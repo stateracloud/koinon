@@ -3,6 +3,8 @@
 server:
   telemetryEnabled: false
   defaultRuntimeClassName: kata
+  # Copied by OpenShell into each managed workspace namespace; pulls koinon/* from Zot.
+  sandboxImagePullSecrets: [{name: zot-pull}]
   drivers:
     kubernetes:
       workspaceMode: managed

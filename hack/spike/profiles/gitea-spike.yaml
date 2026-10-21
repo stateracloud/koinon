@@ -1,0 +1,23 @@
+# Spike provider profile: the koinon-spike-bot Gitea token, usable only against
+# the home-lab Gitea API, read-only for step 2. Modelled on upstream providers/github.yaml.
+id: gitea-spike
+display_name: Gitea (spike)
+description: koinon-spike-bot token for git.apps.lab.example.invalid
+category: source_control
+credentials:
+  - name: api_token
+    description: Gitea personal access token
+    env_vars: [SPIKE_TOKEN]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+    # Koinon pushes rotated values (ADR 0043); running processes keep one placeholder.
+    stable_placeholder: true
+endpoints:
+  - host: git.apps.lab.example.invalid
+    port: 443
+    path: /api/v1/**
+    protocol: rest
+    access: read-only
+    enforcement: enforce
+binaries: [/usr/bin/curl, /usr/bin/git, /usr/bin/python3.12]
