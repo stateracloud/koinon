@@ -1,5 +1,5 @@
 # Spike provider profile: the koinon-spike-bot Gitea token, usable only against
-# the home-lab Gitea API, read-only for step 2. Modelled on upstream providers/github.yaml.
+# the home-lab Gitea API (read-only) and git clone/fetch of the spike org. Modelled on upstream providers/github.yaml.
 id: gitea-spike
 display_name: Gitea (spike)
 description: koinon-spike-bot token for git.apps.lab.example.invalid
@@ -20,4 +20,13 @@ endpoints:
     protocol: rest
     access: read-only
     enforcement: enforce
+  # Git smart HTTP for the spike org: clone and fetch only, push stays denied.
+  - host: git.apps.lab.example.invalid
+    port: 443
+    path: /koinon-spike/**
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: { method: GET, path: "/koinon-spike/*.git/info/refs" }
+      - allow: { method: POST, path: "/koinon-spike/*.git/git-upload-pack" }
 binaries: [/usr/bin/curl, /usr/bin/git, /usr/bin/python3.12]
