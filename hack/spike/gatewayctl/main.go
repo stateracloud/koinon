@@ -27,6 +27,8 @@ const (
 	workspace = "spike-a"
 	gitea     = "git.apps.lab.example.invalid"
 	probe     = "zot.apps.lab.example.invalid/koinon/spike-probe:1"
+	// orgLabel mirrors internal/project.Domain; this spike module cannot import the root module.
+	orgLabel = "koinon.dev/org"
 )
 
 func main() {
@@ -262,7 +264,7 @@ func values(m map[string]string) bool {
 func workspaces(ctx context.Context, c *v1.Client) {
 	ws := c.Workspaces()
 	if _, err := ws.Get(ctx, "spike-b"); err != nil {
-		_, err = ws.Create(ctx, "spike-b", map[string]string{"koinon.dev/org": "spike-b"})
+		_, err = ws.Create(ctx, "spike-b", map[string]string{orgLabel: "spike-b"})
 		must(err, "4.6 create workspace")
 	}
 	m, err := ws.AddMember(ctx, "spike-b", "spike-b-admin", v1.WorkspaceRoleAdmin)

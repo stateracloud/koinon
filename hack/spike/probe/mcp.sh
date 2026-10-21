@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
 # Minimal MCP Streamable HTTP client for the spike: mcp.sh <method> [params-json]
 # Keeps the session id in /tmp/mcp-session. Uses $OPENAI_API_KEY (an OpenShell placeholder).
 set -euo pipefail

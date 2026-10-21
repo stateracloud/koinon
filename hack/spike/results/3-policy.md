@@ -13,7 +13,7 @@ smart HTTP for `/koinon-spike/**`: `GET …/info/refs` and `POST …/git-upload-
 | 3.5 | pass | sandbox `p3` with no provider and no network policy: Gitea and `whoami` unreachable (`000`) |
 | 3.6 | pass | `policy set` adding `whoami`: first `200` after 9 s, no restart |
 | 3.7 | confirmed | `whoami` with `enforcement: audit` and the read-only preset: `POST` and `DELETE` → `200`. Shorthand log says `ALLOWED`; the JSON record keeps `action: Allowed` but `message: "L7_REQUEST audit POST … not permitted by policy"`. ADR 0045's forced `enforce` is needed |
-| 3.8 | pass, with a caveat | OCSF JSON on supervisor stderr (`OCSF-JSON` lines): Network Activity (4001) has `actor.process.name` (binary), `dst_endpoint`, `action`, `firewall_rule`, `container.uid` (sandbox); HTTP Activity (4002) has method, URL, verdict, rule and sandbox but **no binary**. Joining both per connection is Koinon's job if it needs binary per request |
+| 3.8 | partial | OCSF JSON on supervisor stderr (`OCSF-JSON` lines): Network Activity (4001) has `actor.process.name` (binary), `dst_endpoint`, `action`, `firewall_rule`, `container.uid` (sandbox); HTTP Activity (4002) has method, URL, verdict, rule and sandbox but **no binary**. Enforcement held; the binary per HTTP decision is missing, so Koinon joins the connection event to its HTTP events. Partial, no stop (Andre, 2026-10-21) |
 
 ## Findings
 
