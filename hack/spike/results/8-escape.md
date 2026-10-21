@@ -20,7 +20,7 @@ spike version of ADR 0045's ValidatingAdmissionPolicy bound only to namespaces l
 | 8.9 | pass | `ptrace(PTRACE_ATTACH, 1)`: `EPERM`; `/proc/1/mem`: `EACCES`; the supervisor is in a separate pod |
 | 8.10 | pass | PID 1 is `openshell-sandbox`, guest kernel `6.18.35` vs node `6.18.57-talos` |
 | 8.11 | pass | `mount`: `EPERM`; `AF_PACKET` raw: `EPERM`; `AF_INET` raw: not supported; `CapEff = CapPrm = 0`, `NoNewPrivs = 1`; `setuid(0)`: `EPERM`; no setuid binaries |
-| 8.12 | **fail (contained)** | Landlock: writes to `/etc`, `/usr`, `/var` and via `/sandbox/../etc` denied. seccomp: `unshare(NEWUSER)`, `unshare(NEWNS)`, `bpf`, `perf_event_open` → `EPERM`, but **`keyctl` and `add_key` succeed** |
+| 8.12 | **fail** (re-run pending after the platform fix) | Landlock: writes to `/etc`, `/usr`, `/var` and via `/sandbox/../etc` denied. seccomp: `unshare(NEWUSER)`, `unshare(NEWNS)`, `bpf`, `perf_event_open` → `EPERM`, but **`keyctl` and `add_key` succeed** |
 | 8.13 | pass | `kubectl debug p2 --profile=restricted`: denied by the VAP ("ephemeral containers are not allowed on sandbox pods"). With the default profile, Pod Security `baseline` already refuses (`SYS_PTRACE`) |
 | 8.14 | pass | a `Sandbox` created directly (bypassing OpenShell) without a runtime class: pod denied by the VAP. With Pod Security set to `privileged` on the namespace (temporarily), server-side dry runs of workload pods with `hostNetwork`, `hostPID`, `hostPath` or a privileged container are each denied by the VAP |
 | 8.15 | pass, stricter than planned | OpenShell's own `openshell-sandbox-workloads` NetworkPolicy gives workload pods **no egress at all** (ingress only from the supervisor on 5500). A plain pod with the workload label, outside OpenShell's in-VM enforcement, cannot reach the internet, the API server, agentgateway, the gateway, OpenBao, another sandbox or DNS |
@@ -40,11 +40,23 @@ per guest kernel, so there is no host or cross-sandbox reach; the residual risk 
 keyring bug used to get root inside the VM, which then still faces the VM boundary, the
 no-egress NetworkPolicy and the out-of-VM supervisor.
 
-Options (procoduck decides; see the summary):
+Decision (procoduck, 2026-10-21): recorded as a fail. procoduck enables Kata guest seccomp on the workers
+and 8.12 is re-run. If it then passes, it is recorded as "pass after platform fix" and guest
+seccomp becomes a Koinon install requirement; if it still fails, the stop rule applies and Claude
+proposes the OpenSandbox fallback. New criterion 8.16 checks that a pod annotation cannot switch
+guest seccomp off again.
 
-1. Accept as a hardening item: file upstream for OpenShell to block the keyring syscalls, and have
-   Koinon's install docs enable guest seccomp in the Kata configuration.
-2. Treat it as the plan's "fail on isolation" and stop for the OpenSandbox fallback evaluation.
+### Upstream issue draft (not filed; procoduck reviews before filing)
+
+> **seccomp: block kernel keyring syscalls (`keyctl`, `add_key`, `request_key`)**
+>
+> OpenShell 0.1.5, Kubernetes compute driver, Kata Containers. The sandbox seccomp filter
+> (`crates/openshell-sandbox/src/sandbox/linux/seccomp.rs`) is default-allow and does not block the
+> kernel keyring syscalls, which Docker's and containerd's default profiles deny because the
+> keyring is not namespaced. Under Kata with the default `disable_guest_seccomp = true`, the pod's
+> `RuntimeDefault` profile is not applied inside the guest, so the OpenShell filter is the only one.
+> Repro: inside a sandbox, `syscall(SYS_keyctl, KEYCTL_GET_KEYRING_ID, KEY_SPEC_SESSION_KEYRING, 0)`
+> succeeds. Proposal: add `keyctl`, `add_key` and `request_key` to the block list (`EPERM`).
 
 ## Other findings
 

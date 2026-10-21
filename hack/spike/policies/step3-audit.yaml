@@ -1,4 +1,6 @@
 # Spike step 3.6/3.7: step3.yaml plus whoami in audit mode (read-only preset).
+# Deliberate negative test: `enforcement: audit` is forbidden by ADR 0045 and is used here only
+# to show that audit mode lets violations through.
 # Original header follows.
 # Spike step 3: "Gitea read allowed, PR creation needs approval". Reads come from the
 # gitea-spike provider profile (read-only); this policy adds an explicit deny for

@@ -20,7 +20,7 @@ The probe (`hack/spike/probe/cred_probe.py`) never knows the real value: it hash
 | 2.4 | pass | the supervisor runs in a separate pod (`os-supervisor-<id>`), outside the Kata VM; no supervisor process is visible from the agent; the in-VM PID 1 is unreadable |
 | 2.5 | pass | placeholder → Gitea `/api/v1/user`: `200`. → `whoami` (network allowed by `policies/step2-echo.yaml`): `403 credential_endpoint_mismatch`, not forwarded; same request without placeholder: `200`. Placeholder in a query to `whoami`: `403`. Gitea outside `/api/v1`: `403 policy_denied`. `POST` to the read-only API: `403`. `perl` (not an allowed binary): socket refused |
 | 2.6 | pass | gateway, both supervisor pods, workload pods, Agent Sandbox controller, namespace events and object dumps: 0 occurrences of the token or its base64. All Kubernetes Secrets in `openshell` and the workspace namespace: clean |
-| 2.7 | pass, with `stable_placeholder: true` | token rotated in Gitea and OpenBao, pushed with `provider update --wait` (applied in 3 s), no sandbox restart (restart count 0). Default revision-scoped placeholders: new processes get the new value, but an old placeholder keeps resolving the **old** value (Gitea `401` after revocation). With `stable_placeholder: true` on the profile credential, a placeholder taken before rotation resolves the new value afterwards (`200`) |
+| 2.7 | pass, conditional on `stable_placeholder: true` | token rotated in Gitea and OpenBao, pushed with `provider update --wait` (applied in 3 s), no sandbox restart (restart count 0). Default revision-scoped placeholders: new processes get the new value, but an old placeholder keeps resolving the **old** value (Gitea `401` after revocation). With `stable_placeholder: true` on the profile credential, a placeholder taken before rotation resolves the new value afterwards (`200`) |
 | 2.8 | confirmed | `sandbox create --env KEY=value` puts the plain value in the agent's environment (the CLI only warns for credential-looking values); `--env-from` likewise. Neither shows in the `Sandbox` object; the gateway stores them |
 
 ## Findings
@@ -28,7 +28,7 @@ The probe (`hack/spike/probe/cred_probe.py`) never knows the real value: it hash
 1. **OpenShell stores its own copy of every credential.** "Rotating in OpenBao" means updating the
    source and pushing with `provider update`; OpenShell does not watch OpenBao. This matches ADR
    0043's push model (Koinon mints or reads, then pushes).
-2. **Koinon must set `stable_placeholder: true`** on every credential it rotates. Without it,
+2. **Koinon must set `stable_placeholder: true`** on every credential it rotates (decided 2026-10-21: added to the ADR 0045 hardening defaults through ADR 0048). Without it,
    long-running harness processes keep the revision they started with and fail once the old value
    is revoked or expires. Gateway-managed refresh (OAuth2, STS) has its own continuity.
 3. **Landlock is `best_effort` by default** (`landlock.compatibility`); ADR 0045 should require the
