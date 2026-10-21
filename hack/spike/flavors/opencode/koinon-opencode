@@ -1,0 +1,6 @@
+#!/bin/sh
+# Start OpenCode as an ACP agent. OpenShell does not pass the image's ENV to the processes
+# it starts, so the settings live here.
+export OPENCODE_CONFIG=/etc/koinon/opencode/opencode.json
+export OPENCODE_DISABLE_MODELS_FETCH=1 OPENCODE_DISABLE_AUTOUPDATE=1
+exec opencode acp "$@"

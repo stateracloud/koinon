@@ -29,4 +29,9 @@ endpoints:
       - allow:
           tool:
             any: [create_pull_request, get_approval_status]
-binaries: [/usr/bin/curl]
+binaries:
+  - /usr/bin/curl
+  # Step 7 harnesses: the executables that make the network calls.
+  - /usr/local/bin/opencode
+  - /opt/hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3.14
+  - /usr/local/bin/node

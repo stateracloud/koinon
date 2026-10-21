@@ -15,7 +15,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: approver
-          image: zot.apps.lab.example.invalid/koinon/spike-approver:1
+          image: zot.apps.lab.example.invalid/koinon/spike-approver:2
           env:
             - name: GITEA_TOKEN
               valueFrom: {secretKeyRef: {name: approver-gitea, key: token}}

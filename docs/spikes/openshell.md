@@ -1,6 +1,6 @@
 # Spike: OpenShell, Agent Sandbox and agentgateway on the home lab
 
-- Status: Running (steps 1–6 and 8 run on 2026-10-21; 8.12 re-run, gap checks and step 7 pending;
+- Status: Run complete (steps 1–8, re-runs and gap checks on 2026-10-21); ADR 0048 and teardown pending;
   results in `hack/spike/results/`)
 - Tracking: [#3](https://github.com/procoduck/koinon/issues/3)
 - Results: ADR 0048 (written after the run)

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,15 @@ type PullRequest struct {
 	Base  string `json:"base" jsonschema:"target branch"`
 	Title string `json:"title" jsonschema:"pull request title"`
 	Body  string `json:"body,omitempty" jsonschema:"pull request description"`
+	// Files are committed to head (created from base if missing) on approval, so the
+	// agent needs no direct write access to the repository.
+	Files []File `json:"files,omitempty" jsonschema:"files to add on the head branch before the pull request is opened"`
+}
+
+// File is one file the approved call writes.
+type File struct {
+	Path    string `json:"path" jsonschema:"path in the repository, for example hello.md"`
+	Content string `json:"content" jsonschema:"full file content"`
 }
 
 func (p PullRequest) hash() string {
@@ -154,10 +164,28 @@ func main() {
 	log.Error("mcp", "err", http.ListenAndServe(":8080", mcpMux))
 }
 
-// createPR is idempotent per request: before creating, it looks for an open pull
-// request with the same head and base, which Gitea allows only once anyway.
+// createPR is idempotent per request: it creates head and the files only when they
+// are missing, and looks for an open pull request with the same head and base first.
 func createPR(ctx context.Context, token string, r *request) (string, error) {
 	a := r.Args
+	if len(a.Files) > 0 {
+		if _, err := call(ctx, token, http.MethodGet, fmt.Sprintf("/repos/%s/%s/branches/%s", a.Owner, a.Repo, a.Head), nil); err != nil {
+			b, _ := json.Marshal(map[string]string{"new_branch_name": a.Head, "old_ref_name": a.Base})
+			if _, err := call(ctx, token, http.MethodPost, fmt.Sprintf("/repos/%s/%s/branches", a.Owner, a.Repo), b); err != nil {
+				return "", err
+			}
+		}
+		for _, f := range a.Files {
+			if _, err := call(ctx, token, http.MethodGet, fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", a.Owner, a.Repo, f.Path, a.Head), nil); err == nil {
+				continue
+			}
+			b, _ := json.Marshal(map[string]string{"branch": a.Head, "message": "add " + f.Path + " (approved request " + r.ID + ")",
+				"content": base64.StdEncoding.EncodeToString([]byte(f.Content))})
+			if _, err := call(ctx, token, http.MethodPost, fmt.Sprintf("/repos/%s/%s/contents/%s", a.Owner, a.Repo, f.Path), b); err != nil {
+				return "", err
+			}
+		}
+	}
 	list, err := call(ctx, token, http.MethodGet, fmt.Sprintf("/repos/%s/%s/pulls?state=open", a.Owner, a.Repo), nil)
 	if err != nil {
 		return "", err
