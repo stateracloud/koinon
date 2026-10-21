@@ -71,6 +71,22 @@ org and the spike's OpenBao paths.
 - `default_runtime_class_name: kata`
 - Authentication: mTLS (default); the spike client holds a client certificate
 - `credential_drivers = ["vault"]` against OpenBao (KV v2, Kubernetes auth)
+
+### OpenBao setup
+
+Created by procoduck on 2026-10-21; the spike changes nothing else in OpenBao.
+
+- All spike secrets live under KV v2 mount `secret/`, path `koinon-spike/` (the bot's Gitea token and
+  the random probe secrets for step 2).
+- Policy `koinon-spike-read` (read and list on that path) is bound through Kubernetes auth role
+  `openshell-spike` to the OpenShell gateway's service account `openshell/openshell`. If the chart
+  uses another name, procoduck updates the role before step 2.
+- Policy `koinon-spike-admin` (create, read, update, delete on that path only) backs an orphan token
+  with a 7-day TTL in the macOS keychain entry `openbao-kionon`. Setup, rotation (2.7) and teardown
+  scripts on the Mac use it; it never enters the cluster.
+- Teardown deletes `secret/koinon-spike/`; the policies and role are procoduck's to remove.
+- The platform's `openbao` ClusterSecretStore has no namespace conditions, so step 8 also checks that
+  sandbox identities cannot create `ExternalSecret` objects.
 - Every rendered L7 endpoint uses `enforcement: enforce` (ADR 0045)
 - `agent_policy_proposals_enabled: false` (default)
 
