@@ -47,3 +47,20 @@ the gateway over mTLS through `hack/spike/port-forward.sh`.
    capabilities not dropped, no seccomp profile); the apply warns on this cluster.
 7. **Install shape.** Agent Sandbox ships plain manifests, not a Helm chart. The OpenShell chart
    enables telemetry by default (`server.telemetryEnabled`); the spike turns it off.
+8. **`sandbox create --no-keep` can orphan the sandbox** (seen twice: `p3` in step 3.5 and `a16b`
+   in the 8.16 run, both with commands that exit at once; `r1`, which ran longer, was cleaned up).
+   The CLI prints `Deleted sandbox`, the gateway forgets it, but the `Sandbox` object stays
+   `Ready` and its workspace PVC stays bound. Koinon's reconciler must garbage-collect
+   OpenShell-labelled `Sandbox` objects the gateway no longer lists. Upstream issue draft (not
+   filed; Andre reviews first):
+
+   > **Kubernetes driver: `sandbox create --no-keep` with a fast-exiting command leaves the
+   > Sandbox object and PVC behind**
+   >
+   > OpenShell 0.1.5, Kubernetes compute driver, Agent Sandbox v1.0.7, managed workspaces.
+   > `openshell sandbox create --name x --no-keep -- grep ^Seccomp: /proc/self/status` prints the
+   > output and `Deleted sandbox x`; `openshell sandbox list` no longer shows `x`, but
+   > `kubectl get sandbox x` in the workspace namespace shows it `Ready` with both pods running and
+   > `workspace-x` still bound. Reproduced twice with commands that exit within a second; a
+   > command that runs a few seconds is cleaned up. Expected: the driver deletes the `Sandbox`
+   > (and its storage) before the gateway drops its record, or reconciles orphans later.
