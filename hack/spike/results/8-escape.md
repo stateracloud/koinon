@@ -24,6 +24,8 @@ spike version of ADR 0045's ValidatingAdmissionPolicy bound only to namespaces l
 | 8.13 | pass | `kubectl debug p2 --profile=restricted`: denied by the VAP ("ephemeral containers are not allowed on sandbox pods"). With the default profile, Pod Security `baseline` already refuses (`SYS_PTRACE`) |
 | 8.14 | pass | a `Sandbox` created directly (bypassing OpenShell) without a runtime class: pod denied by the VAP. With Pod Security set to `privileged` on the namespace (temporarily), server-side dry runs of workload pods with `hostNetwork`, `hostPID`, `hostPath` or a privileged container are each denied by the VAP |
 | 8.16 | pass, with the new VAP rule | `raw/8.16-annotation.md`. A plain Kata pod annotated `io.katacontainers.config.runtime.disable_guest_seccomp: "true"` runs with `Seccomp: 0` (control pod: `2`): the bypass works for anyone who can create pods in a sandbox namespace. Through OpenShell it does not: `sandbox create --annotation …` stays in gateway metadata and never reaches the `Sandbox` or pod (sandbox keeps 6 filters). With the VAP rule rejecting `io.katacontainers.*` annotations, the annotated pod is denied and normal sandboxes still start |
+| 8.14+ | pass | `raw/8.14-runtimeclass.md`: with a real RuntimeClass outside the list (`koinon-spike-runc`, created and deleted with procoduck's approval), a workload pod is denied by the VAP; `kata-qemu` is admitted. A non-existent class is refused earlier by Kubernetes' RuntimeClass admission |
+| 8.ES | pass | `raw/8-externalsecret.md`: SubjectAccessReview for the sandbox SA `openshell-sandbox`, the workspace `default` SA and `openshell/openshell-sandbox`: no `create` on `externalsecrets` or `clusterexternalsecrets`, no `get secrets`, no `create pods`, `sandboxes` or `serviceaccounts/token`, in the workspace, `koinon-spike`, `openshell` or `external-secrets`. (`kubectl auth can-i --as` is unusable here: impersonation is dropped on the exec-plugin auth path) |
 | 8.15 | pass, stricter than planned | OpenShell's own `openshell-sandbox-workloads` NetworkPolicy gives workload pods **no egress at all** (ingress only from the supervisor on 5500). A plain pod with the workload label, outside OpenShell's in-VM enforcement, cannot reach the internet, the API server, agentgateway, the gateway, OpenBao, another sandbox or DNS |
 
 ## The 8.12 failure
@@ -71,5 +73,10 @@ guest seccomp off again.
 3. A VAP CEL error is a denial under `failurePolicy: Fail`: the first draft (`request.subResource`
    without `has()`) blocked every sandbox pod until fixed. Koinon's VAP needs tests against real
    OpenShell pods before it ships.
-4. Wildcard policy hosts (`**.example.com`) would make DNS lookups of arbitrary subdomains reach
+4. **The spike VAP's runtime-class rule keys on the pod's `boundary-role` label**, which the
+   pod's creator sets: a pod labelled `supervisor`, or unlabelled, may use any runtime class. Koinon's
+   VAP must key on something the creator cannot choose (for example the requesting identity, the
+   Agent Sandbox controller's service account) and treat every other pod in a sandbox namespace as
+   untrusted.
+5. Wildcard policy hosts (`**.example.com`) would make DNS lookups of arbitrary subdomains reach
    the trusted resolver; Koinon's policy renderer should avoid them for agent-controlled names.
