@@ -1,1 +1,1 @@
-{"defaultProvider": "gw", "defaultModel": "qwen3.5:4b", "enableInstallTelemetry": false}
+{"defaultProvider": "gw", "defaultModel": "deepseek/deepseek-v4.1-flash", "enableInstallTelemetry": false}

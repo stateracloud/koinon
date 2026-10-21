@@ -19,7 +19,7 @@ endpoints:
     rules:
       - allow: { method: POST, path: /v1/chat/completions }
   - host: agentgateway.agentgateway.svc.cluster.local
-    port: 3000
+    port: 8080
     path: /mcp
     protocol: mcp
     enforcement: enforce

@@ -21,8 +21,11 @@ frontendPolicies:
       # Koinon's spend ledger needs the charged key; key metadata is flattened into apiKey.
       koinon.key: 'default(apiKey.name, "")'
       koinon.agent: 'default(apiKey.agent, "")'
+# LLM and MCP share the one listener the platform Service exposes (:4000).
+gateways:
+  default:
+    port: 4000
 llm:
-  port: 4000
   policies:
     apiKey:
       mode: strict
@@ -49,3 +52,20 @@ llm:
         data_collection: deny
         only: [fireworks, together, deepinfra, amazon-bedrock, google-vertex]
         allow_fallbacks: false
+mcp:
+  policies:
+    apiKey:
+      mode: strict
+      location: {header: {name: authorization, prefix: "Bearer "}}
+      keys:
+      - keyHash: sha256:88768dd691fb7d05192319488989bdb37842205ec0e2dee6b26a543581a3d9f4
+        metadata: {name: agent-a, agent: spike-a/agent-a}
+    # Ask tier (ADR 0042): only the approval stub's parking tools are visible.
+    mcpAuthorization:
+      rules:
+      - 'mcp.tool.name == "create_pull_request"'
+      - 'mcp.tool.name == "get_approval_status"'
+  targets:
+  - name: approver
+    mcp:
+      host: http://approver.koinon-spike.svc.cluster.local:8080/mcp

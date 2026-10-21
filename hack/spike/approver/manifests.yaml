@@ -43,5 +43,5 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agentgateway-system}}
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agentgateway}}
       ports: [{port: 8080}]

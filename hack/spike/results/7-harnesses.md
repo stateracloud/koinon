@@ -58,3 +58,35 @@ All three harnesses pass 7.1–7.5.
    the harness's job, not the gateway's.
 8. The 4B model is the limiting factor (empty or truncated replies, needing explicit tool
    instructions); plumbing worked in every run.
+
+## Re-run on DeepSeek V4.1 Flash via OpenRouter (2026-10-21, 18:29–18:45Z)
+
+Same harnesses and driver. Images `spike-opencode:4`, `spike-hermes:4`, `spike-pi:5` (default model
+`deepseek/deepseek-v4.1-flash`, the 4B model still listed), sandboxes `d-*`, through the
+**platform** agentgateway (`agentgateway.agentgateway.svc:8080`, Koinon-owned config with LLM and
+MCP on one listener; procoduck/homelab e4e93b6, 318f822). OpenRouter account: ZDR for every model
+group, training off, prompt logging off; agentgateway additionally forces `provider: {zdr: true,
+data_collection: deny, only: [fireworks, together, deepinfra, amazon-bedrock, google-vertex],
+allow_fallbacks: false}` on every request (`raw/5-platform-openrouter.md`). The 7.5 prompt was
+**less explicit** than in the 4B run: it named the repository, branch, file and content, but not
+the tool's arguments. Transcripts in `raw/7-deepseek/`.
+
+| # | OpenCode | Hermes | pi |
+| --- | --- | --- | --- |
+| 7.2/7.4 (write `notes.txt`) | pass, 5 s, reply `done` (4B: 1 m 49 s, empty reply) | pass, 15 s (4B: 49 s) | pass, 2–3 s (4B: 10 s) |
+| 7.5 (PR through approval) | **pass, attempt 1**, 8 s: request `4b14e8c2cb0fe8ed` → PR #7 | **pass, attempt 1**, 15 s: inspected the tools first, then `create_pull_request` and `get_approval_status` → PR #6 | **pass, attempt 2**, 7 s → PR #5 (attempt 1 failed on my side: `pi:4` shipped an empty `mcp.json` because my config rewrite truncated it; fixed in `pi:5`) |
+| 7.3 (load after stop/start) | pass: `agent/opencode-deepseek` | pass: `agent/hermes-deepseek` (4B: truncated to "agent") | pass: `agent/pi-deepseek` |
+
+Each PR contains exactly the requested `hello.md`. OpenRouter spend for the whole re-run:
+**$0.0125** (key limit $100).
+
+Findings:
+
+1. DeepSeek V4.1 Flash removes the model-ability issues of the 4B run: correct replies, tool
+   arguments inferred from a plain task description, and 5–20× faster turns. It is a sound default
+   for v0.1 testing at a cost of cents per run.
+2. With the MCP tools unavailable (the broken `pi:4`), pi explored the filesystem and probed hosts
+   (`koinon`, `gitea`, `pi.dev`) for 1 m 43 s; every probe was refused by policy DNS and transparent
+   TCP. Containment held; Koinon's `agentd` should cap turns or time when an agent stalls.
+3. The OpenRouter account's allowed-provider list contains more hosts than agreed (16, and not
+   Together); Koinon's per-request guard narrows every Koinon request regardless. Recorded for procoduck.
