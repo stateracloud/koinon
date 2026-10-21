@@ -44,7 +44,9 @@ network egress at all; the supervisor relays its traffic through a connection in
 2. **Install requirements**, documented and checked by Koinon's preflight:
    - Kata with **guest seccomp enabled** (`disable_guest_seccomp = false`). Without it the pod's
      `RuntimeDefault` profile is not applied inside the VM and OpenShell's default-allow filter
-     leaves `keyctl`/`add_key` open (8.12).
+     leaves `keyctl`/`add_key` open (8.12). Preflight starts a test Kata pod and checks
+     `Seccomp: 2` and `keyctl` → `EPERM`; on failure it **warns** (a lasting platform-admin warning
+     and an audit entry) but does not block installation (Andre, 2026-10-21).
    - The label `openshell.ai/sandbox-attachable: "true"` on every RuntimeClass Koinon uses.
    - A CNI that enforces egress NetworkPolicy (the workload fence depends on it).
    - The OpenShell `vault` credential driver on its **own KV mount**, outside any broadly usable
@@ -55,9 +57,10 @@ network egress at all; the supervisor relays its traffic through a connection in
    - `landlock.compatibility: hard_requirement` (3, 8.12);
    - OpenShell telemetry off;
    - the sandbox-namespace VAP rejects `io.katacontainers.*` annotations (8.16), and keys its
-     runtime-class and pod-shape rules on the **requesting identity** (the Agent Sandbox
-     controller's service account), not on pod labels the creator chooses; any other pod in a
-     sandbox namespace is denied (8.14 finding);
+     rules on the **requesting identity**: only the Agent Sandbox controller may create pods in
+     sandbox namespaces (and OpenShell's gateway only its Secrets); every other pod is denied,
+     including from cluster admins, with no break-glass; debugging goes through OpenShell exec and
+     logs (Andre, 2026-10-21; 8.14 finding);
    - unchanged from 0045: `enforcement: enforce`, no secrets in sandbox env, managed workspaces,
      `kata` default, ephemeral containers denied (confirmed by 3.7, 2.8, 1.2, 8.13).
 4. **Flavor image contract** (ADR 0016, 0035): OpenShell does not pass the image's `ENV` (not even
@@ -73,8 +76,13 @@ network egress at all; the supervisor relays its traffic through a connection in
 
 6. agentgateway runs in **standalone mode**: per-key USD budgets in a database, `keyHash` entries
    so Koinon never writes key values into gateway config, and hot reload of pushed limits (11 s
-   through a ConfigMap). Kubernetes mode has only token or request buckets in proxy memory. For HA
-   the budget database is Postgres (the upstream `agentgateway-standalone` chart's `database` mode).
+   through a ConfigMap). Kubernetes mode has only token or request buckets in proxy memory.
+   Budget store (Andre, 2026-10-21): **SQLite on a PVC by default** (one replica), with two
+   opt-ins: an external Postgres URL from a Secret (RDS or any Postgres), or a CNPG-managed
+   database when the operator is present. The chart refuses more than one replica with SQLite.
+   Koinon cannot assume CNPG or a cloud database. The upstream `agentgateway-standalone` chart
+   renders its `database` mode URL into a ConfigMap, so Koinon passes the Postgres URL from a
+   Secret instead.
 7. Koinon's ledger (ADR 0041) reads per-request key, agent, tokens and USD from agentgateway's JSON
    access log; budget windows are epoch-aligned, so Koinon keeps its own never-reset totals.
 
@@ -90,7 +98,8 @@ network egress at all; the supervisor relays its traffic through a connection in
 
 ### Reconciler
 
-10. The reconciler uses the Go SDK, plus the generated gRPC client for provider profiles; it
+10. The reconciler uses the Go SDK, plus the generated gRPC client for provider profiles (the SDK
+    fix is proposed upstream after a facts check); it
     watches `agents.x-k8s.io` Sandbox objects in workspace namespaces for status, and
     garbage-collects OpenShell-labelled Sandbox objects the gateway no longer lists (the
     `--no-keep` orphan bug); it decides whether to restart sandboxes that OpenShell stopped after
@@ -136,15 +145,26 @@ From 4.7 and later steps:
 8. Workspace-scoped profiles need `ProviderSpec.ProfileWorkspace` on provider create.
 9. MCP clients must speak a revision OpenShell permits (`2025-11-25` by default).
 
-Upstream issue drafts for 6 and 7 are in `hack/spike/results/1-install.md` and `8-escape.md`; none
-is filed until Andre reviews them.
+Upstream (Andre, 2026-10-21, after checking OpenShell's contribution rules and existing issues):
+
+- 7 is already known upstream: [#578](https://github.com/NVIDIA/OpenShell/issues/578) asked to block
+  `keyctl` and was closed as not planned ("defense-in-depth seccomp hardening"); in
+  [PR #891](https://github.com/NVIDIA/OpenShell/pull/891) a maintainer proposed blocking the keyring
+  calls as a follow-up on an internal tracker. Current `main` still does not block them. Not filed;
+  Koinon relies on Kata guest seccomp and its preflight warning.
+- 6 was not reproduced in five runs with gateway debug logging (`raw/1-no-keep-orphan.md`); the
+  suspected cause from reading the code (a 409 on delete treated like 404) is unconfirmed. Not
+  filed. OpenShell's rules also require a first-hand user story from the human and an
+  OpenShell-only reproduction for any bug report.
 
 ## Open questions
 
-- Should Koinon narrow the supervisor pod's egress with its own NetworkPolicy (union of policy
-  destinations plus the gateway), at the cost of re-rendering on each policy change?
-- Which Ollama or hosted model is the v0.1 default? The 4B model completed every task but needed
-  explicit instructions and produced empty or truncated replies.
+- Narrowing the supervisor pod's egress with Koinon's own NetworkPolicy: not in v0.1; tracked as
+  a hardening issue (Andre, 2026-10-21).
+- Which model is the v0.1 default? The 4B model completed every task but needed explicit
+  instructions and produced empty or truncated replies. A hosted provider for testing is being
+  chosen (no training on data, zero or short retention, no onward sharing, audited); the budget
+  is Andre's decision.
 
 ## Upstream verification
 
