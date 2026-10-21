@@ -1,0 +1,1 @@
+Koinon {{ .Chart.AppVersion }} is pre-alpha. This chart installs nothing yet.
