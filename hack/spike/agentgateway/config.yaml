@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+# Spike step 5: agentgateway 1.6.0 standalone mode in front of the home-lab Ollama.
+# Per-agent API keys appear only as SHA-256 hashes; the values live in OpenBao at
+# secret/koinon-spike/agentgateway and reach sandboxes through OpenShell providers.
+config:
+  database:
+    url: sqlite:///data/agentgateway.db?mode=rwc
+  adminAddr: localhost:15000
+  statsAddr: 0.0.0.0:15020
+  readinessAddr: 0.0.0.0:15021
+  logging:
+    format: json
+    fields:
+      add:
+        # Koinon's ledger needs the charged key; metadata is flattened into apiKey.
+        koinon.key: 'default(apiKey.name, "")'
+        koinon.agent: 'default(apiKey.agent, "")'
+  modelCatalog:
+  - inline:
+      providers:
+        ollama:
+          models:
+            "qwen3.5:4b":
+              # Nominal price so llm.cost is non-zero (USD per 1M tokens).
+              rates: {input: "1", output: "2"}
+llm:
+  port: 8080
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header: {name: authorization, prefix: "Bearer "}
+      keys:
+      - keyHash: sha256:88768dd691fb7d05192319488989bdb37842205ec0e2dee6b26a543581a3d9f4
+        metadata: {name: agent-a, agent: spike-a/agent-a}
+        budgets:
+        - {name: usd-daily, limit: {unit: USD, amount: 10}, window: {rolling: 24h}, onBudgetExceeded: Block}
+      - keyHash: sha256:a65171f2d26d785b2c79fad0befe660ae32a0ac55cbe34734a7ab097dca63856
+        metadata: {name: agent-b, agent: spike-a/agent-b}
+        budgets:
+        - {name: usd-tiny, limit: {unit: USD, amount: 0.01}, window: {rolling: 24h}, onBudgetExceeded: Block}
+  models:
+  - name: "qwen3.5:4b"
+    provider:
+      custom:
+        providerOverride: ollama
+        formats: [{type: completions}]
+    params:
+      baseUrl: http://ollama.lab.example.invalid:11434/v1
