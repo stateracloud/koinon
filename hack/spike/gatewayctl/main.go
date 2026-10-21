@@ -209,7 +209,7 @@ func provider(ctx context.Context, c *v1.Client, mtls string) {
 			Endpoints: []*sandboxv1.NetworkEndpoint{{
 				Host: "agentgateway.agentgateway-system.svc.cluster.local", Port: 8080, Protocol: "rest",
 				Enforcement: sandboxv1.NetworkEnforcementMode_NETWORK_ENFORCEMENT_MODE_ENFORCE,
-				Rules: []*sandboxv1.L7Rule{{Allow: &sandboxv1.L7Allow{Method: "POST", Path: "/v1/chat/completions"}}},
+				Rules:       []*sandboxv1.L7Rule{{Allow: &sandboxv1.L7Allow{Method: "POST", Path: "/v1/chat/completions"}}},
 			}},
 			Binaries: []*sandboxv1.NetworkBinary{{Path: "/usr/bin/curl"}},
 		}}},
