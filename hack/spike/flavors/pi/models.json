@@ -1,1 +1,1 @@
-{"providers": {"gw": {"baseUrl": "http://agentgateway.agentgateway-system.svc.cluster.local:8080/v1", "api": "openai-completions", "apiKey": "$OPENAI_API_KEY", "models": [{"id": "qwen3.5:4b"}]}}}
+{"providers": {"gw": {"baseUrl": "http://agentgateway.agentgateway.svc.cluster.local:8080/v1", "api": "openai-completions", "apiKey": "$OPENAI_API_KEY", "models": [{"id": "deepseek/deepseek-v4.1-flash"}, {"id": "qwen3.5:4b"}]}}}

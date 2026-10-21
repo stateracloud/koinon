@@ -4,7 +4,7 @@
 # Minimal MCP Streamable HTTP client for the spike: mcp.sh <method> [params-json]
 # Keeps the session id in /tmp/mcp-session. Uses $OPENAI_API_KEY (an OpenShell placeholder).
 set -euo pipefail
-URL=${MCP_URL:-http://agentgateway.agentgateway-system.svc.cluster.local:3000/mcp}
+URL=${MCP_URL:-http://agentgateway.agentgateway.svc.cluster.local:8080/mcp}
 method=$1 params=${2:-"{}"}
 id=$RANDOM
 hdr=(-H "Authorization: Bearer $OPENAI_API_KEY" -H 'Content-Type: application/json'

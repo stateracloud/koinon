@@ -1,1 +1,1 @@
-{"mcpServers": {"koinon": {"url": "http://agentgateway.agentgateway-system.svc.cluster.local:3000/mcp", "headers": {"Authorization": "Bearer ${OPENAI_API_KEY}"}, "exposure": "direct", "description": "Koinon tools; risky actions such as opening pull requests need human approval"}}}
+{"mcpServers": {"koinon": {"url": "http://agentgateway.agentgateway.svc.cluster.local:8080/mcp", "headers": {"Authorization": "Bearer ${OPENAI_API_KEY}"}, "exposure": "direct", "description": "Koinon tools; risky actions such as opening pull requests need human approval"}}}
