@@ -1,0 +1,47 @@
+# Spike step 6: approval stub. MCP on 8080 (only agentgateway may connect), admin on
+# 9090 (no in-cluster ingress at all; used through kubectl port-forward).
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: approver, namespace: koinon-spike}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: approver}}
+  template:
+    metadata: {labels: {app: approver}}
+    spec:
+      imagePullSecrets: [{name: zot-pull}]
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: approver
+          image: zot.apps.lab.example.invalid/koinon/spike-approver:1
+          env:
+            - name: GITEA_TOKEN
+              valueFrom: {secretKeyRef: {name: approver-gitea, key: token}}
+          ports:
+            - {name: mcp, containerPort: 8080}
+            - {name: admin, containerPort: 9090}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: approver, namespace: koinon-spike}
+spec:
+  selector: {app: approver}
+  ports:
+    - {name: mcp, port: 8080, targetPort: mcp}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: approver, namespace: koinon-spike}
+spec:
+  podSelector: {matchLabels: {app: approver}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agentgateway-system}}
+      ports: [{port: 8080}]
