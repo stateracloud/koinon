@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Spike flavor: pi 1.3.0 with the pi-acp 0.0.34 adapter. Both run under node.
+FROM docker.io/library/node:24-bookworm-slim
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && npm i -g --ignore-scripts @earendil-works/pi-coding-agent@1.3.0 pi-acp@0.0.34 && npm cache clean --force
+COPY models.json settings.json mcp.json /etc/koinon/pi/
+COPY koinon-pi /usr/local/bin/koinon-pi
+RUN chmod 0755 /usr/local/bin/koinon-pi && chmod -R a+rX /etc/koinon
+ENV PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0

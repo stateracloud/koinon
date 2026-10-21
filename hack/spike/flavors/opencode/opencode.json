@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "gw/qwen3.5:4b",
+  "autoupdate": false,
+  "share": "disabled",
+  "provider": {
+    "gw": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Koinon agentgateway",
+      "options": {"baseURL": "http://agentgateway.agentgateway-system.svc.cluster.local:8080/v1", "apiKey": "{env:OPENAI_API_KEY}"},
+      "models": {"qwen3.5:4b": {}}
+    }
+  },
+  "mcp": {
+    "koinon": {
+      "type": "remote",
+      "url": "http://agentgateway.agentgateway-system.svc.cluster.local:3000/mcp",
+      "headers": {"Authorization": "Bearer {env:OPENAI_API_KEY}"},
+      "oauth": false
+    }
+  }
+}
