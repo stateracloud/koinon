@@ -47,3 +47,24 @@ llm:
         formats: [{type: completions}]
     params:
       baseUrl: http://ollama.lab.example.invalid:11434/v1
+mcp:
+  port: 3000
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header: {name: authorization, prefix: "Bearer "}
+      keys:
+      - keyHash: sha256:88768dd691fb7d05192319488989bdb37842205ec0e2dee6b26a543581a3d9f4
+        metadata: {name: agent-a, agent: spike-a/agent-a}
+      - keyHash: sha256:a65171f2d26d785b2c79fad0befe660ae32a0ac55cbe34734a7ab097dca63856
+        metadata: {name: agent-b, agent: spike-a/agent-b}
+    # Ask-tier routing (ADR 0042): only the approval stub's parking tools are visible.
+    mcpAuthorization:
+      rules:
+      - 'mcp.tool.name == "create_pull_request"'
+      - 'mcp.tool.name == "get_approval_status"'
+  targets:
+  - name: approver
+    mcp:
+      host: http://approver.koinon-spike.svc.cluster.local:8080/mcp

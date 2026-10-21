@@ -1,0 +1,32 @@
+# Spike provider profile: a per-agent agentgateway key, usable for chat completions
+# (port 8080) and the MCP gateway (port 3000), where only the approval tools are allowed.
+id: agentgateway-spike
+display_name: agentgateway (spike)
+description: Per-agent key for the spike agentgateway
+category: inference
+credentials:
+  - name: api_key
+    env_vars: [OPENAI_API_KEY]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+    stable_placeholder: true
+endpoints:
+  - host: agentgateway.agentgateway-system.svc.cluster.local
+    port: 8080
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow: { method: POST, path: /v1/chat/completions }
+  - host: agentgateway.agentgateway-system.svc.cluster.local
+    port: 3000
+    path: /mcp
+    protocol: mcp
+    enforcement: enforce
+    mcp:
+      allow_all_known_mcp_methods: true
+    rules:
+      - allow:
+          tool:
+            any: [create_pull_request, get_approval_status]
+binaries: [/usr/bin/curl]
