@@ -24,7 +24,7 @@ spec:
           env:
             - name: DATABASE_URL
               valueFrom:
-                secretKeyRef: {name: postgres, key: DATABASE_URL}
+                secretKeyRef: {name: koinon-pg-app, key: uri}
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
           securityContext:
@@ -56,7 +56,7 @@ spec:
           env:
             - name: DATABASE_URL
               valueFrom:
-                secretKeyRef: {name: postgres, key: DATABASE_URL}
+                secretKeyRef: {name: koinon-pg-app, key: uri}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
