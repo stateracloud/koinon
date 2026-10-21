@@ -162,9 +162,13 @@ Upstream (procoduck, 2026-10-21, after checking OpenShell's contribution rules a
 - Narrowing the supervisor pod's egress with Koinon's own NetworkPolicy: not in v0.1; tracked as
   a hardening issue (procoduck, 2026-10-21).
 - Which model is the v0.1 default? The 4B model completed every task but needed explicit
-  instructions and produced empty or truncated replies. A hosted provider for testing is being
-  chosen (no training on data, zero or short retention, no onward sharing, audited); the budget
-  is procoduck's decision.
+  instructions and produced empty or truncated replies. Decided (procoduck, 2026-10-21): hosted
+  testing goes through **OpenRouter**, set to zero data retention for every model group, no
+  training, prompt logging off, and an allowlist of audited hosts (`fireworks`, `together`,
+  `deepinfra`, `amazon-bedrock`, `google-vertex`), behind one key with a hard credit limit.
+  Compared and not chosen: Fireworks direct (fewest parties, fewer models), Anthropic direct
+  (30-day retention), Hugging Face Inference Providers (no ZDR filter, provider allowlist or
+  spending cap on personal accounts). The budget amount is procoduck's; CI never calls it.
 
 ## Upstream verification
 
