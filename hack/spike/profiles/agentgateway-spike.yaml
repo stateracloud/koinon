@@ -12,13 +12,13 @@ credentials:
     header_name: authorization
     stable_placeholder: true
 endpoints:
-  - host: agentgateway.agentgateway-system.svc.cluster.local
+  - host: agentgateway.agentgateway.svc.cluster.local
     port: 8080
     protocol: rest
     enforcement: enforce
     rules:
       - allow: { method: POST, path: /v1/chat/completions }
-  - host: agentgateway.agentgateway-system.svc.cluster.local
+  - host: agentgateway.agentgateway.svc.cluster.local
     port: 3000
     path: /mcp
     protocol: mcp
