@@ -6,12 +6,15 @@
 allow_k8s_contexts('homelab')
 default_registry('zot.apps.lab.example.invalid/koinon')
 
+# With outputs_image_ref_to, Tilt only injects $EXPECTED_REGISTRY and needs a
+# tagged reference back, so each build gets a unique tag.
 def ko_image(name, pkg):
+    repo = '$EXPECTED_REGISTRY/' + name
     custom_build(
         name,
-        'KO_DOCKER_REPO="$EXPECTED_REGISTRY/$EXPECTED_IMAGE" ' +
-        'ko build --bare --platform=linux/amd64 --image-refs "$TILT_KO_REF" ' + pkg +
-        ' && cat "$TILT_KO_REF"',
+        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="' + repo + '" ' +
+        'ko build --bare --platform=linux/amd64 --tags "$TAG" ' + pkg +
+        ' && echo "' + repo + ':$TAG" > "$TILT_KO_REF"',
         deps=['cmd', 'internal', 'go.mod', 'go.sum'],
         env={'TILT_KO_REF': '.tilt-ko-' + name},
         outputs_image_ref_to='.tilt-ko-' + name,
