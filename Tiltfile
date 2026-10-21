@@ -4,7 +4,7 @@
 # with ko and pushed to the dev registry (docs/dev/registry.md).
 
 allow_k8s_contexts('homelab')
-default_registry('registry.apps.lab.example.invalid/koinon')
+default_registry('zot.apps.lab.example.invalid/koinon')
 
 def ko_image(name, pkg):
     custom_build(
@@ -23,7 +23,7 @@ ko_image('koinon-reconciler', './cmd/koinon-reconciler')
 
 k8s_yaml(kustomize('hack/dev'))
 
-k8s_resource('postgres', labels=['data'])
+k8s_resource(new_name='postgres', objects=['koinon-pg:cluster'], labels=['data'])
 k8s_resource('koinon-api', port_forwards='8080:8080', resource_deps=['postgres'], labels=['koinon'])
 k8s_resource('koinon-reconciler', resource_deps=['postgres'], labels=['koinon'])
 
