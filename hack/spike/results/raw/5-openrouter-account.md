@@ -1,6 +1,6 @@
 # OpenRouter account settings, checked without Koinon's routing guard
 
-Run 2026-10-21T18:24:13Z from the Mac, straight to openrouter.ai with the koinon-test key, no `provider` field. Andre applied: ZDR for every model group, training off, allowed providers fireworks/together/deepinfra/amazon-bedrock/google-vertex, prompt logging off.
+Run 2026-10-21T18:24:13Z from the Mac, straight to openrouter.ai with the koinon-test key, no `provider` field. Andre applied: ZDR for every model group, training off, allowed providers fireworks/together/deepinfra/amazon-bedrock/google-vertex, prompt logging off. (The request below shows the account list actually holds 16 providers; Andre confirmed the wider list is intentional.)
 
 ```
 deepseek/deepseek-v4.1-flash -> provider DeepInfra error None

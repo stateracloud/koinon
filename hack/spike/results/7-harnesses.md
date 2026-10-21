@@ -88,5 +88,7 @@ Findings:
 2. With the MCP tools unavailable (the broken `pi:4`), pi explored the filesystem and probed hosts
    (`koinon`, `gitea`, `pi.dev`) for 1 m 43 s; every probe was refused by policy DNS and transparent
    TCP. Containment held; Koinon's `agentd` should cap turns or time when an agent stalls.
-3. The OpenRouter account's allowed-provider list contains more hosts than agreed (16, and not
-   Together); Koinon's per-request guard narrows every Koinon request regardless. Recorded for Andre.
+3. The OpenRouter account's allowed-provider list is wider than the five in Koinon's guard (16
+   hosts, not Together). Andre set it wider on purpose.
+   Koinon's per-request guard narrows every Koinon request regardless, so the guard, not the
+   account setting, is the control Koinon relies on.
