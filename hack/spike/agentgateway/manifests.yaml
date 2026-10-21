@@ -33,7 +33,6 @@ spec:
           args: ["-f", "/config/config.yaml"]
           ports:
             - {name: llm, containerPort: 8080}
-            - {name: mcp, containerPort: 3000}
             - {name: stats, containerPort: 15020}
           readinessProbe:
             httpGet: {path: /healthz/ready, port: 15021}
@@ -57,5 +56,4 @@ spec:
   selector: {app: agentgateway}
   ports:
     - {name: llm, port: 8080, targetPort: llm}
-    - {name: mcp, port: 3000, targetPort: mcp}
     - {name: stats, port: 15020, targetPort: stats}
