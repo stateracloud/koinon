@@ -23,7 +23,8 @@ approval for risky actions.** Each step below has pass/fail criteria. A result i
   Claude then writes up the evidence and proposes the fallback (OpenSandbox credential vault behind
   the `ExecutionBackend` interface, ADR 0016) for Andre to decide.
 - The spike starts once Andre reports that **Zot** (`docs/dev/registry.md`) and **OpenBao** are
-  installed. Nothing cluster-wide changes beyond the CRDs and namespaces listed below.
+  installed (both running since 2026-10-21) and gives the go-ahead. Nothing cluster-wide changes
+  beyond the CRDs and namespaces listed below.
 - No paid model calls. Models come from the home-lab Ollama.
 - Throwaway spike code lives in `hack/spike/`; nothing there is product code.
 
@@ -35,10 +36,11 @@ approval for risky actions.** Each step below has pass/fail criteria. A result i
 | Runtime classes | `kata` (Cloud Hypervisor, default), `kata-qemu` (fallback if nested virtualization misbehaves) |
 | CNI | Cilium (Koinon must not depend on it; only standard NetworkPolicy is used) |
 | Storage | `proxmox-zfs` (default) |
-| Registry | Zot at `registry.apps.lab.example.invalid` (installed by Andre) |
-| Secret store | OpenBao (installed by Andre); OpenShell `vault` credential driver |
+| Platform | Managed by Andre's Argo CD; the spike does not modify it |
+| Registry | Zot v2.1.22 at `zot.apps.lab.example.invalid`, namespace `zot` |
+| Secret store | OpenBao 2.7.1 (`openbao-active.openbao.svc:8200`, raft); OpenShell `vault` credential driver |
 | Models | Ollama 0.40.6 at `http://ollama.lab.example.invalid:11434`, model `qwen3.5:4b`, OpenAI-compatible `/v1` |
-| Git target | Gitea in namespace `koinon-spike`, SQLite, cluster-internal only |
+| Git target | The platform's Gitea 28.2 (namespace `gitea`, `gitea-http.gitea.svc:3000`, also at `git.apps.lab.example.invalid`). The spike works only inside a Gitea org `koinon-spike` |
 
 ### Components installed by the spike
 
@@ -47,11 +49,21 @@ approval for risky actions.** Each step below has pass/fail criteria. A result i
 | Kubernetes Agent Sandbox | v1.0.7 | `agent-sandbox-system` | core `agents.x-k8s.io` CRDs plus `extensions.agents.x-k8s.io` |
 | NVIDIA OpenShell gateway | v0.1.5 | `openshell` | Helm chart from `deploy/helm/openshell`; Kubernetes compute driver |
 | agentgateway | latest 1.6.x | `agentgateway-system` | model gateway and MCP gateway (ADR 0040) |
-| Gitea | latest stable chart | `koinon-spike` | target for policy, approval and harness tasks |
 | Spike tools | — | `koinon-spike` | approval stub, escape probes, ACP driver (`hack/spike/`) |
 
 Exact chart versions and values are recorded in `hack/spike/` during the run; `hack/spike/teardown.sh`
-removes every component, namespace and CRD the spike created.
+removes every component, namespace and CRD the spike created, and deletes the `koinon-spike` Gitea
+org and the spike's OpenBao paths.
+
+### Gitea setup
+
+- An admin token (Andre's, from the macOS keychain entry `gitea-kionon`) sits in secret
+  `koinon-spike/gitea-token`. It is used only by setup and teardown scripts on the Mac, never inside a
+  sandbox or by the approval stub.
+- Setup creates org `koinon-spike`, repo `koinon-spike/hello` with a protected `main`, and a
+  non-admin user `koinon-spike-bot` with write access to that repo only.
+- The bot's token is the spike's real credential: it lives only in OpenBao and reaches Gitea
+  through the OpenShell provider (step 2) or the approval stub (step 6).
 
 ### OpenShell configuration
 
@@ -80,8 +92,8 @@ and a sandbox from the default image.
 
 ### 2. Credentials
 
-Create a provider with a test secret `SPIKE_TOKEN` (random 32 bytes) stored in OpenBao, bound to the
-Gitea host only. Inside the sandbox, a probe script searches for the real value.
+Create a provider with the `koinon-spike-bot` Gitea token as `SPIKE_TOKEN`, stored in OpenBao and
+bound to the Gitea host only. Inside the sandbox, a probe script searches for the real value.
 
 | # | Criterion | How |
 | --- | --- | --- |
