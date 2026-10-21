@@ -1,6 +1,6 @@
 # Spike: OpenShell, Agent Sandbox and agentgateway on the home lab
 
-- Status: Planned (not run yet)
+- Status: Running (step 1 done 2026-10-21; results in `hack/spike/results/`)
 - Tracking: [#3](https://github.com/procoduck/koinon/issues/3)
 - Results: ADR 0048 (written after the run)
 - Decisions it verifies: ADR 0002, 0006, 0008, 0009, 0013, 0016, 0029, 0035, 0040–0045
@@ -78,13 +78,19 @@ Created by Andre on 2026-10-21; the spike changes nothing else in OpenBao.
 
 - All spike secrets live under KV v2 mount `secret/`, path `koinon-spike/` (the bot's Gitea token and
   the random probe secrets for step 2).
-- Policy `koinon-spike-read` (read and list on that path) is bound through Kubernetes auth role
-  `openshell-spike` to the OpenShell gateway's service account `openshell/openshell`. If the chart
-  uses another name, Andre updates the role before step 2.
+- The gateway does not read `koinon-spike/`. OpenShell's `vault` driver stores every credential it
+  is given (and each sandbox's SSH identity) itself, under the fixed prefix
+  `openshell/provider-credentials/`, so it gets its own KV v2 mount `openshell-spike`, outside the
+  platform's ESO store. Policy `openshell-spike-gateway` (create, read, update on
+  `openshell-spike/data/openshell/provider-credentials/*`, delete on the matching metadata path) is
+  bound through Kubernetes auth role `openshell-spike` to service account `openshell/openshell`.
+  The driver requires HTTPS, so it uses `https://bao.apps.lab.example.invalid`. (Revised during
+  step 1; see `hack/spike/results/1-install.md`.)
 - Policy `koinon-spike-admin` (create, read, update, delete on that path only) backs an orphan token
   with a 7-day TTL in the macOS keychain entry `openbao-kionon`. Setup, rotation (2.7) and teardown
   scripts on the Mac use it; it never enters the cluster.
-- Teardown deletes `secret/koinon-spike/`; the policies and role are Andre's to remove.
+- Teardown deletes `secret/koinon-spike/`; the `openshell-spike` mount, the policies and the role are
+  Andre's to remove.
 - The platform's `openbao` ClusterSecretStore has no namespace conditions, so step 8 also checks that
   sandbox identities cannot create `ExternalSecret` objects.
 - Every rendered L7 endpoint uses `enforcement: enforce` (ADR 0045)
