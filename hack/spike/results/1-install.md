@@ -64,3 +64,7 @@ the gateway over mTLS through `hack/spike/port-forward.sh`.
    > `workspace-x` still bound. Reproduced twice with commands that exit within a second; a
    > command that runs a few seconds is cleaned up. Expected: the driver deletes the `Sandbox`
    > (and its storage) before the gateway drops its record, or reconciles orphans later.
+9. **A node losing its network stops the sandbox.** When `homelab-workers-cjgkns` was NotReady for
+   about a minute at 14:35Z (`cni plugin not initialized`), OpenShell moved `p2` to `Stopped`
+   and did not restart it; `sandbox start` brought it back with its workspace. Koinon's reconciler
+   decides whether and when to restart an agent's sandbox after infrastructure failures.

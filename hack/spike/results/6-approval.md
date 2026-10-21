@@ -17,7 +17,7 @@ Streamable HTTP) with its placeholder key.
 | 6.2 | pass | the call returned `approval requested: id=8ef58da115b2502a status=pending` in 118 ms; stub log: tool, full arguments, `args_sha256`, target `gitea:koinon-spike/hello` |
 | 6.3 | pass | approving `{id, args_sha256}` created exactly PR #1 (`spike-approval → main`, author `koinon-spike-bot`); replaying the approval returned the same PR with `executions: 1`; Gitea lists one PR. The agent then reads `status=executed pr=…/pulls/1` through `get_approval_status` (the resume path) |
 | 6.4 | pass | approving with the hash of changed arguments (base `release`) → `409 approval does not match the requested arguments`. The agent asking again with base `release` creates a separate pending request (`a6f1c34a5d2c32b8`), which nobody approved |
-| 6.5 | CEL: works; ExtMCP: not tried | CEL `mcpAuthorization` both filters `tools/list` and rejects calls. ExtMCP (`mcp.policies.mcpGuardrails`, an external gRPC processor) was not built within the time box; the park-and-execute design (ADR 0042) does not hold MCP calls open, so call duration limits were not measured |
+| 6.5 | pass, both tried | CEL `mcpAuthorization`: filters `tools/list` and rejects calls by tool name (6.1). ExtMCP (`hack/spike/extmcp`, `raw/6.5-extmcp.md`): a gRPC `mcpGuardrails` processor on `tools/call` (request phase, `failClosed`) sees the method, raw `params` and headers, so it can judge **arguments**: `create_pull_request` into `release` came back as a tool error (`"pull requests may only target main"`, `isError: true`) and never reached the approver; into `main` it passed (+0 ms). The processor call has a fixed 10 s timeout in agentgateway (`BackendRequestTimeout` in `mcp/guardrails/client.rs`): a 5 s processor delay passed (5.1 s), a 15 s delay failed closed at 10.1 s (`-32603 … upstream call timeout`). The park-and-execute design (ADR 0042) never holds an MCP call open, so neither limit binds it |
 
 ## Findings
 
@@ -32,5 +32,9 @@ Streamable HTTP) with its placeholder key.
 3. **Approval binding works as designed** with a content hash over tool name plus canonical
    arguments as the request id; idempotency comes from the request id plus a pre-create lookup
    (Gitea has no idempotency-key header).
-4. The bot token for execution lives only in the approver's Secret (from OpenBao) and never in the
+4. **Use CEL for which tools exist, ExtMCP for what a call may do.** CEL keeps the tool list and
+   names honest at no latency; ExtMCP is the hook for argument rules (target branch, repository,
+   size limits) that neither OpenShell's MCP rules nor CEL tool rules can see. A denial reaches the
+   agent as an ordinary tool error, which harnesses handle without special casing.
+5. The bot token for execution lives only in the approver's Secret (from OpenBao) and never in the
    sandbox; the agent's only credential is its agentgateway key.
