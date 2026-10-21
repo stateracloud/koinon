@@ -28,6 +28,10 @@ spec:
         object.metadata.labels['openshell.ai/boundary-role'] != 'workload' ||
         (has(object.spec.runtimeClassName) && object.spec.runtimeClassName in ['kata', 'kata-qemu'])
       message: sandbox workload pods must use runtimeClassName kata or kata-qemu
+    - expression: >-
+        !has(object.metadata.annotations) ||
+        object.metadata.annotations.all(k, !k.startsWith('io.katacontainers.'))
+      message: io.katacontainers.* annotations are not allowed on sandbox pods (they can switch off guest seccomp)
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
