@@ -5,10 +5,6 @@ config:
   database: {url: "sqlite:///data/agentgateway.db?mode=rwc"}
   logging:
     format: json
-    fields:
-      add:
-        koinon.key: 'default(apiKey.name, "")'
-        koinon.agent: 'default(apiKey.agent, "")'
   modelCatalog:
   - inline:
       providers:
@@ -19,6 +15,12 @@ config:
           models:
             # Highest price among the allowlisted ZDR hosts (Fireworks), so the ledger never under-counts.
             "deepseek/deepseek-v4.1-flash": {rates: {input: "0.30", output: "1.20", cacheRead: "0.006"}}
+frontendPolicies:
+  accessLog:
+    add:
+      # Koinon's spend ledger needs the charged key; key metadata is flattened into apiKey.
+      koinon.key: 'default(apiKey.name, "")'
+      koinon.agent: 'default(apiKey.agent, "")'
 llm:
   port: 4000
   policies:
@@ -39,3 +41,11 @@ llm:
     params:
       baseUrl: https://openrouter.ai/api/v1
       apiKey: {file: /secrets/openrouter/api_key}
+    # Second guard next to the OpenRouter account settings: only zero-retention, no-training
+    # endpoints on the allowlisted hosts, no fallback elsewhere. Overrides beat client values.
+    overrides:
+      provider:
+        zdr: true
+        data_collection: deny
+        only: [fireworks, together, deepinfra, amazon-bedrock, google-vertex]
+        allow_fallbacks: false
