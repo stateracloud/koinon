@@ -1,0 +1,62 @@
+# Step 8: escape checks
+
+Run 2026-10-21, before step 7 (step 8 decides whether the spike stops; step 7 does not). Probe:
+`hack/spike/probe/escape_probe.py` as UID 10001 in sandbox `p2` (probe image, providers
+`gitea-bot` and `agentgateway-key`, policy from step 3/6). Targets were passed in by IP, so the
+probe holds no cluster knowledge. Admission checks use `hack/spike/manifests/sandbox-vap.yaml`, a
+spike version of ADR 0045's ValidatingAdmissionPolicy bound only to namespaces labelled
+`openshell.ai/managed-by=openshell`.
+
+| # | Result | Evidence |
+| --- | --- | --- |
+| 8.1 | pass | TCP to `1.1.1.1:443`, LAN `10.20.0.1:443`, node `10.20.0.181:22`, the Cilium gateway IP, Ollama: `EACCES` at `connect`; UDP to `8.8.8.8:53`: `EDESTADDRREQ` |
+| 8.2 | pass | `169.254.169.254:80`, `[fd00:ec2::254]:80`: `EACCES` |
+| 8.3 | pass | cluster DNS `10.96.0.10:53` over UDP and TCP: blocked. A 50-character random name resolves to synthetic `198.18.0.9` with **no upstream query**: the trusted resolver runs only after a name matches the active policy (`crates/openshell-supervisor-network/src/policy_dns/mod.rs:146-177`) |
+| 8.4 | pass | `10.96.0.1:443`, `kubernetes.default.svc:443`, control plane `:6443`, kubelet `:10250`: `EACCES` |
+| 8.5 | pass | Gitea Postgres, OpenBao, OpenShell gateway `:8080` and metrics `:9090`, agentgateway stats `:15020` and its LLM port by pod IP, Gitea's in-cluster service: all `EACCES`. (agentgateway's admin port listens on localhost only) |
+| 8.6 | pass | sandbox `p1` and its supervisor (same workspace), `b1` in workspace `spike-b`: `EACCES` |
+| 8.7 | pass | no ServiceAccount token mounted (`automountServiceAccountToken: false`); `/.openshell/pod-identity`: `EACCES` |
+| 8.8 | pass | step 2 (2.1-2.6) |
+| 8.9 | pass | `ptrace(PTRACE_ATTACH, 1)`: `EPERM`; `/proc/1/mem`: `EACCES`; the supervisor is in a separate pod |
+| 8.10 | pass | PID 1 is `openshell-sandbox`, guest kernel `6.18.35` vs node `6.18.57-talos` |
+| 8.11 | pass | `mount`: `EPERM`; `AF_PACKET` raw: `EPERM`; `AF_INET` raw: not supported; `CapEff = CapPrm = 0`, `NoNewPrivs = 1`; `setuid(0)`: `EPERM`; no setuid binaries |
+| 8.12 | **fail (contained)** | Landlock: writes to `/etc`, `/usr`, `/var` and via `/sandbox/../etc` denied. seccomp: `unshare(NEWUSER)`, `unshare(NEWNS)`, `bpf`, `perf_event_open` → `EPERM`, but **`keyctl` and `add_key` succeed** |
+| 8.13 | pass | `kubectl debug p2 --profile=restricted`: denied by the VAP ("ephemeral containers are not allowed on sandbox pods"). With the default profile, Pod Security `baseline` already refuses (`SYS_PTRACE`) |
+| 8.14 | pass | a `Sandbox` created directly (bypassing OpenShell) without a runtime class: pod denied by the VAP. With Pod Security set to `privileged` on the namespace (temporarily), server-side dry runs of workload pods with `hostNetwork`, `hostPID`, `hostPath` or a privileged container are each denied by the VAP |
+| 8.15 | pass, stricter than planned | OpenShell's own `openshell-sandbox-workloads` NetworkPolicy gives workload pods **no egress at all** (ingress only from the supervisor on 5500). A plain pod with the workload label, outside OpenShell's in-VM enforcement, cannot reach the internet, the API server, agentgateway, the gateway, OpenBao, another sandbox or DNS |
+
+## The 8.12 failure
+
+OpenShell's seccomp filter is default-allow with a targeted block list
+(`crates/openshell-sandbox/src/sandbox/linux/seccomp.rs`: `bpf`, `mount`, `unshare`, `setns`,
+`ptrace`, `process_vm_*`, `perf_event_open`, `io_uring_setup`, `userfaultfd`, `kexec_*`, module
+loading, new mount API, `memfd_create`, socket domains, …). The kernel keyring calls (`keyctl`,
+`add_key`, `request_key`) are not on it. The pod asks for `seccompProfile: RuntimeDefault`, which
+in containerd blocks them, but it is evidently not applied inside the Kata guest (Kata's default
+`disable_guest_seccomp = true`), so OpenShell's filter is the only one.
+
+Containment: the calls reach the **guest** kernel of a VM that serves one sandbox. Keyrings are
+per guest kernel, so there is no host or cross-sandbox reach; the residual risk is a guest-kernel
+keyring bug used to get root inside the VM, which then still faces the VM boundary, the
+no-egress NetworkPolicy and the out-of-VM supervisor.
+
+Options (procoduck decides; see the summary):
+
+1. Accept as a hardening item: file upstream for OpenShell to block the keyring syscalls, and have
+   Koinon's install docs enable guest seccomp in the Kata configuration.
+2. Treat it as the plan's "fail on isolation" and stop for the OpenSandbox fallback evaluation.
+
+## Other findings
+
+1. **The supervisor pod has unrestricted egress** (`openshell-sandbox-supervisors`: `egress: [{}]`)
+   and no RuntimeClass; it is the policy enforcer and holds the interception CA key. A Koinon
+   NetworkPolicy could narrow it to the union of policy destinations plus the gateway, at the cost
+   of re-rendering on every policy change.
+2. **The cluster enforces Pod Security `baseline` by default**, which already stops `hostNetwork`
+   and debug containers with added capabilities; the VAP is the layer that also covers
+   `--profile=restricted` debug containers, runtime classes and sandboxes created around OpenShell.
+3. A VAP CEL error is a denial under `failurePolicy: Fail`: the first draft (`request.subResource`
+   without `has()`) blocked every sandbox pod until fixed. Koinon's VAP needs tests against real
+   OpenShell pods before it ships.
+4. Wildcard policy hosts (`**.example.com`) would make DNS lookups of arbitrary subdomains reach
+   the trusted resolver; Koinon's policy renderer should avoid them for agent-controlled names.
