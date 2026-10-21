@@ -57,7 +57,7 @@ approval for risky actions.** Each step below has pass/fail criteria. A result i
 | NVIDIA OpenShell gateway | v0.1.5 | `openshell` | Helm chart from `deploy/helm/openshell`; Kubernetes compute driver |
 | agentgateway | 1.6.0 | `agentgateway-system` | model gateway and MCP gateway (ADR 0040); standalone mode |
 | agentgateway controller (Kubernetes mode, 5.6 only) | 1.6.0 chart | `agentgateway-system` | its CRDs and own GatewayClass; approved 2026-10-21 |
-| Spike tools | — | `koinon-spike` | approval stub, escape probes, ACP driver (`hack/spike/`) |
+| Spike tools | — | `koinon-spike` | approval stub, ExtMCP processor (6.5), escape probes, ACP driver (`hack/spike/`) |
 
 ### Approved deviations
 

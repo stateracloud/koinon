@@ -64,6 +64,14 @@ mcp:
       rules:
       - 'mcp.tool.name == "create_pull_request"'
       - 'mcp.tool.name == "get_approval_status"'
+    # Step 6.5: ExtMCP judges tool arguments, which CEL tool rules do not see.
+    mcpGuardrails:
+      processors:
+      - kind: remote
+        host: extmcp.koinon-spike.svc.cluster.local:9000
+        failureMode: failClosed
+        methods:
+          tools/call: request
   targets:
   - name: approver
     mcp:

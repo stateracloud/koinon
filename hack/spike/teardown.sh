@@ -78,6 +78,6 @@ Left for Andre (platform):
     openbao-kionon token.
   - Platform repo: the RuntimeClass label and the Kata guest-seccomp change can stay (Koinon
     needs both); remove them only if Koinon is dropped.
-  - Zot: images koinon/spike-probe and koinon/spike-approver.
+  - Zot: images koinon/spike-probe, koinon/spike-approver and koinon/spike-extmcp.
 EOF
 [[ $run == 1 ]] || echo "(dry run: nothing was changed; pass --yes to execute)"
