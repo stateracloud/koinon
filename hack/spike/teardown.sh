@@ -26,11 +26,13 @@ step "${K[@]}" delete validatingadmissionpolicybinding koinon-spike-sandbox-pods
 step "${K[@]}" delete validatingadmissionpolicy koinon-spike-sandbox-pods --ignore-not-found
 
 step helm --kube-context homelab uninstall openshell -n openshell --ignore-not-found
-if helm --kube-context homelab status agentgateway -n agentgateway-system >/dev/null 2>&1; then
-  step helm --kube-context homelab uninstall agentgateway -n agentgateway-system
+# agentgateway Kubernetes mode (5.6): its Gateway first, then the controller and its CRDs.
+step "${K[@]}" delete -f "$(dirname "$0")/agentgateway-k8s/manifests.yaml" --ignore-not-found
+if helm --kube-context homelab status agw-k8s -n agentgateway-system >/dev/null 2>&1; then
+  step helm --kube-context homelab uninstall agw-k8s -n agentgateway-system
 fi
-if helm --kube-context homelab status agentgateway-crds -n agentgateway-system >/dev/null 2>&1; then
-  step helm --kube-context homelab uninstall agentgateway-crds -n agentgateway-system
+if helm --kube-context homelab status agw-k8s-crds -n agentgateway-system >/dev/null 2>&1; then
+  step helm --kube-context homelab uninstall agw-k8s-crds -n agentgateway-system
 fi
 
 for ns in $("${K[@]}" get ns -l openshell.ai/managed-by=openshell -o name) \
