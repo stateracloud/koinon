@@ -96,7 +96,7 @@ migrations:
 # Install preflight ("koinon-api preflight", plan item H2): a pre-install and pre-upgrade hook Job
 # that fails the release when Agent Sandbox, the OpenShell gateway, openshell.runtimeClassName,
 # the CNPG operator (postgres.mode=cnpg) or the agentgateway GatewayClass (gateway.mode=kubernetes)
-# is missing or unsupported, and warns when Kata guest seccomp is off (ADR 0048).
+# is missing or unsupported, and warns when Kata guest seccomp is off (ADR 0048 decision 2).
 preflight:
   enabled: true
   # Kills the Job after this long; keep it below helm's --timeout (default 5m).
@@ -141,8 +141,9 @@ postgres:
       agentd: agentd-uri
 
 gateway:
-  # standalone: the chart installs agentgateway, configured by the reconciler (ADR 0048).
-  # kubernetes: use an existing agentgateway controller (ADR 0049). The chart renders nothing for
+  # The two gateway modes are decided in ADR 0049 (standalone first chosen in ADR 0048 decision 6).
+  # standalone: the chart installs agentgateway, configured by the reconciler.
+  # kubernetes: use an existing agentgateway controller. The chart renders nothing for
   # the gateway in v0.1; plan item G2 adds the Gateway, AgentgatewayBackend, AgentgatewayPolicy
   # and AgentgatewayParameters in this namespace.
   mode: standalone
