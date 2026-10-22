@@ -6,11 +6,57 @@ package store
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
+	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
+	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
+	CreateLocalCredential(ctx context.Context, arg CreateLocalCredentialParams) error
+	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
+	CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
+	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
+	// Removing a mapping cascades to the memberships it granted.
+	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) error
+	// Drops IdP-sourced memberships from this issuer whose group the user no
+	// longer has, or whose org stopped using the IdP.
+	DeleteStaleGroupMemberships(ctx context.Context, arg DeleteStaleGroupMembershipsParams) error
+	GetActiveUser(ctx context.Context, id pgtype.UUID) (User, error)
+	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
+	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
+	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
+	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
+	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
+	// The effective role per org honours the org's identity mode (ADR 0004):
+	// platform counts manual rows, idp counts IdP rows plus the manual owner,
+	// hybrid counts both. The highest role wins.
+	ListEffectiveMemberships(ctx context.Context, userID pgtype.UUID) ([]ListEffectiveMembershipsRow, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Authentication queries. Users, sessions and credentials are not org-owned;
+	// the membership queries here span orgs on purpose (they build the caller's
+	// principal and sync IdP groups at login), always keyed by user_id.
+	// Serialises bootstrap across API replicas for the rest of the transaction.
+	LockBootstrap(ctx context.Context) error
+	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
+	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) error
+	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
+	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
+	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
+	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
+	// Returns the session if it is still valid at @now and extends its idle
+	// deadline, never past the absolute one.
+	TouchSession(ctx context.Context, arg TouchSessionParams) (Session, error)
+	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
+	// Grants the roles of every mapping that matches one of the user's groups,
+	// in orgs whose identity mode uses the IdP.
+	UpsertGroupMemberships(ctx context.Context, arg UpsertGroupMembershipsParams) error
 }
 
 var _ Querier = (*Queries)(nil)
