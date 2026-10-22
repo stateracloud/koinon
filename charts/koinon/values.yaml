@@ -215,6 +215,12 @@ sandboxPolicy:
       openshell.ai/managed-by: openshell
   # Runtime classes allowed for sandbox workload pods.
   runtimeClasses: [kata, kata-qemu]
+  # Images allowed in OpenShell supervisor pods (label openshell.ai/boundary-role=supervisor),
+  # for every container and init container (ADR 0045: a pinned supervisor image). The default is
+  # OpenShell 0.1.5's own; change it with the OpenShell version, and add your mirror's reference
+  # (by tag or digest) when the gateway pulls the image from one.
+  supervisorImages:
+    - ghcr.io/nvidia/openshell/supervisor:0.1.5
   validationActions: [Deny]
   # Requesting identities (request.userInfo.username) allowed to write each kind of object in
   # sandbox namespaces. Everyone else is denied, cluster admins included; there is no break-glass.

@@ -349,6 +349,11 @@
           "minItems": 1,
           "items": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"}
         },
+        "supervisorImages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
         "validationActions": {
           "type": "array",
           "minItems": 1,
