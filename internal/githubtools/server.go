@@ -56,12 +56,6 @@ const (
 	ToolGetApprovalStatus = "get_approval_status"
 )
 
-// scopeOf is the scope each write tool needs.
-var scopeOf = map[string]string{
-	ToolCreatePullRequest: "pull_request.create",
-	ToolCommentOnIssue:    "issue.comment",
-}
-
 // DefaultApprovalTTL is how long a request waits for a decision (ADR 0049:
 // a parked run expires after 7 days).
 const DefaultApprovalTTL = 7 * 24 * time.Hour
@@ -226,7 +220,11 @@ func (s *Server) authorise(c caller, tool string) (connectors.Decision, string, 
 	if !ok {
 		return connectors.Deny, "", errors.New("this agent has no GitHub grant")
 	}
-	scope := scopeOf[tool]
+	wt, err := LookupWriteTool(tool)
+	if err != nil {
+		return connectors.Deny, "", err
+	}
+	scope := wt.Scope
 	granted := false
 	for _, sc := range grant.Scopes {
 		granted = granted || sc == scope
