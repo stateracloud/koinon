@@ -1,0 +1,267 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package agentd_test
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"slices"
+	"strings"
+	"sync"
+
+	sdk "github.com/coder/acp-go-sdk"
+)
+
+// Prompt markers that script the fake harness.
+const (
+	// markPermit: ask permission for an edit and for a fetch, then report the answers.
+	markPermit = "PERMIT"
+	// markWait: stream one chunk and wait until the turn is cancelled.
+	markWait = "WAIT"
+	// markCrash: on the first attempt stream one chunk and exit with 137 mid-turn, as a
+	// crashed harness or a dropped stream would; the resumed turn finishes.
+	markCrash = "CRASH-ONCE"
+	// markHang: on the first attempt stream two chunks and hang until the stream goes away
+	// (the worker is killed); the resumed turn finishes.
+	markHang = "HANG-ONCE"
+	// resumeMarker is how the fake harness recognises agentd's resume note.
+	resumeMarker = "[Koinon]"
+)
+
+// harness is a scripted ACP agent standing in for a flavor's harness behind exec. Each exec
+// of the launch command is a new process, but sessions persist across them, as they do on
+// the agent's home volume.
+type harness struct {
+	mu       sync.Mutex
+	sessions map[string][]sdk.SessionUpdate
+	nextID   int
+	args     [][]string
+	prompts  []string
+	loads    []string
+	cancels  int
+	crashed  bool
+	hung     bool
+	hangs    chan struct{} // receives when a hang starts
+}
+
+func newHarness() *harness {
+	return &harness{sessions: map[string][]sdk.SessionUpdate{}, hangs: make(chan struct{}, 4)}
+}
+
+// command is the fakegateway command for the launch command.
+func (h *harness) command(ctx context.Context, args []string, stdin io.Reader, stdout, _ io.Writer) int {
+	h.mu.Lock()
+	h.args = append(h.args, slices.Clone(args))
+	h.mu.Unlock()
+	p := &process{h: h, crash: make(chan struct{}), cancelled: make(chan struct{}), ready: make(chan struct{})}
+	p.conn = sdk.NewAgentSideConnection(p, stdout, stdin)
+	close(p.ready)
+	select {
+	case <-p.conn.Done():
+		return 0
+	case <-ctx.Done():
+		return 143
+	case <-p.crash:
+		return 137
+	}
+}
+
+func (h *harness) snapshot() (prompts, loads []string, cancels int, args [][]string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.prompts), slices.Clone(h.loads), h.cancels, slices.Clone(h.args)
+}
+
+// process is one harness process: one ACP connection.
+type process struct {
+	h         *harness
+	conn      *sdk.AgentSideConnection
+	crash     chan struct{}
+	ready     chan struct{} // closed once conn is set
+	once      sync.Once
+	cancelled chan struct{}
+}
+
+var _ sdk.Agent = (*process)(nil)
+
+// agent returns the connection, once the command has set it.
+func (p *process) agent() *sdk.AgentSideConnection {
+	<-p.ready
+	return p.conn
+}
+
+func (p *process) say(ctx context.Context, id sdk.SessionId, u sdk.SessionUpdate) error {
+	p.h.mu.Lock()
+	p.h.sessions[string(id)] = append(p.h.sessions[string(id)], u)
+	p.h.mu.Unlock()
+	return p.agent().SessionUpdate(ctx, sdk.SessionNotification{SessionId: id, Update: u})
+}
+
+func (p *process) Initialize(context.Context, sdk.InitializeRequest) (sdk.InitializeResponse, error) {
+	return sdk.InitializeResponse{
+		ProtocolVersion:   sdk.ProtocolVersionNumber,
+		AgentCapabilities: sdk.AgentCapabilities{LoadSession: true},
+		AgentInfo:         &sdk.Implementation{Name: "fake-harness", Version: "1"},
+	}, nil
+}
+
+func (p *process) NewSession(_ context.Context, r sdk.NewSessionRequest) (sdk.NewSessionResponse, error) {
+	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
+	p.h.nextID++
+	id := fmt.Sprintf("ses_%d", p.h.nextID)
+	p.h.sessions[id] = nil
+	_ = r
+	return sdk.NewSessionResponse{SessionId: sdk.SessionId(id)}, nil
+}
+
+func (p *process) LoadSession(ctx context.Context, r sdk.LoadSessionRequest) (sdk.LoadSessionResponse, error) {
+	p.h.mu.Lock()
+	hist, ok := p.h.sessions[string(r.SessionId)]
+	p.h.loads = append(p.h.loads, string(r.SessionId))
+	hist = slices.Clone(hist)
+	p.h.mu.Unlock()
+	if !ok {
+		return sdk.LoadSessionResponse{}, sdk.NewInvalidParams(map[string]any{"sessionId": "unknown"})
+	}
+	for _, u := range hist {
+		if err := p.agent().SessionUpdate(ctx, sdk.SessionNotification{SessionId: r.SessionId, Update: u}); err != nil {
+			return sdk.LoadSessionResponse{}, err
+		}
+	}
+	return sdk.LoadSessionResponse{}, nil
+}
+
+func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptResponse, error) {
+	text := r.Prompt[0].Text.Text
+	p.h.mu.Lock()
+	p.h.prompts = append(p.h.prompts, text)
+	p.h.sessions[string(r.SessionId)] = append(p.h.sessions[string(r.SessionId)], sdk.UpdateUserMessageText(text))
+	firstCrash := strings.Contains(text, markCrash) && !p.h.crashed
+	if firstCrash {
+		p.h.crashed = true
+	}
+	firstHang := strings.Contains(text, markHang) && !p.h.hung
+	if firstHang {
+		p.h.hung = true
+	}
+	p.h.mu.Unlock()
+	id := r.SessionId
+	end := sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}
+
+	switch {
+	case strings.Contains(text, resumeMarker):
+		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("resumed")); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		return end, nil
+
+	case firstCrash:
+		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("before the crash ")); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		p.once.Do(func() { close(p.crash) })
+		<-ctx.Done()
+		return sdk.PromptResponse{}, ctx.Err()
+
+	case firstHang:
+		for _, s := range []string{"one ", "two "} {
+			if err := p.say(ctx, id, sdk.UpdateAgentMessageText(s)); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+		}
+		p.h.hangs <- struct{}{}
+		<-ctx.Done()
+		return sdk.PromptResponse{}, ctx.Err()
+
+	case strings.Contains(text, markWait):
+		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("working")); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		select {
+		case <-p.cancelled:
+		case <-ctx.Done():
+		}
+		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
+
+	case strings.Contains(text, markPermit):
+		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("asking: ")); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		var answers []string
+		for _, kind := range []sdk.ToolKind{sdk.ToolKindEdit, sdk.ToolKindFetch} {
+			title := "use " + string(kind)
+			k := kind
+			if err := p.say(ctx, id, sdk.StartToolCall(sdk.ToolCallId("t-"+string(kind)), title, sdk.WithStartKind(k))); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+			res, err := p.agent().RequestPermission(ctx, sdk.RequestPermissionRequest{
+				SessionId: id,
+				ToolCall:  sdk.ToolCallUpdate{ToolCallId: sdk.ToolCallId("t-" + string(kind)), Title: &title, Kind: &k},
+				Options: []sdk.PermissionOption{
+					{OptionId: "allow", Name: "Allow", Kind: sdk.PermissionOptionKindAllowOnce},
+					{OptionId: "reject", Name: "Reject", Kind: sdk.PermissionOptionKindRejectOnce},
+				},
+			})
+			if err != nil {
+				return sdk.PromptResponse{}, err
+			}
+			answer := "cancelled"
+			if res.Outcome.Selected != nil {
+				answer = string(res.Outcome.Selected.OptionId)
+			}
+			answers = append(answers, string(kind)+"="+answer)
+		}
+		if err := p.say(ctx, id, sdk.UpdateAgentMessageText(strings.Join(answers, ","))); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		return end, nil
+
+	default:
+		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("Hello from the fake harness.")); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		return end, nil
+	}
+}
+
+func (p *process) Cancel(context.Context, sdk.CancelNotification) error {
+	p.h.mu.Lock()
+	p.h.cancels++
+	p.h.mu.Unlock()
+	select {
+	case <-p.cancelled:
+	default:
+		close(p.cancelled)
+	}
+	return nil
+}
+
+func (p *process) Authenticate(context.Context, sdk.AuthenticateRequest) (sdk.AuthenticateResponse, error) {
+	return sdk.AuthenticateResponse{}, nil
+}
+
+func (p *process) Logout(context.Context, sdk.LogoutRequest) (sdk.LogoutResponse, error) {
+	return sdk.LogoutResponse{}, nil
+}
+
+func (p *process) CloseSession(context.Context, sdk.CloseSessionRequest) (sdk.CloseSessionResponse, error) {
+	return sdk.CloseSessionResponse{}, nil
+}
+
+func (p *process) ListSessions(context.Context, sdk.ListSessionsRequest) (sdk.ListSessionsResponse, error) {
+	return sdk.ListSessionsResponse{}, nil
+}
+
+func (p *process) ResumeSession(context.Context, sdk.ResumeSessionRequest) (sdk.ResumeSessionResponse, error) {
+	return sdk.ResumeSessionResponse{}, nil
+}
+
+func (p *process) SetSessionConfigOption(context.Context, sdk.SetSessionConfigOptionRequest) (sdk.SetSessionConfigOptionResponse, error) {
+	return sdk.SetSessionConfigOptionResponse{}, nil
+}
+
+func (p *process) SetSessionMode(context.Context, sdk.SetSessionModeRequest) (sdk.SetSessionModeResponse, error) {
+	return sdk.SetSessionModeResponse{}, nil
+}

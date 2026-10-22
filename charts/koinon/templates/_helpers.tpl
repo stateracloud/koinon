@@ -218,3 +218,36 @@ koinon.persistentPassword (list $ "<secret name>" "<key>").
 {{- fail "ingress.host is required when ingress.enabled is true" }}
 {{- end }}
 {{- end }}
+
+{{/*
+koinon-agentd's settings (plan item AG1). The gateway URL tells sandboxes where agentgateway is;
+it carries no credentials.
+*/}}
+{{- define "koinon.agentdEnv" -}}
+- name: POD_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+- name: KOINON_OPENSHELL_ADDRESS
+  value: {{ .Values.openshell.address | quote }}
+{{- if .Values.openshell.clientTLSSecret }}
+- name: KOINON_OPENSHELL_TLS_DIR
+  value: /etc/koinon/openshell-tls
+{{- end }}
+{{- $gatewayURL := .Values.agentd.gatewayURL }}
+{{- if and (not $gatewayURL) (eq .Values.gateway.mode "standalone") }}
+{{- $gatewayURL = printf "http://%s.%s.svc:%v" (include "koinon.componentName" (list . "gateway")) .Release.Namespace .Values.gateway.standalone.port }}
+{{- end }}
+{{- with $gatewayURL }}
+- name: KOINON_GATEWAY_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.model.models }}
+- name: KOINON_DEFAULT_MODEL
+  value: {{ (first .).name | quote }}
+{{- end }}
+- name: KOINON_WORKERS
+  value: {{ .Values.agentd.workers | default 8 | quote }}
+- name: KOINON_LEASE
+  value: {{ .Values.agentd.lease | default "30s" | quote }}
+{{- end }}
