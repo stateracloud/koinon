@@ -40,8 +40,14 @@ func (a *fakeAgent) Initialize(context.Context, sdk.InitializeRequest) (sdk.Init
 	}, nil
 }
 
-func (a *fakeAgent) NewSession(context.Context, sdk.NewSessionRequest) (sdk.NewSessionResponse, error) {
-	return sdk.NewSessionResponse{SessionId: "s1"}, nil
+func (a *fakeAgent) NewSession(ctx context.Context, _ sdk.NewSessionRequest) (sdk.NewSessionResponse, error) {
+	err := a.conn.SessionUpdate(ctx, sdk.SessionNotification{SessionId: "s1", Update: sdk.SessionUpdate{
+		AvailableCommandsUpdate: &sdk.SessionAvailableCommandsUpdate{
+			SessionUpdate:     "available_commands_update",
+			AvailableCommands: []sdk.AvailableCommand{{Name: "compact"}, {Name: "koinon:koinon-ready"}},
+		},
+	}})
+	return sdk.NewSessionResponse{SessionId: "s1"}, err
 }
 
 func (a *fakeAgent) LoadSession(ctx context.Context, r sdk.LoadSessionRequest) (sdk.LoadSessionResponse, error) {
@@ -118,8 +124,29 @@ func (a *fakeAgent) ResumeSession(context.Context, sdk.ResumeSessionRequest) (sd
 	return sdk.ResumeSessionResponse{}, nil
 }
 
-func (a *fakeAgent) SetSessionConfigOption(context.Context, sdk.SetSessionConfigOptionRequest) (sdk.SetSessionConfigOptionResponse, error) {
-	return sdk.SetSessionConfigOptionResponse{}, nil
+// SetSessionConfigOption selects any model except "stubborn", for which it keeps "default",
+// and reports no options at all for "silent".
+func (a *fakeAgent) SetSessionConfigOption(_ context.Context, r sdk.SetSessionConfigOptionRequest) (sdk.SetSessionConfigOptionResponse, error) {
+	if r.ValueId == nil || r.ValueId.ConfigId != "model" {
+		return sdk.SetSessionConfigOptionResponse{}, sdk.NewInvalidParams(map[string]any{"configId": "unknown"})
+	}
+	current := r.ValueId.Value
+	switch current {
+	case "silent":
+		return sdk.SetSessionConfigOptionResponse{}, nil
+	case "stubborn":
+		current = "default"
+	}
+	option := func(id, current string) sdk.SessionConfigOption {
+		values := sdk.SessionConfigSelectOptionsUngrouped{{Name: current, Value: sdk.SessionConfigValueId(current)}}
+		return sdk.SessionConfigOption{Select: &sdk.SessionConfigOptionSelect{
+			Id: sdk.SessionConfigId(id), Name: id, Type: "select", CurrentValue: sdk.SessionConfigValueId(current),
+			Options: sdk.SessionConfigSelectOptions{Ungrouped: &values},
+		}}
+	}
+	return sdk.SetSessionConfigOptionResponse{ConfigOptions: []sdk.SessionConfigOption{
+		option("mode", "build"), option("model", string(current)),
+	}}, nil
 }
 
 func (a *fakeAgent) SetSessionMode(context.Context, sdk.SetSessionModeRequest) (sdk.SetSessionModeResponse, error) {
@@ -212,6 +239,25 @@ var _ = Describe("Conn", func() {
 		Consistently(done, 100*time.Millisecond).ShouldNot(Receive())
 		Expect(conn.Cancel(ctx, id)).To(Succeed())
 		Eventually(done).Should(Receive(Equal(acp.StopCancelled)))
+	})
+
+	It("reports the commands the agent announces", func() {
+		_, err := conn.NewSession(ctx, "/sandbox/work")
+		Expect(err).NotTo(HaveOccurred())
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		Expect(rec.updates).To(ContainElement(And(
+			HaveField("Kind", "available_commands_update"),
+			HaveField("Commands", Equal([]string{"compact", "koinon:koinon-ready"})),
+		)))
+	})
+
+	It("selects the model and checks the agent's answer", func() {
+		id, err := conn.NewSession(ctx, "/sandbox/work")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(conn.SetModel(ctx, id, "koinon/m-1")).To(Succeed())
+		Expect(conn.SetModel(ctx, id, "stubborn")).To(MatchError(ContainSubstring(`did not select model "stubborn"`)))
+		Expect(conn.SetModel(ctx, id, "silent")).To(MatchError(ContainSubstring("no \"model\" option")))
 	})
 
 	It("replays history on load and reports unknown sessions", func() {

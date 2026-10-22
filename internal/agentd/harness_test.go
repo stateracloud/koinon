@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	sdk "github.com/coder/acp-go-sdk"
 )
@@ -25,8 +26,14 @@ const (
 	// markHang: on the first attempt stream two chunks and hang until the stream goes away
 	// (the worker is killed); the resumed turn finishes.
 	markHang = "HANG-ONCE"
+	// markOutside: ask permission for reads and an edit inside and outside the session
+	// directory, all with ordinary kinds, then report the answers.
+	markOutside = "OUTSIDE"
 	// resumeMarker is how the fake harness recognises agentd's resume note.
 	resumeMarker = "[Koinon]"
+	// readyCommand is what the fake harness announces once a session is up, as OpenCode does
+	// for Koinon's MCP readiness prompt.
+	readyCommand = "koinon:koinon-ready"
 )
 
 // harness is a scripted ACP agent standing in for a flavor's harness behind exec. Each exec
@@ -46,6 +53,10 @@ type harness struct {
 	// onPrompt, if set, may answer a prompt itself (for example by calling Koinon's tools as
 	// the agent would): it returns the reply and true, or false to fall through.
 	onPrompt func(ctx context.Context, text string) (string, bool)
+	// models are the values of session/set_config_option for the model, in order.
+	models []string
+	// silent: announce no ready command; stubborn: keep its own model.
+	silent, stubborn bool
 }
 
 func newHarness() *harness {
@@ -68,6 +79,38 @@ func (h *harness) command(ctx context.Context, args []string, stdin io.Reader, s
 	case <-p.crash:
 		return 137
 	}
+}
+
+func (h *harness) selectedModels() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.models)
+}
+
+func (h *harness) set(f func(h *harness)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	f(h)
+}
+
+// announce sends the ready command after the session/new or session/load answer, as OpenCode
+// does once its MCP server is connected.
+func (p *process) announce(id sdk.SessionId) {
+	p.h.mu.Lock()
+	silent := p.h.silent
+	p.h.mu.Unlock()
+	if silent {
+		return
+	}
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		_ = p.agent().SessionUpdate(context.Background(), sdk.SessionNotification{SessionId: id, Update: sdk.SessionUpdate{
+			AvailableCommandsUpdate: &sdk.SessionAvailableCommandsUpdate{
+				SessionUpdate:     "available_commands_update",
+				AvailableCommands: []sdk.AvailableCommand{{Name: "compact"}, {Name: readyCommand}},
+			},
+		}})
+	}()
 }
 
 func (h *harness) snapshot() (prompts, loads []string, cancels int, args [][]string) {
@@ -111,11 +154,12 @@ func (p *process) Initialize(context.Context, sdk.InitializeRequest) (sdk.Initia
 
 func (p *process) NewSession(_ context.Context, r sdk.NewSessionRequest) (sdk.NewSessionResponse, error) {
 	p.h.mu.Lock()
-	defer p.h.mu.Unlock()
 	p.h.nextID++
 	id := fmt.Sprintf("ses_%d", p.h.nextID)
 	p.h.sessions[id] = nil
+	p.h.mu.Unlock()
 	_ = r
+	p.announce(sdk.SessionId(id))
 	return sdk.NewSessionResponse{SessionId: sdk.SessionId(id)}, nil
 }
 
@@ -133,6 +177,7 @@ func (p *process) LoadSession(ctx context.Context, r sdk.LoadSessionRequest) (sd
 			return sdk.LoadSessionResponse{}, err
 		}
 	}
+	p.announce(r.SessionId)
 	return sdk.LoadSessionResponse{}, nil
 }
 
@@ -197,6 +242,48 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		case <-ctx.Done():
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
+
+	case strings.Contains(text, markOutside):
+		var answers []string
+		for i, c := range []struct {
+			name, path string
+			kind       sdk.ToolKind
+		}{
+			{"read-in", "/sandbox/work/notes.txt", sdk.ToolKindRead},
+			{"read-relative", "src/main.go", sdk.ToolKindRead},
+			{"read-out", "/etc/passwd", sdk.ToolKindRead},
+			{"read-dotdot", "/sandbox/work/../.koinon/AGENTS.md", sdk.ToolKindRead},
+			{"edit-out", "/sandbox/.koinon/AGENTS.md", sdk.ToolKindEdit},
+		} {
+			tid := sdk.ToolCallId(fmt.Sprintf("o-%d", i))
+			k := c.kind
+			if err := p.say(ctx, id, sdk.StartToolCall(tid, c.name, sdk.WithStartKind(k))); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+			res, err := p.agent().RequestPermission(ctx, sdk.RequestPermissionRequest{
+				SessionId: id,
+				ToolCall: sdk.ToolCallUpdate{
+					ToolCallId: tid, Title: &c.name, Kind: &k,
+					Locations: []sdk.ToolCallLocation{{Path: c.path}},
+				},
+				Options: []sdk.PermissionOption{
+					{OptionId: "allow", Name: "Allow", Kind: sdk.PermissionOptionKindAllowOnce},
+					{OptionId: "reject", Name: "Reject", Kind: sdk.PermissionOptionKindRejectOnce},
+				},
+			})
+			if err != nil {
+				return sdk.PromptResponse{}, err
+			}
+			answer := "cancelled"
+			if res.Outcome.Selected != nil {
+				answer = string(res.Outcome.Selected.OptionId)
+			}
+			answers = append(answers, c.name+"="+answer)
+		}
+		if err := p.say(ctx, id, sdk.UpdateAgentMessageText(strings.Join(answers, ","))); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		return end, nil
 
 	case strings.Contains(text, markPermit):
 		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("asking: ")); err != nil {
@@ -271,8 +358,26 @@ func (p *process) ResumeSession(context.Context, sdk.ResumeSessionRequest) (sdk.
 	return sdk.ResumeSessionResponse{}, nil
 }
 
-func (p *process) SetSessionConfigOption(context.Context, sdk.SetSessionConfigOptionRequest) (sdk.SetSessionConfigOptionResponse, error) {
-	return sdk.SetSessionConfigOptionResponse{}, nil
+// SetSessionConfigOption answers like OpenCode: the full option set, with the selected model
+// as current, unless the harness is stubborn.
+func (p *process) SetSessionConfigOption(_ context.Context, r sdk.SetSessionConfigOptionRequest) (sdk.SetSessionConfigOptionResponse, error) {
+	if r.ValueId == nil || r.ValueId.ConfigId != "model" {
+		return sdk.SetSessionConfigOptionResponse{}, sdk.NewInvalidParams(map[string]any{"configId": "unsupported"})
+	}
+	p.h.mu.Lock()
+	p.h.models = append(p.h.models, string(r.ValueId.Value))
+	current := r.ValueId.Value
+	if p.h.stubborn {
+		current = "opencode/some-free-model"
+	}
+	p.h.mu.Unlock()
+	values := sdk.SessionConfigSelectOptionsUngrouped{{Name: string(current), Value: current}}
+	return sdk.SetSessionConfigOptionResponse{ConfigOptions: []sdk.SessionConfigOption{{
+		Select: &sdk.SessionConfigOptionSelect{
+			Id: "model", Name: "Model", Type: "select", CurrentValue: current,
+			Options: sdk.SessionConfigSelectOptions{Ungrouped: &values},
+		},
+	}}}, nil
 }
 
 func (p *process) SetSessionMode(context.Context, sdk.SetSessionModeRequest) (sdk.SetSessionModeResponse, error) {
