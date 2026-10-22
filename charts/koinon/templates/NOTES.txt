@@ -5,9 +5,9 @@ Gateway:  {{ .Values.gateway.mode }}{{ if eq .Values.gateway.mode "kubernetes" }
 {{- if .Values.bootstrapAdmin.enabled }}
 
 Bootstrap admin: user {{ .Values.bootstrapAdmin.username | quote }}, one-time password in Secret
-{{ include "koinon.componentName" (list . "bootstrap-admin") }}:
+{{ include "koinon.bootstrapSecretName" . }}:
 
-  kubectl -n {{ .Release.Namespace }} get secret {{ include "koinon.componentName" (list . "bootstrap-admin") }} -o jsonpath='{.data.password}' | base64 -d
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "koinon.bootstrapSecretName" . }} -o jsonpath='{.data.password}' | base64 -d
 
 The first login asks for a new password.
 {{- end }}

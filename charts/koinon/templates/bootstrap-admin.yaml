@@ -2,9 +2,11 @@
 {{- /*
 Bootstrap platform admin (plan item A1): a one-time password generated at install and read back
 from the live Secret on upgrade, so it never changes underneath the API. The first login forces a
-password change.
+password change. Rendering without a cluster (helm template, GitOps) cannot read the live Secret
+and generates a new password each time: set bootstrapAdmin.existingSecret there, and the chart
+renders no Secret.
 */ -}}
-{{- if .Values.bootstrapAdmin.enabled }}
+{{- if and .Values.bootstrapAdmin.enabled (not .Values.bootstrapAdmin.existingSecret) }}
 {{- $name := include "koinon.componentName" (list . "bootstrap-admin") }}
 apiVersion: v1
 kind: Secret

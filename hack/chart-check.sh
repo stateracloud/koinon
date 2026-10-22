@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Render-only checks for charts/koinon (plan item H1): helm lint and helm template for every
-# value set in charts/koinon/ci/ (each postgres.mode x gateway.mode), then kubeconform on the
-# output. Never talks to a cluster.
+# value set in charts/koinon/ci/ (each postgres.mode x gateway.mode), assertions on the rendered
+# output for chosen values, then kubeconform on the output. Never talks to a cluster.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -28,6 +28,78 @@ for f in "${value_files[@]}"; do
 	"$HELM" lint --strict "$CHART" -f "$f"
 	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" >"$out/$name.yaml"
 done
+
+# Assertions on rendered output: render with --set flags, then grep.
+render() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
+failures=0
+fail() {
+	echo "FAIL: $*" >&2
+	failures=$((failures + 1))
+}
+# has <description> <extended regexp> <helm args...>: the rendering matches the pattern.
+has() {
+	local what=$1 re=$2
+	shift 2
+	render "$@" | grep -Eq -- "$re" || fail "$what"
+}
+# lacks <description> <extended regexp> <helm args...>: the rendering does not match the pattern.
+lacks() {
+	local what=$1 re=$2
+	shift 2
+	if render "$@" | grep -Eq -- "$re"; then fail "$what"; fi
+}
+# env <name> <value> <helm args...>: koinon-api's env has name=value (the line after the name).
+env_is() {
+	local name=$1 value=$2
+	shift 2
+	render --show-only templates/deployments.yaml "$@" |
+		grep -A1 -E -- "- name: $name\$" | grep -Fq -- "value: $value" ||
+		fail "env $name=$value with $*"
+}
+
+echo "== assertions"
+# bootstrapAdmin.enabled=false turns password login off and renders no password.
+env_is KOINON_BOOTSTRAP_LOGIN '"false"' --set bootstrapAdmin.enabled=false
+lacks "no bootstrap Secret when bootstrapAdmin is disabled" 'name: koinon-bootstrap-admin$' --set bootstrapAdmin.enabled=false
+lacks "no password file when bootstrapAdmin is disabled" 'KOINON_BOOTSTRAP_PASSWORD_FILE' --set bootstrapAdmin.enabled=false
+lacks "bootstrap login stays on by default" 'KOINON_BOOTSTRAP_LOGIN'
+# bootstrapAdmin.username reaches koinon-api.
+env_is KOINON_BOOTSTRAP_ADMIN_USERNAME '"admin"'
+env_is KOINON_BOOTSTRAP_ADMIN_USERNAME '"ops"' --set bootstrapAdmin.username=ops
+# bootstrapAdmin.existingSecret: no generated Secret, the API mounts the given one.
+has "generated bootstrap Secret by default" 'name: koinon-bootstrap-admin$' --show-only templates/bootstrap-admin.yaml
+lacks "no generated bootstrap Secret with existingSecret" 'name: koinon-bootstrap-admin$' --set bootstrapAdmin.existingSecret=mine
+has "existingSecret mounted" 'secretName: mine$' --set bootstrapAdmin.existingSecret=mine
+# publicUrl: explicit, or derived from the ingress.
+lacks "no public URL without ingress or publicUrl" 'KOINON_PUBLIC_URL'
+env_is KOINON_PUBLIC_URL '"http://koinon.lan"' --set publicUrl=http://koinon.lan/
+env_is KOINON_PUBLIC_URL '"http://koinon.example.com"' --set ingress.enabled=true --set ingress.host=koinon.example.com
+env_is KOINON_PUBLIC_URL '"https://koinon.example.com"' --set ingress.enabled=true --set ingress.host=koinon.example.com \
+	--set ingress.tlsSecretName=tls
+# oidc values map to koinon-api's --oidc-* flags; the client secret is a mounted file.
+oidc=(--set publicUrl=https://koinon.example.com --set oidc.enabled=true --set oidc.issuerUrl=https://idp.example.com
+	--set oidc.clientId=koinon --set oidc.clientSecret.existingSecret=koinon-oidc --set oidc.groupMappings.staff=member)
+lacks "no OIDC env when oidc is disabled" 'KOINON_OIDC_'
+env_is KOINON_OIDC_ISSUER_URL '"https://idp.example.com"' "${oidc[@]}"
+env_is KOINON_OIDC_CLIENT_ID '"koinon"' "${oidc[@]}"
+env_is KOINON_OIDC_CLIENT_SECRET_FILE /etc/koinon/oidc/client-secret "${oidc[@]}"
+env_is KOINON_OIDC_SCOPES '"email,profile"' "${oidc[@]}"
+env_is KOINON_DEFAULT_ORG_GROUP_MAPPINGS '"staff=member"' "${oidc[@]}"
+env_is KOINON_SESSION_MAX_LIFETIME '"12h"' "${oidc[@]}"
+has "OIDC client secret mounted" 'secretName: koinon-oidc$' "${oidc[@]}"
+if render --set oidc.enabled=true --set oidc.issuerUrl=https://idp.example.com --set oidc.clientId=koinon \
+	>/dev/null 2>&1; then
+	fail "oidc without a redirect or public URL must not render"
+fi
+# config.yaml is the reconciler's alone.
+n=$(render --show-only templates/deployments.yaml | grep -c 'KOINON_CONFIG' || true)
+[ "$n" = 1 ] || fail "KOINON_CONFIG set on $n components, want only the reconciler"
+n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /etc/koinon/config$' || true)
+[ "$n" = 1 ] || fail "config.yaml mounted into $n components, want only the reconciler"
+if [ "$failures" -gt 0 ]; then
+	echo "$failures assertion(s) failed" >&2
+	exit 1
+fi
 
 echo "== kubeconform (Kubernetes $KUBERNETES_VERSION)"
 "${KUBECONFORM[@]}" \

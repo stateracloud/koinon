@@ -299,12 +299,53 @@
         "runtimeClassName": {"$ref": "#/definitions/nonEmpty"}
       }
     },
+    "publicUrl": {"type": "string", "pattern": "^(https?://[^/?#\\s]+/?)?$"},
     "bootstrapAdmin": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {"type": "boolean"},
-        "username": {"$ref": "#/definitions/nonEmpty"}
+        "username": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^\\S(.*\\S)?$"},
+        "existingSecret": {"type": "string"}
+      }
+    },
+    "oidc": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "issuerUrl": {"type": "string", "pattern": "^(https?://.+)?$"},
+        "clientId": {"type": "string"},
+        "clientSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"},
+            "key": {"$ref": "#/definitions/nonEmpty"}
+          }
+        },
+        "redirectUrl": {"type": "string", "pattern": "^(https?://.+)?$"},
+        "scopes": {"type": "array", "items": {"type": "string", "pattern": "^[^,\\s]+$"}},
+        "groupsClaim": {"$ref": "#/definitions/nonEmpty"},
+        "groupMappings": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[^,=]+$"},
+          "additionalProperties": {"enum": ["viewer", "member", "admin", "owner"]}
+        },
+        "defaultOrgIdentityMode": {"enum": ["platform", "idp", "hybrid"]}
+      },
+      "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
+      "then": {
+        "required": ["issuerUrl", "clientId"],
+        "properties": {"issuerUrl": {"minLength": 1}, "clientId": {"minLength": 1}}
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "idleTimeout": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "maxLifetime": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"}
       }
     },
     "ingress": {

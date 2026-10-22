@@ -185,11 +185,55 @@ openshell:
   # Default sandbox runtime class (ADR 0045).
   runtimeClassName: kata
 
+# URL browsers reach Koinon at, for example https://koinon.example.com. Its scheme sets the
+# session cookies' Secure attribute (http:// turns it off, so logins work without TLS) and it is
+# the base of the default OIDC redirect URL. Empty derives it from the ingress (https with
+# ingress.tlsSecretName, else http); with the ingress off it stays empty, which means https:
+# fine for `kubectl port-forward`, since browsers treat localhost as secure. Set it when you
+# expose the API another way.
+publicUrl: ""
+
 # Bootstrap platform admin (plan item A1). The one-time password is generated once into the Secret
-# <fullname>-bootstrap-admin and kept across upgrades. Disable once OIDC works.
+# <fullname>-bootstrap-admin and kept across upgrades. Disable once OIDC works: enabled=false
+# turns the API's password login off and revokes the bootstrap sessions.
 bootstrapAdmin:
   enabled: true
+  # Login name, applied on every start (changing it renames the login).
   username: admin
+  # Existing Secret holding the one-time password under the key `password`; the chart then renders
+  # no Secret of its own. Use it with `helm template` and GitOps tools (Argo CD, Flux): they render
+  # without cluster access, so the chart cannot read back the generated password and would produce
+  # a new one on every render.
+  existingSecret: ""
+
+# Generic OIDC login (plan item A2, ADR 0004). Users log in with the IdP; roles in the default org
+# come from groupMappings, every other role from Postgres.
+oidc:
+  enabled: false
+  issuerUrl: ""
+  clientId: ""
+  # Secret with the client secret. Empty name: a public client (PKCE only).
+  clientSecret:
+    existingSecret: ""
+    key: client-secret
+  # Empty defaults to <publicUrl>/auth/oidc/callback; one of the two is required.
+  redirectUrl: ""
+  # Requested besides openid.
+  scopes: [email, profile]
+  # ID token claim holding the user's groups.
+  groupsClaim: groups
+  # IdP group -> role in the default org (viewer, member, admin or owner), for example
+  # {koinon-admins: admin, staff: member}. Reconciled on every start.
+  groupMappings: {}
+  # Identity mode of the default org: platform (roles from Koinon only), idp (from groupMappings)
+  # or hybrid (both).
+  defaultOrgIdentityMode: hybrid
+
+# Session lifetimes, for password and OIDC logins alike. IdP group changes take effect at the next
+# login, so maxLifetime bounds how long a removed group keeps granting access.
+session:
+  idleTimeout: 2h
+  maxLifetime: 12h
 
 ingress:
   enabled: false
