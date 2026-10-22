@@ -7,6 +7,9 @@
 # Usage:
 #   koinon-pi --model-base-url URL --model NAME --mcp-url URL [-- PI_ACP_ARGS...]
 #
+# koinon-agentd writes the run's instructions to /sandbox/.koinon/AGENTS.md before it starts
+# this script; without that file the script refuses to start (exit 64).
+#
 # OpenShell does not pass the image's ENV to the processes it starts, PATH included (ADR 0048),
 # so everything pi needs is set here and binaries are called by absolute path. The per-agent
 # values come as arguments, are checked and rendered by koinon-pi-render from the read-only
@@ -74,7 +77,18 @@ export KOINON_MODEL_BASE_URL="$base_url"
 export KOINON_MODEL="$model"
 export KOINON_MCP_URL="$mcp_url"
 
+# Koinon's instructions reach the model only through APPEND_SYSTEM.md, which pi appends to its
+# system prompt and which links to this file. pi skips a missing file silently and appends an
+# empty one as nothing (dist/core/resource-loader.js), so refuse to start without real content.
+instructions=/sandbox/.koinon/AGENTS.md
+if [ ! -f "$instructions" ] || [ -L "$instructions" ] || [ ! -s "$instructions" ]; then
+  die "missing instructions: $instructions (koinon-agentd writes it before the harness starts)"
+fi
+
 /opt/node/bin/node /usr/local/lib/koinon/koinon-pi-render.mjs /etc/koinon/pi "$PI_CODING_AGENT_DIR" \
   || die "rendering the configuration failed"
+# The link is put back on every start; koinon-agentd also restores it before every prompt.
+rm -rf "$PI_CODING_AGENT_DIR/APPEND_SYSTEM.md"
+ln -s "$instructions" "$PI_CODING_AGENT_DIR/APPEND_SYSTEM.md"
 mkdir -p "$PI_CODING_AGENT_DIR/sessions" "$XDG_CACHE_HOME"
 exec /opt/node/bin/node /opt/pi/node_modules/pi-acp/dist/index.js "$@"
