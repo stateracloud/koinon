@@ -79,6 +79,8 @@ message Risk {
   // Dependency manifests and lock files.
   repeated string dependencies = 6;
   repeated string binary = 7;
+  // Files the change writes as executable (git mode 100755).
+  repeated string executable = 8;
 }
 
 // FileChange is one file of a proposed pull request, with its full new
@@ -87,6 +89,9 @@ message FileChange {
   string path = 1;
   string content = 2;
   bool delete = 3;
+  // The file is written as executable (git mode 100755) instead of a regular
+  // file (100644). Symbolic links and submodules are never written.
+  bool executable = 4;
 }
 
 // PullRequestCall is create_pull_request's arguments.
