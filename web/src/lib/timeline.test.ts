@@ -84,4 +84,19 @@ describe('buildTimeline', () => {
     ])
     expect(items[4]).toMatchObject({ type: 'approval', approvalId: 'ap-1', url: 'https://github.com/Acme/Widgets/pull/7' })
   })
+
+  it('shows a session reset as a note', () => {
+    const message = "The agent's workspace was reset, so this run starts a new session."
+    const items = buildTimeline(
+      [
+        ticketEvent(1, 100, 'run.session_reset', { message, previousSessionId: 'ses_1', sessionId: 'ses_2' }),
+        ticketEvent(2, 200, 'run.session_reset', {}),
+      ],
+      {},
+    )
+    expect(items).toEqual([
+      { key: 't:1', at: 100, type: 'note', text: message, runId: run },
+      { key: 't:2', at: 200, type: 'note', text: message, runId: run },
+    ])
+  })
 })

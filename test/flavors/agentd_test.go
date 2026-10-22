@@ -99,7 +99,10 @@ func describeAgentd(f flavor) bool {
 				SandboxName: names.Sandbox, ProviderName: names.Provider, KeySecretName: names.KeySecret,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{OrgID: org, AgentID: agent.ID, State: store.SandboxStateReady})
+			// The home volume outlives the container's stop and start, so its generation is fixed.
+			_, err = q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
+				OrgID: org, AgentID: agent.ID, State: store.SandboxStateReady, HomeGeneration: "flavors-home",
+			})
 			Expect(err).NotTo(HaveOccurred())
 			ticket, err = q.CreateTicket(ctx, store.CreateTicketParams{OrgID: org, Title: "Contract", AgentID: agent.ID, CreatedBy: user})
 			Expect(err).NotTo(HaveOccurred())

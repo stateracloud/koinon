@@ -298,7 +298,7 @@ var _ = Describe("Reconciler", func() {
 			run := claimRun(ctx, org)
 			pass(ctx, r)
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
-			Expect(sandboxRow(ctx, agent.ID).Message).To(ContainSubstring("after the active run"))
+			Expect(sandboxRow(ctx, agent.ID).Message).To(ContainSubstring("after the active and parked runs finish"))
 
 			_, err := q.FinishRun(ctx, store.FinishRunParams{OrgID: org, ID: run.ID, Epoch: run.Epoch, Outcome: store.RunStateSucceeded})
 			Expect(err).NotTo(HaveOccurred())
@@ -307,6 +307,67 @@ var _ = Describe("Reconciler", func() {
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
 			Expect(osg.Sandbox(row.Workspace, names.Sandbox).GetSpec().GetTemplate().GetImage()).To(Equal(image + "-2"))
 			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("records the sandbox's OpenShell ID as its home generation, new for a recreated sandbox", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			id := osg.Sandbox(row.Workspace, names.Sandbox).GetMetadata().GetId()
+			Expect(id).NotTo(BeEmpty())
+			Expect(row.HomeGeneration.String).To(Equal(id))
+
+			By("stop and start keep the home, and so the generation")
+			advance(11 * time.Minute)
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateStopped))
+			now.Store(nil)
+			queueRun(ctx, org, user, agent.ID)
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateReady))
+			Expect(sandboxRow(ctx, agent.ID).HomeGeneration.String).To(Equal(id))
+
+			By("a recreated sandbox has a new home")
+			Expect(backend.DeleteSandbox(ctx, row.Workspace, names.Sandbox)).To(Succeed())
+			pass(ctx, r)
+			recreated := sandboxRow(ctx, agent.ID)
+			Expect(recreated.HomeGeneration.String).To(Equal(osg.Sandbox(row.Workspace, names.Sandbox).GetMetadata().GetId()))
+			Expect(recreated.HomeGeneration.String).NotTo(Equal(id))
+		})
+
+		It("does not recreate the sandbox while a run is parked, and does once it has finished", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			queueRun(ctx, org, user, agent.ID)
+			run := claimRun(ctx, org)
+			run, err := q.ParkRun(ctx, store.ParkRunParams{
+				OrgID: org, ID: run.ID, Epoch: run.Epoch, ParkReason: store.RunParkReasonApproval,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			cfg.Flavors[store.AgentFlavorOpencode] = reconciler.Flavor{
+				Image: image + "-2", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode],
+			}
+			r = newReconciler()
+			pass(ctx, r)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+			Expect(sandboxRow(ctx, agent.ID).Message).To(Equal(
+				"sandbox spec changed; recreating it after the active and parked runs finish"))
+
+			By("a resolved park still waits for the resumed run")
+			_, err = q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: org, ID: run.ID})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx, r)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+			resumed := claimRun(ctx, org)
+			Expect(resumed.ID).To(Equal(run.ID))
+			pass(ctx, r)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+
+			By("the resumed run finishing lets the recreation proceed")
+			_, err = q.FinishRun(ctx, store.FinishRunParams{OrgID: org, ID: resumed.ID, Epoch: resumed.Epoch, Outcome: store.RunStateSucceeded})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx, r) // deletes
+			pass(ctx, r) // creates
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(osg.Sandbox(row.Workspace, names.Sandbox).GetSpec().GetTemplate().GetImage()).To(Equal(image + "-2"))
 		})
 
 		It("stops after the idle timeout and starts again for a queued run", func(ctx SpecContext) {
