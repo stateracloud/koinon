@@ -1,0 +1,105 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Standard networking.k8s.io/v1 NetworkPolicies only (no CNI-specific resources). Ingress is
+restricted per component; egress stays open in v0.1 because the Kubernetes API, the OpenShell
+gateway and the model upstream have no portable selector.
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $release := dict "app.kubernetes.io/name" (include "koinon.name" .) "app.kubernetes.io/instance" .Release.Name }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.componentName" (list . "api") }}
+  labels:
+    {{- include "koinon.labels" (list . "api") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "api") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: http
+      {{- with .Values.networkPolicy.apiFrom }}
+      from:
+        # Koinon's own pods (agentgateway calls the GitHub tools and sends its access log here).
+        - podSelector:
+            matchLabels:
+              {{- toYaml $release | nindent 14 }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- range $component := list "reconciler" "agentd" "migrate" }}
+---
+# {{ $component }} accepts no connections.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.componentName" (list $ $component) }}
+  labels:
+    {{- include "koinon.labels" (list $ $component) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list $ $component) | nindent 6 }}
+  policyTypes: [Ingress]
+{{- end }}
+{{- if eq .Values.gateway.mode "standalone" }}
+---
+# Sandboxes reach agentgateway through their OpenShell supervisor pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.componentName" (list . "gateway") }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "gateway") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: llm
+      from:
+        - namespaceSelector:
+            {{- toYaml .Values.sandboxPolicy.namespaceSelector | nindent 12 }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml $release | nindent 14 }}
+    {{- with .Values.networkPolicy.metricsFrom }}
+    - ports:
+        - port: stats
+      from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- end }}
+{{- if eq .Values.postgres.mode "cnpg" }}
+---
+# Postgres: Koinon's pods, the other instances of the cluster, and the CNPG operator.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.componentName" (list . "postgres") }}
+  labels:
+    {{- include "koinon.labels" (list . "postgres") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ include "koinon.pgCluster" . }}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: 5432
+      from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $release | nindent 14 }}
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ include "koinon.pgCluster" . }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.postgres.cnpg.operatorNamespace }}
+{{- end }}
+{{- end }}

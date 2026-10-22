@@ -1,1 +1,20 @@
-Koinon {{ .Chart.AppVersion }} is pre-alpha. This chart installs nothing yet.
+Koinon {{ .Chart.AppVersion }} is pre-alpha (v0.1 chart skeleton).
+
+Database: {{ .Values.postgres.mode }}{{ if eq .Values.postgres.mode "cnpg" }} (CloudNativePG Cluster {{ include "koinon.pgCluster" . }}){{ end }}
+Gateway:  {{ .Values.gateway.mode }}{{ if eq .Values.gateway.mode "kubernetes" }} (nothing rendered yet; plan item G2){{ end }}
+{{- if .Values.bootstrapAdmin.enabled }}
+
+Bootstrap admin: user {{ .Values.bootstrapAdmin.username | quote }}, one-time password in Secret
+{{ include "koinon.componentName" (list . "bootstrap-admin") }}:
+
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "koinon.componentName" (list . "bootstrap-admin") }} -o jsonpath='{.data.password}' | base64 -d
+
+The first login asks for a new password.
+{{- end }}
+
+Open the UI:
+{{- if .Values.ingress.enabled }}
+  http{{ if .Values.ingress.tlsSecretName }}s{{ end }}://{{ .Values.ingress.host }}/
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "koinon.componentName" (list . "api") }} {{ .Values.api.port }}
+{{- end }}

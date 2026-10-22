@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+gateway:
+  mode: kubernetes
+postgres:
+  cnpg:
+    instances: 3
+    storage:
+      storageClass: fast
