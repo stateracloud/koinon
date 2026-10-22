@@ -141,6 +141,7 @@ type Querier interface {
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
+	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// Stores the harness session for the ticket. Fenced by the run epoch: only the
 	// current owner of one of the ticket's active runs can set it.
