@@ -155,8 +155,12 @@ type Risk struct {
 	// Files tooling or people execute: scripts, Makefiles, hooks.
 	Scripts []string `protobuf:"bytes,5,rep,name=scripts,proto3" json:"scripts,omitempty"`
 	// Dependency manifests and lock files.
-	Dependencies  []string `protobuf:"bytes,6,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
-	Binary        []string `protobuf:"bytes,7,rep,name=binary,proto3" json:"binary,omitempty"`
+	Dependencies []string `protobuf:"bytes,6,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
+	Binary       []string `protobuf:"bytes,7,rep,name=binary,proto3" json:"binary,omitempty"`
+	// Files the call marks executable (git mode 100755); a marked file that is
+	// already executable on the base branch is listed too. Unmarked files keep
+	// their mode.
+	Executable    []string `protobuf:"bytes,8,rep,name=executable,proto3" json:"executable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -240,13 +244,24 @@ func (x *Risk) GetBinary() []string {
 	return nil
 }
 
+func (x *Risk) GetExecutable() []string {
+	if x != nil {
+		return x.Executable
+	}
+	return nil
+}
+
 // FileChange is one file of a proposed pull request, with its full new
 // content: the diff data the card shows collapsed.
 type FileChange struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
-	Delete        bool                   `protobuf:"varint,3,opt,name=delete,proto3" json:"delete,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Path    string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Content string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	Delete  bool                   `protobuf:"varint,3,opt,name=delete,proto3" json:"delete,omitempty"`
+	// The file is written as executable (git mode 100755). Otherwise a new file
+	// is regular (100644) and a modified file keeps its mode on the base branch.
+	// Symbolic links and submodules are never written.
+	Executable    bool `protobuf:"varint,4,opt,name=executable,proto3" json:"executable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -298,6 +313,13 @@ func (x *FileChange) GetContent() string {
 func (x *FileChange) GetDelete() bool {
 	if x != nil {
 		return x.Delete
+	}
+	return false
+}
+
+func (x *FileChange) GetExecutable() bool {
+	if x != nil {
+		return x.Executable
 	}
 	return false
 }
@@ -1135,7 +1157,7 @@ var File_koinon_approval_v1alpha1_approval_proto protoreflect.FileDescriptor
 
 const file_koinon_approval_v1alpha1_approval_proto_rawDesc = "" +
 	"\n" +
-	"'koinon/approval/v1alpha1/approval.proto\x12\x18koinon.approval.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb6\x01\n" +
+	"'koinon/approval/v1alpha1/approval.proto\x12\x18koinon.approval.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd6\x01\n" +
 	"\x04Risk\x12\x14\n" +
 	"\x05files\x18\x01 \x01(\x03R\x05files\x12\x14\n" +
 	"\x05bytes\x18\x02 \x01(\x03R\x05bytes\x12\x1c\n" +
@@ -1143,12 +1165,18 @@ const file_koinon_approval_v1alpha1_approval_proto_rawDesc = "" +
 	"\x02ci\x18\x04 \x03(\tR\x02ci\x12\x18\n" +
 	"\ascripts\x18\x05 \x03(\tR\ascripts\x12\"\n" +
 	"\fdependencies\x18\x06 \x03(\tR\fdependencies\x12\x16\n" +
-	"\x06binary\x18\a \x03(\tR\x06binary\"R\n" +
+	"\x06binary\x18\a \x03(\tR\x06binary\x12\x1e\n" +
+	"\n" +
+	"executable\x18\b \x03(\tR\n" +
+	"executable\"r\n" +
 	"\n" +
 	"FileChange\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12\x16\n" +
-	"\x06delete\x18\x03 \x01(\bR\x06delete\"\xa3\x01\n" +
+	"\x06delete\x18\x03 \x01(\bR\x06delete\x12\x1e\n" +
+	"\n" +
+	"executable\x18\x04 \x01(\bR\n" +
+	"executable\"\xa3\x01\n" +
 	"\x0fPullRequestCall\x12\x16\n" +
 	"\x06branch\x18\x01 \x01(\tR\x06branch\x12\x12\n" +
 	"\x04base\x18\x02 \x01(\tR\x04base\x12\x14\n" +
