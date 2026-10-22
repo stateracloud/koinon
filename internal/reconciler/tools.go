@@ -11,6 +11,7 @@ import (
 	"github.com/procoduck/koinon/connectors"
 	"github.com/procoduck/koinon/internal/agentconfig"
 	"github.com/procoduck/koinon/internal/db/store"
+	"github.com/procoduck/koinon/internal/execution"
 	"github.com/procoduck/koinon/internal/gateway"
 )
 
@@ -31,11 +32,11 @@ func (r *Reconciler) activeConfig(ctx context.Context, a store.Agent) (agentconf
 	}
 	v, err := r.q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: a.OrgID, ID: a.ActiveVersionID})
 	if err != nil {
-		return agentconfig.Config{}, fmt.Errorf("reconciler: read active version of agent %s: %w", uuidString(a.ID), err)
+		return agentconfig.Config{}, fmt.Errorf("reconciler: read active version of agent %s: %w", execution.UUIDString(a.ID.Bytes), err)
 	}
 	cfg, err := agentconfig.Parse(v.Config)
 	if err != nil {
-		return agentconfig.Config{}, fmt.Errorf("reconciler: agent %s: %w", uuidString(a.ID), err)
+		return agentconfig.Config{}, fmt.Errorf("reconciler: agent %s: %w", execution.UUIDString(a.ID.Bytes), err)
 	}
 	return cfg, nil
 }
