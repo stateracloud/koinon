@@ -243,11 +243,47 @@ function FileList({
   )
 }
 
-function FileBody({ file: f, diff: d, binary, base, compared }: { file: FileChange; diff?: FileDiff; binary: boolean; base: string; compared: boolean }) {
+/** modeChange is the git mode line of a file, as git prints it: a modified file whose mode changes, or a new executable file. */
+function modeChange(d?: FileDiff): string | undefined {
+  if (!d?.newMode) return undefined
+  if (d.oldMode && d.oldMode !== d.newMode) return `mode ${d.oldMode} → ${d.newMode}`
+  if (!d.oldMode && d.newMode !== '100644') return `new file mode ${d.newMode}`
+  return undefined
+}
+
+function FileBody(props: { file: FileChange; diff?: FileDiff; binary: boolean; base: string; compared: boolean }) {
+  const mode = modeChange(props.diff)
+  return (
+    <>
+      {mode && (
+        <p className="border-t px-2 py-1 font-mono text-xs" data-testid="mode-change">
+          {mode}
+        </p>
+      )}
+      <FileContent {...props} modeChanged={!!mode} />
+    </>
+  )
+}
+
+function FileContent({
+  file: f,
+  diff: d,
+  binary,
+  base,
+  compared,
+  modeChanged,
+}: {
+  file: FileChange
+  diff?: FileDiff
+  binary: boolean
+  base: string
+  compared: boolean
+  modeChanged: boolean
+}) {
   if (binary) return <p className="text-muted-foreground border-t px-2 py-1 text-sm">Binary file; its content is not shown.</p>
   if (d?.unifiedDiff) return <UnifiedDiff path={f.path} text={d.unifiedDiff} />
   if (d && !d.fallbackReason && d.status !== FileStatus.UNSPECIFIED) {
-    return <p className="text-muted-foreground border-t px-2 py-1 text-sm">No change against {base}.</p>
+    return <p className="text-muted-foreground border-t px-2 py-1 text-sm">{modeChanged ? `Content unchanged against ${base}.` : `No change against ${base}.`}</p>
   }
   return (
     <>

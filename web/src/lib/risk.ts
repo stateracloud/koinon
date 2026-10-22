@@ -3,12 +3,13 @@
 // The push-and-run risk the approval card leads with (ADR 0049, plan item
 // W2). Approving a pull request lets the change into the repository, where
 // CI runs it with the repository's secrets before any GitHub review, so the
-// card puts what runs (CI config, scripts), what pulls in code (dependency
-// manifests), what cannot be read (binaries) and how much changes first.
+// card puts what runs (CI config, scripts, files made executable), what pulls
+// in code (dependency manifests), what cannot be read (binaries) and how much
+// changes first.
 
 import type { Risk } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 
-export type RiskKey = 'ci' | 'scripts' | 'dependencies' | 'binary' | 'deletions' | 'size'
+export type RiskKey = 'ci' | 'scripts' | 'executable' | 'dependencies' | 'binary' | 'deletions' | 'size'
 
 export type RiskItem = {
   key: RiskKey
@@ -32,17 +33,19 @@ export function formatBytes(n: number): string {
 
 /**
  * riskItems orders the summary by how directly a change can run code with
- * the repository's secrets: CI configuration, then scripts, dependency
- * manifests, binaries, deletions, and the change size last. Every category
+ * the repository's secrets: CI configuration, then scripts, files made
+ * executable, dependency manifests, binaries, deletions, and the change size
+ * last. Every category
  * is listed, so "none" is an explicit answer too.
  */
 export function riskItems(risk: Risk | undefined): RiskItem[] {
-  const r = risk ?? { files: 0n, bytes: 0n, ci: [], scripts: [], dependencies: [], binary: [], deletions: [] }
+  const r = risk ?? { files: 0n, bytes: 0n, ci: [], scripts: [], executable: [], dependencies: [], binary: [], deletions: [] }
   const files = Number(r.files)
   const bytes = Number(r.bytes)
   return [
     { key: 'ci', label: 'CI and automation config', why: 'Runs in CI with the repository’s secrets.', paths: r.ci, flagged: r.ci.length > 0 },
     { key: 'scripts', label: 'Scripts and build files', why: 'Executed by tooling, CI or people.', paths: r.scripts, flagged: r.scripts.length > 0 },
+    { key: 'executable', label: 'Makes executable', why: 'Written as mode 100755, so it can be run directly.', paths: r.executable, flagged: r.executable.length > 0 },
     {
       key: 'dependencies',
       label: 'Dependency manifests',

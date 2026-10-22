@@ -1053,8 +1053,14 @@ type FileDiff struct {
 	// Why there is no diff, e.g. "the current version is larger than 1 MiB".
 	// The card then shows the full new content.
 	FallbackReason string `protobuf:"bytes,5,opt,name=fallback_reason,json=fallbackReason,proto3" json:"fallback_reason,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The file's git mode on the base branch ("100644", "100755"; empty for a
+	// new file) and the mode Koinon writes it with (empty for a deleted file).
+	// Both are empty when the base tree could not be read. A modified file
+	// whose modes differ becomes executable.
+	OldMode       string `protobuf:"bytes,6,opt,name=old_mode,json=oldMode,proto3" json:"old_mode,omitempty"`
+	NewMode       string `protobuf:"bytes,7,opt,name=new_mode,json=newMode,proto3" json:"new_mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileDiff) Reset() {
@@ -1118,6 +1124,20 @@ func (x *FileDiff) GetBinary() bool {
 func (x *FileDiff) GetFallbackReason() string {
 	if x != nil {
 		return x.FallbackReason
+	}
+	return ""
+}
+
+func (x *FileDiff) GetOldMode() string {
+	if x != nil {
+		return x.OldMode
+	}
+	return ""
+}
+
+func (x *FileDiff) GetNewMode() string {
+	if x != nil {
+		return x.NewMode
 	}
 	return ""
 }
@@ -1485,13 +1505,15 @@ const file_koinon_approval_v1alpha1_approval_proto_rawDesc = "" +
 	"\x16GetApprovalDiffRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vapproval_id\x18\x02 \x01(\tR\n" +
-	"approvalId\"\xc0\x01\n" +
+	"approvalId\"\xf6\x01\n" +
 	"\bFileDiff\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12<\n" +
 	"\x06status\x18\x02 \x01(\x0e2$.koinon.approval.v1alpha1.FileStatusR\x06status\x12!\n" +
 	"\funified_diff\x18\x03 \x01(\tR\vunifiedDiff\x12\x16\n" +
 	"\x06binary\x18\x04 \x01(\bR\x06binary\x12'\n" +
-	"\x0ffallback_reason\x18\x05 \x01(\tR\x0efallbackReason\"g\n" +
+	"\x0ffallback_reason\x18\x05 \x01(\tR\x0efallbackReason\x12\x19\n" +
+	"\bold_mode\x18\x06 \x01(\tR\aoldMode\x12\x19\n" +
+	"\bnew_mode\x18\a \x01(\tR\anewMode\"g\n" +
 	"\x17GetApprovalDiffResponse\x12\x12\n" +
 	"\x04base\x18\x01 \x01(\tR\x04base\x128\n" +
 	"\x05files\x18\x02 \x03(\v2\".koinon.approval.v1alpha1.FileDiffR\x05files\"}\n" +
