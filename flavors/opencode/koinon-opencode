@@ -5,7 +5,11 @@
 # point: koinon-agentd runs it through OpenShell's non-TTY exec (ADR 0049).
 #
 # Usage:
-#   koinon-opencode --model-base-url URL --model NAME --mcp-url URL [-- OPENCODE_ACP_ARGS...]
+#   koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs]
+#                   [-- OPENCODE_ACP_ARGS...]
+#
+# --plugin-installs is set by koinon-agentd when the agent's template turns
+# harness.pluginInstalls on; only then are external plugins loaded (see README.md).
 #
 # OpenShell does not pass the image's ENV to the processes it starts, PATH included (ADR 0048),
 # so everything OpenCode needs is set here and binaries are called by absolute path. The
@@ -36,12 +40,13 @@ check_url() {
   esac
 }
 
-base_url='' model='' mcp_url=''
+base_url='' model='' mcp_url='' plugin_installs=''
 while [ $# -gt 0 ]; do
   case $1 in
     --model-base-url) [ $# -ge 2 ] || die "$1 needs a value"; base_url=$2; shift 2 ;;
     --model) [ $# -ge 2 ] || die "$1 needs a value"; model=$2; shift 2 ;;
     --mcp-url) [ $# -ge 2 ] || die "$1 needs a value"; mcp_url=$2; shift 2 ;;
+    --plugin-installs) plugin_installs=1; shift ;;
     --) shift; break ;;
     *) die "unknown argument '$1'" ;;
   esac
@@ -73,7 +78,14 @@ export OPENCODE_DISABLE_AUTOUPDATE=1
 export OPENCODE_DISABLE_MODELS_FETCH=1
 export OPENCODE_DISABLE_LSP_DOWNLOAD=1
 export OPENCODE_DISABLE_DEFAULT_PLUGINS=1
-export OPENCODE_PURE=1
+# External plugins (the agent's ~/.opencode/plugin(s) and the npm plugins its ~/.opencode config
+# names) load only when the template allows plugin installs; the reconciler then also opens
+# read-only npm registry access for /usr/local/bin/opencode, which installs them in-process.
+if [ -z "$plugin_installs" ]; then
+  export OPENCODE_PURE=1
+else
+  unset OPENCODE_PURE
+fi
 export OPENCODE_DISABLE_CLAUDE_CODE=1
 
 # The repository the agent works on must not reconfigure the harness: no opencode.json(c) or

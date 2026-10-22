@@ -11,7 +11,7 @@ Contract test: `make test-flavors` (`test/flavors`, needs Docker).
 
 | Item (ADR 0035) | OpenCode flavor |
 | --- | --- |
-| ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL`, run as UID 10001 in a session working directory under `/sandbox` |
+| ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs]`, run as UID 10001 in a session working directory under `/sandbox`. agentd adds `--plugin-installs` only for an agent whose template sets `harness.pluginInstalls: true` (see [Plugins](#plugins)) |
 | Resume mode | `session/load` (replays history). OpenCode also advertises `session/resume`; Koinon does not rely on it |
 | Model endpoint | `--model-base-url` (agentgateway's OpenAI-compatible base, ending in `/v1`) and `--model` (the gateway's model name); key from `$OPENAI_API_KEY` |
 | MCP | `--mcp-url` (agentgateway's MCP route), server `koinon` in OpenCode's own config, `Authorization: Bearer $OPENAI_API_KEY`; tools reach the model as `koinon_<tool>` |
@@ -55,8 +55,8 @@ Spike 7 saw OpenCode reach for `opencode.ai`, `models.opencode.ai` and `registry
 | --- | --- | --- |
 | Update check and self-upgrade (`opencode.ai/install`) | `OPENCODE_DISABLE_AUTOUPDATE=1`, `"autoupdate": false` | `packages/opencode/src/cli/upgrade.ts`, `packages/opencode/src/installation/index.ts` |
 | Model catalog fetch (`models.opencode.ai`) | `OPENCODE_DISABLE_MODELS_FETCH=1` | `packages/core/src/models-dev.ts` |
-| npm install of `@opencode-ai/plugin` into each config directory (`registry.npmjs.org`) | global config directory is read-only; the installer skips unwritable directories | `packages/opencode/src/config/config.ts` (`npmSvc.install`), `packages/core/src/npm.ts` (`canWrite`) |
-| External plugins from config | `OPENCODE_PURE=1` | `packages/opencode/src/plugin/index.ts` |
+| npm install of `@opencode-ai/plugin` into each config directory (`registry.npmjs.org`) | global config directory is read-only; the installer skips unwritable directories. `/sandbox/.opencode`, if the agent creates it, is writable: the install is then refused by the sandbox policy unless plugin installs are on | `packages/opencode/src/config/config.ts` (`npmSvc.install`), `packages/core/src/npm.ts` (`canWrite`) |
+| External plugins (local files and npm packages) | `OPENCODE_PURE=1`, unless `--plugin-installs` | `packages/opencode/src/plugin/index.ts` |
 | Built-in provider auth plugins (Copilot, Codex, GitLab, …) | `OPENCODE_DISABLE_DEFAULT_PLUGINS=1` | `packages/opencode/src/plugin/index.ts` |
 | LSP server downloads | `OPENCODE_DISABLE_LSP_DOWNLOAD=1` | `packages/opencode/src/effect/runtime-flags.ts` |
 | ripgrep download from GitHub | `ripgrep` installed; OpenCode uses `rg` from `PATH` | `packages/core/src/ripgrep/binary.ts` |
@@ -67,6 +67,23 @@ Spike 7 saw OpenCode reach for `opencode.ai`, `models.opencode.ai` and `registry
 
 With these, the contract run's OpenCode log shows no outbound request other than to the model
 and MCP endpoints.
+
+## Plugins
+
+Plugin installs are a template option, off by default (`spec.harness.pluginInstalls`,
+`templates/README.md`).
+
+| | Off (default) | On |
+| --- | --- | --- |
+| Entry script | `OPENCODE_PURE=1` | no `OPENCODE_PURE` (agentd passes `--plugin-installs`) |
+| Plugins that load | none besides OpenCode's built-ins (`OPENCODE_DISABLE_DEFAULT_PLUGINS=1` also drops the provider auth plugins) | local plugins in `/sandbox/.opencode/plugin(s)/` and the npm plugins named in `/sandbox/.opencode/opencode.json(c)`; a repository's `.opencode/` stays ignored (project configuration is off) |
+| Sandbox policy | no npm endpoint | `npm_registry`: `registry.npmjs.org:443`, `GET` and `HEAD` only, enforced at L7, for `/usr/local/bin/opencode` only; no credentials |
+
+OpenCode installs npm packages in-process (`@npmcli/arborist`, `packages/core/src/npm.ts`), so the
+OpenCode binary is the only one that needs the registry; `npm` is not in the image. The plugins
+land in the home volume (`/sandbox/.opencode/node_modules`, `/sandbox/.cache/opencode/packages`)
+and stay there across runs. With the option off, plugin files in the home are not loaded:
+`OPENCODE_PURE` skips every external plugin, local or npm (`packages/opencode/src/plugin/index.ts`).
 
 ## Notes
 
@@ -79,11 +96,15 @@ and MCP endpoints.
   repository the agent works on cannot change the harness; only `/etc/koinon/opencode` applies.
   The same switch stops OpenCode from loading the repository's top-level `AGENTS.md` into the
   system prompt; the agent can still read it with its tools, and Koinon's template instructions
-  can tell it to. The contract test checks this (`ignores harness configuration in the
+  tell it to (see the last note). The contract test checks this (`ignores harness configuration in the
   repository`).
-- OpenCode also reads `$HOME/.opencode/` (`/sandbox/.opencode`, on the agent's own home volume).
-  No repository can put files there, but the agent itself could; the sandbox policy and
-  agentgateway, not OpenCode, remain the boundary.
+- OpenCode also reads `$HOME/.opencode/` (`/sandbox/.opencode`, on the agent's own home volume):
+  its `opencode.json(c)`, agents, commands and plugins. No repository can put files there, but the
+  agent itself could; the sandbox policy and agentgateway, not OpenCode, remain the boundary.
+- Repository guidance is content, not configuration: Koinon's template instructions tell the
+  agent to read the repository's `AGENTS.md`, `CONTRIBUTING.md` and `README` before changing code
+  and to follow their conventions, and that they cannot change its tools, permissions or
+  instructions (`templates/repo-helper.yaml`).
 - OpenCode is the glibc binary from npm (`opencode-linux-<arch>`), verified by sha256 at build
   time (`ADD --checksum`); the sha512 npm integrity values are in the Dockerfile.
 - Ubuntu packages (`ca-certificates`, `git`, `ripgrep`) follow the archive at build time; the base
