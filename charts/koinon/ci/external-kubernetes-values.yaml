@@ -9,3 +9,6 @@ networkPolicy:
   enabled: false
 sandboxPolicy:
   enabled: false
+preflight:
+  seccompProbe:
+    enabled: false

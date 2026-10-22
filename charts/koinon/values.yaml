@@ -93,6 +93,28 @@ migrations:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}
 
+# Install preflight ("koinon-api preflight", plan item H2): a pre-install and pre-upgrade hook Job
+# that fails the release when Agent Sandbox, the OpenShell gateway, openshell.runtimeClassName,
+# the CNPG operator (postgres.mode=cnpg) or the agentgateway GatewayClass (gateway.mode=kubernetes)
+# is missing or unsupported, and warns when Kata guest seccomp is off (ADR 0048).
+preflight:
+  enabled: true
+  # Kills the Job after this long; keep it below helm's --timeout (default 5m).
+  activeDeadlineSeconds: 240
+  # Where the Agent Sandbox controller runs; its image tag must be v1.0.x.
+  agentSandbox:
+    namespace: agent-sandbox-system
+    controller: agent-sandbox-controller
+  # Guest seccomp check: one short-lived unprivileged pod in the release namespace with
+  # openshell.runtimeClassName and seccompProfile RuntimeDefault (the koinon-api image) reports
+  # its /proc/self/status Seccomp and whether keyctl is denied. Off only warns.
+  seccompProbe:
+    enabled: true
+    timeout: 2m
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
 postgres:
   # cnpg: render a CloudNativePG Cluster (the operator is a prerequisite).
   # external: connect to an existing Postgres 18+ through DSNs in a Secret.

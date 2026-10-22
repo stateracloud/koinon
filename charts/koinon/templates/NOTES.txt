@@ -1,3 +1,4 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 Koinon {{ .Chart.AppVersion }} is pre-alpha (v0.1 chart skeleton).
 
 Database: {{ .Values.postgres.mode }}{{ if eq .Values.postgres.mode "cnpg" }} (CloudNativePG Cluster {{ include "koinon.pgCluster" . }}){{ end }}

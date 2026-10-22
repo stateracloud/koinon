@@ -555,6 +555,21 @@ func (q *Queries) SetLocalPassword(ctx context.Context, arg SetLocalPasswordPara
 	return err
 }
 
+const setLocalUsername = `-- name: SetLocalUsername :exec
+UPDATE local_credentials SET username = $1
+WHERE user_id = $2 AND username <> $1
+`
+
+type SetLocalUsernameParams struct {
+	Username string
+	UserID   pgtype.UUID
+}
+
+func (q *Queries) SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error {
+	_, err := q.db.Exec(ctx, setLocalUsername, arg.Username, arg.UserID)
+	return err
+}
+
 const setOrgIdentityMode = `-- name: SetOrgIdentityMode :exec
 UPDATE orgs SET identity_mode = $1
 WHERE id = $2 AND identity_mode <> $1

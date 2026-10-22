@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/procoduck/koinon/connectors"
+	"github.com/procoduck/koinon/internal/project"
 	"github.com/procoduck/koinon/templates"
 )
 
@@ -229,5 +230,5 @@ var _ = DescribeTable("Parse rejects",
 		"deny rules cannot use"),
 	Entry("a step naming an unknown field", "fields: [installationId]", "fields: [nope]", "unknown field"),
 	Entry("an unknown property", "  hosts:\n", "  extra: 1\n  hosts:\n", "schema"),
-	Entry("a wrong apiVersion", "apiVersion: connectors.koinon.dev/v1alpha1", "apiVersion: connectors.koinon.dev/v1", "schema"),
+	Entry("a wrong apiVersion", "apiVersion: "+connectors.APIVersion, "apiVersion: "+project.ConnectorsGroup+"/v1", "schema"),
 )
