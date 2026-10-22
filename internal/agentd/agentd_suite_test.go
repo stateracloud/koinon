@@ -107,6 +107,9 @@ type files struct {
 	failLink  bool
 	onRead    func(data map[string][]byte)
 	onLink    func(links map[string]string)
+	// sweep answers the sweep script: its output and exit code. Nil ends nothing.
+	sweep  func() (string, int)
+	sweeps int
 }
 
 func (f *files) link(path string) (string, bool) {
@@ -125,6 +128,22 @@ func (f *files) get(path string) ([]byte, bool) {
 
 // sh handles agentd's /bin/sh -c SCRIPT sh ARGS... execs by script.
 func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) == 3 && args[0] == "-c" && args[1] == agentd.SweepScript {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.sweeps++
+		if f.sweep == nil {
+			_, _ = io.WriteString(stdout, "ended: none\n")
+			return 0
+		}
+		out, code := f.sweep()
+		if code != 0 {
+			_, _ = io.WriteString(stderr, out)
+		} else {
+			_, _ = io.WriteString(stdout, out)
+		}
+		return code
+	}
 	if len(args) < 4 || args[0] != "-c" {
 		_, _ = fmt.Fprintf(stderr, "unexpected sh %q", args)
 		return 2
