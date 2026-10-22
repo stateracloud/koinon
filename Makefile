@@ -74,6 +74,20 @@ generate: ## Regenerate protobuf and sqlc code
 	buf generate --template buf.gen.openshell.yaml
 	$(GO) tool sqlc generate
 
+# Flavor images build with docker buildx and load into the local Docker image store; nothing is
+# pushed. FLAVOR_PLATFORMS=linux/amd64,linux/arm64 builds both (needs the containerd image store).
+FLAVOR_TAG       ?= dev
+FLAVOR_PLATFORMS ?=
+
+.PHONY: flavor-opencode
+flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:$(FLAVOR_TAG))
+	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
+		--tag koinon/flavor-opencode:$(FLAVOR_TAG) flavors/opencode
+
+.PHONY: test-flavors
+test-flavors: flavor-opencode ## Build the flavor images and run the flavor contract suite
+	$(GO) test -count=1 ./test/flavors/...
+
 .PHONY: dev
 dev: ## Run the inner loop against the home lab with Tilt
 	tilt up
