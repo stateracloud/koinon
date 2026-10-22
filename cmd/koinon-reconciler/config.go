@@ -15,6 +15,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/procoduck/koinon/internal/cli"
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/gateway"
 	"github.com/procoduck/koinon/internal/project"
@@ -117,17 +118,8 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
 
-	var envErr error
-	fs.VisitAll(func(f *flag.Flag) {
-		key := "KOINON_" + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
-		if v, ok := getenv(key); ok {
-			if err := f.Value.Set(v); err != nil && envErr == nil {
-				envErr = fmt.Errorf("%s: %w", key, err)
-			}
-		}
-	})
-	if envErr != nil {
-		return c, envErr
+	if err := cli.BindEnv(fs, getenv); err != nil {
+		return c, err
 	}
 	if err := fs.Parse(args); err != nil {
 		return c, err
