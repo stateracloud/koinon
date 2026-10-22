@@ -27,6 +27,12 @@ func instructionLink(f store.AgentFlavor) string {
 	case store.AgentFlavorOpencode:
 		// The global config directory's AGENTS.md (flavors/opencode/Dockerfile).
 		return "/etc/koinon/opencode/AGENTS.md"
+	case store.AgentFlavorHermes:
+		// SOUL.md opens Hermes's system prompt (flavors/hermes/README.md).
+		return "/sandbox/.hermes/SOUL.md"
+	case store.AgentFlavorPi:
+		// pi appends APPEND_SYSTEM.md to its system prompt (flavors/pi/README.md).
+		return "/sandbox/.pi/agent/APPEND_SYSTEM.md"
 	default:
 		return ""
 	}
