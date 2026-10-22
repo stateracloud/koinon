@@ -2,6 +2,8 @@
 # Keys appear only as hashes; key material lives in Kubernetes Secrets.
 config:
   adminAddr: '[::]:15000'
+  statsAddr: '[::]:15020'
+  readinessAddr: '[::]:15021'
   database:
     url: sqlite:///data/agentgateway.db?mode=rwc
   logging:
@@ -20,7 +22,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"2ba34c6a51faf4e5"'
+      koinon.config: '"0b7d26f07800667f"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
     otlp:

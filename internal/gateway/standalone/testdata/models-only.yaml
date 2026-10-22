@@ -2,6 +2,8 @@
 # Keys appear only as hashes; key material lives in Kubernetes Secrets.
 config:
   adminAddr: 127.0.0.1:15000
+  statsAddr: '[::]:15020'
+  readinessAddr: '[::]:15021'
   logging:
     format: json
   modelCatalog:
@@ -17,7 +19,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"cf614b69f0b7cfe7"'
+      koinon.config: '"c6dbe6b463b05ed3"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
 gateways:
