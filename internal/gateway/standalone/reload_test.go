@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -47,6 +48,39 @@ var _ = Describe("ProbeWaiter", func() {
 		w := standalone.ProbeWaiter{GatewayURL: srv.URL + "/", Interval: 10 * time.Millisecond}
 		Expect(w.Wait(ctx, "abc123")).To(Succeed())
 		Expect(probes.Load()).To(Equal(int32(3)))
+	})
+
+	It("backs off: doubles the wait from Interval up to MaxInterval", func(ctx SpecContext) {
+		var (
+			mu    sync.Mutex
+			times []time.Time
+		)
+		const polls = 7
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+			times = append(times, time.Now())
+			if len(times) < polls {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		DeferCleanup(srv.Close)
+
+		w := standalone.ProbeWaiter{GatewayURL: srv.URL, Interval: 20 * time.Millisecond, MaxInterval: 80 * time.Millisecond}
+		Expect(w.Wait(ctx, "abc123")).To(Succeed())
+
+		mu.Lock()
+		defer mu.Unlock()
+		Expect(times).To(HaveLen(polls))
+		want := []time.Duration{20, 40, 80, 80, 80, 80}
+		for i, ms := range want {
+			gap := times[i+1].Sub(times[i])
+			Expect(gap).To(BeNumerically(">=", ms*time.Millisecond), "wait %d", i+1)
+		}
+		// The waits stop doubling at MaxInterval: uncapped, the last one would be 640 ms.
+		Expect(times[polls-1].Sub(times[polls-2])).To(BeNumerically("<", 320*time.Millisecond))
 	})
 
 	It("treats any status but 401 as live", func(ctx SpecContext) {
@@ -107,6 +141,31 @@ var _ = Describe("ProbeWaiter", func() {
 		err := w.Wait(ctx, "abc123")
 		Expect(errors.Is(err, standalone.ErrConfigRejected)).To(BeTrue(), "%v", err)
 		Expect(metrics.Load()).To(Equal(int32(4)), "rejects after consecutive zeros, not the first")
+	})
+
+	It("counts consecutive zero readings across the backoff, resetting on a 1", func(ctx SpecContext) {
+		// Gauge readings per poll: two zeros, a one, then zeros. The one resets the count,
+		// so the rejection comes on the 7th poll (4 zeros after it), not the 4th.
+		var metrics atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/metrics") {
+				v := 0
+				if metrics.Add(1) == 3 {
+					v = 1
+				}
+				_, _ = fmt.Fprintf(w, "agentgateway_config_synchronized %d\n", v)
+				return
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+		}))
+		DeferCleanup(srv.Close)
+
+		w := standalone.ProbeWaiter{
+			GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 5 * time.Millisecond, MaxInterval: 20 * time.Millisecond,
+		}
+		err := w.Wait(ctx, "abc123")
+		Expect(errors.Is(err, standalone.ErrConfigRejected)).To(BeTrue(), "%v", err)
+		Expect(metrics.Load()).To(Equal(int32(7)))
 	})
 
 	It("keeps waiting while the gauge reads 1", func(ctx SpecContext) {

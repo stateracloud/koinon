@@ -38,17 +38,25 @@ var ErrConfigRejected = errors.New("standalone: agentgateway rejected the config
 // a ConfigMap update additionally waits for the kubelet to resync the volume
 // (11 s in the spike, up to about a minute by default).
 //
+// Polls back off: the first wait is Interval, each next one twice as long, up
+// to MaxInterval. agentgateway logs every 401 as an error line, so waiting for
+// a slow ConfigMap resync should not cost a line every half second.
+//
 // When StatsURL is set, the waiter also reads the
 // agentgateway_config_synchronized gauge from GET /metrics on the stats
 // listener (:15020) and returns ErrConfigRejected once it reads 0 on
-// consecutive polls, instead of waiting for ctx to expire.
+// rejectAfter consecutive polls, instead of waiting for ctx to expire.
 type ProbeWaiter struct {
 	// GatewayURL is the LLM listener base, for example http://agentgateway:4000.
 	GatewayURL string
 	// StatsURL is the stats listener base, for example http://agentgateway:15020. Optional.
 	StatsURL string
-	// Interval between polls, default 500ms.
+	// Interval is the wait after the first poll, default 500ms. Each later
+	// wait doubles, up to MaxInterval.
 	Interval time.Duration
+	// MaxInterval caps the wait between polls, default 5s (or Interval, if
+	// that is longer).
+	MaxInterval time.Duration
 	// Client defaults to a client with a 5 s timeout.
 	Client *http.Client
 	// Log defaults to slog.Default.
@@ -56,8 +64,16 @@ type ProbeWaiter struct {
 }
 
 // rejectAfter is how many consecutive polls must see the gauge at 0 before
-// Wait gives up. A single 0 can be the previous, already rejected file.
+// Wait gives up. A single 0 can be the previous, already rejected file. It
+// counts polls, not time: with the default schedule four polls span 3.5 s
+// (0 s, 0.5 s, 1.5 s, 3.5 s).
 const rejectAfter = 4
+
+// The default poll schedule: waits of 0.5 s, 1 s, 2 s, 4 s, then 5 s.
+const (
+	defaultInterval    = 500 * time.Millisecond
+	defaultMaxInterval = 5 * time.Second
+)
 
 // probeBody is the reload probe's request.
 var probeBody = []byte(`{"model":"` + ReloadProbeModel + `","messages":[{"role":"user","content":"probe"}]}`)
@@ -65,9 +81,14 @@ var probeBody = []byte(`{"model":"` + ReloadProbeModel + `","messages":[{"role":
 // Wait implements Waiter.
 func (w ProbeWaiter) Wait(ctx context.Context, rev gateway.Revision) error {
 	interval := w.Interval
-	if interval == 0 {
-		interval = 500 * time.Millisecond
+	if interval <= 0 {
+		interval = defaultInterval
 	}
+	maxInterval := w.MaxInterval
+	if maxInterval <= 0 {
+		maxInterval = max(defaultMaxInterval, interval)
+	}
+	interval = min(interval, maxInterval)
 	client := w.Client
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
@@ -78,7 +99,7 @@ func (w ProbeWaiter) Wait(ctx context.Context, rev gateway.Revision) error {
 	}
 	var lastErr error
 	unsynced := 0
-	t := time.NewTicker(interval)
+	t := time.NewTimer(interval)
 	defer t.Stop()
 	for {
 		status, err := w.probe(ctx, client, rev)
@@ -104,11 +125,15 @@ func (w ProbeWaiter) Wait(ctx context.Context, rev gateway.Revision) error {
 				unsynced = 0
 			}
 		}
+		// The wait starts after the probe answered, so a slow answer does not
+		// eat into it (Go 1.23 timers: Reset needs no drain).
+		t.Reset(interval)
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("standalone: waiting for revision %s: %w (last: %w)", rev, ctx.Err(), lastErr)
 		case <-t.C:
 		}
+		interval = min(2*interval, maxInterval)
 	}
 }
 
