@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
+	"github.com/procoduck/koinon/internal/project"
 )
 
 // Supported prerequisite versions.
@@ -89,10 +90,10 @@ type Result struct {
 
 // Config is what the release expects of the cluster, from the chart's values.
 type Config struct {
-	// PostgresMode is postgres.mode: cnpg or external.
-	PostgresMode string
-	// GatewayMode is gateway.mode: standalone or kubernetes.
-	GatewayMode string
+	// PostgresMode is postgres.mode.
+	PostgresMode project.PostgresMode
+	// GatewayMode is gateway.mode.
+	GatewayMode project.GatewayMode
 	// GatewayClassName is gateway.kubernetes.gatewayClassName.
 	GatewayClassName string
 	// RuntimeClassName is openshell.runtimeClassName.
@@ -135,10 +136,10 @@ func (c *Checker) Run(ctx context.Context) []Result {
 		c.checkOpenShell(ctx),
 		c.checkRuntimeClass(ctx),
 	}
-	if c.Config.PostgresMode == "cnpg" {
+	if c.Config.PostgresMode == project.PostgresCNPG {
 		results = append(results, c.checkCNPG(ctx))
 	}
-	if c.Config.GatewayMode == "kubernetes" {
+	if c.Config.GatewayMode == project.GatewayKubernetes {
 		results = append(results, c.checkGatewayClass(ctx))
 	}
 	return append(results, c.checkGuestSeccomp(ctx))

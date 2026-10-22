@@ -17,6 +17,7 @@ import (
 
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/procoduck/koinon/internal/project"
 	"github.com/procoduck/koinon/internal/reconciler"
 )
 
@@ -24,14 +25,14 @@ import (
 // reconciler reads.
 type fileConfig struct {
 	Gateway struct {
-		Mode         string `yaml:"mode"`
-		ConfigMap    string `yaml:"configMap"`
-		URL          string `yaml:"url"`
-		AdminURL     string `yaml:"adminUrl"`
-		StatsURL     string `yaml:"statsUrl"`
-		Port         int    `yaml:"port"`
-		DatabaseURL  string `yaml:"databaseUrl"`
-		ModelKeyFile string `yaml:"modelKeyFile"`
+		Mode         project.GatewayMode `yaml:"mode"`
+		ConfigMap    string              `yaml:"configMap"`
+		URL          string              `yaml:"url"`
+		AdminURL     string              `yaml:"adminUrl"`
+		StatsURL     string              `yaml:"statsUrl"`
+		Port         int                 `yaml:"port"`
+		DatabaseURL  string              `yaml:"databaseUrl"`
+		ModelKeyFile string              `yaml:"modelKeyFile"`
 	} `yaml:"gateway"`
 	Model struct {
 		BaseURL  string `yaml:"baseUrl"`
@@ -74,7 +75,7 @@ type config struct {
 	openshellTLSDir  string
 	runtimeClass     string
 
-	gatewayMode      string
+	gatewayMode      project.GatewayMode
 	gatewayURL       string
 	gatewayConfigMap string
 	gatewayAdminURL  string
@@ -104,7 +105,7 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.openshellAddress, "openshell-address", "", "OpenShell gateway host:port")
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "", "directory with tls.crt, tls.key and ca.crt for mTLS; empty connects without TLS")
 	fs.StringVar(&c.runtimeClass, "runtime-class", "", "sandbox runtime class (ADR 0045: kata)")
-	fs.StringVar(&c.gatewayMode, "gateway-mode", "", "standalone or kubernetes")
+	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes (default standalone)")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it")
 	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config")
 	fs.StringVar(&c.gatewayAdminURL, "gateway-admin-url", "", "agentgateway admin URL, to wait for config reloads; empty does not wait")
@@ -169,7 +170,7 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.openshellTLSDir, fc.OpenShell.TLS)
 	orDefault(&c.runtimeClass, fc.OpenShell.RuntimeClassName)
 	orDefault(&c.gatewayMode, fc.Gateway.Mode)
-	orDefault(&c.gatewayMode, "standalone")
+	orDefault(&c.gatewayMode, project.GatewayStandalone)
 	orDefault(&c.gatewayURL, fc.Gateway.URL)
 	orDefault(&c.gatewayConfigMap, fc.Gateway.ConfigMap)
 	orDefault(&c.gatewayAdminURL, fc.Gateway.AdminURL)
@@ -231,7 +232,7 @@ func (c *config) validate() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required settings: %s", strings.Join(missing, ", "))
 	}
-	if c.gatewayMode == "standalone" && c.gatewayConfigMap == "" {
+	if c.gatewayMode == project.GatewayStandalone && c.gatewayConfigMap == "" {
 		return errors.New("--gateway-config-map is required in standalone mode")
 	}
 	return nil

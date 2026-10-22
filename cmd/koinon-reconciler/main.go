@@ -78,7 +78,7 @@ func run() error {
 	}
 	defer func() { _ = backend.Close() }()
 
-	if cfg.gatewayMode != "standalone" {
+	if cfg.gatewayMode != project.GatewayStandalone {
 		return fmt.Errorf("gateway mode %q is not implemented yet (plan item G2); use standalone", cfg.gatewayMode)
 	}
 	driver := &standalone.Driver{
