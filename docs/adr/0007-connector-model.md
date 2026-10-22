@@ -1,6 +1,7 @@
 # 0007. Connector model: type, connection, grant
 
 - Status: Accepted
+- Amended by: [0049](0049-v01-scope-decisions.md)
 - Date: 2026-10-21
 - Decision: [design.md#7](../design.md)
 
@@ -36,6 +37,11 @@ flowchart LR
   C --> G2[Grant: agent B<br/>scopes subset]
   G1 --> P[OpenShell policy +<br/>MCP gateway rules]
 ```
+
+**Amendment ([0049](0049-v01-scope-decisions.md)).** Koinon has no hard dependency on a secret
+store. Connection secrets are Kubernetes Secrets; organisations that keep them in OpenBao, Vault,
+AWS Secrets Manager or Azure Key Vault sync them in with the External Secrets Operator. Secrets
+entered in the UI are written by Koinon as Kubernetes Secrets.
 
 ## Alternatives considered
 
