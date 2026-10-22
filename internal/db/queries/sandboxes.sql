@@ -85,3 +85,9 @@ FROM runs
 WHERE org_id = @org_id AND agent_id = @agent_id
   AND (state IN ('queued', 'starting', 'running', 'parked')
        OR finished_at > now() - interval '1 day');
+
+-- name: NotifyReconciler :exec
+-- Wakes the reconciler for an org, as the agents and runs triggers do. agentd
+-- sends it while it waits for a sandbox that is not ready, so the reconciler
+-- starts it (the waiting run is the demand) without waiting for a resync.
+SELECT pg_notify('koinon_reconcile', CAST(sqlc.arg(org_id)::uuid AS text));

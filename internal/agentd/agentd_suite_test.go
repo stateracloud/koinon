@@ -133,11 +133,29 @@ func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
 	Expect(err).NotTo(HaveOccurred())
 	_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})
 	Expect(err).NotTo(HaveOccurred())
+	// What koinon-reconciler records for the sandbox, which is all agentd reads about it.
+	_, err = q.UpsertOrgWorkspace(ctx, store.UpsertOrgWorkspaceParams{OrgID: e.org, Workspace: e.workspace})
+	Expect(err).NotTo(HaveOccurred())
+	names := execution.AgentObjectNames(e.org.Bytes, e.agent.ID.Bytes)
+	_, err = q.CreateAgentSandbox(ctx, store.CreateAgentSandboxParams{
+		OrgID: e.org, AgentID: e.agent.ID, Workspace: e.workspace,
+		SandboxName: names.Sandbox, ProviderName: names.Provider, KeySecretName: names.KeySecret,
+	})
+	Expect(err).NotTo(HaveOccurred())
+	e.recordSandbox(ctx, store.SandboxStateReady, "")
 
 	e.harness = newHarness()
 	e.gw.Handle("/usr/local/bin/koinon-opencode", e.harness.command)
 	e.gw.Handle("/bin/mkdir", func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { return 0 })
 	return e
+}
+
+// recordSandbox writes the sandbox state as koinon-reconciler would.
+func (e *env) recordSandbox(ctx context.Context, state store.SandboxState, message string) {
+	_, err := q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
+		OrgID: e.org, AgentID: e.agent.ID, State: state, Phase: "", Message: message,
+	})
+	Expect(err).NotTo(HaveOccurred())
 }
 
 // ticket creates a ticket for the agent with one user message.

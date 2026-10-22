@@ -3,7 +3,7 @@
 // Package agentd drives runs (plan item AG1; ADRs 0016 as amended by 0049, 0029, 0030).
 //
 // A [Pool] of workers claims runs from Postgres, takes ownership under a new epoch, waits
-// for the agent's sandbox, execs the flavor's ACP launch command through the execution
+// until koinon-reconciler reports the agent's sandbox ready in agent_sandboxes, execs the flavor's ACP launch command through the execution
 // backend (OpenShell's non-TTY exec) and speaks ACP to the harness over the stream's stdin
 // and stdout:
 //
@@ -44,10 +44,10 @@ import (
 	"github.com/procoduck/koinon/internal/execution"
 )
 
-// Backend is the part of [execution.Backend] agentd uses.
+// Backend is the part of [execution.Backend] agentd uses. agentd only execs: sandbox state
+// comes from koinon-reconciler through agent_sandboxes, and only the reconciler starts and
+// stops sandboxes.
 type Backend interface {
-	GetSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error)
-	StartSandbox(ctx context.Context, workspace, name string) (execution.Sandbox, error)
 	Exec(ctx context.Context, workspace, sandbox string, req execution.ExecRequest) (execution.Process, error)
 }
 
@@ -69,6 +69,9 @@ type Config struct {
 	Poll time.Duration
 	// SandboxTimeout bounds the wait for the agent's sandbox to be ready. Default 5m.
 	SandboxTimeout time.Duration
+	// ReconcileNudge is how often a worker waiting for a sandbox NOTIFYs the reconciler.
+	// Default 5s.
+	ReconcileNudge time.Duration
 	// CancelGrace is how long the harness gets to end its turn after session/cancel.
 	// Default 10s.
 	CancelGrace time.Duration
@@ -86,9 +89,6 @@ type Config struct {
 	SessionCwd string
 	// Permissions answers the harness's permission requests. Default DefaultPermissions.
 	Permissions *PermissionPolicy
-	// Locate names an agent's OpenShell workspace and sandbox. Default: the names the
-	// reconciler gives them (execution.WorkspaceName, execution.AgentSandboxName).
-	Locate func(org, agent [16]byte) (workspace, sandbox string)
 	// KeepLeaseOnShutdown leaves the leases of runs in progress to expire when the pool
 	// stops, as if the process had been killed. By default they are released so another
 	// replica resumes at once. Tests set it to emulate a killed pod.
@@ -117,6 +117,7 @@ func (c *Config) defaults() error {
 	setDefault(&c.Heartbeat, c.Lease/3)
 	setDefault(&c.Poll, time.Second)
 	setDefault(&c.SandboxTimeout, 5*time.Minute)
+	setDefault(&c.ReconcileNudge, 5*time.Second)
 	setDefault(&c.CancelGrace, 10*time.Second)
 	setDefault(&c.MaxTakeovers, 5)
 	setDefault(&c.SessionCwd, "/sandbox/work")
@@ -128,11 +129,6 @@ func (c *Config) defaults() error {
 	}
 	if c.Permissions == nil {
 		c.Permissions = DefaultPermissions()
-	}
-	if c.Locate == nil {
-		c.Locate = func(org, agent [16]byte) (string, string) {
-			return execution.WorkspaceName(org), execution.AgentSandboxName(org, agent)
-		}
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()

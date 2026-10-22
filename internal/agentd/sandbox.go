@@ -10,60 +10,65 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/execution"
 )
 
-// waitSandbox waits until the agent's sandbox is ready. A stopped sandbox (idle stop, plan
-// item R2) is started; a missing one is waited for, since the reconciler creates it when the
-// agent is activated.
-func (r *runner) waitSandbox(ctx context.Context, workspace, name string) error {
+// waitSandbox waits until the agent's sandbox is ready and returns its workspace and name.
+//
+// koinon-reconciler is the one source of sandbox state: it renders the sandbox, records what
+// it observes in agent_sandboxes and is the only component that starts or stops it. agentd
+// reads that row. A stopped sandbox (idle stop, ADR 0049) is started by the reconciler because
+// this run, now starting, is demand for it (GetAgentRunActivity); while the sandbox is not
+// ready agentd NOTIFYs the reconciler every ReconcileNudge, so a pass follows within a second
+// rather than a resync interval (a takeover, for example, changes no run state and so fires no
+// trigger). A missing row is waited for, since the reconciler creates it when the agent is
+// activated. The run fails if the sandbox is not ready within SandboxTimeout.
+func (r *runner) waitSandbox(ctx context.Context) (workspace, name string, err error) {
 	deadline := time.Now().Add(r.p.cfg.SandboxTimeout)
-	started := false
+	var nudged time.Time
 	var last string
 	for {
-		sb, err := r.p.backend.GetSandbox(ctx, workspace, name)
+		sb, err := r.q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
 		switch {
-		case errors.Is(err, execution.ErrNotFound):
-			last = "not created yet"
+		case errors.Is(err, pgx.ErrNoRows):
+			last = "not rendered yet"
 		case err != nil:
 			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if errors.Is(err, execution.ErrPermissionDenied) || errors.Is(err, execution.ErrInvalid) {
-				return &failure{reason: "sandbox: " + err.Error()}
+				return "", "", ctx.Err()
 			}
 			last = err.Error()
-		case sb.Phase == execution.PhaseReady:
-			return nil
-		case sb.Phase == execution.PhaseStopped:
-			last = "stopped"
-			if !started {
-				r.log.Info("starting the agent's sandbox", "sandbox", name)
-				_, err := r.p.backend.StartSandbox(ctx, workspace, name)
-				// FailedPrecondition: someone else started it first.
-				if err != nil && !errors.Is(err, execution.ErrFailedPrecondition) {
-					last = "start: " + err.Error()
-				} else {
-					started = true
-				}
-			}
-		case sb.Phase == execution.PhaseError, sb.Phase == execution.PhaseCompleted, sb.Phase == execution.PhaseDeleting:
-			reason := string(sb.Phase)
-			if sb.Reason != "" {
-				reason += ": " + sb.Reason
+		case sb.State == store.SandboxStateReady:
+			return sb.Workspace, sb.SandboxName, nil
+		case sb.State == store.SandboxStateError, sb.State == store.SandboxStateDeleted,
+			sb.State == store.SandboxStateRetained:
+			reason := "sandbox " + string(sb.State)
+			if sb.Phase != "" {
+				reason += " (" + sb.Phase + ")"
 			}
 			if sb.Message != "" {
 				reason += ": " + sb.Message
 			}
-			return &failure{reason: "sandbox " + reason}
-		default:
-			last = string(sb.Phase)
+			return "", "", &failure{reason: reason}
+		default: // pending, starting, stopping, stopped, deleting (recreated with a new spec)
+			last = string(sb.State)
+		}
+		if time.Since(nudged) >= r.p.cfg.ReconcileNudge {
+			if nudged.IsZero() {
+				r.log.Info("waiting for the reconciler to make the sandbox ready", "state", last)
+			}
+			nudged = time.Now()
+			if err := r.q.NotifyReconciler(ctx, r.run.OrgID); err != nil && ctx.Err() == nil {
+				r.log.Warn("notifying the reconciler failed", "err", err)
+			}
 		}
 		if time.Now().After(deadline) {
-			return &failure{reason: fmt.Sprintf("sandbox not ready after %s (%s)", r.p.cfg.SandboxTimeout, last)}
+			return "", "", &failure{reason: fmt.Sprintf("sandbox not ready after %s (%s)", r.p.cfg.SandboxTimeout, last)}
 		}
 		if !sleep(ctx, r.p.cfg.Poll) {
-			return ctx.Err()
+			return "", "", ctx.Err()
 		}
 	}
 }

@@ -254,12 +254,11 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
-	workspace, sandbox := cfg.Locate(r.run.OrgID.Bytes, r.run.AgentID.Bytes)
-	log := r.log.With("sandbox", sandbox)
-
-	if err := r.waitSandbox(fctx, workspace, sandbox); err != nil {
+	workspace, sandbox, err := r.waitSandbox(fctx)
+	if err != nil {
 		return r.execErr(ctx, "sandbox", err)
 	}
+	log := r.log.With("sandbox", sandbox)
 	cwd := cfg.SessionCwd
 	if ticket.HarnessSessionID.Valid {
 		cwd = ticket.HarnessSessionCwd.String
