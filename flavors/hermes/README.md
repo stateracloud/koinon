@@ -81,13 +81,20 @@ through the terminal tool mid-run, plants `.env`, `.op.env` and `active_profile`
 `HERMES_MANAGED_DIR` and `PYTEST_CURRENT_TEST`, and checks that the tools on offer stay the
 same; a control with the entry script's guards taken out shows the same plants do widen them.
 
-**Not covered:** a `.env` written *after* the entry script has run applies to the next process
-that loads it. `hermes acp` attaches to a gateway daemon that outlives the harness while idle
-for less than `gateway.unmanaged_idle_exit_seconds` (600 s), and an agent process left running
-from an earlier run (a background terminal job) could write `.env` between the entry script and
-the turn: a probe on the contract suite's harness saw the switched-off tools offered then. A run's
-own turn cannot do it, since `.env` is read before the turn starts and each run sends one
-prompt.
+**A process from an earlier run.** A `.env` written *after* the entry script has run applies to
+the next Hermes process that loads it, and `hermes acp` attaches to a gateway daemon that
+outlives the harness while idle for less than `gateway.unmanaged_idle_exit_seconds` (600 s),
+discovered through `gateway.lock` and the control socket in `$HERMES_HOME`
+(`hermes_cli/gateway_client.py`, `connect_gateway`; `hermes_cli/gateway_runtime.py`,
+`ensure_gateway_runtime`). A background job left from an earlier run could write `.env` between
+the entry script and the harness, or a stale daemon serve the next run. koinon-agentd ends every
+process of the sandbox user but the sandbox's main process before it starts the harness and
+after the harness has ended (`../README.md`, `internal/agentd/sweep.sh`), so neither survives
+into a run. The contract suite leaves a job that keeps writing a `.env` moving the managed scope
+to the agent's permissive config, runs the next ticket through koinon-agentd, and checks that
+the tools stay the same; without the sweep they do not (the switched-off memory, skills, web,
+browser and delegation tools are offered). A run's own turn cannot do it, since `.env` is read
+before the turn starts and each run sends one prompt.
 
 ## Instructions
 
