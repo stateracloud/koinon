@@ -47,6 +47,13 @@ assert all(v == [] for v in hooks.values()), "hooks must be empty"' \
       /opt/hermes/tools/python-3.14.7+20260901-linux-arm64/bin/python3.14) ;; \
       *) echo "unexpected Python: $(readlink -f /opt/hermes/.venv/bin/python)" >&2; exit 1 ;; \
     esac
+# No repository context file (AGENTS.md, .hermes.md, CLAUDE.md, .cursorrules) reaches the
+# agent; SOUL.md, Koinon's instructions, does. Hermes has no setting for that, so a two-line
+# patch, checked by building a system prompt (no-context-files.py, README.md).
+COPY --chmod=0644 no-context-files.py /tmp/no-context-files.py
+RUN /opt/hermes/.venv/bin/python -I -B /tmp/no-context-files.py patch \
+ && /opt/hermes/.venv/bin/python -I -B /tmp/no-context-files.py check \
+ && rm /tmp/no-context-files.py
 USER 10001:10001
 WORKDIR /sandbox
 ENTRYPOINT ["/usr/local/bin/koinon-hermes"]
