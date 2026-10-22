@@ -8,7 +8,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"9b538b245a7b6530"'
+      koinon.config: '"4de13a693ef7d5c6"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
 gateways:
@@ -29,7 +29,7 @@ mcp:
             agent: acme/triage
     mcpAuthorization:
       rules:
-        - "false"
+        - mcp.prompt.name == "koinon-ready"
     transformations:
       request:
         set:

@@ -3,11 +3,13 @@
 package agentd
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -80,6 +82,49 @@ type runner struct {
 	// delivered are the approval requests whose outcomes this turn's prompt carries; they are
 	// marked delivered when the turn ends.
 	delivered []pgtype.UUID
+
+	// cwd is the session directory, set before the harness starts; permission requests for
+	// paths outside it are rejected.
+	cwd string
+
+	cmdMu      sync.Mutex
+	commands   []string      // the harness's last available_commands_update
+	cmdChanged chan struct{} // closed and replaced on every available_commands_update
+}
+
+// setCommands records the commands the harness announced.
+func (r *runner) setCommands(names []string) {
+	r.cmdMu.Lock()
+	defer r.cmdMu.Unlock()
+	r.commands = names
+	close(r.cmdChanged)
+	r.cmdChanged = make(chan struct{})
+}
+
+// waitCommand waits until the harness announces command, the connection ends or the
+// timeout passes.
+func (r *runner) waitCommand(ctx context.Context, conn *acp.Conn, command string, timeout time.Duration) error {
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	for {
+		r.cmdMu.Lock()
+		ok, changed := slices.Contains(r.commands, command), r.cmdChanged
+		r.cmdMu.Unlock()
+		if ok {
+			return nil
+		}
+		select {
+		case <-changed:
+		case <-conn.Done():
+			return errors.New("the connection ended")
+		case <-t.C:
+			return &failure{reason: fmt.Sprintf("Koinon's MCP tools did not become available: the harness did not "+
+				"announce %q within %s of starting the session (is agentgateway's MCP route reachable from the sandbox?)",
+				command, timeout)}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // toolSeen returns a channel that is closed once the harness's update for the tool call has
@@ -109,7 +154,7 @@ func (r *runner) markTool(id string) {
 
 func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	r := &runner{
-		p: p, q: p.q, run: run, fenced: make(chan struct{}),
+		p: p, q: p.q, run: run, fenced: make(chan struct{}), cmdChanged: make(chan struct{}),
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
 	r.log.Info("driving run", "state", run.State, "takeovers", run.Takeovers)
@@ -271,6 +316,13 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.mkdir(fctx, workspace, sandbox, cwd); err != nil {
 		return r.execErr(ctx, "prepare the session directory", err)
 	}
+	r.cwd = cwd
+	// The run's own version decides the instructions, so a version bump applies at the next
+	// run without recreating the sandbox.
+	instructions := instructionsFile(versionInstructions(version.Config))
+	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
+		return r.execErr(ctx, "write the instructions", err)
+	}
 
 	var stderr tail
 	proc, err := r.p.backend.Exec(ctx, workspace, sandbox, execution.ExecRequest{
@@ -316,6 +368,25 @@ func (r *runner) execute(ctx context.Context) error {
 			return r.dbErr(ctx, "store the session", err)
 		}
 	}
+	if command := readyCommand(agent.Flavor); command != "" {
+		if err := r.waitCommand(fctx, conn, command, cfg.ReadyTimeout); err != nil {
+			var f *failure
+			if errors.As(err, &f) {
+				return f
+			}
+			return harnessErr("wait for the MCP tools", err)
+		}
+		if !sleep(fctx, cfg.ReadySettle) {
+			return cmp.Or(r.stopped(ctx), errShutdown)
+		}
+	}
+	// The harness may report a model of its own choosing; agentd selects the agent's model
+	// and never relies on what the session reports.
+	if value := modelOption(agent.Flavor, model); value != "" {
+		if err := conn.SetModel(fctx, session, value); err != nil {
+			return harnessErr("select the model "+value, err)
+		}
+	}
 	if r.run.State == store.RunStateStarting {
 		if _, err := r.q.MarkRunRunning(fctx, store.MarkRunRunningParams{OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch}); err != nil {
 			return r.dbErr(ctx, "mark the run running", err)
@@ -323,7 +394,8 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	if err := r.record(fctx, "run.session", map[string]any{
 		"sessionId": session, "loaded": loaded, "takeovers": r.run.Takeovers,
-		"agent": init.AgentInfo,
+		"agent": init.AgentInfo, "model": model,
+		"instructions": map[string]any{"path": instructionsPath, "sha256": sha256Hex(instructions)},
 	}); err != nil {
 		return r.dbErr(ctx, "record the session", err)
 	}
@@ -341,6 +413,11 @@ func (r *runner) execute(ctx context.Context) error {
 		"text": text, "throughSeq": through, "resumed": r.run.PromptThroughSeq.Valid,
 	}); err != nil {
 		return r.dbErr(ctx, "record the prompt", err)
+	}
+	// The agent can write its home, instruction file included; the prompt goes out only with
+	// the run's instructions in place.
+	if err := r.checkInstructions(fctx, workspace, sandbox, instructions); err != nil {
+		return r.execErr(ctx, "check the instructions", err)
 	}
 	return r.turn(ctx, conn, proc, &stderr, session, text)
 }
@@ -719,6 +796,11 @@ func (r *runner) release(ctx context.Context) {
 type handler struct{ r *runner }
 
 func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
+	if n.Update.AvailableCommandsUpdate != nil {
+		// Harness state, not part of the run's timeline: kept for waitCommand only.
+		h.r.setCommands(acp.Flatten(n).Commands)
+		return nil
+	}
 	if h.r.replaying.Load() {
 		return nil
 	}
@@ -748,7 +830,7 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 const toolCallWait = 250 * time.Millisecond
 
 func (h handler) RequestPermission(ctx context.Context, req acp.PermissionRequest) (acp.Decision, error) {
-	d := h.r.p.cfg.Permissions.decide(req)
+	d := h.r.p.cfg.Permissions.decide(req, h.r.cwd)
 	if h.r.replaying.Load() {
 		return acp.Decision{}, nil
 	}
@@ -760,7 +842,7 @@ func (h handler) RequestPermission(ctx context.Context, req acp.PermissionReques
 	if err := h.r.record(ctx, "acp.permission", map[string]any{"toolCall": req.ToolCall, "decision": d}); err != nil {
 		return acp.Decision{}, err
 	}
-	h.r.log.Info("permission answered", "kind", d.Kind, "tier", d.Tier, "verdict", d.Verdict)
+	h.r.log.Info("permission answered", "kind", d.Kind, "tier", d.Tier, "verdict", d.Verdict, "outside", d.Outside)
 	return acp.Decision{OptionID: d.OptionID}, nil
 }
 
