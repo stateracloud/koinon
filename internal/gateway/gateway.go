@@ -94,6 +94,13 @@ func ParseAgentRef(s string) (AgentRef, error) {
 // targets trust it only because they are reachable from the gateway alone.
 const AgentHeader = "X-Koinon-Agent"
 
+// ReadyPrompt is the MCP prompt Koinon's MCP server publishes to every agent.
+// A harness that turns MCP prompts into commands (OpenCode v2) announces it
+// once the server is connected and its tools are registered; koinon-agentd
+// waits for it before the first prompt (ADR 0052). Drivers must let every
+// authenticated key list and get it.
+const ReadyPrompt = "koinon-ready"
+
 // Key is the gateway-side record of an API key: its ID, owner and hash. It
 // holds no key material and is safe to persist and to render into config.
 type Key struct {
