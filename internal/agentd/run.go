@@ -291,7 +291,11 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.dbErr(ctx, "load ticket", err)
 	}
-	model := versionModel(version.Config)
+	vc, err := versionConfig(version.Config)
+	if err != nil {
+		r.log.Warn("agent version config unreadable: no model, harness settings or instructions of its own", "err", err)
+	}
+	model := versionModel(vc)
 	if model == "" {
 		model = cfg.DefaultModel
 	}
@@ -303,7 +307,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
-	cmd = append(cmd, harnessArgs(agent.Flavor, version.Config)...)
+	cmd = append(cmd, harnessArgs(agent.Flavor, vc)...)
 	sb, err := r.waitSandbox(fctx)
 	if err != nil {
 		return r.execErr(ctx, "sandbox", err)
@@ -326,7 +330,7 @@ func (r *runner) execute(ctx context.Context) error {
 	r.cwd = cwd
 	// The run's own version decides the instructions, so a version bump applies at the next
 	// run without recreating the sandbox.
-	instructions := instructionsFile(versionInstructions(version.Config))
+	instructions := instructionsFile(vc.Instructions)
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}

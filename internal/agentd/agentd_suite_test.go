@@ -177,7 +177,7 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 		OrgID: e.org, DisplayName: uniq("agent"), Flavor: flavor, CreatedBy: e.user,
 	})
 	Expect(err).NotTo(HaveOccurred())
-	config := `{"model":{"name":"` + model + `"},"instructions":"` + instructions + `"}`
+	config := `{"model":"` + model + `","instructions":"` + instructions + `"}`
 	if configFor != nil {
 		config = configFor(e)
 	}
