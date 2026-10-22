@@ -337,7 +337,7 @@ WITH next AS (
             AND sib.state IN ('starting', 'running', 'parked'))
     ORDER BY r.ready_at, r.id
     LIMIT 1
-    FOR UPDATE OF a SKIP LOCKED
+    FOR UPDATE OF a, r SKIP LOCKED
 ), agent AS (
     UPDATE agents
     SET epoch = agents.epoch + 1
@@ -381,6 +381,12 @@ type ClaimNextRunParams struct {
 // other agents, and FIFO holds per agent. runs_one_active_per_agent backstops
 // the rare race where two claims for one agent overlap; the loser gets a
 // unique violation and retries.
+//
+// The run row is locked too. A claim whose snapshot predates a concurrent
+// winner's commit, but which locks the agent row after it, re-checks only the
+// rows it locks against their latest version. Were the run not among them, the
+// claim would still see it as claimable, bump the agent's epoch, and then
+// update no run: the next owner would get a skipped epoch.
 func (q *Queries) ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error) {
 	row := q.db.QueryRow(ctx, claimNextRun, arg.OwnerID, arg.LeaseSeconds, arg.OrgID)
 	var i Run
