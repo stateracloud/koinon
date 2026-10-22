@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package standalone_test
+
+import (
+	"bytes"
+	"os/exec"
+	"path/filepath"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"go.yaml.in/yaml/v3"
+
+	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/procoduck/koinon/internal/gateway/standalone"
+)
+
+// The chart writes agentgateway's first config file itself
+// (charts/koinon/templates/gateway-standalone.yaml) because the reconciler
+// may not have run yet. That file must be the document Render produces for the
+// same models with no keys, so agentgateway's static `config` section (read
+// only at startup) does not depend on who wrote the file last.
+var _ = Describe("the chart's bootstrap config", func() {
+	chart := filepath.Join("..", "..", "..", "charts", "koinon")
+
+	// The Options the reconciler builds from the chart's config.yaml.
+	options := standalone.Options{
+		Port:          8080,
+		DatabaseURL:   "sqlite:///data/agentgateway.db?mode=rwc",
+		AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318"},
+	}
+
+	renderChart := func(args ...string) map[string]any {
+		GinkgoHelper()
+		helm, err := exec.LookPath("helm")
+		if err != nil {
+			Skip("helm is not installed")
+		}
+		cmd := exec.Command(helm, append([]string{ //nolint:gosec // fixed test arguments
+			"template", "koinon", chart, "--namespace", "koinon",
+			"--show-only", "templates/gateway-standalone.yaml",
+		}, args...)...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		Expect(err).NotTo(HaveOccurred(), stderr.String())
+
+		dec := yaml.NewDecoder(bytes.NewReader(out))
+		for {
+			var obj struct {
+				Kind     string                `yaml:"kind"`
+				Metadata struct{ Name string } `yaml:"metadata"`
+				Data     map[string]string     `yaml:"data"`
+			}
+			Expect(dec.Decode(&obj)).To(Succeed(), "no gateway config ConfigMap rendered")
+			if obj.Kind == "ConfigMap" && obj.Metadata.Name == "koinon-gateway-config" {
+				var doc map[string]any
+				Expect(yaml.Unmarshal([]byte(obj.Data["config.yaml"]), &doc)).To(Succeed())
+				return doc
+			}
+		}
+	}
+
+	renderGo := func(s gateway.State) map[string]any {
+		GinkgoHelper()
+		body, _, err := standalone.Render(s, options)
+		Expect(err).NotTo(HaveOccurred())
+		var doc map[string]any
+		Expect(yaml.Unmarshal(body, &doc)).To(Succeed())
+		// The revision marker is the one intended difference.
+		add := doc["frontendPolicies"].(map[string]any)["accessLog"].(map[string]any)["add"].(map[string]any)
+		Expect(add).To(HaveKey(standalone.MarkerField))
+		delete(add, standalone.MarkerField)
+		return doc
+	}
+
+	It("matches Render of an empty State", func() {
+		Expect(renderChart()).To(Equal(renderGo(gateway.State{})))
+	})
+
+	It("matches Render of the same priced models", func() {
+		chartDoc := renderChart(
+			"--set", "model.baseUrl=https://openrouter.ai/api/v1",
+			"--set", "model.provider=openrouter",
+			"--set", "model.apiKeySecret.name=koinon-openrouter",
+			"--set", "model.apiKeySecret.key=api_key",
+			"--set", "model.models[0].name=deepseek/deepseek-v4.1-flash",
+			"--set-string", "model.models[0].rates.input=0.30",
+			"--set-string", "model.models[0].rates.output=1.20",
+			"--set-string", "model.models[0].rates.cacheRead=0.006",
+			"--set", "model.models[0].overrides.provider.zdr=true",
+			"--set", "model.models[1].name=unpriced/model",
+		)
+		goDoc := renderGo(gateway.State{Models: gateway.ModelUpstream{
+			Provider:   "openrouter",
+			BaseURL:    "https://openrouter.ai/api/v1",
+			APIKeyFile: "/secrets/model/api_key",
+			Models: []gateway.Model{
+				{Name: "deepseek/deepseek-v4.1-flash", Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006"}},
+				{Name: "unpriced/model"},
+			},
+			Overrides: map[string]any{"provider": map[string]any{"zdr": true}},
+		}})
+		Expect(chartDoc).To(Equal(goDoc))
+	})
+})

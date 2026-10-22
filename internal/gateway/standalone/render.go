@@ -32,8 +32,10 @@ type Options struct {
 	// Port is the listener for LLM and MCP routes. Default 4000.
 	Port int
 	// AdminAddr is agentgateway's admin listener, which serves /config_dump
-	// for reload detection. Default "[::]:15000" (all interfaces, like the readiness and stats listeners); restrict it with a
-	// NetworkPolicy, since the admin listener also serves the UI.
+	// for reload detection. Default "[::]:15000": all interfaces, like the
+	// stats and readiness listeners, because the reconciler polls it from its
+	// own pod. Restrict it with a NetworkPolicy (the chart admits only the
+	// reconciler), since the admin listener also serves the UI.
 	AdminAddr string
 	// DatabaseURL is the budget store (SQLite on a PVC by default, ADR 0048).
 	// Required when any limit is set.
@@ -59,6 +61,11 @@ type OTLPExport struct {
 const (
 	defaultPort      = 4000
 	defaultAdminAddr = "[::]:15000"
+	// The stats (metrics, the reload gauge) and readiness listeners. They are
+	// rendered explicitly, like adminAddr, so the file states every listener;
+	// the chart's bootstrap config uses the same values.
+	statsAddr     = "[::]:15020"
+	readinessAddr = "[::]:15021"
 
 	// MarkerField is the access-log field that carries the config revision.
 	// It shows up in agentgateway's /config_dump, which is how WaitForReload
@@ -119,10 +126,12 @@ type document struct {
 }
 
 type staticConfig struct {
-	AdminAddr    string         `yaml:"adminAddr"`
-	Database     *database      `yaml:"database,omitempty"`
-	Logging      logging        `yaml:"logging"`
-	ModelCatalog []catalogEntry `yaml:"modelCatalog,omitempty"`
+	AdminAddr     string         `yaml:"adminAddr"`
+	StatsAddr     string         `yaml:"statsAddr"`
+	ReadinessAddr string         `yaml:"readinessAddr"`
+	Database      *database      `yaml:"database,omitempty"`
+	Logging       logging        `yaml:"logging"`
+	ModelCatalog  []catalogEntry `yaml:"modelCatalog,omitempty"`
 }
 
 type database struct {
@@ -296,8 +305,10 @@ func build(s gateway.State, o Options) document {
 	}
 	doc := document{
 		Config: staticConfig{
-			AdminAddr: o.AdminAddr,
-			Logging:   logging{Format: "json"},
+			AdminAddr:     o.AdminAddr,
+			StatsAddr:     statsAddr,
+			ReadinessAddr: readinessAddr,
+			Logging:       logging{Format: "json"},
 		},
 		FrontendPolicies: frontendPolicies{AccessLog: accessLog{Add: map[string]string{
 			// The spend ledger (L1) attributes requests by these; key metadata
