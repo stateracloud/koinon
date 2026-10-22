@@ -339,7 +339,7 @@ var _ = Describe("runs", func() {
 		It("does not count a parked run as active", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			first := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			second := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, newTicket(ctx, f.org, f.user, f.agent.ID).ID)
 			parked, err := park(ctx, markRunning(ctx, mustClaim(ctx, f.org, "agentd-a")))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(parked.ID).To(Equal(first.ID))
@@ -356,6 +356,26 @@ var _ = Describe("runs", func() {
 			_, err = finish(ctx, active, store.RunStateFailed)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(mustClaim(ctx, f.org, "agentd-b").ID).To(Equal(first.ID))
+		})
+
+		It("keeps a ticket's next run waiting while another of its runs is owned or parked", func(ctx SpecContext) {
+			f := newFixture(ctx)
+			first := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			parked, err := park(ctx, markRunning(ctx, mustClaim(ctx, f.org, "agentd-a")))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(parked.ID).To(Equal(first.ID))
+			_, err = claim(ctx, f.org, "agentd-a")
+			Expect(err).To(MatchError(pgx.ErrNoRows), "one harness session per ticket")
+
+			_, err = q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: f.org, ID: first.ID})
+			Expect(err).NotTo(HaveOccurred())
+			resumed := markRunning(ctx, mustClaim(ctx, f.org, "agentd-a"))
+			Expect(resumed.ID).To(Equal(first.ID))
+			Expect(resumed.ParkedSeconds).To(BeNumerically(">=", 0))
+			_, err = finish(ctx, resumed, store.RunStateSucceeded)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mustClaim(ctx, f.org, "agentd-a").ID).To(Equal(second.ID))
 		})
 
 		It("claims in FIFO order, across agents too", func(ctx SpecContext) {
