@@ -9,17 +9,14 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/procoduck/koinon/internal/execution/openshell"
+	"github.com/procoduck/koinon/internal/cli"
 	"github.com/procoduck/koinon/internal/preflight"
 	"github.com/procoduck/koinon/internal/project"
 )
@@ -101,11 +98,11 @@ func runPreflight(ctx context.Context, args []string, out io.Writer) error {
 	}
 	checker := &preflight.Checker{Kube: kube, Dynamic: dyn, Config: cfg.check, CallTimeout: cfg.timeout}
 	if cfg.check.OpenShellAddress != "" {
-		gw, closeGW, err := dialGateway(cfg.check.OpenShellAddress, cfg.tlsDir)
+		gw, err := cli.OpenShell{Address: cfg.check.OpenShellAddress, TLSDir: cfg.tlsDir}.Dial()
 		if err != nil {
 			return err
 		}
-		defer closeGW()
+		defer func() { _ = gw.Close() }()
 		checker.OpenShell = gw
 	}
 	if cfg.seccompProbe {
@@ -148,24 +145,4 @@ func restConfig(kubeconfig string) (*rest.Config, error) {
 		return nil, fmt.Errorf("kubernetes client config: %w", err)
 	}
 	return rc, nil
-}
-
-func dialGateway(address, tlsDir string) (preflight.OpenShell, func(), error) {
-	if tlsDir != "" {
-		b, err := openshell.Dial(openshell.Config{
-			Endpoint: address,
-			CertFile: filepath.Join(tlsDir, "tls.crt"),
-			KeyFile:  filepath.Join(tlsDir, "tls.key"),
-			CAFile:   filepath.Join(tlsDir, "ca.crt"),
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		return b, func() { _ = b.Close() }, nil
-	}
-	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, nil, fmt.Errorf("connect to the OpenShell gateway: %w", err)
-	}
-	return openshell.New(conn), func() { _ = conn.Close() }, nil
 }
