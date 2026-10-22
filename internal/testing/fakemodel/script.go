@@ -52,7 +52,8 @@ type Turn struct {
 type When struct {
 	// ToolResult, when empty, requires that the request's last message is not a tool result
 	// (normally a user message). When set to a tool name, the last message must carry that
-	// tool's result; [AnyTool] accepts a result from any tool.
+	// tool's result; [AnyTool] accepts a result from any tool. A result from a tool whose name
+	// ends in _<name> also matches, so one script fits every harness's MCP prefix.
 	ToolResult string `yaml:"toolResult,omitempty"`
 	// UserContains requires the latest user text to contain this substring.
 	UserContains string `yaml:"userContains,omitempty"`
@@ -64,7 +65,10 @@ type When struct {
 // ToolCall is a tool call the model makes.
 type ToolCall struct {
 	// ID is the tool call ID. Empty means a deterministic generated ID.
-	ID        string         `yaml:"id,omitempty"`
+	ID string `yaml:"id,omitempty"`
+	// Name is the tool to call. Harnesses prefix MCP tools with their server name (OpenCode
+	// koinon_<tool>, Hermes and pi mcp__koinon__<tool>): when the request declares no tool of
+	// this name but exactly one whose name ends in _<name>, the call uses that tool's name.
 	Name      string         `yaml:"name"`
 	Arguments map[string]any `yaml:"arguments,omitempty"`
 }
@@ -161,6 +165,38 @@ type conversation struct {
 	toolResults    []string
 	lastUserText   string
 	assistantTurns int
+	// tools are the tool names the request declares.
+	tools []string
+}
+
+// toolMatches reports whether a tool name is the scripted name, possibly behind a harness's
+// MCP prefix (koinon_create_pull_request, mcp__koinon__create_pull_request).
+func toolMatches(name, scripted string) bool {
+	return name == scripted || strings.HasSuffix(name, "_"+scripted)
+}
+
+// resolveTools returns the calls with each name replaced by the request's prefixed tool of that
+// name, when the request declares no tool of the exact name and exactly one prefixed one.
+func resolveTools(calls []ToolCall, tools []string) []ToolCall {
+	if len(calls) == 0 || len(tools) == 0 {
+		return calls
+	}
+	out := slices.Clone(calls)
+	for i, c := range out {
+		if slices.Contains(tools, c.Name) {
+			continue
+		}
+		var found []string
+		for _, t := range tools {
+			if toolMatches(t, c.Name) {
+				found = append(found, t)
+			}
+		}
+		if len(found) == 1 {
+			out[i].Name = found[0]
+		}
+	}
+	return out
 }
 
 func (w When) holds(c conversation) bool {
@@ -174,7 +210,7 @@ func (w When) holds(c conversation) bool {
 			return false
 		}
 	default:
-		if !slices.Contains(c.toolResults, w.ToolResult) {
+		if !slices.ContainsFunc(c.toolResults, func(n string) bool { return toolMatches(n, w.ToolResult) }) {
 			return false
 		}
 	}

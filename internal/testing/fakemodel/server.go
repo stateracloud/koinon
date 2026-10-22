@@ -189,6 +189,7 @@ func (s *Server) plan(path, model string, body []byte, conv conversation) (reply
 	}
 	s.seq++
 	t := e.script.Turns[idx]
+	t.ToolCalls = resolveTools(t.ToolCalls, conv.tools)
 	t.Usage = estimateUsage(t, len(body))
 	return reply{model: model, turn: t, turnIdx: idx, seq: s.seq, created: time.Now().Unix(), faults: e.script.Faults}, nil
 }

@@ -94,14 +94,15 @@ turns:
 			url := ts.URL + "/v1/chat/completions"
 			messages := []map[string]any{userMsg("Add hello.md to koinon-demo/hello")}
 
+			// OpenCode declares the MCP tool behind its server prefix.
+			tools := []map[string]any{{"type": "function", "function": map[string]any{"name": "koinon_create_pull_request"}}}
 			var first oaCompletion
-			decode(post(ctx, url, map[string]any{"model": "repo-helper", "messages": messages}), &first)
+			decode(post(ctx, url, map[string]any{"model": "repo-helper", "messages": messages, "tools": tools}), &first)
 			Expect(first.Choices[0].FinishReason).To(Equal("tool_calls"))
 			call := first.Choices[0].Message.ToolCalls[0]
-			Expect(call.Function.Name).To(Equal("create_pull_request"))
+			Expect(call.Function.Name).To(Equal("koinon_create_pull_request"))
 			Expect(call.Function.Arguments).To(MatchJSON(`{
-				"repository": "koinon-demo/hello",
-				"branch": "agent/repo-helper-hello",
+				"branch": "koinon/add-hello-md",
 				"title": "Add hello.md",
 				"body": "Adds hello.md as requested in the ticket.",
 				"files": [{"path": "hello.md", "content": "hello from koinon\n"}]
@@ -115,10 +116,41 @@ turns:
 				map[string]any{"role": "tool", "tool_call_id": call.ID, "content": `{"approval_request":"15d955b99082815a"}`},
 			)
 			var second oaCompletion
-			decode(post(ctx, url, map[string]any{"model": "repo-helper", "messages": messages}), &second)
+			decode(post(ctx, url, map[string]any{"model": "repo-helper", "messages": messages, "tools": tools}), &second)
 			Expect(second.Choices[0].FinishReason).To(Equal("stop"))
 			Expect(*second.Choices[0].Message.Content).To(ContainSubstring("approval"))
 			Expect(second.Usage.PromptTokensDetails.CachedTokens).To(Equal(1200))
+
+			By("the resumed run reports the pull request agentd's prompt names")
+			messages = append(messages,
+				map[string]any{"role": "assistant", "content": *second.Choices[0].Message.Content},
+				userMsg("[Koinon] Your run was paused ... The outcomes:\n- create_pull_request (approval id=x, github:koinon-demo/hello): "+
+					"approved and executed by Koinon: https://github.test/koinon-demo/hello/pull/1"),
+			)
+			var third oaCompletion
+			decode(post(ctx, url, map[string]any{"model": "repo-helper", "messages": messages, "tools": tools}), &third)
+			Expect(third.Choices[0].FinishReason).To(Equal("stop"))
+			Expect(*third.Choices[0].Message.Content).To(ContainSubstring("https://github.test/koinon-demo/hello/pull/1"))
+		})
+
+		It("keeps the scripted name when no declared tool or several match it", func(ctx SpecContext) {
+			_, ts := start(fakemodel.Script{Model: "m", Turns: []fakemodel.Turn{
+				{ToolCalls: []fakemodel.ToolCall{{Name: "ping"}}},
+			}})
+			call := func(names ...string) string {
+				var tools []map[string]any
+				for _, n := range names {
+					tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": n}})
+				}
+				var c oaCompletion
+				decode(post(ctx, ts.URL+"/v1/chat/completions", map[string]any{"model": "m", "messages": []map[string]any{userMsg("hi")}, "tools": tools}), &c)
+				return c.Choices[0].Message.ToolCalls[0].Function.Name
+			}
+			Expect(call()).To(Equal("ping"))
+			Expect(call("ping", "koinon_ping")).To(Equal("ping"))
+			Expect(call("mcp__koinon__ping")).To(Equal("mcp__koinon__ping"))
+			Expect(call("a_ping", "b_ping")).To(Equal("ping"))
+			Expect(call("pinger")).To(Equal("ping"))
 		})
 	})
 })
