@@ -11,6 +11,8 @@ import (
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/procoduck/koinon/internal/connectors/github"
+	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
 	"github.com/procoduck/koinon/internal/db/store"
 	agentv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1"
 	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
@@ -135,6 +137,25 @@ var _ = Describe("AgentService", func() {
 			Expect(err.Error()).To(ContainSubstring("cannot access"))
 			_, err = create(ctx, binding(ctx, "someone-else/widgets"))
 			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "the owner must be the installation's account")
+		})
+
+		It("stores GitHub's spelling of the repository names", func(ctx SpecContext) {
+			// GitHub matches names case-insensitively; OpenShell's read grant matches paths
+			// case-sensitively, so the binding keeps the full_name GitHub reports.
+			gh := githubtest.New()
+			DeferCleanup(gh.Server.Close)
+			gh.Account, gh.Repositories = "Acme", []string{"Widgets"}
+			ce := newEnv(ctx, envOptions{github: github.NewClient(github.Options{BaseURL: gh.URL()}), ghFake: gh})
+			corg, cowner := ce.newTeamOrg(ctx)
+			res, err := cowner.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
+				OrgId: corg, TemplateId: cowner.repoHelper(ctx).GetId(), Grants: ce.repoGrant(ctx, corg, "acme/WIDGETS"),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetAgent().GetProposedGrants()).To(ConsistOf(HaveField("Repositories", []string{"Acme/Widgets"})))
+			var stored string
+			Expect(ce.pool.QueryRow(ctx, `SELECT config->'bindings'->0->>'targets' FROM agent_versions WHERE agent_id = $1`,
+				res.GetAgent().GetId()).Scan(&stored)).To(Succeed())
+			Expect(stored).To(Equal(`["Acme/Widgets"]`))
 		})
 
 		DescribeTable("rejects bindings that do not fit the template or the org",

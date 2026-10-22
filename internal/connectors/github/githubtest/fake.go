@@ -92,6 +92,16 @@ func New() *Fake {
 	return f
 }
 
+// canonical returns the installation's spelling of a repository name, which GitHub matches
+// case-insensitively.
+func (f *Fake) canonical(name string) (string, bool) {
+	i := slices.IndexFunc(f.Repositories, func(r string) bool { return strings.EqualFold(r, name) })
+	if i < 0 {
+		return "", false
+	}
+	return f.Repositories[i], true
+}
+
 // URL is the fake's base URL.
 func (f *Fake) URL() string { return f.Server.URL }
 
@@ -223,15 +233,19 @@ func (f *Fake) accessToken(w http.ResponseWriter, r *http.Request) {
 	repos := f.Repositories
 	selection := "all"
 	if req.Repositories != nil {
+		// Names are case-insensitive, as on GitHub; the response spells them canonically.
+		repos = nil
 		for _, name := range req.Repositories {
-			if !slices.Contains(f.Repositories, name) {
+			canonical, ok := f.canonical(name)
+			if !ok {
 				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 					"message": "There is at least one repository that does not exist or is not accessible to the parent installation.",
 				})
 				return
 			}
+			repos = append(repos, canonical)
 		}
-		repos, selection = req.Repositories, "selected"
+		selection = "selected"
 	}
 	full := make([]map[string]string, 0, len(repos))
 	for _, name := range repos {
