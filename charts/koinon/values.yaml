@@ -48,6 +48,13 @@ agentd:
     tag: ""
     digest: ""
   replicas: 1
+  # Runs each replica drives at once (one exec stream each).
+  workers: 8
+  # Run lease; when a replica dies, another takes its runs over after this long.
+  lease: 30s
+  # agentgateway's base URL as sandboxes reach it. Empty in standalone mode uses the chart's
+  # gateway Service; required in kubernetes mode until plan item G2.
+  gatewayURL: ""
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}

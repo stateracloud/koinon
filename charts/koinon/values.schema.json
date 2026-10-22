@@ -83,7 +83,23 @@
     },
     "api": {"allOf": [{"$ref": "#/definitions/component"}], "required": ["port"]},
     "reconciler": {"$ref": "#/definitions/component"},
-    "agentd": {"$ref": "#/definitions/component"},
+    "agentd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "replicas"],
+      "properties": {
+        "image": {"$ref": "#/definitions/koinonImage"},
+        "replicas": {"type": "integer", "minimum": 0},
+        "workers": {"type": "integer", "minimum": 1},
+        "lease": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "gatewayURL": {"type": "string", "pattern": "^(https?://[^\\s@?#]+)?$"},
+        "resources": {"$ref": "#/definitions/resources"},
+        "podAnnotations": {"$ref": "#/definitions/map"},
+        "nodeSelector": {"$ref": "#/definitions/map"},
+        "tolerations": {"type": "array"},
+        "affinity": {"$ref": "#/definitions/map"}
+      }
+    },
     "migrations": {
       "type": "object",
       "additionalProperties": false,
