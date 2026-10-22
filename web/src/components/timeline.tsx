@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from 'react'
 import { ActorKind } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
 import type { TimelineItem } from '@/lib/timeline'
 import { cn } from '@/lib/utils'
@@ -19,21 +20,27 @@ function time(at: number): string {
   return at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
 }
 
+export type TimelineProps = {
+  items: readonly TimelineItem[]
+  /** Renders the approval card for a request a human decides (plan item W2). */
+  renderApproval?: (approvalId: string) => ReactNode
+}
+
 /** Timeline renders a ticket's conversation and run activity in one list. */
-export function Timeline({ items }: { items: readonly TimelineItem[] }) {
+export function Timeline({ items, renderApproval }: TimelineProps) {
   if (items.length === 0) return <p className="text-muted-foreground text-sm">No activity yet.</p>
   return (
     <ol aria-label="Timeline" className="grid gap-3">
       {items.map((it) => (
         <li key={it.key} data-testid="timeline-item" data-kind={it.type}>
-          <TimelineEntry item={it} />
+          <TimelineEntry item={it} renderApproval={renderApproval} />
         </li>
       ))}
     </ol>
   )
 }
 
-function TimelineEntry({ item }: { item: TimelineItem }) {
+function TimelineEntry({ item, renderApproval }: { item: TimelineItem; renderApproval?: (approvalId: string) => ReactNode }) {
   switch (item.type) {
     case 'message': {
       const mine = item.actor === ActorKind.USER
@@ -65,6 +72,7 @@ function TimelineEntry({ item }: { item: TimelineItem }) {
         </p>
       )
     case 'approval':
+      if (item.ask && item.approvalId && renderApproval) return renderApproval(item.approvalId)
       return (
         <p className="text-sm">
           {item.text}

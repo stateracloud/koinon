@@ -83,5 +83,9 @@ describe('buildTimeline', () => {
       'Run r-123456 canceled: nobody decided in time',
     ])
     expect(items[4]).toMatchObject({ type: 'approval', approvalId: 'ap-1', url: 'https://github.com/Acme/Widgets/pull/7' })
+    // Only a request a human decides gets the approval card.
+    expect(items[0]).toMatchObject({ kind: 'approval.requested', ask: true })
+    expect(items[9]).toMatchObject({ kind: 'approval.requested', ask: false })
+    expect(items[3]).toMatchObject({ ask: false })
   })
 })

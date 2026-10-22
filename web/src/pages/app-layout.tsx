@@ -81,8 +81,14 @@ function Shell({ who }: { who: WhoAmIResponse }) {
           Koinon
         </Link>
         <nav aria-label="Main" className="flex gap-3 text-sm">
-          <Link to="/" className="hover:underline" activeProps={{ 'aria-current': 'page', className: 'font-medium' }}>
+          <Link to="/" className="hover:underline" activeOptions={{ exact: true }} activeProps={{ 'aria-current': 'page', className: 'font-medium' }}>
             Board
+          </Link>
+          <Link to="/agents" className="hover:underline" activeProps={{ 'aria-current': 'page', className: 'font-medium' }}>
+            Agents
+          </Link>
+          <Link to="/connections" className="hover:underline" activeProps={{ 'aria-current': 'page', className: 'font-medium' }}>
+            Connections
           </Link>
         </nav>
         <div className="ml-auto flex items-center gap-3 text-sm">

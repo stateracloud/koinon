@@ -5,6 +5,9 @@ import { Button } from '@/components/ui/button'
 import { TicketStatus, type Ticket } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
 import { boardColumns } from '@/lib/labels'
 
+/** A pending approval in Waiting on you. */
+export type PendingApproval = { id: string; label: string; ticketId: string; ticketTitle?: string }
+
 export type BoardProps = {
   tickets: readonly Ticket[]
   agentNames: ReadonlyMap<string, string>
@@ -12,10 +15,12 @@ export type BoardProps = {
   /** Tickets with a move in flight. */
   moving?: ReadonlySet<string>
   canEdit?: boolean
+  /** Pending approvals the viewer may decide (admins and owners), shown in Waiting on you. */
+  approvals?: readonly PendingApproval[]
 }
 
 /** Board shows the org's tickets in the four columns of ADR 0049. */
-export function Board({ tickets, agentNames, onMoveToDone, moving, canEdit = true }: BoardProps) {
+export function Board({ tickets, agentNames, onMoveToDone, moving, canEdit = true, approvals = [] }: BoardProps) {
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       {boardColumns.map((col) => {
@@ -29,6 +34,21 @@ export function Board({ tickets, agentNames, onMoveToDone, moving, canEdit = tru
                 {items.length}
               </span>
             </h2>
+            {col.status === TicketStatus.WAITING_ON_YOU && approvals.length > 0 && (
+              <section aria-label="Approvals waiting on you" className="mb-3">
+                <h3 className="text-muted-foreground mb-2 text-xs font-medium uppercase">Approvals</h3>
+                <ul className="grid gap-2">
+                  {approvals.map((a) => (
+                    <li key={a.id} className="bg-card rounded-md border border-amber-500/60 p-3 shadow-xs">
+                      <Link to="/approvals/$approvalId" params={{ approvalId: a.id }} className="font-medium hover:underline">
+                        Review {a.label}
+                      </Link>
+                      {a.ticketTitle && <p className="text-muted-foreground mt-1 text-xs">{a.ticketTitle}</p>}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             {items.length === 0 ? (
               <p className="text-muted-foreground text-sm">Nothing here.</p>
             ) : (
