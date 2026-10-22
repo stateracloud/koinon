@@ -21,6 +21,12 @@ export type ApprovalCardProps = {
   onDeny?: (note: string) => void
   pending?: boolean
   error?: string
+  /**
+   * The approval was refused because the request changed since the card
+   * loaded (Aborted, HTTP 409): the viewer must reload and review it again.
+   */
+  changed?: boolean
+  onReload?: () => void
   /** Link to the standalone view (shown in the ticket timeline). */
   showPermalink?: boolean
 }
@@ -30,7 +36,7 @@ export type ApprovalCardProps = {
  * then what the call does and where, then the change itself, collapsed.
  * Approving binds to the args_sha256 the card was loaded with.
  */
-export function ApprovalCard({ approval: a, canDecide, onApprove, onDeny, pending, error, showPermalink }: ApprovalCardProps) {
+export function ApprovalCard({ approval: a, canDecide, onApprove, onDeny, pending, error, changed, onReload, showPermalink }: ApprovalCardProps) {
   const headingId = useId()
   const pr = a.call.case === 'pullRequest' ? a.call.value : undefined
   const comment = a.call.case === 'comment' ? a.call.value : undefined
@@ -97,6 +103,16 @@ export function ApprovalCard({ approval: a, canDecide, onApprove, onDeny, pendin
         ) : (
           <p className="text-muted-foreground text-sm">Only org admins and owners can approve or deny this request.</p>
         ))}
+      {changed && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            <span>This request changed since you opened it. Reload to review the new version.</span>
+            <Button size="sm" variant="outline" className="ml-auto" onClick={onReload}>
+              Reload
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
       {error && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{error}</AlertDescription>

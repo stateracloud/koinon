@@ -649,8 +649,9 @@ export const ApprovalService: GenService<{
   },
   /**
    * Approve approves a pending request and executes it. args_sha256 must be
-   * the hash shown with the request; a different hash fails with
-   * FAILED_PRECONDITION and nothing is executed. Approving again with the
+   * the hash shown with the request; a different hash fails with ABORTED
+   * (HTTP 409) and nothing is executed. A request that is no longer pending
+   * fails with FAILED_PRECONDITION. Approving again with the
    * same hash returns the request as it is (the same pull request), without
    * executing it again. Admins and owners.
    *

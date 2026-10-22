@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from '@bufbuild/protobuf'
-import { createRouterTransport } from '@connectrpc/connect'
+import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
@@ -61,16 +61,28 @@ function approval(opts: { canDecide?: boolean; status?: Status } = {}) {
   })
 }
 
-function setup(opts: { role?: OrgRole; canDecide?: boolean } = {}) {
+const changedSha = 'a'.repeat(64)
+
+function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean } = {}) {
   const approves: ApproveRequest[] = []
   const denies: DenyRequest[] = []
   let current = approval({ canDecide: opts.canDecide })
+  let gets = 0
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ApprovalService, {
-      getApproval: () => ({ approval: current }),
+      getApproval: () => {
+        gets++
+        return { approval: current }
+      },
       approve: (req) => {
         approves.push(req)
+        if (req.argsSha256 !== current.argsSha256) throw new ConnectError('approval does not match the requested arguments', Code.Aborted)
+        if (opts.changed && approves.length === 1) {
+          // The request changed after the card loaded: the API refuses the old hash.
+          current = create(ApprovalSchema, { ...current, argsSha256: changedSha })
+          throw new ConnectError('approval does not match the requested arguments', Code.Aborted)
+        }
         current = create(ApprovalSchema, { ...current, status: Status.EXECUTED, canDecide: false, decisionNote: req.note, result: { url: 'https://github.com/acme/widgets/pull/7' } })
         return { approval: current }
       },
@@ -82,7 +94,7 @@ function setup(opts: { role?: OrgRole; canDecide?: boolean } = {}) {
     })
   })
   renderApp(transport, '/approvals/ap-1')
-  return { approves, denies }
+  return { approves, denies, gets: () => gets }
 }
 
 describe('riskItems', () => {
@@ -129,6 +141,28 @@ describe('ApprovalCard', () => {
     expect(approves[0]).toMatchObject({ orgId, approvalId: 'ap-1', argsSha256: sha, note: 'looks good' })
     expect(await screen.findByRole('link', { name: 'https://github.com/acme/widgets/pull/7' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+  })
+
+  it('asks to reload when the request changed since it was opened (Aborted, HTTP 409)', async () => {
+    const { approves, gets } = setup({ changed: true })
+    await screen.findByTestId('approval-card')
+    await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('This request changed since you opened it. Reload to review the new version.')
+    expect(alert).not.toHaveTextContent('does not match')
+    const before = gets()
+
+    await userEvent.click(within(alert).getByRole('button', { name: 'Reload' }))
+    await waitFor(() => expect(gets()).toBeGreaterThan(before))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    expect(screen.getByTitle(changedSha)).toBeInTheDocument()
+
+    // Approving again binds to the hash of the version now shown.
+    await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    await waitFor(() => expect(approves).toHaveLength(2))
+    expect(approves[0].argsSha256).toBe(sha)
+    expect(approves[1].argsSha256).toBe(changedSha)
+    expect(await screen.findByRole('link', { name: 'https://github.com/acme/widgets/pull/7' })).toBeInTheDocument()
   })
 
   it('denies with a note', async () => {
