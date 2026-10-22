@@ -85,7 +85,7 @@ func describeAgentd(f flavor) bool {
 			Expect(err).NotTo(HaveOccurred())
 			v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
 				OrgID: org, AgentID: a.ID, CreatedBy: user,
-				Config: []byte(`{"model":{"name":"` + contractModel + `"},"instructions":"` + instructionsMarker + `: you are a contract test agent."}`),
+				Config: []byte(`{"model":"` + contractModel + `","instructions":"` + instructionsMarker + `: you are a contract test agent."}`),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: a.ID, VersionID: v.ID, ActivatedBy: user})
