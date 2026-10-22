@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	// NotifyChannel is the channel the agents and runs triggers notify (migration 00005).
+	// NotifyChannel is the channel the agents and runs triggers notify (migration 00006).
 	NotifyChannel = "koinon_reconcile"
 	// leaderLock is the advisory lock key held by the reconciling replica ("koinonrc").
 	leaderLock int64 = 0x6b6f696e6f6e7263
