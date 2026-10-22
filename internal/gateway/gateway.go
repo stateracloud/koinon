@@ -56,13 +56,24 @@ type AgentRef struct {
 
 func (a AgentRef) String() string { return a.Org + "/" + a.Name }
 
-// dnsLabel matches the slugs Koinon uses for org and agent names.
-var dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+// OrgSlugPattern is the rule for org slugs: a DNS label of at most 40
+// characters. It is the orgs.slug CHECK of migration 00001_initial.sql, so the
+// gateway accepts exactly the orgs Postgres can hold.
+const OrgSlugPattern = `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`
+
+var (
+	orgSlug = regexp.MustCompile(OrgSlugPattern)
+	// dnsLabel matches agent names (agent IDs in practice).
+	dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+)
 
 // Validate reports whether a is safe to embed in gateway config and CEL.
 func (a AgentRef) Validate() error {
-	if !dnsLabel.MatchString(a.Org) || !dnsLabel.MatchString(a.Name) {
-		return fmt.Errorf("gateway: invalid agent ref %q: org and name must be DNS labels", a.String())
+	if !orgSlug.MatchString(a.Org) {
+		return fmt.Errorf("gateway: invalid agent ref %q: org must be an org slug (%s)", a.String(), OrgSlugPattern)
+	}
+	if !dnsLabel.MatchString(a.Name) {
+		return fmt.Errorf("gateway: invalid agent ref %q: name must be a DNS label", a.String())
 	}
 	return nil
 }

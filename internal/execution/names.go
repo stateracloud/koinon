@@ -19,7 +19,7 @@ const MaxSandboxName = 19
 // characters. In managed mode OpenShell prefixes it to form the namespace name, so it is kept
 // short.
 func WorkspaceName(org [16]byte) string {
-	return "kw-" + shortHash("workspace", uuidString(org))
+	return "kw-" + shortHash("workspace", UUIDString(org))
 }
 
 // AgentNames are the per-agent object names, all derived from (org_id, agent_id).
@@ -41,7 +41,7 @@ type AgentNames struct {
 // AgentObjectNames derives an agent's object names. Sandbox and provider names are 19
 // characters ("ka-"/"kp-"/"kg-" and 16 hex characters of a hash of org and agent ID).
 func AgentObjectNames(org, agent [16]byte) AgentNames {
-	h := shortHash("agent", uuidString(org), uuidString(agent))
+	h := shortHash("agent", UUIDString(org), UUIDString(agent))
 	return AgentNames{
 		Sandbox:        "ka-" + h,
 		Provider:       "kp-" + h,
@@ -67,8 +67,8 @@ func shortHash(parts ...string) string {
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
-// uuidString formats a UUID in its canonical lower-case form.
-func uuidString(b [16]byte) string {
+// UUIDString formats a UUID in its canonical lower-case form, as object names and labels carry it.
+func UUIDString(b [16]byte) string {
 	var out [36]byte
 	hex.Encode(out[0:8], b[0:4])
 	out[8] = '-'

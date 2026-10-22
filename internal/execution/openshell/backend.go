@@ -15,6 +15,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/procoduck/koinon/internal/execution"
 	datamodelv1 "github.com/procoduck/koinon/internal/gen/openshell/datamodel/v1"
@@ -64,12 +65,32 @@ func Dial(cfg Config, opts ...grpc.DialOption) (*Backend, error) {
 	return b, nil
 }
 
-// Close closes the connection opened by Dial. It does nothing for a Backend from New.
+// DialPlaintext connects to the gateway at endpoint without TLS, for a gateway behind a mesh
+// that terminates mTLS. Close closes the connection.
+func DialPlaintext(endpoint string, opts ...grpc.DialOption) (*Backend, error) {
+	opts = append([]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}, opts...)
+	conn, err := grpc.NewClient(endpoint, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("openshell: connect to %s: %w", endpoint, err)
+	}
+	b := New(conn)
+	b.conn = conn
+	return b, nil
+}
+
+// Close closes the connection opened by Dial or DialPlaintext. It does nothing for a Backend
+// from New.
 func (b *Backend) Close() error {
 	if b.conn == nil {
 		return nil
 	}
 	return b.conn.Close()
+}
+
+// Health calls the gateway's unauthenticated Health RPC, which reports its status and
+// version (the install preflight checks both).
+func (b *Backend) Health(ctx context.Context) (*openshellv1.HealthResponse, error) {
+	return b.c.Health(ctx, &openshellv1.HealthRequest{})
 }
 
 func (cfg Config) tlsConfig() (*tls.Config, error) {

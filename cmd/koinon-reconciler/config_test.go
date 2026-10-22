@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/reconciler"
 )
@@ -47,45 +50,47 @@ bootstrapAdmin:
   enabled: true
 `
 
-func TestParseConfigFromChart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte(chartConfig), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	env := map[string]string{
-		"KOINON_CONFIG":       path,
-		"DATABASE_URL":        "postgres://koinon_reconciler@db/koinon",
-		"POD_NAMESPACE":       "koinon",
-		"KOINON_IDLE_TIMEOUT": "15m", // flags and env override the file
-	}
-	c, err := parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c.idleTimeout != 15*time.Minute || c.resyncInterval != 30*time.Second {
-		t.Errorf("durations = %v, %v", c.idleTimeout, c.resyncInterval)
-	}
-	if c.homeRetention != "delete" || c.runtimeClass != "kata" || c.openshellTLSDir != "/etc/koinon/openshell-tls" ||
-		c.accessLogOTLP != "koinon-api.koinon.svc:4318" {
-		t.Errorf("unexpected %+v", c)
-	}
-	ep, err := c.gatewayEndpoint()
-	if err != nil || ep != (reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080}) {
-		t.Errorf("gateway endpoint = %+v, %v", ep, err)
-	}
-	if c.models.Provider != "openrouter" || c.models.APIKeyFile != "/secrets/model/api_key" ||
-		len(c.models.Models) != 1 || c.models.Models[0].Price.Output != "1.20" || c.models.Overrides == nil {
-		t.Errorf("models = %+v", c.models)
-	}
-	f := c.flavors()[store.AgentFlavorOpencode]
-	if f.Image != "ghcr.io/procoduck/flavor-opencode:0.1.0" || len(f.Binaries) != 1 {
-		t.Errorf("flavor = %+v", f)
-	}
+func TestReconcilerCommand(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "koinon-reconciler Suite")
 }
 
-func TestParseConfigRequiresSettings(t *testing.T) {
-	_, err := parseConfig(nil, func(string) (string, bool) { return "", false })
-	if err == nil {
-		t.Fatal("want an error without database, namespace, OpenShell and gateway settings")
-	}
-}
+var _ = Describe("parseConfig", func() {
+	It("reads the config file as the chart renders it, with env overriding the file", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		Expect(os.WriteFile(path, []byte(chartConfig), 0o600)).To(Succeed())
+		env := map[string]string{
+			"KOINON_CONFIG":       path,
+			"DATABASE_URL":        "postgres://koinon_reconciler@db/koinon",
+			"POD_NAMESPACE":       "koinon",
+			"KOINON_IDLE_TIMEOUT": "15m", // flags and env override the file
+		}
+		c, err := parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.idleTimeout).To(Equal(15 * time.Minute))
+		Expect(c.resyncInterval).To(Equal(30 * time.Second))
+		Expect(c.homeRetention).To(Equal("delete"))
+		Expect(c.runtimeClass).To(Equal("kata"))
+		Expect(c.openshellTLSDir).To(Equal("/etc/koinon/openshell-tls"))
+		Expect(c.accessLogOTLP).To(Equal("koinon-api.koinon.svc:4318"))
+
+		ep, err := c.gatewayEndpoint()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ep).To(Equal(reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080}))
+
+		Expect(c.models.Provider).To(Equal("openrouter"))
+		Expect(c.models.APIKeyFile).To(Equal("/secrets/model/api_key"))
+		Expect(c.models.Models).To(HaveLen(1))
+		Expect(c.models.Models[0].Price.Output).To(Equal("1.20"))
+		Expect(c.models.Overrides).NotTo(BeNil())
+
+		f := c.flavors()[store.AgentFlavorOpencode]
+		Expect(f.Image).To(Equal("ghcr.io/procoduck/flavor-opencode:0.1.0"))
+		Expect(f.Binaries).To(HaveLen(1))
+	})
+
+	It("requires the database, namespace, OpenShell and gateway settings", func() {
+		_, err := parseConfig(nil, func(string) (string, bool) { return "", false })
+		Expect(err).To(HaveOccurred())
+	})
+})
