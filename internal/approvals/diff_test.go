@@ -50,12 +50,12 @@ var _ = Describe("Diff", func() {
 		Expect(d.Base).To(Equal("main"))
 		Expect(d.Files).To(Equal([]approvals.FileDiff{
 			{Path: "docs/guide.md", Status: approvals.StatusModified, Diff: "--- a/docs/guide.md\n+++ b/docs/guide.md\n" +
-				"@@ -1,5 +1,5 @@\n # Guide\n \n one\n-two\n+2\n three\n"},
-			{Path: "logo.png", Status: approvals.StatusModified, Binary: true},
+				"@@ -1,5 +1,5 @@\n # Guide\n \n one\n-two\n+2\n three\n", OldMode: "100644", NewMode: "100644"},
+			{Path: "logo.png", Status: approvals.StatusModified, Binary: true, OldMode: "100644", NewMode: "100644"},
 			{Path: "new.txt", Status: approvals.StatusAdded, Diff: "--- /dev/null\n+++ b/new.txt\n" +
-				"@@ -0,0 +1,2 @@\n+hello\n+world\n\\ No newline at end of file\n"},
+				"@@ -0,0 +1,2 @@\n+hello\n+world\n\\ No newline at end of file\n", NewMode: "100644"},
 			{Path: "old.txt", Status: approvals.StatusDeleted, Diff: "--- a/old.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-obsolete\n"},
-			{Path: "same.txt", Status: approvals.StatusModified},
+			{Path: "same.txt", Status: approvals.StatusModified, OldMode: "100644", NewMode: "100644"},
 		}), "one entry per file, in the recorded (sorted) order")
 
 		By("one token, for the one repository, that can only read")
@@ -79,9 +79,12 @@ var _ = Describe("Diff", func() {
 		d, err := f.svc.Diff(ctx, f.get(ctx, req.ID))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(d.Files).To(HaveLen(3))
-		Expect(d.Files[0]).To(Equal(approvals.FileDiff{Path: "big.txt", Fallback: "the current version is larger than 1 MiB (1200000 bytes)"}))
+		Expect(d.Files[0]).To(Equal(approvals.FileDiff{
+			Path: "big.txt", Fallback: "the current version is larger than 1 MiB (1200000 bytes)", OldMode: "100644", NewMode: "100644",
+		}))
 		Expect(d.Files[1]).To(Equal(approvals.FileDiff{
 			Path: "docs/guide.md", Fallback: "GitHub answered 502 Bad Gateway when Koinon read the current version",
+			OldMode: "100644", NewMode: "100644",
 		}))
 		Expect(d.Files[2].Diff).To(ContainSubstring("-unchanged\n+changed\n"))
 	})
@@ -97,6 +100,29 @@ var _ = Describe("Diff", func() {
 			{Path: "docs/guide.md", Fallback: "the base branch release does not exist in acme/widgets"},
 			{Path: "old.txt", Status: approvals.StatusDeleted, Fallback: "the base branch release does not exist in acme/widgets"},
 		}}))
+	})
+
+	It("shows the mode each file is written with against its mode on the base branch", func(ctx SpecContext) {
+		f.gh.SetBranchModes("widgets", "main", "scripts", map[string]string{
+			"scripts/run.sh": "#!/bin/sh\necho old\n", "scripts/lib.sh": "# lib\n",
+		}, map[string]string{"scripts/run.sh": "100755"})
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, diffArgs(
+			file("scripts/run.sh", "#!/bin/sh\necho new\n"),
+			map[string]any{"path": "scripts/lib.sh", "content": "# lib\n", "executable": true},
+			map[string]any{"path": "scripts/new.sh", "content": "#!/bin/sh\n", "executable": true},
+		))
+
+		d, err := f.svc.Diff(ctx, f.get(ctx, req.ID))
+		Expect(err).NotTo(HaveOccurred())
+		modes := map[string][2]string{}
+		for _, fd := range d.Files {
+			modes[fd.Path] = [2]string{fd.OldMode, fd.NewMode}
+		}
+		Expect(modes).To(Equal(map[string][2]string{
+			"scripts/run.sh": {"100755", "100755"}, // unmarked: keeps its mode
+			"scripts/lib.sh": {"100644", "100755"}, // marked: becomes executable, content unchanged
+			"scripts/new.sh": {"", "100755"},
+		}))
 	})
 
 	It("has no diff for a comment", func(ctx SpecContext) {

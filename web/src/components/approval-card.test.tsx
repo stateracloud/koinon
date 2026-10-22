@@ -24,7 +24,7 @@ import { orgId, renderApp, whoAmI } from '@/test-utils'
 
 const sha = 'f3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 
-function approval(opts: { canDecide?: boolean; status?: Status } = {}) {
+function approval(opts: { canDecide?: boolean; status?: Status; executable?: boolean } = {}) {
   return create(ApprovalSchema, {
     id: 'ap-1',
     orgId,
@@ -45,6 +45,7 @@ function approval(opts: { canDecide?: boolean; status?: Status } = {}) {
       scripts: ['scripts/release.sh'],
       dependencies: ['package.json'],
       binary: [],
+      executable: opts.executable ? ['scripts/release.sh'] : [],
     }),
     call: {
       case: 'pullRequest',
@@ -55,7 +56,7 @@ function approval(opts: { canDecide?: boolean; status?: Status } = {}) {
         files: [
           create(FileChangeSchema, { path: 'README.md', content: '# Widgets\nreceive\n' }),
           create(FileChangeSchema, { path: '.github/dependabot.yml', content: 'version: 2\n' }),
-          create(FileChangeSchema, { path: 'scripts/release.sh', content: '#!/bin/sh\necho hi\n' }),
+          create(FileChangeSchema, { path: 'scripts/release.sh', content: '#!/bin/sh\necho hi\n', executable: opts.executable ?? false }),
           create(FileChangeSchema, { path: 'old.txt', delete: true }),
         ],
       }),
@@ -67,10 +68,10 @@ const changedSha = 'a'.repeat(64)
 
 type DiffInit = MessageInitShape<typeof GetApprovalDiffResponseSchema>
 
-function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean; diff?: DiffInit } = {}) {
+function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean; diff?: DiffInit; executable?: boolean } = {}) {
   const approves: ApproveRequest[] = []
   const denies: DenyRequest[] = []
-  let current = approval({ canDecide: opts.canDecide })
+  let current = approval({ canDecide: opts.canDecide, executable: opts.executable })
   let gets = 0
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
@@ -106,10 +107,10 @@ function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean; d
 }
 
 describe('riskItems', () => {
-  it('orders push-and-run risk: CI, scripts, dependencies, binaries, deletions, then size', () => {
+  it('orders push-and-run risk: CI, scripts, files made executable, dependencies, binaries, deletions, then size', () => {
     const items = riskItems(approval().risk)
-    expect(items.map((i) => i.key)).toEqual(['ci', 'scripts', 'dependencies', 'binary', 'deletions', 'size'])
-    expect(items.map((i) => i.flagged)).toEqual([true, true, true, false, true, false])
+    expect(items.map((i) => i.key)).toEqual(['ci', 'scripts', 'executable', 'dependencies', 'binary', 'deletions', 'size'])
+    expect(items.map((i) => i.flagged)).toEqual([true, true, false, true, false, true, false])
     expect(riskItems(create(RiskSchema, { files: 120n, bytes: 10n })).at(-1)).toMatchObject({ key: 'size', flagged: true })
   })
 })
@@ -129,7 +130,7 @@ describe('ApprovalCard', () => {
       .getAllByRole('listitem')
       .map((li) => li.dataset.risk)
       .filter(Boolean)
-    expect(order).toEqual(['ci', 'scripts', 'dependencies', 'binary', 'deletions', 'size'])
+    expect(order).toEqual(['ci', 'scripts', 'executable', 'dependencies', 'binary', 'deletions', 'size'])
     expect(within(risk).getByText(/CI and automation config/)).toBeInTheDocument()
 
     // The per-file content is collapsed until opened.
@@ -188,6 +189,42 @@ describe('ApprovalCard', () => {
 
     // The risk summary is unchanged by the diff.
     expect(within(card).getByRole('region', { name: 'Push and run risk' })).toHaveTextContent('CI and automation config')
+  })
+
+  it('flags a file made executable in the summary and on the file, with its mode change', async () => {
+    setup({
+      executable: true,
+      diff: {
+        base: 'main',
+        files: [
+          { path: 'README.md', status: FileStatus.MODIFIED, oldMode: '100644', newMode: '100644' },
+          { path: '.github/dependabot.yml', status: FileStatus.ADDED, newMode: '100644' },
+          {
+            path: 'scripts/release.sh',
+            status: FileStatus.MODIFIED,
+            oldMode: '100644',
+            newMode: '100755',
+            unifiedDiff: '--- a/scripts/release.sh\n+++ b/scripts/release.sh\n@@ -1,2 +1,2 @@\n #!/bin/sh\n-echo old\n+echo hi\n',
+          },
+          { path: 'old.txt', status: FileStatus.DELETED },
+        ],
+      },
+    })
+    const card = await screen.findByTestId('approval-card')
+    const risk = within(card).getByRole('region', { name: 'Push and run risk' })
+    const item = risk.querySelector('[data-risk="executable"]') as HTMLElement
+    expect(item.dataset.flagged).toBe('true')
+    expect(item).toHaveTextContent('Makes executable')
+    expect(item).toHaveTextContent('Written as mode 100755, so it can be run directly.')
+    expect(item).toHaveTextContent('scripts/release.sh')
+
+    const files = within(card).getByRole('region', { name: 'Files' })
+    const script = within(files).getByText('scripts/release.sh').closest('details')!
+    expect(within(script).getByText('makes executable')).toBeInTheDocument()
+    expect(await within(script).findByTestId('mode-change')).toHaveTextContent('mode 100644 → 100755')
+    const readme = within(files).getByText('README.md').closest('details')!
+    expect(within(readme).queryByText('makes executable')).not.toBeInTheDocument()
+    expect(within(readme).queryByTestId('mode-change')).not.toBeInTheDocument()
   })
 
   it('falls back to the full new content when the diff cannot be loaded', async () => {

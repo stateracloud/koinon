@@ -152,6 +152,7 @@ func (s *Server) GetApprovalDiff(ctx context.Context, req *approvalv1alpha1.GetA
 	for _, f := range d.Files {
 		res.Files = append(res.Files, &approvalv1alpha1.FileDiff{
 			Path: f.Path, Status: fileStatusToProto[f.Status], UnifiedDiff: f.Diff, Binary: f.Binary, FallbackReason: f.Fallback,
+			OldMode: f.OldMode, NewMode: f.NewMode,
 		})
 	}
 	return res, nil

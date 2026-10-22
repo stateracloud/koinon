@@ -54,6 +54,11 @@ type FileDiff struct {
 	Binary bool
 	// Fallback says why there is no diff; the card then shows the full new content.
 	Fallback string
+	// OldMode is the file's git mode on the base branch and NewMode the mode Koinon writes
+	// (FileMode): set when the base tree could be read, OldMode for an existing file and
+	// NewMode for every file that is not deleted. A modified file whose modes differ
+	// becomes executable (100644 -> 100755).
+	OldMode, NewMode string
 }
 
 // Diff is a create_pull_request request compared with the branch it targets.
@@ -123,6 +128,7 @@ func (s *Service) Diff(ctx context.Context, row store.ApprovalRequest) (Diff, er
 	if err != nil {
 		return fallback(err), nil
 	}
+	s.modes(ctx, row, tok, repo, head, args.Files, out.Files)
 	budget := maxBaseTotalBytes
 	for i, f := range args.Files {
 		d := &out.Files[i]
@@ -158,6 +164,28 @@ func (s *Service) Diff(ctx context.Context, row store.ApprovalRequest) (Diff, er
 		d.Diff = UnifiedDiff(f.Path, string(cur.Content), f.Content, d.Status)
 	}
 	return out, nil
+}
+
+// modes fills each file's OldMode and NewMode from the base commit's tree, the same read
+// the executor makes. A tree that cannot be read leaves them empty; the diff itself does
+// not depend on it.
+func (s *Service) modes(ctx context.Context, row store.ApprovalRequest, tok github.Token, repo github.Repo, head string, files []githubtools.FileChange, out []FileDiff) {
+	c, err := s.gh.GetCommit(ctx, tok, repo, head)
+	var base map[string]string
+	if err == nil {
+		base, err = s.baseModes(ctx, tok, repo, c.Tree.SHA, files)
+	}
+	if err != nil {
+		s.log.Warn("approval diff: could not read the base modes", append(attrs(row), "err", err)...)
+		return
+	}
+	for i, f := range files {
+		if f.Delete {
+			continue
+		}
+		out[i].OldMode = base[f.Path]
+		out[i].NewMode = FileMode(f, base[f.Path])
+	}
 }
 
 // fallbackReason is the short note the card shows instead of a diff. GitHub's own message

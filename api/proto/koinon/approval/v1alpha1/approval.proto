@@ -220,6 +220,12 @@ message FileDiff {
   // Why there is no diff, e.g. "the current version is larger than 1 MiB".
   // The card then shows the full new content.
   string fallback_reason = 5;
+  // The file's git mode on the base branch ("100644", "100755"; empty for a
+  // new file) and the mode Koinon writes it with (empty for a deleted file).
+  // Both are empty when the base tree could not be read. A modified file
+  // whose modes differ becomes executable.
+  string old_mode = 6;
+  string new_mode = 7;
 }
 
 // GetApprovalDiffResponse holds one FileDiff per file of the call, in the
