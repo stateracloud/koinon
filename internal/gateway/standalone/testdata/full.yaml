@@ -20,7 +20,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"7510ca90efdc0347"'
+      koinon.config: '"2ba34c6a51faf4e5"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
     otlp:
@@ -101,6 +101,10 @@ mcp:
     mcpAuthorization:
       rules:
         - apiKey.agent == "acme/repo-helper" && ((mcp.tool.target == "github" && mcp.tool.name in ["create_pull_request", "get_approval_status"]) || (mcp.tool.target == "docs" && mcp.tool.name in ["search"]))
+    transformations:
+      request:
+        set:
+          x-koinon-agent: apiKey.agent
   targets:
     - name: github
       mcp:

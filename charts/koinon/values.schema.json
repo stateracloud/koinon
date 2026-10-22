@@ -34,7 +34,6 @@
         "image": {"$ref": "#/definitions/koinonImage"},
         "replicas": {"type": "integer", "minimum": 0},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-        "otlpPort": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "api only: the spend ledger's OTLP/HTTP receiver for agentgateway's access log"},
         "resources": {"$ref": "#/definitions/resources"},
         "podAnnotations": {"$ref": "#/definitions/map"},
         "nodeSelector": {"$ref": "#/definitions/map"},
@@ -88,7 +87,23 @@
         "properties": {"name": {"$ref": "#/definitions/nonEmpty"}}
       }
     },
-    "api": {"allOf": [{"$ref": "#/definitions/component"}], "required": ["port", "otlpPort"]},
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "replicas", "port", "otlpPort", "toolsPort"],
+      "properties": {
+        "image": {"$ref": "#/definitions/koinonImage"},
+        "replicas": {"type": "integer", "minimum": 0},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "otlpPort": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "the spend ledger's OTLP/HTTP receiver for agentgateway's access log"},
+        "toolsPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "resources": {"$ref": "#/definitions/resources"},
+        "podAnnotations": {"$ref": "#/definitions/map"},
+        "nodeSelector": {"$ref": "#/definitions/map"},
+        "tolerations": {"type": "array"},
+        "affinity": {"$ref": "#/definitions/map"}
+      }
+    },
     "reconciler": {
       "type": "object",
       "additionalProperties": false,

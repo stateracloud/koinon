@@ -27,7 +27,8 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ $name }}
-      automountServiceAccountToken: {{ eq $component "reconciler" }}
+      {{- /* The reconciler renders key Secrets; the API writes connection Secrets (C1). */}}
+      automountServiceAccountToken: {{ has $component (list "reconciler" "api") }}
       enableServiceLinks: false
       {{- include "koinon.imagePullSecrets" $ | nindent 6 }}
       securityContext:
@@ -37,12 +38,14 @@ spec:
           image: {{ include "koinon.image" (list $ $v.image) }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           {{- if eq $component "api" }}
-          args: ["-addr", ":{{ $v.port }}", "-otlp-addr", ":{{ $v.otlpPort }}"]
+          args: ["-addr", ":{{ $v.port }}", "-otlp-addr", ":{{ $v.otlpPort }}", "-tools-addr", ":{{ $v.toolsPort }}"]
           ports:
             - name: http
               containerPort: {{ $v.port }}
             - name: otlp
               containerPort: {{ $v.otlpPort }}
+            - name: tools
+              containerPort: {{ $v.toolsPort }}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           livenessProbe:
@@ -117,3 +120,19 @@ spec:
     - name: otlp
       port: {{ .Values.api.otlpPort }}
       targetPort: otlp
+---
+# The GitHub tools MCP server, for agentgateway only (see networkpolicy.yaml). A Service of its own
+# keeps it off the API Service, which the ingress exposes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "koinon.componentName" (list . "api-tools") }}
+  labels:
+    {{- include "koinon.labels" (list . "api") | nindent 4 }}
+spec:
+  selector:
+    {{- include "koinon.selectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - name: tools
+      port: {{ .Values.api.toolsPort }}
+      targetPort: tools

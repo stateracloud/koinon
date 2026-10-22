@@ -45,6 +45,16 @@ const (
 // OpenShell adds a provider profile's endpoints to the sandbox's network allowlist (spike
 // steps 5 and 7), so the sandbox policy itself needs no rule for it.
 func (r *Reconciler) profile(flavor store.AgentFlavor, f Flavor) execution.ProviderProfile {
+	allow := []execution.L7Rule{{Method: "POST", Path: "/v1/chat/completions"}}
+	if len(r.cfg.ToolServers) > 0 {
+		// MCP Streamable HTTP on agentgateway's /mcp route (agentd passes <gateway>/mcp to
+		// the harness): POST for messages, GET for the server stream, DELETE to end the
+		// session. Which tools are callable is agentgateway's CEL allowlist.
+		allow = append(allow,
+			execution.L7Rule{Method: "POST", Path: "/mcp"},
+			execution.L7Rule{Method: "GET", Path: "/mcp"},
+			execution.L7Rule{Method: "DELETE", Path: "/mcp"})
+	}
 	return execution.ProviderProfile{
 		ID:          profilePrefix + string(flavor),
 		DisplayName: "agentgateway (" + string(flavor) + ")",
@@ -61,7 +71,7 @@ func (r *Reconciler) profile(flavor store.AgentFlavor, f Flavor) execution.Provi
 			Host:     r.cfg.Gateway.Host,
 			Port:     r.cfg.Gateway.Port,
 			Protocol: "rest",
-			Allow:    []execution.L7Rule{{Method: "POST", Path: "/v1/chat/completions"}},
+			Allow:    allow,
 		}},
 		Binaries: slices.Clone(f.Binaries),
 	}

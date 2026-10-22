@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -34,6 +35,8 @@ import (
 	"github.com/procoduck/koinon/internal/api"
 	"github.com/procoduck/koinon/internal/auth"
 	"github.com/procoduck/koinon/internal/auth/oidctest"
+	"github.com/procoduck/koinon/internal/connections"
+	"github.com/procoduck/koinon/internal/connectors/github"
 	"github.com/procoduck/koinon/internal/db/migrations"
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
@@ -139,6 +142,11 @@ type envOptions struct {
 	watchPoll time.Duration
 	// ui is the web UI to serve, if any.
 	ui fs.FS
+	// secrets and github back ConnectionService.
+	secrets connections.SecretStore
+	github  *github.Client
+	// logs, when set, receives the services' and auth's logs as well.
+	logs io.Writer
 }
 
 // env is one API server on its own database.
@@ -183,11 +191,15 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	}
 	e.bootstrap(ctx)
 
+	var logOut io.Writer = GinkgoWriter
+	if opts.logs != nil {
+		logOut = io.MultiWriter(GinkgoWriter, opts.logs)
+	}
 	cfg := auth.Config{
 		SessionIdleTimeout: idleTimeout,
 		SessionMaxLifetime: maxLifetime,
 		BootstrapLogin:     !opts.bootstrapLoginDisabled,
-		Logger:             slog.New(slog.NewTextHandler(GinkgoWriter, nil)),
+		Logger:             slog.New(slog.NewTextHandler(logOut, nil)),
 		Now:                e.clock.Now,
 	}
 	if opts.oidc {
@@ -212,7 +224,8 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	Eventually(e.hub.Listening()).Should(BeClosed())
 	rpc := services.New(e.pool, services.Options{
 		Hub: e.hub, WatchPollInterval: opts.watchPoll,
-		Logger: slog.New(slog.NewTextHandler(GinkgoWriter, nil)),
+		Logger:  slog.New(slog.NewTextHandler(logOut, nil)),
+		Secrets: opts.secrets, GitHub: opts.github,
 	})
 
 	handler, err = api.NewHandler(api.Options{

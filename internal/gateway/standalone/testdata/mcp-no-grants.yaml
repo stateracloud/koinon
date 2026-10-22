@@ -8,7 +8,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"c468bd44d8c8ac94"'
+      koinon.config: '"9b538b245a7b6530"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
 gateways:
@@ -30,6 +30,10 @@ mcp:
     mcpAuthorization:
       rules:
         - "false"
+    transformations:
+      request:
+        set:
+          x-koinon-agent: apiKey.agent
   targets:
     - name: github
       mcp:
