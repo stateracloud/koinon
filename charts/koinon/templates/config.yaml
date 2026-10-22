@@ -1,7 +1,8 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- include "koinon.validate" . }}
-# Koinon's non-secret configuration, read by api, reconciler and agentd from
-# /etc/koinon/config/config.yaml. Secrets are referenced by name only.
+# Koinon's non-secret configuration, read by koinon-reconciler from
+# /etc/koinon/config/config.yaml (KOINON_CONFIG). koinon-api and koinon-agentd take their settings
+# from KOINON_* environment variables instead. Secrets are referenced by name only.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -45,5 +46,3 @@ data:
       {{ $flavor }}:
         image: {{ include "koinon.image" (list $ $f.image) }}
       {{- end }}
-    bootstrapAdmin:
-      enabled: {{ .Values.bootstrapAdmin.enabled }}

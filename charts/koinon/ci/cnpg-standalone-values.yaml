@@ -31,3 +31,14 @@ networkPolicy:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: monitoring
+oidc:
+  enabled: true
+  issuerUrl: https://idp.example.com/realms/koinon
+  clientId: koinon
+  clientSecret:
+    existingSecret: koinon-oidc
+  groupMappings:
+    koinon-admins: admin
+    staff: member
+bootstrapAdmin:
+  existingSecret: koinon-bootstrap-admin-gitops

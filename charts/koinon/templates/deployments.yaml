@@ -20,11 +20,16 @@ spec:
     metadata:
       labels:
         {{- include "koinon.labels" (list $ $component) | nindent 8 }}
+      {{- if or (eq $component "reconciler") $v.podAnnotations }}
       annotations:
+        {{- if eq $component "reconciler" }}
+        {{- /* Only the reconciler reads config.yaml; roll it when the file changes. */}}
         checksum/config: {{ $configHash }}
+        {{- end }}
         {{- with $v.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- end }}
     spec:
       serviceAccountName: {{ $name }}
       {{- /* The reconciler renders key Secrets; the API writes connection Secrets (C1). */}}
@@ -58,20 +63,16 @@ spec:
             httpGet: {path: /healthz, port: http}
           {{- end }}
           env:
+            {{- if eq $component "reconciler" }}
+            {{- include "koinon.configEnv" $ | nindent 12 }}
+            {{- end }}
             {{- include "koinon.commonEnv" $ | nindent 12 }}
             {{- include "koinon.dbEnv" (list $ $component) | nindent 12 }}
             {{- if has $component (list "api" "reconciler") }}
             {{- include "koinon.githubEnv" $ | nindent 12 }}
             {{- end }}
             {{- if eq $component "api" }}
-            {{- if $.Values.bootstrapAdmin.enabled }}
-            # koinon-api reads the one-time password from a file, never from the environment.
-            - name: KOINON_BOOTSTRAP_PASSWORD_FILE
-              value: /etc/koinon/bootstrap-admin/password
-            {{- else }}
-            - name: KOINON_BOOTSTRAP_LOGIN
-              value: "false"
-            {{- end }}
+            {{- include "koinon.apiEnv" $ | trim | nindent 12 }}
             {{- end }}
             {{- if eq $component "agentd" }}
             {{- include "koinon.agentdEnv" $ | nindent 12 }}
@@ -81,29 +82,30 @@ spec:
           resources:
             {{- toYaml $v.resources | nindent 12 }}
           volumeMounts:
+            {{- if eq $component "reconciler" }}
             {{- include "koinon.configVolumeMount" $ | nindent 12 }}
+            {{- end }}
             {{- include "koinon.dbVolumeMount" $ | nindent 12 }}
             {{- if ne $component "api" }}
             {{- include "koinon.openshellVolumeMount" $ | nindent 12 }}
-            {{- else if $.Values.bootstrapAdmin.enabled }}
-            - name: bootstrap-admin
-              mountPath: /etc/koinon/bootstrap-admin
-              readOnly: true
+            {{- else }}
+            {{- with include "koinon.apiSecretVolumeMounts" $ | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
+        {{- if eq $component "reconciler" }}
         {{- include "koinon.configVolume" $ | nindent 8 }}
+        {{- end }}
         {{- include "koinon.dbVolume" $ | nindent 8 }}
         {{- if ne $component "api" }}
         {{- include "koinon.openshellVolume" $ | nindent 8 }}
-        {{- else if $.Values.bootstrapAdmin.enabled }}
-        - name: bootstrap-admin
-          secret:
-            secretName: {{ include "koinon.componentName" (list $ "bootstrap-admin") }}
-            items:
-              - key: password
-                path: password
+        {{- else }}
+        {{- with include "koinon.apiSecretVolumes" $ | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- end }}
         - name: tmp
           emptyDir:
