@@ -158,6 +158,12 @@ model:
   #     overrides: {}                            # request fields forced by the gateway
   models: []
 
+# GitHub connector (plan item C1). The REST API base URL used to verify connections, mint
+# installation tokens and open approved pull requests; GitHub Enterprise Server uses
+# https://<host>/api/v3. The e2e test points it at a fake.
+github:
+  apiUrl: https://api.github.com
+
 # Flavor images (ADR 0035): <image.registry>/<repository>:<tag>[@<digest>], the tag defaulting to
 # .Chart.AppVersion. Hermes and pi follow in plan items F2 and F3.
 flavors:

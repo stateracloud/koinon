@@ -54,6 +54,9 @@ spec:
           env:
             {{- include "koinon.commonEnv" $ | nindent 12 }}
             {{- include "koinon.dbEnv" (list $ $component) | nindent 12 }}
+            {{- if has $component (list "api" "reconciler") }}
+            {{- include "koinon.githubEnv" $ | nindent 12 }}
+            {{- end }}
             {{- if and (eq $component "api") $.Values.bootstrapAdmin.enabled }}
             - name: KOINON_BOOTSTRAP_ADMIN_USERNAME
               valueFrom:

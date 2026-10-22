@@ -244,6 +244,13 @@
         }
       }
     },
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apiUrl": {"type": "string", "pattern": "^https?://[^/]+(/.*)?$"}
+      }
+    },
     "model": {
       "type": "object",
       "additionalProperties": false,
