@@ -7,6 +7,10 @@
 # Usage:
 #   koinon-hermes --model-base-url URL --model NAME --mcp-url URL [-- HERMES_ACP_ARGS...]
 #
+# koinon-agentd writes the run's instructions to /sandbox/.koinon/AGENTS.md before it starts
+# this script; without that file, or when Hermes does not read the managed scope in
+# /etc/hermes/config.yaml, the script refuses to start (exit 64).
+#
 # OpenShell does not pass the image's ENV to the processes it starts, PATH included (ADR 0048),
 # so everything Hermes needs is set here and binaries are called by absolute path. The
 # per-agent values come as arguments, are checked, exported as KOINON_* variables and read by
@@ -52,8 +56,14 @@ check_url --mcp-url "$mcp_url"
 
 # Drop anything the caller's environment might carry that would change where Hermes reads its
 # configuration, which profile it uses, or that would turn on a messaging platform or the API
-# server of the gateway daemon `hermes acp` starts.
-unset HERMES_IGNORE_USER_CONFIG HERMES_PROFILE HERMES_DOCKER_EXEC_AS_ROOT PYTHONPATH PYTHONHOME \
+# server of the gateway daemon `hermes acp` starts. Every HERMES_* variable goes, the ones set
+# below come back: among them HERMES_MANAGED_DIR, which would move the managed scope away from
+# /etc/hermes, and HERMES_YOLO_MODE and HERMES_ACCEPT_HOOKS. PYTEST_CURRENT_TEST makes Hermes
+# ignore /etc/hermes (hermes_cli/managed_scope.py, _under_pytest).
+for v in $(env | sed -n 's/^\(HERMES_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  unset "$v"
+done
+unset PYTEST_CURRENT_TEST PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONSAFEPATH PYTHONUSERBASE \
   OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS API_SERVER_KEY API_SERVER_ENABLED \
   TELEGRAM_BOT_TOKEN DISCORD_BOT_TOKEN SLACK_BOT_TOKEN SLACK_APP_TOKEN
 
@@ -82,10 +92,42 @@ export KOINON_MODEL_BASE_URL="$base_url"
 export KOINON_MODEL="$model"
 export KOINON_MCP_URL="$mcp_url"
 
+# Koinon's instructions reach the model only through SOUL.md, which links to this file. Hermes
+# skips a missing or empty SOUL.md silently (agent/prompt_builder.py, load_soul_md) and seeds a
+# template through the link when the target is missing (hermes_cli/config.py,
+# ensure_hermes_home), so refuse to start without real content.
+instructions=/sandbox/.koinon/AGENTS.md
+if [ ! -f "$instructions" ] || [ -L "$instructions" ] || [ ! -s "$instructions" ]; then
+  die "missing instructions: $instructions (koinon-agentd writes it before the harness starts)"
+fi
+
+# The managed scope decides the agent's tools, and Hermes ignores it silently when it does not
+# parse. Read it with Hermes's own loader, from where Hermes will look, and refuse to start
+# unless it holds the toolset allowlist.
+/opt/hermes/.venv/bin/python -I -B -c '
+import sys
+sys.path.insert(0, "/opt/hermes")
+from pathlib import Path
+from hermes_cli import managed_scope
+managed = managed_scope.load_managed_config()
+ok = managed_scope.get_managed_dir() == Path("/etc/hermes") and \
+    isinstance(managed.get("platform_toolsets"), dict) and managed["platform_toolsets"].get("acp")
+sys.exit(0 if ok else 1)
+' || die "Hermes does not read its managed scope /etc/hermes/config.yaml"
+
 mkdir -p "$HERMES_HOME" "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR"
 chmod 0700 "$XDG_RUNTIME_DIR"
-# Hermes reads its config only from $HERMES_HOME/config.yaml; the link keeps it the image's
-# read-only file. Only the essential bundled skills are copied into the home.
-ln -sfn /etc/koinon/hermes/config.yaml "$HERMES_HOME/config.yaml"
+# What the agent could have left in its home for this start: .env and .op.env, which Hermes
+# loads over the environment (hermes_cli/env_loader.py, load_hermes_dotenv); active_profile,
+# which moves HERMES_HOME to a profile (hermes_cli/main.py, _apply_profile_override); a
+# distribution manifest, which makes Hermes treat SOUL.md as untrusted; consent for shell hooks.
+rm -rf "$HERMES_HOME/.env" "$HERMES_HOME/.op.env" "$HERMES_HOME/active_profile" \
+  "$HERMES_HOME/distribution.yaml" "$HERMES_HOME/shell-hooks-allowlist.json"
+# Hermes reads its user config only from $HERMES_HOME/config.yaml and its identity from
+# $HERMES_HOME/SOUL.md; both are links, put back on every start (koinon-agentd also restores
+# SOUL.md before every prompt). Only the essential bundled skills are copied into the home.
+rm -rf "$HERMES_HOME/config.yaml" "$HERMES_HOME/SOUL.md"
+ln -s /etc/koinon/hermes/config.yaml "$HERMES_HOME/config.yaml"
+ln -s "$instructions" "$HERMES_HOME/SOUL.md"
 : >"$HERMES_HOME/.no-bundled-skills"
 exec /opt/hermes/.venv/bin/hermes acp "$@"
