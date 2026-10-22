@@ -64,8 +64,10 @@ migrate-lint: ## Check migration file names (and, with BASE=<ref>, that merged m
 	hack/migrate-lint.sh $(BASE)
 
 .PHONY: generate
+# The OpenShell client is generated after buf.gen.yaml, whose clean step empties internal/gen.
 generate: ## Regenerate protobuf and sqlc code
 	buf generate
+	buf generate --template buf.gen.openshell.yaml
 	$(GO) tool sqlc generate
 
 .PHONY: dev
