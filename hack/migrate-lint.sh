@@ -26,7 +26,10 @@ for f in $(ls "$dir"/*.sql | sort); do
 done
 
 if [[ -n $base ]]; then
-  changed=$(git diff --name-only --diff-filter=MDR "$base" -- "$dir"/*.sql || true)
+  # Compare with the merge base, not the base tip: migrations the base gained since the
+  # branch point are not this change's. The directory pathspec (not a glob of the files
+  # present here) is what lets deletions and renames show up.
+  changed=$(git diff --name-only --diff-filter=MDR "$(git merge-base "$base" HEAD)" -- "$dir" || true)
   if [[ -n $changed ]]; then
     echo "merged migrations must not change:"; echo "$changed"; fail=1
   fi

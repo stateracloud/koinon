@@ -16,6 +16,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/procoduck/koinon/connectors"
+	"github.com/procoduck/koinon/internal/cli"
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/gateway"
 	"github.com/procoduck/koinon/internal/reconciler"
@@ -130,17 +131,8 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")
 	fs.StringVar(&c.githubToolsURL, "github-tools-url", "", "URL of the GitHub tools MCP server as agentgateway reaches it; empty serves no GitHub tools")
 
-	var envErr error
-	fs.VisitAll(func(f *flag.Flag) {
-		key := "KOINON_" + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
-		if v, ok := getenv(key); ok {
-			if err := f.Value.Set(v); err != nil && envErr == nil {
-				envErr = fmt.Errorf("%s: %w", key, err)
-			}
-		}
-	})
-	if envErr != nil {
-		return c, envErr
+	if err := cli.BindEnv(fs, getenv); err != nil {
+		return c, err
 	}
 	if err := fs.Parse(args); err != nil {
 		return c, err

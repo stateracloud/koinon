@@ -66,6 +66,7 @@ breaking: ## Check protobuf changes against main
 
 .PHONY: migrate-lint
 migrate-lint: ## Check migration file names (and, with BASE=<ref>, that merged migrations are unchanged)
+	hack/migrate-lint-test.sh
 	hack/migrate-lint.sh $(BASE)
 
 .PHONY: chart-check
