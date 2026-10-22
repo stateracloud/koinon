@@ -33,14 +33,15 @@ import (
 // OpenShell's non-TTY exec.
 var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
 	var (
-		db     *pgxpool.Pool
-		q      *store.Queries
-		gw     *gateway
-		sb     *sandbox
-		org    pgtype.UUID
-		user   pgtype.UUID
-		agent  store.Agent
-		ticket store.Ticket
+		db      *pgxpool.Pool
+		q       *store.Queries
+		gw      *gateway
+		sb      *sandbox
+		org     pgtype.UUID
+		user    pgtype.UUID
+		agent   store.Agent
+		ticket  store.Ticket
+		backend *dockerBackend
 	)
 
 	BeforeAll(func(ctx SpecContext) {
@@ -93,7 +94,8 @@ var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
 		DeferCleanup(func() { sb.remove(context.Background()) })
 		sb.start(bg)
 
-		p, err := agentd.New(db, &dockerBackend{sb: sb}, agentd.Config{
+		backend = &dockerBackend{sb: sb}
+		p, err := agentd.New(db, backend, agentd.Config{
 			OwnerID: "agentd-flavors", Workers: 1, Lease: 10 * time.Second, Poll: 100 * time.Millisecond,
 			GatewayURL: gw.url(""), Logger: newLogger(),
 		})
@@ -126,6 +128,8 @@ var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
 			store.RunStateSucceeded, store.RunStateFailed, store.RunStateCanceled))
 		got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})
 		Expect(err).NotTo(HaveOccurred())
+		// The run is over once agentd has swept after it, too.
+		Eventually(backend.settled).WithTimeout(time.Minute).Should(BeTrue(), "agentd swept after the run")
 		return got
 	}
 
@@ -261,7 +265,21 @@ func expectOnlyMain(ctx context.Context, sb *sandbox) {
 
 // dockerBackend is agentd's execution backend on the Docker stand-in sandbox. The sandbox is
 // always ready; Exec is `docker exec --interactive`, a non-TTY exec like OpenShell's.
-type dockerBackend struct{ sb *sandbox }
+type dockerBackend struct {
+	sb *sandbox
+
+	mu       sync.Mutex
+	inflight int
+	last     []string // the command of the latest exec
+}
+
+// settled reports whether koinon-agentd is done with the sandbox after a run: no exec is
+// running and the last one was the sweep it runs once the harness has ended.
+func (d *dockerBackend) settled() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.inflight == 0 && len(d.last) > 0 && d.last[len(d.last)-1] == "sweep"
+}
 
 func (d *dockerBackend) GetSandbox(context.Context, string, string) (execution.Sandbox, error) {
 	return execution.Sandbox{Phase: execution.PhaseReady}, nil
@@ -272,6 +290,15 @@ func (d *dockerBackend) StartSandbox(context.Context, string, string) (execution
 }
 
 func (d *dockerBackend) Exec(ctx context.Context, _, _ string, req execution.ExecRequest) (execution.Process, error) {
+	d.mu.Lock()
+	d.inflight++
+	d.last = req.Command
+	d.mu.Unlock()
+	done := func() {
+		d.mu.Lock()
+		d.inflight--
+		d.mu.Unlock()
+	}
 	args := []string{"exec", "--interactive"}
 	if req.Workdir != "" {
 		args = append(args, "--workdir", req.Workdir)
@@ -283,6 +310,7 @@ func (d *dockerBackend) Exec(ctx context.Context, _, _ string, req execution.Exe
 	stdin, err := c.StdinPipe()
 	if err != nil {
 		cancel()
+		done()
 		return nil, err
 	}
 	outR, outW := io.Pipe()
@@ -292,10 +320,12 @@ func (d *dockerBackend) Exec(ctx context.Context, _, _ string, req execution.Exe
 	}
 	if err := c.Start(); err != nil {
 		cancel()
+		done()
 		return nil, err
 	}
 	p := &dockerProcess{stdin: stdin, stdout: outR, cancel: cancel, done: make(chan struct{})}
 	go func() {
+		defer done()
 		err := c.Wait()
 		p.code = c.ProcessState.ExitCode()
 		if p.code < 0 {
