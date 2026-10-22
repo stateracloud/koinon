@@ -34,6 +34,10 @@ const (
 	prContent  = "hello from koinon\n"
 )
 
+// quickstartBudget is plan item E1's bound: the quickstart takes at most 15 minutes from
+// `helm install`.
+const quickstartBudget = 15 * time.Minute
+
 // timing is one measured step.
 type timing struct {
 	step string
@@ -343,5 +347,11 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(repo.Calls).To(HaveKeyWithValue("POST pulls", 1))
 		Expect(repo.Pulls).To(HaveLen(1))
 		t.end("6. Run resumes → PR URL on the ticket")
+	})
+
+	It("7. took at most 15 minutes from helm install", func() {
+		total := time.Since(t.t0)
+		Expect(total).To(BeNumerically("<=", quickstartBudget),
+			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)
 	})
 })
