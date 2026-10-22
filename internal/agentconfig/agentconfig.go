@@ -34,6 +34,9 @@ type Config struct {
 	Model        string            `json:"model,omitempty"`
 	Grants       []templates.Grant `json:"grants,omitempty"`
 	Limits       templates.Limits  `json:"limits"`
+	// Harness holds the template's harness settings: harness.pluginInstalls makes agentd
+	// pass --plugin-installs to OpenCode and the reconciler open the npm registry.
+	Harness templates.Harness `json:"harness,omitzero"`
 }
 
 // FromTemplate returns the first version's config for an agent made from t.
@@ -46,6 +49,7 @@ func FromTemplate(t *templates.Template, contentHash string) Config {
 		Model:        t.Spec.Model.Name,
 		Grants:       t.Spec.Grants,
 		Limits:       t.Spec.Limits,
+		Harness:      t.Spec.Harness,
 	}
 }
 
