@@ -5,13 +5,23 @@ schema; the component roles only get DML. Migrations are forward-only (ADR 0027)
 before an upgrade rolls the Deployments.
 
 In external mode the database exists before the release: pre-install,pre-upgrade. In cnpg mode the
-release creates the database, so the first run is post-install (the Job waits for it) and later
-runs are pre-upgrade. Until the first migration finishes, components retry their connection.
+release creates the database, so a post-install hook would deadlock `helm install --wait`: Helm
+runs post-install hooks only once every resource is ready, and koinon-api cannot be ready before
+the schema exists. So on install in cnpg mode the Job is an ordinary release resource, named
+<fullname>-migrate-install so that it never collides with the pre-upgrade hook of later upgrades,
+which drops it from the release. It waits for the database; until it finishes, components retry
+their connection.
 */ -}}
 {{- $name := include "koinon.componentName" (list . "migrate") }}
 {{- $hook := "pre-install,pre-upgrade" }}
+{{- $asResource := false }}
 {{- if eq .Values.postgres.mode "cnpg" }}
-{{- $hook = "post-install,pre-upgrade" }}
+{{- if .Release.IsInstall }}
+{{- $asResource = true }}
+{{- $name = include "koinon.componentName" (list . "migrate-install") }}
+{{- else }}
+{{- $hook = "pre-upgrade" }}
+{{- end }}
 {{- end }}
 apiVersion: v1
 kind: ServiceAccount
@@ -19,10 +29,12 @@ metadata:
   name: {{ $name }}
   labels:
     {{- include "koinon.labels" (list . "migrate") | nindent 4 }}
+  {{- if not $asResource }}
   annotations:
     helm.sh/hook: {{ $hook }}
     helm.sh/hook-weight: "-10"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  {{- end }}
 automountServiceAccountToken: false
 ---
 apiVersion: batch/v1
@@ -31,10 +43,12 @@ metadata:
   name: {{ $name }}
   labels:
     {{- include "koinon.labels" (list . "migrate") | nindent 4 }}
+  {{- if not $asResource }}
   annotations:
     helm.sh/hook: {{ $hook }}
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  {{- end }}
 spec:
   backoffLimit: {{ .Values.migrations.backoffLimit }}
   activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
