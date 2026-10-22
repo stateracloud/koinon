@@ -254,6 +254,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
+	cmd = append(cmd, harnessArgs(agent.Flavor, version.Config)...)
 	workspace, sandbox, err := r.waitSandbox(fctx)
 	if err != nil {
 		return r.execErr(ctx, "sandbox", err)
