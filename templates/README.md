@@ -11,5 +11,10 @@ Agent templates: building blocks for the agent builder; the result is always a d
 - `testdata/`: a minimal valid template and invalid fixtures; each invalid file names the error it
   must produce on a `# want:` line.
 
+`spec.harness` holds harness settings, all off when omitted. `harness.pluginInstalls: true` lets an
+OpenCode agent install plugins: its sandbox may read the npm registry (GET and HEAD, no credentials)
+from the OpenCode binary, and OpenCode loads external plugins (`flavors/opencode/README.md`). It
+needs `opencode` among the allowed flavors. `repo-helper` sets it to `false` explicitly.
+
 Bump `metadata.version` whenever you change a template's content. Scopes are checked against the
 connector type when templates are synced to the database, not by the schema.
