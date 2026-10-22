@@ -15,6 +15,10 @@ spec:
   flavors:
     allowed: [opencode, hermes, pi]
     default: opencode
+  # No npm registry access and no external OpenCode plugins: the agent changes code, it does not
+  # extend its harness.
+  harness:
+    pluginInstalls: false
   model:
     name: default
   grants:
