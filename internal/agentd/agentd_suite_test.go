@@ -145,7 +145,9 @@ func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
 	e.recordSandbox(ctx, store.SandboxStateReady, "")
 
 	e.harness = newHarness()
-	e.gw.Handle("/usr/local/bin/koinon-opencode", e.harness.command)
+	for _, script := range []string{"/usr/local/bin/koinon-opencode", "/usr/local/bin/koinon-hermes", "/usr/local/bin/koinon-pi"} {
+		e.gw.Handle(script, e.harness.command)
+	}
 	e.gw.Handle("/bin/mkdir", func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { return 0 })
 	return e
 }

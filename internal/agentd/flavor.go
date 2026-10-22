@@ -18,22 +18,28 @@ type endpoints struct {
 	MCPURL       string
 }
 
-// launchCommand is the flavor's ACP launch command (the flavor contract, ADR 0035; for
-// OpenCode see flavors/opencode/README.md). Binaries are absolute paths: OpenShell does not
-// pass the image's PATH to exec'd processes (ADR 0048).
+// entryScripts are the flavors' entry scripts, which start the harness as an ACP agent on its
+// stdin and stdout (the flavor contract, ADR 0035, 0048; see flavors/<flavor>/README.md). All
+// take the same arguments.
+var entryScripts = map[store.AgentFlavor]string{
+	store.AgentFlavorOpencode: "/usr/local/bin/koinon-opencode",
+	store.AgentFlavorHermes:   "/usr/local/bin/koinon-hermes",
+	store.AgentFlavorPi:       "/usr/local/bin/koinon-pi",
+}
+
+// launchCommand is the flavor's ACP launch command. Binaries are absolute paths: OpenShell
+// does not pass the image's PATH to exec'd processes (ADR 0048).
 func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
-	switch f {
-	case store.AgentFlavorOpencode:
-		return []string{
-			"/usr/local/bin/koinon-opencode",
-			"--model-base-url", e.ModelBaseURL,
-			"--model", e.Model,
-			"--mcp-url", e.MCPURL,
-		}, nil
-	default:
-		// Hermes and pi arrive with plan items F2 and F3.
-		return nil, fmt.Errorf("flavor %q has no ACP launch command yet", f)
+	script, ok := entryScripts[f]
+	if !ok {
+		return nil, fmt.Errorf("flavor %q has no ACP launch command", f)
 	}
+	return []string{
+		script,
+		"--model-base-url", e.ModelBaseURL,
+		"--model", e.Model,
+		"--mcp-url", e.MCPURL,
+	}, nil
 }
 
 // versionModel returns the model an agent version names, or "" for the install default.
