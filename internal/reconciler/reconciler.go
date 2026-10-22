@@ -79,6 +79,12 @@ type Config struct {
 	Gateway Endpoint
 	// Models is the model upstream rendered into every gateway state.
 	Models gateway.ModelUpstream
+	// ToolServers maps a connector type ID to the URL of its MCP tool server
+	// (for github: koinon-api's tools listener, plan item C3). Each becomes an
+	// agentgateway MCP target named after the connector, and every active
+	// agent is allowed the tools its approved grants expose. Empty serves no
+	// tools.
+	ToolServers map[string]string
 	// Flavors maps each flavor to its image and binaries. Agents of a flavor without an image
 	// are reported as errors.
 	Flavors map[store.AgentFlavor]Flavor
@@ -153,6 +159,8 @@ type work struct {
 	key      gateway.Key
 	material string
 	keyErr   error
+	// tools are the MCP tools the active version's grants allow.
+	tools []gateway.ToolGrant
 }
 
 func (w *work) logAttrs() []any {
@@ -171,6 +179,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		items []*work
 		keys  []gateway.Key
 		errs  []error
+		tools = map[gateway.AgentRef][]gateway.ToolGrant{}
 	)
 	for _, org := range orgs {
 		agents, err := r.q.ListAgentsToReconcile(ctx, org.ID)
@@ -194,11 +203,14 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 			if w.key.ID != "" {
 				keys = append(keys, w.key)
 			}
+			if len(w.tools) > 0 {
+				tools[agentRef(org, a.ID)] = w.tools
+			}
 		}
 	}
 
 	// One gateway state for every agent: keys of archived agents are revoked by omission.
-	state := gateway.State{Keys: keys, Models: r.cfg.Models}
+	state := gateway.State{Keys: keys, Models: r.cfg.Models, MCP: r.mcpTargets(), Tools: tools}
 	// Spend limits net of recorded spend (plan item L1), recomputed every pass, so a key
 	// rotation or a gateway that lost its budget counters gets the remainder, not the full
 	// limit. Without its limit an agent would be unlimited, so a failure aborts the pass and
@@ -268,6 +280,12 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 		}
 	}
 	if a.Status == store.AgentStatusActive {
+		tools, err := r.agentTools(ctx, a)
+		if err != nil {
+			// Without them the agent's tools would be revoked by omission.
+			return nil, fmt.Errorf("%w: %w", errAbortPass, err)
+		}
+		w.tools = tools
 		key, material, err := r.ensureKey(ctx, w)
 		if err != nil {
 			w.keyErr = err

@@ -1,0 +1,172 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The GitHub connector type of v0.1 (ADR 0007, 0021, 0036, 0049). One connection is one GitHub App
+# installation; grants narrow it to repositories and to the scopes below.
+apiVersion: connectors.koinon.dev/v1alpha1
+kind: ConnectorType
+metadata:
+  id: github
+  version: 0.1.0
+  displayName: GitHub
+  description: >-
+    Read repositories from the agent's sandbox and propose pull requests and issue comments, which
+    Koinon sends to GitHub after approval. Connects through a GitHub App you install on your
+    account or organisation.
+spec:
+  auth:
+    type: app-credential
+    # ADR 0049: metadata read, contents write, pull requests write, issues write, no workflows.
+    permissions:
+      metadata: read
+      contents: write
+      pull_requests: write
+      issues: write
+    forbiddenPermissions: [workflows]
+    # Installation tokens expire one hour after creation (GitHub REST docs, "Create an
+    # installation access token for an app").
+    tokenLifetime: 1h
+  hosts:
+    - host: github.com
+      port: 443
+    - host: api.github.com
+      port: 443
+  targets:
+    kind: repository
+    pattern: '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$'
+    description: A repository the App installation can access, as owner/name.
+  scopes:
+    - id: repo.read
+      tier: read
+      description: Clone and fetch the repository over HTTPS and read it through the REST API.
+      permissions:
+        contents: read
+        metadata: read
+      # Rendered into the sandbox's OpenShell policy with a read-only installation token in the
+      # provider record (plan item C2). git-receive-pack (push) is not listed, so it is denied.
+      network:
+        - host: github.com
+          methods: [GET]
+          paths: ['/{owner}/{repo}.git/info/refs', '/{owner}/{repo}/info/refs']
+        - host: github.com
+          methods: [POST]
+          paths: ['/{owner}/{repo}.git/git-upload-pack', '/{owner}/{repo}/git-upload-pack']
+        - host: api.github.com
+          methods: [GET]
+          paths: ['/repos/{owner}/{repo}', '/repos/{owner}/{repo}/**']
+    - id: pull_request.create
+      tier: reversible-write
+      description: >-
+        Propose a pull request (branch, commit and pull request). Koinon creates them through the
+        GitHub API once the call is approved; the agent never pushes.
+      permissions:
+        contents: write
+        pull_requests: write
+      tools: [create_pull_request, get_approval_status]
+    - id: issue.comment
+      tier: reversible-write
+      description: Propose a comment on an issue or pull request, sent by Koinon once approved.
+      permissions:
+        issues: write
+      tools: [comment_on_issue, get_approval_status]
+  # ADR 0049: Read only = read; Standard = read, ask for reversible-write; Trusted = read and
+  # reversible-write allowed.
+  presets:
+    read-only:
+      read: allow
+      reversible-write: deny
+      external-or-irreversible: deny
+      forbidden: deny
+    standard:
+      read: allow
+      reversible-write: ask
+      external-or-irreversible: ask
+      forbidden: deny
+    trusted:
+      read: allow
+      reversible-write: allow
+      external-or-irreversible: ask
+      forbidden: deny
+  setupGuide:
+    fields:
+      - id: appId
+        label: App ID
+        help: The number shown as "App ID" on the App's General settings page.
+        type: integer
+        pattern: '^[1-9][0-9]{0,18}$'
+      - id: installationId
+        label: Installation ID
+        help: >-
+          The number at the end of the installation's settings URL,
+          https://github.com/settings/installations/<id> (or
+          https://github.com/organizations/<org>/settings/installations/<id>).
+        type: integer
+        pattern: '^[1-9][0-9]{0,18}$'
+      - id: privateKey
+        label: Private key
+        help: >-
+          The contents of the .pem file GitHub downloads when you generate a private key. It is
+          written to a Kubernetes Secret and never shown again.
+        type: pem
+        secret: true
+    steps:
+      - id: create-app
+        title: Create a GitHub App
+        body: |
+          Create a GitHub App owned by the account or organisation whose repositories the agent
+          works on. Give it a name, set any homepage URL, and turn **Webhook** off: Koinon does not
+          use webhooks in v0.1.
+
+          Under **Repository permissions** set exactly these and leave everything else at
+          "No access":
+
+          - Contents: **Read and write**
+          - Issues: **Read and write**
+          - Metadata: **Read-only** (set automatically)
+          - Pull requests: **Read and write**
+
+          Do **not** grant Workflows: Koinon refuses changes under `.github/workflows/`, and the
+          connection test fails if the App can change workflows.
+
+          Under **Where can this GitHub App be installed?** choose "Only on this account".
+        links:
+          - label: New GitHub App (personal account)
+            url: https://github.com/settings/apps/new
+          - label: New GitHub App (organisation)
+            url: https://github.com/organizations/{organization}/settings/apps/new
+          - label: GitHub docs, registering a GitHub App
+            url: https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app
+        values:
+          - label: Repository permissions
+            value: 'contents: write, issues: write, metadata: read, pull_requests: write'
+        fields: [appId]
+      - id: generate-key
+        title: Generate a private key
+        body: |
+          On the App's General settings page, under **Private keys**, choose
+          **Generate a private key**. Paste the contents of the downloaded `.pem` file below, then
+          delete the file. Koinon signs short-lived App tokens with it; the key itself never
+          leaves Koinon's Kubernetes Secret.
+        links:
+          - label: GitHub docs, managing private keys
+            url: https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps
+        fields: [privateKey]
+        check: github.app
+      - id: install-app
+        title: Install the App on your repositories
+        body: |
+          From the App's settings choose **Install App**, pick the account, and select **Only
+          select repositories** with the repositories your agents may work on. Each agent is
+          narrowed further to the repositories in its grant.
+
+          After installing, copy the installation ID from the end of the page URL.
+        links:
+          - label: GitHub docs, installing your own GitHub App
+            url: https://docs.github.com/en/apps/using-github-apps/installing-your-own-github-app
+        fields: [installationId]
+        check: github.installation
+      - id: test-token
+        title: Test the connection
+        body: |
+          Koinon mints a short-lived installation token narrowed to metadata read, the same way it
+          mints every token for your agents. Nothing is written to GitHub.
+        check: github.token

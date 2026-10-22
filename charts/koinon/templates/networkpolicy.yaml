@@ -22,7 +22,7 @@ spec:
         - port: http
       {{- with .Values.networkPolicy.apiFrom }}
       from:
-        # Koinon's own pods (agentgateway calls the GitHub tools and sends its access log here).
+        # Koinon's own pods (agentgateway sends its access log here).
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}
@@ -37,6 +37,21 @@ spec:
             matchLabels:
               {{- include "koinon.selectorLabels" (list . "gateway") | nindent 14 }}
     {{- end }}
+    # The GitHub tools trust agentgateway's agent header, so only the gateway may reach them.
+    - ports:
+        - port: tools
+      from:
+        {{- if eq .Values.gateway.mode "standalone" }}
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "gateway") | nindent 14 }}
+        {{- else }}
+        # Kubernetes mode: the controller-managed proxy runs in this namespace for Koinon's own
+        # Gateway (ADR 0049); plan item G2 narrows this to its pod labels.
+        - podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: {{ include "koinon.componentName" (list . "gateway") }}
+        {{- end }}
 {{- range $component := list "reconciler" "agentd" "migrate" }}
 ---
 # {{ $component }} accepts no connections.
