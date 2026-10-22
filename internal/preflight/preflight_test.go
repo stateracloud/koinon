@@ -9,8 +9,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	nodev1 "k8s.io/api/node/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -72,6 +74,48 @@ func controller(image string) *appsv1.Deployment {
 	}
 }
 
+// cnpgWebhook is the CNPG operator's validating webhook configuration, as its Helm chart
+// installs it into namespace cnpg-system.
+func cnpgWebhook() *admissionregistrationv1.ValidatingWebhookConfiguration {
+	return &admissionregistrationv1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: "cnpg-validating-webhook-configuration"},
+		Webhooks: []admissionregistrationv1.ValidatingWebhook{
+			{
+				Name: "vbackup.cnpg.io",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{Namespace: "cnpg-system", Name: "cnpg-webhook-service"},
+				},
+				Rules: []admissionregistrationv1.RuleWithOperations{{Rule: admissionregistrationv1.Rule{
+					APIGroups: []string{"postgresql.cnpg.io"}, Resources: []string{"backups"},
+				}}},
+			},
+			{
+				Name: "vcluster.cnpg.io",
+				ClientConfig: admissionregistrationv1.WebhookClientConfig{
+					Service: &admissionregistrationv1.ServiceReference{Namespace: "cnpg-system", Name: "cnpg-webhook-service"},
+				},
+				Rules: []admissionregistrationv1.RuleWithOperations{{Rule: admissionregistrationv1.Rule{
+					APIGroups: []string{"postgresql.cnpg.io"}, Resources: []string{"clusters"},
+				}}},
+			},
+		},
+	}
+}
+
+// webhookEndpoints is the EndpointSlice of the CNPG webhook Service with one endpoint.
+func webhookEndpoints(ready bool) *discoveryv1.EndpointSlice {
+	return &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "cnpg-webhook-service-x7k2p", Namespace: "cnpg-system",
+			Labels: map[string]string{discoveryv1.LabelServiceName: "cnpg-webhook-service"},
+		},
+		AddressType: discoveryv1.AddressTypeIPv4,
+		Endpoints: []discoveryv1.Endpoint{{
+			Addresses: []string{"10.0.0.7"}, Conditions: discoveryv1.EndpointConditions{Ready: &ready},
+		}},
+	}
+}
+
 func runtimeClass(name string, labels map[string]string) *nodev1.RuntimeClass {
 	return &nodev1.RuntimeClass{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}, Handler: "kata"}
 }
@@ -108,6 +152,16 @@ func healthyCluster() *cluster {
 		kube: []runtime.Object{
 			controller("registry.k8s.io/agent-sandbox/agent-sandbox-controller:v1.0.7"),
 			runtimeClass("kata", map[string]string{preflight.AttachableLabel: "true"}),
+			cnpgWebhook(),
+			webhookEndpoints(true),
+			// Another Service's endpoints in the namespace do not count.
+			&discoveryv1.EndpointSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cnpg-metrics-abcde", Namespace: "cnpg-system",
+					Labels: map[string]string{discoveryv1.LabelServiceName: "cnpg-metrics"},
+				},
+				Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.8"}}},
+			},
 		},
 		dynamic: []runtime.Object{
 			crd("sandboxes.agents.x-k8s.io", "v1beta1"),
@@ -203,6 +257,7 @@ var _ = Describe("Checker", func() {
 		}
 		Expect(find(results, "Agent Sandbox").Message).To(ContainSubstring("controller v1.0.7"))
 		Expect(find(results, "OpenShell").Message).To(ContainSubstring("version 0.1.5"))
+		Expect(find(results, "CloudNativePG").Message).To(ContainSubstring("operator webhook cnpg-system/cnpg-webhook-service ready"))
 
 		var out strings.Builder
 		Expect(preflight.Write(&out, results)).To(BeZero())
@@ -272,6 +327,13 @@ var _ = Describe("Checker", func() {
 			"kubectl label runtimeclass kata openshell.ai/sandbox-attachable=true"),
 		Entry("CNPG operator", func(c *cluster) { c.without("clusters.postgresql.cnpg.io") },
 			"CloudNativePG", "CNPG operator is not installed", "postgres.mode=external"),
+		Entry("CNPG operator without its webhook", func(c *cluster) { c.without("cnpg-validating-webhook-configuration") },
+			"CloudNativePG", "no admission webhook validates it: the CNPG operator is not installed", "CloudNativePG operator"),
+		Entry("CNPG operator not ready", func(c *cluster) { c.with(webhookEndpoints(false)) },
+			"CloudNativePG", "the CNPG operator is not running: its webhook Service cnpg-system/cnpg-webhook-service has no ready endpoints",
+			"kubectl -n cnpg-system get deployments,pods"),
+		Entry("CNPG operator scaled to zero", func(c *cluster) { c.without("cnpg-webhook-service-x7k2p") },
+			"CloudNativePG", "has no ready endpoints", "kubectl -n cnpg-system"),
 		Entry("GatewayClass", func(c *cluster) { c.without("agentgateway") },
 			"GatewayClass", "agentgateway's Kubernetes controller is not installed", "gateway.mode=standalone"),
 		Entry("GatewayClass not accepted", func(c *cluster) { c.with(gatewayClass("agentgateway", "False", "InvalidParameters")) },

@@ -47,6 +47,16 @@ rules:
     resources: [deployments]
     resourceNames: [{{ .Values.preflight.agentSandbox.controller }}]
     verbs: [get]
+  {{- if eq .Values.postgres.mode "cnpg" }}
+  # The CNPG operator: the webhook that validates its Clusters names the operator's Service,
+  # whose ready endpoints say the operator runs (wherever it was installed).
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingwebhookconfigurations]
+    verbs: [list]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [list]
+  {{- end }}
   - apiGroups: [node.k8s.io]
     resources: [runtimeclasses]
     resourceNames: [{{ .Values.openshell.runtimeClassName }}]
