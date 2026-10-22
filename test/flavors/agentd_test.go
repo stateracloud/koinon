@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -197,6 +199,21 @@ func describeAgentd(f flavor) bool {
 			Expect(gw.modelBodies()).To(ContainElement(And(ContainSubstring(recallPrompt), ContainSubstring(helloReply))))
 		}, SpecTimeout(4*time.Minute))
 
+		It("ends what the agent left running before the next run, which keeps its tools", func(ctx SpecContext) {
+			before := requestTools(gw)
+			Expect(before).NotTo(BeEmpty())
+			// A background job, as the agent's terminal tool could leave one.
+			pid := strings.TrimSpace(sb.run(ctx, "sh", "-c", `nohup sh -c "$1" >/dev/null 2>&1 & echo $!`,
+				"sh", "while :; do sleep 0.1; done"))
+			Expect(sb.run(ctx, "cat", "/proc/"+pid+"/cmdline")).To(ContainSubstring("while"), "the job runs")
+
+			r := runTicket(ctx, helloPrompt)
+			Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
+			Expect(requestTools(gw)).To(Equal(before), "the run has the same tools")
+			Expect(sweptPids(eventsOf(ctx, r))).To(ContainElement(pid), "agentd ended the job before the harness started")
+			expectOnlyMain(ctx, sb)
+		}, SpecTimeout(4*time.Minute))
+
 		It("answers the harness's permission requests from the tier mapping", func(ctx SpecContext) {
 			if f.permissionCall.Name == "" {
 				Skip(f.name + " sends no permission requests")
@@ -216,6 +233,57 @@ func describeAgentd(f flavor) bool {
 			}
 		}, SpecTimeout(4*time.Minute))
 	})
+}
+
+// requestTools returns the names of the tools the last chat request that offered any offered,
+// sorted.
+func requestTools(gw *gateway) []string {
+	GinkgoHelper()
+	bodies := gw.modelBodies()
+	for i := len(bodies) - 1; i >= 0; i-- {
+		var req struct {
+			Tools []struct {
+				Function struct{ Name string }
+			}
+		}
+		Expect(json.Unmarshal([]byte(bodies[i]), &req)).To(Succeed())
+		if len(req.Tools) == 0 {
+			continue
+		}
+		var names []string
+		for _, t := range req.Tools {
+			names = append(names, t.Function.Name)
+		}
+		slices.Sort(names)
+		return names
+	}
+	return nil
+}
+
+// sweptPids returns the processes koinon-agentd recorded ending before the run's harness
+// started.
+func sweptPids(evs []store.RunEvent) []string {
+	GinkgoHelper()
+	var pids []string
+	for _, e := range evs {
+		if e.Kind == "run.sandbox_swept" {
+			var p struct{ Pids []string }
+			Expect(json.Unmarshal(e.Payload, &p)).To(Succeed())
+			pids = append(pids, p.Pids...)
+		}
+	}
+	return pids
+}
+
+// expectOnlyMain checks that nothing runs in sb but its main process (PID 1) and the exec
+// that looks: koinon-agentd ended the run's harness and what it left. Zombies do not count,
+// since the stand-in's PID 1 (sleep) reaps nothing.
+func expectOnlyMain(ctx context.Context, sb *sandbox) {
+	GinkgoHelper()
+	Eventually(func() string {
+		return sb.run(ctx, "sh", "-c", `for d in /proc/[0-9]*; do `+
+			`grep -qE '^State:\s+[^Z]' "$d/status" 2>/dev/null && [ "${d#/proc/}" != $$ ] && echo "${d#/proc/} $(tr '\0' ' ' < "$d/cmdline")"; done; true`)
+	}).WithTimeout(30 * time.Second).WithPolling(time.Second).Should(Equal("1 /bin/sleep infinity \n"))
 }
 
 // dockerBackend is agentd's execution backend on the Docker stand-in sandbox, recorded as
