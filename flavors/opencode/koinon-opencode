@@ -9,13 +9,16 @@
 #                   [-- OPENCODE_ACP_ARGS...]
 #
 # --plugin-installs is set by koinon-agentd when the agent's template turns
-# harness.pluginInstalls on; only then are external plugins loaded (see README.md).
+# harness.pluginInstalls on; only then are the agent's own plugins loaded (see README.md).
+#
+# koinon-agentd writes the run's instructions to /sandbox/.koinon/AGENTS.md before it starts
+# this script; without that file the script refuses to start (exit 64).
 #
 # OpenShell does not pass the image's ENV to the processes it starts, PATH included (ADR 0048),
 # so everything OpenCode needs is set here and binaries are called by absolute path. The
 # per-agent values come as arguments, are checked, exported as KOINON_* variables and read by
 # /etc/koinon/opencode/opencode.jsonc through OpenCode's {env:...} substitution. The model key
-# is never an argument: OpenCode reads $OPENAI_API_KEY, which in a sandbox is an OpenShell
+# is never an argument: it arrives as $OPENAI_API_KEY, which in a sandbox is an OpenShell
 # placeholder that the proxy swaps for the real key on the way to agentgateway.
 set -eu
 
@@ -56,9 +59,12 @@ check --model "$model"
 check_url --mcp-url "$mcp_url"
 
 # Drop anything the caller's environment might carry that would change where OpenCode reads its
-# configuration or sends telemetry.
-unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR OPENCODE_CONFIG_CONTENT OPENCODE_PERMISSION \
-  OPENCODE_MODELS_URL OPENCODE_MODELS_PATH OPENCODE_AUTO_SHARE \
+# configuration, its database or its server credentials, or where it sends telemetry
+# (OpenCode 2.0.24, see README.md).
+unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR OPENCODE_CONFIG_CONTENT OPENCODE_CLI_CONFIG_CONTENT \
+  OPENCODE_CONFIG_PROJECT_DISABLE OPENCODE_PERMISSION OPENCODE_MODELS_URL OPENCODE_MODELS_PATH \
+  OPENCODE_AUTO_SHARE OPENCODE_DB OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD OPENCODE_PTY_HANDOFF \
+  OPENCODE_SIMULATE OPENCODE_TEST_HOME OPENCODE_LOCAL OPENCODE_PRINT_LOGS \
   OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -68,34 +74,53 @@ export HOME=/sandbox
 export XDG_DATA_HOME=/sandbox/.local/share
 export XDG_STATE_HOME=/sandbox/.local/state
 export XDG_CACHE_HOME=/sandbox/.cache
-# OpenCode's global config directory is $XDG_CONFIG_HOME/opencode, so this makes
-# /etc/koinon/opencode the global config. It is read-only, which also stops OpenCode from
-# installing @opencode-ai/plugin from npm into it (it skips unwritable directories).
-export XDG_CONFIG_HOME=/etc/koinon
+export XDG_CONFIG_HOME=/sandbox/.config
+# OpenCode's global config directory: read-only in the image, so neither the agent nor a
+# repository can change it.
+export OPENCODE_CONFIG_DIR=/etc/koinon/opencode
 
-# Phone-home and download switches (OpenCode 1.19.3, see README.md for the source of each).
+# No update check and no model catalog download; the repository the agent works on must not
+# reconfigure the harness (no opencode.json(c), .opencode/, AGENTS.md from the session
+# directory upward), so only /etc/koinon/opencode applies (see README.md).
 export OPENCODE_DISABLE_AUTOUPDATE=1
 export OPENCODE_DISABLE_MODELS_FETCH=1
-export OPENCODE_DISABLE_LSP_DOWNLOAD=1
-export OPENCODE_DISABLE_DEFAULT_PLUGINS=1
-# External plugins (the agent's ~/.opencode/plugin(s) and the npm plugins its ~/.opencode config
-# names) load only when the template allows plugin installs; the reconciler then also opens
-# read-only npm registry access for /usr/local/bin/opencode, which installs them in-process.
-if [ -z "$plugin_installs" ]; then
-  export OPENCODE_PURE=1
-else
-  unset OPENCODE_PURE
-fi
-export OPENCODE_DISABLE_CLAUDE_CODE=1
-
-# The repository the agent works on must not reconfigure the harness: no opencode.json(c) or
-# .opencode/ (agents, commands, permissions, instructions) from the session directory upward,
-# so only /etc/koinon/opencode applies (see README.md).
 export OPENCODE_DISABLE_PROJECT_CONFIG=1
 
+# The agent's own plugins load only when the template allows plugin installs. The global config
+# directory is read-only and holds none, project configuration is off and ~/.config/opencode is
+# no config directory here, so the only way in is this list: each directory under
+# ~/.config/opencode/plugins/, merged into the config as OPENCODE_CONFIG_CONTENT.
+if [ -n "$plugin_installs" ]; then
+  list=''
+  for d in /sandbox/.config/opencode/plugins/*/; do
+    [ -d "$d" ] || continue
+    d=${d%/}
+    check plugin "$d"
+    list="$list${list:+,}\"$d\""
+  done
+  export OPENCODE_CONFIG_CONTENT="{\"plugins\":[$list]}"
+fi
+
+# The agentgateway key under a name no built-in OpenCode provider reads: with OPENAI_API_KEY
+# set, OpenCode's built-in openai provider activates on its own.
+export KOINON_MODEL_KEY="${OPENAI_API_KEY:-}"
+unset OPENAI_API_KEY
 export KOINON_MODEL_BASE_URL="$base_url"
 export KOINON_MODEL="$model"
 export KOINON_MCP_URL="$mcp_url"
+
+# opencode acp talks to its own server (opencode serve --stdio --port 0 on 127.0.0.1) over HTTP;
+# that traffic must not go to the sandbox proxy.
+export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}"
+export no_proxy="127.0.0.1,localhost${no_proxy:+,$no_proxy}"
+
+# Koinon's instructions reach the model only through this file (the AGENTS.md link in the
+# global config directory). OpenCode skips a missing file silently and loads an empty one as
+# empty instructions, so refuse to start without real content.
+instructions=/sandbox/.koinon/AGENTS.md
+if [ ! -f "$instructions" ] || [ -L "$instructions" ] || [ ! -s "$instructions" ]; then
+  die "missing instructions: $instructions (koinon-agentd writes it before the harness starts)"
+fi
 
 mkdir -p "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 exec /usr/local/bin/opencode acp "$@"
