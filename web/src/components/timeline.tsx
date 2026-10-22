@@ -64,6 +64,23 @@ function TimelineEntry({ item }: { item: TimelineItem }) {
           {item.status && ` (${item.status})`}
         </p>
       )
+    case 'approval':
+      return (
+        <p className="text-sm">
+          {item.text}
+          {item.url && (
+            <>
+              {' '}
+              <a className="underline" href={item.url} target="_blank" rel="noreferrer">
+                {item.url}
+              </a>
+            </>
+          )}{' '}
+          <time className="text-muted-foreground text-xs" dateTime={new Date(item.at).toISOString()}>
+            {time(item.at)}
+          </time>
+        </p>
+      )
     case 'note':
       return (
         <p className="text-muted-foreground text-center text-xs">

@@ -17,7 +17,7 @@ test('sign in, create a ticket and watch the run stream, across a dropped connec
     event: {
       runId: 'r-1',
       seq: String(seq),
-      kind: 'session.update',
+      kind: 'acp.agent_message_chunk',
       payload: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
       createdAt: now(),
     },
