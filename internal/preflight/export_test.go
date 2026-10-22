@@ -3,6 +3,7 @@
 package preflight
 
 var (
-	ParseStatus = parseStatus
-	ImageTag    = imageTag
+	ParseStatus        = parseStatus
+	ImageTag           = imageTag
+	CheckNetworkPolicy = (*Checker).checkNetworkPolicy
 )

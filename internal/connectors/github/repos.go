@@ -214,6 +214,35 @@ func (c *Client) CreateBlob(ctx context.Context, tok Token, r Repo, content []by
 	return out.SHA, err
 }
 
+// TreeItem is one entry of an existing tree: a blob (Mode 100644, 100755 or 120000), a
+// subtree (040000) or a submodule commit (160000).
+type TreeItem struct {
+	Path string `json:"path"`
+	Mode string `json:"mode"`
+	Type string `json:"type"`
+	SHA  string `json:"sha"`
+}
+
+// Tree is a tree listing. Truncated is set when GitHub cut a recursive listing short (more
+// than 100,000 entries or 7 MB); the entries it did return are correct.
+type Tree struct {
+	SHA       string     `json:"sha"`
+	Tree      []TreeItem `json:"tree"`
+	Truncated bool       `json:"truncated"`
+}
+
+// GetTree lists a tree: its direct entries, or with recursive every entry below it, with
+// paths relative to the tree.
+func (c *Client) GetTree(ctx context.Context, tok Token, r Repo, sha string, recursive bool) (Tree, error) {
+	p := r.path("/git/trees/%s", url.PathEscape(sha))
+	if recursive {
+		p += "?recursive=1"
+	}
+	var out Tree
+	err := c.withToken(ctx, tok, http.MethodGet, p, nil, &out, http.StatusOK)
+	return out, err
+}
+
 // TreeEntry is one path of a new tree. A nil SHA deletes the path from the base tree.
 type TreeEntry struct {
 	Path string  `json:"path"`
