@@ -6,7 +6,7 @@ apiVersion: connectors.koinon.dev/v1alpha1
 kind: ConnectorType
 metadata:
   id: github
-  version: 0.1.0
+  version: 0.2.0
   displayName: GitHub
   description: >-
     Read repositories from the agent's sandbox and propose pull requests and issue comments, which
@@ -38,21 +38,43 @@ spec:
     - id: repo.read
       tier: read
       description: Clone and fetch the repository over HTTPS and read it through the REST API.
+      # The installation token in the sandbox's provider record is narrowed to the bound
+      # repositories and to these permissions, all read (plan item C2).
       permissions:
         contents: read
         metadata: read
-      # Rendered into the sandbox's OpenShell policy with a read-only installation token in the
-      # provider record (plan item C2). git-receive-pack (push) is not listed, so it is denied.
+        pull_requests: read
+        issues: read
+      # Rendered into the sandbox's OpenShell policy and into the provider profile that binds the
+      # token (plan item C2). Paths are OpenShell globs and case-sensitive, so the agent must use
+      # the repository's name as bound. Allowed: git smart HTTP clone and fetch (info/refs for
+      # git-upload-pack, then git-upload-pack) and REST GET under /repos/{owner}/{repo}.
       network:
         - host: github.com
           methods: [GET]
           paths: ['/{owner}/{repo}.git/info/refs', '/{owner}/{repo}/info/refs']
+          query: {service: git-upload-pack}
         - host: github.com
           methods: [POST]
           paths: ['/{owner}/{repo}.git/git-upload-pack', '/{owner}/{repo}/git-upload-pack']
         - host: api.github.com
           methods: [GET]
           paths: ['/repos/{owner}/{repo}', '/repos/{owner}/{repo}/**']
+        # Defence in depth: push is refused however it is spelled, and nothing writes through the
+        # REST API (writes go through tools, ADR 0042).
+        - host: github.com
+          deny: true
+          methods: [GET]
+          paths: ['/**/info/refs']
+          query: {service: git-receive-pack}
+        - host: github.com
+          deny: true
+          methods: [GET, HEAD, POST, PUT, PATCH, DELETE]
+          paths: ['/**/git-receive-pack']
+        - host: api.github.com
+          deny: true
+          methods: [POST, PUT, PATCH, DELETE]
+          paths: ['/**']
     - id: pull_request.create
       tier: reversible-write
       description: >-

@@ -35,7 +35,7 @@ type Config struct {
 	Grants       []templates.Grant `json:"grants,omitempty"`
 	// Bindings tie grants to an org's connections and targets (for GitHub:
 	// the repositories). The grant says what the agent may do; its binding
-	// says where. Set when the repository grant is chosen (plan item W3).
+	// says where. Set from CreateAgentFromTemplate's grants (plan item C2).
 	Bindings []Binding        `json:"bindings,omitempty"`
 	Limits   templates.Limits `json:"limits"`
 }

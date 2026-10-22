@@ -229,3 +229,11 @@ func (b *Backend) DeleteProvider(ctx context.Context, workspace, name string) er
 	})
 	return wrap("DeleteProvider", err)
 }
+
+// DeleteProviderProfile implements execution.Backend.
+func (b *Backend) DeleteProviderProfile(ctx context.Context, workspace, id string) error {
+	_, err := b.c.DeleteProviderProfile(ctx, &openshellv1.DeleteProviderProfileRequest{
+		WorkspaceScope: scope(workspace), Id: id, AllowMissing: true,
+	})
+	return wrap("DeleteProviderProfile", err)
+}

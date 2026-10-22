@@ -64,6 +64,11 @@ const APIVersion = "2026-03-10"
 // for at least this long.
 const DefaultRefreshMargin = 10 * time.Minute
 
+// ErrRepositoryMismatch is returned when a minted token does not cover exactly
+// the requested repositories, for example because one belongs to another
+// account than the installation's.
+var ErrRepositoryMismatch = errors.New("github: repositories do not match the request")
+
 // MaxRepositories is GitHub's limit on repositories per installation token.
 const MaxRepositories = 500
 
@@ -432,7 +437,7 @@ func (c *Client) mint(ctx context.Context, app App, full, names []string, perms 
 		// Names in the request carry no owner: comparing full names also catches a
 		// target whose owner is not the installation's account.
 		if out.RepositorySelection != "selected" || !slices.Equal(got, full) {
-			return Token{}, fmt.Errorf("github: minted token covers repositories %v, requested %v", got, full)
+			return Token{}, fmt.Errorf("%w: minted token covers repositories %v, requested %v", ErrRepositoryMismatch, got, full)
 		}
 	}
 	return Token{value: out.Token, ExpiresAt: out.ExpiresAt, Permissions: out.Permissions, Repositories: got}, nil

@@ -96,9 +96,81 @@ var _ = Describe("Embedded connector types", func() {
 
 	It("narrows permissions to the scopes", func() {
 		t := githubType()
-		Expect(t.Permissions("repo.read")).To(Equal(map[string]string{"contents": "read", "metadata": "read"}))
+		Expect(t.Permissions("repo.read")).To(Equal(map[string]string{
+			"contents": "read", "metadata": "read", "pull_requests": "read", "issues": "read",
+		}))
 		Expect(t.Permissions("repo.read", "pull_request.create")).To(Equal(
-			map[string]string{"contents": "write", "metadata": "read", "pull_requests": "write"}))
+			map[string]string{"contents": "write", "metadata": "read", "pull_requests": "write", "issues": "read"}))
+	})
+
+	Describe("Network", func() {
+		allow := func(method, path string, query ...string) connectors.HTTPRule {
+			r := connectors.HTTPRule{Method: method, Path: path}
+			if len(query) == 2 {
+				r.Query = map[string]string{query[0]: query[1]}
+			}
+			return r
+		}
+
+		It("renders repo.read for one repository: clone and fetch, REST GET, push denied", func() {
+			got, err := githubType().Network(templates.PresetStandard, []string{"repo.read", "pull_request.create"}, []string{"acme/widgets"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal([]connectors.HostAccess{
+				{
+					Host: "github.com", Port: 443,
+					Allow: []connectors.HTTPRule{
+						allow("GET", "/acme/widgets.git/info/refs", "service", "git-upload-pack"),
+						allow("GET", "/acme/widgets/info/refs", "service", "git-upload-pack"),
+						allow("POST", "/acme/widgets.git/git-upload-pack"),
+						allow("POST", "/acme/widgets/git-upload-pack"),
+					},
+					Deny: []connectors.HTTPRule{
+						allow("GET", "/**/info/refs", "service", "git-receive-pack"),
+						allow("GET", "/**/git-receive-pack"),
+						allow("HEAD", "/**/git-receive-pack"),
+						allow("POST", "/**/git-receive-pack"),
+						allow("PUT", "/**/git-receive-pack"),
+						allow("PATCH", "/**/git-receive-pack"),
+						allow("DELETE", "/**/git-receive-pack"),
+					},
+				},
+				{
+					Host: "api.github.com", Port: 443,
+					Allow: []connectors.HTTPRule{
+						allow("GET", "/repos/acme/widgets"),
+						allow("GET", "/repos/acme/widgets/**"),
+					},
+					Deny: []connectors.HTTPRule{
+						allow("POST", "/**"), allow("PUT", "/**"), allow("PATCH", "/**"), allow("DELETE", "/**"),
+					},
+				},
+			}))
+		})
+
+		It("repeats the allow rules per repository and keeps deny rules once", func() {
+			got, err := githubType().Network(templates.PresetReadOnly, []string{"repo.read"}, []string{"acme/widgets", "acme/gadgets"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(HaveLen(2))
+			Expect(got[0].Allow).To(HaveLen(8))
+			Expect(got[0].Deny).To(HaveLen(7))
+			Expect(got[1].Allow).To(ContainElements(allow("GET", "/repos/acme/gadgets/**"), allow("GET", "/repos/acme/widgets")))
+		})
+
+		It("gives nothing without repo.read or without targets", func() {
+			t := githubType()
+			Expect(t.Network(templates.PresetStandard, []string{"pull_request.create"}, []string{"acme/widgets"})).To(BeEmpty())
+			Expect(t.Network(templates.PresetStandard, []string{"repo.read"}, nil)).To(BeEmpty())
+			Expect(t.HasNetwork(templates.PresetStandard, []string{"repo.read"})).To(BeTrue())
+			Expect(t.HasNetwork(templates.PresetStandard, []string{"issue.comment"})).To(BeFalse())
+		})
+
+		It("rejects targets that would change a rendered path", func() {
+			t := githubType()
+			for _, bad := range []string{"acme/..", "acme/.", "acme/*", "acme", "acme/a/b", "acme/**"} {
+				_, err := t.Network(templates.PresetStandard, []string{"repo.read"}, []string{bad})
+				Expect(err).To(HaveOccurred(), bad)
+			}
+		})
 	})
 
 	It("validates targets", func() {
@@ -153,6 +225,8 @@ var _ = DescribeTable("Parse rejects",
 		"not among auth.permissions"),
 	Entry("a forbidden permission on a scope", "        issues: write\n      tools", "        workflows: write\n      tools",
 		"forbidden"),
+	Entry("a deny rule naming a target", "          paths: ['/**/git-receive-pack']", "          paths: ['/{owner}/x']",
+		"deny rules cannot use"),
 	Entry("a step naming an unknown field", "fields: [installationId]", "fields: [nope]", "unknown field"),
 	Entry("an unknown property", "  hosts:\n", "  extra: 1\n  hosts:\n", "schema"),
 	Entry("a wrong apiVersion", "apiVersion: connectors.koinon.dev/v1alpha1", "apiVersion: connectors.koinon.dev/v1", "schema"),

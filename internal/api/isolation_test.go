@@ -56,7 +56,7 @@ var isolationCases = map[string]isolationCase{
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
 			return c.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
-				OrgId: org, TemplateId: c.repoHelper(ctx).GetId(),
+				OrgId: org, TemplateId: c.repoHelper(ctx).GetId(), Grants: c.b.e.repoGrant(ctx, org, "acme/widgets"),
 			})
 		},
 	},
@@ -181,6 +181,7 @@ var _ = Describe("org isolation", func() {
 		e := newEnv(ctx, envOptions{
 			secrets: connections.KubeSecrets{Client: k8sfake.NewClientset(), Namespace: "koinon"},
 			github:  github.NewClient(github.Options{BaseURL: gh.URL()}),
+			ghFake:  gh,
 		})
 		a := e.newIsolationFixture(ctx, gh.PEM)
 		b := e.newIsolationFixture(ctx, gh.PEM)

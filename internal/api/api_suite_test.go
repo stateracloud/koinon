@@ -31,12 +31,14 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/procoduck/koinon/internal/api"
 	"github.com/procoduck/koinon/internal/auth"
 	"github.com/procoduck/koinon/internal/auth/oidctest"
 	"github.com/procoduck/koinon/internal/connections"
 	"github.com/procoduck/koinon/internal/connectors/github"
+	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
 	"github.com/procoduck/koinon/internal/db/migrations"
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
@@ -142,9 +144,14 @@ type envOptions struct {
 	watchPoll time.Duration
 	// ui is the web UI to serve, if any.
 	ui fs.FS
-	// secrets and github back ConnectionService.
-	secrets connections.SecretStore
-	github  *github.Client
+	// secrets and github back ConnectionService and the repository binding
+	// of CreateAgentFromTemplate. Unset, the env uses a fake Kubernetes
+	// Secret store and the suite's fake GitHub; ghFake names the fake that
+	// github talks to, for fixtures that create connections.
+	secrets   connections.SecretStore
+	github    *github.Client
+	ghFake    *githubtest.Fake
+	noSecrets bool
 	// logs, when set, receives the services' and auth's logs as well.
 	logs io.Writer
 }
@@ -160,7 +167,14 @@ type env struct {
 	pwFile   string
 	opts     envOptions
 	bootstrp auth.BootstrapResult
+
+	mu    sync.Mutex
+	conns map[string]string // org ID -> GitHub connection ID made by githubConnection
 }
+
+// suiteGitHub is the fake GitHub of envs that bring none: App 4242,
+// installation 777 on account acme with repositories widgets and gadgets.
+var suiteGitHub = sync.OnceValue(func() *githubtest.Fake { return githubtest.New() })
 
 func newEnv(ctx context.Context, opts envOptions) *env { return newEnvOn(ctx, nil, opts) }
 
@@ -169,7 +183,18 @@ func timeNow() time.Time { return time.Now() }
 // newEnvOn starts an API server. With base, it shares base's database and
 // clock, like a restart with new settings.
 func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
-	e := &env{opts: opts}
+	if opts.github == nil {
+		opts.ghFake = suiteGitHub()
+		opts.github = github.NewClient(github.Options{BaseURL: opts.ghFake.URL()})
+	}
+	if opts.secrets == nil && !opts.noSecrets {
+		if base != nil && base.opts.secrets != nil {
+			opts.secrets = base.opts.secrets
+		} else {
+			opts.secrets = connections.KubeSecrets{Client: fake.NewClientset(), Namespace: "koinon"}
+		}
+	}
+	e := &env{opts: opts, conns: map[string]string{}}
 	if base != nil {
 		e.pool, e.clock, e.pwFile = base.pool, base.clock, base.pwFile
 	} else {

@@ -26,19 +26,28 @@ func WorkspaceName(org [16]byte) string {
 type AgentNames struct {
 	Sandbox  string
 	Provider string
+	// GitHubProvider holds the agent's read-only GitHub installation token (plan item C2),
+	// created only for agents with a repo.read grant.
+	GitHubProvider string
+	// GitHubProfile is the workspace-scoped provider profile of GitHubProvider. It is per
+	// agent because its endpoints name the agent's repositories, and a profile's endpoints
+	// are where its credential may be sent.
+	GitHubProfile string
 	// KeySecret is the Kubernetes Secret in Koinon's namespace that holds the agent's
 	// agentgateway key.
 	KeySecret string
 }
 
 // AgentObjectNames derives an agent's object names. Sandbox and provider names are 19
-// characters ("ka-"/"kp-" and 16 hex characters of a hash of org and agent ID).
+// characters ("ka-"/"kp-"/"kg-" and 16 hex characters of a hash of org and agent ID).
 func AgentObjectNames(org, agent [16]byte) AgentNames {
 	h := shortHash("agent", uuidString(org), uuidString(agent))
 	return AgentNames{
-		Sandbox:   "ka-" + h,
-		Provider:  "kp-" + h,
-		KeySecret: "koinon-agent-key-" + h,
+		Sandbox:        "ka-" + h,
+		Provider:       "kp-" + h,
+		GitHubProvider: "kg-" + h,
+		GitHubProfile:  "koinon-github-" + h,
+		KeySecret:      "koinon-agent-key-" + h,
 	}
 }
 
