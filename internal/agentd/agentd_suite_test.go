@@ -173,7 +173,7 @@ func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
 	Expect(err).NotTo(HaveOccurred())
 	version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
 		OrgID: e.org, AgentID: agent.ID, CreatedBy: e.user,
-		Config: []byte(`{"model":{"name":"` + model + `"},"instructions":"` + instructions + `"}`),
+		Config: []byte(`{"model":"` + model + `","instructions":"` + instructions + `"}`),
 	})
 	Expect(err).NotTo(HaveOccurred())
 	e.agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{

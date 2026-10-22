@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -30,20 +29,10 @@ const writeScript = `umask 077 && mkdir -p "$1" && t=$(mktemp "$1/.AGENTS.md.XXX
 // readScript prints the file if it is a regular file, not a link.
 const readScript = `test -f "$1" && test ! -L "$1" && exec cat "$1"`
 
-// versionInstructions returns the instructions an agent version's config holds
-// ({"instructions": "..."}, as agentconfig.Config writes them).
-func versionInstructions(config []byte) string {
-	var c struct {
-		Instructions string `json:"instructions"`
-	}
-	_ = json.Unmarshal(config, &c)
-	return strings.TrimSpace(c.Instructions)
-}
-
 // instructionsFile is the file's content for a version's instructions. It is never empty,
 // which the flavors' entry scripts require.
 func instructionsFile(instructions string) []byte {
-	if instructions == "" {
+	if instructions = strings.TrimSpace(instructions); instructions == "" {
 		return []byte(instructionsPreamble + "The agent version has no instructions of its own.\n")
 	}
 	return []byte(instructionsPreamble + instructions + "\n")
