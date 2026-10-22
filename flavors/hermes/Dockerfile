@@ -21,8 +21,26 @@ RUN groupadd --gid 10001 sandbox \
  && /opt/hermes/.venv/bin/hermes --version | grep -q 'v0\.22\.3'
 COPY --chmod=0755 koinon-hermes /usr/local/bin/koinon-hermes
 COPY --chmod=0644 etc/koinon/hermes/config.yaml /etc/koinon/hermes/config.yaml
+# Hermes's managed scope: read-only, outside the home, and over the user config at every key
+# it sets (README.md).
+COPY --chmod=0644 etc/hermes/config.yaml /etc/hermes/config.yaml
 # /opt/hermes is already world-readable; the read-only root file system keeps it unchanged.
-RUN chmod -R a+rX,go-w /etc/koinon
+RUN chmod -R a+rX,go-w /etc/koinon /etc/hermes
+# The managed scope must parse with Hermes's loader and pin every shell hook event this Hermes
+# knows, and Python must be the interpreter the reconciler allows to reach agentgateway
+# (internal/reconciler, DefaultBinaries): OpenShell matches the real path of the executable.
+RUN /opt/hermes/.venv/bin/python -I -B -c 'import sys; sys.path.insert(0, "/opt/hermes"); \
+from hermes_cli import managed_scope as m; from hermes_cli.plugins import SHELL_UNSUPPORTED_HOOKS, VALID_HOOKS; \
+c = m.load_managed_config(); hooks = c.get("hooks") or {}; \
+missing = sorted(set(VALID_HOOKS) - set(SHELL_UNSUPPORTED_HOOKS) - set(hooks)); \
+assert c.get("platform_toolsets", {}).get("acp"), "managed scope not read"; \
+assert not missing, "hook events not pinned: %s" % missing; \
+assert all(v == [] for v in hooks.values()), "hooks must be empty"' \
+ && case "$(readlink -f /opt/hermes/.venv/bin/python)" in \
+      /opt/hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3.14 | \
+      /opt/hermes/tools/python-3.14.7+20260901-linux-arm64/bin/python3.14) ;; \
+      *) echo "unexpected Python: $(readlink -f /opt/hermes/.venv/bin/python)" >&2; exit 1 ;; \
+    esac
 USER 10001:10001
 WORKDIR /sandbox
 ENTRYPOINT ["/usr/local/bin/koinon-hermes"]
