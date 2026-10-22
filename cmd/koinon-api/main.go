@@ -35,6 +35,7 @@ import (
 	"time"
 
 	connect "connectrpc.com/connect/v2"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
 	"k8s.io/client-go/kubernetes"
@@ -42,6 +43,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/procoduck/koinon/internal/api"
+	"github.com/procoduck/koinon/internal/approvals"
 	"github.com/procoduck/koinon/internal/auth"
 	"github.com/procoduck/koinon/internal/connections"
 	"github.com/procoduck/koinon/internal/connectors/github"
@@ -312,9 +314,12 @@ func run() error {
 	if secrets == nil {
 		slog.Warn("no Kubernetes access: connections cannot be created (their secrets go to Kubernetes Secrets)")
 	}
+	// One GitHub client, so connection checks and approved calls share its token cache.
+	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL})
+	approvalSvc := approvals.New(pool, approvals.Options{Secrets: secrets, GitHub: gh, Logger: slog.Default()})
+	go approvalSvc.Sweeper(bgCtx, cfg.sweepInterval)
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Secrets: secrets,
-		GitHub: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Secrets: secrets, GitHub: gh, Approvals: approvalSvc,
 	})
 
 	if cfg.otlpAddr != "" {
@@ -342,7 +347,16 @@ func run() error {
 	servers := []*http.Server{srv}
 	toolsErr := make(chan error, 1)
 	if cfg.toolsAddr != "" {
-		tools, err := githubtools.New(pool, githubtools.Options{})
+		tools, err := githubtools.New(pool, githubtools.Options{
+			// Trusted-preset calls run at once instead of on the next sweep.
+			Execute: func(ctx context.Context, org, id pgtype.UUID) {
+				ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
+				defer cancel()
+				if _, err := approvalSvc.Execute(ctx, org, id); err != nil {
+					slog.Warn("executing an allowed call failed; the sweeper retries", "approval", id.String(), "err", err)
+				}
+			},
+		})
 		if err != nil {
 			return err
 		}

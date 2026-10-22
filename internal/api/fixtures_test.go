@@ -21,6 +21,7 @@ import (
 	"github.com/procoduck/koinon/internal/db/store"
 	agentv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1"
 	"github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
+	"github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
 	"github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
@@ -44,6 +45,7 @@ type client struct {
 	runs      runv1alpha1connect.RunServiceClient
 	templates templatev1alpha1connect.TemplateServiceClient
 	conns     connectionv1alpha1connect.ConnectionServiceClient
+	approvals approvalv1alpha1connect.ApprovalServiceClient
 }
 
 func newClient(b *browser) *client {
@@ -55,6 +57,7 @@ func newClient(b *browser) *client {
 		runs:      runv1alpha1connect.NewRunServiceClient(cc),
 		templates: templatev1alpha1connect.NewTemplateServiceClient(cc),
 		conns:     connectionv1alpha1connect.NewConnectionServiceClient(cc),
+		approvals: approvalv1alpha1connect.NewApprovalServiceClient(cc),
 	}
 }
 
@@ -240,6 +243,8 @@ type orgFixture struct {
 	// connection and appKey are set by newIsolationFixture.
 	connection string
 	appKey     []byte
+	// approval is a pending request of run; set by newIsolationFixture.
+	approval store.ApprovalRequest
 }
 
 func (e *env) newOrgFixture(ctx context.Context) orgFixture {

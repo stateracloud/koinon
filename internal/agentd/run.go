@@ -76,6 +76,10 @@ type runner struct {
 
 	toolsMu sync.Mutex
 	tools   map[string]chan struct{} // tool call IDs; closed once the tool call is recorded
+
+	// delivered are the approval requests whose outcomes this turn's prompt carries; they are
+	// marked delivered when the turn ends.
+	delivered []pgtype.UUID
 }
 
 // toolSeen returns a channel that is closed once the harness's update for the tool call has
@@ -353,7 +357,9 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 		stop, err := conn.Prompt(ctx, session, text)
 		done <- promptResult{stop, err}
 	}()
-	deadline := time.Until(r.run.StartedAt.Time.Add(time.Duration(r.run.MaxWallClockSeconds) * time.Second))
+	// Parked time does not count against the cap (ClaimNextRun adds it to parked_seconds).
+	capd := time.Duration(r.run.MaxWallClockSeconds)*time.Second + time.Duration(r.run.ParkedSeconds)*time.Second
+	deadline := time.Until(r.run.StartedAt.Time.Add(capd))
 	capTimer := time.NewTimer(max(deadline, 0))
 	defer capTimer.Stop()
 
@@ -364,7 +370,7 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 		}
 		switch res.stop {
 		case acp.StopEndTurn:
-			return r.finish(ctx, store.RunStateSucceeded, "")
+			return r.endTurn(ctx)
 		case acp.StopCancelled:
 			return &failure{reason: "the harness cancelled the turn"}
 		default:
@@ -489,9 +495,17 @@ func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded bool) (
 		return "", 0, err
 	}
 	var parts []string
+	outcomes, err := r.outcomes(ctx)
+	if err != nil {
+		return "", 0, err
+	}
 	switch {
+	// A claimed parked run is starting with its prompt already recorded: it resumes after
+	// its approvals were decided. A takeover keeps the state it had.
+	case resumed && r.run.State == store.RunStateStarting:
+		parts = append(parts, parkResumeNote+outcomes)
 	case resumed:
-		parts = append(parts, resumeNote)
+		parts = append(parts, resumeNote+outcomes)
 	case !loaded:
 		parts = append(parts, "Ticket: "+ticket.Title)
 	}
@@ -567,39 +581,7 @@ func (r *runner) finish(ctx context.Context, outcome store.RunState, reason stri
 	r.srcSeq++
 	src := r.srcSeq
 	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
-		q := r.q.WithTx(tx)
-		payload, _ := json.Marshal(map[string]string{"reason": reason})
-		if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
-			OrgID: r.run.OrgID, RunID: r.run.ID, Epoch: r.run.Epoch,
-			Kind: "run." + string(outcome), Payload: payload, SourceSeq: src,
-		}); err != nil {
-			return err
-		}
-		if _, err := q.FinishRun(ctx, store.FinishRunParams{
-			OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch, Outcome: outcome,
-			OutcomeReason: pgtype.Text{String: reason, Valid: reason != ""},
-		}); err != nil {
-			return err
-		}
-		ev := store.AppendTicketEventParams{
-			OrgID: r.run.OrgID, TicketID: r.run.TicketID, RunID: r.run.ID,
-		}
-		if outcome == store.RunStateSucceeded {
-			reply, err := r.reply(ctx, q)
-			if err != nil {
-				return err
-			}
-			if reply == "" {
-				return nil
-			}
-			ev.Kind, ev.ActorKind, ev.ActorAgentID = "message", store.TicketActorKindAgent, r.run.AgentID
-			ev.Payload, _ = json.Marshal(map[string]string{"text": reply})
-		} else {
-			ev.Kind, ev.ActorKind = "run."+string(outcome), store.TicketActorKindSystem
-			ev.Payload = payload
-		}
-		_, err := q.AppendTicketEvent(ctx, ev)
-		return err
+		return r.finishIn(ctx, r.q.WithTx(tx), src, outcome, reason)
 	})
 	if err != nil {
 		return r.dbErr(ctx, "finish the run", err)
@@ -608,7 +590,47 @@ func (r *runner) finish(ctx context.Context, outcome store.RunState, reason stri
 	return nil
 }
 
-// reply is the agent's message text of the run, across every epoch.
+// finishIn ends the run in the caller's transaction.
+func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outcome store.RunState, reason string) error {
+	payload, _ := json.Marshal(map[string]string{"reason": reason})
+	if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
+		OrgID: r.run.OrgID, RunID: r.run.ID, Epoch: r.run.Epoch,
+		Kind: "run." + string(outcome), Payload: payload, SourceSeq: src,
+	}); err != nil {
+		return err
+	}
+	if _, err := q.FinishRun(ctx, store.FinishRunParams{
+		OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch, Outcome: outcome,
+		OutcomeReason: pgtype.Text{String: reason, Valid: reason != ""},
+	}); err != nil {
+		return err
+	}
+	if outcome == store.RunStateSucceeded {
+		return r.postReply(ctx, q)
+	}
+	_, err := q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
+		OrgID: r.run.OrgID, TicketID: r.run.TicketID, RunID: r.run.ID,
+		Kind: "run." + string(outcome), ActorKind: store.TicketActorKindSystem, Payload: payload,
+	})
+	return err
+}
+
+// postReply puts the agent's reply since the run's last park on the ticket, if it said
+// anything.
+func (r *runner) postReply(ctx context.Context, q *store.Queries) error {
+	reply, err := r.reply(ctx, q)
+	if err != nil || reply == "" {
+		return err
+	}
+	text, _ := json.Marshal(map[string]string{"text": reply})
+	_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
+		OrgID: r.run.OrgID, TicketID: r.run.TicketID, RunID: r.run.ID,
+		Kind: "message", ActorKind: store.TicketActorKindAgent, ActorAgentID: r.run.AgentID, Payload: text,
+	})
+	return err
+}
+
+// reply is the agent's message text of the run since its last park, across every epoch.
 func (r *runner) reply(ctx context.Context, q *store.Queries) (string, error) {
 	var b strings.Builder
 	var after int64
@@ -621,6 +643,11 @@ func (r *runner) reply(ctx context.Context, q *store.Queries) (string, error) {
 		}
 		for _, e := range evs {
 			after = e.Seq
+			if e.Kind == kindParked {
+				// Posted when the run parked.
+				b.Reset()
+				continue
+			}
 			if e.Kind != "acp.agent_message_chunk" {
 				continue
 			}

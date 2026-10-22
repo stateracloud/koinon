@@ -718,26 +718,31 @@ type AgentVersion struct {
 }
 
 type ApprovalRequest struct {
-	OrgID        pgtype.UUID
-	ID           pgtype.UUID
-	TicketID     pgtype.UUID
-	RunID        pgtype.UUID
-	AgentID      pgtype.UUID
-	Connector    string
-	Tool         string
-	Target       string
-	ArgsJson     string
-	ArgsSha256   string
-	Risk         []byte
-	Decision     ApprovalDecision
-	Status       ApprovalStatus
-	DecidedBy    pgtype.UUID
-	DecidedAt    pgtype.Timestamptz
-	DecisionNote pgtype.Text
-	Result       []byte
-	ExpiresAt    pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
+	OrgID               pgtype.UUID
+	ID                  pgtype.UUID
+	TicketID            pgtype.UUID
+	RunID               pgtype.UUID
+	AgentID             pgtype.UUID
+	Connector           string
+	Tool                string
+	Target              string
+	ArgsJson            string
+	ArgsSha256          string
+	Risk                []byte
+	Decision            ApprovalDecision
+	Status              ApprovalStatus
+	DecidedBy           pgtype.UUID
+	DecidedAt           pgtype.Timestamptz
+	DecisionNote        pgtype.Text
+	Result              []byte
+	ExpiresAt           pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+	Executions          int32
+	ExecutionLeaseUntil pgtype.Timestamptz
+	ExecutedAt          pgtype.Timestamptz
+	Error               pgtype.Text
+	DeliveredAt         pgtype.Timestamptz
 }
 
 type Connection struct {

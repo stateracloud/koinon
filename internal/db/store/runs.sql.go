@@ -690,6 +690,60 @@ func (q *Queries) HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run
 	return i, err
 }
 
+const listExpiredParkedRuns = `-- name: ListExpiredParkedRuns :many
+SELECT org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers FROM runs
+WHERE org_id = $1 AND state = 'parked' AND park_expires_at < now()
+ORDER BY park_expires_at, id
+`
+
+// Parked runs whose park has expired (ADR 0049: 7 days for an approval).
+func (q *Queries) ListExpiredParkedRuns(ctx context.Context, orgID pgtype.UUID) ([]Run, error) {
+	rows, err := q.db.Query(ctx, listExpiredParkedRuns, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Run
+	for rows.Next() {
+		var i Run
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.AgentID,
+			&i.AgentVersionID,
+			&i.TicketID,
+			&i.State,
+			&i.Epoch,
+			&i.OwnerID,
+			&i.LeaseExpiresAt,
+			&i.HeartbeatAt,
+			&i.ReadyAt,
+			&i.ParkReason,
+			&i.ParkedAt,
+			&i.ParkExpiresAt,
+			&i.OutcomeReason,
+			&i.MaxWallClockSeconds,
+			&i.MaxTokens,
+			&i.LastEventSeq,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParkedSeconds,
+			&i.TokensUsed,
+			&i.PromptThroughSeq,
+			&i.Takeovers,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunsForTicket = `-- name: ListRunsForTicket :many
 SELECT org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers FROM runs
 WHERE org_id = $1 AND ticket_id = $2
@@ -746,6 +800,53 @@ func (q *Queries) ListRunsForTicket(ctx context.Context, arg ListRunsForTicketPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockRun = `-- name: LockRun :one
+SELECT org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers FROM runs
+WHERE org_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type LockRunParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// Serialises a park decision (agentd) with the resolution of the run's
+// approvals (the executor), so neither misses the other.
+func (q *Queries) LockRun(ctx context.Context, arg LockRunParams) (Run, error) {
+	row := q.db.QueryRow(ctx, lockRun, arg.OrgID, arg.ID)
+	var i Run
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.AgentVersionID,
+		&i.TicketID,
+		&i.State,
+		&i.Epoch,
+		&i.OwnerID,
+		&i.LeaseExpiresAt,
+		&i.HeartbeatAt,
+		&i.ReadyAt,
+		&i.ParkReason,
+		&i.ParkedAt,
+		&i.ParkExpiresAt,
+		&i.OutcomeReason,
+		&i.MaxWallClockSeconds,
+		&i.MaxTokens,
+		&i.LastEventSeq,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParkedSeconds,
+		&i.TokensUsed,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
+	)
+	return i, err
 }
 
 const markRunRunning = `-- name: MarkRunRunning :one

@@ -43,6 +43,9 @@ type harness struct {
 	crashed  bool
 	hung     bool
 	hangs    chan struct{} // receives when a hang starts
+	// onPrompt, if set, may answer a prompt itself (for example by calling Koinon's tools as
+	// the agent would): it returns the reply and true, or false to fall through.
+	onPrompt func(ctx context.Context, text string) (string, bool)
 }
 
 func newHarness() *harness {
@@ -146,9 +149,19 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	if firstHang {
 		p.h.hung = true
 	}
+	onPrompt := p.h.onPrompt
 	p.h.mu.Unlock()
 	id := r.SessionId
 	end := sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}
+
+	if onPrompt != nil {
+		if reply, ok := onPrompt(ctx, text); ok {
+			if err := p.say(ctx, id, sdk.UpdateAgentMessageText(reply)); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+			return end, nil
+		}
+	}
 
 	switch {
 	case strings.Contains(text, resumeMarker):
