@@ -306,14 +306,23 @@ var _ = Describe("Pool", func() {
 		Expect(tevs[len(tevs)-1].Kind).To(Equal("run.failed"))
 	})
 
-	It("fails runs of a flavor without a launch command", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorHermes)
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
-		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
-		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring(`flavor "hermes" has no ACP launch command`))
-		Expect(e.gw.Calls("ExecSandboxInteractive")).To(BeZero())
-	})
+	DescribeTable("runs each flavor's entry script with the agent's endpoints",
+		func(ctx SpecContext, flavor store.AgentFlavor, script string) {
+			e := newEnv(ctx, flavor)
+			r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+			e.pool("agentd-a")
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			execs := e.gw.Execs()
+			Expect(execs).To(HaveLen(2))
+			Expect(execs[1].GetCommand()).To(Equal([]string{
+				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp",
+			}))
+			Expect(execs[1].GetWorkdir()).To(Equal("/sandbox/work"))
+		},
+		Entry("opencode", store.AgentFlavorOpencode, "/usr/local/bin/koinon-opencode"),
+		Entry("hermes", store.AgentFlavorHermes, "/usr/local/bin/koinon-hermes"),
+		Entry("pi", store.AgentFlavorPi, "/usr/local/bin/koinon-pi"),
+	)
 
 	It("fails a run whose sandbox the reconciler reports in error", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
