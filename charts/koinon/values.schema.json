@@ -360,6 +360,7 @@
           "required": ["pods", "sandboxes", "secrets"],
           "properties": {
             "pods": {"$ref": "#/definitions/identities"},
+            "supervisorPods": {"$ref": "#/definitions/identities"},
             "sandboxes": {"$ref": "#/definitions/identities"},
             "secrets": {"$ref": "#/definitions/identities"}
           }
