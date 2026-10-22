@@ -82,14 +82,25 @@ func renderEndpoints(in []execution.Endpoint) ([]*sandboxv1.NetworkEndpoint, err
 			ep.Enforcement = sandboxv1.NetworkEnforcementMode_NETWORK_ENFORCEMENT_MODE_ENFORCE
 		}
 		for _, r := range e.Allow {
-			ep.Rules = append(ep.Rules, &sandboxv1.L7Rule{Allow: &sandboxv1.L7Allow{Method: r.Method, Path: r.Path}})
+			ep.Rules = append(ep.Rules, &sandboxv1.L7Rule{Allow: &sandboxv1.L7Allow{Method: r.Method, Path: r.Path, Query: renderQuery(r.Query)}})
 		}
 		for _, r := range e.Deny {
-			ep.DenyRules = append(ep.DenyRules, &sandboxv1.L7DenyRule{Method: r.Method, Path: r.Path})
+			ep.DenyRules = append(ep.DenyRules, &sandboxv1.L7DenyRule{Method: r.Method, Path: r.Path, Query: renderQuery(r.Query)})
 		}
 		out = append(out, ep)
 	}
 	return out, nil
+}
+
+func renderQuery(q map[string]string) map[string]*sandboxv1.L7QueryMatcher {
+	if len(q) == 0 {
+		return nil
+	}
+	out := make(map[string]*sandboxv1.L7QueryMatcher, len(q))
+	for k, v := range q {
+		out[k] = &sandboxv1.L7QueryMatcher{Glob: v}
+	}
+	return out
 }
 
 func renderAccess(a execution.Access) (sandboxv1.NetworkAccessPreset, error) {

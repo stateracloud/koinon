@@ -64,7 +64,7 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 			return nil, err
 		}
 		if v.Version == a.LatestVersion {
-			out.ProposedGrants = grantsProto(cfg.Grants)
+			out.ProposedGrants = agentGrantsProto(cfg)
 			out.Instructions = cfg.Instructions
 			out.Model = cfg.Model
 			wall, tokens := cfg.RunCaps()
@@ -72,7 +72,7 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		}
 		if v.ID == a.ActiveVersionID {
 			out.ActiveVersion = v.Version
-			out.ApprovedGrants = grantsProto(cfg.Grants)
+			out.ApprovedGrants = agentGrantsProto(cfg)
 		}
 	}
 	return out, nil
@@ -111,7 +111,13 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 	if len(name) > 200 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "display_name is longer than 200 characters")
 	}
-	config, err := agentconfig.FromTemplate(t, row.ContentHash).Marshal()
+	bindings, err := s.bindGrants(ctx, c.org, t, req.GetGrants())
+	if err != nil {
+		return nil, err
+	}
+	cfg := agentconfig.FromTemplate(t, row.ContentHash)
+	cfg.Bindings = bindings
+	config, err := cfg.Marshal()
 	if err != nil {
 		return nil, s.dbError(err, "agent config")
 	}

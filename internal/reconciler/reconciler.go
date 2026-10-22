@@ -35,12 +35,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/procoduck/koinon/internal/agentconfig"
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/execution"
 	"github.com/procoduck/koinon/internal/gateway"
@@ -84,6 +86,12 @@ type Config struct {
 	// agent is allowed the tools its approved grants expose. Empty serves no
 	// tools.
 	ToolServers map[string]string
+	// GitHub mints the installation tokens of repo.read grants (plan item C2). Nil leaves
+	// agents with such a grant unconverged, with an error.
+	GitHub GitHubTokens
+	// GitBinaries may use the GitHub endpoints of a read grant, besides the flavor's binaries.
+	// Default DefaultGitBinaries.
+	GitBinaries []string
 	// Flavors maps each flavor to its image and binaries. Agents of a flavor without an image
 	// are reported as errors.
 	Flavors map[store.AgentFlavor]Flavor
@@ -111,6 +119,10 @@ type Reconciler struct {
 	backend execution.Backend
 	gw      gateway.ModelGateway
 	secrets SecretStore
+
+	mu sync.Mutex
+	// githubRevs is the token revision last pushed per GitHub provider record, to log refreshes.
+	githubRevs map[string]string
 }
 
 // New returns a Reconciler.
@@ -137,9 +149,12 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.GitBinaries == nil {
+		cfg.GitBinaries = DefaultGitBinaries
+	}
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
-		backend: backend, gw: gw, secrets: secrets,
+		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{},
 	}, nil
 }
 
@@ -155,8 +170,18 @@ type work struct {
 	key      gateway.Key
 	material string
 	keyErr   error
+	// cfg is the active version's config, for active agents.
+	cfg agentconfig.Config
 	// tools are the MCP tools the active version's grants allow.
 	tools []gateway.ToolGrant
+}
+
+// names are the agent's object names: the recorded ones, and the GitHub ones derived from the
+// IDs (they are not recorded: agentd never needs them).
+func (w *work) names() execution.AgentNames {
+	n := execution.AgentObjectNames(w.org.ID.Bytes, w.agent.ID.Bytes)
+	n.Sandbox, n.Provider, n.KeySecret = w.sb.SandboxName, w.sb.ProviderName, w.sb.KeySecretName
+	return n
 }
 
 func (w *work) logAttrs() []any {
@@ -261,12 +286,15 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 		}
 	}
 	if a.Status == store.AgentStatusActive {
-		tools, err := r.agentTools(ctx, a)
+		cfg, err := r.activeConfig(ctx, a)
 		if err != nil {
-			// Without them the agent's tools would be revoked by omission.
+			// Without it the agent's tools would be revoked by omission.
 			return nil, fmt.Errorf("%w: %w", errAbortPass, err)
 		}
-		w.tools = tools
+		w.cfg = cfg
+		if len(r.cfg.ToolServers) > 0 {
+			w.tools = ToolGrants(cfg, r.cfg.ToolServers)
+		}
 		key, material, err := r.ensureKey(ctx, w)
 		if err != nil {
 			w.keyErr = err
@@ -376,7 +404,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	if err != nil {
 		return err
 	}
-	names := execution.AgentNames{Sandbox: w.sb.SandboxName, Provider: w.sb.ProviderName, KeySecret: w.sb.KeySecretName}
+	names := w.names()
 
 	// The key goes only into the provider record; the sandbox sees a placeholder.
 	if err := r.backend.EnsureProvider(ctx, ws, execution.Provider{
@@ -389,7 +417,22 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		return err
 	}
 
-	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor)
+	// The GitHub read grant: its provider record before the sandbox that attaches it.
+	read, hasRead, err := GitHubReadAccess(w.cfg)
+	if err != nil {
+		return err
+	}
+	providers := []string{names.Provider}
+	network := map[string]execution.NetworkRule{}
+	if hasRead {
+		if err := r.ensureGitHub(ctx, ws, w, names, flavor, read); err != nil {
+			return err
+		}
+		providers = append(providers, names.GitHubProvider)
+		network[githubRule] = GitHubRule(read, r.githubBinaries(flavor))
+	}
+
+	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network)
 	act, err := r.q.GetAgentRunActivity(ctx, store.GetAgentRunActivityParams{OrgID: w.org.ID, AgentID: w.agent.ID})
 	if err != nil {
 		return fmt.Errorf("read run activity: %w", err)
@@ -397,6 +440,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 
 	sb, err := r.backend.GetSandbox(ctx, ws, names.Sandbox)
 	if errors.Is(err, execution.ErrNotFound) {
+		if !hasRead {
+			// No sandbox references a GitHub record now: drop one left by a removed grant.
+			if err := r.deleteGitHub(ctx, ws, names); err != nil {
+				return err
+			}
+		}
 		sb, err = r.backend.CreateSandbox(ctx, ws, spec)
 		if err != nil {
 			return err
@@ -522,6 +571,9 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 	}
 
 	if err := r.backend.DeleteProvider(ctx, ws, w.sb.ProviderName); err != nil {
+		return err
+	}
+	if err := r.deleteGitHub(ctx, ws, w.names()); err != nil {
 		return err
 	}
 	if err := r.secrets.Delete(ctx, w.sb.KeySecretName); err != nil {
