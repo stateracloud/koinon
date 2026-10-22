@@ -400,8 +400,10 @@ func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit) ap
 
 // toolRules renders one CEL allow rule per agent. agentgateway allows a tool
 // when any rule matches, and filters tools/list the same way, so an agent sees
-// only its granted tools. With no grants at all a single `false` rule keeps
-// the policy deny-all instead of absent.
+// only its granted tools. The last rule admits gateway.ReadyPrompt for every
+// key: agentgateway filters prompts/list by the same rules, and the tool rules
+// never match a prompt. With no grants at all the prompt rule alone keeps the
+// policy deny-all for tools instead of absent.
 func toolRules(tools map[gateway.AgentRef][]gateway.ToolGrant) []string {
 	agents := make([]gateway.AgentRef, 0, len(tools))
 	for a := range tools {
@@ -428,10 +430,7 @@ func toolRules(tools map[gateway.AgentRef][]gateway.ToolGrant) []string {
 		}
 		rules = append(rules, fmt.Sprintf("apiKey.agent == %s && (%s)", strconv.Quote(a.String()), strings.Join(alts, " || ")))
 	}
-	if len(rules) == 0 {
-		return []string{"false"}
-	}
-	return rules
+	return append(rules, "mcp.prompt.name == "+strconv.Quote(gateway.ReadyPrompt))
 }
 
 // formatWindow renders d in the largest whole unit agentgateway accepts.
