@@ -76,6 +76,11 @@ export OPENCODE_DISABLE_DEFAULT_PLUGINS=1
 export OPENCODE_PURE=1
 export OPENCODE_DISABLE_CLAUDE_CODE=1
 
+# The repository the agent works on must not reconfigure the harness: no opencode.json(c) or
+# .opencode/ (agents, commands, permissions, instructions) from the session directory upward,
+# so only /etc/koinon/opencode applies (see README.md).
+export OPENCODE_DISABLE_PROJECT_CONFIG=1
+
 export KOINON_MODEL_BASE_URL="$base_url"
 export KOINON_MODEL="$model"
 export KOINON_MCP_URL="$mcp_url"

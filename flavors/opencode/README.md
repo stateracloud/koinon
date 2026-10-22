@@ -15,7 +15,8 @@ Contract test: `make test-flavors` (`test/flavors`, needs Docker).
 | Resume mode | `session/load` (replays history). OpenCode also advertises `session/resume`; Koinon does not rely on it |
 | Model endpoint | `--model-base-url` (agentgateway's OpenAI-compatible base, ending in `/v1`) and `--model` (the gateway's model name); key from `$OPENAI_API_KEY` |
 | MCP | `--mcp-url` (agentgateway's MCP route), server `koinon` in OpenCode's own config, `Authorization: Bearer $OPENAI_API_KEY`; tools reach the model as `koinon_<tool>` |
-| Instruction files | `/sandbox/.koinon/AGENTS.md` (Koinon's rendered template instructions, via `instructions`), plus the repository's `AGENTS.md` found from the session directory |
+| Instruction files | `/sandbox/.koinon/AGENTS.md` (Koinon's rendered template instructions, via `instructions`). The repository's own `AGENTS.md` at or above the session directory is not loaded (project configuration is off, see below); OpenCode still attaches an `AGENTS.md` from a subdirectory when the agent reads a file there |
+| Project configuration | Off (`OPENCODE_DISABLE_PROJECT_CONFIG=1`): a repository's `opencode.json(c)` and `.opencode/` have no effect |
 | State | `/sandbox/.local/share/opencode` (sessions in `opencode.db`), `/sandbox/.local/state/opencode` |
 | Home exclude paths | `/sandbox/.cache/opencode`, `/sandbox/.local/share/opencode/log` |
 | Permission requests | OpenCode's defaults: it asks over ACP for paths outside the session directory (`external_directory`), `.env` reads and repeated identical tool calls (`doom_loop`); everything else is allowed inside the sandbox |
@@ -69,9 +70,20 @@ and MCP endpoints.
 
 ## Notes
 
-- Project configuration stays on (`OPENCODE_DISABLE_PROJECT_CONFIG` would also hide the
-  repository's `AGENTS.md`), so a repository's `opencode.json` or `.opencode/` can change the
-  harness's settings. The sandbox policy and agentgateway, not OpenCode, are the boundary.
+- Project configuration is off: `OPENCODE_DISABLE_PROJECT_CONFIG=1` makes OpenCode skip the
+  `opencode.json(c)` files and `.opencode/` directories (agents, commands, modes, plugins,
+  permissions) found from the session directory up to the worktree root, and resolve relative
+  `instructions` against the global config directory instead
+  (`packages/opencode/src/config/config.ts`, `packages/opencode/src/config/paths.ts`,
+  `packages/opencode/src/session/instruction.ts`, `packages/core/src/flag/flag.ts`). So the
+  repository the agent works on cannot change the harness; only `/etc/koinon/opencode` applies.
+  The same switch stops OpenCode from loading the repository's top-level `AGENTS.md` into the
+  system prompt; the agent can still read it with its tools, and Koinon's template instructions
+  can tell it to. The contract test checks this (`ignores harness configuration in the
+  repository`).
+- OpenCode also reads `$HOME/.opencode/` (`/sandbox/.opencode`, on the agent's own home volume).
+  No repository can put files there, but the agent itself could; the sandbox policy and
+  agentgateway, not OpenCode, remain the boundary.
 - OpenCode is the glibc binary from npm (`opencode-linux-<arch>`), verified by sha256 at build
   time (`ADD --checksum`); the sha512 npm integrity values are in the Dockerfile.
 - Ubuntu packages (`ca-certificates`, `git`, `ripgrep`) follow the archive at build time; the base
