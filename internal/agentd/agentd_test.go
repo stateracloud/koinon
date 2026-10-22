@@ -46,6 +46,10 @@ func expectOrdered(evs []store.RunEvent) {
 	}
 }
 
+// repoint and unlink are what an agent does to its instruction link.
+func repoint(links map[string]string, link string) { links[link] = "/sandbox/mine.md" }
+func unlink(links map[string]string, link string)  { delete(links, link) }
+
 func payload(e store.RunEvent) map[string]any {
 	var m map[string]any
 	Expect(json.Unmarshal(e.Payload, &m)).To(Succeed())
@@ -315,22 +319,24 @@ var _ = Describe("Pool", func() {
 	})
 
 	DescribeTable("runs each flavor's entry script with the agent's endpoints",
-		func(ctx SpecContext, flavor store.AgentFlavor, script string) {
+		func(ctx SpecContext, flavor store.AgentFlavor, script, link string) {
 			e := newEnv(ctx, flavor)
 			r := e.enqueue(ctx, e.ticket(ctx, "hello"))
 			e.pool("agentd-a")
 			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			// mkdir, the instruction file, the harness, the instruction check.
+			// mkdir, the instruction file, the harness, then the file's and the flavor's
+			// link's checks before the prompt.
 			execs := e.gw.Execs()
-			Expect(execs).To(HaveLen(4))
+			Expect(execs).To(HaveLen(5))
 			Expect(execs[2].GetCommand()).To(Equal([]string{
 				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp",
 			}))
 			Expect(execs[2].GetWorkdir()).To(Equal("/sandbox/work"))
+			Expect(execs[4].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", link, instructionsFile))
 		},
-		Entry("opencode", store.AgentFlavorOpencode, "/usr/local/bin/koinon-opencode"),
-		Entry("hermes", store.AgentFlavorHermes, "/usr/local/bin/koinon-hermes"),
-		Entry("pi", store.AgentFlavorPi, "/usr/local/bin/koinon-pi"),
+		Entry("opencode", store.AgentFlavorOpencode, "/usr/local/bin/koinon-opencode", opencodeLink),
+		Entry("hermes", store.AgentFlavorHermes, "/usr/local/bin/koinon-hermes", hermesLink),
+		Entry("pi", store.AgentFlavorPi, "/usr/local/bin/koinon-pi", piLink),
 	)
 
 	It("writes the run's instructions before the harness starts and records their hash", func(ctx SpecContext) {
@@ -406,26 +412,26 @@ var _ = Describe("Pool", func() {
 	)
 
 	DescribeTable("restores the flavor's instruction link before the prompt",
-		func(ctx SpecContext, tamper func(map[string]string), reason, found string) {
-			e := newEnv(ctx, store.AgentFlavorOpencode)
+		func(ctx SpecContext, flavor store.AgentFlavor, link string, tamper func(map[string]string, string), reason, found string) {
+			e := newEnv(ctx, flavor)
 			once := false
 			e.files.onLink = func(links map[string]string) {
 				if !once {
 					once = true
-					tamper(links)
+					tamper(links, link)
 				}
 			}
 			r := e.enqueue(ctx, e.ticket(ctx, "hello"))
 			e.pool("agentd-a")
 			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 
-			target, ok := e.files.link(opencodeLink)
+			target, ok := e.files.link(link)
 			Expect(ok).To(BeTrue())
 			Expect(target).To(Equal(instructionsFile))
 			Expect(e.files.writes).To(Equal(1), "the file itself was intact")
 			evs := events(ctx, r)
 			Expect(kinds(evs)[:3]).To(Equal([]string{"run.session", "run.prompt", "run.instructions_restored"}))
-			Expect(payload(evs[2])).To(HaveKeyWithValue("path", opencodeLink))
+			Expect(payload(evs[2])).To(HaveKeyWithValue("path", link))
 			Expect(payload(evs[2])).To(HaveKeyWithValue("target", instructionsFile))
 			Expect(payload(evs[2])).To(HaveKeyWithValue("reason", reason))
 			if found == "" {
@@ -435,8 +441,12 @@ var _ = Describe("Pool", func() {
 			}
 			Expect(payload(evs[2])["sha256"]).To(Equal(payload(evs[0])["instructions"].(map[string]any)["sha256"]))
 		},
-		Entry("repointed by the agent", func(l map[string]string) { l[opencodeLink] = "/sandbox/mine.md" }, "changed", "/sandbox/mine.md"),
-		Entry("removed by the agent", func(l map[string]string) { delete(l, opencodeLink) }, "missing", ""),
+		Entry("OpenCode, repointed", store.AgentFlavorOpencode, opencodeLink, repoint, "changed", "/sandbox/mine.md"),
+		Entry("OpenCode, removed", store.AgentFlavorOpencode, opencodeLink, unlink, "missing", ""),
+		Entry("Hermes, repointed", store.AgentFlavorHermes, hermesLink, repoint, "changed", "/sandbox/mine.md"),
+		Entry("Hermes, removed", store.AgentFlavorHermes, hermesLink, unlink, "missing", ""),
+		Entry("pi, repointed", store.AgentFlavorPi, piLink, repoint, "changed", "/sandbox/mine.md"),
+		Entry("pi, removed", store.AgentFlavorPi, piLink, unlink, "missing", ""),
 	)
 
 	It("fails the run when the instruction link cannot be restored", func(ctx SpecContext) {

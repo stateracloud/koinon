@@ -74,8 +74,10 @@ const (
 	instructions = "You help with the ticket."
 	// instructionsFile is what agentd writes for instructions.
 	instructionsFile = "/sandbox/.koinon/AGENTS.md"
-	// opencodeLink is OpenCode's link to the instruction file.
+	// opencodeLink, hermesLink and piLink are each flavor's link to the instruction file.
 	opencodeLink = "/etc/koinon/opencode/AGENTS.md"
+	hermesLink   = "/sandbox/.hermes/SOUL.md"
+	piLink       = "/sandbox/.pi/agent/APPEND_SYSTEM.md"
 )
 
 // env is one org with an active agent, its sandbox in a fake OpenShell gateway whose exec
@@ -245,7 +247,9 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 		e.gw.Handle(script, e.harness.command)
 	}
 	e.gw.Handle("/bin/mkdir", func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { return 0 })
-	e.files = &files{data: map[string][]byte{}, links: map[string]string{opencodeLink: instructionsFile}}
+	e.files = &files{data: map[string][]byte{}, links: map[string]string{
+		opencodeLink: instructionsFile, hermesLink: instructionsFile, piLink: instructionsFile,
+	}}
 	e.gw.Handle("/bin/sh", e.files.sh)
 	return e
 }
