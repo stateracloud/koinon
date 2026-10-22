@@ -128,6 +128,47 @@ var _ = Describe("Reconciler", func() {
 		org, user = newOrg(ctx)
 	})
 
+	DescribeTable("lets only the flavor's network-calling binaries use the agentgateway credential",
+		func(ctx SpecContext, flavor store.AgentFlavor, binaries []string) {
+			Expect(reconciler.DefaultBinaries[flavor]).To(Equal(binaries))
+			cfg.Flavors = map[store.AgentFlavor]reconciler.Flavor{
+				flavor: {Image: image, Binaries: reconciler.DefaultBinaries[flavor]},
+			}
+			agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
+				OrgID: org, DisplayName: "Flavor binaries", Flavor: flavor, CreatedBy: user,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
+				OrgID: org, AgentID: agent.ID, Config: []byte(`{"instructions":"help"}`), CreatedBy: user,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{
+				OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx, newReconciler())
+
+			row := sandboxRow(ctx, agent.ID)
+			Expect(row.State).To(Equal(store.SandboxStateReady))
+			profile := osg.Profile(row.Workspace, "koinon-agentgateway-"+string(flavor))
+			Expect(profile).NotTo(BeNil())
+			var paths []string
+			for _, b := range profile.GetBinaries() {
+				paths = append(paths, b.GetPath())
+			}
+			Expect(paths).To(Equal(binaries))
+		},
+		Entry("OpenCode: its single binary", store.AgentFlavorOpencode, []string{"/usr/local/bin/opencode"}),
+		// koinon-hermes execs /opt/hermes/.venv/bin/hermes, a bash wrapper that execs the venv's
+		// python, a link to the image's own Python; the gateway daemon it starts is Python too.
+		Entry("Hermes: the image's Python, by its real path on either architecture", store.AgentFlavorHermes, []string{
+			"/opt/hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3.14",
+			"/opt/hermes/tools/python-3.14.7+20260901-linux-arm64/bin/python3.14",
+		}),
+		// pi-acp and the pi it starts per session are scripts run by Node.
+		Entry("pi: Node", store.AgentFlavorPi, []string{"/opt/node/bin/node"}),
+	)
+
 	Describe("an active agent", func() {
 		var (
 			r     *reconciler.Reconciler
