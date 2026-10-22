@@ -62,6 +62,9 @@ func Decode(req *collogspb.ExportLogsServiceRequest) (entries []Entry, rejected 
 				for _, kv := range lr.GetAttributes() {
 					attrs[kv.GetKey()] = kv.GetValue()
 				}
+				if stringValue(attrs[gateway.LogFieldKey]) == gateway.ReloadProbeKeyName {
+					continue // the gateway driver's reload probe, never charged or run-attributed
+				}
 				model := stringValue(attrs[attrRequestModel])
 				in, inOK := intValue(attrs[attrInputTokens])
 				out, outOK := intValue(attrs[attrOutputTokens])

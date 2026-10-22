@@ -96,6 +96,15 @@ n=$(render --show-only templates/deployments.yaml | grep -c 'KOINON_CONFIG' || t
 [ "$n" = 1 ] || fail "KOINON_CONFIG set on $n components, want only the reconciler"
 n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /etc/koinon/config$' || true)
 [ "$n" = 1 ] || fail "config.yaml mounted into $n components, want only the reconciler"
+# agentgateway's admin listener (config dump and UI) binds to localhost: no Service or container
+# port exposes it, and the bootstrap config keeps it there.
+for f in "${value_files[@]}"; do
+	if grep -Eq -- '(containerPort|port|targetPort): 15000$' "$out/$(basename "$f" .yaml).yaml"; then
+		fail "port 15000 exposed with $(basename "$f")"
+	fi
+done
+has "agentgateway admin listener on localhost" 'adminAddr: localhost:15000$' --set gateway.mode=standalone \
+	--show-only templates/gateway-standalone.yaml
 if [ "$failures" -gt 0 ]; then
 	echo "$failures assertion(s) failed" >&2
 	exit 1

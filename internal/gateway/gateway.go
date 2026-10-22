@@ -284,6 +284,8 @@ func (s State) Validate() error {
 	for _, k := range s.Keys {
 		if !keyID.MatchString(k.ID) {
 			errs = append(errs, fmt.Errorf("key %q: invalid id", k.ID))
+		} else if k.ID == ReloadProbeKeyName {
+			errs = append(errs, fmt.Errorf("key %q: reserved for the reload probe", k.ID))
 		}
 		if !keyHash.MatchString(k.Hash) {
 			errs = append(errs, fmt.Errorf("key %q: hash must be sha256:<64 hex>", k.ID))
@@ -356,6 +358,11 @@ const (
 	// LogFieldRequest is a per-request UUID. agentgateway logs its own request
 	// id only at debug level, so drivers add one; the ledger is idempotent on it.
 	LogFieldRequest = "koinon.request"
+
+	// ReloadProbeKeyName is the LogFieldKey of the key a driver puts in each
+	// config to detect its reload (standalone.ReloadProbeKey). Its requests
+	// never reach a model; the spend ledger drops them.
+	ReloadProbeKeyName = "koinon-reload-probe"
 )
 
 // UsageRecord is one charged request, as the spend ledger (L1) needs it.

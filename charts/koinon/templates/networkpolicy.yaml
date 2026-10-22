@@ -90,10 +90,10 @@ spec:
         - podSelector:
             matchLabels:
               {{- toYaml $release | nindent 14 }}
-    # The admin listener (which also serves agentgateway's UI) and the reload gauge on the stats
-    # listener: only the reconciler, which waits on them after pushing a config.
+    # The reload gauge on the stats listener: only the reconciler, which reads it after pushing a
+    # config. Its reload probe goes to the llm port, admitted above for Koinon's pods. The admin
+    # listener binds to localhost and is not exposed.
     - ports:
-        - port: admin
         - port: stats
       from:
         - podSelector:

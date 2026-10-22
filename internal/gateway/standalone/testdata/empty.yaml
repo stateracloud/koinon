@@ -1,7 +1,7 @@
 # Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.
 # Keys appear only as hashes; key material lives in Kubernetes Secrets.
 config:
-  adminAddr: '[::]:15000'
+  adminAddr: localhost:15000
   statsAddr: '[::]:15020'
   readinessAddr: '[::]:15021'
   logging:
@@ -10,9 +10,26 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"469ed5df34c380f6"'
+      koinon.config: '"1dd949fe2ea91c75"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
 gateways:
   default:
     port: 4000
+llm:
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header:
+          name: authorization
+          prefix: 'Bearer '
+      keys:
+        - keyHash: sha256:e0d105450fcc402ecf6f36a922172cf0e5e7b7450bb58aa44c015ef9c7149194
+          metadata:
+            name: koinon-reload-probe
+            agent: ""
+    authorization:
+      rules:
+        - apiKey.name != "koinon-reload-probe"
+  models: []

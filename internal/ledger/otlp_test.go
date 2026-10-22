@@ -118,6 +118,17 @@ var _ = Describe("Decode", func() {
 		Expect(reason).To(ContainSubstring(gateway.LogFieldRequest))
 	})
 
+	It("drops the reload probe's records, even ones that look charged", func() {
+		entries, rejected, reason := ledger.Decode(export(
+			llmRecord(str(gateway.LogFieldKey, gateway.ReloadProbeKeyName)),
+			llmRecord(str(gateway.LogFieldKey, gateway.ReloadProbeKeyName), str(gateway.LogFieldRequest, "")),
+			llmRecord(),
+		))
+		Expect(rejected).To(BeZero(), reason)
+		Expect(entries).To(HaveLen(1))
+		Expect(entries[0].KeyID).To(Equal("k-aaaaaaaaaaaa"))
+	})
+
 	It("accepts numeric costs and tokens", func() {
 		rec := llmRecord(&commonpb.KeyValue{
 			Key:   "agw.ai.usage.cost.total",
@@ -201,6 +212,32 @@ var _ = Describe("Handler", func() {
 			priced = append(priced, p)
 		}
 		Expect(priced).To(Equal([]bool{true, false})) // fake/test-model, unpriced/model
+	})
+
+	It("stores nothing for the reload probe: no spend entry, run match or token usage", func(ctx SpecContext) {
+		needDocker()
+		e := newEnv(ctx, uniq("probe"), "", "10.00", 100_000)
+		at := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC) // llmRecord's time
+		run := e.startRun(ctx, e.ticket(ctx), 100_000, at.Add(-time.Minute))
+
+		body, err := proto.Marshal(export(llmRecord(
+			str(gateway.LogFieldKey, gateway.ReloadProbeKeyName),
+			str(gateway.LogFieldAgent, e.ref().String()),
+		)))
+		Expect(err).NotTo(HaveOccurred())
+		resp, out := post(ctx, body, nil)
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		Expect(out.GetPartialSuccess().GetRejectedLogRecords()).To(BeZero())
+		Expect(e.spendEntries(ctx)).To(BeZero())
+		Expect(e.run(ctx, run.ID).TokensUsed).To(BeZero())
+
+		// The same record under a real key is charged to the run.
+		body, err = proto.Marshal(export(llmRecord(str(gateway.LogFieldAgent, e.ref().String()))))
+		Expect(err).NotTo(HaveOccurred())
+		resp, _ = post(ctx, body, nil)
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		Expect(e.spendEntries(ctx)).To(Equal(1))
+		Expect(e.run(ctx, run.ID).TokensUsed).To(Equal(int64(12)))
 	})
 
 	It("reports records of unknown agents as rejected", func(ctx SpecContext) {

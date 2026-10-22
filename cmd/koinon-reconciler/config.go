@@ -28,7 +28,6 @@ type fileConfig struct {
 		Mode         string `yaml:"mode"`
 		ConfigMap    string `yaml:"configMap"`
 		URL          string `yaml:"url"`
-		AdminURL     string `yaml:"adminUrl"`
 		StatsURL     string `yaml:"statsUrl"`
 		Port         int    `yaml:"port"`
 		DatabaseURL  string `yaml:"databaseUrl"`
@@ -83,7 +82,6 @@ type config struct {
 	gatewayMode      string
 	gatewayURL       string
 	gatewayConfigMap string
-	gatewayAdminURL  string
 	gatewayStatsURL  string
 	gatewayPort      int
 	gatewayDBURL     string
@@ -115,9 +113,8 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "", "directory with tls.crt, tls.key and ca.crt for mTLS; empty connects without TLS")
 	fs.StringVar(&c.runtimeClass, "runtime-class", "", "sandbox runtime class (ADR 0045: kata)")
 	fs.StringVar(&c.gatewayMode, "gateway-mode", "", "standalone or kubernetes")
-	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it")
+	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
 	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config")
-	fs.StringVar(&c.gatewayAdminURL, "gateway-admin-url", "", "agentgateway admin URL, to wait for config reloads; empty does not wait")
 	fs.StringVar(&c.gatewayStatsURL, "gateway-stats-url", "", "agentgateway stats URL, to detect rejected configs")
 	fs.IntVar(&c.gatewayPort, "gateway-port", 0, "agentgateway LLM listener port in the rendered config")
 	fs.StringVar(&c.gatewayDBURL, "gateway-database-url", "", "agentgateway budget store URL in the rendered config")
@@ -186,7 +183,6 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.gatewayMode, "standalone")
 	orDefault(&c.gatewayURL, fc.Gateway.URL)
 	orDefault(&c.gatewayConfigMap, fc.Gateway.ConfigMap)
-	orDefault(&c.gatewayAdminURL, fc.Gateway.AdminURL)
 	orDefault(&c.gatewayStatsURL, fc.Gateway.StatsURL)
 	orDefault(&c.gatewayPort, fc.Gateway.Port)
 	orDefault(&c.gatewayDBURL, fc.Gateway.DatabaseURL)
