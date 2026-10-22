@@ -357,6 +357,50 @@ func (q *Queries) MoveTicket(ctx context.Context, arg MoveTicketParams) (Ticket,
 	return i, err
 }
 
+const moveTicketFrom = `-- name: MoveTicketFrom :one
+UPDATE tickets
+SET status = $1::ticket_status
+WHERE org_id = $2 AND id = $3 AND status::text = ANY($4::text[])
+  AND $1::ticket_status <> 'done'
+RETURNING org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at
+`
+
+type MoveTicketFromParams struct {
+	ToStatus     TicketStatus
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+	FromStatuses []string
+}
+
+// Moves a ticket between two columns other than Done, only if it is in
+// from: parking moves In progress or To do to Waiting on you, and a resolved
+// approval moves it back. No row: the ticket is elsewhere (for example Done,
+// or a user moved it).
+func (q *Queries) MoveTicketFrom(ctx context.Context, arg MoveTicketFromParams) (Ticket, error) {
+	row := q.db.QueryRow(ctx, moveTicketFrom,
+		arg.ToStatus,
+		arg.OrgID,
+		arg.ID,
+		arg.FromStatuses,
+	)
+	var i Ticket
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Title,
+		&i.Status,
+		&i.AgentID,
+		&i.CreatedBy,
+		&i.HarnessSessionID,
+		&i.HarnessSessionCwd,
+		&i.LastEventSeq,
+		&i.DoneAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const setTicketHarnessSession = `-- name: SetTicketHarnessSession :one
 UPDATE tickets t
 SET harness_session_id = $1::text, harness_session_cwd = $2::text

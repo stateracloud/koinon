@@ -45,6 +45,9 @@ const (
 	ReasonAgentArchived CancelReason = "agent_archived"
 	ReasonWallClockCap  CancelReason = "wall_clock_cap"
 	ReasonTokenCap      CancelReason = "token_cap"
+	// ReasonApprovalExpired: the run was parked on an approval nobody decided in time
+	// (ADR 0049: 7 days).
+	ReasonApprovalExpired CancelReason = "approval_expired"
 )
 
 // ErrAgentNotActive means the ticket's agent cannot take runs.

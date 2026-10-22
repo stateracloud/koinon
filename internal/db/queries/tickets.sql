@@ -72,3 +72,14 @@ SELECT * FROM ticket_events
 WHERE org_id = @org_id AND ticket_id = @ticket_id AND seq > @after_seq
   AND kind = 'message' AND actor_kind = 'user'
 ORDER BY seq;
+
+-- name: MoveTicketFrom :one
+-- Moves a ticket between two columns other than Done, only if it is in
+-- from: parking moves In progress or To do to Waiting on you, and a resolved
+-- approval moves it back. No row: the ticket is elsewhere (for example Done,
+-- or a user moved it).
+UPDATE tickets
+SET status = @to_status::ticket_status
+WHERE org_id = @org_id AND id = @id AND status::text = ANY(@from_statuses::text[])
+  AND @to_status::ticket_status <> 'done'
+RETURNING *;

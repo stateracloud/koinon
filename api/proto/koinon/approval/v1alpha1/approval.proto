@@ -1,0 +1,198 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.approval.v1alpha1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1;approvalv1alpha1";
+
+// ApprovalService shows and decides ask-tier tool calls (ADRs 0008, 0042,
+// 0049; plan item P1). An agent's call is recorded exactly; approving it binds
+// to the SHA-256 of its canonical arguments, and Koinon then executes exactly
+// that call (for create_pull_request: the branch, the commit and the pull
+// request through the GitHub API; the agent never pushes) and resumes the
+// parked run with the result. Viewers see every request; only admins and
+// owners decide (ADR 0049: the default approver policy).
+service ApprovalService {
+  // ListApprovals returns the org's requests, oldest first: by default those
+  // waiting for a decision (Waiting on you), or every request of one ticket.
+  // Viewers and above.
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetApproval returns one request with its canonical arguments, the
+  // push-and-run risk summary and the full change. Viewers and above.
+  rpc GetApproval(GetApprovalRequest) returns (GetApprovalResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Approve approves a pending request and executes it. args_sha256 must be
+  // the hash shown with the request; a different hash fails with
+  // FAILED_PRECONDITION and nothing is executed. Approving again with the
+  // same hash returns the request as it is (the same pull request), without
+  // executing it again. Admins and owners.
+  rpc Approve(ApproveRequest) returns (ApproveResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+
+  // Deny denies a pending request; the run resumes with the denial and the
+  // note. Admins and owners.
+  rpc Deny(DenyRequest) returns (DenyResponse);
+}
+
+// Status is the ADR 0042 lifecycle: pending -> approved -> executed | failed,
+// or pending -> denied | expired | canceled.
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_PENDING = 1;
+  STATUS_APPROVED = 2;
+  STATUS_DENIED = 3;
+  STATUS_EXECUTED = 4;
+  STATUS_FAILED = 5;
+  STATUS_EXPIRED = 6;
+  STATUS_CANCELED = 7;
+}
+
+// Decision is what the grant's preset decided for the call.
+enum Decision {
+  DECISION_UNSPECIFIED = 0;
+  // A human decides (the Standard preset).
+  DECISION_ASK = 1;
+  // Executed without a card (the Trusted preset).
+  DECISION_ALLOW = 2;
+}
+
+// Risk is the push-and-run summary the approval card leads with (plan item
+// W2). Lists hold repository paths.
+message Risk {
+  int64 files = 1;
+  int64 bytes = 2;
+  repeated string deletions = 3;
+  // CI and automation configuration (workflow files are refused outright).
+  repeated string ci = 4;
+  // Files tooling or people execute: scripts, Makefiles, hooks.
+  repeated string scripts = 5;
+  // Dependency manifests and lock files.
+  repeated string dependencies = 6;
+  repeated string binary = 7;
+}
+
+// FileChange is one file of a proposed pull request, with its full new
+// content: the diff data the card shows collapsed.
+message FileChange {
+  string path = 1;
+  string content = 2;
+  bool delete = 3;
+}
+
+// PullRequestCall is create_pull_request's arguments.
+message PullRequestCall {
+  // The new branch Koinon creates (always under koinon/).
+  string branch = 1;
+  // The branch to merge into; empty means the repository's default branch.
+  string base = 2;
+  string title = 3;
+  string body = 4;
+  repeated FileChange files = 5;
+}
+
+// CommentCall is comment_on_issue's arguments.
+message CommentCall {
+  int64 issue_number = 1;
+  string body = 2;
+}
+
+// Approval is one recorded ask-tier call.
+message Approval {
+  string id = 1;
+  string org_id = 2;
+  string ticket_id = 3;
+  string run_id = 4;
+  string agent_id = 5;
+  // Connector type, e.g. "github".
+  string connector = 6;
+  string tool = 7;
+  // What the call acts on, e.g. "github:acme/widgets".
+  string target = 8;
+  // The canonical JSON of the arguments, exactly as hashed.
+  string args_json = 9;
+  string args_sha256 = 10;
+  Decision decision = 11;
+  Status status = 12;
+  Risk risk = 13;
+  // The arguments, decoded; only set by GetApproval.
+  oneof call {
+    PullRequestCall pull_request = 14;
+    CommentCall comment = 15;
+  }
+  string decided_by = 16;
+  google.protobuf.Timestamp decided_at = 17;
+  string decision_note = 18;
+  // The executed call's outcome, e.g. {"url": ".../pull/1", "number": 1}.
+  google.protobuf.Struct result = 19;
+  // Why execution failed.
+  string error = 20;
+  int64 executions = 21;
+  google.protobuf.Timestamp expires_at = 22;
+  google.protobuf.Timestamp created_at = 23;
+  google.protobuf.Timestamp executed_at = 24;
+  // Whether the caller may approve or deny it (admins and owners, while it
+  // is pending).
+  bool can_decide = 25;
+}
+
+// ListApprovalsRequest names the org and, optionally, a ticket.
+message ListApprovalsRequest {
+  string org_id = 1;
+  // With a ticket, every request of the ticket in any status; without, the
+  // org's pending requests.
+  string ticket_id = 2;
+}
+
+// ListApprovalsResponse holds the requests, without their decoded calls.
+message ListApprovalsResponse {
+  repeated Approval approvals = 1;
+}
+
+// GetApprovalRequest names a request.
+message GetApprovalRequest {
+  string org_id = 1;
+  string approval_id = 2;
+}
+
+// GetApprovalResponse holds the request with its decoded call.
+message GetApprovalResponse {
+  Approval approval = 1;
+}
+
+// ApproveRequest names a request and the hash the approver saw.
+message ApproveRequest {
+  string org_id = 1;
+  string approval_id = 2;
+  string args_sha256 = 3;
+  // Optional; shown on the ticket.
+  string note = 4;
+}
+
+// ApproveResponse holds the request after execution: executed with its
+// result, failed with an error, or still approved if execution is retried.
+message ApproveResponse {
+  Approval approval = 1;
+}
+
+// DenyRequest names a request.
+message DenyRequest {
+  string org_id = 1;
+  string approval_id = 2;
+  // Optional; sent to the agent and shown on the ticket.
+  string note = 3;
+}
+
+// DenyResponse holds the denied request.
+message DenyResponse {
+  Approval approval = 1;
+}
