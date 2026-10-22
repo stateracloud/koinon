@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { agentStatusLabel, flavorLabel } from '@/lib/agents'
+import { agentStatusLabel, flavorLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
 /** AgentsPage lists the org's agents. */

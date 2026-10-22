@@ -4,24 +4,14 @@
 // ListConnectorTypes returns. Its shape is connectors/schema/connector.schema.json;
 // anything unexpected is dropped rather than trusted.
 
-import type { JsonObject, JsonValue } from '@bufbuild/protobuf'
 import type { ConnectorType } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { arr, obj, str } from '@/lib/json'
 
 export type GuideField = { id: string; label: string; help?: string; type: string; secret: boolean; pattern?: string; required: boolean }
 export type GuideLink = { label: string; url: string }
 export type GuideValue = { label: string; value: string }
 export type GuideStep = { id: string; title: string; body: string; links: GuideLink[]; values: GuideValue[]; fields: string[]; check?: string }
 export type SetupGuide = { fields: GuideField[]; steps: GuideStep[]; targetPattern?: string }
-
-function obj(v: JsonValue | undefined): JsonObject | undefined {
-  return v && typeof v === 'object' && !Array.isArray(v) ? v : undefined
-}
-function arr(v: JsonValue | undefined): JsonValue[] {
-  return Array.isArray(v) ? v : []
-}
-function str(v: JsonValue | undefined): string | undefined {
-  return typeof v === 'string' ? v : undefined
-}
 
 /** Only http(s) links are rendered; anything else is dropped. */
 function safeUrl(u: string | undefined): string | undefined {

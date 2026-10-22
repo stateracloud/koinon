@@ -1,42 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
-import { Flavor, Preset, type Grant } from '@/gen/koinon/template/v1alpha1/template_pb'
-
-const flavorLabels: Record<Flavor, string> = {
-  [Flavor.UNSPECIFIED]: 'Default',
-  [Flavor.OPENCODE]: 'OpenCode',
-  [Flavor.HERMES]: 'Hermes',
-  [Flavor.PI]: 'pi',
-}
-
-export function flavorLabel(f: Flavor): string {
-  return flavorLabels[f] ?? 'Unknown'
-}
-
-const presetLabels: Record<Preset, string> = {
-  [Preset.UNSPECIFIED]: 'Unspecified',
-  [Preset.READ_ONLY]: 'Read only',
-  [Preset.STANDARD]: 'Standard (writes need your approval)',
-  [Preset.TRUSTED]: 'Trusted (writes run without approval)',
-}
-
-export function presetLabel(p: Preset): string {
-  return presetLabels[p] ?? 'Unknown'
-}
-
-export function agentStatusLabel(s: AgentStatus): string {
-  switch (s) {
-    case AgentStatus.DRAFT:
-      return 'Draft'
-    case AgentStatus.ACTIVE:
-      return 'Active'
-    case AgentStatus.ARCHIVED:
-      return 'Archived'
-    default:
-      return 'Unknown'
-  }
-}
+import type { Grant } from '@/gen/koinon/template/v1alpha1/template_pb'
 
 /** The GitHub connector's target pattern (connectors/github/connector.yaml), used when the connector type is not loaded. */
 export const defaultRepositoryPattern = '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$'

@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { GrantBinding } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import type { Connection } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { Flavor, type Grant, type Template } from '@/gen/koinon/template/v1alpha1/template_pb'
-import { flavorLabel, grantNeedsTargets, presetLabel, validateRepositories } from '@/lib/agents'
+import { grantNeedsTargets, validateRepositories } from '@/lib/agents'
+import { flavorLabel, presetLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 
 export type NewAgent = { templateId: string; displayName: string; flavor: Flavor; grants: Pick<GrantBinding, 'connector' | 'connectionId' | 'repositories'>[] }
