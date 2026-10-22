@@ -3,10 +3,10 @@
 package agentd
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/procoduck/koinon/internal/agentconfig"
 	"github.com/procoduck/koinon/internal/db/store"
 )
 
@@ -57,44 +57,31 @@ func modelOption(f store.AgentFlavor, model string) string {
 	return ""
 }
 
+// versionConfig reads an agent version's config with agentconfig.Parse. A config that cannot
+// be read counts as empty: the install default model, every harness setting off and no
+// instructions of its own.
+func versionConfig(raw []byte) (agentconfig.Config, error) {
+	c, err := agentconfig.Parse(raw)
+	if err != nil {
+		return agentconfig.Config{}, err
+	}
+	return c, nil
+}
+
 // versionModel returns the model an agent version names, or "" for the install default.
-// The version config holds it as {"model": {"name": "..."}}, as templates do, or as a
-// string.
-func versionModel(config []byte) string {
-	var c struct {
-		Model json.RawMessage `json:"model"`
+func versionModel(c agentconfig.Config) string {
+	if name := strings.TrimSpace(c.Model); name != "default" {
+		return name
 	}
-	if json.Unmarshal(config, &c) != nil || len(c.Model) == 0 {
-		return ""
-	}
-	var name string
-	if json.Unmarshal(c.Model, &name) != nil {
-		var m struct {
-			Name string `json:"name"`
-		}
-		if json.Unmarshal(c.Model, &m) != nil {
-			return ""
-		}
-		name = m.Name
-	}
-	if name = strings.TrimSpace(name); name == "default" {
-		return ""
-	}
-	return name
+	return ""
 }
 
 // harnessArgs are the launch command's optional switches from the agent version's harness
 // settings ({"harness": {"pluginInstalls": true}}, copied from the template). Only OpenCode
 // has one: --plugin-installs lets it load external plugins (flavors/opencode/README.md); the
-// reconciler opens the npm registry for the same agents. A config that cannot be read turns
-// every setting off.
-func harnessArgs(f store.AgentFlavor, config []byte) []string {
-	var c struct {
-		Harness struct {
-			PluginInstalls bool `json:"pluginInstalls"`
-		} `json:"harness"`
-	}
-	if json.Unmarshal(config, &c) != nil || !c.Harness.PluginInstalls || f != store.AgentFlavorOpencode {
+// reconciler opens the npm registry for the same agents.
+func harnessArgs(f store.AgentFlavor, c agentconfig.Config) []string {
+	if !c.Harness.PluginInstalls || f != store.AgentFlavorOpencode {
 		return nil
 	}
 	return []string{"--plugin-installs"}
