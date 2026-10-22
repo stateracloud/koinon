@@ -142,6 +142,12 @@ func (f *Fake) Snapshot(repo string) Repo {
 // SetBranch points a branch at a new commit with the given files on top of the default
 // branch, as a human pushing to it would.
 func (f *Fake) SetBranch(repo, branch, message string, files map[string]string) string {
+	return f.SetBranchModes(repo, branch, message, files, nil)
+}
+
+// SetBranchModes is SetBranch with a mode (100755) for some of the files; the others are
+// regular (100644).
+func (f *Fake) SetBranchModes(repo, branch, message string, files, fileModes map[string]string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r := f.repo(repo)
@@ -153,8 +159,14 @@ func (f *Fake) SetBranch(repo, branch, message string, files map[string]string) 
 		tree[p] = b
 	}
 	modes := maps.Clone(r.Modes[base.Tree])
+	if modes == nil {
+		modes = map[string]string{}
+	}
 	for p := range files {
 		delete(modes, p)
+		if m, ok := fileModes[p]; ok && m != "100644" {
+			modes[p] = m
+		}
 	}
 	tsha := treeID(tree, modes)
 	r.Trees[tsha] = tree
@@ -181,6 +193,7 @@ func (f *Fake) routeRepos(mux *http.ServeMux) {
 	mux.HandleFunc("POST /repos/{owner}/{repo}/git/commits", f.withRepo("contents", "write", f.createCommit))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/git/blobs", f.withRepo("contents", "write", f.createBlob))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/git/trees", f.withRepo("contents", "write", f.createTree))
+	mux.HandleFunc("GET /repos/{owner}/{repo}/git/trees/{sha}", f.withRepo("contents", "read", f.getTree))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/pulls", f.withRepo("pull_requests", "read", f.listPulls))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/pulls", f.withRepo("pull_requests", "write", f.createPull))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/issues/{number}/comments", f.withRepo("issues", "read", f.listComments))
@@ -375,6 +388,55 @@ func (f *Fake) createTree(w http.ResponseWriter, req *http.Request, r *Repo) {
 	r.Trees[sha] = tree
 	r.Modes[sha] = modes
 	writeJSON(w, http.StatusCreated, map[string]string{"sha": sha})
+}
+
+// getTree lists a tree. The fake stores flat trees (path -> blob), so a subtree is named
+// "<root tree SHA>:<directory>"; GitHub's subtree SHAs are opaque to clients all the same.
+func (f *Fake) getTree(w http.ResponseWriter, req *http.Request, r *Repo) {
+	root, dir, _ := strings.Cut(req.PathValue("sha"), ":")
+	files, ok := r.Trees[root]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	prefix := ""
+	if dir != "" {
+		prefix = dir + "/"
+	}
+	recursive := req.URL.Query().Get("recursive") != ""
+	truncated := recursive && f.TruncateTrees
+	entries := []map[string]string{}
+	seen := map[string]bool{}
+	for _, p := range slices.Sorted(maps.Keys(files)) {
+		rel, ok := strings.CutPrefix(p, prefix)
+		if !ok {
+			continue
+		}
+		// Every directory above the file, then the file; a non-recursive listing stops at
+		// the first level.
+		parts := strings.Split(rel, "/")
+		for i := 1; i < len(parts); i++ {
+			sub := strings.Join(parts[:i], "/")
+			if seen[sub] || (i > 1 && (!recursive || truncated)) {
+				continue
+			}
+			seen[sub] = true
+			entries = append(entries, map[string]string{"path": sub, "mode": "040000", "type": "tree", "sha": root + ":" + prefix + sub})
+		}
+		if len(parts) > 1 && (!recursive || truncated) {
+			continue
+		}
+		mode := "100644"
+		if m, ok := r.Modes[root][p]; ok {
+			mode = m
+		}
+		entries = append(entries, map[string]string{"path": rel, "mode": mode, "type": "blob", "sha": files[p]})
+	}
+	if dir != "" && len(entries) == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sha": req.PathValue("sha"), "tree": entries, "truncated": truncated})
 }
 
 func (f *Fake) pullJSON(p Pull) map[string]any {

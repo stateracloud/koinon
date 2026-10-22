@@ -38,6 +38,9 @@ type Fake struct {
 	// LieAboutPermissions makes token responses claim every App permission,
 	// whatever was requested, to test that clients check responses.
 	LieAboutPermissions bool
+	// TruncateTrees makes recursive tree listings answer only the root's entries, marked
+	// truncated, as GitHub does for a very large repository.
+	TruncateTrees bool
 
 	Server *httptest.Server
 	// PEM is the App's private key, as GitHub's downloaded .pem file.

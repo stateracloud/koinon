@@ -66,7 +66,9 @@ export type Risk = Message<"koinon.approval.v1alpha1.Risk"> & {
   binary: string[];
 
   /**
-   * Files the change writes as executable (git mode 100755).
+   * Files the call marks executable (git mode 100755); a marked file that is
+   * already executable on the base branch is listed too. Unmarked files keep
+   * their mode.
    *
    * @generated from field: repeated string executable = 8;
    */
@@ -103,8 +105,9 @@ export type FileChange = Message<"koinon.approval.v1alpha1.FileChange"> & {
   delete: boolean;
 
   /**
-   * The file is written as executable (git mode 100755) instead of a regular
-   * file (100644). Symbolic links and submodules are never written.
+   * The file is written as executable (git mode 100755). Otherwise a new file
+   * is regular (100644) and a modified file keeps its mode on the base branch.
+   * Symbolic links and submodules are never written.
    *
    * @generated from field: bool executable = 4;
    */

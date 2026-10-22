@@ -157,7 +157,9 @@ type Risk struct {
 	// Dependency manifests and lock files.
 	Dependencies []string `protobuf:"bytes,6,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
 	Binary       []string `protobuf:"bytes,7,rep,name=binary,proto3" json:"binary,omitempty"`
-	// Files the change writes as executable (git mode 100755).
+	// Files the call marks executable (git mode 100755); a marked file that is
+	// already executable on the base branch is listed too. Unmarked files keep
+	// their mode.
 	Executable    []string `protobuf:"bytes,8,rep,name=executable,proto3" json:"executable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -256,8 +258,9 @@ type FileChange struct {
 	Path    string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
 	Content string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
 	Delete  bool                   `protobuf:"varint,3,opt,name=delete,proto3" json:"delete,omitempty"`
-	// The file is written as executable (git mode 100755) instead of a regular
-	// file (100644). Symbolic links and submodules are never written.
+	// The file is written as executable (git mode 100755). Otherwise a new file
+	// is regular (100644) and a modified file keeps its mode on the base branch.
+	// Symbolic links and submodules are never written.
 	Executable    bool `protobuf:"varint,4,opt,name=executable,proto3" json:"executable,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
