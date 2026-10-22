@@ -6,6 +6,11 @@
 # (hermes_cli/config.py, _expand_env_vars); the KOINON_* values come from koinon-hermes's
 # arguments, OPENAI_API_KEY is the agent's agentgateway key, an OpenShell placeholder inside a
 # sandbox. See flavors/hermes/README.md for the source of each switch.
+#
+# This file holds what only shapes the run: the model, the MCP server, phone-home switches.
+# Everything that decides the agent's tools is in Hermes's managed scope,
+# /etc/hermes/config.yaml, which wins over this file at every key it sets; the agent can
+# replace this file's link, not that file.
 
 # Hermes 0.22.3's config schema version (hermes_cli/config_defaults.py). Without it Hermes
 # takes the file for a pre-v12 config and tries to migrate it.
@@ -27,30 +32,8 @@ mcp_servers:
       resources: false
       prompts: false
 
-# The tools an ACP session gets: files, terminal, todo list and the Koinon MCP server. Naming
-# the MCP server makes the list an allowlist; memory, skills, session search, web, browser,
-# delegation and code execution are not in it.
-platform_toolsets:
-  acp: [file, terminal, todo, koinon]
-agent:
-  disabled_toolsets: [memory, skills, session_search, web, browser, delegation, code_execution, cronjob]
-
-# Self-improvement off: no memory or user profile, no nudges to save memories or create
-# skills, no curator, no background review of finished turns.
-memory:
-  memory_enabled: false
-  user_profile_enabled: false
-  nudge_interval: 0
-  provider: ""
-skills:
-  creation_nudge_interval: 0
-curator:
-  enabled: false
-auxiliary:
-  background_review:
-    enabled: false
-
-# Phone-home off: update and plugin update checks, shared metrics, lazy package installs.
+# Phone-home off: update and plugin update checks, shared metrics. The OpenShell policy refuses
+# these requests anyway.
 updates:
   check: false
 plugins:
@@ -59,5 +42,3 @@ telemetry:
   shared_metrics:
     enabled: false
     send: false
-security:
-  allow_lazy_installs: false

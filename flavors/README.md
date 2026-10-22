@@ -25,3 +25,10 @@ one image).
 | Unknown session on load | `-32603` service failure | `-32603` `not_found` | `-32602` `Unknown sessionId` |
 | MCP tool names | `koinon_<tool>` | `mcp__koinon__<tool>` | `mcp__koinon__<tool>` (direct exposure) |
 | Config | read-only, used in place | read-only, linked into `HERMES_HOME` | read-only templates rendered into the home at start |
+| Tool switches | read-only config | managed scope `/etc/hermes/config.yaml`, over the user config | rendered config |
+| Run instructions (`/sandbox/.koinon/AGENTS.md`, written by agentd) | system prompt, through the global `AGENTS.md` link in the read-only image | system prompt, through `$HERMES_HOME/SOUL.md`, linked at start; a loaded session keeps its old prompt | appended to the system prompt, through `$PI_CODING_AGENT_DIR/APPEND_SYSTEM.md`, linked at start |
+
+Instruction delivery is the same for all three: agentd writes the file before the harness
+starts, the entry script refuses to start (exit 64) when it is missing, empty or a symbolic
+link, and before every prompt agentd checks the file's hash and the flavor's link
+(`internal/agentd`, `instructionLink`) and restores either (event `run.instructions_restored`).
