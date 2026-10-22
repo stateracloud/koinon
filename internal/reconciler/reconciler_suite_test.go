@@ -98,13 +98,18 @@ func newOrg(ctx context.Context) (org, user pgtype.UUID) {
 
 // newAgent creates and activates an OpenCode agent.
 func newAgent(ctx context.Context, org, user pgtype.UUID) store.Agent {
+	return newAgentWithConfig(ctx, org, user, `{"instructions":"help"}`)
+}
+
+// newAgentWithConfig creates and activates an OpenCode agent whose version has config.
+func newAgentWithConfig(ctx context.Context, org, user pgtype.UUID, config string) store.Agent {
 	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
 		OrgID: org, DisplayName: "Repo helper with a long display name that is no sandbox name",
 		Flavor: store.AgentFlavorOpencode, CreatedBy: user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
-		OrgID: org, AgentID: agent.ID, Config: []byte(`{"instructions":"help"}`), CreatedBy: user,
+		OrgID: org, AgentID: agent.ID, Config: []byte(config), CreatedBy: user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{

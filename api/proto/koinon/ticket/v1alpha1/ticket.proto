@@ -68,6 +68,9 @@ message Ticket {
   google.protobuf.Timestamp created_at = 8;
   google.protobuf.Timestamp updated_at = 9;
   google.protobuf.Timestamp done_at = 10;
+  // Model spend of all the ticket's runs (plan item L1). Set by GetTicket and
+  // ListTickets.
+  koinon.run.v1alpha1.Cost cost = 11;
 }
 
 // TicketEvent is one entry of the ticket timeline: a message, a column move

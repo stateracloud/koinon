@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/run/v1alpha1/run.proto.
  */
 export const file_koinon_run_v1alpha1_run: GenFile = /*@__PURE__*/
-  fileDesc("Ch1rb2lub24vcnVuL3YxYWxwaGExL3J1bi5wcm90bxITa29pbm9uLnJ1bi52MWFscGhhMSLOAwoDUnVuEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSGAoQYWdlbnRfdmVyc2lvbl9pZBgFIAEoCRIsCgVzdGF0ZRgGIAEoDjIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuU3RhdGUSNAoLcGFya19yZWFzb24YByABKA4yHy5rb2lub24ucnVuLnYxYWxwaGExLlBhcmtSZWFzb24SFgoOb3V0Y29tZV9yZWFzb24YCCABKAkSHgoWbWF4X3dhbGxfY2xvY2tfc2Vjb25kcxgJIAEoAxISCgptYXhfdG9rZW5zGAogASgDEhMKC3Rva2Vuc191c2VkGAsgASgDEhYKDmxhc3RfZXZlbnRfc2VxGAwgASgDEi4KCmNyZWF0ZWRfYXQYDSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnN0YXJ0ZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKPAQoIUnVuRXZlbnQSDgoGcnVuX2lkGAEgASgJEgsKA3NlcRgCIAEoAxIMCgRraW5kGAMgASgJEigKB3BheWxvYWQYBCABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Ei4KCmNyZWF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIi8KDUdldFJ1blJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCSI3Cg5HZXRSdW5SZXNwb25zZRIlCgNydW4YASABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1biJCChBDYW5jZWxSdW5SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSDgoGcmVhc29uGAMgASgJIjoKEUNhbmNlbFJ1blJlc3BvbnNlEiUKA3J1bhgBIAEoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIkQKD1dhdGNoUnVuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEhEKCWFmdGVyX3NlcRgDIAEoAyJzChBXYXRjaFJ1blJlc3BvbnNlEicKA3J1bhgBIAEoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuSAASLgoFZXZlbnQYAiABKAsyHS5rb2lub24ucnVuLnYxYWxwaGExLlJ1bkV2ZW50SABCBgoEaXRlbSrHAQoIUnVuU3RhdGUSGQoVUlVOX1NUQVRFX1VOU1BFQ0lGSUVEEAASFAoQUlVOX1NUQVRFX1FVRVVFRBABEhYKElJVTl9TVEFURV9TVEFSVElORxACEhUKEVJVTl9TVEFURV9SVU5OSU5HEAMSFAoQUlVOX1NUQVRFX1BBUktFRBAEEhcKE1JVTl9TVEFURV9TVUNDRUVERUQQBRIUChBSVU5fU1RBVEVfRkFJTEVEEAYSFgoSUlVOX1NUQVRFX0NBTkNFTEVEEAcqkAEKClBhcmtSZWFzb24SGwoXUEFSS19SRUFTT05fVU5TUEVDSUZJRUQQABIYChRQQVJLX1JFQVNPTl9BUFBST1ZBTBABEhYKElBBUktfUkVBU09OX0JVREdFVBACEhMKD1BBUktfUkVBU09OX0EyQRADEh4KGlBBUktfUkVBU09OX0lOUFVUX1JFUVVJUkVEEAQyoAIKClJ1blNlcnZpY2USVgoGR2V0UnVuEiIua29pbm9uLnJ1bi52MWFscGhhMS5HZXRSdW5SZXF1ZXN0GiMua29pbm9uLnJ1bi52MWFscGhhMS5HZXRSdW5SZXNwb25zZSIDkAIBEloKCUNhbmNlbFJ1bhIlLmtvaW5vbi5ydW4udjFhbHBoYTEuQ2FuY2VsUnVuUmVxdWVzdBomLmtvaW5vbi5ydW4udjFhbHBoYTEuQ2FuY2VsUnVuUmVzcG9uc2USXgoIV2F0Y2hSdW4SJC5rb2lub24ucnVuLnYxYWxwaGExLldhdGNoUnVuUmVxdWVzdBolLmtvaW5vbi5ydW4udjFhbHBoYTEuV2F0Y2hSdW5SZXNwb25zZSIDkAIBMAFCSlpIZ2l0aHViLmNvbS9wcm9jb2R1Y2sva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vcnVuL3YxYWxwaGExO3J1bnYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("Ch1rb2lub24vcnVuL3YxYWxwaGExL3J1bi5wcm90bxITa29pbm9uLnJ1bi52MWFscGhhMSL3AwoDUnVuEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSGAoQYWdlbnRfdmVyc2lvbl9pZBgFIAEoCRIsCgVzdGF0ZRgGIAEoDjIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuU3RhdGUSNAoLcGFya19yZWFzb24YByABKA4yHy5rb2lub24ucnVuLnYxYWxwaGExLlBhcmtSZWFzb24SFgoOb3V0Y29tZV9yZWFzb24YCCABKAkSHgoWbWF4X3dhbGxfY2xvY2tfc2Vjb25kcxgJIAEoAxISCgptYXhfdG9rZW5zGAogASgDEhMKC3Rva2Vuc191c2VkGAsgASgDEhYKDmxhc3RfZXZlbnRfc2VxGAwgASgDEi4KCmNyZWF0ZWRfYXQYDSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnN0YXJ0ZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBInCgRjb3N0GBAgASgLMhkua29pbm9uLnJ1bi52MWFscGhhMS5Db3N0ImIKBENvc3QSEAoIcmVxdWVzdHMYASABKAMSFAoMaW5wdXRfdG9rZW5zGAIgASgDEhUKDW91dHB1dF90b2tlbnMYAyABKAMSCwoDdXNkGAQgASgJEg4KBnByaWNlZBgFIAEoCCKPAQoIUnVuRXZlbnQSDgoGcnVuX2lkGAEgASgJEgsKA3NlcRgCIAEoAxIMCgRraW5kGAMgASgJEigKB3BheWxvYWQYBCABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Ei4KCmNyZWF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIi8KDUdldFJ1blJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCSI3Cg5HZXRSdW5SZXNwb25zZRIlCgNydW4YASABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1biJCChBDYW5jZWxSdW5SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSDgoGcmVhc29uGAMgASgJIjoKEUNhbmNlbFJ1blJlc3BvbnNlEiUKA3J1bhgBIAEoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIkQKD1dhdGNoUnVuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEhEKCWFmdGVyX3NlcRgDIAEoAyJzChBXYXRjaFJ1blJlc3BvbnNlEicKA3J1bhgBIAEoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuSAASLgoFZXZlbnQYAiABKAsyHS5rb2lub24ucnVuLnYxYWxwaGExLlJ1bkV2ZW50SABCBgoEaXRlbSrHAQoIUnVuU3RhdGUSGQoVUlVOX1NUQVRFX1VOU1BFQ0lGSUVEEAASFAoQUlVOX1NUQVRFX1FVRVVFRBABEhYKElJVTl9TVEFURV9TVEFSVElORxACEhUKEVJVTl9TVEFURV9SVU5OSU5HEAMSFAoQUlVOX1NUQVRFX1BBUktFRBAEEhcKE1JVTl9TVEFURV9TVUNDRUVERUQQBRIUChBSVU5fU1RBVEVfRkFJTEVEEAYSFgoSUlVOX1NUQVRFX0NBTkNFTEVEEAcqkAEKClBhcmtSZWFzb24SGwoXUEFSS19SRUFTT05fVU5TUEVDSUZJRUQQABIYChRQQVJLX1JFQVNPTl9BUFBST1ZBTBABEhYKElBBUktfUkVBU09OX0JVREdFVBACEhMKD1BBUktfUkVBU09OX0EyQRADEh4KGlBBUktfUkVBU09OX0lOUFVUX1JFUVVJUkVEEAQyoAIKClJ1blNlcnZpY2USVgoGR2V0UnVuEiIua29pbm9uLnJ1bi52MWFscGhhMS5HZXRSdW5SZXF1ZXN0GiMua29pbm9uLnJ1bi52MWFscGhhMS5HZXRSdW5SZXNwb25zZSIDkAIBEloKCUNhbmNlbFJ1bhIlLmtvaW5vbi5ydW4udjFhbHBoYTEuQ2FuY2VsUnVuUmVxdWVzdBomLmtvaW5vbi5ydW4udjFhbHBoYTEuQ2FuY2VsUnVuUmVzcG9uc2USXgoIV2F0Y2hSdW4SJC5rb2lub24ucnVuLnYxYWxwaGExLldhdGNoUnVuUmVxdWVzdBolLmtvaW5vbi5ydW4udjFhbHBoYTEuV2F0Y2hSdW5SZXNwb25zZSIDkAIBMAFCSlpIZ2l0aHViLmNvbS9wcm9jb2R1Y2sva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vcnVuL3YxYWxwaGExO3J1bnYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * Run is one execution of an agent for a ticket.
@@ -103,6 +103,14 @@ export type Run = Message<"koinon.run.v1alpha1.Run"> & {
    * @generated from field: google.protobuf.Timestamp finished_at = 15;
    */
   finishedAt?: Timestamp | undefined;
+
+  /**
+   * Model spend recorded for the run by the spend ledger (plan item L1). Set
+   * by GetRun and on the runs of GetTicket; unset elsewhere.
+   *
+   * @generated from field: koinon.run.v1alpha1.Cost cost = 16;
+   */
+  cost?: Cost | undefined;
 };
 
 /**
@@ -111,6 +119,53 @@ export type Run = Message<"koinon.run.v1alpha1.Run"> & {
  */
 export const RunSchema: GenMessage<Run> = /*@__PURE__*/
   messageDesc(file_koinon_run_v1alpha1_run, 0);
+
+/**
+ * Cost is model spend recorded by the spend ledger from agentgateway's access
+ * log (plan item L1).
+ *
+ * @generated from message koinon.run.v1alpha1.Cost
+ */
+export type Cost = Message<"koinon.run.v1alpha1.Cost"> & {
+  /**
+   * Charged model requests.
+   *
+   * @generated from field: int64 requests = 1;
+   */
+  requests: bigint;
+
+  /**
+   * @generated from field: int64 input_tokens = 2;
+   */
+  inputTokens: bigint;
+
+  /**
+   * @generated from field: int64 output_tokens = 3;
+   */
+  outputTokens: bigint;
+
+  /**
+   * USD as an exact decimal string with at least two fraction digits, for
+   * example "0.0021" or "0.00".
+   *
+   * @generated from field: string usd = 4;
+   */
+  usd: string;
+
+  /**
+   * False when some request had no price, so usd undercounts.
+   *
+   * @generated from field: bool priced = 5;
+   */
+  priced: boolean;
+};
+
+/**
+ * Describes the message koinon.run.v1alpha1.Cost.
+ * Use `create(CostSchema)` to create a new message.
+ */
+export const CostSchema: GenMessage<Cost> = /*@__PURE__*/
+  messageDesc(file_koinon_run_v1alpha1_run, 1);
 
 /**
  * RunEvent is one session update or lifecycle note of a run.
@@ -153,7 +208,7 @@ export type RunEvent = Message<"koinon.run.v1alpha1.RunEvent"> & {
  * Use `create(RunEventSchema)` to create a new message.
  */
 export const RunEventSchema: GenMessage<RunEvent> = /*@__PURE__*/
-  messageDesc(file_koinon_run_v1alpha1_run, 1);
+  messageDesc(file_koinon_run_v1alpha1_run, 2);
 
 /**
  * GetRunRequest names a run.
@@ -177,7 +232,7 @@ export type GetRunRequest = Message<"koinon.run.v1alpha1.GetRunRequest"> & {
  * Use `create(GetRunRequestSchema)` to create a new message.
  */
 export const GetRunRequestSchema: GenMessage<GetRunRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_run_v1alpha1_run, 2);
+  messageDesc(file_koinon_run_v1alpha1_run, 3);
 
 /**
  * GetRunResponse holds the run.
@@ -196,7 +251,7 @@ export type GetRunResponse = Message<"koinon.run.v1alpha1.GetRunResponse"> & {
  * Use `create(GetRunResponseSchema)` to create a new message.
  */
 export const GetRunResponseSchema: GenMessage<GetRunResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_run_v1alpha1_run, 3);
+  messageDesc(file_koinon_run_v1alpha1_run, 4);
 
 /**
  * CancelRunRequest names a run.
@@ -227,7 +282,7 @@ export type CancelRunRequest = Message<"koinon.run.v1alpha1.CancelRunRequest"> &
  * Use `create(CancelRunRequestSchema)` to create a new message.
  */
 export const CancelRunRequestSchema: GenMessage<CancelRunRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_run_v1alpha1_run, 4);
+  messageDesc(file_koinon_run_v1alpha1_run, 5);
 
 /**
  * CancelRunResponse holds the canceled run.
@@ -246,7 +301,7 @@ export type CancelRunResponse = Message<"koinon.run.v1alpha1.CancelRunResponse">
  * Use `create(CancelRunResponseSchema)` to create a new message.
  */
 export const CancelRunResponseSchema: GenMessage<CancelRunResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_run_v1alpha1_run, 5);
+  messageDesc(file_koinon_run_v1alpha1_run, 6);
 
 /**
  * WatchRunRequest names a run and where to resume.
@@ -277,7 +332,7 @@ export type WatchRunRequest = Message<"koinon.run.v1alpha1.WatchRunRequest"> & {
  * Use `create(WatchRunRequestSchema)` to create a new message.
  */
 export const WatchRunRequestSchema: GenMessage<WatchRunRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_run_v1alpha1_run, 6);
+  messageDesc(file_koinon_run_v1alpha1_run, 7);
 
 /**
  * WatchRunResponse carries either a run snapshot or one event.
@@ -308,7 +363,7 @@ export type WatchRunResponse = Message<"koinon.run.v1alpha1.WatchRunResponse"> &
  * Use `create(WatchRunResponseSchema)` to create a new message.
  */
 export const WatchRunResponseSchema: GenMessage<WatchRunResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_run_v1alpha1_run, 7);
+  messageDesc(file_koinon_run_v1alpha1_run, 8);
 
 /**
  * RunState is the ADR 0030 state machine.

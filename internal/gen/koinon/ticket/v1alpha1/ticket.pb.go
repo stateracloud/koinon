@@ -145,10 +145,13 @@ type Ticket struct {
 	AgentId   string                 `protobuf:"bytes,5,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	CreatedBy string                 `protobuf:"bytes,6,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
 	// The seq of the newest timeline event.
-	LastEventSeq  int64                  `protobuf:"varint,7,opt,name=last_event_seq,json=lastEventSeq,proto3" json:"last_event_seq,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	DoneAt        *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=done_at,json=doneAt,proto3" json:"done_at,omitempty"`
+	LastEventSeq int64                  `protobuf:"varint,7,opt,name=last_event_seq,json=lastEventSeq,proto3" json:"last_event_seq,omitempty"`
+	CreatedAt    *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt    *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	DoneAt       *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=done_at,json=doneAt,proto3" json:"done_at,omitempty"`
+	// Model spend of all the ticket's runs (plan item L1). Set by GetTicket and
+	// ListTickets.
+	Cost          *v1alpha1.Cost `protobuf:"bytes,11,opt,name=cost,proto3" json:"cost,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -249,6 +252,13 @@ func (x *Ticket) GetUpdatedAt() *timestamppb.Timestamp {
 func (x *Ticket) GetDoneAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.DoneAt
+	}
+	return nil
+}
+
+func (x *Ticket) GetCost() *v1alpha1.Cost {
+	if x != nil {
+		return x.Cost
 	}
 	return nil
 }
@@ -928,7 +938,7 @@ var File_koinon_ticket_v1alpha1_ticket_proto protoreflect.FileDescriptor
 
 const file_koinon_ticket_v1alpha1_ticket_proto_rawDesc = "" +
 	"\n" +
-	"#koinon/ticket/v1alpha1/ticket.proto\x12\x16koinon.ticket.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dkoinon/run/v1alpha1/run.proto\"\x8e\x03\n" +
+	"#koinon/ticket/v1alpha1/ticket.proto\x12\x16koinon.ticket.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dkoinon/run/v1alpha1/run.proto\"\xbd\x03\n" +
 	"\x06Ticket\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x14\n" +
@@ -943,7 +953,8 @@ const file_koinon_ticket_v1alpha1_ticket_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x123\n" +
 	"\adone_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\x06doneAt\"\xc4\x02\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\x06doneAt\x12-\n" +
+	"\x04cost\x18\v \x01(\v2\x19.koinon.run.v1alpha1.CostR\x04cost\"\xc4\x02\n" +
 	"\vTicketEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12@\n" +
@@ -1038,44 +1049,46 @@ var file_koinon_ticket_v1alpha1_ticket_proto_goTypes = []any{
 	(*MoveTicketRequest)(nil),     // 12: koinon.ticket.v1alpha1.MoveTicketRequest
 	(*MoveTicketResponse)(nil),    // 13: koinon.ticket.v1alpha1.MoveTicketResponse
 	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),       // 15: google.protobuf.Struct
-	(*v1alpha1.Run)(nil),          // 16: koinon.run.v1alpha1.Run
+	(*v1alpha1.Cost)(nil),         // 15: koinon.run.v1alpha1.Cost
+	(*structpb.Struct)(nil),       // 16: google.protobuf.Struct
+	(*v1alpha1.Run)(nil),          // 17: koinon.run.v1alpha1.Run
 }
 var file_koinon_ticket_v1alpha1_ticket_proto_depIdxs = []int32{
 	0,  // 0: koinon.ticket.v1alpha1.Ticket.status:type_name -> koinon.ticket.v1alpha1.TicketStatus
 	14, // 1: koinon.ticket.v1alpha1.Ticket.created_at:type_name -> google.protobuf.Timestamp
 	14, // 2: koinon.ticket.v1alpha1.Ticket.updated_at:type_name -> google.protobuf.Timestamp
 	14, // 3: koinon.ticket.v1alpha1.Ticket.done_at:type_name -> google.protobuf.Timestamp
-	1,  // 4: koinon.ticket.v1alpha1.TicketEvent.actor_kind:type_name -> koinon.ticket.v1alpha1.ActorKind
-	15, // 5: koinon.ticket.v1alpha1.TicketEvent.payload:type_name -> google.protobuf.Struct
-	14, // 6: koinon.ticket.v1alpha1.TicketEvent.created_at:type_name -> google.protobuf.Timestamp
-	2,  // 7: koinon.ticket.v1alpha1.CreateTicketResponse.ticket:type_name -> koinon.ticket.v1alpha1.Ticket
-	16, // 8: koinon.ticket.v1alpha1.CreateTicketResponse.run:type_name -> koinon.run.v1alpha1.Run
-	0,  // 9: koinon.ticket.v1alpha1.ListTicketsRequest.status:type_name -> koinon.ticket.v1alpha1.TicketStatus
-	2,  // 10: koinon.ticket.v1alpha1.ListTicketsResponse.tickets:type_name -> koinon.ticket.v1alpha1.Ticket
-	2,  // 11: koinon.ticket.v1alpha1.GetTicketResponse.ticket:type_name -> koinon.ticket.v1alpha1.Ticket
-	3,  // 12: koinon.ticket.v1alpha1.GetTicketResponse.events:type_name -> koinon.ticket.v1alpha1.TicketEvent
-	16, // 13: koinon.ticket.v1alpha1.GetTicketResponse.runs:type_name -> koinon.run.v1alpha1.Run
-	3,  // 14: koinon.ticket.v1alpha1.AppendMessageResponse.event:type_name -> koinon.ticket.v1alpha1.TicketEvent
-	16, // 15: koinon.ticket.v1alpha1.AppendMessageResponse.run:type_name -> koinon.run.v1alpha1.Run
-	0,  // 16: koinon.ticket.v1alpha1.MoveTicketRequest.status:type_name -> koinon.ticket.v1alpha1.TicketStatus
-	2,  // 17: koinon.ticket.v1alpha1.MoveTicketResponse.ticket:type_name -> koinon.ticket.v1alpha1.Ticket
-	16, // 18: koinon.ticket.v1alpha1.MoveTicketResponse.canceled_runs:type_name -> koinon.run.v1alpha1.Run
-	4,  // 19: koinon.ticket.v1alpha1.TicketService.CreateTicket:input_type -> koinon.ticket.v1alpha1.CreateTicketRequest
-	6,  // 20: koinon.ticket.v1alpha1.TicketService.ListTickets:input_type -> koinon.ticket.v1alpha1.ListTicketsRequest
-	8,  // 21: koinon.ticket.v1alpha1.TicketService.GetTicket:input_type -> koinon.ticket.v1alpha1.GetTicketRequest
-	10, // 22: koinon.ticket.v1alpha1.TicketService.AppendMessage:input_type -> koinon.ticket.v1alpha1.AppendMessageRequest
-	12, // 23: koinon.ticket.v1alpha1.TicketService.MoveTicket:input_type -> koinon.ticket.v1alpha1.MoveTicketRequest
-	5,  // 24: koinon.ticket.v1alpha1.TicketService.CreateTicket:output_type -> koinon.ticket.v1alpha1.CreateTicketResponse
-	7,  // 25: koinon.ticket.v1alpha1.TicketService.ListTickets:output_type -> koinon.ticket.v1alpha1.ListTicketsResponse
-	9,  // 26: koinon.ticket.v1alpha1.TicketService.GetTicket:output_type -> koinon.ticket.v1alpha1.GetTicketResponse
-	11, // 27: koinon.ticket.v1alpha1.TicketService.AppendMessage:output_type -> koinon.ticket.v1alpha1.AppendMessageResponse
-	13, // 28: koinon.ticket.v1alpha1.TicketService.MoveTicket:output_type -> koinon.ticket.v1alpha1.MoveTicketResponse
-	24, // [24:29] is the sub-list for method output_type
-	19, // [19:24] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	15, // 4: koinon.ticket.v1alpha1.Ticket.cost:type_name -> koinon.run.v1alpha1.Cost
+	1,  // 5: koinon.ticket.v1alpha1.TicketEvent.actor_kind:type_name -> koinon.ticket.v1alpha1.ActorKind
+	16, // 6: koinon.ticket.v1alpha1.TicketEvent.payload:type_name -> google.protobuf.Struct
+	14, // 7: koinon.ticket.v1alpha1.TicketEvent.created_at:type_name -> google.protobuf.Timestamp
+	2,  // 8: koinon.ticket.v1alpha1.CreateTicketResponse.ticket:type_name -> koinon.ticket.v1alpha1.Ticket
+	17, // 9: koinon.ticket.v1alpha1.CreateTicketResponse.run:type_name -> koinon.run.v1alpha1.Run
+	0,  // 10: koinon.ticket.v1alpha1.ListTicketsRequest.status:type_name -> koinon.ticket.v1alpha1.TicketStatus
+	2,  // 11: koinon.ticket.v1alpha1.ListTicketsResponse.tickets:type_name -> koinon.ticket.v1alpha1.Ticket
+	2,  // 12: koinon.ticket.v1alpha1.GetTicketResponse.ticket:type_name -> koinon.ticket.v1alpha1.Ticket
+	3,  // 13: koinon.ticket.v1alpha1.GetTicketResponse.events:type_name -> koinon.ticket.v1alpha1.TicketEvent
+	17, // 14: koinon.ticket.v1alpha1.GetTicketResponse.runs:type_name -> koinon.run.v1alpha1.Run
+	3,  // 15: koinon.ticket.v1alpha1.AppendMessageResponse.event:type_name -> koinon.ticket.v1alpha1.TicketEvent
+	17, // 16: koinon.ticket.v1alpha1.AppendMessageResponse.run:type_name -> koinon.run.v1alpha1.Run
+	0,  // 17: koinon.ticket.v1alpha1.MoveTicketRequest.status:type_name -> koinon.ticket.v1alpha1.TicketStatus
+	2,  // 18: koinon.ticket.v1alpha1.MoveTicketResponse.ticket:type_name -> koinon.ticket.v1alpha1.Ticket
+	17, // 19: koinon.ticket.v1alpha1.MoveTicketResponse.canceled_runs:type_name -> koinon.run.v1alpha1.Run
+	4,  // 20: koinon.ticket.v1alpha1.TicketService.CreateTicket:input_type -> koinon.ticket.v1alpha1.CreateTicketRequest
+	6,  // 21: koinon.ticket.v1alpha1.TicketService.ListTickets:input_type -> koinon.ticket.v1alpha1.ListTicketsRequest
+	8,  // 22: koinon.ticket.v1alpha1.TicketService.GetTicket:input_type -> koinon.ticket.v1alpha1.GetTicketRequest
+	10, // 23: koinon.ticket.v1alpha1.TicketService.AppendMessage:input_type -> koinon.ticket.v1alpha1.AppendMessageRequest
+	12, // 24: koinon.ticket.v1alpha1.TicketService.MoveTicket:input_type -> koinon.ticket.v1alpha1.MoveTicketRequest
+	5,  // 25: koinon.ticket.v1alpha1.TicketService.CreateTicket:output_type -> koinon.ticket.v1alpha1.CreateTicketResponse
+	7,  // 26: koinon.ticket.v1alpha1.TicketService.ListTickets:output_type -> koinon.ticket.v1alpha1.ListTicketsResponse
+	9,  // 27: koinon.ticket.v1alpha1.TicketService.GetTicket:output_type -> koinon.ticket.v1alpha1.GetTicketResponse
+	11, // 28: koinon.ticket.v1alpha1.TicketService.AppendMessage:output_type -> koinon.ticket.v1alpha1.AppendMessageResponse
+	13, // 29: koinon.ticket.v1alpha1.TicketService.MoveTicket:output_type -> koinon.ticket.v1alpha1.MoveTicketResponse
+	25, // [25:30] is the sub-list for method output_type
+	20, // [20:25] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_koinon_ticket_v1alpha1_ticket_proto_init() }

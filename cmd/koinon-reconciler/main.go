@@ -87,6 +87,11 @@ func run() error {
 			Client: kube, Namespace: cfg.namespace, Name: cfg.gatewayConfigMap, FieldManager: reconciler.ManagedByValue,
 		},
 	}
+	if cfg.accessLogOTLP != "" {
+		driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP}
+	} else {
+		log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing and spend limits are not netted")
+	}
 	if cfg.gatewayAdminURL != "" {
 		driver.Waiter = standalone.AdminWaiter{AdminURL: cfg.gatewayAdminURL, StatsURL: cfg.gatewayStatsURL}
 	}
