@@ -7,12 +7,17 @@
 // backend (OpenShell's non-TTY exec) and speaks ACP to the harness over the stream's stdin
 // and stdout:
 //
+//   - before the harness starts, the run's instructions are written to the sandbox
+//     (/sandbox/.koinon/AGENTS.md), and their hash is recorded with the session;
 //   - initialize, then session/new on a ticket's first run (the session ID is stored on the
 //     ticket) or session/load afterwards;
-//   - the ticket's new messages are sent as the prompt;
+//   - for flavors that announce it, agentd waits until Koinon's MCP tools are there and
+//     selects the agent's model on the session;
+//   - the ticket's new messages are sent as the prompt, after the instruction file is checked
+//     and, if it changed, restored;
 //   - every session update is written as a run event, in order and at most once;
-//   - permission requests are answered from a tier mapping, and anything unmapped is
-//     rejected;
+//   - permission requests for paths outside the session directory are rejected; the others
+//     are answered from a tier mapping, and anything unmapped is rejected;
 //   - end_turn finishes the run, errors fail it with a reason, a control-plane cancel sends
 //     session/cancel and closes the stream.
 //
@@ -75,6 +80,13 @@ type Config struct {
 	// CancelGrace is how long the harness gets to end its turn after session/cancel.
 	// Default 10s.
 	CancelGrace time.Duration
+	// ReadyTimeout bounds the wait, after session/new or session/load, for a flavor's harness
+	// to announce Koinon's MCP tools (readyCommand). Default 1m.
+	ReadyTimeout time.Duration
+	// ReadySettle is the pause after that announcement before the first prompt: OpenCode
+	// registers the tools after a 100 ms debounce, separately from the command (ADR 0052).
+	// Default 1s.
+	ReadySettle time.Duration
 	// MaxTakeovers fails a run that has been taken over more often than this, instead of
 	// resuming it again. Default 5.
 	MaxTakeovers int
@@ -119,6 +131,8 @@ func (c *Config) defaults() error {
 	setDefault(&c.SandboxTimeout, 5*time.Minute)
 	setDefault(&c.ReconcileNudge, 5*time.Second)
 	setDefault(&c.CancelGrace, 10*time.Second)
+	setDefault(&c.ReadyTimeout, time.Minute)
+	setDefault(&c.ReadySettle, time.Second)
 	setDefault(&c.MaxTakeovers, 5)
 	setDefault(&c.SessionCwd, "/sandbox/work")
 	if c.Heartbeat >= c.Lease {

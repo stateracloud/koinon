@@ -22,7 +22,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"833d85f77b2b594c"'
+      koinon.config: '"9c1500320f8e5299"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
     otlp:
@@ -64,7 +64,7 @@ llm:
               window:
                 rolling: 30d
               onBudgetExceeded: Block
-        - keyHash: sha256:be6a2a297de483eec06bbffd0f7500217d15cd39b9569c74d5be5383dde44aa1
+        - keyHash: sha256:213afb2aa5a9aae0fc71ff868b6109997f6b0936cd894394a1e224da0950209c
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -118,6 +118,7 @@ mcp:
     mcpAuthorization:
       rules:
         - apiKey.agent == "acme/repo-helper" && ((mcp.tool.target == "github" && mcp.tool.name in ["create_pull_request", "get_approval_status"]) || (mcp.tool.target == "docs" && mcp.tool.name in ["search"]))
+        - mcp.prompt.name == "koinon-ready"
     transformations:
       request:
         set:

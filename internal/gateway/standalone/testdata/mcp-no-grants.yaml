@@ -10,7 +10,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"76044b4575059567"'
+      koinon.config: '"b6858c95813d2ebf"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
 gateways:
@@ -29,7 +29,7 @@ llm:
           metadata:
             name: k-dddddddddddd
             agent: acme/triage
-        - keyHash: sha256:df5c2e5d81ddda45f3cec8d4584124a13404ea6c5dfa22b305835c3e5ffc4fbd
+        - keyHash: sha256:920e79d4cda03923cfeedaf37771f1f1eb12e5aff7ed6398664b35088730fa6e
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -52,7 +52,7 @@ mcp:
             agent: acme/triage
     mcpAuthorization:
       rules:
-        - "false"
+        - mcp.prompt.name == "koinon-ready"
     transformations:
       request:
         set:
