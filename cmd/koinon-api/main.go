@@ -37,7 +37,10 @@ type config struct {
 	migrate        bool
 	trustedOrigins string
 
+	publicURL string
+
 	bootstrapLogin        bool
+	bootstrapUsername     string
 	bootstrapPasswordFile string
 	defaultOrgMode        string
 	defaultOrgGroups      string
@@ -62,8 +65,14 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.trustedOrigins, "trusted-origins", "",
 		"comma-separated extra origins allowed to make state-changing requests (CSRF)")
 
+	fs.StringVar(&c.publicURL, "public-url", "",
+		"URL browsers reach Koinon at, e.g. https://koinon.example.com; an http:// URL drops the "+
+			"cookies' Secure attribute (for installs without TLS); default https")
+
 	fs.BoolVar(&c.bootstrapLogin, "bootstrap-login", true,
 		"allow the bootstrap admin to log in with a password; disable once OIDC works")
+	fs.StringVar(&c.bootstrapUsername, "bootstrap-admin-username", auth.DefaultBootstrapAdminUsername,
+		"the bootstrap admin's login name")
 	fs.StringVar(&c.bootstrapPasswordFile, "bootstrap-password-file", "",
 		"file holding the bootstrap admin's one-time password (a mounted Secret)")
 	fs.StringVar(&c.defaultOrgMode, "default-org-identity-mode", "hybrid",
@@ -75,7 +84,7 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.oidcClientID, "oidc-client-id", "", "OIDC client ID")
 	fs.StringVar(&c.oidcClientSecretFile, "oidc-client-secret-file", "", "file holding the OIDC client secret")
 	fs.StringVar(&c.oidcRedirectURL, "oidc-redirect-url", "",
-		"OIDC redirect URL, https://<host>/auth/oidc/callback")
+		"OIDC redirect URL; default <public-url>/auth/oidc/callback")
 	fs.StringVar(&c.oidcGroupsClaim, "oidc-groups-claim", "groups", "ID token claim holding the user's groups")
 	fs.StringVar(&c.oidcScopes, "oidc-scopes", "email,profile", "comma-separated scopes requested besides openid")
 
@@ -104,6 +113,9 @@ func parseFlags(args []string) (config, error) {
 	}
 	if c.databaseURL == "" {
 		return c, errors.New("--database-url is required")
+	}
+	if c.oidcRedirectURL == "" && c.publicURL != "" {
+		c.oidcRedirectURL = strings.TrimRight(c.publicURL, "/") + "/auth/oidc/callback"
 	}
 	return c, nil
 }
@@ -157,6 +169,7 @@ func run() error {
 		return errors.New("--default-org-group-mappings needs --oidc-issuer-url")
 	}
 	res, err := auth.Bootstrap(ctx, pool, auth.BootstrapConfig{
+		Username:               cfg.bootstrapUsername,
 		PasswordFile:           cfg.bootstrapPasswordFile,
 		LoginEnabled:           cfg.bootstrapLogin,
 		DefaultOrgIdentityMode: mode,
@@ -178,9 +191,10 @@ func run() error {
 		SessionIdleTimeout: cfg.sessionIdle,
 		SessionMaxLifetime: cfg.sessionMax,
 		BootstrapLogin:     cfg.bootstrapLogin,
+		PublicURL:          cfg.publicURL,
 	}
 	if cfg.oidcIssuer != "" {
-		secret, err := readSecretFile(cfg.oidcClientSecretFile)
+		secret, err := auth.ReadSecretFile(cfg.oidcClientSecretFile)
 		if err != nil {
 			return fmt.Errorf("oidc client secret: %w", err)
 		}
@@ -235,17 +249,4 @@ func migrate(ctx context.Context, dsn string) error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil
-}
-
-// readSecretFile reads a secret mounted as a file. An empty path yields an
-// empty secret, for public OIDC clients that rely on PKCE alone.
-func readSecretFile(path string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-	b, err := os.ReadFile(path) //nolint:gosec // path is operator configuration
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(b)), nil
 }

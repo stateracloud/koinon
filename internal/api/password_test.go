@@ -56,6 +56,51 @@ var _ = Describe("bootstrap password login", func() {
 		Expect(stored).To(Equal(sum[:]))
 	})
 
+	It("drops Secure and the __Host- prefix when the public URL is plain http", func(ctx SpecContext) {
+		e := newEnv(ctx, envOptions{plainHTTP: true})
+		Expect(e.srv.URL).To(HavePrefix("http://"))
+		b := e.browser()
+		res := b.login(ctx, "admin", bootstrapPassword)
+		Expect(res.StatusCode).To(Equal(http.StatusOK))
+		Expect(res.Cookies()).To(HaveLen(1))
+		c := res.Cookies()[0]
+		Expect(c.Name).To(Equal(auth.InsecureSessionCookieName))
+		Expect(c.Name).NotTo(HavePrefix("__Host-"))
+		Expect(c.Secure).To(BeFalse())
+		Expect(c.HttpOnly).To(BeTrue())
+		Expect(c.SameSite).To(Equal(http.SameSiteLaxMode))
+
+		By("keeping the session over plain HTTP, as a browser would")
+		who, err := b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(who.GetPlatformAdmin()).To(BeTrue())
+
+		By("logging out with the same cookie")
+		res = b.post(ctx, "/auth/logout", nil)
+		Expect(res.StatusCode).To(Equal(http.StatusNoContent))
+		Expect(res.Cookies()).To(ContainElement(SatisfyAll(
+			HaveField("Name", auth.InsecureSessionCookieName), HaveField("MaxAge", -1), HaveField("Secure", false))))
+		Expect(b.sessionToken()).To(BeEmpty())
+	})
+
+	It("rejects a public URL that is neither http nor https", func(ctx SpecContext) {
+		_, err := auth.New(newPool(ctx), auth.Config{PublicURL: "ftp://koinon.example.com"})
+		Expect(err).To(MatchError(ContainSubstring("scheme must be http or https")))
+	})
+
+	It("logs in with the configured bootstrap admin username", func(ctx SpecContext) {
+		e := newEnv(ctx, envOptions{username: "root"})
+		Expect(e.browser().login(ctx, "admin", bootstrapPassword).StatusCode).To(Equal(http.StatusUnauthorized))
+		Expect(e.browser().login(ctx, "root", bootstrapPassword).StatusCode).To(Equal(http.StatusOK))
+
+		By("renaming the login on a restart with another username")
+		e2 := newEnvOn(ctx, e, envOptions{username: "ops"})
+		Expect(e2.bootstrp).To(Equal(auth.BootstrapResult{}))
+		Expect(e2.browser().login(ctx, "root", bootstrapPassword).StatusCode).To(Equal(http.StatusUnauthorized))
+		Expect(e2.browser().login(ctx, "ops", bootstrapPassword).StatusCode).To(Equal(http.StatusOK))
+		Expect(count(ctx, e2, `SELECT count(*) FROM users`)).To(Equal(1))
+	})
+
 	It("forces a password change before any other call", func(ctx SpecContext) {
 		b := e.browser()
 		Expect(b.login(ctx, "admin", bootstrapPassword).StatusCode).To(Equal(http.StatusOK))

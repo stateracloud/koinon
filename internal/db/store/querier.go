@@ -49,6 +49,7 @@ type Querier interface {
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
+	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// Returns the session if it is still valid at @now and extends its idle
 	// deadline, never past the absolute one.
