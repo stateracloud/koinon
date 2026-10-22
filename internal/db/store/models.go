@@ -97,6 +97,95 @@ func (ns NullAgentStatus) Value() (driver.Value, error) {
 	return string(ns.AgentStatus), nil
 }
 
+type ApprovalDecision string
+
+const (
+	ApprovalDecisionAsk   ApprovalDecision = "ask"
+	ApprovalDecisionAllow ApprovalDecision = "allow"
+)
+
+func (e *ApprovalDecision) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ApprovalDecision(s)
+	case string:
+		*e = ApprovalDecision(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ApprovalDecision: %T", src)
+	}
+	return nil
+}
+
+type NullApprovalDecision struct {
+	ApprovalDecision ApprovalDecision
+	Valid            bool // Valid is true if ApprovalDecision is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullApprovalDecision) Scan(value interface{}) error {
+	if value == nil {
+		ns.ApprovalDecision, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ApprovalDecision.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullApprovalDecision) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ApprovalDecision), nil
+}
+
+type ApprovalStatus string
+
+const (
+	ApprovalStatusPending  ApprovalStatus = "pending"
+	ApprovalStatusApproved ApprovalStatus = "approved"
+	ApprovalStatusDenied   ApprovalStatus = "denied"
+	ApprovalStatusExecuted ApprovalStatus = "executed"
+	ApprovalStatusFailed   ApprovalStatus = "failed"
+	ApprovalStatusExpired  ApprovalStatus = "expired"
+	ApprovalStatusCanceled ApprovalStatus = "canceled"
+)
+
+func (e *ApprovalStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ApprovalStatus(s)
+	case string:
+		*e = ApprovalStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ApprovalStatus: %T", src)
+	}
+	return nil
+}
+
+type NullApprovalStatus struct {
+	ApprovalStatus ApprovalStatus
+	Valid          bool // Valid is true if ApprovalStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullApprovalStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.ApprovalStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ApprovalStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullApprovalStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ApprovalStatus), nil
+}
+
 type AuthMethod string
 
 const (
@@ -137,6 +226,49 @@ func (ns NullAuthMethod) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.AuthMethod), nil
+}
+
+type ConnectionStatus string
+
+const (
+	ConnectionStatusUntested ConnectionStatus = "untested"
+	ConnectionStatusOk       ConnectionStatus = "ok"
+	ConnectionStatusFailing  ConnectionStatus = "failing"
+)
+
+func (e *ConnectionStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ConnectionStatus(s)
+	case string:
+		*e = ConnectionStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ConnectionStatus: %T", src)
+	}
+	return nil
+}
+
+type NullConnectionStatus struct {
+	ConnectionStatus ConnectionStatus
+	Valid            bool // Valid is true if ConnectionStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullConnectionStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.ConnectionStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ConnectionStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullConnectionStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ConnectionStatus), nil
 }
 
 type IdentityMode string
@@ -583,6 +715,45 @@ type AgentVersion struct {
 	Config    []byte
 	CreatedBy pgtype.UUID
 	CreatedAt pgtype.Timestamptz
+}
+
+type ApprovalRequest struct {
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+	TicketID     pgtype.UUID
+	RunID        pgtype.UUID
+	AgentID      pgtype.UUID
+	Connector    string
+	Tool         string
+	Target       string
+	ArgsJson     string
+	ArgsSha256   string
+	Risk         []byte
+	Decision     ApprovalDecision
+	Status       ApprovalStatus
+	DecidedBy    pgtype.UUID
+	DecidedAt    pgtype.Timestamptz
+	DecisionNote pgtype.Text
+	Result       []byte
+	ExpiresAt    pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
+type Connection struct {
+	OrgID             pgtype.UUID
+	ID                pgtype.UUID
+	Connector         string
+	DisplayName       string
+	Config            []byte
+	SecretName        string
+	SecretFingerprint string
+	Status            ConnectionStatus
+	LastTestedAt      pgtype.Timestamptz
+	LastTest          []byte
+	CreatedBy         pgtype.UUID
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
 }
 
 type LocalCredential struct {

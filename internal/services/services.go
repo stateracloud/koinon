@@ -2,7 +2,7 @@
 
 // Package services implements Koinon's org-facing connect-rpc services
 // (plan item A3): AgentService, TicketService, RunService and
-// TemplateService, on the sqlc store and with the caller's Principal from the
+// TemplateService and ConnectionService, on the sqlc store and with the caller's Principal from the
 // auth interceptor.
 //
 // Every org-owned call names its org in the request. The caller must hold a
@@ -11,7 +11,8 @@
 //
 //	viewer  Get*, List*, WatchRun
 //	member  CreateAgentFromTemplate, CreateTicket, AppendMessage, MoveTicket, CancelRun
-//	admin   ActivateAgent (approves the version's grants), ArchiveAgent
+//	admin   ActivateAgent (approves the version's grants), ArchiveAgent,
+//	        CreateGitHubConnection, TestConnection
 //
 // A caller without any role in the org gets NotFound, so org IDs cannot be
 // probed; a member without the required role gets PermissionDenied.
@@ -29,8 +30,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/procoduck/koinon/internal/auth"
+	"github.com/procoduck/koinon/internal/connections"
+	"github.com/procoduck/koinon/internal/connectors/github"
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
+	"github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	"github.com/procoduck/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
@@ -49,6 +53,11 @@ type Options struct {
 	WatchPollInterval time.Duration
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
+	// Secrets stores connections' secure inputs. Nil means Koinon runs
+	// without Kubernetes access, and creating connections fails.
+	Secrets connections.SecretStore
+	// GitHub runs connection checks; defaults to a client for api.github.com.
+	GitHub *github.Client
 }
 
 // Server implements the four services.
@@ -58,6 +67,9 @@ type Server struct {
 	hub  *runwatch.Hub
 	poll time.Duration
 	log  *slog.Logger
+
+	secrets connections.SecretStore
+	github  *github.Client
 }
 
 // New returns a Server backed by pool.
@@ -68,7 +80,13 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	return &Server{pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger}
+	if opts.GitHub == nil {
+		opts.GitHub = github.NewClient(github.Options{})
+	}
+	return &Server{
+		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
+		secrets: opts.Secrets, github: opts.GitHub,
+	}
 }
 
 // Register registers every service on server.
@@ -77,13 +95,15 @@ func (s *Server) Register(server *connect.Server) {
 	ticketv1alpha1connect.RegisterTicketServiceHandler(server, s)
 	runv1alpha1connect.RegisterRunServiceHandler(server, s)
 	templatev1alpha1connect.RegisterTemplateServiceHandler(server, s)
+	connectionv1alpha1connect.RegisterConnectionServiceHandler(server, s)
 }
 
 var (
-	_ agentv1alpha1connect.AgentServiceHandler       = (*Server)(nil)
-	_ ticketv1alpha1connect.TicketServiceHandler     = (*Server)(nil)
-	_ runv1alpha1connect.RunServiceHandler           = (*Server)(nil)
-	_ templatev1alpha1connect.TemplateServiceHandler = (*Server)(nil)
+	_ agentv1alpha1connect.AgentServiceHandler           = (*Server)(nil)
+	_ ticketv1alpha1connect.TicketServiceHandler         = (*Server)(nil)
+	_ runv1alpha1connect.RunServiceHandler               = (*Server)(nil)
+	_ templatev1alpha1connect.TemplateServiceHandler     = (*Server)(nil)
+	_ connectionv1alpha1connect.ConnectionServiceHandler = (*Server)(nil)
 )
 
 // caller is an authorised request in one org.

@@ -67,6 +67,17 @@ type Querier interface {
 	CreateAgentSandbox(ctx context.Context, arg CreateAgentSandboxParams) (AgentSandbox, error)
 	// Adds the next version of a draft or active agent.
 	CreateAgentVersion(ctx context.Context, arg CreateAgentVersionParams) (AgentVersion, error)
+	// No row: the same call was already recorded in this run (see
+	// GetApprovalRequestByCall).
+	CreateApprovalRequest(ctx context.Context, arg CreateApprovalRequestParams) (ApprovalRequest, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Connections (plan item C1). No query reads or writes secret material: it
+	// lives in the Kubernetes Secret named by secret_name.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	CreateConnection(ctx context.Context, arg CreateConnectionParams) (Connection, error)
 	CreateLocalCredential(ctx context.Context, arg CreateLocalCredentialParams) error
 	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
 	CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, error)
@@ -108,6 +119,10 @@ type Querier interface {
 	GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error)
 	GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams) (AgentSandbox, error)
 	GetAgentVersion(ctx context.Context, arg GetAgentVersionParams) (AgentVersion, error)
+	GetApprovalRequestByCall(ctx context.Context, arg GetApprovalRequestByCallParams) (ApprovalRequest, error)
+	// An agent may only read its own requests.
+	GetApprovalRequestForAgent(ctx context.Context, arg GetApprovalRequestForAgentParams) (ApprovalRequest, error)
+	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -115,6 +130,16 @@ type Querier interface {
 	GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWorkspace, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Ask-tier approval requests (plan item C3, ADR 0042). C3 records them; P1
+	// decides, executes and expires them.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// The run an agent's tool call belongs to: one active run per agent
+	// (runs_one_active_per_agent), and tools are only called while it runs.
+	GetRunningRunForAgent(ctx context.Context, arg GetRunningRunForAgentParams) (Run, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
 	// The highest ticket timeline seq already sent to the harness by the ticket's
@@ -134,6 +159,9 @@ type Querier interface {
 	// Agents that are not archived, plus archived agents whose sandbox is not
 	// cleaned up yet.
 	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
+	ListApprovalRequestsForTicket(ctx context.Context, arg ListApprovalRequestsForTicketParams) ([]ApprovalRequest, error)
+	ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Connection, error)
+	ListConnectionsByConnector(ctx context.Context, arg ListConnectionsByConnectorParams) ([]Connection, error)
 	// The most recently synced content of each template.
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// The effective role per org honours the org's identity mode (ADR 0004):
@@ -186,6 +214,7 @@ type Querier interface {
 	// Records the observed sandbox. started_at and stopped_at are stamped on the
 	// transition into ready and stopped.
 	RecordAgentSandbox(ctx context.Context, arg RecordAgentSandboxParams) (AgentSandbox, error)
+	RecordConnectionTest(ctx context.Context, arg RecordConnectionTestParams) (Connection, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
 	// The owner gives the run up without finishing it, for example because the
 	// exec stream to the harness dropped: the lease ends now, so any agentd can
