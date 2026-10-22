@@ -306,6 +306,18 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.waitSandbox(fctx, workspace, sandbox); err != nil {
 		return r.execErr(ctx, "sandbox", err)
 	}
+	// Nothing of an earlier run may still be running when this one starts (sweep.go); a
+	// sweep that cannot end everything fails the run.
+	ended, err := r.sweep(fctx, workspace, sandbox)
+	if err != nil {
+		return r.execErr(ctx, "end the processes left in the sandbox", err)
+	}
+	if len(ended) > 0 {
+		log.Warn("ended processes left in the sandbox", "pids", ended)
+		if err := r.record(fctx, "run.sandbox_swept", map[string]any{"pids": ended}); err != nil {
+			return r.dbErr(ctx, "record the sweep", err)
+		}
+	}
 	cwd := cfg.SessionCwd
 	if ticket.HarnessSessionID.Valid {
 		cwd = ticket.HarnessSessionCwd.String
@@ -328,6 +340,9 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.execErr(ctx, "exec the harness", err)
 	}
+	// Deferred in this order, the sweep runs after the harness is closed: it ends whatever
+	// the harness or the agent left running.
+	defer r.sweepAfter(ctx, workspace, sandbox)
 	defer closeProcess(proc)
 	conn := acp.NewConn(handler{r: r}, proc.Stdin(), proc.Stdout())
 	conn.SetLogger(log)
