@@ -78,6 +78,43 @@ turns:
 			Expect(ask(userMsg("hello"), map[string]any{"role": "assistant", "content": "first"}, userMsg("again"))).To(Equal("later"))
 			Expect(ask(userMsg("bye now"))).To(Equal("goodbye"))
 		})
+
+		It("matches the system prompt with systemContains", func(ctx SpecContext) {
+			_, ts := start(fakemodel.Script{Model: "sys", Turns: []fakemodel.Turn{
+				{When: fakemodel.When{SystemContains: "MARKER"}, Text: "instructed"},
+				{Text: "plain"},
+			}})
+			openAI := func(messages ...map[string]any) string {
+				var c oaCompletion
+				decode(post(ctx, ts.URL+"/v1/chat/completions", map[string]any{"model": "sys", "messages": messages}), &c)
+				return *c.Choices[0].Message.Content
+			}
+			anthropic := func(system any) string {
+				body := map[string]any{"model": "sys", "max_tokens": 10, "messages": []any{anUser("hi")}}
+				if system != nil {
+					body["system"] = system
+				}
+				var m anMessage
+				decode(post(ctx, ts.URL+"/v1/messages", body, "anthropic-version", "2023-06-01"), &m)
+				return m.Content[0].Text
+			}
+			sys := func(role string, content any) map[string]any { return map[string]any{"role": role, "content": content} }
+
+			Expect(openAI(sys("system", "you follow the MARKER rules"), userMsg("hi"))).To(Equal("instructed"))
+			Expect(openAI(sys("developer", []map[string]any{{"type": "text", "text": "MARKER"}}), userMsg("hi"))).To(Equal("instructed"))
+			Expect(openAI(sys("system", "no rules"), userMsg("hi"))).To(Equal("plain"))
+			Expect(openAI(userMsg("MARKER in the user text is not the system prompt"))).To(Equal("plain"))
+
+			Expect(anthropic("the MARKER rules")).To(Equal("instructed"))
+			Expect(anthropic([]map[string]any{{"type": "text", "text": "a"}, {"type": "text", "text": "MARKER"}})).To(Equal("instructed"))
+			Expect(anthropic(nil)).To(Equal("plain"))
+		})
+
+		It("parses systemContains from YAML", func() {
+			s, err := fakemodel.ParseScript([]byte("model: m\nturns: [{when: {systemContains: x}, text: a}]"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(s.Turns[0].When.SystemContains).To(Equal("x"))
+		})
 	})
 
 	Describe("the example repo-helper script", func() {
