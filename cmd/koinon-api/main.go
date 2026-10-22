@@ -30,6 +30,7 @@ import (
 
 	"github.com/procoduck/koinon/internal/api"
 	"github.com/procoduck/koinon/internal/auth"
+	"github.com/procoduck/koinon/internal/cli"
 	"github.com/procoduck/koinon/internal/db/migrations"
 	"github.com/procoduck/koinon/internal/project"
 	"github.com/procoduck/koinon/internal/runwatch"
@@ -102,17 +103,8 @@ func parseFlags(args []string) (config, error) {
 	fs.DurationVar(&c.watchPoll, "watch-poll-interval", services.DefaultWatchPollInterval,
 		"how often a WatchRun stream re-reads its run without a notification (a backstop for missed NOTIFYs)")
 
-	var envErr error
-	fs.VisitAll(func(f *flag.Flag) {
-		key := "KOINON_" + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
-		if v, ok := os.LookupEnv(key); ok {
-			if err := f.Value.Set(v); err != nil && envErr == nil {
-				envErr = fmt.Errorf("%s: %w", key, err)
-			}
-		}
-	})
-	if envErr != nil {
-		return c, envErr
+	if err := cli.BindEnv(fs, nil); err != nil {
+		return c, err
 	}
 	if err := fs.Parse(args); err != nil {
 		return c, err
