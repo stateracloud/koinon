@@ -32,6 +32,9 @@ const (
 	// ApprovalServiceGetApprovalProcedure is the procedure name of the ApprovalService's GetApproval
 	// RPC.
 	ApprovalServiceGetApprovalProcedure = "/koinon.approval.v1alpha1.ApprovalService/GetApproval"
+	// ApprovalServiceGetApprovalDiffProcedure is the procedure name of the ApprovalService's
+	// GetApprovalDiff RPC.
+	ApprovalServiceGetApprovalDiffProcedure = "/koinon.approval.v1alpha1.ApprovalService/GetApprovalDiff"
 	// ApprovalServiceApproveProcedure is the procedure name of the ApprovalService's Approve RPC.
 	ApprovalServiceApproveProcedure = "/koinon.approval.v1alpha1.ApprovalService/Approve"
 	// ApprovalServiceDenyProcedure is the procedure name of the ApprovalService's Deny RPC.
@@ -52,6 +55,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1alpha1.File_koinon_approval_v1alpha1_approval_proto.Services().ByName("ApprovalService").Methods().ByName("GetApproval"),
 			Procedure:        ApprovalServiceGetApprovalProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	approvalServiceGetApprovalDiffSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_approval_v1alpha1_approval_proto.Services().ByName("ApprovalService").Methods().ByName("GetApprovalDiff"),
+			Procedure:        ApprovalServiceGetApprovalDiffProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -81,6 +92,15 @@ type ApprovalServiceClient interface {
 	// GetApproval returns one request with its canonical arguments, the
 	// push-and-run risk summary and the full change. Viewers and above.
 	GetApproval(context.Context, *v1alpha1.GetApprovalRequest) (*v1alpha1.GetApprovalResponse, error)
+	// GetApprovalDiff compares a create_pull_request request with the branch
+	// its pull request will target (plan item W2: the full diff, collapsed
+	// below the risk summary). Koinon reads the current version of each file
+	// through the run's GitHub connection (contents:read, the one repository)
+	// and returns a unified diff per file. A file it cannot compare (GitHub
+	// error, larger than 1 MiB, not a file) carries a fallback_reason instead,
+	// and the card shows its full new content from GetApproval. Other tools
+	// fail with FAILED_PRECONDITION. Viewers and above.
+	GetApprovalDiff(context.Context, *v1alpha1.GetApprovalDiffRequest) (*v1alpha1.GetApprovalDiffResponse, error)
 	// Approve approves a pending request and executes it. args_sha256 must be
 	// the hash shown with the request; a different hash fails with ABORTED
 	// (HTTP 409) and nothing is executed. A request that is no longer pending
@@ -109,6 +129,15 @@ type ApprovalServiceHandler interface {
 	// GetApproval returns one request with its canonical arguments, the
 	// push-and-run risk summary and the full change. Viewers and above.
 	GetApproval(context.Context, *v1alpha1.GetApprovalRequest) (*v1alpha1.GetApprovalResponse, error)
+	// GetApprovalDiff compares a create_pull_request request with the branch
+	// its pull request will target (plan item W2: the full diff, collapsed
+	// below the risk summary). Koinon reads the current version of each file
+	// through the run's GitHub connection (contents:read, the one repository)
+	// and returns a unified diff per file. A file it cannot compare (GitHub
+	// error, larger than 1 MiB, not a file) carries a fallback_reason instead,
+	// and the card shows its full new content from GetApproval. Other tools
+	// fail with FAILED_PRECONDITION. Viewers and above.
+	GetApprovalDiff(context.Context, *v1alpha1.GetApprovalDiffRequest) (*v1alpha1.GetApprovalDiffResponse, error)
 	// Approve approves a pending request and executes it. args_sha256 must be
 	// the hash shown with the request; a different hash fails with ABORTED
 	// (HTTP 409) and nothing is executed. A request that is no longer pending
@@ -128,6 +157,7 @@ func RegisterApprovalServiceHandler(server *connect.Server, svc ApprovalServiceH
 	server.Register(
 		connect.Method{Spec: approvalServiceListApprovalsSpec(), Handler: adapter.listApprovals},
 		connect.Method{Spec: approvalServiceGetApprovalSpec(), Handler: adapter.getApproval},
+		connect.Method{Spec: approvalServiceGetApprovalDiffSpec(), Handler: adapter.getApprovalDiff},
 		connect.Method{Spec: approvalServiceApproveSpec(), Handler: adapter.approve},
 		connect.Method{Spec: approvalServiceDenySpec(), Handler: adapter.deny},
 	)
@@ -142,6 +172,10 @@ func (UnimplementedApprovalServiceHandler) ListApprovals(context.Context, *v1alp
 
 func (UnimplementedApprovalServiceHandler) GetApproval(context.Context, *v1alpha1.GetApprovalRequest) (*v1alpha1.GetApprovalResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.approval.v1alpha1.ApprovalService.GetApproval is not implemented")
+}
+
+func (UnimplementedApprovalServiceHandler) GetApprovalDiff(context.Context, *v1alpha1.GetApprovalDiffRequest) (*v1alpha1.GetApprovalDiffResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.approval.v1alpha1.ApprovalService.GetApprovalDiff is not implemented")
 }
 
 func (UnimplementedApprovalServiceHandler) Approve(context.Context, *v1alpha1.ApproveRequest) (*v1alpha1.ApproveResponse, error) {
@@ -167,6 +201,14 @@ func (c *approvalServiceClient) ListApprovals(ctx context.Context, req *v1alpha1
 func (c *approvalServiceClient) GetApproval(ctx context.Context, req *v1alpha1.GetApprovalRequest) (*v1alpha1.GetApprovalResponse, error) {
 	var res v1alpha1.GetApprovalResponse
 	if err := c.client.CallUnary(ctx, approvalServiceGetApprovalSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *approvalServiceClient) GetApprovalDiff(ctx context.Context, req *v1alpha1.GetApprovalDiffRequest) (*v1alpha1.GetApprovalDiffResponse, error) {
+	var res v1alpha1.GetApprovalDiffResponse
+	if err := c.client.CallUnary(ctx, approvalServiceGetApprovalDiffSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -208,6 +250,18 @@ func (h approvalServiceHandler) getApproval(ctx context.Context, _ connect.Spec,
 		return err
 	}
 	res, err := h.svc.GetApproval(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h approvalServiceHandler) getApprovalDiff(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetApprovalDiffRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetApprovalDiff(ctx, &req)
 	if err != nil {
 		return err
 	}

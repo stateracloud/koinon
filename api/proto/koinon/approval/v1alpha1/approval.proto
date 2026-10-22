@@ -30,6 +30,18 @@ service ApprovalService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // GetApprovalDiff compares a create_pull_request request with the branch
+  // its pull request will target (plan item W2: the full diff, collapsed
+  // below the risk summary). Koinon reads the current version of each file
+  // through the run's GitHub connection (contents:read, the one repository)
+  // and returns a unified diff per file. A file it cannot compare (GitHub
+  // error, larger than 1 MiB, not a file) carries a fallback_reason instead,
+  // and the card shows its full new content from GetApproval. Other tools
+  // fail with FAILED_PRECONDITION. Viewers and above.
+  rpc GetApprovalDiff(GetApprovalDiffRequest) returns (GetApprovalDiffResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // Approve approves a pending request and executes it. args_sha256 must be
   // the hash shown with the request; a different hash fails with ABORTED
   // (HTTP 409) and nothing is executed. A request that is no longer pending
@@ -168,6 +180,47 @@ message GetApprovalRequest {
 // GetApprovalResponse holds the request with its decoded call.
 message GetApprovalResponse {
   Approval approval = 1;
+}
+
+// GetApprovalDiffRequest names a request.
+message GetApprovalDiffRequest {
+  string org_id = 1;
+  string approval_id = 2;
+}
+
+// FileStatus is what a proposed pull request does to one file.
+enum FileStatus {
+  // The current version could not be read (see fallback_reason).
+  FILE_STATUS_UNSPECIFIED = 0;
+  FILE_STATUS_ADDED = 1;
+  FILE_STATUS_MODIFIED = 2;
+  FILE_STATUS_DELETED = 3;
+}
+
+// FileDiff compares one file with its current version on the base branch.
+message FileDiff {
+  string path = 1;
+  FileStatus status = 2;
+  // A unified diff with three lines of context: "--- a/<path>" and
+  // "+++ b/<path>" (/dev/null for an added or deleted file), then "@@"
+  // hunks of " ", "-" and "+" lines; "\ No newline at end of file" follows a
+  // last line without one. Empty when the file is unchanged, binary, or
+  // fallback_reason is set.
+  string unified_diff = 3;
+  // The new or the current version is not text; no content is shown.
+  bool binary = 4;
+  // Why there is no diff, e.g. "the current version is larger than 1 MiB".
+  // The card then shows the full new content.
+  string fallback_reason = 5;
+}
+
+// GetApprovalDiffResponse holds one FileDiff per file of the call, in the
+// call's order.
+message GetApprovalDiffResponse {
+  // The branch compared against: the call's base, or the repository's
+  // default branch. Empty if it could not be resolved.
+  string base = 1;
+  repeated FileDiff files = 2;
 }
 
 // ApproveRequest names a request and the hash the approver saw.

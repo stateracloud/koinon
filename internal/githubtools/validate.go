@@ -237,6 +237,12 @@ func looksBinary(s string) bool {
 	})
 }
 
+// LooksBinary reports a file the risk summary lists as binary: its name says so, or its
+// content is not text.
+func LooksBinary(name, content string) bool {
+	return slices.Contains(binaryExts, path.Ext(strings.ToLower(name))) || looksBinary(content)
+}
+
 // AssessRisk flags push-and-run risk in a validated change.
 func AssessRisk(a PullRequestArgs) Risk {
 	r := Risk{Files: len(a.Files)}
@@ -258,7 +264,7 @@ func AssessRisk(a PullRequestArgs) Risk {
 		if slices.Contains(depBase, base) || strings.HasPrefix(base, "requirements") && ext == ".txt" {
 			r.Dependencies = append(r.Dependencies, f.Path)
 		}
-		if slices.Contains(binaryExts, ext) || looksBinary(f.Content) {
+		if LooksBinary(f.Path, f.Content) {
 			r.Binary = append(r.Binary, f.Path)
 		}
 	}

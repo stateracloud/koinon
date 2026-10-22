@@ -164,6 +164,11 @@ var isolationCases = map[string]isolationCase{
 			return c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: f.approval.ID.String()})
 		},
 	},
+	approvalv1alpha1connect.ApprovalServiceGetApprovalDiffProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.approvals.GetApprovalDiff(ctx, &approvalv1alpha1.GetApprovalDiffRequest{OrgId: org, ApprovalId: f.approval.ID.String()})
+		},
+	},
 	approvalv1alpha1connect.ApprovalServiceApproveProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{

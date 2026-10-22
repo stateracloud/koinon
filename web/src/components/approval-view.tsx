@@ -21,6 +21,10 @@ export function ApprovalView({ approvalId, showPermalink }: { approvalId: string
   const orgId = org.orgId
   const queryClient = useQueryClient()
   const get = useQuery(ApprovalService.method.getApproval, { orgId, approvalId })
+  // The diff against the base branch: Koinon reads the current versions from
+  // GitHub server-side; the browser never fetches file contents itself.
+  const isPullRequest = get.data?.approval?.call.case === 'pullRequest'
+  const diff = useQuery(ApprovalService.method.getApprovalDiff, { orgId, approvalId }, { enabled: isPullRequest, retry: false })
 
   const refresh = async () => {
     // The decision writes ticket events (approved, executed) and leaves
@@ -48,7 +52,7 @@ export function ApprovalView({ approvalId, showPermalink }: { approvalId: string
   const reload = async () => {
     approve.reset()
     deny.reset()
-    await get.refetch()
+    await Promise.all([get.refetch(), isPullRequest ? diff.refetch() : undefined])
   }
   return (
     <ApprovalCard
@@ -57,6 +61,9 @@ export function ApprovalView({ approvalId, showPermalink }: { approvalId: string
       pending={approve.isPending || deny.isPending}
       error={err && !changed ? err.rawMessage : undefined}
       changed={changed}
+      diff={diff.data}
+      diffPending={isPullRequest && diff.isPending}
+      diffError={diff.error ? ConnectError.from(diff.error).rawMessage : undefined}
       onReload={() => void reload()}
       showPermalink={showPermalink}
       onApprove={(note) => approve.mutate({ orgId, approvalId: a.id, argsSha256: a.argsSha256, note })}

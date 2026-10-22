@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { create } from '@bufbuild/protobuf'
+import { create, type MessageInitShape } from '@bufbuild/protobuf'
 import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -10,6 +10,8 @@ import {
   ApprovalService,
   Decision,
   FileChangeSchema,
+  FileStatus,
+  GetApprovalDiffResponseSchema,
   PullRequestCallSchema,
   RiskSchema,
   Status,
@@ -63,7 +65,9 @@ function approval(opts: { canDecide?: boolean; status?: Status } = {}) {
 
 const changedSha = 'a'.repeat(64)
 
-function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean } = {}) {
+type DiffInit = MessageInitShape<typeof GetApprovalDiffResponseSchema>
+
+function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean; diff?: DiffInit } = {}) {
   const approves: ApproveRequest[] = []
   const denies: DenyRequest[] = []
   let current = approval({ canDecide: opts.canDecide })
@@ -74,6 +78,10 @@ function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean } 
       getApproval: () => {
         gets++
         return { approval: current }
+      },
+      getApprovalDiff: () => {
+        if (!opts.diff) throw new ConnectError('approvals are not configured on this server', Code.Unavailable)
+        return opts.diff
       },
       approve: (req) => {
         approves.push(req)
@@ -130,6 +138,75 @@ describe('ApprovalCard', () => {
     await userEvent.click(within(files).getByText('README.md'))
     expect(details.open).toBe(true)
     expect(within(details).getByLabelText('New content of README.md')).toHaveTextContent('receive')
+  })
+
+  it('shows a unified diff per file against the base branch, collapsed, with the reason where there is none', async () => {
+    setup({
+      diff: {
+        base: 'main',
+        files: [
+          {
+            path: 'README.md',
+            status: FileStatus.MODIFIED,
+            unifiedDiff: '--- a/README.md\n+++ b/README.md\n@@ -1,2 +1,2 @@\n # Widgets\n-recieve\n+receive\n',
+          },
+          { path: '.github/dependabot.yml', status: FileStatus.ADDED, unifiedDiff: '--- /dev/null\n+++ b/.github/dependabot.yml\n@@ -0,0 +1 @@\n+version: 2\n' },
+          { path: 'scripts/release.sh', fallbackReason: 'GitHub answered 502 Bad Gateway when Koinon read the current version' },
+          { path: 'old.txt', status: FileStatus.DELETED, unifiedDiff: '--- a/old.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-obsolete\n' },
+        ],
+      },
+    })
+    const card = await screen.findByTestId('approval-card')
+    const files = within(card).getByRole('region', { name: 'Files' })
+    expect(await within(files).findByText('Each file shows its diff against main as it is now.')).toBeInTheDocument()
+
+    const readme = within(files).getByText('README.md').closest('details')!
+    expect(readme.open).toBe(false)
+    expect(within(readme).getByText('modified')).toBeInTheDocument()
+    await userEvent.click(within(files).getByText('README.md'))
+    expect(readme.open).toBe(true)
+    const diff = within(readme).getByLabelText('Diff of README.md')
+    expect([...diff.querySelectorAll('[data-line]')].map((l) => [l.getAttribute('data-line'), l.textContent])).toEqual([
+      ['hunk', '@@ -1,2 +1,2 @@'],
+      ['ctx', ' # Widgets'],
+      ['del', '-recieve'],
+      ['add', '+receive'],
+    ])
+    expect(within(readme).queryByLabelText('New content of README.md')).not.toBeInTheDocument()
+
+    const added = within(files).getByText('.github/dependabot.yml').closest('details')!
+    expect(within(added).getByText('added')).toBeInTheDocument()
+    expect(within(added).getByLabelText('Diff of .github/dependabot.yml')).toHaveTextContent('+version: 2')
+
+    const deleted = within(files).getByText('old.txt').closest('details')!
+    expect(within(deleted).getByText('deleted')).toBeInTheDocument()
+    expect(within(deleted).getByLabelText('Diff of old.txt')).toHaveTextContent('-obsolete')
+
+    const fallback = within(files).getByText('scripts/release.sh').closest('details')!
+    expect(within(fallback).getByRole('note')).toHaveTextContent('No diff: GitHub answered 502 Bad Gateway when Koinon read the current version. Showing the full new content.')
+    expect(within(fallback).getByLabelText('New content of scripts/release.sh')).toHaveTextContent('echo hi')
+
+    // The risk summary is unchanged by the diff.
+    expect(within(card).getByRole('region', { name: 'Push and run risk' })).toHaveTextContent('CI and automation config')
+  })
+
+  it('falls back to the full new content when the diff cannot be loaded', async () => {
+    setup()
+    const files = await screen.findByRole('region', { name: 'Files' })
+    expect(await within(files).findByText(/^Could not compare with the base branch \(approvals are not configured on this server\)/)).toBeInTheDocument()
+    await userEvent.click(within(files).getByText('README.md'))
+    expect(within(files).getByLabelText('New content of README.md')).toHaveTextContent('receive')
+  })
+
+  it('shows a binary file without its content', async () => {
+    setup({ diff: { base: 'main', files: [{ path: 'README.md', status: FileStatus.MODIFIED, binary: true }] } })
+    const files = await screen.findByRole('region', { name: 'Files' })
+    await within(files).findByText('Each file shows its diff against main as it is now.')
+    await userEvent.click(within(files).getByText('README.md'))
+    const readme = within(files).getByText('README.md').closest('details')!
+    expect(within(readme).getByText('Binary file; its content is not shown.')).toBeInTheDocument()
+    expect(within(readme).queryByLabelText('New content of README.md')).not.toBeInTheDocument()
+    expect(within(readme).queryByLabelText('Diff of README.md')).not.toBeInTheDocument()
   })
 
   it('approves with the args_sha256 from GetApproval and shows the result', async () => {

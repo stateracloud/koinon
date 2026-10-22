@@ -27,6 +27,8 @@ type Repo struct {
 	Blobs         map[string][]byte
 	Pulls         []Pull
 	Comments      map[int64][]Comment
+	// FailContents makes GET contents of a path answer with the status instead.
+	FailContents map[string]int
 	// Calls counts write calls by endpoint, e.g. "POST pulls".
 	Calls map[string]int
 }
@@ -70,7 +72,7 @@ func (f *Fake) repo(name string) *Repo {
 	r = &Repo{
 		Name: name, DefaultBranch: "main", Refs: map[string]string{}, Commits: map[string]Commit{},
 		Trees: map[string]map[string]string{}, Blobs: map[string][]byte{}, Comments: map[int64][]Comment{},
-		Calls: map[string]int{},
+		FailContents: map[string]int{}, Calls: map[string]int{},
 	}
 	readme := []byte("# " + name + "\n")
 	blob := objectID("blob", string(readme))
@@ -136,6 +138,13 @@ func (f *Fake) SetBranch(repo, branch, message string, files map[string]string) 
 	return c.SHA
 }
 
+// FailContents makes the contents API answer status for path in repo.
+func (f *Fake) FailContents(repo, path string, status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repo(repo).FailContents[path] = status
+}
+
 func treeID(tree map[string]string) string {
 	var parts []string
 	for _, p := range slices.Sorted(maps.Keys(tree)) {
@@ -146,6 +155,7 @@ func treeID(tree map[string]string) string {
 
 func (f *Fake) routeRepos(mux *http.ServeMux) {
 	mux.HandleFunc("GET /repos/{owner}/{repo}", f.withRepo("metadata", "read", f.getRepo))
+	mux.HandleFunc("GET /repos/{owner}/{repo}/contents/{path...}", f.withRepo("contents", "read", f.getContents))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/git/ref/heads/{branch...}", f.withRepo("contents", "read", f.getRef))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/git/refs", f.withRepo("contents", "write", f.createRef))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/git/commits/{sha}", f.withRepo("contents", "read", f.getCommit))
@@ -203,6 +213,65 @@ func (f *Fake) withRepo(perm, level string, h func(http.ResponseWriter, *http.Re
 
 func (f *Fake) getRepo(w http.ResponseWriter, _ *http.Request, r *Repo) {
 	writeJSON(w, http.StatusOK, map[string]any{"full_name": f.Account + "/" + r.Name, "default_branch": r.DefaultBranch})
+}
+
+// maxContentsSize is the largest file the contents API returns with its content (1 MB).
+const maxContentsSize = 1 << 20
+
+// getContents serves a path at ?ref= (a branch or a commit SHA; default the default
+// branch) as GitHub does: base64 content up to 1 MB, encoding "none" above, an array for a
+// directory.
+func (f *Fake) getContents(w http.ResponseWriter, req *http.Request, r *Repo) {
+	p := req.PathValue("path")
+	if status, ok := r.FailContents[p]; ok {
+		writeJSON(w, status, map[string]string{"message": http.StatusText(status)})
+		return
+	}
+	ref := req.URL.Query().Get("ref")
+	if ref == "" {
+		ref = r.DefaultBranch
+	}
+	sha, ok := r.Refs[ref]
+	if !ok {
+		sha = ref
+	}
+	c, ok := r.Commits[sha]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "No commit found for the ref " + ref})
+		return
+	}
+	tree := r.Trees[c.Tree]
+	blob, ok := tree[p]
+	if !ok {
+		var entries []map[string]any
+		for _, name := range slices.Sorted(maps.Keys(tree)) {
+			if strings.HasPrefix(name, p+"/") {
+				entries = append(entries, map[string]any{"type": "file", "path": name})
+			}
+		}
+		if entries == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, entries)
+		return
+	}
+	content := r.Blobs[blob]
+	out := map[string]any{"type": "file", "path": p, "sha": blob, "size": len(content), "encoding": "base64", "content": ""}
+	if len(content) > maxContentsSize {
+		out["encoding"] = "none"
+	} else {
+		// GitHub wraps the base64 at 60 columns.
+		enc := base64.StdEncoding.EncodeToString(content)
+		var b strings.Builder
+		for len(enc) > 60 {
+			b.WriteString(enc[:60] + "\n")
+			enc = enc[60:]
+		}
+		b.WriteString(enc)
+		out["content"] = b.String()
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (f *Fake) getRef(w http.ResponseWriter, req *http.Request, r *Repo) {

@@ -143,6 +143,60 @@ func (Decision) EnumDescriptor() ([]byte, []int) {
 	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{1}
 }
 
+// FileStatus is what a proposed pull request does to one file.
+type FileStatus int32
+
+const (
+	// The current version could not be read (see fallback_reason).
+	FileStatus_FILE_STATUS_UNSPECIFIED FileStatus = 0
+	FileStatus_FILE_STATUS_ADDED       FileStatus = 1
+	FileStatus_FILE_STATUS_MODIFIED    FileStatus = 2
+	FileStatus_FILE_STATUS_DELETED     FileStatus = 3
+)
+
+// Enum value maps for FileStatus.
+var (
+	FileStatus_name = map[int32]string{
+		0: "FILE_STATUS_UNSPECIFIED",
+		1: "FILE_STATUS_ADDED",
+		2: "FILE_STATUS_MODIFIED",
+		3: "FILE_STATUS_DELETED",
+	}
+	FileStatus_value = map[string]int32{
+		"FILE_STATUS_UNSPECIFIED": 0,
+		"FILE_STATUS_ADDED":       1,
+		"FILE_STATUS_MODIFIED":    2,
+		"FILE_STATUS_DELETED":     3,
+	}
+)
+
+func (x FileStatus) Enum() *FileStatus {
+	p := new(FileStatus)
+	*p = x
+	return p
+}
+
+func (x FileStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FileStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_koinon_approval_v1alpha1_approval_proto_enumTypes[2].Descriptor()
+}
+
+func (FileStatus) Type() protoreflect.EnumType {
+	return &file_koinon_approval_v1alpha1_approval_proto_enumTypes[2]
+}
+
+func (x FileStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FileStatus.Descriptor instead.
+func (FileStatus) EnumDescriptor() ([]byte, []int) {
+	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{2}
+}
+
 // Risk is the push-and-run summary the approval card leads with (plan item
 // W2). Lists hold repository paths.
 type Risk struct {
@@ -908,6 +962,200 @@ func (x *GetApprovalResponse) GetApproval() *Approval {
 	return nil
 }
 
+// GetApprovalDiffRequest names a request.
+type GetApprovalDiffRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ApprovalId    string                 `protobuf:"bytes,2,opt,name=approval_id,json=approvalId,proto3" json:"approval_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetApprovalDiffRequest) Reset() {
+	*x = GetApprovalDiffRequest{}
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetApprovalDiffRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetApprovalDiffRequest) ProtoMessage() {}
+
+func (x *GetApprovalDiffRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetApprovalDiffRequest.ProtoReflect.Descriptor instead.
+func (*GetApprovalDiffRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *GetApprovalDiffRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *GetApprovalDiffRequest) GetApprovalId() string {
+	if x != nil {
+		return x.ApprovalId
+	}
+	return ""
+}
+
+// FileDiff compares one file with its current version on the base branch.
+type FileDiff struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Path   string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Status FileStatus             `protobuf:"varint,2,opt,name=status,proto3,enum=koinon.approval.v1alpha1.FileStatus" json:"status,omitempty"`
+	// A unified diff with three lines of context: "--- a/<path>" and
+	// "+++ b/<path>" (/dev/null for an added or deleted file), then "@@"
+	// hunks of " ", "-" and "+" lines; "\ No newline at end of file" follows a
+	// last line without one. Empty when the file is unchanged, binary, or
+	// fallback_reason is set.
+	UnifiedDiff string `protobuf:"bytes,3,opt,name=unified_diff,json=unifiedDiff,proto3" json:"unified_diff,omitempty"`
+	// The new or the current version is not text; no content is shown.
+	Binary bool `protobuf:"varint,4,opt,name=binary,proto3" json:"binary,omitempty"`
+	// Why there is no diff, e.g. "the current version is larger than 1 MiB".
+	// The card then shows the full new content.
+	FallbackReason string `protobuf:"bytes,5,opt,name=fallback_reason,json=fallbackReason,proto3" json:"fallback_reason,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *FileDiff) Reset() {
+	*x = FileDiff{}
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileDiff) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileDiff) ProtoMessage() {}
+
+func (x *FileDiff) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileDiff.ProtoReflect.Descriptor instead.
+func (*FileDiff) Descriptor() ([]byte, []int) {
+	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *FileDiff) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *FileDiff) GetStatus() FileStatus {
+	if x != nil {
+		return x.Status
+	}
+	return FileStatus_FILE_STATUS_UNSPECIFIED
+}
+
+func (x *FileDiff) GetUnifiedDiff() string {
+	if x != nil {
+		return x.UnifiedDiff
+	}
+	return ""
+}
+
+func (x *FileDiff) GetBinary() bool {
+	if x != nil {
+		return x.Binary
+	}
+	return false
+}
+
+func (x *FileDiff) GetFallbackReason() string {
+	if x != nil {
+		return x.FallbackReason
+	}
+	return ""
+}
+
+// GetApprovalDiffResponse holds one FileDiff per file of the call, in the
+// call's order.
+type GetApprovalDiffResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The branch compared against: the call's base, or the repository's
+	// default branch. Empty if it could not be resolved.
+	Base          string      `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	Files         []*FileDiff `protobuf:"bytes,2,rep,name=files,proto3" json:"files,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetApprovalDiffResponse) Reset() {
+	*x = GetApprovalDiffResponse{}
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetApprovalDiffResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetApprovalDiffResponse) ProtoMessage() {}
+
+func (x *GetApprovalDiffResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetApprovalDiffResponse.ProtoReflect.Descriptor instead.
+func (*GetApprovalDiffResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GetApprovalDiffResponse) GetBase() string {
+	if x != nil {
+		return x.Base
+	}
+	return ""
+}
+
+func (x *GetApprovalDiffResponse) GetFiles() []*FileDiff {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
 // ApproveRequest names a request and the hash the approver saw.
 type ApproveRequest struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
@@ -922,7 +1170,7 @@ type ApproveRequest struct {
 
 func (x *ApproveRequest) Reset() {
 	*x = ApproveRequest{}
-	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[9]
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -934,7 +1182,7 @@ func (x *ApproveRequest) String() string {
 func (*ApproveRequest) ProtoMessage() {}
 
 func (x *ApproveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[9]
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -947,7 +1195,7 @@ func (x *ApproveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveRequest.ProtoReflect.Descriptor instead.
 func (*ApproveRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{9}
+	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ApproveRequest) GetOrgId() string {
@@ -989,7 +1237,7 @@ type ApproveResponse struct {
 
 func (x *ApproveResponse) Reset() {
 	*x = ApproveResponse{}
-	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[10]
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1001,7 +1249,7 @@ func (x *ApproveResponse) String() string {
 func (*ApproveResponse) ProtoMessage() {}
 
 func (x *ApproveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[10]
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1014,7 +1262,7 @@ func (x *ApproveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveResponse.ProtoReflect.Descriptor instead.
 func (*ApproveResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{10}
+	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ApproveResponse) GetApproval() *Approval {
@@ -1037,7 +1285,7 @@ type DenyRequest struct {
 
 func (x *DenyRequest) Reset() {
 	*x = DenyRequest{}
-	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[11]
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1049,7 +1297,7 @@ func (x *DenyRequest) String() string {
 func (*DenyRequest) ProtoMessage() {}
 
 func (x *DenyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[11]
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1062,7 +1310,7 @@ func (x *DenyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DenyRequest.ProtoReflect.Descriptor instead.
 func (*DenyRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{11}
+	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DenyRequest) GetOrgId() string {
@@ -1096,7 +1344,7 @@ type DenyResponse struct {
 
 func (x *DenyResponse) Reset() {
 	*x = DenyResponse{}
-	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[12]
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1108,7 +1356,7 @@ func (x *DenyResponse) String() string {
 func (*DenyResponse) ProtoMessage() {}
 
 func (x *DenyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[12]
+	mi := &file_koinon_approval_v1alpha1_approval_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1121,7 +1369,7 @@ func (x *DenyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DenyResponse.ProtoReflect.Descriptor instead.
 func (*DenyResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{12}
+	return file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DenyResponse) GetApproval() *Approval {
@@ -1205,7 +1453,20 @@ const file_koinon_approval_v1alpha1_approval_proto_rawDesc = "" +
 	"\vapproval_id\x18\x02 \x01(\tR\n" +
 	"approvalId\"U\n" +
 	"\x13GetApprovalResponse\x12>\n" +
-	"\bapproval\x18\x01 \x01(\v2\".koinon.approval.v1alpha1.ApprovalR\bapproval\"}\n" +
+	"\bapproval\x18\x01 \x01(\v2\".koinon.approval.v1alpha1.ApprovalR\bapproval\"P\n" +
+	"\x16GetApprovalDiffRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
+	"\vapproval_id\x18\x02 \x01(\tR\n" +
+	"approvalId\"\xc0\x01\n" +
+	"\bFileDiff\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12<\n" +
+	"\x06status\x18\x02 \x01(\x0e2$.koinon.approval.v1alpha1.FileStatusR\x06status\x12!\n" +
+	"\funified_diff\x18\x03 \x01(\tR\vunifiedDiff\x12\x16\n" +
+	"\x06binary\x18\x04 \x01(\bR\x06binary\x12'\n" +
+	"\x0ffallback_reason\x18\x05 \x01(\tR\x0efallbackReason\"g\n" +
+	"\x17GetApprovalDiffResponse\x12\x12\n" +
+	"\x04base\x18\x01 \x01(\tR\x04base\x128\n" +
+	"\x05files\x18\x02 \x03(\v2\".koinon.approval.v1alpha1.FileDiffR\x05files\"}\n" +
 	"\x0eApproveRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vapproval_id\x18\x02 \x01(\tR\n" +
@@ -1234,10 +1495,17 @@ const file_koinon_approval_v1alpha1_approval_proto_rawDesc = "" +
 	"\bDecision\x12\x18\n" +
 	"\x14DECISION_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fDECISION_ASK\x10\x01\x12\x12\n" +
-	"\x0eDECISION_ALLOW\x10\x022\xb5\x03\n" +
+	"\x0eDECISION_ALLOW\x10\x02*s\n" +
+	"\n" +
+	"FileStatus\x12\x1b\n" +
+	"\x17FILE_STATUS_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11FILE_STATUS_ADDED\x10\x01\x12\x18\n" +
+	"\x14FILE_STATUS_MODIFIED\x10\x02\x12\x17\n" +
+	"\x13FILE_STATUS_DELETED\x10\x032\xb2\x04\n" +
 	"\x0fApprovalService\x12u\n" +
 	"\rListApprovals\x12..koinon.approval.v1alpha1.ListApprovalsRequest\x1a/.koinon.approval.v1alpha1.ListApprovalsResponse\"\x03\x90\x02\x01\x12o\n" +
-	"\vGetApproval\x12,.koinon.approval.v1alpha1.GetApprovalRequest\x1a-.koinon.approval.v1alpha1.GetApprovalResponse\"\x03\x90\x02\x01\x12c\n" +
+	"\vGetApproval\x12,.koinon.approval.v1alpha1.GetApprovalRequest\x1a-.koinon.approval.v1alpha1.GetApprovalResponse\"\x03\x90\x02\x01\x12{\n" +
+	"\x0fGetApprovalDiff\x120.koinon.approval.v1alpha1.GetApprovalDiffRequest\x1a1.koinon.approval.v1alpha1.GetApprovalDiffResponse\"\x03\x90\x02\x01\x12c\n" +
 	"\aApprove\x12(.koinon.approval.v1alpha1.ApproveRequest\x1a).koinon.approval.v1alpha1.ApproveResponse\"\x03\x90\x02\x02\x12U\n" +
 	"\x04Deny\x12%.koinon.approval.v1alpha1.DenyRequest\x1a&.koinon.approval.v1alpha1.DenyResponseBTZRgithub.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1;approvalv1alpha1b\x06proto3"
 
@@ -1253,56 +1521,64 @@ func file_koinon_approval_v1alpha1_approval_proto_rawDescGZIP() []byte {
 	return file_koinon_approval_v1alpha1_approval_proto_rawDescData
 }
 
-var file_koinon_approval_v1alpha1_approval_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_koinon_approval_v1alpha1_approval_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_koinon_approval_v1alpha1_approval_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_koinon_approval_v1alpha1_approval_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_koinon_approval_v1alpha1_approval_proto_goTypes = []any{
-	(Status)(0),                   // 0: koinon.approval.v1alpha1.Status
-	(Decision)(0),                 // 1: koinon.approval.v1alpha1.Decision
-	(*Risk)(nil),                  // 2: koinon.approval.v1alpha1.Risk
-	(*FileChange)(nil),            // 3: koinon.approval.v1alpha1.FileChange
-	(*PullRequestCall)(nil),       // 4: koinon.approval.v1alpha1.PullRequestCall
-	(*CommentCall)(nil),           // 5: koinon.approval.v1alpha1.CommentCall
-	(*Approval)(nil),              // 6: koinon.approval.v1alpha1.Approval
-	(*ListApprovalsRequest)(nil),  // 7: koinon.approval.v1alpha1.ListApprovalsRequest
-	(*ListApprovalsResponse)(nil), // 8: koinon.approval.v1alpha1.ListApprovalsResponse
-	(*GetApprovalRequest)(nil),    // 9: koinon.approval.v1alpha1.GetApprovalRequest
-	(*GetApprovalResponse)(nil),   // 10: koinon.approval.v1alpha1.GetApprovalResponse
-	(*ApproveRequest)(nil),        // 11: koinon.approval.v1alpha1.ApproveRequest
-	(*ApproveResponse)(nil),       // 12: koinon.approval.v1alpha1.ApproveResponse
-	(*DenyRequest)(nil),           // 13: koinon.approval.v1alpha1.DenyRequest
-	(*DenyResponse)(nil),          // 14: koinon.approval.v1alpha1.DenyResponse
-	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),       // 16: google.protobuf.Struct
+	(Status)(0),                     // 0: koinon.approval.v1alpha1.Status
+	(Decision)(0),                   // 1: koinon.approval.v1alpha1.Decision
+	(FileStatus)(0),                 // 2: koinon.approval.v1alpha1.FileStatus
+	(*Risk)(nil),                    // 3: koinon.approval.v1alpha1.Risk
+	(*FileChange)(nil),              // 4: koinon.approval.v1alpha1.FileChange
+	(*PullRequestCall)(nil),         // 5: koinon.approval.v1alpha1.PullRequestCall
+	(*CommentCall)(nil),             // 6: koinon.approval.v1alpha1.CommentCall
+	(*Approval)(nil),                // 7: koinon.approval.v1alpha1.Approval
+	(*ListApprovalsRequest)(nil),    // 8: koinon.approval.v1alpha1.ListApprovalsRequest
+	(*ListApprovalsResponse)(nil),   // 9: koinon.approval.v1alpha1.ListApprovalsResponse
+	(*GetApprovalRequest)(nil),      // 10: koinon.approval.v1alpha1.GetApprovalRequest
+	(*GetApprovalResponse)(nil),     // 11: koinon.approval.v1alpha1.GetApprovalResponse
+	(*GetApprovalDiffRequest)(nil),  // 12: koinon.approval.v1alpha1.GetApprovalDiffRequest
+	(*FileDiff)(nil),                // 13: koinon.approval.v1alpha1.FileDiff
+	(*GetApprovalDiffResponse)(nil), // 14: koinon.approval.v1alpha1.GetApprovalDiffResponse
+	(*ApproveRequest)(nil),          // 15: koinon.approval.v1alpha1.ApproveRequest
+	(*ApproveResponse)(nil),         // 16: koinon.approval.v1alpha1.ApproveResponse
+	(*DenyRequest)(nil),             // 17: koinon.approval.v1alpha1.DenyRequest
+	(*DenyResponse)(nil),            // 18: koinon.approval.v1alpha1.DenyResponse
+	(*timestamppb.Timestamp)(nil),   // 19: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),         // 20: google.protobuf.Struct
 }
 var file_koinon_approval_v1alpha1_approval_proto_depIdxs = []int32{
-	3,  // 0: koinon.approval.v1alpha1.PullRequestCall.files:type_name -> koinon.approval.v1alpha1.FileChange
+	4,  // 0: koinon.approval.v1alpha1.PullRequestCall.files:type_name -> koinon.approval.v1alpha1.FileChange
 	1,  // 1: koinon.approval.v1alpha1.Approval.decision:type_name -> koinon.approval.v1alpha1.Decision
 	0,  // 2: koinon.approval.v1alpha1.Approval.status:type_name -> koinon.approval.v1alpha1.Status
-	2,  // 3: koinon.approval.v1alpha1.Approval.risk:type_name -> koinon.approval.v1alpha1.Risk
-	4,  // 4: koinon.approval.v1alpha1.Approval.pull_request:type_name -> koinon.approval.v1alpha1.PullRequestCall
-	5,  // 5: koinon.approval.v1alpha1.Approval.comment:type_name -> koinon.approval.v1alpha1.CommentCall
-	15, // 6: koinon.approval.v1alpha1.Approval.decided_at:type_name -> google.protobuf.Timestamp
-	16, // 7: koinon.approval.v1alpha1.Approval.result:type_name -> google.protobuf.Struct
-	15, // 8: koinon.approval.v1alpha1.Approval.expires_at:type_name -> google.protobuf.Timestamp
-	15, // 9: koinon.approval.v1alpha1.Approval.created_at:type_name -> google.protobuf.Timestamp
-	15, // 10: koinon.approval.v1alpha1.Approval.executed_at:type_name -> google.protobuf.Timestamp
-	6,  // 11: koinon.approval.v1alpha1.ListApprovalsResponse.approvals:type_name -> koinon.approval.v1alpha1.Approval
-	6,  // 12: koinon.approval.v1alpha1.GetApprovalResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
-	6,  // 13: koinon.approval.v1alpha1.ApproveResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
-	6,  // 14: koinon.approval.v1alpha1.DenyResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
-	7,  // 15: koinon.approval.v1alpha1.ApprovalService.ListApprovals:input_type -> koinon.approval.v1alpha1.ListApprovalsRequest
-	9,  // 16: koinon.approval.v1alpha1.ApprovalService.GetApproval:input_type -> koinon.approval.v1alpha1.GetApprovalRequest
-	11, // 17: koinon.approval.v1alpha1.ApprovalService.Approve:input_type -> koinon.approval.v1alpha1.ApproveRequest
-	13, // 18: koinon.approval.v1alpha1.ApprovalService.Deny:input_type -> koinon.approval.v1alpha1.DenyRequest
-	8,  // 19: koinon.approval.v1alpha1.ApprovalService.ListApprovals:output_type -> koinon.approval.v1alpha1.ListApprovalsResponse
-	10, // 20: koinon.approval.v1alpha1.ApprovalService.GetApproval:output_type -> koinon.approval.v1alpha1.GetApprovalResponse
-	12, // 21: koinon.approval.v1alpha1.ApprovalService.Approve:output_type -> koinon.approval.v1alpha1.ApproveResponse
-	14, // 22: koinon.approval.v1alpha1.ApprovalService.Deny:output_type -> koinon.approval.v1alpha1.DenyResponse
-	19, // [19:23] is the sub-list for method output_type
-	15, // [15:19] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	3,  // 3: koinon.approval.v1alpha1.Approval.risk:type_name -> koinon.approval.v1alpha1.Risk
+	5,  // 4: koinon.approval.v1alpha1.Approval.pull_request:type_name -> koinon.approval.v1alpha1.PullRequestCall
+	6,  // 5: koinon.approval.v1alpha1.Approval.comment:type_name -> koinon.approval.v1alpha1.CommentCall
+	19, // 6: koinon.approval.v1alpha1.Approval.decided_at:type_name -> google.protobuf.Timestamp
+	20, // 7: koinon.approval.v1alpha1.Approval.result:type_name -> google.protobuf.Struct
+	19, // 8: koinon.approval.v1alpha1.Approval.expires_at:type_name -> google.protobuf.Timestamp
+	19, // 9: koinon.approval.v1alpha1.Approval.created_at:type_name -> google.protobuf.Timestamp
+	19, // 10: koinon.approval.v1alpha1.Approval.executed_at:type_name -> google.protobuf.Timestamp
+	7,  // 11: koinon.approval.v1alpha1.ListApprovalsResponse.approvals:type_name -> koinon.approval.v1alpha1.Approval
+	7,  // 12: koinon.approval.v1alpha1.GetApprovalResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
+	2,  // 13: koinon.approval.v1alpha1.FileDiff.status:type_name -> koinon.approval.v1alpha1.FileStatus
+	13, // 14: koinon.approval.v1alpha1.GetApprovalDiffResponse.files:type_name -> koinon.approval.v1alpha1.FileDiff
+	7,  // 15: koinon.approval.v1alpha1.ApproveResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
+	7,  // 16: koinon.approval.v1alpha1.DenyResponse.approval:type_name -> koinon.approval.v1alpha1.Approval
+	8,  // 17: koinon.approval.v1alpha1.ApprovalService.ListApprovals:input_type -> koinon.approval.v1alpha1.ListApprovalsRequest
+	10, // 18: koinon.approval.v1alpha1.ApprovalService.GetApproval:input_type -> koinon.approval.v1alpha1.GetApprovalRequest
+	12, // 19: koinon.approval.v1alpha1.ApprovalService.GetApprovalDiff:input_type -> koinon.approval.v1alpha1.GetApprovalDiffRequest
+	15, // 20: koinon.approval.v1alpha1.ApprovalService.Approve:input_type -> koinon.approval.v1alpha1.ApproveRequest
+	17, // 21: koinon.approval.v1alpha1.ApprovalService.Deny:input_type -> koinon.approval.v1alpha1.DenyRequest
+	9,  // 22: koinon.approval.v1alpha1.ApprovalService.ListApprovals:output_type -> koinon.approval.v1alpha1.ListApprovalsResponse
+	11, // 23: koinon.approval.v1alpha1.ApprovalService.GetApproval:output_type -> koinon.approval.v1alpha1.GetApprovalResponse
+	14, // 24: koinon.approval.v1alpha1.ApprovalService.GetApprovalDiff:output_type -> koinon.approval.v1alpha1.GetApprovalDiffResponse
+	16, // 25: koinon.approval.v1alpha1.ApprovalService.Approve:output_type -> koinon.approval.v1alpha1.ApproveResponse
+	18, // 26: koinon.approval.v1alpha1.ApprovalService.Deny:output_type -> koinon.approval.v1alpha1.DenyResponse
+	22, // [22:27] is the sub-list for method output_type
+	17, // [17:22] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_koinon_approval_v1alpha1_approval_proto_init() }
@@ -1319,8 +1595,8 @@ func file_koinon_approval_v1alpha1_approval_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_approval_v1alpha1_approval_proto_rawDesc), len(file_koinon_approval_v1alpha1_approval_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   13,
+			NumEnums:      3,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
