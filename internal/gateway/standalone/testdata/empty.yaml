@@ -8,8 +8,9 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"0ff4ab93e7f18772"'
+      koinon.config: '"3063cb7b1b34c8d7"'
       koinon.key: default(apiKey.name, "")
+      koinon.request: uuid()
 gateways:
   default:
     port: 4000
