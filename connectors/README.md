@@ -83,9 +83,11 @@ Checked against the vendored protos and the policy schema reference at tag v0.1.
 - **Responses.** OpenShell inspects requests, not responses; GitHub's own token scoping is what
   keeps a `GET` under `/repos/{owner}/{repo}/**` to data the token may read.
 - **Credential placement.** OpenShell 0.1.5 injects static credentials only by rewriting the
-  placeholder where the client puts it (headers, including Basic and Bearer). `git` must be
-  configured to send `$GITHUB_TOKEN` (a credential helper answering `x-access-token` and the
-  placeholder, or `http.extraHeader`); the flavor images do not do this yet.
+  placeholder where the client puts it (headers, including Basic and Bearer). Every flavor image
+  therefore ships `koinon-git-credential` (`flavors/common`), configured for
+  `https://github.com` in the read-only `/etc/koinon/git/config` (included from
+  `/etc/gitconfig`): it answers `x-access-token` and the placeholder from `$GITHUB_TOKEN`, git
+  sends it as Basic auth and OpenShell substitutes the token on the wire. It stores nothing.
 - **Profile changes.** Changing the bound repositories updates the profile in place; OpenShell
   revokes placeholders whose endpoint boundary changed, so a running harness needs a new
   placeholder (a new session) after such a change.

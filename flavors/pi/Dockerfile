@@ -58,6 +58,11 @@ COPY --from=pi /opt/pi /opt/pi
 COPY --chmod=0755 koinon-pi /usr/local/bin/koinon-pi
 COPY --chmod=0644 koinon-pi-render.mjs /usr/local/lib/koinon/koinon-pi-render.mjs
 COPY --chmod=0644 etc/koinon/pi/ /etc/koinon/pi/
+# git's GitHub credential helper, shared by every flavor (flavors/common, build context
+# "common"): it prints the OpenShell placeholder and stores nothing.
+COPY --from=common --chmod=0755 koinon-git-credential /usr/local/bin/koinon-git-credential
+COPY --from=common --chmod=0644 etc/koinon/git/config /etc/koinon/git/config
+RUN printf '[include]\n\tpath = /etc/koinon/git/config\n' >> /etc/gitconfig
 RUN chmod -R a+rX,go-w /etc/koinon /opt/node /opt/pi /usr/local/lib/koinon
 USER 10001:10001
 WORKDIR /sandbox

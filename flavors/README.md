@@ -13,6 +13,13 @@ endpoint, model, MCP URL) arrive as arguments to the entry script, the same for 
 /usr/local/bin/koinon-<flavor> --model-base-url URL --model NAME --mcp-url URL
 ```
 
+Every image also ships what `common/` holds, through the `common` build context (`make
+flavor-<name>` passes it): `koinon-git-credential`, git's credential helper for
+`https://github.com`, configured in the read-only `/etc/koinon/git/config` and included from
+`/etc/gitconfig`. It prints the GitHub provider's OpenShell placeholder from `$GITHUB_TOKEN`,
+which OpenShell swaps for the installation token on the wire, and stores nothing
+(`connectors/README.md`).
+
 `internal/agentd` maps each flavor to its entry script. `test/flavors` checks each flavor with
 the same specs and per-flavor expectations (`make test-flavors`; `make flavor-<name>` builds
 one image).

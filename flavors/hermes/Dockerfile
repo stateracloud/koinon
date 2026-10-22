@@ -21,6 +21,12 @@ RUN groupadd --gid 10001 sandbox \
  && /opt/hermes/.venv/bin/hermes --version | grep -q 'v0\.22\.3'
 COPY --chmod=0755 koinon-hermes /usr/local/bin/koinon-hermes
 COPY --chmod=0644 etc/koinon/hermes/config.yaml /etc/koinon/hermes/config.yaml
+# git's GitHub credential helper, shared by every flavor (flavors/common, build context
+# "common"): it prints the OpenShell placeholder and stores nothing.
+COPY --from=common --chmod=0755 koinon-git-credential /usr/local/bin/koinon-git-credential
+COPY --from=common --chmod=0644 etc/koinon/git/config /etc/koinon/git/config
+RUN /usr/bin/git --version \
+ && printf '[include]\n\tpath = /etc/koinon/git/config\n' >> /etc/gitconfig
 # /opt/hermes is already world-readable; the read-only root file system keeps it unchanged.
 RUN chmod -R a+rX,go-w /etc/koinon
 USER 10001:10001

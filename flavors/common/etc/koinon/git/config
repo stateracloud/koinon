@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Koinon's git configuration for every flavor image, read-only and included from /etc/gitconfig
+# so that every git in the sandbox reads it, whether or not a flavor's entry script started it.
+# GitHub credentials come from koinon-git-credential, which prints the GitHub provider's
+# OpenShell placeholder; nothing secret is stored (connectors/README.md).
+[credential "https://github.com"]
+	# The empty value drops any helper configured before this one.
+	helper =
+	helper = /usr/local/bin/koinon-git-credential
+	useHttpPath = false

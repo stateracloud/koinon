@@ -89,17 +89,17 @@ FLAVORS          := opencode hermes pi
 .PHONY: flavor-opencode
 flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:$(FLAVOR_TAG))
 	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
-		--tag koinon/flavor-opencode:$(FLAVOR_TAG) flavors/opencode
+		--build-context common=flavors/common --tag koinon/flavor-opencode:$(FLAVOR_TAG) flavors/opencode
 
 .PHONY: flavor-hermes
 flavor-hermes: ## Build the Hermes flavor image (koinon/flavor-hermes:$(FLAVOR_TAG))
 	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
-		--tag koinon/flavor-hermes:$(FLAVOR_TAG) flavors/hermes
+		--build-context common=flavors/common --tag koinon/flavor-hermes:$(FLAVOR_TAG) flavors/hermes
 
 .PHONY: flavor-pi
 flavor-pi: ## Build the pi flavor image (koinon/flavor-pi:$(FLAVOR_TAG))
 	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
-		--tag koinon/flavor-pi:$(FLAVOR_TAG) flavors/pi
+		--build-context common=flavors/common --tag koinon/flavor-pi:$(FLAVOR_TAG) flavors/pi
 
 .PHONY: flavors
 flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images

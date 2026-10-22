@@ -42,6 +42,11 @@ RUN groupadd --gid 10001 sandbox \
 COPY --from=fetch /opencode /usr/local/bin/opencode
 COPY --chmod=0755 koinon-opencode /usr/local/bin/koinon-opencode
 COPY --chmod=0644 etc/koinon/opencode/opencode.jsonc /etc/koinon/opencode/opencode.jsonc
+# git's GitHub credential helper, shared by every flavor (flavors/common, build context
+# "common"): it prints the OpenShell placeholder and stores nothing.
+COPY --from=common --chmod=0755 koinon-git-credential /usr/local/bin/koinon-git-credential
+COPY --from=common --chmod=0644 etc/koinon/git/config /etc/koinon/git/config
+RUN printf '[include]\n\tpath = /etc/koinon/git/config\n' >> /etc/gitconfig
 # OpenCode writes a .gitignore into each config directory that lacks one; ship it so the
 # read-only directory needs no write.
 RUN printf '%s\n' node_modules package.json package-lock.json bun.lock .gitignore \

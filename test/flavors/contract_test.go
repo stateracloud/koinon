@@ -82,7 +82,9 @@ var flavors = []flavor{opencode, hermes, pi}
 const (
 	contractModel = "koinon-contract/fake-1"
 	fakeKey       = "sk-koinon-contract-fake"
-	workdir       = "/sandbox/work"
+	// fakeGitHubPlaceholder stands in for the GitHub provider's placeholder in GITHUB_TOKEN.
+	fakeGitHubPlaceholder = "koinon-contract-github-placeholder"
+	workdir               = "/sandbox/work"
 
 	helloPrompt   = "Say hello."
 	helloReply    = "Hello from the fake model."
@@ -143,7 +145,7 @@ func describeContract(f flavor) bool {
 			}
 			ensureImage(f)
 			gw = newGateway(contractScript(f))
-			sb = newSandbox(f.image(), "OPENAI_API_KEY="+fakeKey)
+			sb = newSandbox(f.image(), "OPENAI_API_KEY="+fakeKey, "GITHUB_TOKEN="+fakeGitHubPlaceholder)
 			// Background: harness processes outlive a single spec's context.
 			bg, cancel := context.WithCancel(context.Background())
 			DeferCleanup(func() {
@@ -172,6 +174,39 @@ func describeContract(f flavor) bool {
 				Expect(errors.As(err, &exit)).To(BeTrue(), "%v: %s", args, out)
 				Expect(exit.ExitCode()).To(Equal(64), "%v: %s", args, out)
 			}
+		})
+
+		It("gives git the GitHub placeholder through its credential helper and stores nothing", func() {
+			ctx := step()
+			// git asks its helpers as it would before a clone; without an answer it would
+			// prompt, which GIT_TERMINAL_PROMPT=0 turns into a failure.
+			credential := func(op, input string) (string, error) {
+				c := exec.CommandContext(ctx, "docker", "exec", "--interactive", "--env", "GIT_TERMINAL_PROMPT=0", //nolint:gosec // test-controlled
+					"--workdir", workdir, sb.name, "/usr/bin/git", "credential", op)
+				c.Stdin = strings.NewReader(input)
+				out, err := c.CombinedOutput()
+				return string(out), err
+			}
+			out, err := credential("fill", "protocol=https\nhost=github.com\npath=acme/widgets.git\n\n")
+			Expect(err).NotTo(HaveOccurred(), out)
+			Expect(out).To(ContainSubstring("username=x-access-token\n"))
+			Expect(out).To(ContainSubstring("password=" + fakeGitHubPlaceholder + "\n"))
+			// git hands a used credential to the helpers to store; they must not.
+			out, err = credential("approve", "protocol=https\nhost=github.com\nusername=x-access-token\npassword="+fakeGitHubPlaceholder+"\n\n")
+			Expect(err).NotTo(HaveOccurred(), out)
+
+			out, err = credential("fill", "protocol=https\nhost=example.com\n\n")
+			Expect(err).To(HaveOccurred(), "no credential for other hosts: %s", out)
+			Expect(out).NotTo(ContainSubstring(fakeGitHubPlaceholder))
+
+			// The configuration is the image's, read-only; nothing in the sandbox holds the value.
+			Expect(sb.run(ctx, "/usr/bin/git", "config", "--show-origin", "--get-all", "credential.https://github.com.helper")).
+				To(ContainSubstring("file:/etc/koinon/git/config\t/usr/local/bin/koinon-git-credential"))
+			Expect(sb.run(ctx, "stat", "-c", "%u %A", "/etc/koinon/git/config", "/usr/local/bin/koinon-git-credential")).
+				To(Equal("0 -rw-r--r--\n0 -rwxr-xr-x\n"))
+			grep := exec.CommandContext(ctx, "docker", "exec", sb.name, "grep", "-rlsF", fakeGitHubPlaceholder, "/sandbox", "/tmp", "/etc") //nolint:gosec // test-controlled
+			found, err := grep.Output()
+			Expect(err).To(HaveOccurred(), "grep found the placeholder in %s", found)
 		})
 
 		It("initializes and advertises session/load", func() {
@@ -340,6 +375,7 @@ func ensureImage(f flavor) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	Expect(err).NotTo(HaveOccurred())
 	out, err := exec.CommandContext(ctx, "docker", "buildx", "build", "--load", "--tag", img, //nolint:gosec // test-controlled
+		"--build-context", "common="+filepath.Join(root, "flavors", "common"),
 		filepath.Join(root, f.dockerfile)).CombinedOutput()
 	Expect(err).NotTo(HaveOccurred(), "build %s: %s", img, out)
 }
