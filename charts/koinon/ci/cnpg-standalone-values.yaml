@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+# Default modes with a model upstream, OpenShell mTLS and ingress on.
+model:
+  baseUrl: https://openrouter.ai/api/v1
+  provider: openrouter
+  apiKeySecret:
+    name: koinon-openrouter
+    key: api_key
+  models:
+    - name: deepseek/deepseek-v4.1-flash
+      rates: {input: "0.30", output: "1.20", cacheRead: "0.006"}
+      overrides:
+        provider:
+          zdr: true
+          data_collection: deny
+          allow_fallbacks: false
+openshell:
+  address: openshell.openshell.svc:8080
+  clientTLSSecret: koinon-openshell-client
+ingress:
+  enabled: true
+  className: nginx
+  host: koinon.example.com
+  tlsSecretName: koinon-tls
+networkPolicy:
+  apiFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring

@@ -1,0 +1,28 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- include "koinon.validate" . }}
+# Koinon's non-secret configuration, read by api, reconciler and agentd from
+# /etc/koinon/config/config.yaml. Secrets are referenced by name only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "koinon.componentName" (list . "config") }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+data:
+  config.yaml: |
+    gateway:
+      mode: {{ .Values.gateway.mode }}
+      {{- if eq .Values.gateway.mode "standalone" }}
+      configMap: {{ include "koinon.gatewayConfigName" . }}
+      url: http://{{ include "koinon.componentName" (list . "gateway") }}.{{ .Release.Namespace }}.svc:{{ .Values.gateway.standalone.port }}
+      {{- else }}
+      gatewayClassName: {{ .Values.gateway.kubernetes.gatewayClassName }}
+      {{- end }}
+    model:
+      {{- toYaml .Values.model | nindent 6 }}
+    openshell:
+      address: {{ .Values.openshell.address | quote }}
+      tls: {{ if .Values.openshell.clientTLSSecret }}/etc/koinon/openshell-tls{{ else }}""{{ end }}
+      runtimeClassName: {{ .Values.openshell.runtimeClassName }}
+    bootstrapAdmin:
+      enabled: {{ .Values.bootstrapAdmin.enabled }}

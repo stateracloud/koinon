@@ -1,0 +1,299 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
+  "title": "Koinon chart values",
+  "type": "object",
+  "additionalProperties": false,
+  "definitions": {
+    "nonEmpty": {"type": "string", "minLength": 1},
+    "map": {"type": "object"},
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {"type": "object"},
+        "limits": {"type": "object"},
+        "claims": {"type": "array"}
+      }
+    },
+    "koinonImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository"],
+      "properties": {
+        "repository": {"$ref": "#/definitions/nonEmpty"},
+        "tag": {"type": "string"},
+        "digest": {"type": "string", "pattern": "^(sha256:[a-f0-9]{64})?$"}
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "replicas"],
+      "properties": {
+        "image": {"$ref": "#/definitions/koinonImage"},
+        "replicas": {"type": "integer", "minimum": 0},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "resources": {"$ref": "#/definitions/resources"},
+        "podAnnotations": {"$ref": "#/definitions/map"},
+        "nodeSelector": {"$ref": "#/definitions/map"},
+        "tolerations": {"type": "array"},
+        "affinity": {"$ref": "#/definitions/map"}
+      }
+    },
+    "secretKeyRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "key": {"$ref": "#/definitions/nonEmpty"}
+      }
+    },
+    "peers": {
+      "description": "NetworkPolicyPeer list.",
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "identities": {
+      "description": "Kubernetes usernames, for example system:serviceaccount:<namespace>:<name>.",
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/definitions/nonEmpty"}
+    }
+  },
+  "properties": {
+    "nameOverride": {"type": "string"},
+    "fullnameOverride": {"type": "string"},
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "registry": {"$ref": "#/definitions/nonEmpty"},
+        "tag": {"type": "string"},
+        "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {"name": {"$ref": "#/definitions/nonEmpty"}}
+      }
+    },
+    "api": {"allOf": [{"$ref": "#/definitions/component"}], "required": ["port"]},
+    "reconciler": {"$ref": "#/definitions/component"},
+    "agentd": {"$ref": "#/definitions/component"},
+    "migrations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backoffLimit": {"type": "integer", "minimum": 0},
+        "activeDeadlineSeconds": {"type": "integer", "minimum": 1},
+        "wait": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "resources": {"$ref": "#/definitions/resources"}
+      }
+    },
+    "postgres": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["cnpg", "external"]},
+        "cnpg": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "instances": {"type": "integer", "minimum": 1},
+            "imageName": {"$ref": "#/definitions/nonEmpty"},
+            "database": {"type": "string", "pattern": "^[a-z_][a-z0-9_]*$"},
+            "storage": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "size": {"$ref": "#/definitions/nonEmpty"},
+                "storageClass": {"type": "string"}
+              }
+            },
+            "resources": {"$ref": "#/definitions/resources"},
+            "operatorNamespace": {"$ref": "#/definitions/nonEmpty"}
+          }
+        },
+        "external": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "secretName": {"type": "string"},
+            "keys": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["migrate", "api", "reconciler", "agentd"],
+              "properties": {
+                "migrate": {"$ref": "#/definitions/nonEmpty"},
+                "api": {"$ref": "#/definitions/nonEmpty"},
+                "reconciler": {"$ref": "#/definitions/nonEmpty"},
+                "agentd": {"$ref": "#/definitions/nonEmpty"}
+              }
+            }
+          }
+        }
+      },
+      "if": {"properties": {"mode": {"const": "external"}}},
+      "then": {
+        "properties": {
+          "external": {"required": ["secretName"], "properties": {"secretName": {"minLength": 1}}}
+        }
+      }
+    },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["standalone", "kubernetes"]},
+        "standalone": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["repository", "tag"],
+              "properties": {
+                "repository": {"$ref": "#/definitions/nonEmpty"},
+                "tag": {"$ref": "#/definitions/nonEmpty"},
+                "digest": {"type": "string", "pattern": "^(sha256:[a-f0-9]{64})?$"}
+              }
+            },
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "persistence": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "size": {"$ref": "#/definitions/nonEmpty"},
+                "storageClass": {"type": "string"}
+              }
+            },
+            "resources": {"$ref": "#/definitions/resources"},
+            "podAnnotations": {"$ref": "#/definitions/map"},
+            "nodeSelector": {"$ref": "#/definitions/map"},
+            "tolerations": {"type": "array"},
+            "affinity": {"$ref": "#/definitions/map"}
+          }
+        },
+        "kubernetes": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "gatewayClassName": {"$ref": "#/definitions/nonEmpty"}
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "baseUrl": {"type": "string", "pattern": "^(https?://.+)?$"},
+        "provider": {"$ref": "#/definitions/nonEmpty"},
+        "apiKeySecret": {"$ref": "#/definitions/secretKeyRef"},
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": {"$ref": "#/definitions/nonEmpty"},
+              "rates": {
+                "description": "USD per 1M tokens.",
+                "type": "object",
+                "additionalProperties": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$"}
+              },
+              "overrides": {"type": "object"}
+            }
+          }
+        }
+      },
+      "if": {"properties": {"models": {"minItems": 1}}, "required": ["models"]},
+      "then": {"properties": {"baseUrl": {"minLength": 1}}}
+    },
+    "openshell": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "address": {"type": "string"},
+        "clientTLSSecret": {"type": "string"},
+        "runtimeClassName": {"$ref": "#/definitions/nonEmpty"}
+      }
+    },
+    "bootstrapAdmin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "username": {"$ref": "#/definitions/nonEmpty"}
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "className": {"type": "string"},
+        "annotations": {"type": "object", "additionalProperties": {"type": "string"}},
+        "host": {"type": "string"},
+        "tlsSecretName": {"type": "string"}
+      },
+      "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
+      "then": {"required": ["host"], "properties": {"host": {"minLength": 1}}}
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "apiFrom": {"$ref": "#/definitions/peers"},
+        "metricsFrom": {"$ref": "#/definitions/peers"}
+      }
+    },
+    "sandboxPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "namespaceSelector": {
+          "description": "LabelSelector for OpenShell sandbox namespaces.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "matchLabels": {"type": "object", "additionalProperties": {"type": "string"}},
+            "matchExpressions": {"type": "array"}
+          }
+        },
+        "runtimeClasses": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"}
+        },
+        "validationActions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["Deny", "Warn", "Audit"]}
+        },
+        "identities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pods", "sandboxes", "secrets"],
+          "properties": {
+            "pods": {"$ref": "#/definitions/identities"},
+            "sandboxes": {"$ref": "#/definitions/identities"},
+            "secrets": {"$ref": "#/definitions/identities"}
+          }
+        }
+      }
+    }
+  }
+}
