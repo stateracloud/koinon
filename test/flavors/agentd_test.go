@@ -81,6 +81,18 @@ var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: a.ID, VersionID: v.ID, ActivatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
+		// What koinon-reconciler records for a ready sandbox, which is what agentd reads.
+		ws := execution.WorkspaceName(org.Bytes)
+		_, err = q.UpsertOrgWorkspace(ctx, store.UpsertOrgWorkspaceParams{OrgID: org, Workspace: ws})
+		Expect(err).NotTo(HaveOccurred())
+		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+		_, err = q.CreateAgentSandbox(ctx, store.CreateAgentSandboxParams{
+			OrgID: org, AgentID: agent.ID, Workspace: ws,
+			SandboxName: names.Sandbox, ProviderName: names.Provider, KeySecretName: names.KeySecret,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{OrgID: org, AgentID: agent.ID, State: store.SandboxStateReady})
+		Expect(err).NotTo(HaveOccurred())
 		ticket, err = q.CreateTicket(ctx, store.CreateTicketParams{OrgID: org, Title: "Contract", AgentID: agent.ID, CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -185,17 +197,10 @@ var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
 	}, SpecTimeout(4*time.Minute))
 })
 
-// dockerBackend is agentd's execution backend on the Docker stand-in sandbox. The sandbox is
-// always ready; Exec is `docker exec --interactive`, a non-TTY exec like OpenShell's.
+// dockerBackend is agentd's execution backend on the Docker stand-in sandbox, recorded as
+// ready in agent_sandboxes; Exec is `docker exec --interactive`, a non-TTY exec like
+// OpenShell's.
 type dockerBackend struct{ sb *sandbox }
-
-func (d *dockerBackend) GetSandbox(context.Context, string, string) (execution.Sandbox, error) {
-	return execution.Sandbox{Phase: execution.PhaseReady}, nil
-}
-
-func (d *dockerBackend) StartSandbox(context.Context, string, string) (execution.Sandbox, error) {
-	return execution.Sandbox{Phase: execution.PhaseReady}, nil
-}
 
 func (d *dockerBackend) Exec(ctx context.Context, _, _ string, req execution.ExecRequest) (execution.Process, error) {
 	args := []string{"exec", "--interactive"}

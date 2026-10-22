@@ -176,6 +176,10 @@ type Querier interface {
 	// Moves a ticket to a board column. Callers moving to Done also cancel its
 	// queued runs (CancelQueuedRunsForTicket) in the same transaction.
 	MoveTicket(ctx context.Context, arg MoveTicketParams) (Ticket, error)
+	// Wakes the reconciler for an org, as the agents and runs triggers do. agentd
+	// sends it while it waits for a sandbox that is not ready, so the reconciler
+	// starts it (the waiting run is the demand) without waiting for a resync.
+	NotifyReconciler(ctx context.Context, orgID pgtype.UUID) error
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)

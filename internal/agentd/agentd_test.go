@@ -3,6 +3,7 @@
 package agentd_test
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -144,13 +145,51 @@ var _ = Describe("Pool", func() {
 		Expect(payload(evs[0])).To(HaveKeyWithValue("loaded", true))
 	})
 
-	It("starts a stopped sandbox before it execs", func(ctx SpecContext) {
+	It("asks the reconciler to start a stopped sandbox and waits for it before it execs", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.gw.SetPhase(e.workspace, e.sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED)
+		e.recordSandbox(ctx, store.SandboxStateStopped, "")
 		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
-		e.pool("agentd-a")
+		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+
+		// The claimed run is the reconciler's demand; agentd also wakes it while it waits.
+		conn, err := db.Acquire(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		defer conn.Release()
+		_, err = conn.Exec(ctx, "LISTEN koinon_reconcile")
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() string {
+			wctx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			n, err := conn.Conn().WaitForNotification(wctx)
+			if err != nil {
+				return ""
+			}
+			return n.Payload
+		}).WithTimeout(5 * time.Second).Should(Equal(e.org.String()))
+		_, err = conn.Exec(ctx, "UNLISTEN koinon_reconcile")
+		Expect(err).NotTo(HaveOccurred())
+		Consistently(runState(ctx, r)).WithTimeout(300*time.Millisecond).Should(Equal(store.RunStateStarting),
+			"agentd does not exec into a sandbox the reconciler has not reported ready")
+		Expect(e.gw.Calls("ExecSandboxInteractive")).To(BeZero())
+
+		// The reconciler starts it and records it ready.
+		e.gw.SetPhase(e.workspace, e.sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_READY)
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Expect(e.gw.Calls("StartSandbox")).To(Equal(1))
+		Expect(e.gw.Calls("StartSandbox")).To(BeZero(), "only the reconciler starts sandboxes")
+		Expect(e.gw.Calls("GetSandbox")).To(BeZero(), "sandbox state comes from agent_sandboxes")
+	})
+
+	It("fails a run whose sandbox the reconciler does not make ready in time", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.recordSandbox(ctx, store.SandboxStateStopped, "")
+		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("sandbox not ready after 1s (stopped)"))
+		Expect(e.gw.Calls("StartSandbox")).To(BeZero())
 	})
 
 	It("honours a cancel with session/cancel and records nothing after it", func(ctx SpecContext) {
@@ -276,13 +315,13 @@ var _ = Describe("Pool", func() {
 		Expect(e.gw.Calls("ExecSandboxInteractive")).To(BeZero())
 	})
 
-	It("fails a run whose sandbox does not become ready", func(ctx SpecContext) {
+	It("fails a run whose sandbox the reconciler reports in error", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.gw.SetPhase(e.workspace, e.sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
 		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
-		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("sandbox Error"))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal("sandbox error: image pull failed"))
 	})
 
 	It("records a retried event once", func(ctx SpecContext) {

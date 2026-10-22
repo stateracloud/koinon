@@ -269,6 +269,18 @@ func (q *Queries) ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcil
 	return items, nil
 }
 
+const notifyReconciler = `-- name: NotifyReconciler :exec
+SELECT pg_notify('koinon_reconcile', CAST($1::uuid AS text))
+`
+
+// Wakes the reconciler for an org, as the agents and runs triggers do. agentd
+// sends it while it waits for a sandbox that is not ready, so the reconciler
+// starts it (the waiting run is the demand) without waiting for a resync.
+func (q *Queries) NotifyReconciler(ctx context.Context, orgID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, notifyReconciler, orgID)
+	return err
+}
+
 const recordAgentSandbox = `-- name: RecordAgentSandbox :one
 UPDATE agent_sandboxes
 SET state = $1::sandbox_state,
