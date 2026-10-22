@@ -18,10 +18,17 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
+	k8sfake "k8s.io/client-go/kubernetes/fake"
+
+	"github.com/procoduck/koinon/internal/connections"
+	"github.com/procoduck/koinon/internal/connectors/github"
+	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
 	"github.com/procoduck/koinon/internal/db/store"
 	agentv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1"
 	"github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
 	"github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
+	connectionv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1"
+	"github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	_ "github.com/procoduck/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
 	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
@@ -120,6 +127,31 @@ var isolationCases = map[string]isolationCase{
 			return c.runs.CancelRun(ctx, &runv1alpha1.CancelRunRequest{OrgId: org, RunId: f.run.GetId()})
 		},
 	},
+	connectionv1alpha1connect.ConnectionServiceCreateGitHubConnectionProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+				OrgId: org, AppId: 1, InstallationId: 2, PrivateKey: string(f.appKey),
+			})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceGetConnectionProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: f.connection})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceListConnectionsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.conns.ListConnections(ctx, &connectionv1alpha1.ListConnectionsRequest{OrgId: org})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceTestConnectionProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: f.connection})
+		},
+	},
+
 	runv1alpha1connect.RunServiceWatchRunProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			stream, err := c.runs.WatchRun(ctx, &runv1alpha1.WatchRunRequest{OrgId: org, RunId: f.run.GetId()})
@@ -138,14 +170,21 @@ var isolationExempt = map[string]string{
 	authv1alpha1connect.AuthServiceChangePasswordProcedure: "changes the caller's own password; takes no IDs",
 	templatev1alpha1connect.TemplateServiceListTemplatesProcedure: "templates are platform data shared by every org; " +
 		"takes no IDs",
+	connectionv1alpha1connect.ConnectionServiceListConnectorTypesProcedure: "connector types are platform data shared by " +
+		"every org; takes no IDs",
 }
 
 var _ = Describe("org isolation", func() {
 	It("never serves or changes one org's data for another org's user", func(ctx SpecContext) {
-		e := newEnv(ctx, envOptions{})
-		a := e.newIsolationFixture(ctx)
-		b := e.newIsolationFixture(ctx)
-		foreign := []string{a.org, a.agent.GetId(), a.draft.GetId(), a.ticket.GetId(), a.run.GetId()}
+		gh := githubtest.New()
+		DeferCleanup(gh.Server.Close)
+		e := newEnv(ctx, envOptions{
+			secrets: connections.KubeSecrets{Client: k8sfake.NewClientset(), Namespace: "koinon"},
+			github:  github.NewClient(github.Options{BaseURL: gh.URL()}),
+		})
+		a := e.newIsolationFixture(ctx, gh.PEM)
+		b := e.newIsolationFixture(ctx, gh.PEM)
+		foreign := []string{a.org, a.agent.GetId(), a.draft.GetId(), a.ticket.GetId(), a.run.GetId(), a.connection}
 		before := snapshot(ctx, e, a)
 
 		// The strongest caller in B: its owner, and a B admin.
@@ -179,10 +218,17 @@ var _ = Describe("org isolation", func() {
 	})
 })
 
-// newIsolationFixture is an org fixture plus a draft agent, for ActivateAgent.
-func (e *env) newIsolationFixture(ctx context.Context) orgFixture {
+// newIsolationFixture is an org fixture plus a draft agent, for ActivateAgent,
+// and a connection.
+func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture {
 	f := e.newOrgFixture(ctx)
 	f.draft = f.owner.draftAgent(ctx, f.org)
+	f.appKey = appKey
+	res, err := f.owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+		OrgId: f.org, AppId: 1, InstallationId: 2, PrivateKey: string(appKey),
+	})
+	Expect(err).NotTo(HaveOccurred())
+	f.connection = res.GetConnection().GetId()
 	return f
 }
 
@@ -199,6 +245,8 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM runs WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM runs WHERE org_id = $1 AND state = 'queued'`, org),
 		count(ctx, e, `SELECT count(*) FROM run_events WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1 AND status = 'untested'`, org),
 	}
 }
 

@@ -33,7 +33,41 @@ type Config struct {
 	Instructions string            `json:"instructions"`
 	Model        string            `json:"model,omitempty"`
 	Grants       []templates.Grant `json:"grants,omitempty"`
-	Limits       templates.Limits  `json:"limits"`
+	// Bindings tie grants to an org's connections and targets (for GitHub:
+	// the repositories). The grant says what the agent may do; its binding
+	// says where. Set when the repository grant is chosen (plan item W3).
+	Bindings []Binding        `json:"bindings,omitempty"`
+	Limits   templates.Limits `json:"limits"`
+}
+
+// Binding ties the grant on Connector to one connection and its targets.
+type Binding struct {
+	Connector string `json:"connector"`
+	// ConnectionID is the connections.id the grant uses.
+	ConnectionID string `json:"connectionId"`
+	// Targets the grant is narrowed to, in the connector type's target
+	// syntax (GitHub: owner/name).
+	Targets []string `json:"targets"`
+}
+
+// Grant returns the grant on connector, if any.
+func (c Config) Grant(connector string) (templates.Grant, bool) {
+	for _, g := range c.Grants {
+		if g.Connector == connector {
+			return g, true
+		}
+	}
+	return templates.Grant{}, false
+}
+
+// Binding returns the binding of the grant on connector, if any.
+func (c Config) Binding(connector string) (Binding, bool) {
+	for _, b := range c.Bindings {
+		if b.Connector == connector {
+			return b, true
+		}
+	}
+	return Binding{}, false
 }
 
 // FromTemplate returns the first version's config for an agent made from t.

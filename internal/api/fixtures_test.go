@@ -19,6 +19,7 @@ import (
 	"github.com/procoduck/koinon/internal/db/store"
 	agentv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1"
 	"github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
+	"github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	templatev1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1"
@@ -40,6 +41,7 @@ type client struct {
 	tickets   ticketv1alpha1connect.TicketServiceClient
 	runs      runv1alpha1connect.RunServiceClient
 	templates templatev1alpha1connect.TemplateServiceClient
+	conns     connectionv1alpha1connect.ConnectionServiceClient
 }
 
 func newClient(b *browser) *client {
@@ -50,6 +52,7 @@ func newClient(b *browser) *client {
 		tickets:   ticketv1alpha1connect.NewTicketServiceClient(cc),
 		runs:      runv1alpha1connect.NewRunServiceClient(cc),
 		templates: templatev1alpha1connect.NewTemplateServiceClient(cc),
+		conns:     connectionv1alpha1connect.NewConnectionServiceClient(cc),
 	}
 }
 
@@ -195,6 +198,9 @@ type orgFixture struct {
 	draft  *agentv1alpha1.Agent // set by newIsolationFixture
 	ticket *ticketv1alpha1.Ticket
 	run    *runv1alpha1.Run
+	// connection and appKey are set by newIsolationFixture.
+	connection string
+	appKey     []byte
 }
 
 func (e *env) newOrgFixture(ctx context.Context) orgFixture {

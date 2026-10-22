@@ -21,6 +21,10 @@ const (
 	// TemplatesGroup is the API group of agent template documents
 	// (templates/*.yaml).
 	TemplatesGroup = "templates." + Domain
+
+	// ConnectorsGroup is the API group of connector type documents
+	// (connectors/<id>/connector.yaml).
+	ConnectorsGroup = "connectors." + Domain
 )
 
 // Version is the release version, set at build time with
