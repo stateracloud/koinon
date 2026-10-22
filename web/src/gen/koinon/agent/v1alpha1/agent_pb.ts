@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/agent/v1alpha1/agent.proto.
  */
 export const file_koinon_agent_v1alpha1_agent: GenFile = /*@__PURE__*/
-  fileDesc("CiFrb2lub24vYWdlbnQvdjFhbHBoYTEvYWdlbnQucHJvdG8SFWtvaW5vbi5hZ2VudC52MWFscGhhMSLgBAoFQWdlbnQSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIyCgZzdGF0dXMYBCABKA4yIi5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnRTdGF0dXMSMAoGZmxhdm9yGAUgASgOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvchITCgt0ZW1wbGF0ZV9pZBgGIAEoCRIVCg10ZW1wbGF0ZV9zbHVnGAcgASgJEhYKDmxhdGVzdF92ZXJzaW9uGAggASgFEhYKDmFjdGl2ZV92ZXJzaW9uGAkgASgFEjgKD3Byb3Bvc2VkX2dyYW50cxgKIAMoCzIfLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5HcmFudBI4Cg9hcHByb3ZlZF9ncmFudHMYCyADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSFAoMaW5zdHJ1Y3Rpb25zGAwgASgJEg0KBW1vZGVsGA0gASgJEjcKCnJ1bl9saW1pdHMYDiABKAsyIy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUnVuTGltaXRzEi4KCmNyZWF0ZWRfYXQYDyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDGFjdGl2YXRlZF9hdBgQIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLYXJjaGl2ZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIo0BCh5DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC3RlbXBsYXRlX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIwCgZmbGF2b3IYBCABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuRmxhdm9yIk4KH0NyZWF0ZUFnZW50RnJvbVRlbXBsYXRlUmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiMwoPR2V0QWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSI/ChBHZXRBZ2VudFJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IiMKEUxpc3RBZ2VudHNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJCChJMaXN0QWdlbnRzUmVzcG9uc2USLAoGYWdlbnRzGAEgAygLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IkkKFEFjdGl2YXRlQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRIPCgd2ZXJzaW9uGAMgASgFIkQKFUFjdGl2YXRlQWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCI3ChNBcmNoaXZlQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSJDChRBcmNoaXZlQWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCp3CgtBZ2VudFN0YXR1cxIcChhBR0VOVF9TVEFUVVNfVU5TUEVDSUZJRUQQABIWChJBR0VOVF9TVEFUVVNfRFJBRlQQARIXChNBR0VOVF9TVEFUVVNfQUNUSVZFEAISGQoVQUdFTlRfU1RBVFVTX0FSQ0hJVkVEEAMyuAQKDEFnZW50U2VydmljZRKIAQoXQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGUSNS5rb2lub24uYWdlbnQudjFhbHBoYTEuQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGVSZXF1ZXN0GjYua29pbm9uLmFnZW50LnYxYWxwaGExLkNyZWF0ZUFnZW50RnJvbVRlbXBsYXRlUmVzcG9uc2USYAoIR2V0QWdlbnQSJi5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRSZXF1ZXN0Gicua29pbm9uLmFnZW50LnYxYWxwaGExLkdldEFnZW50UmVzcG9uc2UiA5ACARJmCgpMaXN0QWdlbnRzEigua29pbm9uLmFnZW50LnYxYWxwaGExLkxpc3RBZ2VudHNSZXF1ZXN0Gikua29pbm9uLmFnZW50LnYxYWxwaGExLkxpc3RBZ2VudHNSZXNwb25zZSIDkAIBEmoKDUFjdGl2YXRlQWdlbnQSKy5rb2lub24uYWdlbnQudjFhbHBoYTEuQWN0aXZhdGVBZ2VudFJlcXVlc3QaLC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWN0aXZhdGVBZ2VudFJlc3BvbnNlEmcKDEFyY2hpdmVBZ2VudBIqLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BcmNoaXZlQWdlbnRSZXF1ZXN0Gisua29pbm9uLmFnZW50LnYxYWxwaGExLkFyY2hpdmVBZ2VudFJlc3BvbnNlQk5aTGdpdGh1Yi5jb20vcHJvY29kdWNrL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL2FnZW50L3YxYWxwaGExO2FnZW50djFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_timestamp, file_koinon_template_v1alpha1_template]);
+  fileDesc("CiFrb2lub24vYWdlbnQvdjFhbHBoYTEvYWdlbnQucHJvdG8SFWtvaW5vbi5hZ2VudC52MWFscGhhMSLgBAoFQWdlbnQSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIyCgZzdGF0dXMYBCABKA4yIi5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnRTdGF0dXMSMAoGZmxhdm9yGAUgASgOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvchITCgt0ZW1wbGF0ZV9pZBgGIAEoCRIVCg10ZW1wbGF0ZV9zbHVnGAcgASgJEhYKDmxhdGVzdF92ZXJzaW9uGAggASgFEhYKDmFjdGl2ZV92ZXJzaW9uGAkgASgFEjgKD3Byb3Bvc2VkX2dyYW50cxgKIAMoCzIfLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5HcmFudBI4Cg9hcHByb3ZlZF9ncmFudHMYCyADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSFAoMaW5zdHJ1Y3Rpb25zGAwgASgJEg0KBW1vZGVsGA0gASgJEjcKCnJ1bl9saW1pdHMYDiABKAsyIy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUnVuTGltaXRzEi4KCmNyZWF0ZWRfYXQYDyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDGFjdGl2YXRlZF9hdBgQIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLYXJjaGl2ZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIsIBCh5DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC3RlbXBsYXRlX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIwCgZmbGF2b3IYBCABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuRmxhdm9yEjMKBmdyYW50cxgFIAMoCzIjLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HcmFudEJpbmRpbmciTgoMR3JhbnRCaW5kaW5nEhEKCWNvbm5lY3RvchgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJEhQKDHJlcG9zaXRvcmllcxgDIAMoCSJOCh9DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IjMKD0dldEFnZW50UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiPwoQR2V0QWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCIjChFMaXN0QWdlbnRzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkiQgoSTGlzdEFnZW50c1Jlc3BvbnNlEiwKBmFnZW50cxgBIAMoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCJJChRBY3RpdmF0ZUFnZW50UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSDwoHdmVyc2lvbhgDIAEoBSJEChVBY3RpdmF0ZUFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiNwoTQXJjaGl2ZUFnZW50UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiQwoUQXJjaGl2ZUFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQqdwoLQWdlbnRTdGF0dXMSHAoYQUdFTlRfU1RBVFVTX1VOU1BFQ0lGSUVEEAASFgoSQUdFTlRfU1RBVFVTX0RSQUZUEAESFwoTQUdFTlRfU1RBVFVTX0FDVElWRRACEhkKFUFHRU5UX1NUQVRVU19BUkNISVZFRBADMrgECgxBZ2VudFNlcnZpY2USiAEKF0NyZWF0ZUFnZW50RnJvbVRlbXBsYXRlEjUua29pbm9uLmFnZW50LnYxYWxwaGExLkNyZWF0ZUFnZW50RnJvbVRlbXBsYXRlUmVxdWVzdBo2LmtvaW5vbi5hZ2VudC52MWFscGhhMS5DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlc3BvbnNlEmAKCEdldEFnZW50EiYua29pbm9uLmFnZW50LnYxYWxwaGExLkdldEFnZW50UmVxdWVzdBonLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudFJlc3BvbnNlIgOQAgESZgoKTGlzdEFnZW50cxIoLmtvaW5vbi5hZ2VudC52MWFscGhhMS5MaXN0QWdlbnRzUmVxdWVzdBopLmtvaW5vbi5hZ2VudC52MWFscGhhMS5MaXN0QWdlbnRzUmVzcG9uc2UiA5ACARJqCg1BY3RpdmF0ZUFnZW50Eisua29pbm9uLmFnZW50LnYxYWxwaGExLkFjdGl2YXRlQWdlbnRSZXF1ZXN0Giwua29pbm9uLmFnZW50LnYxYWxwaGExLkFjdGl2YXRlQWdlbnRSZXNwb25zZRJnCgxBcmNoaXZlQWdlbnQSKi5rb2lub24uYWdlbnQudjFhbHBoYTEuQXJjaGl2ZUFnZW50UmVxdWVzdBorLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BcmNoaXZlQWdlbnRSZXNwb25zZUJOWkxnaXRodWIuY29tL3Byb2NvZHVjay9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9hZ2VudC92MWFscGhhMTthZ2VudHYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_timestamp, file_koinon_template_v1alpha1_template]);
 
 /**
  * Agent is an agent and the definition it runs.
@@ -157,6 +157,16 @@ export type CreateAgentFromTemplateRequest = Message<"koinon.agent.v1alpha1.Crea
    * @generated from field: koinon.template.v1alpha1.Flavor flavor = 4;
    */
   flavor: Flavor;
+
+  /**
+   * Where the template's grants apply: one entry per grant on a connector
+   * type with targets. A grant whose template sets targets min above zero
+   * needs one. Stored with the agent's version; ActivateAgent approves it with
+   * the grant.
+   *
+   * @generated from field: repeated koinon.agent.v1alpha1.GrantBinding grants = 5;
+   */
+  grants: GrantBinding[];
 };
 
 /**
@@ -165,6 +175,44 @@ export type CreateAgentFromTemplateRequest = Message<"koinon.agent.v1alpha1.Crea
  */
 export const CreateAgentFromTemplateRequestSchema: GenMessage<CreateAgentFromTemplateRequest> = /*@__PURE__*/
   messageDesc(file_koinon_agent_v1alpha1_agent, 1);
+
+/**
+ * GrantBinding binds a template grant to one of the org's connections and
+ * the targets it is narrowed to.
+ *
+ * @generated from message koinon.agent.v1alpha1.GrantBinding
+ */
+export type GrantBinding = Message<"koinon.agent.v1alpha1.GrantBinding"> & {
+  /**
+   * The grant's connector type, for example "github".
+   *
+   * @generated from field: string connector = 1;
+   */
+  connector: string;
+
+  /**
+   * A connection of that type in the org (ConnectionService).
+   *
+   * @generated from field: string connection_id = 2;
+   */
+  connectionId: string;
+
+  /**
+   * For GitHub: repositories as owner/name. Their number must be within the
+   * template grant's targets min and max, and the connection's installation
+   * must be able to access each of them.
+   *
+   * @generated from field: repeated string repositories = 3;
+   */
+  repositories: string[];
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.GrantBinding.
+ * Use `create(GrantBindingSchema)` to create a new message.
+ */
+export const GrantBindingSchema: GenMessage<GrantBinding> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 2);
 
 /**
  * CreateAgentFromTemplateResponse holds the new draft.
@@ -183,7 +231,7 @@ export type CreateAgentFromTemplateResponse = Message<"koinon.agent.v1alpha1.Cre
  * Use `create(CreateAgentFromTemplateResponseSchema)` to create a new message.
  */
 export const CreateAgentFromTemplateResponseSchema: GenMessage<CreateAgentFromTemplateResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 2);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 3);
 
 /**
  * GetAgentRequest names an agent.
@@ -207,7 +255,7 @@ export type GetAgentRequest = Message<"koinon.agent.v1alpha1.GetAgentRequest"> &
  * Use `create(GetAgentRequestSchema)` to create a new message.
  */
 export const GetAgentRequestSchema: GenMessage<GetAgentRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 3);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 4);
 
 /**
  * GetAgentResponse holds the agent.
@@ -226,7 +274,7 @@ export type GetAgentResponse = Message<"koinon.agent.v1alpha1.GetAgentResponse">
  * Use `create(GetAgentResponseSchema)` to create a new message.
  */
 export const GetAgentResponseSchema: GenMessage<GetAgentResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 4);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 5);
 
 /**
  * ListAgentsRequest names the org.
@@ -245,7 +293,7 @@ export type ListAgentsRequest = Message<"koinon.agent.v1alpha1.ListAgentsRequest
  * Use `create(ListAgentsRequestSchema)` to create a new message.
  */
 export const ListAgentsRequestSchema: GenMessage<ListAgentsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 5);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 6);
 
 /**
  * ListAgentsResponse lists the org's agents.
@@ -264,7 +312,7 @@ export type ListAgentsResponse = Message<"koinon.agent.v1alpha1.ListAgentsRespon
  * Use `create(ListAgentsResponseSchema)` to create a new message.
  */
 export const ListAgentsResponseSchema: GenMessage<ListAgentsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 6);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 7);
 
 /**
  * ActivateAgentRequest names the draft and the version the caller reviewed.
@@ -296,7 +344,7 @@ export type ActivateAgentRequest = Message<"koinon.agent.v1alpha1.ActivateAgentR
  * Use `create(ActivateAgentRequestSchema)` to create a new message.
  */
 export const ActivateAgentRequestSchema: GenMessage<ActivateAgentRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 7);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 8);
 
 /**
  * ActivateAgentResponse holds the active agent.
@@ -315,7 +363,7 @@ export type ActivateAgentResponse = Message<"koinon.agent.v1alpha1.ActivateAgent
  * Use `create(ActivateAgentResponseSchema)` to create a new message.
  */
 export const ActivateAgentResponseSchema: GenMessage<ActivateAgentResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 8);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 9);
 
 /**
  * ArchiveAgentRequest names the agent.
@@ -339,7 +387,7 @@ export type ArchiveAgentRequest = Message<"koinon.agent.v1alpha1.ArchiveAgentReq
  * Use `create(ArchiveAgentRequestSchema)` to create a new message.
  */
 export const ArchiveAgentRequestSchema: GenMessage<ArchiveAgentRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 9);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 10);
 
 /**
  * ArchiveAgentResponse holds the archived agent.
@@ -358,7 +406,7 @@ export type ArchiveAgentResponse = Message<"koinon.agent.v1alpha1.ArchiveAgentRe
  * Use `create(ArchiveAgentResponseSchema)` to create a new message.
  */
 export const ArchiveAgentResponseSchema: GenMessage<ArchiveAgentResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 10);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 11);
 
 /**
  * AgentStatus is the agent lifecycle (ADR 0020).

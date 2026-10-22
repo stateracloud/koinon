@@ -70,6 +70,7 @@ var _ = Describe("ConnectionService", func() {
 		e = newEnv(ctx, envOptions{
 			secrets: connections.KubeSecrets{Client: kube, Namespace: "koinon"},
 			github:  github.NewClient(github.Options{BaseURL: gh.URL()}),
+			ghFake:  gh,
 			logs:    logs,
 		})
 		org, owner = e.newTeamOrg(ctx)
@@ -184,7 +185,7 @@ var _ = Describe("ConnectionService", func() {
 	})
 
 	It("refuses to create connections without a secret store", func(ctx SpecContext) {
-		e2 := newEnvOn(ctx, e, envOptions{})
+		e2 := newEnvOn(ctx, e, envOptions{noSecrets: true})
 		_, err := create(ctx, owner.on(e2), gh.PEM, false)
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 	})

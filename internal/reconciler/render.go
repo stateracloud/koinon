@@ -80,15 +80,23 @@ func (r *Reconciler) profile(flavor store.AgentFlavor, f Flavor) execution.Provi
 // policy is the sandbox policy. The filesystem rules are the ones the harnesses ran under in
 // spike step 7 (policies/harness.yaml); /sandbox, the home volume, is the working directory.
 // Network access is deny by default: agentgateway is reachable through the provider profile,
-// and grant-derived rules (plan item C2) will be added here, enforced like every L7 endpoint.
-func policy() execution.Policy {
+// and network holds the grant-derived rules (plan item C2, github.go), enforced like every L7
+// endpoint.
+func policy(network map[string]execution.NetworkRule) execution.Policy { return SandboxPolicy(network) }
+
+// SandboxPolicy is the policy every agent sandbox gets, with network as its grant-derived
+// entries. Exported for the escape suite, which renders the same policy against a real gateway.
+func SandboxPolicy(network map[string]execution.NetworkRule) execution.Policy {
+	if network == nil {
+		network = map[string]execution.NetworkRule{}
+	}
 	return execution.Policy{
 		Filesystem: execution.FilesystemPolicy{
 			IncludeWorkdir: true,
 			ReadOnly:       []string{"/bin", "/usr", "/lib", "/lib64", "/opt", "/proc", "/dev/urandom", "/etc", "/var/log"},
 			ReadWrite:      []string{"/tmp", "/dev/null"},
 		},
-		Network: map[string]execution.NetworkRule{},
+		Network: network,
 	}
 }
 
@@ -100,13 +108,18 @@ func policy() execution.Policy {
 // at /sandbox, kept while the sandbox is stopped and deleted with it (spike 1.4, 1.5). The
 // SandboxTemplate field for custom volume claim templates was removed upstream
 // (volume_claim_templates is reserved), so the driver's PVC is the agent's home.
-func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNames, f Flavor) (execution.SandboxSpec, string) {
+//
+// providers are the provider records the sandbox attaches; they are part of the hash, so adding
+// or removing the GitHub record of a read grant recreates the sandbox (OpenShell 0.1.5 can attach
+// providers at runtime, but Koinon keeps the attached set fixed per sandbox). network are the
+// grant-derived policy entries, updated in place.
+func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNames, f Flavor, providers []string, network map[string]execution.NetworkRule) (execution.SandboxSpec, string) {
 	spec := execution.SandboxSpec{
 		Name:             names.Sandbox,
 		Image:            f.Image,
 		RuntimeClassName: r.cfg.RuntimeClassName,
-		Providers:        []string{names.Provider},
-		Policy:           policy(),
+		Providers:        providers,
+		Policy:           policy(network),
 		Labels:           ownerLabels(org, agent),
 	}
 	hash := specHash(spec)

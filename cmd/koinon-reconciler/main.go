@@ -27,6 +27,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/procoduck/koinon/internal/connections"
+	"github.com/procoduck/koinon/internal/connectors/github"
 	"github.com/procoduck/koinon/internal/execution/openshell"
 	"github.com/procoduck/koinon/internal/gateway/standalone"
 	"github.com/procoduck/koinon/internal/project"
@@ -102,7 +104,13 @@ func run() error {
 			ResyncInterval:   cfg.resyncInterval,
 			HomeRetention:    reconciler.Retention(cfg.homeRetention),
 			ToolServers:      cfg.toolServers(),
-			Logger:           log,
+			// repo.read grants (plan item C2): tokens minted with the App key from the
+			// connection's Secret, which lives in Koinon's namespace like the key Secrets.
+			GitHub: reconciler.GitHubApps{
+				Secrets: connections.KubeSecrets{Client: kube, Namespace: cfg.namespace},
+				Client:  github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
+			},
+			Logger: log,
 		})
 	if err != nil {
 		return err

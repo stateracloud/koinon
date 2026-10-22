@@ -10,6 +10,8 @@ The reconciler gets what it renders:
   merge patch and never reads it) and the per-agent key Secrets (plan items G1, R2) in this
   namespace; Secrets have no list or watch, so it can only reach names it already knows (they are
   recorded in Postgres);
+- get on connection Secrets in this namespace (the same rule), to mint the read-only GitHub
+  installation tokens of repo.read grants with the App key (plan item C2);
 - read and delete on Agent Sandbox objects cluster-wide, to garbage-collect sandboxes the OpenShell
   gateway no longer lists (ADR 0048 finding 1.8).
 Sandboxes, workspaces, providers and policies go through the OpenShell gateway, not this API.

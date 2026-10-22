@@ -85,6 +85,98 @@ var _ = Describe("AgentService", func() {
 		Expect(a.GetInstructions()).To(ContainSubstring("Repo helper"))
 	})
 
+	Describe("repository binding", func() {
+		create := func(ctx SpecContext, grants ...*agentv1alpha1.GrantBinding) (*agentv1alpha1.Agent, error) {
+			res, err := owner.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
+				OrgId: org, TemplateId: owner.repoHelper(ctx).GetId(), Grants: grants,
+			})
+			return res.GetAgent(), err
+		}
+		binding := func(ctx SpecContext, repos ...string) *agentv1alpha1.GrantBinding {
+			return e.repoGrant(ctx, org, repos...)[0]
+		}
+
+		It("stores the binding with the version, and activation approves it", func(ctx SpecContext) {
+			a, err := create(ctx, binding(ctx, "acme/widgets"))
+			Expect(err).NotTo(HaveOccurred())
+			conn := e.githubConnection(ctx, org)
+			Expect(a.GetProposedGrants()).To(ConsistOf(SatisfyAll(
+				HaveField("Connector", "github"),
+				HaveField("ConnectionId", conn),
+				HaveField("Repositories", []string{"acme/widgets"}),
+				HaveField("TargetsMin", int32(1)), HaveField("TargetsMax", int32(1)),
+			)))
+			var stored string
+			Expect(e.pool.QueryRow(ctx, `SELECT config->'bindings'->0->>'targets' FROM agent_versions WHERE agent_id = $1`, a.GetId()).
+				Scan(&stored)).To(Succeed())
+			Expect(stored).To(Equal(`["acme/widgets"]`))
+
+			res, err := owner.agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{OrgId: org, AgentId: a.GetId(), Version: 1})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetAgent().GetApprovedGrants()).To(ConsistOf(SatisfyAll(
+				HaveField("ConnectionId", conn), HaveField("Repositories", []string{"acme/widgets"}),
+			)))
+		})
+
+		It("checks the repositories against the installation with a metadata-read token", func(ctx SpecContext) {
+			before := len(e.opts.ghFake.Requests())
+			_, err := create(ctx, binding(ctx, "acme/gadgets"))
+			Expect(err).NotTo(HaveOccurred())
+			reqs := e.opts.ghFake.Requests()[before:]
+			Expect(reqs).To(ContainElement(SatisfyAll(
+				HaveField("Repositories", []string{"gadgets"}),
+				HaveField("Permissions", map[string]string{"metadata": "read"}),
+			)))
+
+			_, err = create(ctx, binding(ctx, "acme/not-installed"))
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+			Expect(err.Error()).To(ContainSubstring("cannot access"))
+			_, err = create(ctx, binding(ctx, "someone-else/widgets"))
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "the owner must be the installation's account")
+		})
+
+		DescribeTable("rejects bindings that do not fit the template or the org",
+			func(ctx SpecContext, mutate func(ctx SpecContext, b *agentv1alpha1.GrantBinding) []*agentv1alpha1.GrantBinding, want string) {
+				b := binding(ctx, "acme/widgets")
+				_, err := create(ctx, mutate(ctx, b)...)
+				Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "%v", err)
+				Expect(err.Error()).To(ContainSubstring(want))
+				Expect(count(ctx, e, `SELECT count(*) FROM agents`)).To(BeZero())
+			},
+			Entry("no binding for a grant with targets min 1", func(SpecContext, *agentv1alpha1.GrantBinding) []*agentv1alpha1.GrantBinding {
+				return nil
+			}, "needs a connection"),
+			Entry("more repositories than targets max", func(_ SpecContext, b *agentv1alpha1.GrantBinding) []*agentv1alpha1.GrantBinding {
+				b.Repositories = []string{"acme/widgets", "acme/gadgets"}
+				return []*agentv1alpha1.GrantBinding{b}
+			}, "1 to 1 repositories, not 2"),
+			Entry("no repositories", func(_ SpecContext, b *agentv1alpha1.GrantBinding) []*agentv1alpha1.GrantBinding {
+				b.Repositories = nil
+				return []*agentv1alpha1.GrantBinding{b}
+			}, "not 0"),
+			Entry("a malformed repository", func(_ SpecContext, b *agentv1alpha1.GrantBinding) []*agentv1alpha1.GrantBinding {
+				b.Repositories = []string{"acme/../etc"}
+				return []*agentv1alpha1.GrantBinding{b}
+			}, "is not a repository"),
+			Entry("a connector the template does not grant", func(_ SpecContext, b *agentv1alpha1.GrantBinding) []*agentv1alpha1.GrantBinding {
+				b.Connector = "slack"
+				return []*agentv1alpha1.GrantBinding{b}
+			}, "no grant on connector"),
+			Entry("the grant bound twice", func(_ SpecContext, b *agentv1alpha1.GrantBinding) []*agentv1alpha1.GrantBinding {
+				return []*agentv1alpha1.GrantBinding{b, b}
+			}, "bound twice"),
+			Entry("an unknown connection", func(_ SpecContext, b *agentv1alpha1.GrantBinding) []*agentv1alpha1.GrantBinding {
+				b.ConnectionId = "019a0000-0000-7000-8000-000000000000"
+				return []*agentv1alpha1.GrantBinding{b}
+			}, "connection not found"),
+			Entry("another org's connection", func(ctx SpecContext, b *agentv1alpha1.GrantBinding) []*agentv1alpha1.GrantBinding {
+				other, _ := e.newTeamOrg(ctx)
+				b.ConnectionId = e.githubConnection(ctx, other)
+				return []*agentv1alpha1.GrantBinding{b}
+			}, "connection not found"),
+		)
+	})
+
 	It("rejects a flavor the template does not allow", func(ctx SpecContext) {
 		_, err := owner.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
 			OrgId: org, TemplateId: owner.repoHelper(ctx).GetId(), Flavor: templatev1alpha1.Flavor(99),

@@ -77,6 +77,24 @@ message CreateAgentFromTemplateRequest {
   string display_name = 3;
   // One of the template's allowed flavors; unspecified picks its default.
   koinon.template.v1alpha1.Flavor flavor = 4;
+  // Where the template's grants apply: one entry per grant on a connector
+  // type with targets. A grant whose template sets targets min above zero
+  // needs one. Stored with the agent's version; ActivateAgent approves it with
+  // the grant.
+  repeated GrantBinding grants = 5;
+}
+
+// GrantBinding binds a template grant to one of the org's connections and
+// the targets it is narrowed to.
+message GrantBinding {
+  // The grant's connector type, for example "github".
+  string connector = 1;
+  // A connection of that type in the org (ConnectionService).
+  string connection_id = 2;
+  // For GitHub: repositories as owner/name. Their number must be within the
+  // template grant's targets min and max, and the connection's installation
+  // must be able to access each of them.
+  repeated string repositories = 3;
 }
 
 // CreateAgentFromTemplateResponse holds the new draft.

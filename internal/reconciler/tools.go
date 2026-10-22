@@ -24,20 +24,20 @@ func (r *Reconciler) mcpTargets() []gateway.MCPTarget {
 	return out
 }
 
-// agentTools reads the agent's active version and returns the tools its grants allow.
-func (r *Reconciler) agentTools(ctx context.Context, a store.Agent) ([]gateway.ToolGrant, error) {
-	if len(r.cfg.ToolServers) == 0 || !a.ActiveVersionID.Valid {
-		return nil, nil
+// activeConfig reads the agent's active version: its grants and their bindings.
+func (r *Reconciler) activeConfig(ctx context.Context, a store.Agent) (agentconfig.Config, error) {
+	if !a.ActiveVersionID.Valid {
+		return agentconfig.Config{}, nil
 	}
 	v, err := r.q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: a.OrgID, ID: a.ActiveVersionID})
 	if err != nil {
-		return nil, fmt.Errorf("reconciler: read active version of agent %s: %w", uuidString(a.ID), err)
+		return agentconfig.Config{}, fmt.Errorf("reconciler: read active version of agent %s: %w", uuidString(a.ID), err)
 	}
 	cfg, err := agentconfig.Parse(v.Config)
 	if err != nil {
-		return nil, fmt.Errorf("reconciler: agent %s: %w", uuidString(a.ID), err)
+		return agentconfig.Config{}, fmt.Errorf("reconciler: agent %s: %w", uuidString(a.ID), err)
 	}
-	return ToolGrants(cfg, r.cfg.ToolServers), nil
+	return cfg, nil
 }
 
 // ToolGrants is an agent's MCP allowlist, which agentgateway enforces as CEL (ADR 0008, 0042):

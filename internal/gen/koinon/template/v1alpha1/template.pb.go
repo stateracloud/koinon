@@ -139,9 +139,14 @@ type Grant struct {
 	Preset    Preset   `protobuf:"varint,3,opt,name=preset,proto3,enum=koinon.template.v1alpha1.Preset" json:"preset,omitempty"`
 	// How many targets (for GitHub: repositories) the user picks. Both zero when
 	// the template sets no bound.
-	TargetsMin    int32  `protobuf:"varint,4,opt,name=targets_min,json=targetsMin,proto3" json:"targets_min,omitempty"`
-	TargetsMax    int32  `protobuf:"varint,5,opt,name=targets_max,json=targetsMax,proto3" json:"targets_max,omitempty"`
-	Purpose       string `protobuf:"bytes,6,opt,name=purpose,proto3" json:"purpose,omitempty"`
+	TargetsMin int32  `protobuf:"varint,4,opt,name=targets_min,json=targetsMin,proto3" json:"targets_min,omitempty"`
+	TargetsMax int32  `protobuf:"varint,5,opt,name=targets_max,json=targetsMax,proto3" json:"targets_max,omitempty"`
+	Purpose    string `protobuf:"bytes,6,opt,name=purpose,proto3" json:"purpose,omitempty"`
+	// On an agent, the connection the grant uses and the targets (for GitHub:
+	// repositories, owner/name) it is narrowed to; activating the agent approves
+	// them with the grant. Empty on a template.
+	ConnectionId  string   `protobuf:"bytes,7,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	Repositories  []string `protobuf:"bytes,8,rep,name=repositories,proto3" json:"repositories,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -216,6 +221,20 @@ func (x *Grant) GetPurpose() string {
 		return x.Purpose
 	}
 	return ""
+}
+
+func (x *Grant) GetConnectionId() string {
+	if x != nil {
+		return x.ConnectionId
+	}
+	return ""
+}
+
+func (x *Grant) GetRepositories() []string {
+	if x != nil {
+		return x.Repositories
+	}
+	return nil
 }
 
 // RunLimits cap a single run; hitting one cancels the run (plan item A4).
@@ -505,7 +524,7 @@ var File_koinon_template_v1alpha1_template_proto protoreflect.FileDescriptor
 
 const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\n" +
-	"'koinon/template/v1alpha1/template.proto\x12\x18koinon.template.v1alpha1\"\xd3\x01\n" +
+	"'koinon/template/v1alpha1/template.proto\x12\x18koinon.template.v1alpha1\"\x9c\x02\n" +
 	"\x05Grant\x12\x1c\n" +
 	"\tconnector\x18\x01 \x01(\tR\tconnector\x12\x16\n" +
 	"\x06scopes\x18\x02 \x03(\tR\x06scopes\x128\n" +
@@ -514,7 +533,9 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"targetsMin\x12\x1f\n" +
 	"\vtargets_max\x18\x05 \x01(\x05R\n" +
 	"targetsMax\x12\x18\n" +
-	"\apurpose\x18\x06 \x01(\tR\apurpose\"\\\n" +
+	"\apurpose\x18\x06 \x01(\tR\apurpose\x12#\n" +
+	"\rconnection_id\x18\a \x01(\tR\fconnectionId\x12\"\n" +
+	"\frepositories\x18\b \x03(\tR\frepositories\"\\\n" +
 	"\tRunLimits\x120\n" +
 	"\x14max_duration_seconds\x18\x01 \x01(\x03R\x12maxDurationSeconds\x12\x1d\n" +
 	"\n" +
