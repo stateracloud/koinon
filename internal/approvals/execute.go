@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -277,9 +278,13 @@ func (s *Service) commit(ctx context.Context, tok github.Token, repo github.Repo
 	if err != nil {
 		return "", err
 	}
+	modes, err := s.baseModes(ctx, tok, repo, baseCommit.Tree.SHA, args.Files)
+	if err != nil {
+		return "", err
+	}
 	entries := make([]github.TreeEntry, 0, len(args.Files))
 	for _, f := range args.Files {
-		e := github.TreeEntry{Path: f.Path, Mode: "100644", Type: "blob"}
+		e := github.TreeEntry{Path: f.Path, Mode: FileMode(f, modes[f.Path]), Type: "blob"}
 		if !f.Delete {
 			sha, err := s.gh.CreateBlob(ctx, tok, repo, []byte(f.Content))
 			if err != nil {
@@ -294,6 +299,95 @@ func (s *Service) commit(ctx context.Context, tok github.Token, repo github.Repo
 		return "", err
 	}
 	return s.gh.CreateCommit(ctx, tok, repo, message, tree, []string{baseSHA})
+}
+
+// FileMode is the git mode Koinon writes a file of an approved pull request with, given
+// its mode on the base tree ("" for a new file): 100755 when the call marks it executable
+// or it already was executable, else 100644. Only regular and executable blobs are
+// written: the arguments cannot express a symbolic link (120000) or a submodule (160000),
+// so a modified symbolic link becomes a regular file.
+func FileMode(f githubtools.FileChange, base string) string {
+	if f.Executable || base == "100755" {
+		return "100755"
+	}
+	return "100644"
+}
+
+// baseModes returns the mode in the base tree of each file the call writes that exists
+// there as a blob, keyed by path; an absent path is new. One recursive listing answers it;
+// if GitHub truncated that listing (a very large repository), the paths it did not return
+// are looked up directory by directory. The calls are bounded by the 100-file cap.
+func (s *Service) baseModes(ctx context.Context, tok github.Token, repo github.Repo, tree string, files []githubtools.FileChange) (map[string]string, error) {
+	want := map[string]bool{}
+	for _, f := range files {
+		if !f.Delete {
+			want[f.Path] = true
+		}
+	}
+	modes := map[string]string{}
+	if len(want) == 0 {
+		return modes, nil
+	}
+	all, err := s.gh.GetTree(ctx, tok, repo, tree, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range all.Tree {
+		if e.Type == "blob" && want[e.Path] {
+			modes[e.Path] = e.Mode
+		}
+	}
+	if !all.Truncated {
+		return modes, nil
+	}
+	// dirs caches each directory's listing ("" is the root); nil when it does not exist.
+	dirs := map[string][]github.TreeItem{}
+	var list func(dir string) ([]github.TreeItem, error)
+	list = func(dir string) ([]github.TreeItem, error) {
+		if items, ok := dirs[dir]; ok {
+			return items, nil
+		}
+		sha := tree
+		if dir != "" {
+			parent, name := path.Split(dir)
+			items, err := list(strings.TrimSuffix(parent, "/"))
+			if err != nil {
+				return nil, err
+			}
+			sha = ""
+			for _, e := range items {
+				if e.Path == name && e.Type == "tree" {
+					sha = e.SHA
+				}
+			}
+			if sha == "" {
+				dirs[dir] = nil
+				return nil, nil
+			}
+		}
+		t, err := s.gh.GetTree(ctx, tok, repo, sha, false)
+		if err != nil {
+			return nil, err
+		}
+		dirs[dir] = t.Tree
+		return t.Tree, nil
+	}
+	for p := range want {
+		if _, ok := modes[p]; ok {
+			continue
+		}
+		dir, name := path.Split(p)
+		items, err := list(strings.TrimSuffix(dir, "/"))
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range items {
+			if e.Path == name && e.Type == "blob" {
+				modes[p] = e.Mode
+			}
+		}
+	}
+	return modes, nil
 }
 
 func (s *Service) findPullRequest(ctx context.Context, tok github.Token, repo github.Repo, branch string) (github.PullRequest, bool, error) {

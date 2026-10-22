@@ -67,3 +67,20 @@ func versionModel(config []byte) string {
 	}
 	return name
 }
+
+// harnessArgs are the launch command's optional switches from the agent version's harness
+// settings ({"harness": {"pluginInstalls": true}}, copied from the template). Only OpenCode
+// has one: --plugin-installs lets it load external plugins (flavors/opencode/README.md); the
+// reconciler opens the npm registry for the same agents. A config that cannot be read turns
+// every setting off.
+func harnessArgs(f store.AgentFlavor, config []byte) []string {
+	var c struct {
+		Harness struct {
+			PluginInstalls bool `json:"pluginInstalls"`
+		} `json:"harness"`
+	}
+	if json.Unmarshal(config, &c) != nil || !c.Harness.PluginInstalls || f != store.AgentFlavorOpencode {
+		return nil
+	}
+	return []string{"--plugin-installs"}
+}

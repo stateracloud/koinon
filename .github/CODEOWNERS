@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Every path is owned by the maintainer. GitHub requests their review on each pull request;
+# the main ruleset does not require an approval while there is a single maintainer.
+* @procoduck
