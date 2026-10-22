@@ -10,6 +10,9 @@ package github
 //
 //   - GET  /repos/{owner}/{repo}                       default_branch
 //     https://docs.github.com/en/rest/repos/repos#get-a-repository
+//   - GET  /repos/{owner}/{repo}/contents/{path}?ref=  200 {type, size, encoding, content}
+//     (base64; encoding "none" and no content above 1 MB; an array for a directory) or 404
+//     https://docs.github.com/en/rest/repos/contents#get-repository-content
 //   - GET  /repos/{owner}/{repo}/git/ref/{ref}         200 or 404 (ref is heads/<branch>)
 //   - POST /repos/{owner}/{repo}/git/refs              201; 422 "Reference already exists"
 //     https://docs.github.com/en/rest/git/refs
@@ -146,6 +149,52 @@ func (c *Client) GetBranch(ctx context.Context, tok Token, r Repo, branch string
 		return "", false, err
 	}
 	return out.Object.SHA, true, nil
+}
+
+// FileContent is a path at a ref, from the contents API.
+type FileContent struct {
+	// Type is "file", "dir", "symlink" or "submodule".
+	Type string
+	Size int64
+	// Content is the file's bytes; nil when GitHub sent none (files above 1 MB, and
+	// anything that is not a file).
+	Content []byte
+}
+
+// GetFileContent returns path at ref (a branch, tag or commit SHA); found is false when
+// the path does not exist there. It needs contents:read.
+func (c *Client) GetFileContent(ctx context.Context, tok Token, r Repo, path, ref string) (FileContent, bool, error) {
+	var raw json.RawMessage
+	q := url.Values{"ref": {ref}}
+	err := c.withToken(ctx, tok, http.MethodGet, r.path("/contents/%s?%s", escapeRef(path), q.Encode()), nil, &raw, http.StatusOK)
+	if IsStatus(err, http.StatusNotFound) {
+		return FileContent{}, false, nil
+	}
+	if err != nil {
+		return FileContent{}, false, err
+	}
+	if len(raw) > 0 && raw[0] == '[' {
+		return FileContent{Type: "dir"}, true, nil
+	}
+	var out struct {
+		Type     string `json:"type"`
+		Size     int64  `json:"size"`
+		Encoding string `json:"encoding"`
+		Content  string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return FileContent{}, false, fmt.Errorf("github: contents of %s: decode response: %w", path, err)
+	}
+	fc := FileContent{Type: out.Type, Size: out.Size}
+	if out.Type == "file" && out.Encoding == "base64" {
+		// GitHub wraps the base64 in lines.
+		b, err := base64.StdEncoding.DecodeString(strings.NewReplacer("\n", "", "\r", "").Replace(out.Content))
+		if err != nil {
+			return FileContent{}, false, fmt.Errorf("github: contents of %s: decode base64: %w", path, err)
+		}
+		fc.Content = b
+	}
+	return fc, true, nil
 }
 
 // escapeRef escapes each segment of a branch name, keeping the slashes.

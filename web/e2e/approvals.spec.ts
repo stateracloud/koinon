@@ -152,6 +152,17 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
       'koinon.ticket.v1alpha1.TicketService/GetTicket': () => ({ ticket: ticket(), events, runs: [run()] }),
       'koinon.approval.v1alpha1.ApprovalService/ListApprovals': () => ({ approvals: approvalStatus === 'STATUS_PENDING' && events.length ? [approval()] : [] }),
       'koinon.approval.v1alpha1.ApprovalService/GetApproval': () => ({ approval: approval() }),
+      'koinon.approval.v1alpha1.ApprovalService/GetApprovalDiff': () => ({
+        base: 'main',
+        files: [
+          {
+            path: 'README.md',
+            status: 'FILE_STATUS_MODIFIED',
+            unifiedDiff: '--- a/README.md\n+++ b/README.md\n@@ -1,2 +1,2 @@\n # Widgets\n-recieve\n+receive\n',
+          },
+          { path: 'package.json', fallbackReason: 'GitHub answered 502 Bad Gateway when Koinon read the current version' },
+        ],
+      }),
       'koinon.approval.v1alpha1.ApprovalService/Approve': (req) => {
         approved.push(req)
         if (req.argsSha256 !== sha) return { error: { code: 'failed_precondition', message: 'arguments changed' } }
@@ -203,6 +214,11 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   await expect(page).toHaveURL(/\/tickets\/t-1$/)
   const card = page.getByTestId('approval-card')
   await expect(card.getByRole('region', { name: 'Push and run risk' })).toContainText('Dependency manifests (1)')
+  const files = card.getByRole('region', { name: 'Files' })
+  await files.getByText('README.md').click()
+  await expect(files.getByLabel('Diff of README.md')).toContainText('+receive')
+  await files.getByText('package.json').click()
+  await expect(files.getByRole('note')).toContainText('GitHub answered 502')
 
   // 4. Waiting on you lists it; approve from the standalone view.
   await page.getByRole('link', { name: '← Board' }).click()

@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Status, type Approval, type FileChange } from '@/gen/koinon/approval/v1alpha1/approval_pb'
+import { FileStatus, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { approvalStatusLabel, targetRepo } from '@/lib/approvals'
 import { formatBytes, riskFlagsFor, riskItems, type RiskItem } from '@/lib/risk'
 import { cn } from '@/lib/utils'
@@ -27,6 +27,11 @@ export type ApprovalCardProps = {
    */
   changed?: boolean
   onReload?: () => void
+  /** The change against the base branch, from GetApprovalDiff. */
+  diff?: GetApprovalDiffResponse
+  diffPending?: boolean
+  /** Why GetApprovalDiff failed; the files then show their full new content. */
+  diffError?: string
   /** Link to the standalone view (shown in the ticket timeline). */
   showPermalink?: boolean
 }
@@ -36,7 +41,20 @@ export type ApprovalCardProps = {
  * then what the call does and where, then the change itself, collapsed.
  * Approving binds to the args_sha256 the card was loaded with.
  */
-export function ApprovalCard({ approval: a, canDecide, onApprove, onDeny, pending, error, changed, onReload, showPermalink }: ApprovalCardProps) {
+export function ApprovalCard({
+  approval: a,
+  canDecide,
+  onApprove,
+  onDeny,
+  pending,
+  error,
+  changed,
+  onReload,
+  diff,
+  diffPending,
+  diffError,
+  showPermalink,
+}: ApprovalCardProps) {
   const headingId = useId()
   const pr = a.call.case === 'pullRequest' ? a.call.value : undefined
   const comment = a.call.case === 'comment' ? a.call.value : undefined
@@ -93,7 +111,7 @@ export function ApprovalCard({ approval: a, canDecide, onApprove, onDeny, pendin
         </section>
       )}
 
-      {pr && <FileList files={pr.files} items={items} />}
+      {pr && <FileList files={pr.files} items={items} diff={diff} diffPending={diffPending} diffError={diffError} />}
 
       <Outcome approval={a} resultUrl={resultUrl} />
 
@@ -164,23 +182,50 @@ function RiskSummary({ items }: { items: readonly RiskItem[] }) {
   )
 }
 
-function FileList({ files, items }: { files: readonly FileChange[]; items: readonly RiskItem[] }) {
+const statusLabel: Partial<Record<FileStatus, string>> = {
+  [FileStatus.ADDED]: 'added',
+  [FileStatus.MODIFIED]: 'modified',
+  [FileStatus.DELETED]: 'deleted',
+}
+
+function FileList({
+  files,
+  items,
+  diff,
+  diffPending,
+  diffError,
+}: {
+  files: readonly FileChange[]
+  items: readonly RiskItem[]
+  diff?: GetApprovalDiffResponse
+  diffPending?: boolean
+  diffError?: string
+}) {
+  const byPath = new Map((diff?.files ?? []).map((d) => [d.path, d]))
+  const binary = new Set(items.find((i) => i.key === 'binary')?.paths ?? [])
+  const base = diff?.base || 'the base branch'
   return (
     <section aria-label="Files">
       <h4 className="text-muted-foreground mb-1 text-xs font-medium uppercase">Files ({files.length})</h4>
       <p className="text-muted-foreground mb-2 text-xs">
-        Each file shows its full new content as the agent proposed it. Koinon does not fetch the current version from GitHub; compare on the pull request.
+        {diffPending
+          ? 'Comparing with the base branch on GitHub…'
+          : diff
+            ? `Each file shows its diff against ${base} as it is now.`
+            : `Could not compare with the base branch${diffError ? ` (${diffError})` : ''}; each file shows its full new content.`}
       </p>
       <ul className="grid gap-1">
         {files.map((f) => {
           const flags = riskFlagsFor(f.path, items).filter((i) => i.key !== 'deletions')
+          const d = byPath.get(f.path)
+          const status = f.delete ? 'deleted' : d && statusLabel[d.status]
           return (
             <li key={f.path}>
-              <details className="rounded-md border">
+              <details className="rounded-md border" data-testid="file-diff">
                 <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-2 py-1 text-sm">
                   <FileText aria-hidden className="text-muted-foreground size-4" />
                   <span className="font-mono">{f.path}</span>
-                  {f.delete && <Badge variant="destructive">deleted</Badge>}
+                  {status && <Badge variant={status === 'deleted' ? 'destructive' : 'secondary'}>{status}</Badge>}
                   {flags.map((i) => (
                     <Badge key={i.key} variant="outline">
                       {i.label.toLowerCase()}
@@ -188,19 +233,64 @@ function FileList({ files, items }: { files: readonly FileChange[]; items: reado
                   ))}
                   {!f.delete && <span className="text-muted-foreground ml-auto text-xs">{formatBytes(new TextEncoder().encode(f.content).length)}</span>}
                 </summary>
-                {f.delete ? (
-                  <p className="text-muted-foreground border-t px-2 py-1 text-sm">This file is deleted.</p>
-                ) : (
-                  <pre className="bg-muted/40 max-h-96 overflow-auto border-t p-2 text-xs" aria-label={`New content of ${f.path}`}>
-                    {f.content}
-                  </pre>
-                )}
+                <FileBody file={f} diff={d} binary={(d?.binary ?? false) || binary.has(f.path)} base={base} compared={!!diff} />
               </details>
             </li>
           )
         })}
       </ul>
     </section>
+  )
+}
+
+function FileBody({ file: f, diff: d, binary, base, compared }: { file: FileChange; diff?: FileDiff; binary: boolean; base: string; compared: boolean }) {
+  if (binary) return <p className="text-muted-foreground border-t px-2 py-1 text-sm">Binary file; its content is not shown.</p>
+  if (d?.unifiedDiff) return <UnifiedDiff path={f.path} text={d.unifiedDiff} />
+  if (d && !d.fallbackReason && d.status !== FileStatus.UNSPECIFIED) {
+    return <p className="text-muted-foreground border-t px-2 py-1 text-sm">No change against {base}.</p>
+  }
+  return (
+    <>
+      {compared && (
+        <p className="text-muted-foreground border-t px-2 py-1 text-xs" role="note">
+          No diff{d?.fallbackReason ? `: ${d.fallbackReason}` : ''}. Showing the full new content.
+        </p>
+      )}
+      {f.delete ? (
+        <p className="text-muted-foreground border-t px-2 py-1 text-sm">This file is deleted.</p>
+      ) : (
+        <pre className="bg-muted/40 max-h-96 overflow-auto border-t p-2 text-xs" aria-label={`New content of ${f.path}`}>
+          {f.content}
+        </pre>
+      )}
+    </>
+  )
+}
+
+/** UnifiedDiff colours a unified diff line by line; the file headers are dropped. */
+function UnifiedDiff({ path, text }: { path: string; text: string }) {
+  const lines = text.replace(/\n$/, '').split('\n')
+  return (
+    <pre className="max-h-96 overflow-auto border-t py-1 text-xs" aria-label={`Diff of ${path}`}>
+      {lines.map((line, i) => {
+        if (i < 2 && (line.startsWith('--- ') || line.startsWith('+++ '))) return null
+        const kind = line.startsWith('@@') ? 'hunk' : line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : line.startsWith('\\') ? 'note' : 'ctx'
+        return (
+          <span
+            key={i}
+            data-line={kind}
+            className={cn(
+              'block px-2 whitespace-pre',
+              kind === 'add' && 'bg-emerald-500/15',
+              kind === 'del' && 'bg-red-500/15',
+              (kind === 'hunk' || kind === 'note') && 'text-muted-foreground',
+            )}
+          >
+            {line || ' '}
+          </span>
+        )
+      })}
+    </pre>
   )
 }
 
