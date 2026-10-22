@@ -1,0 +1,91 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# koinon-hermes starts Hermes Agent as an ACP agent on stdin/stdout. It is the flavor's entry
+# point: koinon-agentd runs it through OpenShell's non-TTY exec (ADR 0049).
+#
+# Usage:
+#   koinon-hermes --model-base-url URL --model NAME --mcp-url URL [-- HERMES_ACP_ARGS...]
+#
+# OpenShell does not pass the image's ENV to the processes it starts, PATH included (ADR 0048),
+# so everything Hermes needs is set here and binaries are called by absolute path. The
+# per-agent values come as arguments, are checked, exported as KOINON_* variables and read by
+# /etc/koinon/hermes/config.yaml through Hermes's ${VAR} expansion. The model key is never an
+# argument: Hermes reads $OPENAI_API_KEY, which in a sandbox is an OpenShell placeholder that
+# the proxy swaps for the real key on the way to agentgateway.
+set -eu
+
+die() {
+  echo "koinon-hermes: $*" >&2
+  exit 64
+}
+
+# Hermes expands ${VAR} after parsing the YAML, so a value cannot change the document; the
+# check keeps values to plain URLs and model names all the same.
+check() {
+  case $2 in
+    '' | *'"'* | *"'"* | *'\'* | *'$'* | *'{'* | *'}'* | *[[:space:][:cntrl:]]*) die "invalid $1: '$2'" ;;
+  esac
+}
+
+check_url() {
+  check "$1" "$2"
+  case $2 in
+    http://?* | https://?*) ;;
+    *) die "$1 must be an http or https URL: '$2'" ;;
+  esac
+}
+
+base_url='' model='' mcp_url=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    --model-base-url) [ $# -ge 2 ] || die "$1 needs a value"; base_url=$2; shift 2 ;;
+    --model) [ $# -ge 2 ] || die "$1 needs a value"; model=$2; shift 2 ;;
+    --mcp-url) [ $# -ge 2 ] || die "$1 needs a value"; mcp_url=$2; shift 2 ;;
+    --) shift; break ;;
+    *) die "unknown argument '$1'" ;;
+  esac
+done
+check_url --model-base-url "$base_url"
+check --model "$model"
+check_url --mcp-url "$mcp_url"
+
+# Drop anything the caller's environment might carry that would change where Hermes reads its
+# configuration, which profile it uses, or that would turn on a messaging platform or the API
+# server of the gateway daemon `hermes acp` starts.
+unset HERMES_IGNORE_USER_CONFIG HERMES_PROFILE HERMES_DOCKER_EXEC_AS_ROOT PYTHONPATH PYTHONHOME \
+  OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS API_SERVER_KEY API_SERVER_ENABLED \
+  TELEGRAM_BOT_TOKEN DISCORD_BOT_TOKEN SLACK_BOT_TOKEN SLACK_APP_TOKEN
+
+export PATH=/opt/hermes/bin:/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LANG=C.UTF-8
+# The official image's environment (its Dockerfile ENV), without HERMES_HOME=/opt/data.
+export PYTHONUNBUFFERED=1
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPYCACHEPREFIX=/tmp/hermes-pycache
+export PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/tools
+export HERMES_RUNTIME_DIR=/opt/hermes/tools
+export HERMES_PYTHON=/opt/hermes/.venv/bin/python
+export HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
+export HERMES_TUI_DIR=/opt/hermes/ui-tui
+# State lives in the sandbox home, which is the agent's volume (ADR 0048, 0049): sessions in
+# $HERMES_HOME/state.db. File tools write only below /sandbox.
+export HOME=/sandbox
+export HERMES_HOME=/sandbox/.hermes
+export HERMES_WRITE_SAFE_ROOT=/sandbox
+export XDG_CACHE_HOME=/sandbox/.cache
+# The gateway daemon's control socket; Hermes would otherwise put scratch files in the home.
+export XDG_RUNTIME_DIR=/tmp/hermes-runtime
+export TMPDIR=/tmp
+
+export KOINON_MODEL_BASE_URL="$base_url"
+export KOINON_MODEL="$model"
+export KOINON_MCP_URL="$mcp_url"
+
+mkdir -p "$HERMES_HOME" "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR"
+chmod 0700 "$XDG_RUNTIME_DIR"
+# Hermes reads its config only from $HERMES_HOME/config.yaml; the link keeps it the image's
+# read-only file. Only the essential bundled skills are copied into the home.
+ln -sfn /etc/koinon/hermes/config.yaml "$HERMES_HOME/config.yaml"
+: >"$HERMES_HOME/.no-bundled-skills"
+exec /opt/hermes/.venv/bin/hermes acp "$@"
