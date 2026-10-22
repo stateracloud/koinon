@@ -4,17 +4,20 @@ Install preflight ("koinon-api preflight", plan item H2) as a pre-install and pr
 runs before everything else, the migration Job included. It fails the install with a clear message
 when Agent Sandbox, the OpenShell gateway, the sandbox RuntimeClass, the CNPG operator (cnpg mode)
 or agentgateway's GatewayClass (kubernetes mode) is missing, and warns when Kata guest seccomp is
-off (ADRs 0048, 0049). helm.sh/hook-output-log-policy makes Helm 4 print the Job's output; a
+off (ADRs 0048, 0049) or when the cluster does not enforce NetworkPolicy. helm.sh/hook-output-log-policy makes Helm 4 print the Job's output; a
 failed Job is kept for `kubectl logs job/<name>`.
 
 RBAC is read-only get on exactly the objects checked, by name. The seccomp probe additionally
-creates, reads and deletes one short-lived unprivileged pod in the release namespace.
+creates, reads and deletes one short-lived unprivileged pod in the release namespace; the
+NetworkPolicy probe two such pods (koinon-api's image, the default runtime) and one NetworkPolicy
+that selects only its own server pod, all deleted when it ends.
 */ -}}
 {{- if .Values.preflight.enabled }}
 {{- include "koinon.validate" . }}
 {{- $name := include "koinon.componentName" (list . "preflight") }}
 {{- $clusterName := printf "%s-%s" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
 {{- $probe := .Values.preflight.seccompProbe.enabled }}
+{{- $netpol := .Values.preflight.networkPolicyProbe.enabled }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -84,10 +87,11 @@ subjects:
   - kind: ServiceAccount
     name: {{ $name }}
     namespace: {{ .Release.Namespace }}
-{{- if $probe }}
+{{- if or $probe $netpol }}
 ---
-# The seccomp probe pod. Pods have no create-by-name, so create and delete cover any pod in the
-# release namespace for as long as the hook lives.
+# The probe pods (and the NetworkPolicy probe's policy). Pods and NetworkPolicies have no
+# create-by-name, so create and delete cover any of them in the release namespace for as long as
+# the hook lives. Namespaced only: the probes never touch another namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -103,6 +107,11 @@ rules:
   - apiGroups: [""]
     resources: [pods/log]
     verbs: [get]
+  {{- if $netpol }}
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [create, delete]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -164,16 +173,23 @@ spec:
             - --agent-sandbox-namespace={{ .Values.preflight.agentSandbox.namespace }}
             - --agent-sandbox-controller={{ .Values.preflight.agentSandbox.controller }}
             - --seccomp-probe={{ $probe }}
-            {{- if $probe }}
+            - --netpol-probe={{ $netpol }}
+            {{- if or $probe $netpol }}
             - --probe-image={{ include "koinon.image" (list . .Values.api.image) }}
             {{- with .Values.imagePullSecrets }}
             {{- $secrets := list }}
             {{- range . }}{{ $secrets = append $secrets .name }}{{ end }}
             - --probe-image-pull-secrets={{ join "," $secrets }}
             {{- end }}
+            - --probe-instance={{ .Release.Name }}
+            {{- end }}
+            {{- if $probe }}
             - --probe-timeout={{ .Values.preflight.seccompProbe.timeout }}
             - --probe-name-prefix={{ include "koinon.componentName" (list . "preflight-probe") }}
-            - --probe-instance={{ .Release.Name }}
+            {{- end }}
+            {{- if $netpol }}
+            - --netpol-probe-timeout={{ .Values.preflight.networkPolicyProbe.timeout }}
+            - --netpol-probe-name-prefix={{ include "koinon.componentName" (list . "preflight-netpol") }}
             {{- end }}
           env:
             - name: POD_NAMESPACE
