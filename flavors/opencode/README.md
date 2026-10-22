@@ -69,7 +69,8 @@ resolves the link and reports the target's path.
 - **Edits.** OpenCode watches the file and sends a change with the next turn as a
   `<system-update>` ("The instructions changed: …"; a deleted file becomes "Previously loaded
   instructions no longer apply."). The agent can write the file, so agentd checks its hash before
-  every prompt and restores it (event `run.instructions_restored`).
+  every prompt and restores it (event `run.instructions_restored`). It checks the link the same
+  way; in the read-only image it cannot change.
 - **Missing or empty.** OpenCode skips a missing file silently and loads an empty one as empty
   instructions, so the entry script refuses to start without real content.
 - **Repository guidance** is content, not configuration: with project configuration off, the
