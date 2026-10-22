@@ -1,15 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
-package store_test
+// Package queries_test checks the sqlc queries in this directory. It needs no
+// database, so it runs without Docker.
+package queries_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
+
+func TestQueries(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Queries Suite")
+}
 
 // The rule (ADRs 0001, 0049): every query that touches an org-owned table
 // takes the @org_id parameter, and every read or write of an org-owned table
@@ -44,92 +55,78 @@ var crossOrgQueries = map[string]string{
 	"auth.sql:ListEffectiveMemberships":    "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
 }
 
-func TestQueriesAreOrgScoped(t *testing.T) {
-	owned := orgOwnedTables(t, "../migrations")
-	for _, table := range []string{"agents", "agent_versions", "tickets", "ticket_events", "runs", "run_events"} {
-		if !owned[table] {
-			t.Fatalf("expected %s to be detected as org-owned; detection is broken", table)
+var _ = Describe("org scoping", func() {
+	It("scopes every query on an org-owned table by @org_id", func() {
+		owned := orgOwnedTables("../migrations")
+		for _, table := range []string{"agents", "agent_versions", "tickets", "ticket_events", "runs", "run_events"} {
+			Expect(owned).To(HaveKey(table), "expected %s to be detected as org-owned; detection is broken", table)
 		}
-	}
-	if owned["templates"] || owned["orgs"] {
-		t.Fatal("templates and orgs are not org-owned; detection is broken")
-	}
+		Expect(owned).NotTo(HaveKey("templates"), "templates is not org-owned; detection is broken")
+		Expect(owned).NotTo(HaveKey("orgs"), "orgs is not org-owned; detection is broken")
 
-	files, err := filepath.Glob("../queries/*.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) == 0 {
-		t.Fatal("no query files found")
-	}
-	checked := 0
-	exempted := map[string]bool{}
-	for _, f := range files {
-		data, err := os.ReadFile(f) // #nosec G304 -- fixed test paths
-		if err != nil {
-			t.Fatal(err)
-		}
-		for name, sql := range splitQueries(string(data)) {
-			key := filepath.Base(f) + ":" + name
-			problem := orgScopeProblem(sql, owned)
-			if _, ok := crossOrgQueries[key]; ok {
-				if problem == "" {
-					t.Errorf("%s is allowlisted as cross-org but passes the org_id check; remove it from crossOrgQueries", key)
+		files, err := filepath.Glob("*.sql")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(files).NotTo(BeEmpty(), "no query files found")
+
+		var problems []string
+		checked := 0
+		exempted := map[string]bool{}
+		for _, f := range files {
+			data, err := os.ReadFile(f) // #nosec G304 -- fixed test paths
+			Expect(err).NotTo(HaveOccurred())
+			for name, sql := range splitQueries(string(data)) {
+				key := filepath.Base(f) + ":" + name
+				problem := orgScopeProblem(sql, owned)
+				if _, ok := crossOrgQueries[key]; ok {
+					if problem == "" {
+						problems = append(problems, fmt.Sprintf(
+							"%s is allowlisted as cross-org but passes the org_id check; remove it from crossOrgQueries", key))
+					}
+					exempted[key] = true
+				} else if problem != "" {
+					problems = append(problems, fmt.Sprintf("%s: %s: %s", filepath.Base(f), name, problem))
 				}
-				exempted[key] = true
-			} else if problem != "" {
-				t.Errorf("%s: %s: %s", filepath.Base(f), name, problem)
+				checked++
 			}
-			checked++
 		}
-	}
-	if checked == 0 {
-		t.Fatal("no queries found")
-	}
-	for key, reason := range crossOrgQueries {
-		if reason == "" {
-			t.Errorf("%s: allowlisted without a reason", key)
+		Expect(checked).NotTo(BeZero(), "no queries found")
+		for key, reason := range crossOrgQueries {
+			if reason == "" {
+				problems = append(problems, key+": allowlisted without a reason")
+			}
+			if !exempted[key] {
+				problems = append(problems, key+" is allowlisted in crossOrgQueries but no such query exists")
+			}
 		}
-		if !exempted[key] {
-			t.Errorf("%s is allowlisted in crossOrgQueries but no such query exists", key)
-		}
-	}
-}
+		sort.Strings(problems)
+		Expect(problems).To(BeEmpty())
+	})
 
-// TestOrgScopeCheckCatchesMistakes keeps the checker honest.
-func TestOrgScopeCheckCatchesMistakes(t *testing.T) {
-	owned := map[string]bool{"runs": true, "agents": true}
-	cases := map[string]bool{ // sql -> want a problem
-		`SELECT * FROM runs WHERE org_id = @org_id AND id = @id`:                                                   false,
-		`SELECT * FROM runs WHERE id = @id`:                                                                        true,
-		`SELECT * FROM runs WHERE org_id = $1 AND id = $2`:                                                         true,
-		`INSERT INTO runs (org_id, state) VALUES (@org_id, 'queued')`:                                              false,
-		`INSERT INTO runs (org_id, state) VALUES ($1, 'queued')`:                                                   true,
-		`SELECT * FROM runs r JOIN agents a ON a.id = r.agent_id WHERE r.org_id = @org_id`:                         true,
-		`SELECT * FROM runs r JOIN agents a ON a.org_id = r.org_id AND a.id = r.agent_id WHERE r.org_id = @org_id`: false,
-		`UPDATE runs SET state = 'canceled' WHERE id = @id -- org_id = @org_id`:                                    true,
-		`SELECT * FROM templates WHERE id = $1`:                                                                    false,
-	}
-	for sql, want := range cases {
-		if got := orgScopeProblem(sql, owned) != ""; got != want {
-			t.Errorf("orgScopeProblem(%q) reported=%v, want %v", sql, got, want)
-		}
-	}
-}
+	// Keeps the checker honest.
+	DescribeTable("catches mistakes", func(sql string, wantProblem bool) {
+		owned := map[string]bool{"runs": true, "agents": true}
+		Expect(orgScopeProblem(sql, owned) != "").To(Equal(wantProblem))
+	},
+		Entry(nil, `SELECT * FROM runs WHERE org_id = @org_id AND id = @id`, false),
+		Entry(nil, `SELECT * FROM runs WHERE id = @id`, true),
+		Entry(nil, `SELECT * FROM runs WHERE org_id = $1 AND id = $2`, true),
+		Entry(nil, `INSERT INTO runs (org_id, state) VALUES (@org_id, 'queued')`, false),
+		Entry(nil, `INSERT INTO runs (org_id, state) VALUES ($1, 'queued')`, true),
+		Entry(nil, `SELECT * FROM runs r JOIN agents a ON a.id = r.agent_id WHERE r.org_id = @org_id`, true),
+		Entry(nil, `SELECT * FROM runs r JOIN agents a ON a.org_id = r.org_id AND a.id = r.agent_id WHERE r.org_id = @org_id`, false),
+		Entry(nil, `UPDATE runs SET state = 'canceled' WHERE id = @id -- org_id = @org_id`, true),
+		Entry(nil, `SELECT * FROM templates WHERE id = $1`, false),
+	)
+})
 
-func orgOwnedTables(t *testing.T, dir string) map[string]bool {
-	t.Helper()
+func orgOwnedTables(dir string) map[string]bool {
 	files, err := filepath.Glob(filepath.Join(dir, "*.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	Expect(err).NotTo(HaveOccurred())
 	sort.Strings(files)
 	owned := map[string]bool{}
 	for _, f := range files {
 		data, err := os.ReadFile(f) // #nosec G304 -- fixed test paths
-		if err != nil {
-			t.Fatal(err)
-		}
+		Expect(err).NotTo(HaveOccurred())
 		for _, m := range createTableRE.FindAllStringSubmatch(string(data), -1) {
 			if orgColumnRE.MatchString(m[2]) {
 				owned[strings.ToLower(m[1])] = true
