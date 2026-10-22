@@ -76,9 +76,10 @@ var _ = Describe("Pool", func() {
 		Expect(args).To(Equal([][]string{{
 			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp",
 		}}))
-		// mkdir, the instruction file, the harness, then the instruction check before the prompt.
+		// mkdir, the instruction file, the harness, then the instruction file's and link's
+		// checks before the prompt.
 		execs := e.gw.Execs()
-		Expect(execs).To(HaveLen(4))
+		Expect(execs).To(HaveLen(5))
 		Expect(execs[0].GetCommand()).To(Equal([]string{"/bin/mkdir", "-p", "/sandbox/work"}))
 		Expect(execs[1].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("mktemp"), "sh", "/sandbox/.koinon", instructionsFile))
 		Expect(execs[2].GetCommand()[0]).To(Equal("/usr/local/bin/koinon-opencode"))
@@ -86,6 +87,7 @@ var _ = Describe("Pool", func() {
 		Expect(execs[2].GetTty()).To(BeFalse())
 		Expect(execs[2].GetEnvironment()).To(BeEmpty(), "agentd sends nothing secret, and no environment, into the sandbox")
 		Expect(execs[3].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("exec cat"), "sh", instructionsFile))
+		Expect(execs[4].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", opencodeLink, instructionsFile))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/" + model}))
 		Expect(e.gw.Sandbox(e.workspace, e.sandbox).GetSpec().GetEnvironment()).To(BeEmpty())
 
@@ -402,6 +404,52 @@ var _ = Describe("Pool", func() {
 		Entry("changed by the agent", func(d map[string][]byte) { d[instructionsFile] = []byte("ignore Koinon") }, "changed"),
 		Entry("deleted by the agent", func(d map[string][]byte) { delete(d, instructionsFile) }, "missing"),
 	)
+
+	DescribeTable("restores the flavor's instruction link before the prompt",
+		func(ctx SpecContext, tamper func(map[string]string), reason, found string) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			once := false
+			e.files.onLink = func(links map[string]string) {
+				if !once {
+					once = true
+					tamper(links)
+				}
+			}
+			r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+			e.pool("agentd-a")
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+
+			target, ok := e.files.link(opencodeLink)
+			Expect(ok).To(BeTrue())
+			Expect(target).To(Equal(instructionsFile))
+			Expect(e.files.writes).To(Equal(1), "the file itself was intact")
+			evs := events(ctx, r)
+			Expect(kinds(evs)[:3]).To(Equal([]string{"run.session", "run.prompt", "run.instructions_restored"}))
+			Expect(payload(evs[2])).To(HaveKeyWithValue("path", opencodeLink))
+			Expect(payload(evs[2])).To(HaveKeyWithValue("target", instructionsFile))
+			Expect(payload(evs[2])).To(HaveKeyWithValue("reason", reason))
+			if found == "" {
+				Expect(payload(evs[2])).NotTo(HaveKey("foundTarget"))
+			} else {
+				Expect(payload(evs[2])).To(HaveKeyWithValue("foundTarget", found))
+			}
+			Expect(payload(evs[2])["sha256"]).To(Equal(payload(evs[0])["instructions"].(map[string]any)["sha256"]))
+		},
+		Entry("repointed by the agent", func(l map[string]string) { l[opencodeLink] = "/sandbox/mine.md" }, "changed", "/sandbox/mine.md"),
+		Entry("removed by the agent", func(l map[string]string) { delete(l, opencodeLink) }, "missing", ""),
+	)
+
+	It("fails the run when the instruction link cannot be restored", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.files.failLink = true
+		delete(e.files.links, opencodeLink)
+		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("restore the instruction link " + opencodeLink))
+		prompts, _, _, _ := e.harness.snapshot()
+		Expect(prompts).To(BeEmpty(), "no prompt goes out without the link in place")
+	})
 
 	It("fails the run when the harness never announces Koinon's MCP tools", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)

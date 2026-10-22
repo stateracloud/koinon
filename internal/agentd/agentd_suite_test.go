@@ -74,6 +74,8 @@ const (
 	instructions = "You help with the ticket."
 	// instructionsFile is what agentd writes for instructions.
 	instructionsFile = "/sandbox/.koinon/AGENTS.md"
+	// opencodeLink is OpenCode's link to the instruction file.
+	opencodeLink = "/etc/koinon/opencode/AGENTS.md"
 )
 
 // env is one org with an active agent, its sandbox in a fake OpenShell gateway whose exec
@@ -91,14 +93,25 @@ type env struct {
 }
 
 // files emulates the sandbox's files that agentd writes and reads with /bin/sh: the
-// instruction file.
+// instruction file and the flavor's link to it.
 type files struct {
 	mu     sync.Mutex
 	data   map[string][]byte
+	links  map[string]string
 	writes int
-	// failWrite makes writes exit 1; onRead runs before every read.
+	// failWrite makes writes exit 1, failLink makes restoring a link exit 1; onRead runs
+	// before every read of the file, onLink before every check of a link.
 	failWrite bool
+	failLink  bool
 	onRead    func(data map[string][]byte)
+	onLink    func(links map[string]string)
+}
+
+func (f *files) link(path string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.links[path]
+	return t, ok
 }
 
 func (f *files) get(path string) ([]byte, bool) {
@@ -136,6 +149,21 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		}
 		_, _ = stdout.Write(b)
 		return 0
+	case strings.Contains(script, "readlink") && len(args) == 5:
+		if f.onLink != nil {
+			f.onLink(f.links)
+		}
+		found, ok := f.links[args[3]]
+		if ok && found == args[4] {
+			return 0
+		}
+		if f.failLink {
+			_, _ = io.WriteString(stderr, "rm: Read-only file system")
+			return 1
+		}
+		f.links[args[3]] = args[4]
+		_, _ = io.WriteString(stdout, found)
+		return 3
 	default:
 		_, _ = fmt.Fprintf(stderr, "unexpected script %q", script)
 		return 2
@@ -217,7 +245,7 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 		e.gw.Handle(script, e.harness.command)
 	}
 	e.gw.Handle("/bin/mkdir", func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { return 0 })
-	e.files = &files{data: map[string][]byte{}}
+	e.files = &files{data: map[string][]byte{}, links: map[string]string{opencodeLink: instructionsFile}}
 	e.gw.Handle("/bin/sh", e.files.sh)
 	return e
 }
