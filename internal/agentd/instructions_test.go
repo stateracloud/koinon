@@ -20,6 +20,8 @@ var _ = DescribeTable("InstructionLink",
 		Expect(agentd.InstructionLink(f)).To(Equal(want))
 	},
 	Entry("OpenCode: the global config directory's AGENTS.md", store.AgentFlavorOpencode, "/etc/koinon/opencode/AGENTS.md"),
+	Entry("Hermes: SOUL.md in its home", store.AgentFlavorHermes, "/sandbox/.hermes/SOUL.md"),
+	Entry("pi: APPEND_SYSTEM.md in its agent directory", store.AgentFlavorPi, "/sandbox/.pi/agent/APPEND_SYSTEM.md"),
 )
 
 // The restore script runs in the sandbox's /bin/sh; here it runs in the host's against a
