@@ -3,6 +3,11 @@
 package flavors_test
 
 import (
+	"context"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
 	"github.com/procoduck/koinon/internal/acp"
 	"github.com/procoduck/koinon/internal/testing/fakemodel"
 )
@@ -53,3 +58,39 @@ var opencode = flavor{
 }
 
 var _ = describeContract(opencode)
+
+// The entry script's environment, with OpenCode itself replaced by env: external plugins
+// load only with --plugin-installs (OPENCODE_PURE unset), which agentd passes when the
+// template sets harness.pluginInstalls.
+var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
+	var sb *sandbox
+
+	BeforeAll(func() {
+		if dockerErr != nil {
+			Skip("Docker is not available: " + dockerErr.Error())
+		}
+		ensureImage(opencode)
+		sb = newSandbox(opencode.image())
+		DeferCleanup(func() { sb.remove(context.Background()) })
+		sb.start(context.Background())
+	})
+
+	entryEnv := func(ctx context.Context, extra ...string) string {
+		// The read-only root holds the script; run a copy whose last line prints the
+		// environment instead of starting OpenCode.
+		args := append([]string{"sh", "-c",
+			`sed 's|^exec /usr/local/bin/opencode acp.*|exec /usr/bin/env|' /usr/local/bin/koinon-opencode > /tmp/entry && exec sh /tmp/entry "$@"`,
+			"sh", "--model-base-url", "http://gw.test/v1", "--model", "m-1", "--mcp-url", "http://gw.test/mcp"}, extra...)
+		return sb.run(ctx, args...)
+	}
+
+	It("keeps external plugins off by default", func(ctx SpecContext) {
+		Expect(entryEnv(ctx)).To(ContainSubstring("OPENCODE_PURE=1\n"))
+	})
+
+	It("loads external plugins with --plugin-installs", func(ctx SpecContext) {
+		env := entryEnv(ctx, "--plugin-installs")
+		Expect(env).NotTo(ContainSubstring("OPENCODE_PURE"))
+		Expect(env).To(ContainSubstring("OPENCODE_DISABLE_PROJECT_CONFIG=1\n"), "a repository still cannot configure the harness")
+	})
+})
