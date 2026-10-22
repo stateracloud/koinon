@@ -97,6 +97,48 @@ func (ns NullAgentStatus) Value() (driver.Value, error) {
 	return string(ns.AgentStatus), nil
 }
 
+type AuthMethod string
+
+const (
+	AuthMethodPassword AuthMethod = "password"
+	AuthMethodOidc     AuthMethod = "oidc"
+)
+
+func (e *AuthMethod) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AuthMethod(s)
+	case string:
+		*e = AuthMethod(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AuthMethod: %T", src)
+	}
+	return nil
+}
+
+type NullAuthMethod struct {
+	AuthMethod AuthMethod
+	Valid      bool // Valid is true if AuthMethod is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAuthMethod) Scan(value interface{}) error {
+	if value == nil {
+		ns.AuthMethod, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AuthMethod.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAuthMethod) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AuthMethod), nil
+}
+
 type IdentityMode string
 
 const (
@@ -474,6 +516,25 @@ type AgentVersion struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type LocalCredential struct {
+	UserID             pgtype.UUID
+	Username           string
+	PasswordHash       string
+	MustChangePassword bool
+	PasswordChangedAt  pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+}
+
+type OidcLoginFlow struct {
+	StateHash    []byte
+	CodeVerifier string
+	Nonce        string
+	ReturnTo     string
+	CreatedAt    pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
+}
+
 type Org struct {
 	ID           pgtype.UUID
 	Slug         string
@@ -546,6 +607,18 @@ type RunEvent struct {
 	Kind      string
 	Payload   []byte
 	CreatedAt pgtype.Timestamptz
+}
+
+type Session struct {
+	ID            pgtype.UUID
+	TokenHash     []byte
+	UserID        pgtype.UUID
+	AuthMethod    AuthMethod
+	CreatedAt     pgtype.Timestamptz
+	LastSeenAt    pgtype.Timestamptz
+	IdleExpiresAt pgtype.Timestamptz
+	ExpiresAt     pgtype.Timestamptz
+	RevokedAt     pgtype.Timestamptz
 }
 
 type Template struct {
