@@ -128,7 +128,7 @@ func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
 	DeferCleanup(e.gw.Stop)
 	DeferCleanup(conn.Close)
 	e.backend = openshell.New(conn)
-	e.workspace, e.sandbox = execution.WorkspaceName(e.org.Bytes), execution.AgentSandboxName(e.agent.ID.Bytes)
+	e.workspace, e.sandbox = execution.WorkspaceName(e.org.Bytes), execution.AgentSandboxName(e.org.Bytes, e.agent.ID.Bytes)
 	_, err = e.backend.EnsureWorkspace(ctx, e.workspace, nil)
 	Expect(err).NotTo(HaveOccurred())
 	_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})

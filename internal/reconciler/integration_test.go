@@ -74,8 +74,8 @@ var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 
 		org, user := newOrg(ctx)
 		agent := newAgent(ctx, org, user)
-		names := reconciler.AgentNames(org, agent.ID)
-		ws := reconciler.WorkspaceName(org)
+		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+		ws := execution.WorkspaceName(org.Bytes)
 		DeferCleanup(func(ctx context.Context) error {
 			if err := backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
 				return err

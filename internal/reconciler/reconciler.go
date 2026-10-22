@@ -226,7 +226,7 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 		if err != nil {
 			return nil, err
 		}
-		names := AgentNames(org.ID, a.ID)
+		names := execution.AgentObjectNames(org.ID.Bytes, a.ID.Bytes)
 		w.sb, err = r.q.CreateAgentSandbox(ctx, store.CreateAgentSandboxParams{
 			OrgID: org.ID, AgentID: a.ID, Workspace: ws,
 			SandboxName: names.Sandbox, ProviderName: names.Provider, KeySecretName: names.KeySecret,
@@ -316,7 +316,7 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 	if ws, ok := done[id]; ok {
 		return ws, nil
 	}
-	name := WorkspaceName(org.ID)
+	name := execution.WorkspaceName(org.ID.Bytes)
 	if row, err := r.q.GetOrgWorkspace(ctx, org.ID); err == nil {
 		name = row.Workspace
 	} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -358,7 +358,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	if err != nil {
 		return err
 	}
-	names := Names{Sandbox: w.sb.SandboxName, Provider: w.sb.ProviderName, KeySecret: w.sb.KeySecretName}
+	names := execution.AgentNames{Sandbox: w.sb.SandboxName, Provider: w.sb.ProviderName, KeySecret: w.sb.KeySecretName}
 
 	// The key goes only into the provider record; the sandbox sees a placeholder.
 	if err := r.backend.EnsureProvider(ctx, ws, execution.Provider{
