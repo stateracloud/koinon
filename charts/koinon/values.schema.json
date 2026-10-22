@@ -68,6 +68,7 @@
     }
   },
   "properties": {
+    "clusterDomain": {"$ref": "#/definitions/nonEmpty"},
     "nameOverride": {"type": "string"},
     "fullnameOverride": {"type": "string"},
     "image": {

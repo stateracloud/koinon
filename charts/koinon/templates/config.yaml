@@ -14,7 +14,7 @@ data:
       mode: {{ .Values.gateway.mode }}
       {{- if eq .Values.gateway.mode "standalone" }}
       configMap: {{ include "koinon.gatewayConfigName" . }}
-      {{- $gwHost := printf "%s.%s.svc" (include "koinon.componentName" (list . "gateway")) .Release.Namespace }}
+      {{- $gwHost := include "koinon.gatewayHost" . }}
       url: http://{{ $gwHost }}:{{ .Values.gateway.standalone.port }}
       adminUrl: http://{{ $gwHost }}:15000
       statsUrl: http://{{ $gwHost }}:15020

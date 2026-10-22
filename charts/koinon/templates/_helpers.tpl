@@ -160,6 +160,14 @@ by koinon.dbVolume).
     name: {{ include "koinon.componentName" (list . "config") }}
 {{- end }}
 
+{{/*
+agentgateway's Service as sandboxes reach it: fully qualified, because OpenShell's policy DNS
+resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN there).
+*/}}
+{{- define "koinon.gatewayHost" -}}
+{{- printf "%s.%s.svc.%s" (include "koinon.componentName" (list . "gateway")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") -}}
+{{- end }}
+
 {{- define "koinon.commonEnv" -}}
 - name: KOINON_CONFIG
   value: /etc/koinon/config/config.yaml
@@ -242,7 +250,7 @@ it carries no credentials.
 {{- end }}
 {{- $gatewayURL := .Values.agentd.gatewayURL }}
 {{- if and (not $gatewayURL) (eq .Values.gateway.mode "standalone") }}
-{{- $gatewayURL = printf "http://%s.%s.svc:%v" (include "koinon.componentName" (list . "gateway")) .Release.Namespace .Values.gateway.standalone.port }}
+{{- $gatewayURL = printf "http://%s:%v" (include "koinon.gatewayHost" .) .Values.gateway.standalone.port }}
 {{- end }}
 {{- with $gatewayURL }}
 - name: KOINON_GATEWAY_URL
