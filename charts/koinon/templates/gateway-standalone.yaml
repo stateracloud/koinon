@@ -35,7 +35,7 @@ it renders the live data unchanged, so it never undoes the reconciler's work.
 {{- end }}
 {{- end }}
 {{- $logging := dict "format" "json" "fields" (dict "add" (dict "koinon.key" "default(apiKey.name, \"\")" "koinon.agent" "default(apiKey.agent, \"\")")) }}
-{{- $base := dict "database" (dict "url" "sqlite:///data/agentgateway.db?mode=rwc") "adminAddr" "localhost:15000" "statsAddr" "0.0.0.0:15020" "readinessAddr" "0.0.0.0:15021" "logging" $logging }}
+{{- $base := dict "database" (dict "url" "sqlite:///data/agentgateway.db?mode=rwc") "adminAddr" "[::]:15000" "statsAddr" "0.0.0.0:15020" "readinessAddr" "0.0.0.0:15021" "logging" $logging }}
 {{- if $catalog }}
 {{- $_ := set $base "modelCatalog" (list (dict "inline" (dict "providers" (dict $.Values.model.provider (dict "models" $catalog))))) }}
 {{- end }}
@@ -105,6 +105,8 @@ spec:
           ports:
             - name: llm
               containerPort: {{ $gw.port }}
+            - name: admin
+              containerPort: 15000
             - name: stats
               containerPort: 15020
             - name: readiness
@@ -173,6 +175,10 @@ spec:
     - name: llm
       port: {{ $gw.port }}
       targetPort: llm
+    # The reconciler reads /config_dump here to wait for a config reload (internal/gateway/standalone).
+    - name: admin
+      port: 15000
+      targetPort: admin
     - name: stats
       port: 15020
       targetPort: stats

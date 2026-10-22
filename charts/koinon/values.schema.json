@@ -41,6 +41,12 @@
         "affinity": {"$ref": "#/definitions/map"}
       }
     },
+    "flavor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image"],
+      "properties": {"image": {"$ref": "#/definitions/koinonImage"}}
+    },
     "secretKeyRef": {
       "type": "object",
       "additionalProperties": false,
@@ -82,7 +88,23 @@
       }
     },
     "api": {"allOf": [{"$ref": "#/definitions/component"}], "required": ["port"]},
-    "reconciler": {"$ref": "#/definitions/component"},
+    "reconciler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "replicas"],
+      "properties": {
+        "image": {"$ref": "#/definitions/koinonImage"},
+        "replicas": {"type": "integer", "minimum": 0},
+        "resources": {"$ref": "#/definitions/resources"},
+        "podAnnotations": {"$ref": "#/definitions/map"},
+        "nodeSelector": {"$ref": "#/definitions/map"},
+        "tolerations": {"type": "array"},
+        "affinity": {"$ref": "#/definitions/map"},
+        "idleTimeout": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "resyncInterval": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "homeRetention": {"enum": ["delete", "retain"]}
+      }
+    },
     "agentd": {"$ref": "#/definitions/component"},
     "migrations": {
       "type": "object",
@@ -217,6 +239,16 @@
       },
       "if": {"properties": {"models": {"minItems": 1}}, "required": ["models"]},
       "then": {"properties": {"baseUrl": {"minLength": 1}}}
+    },
+    "flavors": {
+      "description": "Flavor images (ADR 0035). Agents of a flavor without an image are reported as reconcile errors.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "opencode": {"$ref": "#/definitions/flavor"},
+        "hermes": {"$ref": "#/definitions/flavor"},
+        "pi": {"$ref": "#/definitions/flavor"}
+      }
     },
     "openshell": {
       "type": "object",

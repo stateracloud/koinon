@@ -33,7 +33,17 @@ reconciler:
     repository: koinon-reconciler
     tag: ""
     digest: ""
+  # Extra replicas stand by: one reconciles at a time, holding a Postgres advisory lock.
   replicas: 1
+  # Stop a sandbox after this long without an active run, parked runs included (ADR 0049). It
+  # starts again when a run is queued or a park is resolved.
+  idleTimeout: 10m
+  # Time between full passes. Postgres NOTIFY wakes the reconciler earlier for new runs and
+  # agent changes; the timer covers idle timeouts and drift.
+  resyncInterval: 30s
+  # Home volume of an archived agent: delete (with its sandbox) or retain (the stopped sandbox,
+  # and so its OpenShell workspace PVC, is kept; its key and provider record are deleted).
+  homeRetention: delete
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}
@@ -134,6 +144,15 @@ model:
   #     rates: {input: "0.30", output: "1.20"}   # USD per 1M tokens, for budgets and the ledger
   #     overrides: {}                            # request fields forced by the gateway
   models: []
+
+# Flavor images (ADR 0035): <image.registry>/<repository>:<tag>[@<digest>], the tag defaulting to
+# .Chart.AppVersion. Hermes and pi follow in plan items F2 and F3.
+flavors:
+  opencode:
+    image:
+      repository: flavor-opencode
+      tag: ""
+      digest: ""
 
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:
