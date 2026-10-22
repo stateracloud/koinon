@@ -4,7 +4,6 @@ package approvals
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -75,9 +74,14 @@ func (s *Service) Diff(ctx context.Context, row store.ApprovalRequest) (Diff, er
 	if row.Tool != githubtools.ToolCreatePullRequest {
 		return Diff{}, ErrNoDiff
 	}
-	var args githubtools.PullRequestArgs
-	if err := json.Unmarshal([]byte(row.ArgsJson), &args); err != nil {
-		return Diff{}, fmt.Errorf("decode the recorded arguments: %w", err)
+	// The same descriptor the executor uses: decode and validate the recorded call.
+	call, err := githubtools.DecodeCall(row.Tool, []byte(row.ArgsJson))
+	if err != nil {
+		return Diff{}, err
+	}
+	args, ok := call.(*githubtools.PullRequestArgs)
+	if !ok {
+		return Diff{}, ErrNoDiff
 	}
 	out := Diff{Base: args.Base, Files: make([]FileDiff, len(args.Files))}
 	for i, f := range args.Files {
@@ -92,9 +96,6 @@ func (s *Service) Diff(ctx context.Context, row store.ApprovalRequest) (Diff, er
 			out.Files[i].Fallback = reason
 		}
 		return out
-	}
-	if len(args.Files) > githubtools.MaxFiles {
-		return fallback(permanent("the change has more than %d files", githubtools.MaxFiles)), nil
 	}
 	if row.Connector != connectors.GitHubID {
 		return fallback(permanent("no GitHub connector for %q", row.Connector)), nil
