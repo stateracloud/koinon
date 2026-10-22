@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Test doubles for the E1 quickstart e2e, in their own namespace: the fake model server (the
+# OpenAI-compatible upstream, scripts from test/fakemodel/scripts) and the fake GitHub App API
+# (internal/connectors/github/githubtest). Images are built with ko into kind (KO_DOCKER_REPO=kind.local).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: koinon-e2e-fakes
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fakemodel
+  namespace: koinon-e2e-fakes
+  labels: {app: fakemodel}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fakemodel}
+  template:
+    metadata:
+      labels: {app: fakemodel}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: fakemodel
+          image: kind.local/koinon-fakemodel:e2e
+          imagePullPolicy: IfNotPresent
+          args: ["-addr", ":8080"]
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            tcpSocket: {port: http}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fakemodel
+  namespace: koinon-e2e-fakes
+spec:
+  selector: {app: fakemodel}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fakegithub
+  namespace: koinon-e2e-fakes
+  labels: {app: fakegithub}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fakegithub}
+  template:
+    metadata:
+      labels: {app: fakegithub}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: fakegithub
+          image: kind.local/koinon-fakegithub:e2e
+          imagePullPolicy: IfNotPresent
+          # The repository the repo-helper fake-model script targets (koinon-demo/hello).
+          args: ["-addr", ":8080", "-account", "koinon-demo", "-repos", "hello"]
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /_fake/app, port: http}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fakegithub
+  namespace: koinon-e2e-fakes
+spec:
+  selector: {app: fakegithub}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
