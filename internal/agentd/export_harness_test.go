@@ -7,3 +7,9 @@ var HarnessArgs = harnessArgs
 
 // Within exposes the permission policy's workspace check.
 var Within = within
+
+// LinkScript and InstructionLink expose the instruction link's restore script and paths.
+var (
+	LinkScript      = linkScript
+	InstructionLink = instructionLink
+)
