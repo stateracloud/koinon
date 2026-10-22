@@ -12,17 +12,13 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -30,6 +26,7 @@ import (
 	"github.com/procoduck/koinon/internal/connections"
 	"github.com/procoduck/koinon/internal/connectors/github"
 	"github.com/procoduck/koinon/internal/execution/openshell"
+	"github.com/procoduck/koinon/internal/cli"
 	"github.com/procoduck/koinon/internal/gateway/standalone"
 	"github.com/procoduck/koinon/internal/project"
 	"github.com/procoduck/koinon/internal/reconciler"
@@ -74,7 +71,7 @@ func run() error {
 		return err
 	}
 
-	backend, err := dialOpenShell(cfg)
+	backend, err := cli.OpenShell{Address: cfg.openshellAddress, TLSDir: cfg.openshellTLSDir}.Dial()
 	if err != nil {
 		return err
 	}
@@ -139,36 +136,4 @@ func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
 		return nil, fmt.Errorf("kubernetes client config: %w", err)
 	}
 	return kubernetes.NewForConfig(rc)
-}
-
-// openShellBackend is an OpenShell backend with the connection it owns.
-type openShellBackend struct {
-	*openshell.Backend
-	conn *grpc.ClientConn
-}
-
-func (b openShellBackend) Close() error {
-	if b.conn != nil {
-		return b.conn.Close()
-	}
-	return b.Backend.Close()
-}
-
-func dialOpenShell(cfg config) (openShellBackend, error) {
-	if cfg.openshellTLSDir != "" {
-		b, err := openshell.Dial(openshell.Config{
-			Endpoint: cfg.openshellAddress,
-			CertFile: filepath.Join(cfg.openshellTLSDir, "tls.crt"),
-			KeyFile:  filepath.Join(cfg.openshellTLSDir, "tls.key"),
-			CAFile:   filepath.Join(cfg.openshellTLSDir, "ca.crt"),
-		})
-		return openShellBackend{Backend: b}, err
-	}
-	// The chart allows an empty client TLS Secret (for example a gateway behind a mesh that
-	// terminates mTLS); then the connection is plaintext.
-	conn, err := grpc.NewClient(cfg.openshellAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return openShellBackend{}, errors.Join(errors.New("connect to the OpenShell gateway"), err)
-	}
-	return openShellBackend{Backend: openshell.New(conn), conn: conn}, nil
 }

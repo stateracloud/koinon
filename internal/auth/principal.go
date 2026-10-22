@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/procoduck/koinon/internal/db/store"
+	authv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1"
 )
 
 // Membership is the caller's effective role in one org, computed according to
@@ -68,19 +69,34 @@ func RoleAtLeast(role, minRole store.OrgRole) bool {
 	return roleRank(role) >= roleRank(minRole) && roleRank(minRole) > 0
 }
 
+// orgRoles lists the org roles from lowest to highest with their wire form.
+// It is the one ordering of roles: roleRank and roleToProto both read it.
+var orgRoles = []struct {
+	role  store.OrgRole
+	proto authv1alpha1.OrgRole
+}{
+	{store.OrgRoleViewer, authv1alpha1.OrgRole_ORG_ROLE_VIEWER},
+	{store.OrgRoleMember, authv1alpha1.OrgRole_ORG_ROLE_MEMBER},
+	{store.OrgRoleAdmin, authv1alpha1.OrgRole_ORG_ROLE_ADMIN},
+	{store.OrgRoleOwner, authv1alpha1.OrgRole_ORG_ROLE_OWNER},
+}
+
+// roleRank returns 1 for the lowest role and higher numbers for higher roles,
+// 0 for anything that is not a role.
 func roleRank(r store.OrgRole) int {
-	switch r {
-	case store.OrgRoleViewer:
-		return 1
-	case store.OrgRoleMember:
-		return 2
-	case store.OrgRoleAdmin:
-		return 3
-	case store.OrgRoleOwner:
-		return 4
-	default:
-		return 0
+	for i, o := range orgRoles {
+		if o.role == r {
+			return i + 1
+		}
 	}
+	return 0
+}
+
+func roleToProto(r store.OrgRole) authv1alpha1.OrgRole {
+	if i := roleRank(r); i > 0 {
+		return orgRoles[i-1].proto
+	}
+	return authv1alpha1.OrgRole_ORG_ROLE_UNSPECIFIED
 }
 
 type principalKey struct{}

@@ -1,0 +1,71 @@
+# 0027. Monorepo, one version, supply-chain hygiene
+
+- Status: Accepted
+- Date: 2026-10-21
+- Decision: [design.md#27](../design.md)
+
+## Context
+
+Koinon's components (API, reconciler, agentd, web UI, flavor images, connectors, templates, Helm
+chart) change together: a new connector scope touches the proto API, the reconciler's policy
+rendering, the UI card and the chart. Separate repos would need cross-repo version matrices. Users
+install Koinon into clusters that run untrusted agent code, so releases must be signed and carry
+SBOMs.
+
+## Decision
+
+- Monorepo layout: `api/ cmd/ internal/ web/ flavors/ connectors/ templates/ charts/ test/ docs/`.
+- Go images are built with ko.
+- Connectors and templates are data (setup guides, scopes, templates), not code plugins.
+- SemVer with one shared version for all components.
+- CRDs stay `v1alpha1` until 1.0.
+- `buf breaking` runs in CI on the protobuf API.
+- Migrations are forward-only, with an upgrade test from the previous release.
+- Releases: GoReleaser (OSS) with its `kos` pipe for images; images signed keylessly with cosign
+  from GitHub Actions through `docker_signs` (`artifacts: manifests`); the Helm chart published as an
+  OCI artifact to ghcr.io.
+- SBOMs: ko generates image SBOMs (SPDX, pushed to the registry); GoReleaser's syft-based SBOMs
+  cover archives and binaries only.
+
+## Alternatives considered
+
+- Polyrepo per component _(reconstructed)_. Rejected: components move together.
+- Docker/Buildx images instead of ko _(reconstructed)_. Kept for flavor images, which are not plain
+  Go binaries; ko for Go services _(inferred)_.
+- Per-component versions _(reconstructed)_. Rejected: compatibility matrix for users.
+- Reversible (down) migrations _(reconstructed)_. Rejected: down migrations are rarely tested and
+  risky with data; forward fixes instead.
+- GoReleaser Pro _(reconstructed)_. Not needed: kos pipe and signing are in OSS; only the `if`
+  filter is Pro.
+
+## Consequences
+
+- Positive: one version to reason about; signed, attested artifacts.
+- Negative: a release ships every component even if only one changed (accepted).
+- Negative: flavor images need a separate build path (Dockerfiles), not ko _(inferred)_.
+- Negative: Helm 4 is current and Helm 3 gets no new minor releases; the chart must be tested with
+  Helm 4 and should stay compatible with Helm 3 for users who have not moved _(inferred)_.
+- Follow-ups: `.goreleaser.yaml`, release workflow with `id-token: write`, chart push job.
+
+## Open questions
+
+- Whether flavor images get their own release cadence because they track upstream harness releases.
+- Minimum supported Helm version (3.x still in use vs 4.x only).
+
+## Upstream verification
+
+Checked 2026-10-21:
+- ko v0.19.1; GoReleaser v2.18.3, kos pipe in OSS, ko images signed via `docker_signs`.
+  https://goreleaser.com/customization/ko/, https://goreleaser.com/pro/
+- GoReleaser SBOMs exclude container images: https://goreleaser.com/customization/sbom/
+- cosign v3.1.4 keyless in Actions (`permissions: id-token: write`).
+  https://docs.sigstore.dev/quickstart/quickstart-ci/
+- Helm v4.3.1; OCI push to ghcr.io: https://helm.sh/docs/topics/registries/
+- buf v1.74.0, buf.yaml v2, breaking default `FILE`, BSR not required.
+  https://buf.build/docs/configuration/v2/buf-yaml/
+- goose forward-only migrations (Down optional): https://github.com/pressly/goose
+
+## Links
+
+- [design.md](../design.md), decision 27
+- ADR [0034](0034-project-identity.md), [0037](0037-tooling.md)
