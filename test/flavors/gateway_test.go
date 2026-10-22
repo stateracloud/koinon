@@ -26,7 +26,7 @@ import (
 const hangMarker = "KOINON-HANG"
 
 // gateway stands in for agentgateway: the fake model server under /v1 and a minimal MCP
-// server with one tool under /mcp, on one listener the containers reach through
+// server with one tool and one prompt under /mcp, on one listener the containers reach through
 // host.docker.internal.
 type gateway struct {
 	srv   *httptest.Server
@@ -147,6 +147,11 @@ func (g *gateway) mcpMethods() []string {
 // mcpTool is the one tool the stand-in MCP server offers.
 const mcpTool = "koinon_contract_ping"
 
+// readyPrompt is the one prompt it offers, as Koinon's MCP server does behind agentgateway
+// (gateway.ReadyPrompt): a harness that turns MCP prompts into commands announces it once the
+// server is connected, which koinon-agentd waits for (ADR 0052).
+const readyPrompt = "koinon-ready"
+
 // serveMCP is the smallest Streamable HTTP MCP server a harness accepts: JSON responses to
 // POSTed JSON-RPC requests, 202 for notifications, no server-initiated stream.
 // https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
@@ -183,7 +188,7 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		resp["result"] = map[string]any{
 			"protocolVersion": version,
-			"capabilities":    map[string]any{"tools": map[string]any{}},
+			"capabilities":    map[string]any{"tools": map[string]any{}, "prompts": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "koinon-contract", "version": "0"},
 		}
 	case "tools/list":
@@ -191,6 +196,14 @@ func (g *gateway) serveMCP(w http.ResponseWriter, r *http.Request) {
 			"name":        mcpTool,
 			"description": "Koinon flavor contract test tool. Returns pong.",
 			"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+		}}}
+	case "prompts/list":
+		resp["result"] = map[string]any{"prompts": []any{map[string]any{
+			"name": readyPrompt, "description": "Koinon's tools are connected.",
+		}}}
+	case "prompts/get":
+		resp["result"] = map[string]any{"messages": []any{map[string]any{
+			"role": "user", "content": map[string]any{"type": "text", "text": "Koinon's tools are connected."},
 		}}}
 	case "tools/call":
 		resp["result"] = map[string]any{"content": []any{map[string]any{"type": "text", "text": "pong"}}}
