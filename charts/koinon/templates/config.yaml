@@ -14,7 +14,15 @@ data:
       mode: {{ .Values.gateway.mode }}
       {{- if eq .Values.gateway.mode "standalone" }}
       configMap: {{ include "koinon.gatewayConfigName" . }}
-      url: http://{{ include "koinon.componentName" (list . "gateway") }}.{{ .Release.Namespace }}.svc:{{ .Values.gateway.standalone.port }}
+      {{- $gwHost := printf "%s.%s.svc" (include "koinon.componentName" (list . "gateway")) .Release.Namespace }}
+      url: http://{{ $gwHost }}:{{ .Values.gateway.standalone.port }}
+      adminUrl: http://{{ $gwHost }}:15000
+      statsUrl: http://{{ $gwHost }}:15020
+      port: {{ .Values.gateway.standalone.port }}
+      databaseUrl: sqlite:///data/agentgateway.db?mode=rwc
+      {{- if .Values.model.apiKeySecret.name }}
+      modelKeyFile: /secrets/model/{{ .Values.model.apiKeySecret.key }}
+      {{- end }}
       {{- else }}
       gatewayClassName: {{ .Values.gateway.kubernetes.gatewayClassName }}
       {{- end }}
@@ -24,5 +32,14 @@ data:
       address: {{ .Values.openshell.address | quote }}
       tls: {{ if .Values.openshell.clientTLSSecret }}/etc/koinon/openshell-tls{{ else }}""{{ end }}
       runtimeClassName: {{ .Values.openshell.runtimeClassName }}
+    reconciler:
+      idleTimeout: {{ .Values.reconciler.idleTimeout }}
+      resyncInterval: {{ .Values.reconciler.resyncInterval }}
+      homeRetention: {{ .Values.reconciler.homeRetention }}
+    flavors:
+      {{- range $flavor, $f := .Values.flavors }}
+      {{ $flavor }}:
+        image: {{ include "koinon.image" (list $ $f.image) }}
+      {{- end }}
     bootstrapAdmin:
       enabled: {{ .Values.bootstrapAdmin.enabled }}
