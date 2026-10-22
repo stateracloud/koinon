@@ -81,13 +81,20 @@ through the terminal tool mid-run, plants `.env`, `.op.env` and `active_profile`
 `HERMES_MANAGED_DIR` and `PYTEST_CURRENT_TEST`, and checks that the tools on offer stay the
 same; a control with the entry script's guards taken out shows the same plants do widen them.
 
-**Not covered:** a `.env` written *after* the entry script has run applies to the next process
-that loads it. `hermes acp` attaches to a gateway daemon that outlives the harness while idle
-for less than `gateway.unmanaged_idle_exit_seconds` (600 s), and an agent process left running
-from an earlier run (a background terminal job) could write `.env` between the entry script and
-the turn: a probe on the contract suite's harness saw the switched-off tools offered then. A run's
-own turn cannot do it, since `.env` is read before the turn starts and each run sends one
-prompt.
+**A process from an earlier run.** A `.env` written *after* the entry script has run applies to
+the next Hermes process that loads it, and `hermes acp` attaches to a gateway daemon that
+outlives the harness while idle for less than `gateway.unmanaged_idle_exit_seconds` (600 s),
+discovered through `gateway.lock` and the control socket in `$HERMES_HOME`
+(`hermes_cli/gateway_client.py`, `connect_gateway`; `hermes_cli/gateway_runtime.py`,
+`ensure_gateway_runtime`). A background job left from an earlier run could write `.env` between
+the entry script and the harness, or a stale daemon serve the next run. koinon-agentd ends every
+process of the sandbox user but the sandbox's main process before it starts the harness and
+after the harness has ended (`../README.md`, `internal/agentd/sweep.sh`), so neither survives
+into a run. The contract suite leaves a job that keeps writing a `.env` moving the managed scope
+to the agent's permissive config, runs the next ticket through koinon-agentd, and checks that
+the tools stay the same; without the sweep they do not (the switched-off memory, skills, web,
+browser and delegation tools are offered). A run's own turn cannot do it, since `.env` is read
+before the turn starts and each run sends one prompt.
 
 ## Instructions
 
@@ -104,8 +111,39 @@ template (through the link) only when the target is missing (`hermes_cli/config.
   instructions apply from the ticket's next new session, not to a resumed one.
 - Hermes scans SOUL.md for prompt-injection patterns and, for a file in the user's own home,
   only logs a hit.
-- Repository context files (`AGENTS.md`, `.hermes.md`, `.cursorrules` in the session directory)
-  still reach the prompt, as repository content.
+- **Repository context files stay out.** Hermes would open the system prompt with the first
+  of `.hermes.md`/`HERMES.md` (up to the git root), the `AGENTS.md` chain, `CLAUDE.md` or
+  `.cursorrules` and `.cursor/rules/*.mdc` it finds from the session directory
+  (`agent/prompt_builder.py`, `build_context_files_prompt`), and add those of a subdirectory
+  to tool results once a tool touches it (`agent/subdirectory_hints.py`). Koinon ignores
+  repository harness configuration; its instructions tell the agent to read `AGENTS.md`,
+  `CONTRIBUTING.md` and the README as content. See [Context-file patch](#context-file-patch).
+
+## Context-file patch
+
+Hermes skips context files only for an agent built with `skip_context_files`, and keeps
+SOUL.md then only with `load_soul_identity` (`agent/system_prompt.py`, `_identity_parts` and
+`_context_files_part`). No setting gives an ACP session that pair: the gateway builds it with
+`skip_context_files=ignore_rules` and `load_soul_identity=not ignore_rules`
+(`gateway/session_execution.py`, `_build_fresh_agent`), and `ignore_rules` (`--ignore-rules`,
+`HERMES_IGNORE_RULES`) would drop SOUL.md with the context files. There is no managed-scope
+key; `gateway.platforms.<platform>.skip_context_files` is read only for a session without a
+frozen policy, which an ACP session always has.
+
+So the image patches Hermes at build time ([`no-context-files.py`](no-context-files.py)): two
+lines in `agent/agent_init.py`, `init_agent`, after the safe-worker block, make every agent
+skip context files and load SOUL.md wherever it would have before:
+
+```python
+load_soul_identity = load_soul_identity or not skip_context_files
+skip_context_files = True
+```
+
+That also turns off the subdirectory hints and `skills.auto_load` (already empty). The build
+fails if the code to patch is not there exactly once (a new Hermes version), and then builds an
+agent the way the gateway builds an ACP session and checks its system prompt: SOUL.md in, a
+repository's `.hermes.md`, `AGENTS.md`, `CLAUDE.md` and `.cursorrules` out, hints off. The
+contract suite checks the same over ACP for each context file, alone in a session directory.
 
 `hermes acp` is a thin ACP front end: it starts Hermes's gateway daemon in the sandbox
 (`hermes gateway run --idle-exit`, `hermes_cli/gateway_runtime_start.py`) and talks to it over a
@@ -115,7 +153,8 @@ platform token is in the environment (the log says `No messaging platforms enabl
 
 ## Switches
 
-Every switch below except the phone-home ones is in the managed scope.
+Every switch below except the phone-home ones and the context-file patch is in the managed
+scope.
 
 Sources are Hermes Agent `v0.22.3` (commit `5b147ab036d6d19131bff8d20701b5001eab844a`, from the
 image's `/opt/hermes/install-stamp.json`); paths are relative to `/opt/hermes` in the image and
@@ -138,6 +177,7 @@ the repository root upstream.
 | Update check | `updates.check: false` | `hermes_cli/source_check.py` |
 | Plugin update check | `plugins.auto_update_check_hours: 0` | `hermes_cli/config_defaults.py` |
 | Shared metrics (telemetry) | `telemetry.shared_metrics.enabled/send: false` (also the default) | `hermes_cli/config_defaults.py` |
+| Repository context files (`AGENTS.md`, `.hermes.md`, `CLAUDE.md`, `.cursorrules`) in the prompt or tool results | build-time patch: every agent `skip_context_files`, SOUL.md kept through `load_soul_identity` | `agent/agent_init.py` (`init_agent`), `agent/system_prompt.py`, `agent/subdirectory_hints.py` |
 | Lazy package installs | `security.allow_lazy_installs: false` | `hermes_cli/config_defaults.py` |
 | Browser and Chromium download | only on `hermes acp --setup-browser`; the browser toolset is off | `acp_adapter/entry.py` |
 | Writes outside the home | `HERMES_WRITE_SAFE_ROOT=/sandbox`; `TMPDIR=/tmp`, `XDG_RUNTIME_DIR=/tmp/hermes-runtime`, `PYTHONDONTWRITEBYTECODE=1` | `agent/file_safety.py`, `hermes_constants.py`, `libexec/hermes-acp` |
