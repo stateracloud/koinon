@@ -1,27 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// OpenCode configuration for the Koinon OpenCode flavor. Read-only in the image at
+// OpenCode 2.0.24 configuration for the Koinon OpenCode flavor. Read-only in the image at
 // /etc/koinon/opencode/opencode.jsonc, which is OpenCode's global config because koinon-opencode
-// sets XDG_CONFIG_HOME=/etc/koinon. The KOINON_* values come from koinon-opencode's arguments;
-// OPENAI_API_KEY is the agent's agentgateway key, an OpenShell placeholder inside a sandbox.
-// See flavors/opencode/README.md.
+// sets OPENCODE_CONFIG_DIR=/etc/koinon/opencode. The KOINON_* values come from koinon-opencode's
+// arguments; KOINON_MODEL_KEY is the agent's agentgateway key, an OpenShell placeholder inside a
+// sandbox. Koinon's instructions are not configured here: OpenCode loads AGENTS.md from this
+// directory, a link to /sandbox/.koinon/AGENTS.md. See flavors/opencode/README.md.
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "koinon/{env:KOINON_MODEL}",
-  // Session titles use the same model, so no request goes to OpenCode's own providers.
-  "small_model": "koinon/{env:KOINON_MODEL}",
-  "enabled_providers": ["koinon"],
-  "autoupdate": false,
+  "update": "disable",
   "share": "disabled",
-  // The agent's rendered template instructions, written into the home by Koinon.
-  "instructions": ["/sandbox/.koinon/AGENTS.md"],
-  "provider": {
+  // Built-in plugins Koinon turns off: skills from ~/.claude and ~/.agents, the provider plugins
+  // (the koinon provider is defined below; opencode.provider.opencode cannot be removed), web
+  // search, and logins for well-known integrations.
+  "plugins": [
+    "-opencode.config.compatibility",
+    "-opencode.provider.*",
+    "-opencode.websearch.*",
+    "-opencode.tool.websearch",
+    "-opencode.wellknown"
+  ],
+  "providers": {
     "koinon": {
-      "npm": "@ai-sdk/openai-compatible",
       "name": "Koinon agentgateway",
-      "options": {
+      "package": "aisdk:@ai-sdk/openai-compatible",
+      "settings": {
         "baseURL": "{env:KOINON_MODEL_BASE_URL}",
-        "apiKey": "{env:OPENAI_API_KEY}"
+        "apiKey": "{env:KOINON_MODEL_KEY}"
       },
       "models": {
         "{env:KOINON_MODEL}": {}
@@ -29,13 +35,17 @@
     }
   },
   "mcp": {
-    "koinon": {
-      "type": "remote",
-      "url": "{env:KOINON_MCP_URL}",
-      "headers": {
-        "Authorization": "Bearer {env:OPENAI_API_KEY}"
-      },
-      "oauth": false
+    "servers": {
+      "koinon": {
+        "type": "remote",
+        "url": "{env:KOINON_MCP_URL}",
+        "headers": {
+          "Authorization": "Bearer {env:KOINON_MODEL_KEY}"
+        },
+        "oauth": false,
+        // Tools reach the model one by one as koinon_<tool>, not through OpenCode's code mode.
+        "codemode": false
+      }
     }
   }
 }
