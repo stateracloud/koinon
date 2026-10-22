@@ -416,7 +416,7 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	// The agent can write its home, instruction file included; the prompt goes out only with
 	// the run's instructions in place.
-	if err := r.checkInstructions(fctx, workspace, sandbox, instructions); err != nil {
+	if err := r.checkInstructions(fctx, workspace, sandbox, agent.Flavor, instructions); err != nil {
 		return r.execErr(ctx, "check the instructions", err)
 	}
 	return r.turn(ctx, conn, proc, &stderr, session, text)
