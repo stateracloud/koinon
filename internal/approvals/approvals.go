@@ -136,11 +136,6 @@ func mustJSON(v any) []byte {
 	return b
 }
 
-// Open reports whether a request still keeps its run parked.
-func Open(s store.ApprovalStatus) bool {
-	return s == store.ApprovalStatusPending || s == store.ApprovalStatusApproved
-}
-
 func ticketEvent(ctx context.Context, q *store.Queries, r store.ApprovalRequest, kind string, user pgtype.UUID, extra map[string]any) error {
 	p := map[string]any{"approval_id": r.ID.String(), "tool": r.Tool, "target": r.Target, "args_sha256": r.ArgsSha256}
 	for k, v := range extra {
@@ -183,7 +178,7 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 		if err != nil {
 			return err
 		}
-		if finished(run.State) {
+		if run.State.Finished() {
 			return ErrNotPending // the sweeper cancels it
 		}
 		row, err = q.DecideApprovalRequest(ctx, store.DecideApprovalRequestParams{
@@ -206,10 +201,6 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 		return s.Execute(ectx, org, id)
 	}
 	return row, nil
-}
-
-func finished(s store.RunState) bool {
-	return s == store.RunStateSucceeded || s == store.RunStateFailed || s == store.RunStateCanceled
 }
 
 // Deny denies a pending request; its run resumes with the denial.
@@ -263,7 +254,7 @@ func ResolveRun(ctx context.Context, q *store.Queries, org, runID pgtype.UUID) e
 		return err
 	}
 	for _, r := range reqs {
-		if Open(r.Status) {
+		if r.Status.Open() {
 			return nil
 		}
 	}
@@ -456,7 +447,7 @@ func (s *Service) sweepOrg(ctx context.Context, org pgtype.UUID, res *SweepResul
 		if err != nil {
 			return err
 		}
-		if !Open(out.Status) {
+		if !out.Status.Open() {
 			res.Executed++
 		}
 	}

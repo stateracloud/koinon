@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { RunEventSchema, RunSchema, RunService, RunState, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { CostSchema, RunEventSchema, RunSchema, RunService, RunState, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { ActorKind, TicketEventSchema, TicketService, TicketStatus, type TicketEvent } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
 import { agent, orgId, renderApp, ticket, whoAmI } from '@/test-utils'
 
@@ -84,5 +84,38 @@ describe('TicketPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(await screen.findByText('Thanks!')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('')
+  })
+
+  it('shows the ticket total and each run\'s cost in USD', async () => {
+    const cost = (usd: string, priced = true) => create(CostSchema, { requests: 2n, inputTokens: 1500n, outputTokens: 90n, usd, priced })
+    const runs = [
+      create(RunSchema, { id: 'r-1aaaaaaa-0', orgId, ticketId: 't-1', state: RunState.SUCCEEDED, cost: cost('0.0021') }),
+      create(RunSchema, { id: 'r-2bbbbbbb-0', orgId, ticketId: 't-1', state: RunState.FAILED, cost: cost('1234.50', false) }),
+    ]
+    const transport = createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI() })
+      service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+      service(TicketService, {
+        getTicket: () => ({
+          ticket: { ...ticket('t-1', 'Say hello', TicketStatus.DONE), cost: cost('1234.5021', false) },
+          events: [ticketEvent(1, 'ticket.created', { title: 'Say hello' }, ActorKind.SYSTEM)],
+          runs,
+        }),
+      })
+      service(RunService, {
+        // A watched run carries no cost; the page keeps GetTicket's.
+        async *watchRun(req) {
+          const r = runs.find((x) => x.id === req.runId)
+          if (r) yield { item: { case: 'run', value: { ...r, cost: undefined } } }
+        },
+      })
+    })
+
+    renderApp(transport, '/tickets/t-1')
+    expect(await screen.findByRole('heading', { name: 'Say hello' })).toBeInTheDocument()
+    expect(screen.getByText('Cost at least $1,234.5021')).toHaveAttribute('title', '2 model requests, 1500 input and 90 output tokens; some requests had no price')
+    const list = screen.getByRole('region', { name: 'Run costs' })
+    expect(list).toHaveTextContent('Run r-1aaaaa · succeeded · $0.0021')
+    expect(list).toHaveTextContent('Run r-2bbbbb · failed · at least $1,234.50')
   })
 })

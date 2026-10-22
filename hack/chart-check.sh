@@ -101,6 +101,33 @@ if [ "$failures" -gt 0 ]; then
 	exit 1
 fi
 
+# The preflight hook (plan item H2) renders unless preflight.enabled=false, as a pre-install and
+# pre-upgrade hook whose output Helm prints; the probe RBAC only with the seccomp probe on.
+echo "== preflight hook"
+preflight_job() { "$HELM" template koinon "$CHART" --namespace koinon -f "$1" --show-only templates/preflight.yaml 2>/dev/null; }
+for f in "${value_files[@]}"; do
+	name=$(basename "$f" .yaml)
+	enabled=$("$HELM" template koinon "$CHART" -f "$f" --show-only templates/preflight.yaml >/dev/null 2>&1 && echo true || echo false)
+	if [[ $name == external-standalone-values ]]; then
+		[[ $enabled == false ]] || { echo "$name: preflight.enabled=false still renders the hook" >&2; exit 1; }
+		continue
+	fi
+	[[ $enabled == true ]] || { echo "$name: preflight hook not rendered" >&2; exit 1; }
+	rendered=$(preflight_job "$f")
+	for want in 'kind: Job' 'helm.sh/hook: pre-install,pre-upgrade' 'helm.sh/hook-output-log-policy: hook-failed,hook-succeeded' \
+		'kind: ClusterRole' '- preflight'; do
+		grep -qF -- "$want" <<<"$rendered" || { echo "$name: preflight hook lacks '$want'" >&2; exit 1; }
+	done
+	if grep -qE '^ *verbs:.*(list|watch|update|patch|\*)' <<<"$(sed -n '/kind: ClusterRole$/,/^---/p' <<<"$rendered")"; then
+		echo "$name: preflight ClusterRole is not get-only" >&2
+		exit 1
+	fi
+	probe=$(grep -c -- '--seccomp-probe=true' <<<"$rendered" || true)
+	role=$(grep -c '^kind: Role$' <<<"$rendered" || true)
+	[[ $probe == "$role" ]] || { echo "$name: probe Role present=$role but probe enabled=$probe" >&2; exit 1; }
+	echo "$name: ok (seccomp probe: $([[ $probe == 1 ]] && echo on || echo off))"
+done
+
 echo "== kubeconform (Kubernetes $KUBERNETES_VERSION)"
 "${KUBECONFORM[@]}" \
 	-strict -summary \

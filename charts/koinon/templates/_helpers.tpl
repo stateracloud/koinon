@@ -317,6 +317,16 @@ koinon.persistentPassword (list $ "<secret name>" "<key>").
 {{- end }}
 {{- end }}
 
+{{/*
+Hook annotations of the preflight objects: koinon.preflightHook (list $ "<weight>"). They run
+before every other hook; a failed run is kept for inspection and replaced on the next attempt.
+*/}}
+{{- define "koinon.preflightHook" -}}
+helm.sh/hook: pre-install,pre-upgrade
+helm.sh/hook-weight: {{ index . 1 | quote }}
+helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+{{- end }}
+
 {{- define "koinon.gatewayConfigName" -}}
 {{- include "koinon.componentName" (list . "gateway-config") }}
 {{- end }}

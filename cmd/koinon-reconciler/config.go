@@ -16,8 +16,10 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/procoduck/koinon/connectors"
+	"github.com/procoduck/koinon/internal/cli"
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/procoduck/koinon/internal/project"
 	"github.com/procoduck/koinon/internal/reconciler"
 )
 
@@ -25,14 +27,14 @@ import (
 // reconciler reads.
 type fileConfig struct {
 	Gateway struct {
-		Mode         string `yaml:"mode"`
-		ConfigMap    string `yaml:"configMap"`
-		URL          string `yaml:"url"`
-		AdminURL     string `yaml:"adminUrl"`
-		StatsURL     string `yaml:"statsUrl"`
-		Port         int    `yaml:"port"`
-		DatabaseURL  string `yaml:"databaseUrl"`
-		ModelKeyFile string `yaml:"modelKeyFile"`
+		Mode         project.GatewayMode `yaml:"mode"`
+		ConfigMap    string              `yaml:"configMap"`
+		URL          string              `yaml:"url"`
+		AdminURL     string              `yaml:"adminUrl"`
+		StatsURL     string              `yaml:"statsUrl"`
+		Port         int                 `yaml:"port"`
+		DatabaseURL  string              `yaml:"databaseUrl"`
+		ModelKeyFile string              `yaml:"modelKeyFile"`
 		// AccessLogOTLP is koinon-api's OTLP/HTTP receiver as host:port (plan item L1).
 		AccessLogOTLP string `yaml:"accessLogOtlp"`
 	} `yaml:"gateway"`
@@ -80,7 +82,7 @@ type config struct {
 	openshellTLSDir  string
 	runtimeClass     string
 
-	gatewayMode      string
+	gatewayMode      project.GatewayMode
 	gatewayURL       string
 	gatewayConfigMap string
 	gatewayAdminURL  string
@@ -114,7 +116,7 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.openshellAddress, "openshell-address", "", "OpenShell gateway host:port")
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "", "directory with tls.crt, tls.key and ca.crt for mTLS; empty connects without TLS")
 	fs.StringVar(&c.runtimeClass, "runtime-class", "", "sandbox runtime class (ADR 0045: kata)")
-	fs.StringVar(&c.gatewayMode, "gateway-mode", "", "standalone or kubernetes")
+	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes (default standalone)")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it")
 	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config")
 	fs.StringVar(&c.gatewayAdminURL, "gateway-admin-url", "", "agentgateway admin URL, to wait for config reloads; empty does not wait")
@@ -130,17 +132,8 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")
 	fs.StringVar(&c.githubToolsURL, "github-tools-url", "", "URL of the GitHub tools MCP server as agentgateway reaches it; empty serves no GitHub tools")
 
-	var envErr error
-	fs.VisitAll(func(f *flag.Flag) {
-		key := "KOINON_" + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
-		if v, ok := getenv(key); ok {
-			if err := f.Value.Set(v); err != nil && envErr == nil {
-				envErr = fmt.Errorf("%s: %w", key, err)
-			}
-		}
-	})
-	if envErr != nil {
-		return c, envErr
+	if err := cli.BindEnv(fs, getenv); err != nil {
+		return c, err
 	}
 	if err := fs.Parse(args); err != nil {
 		return c, err
@@ -183,7 +176,7 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.openshellTLSDir, fc.OpenShell.TLS)
 	orDefault(&c.runtimeClass, fc.OpenShell.RuntimeClassName)
 	orDefault(&c.gatewayMode, fc.Gateway.Mode)
-	orDefault(&c.gatewayMode, "standalone")
+	orDefault(&c.gatewayMode, project.GatewayStandalone)
 	orDefault(&c.gatewayURL, fc.Gateway.URL)
 	orDefault(&c.gatewayConfigMap, fc.Gateway.ConfigMap)
 	orDefault(&c.gatewayAdminURL, fc.Gateway.AdminURL)
@@ -247,7 +240,7 @@ func (c *config) validate() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required settings: %s", strings.Join(missing, ", "))
 	}
-	if c.gatewayMode == "standalone" && c.gatewayConfigMap == "" {
+	if c.gatewayMode == project.GatewayStandalone && c.gatewayConfigMap == "" {
 		return errors.New("--gateway-config-map is required in standalone mode")
 	}
 	return nil
