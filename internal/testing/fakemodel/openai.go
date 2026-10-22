@@ -68,6 +68,8 @@ func (req openAIRequest) conversation() conversation {
 			if t := contentText(m.Content); t != "" {
 				c.lastUserText = t
 			}
+		case "system", "developer":
+			c.systemText += contentText(m.Content) + "\n"
 		}
 	}
 	// Trailing tool (or legacy function) messages are the results the model is answering.

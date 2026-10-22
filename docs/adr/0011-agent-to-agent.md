@@ -1,0 +1,78 @@
+# 0011. Agent-to-agent: A2A, persisted as tickets
+
+- Status: Accepted
+- Date: 2026-10-21
+- Decision: [design.md#11](../design.md)
+
+## Context
+
+Agents should ask expert agents for help (a personal agent asking the platform team's Kubernetes
+agent), with back-and-forth, without losing the record. A2A is the emerging open protocol for this.
+Agent calls can loop, nest deeply or run up costs.
+
+## Decision
+
+- A2A is the protocol for agent-to-agent calls.
+- Every A2A task is persisted as a ticket, so it is visible on the board and in audit.
+- The caller waits a short time, then parks ([0030](0030-run-state-machine.md)).
+- The A2A `input-required` state is used for clarification questions.
+- Agent cards are used for discovery.
+- Guards:
+  - a maximum call depth;
+  - cycle detection;
+  - cost inherited by the parent ticket ([0041](0041-koinon-spend-ledger-and-budget-stops.md));
+  - results returned to the caller as quoted data, never as instructions, to blunt prompt injection.
+
+```mermaid
+sequenceDiagram
+  participant A as Agent A (caller)
+  participant GW as Koinon A2A gateway
+  participant DB as Postgres (tickets)
+  participant B as Agent B
+  A->>GW: SendMessage (task)
+  GW->>DB: create child ticket (depth+1, parent cost link)
+  GW->>B: start run
+  B-->>GW: input-required (question)
+  GW-->>A: question (A may answer or park)
+  B-->>GW: completed (artifacts)
+  GW-->>A: result as quoted data
+```
+
+## Alternatives considered
+
+- **Direct MCP tool calls between agents** _(reconstructed)_. MCP does not model long-running,
+  multi-turn tasks with states such as `input-required`.
+- **Shared ticket comments only, with no protocol** _(reconstructed)_. Durable, but not
+  interoperable with external A2A agents.
+- **A2A without persisting tickets** _(reconstructed)_. Interoperable, but invisible to humans, and
+  lost if a run dies.
+
+## Consequences
+
+- Positive: a dynamic back-and-forth with a durable, visible record.
+- Positive: interoperable with external A2A agents later.
+- Negative: Koinon builds an A2A gateway that maps A2A tasks to tickets and runs, and handles
+  streaming (SSE) and push notifications _(inferred)_.
+- Negative: depth and cycle limits must be enforced in the gateway, not trusted to agents.
+- Follow-ups: A2A lands in v0.3 ([0024](0024-roadmap.md)).
+
+## Open questions
+
+- Maximum default depth and the cycle-detection key (agent ID chain? ticket lineage?).
+- Should agentgateway (which also speaks A2A, [0040](0040-agentgateway-model-and-mcp-gateway.md))
+  carry the A2A transport, with Koinon owning the ticket mapping? To be evaluated in v0.3.
+- Agent card discovery path and how private, shared and public visibility filters it
+  ([0012](0012-cross-org-sharing.md)).
+
+## Upstream verification
+
+- 2026-10-21: A2A spec v1.0.0. Task states: submitted, working, input-required, auth-required,
+  completed, failed, canceled, rejected. Bindings: JSON-RPC, gRPC, HTTP+JSON. SSE streaming and
+  webhook push notifications. https://a2a-protocol.org/latest/specification/
+- 2026-10-21: the official Go SDK is a2aproject/a2a-go (Apache-2.0, v2.6.0, targets v1.0). The
+  agent card path `/.well-known/agent-card.json` is unverified.
+
+## Links
+
+- [0012](0012-cross-org-sharing.md), [0019](0019-personal-agents-and-teams.md),
+  [0030](0030-run-state-machine.md), [0031](0031-artifacts-in-object-storage.md)
