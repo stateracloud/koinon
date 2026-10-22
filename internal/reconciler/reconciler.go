@@ -44,6 +44,7 @@ import (
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/execution"
 	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/procoduck/koinon/internal/ledger"
 )
 
 // Retention decides what happens to an archived agent's home volume.
@@ -131,6 +132,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if unpriced := cfg.Models.Unpriced(); len(unpriced) > 0 {
+		cfg.Logger.Warn("models without a price are not served; give free models a zero price", "models", unpriced)
+	}
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
 		backend: backend, gw: gw, secrets: secrets,
@@ -195,6 +199,21 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 
 	// One gateway state for every agent: keys of archived agents are revoked by omission.
 	state := gateway.State{Keys: keys, Models: r.cfg.Models}
+	// Spend limits net of recorded spend (plan item L1), recomputed every pass, so a key
+	// rotation or a gateway that lost its budget counters gets the remainder, not the full
+	// limit. Without its limit an agent would be unlimited, so a failure aborts the pass and
+	// the gateway keeps serving the last applied state.
+	now := r.cfg.Now()
+	for _, w := range items {
+		if w.key.ID == "" {
+			continue
+		}
+		l, err := ledger.AgentLimit(ctx, r.q, w.agent, now)
+		if err != nil {
+			return errors.Join(append(errs, fmt.Errorf("%w: spend limit of agent %s: %w", errAbortPass, uuidString(w.agent.ID), err))...)
+		}
+		state.SetLimit(w.key.Agent, l)
+	}
 	if _, err := r.gw.Apply(ctx, state); err != nil {
 		errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
 		return errors.Join(errs...)

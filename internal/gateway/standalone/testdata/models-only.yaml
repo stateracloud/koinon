@@ -4,12 +4,22 @@ config:
   adminAddr: 127.0.0.1:15000
   logging:
     format: json
+  modelCatalog:
+    - inline:
+        providers:
+          ollama:
+            models:
+              qwen3.5:4b:
+                rates:
+                  input: "0"
+                  output: "0"
 frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"3202bffb15a48b62"'
+      koinon.config: '"cf614b69f0b7cfe7"'
       koinon.key: default(apiKey.name, "")
+      koinon.request: uuid()
 gateways:
   default:
     port: 8080

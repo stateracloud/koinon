@@ -163,10 +163,13 @@ type Run struct {
 	MaxTokens           int64 `protobuf:"varint,10,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
 	TokensUsed          int64 `protobuf:"varint,11,opt,name=tokens_used,json=tokensUsed,proto3" json:"tokens_used,omitempty"`
 	// The seq of the newest event.
-	LastEventSeq  int64                  `protobuf:"varint,12,opt,name=last_event_seq,json=lastEventSeq,proto3" json:"last_event_seq,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	FinishedAt    *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	LastEventSeq int64                  `protobuf:"varint,12,opt,name=last_event_seq,json=lastEventSeq,proto3" json:"last_event_seq,omitempty"`
+	CreatedAt    *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	StartedAt    *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	FinishedAt   *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"`
+	// Model spend recorded for the run by the spend ledger (plan item L1). Set
+	// by GetRun and on the runs of GetTicket; unset elsewhere.
+	Cost          *Cost `protobuf:"bytes,16,opt,name=cost,proto3" json:"cost,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -306,6 +309,95 @@ func (x *Run) GetFinishedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Run) GetCost() *Cost {
+	if x != nil {
+		return x.Cost
+	}
+	return nil
+}
+
+// Cost is model spend recorded by the spend ledger from agentgateway's access
+// log (plan item L1).
+type Cost struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Charged model requests.
+	Requests     int64 `protobuf:"varint,1,opt,name=requests,proto3" json:"requests,omitempty"`
+	InputTokens  int64 `protobuf:"varint,2,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`
+	OutputTokens int64 `protobuf:"varint,3,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
+	// USD as an exact decimal string with at least two fraction digits, for
+	// example "0.0021" or "0.00".
+	Usd string `protobuf:"bytes,4,opt,name=usd,proto3" json:"usd,omitempty"`
+	// False when some request had no price, so usd undercounts.
+	Priced        bool `protobuf:"varint,5,opt,name=priced,proto3" json:"priced,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Cost) Reset() {
+	*x = Cost{}
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Cost) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Cost) ProtoMessage() {}
+
+func (x *Cost) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Cost.ProtoReflect.Descriptor instead.
+func (*Cost) Descriptor() ([]byte, []int) {
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Cost) GetRequests() int64 {
+	if x != nil {
+		return x.Requests
+	}
+	return 0
+}
+
+func (x *Cost) GetInputTokens() int64 {
+	if x != nil {
+		return x.InputTokens
+	}
+	return 0
+}
+
+func (x *Cost) GetOutputTokens() int64 {
+	if x != nil {
+		return x.OutputTokens
+	}
+	return 0
+}
+
+func (x *Cost) GetUsd() string {
+	if x != nil {
+		return x.Usd
+	}
+	return ""
+}
+
+func (x *Cost) GetPriced() bool {
+	if x != nil {
+		return x.Priced
+	}
+	return false
+}
+
 // RunEvent is one session update or lifecycle note of a run.
 type RunEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -322,7 +414,7 @@ type RunEvent struct {
 
 func (x *RunEvent) Reset() {
 	*x = RunEvent{}
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[1]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -334,7 +426,7 @@ func (x *RunEvent) String() string {
 func (*RunEvent) ProtoMessage() {}
 
 func (x *RunEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[1]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -347,7 +439,7 @@ func (x *RunEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunEvent.ProtoReflect.Descriptor instead.
 func (*RunEvent) Descriptor() ([]byte, []int) {
-	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{1}
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *RunEvent) GetRunId() string {
@@ -396,7 +488,7 @@ type GetRunRequest struct {
 
 func (x *GetRunRequest) Reset() {
 	*x = GetRunRequest{}
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[2]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -408,7 +500,7 @@ func (x *GetRunRequest) String() string {
 func (*GetRunRequest) ProtoMessage() {}
 
 func (x *GetRunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[2]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -421,7 +513,7 @@ func (x *GetRunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRunRequest.ProtoReflect.Descriptor instead.
 func (*GetRunRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{2}
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *GetRunRequest) GetOrgId() string {
@@ -448,7 +540,7 @@ type GetRunResponse struct {
 
 func (x *GetRunResponse) Reset() {
 	*x = GetRunResponse{}
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[3]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -460,7 +552,7 @@ func (x *GetRunResponse) String() string {
 func (*GetRunResponse) ProtoMessage() {}
 
 func (x *GetRunResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[3]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -473,7 +565,7 @@ func (x *GetRunResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRunResponse.ProtoReflect.Descriptor instead.
 func (*GetRunResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{3}
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetRunResponse) GetRun() *Run {
@@ -496,7 +588,7 @@ type CancelRunRequest struct {
 
 func (x *CancelRunRequest) Reset() {
 	*x = CancelRunRequest{}
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[4]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -508,7 +600,7 @@ func (x *CancelRunRequest) String() string {
 func (*CancelRunRequest) ProtoMessage() {}
 
 func (x *CancelRunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[4]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -521,7 +613,7 @@ func (x *CancelRunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelRunRequest.ProtoReflect.Descriptor instead.
 func (*CancelRunRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{4}
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CancelRunRequest) GetOrgId() string {
@@ -555,7 +647,7 @@ type CancelRunResponse struct {
 
 func (x *CancelRunResponse) Reset() {
 	*x = CancelRunResponse{}
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[5]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -567,7 +659,7 @@ func (x *CancelRunResponse) String() string {
 func (*CancelRunResponse) ProtoMessage() {}
 
 func (x *CancelRunResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[5]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -580,7 +672,7 @@ func (x *CancelRunResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelRunResponse.ProtoReflect.Descriptor instead.
 func (*CancelRunResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{5}
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CancelRunResponse) GetRun() *Run {
@@ -603,7 +695,7 @@ type WatchRunRequest struct {
 
 func (x *WatchRunRequest) Reset() {
 	*x = WatchRunRequest{}
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[6]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -615,7 +707,7 @@ func (x *WatchRunRequest) String() string {
 func (*WatchRunRequest) ProtoMessage() {}
 
 func (x *WatchRunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[6]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -628,7 +720,7 @@ func (x *WatchRunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRunRequest.ProtoReflect.Descriptor instead.
 func (*WatchRunRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{6}
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *WatchRunRequest) GetOrgId() string {
@@ -666,7 +758,7 @@ type WatchRunResponse struct {
 
 func (x *WatchRunResponse) Reset() {
 	*x = WatchRunResponse{}
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[7]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -678,7 +770,7 @@ func (x *WatchRunResponse) String() string {
 func (*WatchRunResponse) ProtoMessage() {}
 
 func (x *WatchRunResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[7]
+	mi := &file_koinon_run_v1alpha1_run_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -691,7 +783,7 @@ func (x *WatchRunResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRunResponse.ProtoReflect.Descriptor instead.
 func (*WatchRunResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{7}
+	return file_koinon_run_v1alpha1_run_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *WatchRunResponse) GetItem() isWatchRunResponse_Item {
@@ -739,7 +831,7 @@ var File_koinon_run_v1alpha1_run_proto protoreflect.FileDescriptor
 
 const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\n" +
-	"\x1dkoinon/run/v1alpha1/run.proto\x12\x13koinon.run.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xfa\x04\n" +
+	"\x1dkoinon/run/v1alpha1/run.proto\x12\x13koinon.run.v1alpha1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa9\x05\n" +
 	"\x03Run\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x1b\n" +
@@ -762,7 +854,14 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\n" +
 	"started_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12;\n" +
 	"\vfinished_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"finishedAt\"\xb5\x01\n" +
+	"finishedAt\x12-\n" +
+	"\x04cost\x18\x10 \x01(\v2\x19.koinon.run.v1alpha1.CostR\x04cost\"\x94\x01\n" +
+	"\x04Cost\x12\x1a\n" +
+	"\brequests\x18\x01 \x01(\x03R\brequests\x12!\n" +
+	"\finput_tokens\x18\x02 \x01(\x03R\vinputTokens\x12#\n" +
+	"\routput_tokens\x18\x03 \x01(\x03R\foutputTokens\x12\x10\n" +
+	"\x03usd\x18\x04 \x01(\tR\x03usd\x12\x16\n" +
+	"\x06priced\x18\x05 \x01(\bR\x06priced\"\xb5\x01\n" +
 	"\bRunEvent\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x03R\x03seq\x12\x12\n" +
@@ -824,44 +923,46 @@ func file_koinon_run_v1alpha1_run_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_run_v1alpha1_run_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_koinon_run_v1alpha1_run_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_koinon_run_v1alpha1_run_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_koinon_run_v1alpha1_run_proto_goTypes = []any{
 	(RunState)(0),                 // 0: koinon.run.v1alpha1.RunState
 	(ParkReason)(0),               // 1: koinon.run.v1alpha1.ParkReason
 	(*Run)(nil),                   // 2: koinon.run.v1alpha1.Run
-	(*RunEvent)(nil),              // 3: koinon.run.v1alpha1.RunEvent
-	(*GetRunRequest)(nil),         // 4: koinon.run.v1alpha1.GetRunRequest
-	(*GetRunResponse)(nil),        // 5: koinon.run.v1alpha1.GetRunResponse
-	(*CancelRunRequest)(nil),      // 6: koinon.run.v1alpha1.CancelRunRequest
-	(*CancelRunResponse)(nil),     // 7: koinon.run.v1alpha1.CancelRunResponse
-	(*WatchRunRequest)(nil),       // 8: koinon.run.v1alpha1.WatchRunRequest
-	(*WatchRunResponse)(nil),      // 9: koinon.run.v1alpha1.WatchRunResponse
-	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),       // 11: google.protobuf.Struct
+	(*Cost)(nil),                  // 3: koinon.run.v1alpha1.Cost
+	(*RunEvent)(nil),              // 4: koinon.run.v1alpha1.RunEvent
+	(*GetRunRequest)(nil),         // 5: koinon.run.v1alpha1.GetRunRequest
+	(*GetRunResponse)(nil),        // 6: koinon.run.v1alpha1.GetRunResponse
+	(*CancelRunRequest)(nil),      // 7: koinon.run.v1alpha1.CancelRunRequest
+	(*CancelRunResponse)(nil),     // 8: koinon.run.v1alpha1.CancelRunResponse
+	(*WatchRunRequest)(nil),       // 9: koinon.run.v1alpha1.WatchRunRequest
+	(*WatchRunResponse)(nil),      // 10: koinon.run.v1alpha1.WatchRunResponse
+	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),       // 12: google.protobuf.Struct
 }
 var file_koinon_run_v1alpha1_run_proto_depIdxs = []int32{
 	0,  // 0: koinon.run.v1alpha1.Run.state:type_name -> koinon.run.v1alpha1.RunState
 	1,  // 1: koinon.run.v1alpha1.Run.park_reason:type_name -> koinon.run.v1alpha1.ParkReason
-	10, // 2: koinon.run.v1alpha1.Run.created_at:type_name -> google.protobuf.Timestamp
-	10, // 3: koinon.run.v1alpha1.Run.started_at:type_name -> google.protobuf.Timestamp
-	10, // 4: koinon.run.v1alpha1.Run.finished_at:type_name -> google.protobuf.Timestamp
-	11, // 5: koinon.run.v1alpha1.RunEvent.payload:type_name -> google.protobuf.Struct
-	10, // 6: koinon.run.v1alpha1.RunEvent.created_at:type_name -> google.protobuf.Timestamp
-	2,  // 7: koinon.run.v1alpha1.GetRunResponse.run:type_name -> koinon.run.v1alpha1.Run
-	2,  // 8: koinon.run.v1alpha1.CancelRunResponse.run:type_name -> koinon.run.v1alpha1.Run
-	2,  // 9: koinon.run.v1alpha1.WatchRunResponse.run:type_name -> koinon.run.v1alpha1.Run
-	3,  // 10: koinon.run.v1alpha1.WatchRunResponse.event:type_name -> koinon.run.v1alpha1.RunEvent
-	4,  // 11: koinon.run.v1alpha1.RunService.GetRun:input_type -> koinon.run.v1alpha1.GetRunRequest
-	6,  // 12: koinon.run.v1alpha1.RunService.CancelRun:input_type -> koinon.run.v1alpha1.CancelRunRequest
-	8,  // 13: koinon.run.v1alpha1.RunService.WatchRun:input_type -> koinon.run.v1alpha1.WatchRunRequest
-	5,  // 14: koinon.run.v1alpha1.RunService.GetRun:output_type -> koinon.run.v1alpha1.GetRunResponse
-	7,  // 15: koinon.run.v1alpha1.RunService.CancelRun:output_type -> koinon.run.v1alpha1.CancelRunResponse
-	9,  // 16: koinon.run.v1alpha1.RunService.WatchRun:output_type -> koinon.run.v1alpha1.WatchRunResponse
-	14, // [14:17] is the sub-list for method output_type
-	11, // [11:14] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	11, // 2: koinon.run.v1alpha1.Run.created_at:type_name -> google.protobuf.Timestamp
+	11, // 3: koinon.run.v1alpha1.Run.started_at:type_name -> google.protobuf.Timestamp
+	11, // 4: koinon.run.v1alpha1.Run.finished_at:type_name -> google.protobuf.Timestamp
+	3,  // 5: koinon.run.v1alpha1.Run.cost:type_name -> koinon.run.v1alpha1.Cost
+	12, // 6: koinon.run.v1alpha1.RunEvent.payload:type_name -> google.protobuf.Struct
+	11, // 7: koinon.run.v1alpha1.RunEvent.created_at:type_name -> google.protobuf.Timestamp
+	2,  // 8: koinon.run.v1alpha1.GetRunResponse.run:type_name -> koinon.run.v1alpha1.Run
+	2,  // 9: koinon.run.v1alpha1.CancelRunResponse.run:type_name -> koinon.run.v1alpha1.Run
+	2,  // 10: koinon.run.v1alpha1.WatchRunResponse.run:type_name -> koinon.run.v1alpha1.Run
+	4,  // 11: koinon.run.v1alpha1.WatchRunResponse.event:type_name -> koinon.run.v1alpha1.RunEvent
+	5,  // 12: koinon.run.v1alpha1.RunService.GetRun:input_type -> koinon.run.v1alpha1.GetRunRequest
+	7,  // 13: koinon.run.v1alpha1.RunService.CancelRun:input_type -> koinon.run.v1alpha1.CancelRunRequest
+	9,  // 14: koinon.run.v1alpha1.RunService.WatchRun:input_type -> koinon.run.v1alpha1.WatchRunRequest
+	6,  // 15: koinon.run.v1alpha1.RunService.GetRun:output_type -> koinon.run.v1alpha1.GetRunResponse
+	8,  // 16: koinon.run.v1alpha1.RunService.CancelRun:output_type -> koinon.run.v1alpha1.CancelRunResponse
+	10, // 17: koinon.run.v1alpha1.RunService.WatchRun:output_type -> koinon.run.v1alpha1.WatchRunResponse
+	15, // [15:18] is the sub-list for method output_type
+	12, // [12:15] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_koinon_run_v1alpha1_run_proto_init() }
@@ -869,7 +970,7 @@ func file_koinon_run_v1alpha1_run_proto_init() {
 	if File_koinon_run_v1alpha1_run_proto != nil {
 		return
 	}
-	file_koinon_run_v1alpha1_run_proto_msgTypes[7].OneofWrappers = []any{
+	file_koinon_run_v1alpha1_run_proto_msgTypes[8].OneofWrappers = []any{
 		(*WatchRunResponse_Run)(nil),
 		(*WatchRunResponse_Event)(nil),
 	}
@@ -879,7 +980,7 @@ func file_koinon_run_v1alpha1_run_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_run_v1alpha1_run_proto_rawDesc), len(file_koinon_run_v1alpha1_run_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -23,6 +23,7 @@ gateway:
   port: 8080
   databaseUrl: sqlite:///data/agentgateway.db?mode=rwc
   modelKeyFile: /secrets/model/api_key
+  accessLogOtlp: koinon-api.koinon.svc:4318
 model:
   apiKeySecret: {key: api_key, name: upstream}
   baseUrl: https://openrouter.ai/api/v1
@@ -64,7 +65,8 @@ func TestParseConfigFromChart(t *testing.T) {
 	if c.idleTimeout != 15*time.Minute || c.resyncInterval != 30*time.Second {
 		t.Errorf("durations = %v, %v", c.idleTimeout, c.resyncInterval)
 	}
-	if c.homeRetention != "delete" || c.runtimeClass != "kata" || c.openshellTLSDir != "/etc/koinon/openshell-tls" {
+	if c.homeRetention != "delete" || c.runtimeClass != "kata" || c.openshellTLSDir != "/etc/koinon/openshell-tls" ||
+		c.accessLogOTLP != "koinon-api.koinon.svc:4318" {
 		t.Errorf("unexpected %+v", c)
 	}
 	ep, err := c.gatewayEndpoint()

@@ -41,5 +41,5 @@ func (d *Driver) Apply(ctx context.Context, s gateway.State) (gateway.Revision, 
 }
 
 // Usage implements gateway.ModelGateway. Usage arrives through agentgateway's
-// access log (L1), not through the driver.
+// access log, exported over OTLP to the spend ledger in koinon-api (package ledger, L1).
 func (d *Driver) Usage() gateway.UsageReader { return gateway.NoUsage{} }

@@ -703,6 +703,23 @@ type Session struct {
 	RevokedAt     pgtype.Timestamptz
 }
 
+type SpendEntry struct {
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+	AgentID      pgtype.UUID
+	RunID        pgtype.UUID
+	TicketID     pgtype.UUID
+	RequestID    string
+	KeyID        string
+	Model        string
+	InputTokens  int64
+	OutputTokens int64
+	CostUsd      pgtype.Numeric
+	Priced       bool
+	OccurredAt   pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+}
+
 type Template struct {
 	ID           pgtype.UUID
 	Slug         string

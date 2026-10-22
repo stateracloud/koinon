@@ -148,6 +148,9 @@ func (s *Server) ListTickets(ctx context.Context, req *ticketv1alpha1.ListTicket
 	for _, t := range tickets {
 		res.Tickets = append(res.Tickets, ticketProto(t))
 	}
+	if err := setTicketCosts(ctx, s.q, c.org, res.Tickets); err != nil {
+		return nil, s.dbError(err, "tickets")
+	}
 	return res, nil
 }
 
@@ -179,8 +182,14 @@ func (s *Server) GetTicket(ctx context.Context, req *ticketv1alpha1.GetTicketReq
 			res.Events = append(res.Events, ticketEventProto(e))
 		}
 		runs, err := q.ListRunsForTicket(ctx, store.ListRunsForTicketParams{OrgID: c.org, TicketID: id})
+		if err != nil {
+			return err
+		}
 		res.Runs = runsProto(runs)
-		return err
+		if err := setRunCosts(ctx, q, c.org, res.Runs); err != nil {
+			return err
+		}
+		return setTicketCosts(ctx, q, c.org, []*ticketv1alpha1.Ticket{res.Ticket})
 	})
 	if err != nil {
 		return nil, s.dbError(err, "ticket")

@@ -28,6 +28,15 @@ spec:
               {{- toYaml $release | nindent 14 }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
+    {{- if eq .Values.gateway.mode "standalone" }}
+    # The spend ledger's OTLP receiver has no authentication: only agentgateway may send to it.
+    - ports:
+        - port: otlp
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "gateway") | nindent 14 }}
+    {{- end }}
 {{- range $component := list "reconciler" "agentd" "migrate" }}
 ---
 # {{ $component }} accepts no connections.
