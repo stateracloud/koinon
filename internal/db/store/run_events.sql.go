@@ -21,7 +21,7 @@ WITH run AS (
 INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload)
 SELECT run.org_id, run.id, run.last_event_seq, run.epoch, $1, $2
 FROM run
-RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at
+RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq
 `
 
 type AppendRunControlEventParams struct {
@@ -50,6 +50,7 @@ func (q *Queries) AppendRunControlEvent(ctx context.Context, arg AppendRunContro
 		&i.Kind,
 		&i.Payload,
 		&i.CreatedAt,
+		&i.SourceSeq,
 	)
 	return i, err
 }
@@ -66,7 +67,7 @@ WITH run AS (
 INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload)
 SELECT run.org_id, run.id, run.last_event_seq, run.epoch, $1, $2
 FROM run
-RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at
+RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq
 `
 
 type AppendRunEventParams struct {
@@ -102,12 +103,102 @@ func (q *Queries) AppendRunEvent(ctx context.Context, arg AppendRunEventParams) 
 		&i.Kind,
 		&i.Payload,
 		&i.CreatedAt,
+		&i.SourceSeq,
+	)
+	return i, err
+}
+
+const appendRunEventOnce = `-- name: AppendRunEventOnce :one
+WITH run AS (
+    UPDATE runs
+    SET last_event_seq = last_event_seq + 1
+    WHERE runs.org_id = $4 AND runs.id = $5 AND runs.epoch = $6
+      AND runs.state IN ('starting', 'running')
+      AND NOT EXISTS (
+          SELECT 1 FROM run_events e
+          WHERE e.org_id = $4 AND e.run_id = $5 AND e.epoch = $6
+            AND e.source_seq = $3::bigint)
+    RETURNING runs.org_id, runs.id, runs.epoch, runs.last_event_seq
+)
+INSERT INTO run_events (org_id, run_id, seq, epoch, kind, payload, source_seq)
+SELECT run.org_id, run.id, run.last_event_seq, run.epoch, $1, $2, $3::bigint
+FROM run
+RETURNING org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq
+`
+
+type AppendRunEventOnceParams struct {
+	Kind      string
+	Payload   []byte
+	SourceSeq int64
+	OrgID     pgtype.UUID
+	RunID     pgtype.UUID
+	Epoch     int64
+}
+
+// AppendRunEvent with the writer's own sequence number: an event already
+// recorded under (run, epoch, source_seq) is not recorded again, so retrying
+// after an ambiguous failure is safe. No row: stale epoch, the run is not
+// active, or the event exists (GetRunEventBySource tells which).
+func (q *Queries) AppendRunEventOnce(ctx context.Context, arg AppendRunEventOnceParams) (RunEvent, error) {
+	row := q.db.QueryRow(ctx, appendRunEventOnce,
+		arg.Kind,
+		arg.Payload,
+		arg.SourceSeq,
+		arg.OrgID,
+		arg.RunID,
+		arg.Epoch,
+	)
+	var i RunEvent
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.RunID,
+		&i.Seq,
+		&i.Epoch,
+		&i.Kind,
+		&i.Payload,
+		&i.CreatedAt,
+		&i.SourceSeq,
+	)
+	return i, err
+}
+
+const getRunEventBySource = `-- name: GetRunEventBySource :one
+SELECT org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq FROM run_events
+WHERE org_id = $1 AND run_id = $2 AND epoch = $3 AND source_seq = $4::bigint
+`
+
+type GetRunEventBySourceParams struct {
+	OrgID     pgtype.UUID
+	RunID     pgtype.UUID
+	Epoch     int64
+	SourceSeq int64
+}
+
+func (q *Queries) GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error) {
+	row := q.db.QueryRow(ctx, getRunEventBySource,
+		arg.OrgID,
+		arg.RunID,
+		arg.Epoch,
+		arg.SourceSeq,
+	)
+	var i RunEvent
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.RunID,
+		&i.Seq,
+		&i.Epoch,
+		&i.Kind,
+		&i.Payload,
+		&i.CreatedAt,
+		&i.SourceSeq,
 	)
 	return i, err
 }
 
 const listRunEventsAfter = `-- name: ListRunEventsAfter :many
-SELECT org_id, id, run_id, seq, epoch, kind, payload, created_at FROM run_events
+SELECT org_id, id, run_id, seq, epoch, kind, payload, created_at, source_seq FROM run_events
 WHERE org_id = $1 AND run_id = $2 AND seq > $3
 ORDER BY seq
 LIMIT $4
@@ -145,6 +236,7 @@ func (q *Queries) ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfter
 			&i.Kind,
 			&i.Payload,
 			&i.CreatedAt,
+			&i.SourceSeq,
 		); err != nil {
 			return nil, err
 		}

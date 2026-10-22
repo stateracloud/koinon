@@ -40,7 +40,8 @@ WHERE deleted_at IS NULL
 ORDER BY id
 `
 
-// Every live org, for control-plane sweeps that then work org by org.
+// Every live org, for control-plane sweeps and workers that then work org by
+// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
 func (q *Queries) ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listOrgIDs)
 	if err != nil {

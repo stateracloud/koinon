@@ -18,7 +18,7 @@ Contract test: `make test-flavors` (`test/flavors`, needs Docker).
 | Instruction files | `/sandbox/.koinon/AGENTS.md` (Koinon's rendered template instructions, via `instructions`), plus the repository's `AGENTS.md` found from the session directory |
 | State | `/sandbox/.local/share/opencode` (sessions in `opencode.db`), `/sandbox/.local/state/opencode` |
 | Home exclude paths | `/sandbox/.cache/opencode`, `/sandbox/.local/share/opencode/log` |
-| Permission requests | OpenCode's defaults: it asks over ACP for paths outside the session directory (`external_directory`), `.env` reads and repeated identical tool calls (`doom_loop`); everything else is allowed inside the sandbox |
+| Permission requests | OpenCode's defaults: it asks over ACP for paths outside the session directory (`external_directory`), `.env` reads and repeated identical tool calls (`doom_loop`); everything else is allowed inside the sandbox. `external_directory` arrives with tool kind `other`, which koinon-agentd's default mapping rejects (`internal/agentd`, `DefaultPermissions`) |
 
 ## How per-agent values reach the config
 

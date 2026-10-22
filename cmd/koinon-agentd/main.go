@@ -1,25 +1,153 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Command koinon-agentd drives runs: it speaks ACP to the harness in each
-// sandbox over OpenShell's exec stream (ADR 0049). For now it only waits for a
-// termination signal.
+// Command koinon-agentd drives runs: it claims them from Postgres and speaks ACP to the
+// harness in each agent's sandbox over OpenShell's non-TTY exec stream (ADR 0049, plan item
+// AG1). It holds no credentials besides its own database and OpenShell client identities.
+//
+// Every flag can also be set by an environment variable: KOINON_ plus the flag name in upper
+// case with dashes as underscores (--gateway-url is KOINON_GATEWAY_URL).
 package main
 
 import (
 	"context"
+	"errors"
+	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/procoduck/koinon/internal/agentd"
+	"github.com/procoduck/koinon/internal/execution/openshell"
 	"github.com/procoduck/koinon/internal/project"
 )
 
+type config struct {
+	databaseURL     string
+	openshellAddr   string
+	openshellTLSDir string
+	openshellName   string
+	pool            agentd.Config
+}
+
+func parseFlags(args []string) (config, error) {
+	var c config
+	fs := flag.NewFlagSet("koinon-agentd", flag.ContinueOnError)
+	fs.StringVar(&c.databaseURL, "database-url", "", "Postgres connection string (default $DATABASE_URL)")
+	fs.StringVar(&c.openshellAddr, "openshell-address", "", "OpenShell gateway host:port")
+	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "",
+		"directory with the OpenShell client bundle (tls.crt, tls.key, ca.crt); empty connects without TLS")
+	fs.StringVar(&c.openshellName, "openshell-server-name", "", "name checked against the gateway's certificate")
+	fs.StringVar(&c.pool.GatewayURL, "gateway-url", "",
+		"agentgateway's base URL as sandboxes reach it; flavors get <url>/v1 and <url>/mcp")
+	fs.StringVar(&c.pool.DefaultModel, "default-model", "", "model of agents that name none")
+	fs.StringVar(&c.pool.OwnerID, "owner-id", "", "this replica's name in run leases (default $POD_NAME, else the host name)")
+	fs.IntVar(&c.pool.Workers, "workers", 8, "runs driven at once")
+	fs.DurationVar(&c.pool.Lease, "lease", 30*time.Second, "run lease; another replica takes a run over when it expires")
+	fs.DurationVar(&c.pool.Heartbeat, "heartbeat", 0, "lease renewal and cancel check interval (default lease/3)")
+	fs.DurationVar(&c.pool.Poll, "poll", time.Second, "how often idle workers look for runs")
+	fs.DurationVar(&c.pool.SandboxTimeout, "sandbox-timeout", 5*time.Minute, "how long a run waits for its sandbox")
+	fs.DurationVar(&c.pool.CancelGrace, "cancel-grace", 10*time.Second, "how long a harness gets to end a cancelled turn")
+	fs.IntVar(&c.pool.MaxTakeovers, "max-takeovers", 5, "fail a run taken over more often than this")
+	fs.StringVar(&c.pool.SessionCwd, "session-cwd", "/sandbox/work", "harness session directory in the sandbox")
+
+	var envErr error
+	fs.VisitAll(func(f *flag.Flag) {
+		key := "KOINON_" + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
+		if v, ok := os.LookupEnv(key); ok {
+			if err := f.Value.Set(v); err != nil && envErr == nil {
+				envErr = fmt.Errorf("%s: %w", key, err)
+			}
+		}
+	})
+	if envErr != nil {
+		return c, envErr
+	}
+	if err := fs.Parse(args); err != nil {
+		return c, err
+	}
+	if c.databaseURL == "" {
+		c.databaseURL = os.Getenv("DATABASE_URL")
+	}
+	if c.pool.OwnerID == "" {
+		c.pool.OwnerID = os.Getenv("POD_NAME")
+	}
+	if c.pool.OwnerID == "" {
+		h, err := os.Hostname()
+		if err != nil {
+			return c, fmt.Errorf("owner id: %w", err)
+		}
+		c.pool.OwnerID = h
+	}
+	switch {
+	case c.databaseURL == "":
+		return c, errors.New("--database-url is required")
+	case c.openshellAddr == "":
+		return c, errors.New("--openshell-address is required")
+	case c.pool.GatewayURL == "":
+		return c, errors.New("--gateway-url is required")
+	}
+	return c, nil
+}
+
 func main() {
+	if err := run(); err != nil {
+		slog.Error("koinon-agentd failed", "err", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfg, err := parseFlags(os.Args[1:])
+	if err != nil {
+		return err
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	slog.Info("starting koinon-agentd", "version", project.Version)
-	<-ctx.Done()
+	db, err := pgxpool.New(ctx, cfg.databaseURL)
+	if err != nil {
+		return fmt.Errorf("database: %w", err)
+	}
+	defer db.Close()
+
+	var backend *openshell.Backend
+	if cfg.openshellTLSDir != "" {
+		backend, err = openshell.Dial(openshell.Config{
+			Endpoint:   cfg.openshellAddr,
+			CertFile:   filepath.Join(cfg.openshellTLSDir, "tls.crt"),
+			KeyFile:    filepath.Join(cfg.openshellTLSDir, "tls.key"),
+			CAFile:     filepath.Join(cfg.openshellTLSDir, "ca.crt"),
+			ServerName: cfg.openshellName,
+		})
+		if err != nil {
+			return err
+		}
+		defer func() { _ = backend.Close() }()
+	} else {
+		slog.Warn("connecting to the OpenShell gateway without TLS", "address", cfg.openshellAddr)
+		conn, err := grpc.NewClient(cfg.openshellAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return fmt.Errorf("openshell: %w", err)
+		}
+		defer func() { _ = conn.Close() }()
+		backend = openshell.New(conn)
+	}
+
+	pool, err := agentd.New(db, backend, cfg.pool)
+	if err != nil {
+		return err
+	}
+	slog.Info("starting koinon-agentd", "version", project.Version, "owner", cfg.pool.OwnerID, "workers", cfg.pool.Workers)
+	err = pool.Run(ctx)
 	slog.Info("stopping koinon-agentd")
+	return err
 }

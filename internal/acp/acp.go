@@ -14,11 +14,14 @@
 package acp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 
 	sdk "github.com/coder/acp-go-sdk"
 
@@ -43,6 +46,10 @@ type (
 	StopReason = sdk.StopReason
 	// ToolCallStatus is the state of a tool call.
 	ToolCallStatus = sdk.ToolCallStatus
+	// ToolKind classifies what a tool call does (read, edit, execute, ...).
+	ToolKind = sdk.ToolKind
+	// SessionUpdate is the payload of a session/update notification.
+	SessionUpdate = sdk.SessionUpdate
 )
 
 // Stop reasons.
@@ -67,6 +74,20 @@ const (
 	ToolInProgress = sdk.ToolCallStatusInProgress
 	ToolCompleted  = sdk.ToolCallStatusCompleted
 	ToolFailed     = sdk.ToolCallStatusFailed
+)
+
+// Tool kinds.
+const (
+	ToolKindRead       = sdk.ToolKindRead
+	ToolKindEdit       = sdk.ToolKindEdit
+	ToolKindDelete     = sdk.ToolKindDelete
+	ToolKindMove       = sdk.ToolKindMove
+	ToolKindSearch     = sdk.ToolKindSearch
+	ToolKindExecute    = sdk.ToolKindExecute
+	ToolKindThink      = sdk.ToolKindThink
+	ToolKindFetch      = sdk.ToolKindFetch
+	ToolKindSwitchMode = sdk.ToolKindSwitchMode
+	ToolKindOther      = sdk.ToolKindOther
 )
 
 // ProtocolVersion is the ACP protocol version Koinon speaks.
@@ -104,17 +125,35 @@ type Handler interface {
 // Conn is an ACP client connection to one harness process.
 type Conn struct {
 	c *sdk.ClientSideConnection
+	t *tracker
 }
 
 // NewConn starts a client connection that writes requests to toAgent (the harness's stdin)
 // and reads from fromAgent (its stdout). The connection ends when fromAgent returns an error
 // or end-of-file.
 func NewConn(h Handler, toAgent io.Writer, fromAgent io.Reader) *Conn {
-	return &Conn{c: sdk.NewClientSideConnection(client{h: h}, toAgent, fromAgent)}
+	t := newTracker()
+	return &Conn{
+		c: sdk.NewClientSideConnection(client{h: h, t: t}, toAgent, &countingReader{r: fromAgent, t: t}),
+		t: t,
+	}
 }
 
 // Done is closed when the connection has ended.
 func (c *Conn) Done() <-chan struct{} { return c.c.Done() }
+
+// WaitUpdates waits until the connection has ended and every session update the agent sent
+// has been handed to the [Handler]. When a connection drops, the SDK fails pending calls
+// first and delivers the updates received before the drop afterwards; waiting for them keeps
+// what the handler records in the agent's order. It returns false if ctx ends first.
+func (c *Conn) WaitUpdates(ctx context.Context) bool {
+	select {
+	case <-c.t.drained:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
 
 // SetLogger sets the logger for protocol-level events, such as the connection closing.
 func (c *Conn) SetLogger(l *slog.Logger) { c.c.SetLogger(l) }
@@ -224,12 +263,87 @@ var ErrUnsupported = errors.New("acp: not supported by koinon-agentd; the harnes
 // client adapts a Handler to the SDK's Client interface.
 type client struct {
 	h Handler
+	t *tracker
 }
 
 var _ sdk.Client = client{}
 
 func (c client) SessionUpdate(ctx context.Context, n sdk.SessionNotification) error {
+	defer c.t.handled()
 	return c.h.SessionUpdate(ctx, n)
+}
+
+// tracker counts the session/update notifications read from the agent and those handled,
+// to tell when every update of an ended connection has been delivered.
+type tracker struct {
+	mu      sync.Mutex
+	read    int64
+	done    int64
+	eof     bool
+	drained chan struct{}
+}
+
+func newTracker() *tracker { return &tracker{drained: make(chan struct{})} }
+
+func (t *tracker) update(f func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	f()
+	if t.eof && t.done >= t.read {
+		select {
+		case <-t.drained:
+		default:
+			close(t.drained)
+		}
+	}
+}
+
+func (t *tracker) handled() { t.update(func() { t.done++ }) }
+
+// countingReader passes the agent's output through and counts its session/update
+// notifications. The SDK reads lines in order and queues each notification before it reads
+// the next, so once Read has returned an error every counted notification is queued.
+type countingReader struct {
+	r       io.Reader
+	t       *tracker
+	partial []byte
+}
+
+func (cr *countingReader) Read(p []byte) (int, error) {
+	n, err := cr.r.Read(p)
+	data := p[:n]
+	for len(data) > 0 {
+		i := bytes.IndexByte(data, '\n')
+		if i < 0 {
+			cr.partial = append(cr.partial, data...)
+			break
+		}
+		line := data[:i]
+		if len(cr.partial) > 0 {
+			line = append(cr.partial, line...)
+			cr.partial = nil
+		}
+		if isUpdate(line) {
+			cr.t.update(func() { cr.t.read++ })
+		}
+		data = data[i+1:]
+	}
+	if err != nil {
+		if len(cr.partial) > 0 && isUpdate(cr.partial) {
+			cr.t.update(func() { cr.t.read++ })
+		}
+		cr.partial = nil
+		cr.t.update(func() { cr.t.eof = true })
+	}
+	return n, err
+}
+
+func isUpdate(line []byte) bool {
+	var m struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+	}
+	return json.Unmarshal(line, &m) == nil && m.ID == nil && m.Method == sdk.ClientMethodSessionUpdate
 }
 
 func (c client) RequestPermission(ctx context.Context, req sdk.RequestPermissionRequest) (sdk.RequestPermissionResponse, error) {
