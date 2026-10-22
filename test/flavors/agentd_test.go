@@ -26,176 +26,189 @@ import (
 	"github.com/procoduck/koinon/internal/execution"
 )
 
-// koinon-agentd driving the real OpenCode image: Postgres in a container, the flavor in the
+// koinon-agentd driving each real flavor image: Postgres in a container, the flavor in the
 // Docker stand-in for a sandbox, and Exec as `docker exec --interactive` in place of
-// OpenShell's non-TTY exec.
-var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
-	var (
-		db     *pgxpool.Pool
-		q      *store.Queries
-		gw     *gateway
-		sb     *sandbox
-		org    pgtype.UUID
-		user   pgtype.UUID
-		agent  store.Agent
-		ticket store.Ticket
-	)
+// OpenShell's non-TTY exec. agentd picks the launch command from the agent's flavor.
+var _ = func() bool {
+	for _, f := range flavors {
+		describeAgentd(f)
+	}
+	return true
+}()
 
-	BeforeAll(func(ctx SpecContext) {
-		if dockerErr != nil {
-			Skip("Docker is not available: " + dockerErr.Error())
-		}
-		ensureImage(opencode)
+func describeAgentd(f flavor) bool {
+	return Describe("koinon-agentd with the "+f.name+" flavor", Ordered, func() {
+		var (
+			db     *pgxpool.Pool
+			q      *store.Queries
+			gw     *gateway
+			sb     *sandbox
+			org    pgtype.UUID
+			user   pgtype.UUID
+			agent  store.Agent
+			ticket store.Ticket
+		)
 
-		ctr, err := postgres.Run(ctx, "postgres:18-alpine", postgres.WithDatabase("koinon"), postgres.BasicWaitStrategies())
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-		dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-		Expect(err).NotTo(HaveOccurred())
-		db, err = pgxpool.New(ctx, dsn)
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(db.Close)
-		sqlDB := stdlib.OpenDBFromPool(db)
-		DeferCleanup(sqlDB.Close)
-		provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS)
-		Expect(err).NotTo(HaveOccurred())
-		_, err = provider.Up(ctx)
-		Expect(err).NotTo(HaveOccurred())
-		q = store.New(db)
-
-		Expect(pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
-			if err := tx.QueryRow(ctx, `INSERT INTO orgs (slug, display_name, kind) VALUES ('flavors', 'Flavors', 'personal') RETURNING id`).Scan(&org); err != nil {
-				return err
+		BeforeAll(func(ctx SpecContext) {
+			if dockerErr != nil {
+				Skip("Docker is not available: " + dockerErr.Error())
 			}
-			if err := tx.QueryRow(ctx, `INSERT INTO users (oidc_issuer, oidc_subject, personal_org_id) VALUES ('https://idp.test', 'flavors', $1) RETURNING id`, org).Scan(&user); err != nil {
+			ensureImage(f)
+
+			ctr, err := postgres.Run(ctx, "postgres:18-alpine", postgres.WithDatabase("koinon"), postgres.BasicWaitStrategies())
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
+			dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
+			Expect(err).NotTo(HaveOccurred())
+			db, err = pgxpool.New(ctx, dsn)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(db.Close)
+			sqlDB := stdlib.OpenDBFromPool(db)
+			DeferCleanup(sqlDB.Close)
+			provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, migrations.FS)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = provider.Up(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			q = store.New(db)
+
+			Expect(pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(ctx, `INSERT INTO orgs (slug, display_name, kind) VALUES ('flavors', 'Flavors', 'personal') RETURNING id`).Scan(&org); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `INSERT INTO users (oidc_issuer, oidc_subject, personal_org_id) VALUES ('https://idp.test', 'flavors', $1) RETURNING id`, org).Scan(&user); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `INSERT INTO org_memberships (org_id, user_id, source, role) VALUES ($1, $2, 'manual', 'owner')`, org, user)
 				return err
-			}
-			_, err := tx.Exec(ctx, `INSERT INTO org_memberships (org_id, user_id, source, role) VALUES ($1, $2, 'manual', 'owner')`, org, user)
-			return err
-		})).To(Succeed())
-		a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "OpenCode", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
-		Expect(err).NotTo(HaveOccurred())
-		v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
-			OrgID: org, AgentID: a.ID, Config: []byte(`{"model":{"name":"` + contractModel + `"}}`), CreatedBy: user,
-		})
-		Expect(err).NotTo(HaveOccurred())
-		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: a.ID, VersionID: v.ID, ActivatedBy: user})
-		Expect(err).NotTo(HaveOccurred())
-		// What koinon-reconciler records for a ready sandbox, which is what agentd reads.
-		ws := execution.WorkspaceName(org.Bytes)
-		_, err = q.UpsertOrgWorkspace(ctx, store.UpsertOrgWorkspaceParams{OrgID: org, Workspace: ws})
-		Expect(err).NotTo(HaveOccurred())
-		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
-		_, err = q.CreateAgentSandbox(ctx, store.CreateAgentSandboxParams{
-			OrgID: org, AgentID: agent.ID, Workspace: ws,
-			SandboxName: names.Sandbox, ProviderName: names.Provider, KeySecretName: names.KeySecret,
-		})
-		Expect(err).NotTo(HaveOccurred())
-		_, err = q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{OrgID: org, AgentID: agent.ID, State: store.SandboxStateReady})
-		Expect(err).NotTo(HaveOccurred())
-		ticket, err = q.CreateTicket(ctx, store.CreateTicketParams{OrgID: org, Title: "Contract", AgentID: agent.ID, CreatedBy: user})
-		Expect(err).NotTo(HaveOccurred())
+			})).To(Succeed())
+			a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: f.name, Flavor: f.storeFlavor, CreatedBy: user})
+			Expect(err).NotTo(HaveOccurred())
+			v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
+				OrgID: org, AgentID: a.ID, Config: []byte(`{"model":{"name":"` + contractModel + `"}}`), CreatedBy: user,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: a.ID, VersionID: v.ID, ActivatedBy: user})
+			Expect(err).NotTo(HaveOccurred())
+			// What koinon-reconciler records for a ready sandbox, which is what agentd reads.
+			ws := execution.WorkspaceName(org.Bytes)
+			_, err = q.UpsertOrgWorkspace(ctx, store.UpsertOrgWorkspaceParams{OrgID: org, Workspace: ws})
+			Expect(err).NotTo(HaveOccurred())
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			_, err = q.CreateAgentSandbox(ctx, store.CreateAgentSandboxParams{
+				OrgID: org, AgentID: agent.ID, Workspace: ws,
+				SandboxName: names.Sandbox, ProviderName: names.Provider, KeySecretName: names.KeySecret,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{OrgID: org, AgentID: agent.ID, State: store.SandboxStateReady})
+			Expect(err).NotTo(HaveOccurred())
+			ticket, err = q.CreateTicket(ctx, store.CreateTicketParams{OrgID: org, Title: "Contract", AgentID: agent.ID, CreatedBy: user})
+			Expect(err).NotTo(HaveOccurred())
 
-		gw = newGateway(contractScript(opencode))
-		sb = newSandbox(opencode.image(), "OPENAI_API_KEY="+fakeKey)
-		bg := context.Background()
-		DeferCleanup(func() { sb.remove(context.Background()) })
-		sb.start(bg)
+			gw = newGateway(contractScript(f))
+			sb = newSandbox(f.image(), "OPENAI_API_KEY="+fakeKey)
+			bg := context.Background()
+			DeferCleanup(func() { sb.remove(context.Background()) })
+			sb.start(bg)
 
-		p, err := agentd.New(db, &dockerBackend{sb: sb}, agentd.Config{
-			OwnerID: "agentd-flavors", Workers: 1, Lease: 10 * time.Second, Poll: 100 * time.Millisecond,
-			GatewayURL: gw.url(""), Logger: newLogger(),
-		})
-		Expect(err).NotTo(HaveOccurred())
-		pctx, cancel := context.WithCancel(bg)
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			_ = p.Run(pctx)
-		}()
-		DeferCleanup(func() {
-			cancel()
-			<-done
-		})
-	}, NodeTimeout(10*time.Minute))
+			p, err := agentd.New(db, &dockerBackend{sb: sb}, agentd.Config{
+				OwnerID: "agentd-flavors", Workers: 1, Lease: 10 * time.Second, Poll: 100 * time.Millisecond,
+				GatewayURL: gw.url(""), Logger: newLogger(),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			pctx, cancel := context.WithCancel(bg)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				_ = p.Run(pctx)
+			}()
+			DeferCleanup(func() {
+				cancel()
+				<-done
+			})
+		}, NodeTimeout(10*time.Minute))
 
-	runTicket := func(ctx context.Context, text string) store.Run {
-		_, err := q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-			OrgID: org, TicketID: ticket.ID, Kind: "message", ActorKind: store.TicketActorKindUser,
-			ActorUserID: user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)),
-		})
-		Expect(err).NotTo(HaveOccurred())
-		r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TicketID: ticket.ID, MaxWallClockSeconds: 300, MaxTokens: 100_000})
-		Expect(err).NotTo(HaveOccurred())
-		Eventually(func() store.RunState {
+		runTicket := func(ctx context.Context, text string) store.Run {
+			_, err := q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
+				OrgID: org, TicketID: ticket.ID, Kind: "message", ActorKind: store.TicketActorKindUser,
+				ActorUserID: user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TicketID: ticket.ID, MaxWallClockSeconds: 300, MaxTokens: 100_000})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() store.RunState {
+				got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})
+				Expect(err).NotTo(HaveOccurred())
+				return got.State
+			}).WithTimeout(3 * time.Minute).WithPolling(250 * time.Millisecond).Should(BeElementOf(
+				store.RunStateSucceeded, store.RunStateFailed, store.RunStateCanceled))
 			got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})
 			Expect(err).NotTo(HaveOccurred())
-			return got.State
-		}).WithTimeout(3 * time.Minute).WithPolling(250 * time.Millisecond).Should(BeElementOf(
-			store.RunStateSucceeded, store.RunStateFailed, store.RunStateCanceled))
-		got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})
-		Expect(err).NotTo(HaveOccurred())
-		return got
-	}
+			return got
+		}
 
-	eventsOf := func(ctx context.Context, r store.Run) []store.RunEvent {
-		evs, err := q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{OrgID: org, RunID: r.ID, MaxEvents: 1000})
-		Expect(err).NotTo(HaveOccurred())
-		return evs
-	}
+		eventsOf := func(ctx context.Context, r store.Run) []store.RunEvent {
+			evs, err := q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{OrgID: org, RunID: r.ID, MaxEvents: 1000})
+			Expect(err).NotTo(HaveOccurred())
+			return evs
+		}
 
-	It("runs a ticket's first turn on a new session", func(ctx SpecContext) {
-		r := runTicket(ctx, helloPrompt)
-		Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
-		t, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: org, ID: ticket.ID})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(t.HarnessSessionID.String).NotTo(BeEmpty())
-		evs := eventsOf(ctx, r)
-		var text string
-		for _, e := range evs {
-			if e.Kind == "acp.agent_message_chunk" {
-				var u struct {
-					Content struct{ Text string } `json:"content"`
+		It("runs a ticket's first turn on a new session", func(ctx SpecContext) {
+			r := runTicket(ctx, helloPrompt)
+			Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
+			t, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: org, ID: ticket.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(t.HarnessSessionID.String).NotTo(BeEmpty())
+			evs := eventsOf(ctx, r)
+			var text string
+			for _, e := range evs {
+				if e.Kind == "acp.agent_message_chunk" {
+					var u struct {
+						Content struct{ Text string } `json:"content"`
+					}
+					Expect(json.Unmarshal(e.Payload, &u)).To(Succeed())
+					text += u.Content.Text
 				}
-				Expect(json.Unmarshal(e.Payload, &u)).To(Succeed())
-				text += u.Content.Text
 			}
-		}
-		Expect(text).To(ContainSubstring(helloReply))
-		Expect(gw.authHeaders()).To(HaveEach("Bearer " + fakeKey))
-	}, SpecTimeout(4*time.Minute))
+			Expect(text).To(ContainSubstring(helloReply))
+			Expect(gw.authHeaders()).To(HaveEach("Bearer " + fakeKey))
+		}, SpecTimeout(4*time.Minute))
 
-	It("loads the session on the next run, after the sandbox restarted", func(ctx SpecContext) {
-		sb.stop(ctx)
-		sb.start(context.Background())
-		r := runTicket(ctx, recallPrompt)
-		Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
-		// OpenCode announces its commands after a load, so run.session need not come first.
-		Expect(eventsOf(ctx, r)).To(ContainElement(WithTransform(
-			func(e store.RunEvent) string { return e.Kind + " " + string(e.Payload) },
-			And(HavePrefix("run.session "), ContainSubstring(`"loaded": true`)), // jsonb's spacing
-		)))
-		for _, e := range eventsOf(ctx, r) {
-			Expect(e.Kind).NotTo(Equal("acp.user_message_chunk"), "the replayed history is not recorded")
-		}
-		Expect(gw.modelBodies()).To(ContainElement(And(ContainSubstring(recallPrompt), ContainSubstring(helloReply))))
-	}, SpecTimeout(4*time.Minute))
-
-	It("answers the harness's permission requests from the tier mapping", func(ctx SpecContext) {
-		r := runTicket(ctx, readPrompt)
-		var perms []store.RunEvent
-		for _, e := range eventsOf(ctx, r) {
-			if e.Kind == "acp.permission" {
-				perms = append(perms, e)
+		It("loads the session on the next run, after the sandbox restarted", func(ctx SpecContext) {
+			sb.stop(ctx)
+			sb.start(context.Background())
+			r := runTicket(ctx, recallPrompt)
+			Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
+			// A harness may announce its commands after a load, so run.session need not come first.
+			Expect(eventsOf(ctx, r)).To(ContainElement(WithTransform(
+				func(e store.RunEvent) string { return e.Kind + " " + string(e.Payload) },
+				And(HavePrefix("run.session "), ContainSubstring(`"loaded": true`)), // jsonb's spacing
+			)))
+			for _, e := range eventsOf(ctx, r) {
+				Expect(e.Kind).NotTo(Equal("acp.user_message_chunk"), "the replayed history is not recorded")
 			}
-		}
-		Expect(perms).NotTo(BeEmpty())
-		GinkgoWriter.Printf("permission decisions: %s (run %s: %s)\n", perms[0].Payload, r.State, r.OutcomeReason.String)
-		// OpenCode asks for paths outside the session directory with tool kind "other", which
-		// the default mapping leaves unmapped: rejected.
-		Expect(string(perms[0].Payload)).To(ContainSubstring(`"verdict": "reject"`))
-	}, SpecTimeout(4*time.Minute))
-})
+			Expect(gw.modelBodies()).To(ContainElement(And(ContainSubstring(recallPrompt), ContainSubstring(helloReply))))
+		}, SpecTimeout(4*time.Minute))
+
+		It("answers the harness's permission requests from the tier mapping", func(ctx SpecContext) {
+			if f.permissionCall.Name == "" {
+				Skip(f.name + " sends no permission requests")
+			}
+			r := runTicket(ctx, permitPrompt)
+			var perms []store.RunEvent
+			for _, e := range eventsOf(ctx, r) {
+				if e.Kind == "acp.permission" {
+					perms = append(perms, e)
+				}
+			}
+			Expect(perms).NotTo(BeEmpty())
+			GinkgoWriter.Printf("permission decisions: %s (run %s: %s)\n", perms[0].Payload, r.State, r.OutcomeReason.String)
+			Expect(string(perms[0].Payload)).To(ContainSubstring(`"verdict": "` + f.agentdVerdict + `"`))
+			if f.agentdVerdict == "allow" {
+				Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
+			}
+		}, SpecTimeout(4*time.Minute))
+	})
+}
 
 // dockerBackend is agentd's execution backend on the Docker stand-in sandbox, recorded as
 // ready in agent_sandboxes; Exec is `docker exec --interactive`, a non-TTY exec like

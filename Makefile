@@ -79,13 +79,28 @@ generate: ## Regenerate protobuf and sqlc code
 FLAVOR_TAG       ?= dev
 FLAVOR_PLATFORMS ?=
 
+FLAVORS          := opencode hermes pi
+
 .PHONY: flavor-opencode
 flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:$(FLAVOR_TAG))
 	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
 		--tag koinon/flavor-opencode:$(FLAVOR_TAG) flavors/opencode
 
+.PHONY: flavor-hermes
+flavor-hermes: ## Build the Hermes flavor image (koinon/flavor-hermes:$(FLAVOR_TAG))
+	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
+		--tag koinon/flavor-hermes:$(FLAVOR_TAG) flavors/hermes
+
+.PHONY: flavor-pi
+flavor-pi: ## Build the pi flavor image (koinon/flavor-pi:$(FLAVOR_TAG))
+	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
+		--tag koinon/flavor-pi:$(FLAVOR_TAG) flavors/pi
+
+.PHONY: flavors
+flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images
+
 .PHONY: test-flavors
-test-flavors: flavor-opencode ## Build the flavor images and run the flavor contract suite
+test-flavors: flavors ## Build the flavor images and run the flavor contract suite
 	$(GO) test -count=1 ./test/flavors/...
 
 .PHONY: dev

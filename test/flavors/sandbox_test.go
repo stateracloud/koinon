@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -119,7 +120,7 @@ func (h *harness) close() {
 		_ = h.cmd.Process.Kill()
 		<-done
 	}
-	if CurrentSpecReport().Failed() {
+	if CurrentSpecReport().Failed() || os.Getenv("KOINON_FLAVOR_STDERR") == "1" {
 		GinkgoWriter.Printf("harness stderr:\n%s\n", h.stderr.String())
 	}
 }
