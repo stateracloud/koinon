@@ -351,7 +351,7 @@ var _ = Describe("Pool", func() {
 		// A new version applies at the next run, without touching the sandbox.
 		v2, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
 			OrgID: e.org, AgentID: e.agent.ID, CreatedBy: e.user,
-			Config: []byte(`{"model":{"name":"` + model + `"},"instructions":"Version two."}`),
+			Config: []byte(`{"model":"` + model + `","instructions":"Version two."}`),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: e.org, ID: e.agent.ID})
