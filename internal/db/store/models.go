@@ -673,10 +673,10 @@ type Run struct {
 	FinishedAt          pgtype.Timestamptz
 	CreatedAt           pgtype.Timestamptz
 	UpdatedAt           pgtype.Timestamptz
-	PromptThroughSeq    pgtype.Int8
-	Takeovers           int32
 	ParkedSeconds       int64
 	TokensUsed          int64
+	PromptThroughSeq    pgtype.Int8
+	Takeovers           int32
 }
 
 type RunEvent struct {
