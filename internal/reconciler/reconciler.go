@@ -450,6 +450,9 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		providers = append(providers, names.GitHubProvider)
 		network[githubRule] = GitHubRule(read, r.githubBinaries(flavor))
 	}
+	if rule, ok := PluginInstallRule(w.cfg, w.agent.Flavor, flavor); ok {
+		network[npmRule] = rule
+	}
 
 	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network)
 	act, err := r.q.GetAgentRunActivity(ctx, store.GetAgentRunActivityParams{OrgID: w.org.ID, AgentID: w.agent.ID})
