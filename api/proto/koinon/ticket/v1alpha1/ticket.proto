@@ -1,0 +1,155 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.ticket.v1alpha1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "koinon/run/v1alpha1/run.proto";
+
+option go_package = "github.com/procoduck/koinon/internal/gen/koinon/ticket/v1alpha1;ticketv1alpha1";
+
+// TicketService is the board and the conversation on each ticket (ADR 0017).
+// Every request names the org it acts in; IDs from another org are not found.
+service TicketService {
+  // CreateTicket creates a ticket for an active agent and queues a run for it
+  // (plan item A4). Members and above.
+  rpc CreateTicket(CreateTicketRequest) returns (CreateTicketResponse);
+
+  // ListTickets returns the org's tickets, oldest first, optionally one board
+  // column. Viewers and above.
+  rpc ListTickets(ListTicketsRequest) returns (ListTicketsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetTicket returns a ticket with its timeline and runs. Viewers and above.
+  rpc GetTicket(GetTicketRequest) returns (GetTicketResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // AppendMessage adds a user message to the ticket and queues a run for the
+  // ticket's agent unless one is already queued, which will see the message.
+  // Members and above.
+  rpc AppendMessage(AppendMessageRequest) returns (AppendMessageResponse);
+
+  // MoveTicket moves the ticket to a board column. Moving it to Done cancels
+  // its queued runs. Members and above.
+  rpc MoveTicket(MoveTicketRequest) returns (MoveTicketResponse);
+}
+
+// TicketStatus is the board column (ADR 0049).
+enum TicketStatus {
+  TICKET_STATUS_UNSPECIFIED = 0;
+  TICKET_STATUS_TODO = 1;
+  TICKET_STATUS_IN_PROGRESS = 2;
+  TICKET_STATUS_WAITING_ON_YOU = 3;
+  TICKET_STATUS_DONE = 4;
+}
+
+// ActorKind says who wrote a ticket event.
+enum ActorKind {
+  ACTOR_KIND_UNSPECIFIED = 0;
+  ACTOR_KIND_USER = 1;
+  ACTOR_KIND_AGENT = 2;
+  ACTOR_KIND_SYSTEM = 3;
+}
+
+// Ticket is one unit of work and its conversation.
+message Ticket {
+  string id = 1;
+  string org_id = 2;
+  string title = 3;
+  TicketStatus status = 4;
+  string agent_id = 5;
+  string created_by = 6;
+  // The seq of the newest timeline event.
+  int64 last_event_seq = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  google.protobuf.Timestamp done_at = 10;
+}
+
+// TicketEvent is one entry of the ticket timeline: a message, a column move
+// or a run note such as "canceled: wall-clock cap".
+message TicketEvent {
+  // Gap-free and strictly increasing per ticket, from 1.
+  int64 seq = 1;
+  // For example "message", "status.changed", "run.queued", "run.canceled".
+  string kind = 2;
+  ActorKind actor_kind = 3;
+  string actor_user_id = 4;
+  string actor_agent_id = 5;
+  // The run the event is about, if any.
+  string run_id = 6;
+  google.protobuf.Struct payload = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+// CreateTicketRequest describes the ticket and its first message.
+message CreateTicketRequest {
+  string org_id = 1;
+  // An active agent of the org.
+  string agent_id = 2;
+  string title = 3;
+  // The first message; optional.
+  string message = 4;
+}
+
+// CreateTicketResponse holds the ticket and the run queued for it.
+message CreateTicketResponse {
+  Ticket ticket = 1;
+  koinon.run.v1alpha1.Run run = 2;
+}
+
+// ListTicketsRequest names the org and an optional column.
+message ListTicketsRequest {
+  string org_id = 1;
+  // Unspecified lists every column.
+  TicketStatus status = 2;
+}
+
+// ListTicketsResponse lists tickets.
+message ListTicketsResponse {
+  repeated Ticket tickets = 1;
+}
+
+// GetTicketRequest names a ticket.
+message GetTicketRequest {
+  string org_id = 1;
+  string ticket_id = 2;
+}
+
+// GetTicketResponse holds the ticket, its whole timeline and its runs.
+message GetTicketResponse {
+  Ticket ticket = 1;
+  repeated TicketEvent events = 2;
+  repeated koinon.run.v1alpha1.Run runs = 3;
+}
+
+// AppendMessageRequest is a user message on a ticket.
+message AppendMessageRequest {
+  string org_id = 1;
+  string ticket_id = 2;
+  string text = 3;
+}
+
+// AppendMessageResponse holds the new event and the queued run, if one was
+// queued by this call.
+message AppendMessageResponse {
+  TicketEvent event = 1;
+  koinon.run.v1alpha1.Run run = 2;
+}
+
+// MoveTicketRequest names the ticket and the target column.
+message MoveTicketRequest {
+  string org_id = 1;
+  string ticket_id = 2;
+  TicketStatus status = 3;
+}
+
+// MoveTicketResponse holds the moved ticket and the runs the move canceled.
+message MoveTicketResponse {
+  Ticket ticket = 1;
+  repeated koinon.run.v1alpha1.Run canceled_runs = 2;
+}
