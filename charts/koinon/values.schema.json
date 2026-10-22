@@ -87,7 +87,22 @@
         "properties": {"name": {"$ref": "#/definitions/nonEmpty"}}
       }
     },
-    "api": {"allOf": [{"$ref": "#/definitions/component"}], "required": ["port"]},
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "replicas", "port", "toolsPort"],
+      "properties": {
+        "image": {"$ref": "#/definitions/koinonImage"},
+        "replicas": {"type": "integer", "minimum": 0},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "toolsPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "resources": {"$ref": "#/definitions/resources"},
+        "podAnnotations": {"$ref": "#/definitions/map"},
+        "nodeSelector": {"$ref": "#/definitions/map"},
+        "tolerations": {"type": "array"},
+        "affinity": {"$ref": "#/definitions/map"}
+      }
+    },
     "reconciler": {
       "type": "object",
       "additionalProperties": false,

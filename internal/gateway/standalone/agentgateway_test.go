@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -66,7 +67,8 @@ func fakeUpstream() *httptest.Server {
 }
 
 // fakeTools is an MCP server with the two parking tools and a bypass tool
-// that no agent is granted (spike step 6).
+// that no agent is granted (spike step 6). Each tool answers with the agent
+// header it received.
 func fakeTools() *httptest.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "fake-tools", Version: "0.0.1"}, nil)
 	type args struct {
@@ -74,8 +76,9 @@ func fakeTools() *httptest.Server {
 	}
 	for _, name := range []string{"create_pull_request", "get_approval_status", "direct_create_pull_request"} {
 		mcp.AddTool(srv, &mcp.Tool{Name: name, Description: name},
-			func(context.Context, *mcp.CallToolRequest, args) (*mcp.CallToolResult, any, error) {
-				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: name + " reached"}}}, nil, nil
+			func(_ context.Context, req *mcp.CallToolRequest, _ args) (*mcp.CallToolResult, any, error) {
+				agent := strings.Join(req.Extra.Header.Values(gateway.AgentHeader), ",")
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: name + " reached by " + agent}}}, nil, nil
 			})
 	}
 	// agentgateway reaches it through the testcontainers SSH tunnel, which
@@ -93,11 +96,17 @@ func port(s *httptest.Server) int {
 type bearer struct {
 	key  string
 	base http.RoundTripper
+	// spoof, when set, is sent as the agent header, which agentgateway must
+	// overwrite.
+	spoof string
 }
 
 func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
 	r.Header.Set("Authorization", "Bearer "+b.key)
+	if b.spoof != "" {
+		r.Header.Set(gateway.AgentHeader, b.spoof)
+	}
 	return b.base.RoundTrip(r)
 }
 
@@ -128,14 +137,17 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		return resp.StatusCode, string(b)
 	}
 
-	mcpSession := func(ctx context.Context, key string) (*mcp.ClientSession, error) {
+	mcpSessionAs := func(ctx context.Context, key, spoof string) (*mcp.ClientSession, error) {
 		client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
 		return client.Connect(ctx, &mcp.StreamableClientTransport{
 			Endpoint:             llmURL + "/mcp",
-			HTTPClient:           &http.Client{Transport: bearer{key: key, base: http.DefaultTransport}},
+			HTTPClient:           &http.Client{Transport: bearer{key: key, base: http.DefaultTransport, spoof: spoof}},
 			DisableStandaloneSSE: true,
 			MaxRetries:           -1,
 		}, nil)
+	}
+	mcpSession := func(ctx context.Context, key string) (*mcp.ClientSession, error) {
+		return mcpSessionAs(ctx, key, "")
 	}
 
 	toolNames := func(ctx context.Context, key string) []string {
@@ -282,6 +294,18 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "get_approval_status"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.IsError).To(BeFalse())
+	})
+
+	It("tells the target which agent calls, overwriting a client-supplied header", func(ctx SpecContext) {
+		for _, spoof := range []string{"", agentB.String()} {
+			s, err := mcpSessionAs(ctx, keyA.Material, spoof)
+			Expect(err).NotTo(HaveOccurred())
+			res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "get_approval_status"})
+			_ = s.Close()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsError).To(BeFalse())
+			Expect(res.Content[0].(*mcp.TextContent).Text).To(Equal("get_approval_status reached by " + agentA.String()))
+		}
 	})
 
 	It("rejects MCP requests without a key", func(ctx SpecContext) {

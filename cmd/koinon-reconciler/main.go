@@ -101,6 +101,7 @@ func run() error {
 			IdleTimeout:      cfg.idleTimeout,
 			ResyncInterval:   cfg.resyncInterval,
 			HomeRetention:    reconciler.Retention(cfg.homeRetention),
+			ToolServers:      cfg.toolServers(),
 			Logger:           log,
 		})
 	if err != nil {

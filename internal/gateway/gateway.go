@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -65,6 +66,22 @@ func (a AgentRef) Validate() error {
 	}
 	return nil
 }
+
+// ParseAgentRef parses the "org/name" form String returns.
+func ParseAgentRef(s string) (AgentRef, error) {
+	org, name, _ := strings.Cut(s, "/")
+	a := AgentRef{Org: org, Name: name}
+	if err := a.Validate(); err != nil {
+		return AgentRef{}, err
+	}
+	return a, nil
+}
+
+// AgentHeader is the request header agentgateway sets on every MCP request
+// it forwards to a target: the authenticated key's agent (AgentRef.String).
+// Drivers render it so that a client-supplied value is overwritten; MCP
+// targets trust it only because they are reachable from the gateway alone.
+const AgentHeader = "X-Koinon-Agent"
 
 // Key is the gateway-side record of an API key: its ID, owner and hash. It
 // holds no key material and is safe to persist and to render into config.

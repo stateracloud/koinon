@@ -239,6 +239,16 @@ type mcpSection struct {
 type mcpPolicies struct {
 	APIKey           apiKeyPolicy     `yaml:"apiKey"`
 	MCPAuthorization mcpAuthorization `yaml:"mcpAuthorization"`
+	Transformations  transformations  `yaml:"transformations"`
+}
+
+type transformations struct {
+	Request headerTransform `yaml:"request"`
+}
+
+type headerTransform struct {
+	// Set replaces a header, so a client cannot supply its own value.
+	Set map[string]string `yaml:"set"`
 }
 
 type mcpAuthorization struct {
@@ -315,6 +325,11 @@ func build(s gateway.State, o Options) document {
 			Policies: mcpPolicies{
 				APIKey:           keyPolicy(keys, nil),
 				MCPAuthorization: mcpAuthorization{Rules: toolRules(s.Tools)},
+				// Targets learn which agent calls from this header (gateway.AgentHeader);
+				// set overwrites whatever the client sent.
+				Transformations: transformations{Request: headerTransform{Set: map[string]string{
+					strings.ToLower(gateway.AgentHeader): "apiKey.agent",
+				}}},
 			},
 		}
 		for _, t := range s.MCP {
