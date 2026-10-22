@@ -72,6 +72,12 @@ func (b *Backend) Close() error {
 	return b.conn.Close()
 }
 
+// Health calls the gateway's unauthenticated Health RPC, which reports its status and
+// version (the install preflight checks both).
+func (b *Backend) Health(ctx context.Context) (*openshellv1.HealthResponse, error) {
+	return b.c.Health(ctx, &openshellv1.HealthRequest{})
+}
+
 func (cfg Config) tlsConfig() (*tls.Config, error) {
 	if cfg.CertFile == "" || cfg.KeyFile == "" || cfg.CAFile == "" {
 		return nil, errors.New("openshell: CertFile, KeyFile and CAFile are required")

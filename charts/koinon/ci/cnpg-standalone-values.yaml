@@ -31,3 +31,5 @@ networkPolicy:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: monitoring
+imagePullSecrets:
+  - name: ghcr-pull
