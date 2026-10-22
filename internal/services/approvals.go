@@ -55,7 +55,7 @@ func approvalProto(a store.ApprovalRequest, canDecide, detail bool) *approvalv1a
 	if json.Unmarshal(a.Risk, &risk) == nil {
 		out.Risk = &approvalv1alpha1.Risk{
 			Files: int64(risk.Files), Bytes: int64(risk.Bytes), Deletions: risk.Deletions, Ci: risk.CI,
-			Scripts: risk.Scripts, Dependencies: risk.Dependencies, Binary: risk.Binary,
+			Scripts: risk.Scripts, Dependencies: risk.Dependencies, Binary: risk.Binary, Executable: risk.Executable,
 		}
 	}
 	if !detail {

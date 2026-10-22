@@ -34,6 +34,10 @@ type preflightConfig struct {
 	probeTimeout     time.Duration
 	probeNamePrefix  string
 	probeInstance    string
+
+	netpolProbe      bool
+	netpolTimeout    time.Duration
+	netpolNamePrefix string
 }
 
 func parsePreflightFlags(args []string) (preflightConfig, error) {
@@ -56,7 +60,10 @@ func parsePreflightFlags(args []string) (preflightConfig, error) {
 	fs.StringVar(&c.probePullSecrets, "probe-image-pull-secrets", "", "comma-separated image pull Secrets of the probe pod")
 	fs.DurationVar(&c.probeTimeout, "probe-timeout", 2*time.Minute, "how long the seccomp probe may take, image pull included")
 	fs.StringVar(&c.probeNamePrefix, "probe-name-prefix", "koinon-preflight-probe", "name prefix of the probe pod")
-	fs.StringVar(&c.probeInstance, "probe-instance", "", "app.kubernetes.io/instance label of the probe pod")
+	fs.StringVar(&c.probeInstance, "probe-instance", "", "app.kubernetes.io/instance label of the probe pods")
+	fs.BoolVar(&c.netpolProbe, "netpol-probe", true, "run two pods and a NetworkPolicy to check that NetworkPolicy is enforced")
+	fs.DurationVar(&c.netpolTimeout, "netpol-probe-timeout", 90*time.Second, "how long the NetworkPolicy probe may take, image pulls included")
+	fs.StringVar(&c.netpolNamePrefix, "netpol-probe-name-prefix", "koinon-preflight-netpol", "name prefix of the NetworkPolicy probe's objects")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
@@ -66,19 +73,43 @@ func parsePreflightFlags(args []string) (preflightConfig, error) {
 	if c.seccompProbe && (c.probeImage == "" || c.namespace == "") {
 		return c, errors.New("--seccomp-probe needs --probe-image and --namespace (or POD_NAMESPACE)")
 	}
+	if c.netpolProbe && (c.probeImage == "" || c.namespace == "") {
+		return c, errors.New("--netpol-probe needs --probe-image and --namespace (or POD_NAMESPACE)")
+	}
 	return c, nil
 }
 
-// runPreflight is "koinon-api preflight": the install checks, or, as "preflight probe", the
-// seccomp probe that runs inside the probe pod.
+// runNetPolClient is "preflight netpol-client", the NetworkPolicy probe's client pod.
+func runNetPolClient(ctx context.Context, args []string, out io.Writer) error {
+	var c preflight.NetPolClient
+	fs := flag.NewFlagSet("koinon-api preflight netpol-client", flag.ContinueOnError)
+	fs.StringVar(&c.Host, "target", "", "IP of the probe server pod")
+	fs.DurationVar(&c.Window, "window", 5*time.Second, "how long the denied port must keep answering to count as open")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if c.Host == "" || fs.NArg() > 0 {
+		return errors.New("netpol-client needs --target and no other arguments")
+	}
+	_, err := fmt.Fprintln(out, c.Run(ctx))
+	return err
+}
+
+// runPreflight is "koinon-api preflight": the install checks, or what the probe pods run:
+// "preflight probe" (seccomp), "preflight netpol-server" and "preflight netpol-client".
 func runPreflight(ctx context.Context, args []string, out io.Writer) error {
-	if len(args) == 1 && args[0] == "probe" {
+	switch {
+	case len(args) == 1 && args[0] == "probe":
 		res, err := preflight.SelfProbe()
 		if err != nil {
 			return err
 		}
 		_, err = fmt.Fprintln(out, res)
 		return err
+	case len(args) == 1 && args[0] == "netpol-server":
+		return preflight.ServeNetPolProbe(ctx, "")
+	case len(args) > 0 && args[0] == "netpol-client":
+		return runNetPolClient(ctx, args[1:], out)
 	}
 	cfg, err := parsePreflightFlags(args)
 	if err != nil {
@@ -105,15 +136,26 @@ func runPreflight(ctx context.Context, args []string, out io.Writer) error {
 		defer func() { _ = gw.Close() }()
 		checker.OpenShell = gw
 	}
+	labels := map[string]string{
+		"app.kubernetes.io/name":      "koinon",
+		"app.kubernetes.io/component": "preflight-probe",
+		"app.kubernetes.io/part-of":   "koinon",
+	}
+	if cfg.probeInstance != "" {
+		labels["app.kubernetes.io/instance"] = cfg.probeInstance
+	}
+	if cfg.netpolProbe {
+		checker.NetPol = preflight.KubeNetPolProber{
+			Client:           kube,
+			Namespace:        cfg.namespace,
+			NamePrefix:       cfg.netpolNamePrefix,
+			Image:            cfg.probeImage,
+			ImagePullSecrets: splitList(cfg.probePullSecrets),
+			Labels:           labels,
+			Timeout:          cfg.netpolTimeout,
+		}
+	}
 	if cfg.seccompProbe {
-		labels := map[string]string{
-			"app.kubernetes.io/name":      "koinon",
-			"app.kubernetes.io/component": "preflight-probe",
-			"app.kubernetes.io/part-of":   "koinon",
-		}
-		if cfg.probeInstance != "" {
-			labels["app.kubernetes.io/instance"] = cfg.probeInstance
-		}
 		checker.Prober = preflight.KubeProber{
 			Client:           kube,
 			Namespace:        cfg.namespace,

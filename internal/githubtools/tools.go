@@ -103,7 +103,7 @@ func (a *PullRequestArgs) Validate() error { return ValidatePullRequest(*a) }
 func (a *PullRequestArgs) SetApprovalCall(out *approvalv1alpha1.Approval) {
 	pr := &approvalv1alpha1.PullRequestCall{Branch: a.Branch, Base: a.Base, Title: a.Title, Body: a.Body}
 	for _, f := range a.Files {
-		pr.Files = append(pr.Files, &approvalv1alpha1.FileChange{Path: f.Path, Content: f.Content, Delete: f.Delete})
+		pr.Files = append(pr.Files, &approvalv1alpha1.FileChange{Path: f.Path, Content: f.Content, Delete: f.Delete, Executable: f.Executable})
 	}
 	out.Call = &approvalv1alpha1.Approval_PullRequest{PullRequest: pr}
 }
