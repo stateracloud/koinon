@@ -263,3 +263,16 @@ RETURNING *;
 SELECT coalesce(max(prompt_through_seq), 0)::bigint AS prompted_through
 FROM runs
 WHERE org_id = @org_id AND ticket_id = @ticket_id AND id <> @run_id;
+
+-- name: LockRun :one
+-- Serialises a park decision (agentd) with the resolution of the run's
+-- approvals (the executor), so neither misses the other.
+SELECT * FROM runs
+WHERE org_id = @org_id AND id = @id
+FOR UPDATE;
+
+-- name: ListExpiredParkedRuns :many
+-- Parked runs whose park has expired (ADR 0049: 7 days for an approval).
+SELECT * FROM runs
+WHERE org_id = @org_id AND state = 'parked' AND park_expires_at < now()
+ORDER BY park_expires_at, id;

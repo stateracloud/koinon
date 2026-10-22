@@ -26,6 +26,8 @@ import (
 	"github.com/procoduck/koinon/internal/db/store"
 	agentv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1"
 	"github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
+	approvalv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1"
+	"github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
 	"github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
 	connectionv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
@@ -152,6 +154,29 @@ var isolationCases = map[string]isolationCase{
 		},
 	},
 
+	approvalv1alpha1connect.ApprovalServiceListApprovalsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: f.ticket.GetId()})
+		},
+	},
+	approvalv1alpha1connect.ApprovalServiceGetApprovalProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: f.approval.ID.String()})
+		},
+	},
+	approvalv1alpha1connect.ApprovalServiceApproveProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{
+				OrgId: org, ApprovalId: f.approval.ID.String(), ArgsSha256: f.approval.ArgsSha256,
+			})
+		},
+	},
+	approvalv1alpha1connect.ApprovalServiceDenyProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.approvals.Deny(ctx, &approvalv1alpha1.DenyRequest{OrgId: org, ApprovalId: f.approval.ID.String()})
+		},
+	},
+
 	runv1alpha1connect.RunServiceWatchRunProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			stream, err := c.runs.WatchRun(ctx, &runv1alpha1.WatchRunRequest{OrgId: org, RunId: f.run.GetId()})
@@ -185,7 +210,7 @@ var _ = Describe("org isolation", func() {
 		})
 		a := e.newIsolationFixture(ctx, gh.PEM)
 		b := e.newIsolationFixture(ctx, gh.PEM)
-		foreign := []string{a.org, a.agent.GetId(), a.draft.GetId(), a.ticket.GetId(), a.run.GetId(), a.connection}
+		foreign := []string{a.org, a.agent.GetId(), a.draft.GetId(), a.ticket.GetId(), a.run.GetId(), a.connection, a.approval.ID.String()}
 		before := snapshot(ctx, e, a)
 
 		// The strongest caller in B: its owner, and a B admin.
@@ -230,6 +255,7 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	})
 	Expect(err).NotTo(HaveOccurred())
 	f.connection = res.GetConnection().GetId()
+	f.approval = e.pendingApproval(ctx, f)
 	return f
 }
 
@@ -248,6 +274,7 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM run_events WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1 AND status = 'untested'`, org),
+		count(ctx, e, `SELECT count(*) FROM approval_requests WHERE org_id = $1 AND status = 'pending'`, org),
 	}
 }
 

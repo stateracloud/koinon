@@ -47,6 +47,9 @@ const (
 	ReasonTokenCap      CancelReason = "token_cap"
 	// ReasonSpendLimit: the agent reached its spend limit (plan item L1).
 	ReasonSpendLimit CancelReason = "spend_limit"
+	// ReasonApprovalExpired: the run was parked on an approval nobody decided in time
+	// (ADR 0049: 7 days).
+	ReasonApprovalExpired CancelReason = "approval_expired"
 )
 
 // ErrAgentNotActive means the ticket's agent cannot take runs.
