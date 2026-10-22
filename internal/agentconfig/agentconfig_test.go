@@ -15,7 +15,6 @@ var _ = Describe("Harness settings", func() {
 		t := &templates.Template{Spec: templates.Spec{Harness: templates.Harness{PluginInstalls: true}}}
 		raw, err := agentconfig.FromTemplate(t, "sha256:x").Marshal()
 		Expect(err).NotTo(HaveOccurred())
-		// agentd reads the same JSON path without this package.
 		Expect(string(raw)).To(ContainSubstring(`"harness":{"pluginInstalls":true}`))
 		cfg, err := agentconfig.Parse(raw)
 		Expect(err).NotTo(HaveOccurred())
@@ -37,5 +36,27 @@ var _ = Describe("Harness settings", func() {
 		for _, t := range ts {
 			Expect(agentconfig.FromTemplate(t, t.Hash).Harness.PluginInstalls).To(BeFalse(), t.Metadata.ID)
 		}
+	})
+})
+
+var _ = Describe("Parse", func() {
+	It("reads back what FromTemplate writes, with the model as a plain string", func() {
+		t := &templates.Template{Spec: templates.Spec{Instructions: "help", Model: templates.Model{Name: "fake/model-1"}}}
+		raw, err := agentconfig.FromTemplate(t, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(ContainSubstring(`"model":"fake/model-1"`))
+		cfg, err := agentconfig.Parse(raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.Model).To(Equal("fake/model-1"))
+		Expect(cfg.Instructions).To(Equal("help"))
+	})
+
+	It("reads an empty config as the zero config", func() {
+		Expect(agentconfig.Parse(nil)).To(BeZero())
+	})
+
+	It("rejects a model that is not a string", func() {
+		_, err := agentconfig.Parse([]byte(`{"model":{"name":"fake/model-1"}}`))
+		Expect(err).To(MatchError(ContainSubstring("decode agent config")))
 	})
 })
