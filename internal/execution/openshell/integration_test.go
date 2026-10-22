@@ -30,7 +30,7 @@ var _ = Describe("OpenShell gateway", Label("integration"), Ordered, func() {
 	var (
 		b         *openshell.Backend
 		workspace string
-		name      = fmt.Sprintf("koinon-it-%d", time.Now().Unix())
+		name      = fmt.Sprintf("kit-%d", time.Now().Unix()) // OpenShell 0.1.5: names are at most 19 characters
 	)
 
 	BeforeAll(func(ctx SpecContext) {
