@@ -16,6 +16,11 @@ type openAIRequest struct {
 	StreamOptions *struct {
 		IncludeUsage bool `json:"include_usage"`
 	} `json:"stream_options"`
+	Tools []struct {
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	} `json:"tools"`
 }
 
 type openAIMessage struct {
@@ -56,6 +61,9 @@ func contentText(raw json.RawMessage) string {
 
 func (req openAIRequest) conversation() conversation {
 	var c conversation
+	for _, t := range req.Tools {
+		c.tools = append(c.tools, t.Function.Name)
+	}
 	names := map[string]string{}
 	for _, m := range req.Messages {
 		switch m.Role {

@@ -13,6 +13,9 @@ type anthropicRequest struct {
 	Model    string             `json:"model"`
 	Messages []anthropicMessage `json:"messages"`
 	Stream   bool               `json:"stream"`
+	Tools    []struct {
+		Name string `json:"name"`
+	} `json:"tools"`
 }
 
 type anthropicMessage struct {
@@ -41,6 +44,9 @@ func (m anthropicMessage) blocks() []anthropicBlock {
 
 func (req anthropicRequest) conversation() conversation {
 	var c conversation
+	for _, t := range req.Tools {
+		c.tools = append(c.tools, t.Name)
+	}
 	names := map[string]string{}
 	for i, m := range req.Messages {
 		blocks := m.blocks()
