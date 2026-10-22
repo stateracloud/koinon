@@ -3,6 +3,7 @@
 package fakemodel_test
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -129,7 +130,9 @@ turns:
 			Expect(err).NotTo(HaveOccurred())
 			_, ts := start(scripts...)
 			url := ts.URL + "/v1/chat/completions"
-			messages := []map[string]any{userMsg("Add hello.md to koinon-demo/hello")}
+			// The instructions koinon-agentd writes, as OpenCode puts them in the system prompt.
+			system := map[string]any{"role": "system", "content": "Instructions from: /sandbox/.koinon/AGENTS.md\n# Koinon\n\n# Repo helper\n"}
+			messages := []map[string]any{system, userMsg("Add hello.md to koinon-demo/hello")}
 
 			// OpenCode declares the MCP tool behind its server prefix.
 			tools := []map[string]any{{"type": "function", "function": map[string]any{"name": "koinon_create_pull_request"}}}
@@ -168,6 +171,11 @@ turns:
 			decode(post(ctx, url, map[string]any{"model": "repo-helper", "messages": messages, "tools": tools}), &third)
 			Expect(third.Choices[0].FinishReason).To(Equal("stop"))
 			Expect(*third.Choices[0].Message.Content).To(ContainSubstring("https://github.test/koinon-demo/hello/pull/1"))
+
+			By("a request without the repo-helper instructions gets no answer")
+			resp := post(ctx, url, map[string]any{"model": "repo-helper", "messages": messages[1:], "tools": tools})
+			DeferCleanup(resp.Body.Close)
+			Expect(resp.StatusCode).To(Equal(http.StatusBadRequest))
 		})
 
 		It("keeps the scripted name when no declared tool or several match it", func(ctx SpecContext) {

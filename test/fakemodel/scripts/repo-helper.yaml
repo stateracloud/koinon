@@ -9,17 +9,26 @@
 #
 # The fake GitHub (internal/connectors/github/githubtest) numbers pull requests from 1 and links
 # them under https://github.test/, which is the URL the resumed run reports.
+#
+# Every turn needs the repo-helper template's instructions in the system prompt ("# Repo helper",
+# templates/repo-helper.yaml), which koinon-agentd writes into the sandbox for each run (ADR 0052).
+# A request without them, such as a harness's title request or a run whose instructions did not
+# arrive, matches no turn and gets HTTP 400, so the quickstart fails instead of passing on a
+# harness that never saw its instructions.
 model: repo-helper
 turns:
   # The resumed run: agentd's prompt carries the approval's outcome (internal/agentd/park.go).
   - when:
+      systemContains: "# Repo helper"
       userContains: "approved and executed by Koinon"
     text: "The pull request is open: https://github.test/koinon-demo/hello/pull/1"
     usage:
       inputTokens: 1500
       cachedInputTokens: 1350
       outputTokens: 20
-  - toolCalls:
+  - when:
+      systemContains: "# Repo helper"
+    toolCalls:
       - name: create_pull_request
         arguments:
           branch: koinon/add-hello-md
@@ -32,6 +41,7 @@ turns:
       inputTokens: 1200
       outputTokens: 60
   - when:
+      systemContains: "# Repo helper"
       toolResult: create_pull_request
     text: I asked for approval to open the pull request "Add hello.md". It will be opened once approved.
     usage:
