@@ -4,8 +4,8 @@
 - Date: 2026-10-22
 - Amends: [0007](0007-connector-model.md), [0016](0016-harness-and-deployment.md),
   [0036](0036-v01-demo.md); extends [0048](0048-openshell-spike-results.md) (Proposed, #15)
-- Verification: Pending: agentgateway Kubernetes-mode `rawConfig` budgets (plan item S2 in
-  [docs/plans/v0.1.md](../plans/v0.1.md))
+- Verification: agentgateway Kubernetes-mode `rawConfig` budgets verified by spike S2
+  (2026-10-22, below)
 
 ## Context
 
@@ -61,10 +61,17 @@ Andre answered these in a grilling session on 2026-10-21/22. This ADR records th
     Koinon never edits the user's other gateways or their ConfigMaps.
   - The v0.1 CRDs (`agentgateway-crds` v1.6.0) cover API keys, AI backends with request overrides,
     MCP authorization and guardrails, access-log attributes and a model cost catalog, but have no
-    USD budget. Plan item S2 tests whether the standalone budget configuration works through
-    `AgentgatewayParameters.rawConfig`. If it does not, Kubernetes mode stops spend from Koinon's
-    ledger by revoking the agent's key, bounded by a token rate limit, and the docs state the larger
-    overshoot.
+    USD budget. Spike S2 showed that the standalone LLM configuration (keys with budgets, models,
+    budget database, model catalog) works when carried in the Gateway-level
+    `AgentgatewayParameters.rawConfig`, on its own bind next to the xDS listeners. So in Kubernetes
+    mode Koinon renders the same LLM configuration as in standalone mode into `rawConfig`, and
+    exposes that bind through the Parameters' Service overlay. Budget stops are the same in both
+    modes.
+  - In Kubernetes mode the budget database is SQLite on the proxy's `/tmp` emptyDir: it survives
+    container restarts but not pod replacement, so budget windows restart with a new pod. Koinon's
+    ledger stays authoritative (ADR 0041) and re-pushes limits net of spend already recorded. A
+    persistent volume or an external database through the Parameters' deployment overlay is
+    evaluated in G2.
 - **Spend:** a minimal ledger (tokens and cost per run, cost per ticket) and one per-agent limit
   pushed to agentgateway. Hierarchical budgets wait (ADR [0041](0041-koinon-spend-ledger-and-budget-stops.md)).
 - **`agentd` runs in the control plane**, as the `koinon-agentd` Deployment, and speaks ACP to the
@@ -146,7 +153,8 @@ Andre answered these in a grilling session on 2026-10-21/22. This ADR records th
 
 - Positive: the demo exercises credential isolation, park-and-execute and resume end to end.
 - Positive: Koinon works next to an existing agentgateway without touching its configuration.
-- Negative: two gateway drivers to test; Kubernetes mode may have weaker budget stops.
+- Negative: two gateway drivers to test; in Kubernetes mode budget usage resets when the proxy
+  pod is replaced, unless G2 adds persistent storage.
 - Negative: every run depends on a long-lived exec stream through the OpenShell gateway; a gateway
   restart costs a `session/load` per active run _(inferred)_.
 - Negative: approvers see agent PRs twice (Koinon card, GitHub review), for different questions.
@@ -155,7 +163,7 @@ Andre answered these in a grilling session on 2026-10-21/22. This ADR records th
 
 ## Open questions
 
-- Whether `rawConfig` carries budgets in Kubernetes mode (plan item S2).
+- Budget persistence across proxy pod replacement in Kubernetes mode (G2).
 - Whether OpenShell's Kubernetes driver runs on kind in GitHub's free runners (plan item S1).
 
 ## Upstream verification
@@ -169,6 +177,18 @@ Checked 2026-10-22:
   `AgentgatewayParameters.rawConfig` merges raw configuration into the generated config file;
   `modelCatalog` is honoured only on Gateway-level parameters.
 - The standalone install on the home lab runs with no `agentgateway.dev` CRDs present.
+- **Spike S2** (2026-10-22, home lab, approved by Andre for one day; manifests in
+  `hack/spike/s2/manifests.yaml`): controller `agentgateway` v1.6.0 (chart digest
+  `sha256:d3edf2b33cbf2e9d59406c207b8d3554597799707b8803b5f62e698fe5376e28`) in `koinon-spike`; a
+  Koinon-owned Gateway with Gateway-level Parameters whose `rawConfig` holds the standalone `config`
+  (SQLite database, model catalog), `gateways.default` on port 4000 and `llm` (two keys by hash
+  with USD budgets, one Ollama model). The proxy logged `started bind bind="8090/koinon-spike/koinon-s2"`
+  and `started bind bind="bind/4000"`. Results on the 4000 bind: no key `401`; agent B (limit
+  $0.0005) `200` nine times, then `429 {"code":"budget_exceeded"}`, with the log
+  `used=0.000504000 limit_amount=0.0005` (overshoot $0.000004, under one response of about
+  $0.000056); agent A still `200`. The controller's Service carries only Gateway listener ports;
+  adding port 4000 through `spec.service.spec.ports` in the Parameters exposed the bind, and the
+  same results held through the Service. Released and removed the same day.
 - GitHub Actions: workflows on `push` and on `pull_request` from same-repository branches receive
   repository secrets; pull requests from forks do not.
   https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions
