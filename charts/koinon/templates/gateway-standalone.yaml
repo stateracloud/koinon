@@ -1,0 +1,179 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+gateway.mode=standalone: agentgateway v1.6.0 without CRDs or controller (ADR 0048). One replica,
+because the budget store is SQLite on a PVC.
+
+The config ConfigMap belongs to the reconciler (plan item G1), which rewrites it with per-agent key
+hashes, budgets and MCP routes; agentgateway hot-reloads it. The chart writes a bootstrap config
+(the model upstream from values, no keys, so every request is refused) on install only. On upgrade
+it renders the live data unchanged, so it never undoes the reconciler's work.
+*/ -}}
+{{- if eq .Values.gateway.mode "standalone" }}
+{{- $name := include "koinon.componentName" (list . "gateway") }}
+{{- $cmName := include "koinon.gatewayConfigName" . }}
+{{- $gw := .Values.gateway.standalone }}
+{{- $keyDir := "/secrets/model" }}
+{{- $existing := lookup "v1" "ConfigMap" .Release.Namespace $cmName }}
+{{- $config := "" }}
+{{- if and $existing $existing.data (hasKey $existing.data "config.yaml") }}
+{{- $config = index $existing.data "config.yaml" }}
+{{- else }}
+{{- $models := list }}
+{{- $catalog := dict }}
+{{- range $model := .Values.model.models }}
+{{- $params := dict "baseUrl" (required "model.baseUrl is required when model.models is set" $.Values.model.baseUrl) }}
+{{- if $.Values.model.apiKeySecret.name }}
+{{- $_ := set $params "apiKey" (dict "file" (printf "%s/%s" $keyDir $.Values.model.apiKeySecret.key)) }}
+{{- end }}
+{{- $m := dict "name" $model.name "provider" (dict "custom" (dict "providerOverride" $.Values.model.provider "formats" (list (dict "type" "completions")))) "params" $params }}
+{{- with $model.overrides }}
+{{- $_ := set $m "overrides" . }}
+{{- end }}
+{{- $models = append $models $m }}
+{{- with $model.rates }}
+{{- $_ := set $catalog $model.name (dict "rates" .) }}
+{{- end }}
+{{- end }}
+{{- $logging := dict "format" "json" "fields" (dict "add" (dict "koinon.key" "default(apiKey.name, \"\")" "koinon.agent" "default(apiKey.agent, \"\")")) }}
+{{- $base := dict "database" (dict "url" "sqlite:///data/agentgateway.db?mode=rwc") "adminAddr" "localhost:15000" "statsAddr" "0.0.0.0:15020" "readinessAddr" "0.0.0.0:15021" "logging" $logging }}
+{{- if $catalog }}
+{{- $_ := set $base "modelCatalog" (list (dict "inline" (dict "providers" (dict $.Values.model.provider (dict "models" $catalog))))) }}
+{{- end }}
+{{- $apiKey := dict "mode" "strict" "location" (dict "header" (dict "name" "authorization" "prefix" "Bearer ")) "keys" (list) }}
+{{- $llm := dict "port" (int $gw.port) "policies" (dict "apiKey" $apiKey) "models" $models }}
+{{- $config = printf "# Bootstrap config written by the Koinon chart; the reconciler owns this ConfigMap.\n%s" (toYaml (dict "config" $base "llm" $llm)) }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $cmName }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+    koinon.dev/owner: reconciler
+data:
+  config.yaml: |
+    {{- $config | nindent 4 }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-data
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $gw.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $gw.persistence.size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+spec:
+  # SQLite budget store: exactly one replica, and the old pod stops before the new one starts.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list . "gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list . "gateway") | nindent 8 }}
+      {{- with $gw.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "koinon.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: agentgateway
+          image: {{ printf "%s:%s" $gw.image.repository $gw.image.tag }}{{ with $gw.image.digest }}@{{ . }}{{ end }}
+          imagePullPolicy: IfNotPresent
+          args: ["-f", "/config/config.yaml"]
+          ports:
+            - name: llm
+              containerPort: {{ $gw.port }}
+            - name: stats
+              containerPort: 15020
+            - name: readiness
+              containerPort: 15021
+          readinessProbe:
+            httpGet: {path: /healthz/ready, port: readiness}
+          securityContext:
+            {{- include "koinon.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml $gw.resources | nindent 12 }}
+          volumeMounts:
+            # A directory mount (not subPath), so ConfigMap updates reach the hot reload.
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.model.apiKeySecret.name }}
+            - name: model-key
+              mountPath: {{ $keyDir }}
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $cmName }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $name }}-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- if .Values.model.apiKeySecret.name }}
+        - name: model-key
+          secret:
+            secretName: {{ .Values.model.apiKeySecret.name }}
+            items:
+              - key: {{ .Values.model.apiKeySecret.key }}
+                path: {{ .Values.model.apiKeySecret.key }}
+        {{- end }}
+      {{- with $gw.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $gw.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $gw.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+spec:
+  selector:
+    {{- include "koinon.selectorLabels" (list . "gateway") | nindent 4 }}
+  ports:
+    - name: llm
+      port: {{ $gw.port }}
+      targetPort: llm
+    - name: stats
+      port: 15020
+      targetPort: stats
+{{- end }}
