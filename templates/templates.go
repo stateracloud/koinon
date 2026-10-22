@@ -59,6 +59,11 @@ const (
 	FlavorPi       Flavor = "pi"
 )
 
+// AllFlavors lists every flavor. The schema's $defs.flavor enum and the
+// agent_flavor type in the migrations hold the same list; a test keeps the
+// three in step.
+var AllFlavors = []Flavor{FlavorOpenCode, FlavorHermes, FlavorPi}
+
 // Preset maps a grant's risk tiers to allow, ask or deny (ADR 0008, 0049).
 type Preset string
 
