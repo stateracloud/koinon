@@ -48,8 +48,9 @@ Facts checked against agentgateway v1.6.0 (source tag `v1.6.0`) on 2026-10-22:
    an explicit zero price. A record that still arrives without a cost is kept with `priced = false`.
 5. **Token cap.** Each new entry adds its tokens to its run through `scheduler.RecordTokenUsage` in
    the same transaction, which cancels the run at its token cap (plan item A4).
-6. **Net limits.** The template's `limits.spendUSD` is a per-agent limit per 24-hour window aligned
-   to midnight UTC, like agentgateway's `24h`. Every reconciler pass pushes `limit - spent` (never
+6. **Net limits.** The template's `limits.spendUSD` is a per-agent limit per calendar day in UTC
+   (a 24-hour window aligned to midnight UTC, like agentgateway's `24h`); a per-template window
+   was considered and left out of v0.1. Every reconciler pass pushes `limit - spent` (never
    below zero) as the key's budget, where `spent` is the ledger's total for the current window. The
    budget's name carries a generation, `<window start>-<spent in nano-USD>`, so every new net amount
    starts a fresh gateway counter: spend is never in both the amount and the counter, whatever the
@@ -91,7 +92,6 @@ Facts checked against agentgateway v1.6.0 (source tag `v1.6.0`) on 2026-10-22:
 
 ## Open questions
 
-- Whether the limit window should be configurable per template (now fixed at 24 hours).
 - Whether the receiver should require a token once agentgateway can read one from a file.
 
 ## Upstream verification
