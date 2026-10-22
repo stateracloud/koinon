@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/procoduck/koinon/internal/api"
+	"github.com/procoduck/koinon/internal/approvals"
 	"github.com/procoduck/koinon/internal/auth"
 	"github.com/procoduck/koinon/internal/auth/oidctest"
 	"github.com/procoduck/koinon/internal/connections"
@@ -223,6 +224,9 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 		Hub: e.hub, WatchPollInterval: opts.watchPoll,
 		Logger:  slog.New(slog.NewTextHandler(logOut, nil)),
 		Secrets: opts.secrets, GitHub: opts.github,
+		Approvals: approvals.New(e.pool, approvals.Options{
+			Secrets: opts.secrets, GitHub: opts.github, Logger: slog.New(slog.NewTextHandler(logOut, nil)),
+		}),
 	})
 
 	handler, err = api.NewHandler(api.Options{

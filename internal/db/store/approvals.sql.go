@@ -11,13 +11,186 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelPendingApprovalRequestsForRun = `-- name: CancelPendingApprovalRequestsForRun :many
+UPDATE approval_requests
+SET status = 'canceled'
+WHERE org_id = $1 AND run_id = $2 AND status = 'pending'
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+`
+
+type CancelPendingApprovalRequestsForRunParams struct {
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+}
+
+// pending -> canceled, for a run that finished without them (for example a
+// user canceled the parked run).
+func (q *Queries) CancelPendingApprovalRequestsForRun(ctx context.Context, arg CancelPendingApprovalRequestsForRunParams) ([]ApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, cancelPendingApprovalRequestsForRun, arg.OrgID, arg.RunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ApprovalRequest
+	for rows.Next() {
+		var i ApprovalRequest
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.TicketID,
+			&i.RunID,
+			&i.AgentID,
+			&i.Connector,
+			&i.Tool,
+			&i.Target,
+			&i.ArgsJson,
+			&i.ArgsSha256,
+			&i.Risk,
+			&i.Decision,
+			&i.Status,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.DecisionNote,
+			&i.Result,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Executions,
+			&i.ExecutionLeaseUntil,
+			&i.ExecutedAt,
+			&i.Error,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const claimApprovalExecution = `-- name: ClaimApprovalExecution :one
+UPDATE approval_requests
+SET executions = executions + 1,
+    execution_lease_until = now() + make_interval(secs => $1::integer)
+WHERE org_id = $2 AND id = $3 AND status = 'approved'
+  AND (execution_lease_until IS NULL OR execution_lease_until < now())
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+`
+
+type ClaimApprovalExecutionParams struct {
+	LeaseSeconds int32
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+}
+
+// Takes an approved request for execution for lease_seconds. No row: it is
+// not approved, or another executor holds it.
+func (q *Queries) ClaimApprovalExecution(ctx context.Context, arg ClaimApprovalExecutionParams) (ApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, claimApprovalExecution, arg.LeaseSeconds, arg.OrgID, arg.ID)
+	var i ApprovalRequest
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.TicketID,
+		&i.RunID,
+		&i.AgentID,
+		&i.Connector,
+		&i.Tool,
+		&i.Target,
+		&i.ArgsJson,
+		&i.ArgsSha256,
+		&i.Risk,
+		&i.Decision,
+		&i.Status,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.Result,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
+	)
+	return i, err
+}
+
+const completeApprovalExecution = `-- name: CompleteApprovalExecution :one
+UPDATE approval_requests
+SET status = $1::approval_status,
+    result = $2,
+    error = $3,
+    executed_at = now(),
+    execution_lease_until = NULL
+WHERE org_id = $4 AND id = $5 AND status = 'approved' AND executions = $6
+  AND $1::approval_status IN ('executed', 'failed')
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+`
+
+type CompleteApprovalExecutionParams struct {
+	Status     ApprovalStatus
+	Result     []byte
+	Error      pgtype.Text
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
+	Executions int32
+}
+
+// approved -> executed | failed, by the executor that claimed it (fenced on
+// executions). No row: another executor took it over.
+func (q *Queries) CompleteApprovalExecution(ctx context.Context, arg CompleteApprovalExecutionParams) (ApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, completeApprovalExecution,
+		arg.Status,
+		arg.Result,
+		arg.Error,
+		arg.OrgID,
+		arg.ID,
+		arg.Executions,
+	)
+	var i ApprovalRequest
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.TicketID,
+		&i.RunID,
+		&i.AgentID,
+		&i.Connector,
+		&i.Tool,
+		&i.Target,
+		&i.ArgsJson,
+		&i.ArgsSha256,
+		&i.Risk,
+		&i.Decision,
+		&i.Status,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.Result,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
+	)
+	return i, err
+}
+
 const createApprovalRequest = `-- name: CreateApprovalRequest :one
 INSERT INTO approval_requests (org_id, ticket_id, run_id, agent_id, connector, tool, target,
                                args_json, args_sha256, risk, decision, status, expires_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7,
         $8, $9, $10, $11, $12, $13)
 ON CONFLICT (org_id, run_id, tool, target, args_sha256) DO NOTHING
-RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
 `
 
 type CreateApprovalRequestParams struct {
@@ -76,12 +249,173 @@ func (q *Queries) CreateApprovalRequest(ctx context.Context, arg CreateApprovalR
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
+	)
+	return i, err
+}
+
+const decideApprovalRequest = `-- name: DecideApprovalRequest :one
+UPDATE approval_requests
+SET status = $1::approval_status,
+    decided_by = $2::uuid,
+    decided_at = now(),
+    decision_note = $3
+WHERE org_id = $4 AND id = $5 AND status = 'pending'
+  AND $1::approval_status IN ('approved', 'denied')
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+`
+
+type DecideApprovalRequestParams struct {
+	Status       ApprovalStatus
+	DecidedBy    pgtype.UUID
+	DecisionNote pgtype.Text
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+}
+
+// pending -> approved | denied by a human. No row: already decided.
+func (q *Queries) DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, decideApprovalRequest,
+		arg.Status,
+		arg.DecidedBy,
+		arg.DecisionNote,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i ApprovalRequest
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.TicketID,
+		&i.RunID,
+		&i.AgentID,
+		&i.Connector,
+		&i.Tool,
+		&i.Target,
+		&i.ArgsJson,
+		&i.ArgsSha256,
+		&i.Risk,
+		&i.Decision,
+		&i.Status,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.Result,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
+	)
+	return i, err
+}
+
+const expirePendingApprovalRequests = `-- name: ExpirePendingApprovalRequests :many
+UPDATE approval_requests
+SET status = 'expired'
+WHERE org_id = $1 AND status = 'pending' AND expires_at < now()
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+`
+
+// pending -> expired once expires_at has passed (ADR 0049: 7 days).
+func (q *Queries) ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, expirePendingApprovalRequests, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ApprovalRequest
+	for rows.Next() {
+		var i ApprovalRequest
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.TicketID,
+			&i.RunID,
+			&i.AgentID,
+			&i.Connector,
+			&i.Tool,
+			&i.Target,
+			&i.ArgsJson,
+			&i.ArgsSha256,
+			&i.Risk,
+			&i.Decision,
+			&i.Status,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.DecisionNote,
+			&i.Result,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Executions,
+			&i.ExecutionLeaseUntil,
+			&i.ExecutedAt,
+			&i.Error,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getApprovalRequest = `-- name: GetApprovalRequest :one
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+WHERE org_id = $1 AND id = $2
+`
+
+type GetApprovalRequestParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+func (q *Queries) GetApprovalRequest(ctx context.Context, arg GetApprovalRequestParams) (ApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, getApprovalRequest, arg.OrgID, arg.ID)
+	var i ApprovalRequest
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.TicketID,
+		&i.RunID,
+		&i.AgentID,
+		&i.Connector,
+		&i.Tool,
+		&i.Target,
+		&i.ArgsJson,
+		&i.ArgsSha256,
+		&i.Risk,
+		&i.Decision,
+		&i.Status,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.Result,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
 	)
 	return i, err
 }
 
 const getApprovalRequestByCall = `-- name: GetApprovalRequestByCall :one
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
 WHERE org_id = $1 AND run_id = $2 AND tool = $3 AND target = $4
   AND args_sha256 = $5
 `
@@ -124,12 +458,17 @@ func (q *Queries) GetApprovalRequestByCall(ctx context.Context, arg GetApprovalR
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
 	)
 	return i, err
 }
 
 const getApprovalRequestForAgent = `-- name: GetApprovalRequestForAgent :one
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
 WHERE org_id = $1 AND id = $2 AND agent_id = $3
 `
 
@@ -164,6 +503,11 @@ func (q *Queries) GetApprovalRequestForAgent(ctx context.Context, arg GetApprova
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
 	)
 	return i, err
 }
@@ -223,7 +567,7 @@ func (q *Queries) GetRunningRunForAgent(ctx context.Context, arg GetRunningRunFo
 }
 
 const listApprovalRequestsForTicket = `-- name: ListApprovalRequestsForTicket :many
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
 WHERE org_id = $1 AND ticket_id = $2
 ORDER BY created_at, id
 `
@@ -263,6 +607,11 @@ func (q *Queries) ListApprovalRequestsForTicket(ctx context.Context, arg ListApp
 			&i.ExpiresAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Executions,
+			&i.ExecutionLeaseUntil,
+			&i.ExecutedAt,
+			&i.Error,
+			&i.DeliveredAt,
 		); err != nil {
 			return nil, err
 		}
@@ -272,4 +621,297 @@ func (q *Queries) ListApprovalRequestsForTicket(ctx context.Context, arg ListApp
 		return nil, err
 	}
 	return items, nil
+}
+
+const listExecutableApprovalRequests = `-- name: ListExecutableApprovalRequests :many
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+WHERE org_id = $1 AND status = 'approved'
+  AND (execution_lease_until IS NULL OR execution_lease_until < now())
+ORDER BY updated_at, id
+LIMIT $2
+`
+
+type ListExecutableApprovalRequestsParams struct {
+	OrgID       pgtype.UUID
+	MaxRequests int32
+}
+
+// Approved requests no executor holds: Trusted-preset calls, and calls whose
+// executor died or failed to record the outcome.
+func (q *Queries) ListExecutableApprovalRequests(ctx context.Context, arg ListExecutableApprovalRequestsParams) ([]ApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, listExecutableApprovalRequests, arg.OrgID, arg.MaxRequests)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ApprovalRequest
+	for rows.Next() {
+		var i ApprovalRequest
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.TicketID,
+			&i.RunID,
+			&i.AgentID,
+			&i.Connector,
+			&i.Tool,
+			&i.Target,
+			&i.ArgsJson,
+			&i.ArgsSha256,
+			&i.Risk,
+			&i.Decision,
+			&i.Status,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.DecisionNote,
+			&i.Result,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Executions,
+			&i.ExecutionLeaseUntil,
+			&i.ExecutedAt,
+			&i.Error,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingApprovalRequests = `-- name: ListPendingApprovalRequests :many
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+WHERE org_id = $1 AND status = 'pending'
+ORDER BY created_at, id
+`
+
+// The org's requests waiting for a human (Waiting on you), oldest first.
+// Trusted-preset calls are recorded as approved and never listed here.
+func (q *Queries) ListPendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, listPendingApprovalRequests, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ApprovalRequest
+	for rows.Next() {
+		var i ApprovalRequest
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.TicketID,
+			&i.RunID,
+			&i.AgentID,
+			&i.Connector,
+			&i.Tool,
+			&i.Target,
+			&i.ArgsJson,
+			&i.ArgsSha256,
+			&i.Risk,
+			&i.Decision,
+			&i.Status,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.DecisionNote,
+			&i.Result,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Executions,
+			&i.ExecutionLeaseUntil,
+			&i.ExecutedAt,
+			&i.Error,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingApprovalRequestsOfFinishedRuns = `-- name: ListPendingApprovalRequestsOfFinishedRuns :many
+SELECT a.org_id, a.id, a.ticket_id, a.run_id, a.agent_id, a.connector, a.tool, a.target, a.args_json, a.args_sha256, a.risk, a.decision, a.status, a.decided_by, a.decided_at, a.decision_note, a.result, a.expires_at, a.created_at, a.updated_at, a.executions, a.execution_lease_until, a.executed_at, a.error, a.delivered_at FROM approval_requests a
+JOIN runs r ON r.org_id = a.org_id AND r.id = a.run_id
+WHERE a.org_id = $1 AND a.status = 'pending'
+  AND r.state IN ('succeeded', 'failed', 'canceled')
+ORDER BY a.created_at, a.id
+`
+
+func (q *Queries) ListPendingApprovalRequestsOfFinishedRuns(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, listPendingApprovalRequestsOfFinishedRuns, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ApprovalRequest
+	for rows.Next() {
+		var i ApprovalRequest
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.TicketID,
+			&i.RunID,
+			&i.AgentID,
+			&i.Connector,
+			&i.Tool,
+			&i.Target,
+			&i.ArgsJson,
+			&i.ArgsSha256,
+			&i.Risk,
+			&i.Decision,
+			&i.Status,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.DecisionNote,
+			&i.Result,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Executions,
+			&i.ExecutionLeaseUntil,
+			&i.ExecutedAt,
+			&i.Error,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUndeliveredApprovalRequestsForRun = `-- name: ListUndeliveredApprovalRequestsForRun :many
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+WHERE org_id = $1 AND run_id = $2 AND delivered_at IS NULL
+ORDER BY created_at, id
+`
+
+type ListUndeliveredApprovalRequestsForRunParams struct {
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+}
+
+// A run's requests whose outcome the agent has not been sent yet.
+func (q *Queries) ListUndeliveredApprovalRequestsForRun(ctx context.Context, arg ListUndeliveredApprovalRequestsForRunParams) ([]ApprovalRequest, error) {
+	rows, err := q.db.Query(ctx, listUndeliveredApprovalRequestsForRun, arg.OrgID, arg.RunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ApprovalRequest
+	for rows.Next() {
+		var i ApprovalRequest
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.TicketID,
+			&i.RunID,
+			&i.AgentID,
+			&i.Connector,
+			&i.Tool,
+			&i.Target,
+			&i.ArgsJson,
+			&i.ArgsSha256,
+			&i.Risk,
+			&i.Decision,
+			&i.Status,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.DecisionNote,
+			&i.Result,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Executions,
+			&i.ExecutionLeaseUntil,
+			&i.ExecutedAt,
+			&i.Error,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockApprovalRequest = `-- name: LockApprovalRequest :one
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+WHERE org_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type LockApprovalRequestParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// Serialises decisions on one request.
+func (q *Queries) LockApprovalRequest(ctx context.Context, arg LockApprovalRequestParams) (ApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, lockApprovalRequest, arg.OrgID, arg.ID)
+	var i ApprovalRequest
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.TicketID,
+		&i.RunID,
+		&i.AgentID,
+		&i.Connector,
+		&i.Tool,
+		&i.Target,
+		&i.ArgsJson,
+		&i.ArgsSha256,
+		&i.Risk,
+		&i.Decision,
+		&i.Status,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.Result,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
+	)
+	return i, err
+}
+
+const markApprovalRequestsDelivered = `-- name: MarkApprovalRequestsDelivered :execrows
+UPDATE approval_requests
+SET delivered_at = now()
+WHERE org_id = $1 AND id = ANY($2::uuid[]) AND delivered_at IS NULL
+  AND status IN ('executed', 'failed', 'denied', 'expired', 'canceled')
+`
+
+type MarkApprovalRequestsDeliveredParams struct {
+	OrgID pgtype.UUID
+	Ids   []pgtype.UUID
+}
+
+// Records that the outcomes were sent to the agent.
+func (q *Queries) MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markApprovalRequestsDelivered, arg.OrgID, arg.Ids)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

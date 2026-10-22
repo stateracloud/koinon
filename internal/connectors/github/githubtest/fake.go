@@ -48,6 +48,14 @@ type Fake struct {
 	mu       sync.Mutex
 	mints    int
 	requests []Request
+	tokens   map[string]tokenInfo
+	repos    map[string]*Repo
+}
+
+// tokenInfo is what a minted token may do.
+type tokenInfo struct {
+	repos []string // names; every repository of the installation when selection is all
+	perms map[string]string
 }
 
 // Request is a token request the fake received.
@@ -68,12 +76,15 @@ func New() *Fake {
 		Permissions:  map[string]string{"metadata": "read", "contents": "write", "pull_requests": "write", "issues": "write"},
 		Now:          time.Now,
 		key:          key,
+		tokens:       map[string]tokenInfo{},
+		repos:        map[string]*Repo{},
 		PEM:          pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /app", f.app)
 	mux.HandleFunc("GET /app/installations/{id}", f.installation)
 	mux.HandleFunc("POST /app/installations/{id}/access_tokens", f.accessToken)
+	f.routeRepos(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 	})
@@ -230,9 +241,11 @@ func (f *Fake) accessToken(w http.ResponseWriter, r *http.Request) {
 	f.mints++
 	n := f.mints
 	f.requests = append(f.requests, Request{Repositories: req.Repositories, Permissions: req.Permissions})
+	token := fmt.Sprintf("ghs_faketoken%04d", n)
+	f.tokens[token] = tokenInfo{repos: slices.Clone(repos), perms: perms}
 	f.mu.Unlock()
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"token":                fmt.Sprintf("ghs_faketoken%04d", n),
+		"token":                token,
 		"expires_at":           f.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 		"permissions":          perms,
 		"repository_selection": selection,

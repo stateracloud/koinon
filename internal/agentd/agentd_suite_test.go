@@ -85,6 +85,12 @@ type env struct {
 }
 
 func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
+	return newEnvWith(ctx, flavor, nil)
+}
+
+// newEnvWith is newEnv with the agent version's config from configFor, which runs once the
+// org and user exist.
+func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*env) string) *env {
 	e := &env{}
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
@@ -113,8 +119,12 @@ func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
 		OrgID: e.org, DisplayName: uniq("agent"), Flavor: flavor, CreatedBy: e.user,
 	})
 	Expect(err).NotTo(HaveOccurred())
+	config := `{"model":{"name":"` + model + `"}}`
+	if configFor != nil {
+		config = configFor(e)
+	}
 	version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
-		OrgID: e.org, AgentID: agent.ID, Config: []byte(`{"model":{"name":"` + model + `"}}`), CreatedBy: e.user,
+		OrgID: e.org, AgentID: agent.ID, Config: []byte(config), CreatedBy: e.user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	e.agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{

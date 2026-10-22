@@ -74,7 +74,14 @@ type Options struct {
 	ApprovalTTL time.Duration
 	// Now defaults to time.Now.
 	Now func() time.Time
+	// Execute, if set, is called in its own goroutine for a newly recorded call the grant's
+	// preset allows without a human (Trusted), so it runs at once; the approval sweeper
+	// executes it otherwise.
+	Execute func(ctx context.Context, org, id pgtype.UUID)
 }
+
+// KindApprovalRequested is the ticket event written when a call is recorded.
+const KindApprovalRequested = "approval.requested"
 
 // Server is the GitHub tools MCP server.
 type Server struct {
@@ -85,6 +92,7 @@ type Server struct {
 	now  func() time.Time
 	ct   *connectors.Type
 	mcp  *mcp.Server
+	exec func(ctx context.Context, org, id pgtype.UUID)
 }
 
 // New returns a Server recording requests in pool.
@@ -102,7 +110,7 @@ func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, ct: ct}
+	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, ct: ct, exec: opts.Execute}
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: project.Name + "-github-tools", Version: project.Version}, nil)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolCreatePullRequest,
@@ -144,6 +152,8 @@ type Result struct {
 	Result map[string]any `json:"result,omitempty"`
 	// Note is the approver's note on a denial.
 	Note string `json:"note,omitempty"`
+	// Error is why execution failed.
+	Error string `json:"error,omitempty"`
 }
 
 // caller is the agent behind one tool call and the run it belongs to.
@@ -303,7 +313,22 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 			row, err = q.GetApprovalRequestByCall(ctx, store.GetApprovalRequestByCallParams{
 				OrgID: params.OrgID, RunID: params.RunID, Tool: tool, Target: params.Target, ArgsSha256: params.ArgsSha256,
 			})
+			return err
 		}
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{
+			"approval_id": row.ID.String(), "tool": tool, "target": row.Target, "args_sha256": row.ArgsSha256,
+			"decision": string(row.Decision), "risk": json.RawMessage(riskJSON),
+		})
+		if err != nil {
+			return err
+		}
+		_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
+			OrgID: row.OrgID, TicketID: row.TicketID, Kind: KindApprovalRequested, ActorKind: store.TicketActorKindAgent,
+			ActorAgentID: row.AgentID, RunID: row.RunID, Payload: payload,
+		})
 		return err
 	})
 	if err != nil {
@@ -313,6 +338,9 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 	// Arguments are not logged: they can be large and are in the database.
 	s.log.Info("approval requested", append(c.attrs(), "id", row.ID.String(), "tool", tool, "target", row.Target,
 		"args_sha256", row.ArgsSha256, "decision", string(row.Decision), "status", string(row.Status), "new", created)...)
+	if created && row.Status == store.ApprovalStatusApproved && s.exec != nil {
+		go s.exec(context.WithoutCancel(ctx), row.OrgID, row.ID)
+	}
 	out := resultOf(row)
 	return textResult(statusLine(out)), out, nil
 }
@@ -340,7 +368,7 @@ func (s *Server) getApprovalStatus(ctx context.Context, req *mcp.CallToolRequest
 func resultOf(row store.ApprovalRequest) Result {
 	out := Result{
 		ID: row.ID.String(), Status: string(row.Status), Tool: row.Tool, Target: row.Target,
-		ArgsSHA256: row.ArgsSha256, Note: row.DecisionNote.String,
+		ArgsSHA256: row.ArgsSha256, Note: row.DecisionNote.String, Error: row.Error.String,
 	}
 	if row.ExpiresAt.Valid {
 		out.ExpiresAt = row.ExpiresAt.Time.UTC().Format(time.RFC3339)
@@ -359,7 +387,15 @@ func statusLine(r Result) string {
 	case store.ApprovalStatusApproved:
 		return fmt.Sprintf("accepted: id=%s status=approved args_sha256=%s. Koinon executes it and your run resumes with the result.", r.ID, r.ArgsSHA256)
 	case store.ApprovalStatusDenied:
-		return fmt.Sprintf("id=%s status=denied note=%q", r.ID, r.Note)
+		return fmt.Sprintf("id=%s status=denied note=%q. The human denied this call; do not retry it.", r.ID, r.Note)
+	case store.ApprovalStatusFailed:
+		return fmt.Sprintf("id=%s status=failed error=%q", r.ID, r.Error)
+	case store.ApprovalStatusExecuted:
+		res, _ := json.Marshal(r.Result)
+		if url, _ := r.Result["url"].(string); url != "" {
+			return fmt.Sprintf("id=%s status=executed url=%s result=%s", r.ID, url, res)
+		}
+		return fmt.Sprintf("id=%s status=executed result=%s", r.ID, res)
 	default:
 		res, _ := json.Marshal(r.Result)
 		return fmt.Sprintf("id=%s status=%s result=%s", r.ID, r.Status, res)
