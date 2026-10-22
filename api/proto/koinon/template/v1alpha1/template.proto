@@ -44,6 +44,11 @@ message Grant {
   int32 targets_min = 4;
   int32 targets_max = 5;
   string purpose = 6;
+  // On an agent, the connection the grant uses and the targets (for GitHub:
+  // repositories, owner/name) it is narrowed to; activating the agent approves
+  // them with the grant. Empty on a template.
+  string connection_id = 7;
+  repeated string repositories = 8;
 }
 
 // RunLimits cap a single run; hitting one cancels the run (plan item A4).

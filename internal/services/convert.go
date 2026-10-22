@@ -4,11 +4,13 @@ package services
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/procoduck/koinon/internal/agentconfig"
 	"github.com/procoduck/koinon/internal/db/store"
 	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
 	templatev1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1"
@@ -83,6 +85,17 @@ func grantsProto(gs []templates.Grant) []*templatev1alpha1.Grant {
 			pg.TargetsMin, pg.TargetsMax = int32(g.Targets.Min), int32(g.Targets.Max) //nolint:gosec // schema-bounded
 		}
 		out = append(out, pg)
+	}
+	return out
+}
+
+// agentGrantsProto renders an agent version's grants with their bindings.
+func agentGrantsProto(cfg agentconfig.Config) []*templatev1alpha1.Grant {
+	out := grantsProto(cfg.Grants)
+	for _, g := range out {
+		if b, ok := cfg.Binding(g.GetConnector()); ok {
+			g.ConnectionId, g.Repositories = b.ConnectionID, slices.Clone(b.Targets)
+		}
 	}
 	return out
 }

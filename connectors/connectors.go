@@ -143,6 +143,10 @@ type NetworkRule struct {
 	Host    string   `json:"host"`
 	Methods []string `json:"methods"`
 	Paths   []string `json:"paths"`
+	// Query maps a query parameter to the glob each of its values must match.
+	Query map[string]string `json:"query,omitempty"`
+	// Deny makes the rule a deny rule, which wins over every allow rule.
+	Deny bool `json:"deny,omitempty"`
 }
 
 // Preset maps each tier to a decision.
@@ -386,6 +390,9 @@ func (t *Type) check() error {
 		for _, n := range s.Network {
 			if !hosts[n.Host] {
 				return fmt.Errorf("scope %s: network host %q is not in spec.hosts", s.ID, n.Host)
+			}
+			if n.Deny && slices.ContainsFunc(n.Paths, hasTargetPlaceholder) {
+				return fmt.Errorf("scope %s: deny rules cannot use {owner} or {repo}", s.ID)
 			}
 		}
 		if s.Tier != TierRead && len(s.Tools) == 0 {

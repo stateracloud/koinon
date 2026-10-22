@@ -10,12 +10,14 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
+	guuid "github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/procoduck/koinon/internal/auth"
+	"github.com/procoduck/koinon/internal/connections"
 	"github.com/procoduck/koinon/internal/db/store"
 	agentv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1"
 	"github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
@@ -150,13 +152,50 @@ func (c *client) repoHelper(ctx context.Context) *templatev1alpha1.Template {
 	return nil
 }
 
-// draftAgent creates a draft agent from the repo-helper template.
+// draftAgent creates a draft agent from the repo-helper template, bound to
+// acme/widgets through the org's fixture GitHub connection.
 func (c *client) draftAgent(ctx context.Context, org string) *agentv1alpha1.Agent {
 	res, err := c.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
 		OrgId: org, TemplateId: c.repoHelper(ctx).GetId(), DisplayName: "Repo helper",
+		Grants: c.b.e.repoGrant(ctx, org, "acme/widgets"),
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return res.GetAgent()
+}
+
+// repoGrant binds the repo-helper template's GitHub grant to repos through
+// the org's fixture connection.
+func (e *env) repoGrant(ctx context.Context, org string, repos ...string) []*agentv1alpha1.GrantBinding {
+	return []*agentv1alpha1.GrantBinding{{Connector: "github", ConnectionId: e.githubConnection(ctx, org), Repositories: repos}}
+}
+
+// githubConnection returns the org's fixture GitHub connection to the env's
+// fake GitHub, creating it (row and key Secret, as CreateGitHubConnection
+// does) on first use. It bypasses the API, so any test user can use it.
+func (e *env) githubConnection(ctx context.Context, org string) string {
+	GinkgoHelper()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if id, ok := e.conns[org]; ok {
+		return id
+	}
+	Expect(e.opts.secrets).NotTo(BeNil(), "this env has no secret store")
+	var orgID pgtype.UUID
+	Expect(orgID.Scan(org)).To(Succeed())
+	id := pgtype.UUID{Bytes: guuid.New(), Valid: true}
+	name := connections.SecretName(orgID.Bytes, id.Bytes)
+	gh := e.opts.ghFake
+	Expect(gh).NotTo(BeNil(), "envOptions.github is set without ghFake")
+	Expect(e.opts.secrets.Create(ctx, connections.Secret{
+		Name: name, Data: map[string][]byte{connections.GitHubPrivateKeyField: gh.PEM},
+	})).To(Succeed())
+	cfg := fmt.Sprintf(`{"appId": %d, "installationId": %d}`, gh.AppID, gh.InstallationID)
+	conn, err := store.New(e.pool).CreateConnection(ctx, store.CreateConnectionParams{
+		OrgID: orgID, ID: id, Connector: "github", DisplayName: "acme", Config: []byte(cfg), SecretName: name,
+	})
+	Expect(err).NotTo(HaveOccurred())
+	e.conns[org] = conn.ID.String()
+	return e.conns[org]
 }
 
 // activeAgent creates and activates an agent; c must be an admin or owner.

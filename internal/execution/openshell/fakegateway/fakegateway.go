@@ -484,6 +484,31 @@ func (g *Gateway) DeleteProvider(_ context.Context, req *openshellv1.DeleteProvi
 	return &openshellv1.DeleteProviderResponse{Outcome: openshellv1.DeletionOutcome_DELETION_OUTCOME_COMPLETED}, nil
 }
 
+// DeleteProviderProfile implements openshellv1.OpenShellServer. Like OpenShell, it refuses to
+// delete a profile that a provider still uses.
+func (g *Gateway) DeleteProviderProfile(_ context.Context, req *openshellv1.DeleteProviderProfileRequest) (*openshellv1.DeleteProviderProfileResponse, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := g.enter("DeleteProviderProfile"); err != nil {
+		return nil, err
+	}
+	ws := req.GetWorkspaceScope().GetWorkspace()
+	k := key{ws, req.GetId()}
+	if _, ok := g.profiles[k]; !ok {
+		if req.GetAllowMissing() {
+			return &openshellv1.DeleteProviderProfileResponse{Outcome: openshellv1.DeletionOutcome_DELETION_OUTCOME_ALREADY_ABSENT}, nil
+		}
+		return nil, status.Errorf(codes.NotFound, "provider profile %q not found", req.GetId())
+	}
+	for pk, p := range g.providers {
+		if pk.workspace == ws && p.GetType() == req.GetId() {
+			return nil, status.Errorf(codes.FailedPrecondition, "provider profile %q is used by provider %q", req.GetId(), p.GetMetadata().GetName())
+		}
+	}
+	delete(g.profiles, k)
+	return &openshellv1.DeleteProviderProfileResponse{Outcome: openshellv1.DeletionOutcome_DELETION_OUTCOME_COMPLETED}, nil
+}
+
 // CreateSandbox implements openshellv1.OpenShellServer. New sandboxes are ready at once.
 func (g *Gateway) CreateSandbox(_ context.Context, req *openshellv1.CreateSandboxRequest) (*openshellv1.SandboxResponse, error) {
 	g.mu.Lock()
