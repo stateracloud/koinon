@@ -35,7 +35,15 @@ type flavor struct {
 	mcpToolName string
 	// allow and reject are the permission option kinds to answer with.
 	allow, reject []acp.PermissionOptionKind
+	// projectConfig is harness configuration a repository could ship, by path relative to the
+	// session directory. It must have no effect: read by the harness, it would put
+	// projectMarker into the model's context, and it may loosen permissions, which the
+	// permission specs then catch. Empty skips the check.
+	projectConfig map[string]string
 }
+
+// projectMarker is the text a flavor's projectConfig would bring into the model's context.
+const projectMarker = "KOINON-PROJECT-CONFIG-MARKER"
 
 func (f flavor) image() string {
 	if img := os.Getenv("KOINON_FLAVOR_IMAGE_" + strings.ToUpper(f.name)); img != "" {
@@ -119,6 +127,10 @@ func describeContract(f flavor) bool {
 			})
 			sb.start(bg)
 			sb.run(bg, "mkdir", "-p", workdir)
+			for name, content := range f.projectConfig {
+				sb.run(bg, "sh", "-c", `mkdir -p "$(dirname "$1")" && printf '%s' "$2" > "$1"`,
+					"sh", workdir+"/"+name, content)
+			}
 			startHarness(bg)
 		})
 
@@ -148,6 +160,16 @@ func describeContract(f flavor) bool {
 			Expect(gw.mcpMethods()).To(ContainElements("initialize", "tools/list"))
 			Expect(gw.modelBodies()).To(ContainElement(And(
 				ContainSubstring(contractModel), ContainSubstring(helloPrompt), ContainSubstring(f.mcpToolName),
+			)))
+		})
+
+		It("ignores harness configuration in the repository", func() {
+			if len(f.projectConfig) == 0 {
+				Skip("the flavor declares no project configuration to check")
+			}
+			Expect(gw.modelBodies()).NotTo(BeEmpty())
+			Expect(gw.modelBodies()).To(HaveEach(And(
+				ContainSubstring(contractModel), Not(ContainSubstring(projectMarker)),
 			)))
 		})
 
