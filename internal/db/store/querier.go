@@ -41,6 +41,7 @@ type Querier interface {
 	// the rare race where two claims for one agent overlap; the loser gets a
 	// unique violation and retries.
 	ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error)
+	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -48,6 +49,7 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	// New agents are drafts (ADR 0020).
 	CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error)
+	CreateAgentSandbox(ctx context.Context, arg CreateAgentSandboxParams) (AgentSandbox, error)
 	// Adds the next version of a draft or active agent.
 	CreateAgentVersion(ctx context.Context, arg CreateAgentVersionParams) (AgentVersion, error)
 	CreateLocalCredential(ctx context.Context, arg CreateLocalCredentialParams) error
@@ -84,11 +86,18 @@ type Querier interface {
 	FinishRun(ctx context.Context, arg FinishRunParams) (Run, error)
 	GetActiveUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetAgent(ctx context.Context, arg GetAgentParams) (Agent, error)
+	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
+	// holds the agent, whether one is waiting to be claimed (queued, or parked
+	// with its park resolved), and when a run last finished or parked. Parked runs
+	// do not keep the sandbox up.
+	GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error)
+	GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams) (AgentSandbox, error)
 	GetAgentVersion(ctx context.Context, arg GetAgentVersionParams) (AgentVersion, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
+	GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWorkspace, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
@@ -100,12 +109,24 @@ type Querier interface {
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
 	ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
+	// Agents that are not archived, plus archived agents whose sandbox is not
+	// cleaned up yet.
+	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
 	// The most recently synced content of each template.
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// The effective role per org honours the org's identity mode (ADR 0004):
 	// platform counts manual rows, idp counts IdP rows plus the manual owner,
 	// hybrid counts both. The highest role wins.
 	ListEffectiveMemberships(ctx context.Context, userID pgtype.UUID) ([]ListEffectiveMembershipsRow, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Execution state rendered by koinon-reconciler (plan item R2) and read by
+	// koinon-agentd.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// The reconciler walks orgs one at a time, so every later query is org-scoped.
+	ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcileRow, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
@@ -130,6 +151,9 @@ type Querier interface {
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
+	// Records the observed sandbox. started_at and stopped_at are stamped on the
+	// transition into ready and stopped.
+	RecordAgentSandbox(ctx context.Context, arg RecordAgentSandboxParams) (AgentSandbox, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
 	// Makes a parked run claimable again (approval decided, input given). It
 	// stays parked until an owner claims it: parked -> starting.
@@ -140,6 +164,8 @@ type Querier interface {
 	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
+	// Records a newly issued agentgateway key by ID and hash.
+	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// Stores the harness session for the ticket. Fenced by the run epoch: only the
@@ -156,6 +182,7 @@ type Querier interface {
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.
 	UpsertGroupMemberships(ctx context.Context, arg UpsertGroupMembershipsParams) error
+	UpsertOrgWorkspace(ctx context.Context, arg UpsertOrgWorkspaceParams) (OrgWorkspace, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Templates are platform data (not org-owned); see 00002_agents.sql.
