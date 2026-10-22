@@ -13,3 +13,6 @@ var (
 	LinkScript      = linkScript
 	InstructionLink = instructionLink
 )
+
+// SweepScript exposes the script that ends the processes left in the sandbox.
+var SweepScript = sweepScript
