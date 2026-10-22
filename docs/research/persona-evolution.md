@@ -184,6 +184,37 @@ Prompt-based mitigations help only partly ([Your Agent May Misevolve, Shao et al
    If open-weights models are ever self-hosted, persona-vector projections on the sycophancy and evil directions are a cheap drift monitor.
 6. **Treat "growing a personality" as a product hypothesis, not a known benefit.** No study shows that a self-authored persona improves task outcomes or user trust over a well-written fixed persona. Persona prompts don't improve accuracy, and engagement-seeking traits hurt users.
 
+## Decided rules (2026-10-22)
+
+procoduck decided these rules from the evidence above, as input to the v0.2 design (#91). They are recorded here, not in an ADR, until the v0.2 design pass.
+
+1. **Schema:**
+   - The persona is a set of typed sections in the agent store (ADR 0033), each with a character cap: working style (600), conventions (1,500), domain notes (3,000), lessons learned (2,000) and team preferences (800).
+   - Per-person preferences go in each requester's private memory, never in the persona.
+   - The fixed core sits above the persona in the prompt and is restored every run. It holds the role, values, rules, approvals, permissions and identity.
+2. **Forbidden content** is rejected by a deterministic linter on every proposed change:
+   - instructions to future runs ("always", "never", "ignore");
+   - claims about the agent's own nature, feelings or relationships;
+   - anything about values, rules, approvals, permissions, tools or the fixed core;
+   - secrets and credentials, URLs to fetch, and text that matches injection patterns.
+3. **Gating:**
+   - The agent never writes the persona directly. It proposes small diffs, never full rewrites.
+   - Domain notes and lessons learned auto-merge once the checks pass.
+   - Working style, conventions and team preferences need the owner's approval through the "waiting on you" column.
+   - Every change is a git commit and can be reverted.
+4. **Checks:**
+   - On every proposal: the linter, an injection scan, and size and churn limits. These are free and deterministic.
+   - Once a day, for each agent with merged changes: a fixed suite of sycophancy probes, refusal and safety probes, and the template's task regression set. They run on the agent's own model and are charged to the org, with a cap.
+   - A failure reverts that day's persona changes and notifies the owner.
+5. **Drift:**
+   - Once a month, the owner reviews the cumulative diff against the last reviewed baseline, then approves it (it becomes the new baseline) or reverts it.
+   - If churn since the baseline goes over a cap, for example 50% of the persona's characters, auto-merge pauses until that review.
+6. **Personal agents** follow the same rules, with the user as the approver. The fixed core still comes from the template and the org.
+7. **Measuring the hypothesis:**
+   - Every run records the persona's git version.
+   - For each version, Koinon tracks the approval rate, how often requesters reject the work or ask for rework, and ticket completion time and cost. These are compared with the template's starting persona.
+   - Whether evolution stays on by default is decided after real use.
+
 ## Evidence gaps
 
 - **No direct study** of an agent editing its own persona or identity file over a long deployment with outcomes measured. Letta, Hermes and Generative Agents ship or demo the mechanism but publish no longitudinal evaluations of personas.
