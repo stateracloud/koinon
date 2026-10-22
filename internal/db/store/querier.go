@@ -14,6 +14,9 @@ type Querier interface {
 	// draft -> active with the given version (ADR 0020). No row: not a draft.
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
+	// Adds reported token usage to an unfinished run. The caller cancels the run
+	// when tokens_used reaches max_tokens. No row: the run is finished or absent.
+	AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run, error)
 	// Appends an event from the control plane (API, scheduler) without an epoch,
 	// for example a cancel notice. Stamped with the run's current epoch.
 	AppendRunControlEvent(ctx context.Context, arg AppendRunControlEventParams) (RunEvent, error)
@@ -27,14 +30,21 @@ type Querier interface {
 	AppendRunEvent(ctx context.Context, arg AppendRunEventParams) (RunEvent, error)
 	AppendTicketEvent(ctx context.Context, arg AppendTicketEventParams) (TicketEvent, error)
 	ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Agent, error)
+	// Archiving an agent cancels every run it has not finished.
+	CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRunsForAgentParams) ([]Run, error)
 	// A ticket moved to Done cancels its queued runs (plan item A4).
 	CancelQueuedRunsForTicket(ctx context.Context, arg CancelQueuedRunsForTicketParams) ([]Run, error)
 	// Control-plane cancel from any non-terminal state (user cancel, run caps,
 	// park expiry). Needs no epoch; an owner's next write then matches no rows
 	// because the state changed.
 	CancelRun(ctx context.Context, arg CancelRunParams) (Run, error)
+	// Cancels owned runs that have been owned longer than their wall-clock cap
+	// (plan item A4). Parked time is excluded through parked_seconds. Safe to run
+	// from every API replica: a run canceled by one sweep no longer matches.
+	CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOverWallClockParams) ([]Run, error)
 	// queued -> starting, or a resolved parked -> starting. Takes the oldest
-	// claimable run (by ready_at) of an active agent that has no active run, and
+	// claimable run (by ready_at) of an active agent that has no active run and
+	// whose ticket has no other owned or parked run, and
 	// makes the caller its owner under a new epoch. Locking the agent row with
 	// SKIP LOCKED serialises claims per agent, so concurrent claimers move on to
 	// other agents, and FIFO holds per agent. runs_one_active_per_agent backstops
@@ -94,6 +104,9 @@ type Querier interface {
 	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
+	// Whether the ticket already has a queued run, which will see every message
+	// appended before it starts (plan item A4).
+	HasQueuedRunForTicket(ctx context.Context, arg HasQueuedRunForTicketParams) (bool, error)
 	// Extends the owner's lease. No row: the caller is no longer the owner and
 	// must stop (ADR 0030).
 	HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run, error)
@@ -106,6 +119,8 @@ type Querier interface {
 	// platform counts manual rows, idp counts IdP rows plus the manual owner,
 	// hybrid counts both. The highest role wins.
 	ListEffectiveMemberships(ctx context.Context, userID pgtype.UUID) ([]ListEffectiveMembershipsRow, error)
+	// Every live org, for control-plane sweeps that then work org by org.
+	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)

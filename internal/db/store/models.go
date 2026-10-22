@@ -596,6 +596,8 @@ type Run struct {
 	FinishedAt          pgtype.Timestamptz
 	CreatedAt           pgtype.Timestamptz
 	UpdatedAt           pgtype.Timestamptz
+	ParkedSeconds       int64
+	TokensUsed          int64
 }
 
 type RunEvent struct {
