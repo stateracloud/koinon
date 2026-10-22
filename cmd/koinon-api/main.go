@@ -8,6 +8,10 @@
 //
 // "koinon-api migrate" applies the database migrations and exits; the Helm
 // chart runs it as a hook Job with the migration role.
+//
+// "koinon-api preflight [flags]" checks the cluster for Koinon's install
+// prerequisites and exits non-zero when one is missing (plan item H2); the chart
+// runs it as a pre-install and pre-upgrade hook Job. It needs no database.
 package main
 
 import (
@@ -145,6 +149,11 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "preflight" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runPreflight(ctx, os.Args[2:], os.Stdout)
+	}
 	cfg, err := parseFlags(os.Args[1:])
 	if err != nil {
 		return err
@@ -157,7 +166,7 @@ func run() error {
 	case len(cfg.args) == 1 && cfg.args[0] == "migrate":
 		return migrate(ctx, cfg.databaseURL, cfg.wait)
 	case len(cfg.args) > 0:
-		return fmt.Errorf("unknown arguments %q; the only subcommand is \"migrate\"", cfg.args)
+		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\" and \"preflight\" (first)", cfg.args)
 	case cfg.migrate:
 		if err := migrate(ctx, cfg.databaseURL, cfg.wait); err != nil {
 			return err
