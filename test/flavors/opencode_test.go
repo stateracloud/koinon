@@ -44,6 +44,7 @@ var opencode = flavor{
 	unknownSession: "session not found",
 	// The global AGENTS.md links to the file koinon-agentd writes.
 	instructionsInSystem: true,
+	instructionLink:      "/etc/koinon/opencode/AGENTS.md",
 	// OpenCode turns MCP prompts into commands named <server>:<prompt>.
 	readyCommand: "koinon:" + readyPrompt,
 	// OpenCode 2.0.24 reports a model of its own choosing until one is selected.
@@ -94,18 +95,7 @@ func opencodeHarness(ctx context.Context, sb *sandbox, gw *gateway, extra ...str
 // instructions is empty, the instruction file koinon-agentd writes.
 func newOpencodeSandbox(ctx context.Context, instructions string) *sandbox {
 	GinkgoHelper()
-	if dockerErr != nil {
-		Skip("Docker is not available: " + dockerErr.Error())
-	}
-	ensureImage(opencode)
-	sb := newSandbox(opencode.image(), "OPENAI_API_KEY="+fakeKey)
-	DeferCleanup(func() { sb.remove(context.Background()) })
-	sb.start(ctx)
-	sb.run(ctx, "mkdir", "-p", workdir)
-	if instructions != "" {
-		sb.write(ctx, instructionsPath, instructions)
-	}
-	return sb
+	return newFlavorSandbox(ctx, opencode, instructions)
 }
 
 // lastBody is the last chat request the fake model received.
@@ -132,22 +122,6 @@ var _ = Describe("koinon-opencode instructions", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lastBody(gw)).To(ContainSubstring(instructionsMarker + " version two"))
 	}, SpecTimeout(3*time.Minute))
-
-	DescribeTable("refuses to start without the instruction file",
-		func(ctx SpecContext, setup string) {
-			sb := newOpencodeSandbox(ctx, "")
-			if setup != "" {
-				sb.run(ctx, "sh", "-c", setup)
-			}
-			_, stderr, code := sb.try(ctx, opencode.command("http://gw.test/v1", contractModel, "http://gw.test/mcp")...)
-			Expect(code).To(Equal(64))
-			Expect(stderr).To(ContainSubstring("missing instructions: " + instructionsPath))
-		},
-		Entry("missing", SpecTimeout(2*time.Minute), ""),
-		Entry("empty", SpecTimeout(2*time.Minute), "mkdir -p /sandbox/.koinon && : > "+instructionsPath),
-		Entry("a symbolic link", SpecTimeout(2*time.Minute),
-			"mkdir -p /sandbox/.koinon && echo x > /sandbox/x.md && ln -s /sandbox/x.md "+instructionsPath),
-	)
 })
 
 // homePlugin is an OpenCode v2 plugin (the promise form of @opencode/plugin's define) that
