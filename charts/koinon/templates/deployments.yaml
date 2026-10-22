@@ -46,6 +46,12 @@ spec:
               containerPort: {{ $v.otlpPort }}
             - name: tools
               containerPort: {{ $v.toolsPort }}
+          # Until the first migration has run, koinon-api retries its bootstrap without serving;
+          # the startup probe keeps the liveness probe from restarting it meanwhile.
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 2
+            failureThreshold: 150
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           livenessProbe:
