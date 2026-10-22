@@ -116,6 +116,14 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
         return { connection: connections[0], results: lastTest }
       },
       'koinon.connection.v1alpha1.ConnectionService/GetConnection': () => ({ connection: connections[0] }),
+      'koinon.connection.v1alpha1.ConnectionService/ListInstallationRepos': (req) => {
+        const repos = [
+          { fullName: 'acme/widgets', private: true, defaultBranch: 'main' },
+          { fullName: 'acme/gadgets', defaultBranch: 'main' },
+        ]
+        const q = String(req.query ?? '').toLowerCase()
+        return { repos: repos.filter((r) => r.fullName.includes(q)), totalCount: String(repos.length) }
+      },
       'koinon.template.v1alpha1.TemplateService/ListTemplates': () => ({ templates: [template] }),
       'koinon.agent.v1alpha1.AgentService/CreateAgentFromTemplate': (req) => {
         expect(req).toMatchObject({ orgId: org, templateId: 'tpl-1', grants: [{ connector: 'github', connectionId: 'c-1', repositories: ['acme/widgets'] }] })
@@ -192,6 +200,7 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   await expect(page.getByRole('list', { name: 'Checks for Test the connection' })).toContainText('token minted')
   expect(created[0]).toMatchObject({ appId: '12', installationId: '34', privateKey: pem, test: true })
   await expect(page.locator('body')).not.toContainText('E2E-ONLY-NOT-A-KEY')
+  await expect(page.getByRole('list', { name: 'Installation repositories' })).toContainText('acme/gadgets')
 
   // 2. Create an agent from the template and activate it.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
@@ -199,7 +208,9 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   await page.getByRole('button', { name: 'Next' }).click()
   await expect(page.getByRole('radio', { name: /OpenCode/ })).toBeChecked()
   await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByLabel('Repository 1').fill('acme/widgets')
+  await page.getByRole('combobox', { name: 'Repository 1' }).fill('widg')
+  await page.getByRole('option', { name: /acme\/widgets/ }).click()
+  await expect(page.getByRole('combobox', { name: 'Repository 1' })).toHaveValue('acme/widgets')
   await page.getByRole('button', { name: 'Next' }).click()
   await expect(page.getByRole('region', { name: 'Draft summary' })).toContainText('Connection: Acme GitHub')
   await page.getByRole('button', { name: 'Create draft' }).click()

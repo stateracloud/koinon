@@ -43,6 +43,11 @@ type FileChange struct {
 	Path    string `json:"path" jsonschema:"path relative to the repository root, for example docs/README.md"`
 	Content string `json:"content,omitempty" jsonschema:"the file's full new content (UTF-8 text)"`
 	Delete  bool   `json:"delete,omitempty" jsonschema:"true to delete the file; content must then be empty"`
+	// Executable is the only mode choice: true writes the file as git mode 100755. Without
+	// it a new file is regular (100644) and a modified file keeps its mode on the base
+	// branch, so an existing script stays executable. Symbolic links (120000) and
+	// submodules (160000) cannot be expressed, so they are never written.
+	Executable bool `json:"executable,omitempty" jsonschema:"true to write the file as executable (git mode 100755), for example a new script run as ./scripts/check.sh; otherwise a new file is regular (100644) and a modified file keeps its current mode, so an existing executable script stays executable"`
 }
 
 // CommentArgs are comment_on_issue's arguments.
@@ -172,6 +177,9 @@ func ValidatePullRequest(a PullRequestArgs) error {
 		if f.Delete && f.Content != "" {
 			reasons = append(reasons, fmt.Sprintf("path %q is deleted but has content", f.Path))
 		}
+		if f.Delete && f.Executable {
+			reasons = append(reasons, fmt.Sprintf("path %q is deleted but marked executable", f.Path))
+		}
 		total += len(f.Content)
 	}
 	if total > MaxTotalBytes {
@@ -210,6 +218,11 @@ type Risk struct {
 	// Binary lists files whose content is not text (NUL or other control
 	// bytes) or whose name says they are binary.
 	Binary []string `json:"binary,omitempty"`
+	// Executable lists the files the call marks executable (git mode 100755). It is
+	// derived from the arguments alone, so a marked file that already is executable on
+	// the base branch is listed too; the approval diff shows each file's mode change. An
+	// unmarked file keeps its mode, so it never becomes executable.
+	Executable []string `json:"executable,omitempty"`
 }
 
 var (
@@ -266,6 +279,9 @@ func AssessRisk(a PullRequestArgs) Risk {
 		}
 		if LooksBinary(f.Path, f.Content) {
 			r.Binary = append(r.Binary, f.Path)
+		}
+		if f.Executable {
+			r.Executable = append(r.Executable, f.Path)
 		}
 	}
 	return r

@@ -50,6 +50,43 @@ var _ = Describe("WriteTool", func() {
 		Expect(out.GetPullRequest().GetBranch()).To(Equal("koinon/fix-typo"))
 		Expect(out.GetPullRequest().GetFiles()).To(HaveLen(1))
 		Expect(out.GetPullRequest().GetFiles()[0].GetPath()).To(Equal("README.md"))
+		Expect(out.GetPullRequest().GetFiles()[0].GetExecutable()).To(BeFalse())
+	})
+
+	It("decodes the executable flag and puts it on the approval", func() {
+		raw := []byte(`{"branch":"koinon/add-check","title":"Add a check script","files":[` +
+			`{"path":"scripts/check.sh","content":"#!/bin/sh\n","executable":true},{"path":"README.md","content":"x"}]}`)
+		call, err := githubtools.DecodeCall(githubtools.ToolCreatePullRequest, raw)
+		Expect(err).NotTo(HaveOccurred())
+		args := call.(*githubtools.PullRequestArgs)
+		Expect(args.Files[0].Executable).To(BeTrue())
+		Expect(args.Files[1].Executable).To(BeFalse())
+
+		out := &approvalv1alpha1.Approval{}
+		call.SetApprovalCall(out)
+		Expect(out.GetPullRequest().GetFiles()[0].GetExecutable()).To(BeTrue())
+		Expect(out.GetPullRequest().GetFiles()[1].GetExecutable()).To(BeFalse())
+	})
+
+	It("refuses an executable flag that is not a boolean or on a deleted file", func() {
+		_, err := githubtools.DecodeCall(githubtools.ToolCreatePullRequest,
+			[]byte(`{"branch":"koinon/x","title":"x","files":[{"path":"a.sh","content":"x","executable":"yes"}]}`))
+		Expect(err).To(MatchError(ContainSubstring("decode the recorded arguments")))
+		_, err = githubtools.DecodeCall(githubtools.ToolCreatePullRequest,
+			[]byte(`{"branch":"koinon/x","title":"x","files":[{"path":"a.sh","delete":true,"executable":true}]}`))
+		Expect(err).To(MatchError(ContainSubstring("deleted but marked executable")))
+	})
+
+	It("keeps the executable flag in the canonical arguments the hash covers", func() {
+		a := validPR()
+		plain, err := githubtools.Canonical(a)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(plain)).NotTo(ContainSubstring("executable"))
+		a.Files[0].Executable = true
+		exec, err := githubtools.Canonical(a)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(exec)).To(ContainSubstring(`"executable":true`))
+		Expect(githubtools.HashArgs(exec)).NotTo(Equal(githubtools.HashArgs(plain)))
 	})
 
 	It("decodes, validates and converts a comment call", func() {

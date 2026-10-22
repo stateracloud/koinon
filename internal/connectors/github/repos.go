@@ -124,12 +124,39 @@ func (c *Client) withToken(ctx context.Context, tok Token, method, path string, 
 type Repository struct {
 	FullName      string `json:"full_name"`
 	DefaultBranch string `json:"default_branch"`
+	Private       bool   `json:"private"`
 }
 
 // GetRepository returns the repository.
 func (c *Client) GetRepository(ctx context.Context, tok Token, r Repo) (Repository, error) {
 	var out Repository
 	err := c.withToken(ctx, tok, http.MethodGet, r.path(""), nil, &out, http.StatusOK)
+	return out, err
+}
+
+// MaxPerPage is the largest page GitHub's list endpoints serve.
+const MaxPerPage = 100
+
+// InstallationRepositories is one page of GET /installation/repositories.
+type InstallationRepositories struct {
+	// TotalCount is how many repositories the installation can access, on every page.
+	TotalCount   int64        `json:"total_count"`
+	Repositories []Repository `json:"repositories"`
+}
+
+// ListInstallationRepositories returns one page (1-based, perPage up to MaxPerPage) of the
+// repositories the token's installation can access; a token narrowed to some repositories
+// lists only those.
+//
+//   - GET /installation/repositories?per_page=&page=   {total_count, repositories}
+//     https://docs.github.com/en/rest/apps/installations#list-repositories-accessible-to-the-app-installation
+func (c *Client) ListInstallationRepositories(ctx context.Context, tok Token, page, perPage int) (InstallationRepositories, error) {
+	if page < 1 || perPage < 1 || perPage > MaxPerPage {
+		return InstallationRepositories{}, fmt.Errorf("github: page must be at least 1 and per_page 1 to %d", MaxPerPage)
+	}
+	var out InstallationRepositories
+	path := "/installation/repositories?" + url.Values{"page": {strconv.Itoa(page)}, "per_page": {strconv.Itoa(perPage)}}.Encode()
+	err := c.withToken(ctx, tok, http.MethodGet, path, nil, &out, http.StatusOK)
 	return out, err
 }
 
@@ -234,6 +261,35 @@ func (c *Client) CreateBlob(ctx context.Context, tok Token, r Repo, content []by
 		"content": base64.StdEncoding.EncodeToString(content), "encoding": "base64",
 	}, &out, http.StatusCreated)
 	return out.SHA, err
+}
+
+// TreeItem is one entry of an existing tree: a blob (Mode 100644, 100755 or 120000), a
+// subtree (040000) or a submodule commit (160000).
+type TreeItem struct {
+	Path string `json:"path"`
+	Mode string `json:"mode"`
+	Type string `json:"type"`
+	SHA  string `json:"sha"`
+}
+
+// Tree is a tree listing. Truncated is set when GitHub cut a recursive listing short (more
+// than 100,000 entries or 7 MB); the entries it did return are correct.
+type Tree struct {
+	SHA       string     `json:"sha"`
+	Tree      []TreeItem `json:"tree"`
+	Truncated bool       `json:"truncated"`
+}
+
+// GetTree lists a tree: its direct entries, or with recursive every entry below it, with
+// paths relative to the tree.
+func (c *Client) GetTree(ctx context.Context, tok Token, r Repo, sha string, recursive bool) (Tree, error) {
+	p := r.path("/git/trees/%s", url.PathEscape(sha))
+	if recursive {
+		p += "?recursive=1"
+	}
+	var out Tree
+	err := c.withToken(ctx, tok, http.MethodGet, p, nil, &out, http.StatusOK)
+	return out, err
 }
 
 // TreeEntry is one path of a new tree. A nil SHA deletes the path from the base tree.

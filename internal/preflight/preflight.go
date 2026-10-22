@@ -3,8 +3,10 @@
 // Package preflight checks a cluster for Koinon's install prerequisites (plan item H2, ADRs
 // 0048 and 0049): Agent Sandbox, the OpenShell gateway, the sandbox RuntimeClass, the CNPG
 // operator in cnpg mode, the agentgateway GatewayClass in kubernetes mode and Kata guest
-// seccomp. Every check only reads, except the seccomp probe, which runs one short-lived
-// unprivileged pod. A missing prerequisite fails; guest seccomp only warns.
+// seccomp, and whether the cluster enforces NetworkPolicy. Every check only reads, except the
+// probes: the seccomp probe runs one short-lived unprivileged pod, the NetworkPolicy probe two
+// pods and a NetworkPolicy in the release namespace. A missing prerequisite fails; guest
+// seccomp and NetworkPolicy enforcement only warn.
 package preflight
 
 import (
@@ -124,13 +126,19 @@ type Checker struct {
 	OpenShell OpenShell
 	// Prober is nil when the seccomp probe is disabled.
 	Prober Prober
+	// NetPol is nil when the NetworkPolicy probe is disabled.
+	NetPol NetPolProber
 	Config Config
-	// CallTimeout bounds each API and gateway call; the probe has its own timeout.
+	// CallTimeout bounds each API and gateway call; the probes have their own timeouts.
 	CallTimeout time.Duration
 }
 
-// Run runs every check that applies to the configuration, in a fixed order.
+// Run runs every check that applies to the configuration and reports them in a fixed order.
+// The NetworkPolicy probe runs alongside the other checks, so that the two probes' timeouts do
+// not add up against the preflight Job's deadline.
 func (c *Checker) Run(ctx context.Context) []Result {
+	netpol := make(chan Result, 1)
+	go func() { netpol <- c.checkNetworkPolicy(ctx) }()
 	results := []Result{
 		c.checkAgentSandbox(ctx),
 		c.checkOpenShell(ctx),
@@ -142,7 +150,7 @@ func (c *Checker) Run(ctx context.Context) []Result {
 	if c.Config.GatewayMode == project.GatewayKubernetes {
 		results = append(results, c.checkGatewayClass(ctx))
 	}
-	return append(results, c.checkGuestSeccomp(ctx))
+	return append(results, c.checkGuestSeccomp(ctx), <-netpol)
 }
 
 func (c *Checker) callCtx(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -503,6 +511,47 @@ func (c *Checker) checkGuestSeccomp(ctx context.Context) Result {
 		}
 	}
 	return Result{Check: check, Status: Pass, Message: fmt.Sprintf("on: Seccomp: 2, keyctl EPERM in a %s pod", c.Config.RuntimeClassName)}
+}
+
+// NetPolNotEnforced is the warning when a denied connection got through.
+const NetPolNotEnforced = "NetworkPolicy is not enforced in this cluster; the OTLP receiver and gateway access rules are advisory"
+
+// verifyNetPol tells the operator how to check NetworkPolicy enforcement by hand.
+const verifyNetPol = "verify by hand: apply a NetworkPolicy that denies ingress to a test pod and check that " +
+	"another pod can no longer connect to it. Enforcement needs a network plugin that implements " +
+	"NetworkPolicy (any one; Koinon depends on none in particular)"
+
+func (c *Checker) checkNetworkPolicy(ctx context.Context) Result {
+	const check = "NetworkPolicy enforcement"
+	if c.NetPol == nil {
+		return Result{
+			Check: check, Status: Warn,
+			Message: "not checked (preflight.networkPolicyProbe.enabled=false)",
+			Fix:     verifyNetPol,
+		}
+	}
+	res, err := c.NetPol.Probe(ctx)
+	switch {
+	case err != nil:
+		return Result{
+			Check: check, Status: Warn,
+			Message: fmt.Sprintf("probe did not report: %v", err),
+			Fix:     verifyNetPol,
+		}
+	case !res.ControlReached:
+		return Result{
+			Check: check, Status: Warn,
+			Message: "inconclusive: the probe client could not reach the probe server on the port its NetworkPolicy allows",
+			Fix:     "check for other NetworkPolicies or a firewall between pods in the release namespace; " + verifyNetPol,
+		}
+	case res.DeniedReached:
+		return Result{
+			Check: check, Status: Warn,
+			Message: NetPolNotEnforced,
+			Fix:     "install a network plugin that enforces NetworkPolicy, or restrict access to the OTLP receiver and agentgateway another way",
+		}
+	}
+	return Result{Check: check, Status: Pass, Message: "a NetworkPolicy denying ingress blocked a probe connection in the release namespace"}
 }
 
 // Write prints the results for the operator and returns how many failed.

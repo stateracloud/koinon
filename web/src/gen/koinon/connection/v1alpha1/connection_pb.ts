@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/connection/v1alpha1/connection.proto.
  */
 export const file_koinon_connection_v1alpha1_connection: GenFile = /*@__PURE__*/
-  fileDesc("Citrb2lub24vY29ubmVjdGlvbi92MWFscGhhMS9jb25uZWN0aW9uLnByb3RvEhprb2lub24uY29ubmVjdGlvbi52MWFscGhhMSJnCgVTY29wZRIKCgJpZBgBIAEoCRIuCgR0aWVyGAIgASgOMiAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGllchITCgtkZXNjcmlwdGlvbhgDIAEoCRINCgV0b29scxgEIAMoCSLIAQoNQ29ubmVjdG9yVHlwZRIKCgJpZBgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIRCglhdXRoX3R5cGUYBSABKAkSMQoGc2NvcGVzGAYgAygLMiEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU2NvcGUSKQoIZG9jdW1lbnQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IhsKGUxpc3RDb25uZWN0b3JUeXBlc1JlcXVlc3QiYAoaTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2USQgoPY29ubmVjdG9yX3R5cGVzGAEgAygLMikua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdG9yVHlwZSJHCgtDaGVja1Jlc3VsdBINCgVjaGVjaxgBIAEoCRIMCgRzdGVwGAIgASgJEgoKAm9rGAMgASgIEg8KB21lc3NhZ2UYBCABKAkiVAoQR2l0SHViQ29ubmVjdGlvbhIOCgZhcHBfaWQYASABKAMSFwoPaW5zdGFsbGF0aW9uX2lkGAIgASgDEhcKD2tleV9maW5nZXJwcmludBgDIAEoCSL7AgoKQ29ubmVjdGlvbhIKCgJpZBgBIAEoCRIOCgZvcmdfaWQYAiABKAkSEQoJY29ubmVjdG9yGAMgASgJEhQKDGRpc3BsYXlfbmFtZRgEIAEoCRI8CgZzdGF0dXMYBSABKA4yLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uU3RhdHVzEjIKDmxhc3RfdGVzdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI6CglsYXN0X3Rlc3QYByADKAsyJy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DaGVja1Jlc3VsdBIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI+CgZnaXRodWIYCiABKAsyLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HaXRIdWJDb25uZWN0aW9uSABCCgoIc2V0dGluZ3MilgEKHUNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSDgoGYXBwX2lkGAMgASgDEhcKD2luc3RhbGxhdGlvbl9pZBgEIAEoAxIYCgtwcml2YXRlX2tleRgFIAEoCUIDgAEBEgwKBHRlc3QYBiABKAgilgEKHkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbhI4CgdyZXN1bHRzGAIgAygLMicua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ2hlY2tSZXN1bHQiPQoUR2V0Q29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkiUwoVR2V0Q29ubmVjdGlvblJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uIigKFkxpc3RDb25uZWN0aW9uc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIlYKF0xpc3RDb25uZWN0aW9uc1Jlc3BvbnNlEjsKC2Nvbm5lY3Rpb25zGAEgAygLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbiI+ChVUZXN0Q29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkijgEKFlRlc3RDb25uZWN0aW9uUmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24SOAoHcmVzdWx0cxgCIAMoCzInLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNoZWNrUmVzdWx0Kn0KBFRpZXISFAoQVElFUl9VTlNQRUNJRklFRBAAEg0KCVRJRVJfUkVBRBABEhkKFVRJRVJfUkVWRVJTSUJMRV9XUklURRACEiEKHVRJRVJfRVhURVJOQUxfT1JfSVJSRVZFUlNJQkxFEAMSEgoOVElFUl9GT1JCSURERU4QBCqOAQoQQ29ubmVjdGlvblN0YXR1cxIhCh1DT05ORUNUSU9OX1NUQVRVU19VTlNQRUNJRklFRBAAEh4KGkNPTk5FQ1RJT05fU1RBVFVTX1VOVEVTVEVEEAESGAoUQ09OTkVDVElPTl9TVEFUVVNfT0sQAhIdChlDT05ORUNUSU9OX1NUQVRVU19GQUlMSU5HEAMypQUKEUNvbm5lY3Rpb25TZXJ2aWNlEogBChJMaXN0Q29ubmVjdG9yVHlwZXMSNS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdG9yVHlwZXNSZXF1ZXN0GjYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2UiA5ACARKPAQoWQ3JlYXRlR2l0SHViQ29ubmVjdGlvbhI5LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXF1ZXN0Gjoua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ3JlYXRlR2l0SHViQ29ubmVjdGlvblJlc3BvbnNlEnkKDUdldENvbm5lY3Rpb24SMC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HZXRDb25uZWN0aW9uUmVxdWVzdBoxLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkdldENvbm5lY3Rpb25SZXNwb25zZSIDkAIBEn8KD0xpc3RDb25uZWN0aW9ucxIyLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RDb25uZWN0aW9uc1JlcXVlc3QaMy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdGlvbnNSZXNwb25zZSIDkAIBEncKDlRlc3RDb25uZWN0aW9uEjEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGVzdENvbm5lY3Rpb25SZXF1ZXN0GjIua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGVzdENvbm5lY3Rpb25SZXNwb25zZUJYWlZnaXRodWIuY29tL3Byb2NvZHVjay9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9jb25uZWN0aW9uL3YxYWxwaGExO2Nvbm5lY3Rpb252MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("Citrb2lub24vY29ubmVjdGlvbi92MWFscGhhMS9jb25uZWN0aW9uLnByb3RvEhprb2lub24uY29ubmVjdGlvbi52MWFscGhhMSJnCgVTY29wZRIKCgJpZBgBIAEoCRIuCgR0aWVyGAIgASgOMiAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGllchITCgtkZXNjcmlwdGlvbhgDIAEoCRINCgV0b29scxgEIAMoCSLIAQoNQ29ubmVjdG9yVHlwZRIKCgJpZBgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIRCglhdXRoX3R5cGUYBSABKAkSMQoGc2NvcGVzGAYgAygLMiEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU2NvcGUSKQoIZG9jdW1lbnQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IhsKGUxpc3RDb25uZWN0b3JUeXBlc1JlcXVlc3QiYAoaTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2USQgoPY29ubmVjdG9yX3R5cGVzGAEgAygLMikua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdG9yVHlwZSJHCgtDaGVja1Jlc3VsdBINCgVjaGVjaxgBIAEoCRIMCgRzdGVwGAIgASgJEgoKAm9rGAMgASgIEg8KB21lc3NhZ2UYBCABKAkiVAoQR2l0SHViQ29ubmVjdGlvbhIOCgZhcHBfaWQYASABKAMSFwoPaW5zdGFsbGF0aW9uX2lkGAIgASgDEhcKD2tleV9maW5nZXJwcmludBgDIAEoCSL7AgoKQ29ubmVjdGlvbhIKCgJpZBgBIAEoCRIOCgZvcmdfaWQYAiABKAkSEQoJY29ubmVjdG9yGAMgASgJEhQKDGRpc3BsYXlfbmFtZRgEIAEoCRI8CgZzdGF0dXMYBSABKA4yLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uU3RhdHVzEjIKDmxhc3RfdGVzdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI6CglsYXN0X3Rlc3QYByADKAsyJy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DaGVja1Jlc3VsdBIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI+CgZnaXRodWIYCiABKAsyLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HaXRIdWJDb25uZWN0aW9uSABCCgoIc2V0dGluZ3MilgEKHUNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSDgoGYXBwX2lkGAMgASgDEhcKD2luc3RhbGxhdGlvbl9pZBgEIAEoAxIYCgtwcml2YXRlX2tleRgFIAEoCUIDgAEBEgwKBHRlc3QYBiABKAgilgEKHkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbhI4CgdyZXN1bHRzGAIgAygLMicua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ2hlY2tSZXN1bHQiPQoUR2V0Q29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkiUwoVR2V0Q29ubmVjdGlvblJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uIigKFkxpc3RDb25uZWN0aW9uc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIlYKF0xpc3RDb25uZWN0aW9uc1Jlc3BvbnNlEjsKC2Nvbm5lY3Rpb25zGAEgAygLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbiI+ChVUZXN0Q29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkijgEKFlRlc3RDb25uZWN0aW9uUmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24SOAoHcmVzdWx0cxgCIAMoCzInLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNoZWNrUmVzdWx0ImgKHExpc3RJbnN0YWxsYXRpb25SZXBvc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkSEgoKcGFnZV90b2tlbhgDIAEoCRINCgVxdWVyeRgEIAEoCSJOChBJbnN0YWxsYXRpb25SZXBvEhEKCWZ1bGxfbmFtZRgBIAEoCRIPCgdwcml2YXRlGAIgASgIEhYKDmRlZmF1bHRfYnJhbmNoGAMgASgJIooBCh1MaXN0SW5zdGFsbGF0aW9uUmVwb3NSZXNwb25zZRI7CgVyZXBvcxgBIAMoCzIsLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkluc3RhbGxhdGlvblJlcG8SFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEhMKC3RvdGFsX2NvdW50GAMgASgDKn0KBFRpZXISFAoQVElFUl9VTlNQRUNJRklFRBAAEg0KCVRJRVJfUkVBRBABEhkKFVRJRVJfUkVWRVJTSUJMRV9XUklURRACEiEKHVRJRVJfRVhURVJOQUxfT1JfSVJSRVZFUlNJQkxFEAMSEgoOVElFUl9GT1JCSURERU4QBCqOAQoQQ29ubmVjdGlvblN0YXR1cxIhCh1DT05ORUNUSU9OX1NUQVRVU19VTlNQRUNJRklFRBAAEh4KGkNPTk5FQ1RJT05fU1RBVFVTX1VOVEVTVEVEEAESGAoUQ09OTkVDVElPTl9TVEFUVVNfT0sQAhIdChlDT05ORUNUSU9OX1NUQVRVU19GQUlMSU5HEAMyuQYKEUNvbm5lY3Rpb25TZXJ2aWNlEogBChJMaXN0Q29ubmVjdG9yVHlwZXMSNS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdG9yVHlwZXNSZXF1ZXN0GjYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2UiA5ACARKPAQoWQ3JlYXRlR2l0SHViQ29ubmVjdGlvbhI5LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXF1ZXN0Gjoua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ3JlYXRlR2l0SHViQ29ubmVjdGlvblJlc3BvbnNlEnkKDUdldENvbm5lY3Rpb24SMC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HZXRDb25uZWN0aW9uUmVxdWVzdBoxLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkdldENvbm5lY3Rpb25SZXNwb25zZSIDkAIBEn8KD0xpc3RDb25uZWN0aW9ucxIyLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RDb25uZWN0aW9uc1JlcXVlc3QaMy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdGlvbnNSZXNwb25zZSIDkAIBEncKDlRlc3RDb25uZWN0aW9uEjEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGVzdENvbm5lY3Rpb25SZXF1ZXN0GjIua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGVzdENvbm5lY3Rpb25SZXNwb25zZRKRAQoVTGlzdEluc3RhbGxhdGlvblJlcG9zEjgua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdEluc3RhbGxhdGlvblJlcG9zUmVxdWVzdBo5LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RJbnN0YWxsYXRpb25SZXBvc1Jlc3BvbnNlIgOQAgFCWFpWZ2l0aHViLmNvbS9wcm9jb2R1Y2sva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vY29ubmVjdGlvbi92MWFscGhhMTtjb25uZWN0aW9udjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * Scope is a grantable capability of a connector type.
@@ -484,6 +484,111 @@ export const TestConnectionResponseSchema: GenMessage<TestConnectionResponse> = 
   messageDesc(file_koinon_connection_v1alpha1_connection, 14);
 
 /**
+ * ListInstallationReposRequest names a GitHub connection and a page.
+ *
+ * @generated from message koinon.connection.v1alpha1.ListInstallationReposRequest
+ */
+export type ListInstallationReposRequest = Message<"koinon.connection.v1alpha1.ListInstallationReposRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string connection_id = 2;
+   */
+  connectionId: string;
+
+  /**
+   * Empty for the first page; otherwise next_page_token of the previous
+   * response, sent with the same query.
+   *
+   * @generated from field: string page_token = 3;
+   */
+  pageToken: string;
+
+  /**
+   * Keeps only repositories whose owner/name contains it, ignoring case.
+   * At most 200 characters.
+   *
+   * @generated from field: string query = 4;
+   */
+  query: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.ListInstallationReposRequest.
+ * Use `create(ListInstallationReposRequestSchema)` to create a new message.
+ */
+export const ListInstallationReposRequestSchema: GenMessage<ListInstallationReposRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 15);
+
+/**
+ * InstallationRepo is one repository the installation can access.
+ *
+ * @generated from message koinon.connection.v1alpha1.InstallationRepo
+ */
+export type InstallationRepo = Message<"koinon.connection.v1alpha1.InstallationRepo"> & {
+  /**
+   * owner/name as GitHub spells it: the name to bind.
+   *
+   * @generated from field: string full_name = 1;
+   */
+  fullName: string;
+
+  /**
+   * @generated from field: bool private = 2;
+   */
+  private: boolean;
+
+  /**
+   * @generated from field: string default_branch = 3;
+   */
+  defaultBranch: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.InstallationRepo.
+ * Use `create(InstallationRepoSchema)` to create a new message.
+ */
+export const InstallationRepoSchema: GenMessage<InstallationRepo> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 16);
+
+/**
+ * ListInstallationReposResponse is one page, in GitHub's order.
+ *
+ * @generated from message koinon.connection.v1alpha1.ListInstallationReposResponse
+ */
+export type ListInstallationReposResponse = Message<"koinon.connection.v1alpha1.ListInstallationReposResponse"> & {
+  /**
+   * @generated from field: repeated koinon.connection.v1alpha1.InstallationRepo repos = 1;
+   */
+  repos: InstallationRepo[];
+
+  /**
+   * Empty on the last page. A filtered page can hold fewer repositories than
+   * an unfiltered one, or none, and still have a next page.
+   *
+   * @generated from field: string next_page_token = 2;
+   */
+  nextPageToken: string;
+
+  /**
+   * How many repositories the installation can access, before the query.
+   *
+   * @generated from field: int64 total_count = 3;
+   */
+  totalCount: bigint;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.ListInstallationReposResponse.
+ * Use `create(ListInstallationReposResponseSchema)` to create a new message.
+ */
+export const ListInstallationReposResponseSchema: GenMessage<ListInstallationReposResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 17);
+
+/**
  * Tier is a scope's risk tier (ADR 0008).
  *
  * @generated from enum koinon.connection.v1alpha1.Tier
@@ -616,6 +721,19 @@ export const ConnectionService: GenService<{
     methodKind: "unary";
     input: typeof TestConnectionRequestSchema;
     output: typeof TestConnectionResponseSchema;
+  },
+  /**
+   * ListInstallationRepos lists the repositories a GitHub connection's App
+   * installation can access, for choosing what to bind an agent to. Koinon
+   * asks GitHub with a metadata-read installation token; nothing is written.
+   * Admins and owners.
+   *
+   * @generated from rpc koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos
+   */
+  listInstallationRepos: {
+    methodKind: "unary";
+    input: typeof ListInstallationReposRequestSchema;
+    output: typeof ListInstallationReposResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_connection_v1alpha1_connection, 0);

@@ -77,6 +77,18 @@
             }
           }
         },
+        "harness": {
+          "description": "Harness settings beyond the flavor choice. Omitted means every setting is off.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pluginInstalls": {
+              "description": "Let the agent install OpenCode plugins: the sandbox may read the npm registry (registry.npmjs.org, GET and HEAD only, no credentials) from the OpenCode binary, and OpenCode loads the plugins in the agent's home and its config. Off by default. Applies to the OpenCode flavor only, so opencode must be an allowed flavor.",
+              "type": "boolean",
+              "default": false
+            }
+          }
+        },
         "instructions": {
           "description": "Markdown instructions for the agent, written to the flavor's instruction file.",
           "type": "string",

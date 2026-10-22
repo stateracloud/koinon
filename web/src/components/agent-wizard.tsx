@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RepoPicker } from '@/components/repo-picker'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { GrantBinding } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import type { Connection } from '@/gen/koinon/connection/v1alpha1/connection_pb'
@@ -23,6 +24,11 @@ export type AgentWizardProps = {
   targetPatterns?: ReadonlyMap<string, string>
   /** Whether the viewer may add a connection (admins and owners). */
   canConnect?: boolean
+  /**
+   * Whether the viewer may list a connection's repositories (admins and
+   * owners): the repository inputs then suggest the installation's.
+   */
+  canListRepos?: boolean
   onCreate: (a: NewAgent) => void
   pending?: boolean
   error?: string
@@ -48,7 +54,7 @@ function boundsText(g: Grant): string {
  * flavor, the GitHub grant (connection and repositories within the
  * template's bounds), then a summary of what the draft will propose.
  */
-export function AgentWizard({ templates, connections, targetPatterns, canConnect, onCreate, pending, error }: AgentWizardProps) {
+export function AgentWizard({ templates, connections, targetPatterns, canConnect, canListRepos, onCreate, pending, error }: AgentWizardProps) {
   const [step, setStep] = useState(0)
   const [templateId, setTemplateId] = useState(templates.length === 1 ? templates[0].id : '')
   const template = templates.find((t) => t.id === templateId)
@@ -166,6 +172,7 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
               binding={binding(i, g)}
               connections={connections.filter((c) => c.connector === g.connector)}
               canConnect={canConnect}
+              canListRepos={canListRepos}
               errors={showErrors ? grantErrors(i, g) : []}
               boundsText={boundsText(g)}
               onChange={(patch) => setBinding(i, g, patch)}
@@ -264,12 +271,13 @@ type GrantStepProps = {
   binding: Binding
   connections: readonly Connection[]
   canConnect?: boolean
+  canListRepos?: boolean
   errors: readonly string[]
   boundsText: string
   onChange: (patch: Partial<Binding>) => void
 }
 
-function GrantStep({ grant: g, binding: b, connections, canConnect, errors, boundsText, onChange }: GrantStepProps) {
+function GrantStep({ grant: g, binding: b, connections, canConnect, canListRepos, errors, boundsText, onChange }: GrantStepProps) {
   const id = useId()
   const max = g.targetsMax
   const atMax = max > 0 && b.repositories.length >= max
@@ -312,15 +320,18 @@ function GrantStep({ grant: g, binding: b, connections, canConnect, errors, boun
         <span className="text-sm font-medium" id={`${id}-repos`}>
           Repositories ({boundsText})
         </span>
-        <p className="text-muted-foreground text-xs">As owner/name. The connection’s GitHub App installation must be able to access each one.</p>
+        <p className="text-muted-foreground text-xs">
+          As owner/name. The connection’s GitHub App installation must be able to access each one
+          {canListRepos && g.connector === 'github' ? '; type to search its repositories.' : '.'}
+        </p>
         {b.repositories.map((r, ri) => (
           <div key={ri} className="flex gap-2">
-            <Input
+            <RepoPicker
               aria-label={`Repository ${ri + 1}`}
+              connectionId={b.connectionId}
+              searchable={!!canListRepos && g.connector === 'github'}
               value={r}
-              placeholder="owner/name"
-              autoComplete="off"
-              onChange={(e) => onChange({ repositories: b.repositories.map((x, xi) => (xi === ri ? e.target.value : x)) })}
+              onChange={(v) => onChange({ repositories: b.repositories.map((x, xi) => (xi === ri ? v : x)) })}
             />
             {b.repositories.length > 1 && (
               <Button type="button" variant="ghost" size="sm" aria-label={`Remove repository ${ri + 1}`} onClick={() => onChange({ repositories: b.repositories.filter((_, xi) => xi !== ri) })}>

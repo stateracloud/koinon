@@ -38,6 +38,14 @@ service ConnectionService {
   // TestConnection runs the setup guide's checks against the provider and
   // records the result. Nothing is written to the provider. Admins and owners.
   rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse);
+
+  // ListInstallationRepos lists the repositories a GitHub connection's App
+  // installation can access, for choosing what to bind an agent to. Koinon
+  // asks GitHub with a metadata-read installation token; nothing is written.
+  // Admins and owners.
+  rpc ListInstallationRepos(ListInstallationReposRequest) returns (ListInstallationReposResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // Tier is a scope's risk tier (ADR 0008).
@@ -176,4 +184,34 @@ message TestConnectionRequest {
 message TestConnectionResponse {
   Connection connection = 1;
   repeated CheckResult results = 2;
+}
+
+// ListInstallationReposRequest names a GitHub connection and a page.
+message ListInstallationReposRequest {
+  string org_id = 1;
+  string connection_id = 2;
+  // Empty for the first page; otherwise next_page_token of the previous
+  // response, sent with the same query.
+  string page_token = 3;
+  // Keeps only repositories whose owner/name contains it, ignoring case.
+  // At most 200 characters.
+  string query = 4;
+}
+
+// InstallationRepo is one repository the installation can access.
+message InstallationRepo {
+  // owner/name as GitHub spells it: the name to bind.
+  string full_name = 1;
+  bool private = 2;
+  string default_branch = 3;
+}
+
+// ListInstallationReposResponse is one page, in GitHub's order.
+message ListInstallationReposResponse {
+  repeated InstallationRepo repos = 1;
+  // Empty on the last page. A filtered page can hold fewer repositories than
+  // an unfiltered one, or none, and still have a next page.
+  string next_page_token = 2;
+  // How many repositories the installation can access, before the query.
+  int64 total_count = 3;
 }

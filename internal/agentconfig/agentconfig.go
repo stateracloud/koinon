@@ -38,6 +38,9 @@ type Config struct {
 	// says where. Set from CreateAgentFromTemplate's grants (plan item C2).
 	Bindings []Binding        `json:"bindings,omitempty"`
 	Limits   templates.Limits `json:"limits"`
+	// Harness holds the template's harness settings: harness.pluginInstalls makes agentd
+	// pass --plugin-installs to OpenCode and the reconciler open the npm registry.
+	Harness templates.Harness `json:"harness,omitzero"`
 }
 
 // Binding ties the grant on Connector to one connection and its targets.
@@ -80,6 +83,7 @@ func FromTemplate(t *templates.Template, contentHash string) Config {
 		Model:        t.Spec.Model.Name,
 		Grants:       t.Spec.Grants,
 		Limits:       t.Spec.Limits,
+		Harness:      t.Spec.Harness,
 	}
 }
 

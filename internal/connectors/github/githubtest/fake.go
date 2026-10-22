@@ -31,6 +31,8 @@ type Fake struct {
 	Account        string
 	// Repositories the installation can access (names, without the owner).
 	Repositories []string
+	// Private marks repositories (by name) as private; the rest are public.
+	Private map[string]bool
 	// Permissions the App was granted.
 	Permissions map[string]string
 	// Now defaults to time.Now; tokens expire an hour after Now.
@@ -38,6 +40,9 @@ type Fake struct {
 	// LieAboutPermissions makes token responses claim every App permission,
 	// whatever was requested, to test that clients check responses.
 	LieAboutPermissions bool
+	// TruncateTrees makes recursive tree listings answer only the root's entries, marked
+	// truncated, as GitHub does for a very large repository.
+	TruncateTrees bool
 
 	Server *httptest.Server
 	// PEM is the App's private key, as GitHub's downloaded .pem file.
@@ -45,11 +50,12 @@ type Fake struct {
 
 	key *rsa.PrivateKey
 
-	mu       sync.Mutex
-	mints    int
-	requests []Request
-	tokens   map[string]tokenInfo
-	repos    map[string]*Repo
+	mu        sync.Mutex
+	mints     int
+	listCalls int
+	requests  []Request
+	tokens    map[string]tokenInfo
+	repos     map[string]*Repo
 }
 
 // tokenInfo is what a minted token may do.
