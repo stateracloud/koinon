@@ -1,0 +1,239 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package api_test
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	connect "connectrpc.com/connect/v2"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/procoduck/koinon/internal/auth"
+	"github.com/procoduck/koinon/internal/auth/oidctest"
+	"github.com/procoduck/koinon/internal/db/store"
+	authv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1"
+)
+
+func stringsReader(s string) io.Reader { return strings.NewReader(s) }
+
+func oidcUser(sub string, groups ...string) oidctest.User {
+	return oidctest.User{Subject: sub, Email: sub + "@example.test", Name: strings.ToUpper(sub[:1]) + sub[1:], Groups: groups}
+}
+
+// oidcLogin runs the browser through start, the issuer and the callback, and
+// returns the final response (the page the user lands on).
+func (b *browser) oidcLogin(ctx context.Context, returnTo string) *http.Response {
+	u := b.e.srv.URL + "/auth/oidc/start"
+	if returnTo != "" {
+		u += "?return_to=" + url.QueryEscape(returnTo)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	Expect(err).NotTo(HaveOccurred())
+	res, err := b.http.Do(req)
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(res.Body.Close)
+	return res
+}
+
+func membershipsOf(who *authv1alpha1.WhoAmIResponse) map[string]authv1alpha1.OrgRole {
+	out := map[string]authv1alpha1.OrgRole{}
+	for _, m := range who.GetMemberships() {
+		out[m.GetOrgSlug()] = m.GetRole()
+	}
+	return out
+}
+
+// teamOrg creates a team org owned by the bootstrap admin, with one group
+// mapping from the test issuer.
+func teamOrg(ctx context.Context, e *env, slug string, mode store.IdentityMode, group string, role store.OrgRole) {
+	tx, err := e.pool.Begin(ctx)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = tx.Rollback(ctx) }()
+	var orgID string
+	Expect(tx.QueryRow(ctx, `INSERT INTO orgs (slug, display_name, kind, identity_mode) VALUES ($1, $1, 'team', $2) RETURNING id`,
+		slug, mode).Scan(&orgID)).To(Succeed())
+	_, err = tx.Exec(ctx, `INSERT INTO org_memberships (org_id, user_id, source, role)
+		SELECT $1, id, 'manual', 'owner' FROM users WHERE oidc_issuer = $2`, orgID, auth.LocalIssuer)
+	Expect(err).NotTo(HaveOccurred())
+	_, err = tx.Exec(ctx, `INSERT INTO org_group_mappings (org_id, oidc_issuer, group_name, role) VALUES ($1, $2, $3, $4)`,
+		orgID, e.issuer.URL(), group, role)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(tx.Commit(ctx)).To(Succeed())
+}
+
+var _ = Describe("OIDC login", func() {
+	var e *env
+
+	BeforeEach(func(ctx SpecContext) {
+		e = newEnv(ctx, envOptions{oidc: true, groupMappings: []auth.GroupMapping{
+			{Group: "koinon-admins", Role: store.OrgRoleAdmin},
+			{Group: "staff", Role: store.OrgRoleMember},
+		}})
+	})
+
+	It("logs in with code + PKCE, creates the user and maps groups to roles", func(ctx SpecContext) {
+		teamOrg(ctx, e, "platform-team", store.IdentityModePlatform, "staff", store.OrgRoleAdmin)
+		teamOrg(ctx, e, "idp-team", store.IdentityModeIdp, "eng", store.OrgRoleViewer)
+		e.issuer.SetUser(oidcUser("alice", "koinon-admins", "staff", "eng"))
+
+		b := e.browser()
+		res := b.oidcLogin(ctx, "/board?ticket=1")
+		Expect(res.Request.URL.Host).To(Equal(strings.TrimPrefix(e.srv.URL, "https://")))
+		Expect(res.Request.URL.RequestURI()).To(Equal("/board?ticket=1"))
+		Expect(b.sessionToken()).NotTo(BeEmpty())
+
+		By("sending an S256 challenge and a nonce to the IdP")
+		Expect(e.issuer.LastRequest.Get("code_challenge_method")).To(Equal("S256"))
+		Expect(e.issuer.LastRequest.Get("nonce")).NotTo(BeEmpty())
+		Expect(e.issuer.LastRequest.Get("scope")).To(Equal("openid email profile"))
+
+		who, err := b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(who.GetAuthMethod()).To(Equal(authv1alpha1.AuthMethod_AUTH_METHOD_OIDC))
+		Expect(who.GetPlatformAdmin()).To(BeFalse())
+		Expect(who.GetPasswordChangeRequired()).To(BeFalse())
+		Expect(who.GetUser().GetEmail()).To(Equal("alice@example.test"))
+		Expect(who.GetUser().GetDisplayName()).To(Equal("Alice"))
+		roles := membershipsOf(who)
+		// Highest mapped role wins in the hybrid default org; the platform-mode
+		// org ignores IdP groups; the idp-mode org uses them.
+		Expect(roles).To(HaveKeyWithValue("default", authv1alpha1.OrgRole_ORG_ROLE_ADMIN))
+		Expect(roles).To(HaveKeyWithValue("idp-team", authv1alpha1.OrgRole_ORG_ROLE_VIEWER))
+		Expect(roles).NotTo(HaveKey("platform-team"))
+		Expect(roles).To(HaveLen(3)) // plus the personal org
+		var personal int
+		for _, m := range who.GetMemberships() {
+			if m.GetOrgId() == who.GetUser().GetPersonalOrgId() {
+				Expect(m.GetRole()).To(Equal(authv1alpha1.OrgRole_ORG_ROLE_OWNER))
+				personal++
+			}
+		}
+		Expect(personal).To(Equal(1))
+	})
+
+	It("upserts by issuer and subject and resyncs groups at every login", func(ctx SpecContext) {
+		e.issuer.SetUser(oidcUser("bob", "koinon-admins"))
+		first := e.browser()
+		first.oidcLogin(ctx, "")
+		who1, err := first.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(membershipsOf(who1)).To(HaveKeyWithValue("default", authv1alpha1.OrgRole_ORG_ROLE_ADMIN))
+
+		u := oidcUser("bob", "staff")
+		u.Email = "robert@example.test"
+		e.issuer.SetUser(u)
+		second := e.browser()
+		second.oidcLogin(ctx, "")
+		who2, err := second.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(who2.GetUser().GetId()).To(Equal(who1.GetUser().GetId()))
+		Expect(who2.GetUser().GetEmail()).To(Equal("robert@example.test"))
+		Expect(membershipsOf(who2)).To(HaveKeyWithValue("default", authv1alpha1.OrgRole_ORG_ROLE_MEMBER))
+
+		e.issuer.SetUser(oidcUser("bob"))
+		third := e.browser()
+		third.oidcLogin(ctx, "")
+		who3, err := third.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(membershipsOf(who3)).NotTo(HaveKey("default"))
+		Expect(count(ctx, e, `SELECT count(*) FROM users WHERE oidc_subject = 'bob'`)).To(Equal(1))
+	})
+
+	It("drops IdP roles when a mapping is removed from the configuration", func(ctx SpecContext) {
+		e.issuer.SetUser(oidcUser("dana", "staff"))
+		b := e.browser()
+		b.oidcLogin(ctx, "")
+		e.opts.groupMappings = []auth.GroupMapping{{Group: "koinon-admins", Role: store.OrgRoleAdmin}}
+		e.bootstrap(ctx)
+		who, err := b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(membershipsOf(who)).NotTo(HaveKey("default"))
+	})
+
+	It("keeps redirects on this site", func(ctx SpecContext) {
+		e.issuer.SetUser(oidcUser("erin"))
+		for _, target := range []string{"//evil.example/x", "https://evil.example/", "/\\evil.example", "board"} {
+			res := e.browser().oidcLogin(ctx, target)
+			Expect(res.Request.URL.Host).To(Equal(strings.TrimPrefix(e.srv.URL, "https://")), target)
+			Expect(res.Request.URL.Path).To(Equal("/"), target)
+		}
+	})
+
+	It("rejects a callback whose state does not match this browser", func(ctx SpecContext) {
+		e.issuer.SetUser(oidcUser("mallory"))
+		attacker := e.browser()
+		attacker.http.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+			if req.URL.Path == "/auth/oidc/callback" {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		}
+		res := attacker.oidcLogin(ctx, "")
+		Expect(res.StatusCode).To(Equal(http.StatusFound))
+		callback := res.Header.Get("Location")
+
+		// The victim's browser has no state cookie for this flow.
+		victim := e.browser()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, callback, nil)
+		Expect(err).NotTo(HaveOccurred())
+		vres, err := victim.http.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = vres.Body.Close() }()
+		Expect(vres.StatusCode).To(Equal(http.StatusBadRequest))
+		Expect(victim.sessionToken()).To(BeEmpty())
+		Expect(e.issuer.Exchanges).To(Equal(0))
+	})
+
+	It("rejects an ID token with the wrong nonce", func(ctx SpecContext) {
+		e.issuer.SetUser(oidcUser("oscar"))
+		e.issuer.SetWrongNonce(true)
+		b := e.browser()
+		res := b.oidcLogin(ctx, "")
+		Expect(res.StatusCode).To(Equal(http.StatusUnauthorized))
+		Expect(b.sessionToken()).To(BeEmpty())
+		Expect(count(ctx, e, `SELECT count(*) FROM users WHERE oidc_subject = 'oscar'`)).To(Equal(0))
+	})
+
+	It("rejects an expired login flow", func(ctx SpecContext) {
+		e.issuer.SetUser(oidcUser("pat"))
+		b := e.browser()
+		b.http.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+			if req.URL.Path == "/auth/oidc/callback" {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		}
+		callback := b.oidcLogin(ctx, "").Header.Get("Location")
+		e.clock.Advance(11 * time.Minute)
+		b.http.CheckRedirect = nil
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, callback, nil)
+		Expect(err).NotTo(HaveOccurred())
+		res, err := b.http.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = res.Body.Close() }()
+		Expect(res.StatusCode).To(Equal(http.StatusBadRequest))
+	})
+
+	It("is not offered when OIDC is not configured", func(ctx SpecContext) {
+		plain := newEnv(ctx, envOptions{})
+		res := plain.browser().oidcLogin(ctx, "")
+		Expect(res.StatusCode).To(Equal(http.StatusNotFound))
+	})
+
+	It("rejects a disabled user", func(ctx SpecContext) {
+		e.issuer.SetUser(oidcUser("quinn"))
+		b := e.browser()
+		b.oidcLogin(ctx, "")
+		_, err := e.pool.Exec(ctx, `UPDATE users SET deleted_at = now() WHERE oidc_subject = 'quinn'`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(codeOf(err)).To(Equal(connect.CodeUnauthenticated))
+		Expect(e.browser().oidcLogin(ctx, "").StatusCode).To(Equal(http.StatusForbidden))
+	})
+})
