@@ -3,6 +3,9 @@
 package agentd
 
 import (
+	"path"
+	"strings"
+
 	"github.com/procoduck/koinon/internal/acp"
 )
 
@@ -27,8 +30,10 @@ const (
 	Reject Verdict = "reject"
 )
 
-// PermissionPolicy answers a harness's session/request_permission. The tool call's kind maps
-// to a tier and the tier to a verdict; a kind or tier without an entry is rejected.
+// PermissionPolicy answers a harness's session/request_permission. A request that names a path
+// outside the session directory is rejected whatever the mapping says, since harnesses report
+// such reads with ordinary kinds (OpenCode v2: kind "read"). Otherwise the tool call's kind
+// maps to a tier and the tier to a verdict; a kind or tier without an entry is rejected.
 //
 // Harness permission requests are about actions inside the sandbox. Actions with effects
 // outside (a pull request, an issue comment) are MCP tools behind agentgateway, whose
@@ -61,15 +66,18 @@ func DefaultPermissions() *PermissionPolicy {
 
 // decision is a policy answer and why.
 type decision struct {
+	// Outside is the first path the request names outside the session directory.
+	Outside  string       `json:"outsideWorkspace,omitempty"`
 	Kind     acp.ToolKind `json:"kind,omitempty"`
 	Tier     Tier         `json:"tier,omitempty"`
 	Verdict  Verdict      `json:"verdict"`
 	OptionID string       `json:"optionId,omitempty"`
 }
 
-// decide answers req. Allowing picks a one-time allow option, so the harness asks again
-// next time; rejecting picks a reject option, or cancels the request if none is offered.
-func (p *PermissionPolicy) decide(req acp.PermissionRequest) decision {
+// decide answers req for a session working in workspace. Allowing picks a one-time allow
+// option, so the harness asks again next time; rejecting picks a reject option, or cancels
+// the request if none is offered.
+func (p *PermissionPolicy) decide(req acp.PermissionRequest, workspace string) decision {
 	var d decision
 	if req.ToolCall.Kind != nil {
 		d.Kind = *req.ToolCall.Kind
@@ -78,6 +86,12 @@ func (p *PermissionPolicy) decide(req acp.PermissionRequest) decision {
 	d.Verdict = p.Verdicts[d.Tier]
 	if d.Tier == "" || d.Verdict == "" {
 		d.Verdict = Reject
+	}
+	for _, l := range req.ToolCall.Locations {
+		if !within(workspace, l.Path) {
+			d.Outside, d.Verdict = l.Path, Reject
+			break
+		}
 	}
 	var opt acp.Decision
 	if d.Verdict == Allow {
@@ -92,4 +106,14 @@ func (p *PermissionPolicy) decide(req acp.PermissionRequest) decision {
 	}
 	d.OptionID = opt.OptionID
 	return d
+}
+
+// within reports whether p, absolute or relative to dir, is dir or below it.
+func within(dir, p string) bool {
+	dir = path.Clean(dir)
+	if !path.IsAbs(p) {
+		p = path.Join(dir, p)
+	}
+	p = path.Clean(p)
+	return p == dir || strings.HasPrefix(p, strings.TrimSuffix(dir, "/")+"/")
 }

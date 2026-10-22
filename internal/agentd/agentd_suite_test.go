@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -67,8 +69,11 @@ var seq atomic.Int64
 func uniq(prefix string) string { return fmt.Sprintf("%s-%d", prefix, seq.Add(1)) }
 
 const (
-	gatewayURL = "http://gateway.koinon.test:8080"
-	model      = "fake/model-1"
+	gatewayURL   = "http://gateway.koinon.test:8080"
+	model        = "fake/model-1"
+	instructions = "You help with the ticket."
+	// instructionsFile is what agentd writes for instructions.
+	instructionsFile = "/sandbox/.koinon/AGENTS.md"
 )
 
 // env is one org with an active agent, its sandbox in a fake OpenShell gateway whose exec
@@ -82,6 +87,59 @@ type env struct {
 	harness   *harness
 	workspace string
 	sandbox   string
+	files     *files
+}
+
+// files emulates the sandbox's files that agentd writes and reads with /bin/sh: the
+// instruction file.
+type files struct {
+	mu     sync.Mutex
+	data   map[string][]byte
+	writes int
+	// failWrite makes writes exit 1; onRead runs before every read.
+	failWrite bool
+	onRead    func(data map[string][]byte)
+}
+
+func (f *files) get(path string) ([]byte, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	b, ok := f.data[path]
+	return b, ok
+}
+
+// sh handles agentd's /bin/sh -c SCRIPT sh ARGS... execs by script.
+func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) < 4 || args[0] != "-c" {
+		_, _ = fmt.Fprintf(stderr, "unexpected sh %q", args)
+		return 2
+	}
+	in, _ := io.ReadAll(stdin)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch script := args[1]; {
+	case strings.Contains(script, "mktemp") && len(args) == 5:
+		f.writes++
+		if f.failWrite {
+			_, _ = io.WriteString(stderr, "mktemp: Read-only file system")
+			return 1
+		}
+		f.data[args[4]] = in
+		return 0
+	case strings.Contains(script, "exec cat"):
+		if f.onRead != nil {
+			f.onRead(f.data)
+		}
+		b, ok := f.data[args[3]]
+		if !ok {
+			return 1
+		}
+		_, _ = stdout.Write(b)
+		return 0
+	default:
+		_, _ = fmt.Fprintf(stderr, "unexpected script %q", script)
+		return 2
+	}
 }
 
 func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
@@ -119,7 +177,7 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 		OrgID: e.org, DisplayName: uniq("agent"), Flavor: flavor, CreatedBy: e.user,
 	})
 	Expect(err).NotTo(HaveOccurred())
-	config := `{"model":{"name":"` + model + `"}}`
+	config := `{"model":{"name":"` + model + `"},"instructions":"` + instructions + `"}`
 	if configFor != nil {
 		config = configFor(e)
 	}
@@ -159,6 +217,8 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 		e.gw.Handle(script, e.harness.command)
 	}
 	e.gw.Handle("/bin/mkdir", func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { return 0 })
+	e.files = &files{data: map[string][]byte{}}
+	e.gw.Handle("/bin/sh", e.files.sh)
 	return e
 }
 
@@ -220,6 +280,8 @@ func (e *env) pool(name string, mutate ...func(*agentd.Config)) (stop func()) {
 		Logger:         slog.New(slog.NewTextHandler(GinkgoWriter, &slog.HandlerOptions{Level: slog.LevelDebug})).With("pool", name),
 		CancelGrace:    2 * time.Second,
 		SandboxTimeout: 10 * time.Second,
+		ReadyTimeout:   2 * time.Second,
+		ReadySettle:    10 * time.Millisecond,
 	}
 	for _, m := range mutate {
 		m(&cfg)

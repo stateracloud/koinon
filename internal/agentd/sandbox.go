@@ -76,24 +76,41 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 
 // mkdir creates dir in the sandbox. Harnesses refuse a session whose directory is missing.
 func (r *runner) mkdir(ctx context.Context, workspace, name, dir string) error {
-	var stderr tail
-	proc, err := r.p.backend.Exec(ctx, workspace, name, execution.ExecRequest{
-		Command: []string{"/bin/mkdir", "-p", dir}, Stderr: &stderr, Timeout: time.Minute,
-	})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = proc.Close() }()
-	_ = proc.Stdin().Close()
-	_, _ = io.Copy(io.Discard, proc.Stdout())
-	code, err := proc.Wait()
+	_, code, stderr, err := r.sandboxExec(ctx, workspace, name, []string{"/bin/mkdir", "-p", dir}, nil)
 	if err != nil {
 		return err
 	}
 	if code != 0 {
-		return &failure{reason: fmt.Sprintf("mkdir %s exited with %d: %s", dir, code, stderr.String())}
+		return &failure{reason: fmt.Sprintf("mkdir %s exited with %d: %s", dir, code, stderr)}
 	}
 	return nil
+}
+
+// sandboxExec runs a short command in the sandbox with stdin as its input and returns its
+// output, exit code and the tail of its standard error.
+func (r *runner) sandboxExec(ctx context.Context, workspace, name string, cmd []string, stdin []byte) ([]byte, int, string, error) {
+	var stderr tail
+	proc, err := r.p.backend.Exec(ctx, workspace, name, execution.ExecRequest{
+		Command: cmd, Stderr: &stderr, Timeout: time.Minute,
+	})
+	if err != nil {
+		return nil, 0, "", err
+	}
+	defer func() { _ = proc.Close() }()
+	werr := make(chan error, 1)
+	go func() {
+		_, err := proc.Stdin().Write(stdin)
+		werr <- errors.Join(err, proc.Stdin().Close())
+	}()
+	out, _ := io.ReadAll(io.LimitReader(proc.Stdout(), 1<<20))
+	code, err := proc.Wait()
+	if err != nil {
+		return nil, 0, "", err
+	}
+	if err := <-werr; err != nil && code == 0 {
+		return nil, 0, "", err
+	}
+	return out, code, stderr.String(), nil
 }
 
 // closeProcess ends a harness: end-of-file on stdin first, so it can exit cleanly, then the
