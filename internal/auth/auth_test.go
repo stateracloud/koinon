@@ -3,12 +3,15 @@
 package auth
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/procoduck/koinon/internal/db/store"
+	authv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1"
 )
 
 var _ = Describe("passwords", func() {
@@ -74,6 +77,17 @@ var _ = Describe("roles", func() {
 		Expect(RoleAtLeast(store.OrgRoleOwner, "")).To(BeFalse())
 	})
 
+	It("maps every role to its wire form in the same order", func() {
+		Expect(roleToProto(store.OrgRoleViewer)).To(Equal(authv1alpha1.OrgRole_ORG_ROLE_VIEWER))
+		Expect(roleToProto(store.OrgRoleMember)).To(Equal(authv1alpha1.OrgRole_ORG_ROLE_MEMBER))
+		Expect(roleToProto(store.OrgRoleAdmin)).To(Equal(authv1alpha1.OrgRole_ORG_ROLE_ADMIN))
+		Expect(roleToProto(store.OrgRoleOwner)).To(Equal(authv1alpha1.OrgRole_ORG_ROLE_OWNER))
+		Expect(roleToProto("root")).To(Equal(authv1alpha1.OrgRole_ORG_ROLE_UNSPECIFIED))
+		for i := 1; i < len(orgRoles); i++ {
+			Expect(orgRoles[i].proto).To(BeNumerically(">", orgRoles[i-1].proto))
+		}
+	})
+
 	It("gives platform admins every role", func() {
 		p := &Principal{PlatformAdmin: true}
 		Expect(p.HasRole(p.UserID, store.OrgRoleOwner)).To(BeTrue())
@@ -92,3 +106,19 @@ var _ = DescribeTable("safeReturnTo", func(in, want string) {
 	Entry("absolute", "https://evil.test/", "/"),
 	Entry("tab trick", "/\t/evil.test", "/"),
 )
+
+var _ = DescribeTable("ReadSecretFile strips trailing line breaks only", func(content, want string) {
+	path := filepath.Join(GinkgoT().TempDir(), "secret")
+	Expect(os.WriteFile(path, []byte(content), 0o600)).To(Succeed())
+	Expect(ReadSecretFile(path)).To(Equal(want))
+},
+	Entry("bare", "s3cret", "s3cret"),
+	Entry("LF", "s3cret\n", "s3cret"),
+	Entry("CRLF", "s3cret\r\n", "s3cret"),
+	Entry("inner and leading spaces are kept", " s3 cret \n", " s3 cret "),
+	Entry("trailing tab is kept", "s3cret\t", "s3cret\t"),
+)
+
+var _ = It("ReadSecretFile returns an empty secret for an empty path", func() {
+	Expect(ReadSecretFile("")).To(BeEmpty())
+})

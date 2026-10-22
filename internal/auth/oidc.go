@@ -166,13 +166,13 @@ func (s *Service) handleOIDCStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is off only for a plain http:// public URL (Config.PublicURL)
 		Name:     oidcStateCookieName,
 		Value:    state,
 		Path:     oidcCookiePath,
 		MaxAge:   int(oidcFlowLifetime / time.Second),
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   s.secureCookies,
 		// Lax: the IdP's redirect back is a top-level GET navigation.
 		SameSite: http.SameSiteLaxMode,
 	})
@@ -190,7 +190,7 @@ func (s *Service) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	query := r.URL.Query()
-	clearCookie(w, oidcStateCookieName, oidcCookiePath)
+	s.clearCookie(w, oidcStateCookieName, oidcCookiePath)
 	if e := query.Get("error"); e != "" {
 		s.log.Info("oidc login refused by provider", "error", e)
 		http.Error(w, "login was refused by the identity provider", http.StatusUnauthorized)
@@ -272,7 +272,7 @@ func (s *Service) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if old, err := r.Cookie(SessionCookieName); err == nil {
+	if old, err := r.Cookie(s.SessionCookie()); err == nil {
 		_ = s.revokeToken(ctx, old.Value)
 	}
 	s.setSessionCookie(w, token)

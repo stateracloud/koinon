@@ -59,6 +59,11 @@ const (
 	FlavorPi       Flavor = "pi"
 )
 
+// AllFlavors lists every flavor. The schema's $defs.flavor enum and the
+// agent_flavor type in the migrations hold the same list; a test keeps the
+// three in step.
+var AllFlavors = []Flavor{FlavorOpenCode, FlavorHermes, FlavorPi}
+
 // Preset maps a grant's risk tiers to allow, ask or deny (ADR 0008, 0049).
 type Preset string
 
@@ -94,10 +99,20 @@ type Metadata struct {
 // Spec is what an agent draft starts from.
 type Spec struct {
 	Flavors      Flavors `json:"flavors"`
+	Harness      Harness `json:"harness,omitzero"`
 	Model        Model   `json:"model"`
 	Instructions string  `json:"instructions"`
 	Grants       []Grant `json:"grants"`
 	Limits       Limits  `json:"limits"`
+}
+
+// Harness holds harness settings beyond the flavor choice. The zero value turns every
+// setting off.
+type Harness struct {
+	// PluginInstalls lets an OpenCode agent install plugins: its sandbox may read the npm
+	// registry (GET and HEAD, no credentials) from the OpenCode binary, and OpenCode loads
+	// external plugins. Off by default; OpenCode only.
+	PluginInstalls bool `json:"pluginInstalls,omitempty"`
 }
 
 // Flavors lists the allowed harnesses and the default choice.
@@ -286,6 +301,9 @@ func (t *Template) check() error {
 	}
 	if !slices.Contains(t.Spec.Flavors.Allowed, t.Spec.Flavors.Default) {
 		return fmt.Errorf("default flavor %q is not in the allowed flavors", t.Spec.Flavors.Default)
+	}
+	if t.Spec.Harness.PluginInstalls && !slices.Contains(t.Spec.Flavors.Allowed, FlavorOpenCode) {
+		return errors.New("harness.pluginInstalls applies to the opencode flavor only, which is not allowed")
 	}
 	if d := t.Spec.Limits.Run.MaxDuration.Duration; d > MaxRunDuration {
 		return fmt.Errorf("limits.run.maxDuration %s exceeds %s", d, MaxRunDuration)
