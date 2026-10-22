@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// OpenCode configuration for the Koinon OpenCode flavor. Read-only in the image at
+// /etc/koinon/opencode/opencode.jsonc, which is OpenCode's global config because koinon-opencode
+// sets XDG_CONFIG_HOME=/etc/koinon. The KOINON_* values come from koinon-opencode's arguments;
+// OPENAI_API_KEY is the agent's agentgateway key, an OpenShell placeholder inside a sandbox.
+// See flavors/opencode/README.md.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "koinon/{env:KOINON_MODEL}",
+  // Session titles use the same model, so no request goes to OpenCode's own providers.
+  "small_model": "koinon/{env:KOINON_MODEL}",
+  "enabled_providers": ["koinon"],
+  "autoupdate": false,
+  "share": "disabled",
+  // The agent's rendered template instructions, written into the home by Koinon.
+  "instructions": ["/sandbox/.koinon/AGENTS.md"],
+  "provider": {
+    "koinon": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Koinon agentgateway",
+      "options": {
+        "baseURL": "{env:KOINON_MODEL_BASE_URL}",
+        "apiKey": "{env:OPENAI_API_KEY}"
+      },
+      "models": {
+        "{env:KOINON_MODEL}": {}
+      }
+    }
+  },
+  "mcp": {
+    "koinon": {
+      "type": "remote",
+      "url": "{env:KOINON_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer {env:OPENAI_API_KEY}"
+      },
+      "oauth": false
+    }
+  }
+}
