@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -355,7 +357,76 @@ func (c *Checker) checkCNPG(ctx context.Context) Result {
 			Fix:     "upgrade the CloudNativePG operator",
 		}
 	}
-	return Result{Check: check, Status: Pass, Message: fmt.Sprintf("%s serves %s", cnpgCRD, CNPGAPIVersion)}
+	return c.checkCNPGOperator(ctx, check)
+}
+
+// checkCNPGOperator checks that the CNPG operator is running, not only that its CRDs exist.
+// The chart's Cluster goes through the operator's admission webhooks, whose failure policy is
+// Fail, so an operator that is not running fails the install with an opaque webhook error.
+// The webhook configuration covering postgresql.cnpg.io clusters names the operator's
+// Service wherever and however the operator was installed (manifests, Helm chart, OLM), and
+// the Service having a ready endpoint means an operator pod serves it. This needs no
+// cluster-wide read of Deployments (which would expose every pod spec), and does not depend
+// on the operator's Deployment name or labels, which differ between install methods.
+func (c *Checker) checkCNPGOperator(ctx context.Context, check string) Result {
+	const fix = "install the CloudNativePG operator and wait for it to be ready, or set postgres.mode=external"
+	lctx, cancel := c.callCtx(ctx)
+	defer cancel()
+	hooks, err := c.Kube.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(lctx, metav1.ListOptions{})
+	if err != nil {
+		return apiFailure(check, "ValidatingWebhookConfigurations", err)
+	}
+	var svc *admissionregistrationv1.ServiceReference
+	for _, cfg := range hooks.Items {
+		for _, h := range cfg.Webhooks {
+			if h.ClientConfig.Service != nil && coversCNPGClusters(h.Rules) {
+				svc = h.ClientConfig.Service
+				break
+			}
+		}
+		if svc != nil {
+			break
+		}
+	}
+	if svc == nil {
+		return Result{
+			Check: check, Status: Fail,
+			Message: fmt.Sprintf("CRD %s present but no admission webhook validates it: the CNPG operator is not installed", cnpgCRD),
+			Fix:     fix,
+		}
+	}
+	ectx, cancel := c.callCtx(ctx)
+	defer cancel()
+	eps, err := c.Kube.DiscoveryV1().EndpointSlices(svc.Namespace).List(ectx, metav1.ListOptions{
+		LabelSelector: discoveryv1.LabelServiceName + "=" + svc.Name,
+	})
+	if err != nil {
+		return apiFailure(check, fmt.Sprintf("EndpointSlices of Service %s/%s", svc.Namespace, svc.Name), err)
+	}
+	for _, sl := range eps.Items {
+		for _, ep := range sl.Endpoints {
+			if ep.Conditions.Ready == nil || *ep.Conditions.Ready {
+				return Result{Check: check, Status: Pass, Message: fmt.Sprintf("%s serves %s; operator webhook %s/%s ready",
+					cnpgCRD, CNPGAPIVersion, svc.Namespace, svc.Name)}
+			}
+		}
+	}
+	return Result{
+		Check: check, Status: Fail,
+		Message: fmt.Sprintf("the CNPG operator is not running: its webhook Service %s/%s has no ready endpoints", svc.Namespace, svc.Name),
+		Fix:     fmt.Sprintf("check the operator's pods with kubectl -n %s get deployments,pods; %s", svc.Namespace, fix),
+	}
+}
+
+// coversCNPGClusters reports whether webhook rules match postgresql.cnpg.io clusters.
+func coversCNPGClusters(rules []admissionregistrationv1.RuleWithOperations) bool {
+	for _, r := range rules {
+		if (slices.Contains(r.APIGroups, "postgresql.cnpg.io") || slices.Contains(r.APIGroups, "*")) &&
+			(slices.Contains(r.Resources, "clusters") || slices.Contains(r.Resources, "*")) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Checker) checkGatewayClass(ctx context.Context) Result {
