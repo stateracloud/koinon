@@ -42,3 +42,5 @@ oidc:
     staff: member
 bootstrapAdmin:
   existingSecret: koinon-bootstrap-admin-gitops
+imagePullSecrets:
+  - name: ghcr-pull

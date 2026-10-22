@@ -149,6 +149,20 @@ var _ = Describe("Service", func() {
 		Expect(kinds(f.ticketEvents(ctx))).To(Equal([]string{approvals.KindRequested}))
 	})
 
+	It("fails a recorded call of an unknown tool permanently and mints no token", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard")
+		req := f.call(ctx, githubtools.ToolCommentOnIssue, map[string]any{"issue_number": 7, "body": "x"})
+		_, err := pool.Exec(ctx, `UPDATE approval_requests SET tool = 'delete_repository' WHERE id = $1`, mustID(req.ID))
+		Expect(err).NotTo(HaveOccurred())
+
+		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).To(Equal(store.ApprovalStatusFailed))
+		Expect(row.Error.String).To(ContainSubstring(`unknown GitHub write tool "delete_repository"`))
+		Expect(f.gh.Mints()).To(BeZero(), "nothing is executed, not even as a comment")
+		Expect(f.gh.Snapshot("widgets").Calls).To(BeEmpty())
+	})
+
 	It("denies with a note and resumes the parked run", func(ctx SpecContext) {
 		f := newFixture(ctx, "standard")
 		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
