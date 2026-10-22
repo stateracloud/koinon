@@ -169,6 +169,12 @@ by koinon.dbVolume).
       fieldPath: metadata.namespace
 {{- end }}
 
+{{/* GitHub REST API base URL, for the components that call GitHub (api and reconciler). */}}
+{{- define "koinon.githubEnv" -}}
+- name: KOINON_GITHUB_API_URL
+  value: {{ .Values.github.apiUrl | default "https://api.github.com" | quote }}
+{{- end }}
+
 {{/* OpenShell client certificate for components that call the OpenShell gateway. */}}
 {{- define "koinon.openshellVolumeMount" -}}
 {{- if .Values.openshell.clientTLSSecret -}}
