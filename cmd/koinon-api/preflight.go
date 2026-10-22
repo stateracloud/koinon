@@ -21,6 +21,7 @@ import (
 
 	"github.com/procoduck/koinon/internal/execution/openshell"
 	"github.com/procoduck/koinon/internal/preflight"
+	"github.com/procoduck/koinon/internal/project"
 )
 
 type preflightConfig struct {
@@ -44,8 +45,9 @@ func parsePreflightFlags(args []string) (preflightConfig, error) {
 	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config")
 	fs.StringVar(&c.namespace, "namespace", os.Getenv("POD_NAMESPACE"), "release namespace, where the seccomp probe pod runs")
 	fs.DurationVar(&c.timeout, "call-timeout", 15*time.Second, "timeout of each Kubernetes API and gateway call")
-	fs.StringVar(&c.check.PostgresMode, "postgres-mode", "cnpg", "postgres.mode: cnpg or external")
-	fs.StringVar(&c.check.GatewayMode, "gateway-mode", "standalone", "gateway.mode: standalone or kubernetes")
+	c.check.PostgresMode, c.check.GatewayMode = project.PostgresCNPG, project.GatewayStandalone
+	fs.Var(&c.check.PostgresMode, "postgres-mode", "postgres.mode: cnpg or external")
+	fs.Var(&c.check.GatewayMode, "gateway-mode", "gateway.mode: standalone or kubernetes")
 	fs.StringVar(&c.check.GatewayClassName, "gateway-class", "agentgateway", "GatewayClass of agentgateway in kubernetes mode")
 	fs.StringVar(&c.check.RuntimeClassName, "runtime-class", "kata", "sandbox RuntimeClass")
 	fs.StringVar(&c.check.OpenShellAddress, "openshell-address", "", "OpenShell gateway host:port")
