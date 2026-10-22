@@ -1,0 +1,111 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /* koinon-api, koinon-reconciler and koinon-agentd. */ -}}
+{{- $configHash := include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+{{- range $component := list "api" "reconciler" "agentd" }}
+{{- $v := index $.Values $component }}
+{{- $name := include "koinon.componentName" (list $ $component) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list $ $component) | nindent 4 }}
+spec:
+  replicas: {{ $v.replicas }}
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list $ $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list $ $component) | nindent 8 }}
+      annotations:
+        checksum/config: {{ $configHash }}
+        {{- with $v.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: {{ eq $component "reconciler" }}
+      enableServiceLinks: false
+      {{- include "koinon.imagePullSecrets" $ | nindent 6 }}
+      securityContext:
+        {{- include "koinon.podSecurityContext" $ | nindent 8 }}
+      containers:
+        - name: {{ $component }}
+          image: {{ include "koinon.image" (list $ $v.image) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          {{- if eq $component "api" }}
+          args: ["-addr", ":{{ $v.port }}"]
+          ports:
+            - name: http
+              containerPort: {{ $v.port }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          {{- end }}
+          env:
+            {{- include "koinon.commonEnv" $ | nindent 12 }}
+            {{- include "koinon.dbEnv" (list $ $component) | nindent 12 }}
+            {{- if and (eq $component "api") $.Values.bootstrapAdmin.enabled }}
+            - name: KOINON_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "koinon.componentName" (list $ "bootstrap-admin") }}
+                  key: username
+            - name: KOINON_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "koinon.componentName" (list $ "bootstrap-admin") }}
+                  key: password
+            {{- end }}
+          securityContext:
+            {{- include "koinon.containerSecurityContext" $ | nindent 12 }}
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "koinon.configVolumeMount" $ | nindent 12 }}
+            {{- include "koinon.dbVolumeMount" $ | nindent 12 }}
+            {{- if ne $component "api" }}
+            {{- include "koinon.openshellVolumeMount" $ | nindent 12 }}
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- include "koinon.configVolume" $ | nindent 8 }}
+        {{- include "koinon.dbVolume" $ | nindent 8 }}
+        {{- if ne $component "api" }}
+        {{- include "koinon.openshellVolume" $ | nindent 8 }}
+        {{- end }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+      {{- with $v.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "koinon.componentName" (list . "api") }}
+  labels:
+    {{- include "koinon.labels" (list . "api") | nindent 4 }}
+spec:
+  selector:
+    {{- include "koinon.selectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.api.port }}
+      targetPort: http

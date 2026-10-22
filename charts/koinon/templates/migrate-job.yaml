@@ -1,0 +1,72 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+goose migrations ("koinon-api migrate") as a Helm hook, run with the migration role, which owns the
+schema; the component roles only get DML. Migrations are forward-only (ADR 0027), so they run
+before an upgrade rolls the Deployments.
+
+In external mode the database exists before the release: pre-install,pre-upgrade. In cnpg mode the
+release creates the database, so the first run is post-install (the Job waits for it) and later
+runs are pre-upgrade. Until the first migration finishes, components retry their connection.
+*/ -}}
+{{- $name := include "koinon.componentName" (list . "migrate") }}
+{{- $hook := "pre-install,pre-upgrade" }}
+{{- if eq .Values.postgres.mode "cnpg" }}
+{{- $hook = "post-install,pre-upgrade" }}
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "migrate") | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "migrate") | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list . "migrate") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- include "koinon.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "koinon.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "koinon.image" (list . .Values.api.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["-wait", {{ .Values.migrations.wait | quote }}, "migrate"]
+          env:
+            {{- include "koinon.dbEnv" (list . "migrate") | nindent 12 }}
+          securityContext:
+            {{- include "koinon.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrations.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "koinon.dbVolumeMount" . | nindent 12 }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- include "koinon.dbVolume" . | nindent 8 }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
