@@ -27,10 +27,13 @@ import (
 //	KOINON_OPENSHELL_IMAGE      flavor image for the sandbox (required)
 //	KOINON_AGENTGATEWAY_HOST    agentgateway host the provider profile binds the key to
 //	                            (default agentgateway.agentgateway.svc.cluster.local, port 8080)
+//	KOINON_E2E_ORG_ID           fixed org UUID, so every run reuses one long-lived workspace
+//	                            (kw-… is derived from it); default a new org per run
 //
 // It creates a workspace (kw-…), a provider record and a sandbox, waits for the sandbox to be
 // ready, stops it as idle, then archives the agent and waits for the sandbox to be deleted. The
-// workspace is left behind (OpenShell 0.1.5 has no workspace delete in Koinon's backend).
+// workspace is left behind (OpenShell 0.1.5 has no workspace delete in Koinon's backend), which
+// is why the home lab runs it with KOINON_E2E_ORG_ID.
 var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 	It("activates, stops and archives an agent", func(ctx SpecContext) {
 		endpoint := os.Getenv("KOINON_OPENSHELL_ENDPOINT")
@@ -73,6 +76,9 @@ var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		org, user := newOrg(ctx)
+		if id := os.Getenv("KOINON_E2E_ORG_ID"); id != "" {
+			org, user = newOrgWithID(ctx, id)
+		}
 		agent := newAgent(ctx, org, user)
 		names := reconciler.AgentNames(org, agent.ID)
 		ws := reconciler.WorkspaceName(org)
