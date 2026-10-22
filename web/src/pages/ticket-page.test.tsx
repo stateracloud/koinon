@@ -18,7 +18,7 @@ function chunk(seq: number, text: string) {
   return create(RunEventSchema, {
     runId: 'r-1',
     seq: BigInt(seq),
-    kind: 'session.update',
+    kind: 'acp.agent_message_chunk',
     payload: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
     createdAt: timestampFromMs(t0 + 1000 * (seq + 1)),
   })

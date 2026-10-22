@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { RunEventSchema, RunService, type RunEvent, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { watchRun, type WatchStatus } from '@/lib/run-watch'
 
-const ev = (seq: number) => create(RunEventSchema, { runId: 'r', seq: BigInt(seq), kind: 'session.update' })
+const ev = (seq: number) => create(RunEventSchema, { runId: 'r', seq: BigInt(seq), kind: 'acp.agent_message_chunk' })
 
 function drive(script: ((req: WatchRunRequest) => AsyncIterable<number | Error>)[]) {
   const calls: WatchRunRequest[] = []
