@@ -35,6 +35,13 @@ type flavor struct {
 	mcpToolName string
 	// allow and reject are the permission option kinds to answer with.
 	allow, reject []acp.PermissionOptionKind
+	// readyCommand is the command the harness announces once the Koinon MCP server's tools are
+	// registered (the server's readyPrompt as a command); koinon-agentd waits for it before the
+	// first prompt. Empty means the harness announces none.
+	readyCommand string
+	// selectModel, when set, is the model value koinon-agentd selects with
+	// session/set_config_option after starting or loading a session.
+	selectModel func(model string) string
 	// projectConfig is harness configuration a repository could ship, by path relative to the
 	// session directory. It must have no effect: read by the harness, it would put
 	// projectMarker into the model's context, and it may loosen permissions, which the
@@ -44,6 +51,19 @@ type flavor struct {
 
 // projectMarker is the text a flavor's projectConfig would bring into the model's context.
 const projectMarker = "KOINON-PROJECT-CONFIG-MARKER"
+
+// readySettle is how long koinon-agentd waits after the ready command before the first prompt:
+// OpenCode 2.0.24 announces the command and registers the server's tools on separate paths, the
+// tools after a 100 ms debounce (packages/core/src/tool/mcp.ts), so the command can come first.
+const readySettle = time.Second
+
+// instructionsPath is where koinon-agentd writes the run's instructions before it starts the
+// harness; instructionsMarker is in the contract's instructions, and the fake model answers
+// helloPrompt only when its system prompt carries it.
+const (
+	instructionsPath   = "/sandbox/.koinon/AGENTS.md"
+	instructionsMarker = "KOINON-CONTRACT-INSTRUCTIONS"
+)
 
 func (f flavor) image() string {
 	if img := os.Getenv("KOINON_FLAVOR_IMAGE_" + strings.ToUpper(f.name)); img != "" {
@@ -66,6 +86,8 @@ const (
 	readPrompt   = "KOINON-READ-OUTSIDE the config, please."
 	readReply    = "Done with the file."
 	recallPrompt = "What did you say first?"
+
+	noInstructionsReply = "Koinon's instructions did not reach the system prompt."
 )
 
 func contractScript(f flavor) fakemodel.Script {
@@ -82,7 +104,8 @@ func contractScript(f flavor) fakemodel.Script {
 				When:      fakemodel.When{UserContains: "KOINON-READ-OUTSIDE"},
 				ToolCalls: []fakemodel.ToolCall{f.readFile(f.outsidePath)},
 			},
-			{Text: helloReply},
+			{When: fakemodel.When{SystemContains: instructionsMarker}, Text: helloReply},
+			{Text: noInstructionsReply},
 		},
 	}
 }
@@ -109,6 +132,18 @@ func describeContract(f flavor) bool {
 			h = sb.harness(ctx, workdir, f.command(gw.url("/v1"), contractModel, gw.url("/mcp")))
 		}
 
+		// ready does what koinon-agentd does between session/new or load and the first prompt.
+		ready := func(ctx context.Context) {
+			if f.readyCommand != "" {
+				Eventually(h.client.availableCommands).WithTimeout(30*time.Second).
+					Should(ContainElement(f.readyCommand), "the harness never announced the Koinon MCP server")
+				time.Sleep(readySettle)
+			}
+			if f.selectModel != nil {
+				Expect(h.conn.SetModel(ctx, session, f.selectModel(contractModel))).To(Succeed())
+			}
+		}
+
 		BeforeAll(func() {
 			if dockerErr != nil {
 				Skip("Docker is not available: " + dockerErr.Error())
@@ -127,9 +162,9 @@ func describeContract(f flavor) bool {
 			})
 			sb.start(bg)
 			sb.run(bg, "mkdir", "-p", workdir)
+			sb.write(bg, instructionsPath, "# Koinon\n\n"+instructionsMarker+": you are a contract test agent.\n")
 			for name, content := range f.projectConfig {
-				sb.run(bg, "sh", "-c", `mkdir -p "$(dirname "$1")" && printf '%s' "$2" > "$1"`,
-					"sh", workdir+"/"+name, content)
+				sb.write(bg, workdir+"/"+name, content)
 			}
 			startHarness(bg)
 		})
@@ -142,13 +177,15 @@ func describeContract(f flavor) bool {
 		})
 
 		It("starts a session", func() {
+			ctx := step()
 			var err error
-			session, err = h.conn.NewSession(step(), workdir)
+			session, err = h.conn.NewSession(ctx, workdir)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(session).NotTo(BeEmpty())
+			ready(ctx)
 		})
 
-		It("answers a prompt through the gateway with the agent's key and the Koinon MCP tools", func() {
+		It("answers a prompt through the gateway with the agent's key, its instructions and the Koinon MCP tools", func() {
 			stop, err := h.conn.Prompt(step(), session, helloPrompt)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(stop).To(Equal(acp.StopEndTurn))
@@ -241,6 +278,7 @@ func describeContract(f flavor) bool {
 			_, err := h.conn.Initialize(ctx)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(h.conn.LoadSession(ctx, session, workdir)).To(Succeed())
+			ready(ctx)
 			updates, _ := h.client.take()
 			Expect(acp.Text(updates, "user_message_chunk")).To(ContainSubstring(helloPrompt))
 			Expect(acp.Text(updates, "agent_message_chunk")).To(ContainSubstring(helloReply))
