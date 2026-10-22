@@ -401,6 +401,55 @@ func (ns NullRunState) Value() (driver.Value, error) {
 	return string(ns.RunState), nil
 }
 
+type SandboxState string
+
+const (
+	SandboxStatePending  SandboxState = "pending"
+	SandboxStateStarting SandboxState = "starting"
+	SandboxStateReady    SandboxState = "ready"
+	SandboxStateStopping SandboxState = "stopping"
+	SandboxStateStopped  SandboxState = "stopped"
+	SandboxStateError    SandboxState = "error"
+	SandboxStateDeleting SandboxState = "deleting"
+	SandboxStateDeleted  SandboxState = "deleted"
+	SandboxStateRetained SandboxState = "retained"
+)
+
+func (e *SandboxState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SandboxState(s)
+	case string:
+		*e = SandboxState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SandboxState: %T", src)
+	}
+	return nil
+}
+
+type NullSandboxState struct {
+	SandboxState SandboxState
+	Valid        bool // Valid is true if SandboxState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSandboxState) Scan(value interface{}) error {
+	if value == nil {
+		ns.SandboxState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SandboxState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSandboxState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SandboxState), nil
+}
+
 type TicketActorKind string
 
 const (
@@ -506,6 +555,26 @@ type Agent struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+type AgentSandbox struct {
+	OrgID          pgtype.UUID
+	AgentID        pgtype.UUID
+	Workspace      string
+	SandboxName    string
+	ProviderName   string
+	KeySecretName  string
+	GatewayKeyID   pgtype.Text
+	GatewayKeyHash pgtype.Text
+	State          SandboxState
+	Phase          string
+	Message        string
+	SpecHash       string
+	StartedAt      pgtype.Timestamptz
+	StoppedAt      pgtype.Timestamptz
+	ObservedAt     pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+}
+
 type AgentVersion struct {
 	OrgID     pgtype.UUID
 	ID        pgtype.UUID
@@ -565,6 +634,14 @@ type OrgMembership struct {
 	Role           OrgRole
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+}
+
+type OrgWorkspace struct {
+	OrgID       pgtype.UUID
+	Workspace   string
+	WorkspaceID string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type PlatformAdmin struct {
