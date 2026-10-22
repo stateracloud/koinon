@@ -1,0 +1,13 @@
+/bin/
+/dist/
+.env
+*.local
+.DS_Store
+coverage.out
+
+web/node_modules/
+web/dist/
+
+# Tilt
+tilt_modules/
+.tilt-ko-*
