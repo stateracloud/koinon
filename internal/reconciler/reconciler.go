@@ -247,7 +247,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 		l, err := ledger.AgentLimit(ctx, r.q, w.agent, now)
 		if err != nil {
-			return errors.Join(append(errs, fmt.Errorf("%w: spend limit of agent %s: %w", errAbortPass, uuidString(w.agent.ID), err))...)
+			return errors.Join(append(errs, fmt.Errorf("%w: spend limit of agent %s: %w", errAbortPass, execution.UUIDString(w.agent.ID.Bytes), err))...)
 		}
 		state.SetLimit(w.key.Agent, l)
 	}

@@ -23,10 +23,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/procoduck/koinon/internal/cli"
 	"github.com/procoduck/koinon/internal/connections"
 	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/execution/openshell"
-	"github.com/procoduck/koinon/internal/cli"
 	"github.com/procoduck/koinon/internal/gateway/standalone"
 	"github.com/procoduck/koinon/internal/project"
 	"github.com/procoduck/koinon/internal/reconciler"
