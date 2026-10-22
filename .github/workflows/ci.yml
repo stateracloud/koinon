@@ -111,6 +111,21 @@ jobs:
       # helm lint, helm template for each mode and kubeconform; render only, no cluster.
       - run: make chart-check
 
+  # Escape suite, admission part (plan item E2): the chart's ValidatingAdmissionPolicies against
+  # envtest's API server. The OpenShell cases need a gateway and run on the home lab only.
+  escape-admission:
+    name: escape (admission)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+      - run: make test-admission
+
   migrations:
     name: migrations
     runs-on: ubuntu-latest

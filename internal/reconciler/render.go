@@ -30,10 +30,12 @@ var DefaultBinaries = map[store.AgentFlavor][]string{
 	store.AgentFlavorOpencode: {"/usr/local/bin/opencode"},
 }
 
-// The credential each sandbox gets: the agent's agentgateway key, as the OpenAI-compatible
-// key every flavor reads (flavors/opencode/README.md).
+// GatewayKeyEnvVar holds the credential each sandbox gets: the agent's agentgateway key, as
+// the OpenAI-compatible key every flavor reads (flavors/opencode/README.md).
+const GatewayKeyEnvVar = "OPENAI_API_KEY"
+
 const (
-	keyEnvVar     = "OPENAI_API_KEY"
+	keyEnvVar     = GatewayKeyEnvVar
 	keyCredential = "api_key"
 	profilePrefix = "koinon-agentgateway-"
 )
@@ -45,8 +47,15 @@ const (
 // OpenShell adds a provider profile's endpoints to the sandbox's network allowlist (spike
 // steps 5 and 7), so the sandbox policy itself needs no rule for it.
 func (r *Reconciler) profile(flavor store.AgentFlavor, f Flavor) execution.ProviderProfile {
+	return GatewayProfile(flavor, f, r.cfg.Gateway, len(r.cfg.ToolServers) > 0)
+}
+
+// GatewayProfile is the profile the reconciler renders for flavor, with agentgateway at gw and
+// the /mcp route allowed when tools is set. Exported for the escape suite, which attaches the
+// same profile to a sandbox on a real gateway.
+func GatewayProfile(flavor store.AgentFlavor, f Flavor, gw Endpoint, tools bool) execution.ProviderProfile {
 	allow := []execution.L7Rule{{Method: "POST", Path: "/v1/chat/completions"}}
-	if len(r.cfg.ToolServers) > 0 {
+	if tools {
 		// MCP Streamable HTTP on agentgateway's /mcp route (agentd passes <gateway>/mcp to
 		// the harness): POST for messages, GET for the server stream, DELETE to end the
 		// session. Which tools are callable is agentgateway's CEL allowlist.
@@ -68,8 +77,8 @@ func (r *Reconciler) profile(flavor store.AgentFlavor, f Flavor) execution.Provi
 			HeaderName: "authorization",
 		}},
 		Endpoints: []execution.Endpoint{{
-			Host:     r.cfg.Gateway.Host,
-			Port:     r.cfg.Gateway.Port,
+			Host:     gw.Host,
+			Port:     gw.Port,
 			Protocol: "rest",
 			Allow:    allow,
 		}},
