@@ -20,6 +20,9 @@ api:
     digest: ""
   replicas: 1
   port: 8080
+  # The GitHub tools MCP server (plan item C3): its own listener and Service, reachable only from
+  # agentgateway (NetworkPolicy), never through the API Service or ingress.
+  toolsPort: 8081
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}

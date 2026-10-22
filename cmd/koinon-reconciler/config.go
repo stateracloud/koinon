@@ -15,6 +15,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/procoduck/koinon/connectors"
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/gateway"
 	"github.com/procoduck/koinon/internal/reconciler"
@@ -59,6 +60,9 @@ type fileConfig struct {
 	Flavors map[string]struct {
 		Image string `yaml:"image"`
 	} `yaml:"flavors"`
+	GitHubTools struct {
+		URL string `yaml:"url"`
+	} `yaml:"githubTools"`
 }
 
 // config is the reconciler's effective configuration: the config file, overridden by flags
@@ -88,6 +92,8 @@ type config struct {
 	homeRetention  string
 	flavorImages   map[string]string
 
+	githubToolsURL string
+
 	models gateway.ModelUpstream
 }
 
@@ -115,6 +121,7 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
+	fs.StringVar(&c.githubToolsURL, "github-tools-url", "", "URL of the GitHub tools MCP server as agentgateway reaches it; empty serves no GitHub tools")
 
 	var envErr error
 	fs.VisitAll(func(f *flag.Flag) {
@@ -178,6 +185,7 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.gatewayDBURL, fc.Gateway.DatabaseURL)
 	orDefault(&c.modelKeyFile, fc.Gateway.ModelKeyFile)
 	orDefault(&c.homeRetention, fc.Reconciler.HomeRetention)
+	orDefault(&c.githubToolsURL, fc.GitHubTools.URL)
 	for _, d := range []struct {
 		dst *time.Duration
 		src string
@@ -259,6 +267,14 @@ func (c *config) gatewayEndpoint() (reconciler.Endpoint, error) {
 		return reconciler.Endpoint{}, fmt.Errorf("--gateway-url %q: want http(s)://host[:port]", c.gatewayURL)
 	}
 	return reconciler.Endpoint{Host: u.Hostname(), Port: uint32(p)}, nil
+}
+
+// toolServers maps connector type IDs to their MCP tool servers.
+func (c *config) toolServers() map[string]string {
+	if c.githubToolsURL == "" {
+		return nil
+	}
+	return map[string]string{connectors.GitHubID: c.githubToolsURL}
 }
 
 // flavors combines the configured images with each flavor's binaries.

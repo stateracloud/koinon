@@ -1,0 +1,105 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package reconciler_test
+
+import (
+	"log/slog"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/procoduck/koinon/internal/agentconfig"
+	"github.com/procoduck/koinon/internal/db/store"
+	"github.com/procoduck/koinon/internal/execution/openshell"
+	"github.com/procoduck/koinon/internal/execution/openshell/fakegateway"
+	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/procoduck/koinon/internal/reconciler"
+	"github.com/procoduck/koinon/templates"
+)
+
+const toolsURL = "http://koinon-api-tools.koinon.svc:8081/mcp"
+
+var _ = Describe("ToolGrants", func() {
+	servers := map[string]string{"github": toolsURL}
+	grant := func(preset templates.Preset, scopes ...string) agentconfig.Config {
+		return agentconfig.Config{Grants: []templates.Grant{{Connector: "github", Scopes: scopes, Preset: preset}}}
+	}
+
+	It("allows the tools of the grant's scopes", func() {
+		Expect(reconciler.ToolGrants(grant(templates.PresetStandard, "repo.read", "pull_request.create", "issue.comment"), servers)).To(Equal(
+			[]gateway.ToolGrant{{Target: "github", Tools: []string{"comment_on_issue", "create_pull_request", "get_approval_status"}}}))
+		Expect(reconciler.ToolGrants(grant(templates.PresetStandard, "repo.read", "pull_request.create"), servers)).To(Equal(
+			[]gateway.ToolGrant{{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}}}))
+	})
+
+	It("allows nothing the preset denies, or without a tool server", func() {
+		Expect(reconciler.ToolGrants(grant(templates.PresetReadOnly, "repo.read", "pull_request.create"), servers)).To(BeEmpty())
+		Expect(reconciler.ToolGrants(grant(templates.PresetStandard, "repo.read"), servers)).To(BeEmpty())
+		Expect(reconciler.ToolGrants(grant(templates.PresetStandard, "pull_request.create"), nil)).To(BeEmpty())
+	})
+})
+
+var _ = Describe("Reconciler with the GitHub tool server", func() {
+	It("routes the tool server and allows each active agent its granted tools", func(ctx SpecContext) {
+		osg := fakegateway.New()
+		conn, err := osg.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = conn.Close(); osg.Stop() })
+		mg := &fakeModelGateway{}
+		cfg := reconciler.Config{
+			Gateway:     reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			ToolServers: map[string]string{"github": toolsURL},
+			Flavors: map[store.AgentFlavor]reconciler.Flavor{
+				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			},
+			Logger: slog.New(slog.DiscardHandler),
+		}
+		r, err := reconciler.New(pool, openshell.New(conn), mg, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
+		Expect(err).NotTo(HaveOccurred())
+
+		org, user := newOrg(ctx)
+		withGrant := newAgentWithConfig(ctx, org, user, `{"instructions":"help","grants":[`+
+			`{"connector":"github","scopes":["repo.read","pull_request.create","issue.comment"],"preset":"standard"}]}`)
+		readOnly := newAgentWithConfig(ctx, org, user, `{"instructions":"help","grants":[`+
+			`{"connector":"github","scopes":["repo.read","pull_request.create"],"preset":"read-only"}]}`)
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+
+		state := mg.last()
+		Expect(state.MCP).To(Equal([]gateway.MCPTarget{{Name: "github", URL: toolsURL}}))
+		ref := func(a store.Agent) gateway.AgentRef {
+			o, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: a.ID})
+			Expect(err).NotTo(HaveOccurred())
+			return gateway.AgentRef{Org: state.Keys[0].Agent.Org, Name: o.ID.String()}
+		}
+		Expect(state.Tools).To(Equal(map[gateway.AgentRef][]gateway.ToolGrant{
+			ref(withGrant): {{Target: "github", Tools: []string{"comment_on_issue", "create_pull_request", "get_approval_status"}}},
+		}))
+		Expect(state.Tools).NotTo(HaveKey(ref(readOnly)))
+
+		By("the sandbox may reach agentgateway's MCP route")
+		ws := orgWorkspace(ctx, org)
+		var paths []string
+		for _, rule := range osg.Profile(ws, "koinon-agentgateway-opencode").GetEndpoints()[0].GetRules() {
+			paths = append(paths, rule.GetAllow().GetMethod()+" "+rule.GetAllow().GetPath())
+		}
+		Expect(paths).To(ContainElements("POST /v1/chat/completions", "POST /mcp", "GET /mcp", "DELETE /mcp"))
+	})
+})
+
+func newAgentWithConfig(ctx SpecContext, org, user pgtype.UUID, config string) store.Agent {
+	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "agent", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
+	Expect(err).NotTo(HaveOccurred())
+	v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent.ID, Config: []byte(config), CreatedBy: user})
+	Expect(err).NotTo(HaveOccurred())
+	agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: v.ID, ActivatedBy: user})
+	Expect(err).NotTo(HaveOccurred())
+	return agent
+}
+
+func orgWorkspace(ctx SpecContext, org pgtype.UUID) string {
+	row, err := q.GetOrgWorkspace(ctx, org)
+	Expect(err).NotTo(HaveOccurred())
+	return row.Workspace
+}
