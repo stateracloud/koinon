@@ -149,8 +149,36 @@ turns:
 			Expect(call()).To(Equal("ping"))
 			Expect(call("ping", "koinon_ping")).To(Equal("ping"))
 			Expect(call("mcp__koinon__ping")).To(Equal("mcp__koinon__ping"))
+			Expect(call("koinon_ping", "mcp__koinon__ping")).To(Equal("ping"))
 			Expect(call("a_ping", "b_ping")).To(Equal("ping"))
+			Expect(call("foo_ping")).To(Equal("ping"), "another server's tool of the same name")
+			Expect(call("mcp__other__ping")).To(Equal("ping"))
 			Expect(call("pinger")).To(Equal("ping"))
+		})
+
+		It("matches a tool result only from the scripted tool, behind a harness's MCP prefix", func(ctx SpecContext) {
+			_, ts := start(fakemodel.Script{Model: "m", Turns: []fakemodel.Turn{
+				{When: fakemodel.When{ToolResult: "create_pull_request"}, Text: "pull request result"},
+				{When: fakemodel.When{ToolResult: fakemodel.AnyTool}, Text: "another result"},
+				{Text: "first"},
+			}})
+			after := func(tool string) string {
+				messages := []map[string]any{
+					userMsg("hi"),
+					{"role": "assistant", "content": nil, "tool_calls": []map[string]any{{
+						"id": "call_1", "type": "function", "function": map[string]any{"name": tool, "arguments": "{}"},
+					}}},
+					{"role": "tool", "tool_call_id": "call_1", "content": "ok"},
+				}
+				var c oaCompletion
+				decode(post(ctx, ts.URL+"/v1/chat/completions", map[string]any{"model": "m", "messages": messages}), &c)
+				return *c.Choices[0].Message.Content
+			}
+			Expect(after("create_pull_request")).To(Equal("pull request result"))
+			Expect(after("koinon_create_pull_request")).To(Equal("pull request result"))
+			Expect(after("mcp__koinon__create_pull_request")).To(Equal("pull request result"))
+			Expect(after("foo_create_pull_request")).To(Equal("another result"))
+			Expect(after("mcp__other__create_pull_request")).To(Equal("another result"))
 		})
 	})
 })
