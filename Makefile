@@ -19,11 +19,16 @@ web-deps: ## Install web dependencies
 	cd web && $(PNPM) install --frozen-lockfile
 
 .PHONY: build
-build: build-go build-web ## Build everything
+build: build-web ## Build everything; koinon-api embeds the web UI
+	$(MAKE) build-go GO_TAGS=webui
+
+# GO_TAGS=webui embeds web/dist into koinon-api (build the UI first); without
+# it koinon-api serves the API only, and the UI runs on the Vite dev server.
+GO_TAGS ?=
 
 .PHONY: build-go
 build-go: ## Build Go binaries into bin/
-	$(GO) build -ldflags "$(LDFLAGS)" -o bin/ ./cmd/...
+	$(GO) build -tags "$(GO_TAGS)" -ldflags "$(LDFLAGS)" -o bin/ ./cmd/...
 
 .PHONY: build-web
 build-web: ## Build the web UI

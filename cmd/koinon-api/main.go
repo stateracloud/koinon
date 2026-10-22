@@ -36,6 +36,7 @@ import (
 	"github.com/procoduck/koinon/internal/scheduler"
 	"github.com/procoduck/koinon/internal/services"
 	"github.com/procoduck/koinon/templates"
+	"github.com/procoduck/koinon/web"
 )
 
 type config struct {
@@ -246,6 +247,7 @@ func run() error {
 		Auth:           authSvc,
 		TrustedOrigins: splitList(cfg.trustedOrigins),
 		Services:       []func(*connect.Server){svc.Register},
+		UI:             web.Dist(),
 	})
 	if err != nil {
 		return err
@@ -259,7 +261,7 @@ func run() error {
 	}()
 
 	slog.Info("starting koinon-api", "version", project.Version, "addr", cfg.addr,
-		"oidc", cfg.oidcIssuer != "")
+		"oidc", cfg.oidcIssuer != "", "web_ui", web.Dist() != nil)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
