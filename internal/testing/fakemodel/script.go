@@ -60,6 +60,9 @@ type When struct {
 	ToolResult string `yaml:"toolResult,omitempty"`
 	// UserContains requires the latest user text to contain this substring.
 	UserContains string `yaml:"userContains,omitempty"`
+	// SystemContains requires the system prompt to contain this substring: the text of every
+	// OpenAI system or developer message, or Anthropic's top-level system field.
+	SystemContains string `yaml:"systemContains,omitempty"`
 	// AssistantTurns, when set, requires exactly this many assistant messages in the request.
 	// Use it to tell apart repeated steps of the same shape.
 	AssistantTurns *int `yaml:"assistantTurns,omitempty"`
@@ -167,6 +170,7 @@ type conversation struct {
 	// message is not a tool result. A result whose call cannot be resolved has an empty name.
 	toolResults    []string
 	lastUserText   string
+	systemText     string
 	assistantTurns int
 	// tools are the tool names the request declares.
 	tools []string
@@ -231,6 +235,9 @@ func (w When) holds(c conversation) bool {
 		}
 	}
 	if w.UserContains != "" && !strings.Contains(c.lastUserText, w.UserContains) {
+		return false
+	}
+	if w.SystemContains != "" && !strings.Contains(c.systemText, w.SystemContains) {
 		return false
 	}
 	if w.AssistantTurns != nil && *w.AssistantTurns != c.assistantTurns {

@@ -3,6 +3,7 @@
 package fakemodel_test
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -78,6 +79,43 @@ turns:
 			Expect(ask(userMsg("hello"), map[string]any{"role": "assistant", "content": "first"}, userMsg("again"))).To(Equal("later"))
 			Expect(ask(userMsg("bye now"))).To(Equal("goodbye"))
 		})
+
+		It("matches the system prompt with systemContains", func(ctx SpecContext) {
+			_, ts := start(fakemodel.Script{Model: "sys", Turns: []fakemodel.Turn{
+				{When: fakemodel.When{SystemContains: "MARKER"}, Text: "instructed"},
+				{Text: "plain"},
+			}})
+			openAI := func(messages ...map[string]any) string {
+				var c oaCompletion
+				decode(post(ctx, ts.URL+"/v1/chat/completions", map[string]any{"model": "sys", "messages": messages}), &c)
+				return *c.Choices[0].Message.Content
+			}
+			anthropic := func(system any) string {
+				body := map[string]any{"model": "sys", "max_tokens": 10, "messages": []any{anUser("hi")}}
+				if system != nil {
+					body["system"] = system
+				}
+				var m anMessage
+				decode(post(ctx, ts.URL+"/v1/messages", body, "anthropic-version", "2023-06-01"), &m)
+				return m.Content[0].Text
+			}
+			sys := func(role string, content any) map[string]any { return map[string]any{"role": role, "content": content} }
+
+			Expect(openAI(sys("system", "you follow the MARKER rules"), userMsg("hi"))).To(Equal("instructed"))
+			Expect(openAI(sys("developer", []map[string]any{{"type": "text", "text": "MARKER"}}), userMsg("hi"))).To(Equal("instructed"))
+			Expect(openAI(sys("system", "no rules"), userMsg("hi"))).To(Equal("plain"))
+			Expect(openAI(userMsg("MARKER in the user text is not the system prompt"))).To(Equal("plain"))
+
+			Expect(anthropic("the MARKER rules")).To(Equal("instructed"))
+			Expect(anthropic([]map[string]any{{"type": "text", "text": "a"}, {"type": "text", "text": "MARKER"}})).To(Equal("instructed"))
+			Expect(anthropic(nil)).To(Equal("plain"))
+		})
+
+		It("parses systemContains from YAML", func() {
+			s, err := fakemodel.ParseScript([]byte("model: m\nturns: [{when: {systemContains: x}, text: a}]"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(s.Turns[0].When.SystemContains).To(Equal("x"))
+		})
 	})
 
 	Describe("the example repo-helper script", func() {
@@ -92,7 +130,9 @@ turns:
 			Expect(err).NotTo(HaveOccurred())
 			_, ts := start(scripts...)
 			url := ts.URL + "/v1/chat/completions"
-			messages := []map[string]any{userMsg("Add hello.md to koinon-demo/hello")}
+			// The instructions koinon-agentd writes, as OpenCode puts them in the system prompt.
+			system := map[string]any{"role": "system", "content": "Instructions from: /sandbox/.koinon/AGENTS.md\n# Koinon\n\n# Repo helper\n"}
+			messages := []map[string]any{system, userMsg("Add hello.md to koinon-demo/hello")}
 
 			// OpenCode declares the MCP tool behind its server prefix.
 			tools := []map[string]any{{"type": "function", "function": map[string]any{"name": "koinon_create_pull_request"}}}
@@ -131,6 +171,11 @@ turns:
 			decode(post(ctx, url, map[string]any{"model": "repo-helper", "messages": messages, "tools": tools}), &third)
 			Expect(third.Choices[0].FinishReason).To(Equal("stop"))
 			Expect(*third.Choices[0].Message.Content).To(ContainSubstring("https://github.test/koinon-demo/hello/pull/1"))
+
+			By("a request without the repo-helper instructions gets no answer")
+			resp := post(ctx, url, map[string]any{"model": "repo-helper", "messages": messages[1:], "tools": tools})
+			DeferCleanup(resp.Body.Close)
+			Expect(resp.StatusCode).To(Equal(http.StatusBadRequest))
 		})
 
 		It("keeps the scripted name when no declared tool or several match it", func(ctx SpecContext) {
