@@ -248,26 +248,17 @@ func run() error {
 		return errors.New("--default-org-group-mappings needs --oidc-issuer-url")
 	}
 	// On a fresh install the database and its schema come up after koinon-api starts (the chart's
-	// migration Job waits for CNPG), so bootstrap is retried for up to --wait.
-	var res auth.BootstrapResult
-	retryUntil := time.Now().Add(cfg.wait)
-	for {
-		res, err = auth.Bootstrap(ctx, pool, auth.BootstrapConfig{
+	// migration Job waits for CNPG), so bootstrap is retried for up to --wait while the database
+	// is unreachable or not migrated. Any other error fails at once.
+	res, err := retryBootstrap(ctx, cfg.wait, 2*time.Second, func() (auth.BootstrapResult, error) {
+		return auth.Bootstrap(ctx, pool, auth.BootstrapConfig{
 			PasswordFile:           cfg.bootstrapPasswordFile,
 			LoginEnabled:           cfg.bootstrapLogin,
 			DefaultOrgIdentityMode: mode,
 			OIDCIssuer:             cfg.oidcIssuer,
 			GroupMappings:          mappings,
 		}, time.Now())
-		if err == nil || ctx.Err() != nil || time.Now().After(retryUntil) {
-			break
-		}
-		slog.Warn("bootstrap failed; retrying (is the database migrated?)", "err", err)
-		select {
-		case <-ctx.Done():
-		case <-time.After(2 * time.Second):
-		}
-	}
+	})
 	if err != nil {
 		return fmt.Errorf("bootstrap: %w", err)
 	}
