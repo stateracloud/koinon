@@ -93,7 +93,7 @@ func (s *Server) bindGrants(ctx context.Context, org pgtype.UUID, t *templates.T
 			return nil, invalid("%s: the template allows %d to %d repositories, not %d", field, lo, hi, len(repos))
 		}
 		if g.Connector == connectors.GitHubID {
-			if err := s.checkInstallation(ctx, conn, field, repos); err != nil {
+			if repos, err = s.checkInstallation(ctx, conn, field, repos); err != nil {
 				return nil, err
 			}
 		}
@@ -108,23 +108,50 @@ func (s *Server) bindGrants(ctx context.Context, org pgtype.UUID, t *templates.T
 }
 
 // checkInstallation asks GitHub, as the connection's App, for a metadata-read token narrowed to
-// repos. Nothing is written to GitHub and the token is not used.
-func (s *Server) checkInstallation(ctx context.Context, conn store.Connection, field string, repos []string) error {
+// repos, and with it reads each repository's full_name: GitHub matches names
+// case-insensitively but OpenShell matches the read grant's paths case-sensitively, so the
+// binding stores GitHub's spelling. It returns the repositories in that spelling, in the order
+// given. Nothing is written to GitHub.
+func (s *Server) checkInstallation(ctx context.Context, conn store.Connection, field string, repos []string) ([]string, error) {
 	app, err := connections.LoadGitHubApp(ctx, s.secrets, conn)
 	if err != nil {
 		if errors.Is(err, connections.ErrNoSecretStore) {
-			return connect.NewError(connect.CodeFailedPrecondition, err.Error())
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err.Error())
 		}
 		// The messages name the Secret or say the key is malformed; never its content.
-		return connect.NewError(connect.CodeFailedPrecondition, field+": the connection cannot authenticate to GitHub: "+err.Error())
+		return nil, connect.NewError(connect.CodeFailedPrecondition, field+": the connection cannot authenticate to GitHub: "+err.Error())
 	}
-	_, err = s.github.InstallationToken(ctx, app, github.TokenRequest{
+	tok, err := s.github.InstallationToken(ctx, app, github.TokenRequest{
 		Repositories: repos, Permissions: map[string]string{"metadata": "read"},
 	})
+	if err != nil {
+		return nil, s.githubError(conn, field, repos, err)
+	}
+	canonical := make([]string, 0, len(repos))
+	for j, r := range repos {
+		repo, err := github.ParseRepo(r)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf("%s.repositories[%d]: %v", field, j, err))
+		}
+		info, err := s.github.GetRepository(ctx, tok, repo)
+		if err != nil {
+			return nil, s.githubError(conn, field, repos, err)
+		}
+		// A renamed or transferred repository answers under its new name (GitHub redirects);
+		// binding the old one would grant a path that no longer exists.
+		if !strings.EqualFold(info.FullName, r) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
+				"%s.repositories[%d]: %q is now %q on GitHub; bind it by that name", field, j, r, info.FullName))
+		}
+		canonical = append(canonical, info.FullName)
+	}
+	return canonical, nil
+}
+
+// githubError maps an error from GitHub while checking a binding to the caller's error.
+func (s *Server) githubError(conn store.Connection, field string, repos []string, err error) error {
 	var apiErr *github.APIError
 	switch {
-	case err == nil:
-		return nil
 	case errors.As(err, &apiErr) && (apiErr.Status == http.StatusUnprocessableEntity || apiErr.Status == http.StatusNotFound):
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
 			"%s: the connection's installation cannot access every repository in %v; install the App on them first", field, repos))

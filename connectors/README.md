@@ -65,7 +65,9 @@ Checked against the vendored protos and the policy schema reference at tag v0.1.
 
 - **Case.** REST path globs are case-sensitive; GitHub owner and repository names are not. Only
   the spelling stored in the binding is allowed (other spellings are denied, which fails closed).
-  The binding stores the names as the user entered them.
+  The binding stores GitHub's spelling: at binding time Koinon reads `full_name` from
+  `GET /repos/{owner}/{repo}` with the metadata-read token, so a binding entered as
+  `acme/WIDGETS` grants `Acme/Widgets`, the spelling git's remote URLs then need.
 - **Binary ancestry.** A binary matches its own connections and those of its children. Listing
   the harness binary (needed for REST reads from its tools) therefore admits every process the
   harness starts; the method and path rules, not the binary list, are the boundary.

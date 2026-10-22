@@ -175,8 +175,8 @@ func (f *Fake) withRepo(perm, level string, h func(http.ResponseWriter, *http.Re
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Bad credentials"})
 			return
 		}
-		name := r.PathValue("repo")
-		if !strings.EqualFold(r.PathValue("owner"), f.Account) || !slices.Contains(f.Repositories, name) {
+		name, ok := f.canonical(r.PathValue("repo"))
+		if !strings.EqualFold(r.PathValue("owner"), f.Account) || !ok {
 			writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 			return
 		}
