@@ -57,6 +57,10 @@ type flavor struct {
 	// instructionsInSystem is whether the harness puts the instruction file koinon-agentd
 	// writes (instructionsPath) into the model's system prompt.
 	instructionsInSystem bool
+	// instructionLink is the path the harness reads the instructions from, a symbolic link to
+	// instructionsPath (internal/agentd, instructionLink). One in the home is put back on
+	// every start; one in the image cannot change.
+	instructionLink string
 	// readyCommand is the command the harness announces once the Koinon MCP server's tools are
 	// registered (the server's readyPrompt as a command); koinon-agentd waits for it before the
 	// first prompt. Empty means the harness announces none.

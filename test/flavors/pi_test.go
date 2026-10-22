@@ -23,4 +23,7 @@ var pi = flavor{
 	// pi-acp asks over ACP only for pi extension dialogs; built-in tools never ask.
 	editAsks:       false,
 	unknownSession: "Unknown sessionId",
+	// pi appends APPEND_SYSTEM.md, linked to the file koinon-agentd writes, to its system prompt.
+	instructionsInSystem: true,
+	instructionLink:      "/sandbox/.pi/agent/APPEND_SYSTEM.md",
 }
