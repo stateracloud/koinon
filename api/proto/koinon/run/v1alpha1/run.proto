@@ -72,6 +72,23 @@ message Run {
   google.protobuf.Timestamp created_at = 13;
   google.protobuf.Timestamp started_at = 14;
   google.protobuf.Timestamp finished_at = 15;
+  // Model spend recorded for the run by the spend ledger (plan item L1). Set
+  // by GetRun and on the runs of GetTicket; unset elsewhere.
+  Cost cost = 16;
+}
+
+// Cost is model spend recorded by the spend ledger from agentgateway's access
+// log (plan item L1).
+message Cost {
+  // Charged model requests.
+  int64 requests = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
+  // USD as an exact decimal string with at least two fraction digits, for
+  // example "0.0021" or "0.00".
+  string usd = 4;
+  // False when some request had no price, so usd undercounts.
+  bool priced = 5;
 }
 
 // RunEvent is one session update or lifecycle note of a run.

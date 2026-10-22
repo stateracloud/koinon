@@ -25,6 +25,7 @@ import (
 	"github.com/procoduck/koinon/internal/gateway"
 	sandboxv1 "github.com/procoduck/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
+	"github.com/procoduck/koinon/internal/ledger"
 	"github.com/procoduck/koinon/internal/reconciler"
 )
 
@@ -402,6 +403,34 @@ var _ = Describe("Reconciler", func() {
 			Expect(mg.last().Keys).To(BeEmpty())
 			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateRetained))
 		})
+	})
+
+	It("pushes the agent's spend limit net of recorded spend, also after a key rotation", func(ctx SpecContext) {
+		agent := newAgentWithConfig(ctx, org, user, `{"instructions":"help","limits":{"spendUSD":"10.00"}}`)
+		r := newReconciler()
+		pass(ctx, r)
+		row := sandboxRow(ctx, agent.ID)
+		ref := mg.last().Keys[0].Agent
+		full := mg.last().Limits[ref]
+		Expect(full.Unit).To(Equal(gateway.USD))
+		Expect(full.Amount).To(BeNumerically("==", 10))
+		Expect(full.Window).To(Equal(ledger.Window))
+
+		By("recorded spend lowers the pushed amount and starts a new gateway counter")
+		_, err := pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model,
+			input_tokens, output_tokens, cost_usd, priced, occurred_at)
+			VALUES ($1, $2, 'req-1', $3, 'm', 1, 1, 2.5, true, now())`, org, agent.ID, row.GatewayKeyID.String)
+		Expect(err).NotTo(HaveOccurred())
+		pass(ctx, r)
+		net := mg.last().Limits[ref]
+		Expect(net.Amount).To(BeNumerically("==", 7.5))
+		Expect(net.Generation).NotTo(Equal(full.Generation))
+
+		By("a rotated key gets the remainder, not the full limit")
+		Expect(kube.CoreV1().Secrets(namespace).Delete(ctx, row.KeySecretName, metav1.DeleteOptions{})).To(Succeed())
+		pass(ctx, r)
+		Expect(mg.last().Keys[0].ID).NotTo(Equal(row.GatewayKeyID.String))
+		Expect(mg.last().Limits[ref]).To(Equal(net))
 	})
 
 	It("uses one workspace per org", func(ctx SpecContext) {

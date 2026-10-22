@@ -3,11 +3,13 @@
 package api_test
 
 import (
+	"fmt"
 	"strings"
 
 	connect "connectrpc.com/connect/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/procoduck/koinon/internal/db/store"
 	agentv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1"
@@ -381,6 +383,28 @@ var _ = Describe("TicketService and run scheduling", func() {
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "token_cap"))
 			_, err = recordTokens(ctx, e, run, 10)
 			Expect(err).To(HaveOccurred(), "usage after the run finished is dropped")
+		})
+
+		It("shows the recorded spend of each run and of the ticket", func(ctx SpecContext) {
+			t, r := member.createTicket(ctx, org, agent.GetId(), "costly")
+			run := ad.mustClaim(ctx, org)
+			for i, cost := range []string{"0.0015", "0.25"} {
+				_, err := e.pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, run_id, ticket_id, request_id,
+					key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)
+					VALUES ($1, $2, $3, $4, $5, 'k-1', 'm', 100, 20, $6::numeric, true, now())`,
+					run.OrgID, run.AgentID, run.ID, run.TicketID, fmt.Sprintf("req-%s-%d", r.GetId(), i), cost)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			want := &runv1alpha1.Cost{Requests: 2, InputTokens: 200, OutputTokens: 40, Usd: "0.2515", Priced: true}
+			Expect(proto.Equal(member.getRun(ctx, org, r.GetId()).GetCost(), want)).To(BeTrue())
+
+			ticket := member.getTicket(ctx, org, t.GetId())
+			Expect(proto.Equal(ticket.GetTicket().GetCost(), want)).To(BeTrue())
+			Expect(proto.Equal(ticket.GetRuns()[0].GetCost(), want)).To(BeTrue())
+
+			// A ticket without spend shows zero.
+			t2, _ := member.createTicket(ctx, org, agent.GetId(), "free")
+			Expect(member.getTicket(ctx, org, t2.GetId()).GetTicket().GetCost().GetUsd()).To(Equal("0.00"))
 		})
 	})
 })

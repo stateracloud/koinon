@@ -20,6 +20,8 @@ data:
       statsUrl: http://{{ $gwHost }}:15020
       port: {{ .Values.gateway.standalone.port }}
       databaseUrl: sqlite:///data/agentgateway.db?mode=rwc
+      # agentgateway exports its access log here, for the spend ledger (plan item L1).
+      accessLogOtlp: {{ include "koinon.componentName" (list . "api") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.otlpPort }}
       {{- if .Values.model.apiKeySecret.name }}
       modelKeyFile: /secrets/model/{{ .Values.model.apiKeySecret.key }}
       {{- end }}

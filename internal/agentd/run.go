@@ -704,13 +704,12 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if n.Update.ToolCall != nil {
 		h.r.markTool(string(n.Update.ToolCall.ToolCallId))
 	}
-	// TODO(token cap, #27): call scheduler.RecordTokenUsage once ACP reports tokens consumed.
-	// ACP session updates carry no consumption today: the only usage update (usage_update,
-	// unstable in acp-go-sdk v0.13.5) reports the context window's occupancy (used/size) and
-	// a cost, which rise and fall with compaction and cannot be summed into tokens used. The
-	// unstable PromptResponse.usage arrives only when the turn, and so the run, has ended, too
-	// late to cap it. Until then only the spend ledger (plan item L1, not built yet), the
-	// hook's other caller, can enforce the cap; usage_update is still recorded as a run event.
+	// The token cap (#27) is fed by the spend ledger (package ledger, plan item L1), which calls
+	// scheduler.RecordTokenUsage for every request agentgateway logs. ACP cannot feed it: the
+	// only usage update (usage_update, unstable in acp-go-sdk v0.13.5) reports the context
+	// window's occupancy (used/size) and a cost, which rise and fall with compaction and cannot
+	// be summed into tokens used, and the unstable PromptResponse.usage arrives only when the turn,
+	// and so the run, has ended. usage_update is still recorded as a run event.
 	return nil
 }
 

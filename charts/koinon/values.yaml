@@ -20,6 +20,9 @@ api:
     digest: ""
   replicas: 1
   port: 8080
+  # The spend ledger's OTLP/HTTP receiver (plan item L1). agentgateway exports its access log
+  # here; the NetworkPolicy admits only the gateway, since the receiver has no authentication.
+  otlpPort: 4318
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}

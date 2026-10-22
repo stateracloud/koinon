@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The agentgateway v1.6.0 config that produced agentgateway-v1.6.0-logs.binpb, captured
+# 2026-10-22 with `docker run cr.agentgateway.dev/agentgateway:v1.6.0 -f config.yaml`, a stub
+# OpenAI upstream answering 10 prompt / 30 completion tokens, and a raw HTTP sink on :14318.
+# Four requests, exported in one OTLP/HTTP batch (application/x-protobuf, POST /v1/logs):
+#   1. GET /healthz without a key                   -> 401, no koinon.agent
+#   2. fake/test-model with key "test-a"            -> 200, cost 0.0020
+#   3. unpriced/model (no catalog entry) with key   -> 200, no agw.ai.usage.cost.total
+#   4. unknown/model (not in llm.models) with key   -> 404 model_not_found, no usage
+# keyHash is sha256("test-a"), not a real key.
+config:
+  adminAddr: '[::]:15000'
+  logging:
+    format: json
+  modelCatalog:
+    - inline:
+        providers:
+          fake:
+            models:
+              fake/test-model:
+                rates:
+                  input: "50"
+                  output: "50"
+frontendPolicies:
+  accessLog:
+    add:
+      koinon.agent: default(apiKey.agent, "")
+      koinon.key: default(apiKey.name, "")
+      koinon.request: uuid()
+    otlp:
+      host: host.docker.internal:14318
+      protocol: http
+gateways:
+  default:
+    port: 4000
+llm:
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header:
+          name: authorization
+          prefix: 'Bearer '
+      keys:
+        - keyHash: sha256:d7ef9a39720870db13b85251d2f81938233b8417e9ef596c773638c5d38fd60c
+          metadata:
+            name: k-aaaaaaaaaaaa
+            agent: acme/019a0000-0000-7000-8000-000000000001
+  models:
+    - name: fake/test-model
+      provider:
+        custom:
+          providerOverride: fake
+          formats:
+            - type: completions
+      params:
+        baseUrl: http://host.docker.internal:18081/v1
+    - name: unpriced/model
+      provider:
+        custom:
+          providerOverride: fake
+          formats:
+            - type: completions
+      params:
+        baseUrl: http://host.docker.internal:18081/v1

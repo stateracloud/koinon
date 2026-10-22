@@ -34,7 +34,11 @@ func (s *Server) GetRun(ctx context.Context, req *runv1alpha1.GetRunRequest) (*r
 	if err != nil {
 		return nil, s.dbError(err, "run")
 	}
-	return &runv1alpha1.GetRunResponse{Run: runProto(r)}, nil
+	out := runProto(r)
+	if err := setRunCosts(ctx, s.q, c.org, []*runv1alpha1.Run{out}); err != nil {
+		return nil, s.dbError(err, "run")
+	}
+	return &runv1alpha1.GetRunResponse{Run: out}, nil
 }
 
 // CancelRun implements RunService.

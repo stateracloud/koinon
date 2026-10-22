@@ -37,10 +37,12 @@ spec:
           image: {{ include "koinon.image" (list $ $v.image) }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           {{- if eq $component "api" }}
-          args: ["-addr", ":{{ $v.port }}"]
+          args: ["-addr", ":{{ $v.port }}", "-otlp-addr", ":{{ $v.otlpPort }}"]
           ports:
             - name: http
               containerPort: {{ $v.port }}
+            - name: otlp
+              containerPort: {{ $v.otlpPort }}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           livenessProbe:
@@ -112,3 +114,6 @@ spec:
     - name: http
       port: {{ .Values.api.port }}
       targetPort: http
+    - name: otlp
+      port: {{ .Values.api.otlpPort }}
+      targetPort: otlp
