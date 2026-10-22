@@ -6,6 +6,10 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# The cluster's DNS domain. Sandboxes reach agentgateway by its fully qualified Service name,
+# because OpenShell's policy DNS resolves names without the pod's search domains.
+clusterDomain: cluster.local
+
 # Koinon images: <registry>/<repository>:<tag>[@<digest>]. The tag defaults to .Chart.AppVersion.
 image:
   registry: ghcr.io/procoduck
