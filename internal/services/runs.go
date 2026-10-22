@@ -144,7 +144,7 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 		if cursor < run.LastEventSeq {
 			continue
 		}
-		if terminal(run.State) {
+		if run.State.Finished() {
 			return nil
 		}
 		select {

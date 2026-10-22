@@ -194,7 +194,3 @@ func runEventProto(e store.RunEvent) *runv1alpha1.RunEvent {
 		CreatedAt: tsProto(e.CreatedAt),
 	}
 }
-
-func terminal(s store.RunState) bool {
-	return s == store.RunStateSucceeded || s == store.RunStateFailed || s == store.RunStateCanceled
-}
