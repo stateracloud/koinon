@@ -64,3 +64,11 @@ SELECT * FROM ticket_events
 WHERE org_id = @org_id AND ticket_id = @ticket_id AND seq > @after_seq
 ORDER BY seq
 LIMIT @max_events;
+
+-- name: ListTicketMessagesAfter :many
+-- The users' messages on the ticket after a timeline seq, in order: what
+-- agentd sends the harness as a run's prompt.
+SELECT * FROM ticket_events
+WHERE org_id = @org_id AND ticket_id = @ticket_id AND seq > @after_seq
+  AND kind = 'message' AND actor_kind = 'user'
+ORDER BY seq;

@@ -596,6 +596,8 @@ type Run struct {
 	FinishedAt          pgtype.Timestamptz
 	CreatedAt           pgtype.Timestamptz
 	UpdatedAt           pgtype.Timestamptz
+	PromptThroughSeq    pgtype.Int8
+	Takeovers           int32
 }
 
 type RunEvent struct {
@@ -607,6 +609,7 @@ type RunEvent struct {
 	Kind      string
 	Payload   []byte
 	CreatedAt pgtype.Timestamptz
+	SourceSeq pgtype.Int8
 }
 
 type Session struct {

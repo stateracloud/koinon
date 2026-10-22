@@ -96,6 +96,7 @@ WITH stale AS (
 )
 UPDATE runs
 SET epoch = agent.epoch,
+    takeovers = runs.takeovers + 1,
     owner_id = @owner_id::text,
     lease_expires_at = now() + make_interval(secs => @lease_seconds::integer),
     heartbeat_at = now()
@@ -180,3 +181,29 @@ SET state = 'canceled',
     ready_at = NULL
 WHERE org_id = @org_id AND ticket_id = @ticket_id AND state = 'queued'
 RETURNING *;
+
+-- name: ReleaseRunLease :one
+-- The owner gives the run up without finishing it, for example because the
+-- exec stream to the harness dropped: the lease ends now, so any agentd can
+-- take the run over at once (TakeOverExpiredRun) and resume the session.
+UPDATE runs
+SET lease_expires_at = now() - interval '1 second'
+WHERE org_id = @org_id AND id = @id AND epoch = @epoch
+  AND state IN ('starting', 'running')
+RETURNING *;
+
+-- name: SetRunPromptThrough :one
+-- Records, before the prompt is sent, the ticket timeline seq through which
+-- the ticket's messages are in it.
+UPDATE runs
+SET prompt_through_seq = @prompt_through_seq::bigint
+WHERE org_id = @org_id AND id = @id AND epoch = @epoch
+  AND state IN ('starting', 'running')
+RETURNING *;
+
+-- name: GetTicketPromptedThrough :one
+-- The highest ticket timeline seq already sent to the harness by the ticket's
+-- other runs; messages after it are new for the next run.
+SELECT coalesce(max(prompt_through_seq), 0)::bigint AS prompted_through
+FROM runs
+WHERE org_id = @org_id AND ticket_id = @ticket_id AND id <> @run_id;
