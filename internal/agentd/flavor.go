@@ -42,6 +42,27 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 	}, nil
 }
 
+// readyCommand is the ACP command a flavor's harness announces once Koinon's MCP tools are
+// registered, or "" when it announces none. OpenCode turns the MCP prompt koinon-ready
+// (gateway.ReadyPrompt, published by Koinon's MCP server) into the command
+// <server>:<prompt>, and its server is "koinon" (flavors/opencode/README.md, ADR 0052).
+func readyCommand(f store.AgentFlavor) string {
+	if f == store.AgentFlavorOpencode {
+		return "koinon:koinon-ready"
+	}
+	return ""
+}
+
+// modelOption is the value agentd selects for the session's model option
+// (session/set_config_option), or "" when the flavor takes its model from the launch command
+// alone. OpenCode names models <provider>/<model>; the provider is "koinon".
+func modelOption(f store.AgentFlavor, model string) string {
+	if f == store.AgentFlavorOpencode {
+		return "koinon/" + model
+	}
+	return ""
+}
+
 // versionModel returns the model an agent version names, or "" for the install default.
 // The version config holds it as {"model": {"name": "..."}}, as templates do, or as a
 // string.

@@ -12,8 +12,10 @@ import (
 type anthropicRequest struct {
 	Model    string             `json:"model"`
 	Messages []anthropicMessage `json:"messages"`
-	Stream   bool               `json:"stream"`
-	Tools    []struct {
+	// System is a string or an array of text blocks.
+	System json.RawMessage `json:"system"`
+	Stream bool            `json:"stream"`
+	Tools  []struct {
 		Name string `json:"name"`
 	} `json:"tools"`
 }
@@ -44,6 +46,13 @@ func (m anthropicMessage) blocks() []anthropicBlock {
 
 func (req anthropicRequest) conversation() conversation {
 	var c conversation
+	if len(req.System) > 0 {
+		for _, b := range (anthropicMessage{Content: req.System}).blocks() {
+			if b.Type == "text" {
+				c.systemText += b.Text + "\n"
+			}
+		}
+	}
 	for _, t := range req.Tools {
 		c.tools = append(c.tools, t.Name)
 	}
