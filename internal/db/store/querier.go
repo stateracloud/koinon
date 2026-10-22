@@ -96,6 +96,19 @@ type Querier interface {
 	// Drops IdP-sourced memberships from this issuer whose group the user no
 	// longer has, or whose org stopped using the IdP.
 	DeleteStaleGroupMemberships(ctx context.Context, arg DeleteStaleGroupMembershipsParams) error
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The spend ledger (plan item L1). USD amounts cross the Go boundary as
+	// decimal text, never as floats.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// The run an agent was executing at @at: the latest-started run that had
+	// started by then and had not finished more than @grace_seconds earlier. One
+	// run per agent is owned at a time (ADR 0009), so the latest start wins when a
+	// parked run's window overlaps a later run. The grace covers a response that
+	// completes just after its run was canceled (for example by the token cap).
+	FindRunAt(ctx context.Context, arg FindRunAtParams) (FindRunAtRow, error)
 	// The owner ends the run: running -> succeeded | failed | canceled, or
 	// starting -> failed | canceled. No row: stale epoch or illegal transition.
 	FinishRun(ctx context.Context, arg FinishRunParams) (Run, error)
@@ -107,6 +120,8 @@ type Querier interface {
 	// do not keep the sandbox up.
 	GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error)
 	GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams) (AgentSandbox, error)
+	// An agent's recorded USD spend since @since, for its spend limit.
+	GetAgentSpendSince(ctx context.Context, arg GetAgentSpendSinceParams) (string, error)
 	GetAgentVersion(ctx context.Context, arg GetAgentVersionParams) (AgentVersion, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
@@ -128,6 +143,9 @@ type Querier interface {
 	// Extends the owner's lease. No row: the caller is no longer the owner and
 	// must stop (ADR 0030).
 	HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run, error)
+	// Records one request. Returns no row when the request id is already
+	// recorded, so a replayed export is not charged twice.
+	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
 	ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
@@ -210,6 +228,10 @@ type Querier interface {
 	// Stores the harness session for the ticket. Fenced by the run epoch: only the
 	// current owner of one of the ticket's active runs can set it.
 	SetTicketHarnessSession(ctx context.Context, arg SetTicketHarnessSessionParams) (Ticket, error)
+	// Totals per run, for the runs in @run_ids that have spend.
+	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
+	// Totals per ticket, for the tickets in @ticket_ids that have spend.
+	SumTicketCosts(ctx context.Context, arg SumTicketCostsParams) ([]SumTicketCostsRow, error)
 	// Takes ownership of a starting or running run whose owner's lease expired
 	// (for example a killed agentd). The state is unchanged; the new epoch makes
 	// every later write of the old owner match no rows.
