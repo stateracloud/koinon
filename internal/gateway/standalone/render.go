@@ -38,6 +38,22 @@ type Options struct {
 	// DatabaseURL is the budget store (SQLite on a PVC by default, ADR 0048).
 	// Required when any limit is set.
 	DatabaseURL string
+	// AccessLogOTLP exports the access log to the spend ledger's OTLP/HTTP
+	// receiver in koinon-api (plan item L1). Nil exports nothing.
+	AccessLogOTLP *OTLPExport
+}
+
+// OTLPExport is an OTLP/HTTP (protobuf) logs endpoint.
+//
+// agentgateway v1.6.0 schema/config.md: frontendPolicies.accessLog.otlp takes
+// a backend reference (`host`: "host:port"), `protocol` (grpc, the default, or
+// http) and `path` (default /v1/logs). With `otlp.fields` unset, the export
+// carries the same `add` fields as the stdout log.
+type OTLPExport struct {
+	// HostPort is the receiver, for example "koinon-api.koinon.svc:4318".
+	HostPort string
+	// Path defaults to /v1/logs.
+	Path string
 }
 
 const (
@@ -144,7 +160,14 @@ type frontendPolicies struct {
 }
 
 type accessLog struct {
-	Add map[string]string `yaml:"add"`
+	Add  map[string]string `yaml:"add"`
+	OTLP *otlpLog          `yaml:"otlp,omitempty"`
+}
+
+type otlpLog struct {
+	Host     string `yaml:"host"`
+	Protocol string `yaml:"protocol"`
+	Path     string `yaml:"path,omitempty"`
 }
 
 type listener struct {
@@ -268,12 +291,21 @@ func build(s gateway.State, o Options) document {
 		},
 		FrontendPolicies: frontendPolicies{AccessLog: accessLog{Add: map[string]string{
 			// The spend ledger (L1) attributes requests by these; key metadata
-			// is flattened into apiKey (schema/cel.md).
-			"koinon.key":   `default(apiKey.name, "")`,
-			"koinon.agent": `default(apiKey.agent, "")`,
-			MarkerField:    `""`,
+			// is flattened into apiKey (schema/cel.md). uuid() is a CEL
+			// extension function (schema/cel-functions.md); each log record
+			// evaluates it once, so an exported record keeps its id on retry.
+			gateway.LogFieldKey:     `default(apiKey.name, "")`,
+			gateway.LogFieldAgent:   `default(apiKey.agent, "")`,
+			gateway.LogFieldRequest: `uuid()`,
+			MarkerField:             `""`,
 		}}},
 		Gateways: map[string]listener{"default": {Port: o.Port}},
+	}
+	if o.AccessLogOTLP != nil {
+		doc.FrontendPolicies.AccessLog.OTLP = &otlpLog{Host: o.AccessLogOTLP.HostPort, Protocol: "http", Path: o.AccessLogOTLP.Path}
+		if doc.FrontendPolicies.AccessLog.OTLP.Path == "/v1/logs" {
+			doc.FrontendPolicies.AccessLog.OTLP.Path = ""
+		}
 	}
 	if o.DatabaseURL != "" {
 		doc.Config.Database = &database{URL: o.DatabaseURL}
@@ -282,10 +314,14 @@ func build(s gateway.State, o Options) document {
 	keys := slices.Clone(s.Keys)
 	slices.SortFunc(keys, func(a, b gateway.Key) int { return strings.Compare(a.ID, b.ID) })
 
-	if len(s.Models.Models) > 0 {
+	// Only priced models are served. agentgateway answers a request for any
+	// other model with 404 model_not_found, so an unpriced model can never be
+	// charged zero (ADR 0041 decision 7, plan item L1).
+	priced := slices.DeleteFunc(slices.Clone(s.Models.Models), func(m gateway.Model) bool { return m.Price == nil })
+	if len(priced) > 0 {
 		doc.LLM = &llmSection{Policies: llmPolicies{APIKey: keyPolicy(keys, s.Limits)}}
 		prices := map[string]catalogModel{}
-		for _, m := range s.Models.Models {
+		for _, m := range priced {
 			lm := llmModel{
 				Name: m.Name,
 				Provider: llmProvider{Custom: customProvider{
@@ -299,15 +335,11 @@ func build(s gateway.State, o Options) document {
 				lm.Params.APIKey = &fileSource{File: s.Models.APIKeyFile}
 			}
 			doc.LLM.Models = append(doc.LLM.Models, lm)
-			if m.Price != nil {
-				prices[m.Name] = catalogModel{Rates: rates{Input: m.Price.Input, Output: m.Price.Output, CacheRead: m.Price.CacheRead}}
-			}
+			prices[m.Name] = catalogModel{Rates: rates{Input: m.Price.Input, Output: m.Price.Output, CacheRead: m.Price.CacheRead}}
 		}
-		if len(prices) > 0 {
-			doc.Config.ModelCatalog = []catalogEntry{{Inline: catalog{Providers: map[string]catalogProvider{
-				s.Models.Provider: {Models: prices},
-			}}}}
-		}
+		doc.Config.ModelCatalog = []catalogEntry{{Inline: catalog{Providers: map[string]catalogProvider{
+			s.Models.Provider: {Models: prices},
+		}}}}
 	}
 
 	if len(s.MCP) > 0 {
@@ -333,8 +365,14 @@ func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit) ap
 	for _, k := range keys {
 		ak := apiKey{KeyHash: k.Hash, Metadata: keyMetadata{Name: k.ID, Agent: k.Agent.String()}}
 		if l, ok := limits[k.Agent]; ok {
+			// agentgateway keys budget usage by key name and budget name
+			// (http/budget budget_id), so the generation selects the counter.
+			name := "koinon-agent-limit"
+			if l.Generation != "" {
+				name += "-" + l.Generation
+			}
 			ak.Budgets = []budget{{
-				Name:             "koinon-agent-limit",
+				Name:             name,
 				Limit:            budgetLimit{Unit: string(l.Unit), Amount: l.Amount},
 				Window:           window{Rolling: formatWindow(l.Window)},
 				OnBudgetExceeded: "Block",

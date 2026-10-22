@@ -139,6 +139,13 @@ type Limit struct {
 	// Window is the accounting window. agentgateway aligns windows to the Unix
 	// epoch (24h starts at midnight UTC).
 	Window time.Duration
+	// Generation names the gateway's spend counter for this limit. agentgateway
+	// keys budget usage by key and budget name, so a new Generation starts a
+	// fresh counter. The spend ledger pushes limits net of recorded spend and
+	// changes Generation with every new net amount, so spend is never counted
+	// both in the amount and in the gateway's counter (plan item L1). Empty
+	// keeps one counter per key.
+	Generation string
 }
 
 // ModelUpstream is the one OpenAI-compatible upstream of v0.1 (ADR 0049).
@@ -160,8 +167,10 @@ type ModelUpstream struct {
 // Model is one model clients may request.
 type Model struct {
 	Name string
-	// Price is per million tokens in USD. Requests for models without a price
-	// are charged zero by agentgateway; L1 decides the policy for that.
+	// Price is per million tokens in USD. agentgateway charges zero for models
+	// it cannot price (ADR 0041), so drivers do not serve models without a
+	// price: requests for them are rejected as unknown models (plan item L1).
+	// A free model needs an explicit zero price.
 	Price *Price
 }
 
@@ -170,6 +179,18 @@ type Price struct {
 	Input     string
 	Output    string
 	CacheRead string
+}
+
+// Unpriced returns the names of the models without a price, which drivers do
+// not serve.
+func (u ModelUpstream) Unpriced() []string {
+	var out []string
+	for _, m := range u.Models {
+		if m.Price == nil {
+			out = append(out, m.Name)
+		}
+	}
+	return out
 }
 
 // MCPTarget is an upstream MCP server (Streamable HTTP).
@@ -230,10 +251,11 @@ func (s *State) GrantTools(agent AgentRef, grants ...ToolGrant) {
 }
 
 var (
-	toolName  = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
-	keyID     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
-	keyHash   = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	modelName = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
+	toolName   = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
+	generation = regexp.MustCompile(`^[a-z0-9-]{0,64}$`)
+	keyID      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	keyHash    = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	modelName  = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
 )
 
 // Validate checks s for values that would be unsafe or ambiguous in gateway
@@ -266,6 +288,9 @@ func (s State) Validate() error {
 		}
 		if l.Amount < 0 || l.Window <= 0 {
 			errs = append(errs, fmt.Errorf("limit for %s: amount must be >= 0 and window > 0", a))
+		}
+		if !generation.MatchString(l.Generation) {
+			errs = append(errs, fmt.Errorf("limit for %s: generation must be at most 64 of [a-z0-9-]", a))
 		}
 	}
 	for _, m := range s.Models.Models {
@@ -304,6 +329,18 @@ func (s State) Validate() error {
 	return nil
 }
 
+// Access-log attributes every driver adds to agentgateway's access log. The
+// spend ledger (package ledger) attributes requests by them.
+const (
+	// LogFieldKey is the gateway key's ID (Key.ID).
+	LogFieldKey = "koinon.key"
+	// LogFieldAgent is the key's agent (AgentRef.String: "<org slug>/<agent>").
+	LogFieldAgent = "koinon.agent"
+	// LogFieldRequest is a per-request UUID. agentgateway logs its own request
+	// id only at debug level, so drivers add one; the ledger is idempotent on it.
+	LogFieldRequest = "koinon.request"
+)
+
 // UsageRecord is one charged request, as the spend ledger (L1) needs it.
 type UsageRecord struct {
 	RequestID    string
@@ -316,9 +353,9 @@ type UsageRecord struct {
 	Time         time.Time
 }
 
-// UsageReader yields usage records. L1 decides the transport (OTLP access-log
-// export per the plan); drivers that cannot read usage return
-// ErrUsageUnsupported.
+// UsageReader yields usage records, for drivers whose gateway can be polled.
+// The spend ledger does not poll: agentgateway pushes its access log over OTLP
+// to koinon-api (package ledger), so drivers return NoUsage.
 type UsageReader interface {
 	ReadUsage(ctx context.Context, since time.Time) ([]UsageRecord, error)
 }
