@@ -118,8 +118,19 @@ for f in "${value_files[@]}"; do
 		'kind: ClusterRole' '- preflight'; do
 		grep -qF -- "$want" <<<"$rendered" || { echo "$name: preflight hook lacks '$want'" >&2; exit 1; }
 	done
-	if grep -qE '^ *verbs:.*(list|watch|update|patch|\*)' <<<"$(sed -n '/kind: ClusterRole$/,/^---/p' <<<"$rendered")"; then
-		echo "$name: preflight ClusterRole is not get-only" >&2
+	# The ClusterRole is get-only, except that in cnpg mode the CNPG operator check lists
+	# exactly validatingwebhookconfigurations and endpointslices (neither can be narrowed by
+	# resourceNames).
+	clusterrole=$(sed -n '/kind: ClusterRole$/,/^---/p' <<<"$rendered")
+	if grep -qE '^ *verbs:' <<<"$clusterrole" && grep -E '^ *verbs:' <<<"$clusterrole" | grep -qvE '^ *verbs: \[(get|list)\]$'; then
+		echo "$name: preflight ClusterRole has verbs other than get and list" >&2
+		exit 1
+	fi
+	listed=$(awk '/^ *resources:/ { res = $0; sub(/^ *resources: */, "", res) } /^ *verbs: \[list\]$/ { print res }' <<<"$clusterrole" | sort | tr '\n' ' ')
+	want_listed=""
+	[[ $name == external-* ]] || want_listed="[endpointslices] [validatingwebhookconfigurations] "
+	if [[ $listed != "$want_listed" ]]; then
+		echo "$name: preflight ClusterRole lists '${listed}', want '${want_listed}' (get-only otherwise)" >&2
 		exit 1
 	fi
 	probe=$(grep -c -- '--seccomp-probe=true' <<<"$rendered" || true)
