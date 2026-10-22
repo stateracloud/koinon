@@ -76,10 +76,16 @@ func uniq(prefix string) string { return fmt.Sprintf("%s-%d", prefix, seq.Add(1)
 
 // newOrg creates an org with a manual owner.
 func newOrg(ctx context.Context) (org, user pgtype.UUID) {
+	return newOrgWithID(ctx, "")
+}
+
+// newOrgWithID is newOrg with a fixed org UUID; empty lets the database choose one.
+func newOrgWithID(ctx context.Context, id string) (org, user pgtype.UUID) {
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO orgs (slug, display_name, kind) VALUES ($1, 'Personal', 'personal') RETURNING id`,
-			uniq("org")).Scan(&org); err != nil {
+			`INSERT INTO orgs (id, slug, display_name, kind)
+			 VALUES (coalesce(nullif($2, '')::uuid, uuidv7()), $1, 'Personal', 'personal') RETURNING id`,
+			uniq("org"), id).Scan(&org); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx,
