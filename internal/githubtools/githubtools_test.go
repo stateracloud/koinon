@@ -275,6 +275,16 @@ var _ = Describe("Server", func() {
 		Expect(items.Required).NotTo(ContainElement("executable"))
 	})
 
+	It("publishes the readiness prompt", func(ctx SpecContext) {
+		f := newFixture(ctx, standardGrant)
+		res, err := session(ctx, f.agentID).ListPrompts(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Prompts).To(ConsistOf(HaveField("Name", gateway.ReadyPrompt)))
+		got, err := session(ctx, f.agentID).GetPrompt(ctx, &mcp.GetPromptParams{Name: gateway.ReadyPrompt})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Messages).To(HaveLen(1))
+	})
+
 	It("records a pending approval with a stable hash and returns at once", func(ctx SpecContext) {
 		f := newFixture(ctx, standardGrant)
 		s := session(ctx, f.agentID)
