@@ -279,7 +279,13 @@ func (s *Service) commit(ctx context.Context, tok github.Token, repo github.Repo
 	}
 	entries := make([]github.TreeEntry, 0, len(args.Files))
 	for _, f := range args.Files {
-		e := github.TreeEntry{Path: f.Path, Mode: "100644", Type: "blob"}
+		// Only regular and executable blobs: the arguments cannot express a symbolic
+		// link (120000) or a submodule (160000).
+		mode := "100644"
+		if f.Executable {
+			mode = "100755"
+		}
+		e := github.TreeEntry{Path: f.Path, Mode: mode, Type: "blob"}
 		if !f.Delete {
 			sha, err := s.gh.CreateBlob(ctx, tok, repo, []byte(f.Content))
 			if err != nil {

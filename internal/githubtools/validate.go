@@ -43,6 +43,10 @@ type FileChange struct {
 	Path    string `json:"path" jsonschema:"path relative to the repository root, for example docs/README.md"`
 	Content string `json:"content,omitempty" jsonschema:"the file's full new content (UTF-8 text)"`
 	Delete  bool   `json:"delete,omitempty" jsonschema:"true to delete the file; content must then be empty"`
+	// Executable is the only mode choice: a regular file is written as git mode 100644, an
+	// executable one as 100755. Symbolic links (120000) and submodules (160000) cannot be
+	// expressed, so they are never written.
+	Executable bool `json:"executable,omitempty" jsonschema:"true to write the file as executable (git mode 100755), for example a script run as ./scripts/check.sh; otherwise it is written as a regular file (100644), also when it was executable before"`
 }
 
 // CommentArgs are comment_on_issue's arguments.
@@ -172,6 +176,9 @@ func ValidatePullRequest(a PullRequestArgs) error {
 		if f.Delete && f.Content != "" {
 			reasons = append(reasons, fmt.Sprintf("path %q is deleted but has content", f.Path))
 		}
+		if f.Delete && f.Executable {
+			reasons = append(reasons, fmt.Sprintf("path %q is deleted but marked executable", f.Path))
+		}
 		total += len(f.Content)
 	}
 	if total > MaxTotalBytes {
@@ -210,6 +217,8 @@ type Risk struct {
 	// Binary lists files whose content is not text (NUL or other control
 	// bytes) or whose name says they are binary.
 	Binary []string `json:"binary,omitempty"`
+	// Executable lists files the change writes as executable (git mode 100755).
+	Executable []string `json:"executable,omitempty"`
 }
 
 var (
@@ -260,6 +269,9 @@ func AssessRisk(a PullRequestArgs) Risk {
 		}
 		if slices.Contains(binaryExts, ext) || looksBinary(f.Content) {
 			r.Binary = append(r.Binary, f.Path)
+		}
+		if f.Executable {
+			r.Executable = append(r.Executable, f.Path)
 		}
 	}
 	return r
