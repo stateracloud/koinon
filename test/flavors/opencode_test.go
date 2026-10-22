@@ -78,9 +78,11 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 	entryEnv := func(ctx context.Context, extra ...string) string {
 		// The read-only root holds the script; run a copy whose last line prints the
 		// environment instead of starting OpenCode.
-		args := append([]string{"sh", "-c",
+		args := append([]string{
+			"sh", "-c",
 			`sed 's|^exec /usr/local/bin/opencode acp.*|exec /usr/bin/env|' /usr/local/bin/koinon-opencode > /tmp/entry && exec sh /tmp/entry "$@"`,
-			"sh", "--model-base-url", "http://gw.test/v1", "--model", "m-1", "--mcp-url", "http://gw.test/mcp"}, extra...)
+			"sh", "--model-base-url", "http://gw.test/v1", "--model", "m-1", "--mcp-url", "http://gw.test/mcp",
+		}, extra...)
 		return sb.run(ctx, args...)
 	}
 
