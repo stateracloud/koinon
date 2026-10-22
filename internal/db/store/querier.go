@@ -55,6 +55,12 @@ type Querier interface {
 	// other agents, and FIFO holds per agent. runs_one_active_per_agent backstops
 	// the rare race where two claims for one agent overlap; the loser gets a
 	// unique violation and retries.
+	//
+	// The run row is locked too. A claim whose snapshot predates a concurrent
+	// winner's commit, but which locks the agent row after it, re-checks only the
+	// rows it locks against their latest version. Were the run not among them, the
+	// claim would still see it as claimable, bump the agent's epoch, and then
+	// update no run: the next owner would get a skipped epoch.
 	ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error)
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
@@ -203,6 +209,7 @@ type Querier interface {
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
+	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// Records, before the prompt is sent, the ticket timeline seq through which
 	// the ticket's messages are in it.

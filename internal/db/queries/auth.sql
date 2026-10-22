@@ -115,6 +115,10 @@ INSERT INTO local_credentials (user_id, username, password_hash, must_change_pas
 VALUES (@user_id, @username, @password_hash, true)
 ON CONFLICT (user_id) DO NOTHING;
 
+-- name: SetLocalUsername :exec
+UPDATE local_credentials SET username = @username
+WHERE user_id = @user_id AND username <> @username;
+
 -- name: SetLocalPassword :exec
 UPDATE local_credentials
 SET password_hash = @password_hash,

@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -183,6 +184,33 @@ func (c *Conn) LoadSession(ctx context.Context, id SessionID, cwd string) error 
 	return err
 }
 
+// ModelOption is the session configuration option that selects the model (ACP session config
+// options, category "model"); OpenCode v2 has no session/set_model.
+const ModelOption = "model"
+
+// SetModel selects the session's model through session/set_config_option. It fails unless the
+// agent's answer shows model as the option's current value, so a caller never runs on a model
+// the harness chose for itself.
+func (c *Conn) SetModel(ctx context.Context, id SessionID, model string) error {
+	r, err := c.c.SetSessionConfigOption(ctx, sdk.SetSessionConfigOptionRequest{
+		ValueId: &sdk.SetSessionConfigOptionValueId{
+			SessionId: id, ConfigId: ModelOption, Value: sdk.SessionConfigValueId(model),
+		},
+	})
+	if err != nil {
+		return err
+	}
+	for _, o := range r.ConfigOptions {
+		if o.Select != nil && o.Select.Id == ModelOption {
+			if string(o.Select.CurrentValue) != model {
+				return fmt.Errorf("acp: the agent did not select model %q", model)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("acp: the agent reports no %q option after selecting %q", ModelOption, model)
+}
+
 // Prompt sends a user message and blocks until the turn ends.
 func (c *Conn) Prompt(ctx context.Context, id SessionID, text string) (StopReason, error) {
 	r, err := c.c.Prompt(ctx, sdk.PromptRequest{SessionId: id, Prompt: []sdk.ContentBlock{sdk.TextBlock(text)}})
@@ -208,6 +236,8 @@ type Update struct {
 	ToolCallID string
 	ToolTitle  string
 	ToolStatus ToolCallStatus
+	// Commands are the names in an available_commands_update.
+	Commands []string
 }
 
 // Flatten extracts the fields of n that Koinon records.
@@ -232,6 +262,12 @@ func Flatten(n SessionNotification) Update {
 		}
 		if u.ToolCallUpdate.Status != nil {
 			up.ToolStatus = *u.ToolCallUpdate.Status
+		}
+		return up
+	case u.AvailableCommandsUpdate != nil:
+		up := Update{Kind: "available_commands_update", Commands: []string{}}
+		for _, c := range u.AvailableCommandsUpdate.AvailableCommands {
+			up.Commands = append(up.Commands, c.Name)
 		}
 		return up
 	default:

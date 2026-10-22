@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,10 +21,15 @@ import (
 	"github.com/procoduck/koinon/internal/db/store"
 )
 
-// SessionCookieName is the session cookie. The __Host- prefix makes browsers
-// insist on Secure, Path=/ and no Domain, so a sibling subdomain cannot set
-// or shadow it.
+// SessionCookieName is the session cookie when Koinon is served over HTTPS.
+// The __Host- prefix makes browsers insist on Secure, Path=/ and no Domain, so
+// a sibling subdomain cannot set or shadow it.
 const SessionCookieName = "__Host-koinon_session"
+
+// InsecureSessionCookieName is the session cookie when Config.PublicURL is
+// plain http://. Browsers drop Secure cookies (and so every __Host- cookie)
+// over plain HTTP on hosts other than localhost.
+const InsecureSessionCookieName = "koinon_session"
 
 // Defaults for session lifetimes. Group changes in the IdP take effect at the
 // next login, so the absolute lifetime bounds how long a removed group keeps
@@ -45,6 +51,11 @@ type Config struct {
 	SessionMaxLifetime time.Duration
 	// BootstrapLogin enables /auth/login for the bootstrap admin.
 	BootstrapLogin bool
+	// PublicURL is the URL browsers reach Koinon at. Its scheme decides the
+	// cookies' Secure attribute: an http:// URL turns Secure (and the
+	// __Host- session cookie name) off, for installs without TLS. Empty
+	// means https.
+	PublicURL string
 	// OIDC enables /auth/oidc/*; nil disables OIDC login.
 	OIDC *OIDCConfig
 	// Logger defaults to slog.Default().
@@ -65,6 +76,9 @@ type Service struct {
 	// verifySlots bounds concurrent argon2id verifications (64 MiB each), so
 	// a burst of login attempts cannot exhaust memory.
 	verifySlots chan struct{}
+
+	// secureCookies is false only for a plain http:// PublicURL.
+	secureCookies bool
 }
 
 // New returns a Service backed by pool.
@@ -79,6 +93,10 @@ func New(pool *pgxpool.Pool, cfg Config) (*Service, error) {
 		return nil, fmt.Errorf("session idle timeout %s exceeds max lifetime %s",
 			cfg.SessionIdleTimeout, cfg.SessionMaxLifetime)
 	}
+	secure, err := secureCookies(cfg.PublicURL)
+	if err != nil {
+		return nil, err
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -86,11 +104,12 @@ func New(pool *pgxpool.Pool, cfg Config) (*Service, error) {
 		cfg.Now = time.Now
 	}
 	s := &Service{
-		pool:        pool,
-		q:           store.New(pool),
-		cfg:         cfg,
-		log:         cfg.Logger,
-		verifySlots: make(chan struct{}, 4),
+		pool:          pool,
+		q:             store.New(pool),
+		cfg:           cfg,
+		log:           cfg.Logger,
+		verifySlots:   make(chan struct{}, 4),
+		secureCookies: secure,
 	}
 	if cfg.OIDC != nil {
 		c, err := newOIDCClient(*cfg.OIDC)
@@ -103,6 +122,36 @@ func New(pool *pgxpool.Pool, cfg Config) (*Service, error) {
 }
 
 func (s *Service) now() time.Time { return s.cfg.Now() }
+
+// secureCookies reports whether cookies need the Secure attribute for
+// publicURL: everything but plain http.
+func secureCookies(publicURL string) (bool, error) {
+	if publicURL == "" {
+		return true, nil
+	}
+	u, err := url.Parse(publicURL)
+	if err != nil {
+		return false, fmt.Errorf("public URL: %w", err)
+	}
+	switch u.Scheme {
+	case "https":
+		return true, nil
+	case "http":
+		return false, nil
+	default:
+		return false, fmt.Errorf("public URL %q: scheme must be http or https", publicURL)
+	}
+}
+
+// SessionCookie returns the name of the session cookie this Service sets:
+// SessionCookieName, or InsecureSessionCookieName for a plain http://
+// PublicURL.
+func (s *Service) SessionCookie() string {
+	if s.secureCookies {
+		return SessionCookieName
+	}
+	return InsecureSessionCookieName
+}
 
 func ts(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 
@@ -209,7 +258,7 @@ func (s *Service) loadPrincipal(ctx context.Context, sess store.Session) (*Princ
 // AuthenticateRequest resolves the session cookie of r. It is for plain HTTP
 // handlers; RPCs use the interceptor.
 func (s *Service) AuthenticateRequest(r *http.Request) (*Principal, error) {
-	c, err := r.Cookie(SessionCookieName)
+	c, err := r.Cookie(s.SessionCookie())
 	if err != nil {
 		return nil, ErrUnauthenticated
 	}
@@ -225,25 +274,25 @@ func (s *Service) revokeToken(ctx context.Context, token string) error {
 }
 
 func (s *Service) setSessionCookie(w http.ResponseWriter, token string) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     SessionCookieName,
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is off only for a plain http:// public URL (Config.PublicURL)
+		Name:     s.SessionCookie(),
 		Value:    token,
 		Path:     "/",
 		MaxAge:   int(s.cfg.SessionMaxLifetime / time.Second),
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   s.secureCookies,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-func clearCookie(w http.ResponseWriter, name, path string) {
-	http.SetCookie(w, &http.Cookie{
+func (s *Service) clearCookie(w http.ResponseWriter, name, path string) {
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure is off only for a plain http:// public URL (Config.PublicURL)
 		Name:     name,
 		Value:    "",
 		Path:     path,
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   s.secureCookies,
 		SameSite: http.SameSiteLaxMode,
 	})
 }

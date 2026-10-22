@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"testing"
 
 	connect "connectrpc.com/connect/v2"
 	. "github.com/onsi/ginkgo/v2"
@@ -33,7 +32,7 @@ import (
 // Org isolation suite (plan item D2). Every RPC is called by a user of org B
 // with org A's IDs, and must return NotFound or PermissionDenied, never data.
 // Every RPC in api/proto must be listed here, in isolationCases or with a
-// reason in isolationExempt; TestIsolationRegistry fails otherwise.
+// reason in isolationExempt; the "org isolation registry" spec fails otherwise.
 
 // isolationCase calls one RPC as c, naming org and the resources of f.
 type isolationCase struct {
@@ -211,66 +210,64 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-// TestIsolationRegistry fails when an RPC defined in api/proto is not listed
-// in the isolation suite, or when the suite lists one that no longer exists.
-// It needs no database.
-func TestIsolationRegistry(t *testing.T) {
-	root := filepath.Join("..", "..", "api", "proto")
-	var files []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && strings.HasSuffix(path, ".proto") {
-			rel, err := filepath.Rel(root, path)
+// The registry spec fails when an RPC defined in api/proto is not listed in the isolation
+// suite, or when the suite lists one that no longer exists. It uses no database.
+var _ = Describe("org isolation registry", func() {
+	It("lists every RPC defined in api/proto exactly once, and no other", func() {
+		root := filepath.Join("..", "..", "api", "proto")
+		var files []string
+		Expect(filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			files = append(files, filepath.ToSlash(rel))
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) == 0 {
-		t.Fatal("no proto files found")
-	}
+			if !d.IsDir() && strings.HasSuffix(path, ".proto") {
+				rel, err := filepath.Rel(root, path)
+				if err != nil {
+					return err
+				}
+				files = append(files, filepath.ToSlash(rel))
+			}
+			return nil
+		})).To(Succeed())
+		Expect(files).NotTo(BeEmpty(), "no proto files found")
 
-	defined := map[string]bool{}
-	for _, name := range files {
-		fd, err := protoregistry.GlobalFiles.FindFileByPath(name)
-		if err != nil {
-			t.Errorf("%s is not linked into this test; import its generated package in isolation_test.go", name)
-			continue
-		}
-		services := fd.Services()
-		for i := range services.Len() {
-			addMethods(defined, services.Get(i))
-		}
-	}
-
-	for proc := range defined {
-		_, listed := isolationCases[proc]
-		reason, exempt := isolationExempt[proc]
-		switch {
-		case listed && exempt:
-			t.Errorf("%s is both tested and exempt in the org isolation suite", proc)
-		case exempt && strings.TrimSpace(reason) == "":
-			t.Errorf("%s is exempt from the org isolation suite without a reason", proc)
-		case !listed && !exempt:
-			t.Errorf("%s is not covered by the org isolation suite: add it to isolationCases "+
-				"(or, if it takes no org-owned input, to isolationExempt with a reason)", proc)
-		}
-	}
-	for _, m := range []map[string]bool{keysOf(isolationCases), keysOf(isolationExempt)} {
-		for proc := range m {
-			if !defined[proc] {
-				t.Errorf("%s is listed in the org isolation suite but no such RPC exists", proc)
+		var problems []string
+		defined := map[string]bool{}
+		for _, name := range files {
+			fd, err := protoregistry.GlobalFiles.FindFileByPath(name)
+			if err != nil {
+				problems = append(problems, name+" is not linked into this test; import its generated package in isolation_test.go")
+				continue
+			}
+			services := fd.Services()
+			for i := range services.Len() {
+				addMethods(defined, services.Get(i))
 			}
 		}
-	}
-}
+
+		for _, proc := range sortedKeys(defined) {
+			_, listed := isolationCases[proc]
+			reason, exempt := isolationExempt[proc]
+			switch {
+			case listed && exempt:
+				problems = append(problems, proc+" is both tested and exempt in the org isolation suite")
+			case exempt && strings.TrimSpace(reason) == "":
+				problems = append(problems, proc+" is exempt from the org isolation suite without a reason")
+			case !listed && !exempt:
+				problems = append(problems, proc+" is not covered by the org isolation suite: add it to isolationCases "+
+					"(or, if it takes no org-owned input, to isolationExempt with a reason)")
+			}
+		}
+		for _, m := range []map[string]bool{keysOf(isolationCases), keysOf(isolationExempt)} {
+			for _, proc := range sortedKeys(m) {
+				if !defined[proc] {
+					problems = append(problems, proc+" is listed in the org isolation suite but no such RPC exists")
+				}
+			}
+		}
+		Expect(problems).To(BeEmpty())
+	})
+})
 
 func addMethods(into map[string]bool, svc protoreflect.ServiceDescriptor) {
 	methods := svc.Methods()

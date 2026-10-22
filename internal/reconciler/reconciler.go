@@ -152,7 +152,7 @@ type work struct {
 }
 
 func (w *work) logAttrs() []any {
-	return []any{"org", w.org.Slug, "agent", uuidString(w.agent.ID), "sandbox", w.sb.SandboxName}
+	return []any{"org", w.org.Slug, "agent", execution.UUIDString(w.agent.ID.Bytes), "sandbox", w.sb.SandboxName}
 }
 
 // ReconcileAll runs one pass over every org and agent. It returns the errors of the agents it
@@ -204,7 +204,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		if err := r.reconcileAgent(ctx, w, workspaces); err != nil {
 			r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
 			r.recordMessage(ctx, w, err)
-			errs = append(errs, fmt.Errorf("agent %s: %w", uuidString(w.agent.ID), err))
+			errs = append(errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
 		}
 	}
 	return errors.Join(errs...)
@@ -232,12 +232,12 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 			SandboxName: names.Sandbox, ProviderName: names.Provider, KeySecretName: names.KeySecret,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("reconciler: record sandbox of agent %s: %w", uuidString(a.ID), err)
+			return nil, fmt.Errorf("reconciler: record sandbox of agent %s: %w", execution.UUIDString(a.ID.Bytes), err)
 		}
 	default:
 		// Without the row, the agent's key would be left out of the gateway state and so
 		// revoked: abort the pass instead.
-		return nil, fmt.Errorf("%w: read sandbox of agent %s: %w", errAbortPass, uuidString(a.ID), err)
+		return nil, fmt.Errorf("%w: read sandbox of agent %s: %w", errAbortPass, execution.UUIDString(a.ID.Bytes), err)
 	}
 
 	if recorded, ok := recordedKey(org, w.sb); ok {
@@ -260,7 +260,7 @@ func (r *Reconciler) prepare(ctx context.Context, org store.ListOrgsToReconcileR
 }
 
 func agentRef(org store.ListOrgsToReconcileRow, agent pgtype.UUID) gateway.AgentRef {
-	return gateway.AgentRef{Org: org.Slug, Name: uuidString(agent)}
+	return gateway.AgentRef{Org: org.Slug, Name: execution.UUIDString(agent.Bytes)}
 }
 
 func recordedKey(org store.ListOrgsToReconcileRow, sb store.AgentSandbox) (gateway.Key, bool) {
@@ -312,7 +312,7 @@ func (r *Reconciler) ensureKey(ctx context.Context, w *work) (gateway.Key, strin
 
 // ensureWorkspace makes sure the org's workspace exists, once per pass.
 func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToReconcileRow, done map[string]string) (string, error) {
-	id := uuidString(org.ID)
+	id := execution.UUIDString(org.ID.Bytes)
 	if ws, ok := done[id]; ok {
 		return ws, nil
 	}
