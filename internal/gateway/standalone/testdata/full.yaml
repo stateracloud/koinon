@@ -1,7 +1,7 @@
 # Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.
 # Keys appear only as hashes; key material lives in Kubernetes Secrets.
 config:
-  adminAddr: '[::]:15000'
+  adminAddr: localhost:15000
   statsAddr: '[::]:15020'
   readinessAddr: '[::]:15021'
   database:
@@ -22,7 +22,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"0b7d26f07800667f"'
+      koinon.config: '"833d85f77b2b594c"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
     otlp:
@@ -64,6 +64,21 @@ llm:
               window:
                 rolling: 30d
               onBudgetExceeded: Block
+        - keyHash: sha256:be6a2a297de483eec06bbffd0f7500217d15cd39b9569c74d5be5383dde44aa1
+          metadata:
+            name: koinon-reload-probe
+            agent: ""
+          budgets:
+            - name: koinon-reload-probe
+              limit:
+                unit: Tokens
+                amount: 0
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+    authorization:
+      rules:
+        - apiKey.name != "koinon-reload-probe"
   models:
     - name: deepseek/deepseek-v4.1-flash
       provider:

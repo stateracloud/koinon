@@ -31,12 +31,6 @@ import (
 type Options struct {
 	// Port is the listener for LLM and MCP routes. Default 4000.
 	Port int
-	// AdminAddr is agentgateway's admin listener, which serves /config_dump
-	// for reload detection. Default "[::]:15000": all interfaces, like the
-	// stats and readiness listeners, because the reconciler polls it from its
-	// own pod. Restrict it with a NetworkPolicy (the chart admits only the
-	// reconciler), since the admin listener also serves the UI.
-	AdminAddr string
 	// DatabaseURL is the budget store (SQLite on a PVC by default, ADR 0048).
 	// Required when any limit is set.
 	DatabaseURL string
@@ -59,19 +53,35 @@ type OTLPExport struct {
 }
 
 const (
-	defaultPort      = 4000
-	defaultAdminAddr = "[::]:15000"
-	// The stats (metrics, the reload gauge) and readiness listeners. They are
-	// rendered explicitly, like adminAddr, so the file states every listener;
-	// the chart's bootstrap config uses the same values.
+	defaultPort = 4000
+	// agentgateway's listeners, rendered explicitly so the file states every
+	// one; the chart's bootstrap config uses the same values. The admin
+	// listener serves the whole config (/config_dump) and the UI, so it stays
+	// on localhost: nothing outside the pod needs it, since reloads are
+	// detected with the probe key (ReloadProbeKey). The stats listener
+	// (metrics, the reload gauge) and the readiness listener are open.
+	adminAddr     = "localhost:15000"
 	statsAddr     = "[::]:15020"
 	readinessAddr = "[::]:15021"
 
 	// MarkerField is the access-log field that carries the config revision.
-	// It shows up in agentgateway's /config_dump, which is how WaitForReload
-	// knows a revision is live, and it stamps every access-log entry with the
-	// revision that served it.
+	// It stamps every access-log entry with the revision that served it.
 	MarkerField = "koinon.config"
+
+	// ReloadProbeModel is the model the reload probe asks for. No config
+	// serves it, so even a probe past every policy could not reach an upstream.
+	ReloadProbeModel = "koinon/reload-probe"
+
+	// BootstrapRevision is the revision of the chart's bootstrap config
+	// (charts/koinon/templates/gateway-standalone.yaml), which cannot compute
+	// Render's content hash. Nothing waits for it; it gives the bootstrap file
+	// the same shape as a rendered one, probe key included.
+	BootstrapRevision gateway.Revision = "bootstrap"
+
+	// probeRule is the llm authorization rule that refuses the probe key with
+	// 403 before routing. agentgateway v1.6.0 checks budgets first, so with a
+	// database the zero budget answers (429); without one, this rule does.
+	probeRule = `apiKey.name != "` + gateway.ReloadProbeKeyName + `"`
 
 	header = "# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.\n" +
 		"# Keys appear only as hashes; key material lives in Kubernetes Secrets.\n"
@@ -93,12 +103,32 @@ func Render(s gateway.State, o Options) ([]byte, gateway.Revision, error) {
 	}
 	sum := sha256.Sum256(body)
 	rev := gateway.Revision(hex.EncodeToString(sum[:8]))
-	doc.FrontendPolicies.AccessLog.Add[MarkerField] = strconv.Quote(string(rev))
+	stamp(&doc, rev)
 	body, err = marshal(doc)
 	if err != nil {
 		return nil, "", err
 	}
 	return append([]byte(header), body...), rev, nil
+}
+
+// ReloadProbeKey is the key material of the reload probe for rev. Every
+// rendered config accepts exactly this key, under llm only, as
+// gateway.ReloadProbeKeyName, so agentgateway answers it with something other
+// than 401 once it serves rev (ProbeWaiter). It is derived from the revision
+// rather than secret, because it opens nothing: before routing, its zero
+// Tokens budget refuses it with 429 when a database is configured, and the
+// llm authorization rule with 403 otherwise; and the probe asks for a model
+// no config serves.
+func ReloadProbeKey(rev gateway.Revision) string {
+	return "koinon-probe-" + string(rev)
+}
+
+// stamp writes rev's marker and probe key hash into doc. build puts the probe
+// entry last among the llm keys, with an empty hash.
+func stamp(doc *document, rev gateway.Revision) {
+	doc.FrontendPolicies.AccessLog.Add[MarkerField] = strconv.Quote(string(rev))
+	keys := doc.LLM.Policies.APIKey.Keys
+	keys[len(keys)-1].KeyHash = gateway.HashKey(ReloadProbeKey(rev))
 }
 
 func marshal(doc document) ([]byte, error) {
@@ -231,7 +261,13 @@ type llmSection struct {
 }
 
 type llmPolicies struct {
-	APIKey apiKeyPolicy `yaml:"apiKey"`
+	APIKey        apiKeyPolicy  `yaml:"apiKey"`
+	Authorization authorization `yaml:"authorization"`
+}
+
+// authorization admits a request when any rule matches.
+type authorization struct {
+	Rules []string `yaml:"rules"`
 }
 
 type llmModel struct {
@@ -300,12 +336,9 @@ func build(s gateway.State, o Options) document {
 	if o.Port == 0 {
 		o.Port = defaultPort
 	}
-	if o.AdminAddr == "" {
-		o.AdminAddr = defaultAdminAddr
-	}
 	doc := document{
 		Config: staticConfig{
-			AdminAddr:     o.AdminAddr,
+			AdminAddr:     adminAddr,
 			StatsAddr:     statsAddr,
 			ReadinessAddr: readinessAddr,
 			Logging:       logging{Format: "json"},
@@ -335,12 +368,22 @@ func build(s gateway.State, o Options) document {
 	keys := slices.Clone(s.Keys)
 	slices.SortFunc(keys, func(a, b gateway.Key) int { return strings.Compare(a.ID, b.ID) })
 
+	// The llm section is always rendered, models or not, because it carries
+	// the reload probe key (stamp fills in its hash).
+	doc.LLM = &llmSection{
+		Policies: llmPolicies{
+			APIKey:        keyPolicy(keys, s.Limits),
+			Authorization: authorization{Rules: []string{probeRule}},
+		},
+		Models: []llmModel{},
+	}
+	doc.LLM.Policies.APIKey.Keys = append(doc.LLM.Policies.APIKey.Keys, probeKey(o.DatabaseURL != ""))
+
 	// Only priced models are served. agentgateway answers a request for any
 	// other model with 404 model_not_found, so an unpriced model can never be
 	// charged zero (ADR 0041 decision 7, plan item L1).
 	priced := slices.DeleteFunc(slices.Clone(s.Models.Models), func(m gateway.Model) bool { return m.Price == nil })
 	if len(priced) > 0 {
-		doc.LLM = &llmSection{Policies: llmPolicies{APIKey: keyPolicy(keys, s.Limits)}}
 		prices := map[string]catalogModel{}
 		for _, m := range priced {
 			lm := llmModel{
@@ -380,6 +423,23 @@ func build(s gateway.State, o Options) document {
 		}
 	}
 	return doc
+}
+
+// probeKey is the reload probe's llm key entry, without its hash.
+// agentgateway v1.6.0 refuses a config with budgets but no config.database,
+// so the zero budget (429 before routing) is rendered only with a database;
+// the authorization rule (403) covers both cases.
+func probeKey(withBudget bool) apiKey {
+	k := apiKey{Metadata: keyMetadata{Name: gateway.ReloadProbeKeyName}}
+	if withBudget {
+		k.Budgets = []budget{{
+			Name:             gateway.ReloadProbeKeyName,
+			Limit:            budgetLimit{Unit: string(gateway.Tokens), Amount: 0},
+			Window:           window{Rolling: "24h"},
+			OnBudgetExceeded: "Block",
+		}}
+	}
+	return k
 }
 
 func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit) apiKeyPolicy {

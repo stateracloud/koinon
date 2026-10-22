@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -63,14 +64,20 @@ var _ = Describe("the chart's bootstrap config", func() {
 
 	renderGo := func(s gateway.State) map[string]any {
 		GinkgoHelper()
-		body, _, err := standalone.Render(s, options)
+		body, rev, err := standalone.Render(s, options)
 		Expect(err).NotTo(HaveOccurred())
 		var doc map[string]any
 		Expect(yaml.Unmarshal(body, &doc)).To(Succeed())
-		// The revision marker is the one intended difference.
+		// The revision is the one intended difference: the chart cannot compute
+		// Render's content hash, so its file is for standalone.BootstrapRevision.
+		// Swap in that revision's marker and probe key hash.
 		add := doc["frontendPolicies"].(map[string]any)["accessLog"].(map[string]any)["add"].(map[string]any)
-		Expect(add).To(HaveKey(standalone.MarkerField))
-		delete(add, standalone.MarkerField)
+		Expect(add).To(HaveKeyWithValue(standalone.MarkerField, strconv.Quote(string(rev))))
+		add[standalone.MarkerField] = strconv.Quote(string(standalone.BootstrapRevision))
+		keys := doc["llm"].(map[string]any)["policies"].(map[string]any)["apiKey"].(map[string]any)["keys"].([]any)
+		probe := keys[len(keys)-1].(map[string]any)
+		Expect(probe).To(HaveKeyWithValue("keyHash", gateway.HashKey(standalone.ReloadProbeKey(rev))))
+		probe["keyHash"] = gateway.HashKey(standalone.ReloadProbeKey(standalone.BootstrapRevision))
 		return doc
 	}
 

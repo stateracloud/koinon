@@ -130,7 +130,7 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 
 		ctr, err = testcontainers.Run(ctx, agentgatewayImage,
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
-			testcontainers.WithExposedPorts("4000/tcp", "15000/tcp", "15020/tcp", "15021/tcp"),
+			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
 			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver)),
 			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
 				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro")
@@ -142,13 +142,11 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 
 		llmURL, err = ctr.PortEndpoint(ctx, "4000/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
-		adminURL, err := ctr.PortEndpoint(ctx, "15000/tcp", "http")
-		Expect(err).NotTo(HaveOccurred())
 		statsURL, err := ctr.PortEndpoint(ctx, "15020/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
 		driver = &standalone.Driver{
 			Options: options, Deliverer: file,
-			Waiter: standalone.AdminWaiter{AdminURL: adminURL, StatsURL: statsURL, Interval: 200 * time.Millisecond},
+			Waiter: standalone.ProbeWaiter{GatewayURL: llmURL, StatsURL: statsURL, Interval: 200 * time.Millisecond},
 		}
 		_, err = driver.Apply(ctx, state)
 		Expect(err).NotTo(HaveOccurred())

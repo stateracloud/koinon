@@ -18,7 +18,6 @@ gateway:
   mode: standalone
   configMap: koinon-gateway-config
   url: http://koinon-gateway.koinon.svc:8080
-  adminUrl: http://koinon-gateway.koinon.svc:15000
   statsUrl: http://koinon-gateway.koinon.svc:15020
   port: 8080
   databaseUrl: sqlite:///data/agentgateway.db?mode=rwc
@@ -66,7 +65,7 @@ func TestParseConfigFromChart(t *testing.T) {
 		t.Errorf("durations = %v, %v", c.idleTimeout, c.resyncInterval)
 	}
 	if c.homeRetention != "delete" || c.runtimeClass != "kata" || c.openshellTLSDir != "/etc/koinon/openshell-tls" ||
-		c.accessLogOTLP != "koinon-api.koinon.svc:4318" {
+		c.accessLogOTLP != "koinon-api.koinon.svc:4318" || c.gatewayStatsURL != "http://koinon-gateway.koinon.svc:15020" {
 		t.Errorf("unexpected %+v", c)
 	}
 	ep, err := c.gatewayEndpoint()

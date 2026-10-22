@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -47,9 +48,10 @@ func skipWithoutDocker(ctx context.Context) {
 }
 
 // fakeUpstream is an OpenAI-compatible chat completions server that reports
-// 10 input and 10 output tokens per request.
-func fakeUpstream() *httptest.Server {
+// 10 input and 10 output tokens per request and counts requests in hits.
+func fakeUpstream(hits *atomic.Int64) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
 		var req struct {
 			Model string `json:"model"`
 		}
@@ -119,11 +121,12 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		keyA    gateway.IssuedKey // limited agent
 		keyB    gateway.IssuedKey // unlimited agent, no tool grants
 		ctr     *testcontainers.DockerContainer
+		hits    atomic.Int64 // requests that reached the upstream
 		options = standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mode=rwc"}
 	)
 
-	chat := func(ctx context.Context, key string) (int, string) {
-		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, testModel)
+	chatModel := func(ctx context.Context, key, model string) (int, string) {
+		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, model)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions", bytes.NewBufferString(body))
 		Expect(err).NotTo(HaveOccurred())
 		req.Header.Set("Content-Type", "application/json")
@@ -136,6 +139,7 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
+	chat := func(ctx context.Context, key string) (int, string) { return chatModel(ctx, key, testModel) }
 
 	mcpSessionAs := func(ctx context.Context, key, spoof string) (*mcp.ClientSession, error) {
 		client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
@@ -167,7 +171,7 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 	BeforeAll(func(ctx SpecContext) {
 		skipWithoutDocker(ctx)
 
-		upstream := fakeUpstream()
+		upstream := fakeUpstream(&hits)
 		DeferCleanup(upstream.Close)
 		tools := fakeTools()
 		DeferCleanup(tools.Close)
@@ -205,7 +209,7 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 
 		ctr, err = testcontainers.Run(ctx, AgentgatewayImage,
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
-			testcontainers.WithExposedPorts("4000/tcp", "15000/tcp", "15020/tcp", "15021/tcp"),
+			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
 			testcontainers.WithHostPortAccess(port(upstream), port(tools)),
 			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
 				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro")
@@ -218,15 +222,13 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 
 		llmURL, err = ctr.PortEndpoint(ctx, "4000/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
-		adminURL, err := ctr.PortEndpoint(ctx, "15000/tcp", "http")
-		Expect(err).NotTo(HaveOccurred())
 		statsURL, err := ctr.PortEndpoint(ctx, "15020/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
 
 		driver = &standalone.Driver{
 			Options:   options,
 			Deliverer: file,
-			Waiter:    standalone.AdminWaiter{AdminURL: adminURL, StatsURL: statsURL, Interval: 200 * time.Millisecond},
+			Waiter:    standalone.ProbeWaiter{GatewayURL: llmURL, StatsURL: statsURL, Interval: 200 * time.Millisecond},
 		}
 		// Same state again: confirms the waiter sees the initial revision.
 		_, err = driver.Apply(ctx, state)
@@ -241,6 +243,39 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 			}
 		}
 	})
+
+	It("detects reloads with the probe key, which never reaches the upstream", func(ctx SpecContext) {
+		// BeforeAll's Apply waited on the initial revision's probe.
+		Expect(hits.Load()).To(BeZero())
+		_, rev, err := standalone.Render(state, options)
+		Expect(err).NotTo(HaveOccurred())
+		// Not even with a served model name: the zero budget (429, with a
+		// database) or the authorization rule (403) refuses the key first.
+		code, body := chatModel(ctx, standalone.ReloadProbeKey(rev), testModel)
+		Expect(code).To(BeElementOf(http.StatusTooManyRequests, http.StatusForbidden), body)
+
+		// A new revision: its probe key is accepted only once it is live.
+		extra, err := gateway.NewKey(agentB)
+		Expect(err).NotTo(HaveOccurred())
+		state.AddKey(extra.Key)
+		next, err := driver.Apply(ctx, state)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(next).NotTo(Equal(rev))
+		code, _ = chatModel(ctx, standalone.ReloadProbeKey(rev), testModel)
+		Expect(code).To(Equal(http.StatusUnauthorized), "the previous revision's probe key is gone")
+		code, body = chatModel(ctx, extra.Material, testModel)
+		Expect(code).To(Equal(http.StatusOK), body)
+		Expect(hits.Load()).To(Equal(int64(1)), "only the real key's request reached the upstream")
+
+		// A revision that was never delivered is never live.
+		short, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		Expect(driver.Waiter.Wait(short, "0000000000000000")).To(MatchError(context.DeadlineExceeded))
+
+		Expect(state.RevokeKey(extra.ID)).To(BeTrue())
+		_, err = driver.Apply(ctx, state)
+		Expect(err).NotTo(HaveOccurred())
+	}, SpecTimeout(2*time.Minute))
 
 	It("rejects requests without a key", func(ctx SpecContext) {
 		code, _ := chat(ctx, "")

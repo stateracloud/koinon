@@ -36,24 +36,28 @@ it renders the live data unchanged, so it never undoes the reconciler's work.
 {{- end }}
 {{- end }}
 {{- /*
-Same document as internal/gateway/standalone renders for the same models and no keys, minus its
-revision marker (internal/gateway/standalone/chart_test.go compares them): agentgateway keeps the
-static `config` section of the file it started with, and refuses to reload a file with
-frontendPolicies.accessLog while that section has the deprecated config.logging.fields, so the
-access-log fields go in frontendPolicies. The admin listener is open because the reconciler polls
-it from its own pod; the NetworkPolicy admits only the reconciler.
+Same document as internal/gateway/standalone renders for the same models and no keys, for the
+fixed revision "bootstrap" (standalone.BootstrapRevision) instead of a content hash
+(internal/gateway/standalone/chart_test.go compares them): agentgateway keeps the static `config`
+section of the file it started with, and refuses to reload a file with frontendPolicies.accessLog
+while that section has the deprecated config.logging.fields, so the access-log fields go in
+frontendPolicies. The admin listener (config dump and UI) stays on localhost; the reconciler
+detects reloads with each revision's probe key on the llm listener (standalone.ReloadProbeKey).
 */ -}}
-{{- $base := dict "database" (dict "url" "sqlite:///data/agentgateway.db?mode=rwc") "adminAddr" "[::]:15000" "statsAddr" "[::]:15020" "readinessAddr" "[::]:15021" "logging" (dict "format" "json") }}
+{{- $revision := "bootstrap" }}
+{{- $base := dict "database" (dict "url" "sqlite:///data/agentgateway.db?mode=rwc") "adminAddr" "localhost:15000" "statsAddr" "[::]:15020" "readinessAddr" "[::]:15021" "logging" (dict "format" "json") }}
 {{- $otlp := dict "host" (printf "%s.%s.svc:%v" (include "koinon.componentName" (list . "api")) .Release.Namespace .Values.api.otlpPort) "protocol" "http" }}
-{{- $accessLog := dict "add" (dict "koinon.key" "default(apiKey.name, \"\")" "koinon.agent" "default(apiKey.agent, \"\")" "koinon.request" "uuid()") "otlp" $otlp }}
+{{- $accessLog := dict "add" (dict "koinon.key" "default(apiKey.name, \"\")" "koinon.agent" "default(apiKey.agent, \"\")" "koinon.request" "uuid()" "koinon.config" (quote $revision)) "otlp" $otlp }}
 {{- if $catalog }}
 {{- $_ := set $base "modelCatalog" (list (dict "inline" (dict "providers" (dict $.Values.model.provider (dict "models" $catalog))))) }}
 {{- end }}
-{{- $apiKey := dict "mode" "strict" "location" (dict "header" (dict "name" "authorization" "prefix" "Bearer ")) "keys" (list) }}
+{{- /* The reload probe key, refused before routing by the authorization rule and its zero budget. */ -}}
+{{- $probeBudget := dict "name" "koinon-reload-probe" "limit" (dict "unit" "Tokens" "amount" 0) "window" (dict "rolling" "24h") "onBudgetExceeded" "Block" }}
+{{- $probe := dict "keyHash" (printf "sha256:%s" (sha256sum (printf "koinon-probe-%s" $revision))) "metadata" (dict "name" "koinon-reload-probe" "agent" "") "budgets" (list $probeBudget) }}
+{{- $apiKey := dict "mode" "strict" "location" (dict "header" (dict "name" "authorization" "prefix" "Bearer ")) "keys" (list $probe) }}
+{{- $authorization := dict "rules" (list "apiKey.name != \"koinon-reload-probe\"") }}
 {{- $doc := dict "config" $base "frontendPolicies" (dict "accessLog" $accessLog) "gateways" (dict "default" (dict "port" (int $gw.port))) }}
-{{- if $models }}
-{{- $_ := set $doc "llm" (dict "policies" (dict "apiKey" $apiKey) "models" $models) }}
-{{- end }}
+{{- $_ := set $doc "llm" (dict "policies" (dict "apiKey" $apiKey "authorization" $authorization) "models" $models) }}
 {{- $config = printf "# Bootstrap config written by the Koinon chart; the reconciler owns this ConfigMap.\n%s" (toYaml $doc) }}
 {{- end }}
 apiVersion: v1
@@ -118,8 +122,6 @@ spec:
           ports:
             - name: llm
               containerPort: {{ $gw.port }}
-            - name: admin
-              containerPort: 15000
             - name: stats
               containerPort: 15020
             - name: readiness
@@ -188,10 +190,7 @@ spec:
     - name: llm
       port: {{ $gw.port }}
       targetPort: llm
-    # The reconciler reads /config_dump here to wait for a config reload (internal/gateway/standalone).
-    - name: admin
-      port: 15000
-      targetPort: admin
+    # agentgateway_config_synchronized: the reconciler reads it to detect a rejected config.
     - name: stats
       port: 15020
       targetPort: stats

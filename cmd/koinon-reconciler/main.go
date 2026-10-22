@@ -94,9 +94,9 @@ func run() error {
 	} else {
 		log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing and spend limits are not netted")
 	}
-	if cfg.gatewayAdminURL != "" {
-		driver.Waiter = standalone.AdminWaiter{AdminURL: cfg.gatewayAdminURL, StatsURL: cfg.gatewayStatsURL}
-	}
+	// Reloads are detected on the data plane, with the revision's probe key; agentgateway's
+	// admin listener stays on localhost.
+	driver.Waiter = standalone.ProbeWaiter{GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log}
 
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},

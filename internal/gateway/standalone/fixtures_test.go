@@ -68,7 +68,7 @@ func fixtures() []fixture {
 
 	return []fixture{
 		{name: "empty", state: gateway.State{}},
-		{name: "models-only", state: modelsOnly, options: standalone.Options{Port: 8080, AdminAddr: "127.0.0.1:15000"}},
+		{name: "models-only", state: modelsOnly, options: standalone.Options{Port: 8080}},
 		{name: "full", state: full, options: standalone.Options{
 			DatabaseURL:   "sqlite:///data/agentgateway.db?mode=rwc",
 			AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318"},

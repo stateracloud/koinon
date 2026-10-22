@@ -17,7 +17,6 @@ data:
       configMap: {{ include "koinon.gatewayConfigName" . }}
       {{- $gwHost := include "koinon.gatewayHost" . }}
       url: http://{{ $gwHost }}:{{ .Values.gateway.standalone.port }}
-      adminUrl: http://{{ $gwHost }}:15000
       statsUrl: http://{{ $gwHost }}:15020
       port: {{ .Values.gateway.standalone.port }}
       databaseUrl: sqlite:///data/agentgateway.db?mode=rwc
