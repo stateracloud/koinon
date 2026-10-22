@@ -96,6 +96,62 @@ var _ = Describe("Service", func() {
 		Expect(string(evs[2].Payload)).To(ContainSubstring("https://github.test/acme/widgets/pull/1"))
 	})
 
+	It("writes files marked executable as mode 100755 and every other file as 100644", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard")
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, map[string]any{
+			"branch": "koinon/add-check", "title": "Add a check script",
+			"files": []map[string]any{
+				{"path": "scripts/check.sh", "content": "#!/bin/sh\nexit 0\n", "executable": true},
+				{"path": "scripts/lib.sh", "content": "# sourced, not run\n"},
+				{"path": "docs/check.md", "content": "Run ./scripts/check.sh\n", "executable": false},
+			},
+		})
+		Expect(req.Status).To(Equal("pending"))
+		Expect(f.get(ctx, req.ID).ArgsJson).To(ContainSubstring(`"executable":true`), "the hashed arguments carry the flag")
+
+		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).To(Equal(store.ApprovalStatusExecuted), row.Error.String)
+		Expect(f.gh.FileModes("widgets", "koinon/add-check")).To(Equal(map[string]string{
+			"README.md":        "100644",
+			"scripts/check.sh": "100755",
+			"scripts/lib.sh":   "100644",
+			"docs/check.md":    "100644",
+		}))
+	})
+
+	DescribeTable("keeps the base mode of an unmarked modified file",
+		func(ctx SpecContext, truncate bool) {
+			f := newFixture(ctx, "standard")
+			f.gh.SetBranchModes("widgets", "main", "add scripts", map[string]string{
+				"scripts/run.sh": "#!/bin/sh\necho old\n", "scripts/lib.sh": "# old\n", "tools/deep/x/build": "#!/bin/sh\n",
+			}, map[string]string{"scripts/run.sh": "100755", "tools/deep/x/build": "100755"})
+			f.gh.TruncateTrees = truncate
+			req := f.call(ctx, githubtools.ToolCreatePullRequest, map[string]any{
+				"branch": "koinon/edit-scripts", "title": "Edit the scripts",
+				"files": []map[string]any{
+					{"path": "scripts/run.sh", "content": "#!/bin/sh\necho new\n"},
+					{"path": "tools/deep/x/build", "content": "#!/bin/sh\necho build\n"},
+					{"path": "scripts/lib.sh", "content": "# now run\n", "executable": true},
+					{"path": "scripts/new.sh", "content": "#!/bin/sh\n"},
+					{"path": "README.md", "content": "# widgets\n"},
+				},
+			})
+			row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(row.Status).To(Equal(store.ApprovalStatusExecuted), row.Error.String)
+			Expect(f.gh.FileModes("widgets", "koinon/edit-scripts")).To(Equal(map[string]string{
+				"README.md":          "100644",
+				"scripts/run.sh":     "100755", // was executable, not marked: stays executable
+				"tools/deep/x/build": "100755",
+				"scripts/lib.sh":     "100755", // marked: becomes executable
+				"scripts/new.sh":     "100644", // new and not marked: regular
+			}))
+		},
+		Entry("from one recursive tree listing", false),
+		Entry("directory by directory when GitHub truncates the listing", true),
+	)
+
 	It("returns the same pull request on a replayed approval and after a crashed execution", func(ctx SpecContext) {
 		f := newFixture(ctx, "standard")
 		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())

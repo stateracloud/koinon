@@ -85,6 +85,15 @@ var _ = DescribeTable("ValidatePullRequest",
 	Entry("refuses an empty path", func(a *githubtools.PullRequestArgs) { a.Files[0].Path = "" }, "empty path"),
 	Entry("refuses a path listed twice", func(a *githubtools.PullRequestArgs) { a.Files = append(a.Files, a.Files[0]) }, "listed twice"),
 	Entry("refuses a deletion with content", func(a *githubtools.PullRequestArgs) { a.Files[0].Delete = true }, "deleted but has content"),
+	Entry("accepts an executable file", func(a *githubtools.PullRequestArgs) {
+		a.Files = append(a.Files, githubtools.FileChange{Path: "scripts/check.sh", Content: "#!/bin/sh\n", Executable: true})
+	}, ""),
+	Entry("refuses an executable deletion", func(a *githubtools.PullRequestArgs) {
+		a.Files = append(a.Files, githubtools.FileChange{Path: "old.sh", Delete: true, Executable: true})
+	}, "deleted but marked executable"),
+	Entry("refuses an executable workflow", func(a *githubtools.PullRequestArgs) {
+		a.Files = append(a.Files, githubtools.FileChange{Path: ".github/workflows/ci.yml", Content: "on: push", Executable: true})
+	}, "under .github/workflows/"),
 	Entry("refuses no files", func(a *githubtools.PullRequestArgs) { a.Files = nil }, "files is empty"),
 	Entry("refuses a branch outside koinon/", func(a *githubtools.PullRequestArgs) { a.Branch = "main" }, "must be a new branch name starting with koinon/"),
 	Entry("refuses the bare prefix", func(a *githubtools.PullRequestArgs) { a.Branch = "koinon/" }, "starting with koinon/"),
@@ -134,13 +143,15 @@ var _ = Describe("AssessRisk", func() {
 			file("logo.png", "x"),
 			file("data.bin.txt", "a\x00b"),
 			{Path: "old.txt", Delete: true},
+			{Path: "bin/tool", Content: "x", Executable: true},
 		}})
-		Expect(r.Files).To(Equal(10))
+		Expect(r.Files).To(Equal(11))
 		Expect(r.CI).To(Equal([]string{".github/dependabot.yml"}))
 		Expect(r.Scripts).To(Equal([]string{"scripts/release.sh", "tools/run", "Makefile"}))
 		Expect(r.Dependencies).To(Equal([]string{"go.mod", "web/package.json"}))
 		Expect(r.Binary).To(Equal([]string{"logo.png", "data.bin.txt"}))
 		Expect(r.Deletions).To(Equal([]string{"old.txt"}))
+		Expect(r.Executable).To(Equal([]string{"bin/tool"}))
 	})
 })
 
@@ -230,6 +241,38 @@ var _ = Describe("Server", func() {
 			names = append(names, t.Name)
 		}
 		Expect(names).To(ConsistOf("create_pull_request", "comment_on_issue", "get_approval_status"))
+	})
+
+	It("advertises the optional executable flag on create_pull_request's files", func(ctx SpecContext) {
+		f := newFixture(ctx, standardGrant)
+		res, err := session(ctx, f.agentID).ListTools(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		var schema struct {
+			Properties struct {
+				Files struct {
+					Items struct {
+						Properties map[string]struct {
+							Type        string `json:"type"`
+							Description string `json:"description"`
+						} `json:"properties"`
+						Required []string `json:"required"`
+					} `json:"items"`
+				} `json:"files"`
+			} `json:"properties"`
+		}
+		for _, t := range res.Tools {
+			if t.Name != "create_pull_request" {
+				continue
+			}
+			b, err := json.Marshal(t.InputSchema)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(json.Unmarshal(b, &schema)).To(Succeed())
+		}
+		items := schema.Properties.Files.Items
+		Expect(items.Properties).To(HaveKey("executable"))
+		Expect(items.Properties["executable"].Type).To(Equal("boolean"))
+		Expect(items.Properties["executable"].Description).To(ContainSubstring("100755"))
+		Expect(items.Required).NotTo(ContainElement("executable"))
 	})
 
 	It("records a pending approval with a stable hash and returns at once", func(ctx SpecContext) {

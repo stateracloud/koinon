@@ -142,10 +142,27 @@ for f in "${value_files[@]}"; do
 		echo "$name: preflight ClusterRole lists '${listed}', want '${want_listed}' (get-only otherwise)" >&2
 		exit 1
 	fi
+	# The probes' Role is namespaced (the release namespace only) and renders iff a probe is on:
+	# pods create/get/delete and pods/log get for either probe, plus networkpolicies
+	# create/delete for the NetworkPolicy probe and nothing else.
 	probe=$(grep -c -- '--seccomp-probe=true' <<<"$rendered" || true)
+	netpol=$(grep -c -- '--netpol-probe=true' <<<"$rendered" || true)
 	role=$(grep -c '^kind: Role$' <<<"$rendered" || true)
-	[[ $probe == "$role" ]] || { echo "$name: probe Role present=$role but probe enabled=$probe" >&2; exit 1; }
-	echo "$name: ok (seccomp probe: $([[ $probe == 1 ]] && echo on || echo off))"
+	want_role=0
+	[[ $probe == 1 || $netpol == 1 ]] && want_role=1
+	[[ $role == "$want_role" ]] || { echo "$name: probe Role present=$role, want $want_role (seccomp=$probe netpol=$netpol)" >&2; exit 1; }
+	if [[ $role == 1 ]]; then
+		rolerules=$(sed -n '/^kind: Role$/,/^---/p' <<<"$rendered" | awk '/^ *resources:/ { res = $0; sub(/^ *resources: */, "", res) } /^ *verbs:/ { v = $0; sub(/^ *verbs: */, "", v); print res " " v }' | LC_ALL=C sort | tr '\n' ';')
+		want_rules="[pods/log] [get];[pods] [create, get, delete];"
+		[[ $netpol == 1 ]] && want_rules="[networkpolicies] [create, delete];$want_rules"
+		if [[ $rolerules != "$want_rules" ]]; then
+			echo "$name: preflight Role rules '${rolerules}', want '${want_rules}'" >&2
+			exit 1
+		fi
+		grep -q '^  namespace:' <<<"$(sed -n '/^kind: Role$/,/^---/p' <<<"$rendered")" &&
+			{ echo "$name: preflight Role names a namespace; it must be the release namespace" >&2; exit 1; }
+	fi
+	echo "$name: ok (seccomp probe: $([[ $probe == 1 ]] && echo on || echo off), NetworkPolicy probe: $([[ $netpol == 1 ]] && echo on || echo off))"
 done
 
 echo "== kubeconform (Kubernetes $KUBERNETES_VERSION)"

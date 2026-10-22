@@ -24,9 +24,12 @@ type Repo struct {
 	Refs          map[string]string // branch -> commit SHA
 	Commits       map[string]Commit
 	Trees         map[string]map[string]string // tree SHA -> path -> blob SHA
-	Blobs         map[string][]byte
-	Pulls         []Pull
-	Comments      map[int64][]Comment
+	// Modes holds each tree's non-regular entries: tree SHA -> path -> mode (100755). A
+	// path that is absent is a regular file (100644).
+	Modes    map[string]map[string]string
+	Blobs    map[string][]byte
+	Pulls    []Pull
+	Comments map[int64][]Comment
 	// Calls counts write calls by endpoint, e.g. "POST pulls".
 	Calls map[string]int
 }
@@ -69,7 +72,7 @@ func (f *Fake) repo(name string) *Repo {
 	}
 	r = &Repo{
 		Name: name, DefaultBranch: "main", Refs: map[string]string{}, Commits: map[string]Commit{},
-		Trees: map[string]map[string]string{}, Blobs: map[string][]byte{}, Comments: map[int64][]Comment{},
+		Trees: map[string]map[string]string{}, Modes: map[string]map[string]string{}, Blobs: map[string][]byte{}, Comments: map[int64][]Comment{},
 		Calls: map[string]int{},
 	}
 	readme := []byte("# " + name + "\n")
@@ -100,6 +103,27 @@ func (f *Fake) Files(repo, branch string) map[string][]byte {
 	return out
 }
 
+// FileModes returns the git mode of every file of a branch's head commit (100644 or
+// 100755), or nil if the branch does not exist.
+func (f *Fake) FileModes(repo, branch string) map[string]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.repo(repo)
+	sha, ok := r.Refs[branch]
+	if !ok {
+		return nil
+	}
+	tree := r.Commits[sha].Tree
+	out := map[string]string{}
+	for p := range r.Trees[tree] {
+		out[p] = "100644"
+		if m, ok := r.Modes[tree][p]; ok {
+			out[p] = m
+		}
+	}
+	return out
+}
+
 // Snapshot returns a copy of a repository's state.
 func (f *Fake) Snapshot(repo string) Repo {
 	f.mu.Lock()
@@ -118,6 +142,12 @@ func (f *Fake) Snapshot(repo string) Repo {
 // SetBranch points a branch at a new commit with the given files on top of the default
 // branch, as a human pushing to it would.
 func (f *Fake) SetBranch(repo, branch, message string, files map[string]string) string {
+	return f.SetBranchModes(repo, branch, message, files, nil)
+}
+
+// SetBranchModes is SetBranch with a mode (100755) for some of the files; the others are
+// regular (100644).
+func (f *Fake) SetBranchModes(repo, branch, message string, files, fileModes map[string]string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	r := f.repo(repo)
@@ -128,18 +158,29 @@ func (f *Fake) SetBranch(repo, branch, message string, files map[string]string) 
 		r.Blobs[b] = []byte(content)
 		tree[p] = b
 	}
-	tsha := treeID(tree)
+	modes := maps.Clone(r.Modes[base.Tree])
+	if modes == nil {
+		modes = map[string]string{}
+	}
+	for p := range files {
+		delete(modes, p)
+		if m, ok := fileModes[p]; ok && m != "100644" {
+			modes[p] = m
+		}
+	}
+	tsha := treeID(tree, modes)
 	r.Trees[tsha] = tree
+	r.Modes[tsha] = modes
 	c := Commit{SHA: objectID("commit", message, tsha, base.SHA), Message: message, Tree: tsha, Parents: []string{base.SHA}}
 	r.Commits[c.SHA] = c
 	r.Refs[branch] = c.SHA
 	return c.SHA
 }
 
-func treeID(tree map[string]string) string {
+func treeID(tree, modes map[string]string) string {
 	var parts []string
 	for _, p := range slices.Sorted(maps.Keys(tree)) {
-		parts = append(parts, p, tree[p])
+		parts = append(parts, p, tree[p], modes[p])
 	}
 	return objectID("tree", parts...)
 }
@@ -152,6 +193,7 @@ func (f *Fake) routeRepos(mux *http.ServeMux) {
 	mux.HandleFunc("POST /repos/{owner}/{repo}/git/commits", f.withRepo("contents", "write", f.createCommit))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/git/blobs", f.withRepo("contents", "write", f.createBlob))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/git/trees", f.withRepo("contents", "write", f.createTree))
+	mux.HandleFunc("GET /repos/{owner}/{repo}/git/trees/{sha}", f.withRepo("contents", "read", f.getTree))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/pulls", f.withRepo("pull_requests", "read", f.listPulls))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/pulls", f.withRepo("pull_requests", "write", f.createPull))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/issues/{number}/comments", f.withRepo("issues", "read", f.listComments))
@@ -311,7 +353,7 @@ func (f *Fake) createTree(w http.ResponseWriter, req *http.Request, r *Repo) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"message": "Problems parsing JSON"})
 		return
 	}
-	tree := map[string]string{}
+	tree, modes := map[string]string{}, map[string]string{}
 	if in.BaseTree != "" {
 		base, ok := r.Trees[in.BaseTree]
 		if !ok {
@@ -319,12 +361,16 @@ func (f *Fake) createTree(w http.ResponseWriter, req *http.Request, r *Repo) {
 			return
 		}
 		tree = maps.Clone(base)
+		if m := r.Modes[in.BaseTree]; m != nil {
+			modes = maps.Clone(m)
+		}
 	}
 	for _, e := range in.Tree {
 		if e.Type != "blob" || (e.Mode != "100644" && e.Mode != "100755") {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "unsupported tree entry"})
 			return
 		}
+		delete(modes, e.Path)
 		if e.SHA == nil {
 			delete(tree, e.Path)
 			continue
@@ -334,10 +380,63 @@ func (f *Fake) createTree(w http.ResponseWriter, req *http.Request, r *Repo) {
 			return
 		}
 		tree[e.Path] = *e.SHA
+		if e.Mode != "100644" {
+			modes[e.Path] = e.Mode
+		}
 	}
-	sha := treeID(tree)
+	sha := treeID(tree, modes)
 	r.Trees[sha] = tree
+	r.Modes[sha] = modes
 	writeJSON(w, http.StatusCreated, map[string]string{"sha": sha})
+}
+
+// getTree lists a tree. The fake stores flat trees (path -> blob), so a subtree is named
+// "<root tree SHA>:<directory>"; GitHub's subtree SHAs are opaque to clients all the same.
+func (f *Fake) getTree(w http.ResponseWriter, req *http.Request, r *Repo) {
+	root, dir, _ := strings.Cut(req.PathValue("sha"), ":")
+	files, ok := r.Trees[root]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	prefix := ""
+	if dir != "" {
+		prefix = dir + "/"
+	}
+	recursive := req.URL.Query().Get("recursive") != ""
+	truncated := recursive && f.TruncateTrees
+	entries := []map[string]string{}
+	seen := map[string]bool{}
+	for _, p := range slices.Sorted(maps.Keys(files)) {
+		rel, ok := strings.CutPrefix(p, prefix)
+		if !ok {
+			continue
+		}
+		// Every directory above the file, then the file; a non-recursive listing stops at
+		// the first level.
+		parts := strings.Split(rel, "/")
+		for i := 1; i < len(parts); i++ {
+			sub := strings.Join(parts[:i], "/")
+			if seen[sub] || (i > 1 && (!recursive || truncated)) {
+				continue
+			}
+			seen[sub] = true
+			entries = append(entries, map[string]string{"path": sub, "mode": "040000", "type": "tree", "sha": root + ":" + prefix + sub})
+		}
+		if len(parts) > 1 && (!recursive || truncated) {
+			continue
+		}
+		mode := "100644"
+		if m, ok := r.Modes[root][p]; ok {
+			mode = m
+		}
+		entries = append(entries, map[string]string{"path": rel, "mode": mode, "type": "blob", "sha": files[p]})
+	}
+	if dir != "" && len(entries) == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sha": req.PathValue("sha"), "tree": entries, "truncated": truncated})
 }
 
 func (f *Fake) pullJSON(p Pull) map[string]any {

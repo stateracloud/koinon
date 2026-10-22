@@ -61,3 +61,4 @@ are in [0046](0046-adr-conventions.md).
 | [0044](0044-in-sandbox-credential-exception.md) | In-sandbox credentials as a gated exception | Accepted |
 | [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted |
 | [0046](0046-adr-conventions.md) | ADR conventions | Accepted |
+| [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted |
