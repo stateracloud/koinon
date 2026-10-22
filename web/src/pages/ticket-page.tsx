@@ -14,8 +14,10 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import type { Cost, RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { TicketService, TicketStatus } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
 import { useRunWatches, type RunWatch } from '@/hooks/use-run-watches'
+import { costDetail, costLabel } from '@/lib/cost'
 import { runFinished, runStateLabel, statusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 import { buildTimeline } from '@/lib/timeline'
@@ -70,6 +72,8 @@ export function TicketPage() {
   const t = ticket.data.ticket
   const agentName = agents.data?.agents.find((a) => a.id === t?.agentId)?.displayName
   const runs = ticket.data.runs.map((r) => watches[r.id]?.run ?? r)
+  // Costs come from GetTicket only: watched runs carry none.
+  const runCosts = ticket.data.runs.map((r, i) => ({ id: r.id, state: runs[i].state, cost: r.cost }))
   const active = runs.filter((r) => !runFinished(r.state))
 
   return (
@@ -82,7 +86,14 @@ export function TicketPage() {
           <h1 className="text-xl font-semibold">{t?.title}</h1>
           <p className="text-muted-foreground text-sm">
             <Badge variant="secondary">{statusLabel(t?.status ?? TicketStatus.UNSPECIFIED)}</Badge> {agentName && <>· {agentName}</>}
+            {t?.cost && (
+              <>
+                {' '}
+                · <span title={costDetail(t.cost)}>Cost {costLabel(t.cost)}</span>
+              </>
+            )}
           </p>
+          <RunCosts runs={runCosts} />
         </div>
         {canEdit && t && t.status !== TicketStatus.DONE && (
           <Button variant="outline" size="sm" className="ml-auto" disabled={move.isPending} onClick={() => move.mutate({ orgId, ticketId, status: TicketStatus.DONE })}>
@@ -122,6 +133,22 @@ function RunStatus({ runs }: { runs: { id: string; state: string; watch?: RunWat
         </p>
       ))}
     </div>
+  )
+}
+
+function RunCosts({ runs }: { runs: { id: string; state: RunState; cost?: Cost }[] }) {
+  if (!runs.some((r) => r.cost)) return null
+  return (
+    <section aria-label="Run costs" className="text-muted-foreground text-sm">
+      <ul className="grid gap-0.5">
+        {runs.map((r) => (
+          <li key={r.id}>
+            Run {r.id.slice(0, 8)} · {runStateLabel(r.state)} ·{' '}
+            {r.cost ? <span title={costDetail(r.cost)}>{costLabel(r.cost)}</span> : 'no cost recorded'}
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 

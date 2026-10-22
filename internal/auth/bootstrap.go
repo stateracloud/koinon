@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -21,12 +20,14 @@ import (
 
 // The bootstrap admin is a local user, not an OIDC one. users requires an
 // (issuer, subject) pair, so it gets a reserved non-URL issuer that no OIDC
-// provider can produce.
+// provider can produce, and a fixed subject: the login username is
+// configurable and may change, the user it names may not.
 const (
-	LocalIssuer            = "koinon:local"
-	BootstrapAdminUsername = "admin"
-	DefaultOrgSlug         = "default"
-	DefaultOrgDisplayName  = "Default"
+	LocalIssuer                   = "koinon:local"
+	BootstrapAdminSubject         = "admin"
+	DefaultBootstrapAdminUsername = "admin"
+	DefaultOrgSlug                = "default"
+	DefaultOrgDisplayName         = "Default"
 )
 
 // GroupMapping maps an IdP group to a role in the default org.
@@ -73,6 +74,9 @@ func ParseIdentityMode(s string) (store.IdentityMode, error) {
 
 // BootstrapConfig configures Bootstrap.
 type BootstrapConfig struct {
+	// Username is the bootstrap admin's login name, default "admin". It is
+	// applied on every start, so changing it renames the existing login.
+	Username string
 	// PasswordFile holds the bootstrap admin's one-time password, typically a
 	// mounted Kubernetes Secret. It is read only when the credential does
 	// not exist yet, and only its argon2id hash is stored. A configured but
@@ -110,6 +114,12 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 	if cfg.DefaultOrgIdentityMode == "" {
 		cfg.DefaultOrgIdentityMode = store.IdentityModeHybrid
 	}
+	if cfg.Username == "" {
+		cfg.Username = DefaultBootstrapAdminUsername
+	}
+	if len(cfg.Username) > 64 || strings.TrimSpace(cfg.Username) != cfg.Username {
+		return res, fmt.Errorf("bootstrap admin username %q: want at most 64 characters, no surrounding spaces", cfg.Username)
+	}
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		if err := q.LockBootstrap(ctx); err != nil {
@@ -117,10 +127,10 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 		}
 
 		admin, err := q.GetUserByIdentity(ctx, store.GetUserByIdentityParams{
-			OidcIssuer: LocalIssuer, OidcSubject: BootstrapAdminUsername,
+			OidcIssuer: LocalIssuer, OidcSubject: BootstrapAdminSubject,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
-			admin, err = createUser(ctx, q, LocalIssuer, BootstrapAdminUsername, "", "Bootstrap admin")
+			admin, err = createUser(ctx, q, LocalIssuer, BootstrapAdminSubject, "", "Bootstrap admin")
 			res.CreatedAdmin = true
 		}
 		if err != nil {
@@ -182,7 +192,13 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 		}
 		_, err = q.GetLocalCredential(ctx, admin.ID)
 		if err == nil {
-			return nil // already set; the file is not read again
+			// Already set; the file is not read again.
+			if err := q.SetLocalUsername(ctx, store.SetLocalUsernameParams{
+				UserID: admin.ID, Username: cfg.Username,
+			}); err != nil {
+				return fmt.Errorf("rename bootstrap admin: %w", err)
+			}
+			return nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("load credential: %w", err)
@@ -200,7 +216,7 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 			return err
 		}
 		if err := q.CreateLocalCredential(ctx, store.CreateLocalCredentialParams{
-			UserID: admin.ID, Username: BootstrapAdminUsername, PasswordHash: hash,
+			UserID: admin.ID, Username: cfg.Username, PasswordHash: hash,
 		}); err != nil {
 			return fmt.Errorf("create credential: %w", err)
 		}
@@ -211,11 +227,10 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 }
 
 func readPasswordFile(path string) (string, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // path is operator configuration
+	password, err := ReadSecretFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read bootstrap password file: %w", err)
 	}
-	password := strings.TrimRight(string(b), "\r\n")
 	if password == "" {
 		return "", errors.New("bootstrap password file is empty")
 	}

@@ -107,7 +107,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if old, err := r.Cookie(SessionCookieName); err == nil {
+	if old, err := r.Cookie(s.SessionCookie()); err == nil {
 		_ = s.revokeToken(r.Context(), old.Value)
 	}
 	token, _, err := s.createSession(r.Context(), s.q, cred.UserID, store.AuthMethodPassword)
@@ -154,13 +154,13 @@ func (s *Service) checkPassword(ctx context.Context, username, password string) 
 
 // handleLogout revokes the current session. It always clears the cookie.
 func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(SessionCookieName); err == nil {
+	if c, err := r.Cookie(s.SessionCookie()); err == nil {
 		if err := s.revokeToken(r.Context(), c.Value); err != nil {
 			s.log.Error("revoking session failed", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 	}
-	clearCookie(w, SessionCookieName, "/")
+	s.clearCookie(w, s.SessionCookie(), "/")
 	w.WriteHeader(http.StatusNoContent)
 }

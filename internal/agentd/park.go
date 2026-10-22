@@ -33,10 +33,6 @@ const kindParked = "run.parked"
 const parkResumeNote = "[Koinon] Your run was paused while a human decided on your approval requests, " +
 	"and has now resumed. The outcomes:"
 
-func openApproval(s store.ApprovalStatus) bool {
-	return s == store.ApprovalStatusPending || s == store.ApprovalStatusApproved
-}
-
 // outcomes returns the decided requests of the run the agent has not been sent yet, as text
 // for the prompt, and remembers them so the turn's end marks them delivered.
 func (r *runner) outcomes(ctx context.Context) (string, error) {
@@ -49,7 +45,7 @@ func (r *runner) outcomes(ctx context.Context) (string, error) {
 	r.delivered = r.delivered[:0]
 	var b strings.Builder
 	for _, a := range reqs {
-		if openApproval(a.Status) {
+		if a.Status.Open() {
 			continue
 		}
 		r.delivered = append(r.delivered, a.ID)
@@ -172,7 +168,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 			return nil
 		}
 		for _, a := range reqs {
-			if openApproval(a.Status) {
+			if a.Status.Open() {
 				return nil // approved, being executed: the executor resolves the park
 			}
 		}

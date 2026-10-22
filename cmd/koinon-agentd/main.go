@@ -16,17 +16,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/procoduck/koinon/internal/agentd"
-	"github.com/procoduck/koinon/internal/execution/openshell"
+	"github.com/procoduck/koinon/internal/cli"
 	"github.com/procoduck/koinon/internal/project"
 )
 
@@ -59,17 +55,8 @@ func parseFlags(args []string) (config, error) {
 	fs.IntVar(&c.pool.MaxTakeovers, "max-takeovers", 5, "fail a run taken over more often than this")
 	fs.StringVar(&c.pool.SessionCwd, "session-cwd", "/sandbox/work", "harness session directory in the sandbox")
 
-	var envErr error
-	fs.VisitAll(func(f *flag.Flag) {
-		key := "KOINON_" + strings.ToUpper(strings.ReplaceAll(f.Name, "-", "_"))
-		if v, ok := os.LookupEnv(key); ok {
-			if err := f.Value.Set(v); err != nil && envErr == nil {
-				envErr = fmt.Errorf("%s: %w", key, err)
-			}
-		}
-	})
-	if envErr != nil {
-		return c, envErr
+	if err := cli.BindEnv(fs, nil); err != nil {
+		return c, err
 	}
 	if err := fs.Parse(args); err != nil {
 		return c, err
@@ -119,28 +106,11 @@ func run() error {
 	}
 	defer db.Close()
 
-	var backend *openshell.Backend
-	if cfg.openshellTLSDir != "" {
-		backend, err = openshell.Dial(openshell.Config{
-			Endpoint:   cfg.openshellAddr,
-			CertFile:   filepath.Join(cfg.openshellTLSDir, "tls.crt"),
-			KeyFile:    filepath.Join(cfg.openshellTLSDir, "tls.key"),
-			CAFile:     filepath.Join(cfg.openshellTLSDir, "ca.crt"),
-			ServerName: cfg.openshellName,
-		})
-		if err != nil {
-			return err
-		}
-		defer func() { _ = backend.Close() }()
-	} else {
-		slog.Warn("connecting to the OpenShell gateway without TLS", "address", cfg.openshellAddr)
-		conn, err := grpc.NewClient(cfg.openshellAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			return fmt.Errorf("openshell: %w", err)
-		}
-		defer func() { _ = conn.Close() }()
-		backend = openshell.New(conn)
+	backend, err := cli.OpenShell{Address: cfg.openshellAddr, TLSDir: cfg.openshellTLSDir, ServerName: cfg.openshellName}.Dial()
+	if err != nil {
+		return err
 	}
+	defer func() { _ = backend.Close() }()
 
 	pool, err := agentd.New(db, backend, cfg.pool)
 	if err != nil {
