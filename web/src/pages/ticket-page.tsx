@@ -92,6 +92,7 @@ export function TicketPage() {
               </>
             )}
           </p>
+          <RunCosts runs={runCosts} />
         </div>
         {canEdit && t && t.status !== TicketStatus.DONE && (
           <Button variant="outline" size="sm" className="ml-auto" disabled={move.isPending} onClick={() => move.mutate({ orgId, ticketId, status: TicketStatus.DONE })}>
@@ -101,8 +102,6 @@ export function TicketPage() {
       </div>
 
       <RunStatus runs={active.map((r) => ({ id: r.id, state: runStateLabel(r.state), watch: watches[r.id] }))} />
-
-      <RunCosts runs={runCosts} />
 
       <Timeline items={items} />
 
