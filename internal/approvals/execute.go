@@ -4,7 +4,6 @@ package approvals
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,54 +28,39 @@ const (
 // trustedApprover names the approver of a call the Trusted preset allowed.
 const trustedApprover = "Koinon Trusted preset (no human approval)"
 
-// Token permissions per tool: the least each call needs. Every installation token can read
-// metadata; asking for it explicitly keeps GitHub's answer equal to the request.
-var toolPermissions = map[string]map[string]string{
-	githubtools.ToolCreatePullRequest: {"metadata": "read", "contents": "write", "pull_requests": "write"},
-	githubtools.ToolCommentOnIssue:    {"metadata": "read", "issues": "write"},
-}
-
 // execute runs the approved call against GitHub and returns its result.
 func (s *Service) execute(ctx context.Context, row store.ApprovalRequest) (map[string]any, error) {
 	if row.Connector != connectors.GitHubID {
 		return nil, permanent("no executor for connector %q", row.Connector)
 	}
-	perms, ok := toolPermissions[row.Tool]
-	if !ok {
-		return nil, permanent("no executor for tool %q", row.Tool)
+	tool, err := githubtools.LookupWriteTool(row.Tool)
+	if err != nil {
+		return nil, permanentError{err}
+	}
+	// Defence in depth: the tool server validated the call before recording it.
+	call, err := tool.Decode([]byte(row.ArgsJson))
+	if err != nil {
+		return nil, permanentError{err}
 	}
 	repo, app, err := s.target(ctx, row)
 	if err != nil {
 		return nil, err
 	}
-	tok, err := s.gh.InstallationToken(ctx, app, github.TokenRequest{Repositories: []string{repo.String()}, Permissions: perms})
+	tok, err := s.gh.InstallationToken(ctx, app, github.TokenRequest{Repositories: []string{repo.String()}, Permissions: tool.Permissions})
 	if err != nil {
 		return nil, err
 	}
-	switch row.Tool {
-	case githubtools.ToolCreatePullRequest:
-		var args githubtools.PullRequestArgs
-		if err := json.Unmarshal([]byte(row.ArgsJson), &args); err != nil {
-			return nil, permanent("decode the recorded arguments: %w", err)
-		}
-		// Defence in depth: the tool server validated the call before recording it.
-		if err := githubtools.ValidatePullRequest(args); err != nil {
-			return nil, permanentError{err}
-		}
+	switch args := call.(type) {
+	case *githubtools.PullRequestArgs:
 		requested, approved, err := s.people(ctx, row)
 		if err != nil {
 			return nil, err
 		}
-		return s.createPullRequest(ctx, tok, repo, args, row.ID.String(), requested, approved)
+		return s.createPullRequest(ctx, tok, repo, *args, row.ID.String(), requested, approved)
+	case *githubtools.CommentArgs:
+		return s.comment(ctx, tok, repo, *args, row.ID.String())
 	default:
-		var args githubtools.CommentArgs
-		if err := json.Unmarshal([]byte(row.ArgsJson), &args); err != nil {
-			return nil, permanent("decode the recorded arguments: %w", err)
-		}
-		if err := githubtools.ValidateComment(args); err != nil {
-			return nil, permanentError{err}
-		}
-		return s.comment(ctx, tok, repo, args, row.ID.String())
+		return nil, permanent("no executor for tool %q", call.Tool())
 	}
 }
 

@@ -155,6 +155,10 @@ type envOptions struct {
 	noSecrets bool
 	// logs, when set, receives the services' and auth's logs as well.
 	logs io.Writer
+	// plainHTTP serves over http:// instead of TLS, with a matching PublicURL.
+	plainHTTP bool
+	// username is the bootstrap admin's login name; empty means the default.
+	username string
 }
 
 // env is one API server on its own database.
@@ -205,9 +209,14 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	}
 
 	var handler http.Handler
-	e.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serve := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler.ServeHTTP(w, r)
-	}))
+	})
+	if opts.plainHTTP {
+		e.srv = httptest.NewServer(serve)
+	} else {
+		e.srv = httptest.NewTLSServer(serve)
+	}
 	DeferCleanup(e.srv.Close)
 
 	if opts.oidc {
@@ -225,6 +234,7 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 		SessionIdleTimeout: idleTimeout,
 		SessionMaxLifetime: maxLifetime,
 		BootstrapLogin:     !opts.bootstrapLoginDisabled,
+		PublicURL:          e.srv.URL,
 		Logger:             slog.New(slog.NewTextHandler(logOut, nil)),
 		Now:                e.clock.Now,
 	}
@@ -269,6 +279,7 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 
 func (e *env) bootstrap(ctx context.Context) auth.BootstrapResult {
 	cfg := auth.BootstrapConfig{
+		Username:               e.opts.username,
 		PasswordFile:           e.pwFile,
 		LoginEnabled:           !e.opts.bootstrapLoginDisabled,
 		DefaultOrgIdentityMode: e.opts.defaultOrgMode,
@@ -350,7 +361,7 @@ func (b *browser) post(ctx context.Context, path string, header http.Header) *ht
 func (b *browser) sessionToken() string {
 	u, _ := url.Parse(b.e.srv.URL)
 	for _, c := range b.http.Jar.Cookies(u) {
-		if c.Name == auth.SessionCookieName {
+		if c.Name == b.e.svc.SessionCookie() {
 			return c.Value
 		}
 	}
@@ -360,7 +371,7 @@ func (b *browser) sessionToken() string {
 // setSessionToken plants a session cookie, as a replaying attacker would.
 func (b *browser) setSessionToken(token string) {
 	u, _ := url.Parse(b.e.srv.URL)
-	b.http.Jar.SetCookies(u, []*http.Cookie{{Name: auth.SessionCookieName, Value: token, Path: "/", Secure: true}})
+	b.http.Jar.SetCookies(u, []*http.Cookie{{Name: b.e.svc.SessionCookie(), Value: token, Path: "/", Secure: !b.e.opts.plainHTTP}})
 }
 
 func codeOf(err error) connect.Code {
