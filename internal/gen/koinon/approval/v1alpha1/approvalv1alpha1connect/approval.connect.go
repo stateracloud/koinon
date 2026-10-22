@@ -82,8 +82,9 @@ type ApprovalServiceClient interface {
 	// push-and-run risk summary and the full change. Viewers and above.
 	GetApproval(context.Context, *v1alpha1.GetApprovalRequest) (*v1alpha1.GetApprovalResponse, error)
 	// Approve approves a pending request and executes it. args_sha256 must be
-	// the hash shown with the request; a different hash fails with
-	// FAILED_PRECONDITION and nothing is executed. Approving again with the
+	// the hash shown with the request; a different hash fails with ABORTED
+	// (HTTP 409) and nothing is executed. A request that is no longer pending
+	// fails with FAILED_PRECONDITION. Approving again with the
 	// same hash returns the request as it is (the same pull request), without
 	// executing it again. Admins and owners.
 	Approve(context.Context, *v1alpha1.ApproveRequest) (*v1alpha1.ApproveResponse, error)
@@ -109,8 +110,9 @@ type ApprovalServiceHandler interface {
 	// push-and-run risk summary and the full change. Viewers and above.
 	GetApproval(context.Context, *v1alpha1.GetApprovalRequest) (*v1alpha1.GetApprovalResponse, error)
 	// Approve approves a pending request and executes it. args_sha256 must be
-	// the hash shown with the request; a different hash fails with
-	// FAILED_PRECONDITION and nothing is executed. Approving again with the
+	// the hash shown with the request; a different hash fails with ABORTED
+	// (HTTP 409) and nothing is executed. A request that is no longer pending
+	// fails with FAILED_PRECONDITION. Approving again with the
 	// same hash returns the request as it is (the same pull request), without
 	// executing it again. Admins and owners.
 	Approve(context.Context, *v1alpha1.ApproveRequest) (*v1alpha1.ApproveResponse, error)

@@ -153,10 +153,13 @@ func (s *Server) decision(ctx context.Context, orgID, approvalID, note string) (
 	return c, id, note, nil
 }
 
+// approvalError maps the approvals package's errors. A hash mismatch is Aborted (HTTP 409,
+// plan item P1): the request changed since the approver loaded it, and reloading shows the
+// new version. A request that is no longer pending stays FailedPrecondition.
 func (s *Server) approvalError(err error) error {
 	switch {
 	case errors.Is(err, approvals.ErrHashMismatch):
-		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
+		return connect.NewError(connect.CodeAborted, err.Error())
 	case errors.Is(err, approvals.ErrNotPending):
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	}

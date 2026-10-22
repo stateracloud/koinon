@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { Code, ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApprovalCard } from '@/components/approval-card'
@@ -13,7 +13,8 @@ import { useOrg } from '@/lib/org-context'
 /**
  * ApprovalView loads one request with GetApproval and decides it. Approve
  * sends the args_sha256 GetApproval returned, so a change the viewer has not
- * seen cannot be approved (the API answers FailedPrecondition).
+ * seen cannot be approved: the API answers Aborted (HTTP 409), and the card
+ * asks the viewer to reload and review the new version.
  */
 export function ApprovalView({ approvalId, showPermalink }: { approvalId: string; showPermalink?: boolean }) {
   const { org } = useOrg()
@@ -42,13 +43,21 @@ export function ApprovalView({ approvalId, showPermalink }: { approvalId: string
   }
   const a = get.data.approval
   if (!a) return null
-  const err = approve.error ?? deny.error
+  const err = approve.error ? ConnectError.from(approve.error) : deny.error ? ConnectError.from(deny.error) : undefined
+  const changed = err?.code === Code.Aborted
+  const reload = async () => {
+    approve.reset()
+    deny.reset()
+    await get.refetch()
+  }
   return (
     <ApprovalCard
       approval={a}
       canDecide={a.canDecide && isApprover(org.role)}
       pending={approve.isPending || deny.isPending}
-      error={err ? ConnectError.from(err).rawMessage : undefined}
+      error={err && !changed ? err.rawMessage : undefined}
+      changed={changed}
+      onReload={() => void reload()}
       showPermalink={showPermalink}
       onApprove={(note) => approve.mutate({ orgId, approvalId: a.id, argsSha256: a.argsSha256, note })}
       onDeny={(note) => deny.mutate({ orgId, approvalId: a.id, note })}

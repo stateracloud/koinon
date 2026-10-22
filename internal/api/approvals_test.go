@@ -4,6 +4,9 @@ package api_test
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	connect "connectrpc.com/connect/v2"
@@ -31,6 +34,23 @@ func (e *env) pendingApproval(ctx context.Context, f orgFixture) store.ApprovalR
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return req
+}
+
+// approveStatus calls Approve as plain Connect JSON over HTTP and returns the HTTP status, to
+// check what a browser sees.
+func approveStatus(ctx context.Context, c *client, org, id, sha string) int {
+	GinkgoHelper()
+	body := fmt.Sprintf(`{"orgId":%q,"approvalId":%q,"argsSha256":%q}`, org, id, sha)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.b.e.srv.URL+"/koinon.approval.v1alpha1.ApprovalService/Approve", strings.NewReader(body))
+	Expect(err).NotTo(HaveOccurred())
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Connect-Protocol-Version", "1")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	res, err := c.b.http.Do(req)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = res.Body.Close() }()
+	return res.StatusCode
 }
 
 var _ = Describe("ApprovalService", func() {
@@ -67,9 +87,10 @@ var _ = Describe("ApprovalService", func() {
 		_, err = member.approvals.Deny(ctx, &approvalv1alpha1.DenyRequest{OrgId: f.org, ApprovalId: id})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
 
-		By("an admin with the wrong hash is refused and nothing changes")
+		By("an admin with the wrong hash is refused with Aborted (HTTP 409) and nothing changes")
 		_, err = admin.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: f.org, ApprovalId: id, ArgsSha256: githubtools.HashArgs([]byte("{}"))})
-		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+		Expect(codeOf(err)).To(Equal(connect.CodeAborted))
+		Expect(approveStatus(ctx, admin, f.org, id, githubtools.HashArgs([]byte("{}")))).To(Equal(http.StatusConflict))
 		got, err = admin.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: f.org, ApprovalId: id})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.GetApproval().GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_PENDING))
@@ -86,8 +107,10 @@ var _ = Describe("ApprovalService", func() {
 		list, err = member.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: f.org, TicketId: f.ticket.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list.GetApprovals()).To(HaveLen(1))
+		By("approving a request that is no longer pending stays FailedPrecondition (HTTP 400)")
 		_, err = f.owner.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: f.org, ApprovalId: id, ArgsSha256: req.ArgsSha256})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+		Expect(approveStatus(ctx, f.owner, f.org, id, req.ArgsSha256)).To(Equal(http.StatusBadRequest))
 	})
 
 	It("hides requests from other orgs", func(ctx SpecContext) {
