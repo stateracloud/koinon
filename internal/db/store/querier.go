@@ -25,6 +25,11 @@ type Querier interface {
 	// lock, so events are gap-free and ordered per run. No row: stale epoch or the
 	// run is not active, and nothing is written.
 	AppendRunEvent(ctx context.Context, arg AppendRunEventParams) (RunEvent, error)
+	// AppendRunEvent with the writer's own sequence number: an event already
+	// recorded under (run, epoch, source_seq) is not recorded again, so retrying
+	// after an ambiguous failure is safe. No row: stale epoch, the run is not
+	// active, or the event exists (GetRunEventBySource tells which).
+	AppendRunEventOnce(ctx context.Context, arg AppendRunEventOnceParams) (RunEvent, error)
 	AppendTicketEvent(ctx context.Context, arg AppendTicketEventParams) (TicketEvent, error)
 	ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Agent, error)
 	// A ticket moved to Done cancels its queued runs (plan item A4).
@@ -90,8 +95,12 @@ type Querier interface {
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
+	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
+	// The highest ticket timeline seq already sent to the harness by the ticket's
+	// other runs; messages after it are new for the next run.
+	GetTicketPromptedThrough(ctx context.Context, arg GetTicketPromptedThroughParams) (int64, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
 	// Extends the owner's lease. No row: the caller is no longer the owner and
@@ -106,12 +115,18 @@ type Querier interface {
 	// platform counts manual rows, idp counts IdP rows plus the manual owner,
 	// hybrid counts both. The highest role wins.
 	ListEffectiveMemberships(ctx context.Context, userID pgtype.UUID) ([]ListEffectiveMembershipsRow, error)
+	// Orgs that are not deleted, for workers that scan every org (koinon-agentd
+	// claims runs org by org, so each claim stays org-scoped).
+	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
 	ListRunsForTicket(ctx context.Context, arg ListRunsForTicketParams) ([]Run, error)
 	// The timeline after a sequence number (0 for the start), in order.
 	ListTicketEvents(ctx context.Context, arg ListTicketEventsParams) ([]TicketEvent, error)
+	// The users' messages on the ticket after a timeline seq, in order: what
+	// agentd sends the harness as a run's prompt.
+	ListTicketMessagesAfter(ctx context.Context, arg ListTicketMessagesAfterParams) ([]TicketEvent, error)
 	ListTickets(ctx context.Context, orgID pgtype.UUID) ([]Ticket, error)
 	// One board column, oldest first.
 	ListTicketsByStatus(ctx context.Context, arg ListTicketsByStatusParams) ([]Ticket, error)
@@ -131,6 +146,10 @@ type Querier interface {
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
+	// The owner gives the run up without finishing it, for example because the
+	// exec stream to the harness dropped: the lease ends now, so any agentd can
+	// take the run over at once (TakeOverExpiredRun) and resume the session.
+	ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams) (Run, error)
 	// Makes a parked run claimable again (approval decided, input given). It
 	// stays parked until an owner claims it: parked -> starting.
 	ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) (Run, error)
@@ -142,6 +161,9 @@ type Querier interface {
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
+	// Records, before the prompt is sent, the ticket timeline seq through which
+	// the ticket's messages are in it.
+	SetRunPromptThrough(ctx context.Context, arg SetRunPromptThroughParams) (Run, error)
 	// Stores the harness session for the ticket. Fenced by the run epoch: only the
 	// current owner of one of the ticket's active runs can set it.
 	SetTicketHarnessSession(ctx context.Context, arg SetTicketHarnessSessionParams) (Ticket, error)
