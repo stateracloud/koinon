@@ -76,7 +76,8 @@ var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
 		a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "OpenCode", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
 		v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
-			OrgID: org, AgentID: a.ID, Config: []byte(`{"model":{"name":"` + contractModel + `"}}`), CreatedBy: user,
+			OrgID: org, AgentID: a.ID, CreatedBy: user,
+			Config: []byte(`{"model":{"name":"` + contractModel + `"},"instructions":"` + instructionsMarker + `: you are a contract test agent."}`),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: a.ID, VersionID: v.ID, ActivatedBy: user})
@@ -161,8 +162,12 @@ var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
 				text += u.Content.Text
 			}
 		}
+		// The fake model answers helloPrompt only with the instructions agentd wrote in the
+		// system prompt, and the Koinon tool was there for the first request.
 		Expect(text).To(ContainSubstring(helloReply))
 		Expect(gw.authHeaders()).To(HaveEach("Bearer " + fakeKey))
+		Expect(gw.modelBodies()).To(ContainElement(And(ContainSubstring(helloPrompt), ContainSubstring(opencode.mcpToolName))))
+		Expect(sb.run(ctx, "cat", instructionsPath)).To(ContainSubstring(instructionsMarker))
 	}, SpecTimeout(4*time.Minute))
 
 	It("loads the session on the next run, after the sandbox restarted", func(ctx SpecContext) {
@@ -181,7 +186,7 @@ var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
 		Expect(gw.modelBodies()).To(ContainElement(And(ContainSubstring(recallPrompt), ContainSubstring(helloReply))))
 	}, SpecTimeout(4*time.Minute))
 
-	It("answers the harness's permission requests from the tier mapping", func(ctx SpecContext) {
+	It("rejects the harness's requests for paths outside the session directory", func(ctx SpecContext) {
 		r := runTicket(ctx, readPrompt)
 		var perms []store.RunEvent
 		for _, e := range eventsOf(ctx, r) {
@@ -191,9 +196,10 @@ var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
 		}
 		Expect(perms).NotTo(BeEmpty())
 		GinkgoWriter.Printf("permission decisions: %s (run %s: %s)\n", perms[0].Payload, r.State, r.OutcomeReason.String)
-		// OpenCode asks for paths outside the session directory with tool kind "other", which
-		// the default mapping leaves unmapped: rejected.
+		// OpenCode asks for paths outside the session directory with tool kind "read", which the
+		// mapping allows; agentd rejects them for the path.
 		Expect(string(perms[0].Payload)).To(ContainSubstring(`"verdict": "reject"`))
+		Expect(string(perms[0].Payload)).To(ContainSubstring(`"outsideWorkspace": "` + opencode.outsidePath + `"`))
 	}, SpecTimeout(4*time.Minute))
 })
 
