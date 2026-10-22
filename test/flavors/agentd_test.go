@@ -84,7 +84,8 @@ func describeAgentd(f flavor) bool {
 			a, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: f.name, Flavor: f.storeFlavor, CreatedBy: user})
 			Expect(err).NotTo(HaveOccurred())
 			v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
-				OrgID: org, AgentID: a.ID, Config: []byte(`{"model":{"name":"` + contractModel + `"}}`), CreatedBy: user,
+				OrgID: org, AgentID: a.ID, CreatedBy: user,
+				Config: []byte(`{"model":{"name":"` + contractModel + `"},"instructions":"` + instructionsMarker + `: you are a contract test agent."}`),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: a.ID, VersionID: v.ID, ActivatedBy: user})
@@ -169,8 +170,15 @@ func describeAgentd(f flavor) bool {
 					text += u.Content.Text
 				}
 			}
+			// For a flavor with instructionsInSystem, the fake model answers helloPrompt only with
+			// the instructions agentd wrote in the system prompt.
 			Expect(text).To(ContainSubstring(helloReply))
 			Expect(gw.authHeaders()).To(HaveEach("Bearer " + fakeKey))
+			Expect(sb.run(ctx, "cat", instructionsPath)).To(ContainSubstring(instructionsMarker))
+			if f.readyCommand != "" {
+				// agentd waited for the Koinon tools: the first request already offers them.
+				Expect(gw.modelBodies()).To(ContainElement(And(ContainSubstring(helloPrompt), ContainSubstring(f.mcpToolName))))
+			}
 		}, SpecTimeout(4*time.Minute))
 
 		It("loads the session on the next run, after the sandbox restarted", func(ctx SpecContext) {

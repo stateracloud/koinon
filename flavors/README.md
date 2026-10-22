@@ -26,9 +26,11 @@ one image).
 
 | | OpenCode | Hermes | pi |
 | --- | --- | --- | --- |
-| Harness | OpenCode 1.19.3 | Hermes Agent 0.22.3 | pi 1.3.0 + pi-acp 0.0.34 |
+| Harness | OpenCode 2.0.24 | Hermes Agent 0.22.3 | pi 1.3.0 + pi-acp 0.0.34 |
 | `session/resume` advertised | yes | yes | no |
 | Asks permission for | paths outside the session directory | every file write or patch | nothing |
-| Unknown session on load | `-32603` service failure | `-32603` `not_found` | `-32602` `Unknown sessionId` |
+| Unknown session on load | `session not found` | `-32603` `not_found` | `-32602` `Unknown sessionId` |
+| Run instructions (`/sandbox/.koinon/AGENTS.md`, written by agentd) | in the system prompt (global `AGENTS.md` link) | not read | not read |
+| MCP readiness | `koinon:koinon-ready` command, waited for by agentd | none | none |
 | MCP tool names | `koinon_<tool>` | `mcp__koinon__<tool>` | `mcp__koinon__<tool>` (direct exposure) |
 | Config | read-only, used in place | read-only, linked into `HERMES_HOME` | read-only templates rendered into the home at start |
