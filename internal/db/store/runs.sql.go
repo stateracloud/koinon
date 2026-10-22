@@ -16,7 +16,7 @@ UPDATE runs
 SET tokens_used = tokens_used + $1::bigint
 WHERE org_id = $2 AND id = $3
   AND state IN ('queued', 'starting', 'running', 'parked')
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type AddRunTokensParams struct {
@@ -53,6 +53,8 @@ func (q *Queries) AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)
@@ -69,7 +71,7 @@ SET state = 'canceled',
     heartbeat_at = NULL
 WHERE org_id = $2 AND agent_id = $3
   AND state IN ('queued', 'starting', 'running', 'parked')
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type CancelOpenRunsForAgentParams struct {
@@ -111,6 +113,8 @@ func (q *Queries) CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRuns
 			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PromptThroughSeq,
+			&i.Takeovers,
 			&i.ParkedSeconds,
 			&i.TokensUsed,
 		); err != nil {
@@ -131,7 +135,7 @@ SET state = 'canceled',
     finished_at = now(),
     ready_at = NULL
 WHERE org_id = $2 AND ticket_id = $3 AND state = 'queued'
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type CancelQueuedRunsForTicketParams struct {
@@ -173,6 +177,8 @@ func (q *Queries) CancelQueuedRunsForTicket(ctx context.Context, arg CancelQueue
 			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PromptThroughSeq,
+			&i.Takeovers,
 			&i.ParkedSeconds,
 			&i.TokensUsed,
 		); err != nil {
@@ -196,7 +202,7 @@ SET state = 'canceled',
     heartbeat_at = NULL
 WHERE org_id = $2 AND id = $3
   AND state IN ('queued', 'starting', 'running', 'parked')
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type CancelRunParams struct {
@@ -234,6 +240,8 @@ func (q *Queries) CancelRun(ctx context.Context, arg CancelRunParams) (Run, erro
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)
@@ -251,7 +259,7 @@ SET state = 'canceled',
 WHERE org_id = $2
   AND state IN ('starting', 'running')
   AND started_at + make_interval(secs => max_wall_clock_seconds + parked_seconds) < now()
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type CancelRunsOverWallClockParams struct {
@@ -294,6 +302,8 @@ func (q *Queries) CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOve
 			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PromptThroughSeq,
+			&i.Takeovers,
 			&i.ParkedSeconds,
 			&i.TokensUsed,
 		); err != nil {
@@ -354,7 +364,7 @@ FROM next
 JOIN agent ON agent.id = next.agent_id
 WHERE runs.org_id = $3 AND runs.id = next.run_id
   AND runs.state IN ('queued', 'parked') AND runs.ready_at IS NOT NULL
-RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.ticket_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.parked_seconds, runs.tokens_used
+RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.ticket_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.prompt_through_seq, runs.takeovers, runs.parked_seconds, runs.tokens_used
 `
 
 type ClaimNextRunParams struct {
@@ -397,6 +407,8 @@ func (q *Queries) ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)
@@ -411,7 +423,7 @@ SELECT a.org_id, a.id, a.active_version_id, $1, now(),
        $2, $3
 FROM agents a
 WHERE a.org_id = $4 AND a.id = $5 AND a.status = 'active'
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type CreateRunParams struct {
@@ -465,6 +477,8 @@ func (q *Queries) CreateRun(ctx context.Context, arg CreateRunParams) (Run, erro
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)
@@ -481,7 +495,7 @@ SET state = $1::run_state,
 WHERE org_id = $3 AND id = $4 AND epoch = $5
   AND ((state = 'running' AND $1::run_state IN ('succeeded', 'failed', 'canceled'))
        OR (state = 'starting' AND $1::run_state IN ('failed', 'canceled')))
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type FinishRunParams struct {
@@ -526,6 +540,8 @@ func (q *Queries) FinishRun(ctx context.Context, arg FinishRunParams) (Run, erro
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)
@@ -533,7 +549,7 @@ func (q *Queries) FinishRun(ctx context.Context, arg FinishRunParams) (Run, erro
 }
 
 const getRun = `-- name: GetRun :one
-SELECT org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used FROM runs
+SELECT org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used FROM runs
 WHERE org_id = $1 AND id = $2
 `
 
@@ -568,10 +584,33 @@ func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (Run, error) {
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)
 	return i, err
+}
+
+const getTicketPromptedThrough = `-- name: GetTicketPromptedThrough :one
+SELECT coalesce(max(prompt_through_seq), 0)::bigint AS prompted_through
+FROM runs
+WHERE org_id = $1 AND ticket_id = $2 AND id <> $3
+`
+
+type GetTicketPromptedThroughParams struct {
+	OrgID    pgtype.UUID
+	TicketID pgtype.UUID
+	RunID    pgtype.UUID
+}
+
+// The highest ticket timeline seq already sent to the harness by the ticket's
+// other runs; messages after it are new for the next run.
+func (q *Queries) GetTicketPromptedThrough(ctx context.Context, arg GetTicketPromptedThroughParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getTicketPromptedThrough, arg.OrgID, arg.TicketID, arg.RunID)
+	var prompted_through int64
+	err := row.Scan(&prompted_through)
+	return prompted_through, err
 }
 
 const hasQueuedRunForTicket = `-- name: HasQueuedRunForTicket :one
@@ -600,7 +639,7 @@ SET heartbeat_at = now(),
     lease_expires_at = now() + make_interval(secs => $1::integer)
 WHERE org_id = $2 AND id = $3 AND epoch = $4
   AND state IN ('starting', 'running')
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type HeartbeatRunParams struct {
@@ -643,6 +682,8 @@ func (q *Queries) HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)
@@ -650,7 +691,7 @@ func (q *Queries) HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run
 }
 
 const listRunsForTicket = `-- name: ListRunsForTicket :many
-SELECT org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used FROM runs
+SELECT org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used FROM runs
 WHERE org_id = $1 AND ticket_id = $2
 ORDER BY created_at, id
 `
@@ -692,6 +733,8 @@ func (q *Queries) ListRunsForTicket(ctx context.Context, arg ListRunsForTicketPa
 			&i.FinishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PromptThroughSeq,
+			&i.Takeovers,
 			&i.ParkedSeconds,
 			&i.TokensUsed,
 		); err != nil {
@@ -709,7 +752,7 @@ const markRunRunning = `-- name: MarkRunRunning :one
 UPDATE runs
 SET state = 'running'
 WHERE org_id = $1 AND id = $2 AND epoch = $3 AND state = 'starting'
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type MarkRunRunningParams struct {
@@ -745,6 +788,8 @@ func (q *Queries) MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) 
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)
@@ -760,7 +805,7 @@ SET state = 'parked',
     lease_expires_at = NULL,
     heartbeat_at = NULL
 WHERE org_id = $3 AND id = $4 AND epoch = $5 AND state = 'running'
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type ParkRunParams struct {
@@ -805,6 +850,59 @@ func (q *Queries) ParkRun(ctx context.Context, arg ParkRunParams) (Run, error) {
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
+		&i.ParkedSeconds,
+		&i.TokensUsed,
+	)
+	return i, err
+}
+
+const releaseRunLease = `-- name: ReleaseRunLease :one
+UPDATE runs
+SET lease_expires_at = now() - interval '1 second'
+WHERE org_id = $1 AND id = $2 AND epoch = $3
+  AND state IN ('starting', 'running')
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
+`
+
+type ReleaseRunLeaseParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+	Epoch int64
+}
+
+// The owner gives the run up without finishing it, for example because the
+// exec stream to the harness dropped: the lease ends now, so any agentd can
+// take the run over at once (TakeOverExpiredRun) and resume the session.
+func (q *Queries) ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams) (Run, error) {
+	row := q.db.QueryRow(ctx, releaseRunLease, arg.OrgID, arg.ID, arg.Epoch)
+	var i Run
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.AgentVersionID,
+		&i.TicketID,
+		&i.State,
+		&i.Epoch,
+		&i.OwnerID,
+		&i.LeaseExpiresAt,
+		&i.HeartbeatAt,
+		&i.ReadyAt,
+		&i.ParkReason,
+		&i.ParkedAt,
+		&i.ParkExpiresAt,
+		&i.OutcomeReason,
+		&i.MaxWallClockSeconds,
+		&i.MaxTokens,
+		&i.LastEventSeq,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)
@@ -815,7 +913,7 @@ const resolveRunPark = `-- name: ResolveRunPark :one
 UPDATE runs
 SET ready_at = now()
 WHERE org_id = $1 AND id = $2 AND state = 'parked' AND ready_at IS NULL
-RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
 `
 
 type ResolveRunParkParams struct {
@@ -851,6 +949,64 @@ func (q *Queries) ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) 
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
+		&i.ParkedSeconds,
+		&i.TokensUsed,
+	)
+	return i, err
+}
+
+const setRunPromptThrough = `-- name: SetRunPromptThrough :one
+UPDATE runs
+SET prompt_through_seq = $1::bigint
+WHERE org_id = $2 AND id = $3 AND epoch = $4
+  AND state IN ('starting', 'running')
+RETURNING org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, prompt_through_seq, takeovers, parked_seconds, tokens_used
+`
+
+type SetRunPromptThroughParams struct {
+	PromptThroughSeq int64
+	OrgID            pgtype.UUID
+	ID               pgtype.UUID
+	Epoch            int64
+}
+
+// Records, before the prompt is sent, the ticket timeline seq through which
+// the ticket's messages are in it.
+func (q *Queries) SetRunPromptThrough(ctx context.Context, arg SetRunPromptThroughParams) (Run, error) {
+	row := q.db.QueryRow(ctx, setRunPromptThrough,
+		arg.PromptThroughSeq,
+		arg.OrgID,
+		arg.ID,
+		arg.Epoch,
+	)
+	var i Run
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.AgentVersionID,
+		&i.TicketID,
+		&i.State,
+		&i.Epoch,
+		&i.OwnerID,
+		&i.LeaseExpiresAt,
+		&i.HeartbeatAt,
+		&i.ReadyAt,
+		&i.ParkReason,
+		&i.ParkedAt,
+		&i.ParkExpiresAt,
+		&i.OutcomeReason,
+		&i.MaxWallClockSeconds,
+		&i.MaxTokens,
+		&i.LastEventSeq,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)
@@ -876,13 +1032,14 @@ WITH stale AS (
 )
 UPDATE runs
 SET epoch = agent.epoch,
+    takeovers = runs.takeovers + 1,
     owner_id = $1::text,
     lease_expires_at = now() + make_interval(secs => $2::integer),
     heartbeat_at = now()
 FROM stale
 JOIN agent ON agent.id = stale.agent_id
 WHERE runs.org_id = $3 AND runs.id = stale.run_id
-RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.ticket_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.parked_seconds, runs.tokens_used
+RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.ticket_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.prompt_through_seq, runs.takeovers, runs.parked_seconds, runs.tokens_used
 `
 
 type TakeOverExpiredRunParams struct {
@@ -920,6 +1077,8 @@ func (q *Queries) TakeOverExpiredRun(ctx context.Context, arg TakeOverExpiredRun
 		&i.FinishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
 		&i.ParkedSeconds,
 		&i.TokensUsed,
 	)

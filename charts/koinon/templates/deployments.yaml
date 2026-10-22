@@ -61,6 +61,9 @@ spec:
                   name: {{ include "koinon.componentName" (list $ "bootstrap-admin") }}
                   key: password
             {{- end }}
+            {{- if eq $component "agentd" }}
+            {{- include "koinon.agentdEnv" $ | nindent 12 }}
+            {{- end }}
           securityContext:
             {{- include "koinon.containerSecurityContext" $ | nindent 12 }}
           resources:

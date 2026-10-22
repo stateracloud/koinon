@@ -190,6 +190,53 @@ func (q *Queries) ListTicketEvents(ctx context.Context, arg ListTicketEventsPara
 	return items, nil
 }
 
+const listTicketMessagesAfter = `-- name: ListTicketMessagesAfter :many
+SELECT org_id, id, ticket_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM ticket_events
+WHERE org_id = $1 AND ticket_id = $2 AND seq > $3
+  AND kind = 'message' AND actor_kind = 'user'
+ORDER BY seq
+`
+
+type ListTicketMessagesAfterParams struct {
+	OrgID    pgtype.UUID
+	TicketID pgtype.UUID
+	AfterSeq int64
+}
+
+// The users' messages on the ticket after a timeline seq, in order: what
+// agentd sends the harness as a run's prompt.
+func (q *Queries) ListTicketMessagesAfter(ctx context.Context, arg ListTicketMessagesAfterParams) ([]TicketEvent, error) {
+	rows, err := q.db.Query(ctx, listTicketMessagesAfter, arg.OrgID, arg.TicketID, arg.AfterSeq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TicketEvent
+	for rows.Next() {
+		var i TicketEvent
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.TicketID,
+			&i.Seq,
+			&i.Kind,
+			&i.ActorKind,
+			&i.ActorUserID,
+			&i.ActorAgentID,
+			&i.RunID,
+			&i.Payload,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTickets = `-- name: ListTickets :many
 SELECT org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at FROM tickets
 WHERE org_id = $1

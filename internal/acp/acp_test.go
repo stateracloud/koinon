@@ -4,6 +4,7 @@ package acp_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -219,3 +220,51 @@ var _ = Describe("Conn", func() {
 		Expect(conn.LoadSession(ctx, "nope", "/sandbox/work")).NotTo(Succeed())
 	})
 })
+
+var _ = Describe("Conn.WaitUpdates", func() {
+	It("returns once the connection ended and every update reached the handler", func(ctx SpecContext) {
+		fromAgentR, fromAgentW := io.Pipe()
+		rec := &slowRecorder{}
+		conn := acp.NewConn(rec, io.Discard, fromAgentR)
+		conn.SetLogger(slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+		const n = 50
+		go func() {
+			defer GinkgoRecover()
+			for i := range n {
+				_, err := fmt.Fprintf(fromAgentW, `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"%d"}}}}`+"\n", i)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			// A response is not counted.
+			_, _ = io.WriteString(fromAgentW, `{"jsonrpc":"2.0","id":7,"result":{}}`+"\n")
+			_ = fromAgentW.Close()
+		}()
+		Eventually(conn.Done()).Should(BeClosed())
+		Expect(conn.WaitUpdates(ctx)).To(BeTrue())
+		Expect(rec.count()).To(Equal(n))
+	})
+})
+
+// slowRecorder counts updates and takes its time with each, so that updates are still being
+// delivered after the connection ended.
+type slowRecorder struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (r *slowRecorder) SessionUpdate(context.Context, acp.SessionNotification) error {
+	time.Sleep(2 * time.Millisecond)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.n++
+	return nil
+}
+
+func (r *slowRecorder) RequestPermission(context.Context, acp.PermissionRequest) (acp.Decision, error) {
+	return acp.Decision{}, nil
+}
+
+func (r *slowRecorder) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.n
+}
