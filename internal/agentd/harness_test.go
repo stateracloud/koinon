@@ -54,6 +54,8 @@ type harness struct {
 	models []string
 	// silent: announce no ready command; stubborn: keep its own model.
 	silent, stubborn bool
+	// lingers: keep running after end-of-file on stdin, until the exec is closed.
+	lingers bool
 }
 
 func newHarness() *harness {
@@ -70,6 +72,13 @@ func (h *harness) command(ctx context.Context, args []string, stdin io.Reader, s
 	close(p.ready)
 	select {
 	case <-p.conn.Done():
+		h.mu.Lock()
+		lingers := h.lingers
+		h.mu.Unlock()
+		if lingers {
+			<-ctx.Done()
+			return 143
+		}
 		return 0
 	case <-ctx.Done():
 		return 143
