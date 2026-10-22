@@ -1085,6 +1085,205 @@ func (x *TestConnectionResponse) GetResults() []*CheckResult {
 	return nil
 }
 
+// ListInstallationReposRequest names a GitHub connection and a page.
+type ListInstallationReposRequest struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	OrgId        string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ConnectionId string                 `protobuf:"bytes,2,opt,name=connection_id,json=connectionId,proto3" json:"connection_id,omitempty"`
+	// Empty for the first page; otherwise next_page_token of the previous
+	// response, sent with the same query.
+	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	// Keeps only repositories whose owner/name contains it, ignoring case.
+	// At most 200 characters.
+	Query         string `protobuf:"bytes,4,opt,name=query,proto3" json:"query,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListInstallationReposRequest) Reset() {
+	*x = ListInstallationReposRequest{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListInstallationReposRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListInstallationReposRequest) ProtoMessage() {}
+
+func (x *ListInstallationReposRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListInstallationReposRequest.ProtoReflect.Descriptor instead.
+func (*ListInstallationReposRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ListInstallationReposRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *ListInstallationReposRequest) GetConnectionId() string {
+	if x != nil {
+		return x.ConnectionId
+	}
+	return ""
+}
+
+func (x *ListInstallationReposRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+func (x *ListInstallationReposRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+// InstallationRepo is one repository the installation can access.
+type InstallationRepo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// owner/name as GitHub spells it: the name to bind.
+	FullName      string `protobuf:"bytes,1,opt,name=full_name,json=fullName,proto3" json:"full_name,omitempty"`
+	Private       bool   `protobuf:"varint,2,opt,name=private,proto3" json:"private,omitempty"`
+	DefaultBranch string `protobuf:"bytes,3,opt,name=default_branch,json=defaultBranch,proto3" json:"default_branch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallationRepo) Reset() {
+	*x = InstallationRepo{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallationRepo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallationRepo) ProtoMessage() {}
+
+func (x *InstallationRepo) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallationRepo.ProtoReflect.Descriptor instead.
+func (*InstallationRepo) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *InstallationRepo) GetFullName() string {
+	if x != nil {
+		return x.FullName
+	}
+	return ""
+}
+
+func (x *InstallationRepo) GetPrivate() bool {
+	if x != nil {
+		return x.Private
+	}
+	return false
+}
+
+func (x *InstallationRepo) GetDefaultBranch() string {
+	if x != nil {
+		return x.DefaultBranch
+	}
+	return ""
+}
+
+// ListInstallationReposResponse is one page, in GitHub's order.
+type ListInstallationReposResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Repos []*InstallationRepo    `protobuf:"bytes,1,rep,name=repos,proto3" json:"repos,omitempty"`
+	// Empty on the last page. A filtered page can hold fewer repositories than
+	// an unfiltered one, or none, and still have a next page.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+	// How many repositories the installation can access, before the query.
+	TotalCount    int64 `protobuf:"varint,3,opt,name=total_count,json=totalCount,proto3" json:"total_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListInstallationReposResponse) Reset() {
+	*x = ListInstallationReposResponse{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListInstallationReposResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListInstallationReposResponse) ProtoMessage() {}
+
+func (x *ListInstallationReposResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListInstallationReposResponse.ProtoReflect.Descriptor instead.
+func (*ListInstallationReposResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ListInstallationReposResponse) GetRepos() []*InstallationRepo {
+	if x != nil {
+		return x.Repos
+	}
+	return nil
+}
+
+func (x *ListInstallationReposResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
+func (x *ListInstallationReposResponse) GetTotalCount() int64 {
+	if x != nil {
+		return x.TotalCount
+	}
+	return 0
+}
+
 var File_koinon_connection_v1alpha1_connection_proto protoreflect.FileDescriptor
 
 const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
@@ -1161,7 +1360,22 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\n" +
 	"connection\x18\x01 \x01(\v2&.koinon.connection.v1alpha1.ConnectionR\n" +
 	"connection\x12A\n" +
-	"\aresults\x18\x02 \x03(\v2'.koinon.connection.v1alpha1.CheckResultR\aresults*}\n" +
+	"\aresults\x18\x02 \x03(\v2'.koinon.connection.v1alpha1.CheckResultR\aresults\"\x8f\x01\n" +
+	"\x1cListInstallationReposRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12#\n" +
+	"\rconnection_id\x18\x02 \x01(\tR\fconnectionId\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\x12\x14\n" +
+	"\x05query\x18\x04 \x01(\tR\x05query\"p\n" +
+	"\x10InstallationRepo\x12\x1b\n" +
+	"\tfull_name\x18\x01 \x01(\tR\bfullName\x12\x18\n" +
+	"\aprivate\x18\x02 \x01(\bR\aprivate\x12%\n" +
+	"\x0edefault_branch\x18\x03 \x01(\tR\rdefaultBranch\"\xac\x01\n" +
+	"\x1dListInstallationReposResponse\x12B\n" +
+	"\x05repos\x18\x01 \x03(\v2,.koinon.connection.v1alpha1.InstallationRepoR\x05repos\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\x12\x1f\n" +
+	"\vtotal_count\x18\x03 \x01(\x03R\n" +
+	"totalCount*}\n" +
 	"\x04Tier\x12\x14\n" +
 	"\x10TIER_UNSPECIFIED\x10\x00\x12\r\n" +
 	"\tTIER_READ\x10\x01\x12\x19\n" +
@@ -1172,13 +1386,14 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x1dCONNECTION_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aCONNECTION_STATUS_UNTESTED\x10\x01\x12\x18\n" +
 	"\x14CONNECTION_STATUS_OK\x10\x02\x12\x1d\n" +
-	"\x19CONNECTION_STATUS_FAILING\x10\x032\xa5\x05\n" +
+	"\x19CONNECTION_STATUS_FAILING\x10\x032\xb9\x06\n" +
 	"\x11ConnectionService\x12\x88\x01\n" +
 	"\x12ListConnectorTypes\x125.koinon.connection.v1alpha1.ListConnectorTypesRequest\x1a6.koinon.connection.v1alpha1.ListConnectorTypesResponse\"\x03\x90\x02\x01\x12\x8f\x01\n" +
 	"\x16CreateGitHubConnection\x129.koinon.connection.v1alpha1.CreateGitHubConnectionRequest\x1a:.koinon.connection.v1alpha1.CreateGitHubConnectionResponse\x12y\n" +
 	"\rGetConnection\x120.koinon.connection.v1alpha1.GetConnectionRequest\x1a1.koinon.connection.v1alpha1.GetConnectionResponse\"\x03\x90\x02\x01\x12\x7f\n" +
 	"\x0fListConnections\x122.koinon.connection.v1alpha1.ListConnectionsRequest\x1a3.koinon.connection.v1alpha1.ListConnectionsResponse\"\x03\x90\x02\x01\x12w\n" +
-	"\x0eTestConnection\x121.koinon.connection.v1alpha1.TestConnectionRequest\x1a2.koinon.connection.v1alpha1.TestConnectionResponseBXZVgithub.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1;connectionv1alpha1b\x06proto3"
+	"\x0eTestConnection\x121.koinon.connection.v1alpha1.TestConnectionRequest\x1a2.koinon.connection.v1alpha1.TestConnectionResponse\x12\x91\x01\n" +
+	"\x15ListInstallationRepos\x128.koinon.connection.v1alpha1.ListInstallationReposRequest\x1a9.koinon.connection.v1alpha1.ListInstallationReposResponse\"\x03\x90\x02\x01BXZVgithub.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1;connectionv1alpha1b\x06proto3"
 
 var (
 	file_koinon_connection_v1alpha1_connection_proto_rawDescOnce sync.Once
@@ -1193,7 +1408,7 @@ func file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_connection_v1alpha1_connection_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_koinon_connection_v1alpha1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_koinon_connection_v1alpha1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_koinon_connection_v1alpha1_connection_proto_goTypes = []any{
 	(Tier)(0),                              // 0: koinon.connection.v1alpha1.Tier
 	(ConnectionStatus)(0),                  // 1: koinon.connection.v1alpha1.ConnectionStatus
@@ -1212,18 +1427,21 @@ var file_koinon_connection_v1alpha1_connection_proto_goTypes = []any{
 	(*ListConnectionsResponse)(nil),        // 14: koinon.connection.v1alpha1.ListConnectionsResponse
 	(*TestConnectionRequest)(nil),          // 15: koinon.connection.v1alpha1.TestConnectionRequest
 	(*TestConnectionResponse)(nil),         // 16: koinon.connection.v1alpha1.TestConnectionResponse
-	(*structpb.Struct)(nil),                // 17: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil),          // 18: google.protobuf.Timestamp
+	(*ListInstallationReposRequest)(nil),   // 17: koinon.connection.v1alpha1.ListInstallationReposRequest
+	(*InstallationRepo)(nil),               // 18: koinon.connection.v1alpha1.InstallationRepo
+	(*ListInstallationReposResponse)(nil),  // 19: koinon.connection.v1alpha1.ListInstallationReposResponse
+	(*structpb.Struct)(nil),                // 20: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),          // 21: google.protobuf.Timestamp
 }
 var file_koinon_connection_v1alpha1_connection_proto_depIdxs = []int32{
 	0,  // 0: koinon.connection.v1alpha1.Scope.tier:type_name -> koinon.connection.v1alpha1.Tier
 	2,  // 1: koinon.connection.v1alpha1.ConnectorType.scopes:type_name -> koinon.connection.v1alpha1.Scope
-	17, // 2: koinon.connection.v1alpha1.ConnectorType.document:type_name -> google.protobuf.Struct
+	20, // 2: koinon.connection.v1alpha1.ConnectorType.document:type_name -> google.protobuf.Struct
 	3,  // 3: koinon.connection.v1alpha1.ListConnectorTypesResponse.connector_types:type_name -> koinon.connection.v1alpha1.ConnectorType
 	1,  // 4: koinon.connection.v1alpha1.Connection.status:type_name -> koinon.connection.v1alpha1.ConnectionStatus
-	18, // 5: koinon.connection.v1alpha1.Connection.last_tested_at:type_name -> google.protobuf.Timestamp
+	21, // 5: koinon.connection.v1alpha1.Connection.last_tested_at:type_name -> google.protobuf.Timestamp
 	6,  // 6: koinon.connection.v1alpha1.Connection.last_test:type_name -> koinon.connection.v1alpha1.CheckResult
-	18, // 7: koinon.connection.v1alpha1.Connection.created_at:type_name -> google.protobuf.Timestamp
+	21, // 7: koinon.connection.v1alpha1.Connection.created_at:type_name -> google.protobuf.Timestamp
 	7,  // 8: koinon.connection.v1alpha1.Connection.github:type_name -> koinon.connection.v1alpha1.GitHubConnection
 	8,  // 9: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
 	6,  // 10: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
@@ -1231,21 +1449,24 @@ var file_koinon_connection_v1alpha1_connection_proto_depIdxs = []int32{
 	8,  // 12: koinon.connection.v1alpha1.ListConnectionsResponse.connections:type_name -> koinon.connection.v1alpha1.Connection
 	8,  // 13: koinon.connection.v1alpha1.TestConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
 	6,  // 14: koinon.connection.v1alpha1.TestConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
-	4,  // 15: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:input_type -> koinon.connection.v1alpha1.ListConnectorTypesRequest
-	9,  // 16: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:input_type -> koinon.connection.v1alpha1.CreateGitHubConnectionRequest
-	11, // 17: koinon.connection.v1alpha1.ConnectionService.GetConnection:input_type -> koinon.connection.v1alpha1.GetConnectionRequest
-	13, // 18: koinon.connection.v1alpha1.ConnectionService.ListConnections:input_type -> koinon.connection.v1alpha1.ListConnectionsRequest
-	15, // 19: koinon.connection.v1alpha1.ConnectionService.TestConnection:input_type -> koinon.connection.v1alpha1.TestConnectionRequest
-	5,  // 20: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:output_type -> koinon.connection.v1alpha1.ListConnectorTypesResponse
-	10, // 21: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:output_type -> koinon.connection.v1alpha1.CreateGitHubConnectionResponse
-	12, // 22: koinon.connection.v1alpha1.ConnectionService.GetConnection:output_type -> koinon.connection.v1alpha1.GetConnectionResponse
-	14, // 23: koinon.connection.v1alpha1.ConnectionService.ListConnections:output_type -> koinon.connection.v1alpha1.ListConnectionsResponse
-	16, // 24: koinon.connection.v1alpha1.ConnectionService.TestConnection:output_type -> koinon.connection.v1alpha1.TestConnectionResponse
-	20, // [20:25] is the sub-list for method output_type
-	15, // [15:20] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	18, // 15: koinon.connection.v1alpha1.ListInstallationReposResponse.repos:type_name -> koinon.connection.v1alpha1.InstallationRepo
+	4,  // 16: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:input_type -> koinon.connection.v1alpha1.ListConnectorTypesRequest
+	9,  // 17: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:input_type -> koinon.connection.v1alpha1.CreateGitHubConnectionRequest
+	11, // 18: koinon.connection.v1alpha1.ConnectionService.GetConnection:input_type -> koinon.connection.v1alpha1.GetConnectionRequest
+	13, // 19: koinon.connection.v1alpha1.ConnectionService.ListConnections:input_type -> koinon.connection.v1alpha1.ListConnectionsRequest
+	15, // 20: koinon.connection.v1alpha1.ConnectionService.TestConnection:input_type -> koinon.connection.v1alpha1.TestConnectionRequest
+	17, // 21: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:input_type -> koinon.connection.v1alpha1.ListInstallationReposRequest
+	5,  // 22: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:output_type -> koinon.connection.v1alpha1.ListConnectorTypesResponse
+	10, // 23: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:output_type -> koinon.connection.v1alpha1.CreateGitHubConnectionResponse
+	12, // 24: koinon.connection.v1alpha1.ConnectionService.GetConnection:output_type -> koinon.connection.v1alpha1.GetConnectionResponse
+	14, // 25: koinon.connection.v1alpha1.ConnectionService.ListConnections:output_type -> koinon.connection.v1alpha1.ListConnectionsResponse
+	16, // 26: koinon.connection.v1alpha1.ConnectionService.TestConnection:output_type -> koinon.connection.v1alpha1.TestConnectionResponse
+	19, // 27: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:output_type -> koinon.connection.v1alpha1.ListInstallationReposResponse
+	22, // [22:28] is the sub-list for method output_type
+	16, // [16:22] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_koinon_connection_v1alpha1_connection_proto_init() }
@@ -1262,7 +1483,7 @@ func file_koinon_connection_v1alpha1_connection_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_connection_v1alpha1_connection_proto_rawDesc), len(file_koinon_connection_v1alpha1_connection_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   15,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -31,6 +31,8 @@ type Fake struct {
 	Account        string
 	// Repositories the installation can access (names, without the owner).
 	Repositories []string
+	// Private marks repositories (by name) as private; the rest are public.
+	Private map[string]bool
 	// Permissions the App was granted.
 	Permissions map[string]string
 	// Now defaults to time.Now; tokens expire an hour after Now.
@@ -45,11 +47,12 @@ type Fake struct {
 
 	key *rsa.PrivateKey
 
-	mu       sync.Mutex
-	mints    int
-	requests []Request
-	tokens   map[string]tokenInfo
-	repos    map[string]*Repo
+	mu        sync.Mutex
+	mints     int
+	listCalls int
+	requests  []Request
+	tokens    map[string]tokenInfo
+	repos     map[string]*Repo
 }
 
 // tokenInfo is what a minted token may do.
