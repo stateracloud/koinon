@@ -10,3 +10,5 @@ model:
   provider: ollama
   models:
     - name: "qwen3.5:4b"
+preflight:
+  enabled: false
