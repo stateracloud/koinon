@@ -136,12 +136,20 @@ type fakeProber struct {
 
 func (p fakeProber) Probe(context.Context) (preflight.ProbeResult, error) { return p.res, p.err }
 
+type fakeNetPol struct {
+	res preflight.NetPolResult
+	err error
+}
+
+func (p fakeNetPol) Probe(context.Context) (preflight.NetPolResult, error) { return p.res, p.err }
+
 // cluster is a cluster with every prerequisite in place; tests break one at a time.
 type cluster struct {
 	kube    []runtime.Object
 	dynamic []runtime.Object
 	gateway preflight.OpenShell
 	prober  preflight.Prober
+	netpol  preflight.NetPolProber
 	config  preflight.Config
 	// forbid makes reads of this resource return Forbidden.
 	forbid string
@@ -172,6 +180,7 @@ func healthyCluster() *cluster {
 			Status: openshellv1.ServiceStatus_SERVICE_STATUS_HEALTHY, Version: "0.1.5",
 		}},
 		prober: fakeProber{res: preflight.ProbeResult{Seccomp: 2, Filters: 1, Keyctl: "EPERM"}},
+		netpol: fakeNetPol{res: preflight.NetPolResult{ControlReached: true}},
 		config: preflight.Config{
 			PostgresMode: "cnpg", GatewayMode: "kubernetes", GatewayClassName: "agentgateway",
 			RuntimeClassName: "kata", OpenShellAddress: "openshell.openshell.svc:8080",
@@ -222,7 +231,7 @@ func (c *cluster) run(ctx context.Context) []preflight.Result {
 		dyn.PrependReactor("get", c.forbid, forbidden)
 	}
 	checker := &preflight.Checker{
-		Kube: kube, Dynamic: dyn, OpenShell: c.gateway, Prober: c.prober, Config: c.config,
+		Kube: kube, Dynamic: dyn, OpenShell: c.gateway, Prober: c.prober, NetPol: c.netpol, Config: c.config,
 	}
 	return checker.Run(ctx)
 }
@@ -250,7 +259,7 @@ var _ = Describe("Checker", func() {
 		results := healthyCluster().run(ctx)
 		Expect(checks(results)).To(Equal([]string{
 			"Agent Sandbox", "OpenShell gateway", `RuntimeClass "kata"`, "CloudNativePG",
-			`GatewayClass "agentgateway"`, "Kata guest seccomp",
+			`GatewayClass "agentgateway"`, "Kata guest seccomp", "NetworkPolicy enforcement",
 		}))
 		for _, r := range results {
 			Expect(r.Status).To(Equal(preflight.Pass), "%s: %s", r.Check, r.Message)
@@ -271,6 +280,7 @@ var _ = Describe("Checker", func() {
 		results := c.run(ctx)
 		Expect(checks(results)).To(Equal([]string{
 			"Agent Sandbox", "OpenShell gateway", `RuntimeClass "kata"`, "Kata guest seccomp",
+			"NetworkPolicy enforcement",
 		}))
 		Expect(preflight.Write(&strings.Builder{}, results)).To(BeZero())
 	})
@@ -294,7 +304,7 @@ var _ = Describe("Checker", func() {
 			Expect(preflight.Write(&out, results)).To(Equal(1))
 			Expect(out.String()).To(ContainSubstring("FAIL  " + r.Check + ": " + r.Message))
 			Expect(out.String()).To(ContainSubstring("fix: "))
-			Expect(out.String()).To(ContainSubstring("Preflight failed: 1 of 6 checks failed"))
+			Expect(out.String()).To(ContainSubstring("Preflight failed: 1 of 7 checks failed"))
 		},
 		Entry("Agent Sandbox CRD", func(c *cluster) { c.without("sandboxes.agents.x-k8s.io") },
 			"Agent Sandbox", "CRD sandboxes.agents.x-k8s.io not found", "v1.0.7/sandbox-with-extensions.yaml"),
@@ -378,6 +388,15 @@ var _ = Describe("Checker", func() {
 			"Kata guest seccomp", "probe pod did not report: pod still Pending", "grep Seccomp: /proc/self/status"),
 		Entry("probe disabled", func(c *cluster) { c.prober = nil },
 			"Kata guest seccomp", "not checked (preflight.seccompProbe.enabled=false)", "runtimeClassName kata"),
+		Entry("NetworkPolicy not enforced", func(c *cluster) {
+			c.netpol = fakeNetPol{res: preflight.NetPolResult{ControlReached: true, DeniedReached: true}}
+		}, "NetworkPolicy enforcement", preflight.NetPolNotEnforced, "network plugin that enforces NetworkPolicy"),
+		Entry("NetworkPolicy probe inconclusive", func(c *cluster) { c.netpol = fakeNetPol{} },
+			"NetworkPolicy enforcement", "inconclusive", "verify by hand"),
+		Entry("NetworkPolicy probe failed", func(c *cluster) { c.netpol = fakeNetPol{err: errors.New("server pod still Pending")} },
+			"NetworkPolicy enforcement", "probe did not report: server pod still Pending", "verify by hand"),
+		Entry("NetworkPolicy probe disabled", func(c *cluster) { c.netpol = nil },
+			"NetworkPolicy enforcement", "not checked (preflight.networkPolicyProbe.enabled=false)", "verify by hand"),
 		Entry("untagged Agent Sandbox controller", func(c *cluster) {
 			c.with(controller("registry.k8s.io/agent-sandbox/agent-sandbox-controller@sha256:0123"))
 		}, "Agent Sandbox", "has no tag", "v1.0.x"),

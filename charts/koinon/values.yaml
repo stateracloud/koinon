@@ -101,6 +101,15 @@ preflight:
   seccompProbe:
     enabled: true
     timeout: 2m
+  # NetworkPolicy enforcement check, functional so that it works with any network plugin: a
+  # server pod, a client pod (both the koinon-api image, the cluster's default runtime) and a
+  # NetworkPolicy denying ingress to the server, all in the release namespace and deleted
+  # afterwards. If the client still connects, the preflight warns that the chart's
+  # NetworkPolicies (OTLP receiver, gateway access) are advisory. It never fails the install.
+  # Runs alongside the seccomp probe.
+  networkPolicyProbe:
+    enabled: true
+    timeout: 90s
   resources:
     requests: {cpu: 10m, memory: 32Mi}
     limits: {memory: 128Mi}
