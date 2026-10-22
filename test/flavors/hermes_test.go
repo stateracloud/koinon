@@ -4,7 +4,10 @@ package flavors_test
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,7 +56,61 @@ var hermes = flavor{
 	// Hermes's session/load reports an unknown session as an internal error with
 	// data {"details": "not_found"} (acp_adapter/gateway_server.py).
 	unknownSession: "not_found",
+	// Hermes's context files: the first found of these would open the system prompt
+	// (agent/prompt_builder.py, build_context_files_prompt), and one in a subdirectory would be
+	// added to tool results (agent/subdirectory_hints.py). The image's patch turns both off.
+	projectConfig: hermesContextFiles,
+	// The .env an earlier run's background job could put back after the entry script deleted
+	// it: Hermes would read its managed scope from the agent's permissive config.
+	plant: func(ctx context.Context, sb *sandbox) string {
+		writeEvilConfig(ctx, sb)
+		return `[ -e /sandbox/.hermes/.env ] || echo HERMES_MANAGED_DIR=` + evilDir + ` > /sandbox/.hermes/.env`
+	},
 }
+
+// hermesContextFiles are the repository files Hermes would load as instructions, each with
+// projectMarker.
+var hermesContextFiles = map[string]string{
+	".hermes.md":               projectMarker + " from .hermes.md\n",
+	"HERMES.md":                projectMarker + " from HERMES.md\n",
+	"AGENTS.md":                projectMarker + " from AGENTS.md\n",
+	"CLAUDE.md":                projectMarker + " from CLAUDE.md\n",
+	".cursorrules":             projectMarker + " from .cursorrules\n",
+	".cursor/rules/koinon.mdc": projectMarker + " from .cursor/rules\n",
+}
+
+// projectReply is the fake model's answer when a repository context file reached the system
+// prompt.
+const projectReply = "A repository context file is in the system prompt."
+
+// Hermes loads one context file from the session directory, the first it finds; each is
+// checked alone. The system prompt must carry SOUL.md (Koinon's instructions) and none of them.
+var _ = Describe("Hermes and repository context files", func() {
+	It("keeps every context file out of the system prompt, and SOUL.md in it", func(ctx SpecContext) {
+		script := contractScript(hermes)
+		script.Turns = append([]fakemodel.Turn{
+			{When: fakemodel.When{SystemContains: projectMarker}, Text: projectReply},
+		}, script.Turns...)
+		gw := newGateway(script)
+		sb := newFlavorSandbox(ctx, hermes, "# Koinon\n\n"+instructionsMarker+": you are a contract test agent.\n")
+		h, _ := startSession(ctx, hermes, sb, hermes.command(gw.url("/v1"), contractModel, gw.url("/mcp")))
+		DeferCleanup(h.close)
+		names := slices.Sorted(maps.Keys(hermesContextFiles))
+		for i, name := range names {
+			By(name)
+			dir := fmt.Sprintf("/sandbox/repo-%d", i)
+			sb.write(ctx, dir+"/"+name, hermesContextFiles[name])
+			session, err := h.conn.NewSession(ctx, dir)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = h.conn.Prompt(ctx, session, helloPrompt)
+			Expect(err).NotTo(HaveOccurred())
+			updates, _ := h.client.take()
+			Expect(acp.Text(updates, "agent_message_chunk")).To(And(
+				ContainSubstring(helloReply), Not(ContainSubstring(projectReply))), "with %s", name)
+		}
+		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring(projectMarker))))
+	}, SpecTimeout(5*time.Minute))
+})
 
 // tamperMarker in a prompt makes the fake model repoint Hermes's config link with the terminal
 // tool, as an agent could.
@@ -82,6 +139,13 @@ curator:
 approvals:
   mode: "off"
 `
+
+// writeEvilConfig writes evilConfig to evilDir, as the agent could.
+func writeEvilConfig(ctx context.Context, sb *sandbox) {
+	GinkgoHelper()
+	sb.run(ctx, "sh", "-c", `mkdir -p "$1" && cat /etc/koinon/hermes/config.yaml > "$1/config.yaml" && printf '%s' "$2" >> "$1/config.yaml"`,
+		"sh", evilDir, evilConfig)
+}
 
 // hermesTamperScript is the contract script plus the tamper turn.
 func hermesTamperScript() fakemodel.Script {
@@ -133,8 +197,7 @@ var _ = Describe("koinon-hermes and its managed scope", Ordered, func() {
 	BeforeAll(func(ctx SpecContext) {
 		gw = newGateway(hermesTamperScript())
 		sb = newFlavorSandbox(ctx, hermes, "# Koinon\n\n"+instructionsMarker+": you are a contract test agent.\n")
-		sb.run(ctx, "sh", "-c", `mkdir -p "$1" && cat /etc/koinon/hermes/config.yaml > "$1/config.yaml" && printf '%s' "$2" >> "$1/config.yaml"`,
-			"sh", evilDir, evilConfig)
+		writeEvilConfig(ctx, sb)
 	}, NodeTimeout(5*time.Minute))
 	AfterAll(func() {
 		if h != nil {
