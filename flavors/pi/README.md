@@ -18,6 +18,7 @@ Contract test: `make test-flavors` (`test/flavors`, needs Docker).
 | MCP | `--mcp-url`, server `koinon` in pi's `mcp.json` with `"exposure": "direct"` and `Authorization: Bearer ${OPENAI_API_KEY}`; pi-acp takes no client MCP servers. Tools reach the model as `mcp__koinon__<tool>` |
 | State | `/sandbox/.pi/agent` (`PI_CODING_AGENT_DIR`): sessions in `sessions/`, rendered config, `auth.json` (empty); pi-acp's session map in `/sandbox/.pi/pi-acp` |
 | Home exclude paths | `/sandbox/.pi/agent/models-store.json`, `/sandbox/.cache` |
+| Instructions | `/sandbox/.koinon/AGENTS.md`, written by koinon-agentd before every harness start, appended to pi's system prompt as `/sandbox/.pi/agent/APPEND_SYSTEM.md`, a link to it (see [Instructions](#instructions)). The entry script refuses to start (exit 64) when the file is missing, empty or a symbolic link |
 | Permission requests | none: pi has no permission prompts for its tools, and pi-acp sends `session/request_permission` only for extension dialogs (none are installed). The sandbox is the boundary |
 
 ## How per-agent values reach the config
@@ -48,6 +49,17 @@ exposure lists them only to its code mode, where the model never found them (spi
 
 pi-acp starts one `pi --mode rpc` per session; `PI_ACP_PI_COMMAND` points it at the pinned pi
 by absolute path.
+
+## Instructions
+
+pi appends `$PI_CODING_AGENT_DIR/APPEND_SYSTEM.md` to its system prompt, with no trust gate
+(`dist/core/resource-loader.js`, `discoverAppendSystemPromptFile`; a project's
+`.pi/APPEND_SYSTEM.md` counts only in a trusted project). After the render step the entry script
+links it to `/sandbox/.koinon/AGENTS.md`, which koinon-agentd writes from the run's agent
+version; koinon-agentd checks and restores the link before every prompt (event
+`run.instructions_restored`). pi skips a missing file and appends an empty one as nothing, so
+the entry script refuses to start without real content. pi-acp starts one pi per session, which
+reads the file when it starts.
 
 ## Phone-home, updates and telemetry
 

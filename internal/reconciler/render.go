@@ -25,9 +25,17 @@ type Flavor struct {
 }
 
 // DefaultBinaries are the network-calling executables of each flavor Koinon ships
-// (flavors/<flavor>/README.md).
+// (flavors/<flavor>/README.md). OpenShell matches the real path of the executable that opens a
+// connection, or of one of its ancestors, never a symbolic link or a script: a script runs as
+// its interpreter. Hermes is Python scripts on the image's own Python, whose path names the
+// architecture (flavors/hermes/Dockerfile checks it); pi and pi-acp are scripts on Node.
 var DefaultBinaries = map[store.AgentFlavor][]string{
 	store.AgentFlavorOpencode: {"/usr/local/bin/opencode"},
+	store.AgentFlavorHermes: {
+		"/opt/hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3.14",
+		"/opt/hermes/tools/python-3.14.7+20260901-linux-arm64/bin/python3.14",
+	},
+	store.AgentFlavorPi: {"/opt/node/bin/node"},
 }
 
 // The credential each sandbox gets: the agent's agentgateway key, as the OpenAI-compatible
