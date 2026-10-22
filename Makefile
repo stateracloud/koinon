@@ -108,6 +108,10 @@ flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images
 test-flavors: flavors ## Build the flavor images and run the flavor contract suite
 	$(GO) test -count=1 ./test/flavors/...
 
+.PHONY: test-e2e-kind
+test-e2e-kind: ## Quickstart e2e on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
+	test/e2e/run.sh
+
 .PHONY: dev
 dev: ## Run the inner loop against the home lab with Tilt
 	tilt up

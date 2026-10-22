@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# E1 quickstart e2e on kind (plan item E1): test/e2e/run.sh on a GitHub-hosted runner. Manual
+# trigger only until it has run once by hand; plan item E1 then decides between every PR to main
+# and nightly. Calls no external service besides image and manifest downloads: the model is the
+# fake model server and GitHub is the fake GitHub, both in the cluster.
+name: e2e-kind
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-kind-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quickstart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        # Explicit bash adds -o pipefail, so `| tee` keeps the script's exit code.
+        shell: bash
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+      KO_VERSION: 0.19.1
+      KO_SHA256: 635ac6ea3fd376c935fee597fbb29ab2c2449f49ef1655085fe3aa9c25fed7a5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+
+      - name: Runner facts
+        run: |
+          set -x
+          nproc; free -m; df -h /; uname -a
+          cat /sys/kernel/security/lsm || true
+          docker info --format '{{.ServerVersion}} {{.CgroupVersion}} {{.SecurityOptions}}'
+
+      - name: Install kind and ko
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/kind" \
+            "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  $RUNNER_TEMP/bin/kind" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/kind"
+          curl -fsSL -o "$RUNNER_TEMP/ko.tgz" \
+            "https://github.com/ko-build/ko/releases/download/v${KO_VERSION}/ko_${KO_VERSION}_Linux_x86_64.tar.gz"
+          echo "${KO_SHA256}  $RUNNER_TEMP/ko.tgz" | sha256sum -c -
+          tar xzf "$RUNNER_TEMP/ko.tgz" -C "$RUNNER_TEMP/bin" ko
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Quickstart e2e (kind, images, helm install, driver)
+        env:
+          OUT: ${{ runner.temp }}/e2e
+          # The workflow deletes the cluster in its own step, after collecting resource use.
+          KEEP: "1"
+        run: test/e2e/run.sh 2>&1 | tee "$RUNNER_TEMP/e2e.log"
+
+      - name: Timings
+        if: always()
+        run: |
+          {
+            echo '## Quickstart e2e on kind'
+            echo
+            cat "$RUNNER_TEMP/e2e/quickstart-timings.md" 2>/dev/null || echo 'No timings: the driver did not finish.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resource use
+        if: always()
+        run: |
+          kubectl --context kind-koinon-e1 get pods -A -o wide || true
+          docker stats --no-stream || true
+          free -m
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-kind-logs
+          path: |
+            ${{ runner.temp }}/e2e.log
+            ${{ runner.temp }}/e2e/
+          retention-days: 7
+
+      - name: Delete cluster
+        if: always()
+        run: test/e2e/kind/down.sh

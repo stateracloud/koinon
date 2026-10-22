@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# charts/koinon values for the E1 quickstart e2e on kind: runc instead of Kata (kind has no VM
+# runtime), CNPG, the fake model server as the OpenAI-compatible upstream and the fake GitHub as
+# the GitHub API. Images come from ko/buildx and are loaded into the node (kind.local).
+image:
+  registry: kind.local
+  tag: e2e
+  pullPolicy: IfNotPresent
+
+postgres:
+  mode: cnpg
+  cnpg:
+    storage:
+      size: 1Gi
+
+gateway:
+  mode: standalone
+
+model:
+  baseUrl: http://fakemodel.koinon-e2e-fakes.svc:8080/v1
+  provider: openai
+  models:
+    # The fake model script test/fakemodel/scripts/repo-helper.yaml.
+    - name: repo-helper
+      rates: {input: "0.30", output: "1.20"}
+
+github:
+  apiUrl: http://fakegithub.koinon-e2e-fakes.svc:8080
+
+openshell:
+  address: openshell.openshell.svc:8080
+  # Copied from the openshell namespace by test/e2e/run.sh.
+  clientTLSSecret: openshell-client-tls
+  runtimeClassName: runc
+
+sandboxPolicy:
+  runtimeClasses: [runc]

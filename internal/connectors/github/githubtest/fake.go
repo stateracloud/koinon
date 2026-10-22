@@ -39,7 +39,10 @@ type Fake struct {
 	// whatever was requested, to test that clients check responses.
 	LieAboutPermissions bool
 
+	// Server is the test server New starts; nil for NewUnstarted.
 	Server *httptest.Server
+	// Handler serves the fake's API.
+	Handler http.Handler
 	// PEM is the App's private key, as GitHub's downloaded .pem file.
 	PEM []byte
 
@@ -66,6 +69,14 @@ type Request struct {
 
 // New starts a fake with a fresh 2048-bit key. Close it with f.Server.Close.
 func New() *Fake {
+	f := NewUnstarted()
+	f.Server = httptest.NewServer(f.Handler)
+	return f
+}
+
+// NewUnstarted returns a fake with a fresh 2048-bit key whose Handler the caller serves, as
+// cmd/koinon-fakegithub does. Set the exported fields before serving requests.
+func NewUnstarted() *Fake {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		panic(err)
@@ -88,7 +99,7 @@ func New() *Fake {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 	})
-	f.Server = httptest.NewServer(mux)
+	f.Handler = mux
 	return f
 }
 
