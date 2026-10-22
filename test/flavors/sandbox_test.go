@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -79,6 +80,29 @@ func (s *sandbox) run(ctx context.Context, cmd ...string) string {
 	return docker(ctx, append([]string{"exec", s.name}, cmd...)...)
 }
 
+// try executes a command in the sandbox and returns its output and exit code; unlike run it
+// does not fail the spec when the command fails.
+func (s *sandbox) try(ctx context.Context, cmd ...string) (stdout, stderr string, code int) {
+	var o, e bytes.Buffer
+	c := exec.CommandContext(ctx, "docker", append([]string{"exec", s.name}, cmd...)...) //nolint:gosec // test-controlled arguments
+	c.Stdout, c.Stderr = &o, &e
+	err := c.Run()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+	case errors.As(err, &exit):
+		code = exit.ExitCode()
+	default:
+		Expect(err).NotTo(HaveOccurred())
+	}
+	return o.String(), e.String(), code
+}
+
+// write puts content at path in the sandbox, creating the parent directories.
+func (s *sandbox) write(ctx context.Context, path, content string) {
+	s.run(ctx, "sh", "-c", `mkdir -p "$(dirname "$1")" && printf '%s' "$2" > "$1"`, "sh", path, content)
+}
+
 // harness starts cmd with a non-TTY exec, as koinon-agentd does through OpenShell, and
 // connects an ACP client to its stdin and stdout.
 func (s *sandbox) harness(ctx context.Context, workdir string, cmd []string) *harness {
@@ -130,13 +154,26 @@ type client struct {
 	updates     []acp.Update
 	permissions []acp.PermissionRequest
 	answer      []acp.PermissionOptionKind
+	// commands is the latest available_commands_update; take does not clear it.
+	commands []string
 }
 
 func (c *client) SessionUpdate(_ context.Context, n acp.SessionNotification) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.updates = append(c.updates, acp.Flatten(n))
+	u := acp.Flatten(n)
+	if u.Kind == "available_commands_update" {
+		c.commands = u.Commands
+	}
+	c.updates = append(c.updates, u)
 	return nil
+}
+
+// availableCommands returns the commands the harness announced last.
+func (c *client) availableCommands() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.commands...)
 }
 
 func (c *client) RequestPermission(_ context.Context, req acp.PermissionRequest) (acp.Decision, error) {
