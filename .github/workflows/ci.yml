@@ -50,6 +50,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      # The Playwright test fakes the API in the browser; E1 covers the real path.
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
 
   proto:
     name: proto

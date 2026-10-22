@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
@@ -136,6 +137,8 @@ type envOptions struct {
 	// watchPoll is WatchRun's backstop poll interval; tests that check
 	// NOTIFY delivery set it long so that polling cannot hide a failure.
 	watchPoll time.Duration
+	// ui is the web UI to serve, if any.
+	ui fs.FS
 }
 
 // env is one API server on its own database.
@@ -216,6 +219,7 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 		Auth:           svc,
 		TrustedOrigins: opts.trustedOrigins,
 		Services:       []func(*connect.Server){registerProbe, rpc.Register},
+		UI:             opts.ui,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return e

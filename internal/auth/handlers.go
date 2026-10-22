@@ -20,6 +20,7 @@ import (
 //	GET  /auth/oidc/start     begin OIDC login (optional ?return_to=/path)
 //	GET  /auth/oidc/callback  OIDC redirect URI
 //	POST /auth/logout         revoke the session and clear the cookie
+//	GET  /auth/methods        which login methods are enabled, for the login page
 //
 // Wrap the whole mux with CSRFProtection.
 func (s *Service) Mount(mux *http.ServeMux) {
@@ -27,6 +28,18 @@ func (s *Service) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/oidc/start", s.handleOIDCStart)
 	mux.HandleFunc("GET /auth/oidc/callback", s.handleOIDCCallback)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
+	mux.HandleFunc("GET /auth/methods", s.handleMethods)
+}
+
+type methodsResponse struct {
+	Password bool `json:"password"`
+	OIDC     bool `json:"oidc"`
+}
+
+// handleMethods tells the login page which forms to show. It needs no
+// session and reveals only configuration the login page shows anyway.
+func (s *Service) handleMethods(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, methodsResponse{Password: s.cfg.BootstrapLogin, OIDC: s.oidc != nil})
 }
 
 type loginRequest struct {
