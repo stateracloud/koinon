@@ -467,6 +467,41 @@ var _ = Describe("runs", func() {
 			Expect(tx.Commit(ctx)).To(Succeed())
 		})
 
+		// A claim whose snapshot predates a concurrent winner's commit, but whose lock on the
+		// agent row comes after it, re-checks the agent row and sees the run as claimable
+		// again; the run update then matches nothing. It must not have bumped the agent's
+		// epoch on the way, or the next owner gets a skipped epoch.
+		It("bumps the agent epoch only for the claim that wins", func(ctx SpecContext) {
+			const rounds, claimers = 40, 12
+			for range rounds {
+				f := newFixture(ctx)
+				enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+				start := make(chan struct{})
+				won := make(chan store.Run, claimers)
+				var wg sync.WaitGroup
+				for i := range claimers {
+					wg.Go(func() {
+						defer GinkgoRecover()
+						<-start
+						r, err := claim(ctx, f.org, fmt.Sprintf("w%d", i))
+						if err == nil {
+							won <- r
+							return
+						}
+						Expect(err).To(MatchError(pgx.ErrNoRows))
+					})
+				}
+				close(start)
+				wg.Wait()
+				close(won)
+				Expect(won).To(HaveLen(1))
+				winner := <-won
+				agent, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: f.org, ID: f.agent.ID})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(agent.Epoch).To(Equal(winner.Epoch), "a losing claim bumped the agent epoch")
+			}
+		})
+
 		It("never claims another org's runs", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
