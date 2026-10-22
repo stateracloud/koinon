@@ -218,6 +218,13 @@ sandboxPolicy:
     # Pods: the Agent Sandbox controller.
     pods:
       - system:serviceaccount:agent-sandbox-system:agent-sandbox-controller
+    # Supervisor pods: OpenShell 0.1.5's gateway creates each sandbox's supervisor pod itself
+    # (os-supervisor-*, label openshell.ai/boundary-role=supervisor) and starts both pods by
+    # removing their openshell.ai/bootstrap scheduling gate. These identities may create pods
+    # with that label only, never workload pods, and change pod specs only by removing
+    # scheduling gates; the shape rules still apply.
+    supervisorPods:
+      - system:serviceaccount:openshell:openshell
     # agents.x-k8s.io Sandboxes: the OpenShell gateway and the Agent Sandbox controller.
     sandboxes:
       - system:serviceaccount:openshell:openshell

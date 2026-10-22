@@ -2,7 +2,12 @@
 {{- /*
 Native ValidatingAdmissionPolicies for OpenShell sandbox namespaces (ADR 0045, ADR 0048 decision 3;
 never Kyverno). Rules key on the requesting identity, which a pod's creator cannot choose:
-- only the Agent Sandbox controller creates pods or changes their spec;
+- only the Agent Sandbox controller creates pods or changes their spec, with two exceptions for
+  the OpenShell gateway, which OpenShell 0.1.5 needs: it creates supervisor pods (label
+  openshell.ai/boundary-role=supervisor) next to the workload pod the controller creates, and it
+  starts both by removing their openshell.ai/bootstrap scheduling gate. The gateway may change a
+  pod's spec only by removing scheduling gates: containers, init containers, tolerations, node
+  selector, affinity and deadline must stay as they were (the other spec fields are immutable);
 - only the OpenShell gateway (and the controller) writes Sandbox objects, and only the gateway
   writes Secrets;
 - everyone else is denied, cluster admins included, with no break-glass: debug through OpenShell
@@ -34,13 +39,39 @@ spec:
   variables:
     - name: trusted
       expression: {{ printf "request.userInfo.username in %s" (toJson $p.identities.pods) | quote }}
+    - name: supervisor
+      expression: >-
+        has(object.metadata.labels) && 'openshell.ai/boundary-role' in object.metadata.labels &&
+        object.metadata.labels['openshell.ai/boundary-role'] == 'supervisor'
+    # An update that only removes scheduling gates. On a pod, every spec field other than these
+    # is immutable (pod update rules), so comparing them covers the whole spec.
+    - name: onlyUngates
+      expression: >-
+        oldObject != null &&
+        object.spec.containers == oldObject.spec.containers &&
+        has(object.spec.initContainers) == has(oldObject.spec.initContainers) &&
+        (!has(object.spec.initContainers) || object.spec.initContainers == oldObject.spec.initContainers) &&
+        has(object.spec.tolerations) == has(oldObject.spec.tolerations) &&
+        (!has(object.spec.tolerations) || object.spec.tolerations == oldObject.spec.tolerations) &&
+        has(object.spec.nodeSelector) == has(oldObject.spec.nodeSelector) &&
+        (!has(object.spec.nodeSelector) || object.spec.nodeSelector == oldObject.spec.nodeSelector) &&
+        has(object.spec.affinity) == has(oldObject.spec.affinity) &&
+        (!has(object.spec.affinity) || object.spec.affinity == oldObject.spec.affinity) &&
+        has(object.spec.activeDeadlineSeconds) == has(oldObject.spec.activeDeadlineSeconds) &&
+        (!has(object.spec.activeDeadlineSeconds) || object.spec.activeDeadlineSeconds == oldObject.spec.activeDeadlineSeconds) &&
+        (!has(object.spec.schedulingGates) ||
+          (has(oldObject.spec.schedulingGates) && object.spec.schedulingGates.all(g, g in oldObject.spec.schedulingGates)))
+    - name: supervisorCreator
+      expression: {{ printf "request.userInfo.username in %s" (toJson ($p.identities.supervisorPods | default list)) | quote }}
   validations:
     - expression: "!has(request.subResource) || request.subResource != 'ephemeralcontainers'"
       message: ephemeral containers are not allowed on sandbox pods
-    - expression: "request.operation != 'CREATE' || variables.trusted"
-      messageExpression: "'only the Agent Sandbox controller may create pods in sandbox namespaces, not ' + request.userInfo.username"
-    - expression: "request.operation != 'UPDATE' || variables.trusted || object.spec == oldObject.spec"
-      messageExpression: "'only the Agent Sandbox controller may change sandbox pod specs, not ' + request.userInfo.username"
+    - expression: "request.operation != 'CREATE' || variables.trusted || (variables.supervisorCreator && variables.supervisor)"
+      messageExpression: "'only the Agent Sandbox controller (and the OpenShell gateway, for supervisor pods) may create pods in sandbox namespaces, not ' + request.userInfo.username"
+    - expression: >-
+        request.operation != 'UPDATE' || variables.trusted || object.spec == oldObject.spec ||
+        (variables.supervisorCreator && variables.onlyUngates)
+      messageExpression: "'only the Agent Sandbox controller may change sandbox pod specs (the OpenShell gateway only by removing scheduling gates), not ' + request.userInfo.username"
     - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
       message: hostNetwork is not allowed
     - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"
