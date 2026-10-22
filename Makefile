@@ -113,6 +113,21 @@ test-flavors: flavors ## Build the flavor images and run the flavor contract sui
 test-e2e-kind: ## Quickstart e2e on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
 	test/e2e/run.sh
 
+# The escape suite (ADR 0025, plan item E2). The admission cases need only envtest and helm; the
+# OpenShell cases need a gateway (KOINON_OPENSHELL_*, see test/escape) and run on the home lab.
+ENVTEST_K8S_VERSION ?= 1.37.0
+SETUP_ENVTEST       ?= $(GO) run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2
+
+.PHONY: test-admission
+test-admission: ## Run the escape suite's admission policy cases against envtest (needs helm)
+	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
+		KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
+
+.PHONY: test-escape
+test-escape: ## Run the escape suite's OpenShell cases against a real gateway (home lab)
+	@test -n "$$KOINON_OPENSHELL_ENDPOINT" || { echo "set KOINON_OPENSHELL_* (see test/escape)"; exit 1; }
+	$(GO) test -count=1 -v -timeout 20m ./test/escape/ -ginkgo.label-filter=openshell
+
 .PHONY: dev
 dev: ## Run the inner loop against the home lab with Tilt
 	tilt up
