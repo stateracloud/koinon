@@ -61,21 +61,8 @@ func approvalProto(a store.ApprovalRequest, canDecide, detail bool) *approvalv1a
 	if !detail {
 		return out
 	}
-	switch a.Tool {
-	case githubtools.ToolCreatePullRequest:
-		var args githubtools.PullRequestArgs
-		if json.Unmarshal([]byte(a.ArgsJson), &args) == nil {
-			pr := &approvalv1alpha1.PullRequestCall{Branch: args.Branch, Base: args.Base, Title: args.Title, Body: args.Body}
-			for _, f := range args.Files {
-				pr.Files = append(pr.Files, &approvalv1alpha1.FileChange{Path: f.Path, Content: f.Content, Delete: f.Delete})
-			}
-			out.Call = &approvalv1alpha1.Approval_PullRequest{PullRequest: pr}
-		}
-	case githubtools.ToolCommentOnIssue:
-		var args githubtools.CommentArgs
-		if json.Unmarshal([]byte(a.ArgsJson), &args) == nil {
-			out.Call = &approvalv1alpha1.Approval_Comment{Comment: &approvalv1alpha1.CommentCall{IssueNumber: args.IssueNumber, Body: args.Body}}
-		}
+	if call, err := githubtools.DecodeCall(a.Tool, []byte(a.ArgsJson)); err == nil {
+		call.SetApprovalCall(out)
 	}
 	return out
 }
