@@ -131,7 +131,7 @@ func (c *Config) defaults() error {
 	}
 	if c.Locate == nil {
 		c.Locate = func(org, agent [16]byte) (string, string) {
-			return execution.WorkspaceName(org), execution.AgentSandboxName(agent)
+			return execution.WorkspaceName(org), execution.AgentSandboxName(org, agent)
 		}
 	}
 	if c.Logger == nil {

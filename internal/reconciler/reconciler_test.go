@@ -43,16 +43,16 @@ var _ = Describe("names", func() {
 			org.Valid, agent.Valid = true, true
 			org.Bytes[0], org.Bytes[15] = byte(i), byte(i>>8)
 			agent.Bytes[3], agent.Bytes[9] = byte(i*7), byte(i)
-			n := reconciler.AgentNames(org, agent)
+			n := execution.AgentObjectNames(org.Bytes, agent.Bytes)
 			for _, name := range []string{n.Sandbox, n.Provider} {
-				Expect(len(name)).To(BeNumerically("<=", reconciler.MaxSandboxName), name)
+				Expect(len(name)).To(BeNumerically("<=", execution.MaxSandboxName), name)
 				Expect(name).To(MatchRegexp(dnsLabel.String()))
 			}
 			Expect(n.KeySecret).To(MatchRegexp(dnsLabel.String()))
-			Expect(reconciler.WorkspaceName(org)).To(MatchRegexp(dnsLabel.String()))
+			Expect(execution.WorkspaceName(org.Bytes)).To(MatchRegexp(dnsLabel.String()))
 			Expect(seen[n.Sandbox]).To(BeFalse())
 			seen[n.Sandbox] = true
-			Expect(reconciler.AgentNames(org, agent)).To(Equal(n), "names are stable")
+			Expect(execution.AgentObjectNames(org.Bytes, agent.Bytes)).To(Equal(n), "names are stable")
 		}
 	})
 })
@@ -142,11 +142,11 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("gets a workspace, a key, a provider record and a sandbox", func(ctx SpecContext) {
-			names := reconciler.AgentNames(org, agent.ID)
-			ws := reconciler.WorkspaceName(org)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			ws := execution.WorkspaceName(org.Bytes)
 			Expect(row.Workspace).To(Equal(ws))
 			Expect(row.SandboxName).To(Equal(names.Sandbox))
-			Expect(len(row.SandboxName)).To(BeNumerically("<=", reconciler.MaxSandboxName))
+			Expect(len(row.SandboxName)).To(BeNumerically("<=", execution.MaxSandboxName))
 			Expect(row.State).To(Equal(store.SandboxStateReady))
 			Expect(row.StartedAt.Valid).To(BeTrue())
 
@@ -198,7 +198,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("keeps key material out of the sandbox spec, the profile, the gateway state and the logs", func(ctx SpecContext) {
-			names := reconciler.AgentNames(org, agent.ID)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			key := material(ctx, row)
 
 			sb := osg.Sandbox(row.Workspace, names.Sandbox)
@@ -224,7 +224,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("ensures each object once and is idempotent on later passes", func(ctx SpecContext) {
-			names := reconciler.AgentNames(org, agent.ID)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			for range 3 {
 				pass(ctx, r)
 			}
@@ -242,7 +242,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("reverts drift", func(ctx SpecContext) {
-			names := reconciler.AgentNames(org, agent.ID)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			ws := row.Workspace
 
 			By("a hand-added network rule is removed again")
@@ -287,7 +287,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("recreates the sandbox when its image changes, but not during a run", func(ctx SpecContext) {
-			names := reconciler.AgentNames(org, agent.ID)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			cfg.Flavors[store.AgentFlavorOpencode] = reconciler.Flavor{
 				Image: image + "-2", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode],
 			}
@@ -309,7 +309,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("stops after the idle timeout and starts again for a queued run", func(ctx SpecContext) {
-			names := reconciler.AgentNames(org, agent.ID)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			phase := func() openshellv1.SandboxPhase {
 				return osg.Sandbox(row.Workspace, names.Sandbox).GetStatus().GetPhase()
 			}
@@ -359,7 +359,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("stops the sandbox of an agent returned to draft", func(ctx SpecContext) {
-			names := reconciler.AgentNames(org, agent.ID)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			_, err := q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: org, ID: agent.ID})
 			Expect(err).NotTo(HaveOccurred())
 			pass(ctx, r)
@@ -369,7 +369,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("cleans up everything on archive", func(ctx SpecContext) {
-			names := reconciler.AgentNames(org, agent.ID)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			_, err := q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: agent.ID})
 			Expect(err).NotTo(HaveOccurred())
 			pass(ctx, r)
@@ -390,7 +390,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("keeps the stopped sandbox, and so its home, with retention retain", func(ctx SpecContext) {
-			names := reconciler.AgentNames(org, agent.ID)
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			cfg.HomeRetention = reconciler.RetentionRetain
 			r = newReconciler()
 			_, err := q.ArchiveAgent(ctx, store.ArchiveAgentParams{OrgID: org, ID: agent.ID})
@@ -414,7 +414,7 @@ var _ = Describe("Reconciler", func() {
 		Expect(sandboxRow(ctx, a1.ID).Workspace).To(Equal(sandboxRow(ctx, a2.ID).Workspace))
 		row3, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: org2, AgentID: a3.ID})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(row3.Workspace).To(Equal(reconciler.WorkspaceName(org2)))
+		Expect(row3.Workspace).To(Equal(execution.WorkspaceName(org2.Bytes)))
 		Expect(mg.last().Keys).To(HaveLen(3))
 	})
 
@@ -433,8 +433,8 @@ var _ = Describe("Reconciler", func() {
 		r := newReconciler()
 		pass(ctx, r)
 		pass(ctx, r)
-		names := reconciler.AgentNames(org, agent.ID)
-		ws := reconciler.WorkspaceName(org)
+		names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+		ws := execution.WorkspaceName(org.Bytes)
 		Expect(osg.Sandbox(ws, names.Sandbox).GetStatus().GetPhase()).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
 		now.Store(nil)
 

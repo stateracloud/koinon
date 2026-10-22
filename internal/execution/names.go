@@ -2,20 +2,73 @@
 
 package execution
 
-import "encoding/hex"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+)
 
-// Names of the OpenShell objects Koinon owns, shared by the reconciler (which creates them)
-// and koinon-agentd (which execs into them). OpenShell 0.1.5 limits names to 19 characters,
-// so a full UUID does not fit. The names use the last 8 bytes of the UUID, which in a UUIDv7
-// are random (62 bits), not the leading timestamp: two objects created in the same
-// millisecond still get different names.
+// Names of the OpenShell objects Koinon owns. The reconciler derives them when it first
+// renders an agent and records them in agent_sandboxes, which koinon-agentd reads; these
+// functions are the one place that derives them. Names come from IDs, never display names.
 
-// WorkspaceName is the OpenShell workspace of an org (one per org, ADR 0002).
-func WorkspaceName(orgID [16]byte) string {
-	return "o-" + hex.EncodeToString(orgID[8:])
+// MaxSandboxName is OpenShell 0.1.5's limit on sandbox names (found on the home lab, PR #21).
+// Provider names follow the same limit to be safe.
+const MaxSandboxName = 19
+
+// WorkspaceName is the OpenShell workspace of an org (one per org, ADR 0002): "kw-" and 16 hex
+// characters. In managed mode OpenShell prefixes it to form the namespace name, so it is kept
+// short.
+func WorkspaceName(org [16]byte) string {
+	return "kw-" + shortHash("workspace", uuidString(org))
+}
+
+// AgentNames are the per-agent object names, all derived from (org_id, agent_id).
+type AgentNames struct {
+	Sandbox  string
+	Provider string
+	// KeySecret is the Kubernetes Secret in Koinon's namespace that holds the agent's
+	// agentgateway key.
+	KeySecret string
+}
+
+// AgentObjectNames derives an agent's object names. Sandbox and provider names are 19
+// characters ("ka-"/"kp-" and 16 hex characters of a hash of org and agent ID).
+func AgentObjectNames(org, agent [16]byte) AgentNames {
+	h := shortHash("agent", uuidString(org), uuidString(agent))
+	return AgentNames{
+		Sandbox:   "ka-" + h,
+		Provider:  "kp-" + h,
+		KeySecret: "koinon-agent-key-" + h,
+	}
 }
 
 // AgentSandboxName is the OpenShell sandbox of an agent.
-func AgentSandboxName(agentID [16]byte) string {
-	return "a-" + hex.EncodeToString(agentID[8:])
+func AgentSandboxName(org, agent [16]byte) string {
+	return AgentObjectNames(org, agent).Sandbox
+}
+
+// shortHash is 16 hex characters (64 bits) of SHA-256 over the parts, each terminated by a
+// NUL so that ("ab","c") and ("a","bc") differ.
+func shortHash(parts ...string) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write([]byte(p))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// uuidString formats a UUID in its canonical lower-case form.
+func uuidString(b [16]byte) string {
+	var out [36]byte
+	hex.Encode(out[0:8], b[0:4])
+	out[8] = '-'
+	hex.Encode(out[9:13], b[4:6])
+	out[13] = '-'
+	hex.Encode(out[14:18], b[6:8])
+	out[18] = '-'
+	hex.Encode(out[19:23], b[8:10])
+	out[23] = '-'
+	hex.Encode(out[24:], b[10:16])
+	return string(out[:])
 }

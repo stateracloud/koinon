@@ -90,7 +90,7 @@ func policy() execution.Policy {
 // at /sandbox, kept while the sandbox is stopped and deleted with it (spike 1.4, 1.5). The
 // SandboxTemplate field for custom volume claim templates was removed upstream
 // (volume_claim_templates is reserved), so the driver's PVC is the agent's home.
-func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names Names, f Flavor) (execution.SandboxSpec, string) {
+func (r *Reconciler) sandboxSpec(org, agent pgtype.UUID, names execution.AgentNames, f Flavor) (execution.SandboxSpec, string) {
 	spec := execution.SandboxSpec{
 		Name:             names.Sandbox,
 		Image:            f.Image,
