@@ -61,6 +61,12 @@ type Querier interface {
 	// other agents, and FIFO holds per agent. runs_one_active_per_agent backstops
 	// the rare race where two claims for one agent overlap; the loser gets a
 	// unique violation and retries.
+	//
+	// The run row is locked too. A claim whose snapshot predates a concurrent
+	// winner's commit, but which locks the agent row after it, re-checks only the
+	// rows it locks against their latest version. Were the run not among them, the
+	// claim would still see it as claimable, bump the agent's epoch, and then
+	// update no run: the next owner would get a skipped epoch.
 	ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error)
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
 	// approved -> executed | failed, by the executor that claimed it (fenced on
