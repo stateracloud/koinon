@@ -6,6 +6,7 @@ import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connec
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
 import { useMemo } from 'react'
+import { InstallationRepos } from '@/components/installation-repos'
 import { SetupGuideSteps } from '@/components/setup-guide'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -97,6 +98,7 @@ export function ConnectionPage() {
           ))}
         </ul>
       )}
+      {gh && isApprover(org.role) && <InstallationRepos orgId={orgId} connectionId={connectionId} />}
       <SetupGuideSteps steps={guide.steps} results={results} />
     </div>
   )

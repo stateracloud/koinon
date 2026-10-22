@@ -152,6 +152,11 @@ var isolationCases = map[string]isolationCase{
 			return c.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: f.connection})
 		},
 	},
+	connectionv1alpha1connect.ConnectionServiceListInstallationReposProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.ListInstallationRepos(ctx, &connectionv1alpha1.ListInstallationReposRequest{OrgId: org, ConnectionId: f.connection})
+		},
+	},
 
 	approvalv1alpha1connect.ApprovalServiceListApprovalsProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {

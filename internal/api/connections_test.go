@@ -4,6 +4,7 @@ package api_test
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -182,6 +183,110 @@ var _ = Describe("ConnectionService", func() {
 		other, otherOwner := e.newTeamOrg(ctx)
 		_, err = otherOwner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: other, ConnectionId: res.GetConnection().GetId()})
 		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+	})
+
+	Describe("ListInstallationRepos", func() {
+		var connID string
+
+		BeforeEach(func(ctx SpecContext) {
+			gh.Repositories = nil
+			for i := range 250 {
+				gh.Repositories = append(gh.Repositories, fmt.Sprintf("Repo-%03d", i))
+			}
+			gh.Private = map[string]bool{"Repo-007": true}
+			res, err := create(ctx, owner, gh.PEM, false)
+			Expect(err).NotTo(HaveOccurred())
+			connID = res.GetConnection().GetId()
+		})
+
+		list := func(ctx SpecContext, c *client, token, query string) (*connectionv1alpha1.ListInstallationReposResponse, error) {
+			return c.conns.ListInstallationRepos(ctx, &connectionv1alpha1.ListInstallationReposRequest{
+				OrgId: org, ConnectionId: connID, PageToken: token, Query: query,
+			})
+		}
+
+		It("pages through GitHub's list with a metadata-read token", func(ctx SpecContext) {
+			var names []string
+			token := ""
+			for range 3 {
+				res, err := list(ctx, owner, token, "")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res.GetTotalCount()).To(BeEquivalentTo(250))
+				for _, r := range res.GetRepos() {
+					names = append(names, r.GetFullName())
+					Expect(r.GetDefaultBranch()).To(Equal("main"))
+					Expect(r.GetPrivate()).To(Equal(r.GetFullName() == "acme/Repo-007"))
+				}
+				token = res.GetNextPageToken()
+			}
+			Expect(token).To(BeEmpty(), "the third page is the last")
+			Expect(names).To(HaveLen(250))
+			Expect(names[0]).To(Equal("acme/Repo-000"), "GitHub's spelling, owner included")
+			Expect(names[249]).To(Equal("acme/Repo-249"))
+			Expect(gh.ListCalls()).To(Equal(3))
+			for _, r := range gh.Requests() {
+				Expect(r).To(Equal(githubtest.Request{Permissions: map[string]string{"metadata": "read"}}))
+			}
+		})
+
+		It("filters case-insensitively across GitHub pages", func(ctx SpecContext) {
+			res, err := list(ctx, owner, "", "  REPO-2  ")
+			Expect(err).NotTo(HaveOccurred())
+			// Repo-200..249, all on GitHub's third page.
+			Expect(res.GetRepos()).To(HaveLen(50))
+			Expect(res.GetRepos()[0].GetFullName()).To(Equal("acme/Repo-200"))
+			Expect(res.GetNextPageToken()).To(BeEmpty())
+			Expect(gh.ListCalls()).To(Equal(3))
+
+			res, err = list(ctx, owner, "", "ACME/REPO-24")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetRepos()).To(HaveLen(10))
+
+			res, err = list(ctx, owner, "", "nothing-matches")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetRepos()).To(BeEmpty())
+			Expect(res.GetNextPageToken()).To(BeEmpty())
+		})
+
+		It("stops a filtered call after a page's worth of matches and continues from the token", func(ctx SpecContext) {
+			res, err := list(ctx, owner, "", "acme/")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetRepos()).To(HaveLen(100))
+			Expect(res.GetNextPageToken()).To(Equal("2"))
+			res, err = list(ctx, owner, res.GetNextPageToken(), "acme/")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.GetRepos()[0].GetFullName()).To(Equal("acme/Repo-100"))
+		})
+
+		It("refuses bad tokens and queries, members and other orgs", func(ctx SpecContext) {
+			_, err := list(ctx, owner, "two", "")
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+			_, err = list(ctx, owner, "0", "")
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+			_, err = list(ctx, owner, "", strings.Repeat("x", 201))
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+
+			for _, role := range []store.OrgRole{store.OrgRoleMember, store.OrgRoleViewer} {
+				_, err = list(ctx, e.userIn(ctx, org, role), "", "")
+				Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied), string(role))
+			}
+			_, err = list(ctx, e.userIn(ctx, org, store.OrgRoleAdmin), "", "")
+			Expect(err).NotTo(HaveOccurred(), "admins may list")
+
+			other, otherOwner := e.newTeamOrg(ctx)
+			_, err = otherOwner.conns.ListInstallationRepos(ctx, &connectionv1alpha1.ListInstallationReposRequest{OrgId: other, ConnectionId: connID})
+			Expect(codeOf(err)).To(Equal(connect.CodeNotFound), "another org's connection is not found")
+			_, err = otherOwner.conns.ListInstallationRepos(ctx, &connectionv1alpha1.ListInstallationReposRequest{OrgId: org, ConnectionId: connID})
+			Expect(codeOf(err)).To(BeElementOf(connect.CodeNotFound, connect.CodePermissionDenied), "another org is denied")
+			Expect(gh.ListCalls()).To(Equal(1), "only the admin's call reached GitHub")
+		})
+
+		It("reports GitHub refusing the connection", func(ctx SpecContext) {
+			gh.InstallationID++
+			_, err := list(ctx, owner, "", "")
+			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+			Expect(err.Error()).To(ContainSubstring("GitHub refused the connection"))
+		})
 	})
 
 	It("refuses to create connections without a secret store", func(ctx SpecContext) {

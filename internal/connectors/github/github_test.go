@@ -140,6 +140,36 @@ var _ = Describe("Client", func() {
 		Expect(buf.String()).NotTo(ContainSubstring(tok.Value()))
 	})
 
+	It("pages through the repositories the installation can access", func() {
+		fake.Repositories = nil
+		for i := range 5 {
+			fake.Repositories = append(fake.Repositories, fmt.Sprintf("repo-%d", i))
+		}
+		fake.Private = map[string]bool{"repo-1": true}
+		tok, err := client.InstallationToken(ctx, app, github.TokenRequest{Permissions: map[string]string{"metadata": "read"}})
+		Expect(err).NotTo(HaveOccurred())
+
+		var names []string
+		for page := 1; page <= 3; page++ {
+			res, err := client.ListInstallationRepositories(ctx, tok, page, 2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.TotalCount).To(BeEquivalentTo(5))
+			for _, r := range res.Repositories {
+				names = append(names, r.FullName)
+				Expect(r.DefaultBranch).To(Equal("main"))
+				Expect(r.Private).To(Equal(r.FullName == "acme/repo-1"))
+			}
+		}
+		Expect(names).To(Equal([]string{"acme/repo-0", "acme/repo-1", "acme/repo-2", "acme/repo-3", "acme/repo-4"}))
+
+		res, err := client.ListInstallationRepositories(ctx, tok, 4, 2)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Repositories).To(BeEmpty())
+
+		_, err = client.ListInstallationRepositories(ctx, tok, 1, 101)
+		Expect(err).To(MatchError(ContainSubstring("per_page")))
+	})
+
 	It("caches a token until the refresh margin before expiry", func() {
 		req := github.TokenRequest{Repositories: []string{"acme/widgets"}, Permissions: map[string]string{"contents": "read"}}
 		first, err := client.InstallationToken(ctx, app, req)

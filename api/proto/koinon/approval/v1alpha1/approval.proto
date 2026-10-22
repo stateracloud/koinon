@@ -92,6 +92,10 @@ message Risk {
   // Dependency manifests and lock files.
   repeated string dependencies = 6;
   repeated string binary = 7;
+  // Files the call marks executable (git mode 100755); a marked file that is
+  // already executable on the base branch is listed too. Unmarked files keep
+  // their mode.
+  repeated string executable = 8;
 }
 
 // FileChange is one file of a proposed pull request, with its full new
@@ -100,6 +104,10 @@ message FileChange {
   string path = 1;
   string content = 2;
   bool delete = 3;
+  // The file is written as executable (git mode 100755). Otherwise a new file
+  // is regular (100644) and a modified file keeps its mode on the base branch.
+  // Symbolic links and submodules are never written.
+  bool executable = 4;
 }
 
 // PullRequestCall is create_pull_request's arguments.

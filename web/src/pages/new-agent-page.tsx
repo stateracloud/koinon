@@ -65,6 +65,7 @@ export function NewAgentPage() {
             connections={connections.data.connections}
             targetPatterns={patterns}
             canConnect={isApprover(org.role)}
+            canListRepos={isApprover(org.role)}
             pending={create.isPending}
             error={create.error ? ConnectError.from(create.error).rawMessage : undefined}
             onCreate={(a) => create.mutate({ orgId, ...a })}

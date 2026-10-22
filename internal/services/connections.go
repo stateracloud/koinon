@@ -6,7 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/google/uuid"
@@ -280,4 +283,97 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection) (stor
 	}
 	s.log.Info("connection tested", "org", row.OrgID.String(), "connection", row.ID.String(), "status", string(status))
 	return row, checksProto(results), nil
+}
+
+// Paging of ListInstallationRepos. The page token is GitHub's page number, in pages of
+// installationReposPerPage repositories. A query is matched here, because GitHub's endpoint
+// cannot filter: a filtered call reads GitHub pages until it has a page's worth of matches,
+// the installation's repositories end, or it has read maxInstallationRepoPages pages.
+const (
+	installationReposPerPage = github.MaxPerPage
+	maxInstallationRepoPages = 10
+	maxInstallationRepoQuery = 200
+)
+
+// ListInstallationRepos implements ConnectionService.
+func (s *Server) ListInstallationRepos(ctx context.Context, req *connectionv1alpha1.ListInstallationReposRequest) (*connectionv1alpha1.ListInstallationReposResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("connection_id", req.GetConnectionId())
+	if err != nil {
+		return nil, err
+	}
+	page := 1
+	if t := req.GetPageToken(); t != "" {
+		n, err := strconv.Atoi(t)
+		if err != nil || n < 1 || strconv.Itoa(n) != t {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "page_token is not a next_page_token of this call")
+		}
+		page = n
+	}
+	query := strings.ToLower(strings.TrimSpace(req.GetQuery()))
+	if utf8.RuneCountInString(query) > maxInstallationRepoQuery {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf("query is longer than %d characters", maxInstallationRepoQuery))
+	}
+	row, err := s.q.GetConnection(ctx, store.GetConnectionParams{OrgID: c.org, ID: id})
+	if err != nil {
+		return nil, s.dbError(err, "connection")
+	}
+	if row.Connector != connectors.GitHubID {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, "the connection is not a GitHub connection")
+	}
+	app, err := connections.LoadGitHubApp(ctx, s.secrets, row)
+	if err != nil {
+		if errors.Is(err, connections.ErrNoSecretStore) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, err.Error())
+		}
+		// The messages name the Secret or say the key is malformed; never its content.
+		return nil, connect.NewError(connect.CodeFailedPrecondition, "the connection cannot authenticate to GitHub: "+err.Error())
+	}
+	// Metadata read only, the least any installation token has. No repositories named: the
+	// token covers every repository of the installation, which is what is listed.
+	tok, err := s.github.InstallationToken(ctx, app, github.TokenRequest{Permissions: map[string]string{"metadata": "read"}})
+	if err != nil {
+		return nil, s.listReposError(row, err)
+	}
+	res := &connectionv1alpha1.ListInstallationReposResponse{}
+	for read := 0; ; read++ {
+		if read == maxInstallationRepoPages || (read > 0 && (query == "" || len(res.Repos) >= installationReposPerPage)) {
+			res.NextPageToken = strconv.Itoa(page)
+			break
+		}
+		got, err := s.github.ListInstallationRepositories(ctx, tok, page, installationReposPerPage)
+		if err != nil {
+			return nil, s.listReposError(row, err)
+		}
+		res.TotalCount = got.TotalCount
+		for _, r := range got.Repositories {
+			if query == "" || strings.Contains(strings.ToLower(r.FullName), query) {
+				res.Repos = append(res.Repos, &connectionv1alpha1.InstallationRepo{
+					FullName: r.FullName, Private: r.Private, DefaultBranch: r.DefaultBranch,
+				})
+			}
+		}
+		if len(got.Repositories) == 0 || int64(page)*installationReposPerPage >= got.TotalCount {
+			break
+		}
+		page++
+	}
+	return res, nil
+}
+
+// listReposError maps an error from GitHub while listing an installation's repositories.
+func (s *Server) listReposError(conn store.Connection, err error) error {
+	var apiErr *github.APIError
+	switch {
+	case errors.As(err, &apiErr):
+		return connect.NewError(connect.CodeFailedPrecondition, "GitHub refused the connection; test it for details: "+apiErr.Error())
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return connect.NewError(connect.CodeCanceled, "request canceled")
+	default:
+		s.log.Warn("listing installation repositories failed", "connection", idString(conn.ID), "err", err)
+		return connect.NewError(connect.CodeUnavailable, "could not reach GitHub to list the repositories; try again")
+	}
 }

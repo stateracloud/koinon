@@ -111,6 +111,8 @@ func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
 		Description: "Propose a pull request on the ticket's repository. Needs human approval: returns " +
 			"\"approval requested: id=...\" at once and your run pauses; once approved, Koinon creates the branch, " +
 			"the commit and the pull request exactly as given, and you get the result when the run resumes. " +
+			"A file marked executable is written as 100755; otherwise a new file is regular (100644) and a modified file keeps its mode. " +
+			"Symbolic links and submodules cannot be written. " +
 			"Refused: changes under .github/workflows/, more than 100 files or 1 MiB, unsafe paths.",
 	}, s.createPullRequest)
 	mcp.AddTool(s.mcp, &mcp.Tool{
