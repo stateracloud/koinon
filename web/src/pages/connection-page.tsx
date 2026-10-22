@@ -12,8 +12,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConnectionService, ConnectionStatus } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { isApprover } from '@/lib/approvals'
-import { connectionStatusLabel } from '@/lib/connections'
 import { setupGuide } from '@/lib/connector'
+import { connectionStatusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
 const route = getRouteApi('/app/connections/$connectionId')

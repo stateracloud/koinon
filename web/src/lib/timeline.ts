@@ -4,10 +4,11 @@
 // column moves, run notes, approvals) and the session updates of its runs,
 // by time.
 
-import type { JsonObject, JsonValue } from '@bufbuild/protobuf'
+import type { JsonObject } from '@bufbuild/protobuf'
 import { timestampMs, type Timestamp } from '@bufbuild/protobuf/wkt'
 import type { RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { ActorKind, type TicketEvent } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
+import { obj, str } from '@/lib/json'
 import { statusLabel, ticketStatusFromName } from '@/lib/labels'
 
 export type TimelineItem =
@@ -28,14 +29,6 @@ export type TimelineItem =
       url?: string
     }
   | { key: string; at: number; type: 'note'; text: string; runId?: string }
-
-function str(v: JsonValue | undefined): string | undefined {
-  return typeof v === 'string' ? v : undefined
-}
-
-function obj(v: JsonValue | undefined): JsonObject | undefined {
-  return v && typeof v === 'object' && !Array.isArray(v) ? v : undefined
-}
 
 function ms(t: Timestamp | undefined): number {
   return t ? timestampMs(t) : 0

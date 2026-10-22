@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConnectionService, ConnectionStatus } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { isApprover } from '@/lib/approvals'
-import { connectionStatusLabel } from '@/lib/connections'
+import { connectionStatusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
 /** ConnectionsPage lists the org's connections (ADR 0007). */

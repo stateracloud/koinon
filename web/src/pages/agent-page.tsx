@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { Grant } from '@/gen/koinon/template/v1alpha1/template_pb'
-import { agentStatusLabel, flavorLabel, presetLabel } from '@/lib/agents'
+import { agentStatusLabel, flavorLabel, presetLabel } from '@/lib/labels'
 import { isApprover } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
 
