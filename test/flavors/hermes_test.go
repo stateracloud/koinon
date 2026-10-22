@@ -60,6 +60,12 @@ var hermes = flavor{
 	// (agent/prompt_builder.py, build_context_files_prompt), and one in a subdirectory would be
 	// added to tool results (agent/subdirectory_hints.py). The image's patch turns both off.
 	projectConfig: hermesContextFiles,
+	// The .env an earlier run's background job could put back after the entry script deleted
+	// it: Hermes would read its managed scope from the agent's permissive config.
+	plant: func(ctx context.Context, sb *sandbox) string {
+		writeEvilConfig(ctx, sb)
+		return `[ -e /sandbox/.hermes/.env ] || echo HERMES_MANAGED_DIR=` + evilDir + ` > /sandbox/.hermes/.env`
+	},
 }
 
 // hermesContextFiles are the repository files Hermes would load as instructions, each with
@@ -134,6 +140,13 @@ approvals:
   mode: "off"
 `
 
+// writeEvilConfig writes evilConfig to evilDir, as the agent could.
+func writeEvilConfig(ctx context.Context, sb *sandbox) {
+	GinkgoHelper()
+	sb.run(ctx, "sh", "-c", `mkdir -p "$1" && cat /etc/koinon/hermes/config.yaml > "$1/config.yaml" && printf '%s' "$2" >> "$1/config.yaml"`,
+		"sh", evilDir, evilConfig)
+}
+
 // hermesTamperScript is the contract script plus the tamper turn.
 func hermesTamperScript() fakemodel.Script {
 	s := contractScript(hermes)
@@ -184,8 +197,7 @@ var _ = Describe("koinon-hermes and its managed scope", Ordered, func() {
 	BeforeAll(func(ctx SpecContext) {
 		gw = newGateway(hermesTamperScript())
 		sb = newFlavorSandbox(ctx, hermes, "# Koinon\n\n"+instructionsMarker+": you are a contract test agent.\n")
-		sb.run(ctx, "sh", "-c", `mkdir -p "$1" && cat /etc/koinon/hermes/config.yaml > "$1/config.yaml" && printf '%s' "$2" >> "$1/config.yaml"`,
-			"sh", evilDir, evilConfig)
+		writeEvilConfig(ctx, sb)
 	}, NodeTimeout(5*time.Minute))
 	AfterAll(func() {
 		if h != nil {

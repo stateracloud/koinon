@@ -41,14 +41,15 @@ var _ = func() bool {
 func describeAgentd(f flavor) bool {
 	return Describe("koinon-agentd with the "+f.name+" flavor", Ordered, func() {
 		var (
-			db     *pgxpool.Pool
-			q      *store.Queries
-			gw     *gateway
-			sb     *sandbox
-			org    pgtype.UUID
-			user   pgtype.UUID
-			agent  store.Agent
-			ticket store.Ticket
+			db      *pgxpool.Pool
+			q       *store.Queries
+			gw      *gateway
+			sb      *sandbox
+			org     pgtype.UUID
+			user    pgtype.UUID
+			agent   store.Agent
+			ticket  store.Ticket
+			backend *dockerBackend
 		)
 
 		BeforeAll(func(ctx SpecContext) {
@@ -113,7 +114,8 @@ func describeAgentd(f flavor) bool {
 			DeferCleanup(func() { sb.remove(context.Background()) })
 			sb.start(bg)
 
-			p, err := agentd.New(db, &dockerBackend{sb: sb}, agentd.Config{
+			backend = &dockerBackend{sb: sb}
+			p, err := agentd.New(db, backend, agentd.Config{
 				OwnerID: "agentd-flavors", Workers: 1, Lease: 10 * time.Second, Poll: 100 * time.Millisecond,
 				GatewayURL: gw.url(""), Logger: newLogger(),
 			})
@@ -146,6 +148,8 @@ func describeAgentd(f flavor) bool {
 				store.RunStateSucceeded, store.RunStateFailed, store.RunStateCanceled))
 			got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})
 			Expect(err).NotTo(HaveOccurred())
+			// The run is over once agentd has swept after it, too.
+			Eventually(backend.settled).WithTimeout(time.Minute).Should(BeTrue(), "agentd swept after the run")
 			return got
 		}
 
@@ -202,9 +206,14 @@ func describeAgentd(f flavor) bool {
 		It("ends what the agent left running before the next run, which keeps its tools", func(ctx SpecContext) {
 			before := requestTools(gw)
 			Expect(before).NotTo(BeEmpty())
-			// A background job, as the agent's terminal tool could leave one.
+			// A background job, as the agent's terminal tool could leave one, that keeps putting
+			// its change to the home back (f.plant).
+			step := ":"
+			if f.plant != nil {
+				step = f.plant(ctx, sb)
+			}
 			pid := strings.TrimSpace(sb.run(ctx, "sh", "-c", `nohup sh -c "$1" >/dev/null 2>&1 & echo $!`,
-				"sh", "while :; do sleep 0.1; done"))
+				"sh", "while :; do "+step+"; sleep 0.1; done"))
 			Expect(sb.run(ctx, "cat", "/proc/"+pid+"/cmdline")).To(ContainSubstring("while"), "the job runs")
 
 			r := runTicket(ctx, helloPrompt)
@@ -289,9 +298,32 @@ func expectOnlyMain(ctx context.Context, sb *sandbox) {
 // dockerBackend is agentd's execution backend on the Docker stand-in sandbox, recorded as
 // ready in agent_sandboxes; Exec is `docker exec --interactive`, a non-TTY exec like
 // OpenShell's.
-type dockerBackend struct{ sb *sandbox }
+type dockerBackend struct {
+	sb *sandbox
+
+	mu       sync.Mutex
+	inflight int
+	last     []string // the command of the latest exec
+}
+
+// settled reports whether koinon-agentd is done with the sandbox after a run: no exec is
+// running and the last one was the sweep it runs once the harness has ended.
+func (d *dockerBackend) settled() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.inflight == 0 && len(d.last) > 0 && d.last[len(d.last)-1] == "sweep"
+}
 
 func (d *dockerBackend) Exec(ctx context.Context, _, _ string, req execution.ExecRequest) (execution.Process, error) {
+	d.mu.Lock()
+	d.inflight++
+	d.last = req.Command
+	d.mu.Unlock()
+	done := func() {
+		d.mu.Lock()
+		d.inflight--
+		d.mu.Unlock()
+	}
 	args := []string{"exec", "--interactive"}
 	if req.Workdir != "" {
 		args = append(args, "--workdir", req.Workdir)
@@ -303,6 +335,7 @@ func (d *dockerBackend) Exec(ctx context.Context, _, _ string, req execution.Exe
 	stdin, err := c.StdinPipe()
 	if err != nil {
 		cancel()
+		done()
 		return nil, err
 	}
 	outR, outW := io.Pipe()
@@ -312,10 +345,12 @@ func (d *dockerBackend) Exec(ctx context.Context, _, _ string, req execution.Exe
 	}
 	if err := c.Start(); err != nil {
 		cancel()
+		done()
 		return nil, err
 	}
 	p := &dockerProcess{stdin: stdin, stdout: outR, cancel: cancel, done: make(chan struct{})}
 	go func() {
+		defer done()
 		err := c.Wait()
 		p.code = c.ProcessState.ExitCode()
 		if p.code < 0 {

@@ -73,6 +73,9 @@ type flavor struct {
 	// projectMarker into the model's context, and it may loosen permissions, which the
 	// permission specs then catch. Empty skips the check.
 	projectConfig map[string]string
+	// plant prepares sb for a background job of the agent's that would change a later run from
+	// the home, and returns the shell command the job repeats. Nil repeats nothing.
+	plant func(ctx context.Context, sb *sandbox) string
 }
 
 // projectMarker is the text a flavor's projectConfig would bring into the model's context.
