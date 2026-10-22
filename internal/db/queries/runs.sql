@@ -30,7 +30,8 @@ ORDER BY created_at, id;
 
 -- name: ClaimNextRun :one
 -- queued -> starting, or a resolved parked -> starting. Takes the oldest
--- claimable run (by ready_at) of an active agent that has no active run, and
+-- claimable run (by ready_at) of an active agent that has no active run and
+-- whose ticket has no other owned or parked run, and
 -- makes the caller its owner under a new epoch. Locking the agent row with
 -- SKIP LOCKED serialises claims per agent, so concurrent claimers move on to
 -- other agents, and FIFO holds per agent. runs_one_active_per_agent backstops
@@ -47,6 +48,12 @@ WITH next AS (
           SELECT 1 FROM runs act
           WHERE act.org_id = r.org_id AND act.agent_id = r.agent_id
             AND act.state IN ('starting', 'running'))
+      -- One harness session per ticket (ADR 0029): a ticket's next run waits
+      -- while another run of the same ticket is owned or parked.
+      AND NOT EXISTS (
+          SELECT 1 FROM runs sib
+          WHERE sib.org_id = r.org_id AND sib.ticket_id = r.ticket_id AND sib.id <> r.id
+            AND sib.state IN ('starting', 'running', 'parked'))
     ORDER BY r.ready_at, r.id
     LIMIT 1
     FOR UPDATE OF a SKIP LOCKED
@@ -64,6 +71,10 @@ SET state = 'starting',
     lease_expires_at = now() + make_interval(secs => @lease_seconds::integer),
     heartbeat_at = now(),
     ready_at = NULL,
+    -- Parked time does not count against the wall-clock cap.
+    parked_seconds = runs.parked_seconds + CASE
+        WHEN runs.state = 'parked' THEN greatest(0, floor(extract(epoch FROM now() - runs.parked_at)))::bigint
+        ELSE 0 END,
     park_reason = NULL,
     parked_at = NULL,
     park_expires_at = NULL,
@@ -179,4 +190,49 @@ SET state = 'canceled',
     finished_at = now(),
     ready_at = NULL
 WHERE org_id = @org_id AND ticket_id = @ticket_id AND state = 'queued'
+RETURNING *;
+
+-- name: HasQueuedRunForTicket :one
+-- Whether the ticket already has a queued run, which will see every message
+-- appended before it starts (plan item A4).
+SELECT EXISTS (
+    SELECT 1 FROM runs
+    WHERE org_id = @org_id AND ticket_id = @ticket_id AND state = 'queued');
+
+-- name: CancelOpenRunsForAgent :many
+-- Archiving an agent cancels every run it has not finished.
+UPDATE runs
+SET state = 'canceled',
+    outcome_reason = @outcome_reason::text,
+    finished_at = now(),
+    ready_at = NULL,
+    lease_expires_at = NULL,
+    heartbeat_at = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id
+  AND state IN ('queued', 'starting', 'running', 'parked')
+RETURNING *;
+
+-- name: CancelRunsOverWallClock :many
+-- Cancels owned runs that have been owned longer than their wall-clock cap
+-- (plan item A4). Parked time is excluded through parked_seconds. Safe to run
+-- from every API replica: a run canceled by one sweep no longer matches.
+UPDATE runs
+SET state = 'canceled',
+    outcome_reason = @outcome_reason::text,
+    finished_at = now(),
+    ready_at = NULL,
+    lease_expires_at = NULL,
+    heartbeat_at = NULL
+WHERE org_id = @org_id
+  AND state IN ('starting', 'running')
+  AND started_at + make_interval(secs => max_wall_clock_seconds + parked_seconds) < now()
+RETURNING *;
+
+-- name: AddRunTokens :one
+-- Adds reported token usage to an unfinished run. The caller cancels the run
+-- when tokens_used reaches max_tokens. No row: the run is finished or absent.
+UPDATE runs
+SET tokens_used = tokens_used + @tokens::bigint
+WHERE org_id = @org_id AND id = @id
+  AND state IN ('queued', 'starting', 'running', 'parked')
 RETURNING *;

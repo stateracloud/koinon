@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package api_test
+
+import (
+	"context"
+	"errors"
+	"io"
+	"time"
+
+	connect "connectrpc.com/connect/v2"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/procoduck/koinon/internal/db/store"
+	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
+)
+
+// watcher reads one WatchRun stream in the background.
+type watcher struct {
+	cancel context.CancelFunc
+	items  chan *runv1alpha1.WatchRunResponse
+	done   chan error
+}
+
+func watch(ctx context.Context, c *client, org, run string, after int64) *watcher {
+	ctx, cancel := context.WithCancel(ctx)
+	w := &watcher{cancel: cancel, items: make(chan *runv1alpha1.WatchRunResponse, 1024), done: make(chan error, 1)}
+	stream, err := c.runs.WatchRun(ctx, &runv1alpha1.WatchRunRequest{OrgId: org, RunId: run, AfterSeq: after})
+	if err != nil {
+		cancel()
+		w.done <- err
+		close(w.items)
+		return w
+	}
+	go func() {
+		defer close(w.items)
+		defer func() { _ = stream.Close() }()
+		for {
+			msg, err := stream.Receive()
+			if errors.Is(err, io.EOF) {
+				w.done <- nil
+				return
+			}
+			if err != nil {
+				w.done <- err
+				return
+			}
+			w.items <- msg
+		}
+	}()
+	DeferCleanup(cancel)
+	return w
+}
+
+// nextEvent waits for the next event, skipping run snapshots.
+func (w *watcher) nextEvent(timeout time.Duration) *runv1alpha1.RunEvent {
+	deadline := time.After(timeout)
+	for {
+		select {
+		case msg, ok := <-w.items:
+			if !ok {
+				Fail("stream ended before the next event")
+			}
+			if ev := msg.GetEvent(); ev != nil {
+				return ev
+			}
+		case <-deadline:
+			Fail("no event within " + timeout.String())
+		}
+	}
+}
+
+var _ = Describe("WatchRun", func() {
+	var (
+		e   *env
+		f   orgFixture
+		ad  *agentd
+		run store.Run
+	)
+	BeforeEach(func(ctx SpecContext) {
+		// Polling is effectively off: live events must come through NOTIFY.
+		e = newEnv(ctx, envOptions{watchPoll: time.Hour})
+		f = e.newOrgFixture(ctx)
+		ad = e.agentd("agentd-a")
+		run = ad.mustClaim(ctx, f.org)
+		Expect(run.ID.String()).To(Equal(f.run.GetId()))
+	})
+
+	It("replays stored events after the given seq, then streams live ones", func(ctx SpecContext) {
+		// seq 1 is the scheduler's run.queued event.
+		for i := 2; i <= 4; i++ {
+			Expect(ad.event(ctx, run, i).Seq).To(Equal(int64(i)))
+		}
+		w := watch(ctx, f.owner, f.org, f.run.GetId(), 2)
+		first := <-w.items
+		Expect(first.GetRun().GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_RUNNING))
+		Expect(w.nextEvent(5 * time.Second).GetSeq()).To(Equal(int64(3)))
+		Expect(w.nextEvent(5 * time.Second).GetSeq()).To(Equal(int64(4)))
+
+		ad.event(ctx, run, 5)
+		ev := w.nextEvent(time.Second)
+		Expect(ev.GetSeq()).To(Equal(int64(5)))
+		Expect(ev.GetKind()).To(Equal("session.update"))
+		Expect(ev.GetPayload().AsMap()).To(HaveKeyWithValue("n", BeEquivalentTo(5)))
+	})
+
+	It("ends after the run finishes and its last event is sent", func(ctx SpecContext) {
+		w := watch(ctx, f.owner, f.org, f.run.GetId(), 0)
+		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
+		_, err := f.owner.runs.CancelRun(ctx, &runv1alpha1.CancelRunRequest{OrgId: f.org, RunId: f.run.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+
+		ev := w.nextEvent(time.Second)
+		Expect(ev.GetKind()).To(Equal("run.canceled"))
+		var last *runv1alpha1.WatchRunResponse
+		for msg := range w.items {
+			last = msg
+		}
+		Expect(<-w.done).To(Succeed())
+		Expect(last.GetRun().GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_CANCELED))
+	})
+
+	It("wakes streams on every API replica when another process writes", func(ctx SpecContext) {
+		replica := newEnvOn(ctx, e, envOptions{watchPoll: time.Hour})
+		w1 := watch(ctx, f.owner, f.org, f.run.GetId(), 1)
+		w2 := watch(ctx, f.owner.on(replica), f.org, f.run.GetId(), 1)
+		Eventually(func() int { return e.hub.Subscribers() + replica.hub.Subscribers() }).Should(Equal(2))
+
+		start := time.Now()
+		ad.event(ctx, run, 2) // written by "agentd", neither replica
+		Expect(w1.nextEvent(time.Second).GetSeq()).To(Equal(int64(2)))
+		Expect(w2.nextEvent(time.Second).GetSeq()).To(Equal(int64(2)))
+		Expect(time.Since(start)).To(BeNumerically("<", time.Second))
+	})
+
+	It("loses and duplicates nothing across reconnects to different replicas", func(ctx SpecContext) {
+		replica := newEnvOn(ctx, e, envOptions{watchPoll: time.Hour})
+		servers := []*client{f.owner, f.owner.on(replica)}
+		const total = 150
+
+		writerDone := make(chan struct{})
+		go func() {
+			defer GinkgoRecover()
+			defer close(writerDone)
+			for i := 2; i <= total; i++ {
+				ad.event(ctx, run, i)
+				if i%10 == 0 {
+					time.Sleep(5 * time.Millisecond)
+				}
+			}
+			ad.finish(ctx, run)
+		}()
+
+		var seen []int64
+		cursor := int64(0)
+		for attempt := 0; ; attempt++ {
+			Expect(attempt).To(BeNumerically("<", 100), "too many reconnects")
+			w := watch(ctx, servers[attempt%2], f.org, f.run.GetId(), cursor)
+			// Drop the stream after a few events, mid-flight.
+			ended := false
+			for got := 0; got < 7; {
+				msg, ok := <-w.items
+				if !ok {
+					ended = true
+					break
+				}
+				if ev := msg.GetEvent(); ev != nil {
+					seen = append(seen, ev.GetSeq())
+					cursor = ev.GetSeq()
+					got++
+				}
+			}
+			w.cancel()
+			for range w.items { //nolint:revive // drain what was already read; it is discarded like a lost connection's buffer
+			}
+			if ended {
+				Expect(<-w.done).To(Succeed())
+				break
+			}
+		}
+		<-writerDone
+
+		want := make([]int64, 0, total)
+		for i := int64(1); i <= total; i++ {
+			want = append(want, i)
+		}
+		Expect(seen).To(Equal(want))
+	})
+
+	It("rejects a negative after_seq", func(ctx SpecContext) {
+		w := watch(ctx, f.owner, f.org, f.run.GetId(), -1)
+		for range w.items { //nolint:revive // wait for the end
+		}
+		Expect(codeOf(<-w.done)).To(Equal(connect.CodeInvalidArgument))
+	})
+})
