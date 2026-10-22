@@ -23,6 +23,13 @@
 // listener, which the chart's NetworkPolicy opens to the gateway pods only.
 // Which tools an agent sees is decided at the gateway (the CEL allowlist built
 // from its grants); the server checks the grant again for every call.
+//
+// # Readiness prompt
+//
+// The server also publishes one MCP prompt, gateway.ReadyPrompt, to every
+// caller. OpenCode turns MCP prompts into commands and announces them over
+// ACP once the server is connected, which is how koinon-agentd knows the
+// tools are there before it sends the first prompt (ADR 0052).
 package githubtools
 
 import (
@@ -120,6 +127,14 @@ func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
 		Name:        ToolGetApprovalStatus,
 		Description: "The status of one of your approval requests and, once executed, its result (for example the pull request URL).",
 	}, s.getApprovalStatus)
+	s.mcp.AddPrompt(&mcp.Prompt{
+		Name:        gateway.ReadyPrompt,
+		Description: "Koinon's tools are connected. Koinon uses this to know the session is ready; there is nothing to run.",
+	}, func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{{
+			Role: "user", Content: &mcp.TextContent{Text: "Koinon's tools are connected."},
+		}}}, nil
+	})
 	return s, nil
 }
 
