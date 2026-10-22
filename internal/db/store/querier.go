@@ -141,7 +141,8 @@ type Querier interface {
 	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
 	// holds the agent, whether one is waiting to be claimed (queued, or parked
 	// with its park resolved), and when a run last finished or parked. Parked runs
-	// do not keep the sandbox up.
+	// do not keep the sandbox up, but they hold off its recreation (has_held):
+	// a parked run resumes its session in the same home volume.
 	GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error)
 	GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams) (AgentSandbox, error)
 	// An agent's recorded USD spend since @since, for its spend limit.
@@ -267,7 +268,8 @@ type Querier interface {
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
 	// Records the observed sandbox. started_at and stopped_at are stamped on the
-	// transition into ready and stopped.
+	// transition into ready and stopped. An empty home_generation (no sandbox
+	// observed) keeps the recorded one.
 	RecordAgentSandbox(ctx context.Context, arg RecordAgentSandboxParams) (AgentSandbox, error)
 	RecordConnectionTest(ctx context.Context, arg RecordConnectionTestParams) (Connection, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
@@ -291,8 +293,9 @@ type Querier interface {
 	// Records, before the prompt is sent, the ticket timeline seq through which
 	// the ticket's messages are in it.
 	SetRunPromptThrough(ctx context.Context, arg SetRunPromptThroughParams) (Run, error)
-	// Stores the harness session for the ticket. Fenced by the run epoch: only the
-	// current owner of one of the ticket's active runs can set it.
+	// Stores the harness session for the ticket with the home generation of the
+	// sandbox it was created in. Fenced by the run epoch: only the current owner
+	// of one of the ticket's active runs can set it.
 	SetTicketHarnessSession(ctx context.Context, arg SetTicketHarnessSessionParams) (Ticket, error)
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)

@@ -15,7 +15,7 @@ const clearAgentSandboxKey = `-- name: ClearAgentSandboxKey :one
 UPDATE agent_sandboxes
 SET gateway_key_id = NULL, gateway_key_hash = NULL
 WHERE org_id = $1 AND agent_id = $2
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation
 `
 
 type ClearAgentSandboxKeyParams struct {
@@ -44,6 +44,7 @@ func (q *Queries) ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandbo
 		&i.ObservedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HomeGeneration,
 	)
 	return i, err
 }
@@ -51,7 +52,7 @@ func (q *Queries) ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandbo
 const createAgentSandbox = `-- name: CreateAgentSandbox :one
 INSERT INTO agent_sandboxes (org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation
 `
 
 type CreateAgentSandboxParams struct {
@@ -91,6 +92,7 @@ func (q *Queries) CreateAgentSandbox(ctx context.Context, arg CreateAgentSandbox
 		&i.ObservedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HomeGeneration,
 	)
 	return i, err
 }
@@ -98,6 +100,7 @@ func (q *Queries) CreateAgentSandbox(ctx context.Context, arg CreateAgentSandbox
 const getAgentRunActivity = `-- name: GetAgentRunActivity :one
 SELECT
     coalesce(bool_or(state IN ('starting', 'running')), false)::boolean AS has_active,
+    coalesce(bool_or(state IN ('starting', 'running', 'parked')), false)::boolean AS has_held,
     coalesce(bool_or(ready_at IS NOT NULL), false)::boolean AS has_demand,
     max(greatest(finished_at, parked_at))::timestamptz AS last_activity
 FROM runs
@@ -113,6 +116,7 @@ type GetAgentRunActivityParams struct {
 
 type GetAgentRunActivityRow struct {
 	HasActive    bool
+	HasHeld      bool
 	HasDemand    bool
 	LastActivity pgtype.Timestamptz
 }
@@ -120,16 +124,22 @@ type GetAgentRunActivityRow struct {
 // What the idle timeout and start-on-demand need (ADR 0049): whether a run
 // holds the agent, whether one is waiting to be claimed (queued, or parked
 // with its park resolved), and when a run last finished or parked. Parked runs
-// do not keep the sandbox up.
+// do not keep the sandbox up, but they hold off its recreation (has_held):
+// a parked run resumes its session in the same home volume.
 func (q *Queries) GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error) {
 	row := q.db.QueryRow(ctx, getAgentRunActivity, arg.OrgID, arg.AgentID)
 	var i GetAgentRunActivityRow
-	err := row.Scan(&i.HasActive, &i.HasDemand, &i.LastActivity)
+	err := row.Scan(
+		&i.HasActive,
+		&i.HasHeld,
+		&i.HasDemand,
+		&i.LastActivity,
+	)
 	return i, err
 }
 
 const getAgentSandbox = `-- name: GetAgentSandbox :one
-SELECT org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at FROM agent_sandboxes
+SELECT org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation FROM agent_sandboxes
 WHERE org_id = $1 AND agent_id = $2
 `
 
@@ -159,6 +169,7 @@ func (q *Queries) GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams
 		&i.ObservedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HomeGeneration,
 	)
 	return i, err
 }
@@ -287,32 +298,36 @@ SET state = $1::sandbox_state,
     phase = $2,
     message = $3,
     spec_hash = $4,
+    home_generation = coalesce(nullif($5::text, ''), agent_sandboxes.home_generation),
     started_at = CASE WHEN $1::sandbox_state = 'ready' AND agent_sandboxes.state <> 'ready'
                       THEN now() ELSE agent_sandboxes.started_at END,
     stopped_at = CASE WHEN $1::sandbox_state = 'stopped' AND agent_sandboxes.state <> 'stopped'
                       THEN now() ELSE agent_sandboxes.stopped_at END,
     observed_at = now()
-WHERE org_id = $5 AND agent_id = $6
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at
+WHERE org_id = $6 AND agent_id = $7
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation
 `
 
 type RecordAgentSandboxParams struct {
-	State    SandboxState
-	Phase    string
-	Message  string
-	SpecHash string
-	OrgID    pgtype.UUID
-	AgentID  pgtype.UUID
+	State          SandboxState
+	Phase          string
+	Message        string
+	SpecHash       string
+	HomeGeneration string
+	OrgID          pgtype.UUID
+	AgentID        pgtype.UUID
 }
 
 // Records the observed sandbox. started_at and stopped_at are stamped on the
-// transition into ready and stopped.
+// transition into ready and stopped. An empty home_generation (no sandbox
+// observed) keeps the recorded one.
 func (q *Queries) RecordAgentSandbox(ctx context.Context, arg RecordAgentSandboxParams) (AgentSandbox, error) {
 	row := q.db.QueryRow(ctx, recordAgentSandbox,
 		arg.State,
 		arg.Phase,
 		arg.Message,
 		arg.SpecHash,
+		arg.HomeGeneration,
 		arg.OrgID,
 		arg.AgentID,
 	)
@@ -335,6 +350,7 @@ func (q *Queries) RecordAgentSandbox(ctx context.Context, arg RecordAgentSandbox
 		&i.ObservedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HomeGeneration,
 	)
 	return i, err
 }
@@ -343,7 +359,7 @@ const setAgentSandboxKey = `-- name: SetAgentSandboxKey :one
 UPDATE agent_sandboxes
 SET gateway_key_id = $1, gateway_key_hash = $2
 WHERE org_id = $3 AND agent_id = $4
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation
 `
 
 type SetAgentSandboxKeyParams struct {
@@ -380,6 +396,7 @@ func (q *Queries) SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKey
 		&i.ObservedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HomeGeneration,
 	)
 	return i, err
 }
