@@ -166,6 +166,7 @@ type Querier interface {
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
+	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// Records, before the prompt is sent, the ticket timeline seq through which
 	// the ticket's messages are in it.

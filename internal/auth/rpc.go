@@ -29,7 +29,7 @@ func (s *Service) Interceptor() connect.ServerInterceptor {
 		return func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
 			var token string
 			if info, ok := connect.CallInfoForServerContext(ctx); ok {
-				token = sessionTokenFromCookies(info.RequestHeader().Values("Cookie"))
+				token = sessionTokenFromCookies(info.RequestHeader().Values("Cookie"), s.SessionCookie())
 			}
 			p, err := s.Authenticate(ctx, token)
 			if errors.Is(err, ErrUnauthenticated) {
@@ -47,14 +47,14 @@ func (s *Service) Interceptor() connect.ServerInterceptor {
 	}
 }
 
-func sessionTokenFromCookies(lines []string) string {
+func sessionTokenFromCookies(lines []string, name string) string {
 	for _, line := range lines {
 		cookies, err := http.ParseCookie(line)
 		if err != nil {
 			continue
 		}
 		for _, c := range cookies {
-			if c.Name == SessionCookieName {
+			if c.Name == name {
 				return c.Value
 			}
 		}
@@ -156,20 +156,5 @@ func authMethodToProto(m store.AuthMethod) authv1alpha1.AuthMethod {
 		return authv1alpha1.AuthMethod_AUTH_METHOD_OIDC
 	default:
 		return authv1alpha1.AuthMethod_AUTH_METHOD_UNSPECIFIED
-	}
-}
-
-func roleToProto(r store.OrgRole) authv1alpha1.OrgRole {
-	switch r {
-	case store.OrgRoleViewer:
-		return authv1alpha1.OrgRole_ORG_ROLE_VIEWER
-	case store.OrgRoleMember:
-		return authv1alpha1.OrgRole_ORG_ROLE_MEMBER
-	case store.OrgRoleAdmin:
-		return authv1alpha1.OrgRole_ORG_ROLE_ADMIN
-	case store.OrgRoleOwner:
-		return authv1alpha1.OrgRole_ORG_ROLE_OWNER
-	default:
-		return authv1alpha1.OrgRole_ORG_ROLE_UNSPECIFIED
 	}
 }
