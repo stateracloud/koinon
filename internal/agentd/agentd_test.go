@@ -80,18 +80,21 @@ var _ = Describe("Pool", func() {
 		Expect(args).To(Equal([][]string{{
 			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp",
 		}}))
-		// mkdir, the instruction file, the harness, then the instruction file's and link's
-		// checks before the prompt.
+		// The sweep, mkdir, the instruction file, the harness, the instruction file's and link's
+		// checks before the prompt, then the sweep after the harness has ended.
+		Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(7))
 		execs := e.gw.Execs()
-		Expect(execs).To(HaveLen(5))
-		Expect(execs[0].GetCommand()).To(Equal([]string{"/bin/mkdir", "-p", "/sandbox/work"}))
-		Expect(execs[1].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("mktemp"), "sh", "/sandbox/.koinon", instructionsFile))
-		Expect(execs[2].GetCommand()[0]).To(Equal("/usr/local/bin/koinon-opencode"))
-		Expect(execs[2].GetWorkdir()).To(Equal("/sandbox/work"))
-		Expect(execs[2].GetTty()).To(BeFalse())
-		Expect(execs[2].GetEnvironment()).To(BeEmpty(), "agentd sends nothing secret, and no environment, into the sandbox")
-		Expect(execs[3].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("exec cat"), "sh", instructionsFile))
-		Expect(execs[4].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", opencodeLink, instructionsFile))
+		sweep := []string{"/bin/sh", "-c", agentd.SweepScript, "sweep"}
+		Expect(execs[0].GetCommand()).To(Equal(sweep))
+		Expect(execs[1].GetCommand()).To(Equal([]string{"/bin/mkdir", "-p", "/sandbox/work"}))
+		Expect(execs[2].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("mktemp"), "sh", "/sandbox/.koinon", instructionsFile))
+		Expect(execs[3].GetCommand()[0]).To(Equal("/usr/local/bin/koinon-opencode"))
+		Expect(execs[3].GetWorkdir()).To(Equal("/sandbox/work"))
+		Expect(execs[3].GetTty()).To(BeFalse())
+		Expect(execs[3].GetEnvironment()).To(BeEmpty(), "agentd sends nothing secret, and no environment, into the sandbox")
+		Expect(execs[4].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("exec cat"), "sh", instructionsFile))
+		Expect(execs[5].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", opencodeLink, instructionsFile))
+		Expect(execs[6].GetCommand()).To(Equal(sweep))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/" + model}))
 		Expect(e.gw.Sandbox(e.workspace, e.sandbox).GetSpec().GetEnvironment()).To(BeEmpty())
 
@@ -324,15 +327,15 @@ var _ = Describe("Pool", func() {
 			r := e.enqueue(ctx, e.ticket(ctx, "hello"))
 			e.pool("agentd-a")
 			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			// mkdir, the instruction file, the harness, then the file's and the flavor's
-			// link's checks before the prompt.
+			// The sweep, mkdir, the instruction file, the harness, the file's and the flavor's
+			// link's checks before the prompt, then the sweep after the harness.
+			Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(7))
 			execs := e.gw.Execs()
-			Expect(execs).To(HaveLen(5))
-			Expect(execs[2].GetCommand()).To(Equal([]string{
+			Expect(execs[3].GetCommand()).To(Equal([]string{
 				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp",
 			}))
-			Expect(execs[2].GetWorkdir()).To(Equal("/sandbox/work"))
-			Expect(execs[4].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", link, instructionsFile))
+			Expect(execs[3].GetWorkdir()).To(Equal("/sandbox/work"))
+			Expect(execs[5].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", link, instructionsFile))
 		},
 		Entry("opencode", store.AgentFlavorOpencode, "/usr/local/bin/koinon-opencode", opencodeLink),
 		Entry("hermes", store.AgentFlavorHermes, "/usr/local/bin/koinon-hermes", hermesLink),
@@ -372,6 +375,31 @@ var _ = Describe("Pool", func() {
 		content, _ = e.files.get(instructionsFile)
 		Expect(string(content)).To(HaveSuffix("\n\nVersion two.\n"))
 		Expect(e.gw.Calls("CreateSandbox")).To(Equal(1), "only newEnv created the sandbox")
+	})
+
+	It("ends what an earlier run left running before the harness starts, and records it", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.files.sweep = func() (string, int) { return "ended: 41 57\n", 0 }
+		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		evs := events(ctx, r)
+		swept := eventOf(evs, "run.sandbox_swept")
+		Expect(swept).To(HaveLen(1))
+		Expect(payload(swept[0])).To(HaveKeyWithValue("pids", ConsistOf("41", "57")))
+		Expect(swept[0].Seq).To(BeNumerically("<", eventOf(evs, "run.session")[0].Seq), "before the harness starts")
+	})
+
+	It("fails the run, without starting the harness, when processes of an earlier run keep running", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.files.sweep = func() (string, int) { return "still running: 41\n", 1 }
+		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(And(
+			ContainSubstring("end the processes left in the sandbox"), ContainSubstring("still running: 41")))
+		_, _, _, args := e.harness.snapshot()
+		Expect(args).To(BeEmpty(), "the harness never starts")
 	})
 
 	It("fails the run when the instructions cannot be written", func(ctx SpecContext) {
