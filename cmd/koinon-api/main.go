@@ -31,6 +31,7 @@ import (
 	"github.com/procoduck/koinon/internal/api"
 	"github.com/procoduck/koinon/internal/auth"
 	"github.com/procoduck/koinon/internal/db/migrations"
+	"github.com/procoduck/koinon/internal/ledger"
 	"github.com/procoduck/koinon/internal/project"
 	"github.com/procoduck/koinon/internal/runwatch"
 	"github.com/procoduck/koinon/internal/scheduler"
@@ -64,6 +65,8 @@ type config struct {
 
 	sweepInterval time.Duration
 	watchPoll     time.Duration
+
+	otlpAddr string
 }
 
 func parseFlags(args []string) (config, error) {
@@ -102,6 +105,9 @@ func parseFlags(args []string) (config, error) {
 		"how often to cancel runs past their wall-clock cap")
 	fs.DurationVar(&c.watchPoll, "watch-poll-interval", services.DefaultWatchPollInterval,
 		"how often a WatchRun stream re-reads its run without a notification (a backstop for missed NOTIFYs)")
+	fs.StringVar(&c.otlpAddr, "otlp-addr", ":4318",
+		"listen address of the spend ledger's OTLP/HTTP logs receiver, for agentgateway's access log; "+
+			"it has no authentication, so restrict it to agentgateway with a NetworkPolicy; empty disables it")
 
 	var envErr error
 	fs.VisitAll(func(f *flag.Flag) {
@@ -242,6 +248,18 @@ func run() error {
 	go hub.Run(bgCtx)
 	go scheduler.Sweeper(bgCtx, pool, cfg.sweepInterval, slog.Default())
 	svc := services.New(pool, services.Options{Hub: hub, WatchPollInterval: cfg.watchPoll})
+
+	if cfg.otlpAddr != "" {
+		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
+		// the session-authenticated API handler.
+		go func() {
+			slog.Info("starting the spend ledger's OTLP receiver", "addr", cfg.otlpAddr)
+			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool}, slog.Default()); err != nil {
+				slog.Error("spend ledger OTLP receiver failed", "err", err)
+				stop()
+			}
+		}()
+	}
 
 	handler, err := api.NewHandler(api.Options{
 		Auth:           authSvc,

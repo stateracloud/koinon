@@ -20,8 +20,12 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"9cc1487646dafd10"'
+      koinon.config: '"7510ca90efdc0347"'
       koinon.key: default(apiKey.name, "")
+      koinon.request: uuid()
+    otlp:
+      host: koinon-api.koinon.svc:4318
+      protocol: http
 gateways:
   default:
     port: 4000
@@ -39,10 +43,10 @@ llm:
             name: k-aaaaaaaaaaaa
             agent: acme/repo-helper
           budgets:
-            - name: koinon-agent-limit
+            - name: koinon-agent-limit-1792627200-750000000
               limit:
                 unit: USD
-                amount: 5
+                amount: 4.25
               window:
                 rolling: 24h
               onBudgetExceeded: Block
@@ -60,24 +64,6 @@ llm:
               onBudgetExceeded: Block
   models:
     - name: deepseek/deepseek-v4.1-flash
-      provider:
-        custom:
-          providerOverride: openrouter
-          formats:
-            - type: completions
-      params:
-        baseUrl: https://openrouter.ai/api/v1
-        apiKey:
-          file: /secrets/upstream/api_key
-      overrides:
-        provider:
-          allow_fallbacks: false
-          data_collection: deny
-          only:
-            - fireworks
-            - deepinfra
-          zdr: true
-    - name: unpriced/model
       provider:
         custom:
           providerOverride: openrouter

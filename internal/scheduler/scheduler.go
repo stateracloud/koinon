@@ -45,6 +45,8 @@ const (
 	ReasonAgentArchived CancelReason = "agent_archived"
 	ReasonWallClockCap  CancelReason = "wall_clock_cap"
 	ReasonTokenCap      CancelReason = "token_cap"
+	// ReasonSpendLimit: the agent reached its spend limit (plan item L1).
+	ReasonSpendLimit CancelReason = "spend_limit"
 )
 
 // ErrAgentNotActive means the ticket's agent cannot take runs.

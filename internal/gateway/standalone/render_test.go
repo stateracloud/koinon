@@ -68,6 +68,34 @@ var _ = Describe("Render", func() {
 		Expect(string(out)).NotTo(ContainSubstring(k.Material))
 	})
 
+	It("serves only priced models, so none is charged zero (L1)", func() {
+		out, _, err := standalone.Render(fixtures()[2].state, fixtures()[2].options)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fixtures()[2].state.Models.Unpriced()).To(Equal([]string{"unpriced/model"}))
+		Expect(string(out)).NotTo(ContainSubstring("unpriced/model"))
+
+		onlyUnpriced := gateway.State{Models: gateway.ModelUpstream{
+			Provider: "x", BaseURL: "http://x/v1", Models: []gateway.Model{{Name: "free"}},
+		}}
+		out, _, err = standalone.Render(onlyUnpriced, standalone.Options{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(out)).NotTo(ContainSubstring("llm:"))
+	})
+
+	It("names the budget after the limit's generation", func() {
+		s := gateway.State{Models: fixtures()[2].state.Models}
+		s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour, Generation: "g1"})
+		o := standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}
+		a, _, err := standalone.Render(s, o)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(a)).To(ContainSubstring("name: koinon-agent-limit-g1\n"))
+
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour, Generation: "Bad_Gen"})
+		_, _, err = standalone.Render(s, o)
+		Expect(err).To(MatchError(ContainSubstring("generation")))
+	})
+
 	It("requires a database for limits", func() {
 		s := gateway.State{}
 		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: time.Hour})

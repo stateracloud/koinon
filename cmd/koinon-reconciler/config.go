@@ -32,6 +32,8 @@ type fileConfig struct {
 		Port         int    `yaml:"port"`
 		DatabaseURL  string `yaml:"databaseUrl"`
 		ModelKeyFile string `yaml:"modelKeyFile"`
+		// AccessLogOTLP is koinon-api's OTLP/HTTP receiver as host:port (plan item L1).
+		AccessLogOTLP string `yaml:"accessLogOtlp"`
 	} `yaml:"gateway"`
 	Model struct {
 		BaseURL  string `yaml:"baseUrl"`
@@ -82,6 +84,7 @@ type config struct {
 	gatewayPort      int
 	gatewayDBURL     string
 	modelKeyFile     string
+	accessLogOTLP    string
 
 	idleTimeout    time.Duration
 	resyncInterval time.Duration
@@ -112,6 +115,8 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.IntVar(&c.gatewayPort, "gateway-port", 0, "agentgateway LLM listener port in the rendered config")
 	fs.StringVar(&c.gatewayDBURL, "gateway-database-url", "", "agentgateway budget store URL in the rendered config")
 	fs.StringVar(&c.modelKeyFile, "model-key-file", "", "path of the upstream model key inside agentgateway")
+	fs.StringVar(&c.accessLogOTLP, "gateway-access-log-otlp", "",
+		"host:port of koinon-api's OTLP/HTTP receiver, where agentgateway exports its access log for the spend ledger; empty exports nothing")
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
@@ -177,6 +182,7 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.gatewayPort, fc.Gateway.Port)
 	orDefault(&c.gatewayDBURL, fc.Gateway.DatabaseURL)
 	orDefault(&c.modelKeyFile, fc.Gateway.ModelKeyFile)
+	orDefault(&c.accessLogOTLP, fc.Gateway.AccessLogOTLP)
 	orDefault(&c.homeRetention, fc.Reconciler.HomeRetention)
 	for _, d := range []struct {
 		dst *time.Duration
