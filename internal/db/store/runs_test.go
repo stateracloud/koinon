@@ -378,6 +378,48 @@ var _ = Describe("runs", func() {
 			Expect(mustClaim(ctx, f.org, "agentd-a").ID).To(Equal(second.ID))
 		})
 
+		// #27's per-ticket rule with #28's takeover columns: a run whose lease was released or
+		// expired is still owned, so the ticket's next run waits through every takeover, and
+		// the next run sees how far the taken-over run prompted.
+		It("keeps a ticket's next run waiting while another of its runs is taken over", func(ctx SpecContext) {
+			f := newFixture(ctx)
+			first := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			a := markRunning(ctx, mustClaim(ctx, f.org, "agentd-a"))
+			Expect(a.ID).To(Equal(first.ID))
+			Expect(a.Takeovers).To(BeZero())
+			_, err := q.SetRunPromptThrough(ctx, store.SetRunPromptThroughParams{OrgID: f.org, ID: a.ID, Epoch: a.Epoch, PromptThroughSeq: 3})
+			Expect(err).NotTo(HaveOccurred())
+
+			// The exec stream dropped: agentd releases the lease.
+			_, err = q.ReleaseRunLease(ctx, store.ReleaseRunLeaseParams{OrgID: f.org, ID: a.ID, Epoch: a.Epoch})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = claim(ctx, f.org, "agentd-b")
+			Expect(err).To(MatchError(pgx.ErrNoRows), "a released run still holds its ticket")
+			b, err := q.TakeOverExpiredRun(ctx, store.TakeOverExpiredRunParams{OrgID: f.org, OwnerID: "agentd-b", LeaseSeconds: lease})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b.ID).To(Equal(first.ID))
+			Expect(b.Takeovers).To(BeEquivalentTo(1))
+
+			// The new owner is killed: its lease expires and a third worker takes over.
+			expireLease(ctx, b)
+			_, err = claim(ctx, f.org, "agentd-c")
+			Expect(err).To(MatchError(pgx.ErrNoRows), "an expired run still holds its ticket")
+			c, err := q.TakeOverExpiredRun(ctx, store.TakeOverExpiredRunParams{OrgID: f.org, OwnerID: "agentd-c", LeaseSeconds: lease})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(c.Takeovers).To(BeEquivalentTo(2))
+			Expect(c.PromptThroughSeq.Int64).To(BeEquivalentTo(3))
+			_, err = finish(ctx, c, store.RunStateSucceeded)
+			Expect(err).NotTo(HaveOccurred())
+
+			next := mustClaim(ctx, f.org, "agentd-a")
+			Expect(next.ID).To(Equal(second.ID))
+			Expect(next.Takeovers).To(BeZero())
+			through, err := q.GetTicketPromptedThrough(ctx, store.GetTicketPromptedThroughParams{OrgID: f.org, TicketID: f.ticket.ID, RunID: next.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(through).To(BeEquivalentTo(3))
+		})
+
 		It("claims in FIFO order, across agents too", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			other, _ := newAgent(ctx, f.org, f.user)
