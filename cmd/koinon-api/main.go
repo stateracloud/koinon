@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
 
@@ -31,6 +32,10 @@ import (
 	"github.com/procoduck/koinon/internal/auth"
 	"github.com/procoduck/koinon/internal/db/migrations"
 	"github.com/procoduck/koinon/internal/project"
+	"github.com/procoduck/koinon/internal/runwatch"
+	"github.com/procoduck/koinon/internal/scheduler"
+	"github.com/procoduck/koinon/internal/services"
+	"github.com/procoduck/koinon/templates"
 )
 
 type config struct {
@@ -55,6 +60,9 @@ type config struct {
 
 	sessionIdle time.Duration
 	sessionMax  time.Duration
+
+	sweepInterval time.Duration
+	watchPoll     time.Duration
 }
 
 func parseFlags(args []string) (config, error) {
@@ -88,6 +96,11 @@ func parseFlags(args []string) (config, error) {
 		"end sessions after this long without requests")
 	fs.DurationVar(&c.sessionMax, "session-max-lifetime", auth.DefaultSessionMaxLifetime,
 		"end sessions this long after login")
+
+	fs.DurationVar(&c.sweepInterval, "run-cap-sweep-interval", 30*time.Second,
+		"how often to cancel runs past their wall-clock cap")
+	fs.DurationVar(&c.watchPoll, "watch-poll-interval", services.DefaultWatchPollInterval,
+		"how often a WatchRun stream re-reads its run without a notification (a backstop for missed NOTIFYs)")
 
 	var envErr error
 	fs.VisitAll(func(f *flag.Flag) {
@@ -212,7 +225,28 @@ func run() error {
 	defer cancelPurge() // before pool.Close
 	go authSvc.RunPurger(purgeCtx, time.Hour, 7*24*time.Hour)
 
-	handler, err := api.NewHandler(api.Options{Auth: authSvc, TrustedOrigins: splitList(cfg.trustedOrigins)})
+	// Templates embedded in the binary become rows, versioned by content hash.
+	embedded, err := templates.All()
+	if err != nil {
+		return fmt.Errorf("load templates: %w", err)
+	}
+	if _, err := services.SyncTemplates(ctx, pool, embedded); err != nil {
+		return err
+	}
+	slog.Info("templates synced", "count", len(embedded))
+
+	bgCtx, cancelBg := context.WithCancel(ctx)
+	defer cancelBg() // before pool.Close
+	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
+	go hub.Run(bgCtx)
+	go scheduler.Sweeper(bgCtx, pool, cfg.sweepInterval, slog.Default())
+	svc := services.New(pool, services.Options{Hub: hub, WatchPollInterval: cfg.watchPoll})
+
+	handler, err := api.NewHandler(api.Options{
+		Auth:           authSvc,
+		TrustedOrigins: splitList(cfg.trustedOrigins),
+		Services:       []func(*connect.Server){svc.Register},
+	})
 	if err != nil {
 		return err
 	}

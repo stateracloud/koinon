@@ -36,6 +36,9 @@ import (
 	"github.com/procoduck/koinon/internal/db/migrations"
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
+	"github.com/procoduck/koinon/internal/runwatch"
+	"github.com/procoduck/koinon/internal/services"
+	"github.com/procoduck/koinon/templates"
 )
 
 // PostgresImage is the minimum supported Postgres version (ADR 0047).
@@ -130,6 +133,9 @@ type envOptions struct {
 	groupMappings          []auth.GroupMapping
 	defaultOrgMode         store.IdentityMode
 	trustedOrigins         []string
+	// watchPoll is WatchRun's backstop poll interval; tests that check
+	// NOTIFY delivery set it long so that polling cannot hide a failure.
+	watchPoll time.Duration
 }
 
 // env is one API server on its own database.
@@ -139,6 +145,7 @@ type env struct {
 	issuer   *oidctest.Issuer
 	srv      *httptest.Server
 	svc      *auth.Service
+	hub      *runwatch.Hub
 	pwFile   string
 	opts     envOptions
 	bootstrp auth.BootstrapResult
@@ -191,10 +198,24 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	svc, err := auth.New(e.pool, cfg)
 	Expect(err).NotTo(HaveOccurred())
 	e.svc = svc
+
+	_, err = services.SyncTemplates(ctx, e.pool, mustTemplates())
+	Expect(err).NotTo(HaveOccurred())
+	hubCtx, stopHub := context.WithCancel(context.Background())
+	e.hub = runwatch.New(e.pool.Config().ConnConfig, slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+	hubDone := make(chan struct{})
+	go func() { defer close(hubDone); e.hub.Run(hubCtx) }()
+	DeferCleanup(func() { stopHub(); <-hubDone })
+	Eventually(e.hub.Listening()).Should(BeClosed())
+	rpc := services.New(e.pool, services.Options{
+		Hub: e.hub, WatchPollInterval: opts.watchPoll,
+		Logger: slog.New(slog.NewTextHandler(GinkgoWriter, nil)),
+	})
+
 	handler, err = api.NewHandler(api.Options{
 		Auth:           svc,
 		TrustedOrigins: opts.trustedOrigins,
-		Services:       []func(*connect.Server){registerProbe},
+		Services:       []func(*connect.Server){registerProbe, rpc.Register},
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return e
@@ -298,4 +319,10 @@ func (b *browser) setSessionToken(token string) {
 
 func codeOf(err error) connect.Code {
 	return connect.CodeOf(err)
+}
+
+func mustTemplates() []*templates.Template {
+	ts, err := templates.All()
+	Expect(err).NotTo(HaveOccurred())
+	return ts
 }
