@@ -11,10 +11,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/procoduck/koinon/internal/agentconfig"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // NetLimit is the budget pushed to agentgateway for an agent whose limit is

@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/procoduck/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution"
 )
 
 // wrap maps a gRPC error to an *execution.Error. It returns nil for a nil error. Context

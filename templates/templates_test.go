@@ -13,7 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/templates"
 )
 
 func readFile(name string) []byte {

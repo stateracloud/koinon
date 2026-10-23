@@ -13,7 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	authv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1"
+	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 )
 
 func (b *browser) get(ctx context.Context, path string) (int, string) {

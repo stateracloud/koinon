@@ -44,11 +44,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/procoduck/koinon/internal/connections"
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/githubtools"
-	"github.com/procoduck/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
 // Ticket event kinds written here. The tool server writes KindRequested.

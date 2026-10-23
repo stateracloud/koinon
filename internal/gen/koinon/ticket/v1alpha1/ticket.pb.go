@@ -9,7 +9,7 @@
 package ticketv1alpha1
 
 import (
-	v1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
+	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	structpb "google.golang.org/protobuf/types/known/structpb"
@@ -1017,7 +1017,7 @@ const file_koinon_ticket_v1alpha1_ticket_proto_rawDesc = "" +
 	"\tGetTicket\x12(.koinon.ticket.v1alpha1.GetTicketRequest\x1a).koinon.ticket.v1alpha1.GetTicketResponse\"\x03\x90\x02\x01\x12l\n" +
 	"\rAppendMessage\x12,.koinon.ticket.v1alpha1.AppendMessageRequest\x1a-.koinon.ticket.v1alpha1.AppendMessageResponse\x12c\n" +
 	"\n" +
-	"MoveTicket\x12).koinon.ticket.v1alpha1.MoveTicketRequest\x1a*.koinon.ticket.v1alpha1.MoveTicketResponseBPZNgithub.com/procoduck/koinon/internal/gen/koinon/ticket/v1alpha1;ticketv1alpha1b\x06proto3"
+	"MoveTicket\x12).koinon.ticket.v1alpha1.MoveTicketRequest\x1a*.koinon.ticket.v1alpha1.MoveTicketResponseBSZQgithub.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1;ticketv1alpha1b\x06proto3"
 
 var (
 	file_koinon_ticket_v1alpha1_ticket_proto_rawDescOnce sync.Once

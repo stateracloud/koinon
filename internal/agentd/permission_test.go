@@ -6,7 +6,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/agentd"
 )
 
 var _ = DescribeTable("the workspace check of permission requests",

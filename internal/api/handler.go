@@ -12,7 +12,7 @@ import (
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
 
-	"github.com/procoduck/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/auth"
 )
 
 // Options configures NewHandler.

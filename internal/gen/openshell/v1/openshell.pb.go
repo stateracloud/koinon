@@ -10,9 +10,9 @@
 package openshellv1
 
 import (
-	v1 "github.com/procoduck/koinon/internal/gen/openshell/datamodel/v1"
-	_ "github.com/procoduck/koinon/internal/gen/openshell/options/v1"
-	v11 "github.com/procoduck/koinon/internal/gen/openshell/sandbox/v1"
+	v1 "github.com/stateracloud/koinon/internal/gen/openshell/datamodel/v1"
+	_ "github.com/stateracloud/koinon/internal/gen/openshell/options/v1"
+	v11 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"

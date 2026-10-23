@@ -1557,7 +1557,7 @@ const file_koinon_approval_v1alpha1_approval_proto_rawDesc = "" +
 	"\vGetApproval\x12,.koinon.approval.v1alpha1.GetApprovalRequest\x1a-.koinon.approval.v1alpha1.GetApprovalResponse\"\x03\x90\x02\x01\x12{\n" +
 	"\x0fGetApprovalDiff\x120.koinon.approval.v1alpha1.GetApprovalDiffRequest\x1a1.koinon.approval.v1alpha1.GetApprovalDiffResponse\"\x03\x90\x02\x01\x12c\n" +
 	"\aApprove\x12(.koinon.approval.v1alpha1.ApproveRequest\x1a).koinon.approval.v1alpha1.ApproveResponse\"\x03\x90\x02\x02\x12U\n" +
-	"\x04Deny\x12%.koinon.approval.v1alpha1.DenyRequest\x1a&.koinon.approval.v1alpha1.DenyResponseBTZRgithub.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1;approvalv1alpha1b\x06proto3"
+	"\x04Deny\x12%.koinon.approval.v1alpha1.DenyRequest\x1a&.koinon.approval.v1alpha1.DenyResponseBWZUgithub.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1;approvalv1alpha1b\x06proto3"
 
 var (
 	file_koinon_approval_v1alpha1_approval_proto_rawDescOnce sync.Once

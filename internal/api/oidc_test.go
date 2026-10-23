@@ -14,10 +14,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/auth"
-	"github.com/procoduck/koinon/internal/auth/oidctest"
-	"github.com/procoduck/koinon/internal/db/store"
-	authv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1"
+	"github.com/stateracloud/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/auth/oidctest"
+	"github.com/stateracloud/koinon/internal/db/store"
+	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 )
 
 func stringsReader(s string) io.Reader { return strings.NewReader(s) }

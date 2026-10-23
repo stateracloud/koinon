@@ -28,8 +28,8 @@ import (
 	"path"
 	"strings"
 
-	sandboxv1 "github.com/procoduck/koinon/internal/gen/openshell/sandbox/v1"
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
+	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 )
 
 // Request is one HTTP request a sandboxed binary makes.

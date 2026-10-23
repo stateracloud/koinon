@@ -18,13 +18,13 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/approvals"
-	"github.com/procoduck/koinon/internal/connections"
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/githubtools"
 )
 
 // markAsk makes the fake harness call create_pull_request through Koinon's tool server.

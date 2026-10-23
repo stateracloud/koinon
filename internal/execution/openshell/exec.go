@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"github.com/procoduck/koinon/internal/execution"
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/execution"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 )
 
 // stdinChunk bounds one stdin message, well below gRPC's 4 MiB default message limit.

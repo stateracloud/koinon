@@ -7,7 +7,7 @@ package koinon.approval.v1alpha1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1;approvalv1alpha1";
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1;approvalv1alpha1";
 
 // ApprovalService shows and decides ask-tier tool calls (ADRs 0008, 0042,
 // 0049; plan item P1). An agent's call is recorded exactly; approving it binds

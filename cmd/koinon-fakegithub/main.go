@@ -24,8 +24,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 func main() {

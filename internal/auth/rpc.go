@@ -10,9 +10,9 @@ import (
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/procoduck/koinon/internal/db/store"
-	authv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1"
-	"github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/db/store"
+	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
 )
 
 // allowedDuringPasswordChange lists the procedures a principal may call

@@ -5,9 +5,9 @@ package reconciler
 import (
 	"slices"
 
-	"github.com/procoduck/koinon/internal/agentconfig"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 )
 
 // Plugin installs (template option harness.pluginInstalls, off by default). An OpenCode agent

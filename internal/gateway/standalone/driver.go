@@ -5,7 +5,7 @@ package standalone
 import (
 	"context"
 
-	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway"
 )
 
 // Driver is the standalone ModelGateway: Render, Deliver, Wait.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 func TestModulePathMatchesGoMod(t *testing.T) {

@@ -11,12 +11,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/procoduck/koinon/internal/execution"
-	"github.com/procoduck/koinon/internal/execution/openshell"
-	"github.com/procoduck/koinon/internal/execution/openshell/fakegateway"
-	sandboxv1 "github.com/procoduck/koinon/internal/gen/openshell/sandbox/v1"
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 var (
@@ -210,7 +210,7 @@ var _ = Describe("Backend", func() {
 	Describe("sandbox lifecycle", func() {
 		spec := func() execution.SandboxSpec {
 			return execution.SandboxSpec{
-				Name: "agent-1", Image: "ghcr.io/procoduck/koinon-opencode:dev",
+				Name: "agent-1", Image: "ghcr.io/stateracloud/koinon-opencode:dev",
 				Command: []string{"sleep", "infinity"}, Policy: harnessPolicy(),
 				Labels: map[string]string{agentLabel: "a1"}, CPU: "1", Memory: "2Gi",
 			}
@@ -223,7 +223,7 @@ var _ = Describe("Backend", func() {
 			stored := gw.Sandbox(ws, "agent-1").GetSpec()
 			Expect(stored.GetEnvironment()).To(BeEmpty())
 			Expect(stored.GetTemplate().GetEnvironment()).To(BeEmpty())
-			Expect(stored.GetTemplate().GetImage()).To(Equal("ghcr.io/procoduck/koinon-opencode:dev"))
+			Expect(stored.GetTemplate().GetImage()).To(Equal("ghcr.io/stateracloud/koinon-opencode:dev"))
 			Expect(stored.GetTemplate().GetResources().AsMap()).To(Equal(map[string]any{
 				"limits": map[string]any{"cpu": "1", "memory": "2Gi"},
 			}))

@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // Defaults for versions whose config sets no run caps (plan item A4, ADR 0049).

@@ -11,9 +11,9 @@ import (
 
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/procoduck/koinon/internal/execution"
-	sandboxv1 "github.com/procoduck/koinon/internal/gen/openshell/sandbox/v1"
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/execution"
+	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 )
 
 // Hardening defaults rendered into every policy (ADR 0045, ADR 0048).

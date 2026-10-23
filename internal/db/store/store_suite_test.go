@@ -15,8 +15,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/procoduck/koinon/internal/db/migrations"
-	"github.com/procoduck/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/db/store"
 )
 
 // postgresImage is the minimum supported Postgres version (ADR 0047).

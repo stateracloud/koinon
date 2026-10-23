@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/procoduck/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/db/store"
 )
 
 // Mount registers the login endpoints on mux:

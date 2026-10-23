@@ -16,7 +16,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
 func TestFakemodel(t *testing.T) {

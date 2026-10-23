@@ -2,7 +2,7 @@
 
 package agentd
 
-import "github.com/procoduck/koinon/internal/db/store"
+import "github.com/stateracloud/koinon/internal/db/store"
 
 // HarnessArgs exposes the launch command's harness switches, read from a raw version config,
 // to the external test package.

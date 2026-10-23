@@ -28,8 +28,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
-	"github.com/procoduck/koinon/internal/project"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // Supported prerequisite versions.

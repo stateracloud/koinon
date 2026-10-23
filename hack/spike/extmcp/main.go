@@ -19,7 +19,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/procoduck/koinon/hack/spike/extmcp/gen"
+	"github.com/stateracloud/koinon/hack/spike/extmcp/gen"
 )
 
 type server struct {

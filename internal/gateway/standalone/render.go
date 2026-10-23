@@ -22,7 +22,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway"
 )
 
 // Options are the static settings of a standalone agentgateway. Most of them

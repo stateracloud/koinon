@@ -28,7 +28,7 @@ package ledger
 import (
 	"time"
 
-	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway"
 )
 
 // Window is the spend-limit window. agentgateway aligns budget windows to the

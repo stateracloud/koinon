@@ -14,7 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway"
 )
 
 func TestGateway(t *testing.T) {

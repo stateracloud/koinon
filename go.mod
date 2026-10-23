@@ -1,4 +1,4 @@
-module github.com/procoduck/koinon
+module github.com/stateracloud/koinon
 
 go 1.27.3
 

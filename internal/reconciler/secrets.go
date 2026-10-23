@@ -12,7 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // KeySecret is an agent's agentgateway key as stored in a Kubernetes Secret. Material is the

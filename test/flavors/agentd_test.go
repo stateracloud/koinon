@@ -22,10 +22,10 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/procoduck/koinon/internal/agentd"
-	"github.com/procoduck/koinon/internal/db/migrations"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 )
 
 // koinon-agentd driving each real flavor image: Postgres in a container, the flavor in the

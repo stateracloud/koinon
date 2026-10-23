@@ -19,7 +19,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/acp"
+	"github.com/stateracloud/koinon/internal/acp"
 )
 
 // sandboxUID is the user OpenShell runs sandbox processes as (spike steps 1 and 8).

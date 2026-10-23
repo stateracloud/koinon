@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // HostAccess is what a grant lets the sandbox send straight to one host (plan item C2): allow

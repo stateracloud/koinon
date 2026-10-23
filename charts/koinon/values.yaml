@@ -12,7 +12,7 @@ clusterDomain: cluster.local
 
 # Koinon images: <registry>/<repository>:<tag>[@<digest>]. The tag defaults to .Chart.AppVersion.
 image:
-  registry: ghcr.io/procoduck
+  registry: ghcr.io/stateracloud
   tag: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []

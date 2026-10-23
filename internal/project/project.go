@@ -10,7 +10,7 @@ const (
 
 	// ModulePath is the Go module path. Keep in sync with go.mod and the
 	// MODULE variable in the Makefile.
-	ModulePath = "github.com/procoduck/koinon"
+	ModulePath = "github.com/stateracloud/koinon"
 
 	// Domain is the project domain. Kubernetes API groups live under it.
 	Domain = "koinon.dev"
@@ -28,5 +28,5 @@ const (
 )
 
 // Version is the release version, set at build time with
-// -ldflags "-X github.com/procoduck/koinon/internal/project.Version=...".
+// -ldflags "-X github.com/stateracloud/koinon/internal/project.Version=...".
 var Version = "dev"
