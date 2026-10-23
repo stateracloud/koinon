@@ -7,13 +7,17 @@
 #   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode flavor
 #      with buildx, all loaded into the kind node; the fakes deployed in koinon-e2e-fakes;
 #   3. `helm install` of charts/koinon (runc, CNPG, the fakes as model and GitHub);
-#   4. the Go driver in test/e2e drives the quickstart steps through the API and prints the wall
-#      clock of each step and the total from `helm install`.
+#   4. SUITE=go (default): the Go driver in test/e2e drives the quickstart steps through the API
+#      and prints the wall clock of each step and the total from `helm install`.
+#      SUITE=web: Playwright (web/e2e-real, issue #50) drives the same install through the
+#      browser: login, GitHub connection, agent, ticket, streamed reply, approval, terminal run.
+#      The two suites each need a fresh install (the bootstrap password is one-time), so run one
+#      per cluster.
 #
 # Only the kube context kind-$CLUSTER is used; every kubectl/helm call names it. The cluster is
 # deleted at the end unless KEEP=1.
 #
-#   CLUSTER=koinon-e1  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
+#   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 set -euo pipefail
 
 CLUSTER=${CLUSTER:-koinon-e1}
@@ -21,6 +25,8 @@ CTX="kind-${CLUSTER}"
 NS=koinon
 FAKES=koinon-e2e-fakes
 KEEP=${KEEP:-0}
+SUITE=${SUITE:-go}
+case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; esac
 SKIP_UP=${SKIP_UP:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}
 API_PORT=${API_PORT:-18080}
@@ -123,15 +129,30 @@ for port in "$API_PORT" "$GH_PORT"; do
   nc -z 127.0.0.1 "$port" || { echo "port-forward to $port did not come up" >&2; exit 1; }
 done
 
-step "quickstart driver (go test ./test/e2e)"
 password=$("${K[@]}" -n "$NS" get secret koinon-bootstrap-admin -o jsonpath='{.data.password}' | base64 -d)
-KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
-KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
-KOINON_E2E_PASSWORD="$password" \
-KOINON_E2E_T0="$T0" \
-KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \
-  go test -count=1 -timeout 30m ./test/e2e/ -ginkgo.v 2>&1 | tee "$OUT/driver.log"
-done_step "Quickstart driver"
+case "$SUITE" in
+go)
+  step "quickstart driver (go test ./test/e2e)"
+  KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
+  KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
+  KOINON_E2E_PASSWORD="$password" \
+  KOINON_E2E_T0="$T0" \
+  KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \
+    go test -count=1 -timeout 30m ./test/e2e/ -ginkgo.v 2>&1 | tee "$OUT/driver.log"
+  done_step "Quickstart driver"
+  ;;
+web)
+  step "browser e2e (playwright, web/e2e-real)"
+  (cd web && pnpm install --frozen-lockfile && pnpm exec playwright install --with-deps chromium)
+  (cd web && KOINON_API_URL="http://127.0.0.1:$API_PORT" \
+    KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
+    KOINON_E2E_PASSWORD="$password" \
+    PLAYWRIGHT_OUTPUT_DIR="$OUT/playwright" \
+    pnpm exec playwright test -c playwright.real.config.ts) 2>&1 | tee "$OUT/web.log"
+  done_step "Browser e2e"
+  echo "Browser e2e (Playwright, web/e2e-real) passed in $(( $(date +%s) - ts )) s; details in web.log." >"$OUT/quickstart-timings.md"
+  ;;
+esac
 
 status=0
 echo

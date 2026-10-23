@@ -167,7 +167,11 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
 /**
  * buildTimeline merges the ticket's events and its runs' events by time.
  * Consecutive agent text chunks of one run become one item; a tool call's
- * updates fold into the call's item.
+ * updates fold into the call's item. agentd also persists each reply as an
+ * agent message on the ticket (with the run's id); once that message exists,
+ * the streamed text it covers (this run's agent text since its previous
+ * message) is dropped so the reply shows once. Until it arrives, the live text
+ * stays.
  */
 export function buildTimeline(ticketEvents: readonly TicketEvent[], runEvents: Readonly<Record<string, readonly RunEvent[]>>): TimelineItem[] {
   const raw: { item: TimelineItem; order: number }[] = []
@@ -203,5 +207,19 @@ export function buildTimeline(ticketEvents: readonly TicketEvent[], runEvents: R
     }
     out.push(item)
   }
-  return out
+  return dropPersistedReplies(out)
+}
+
+function dropPersistedReplies(items: TimelineItem[]): TimelineItem[] {
+  const streamed = new Map<string, number[]>()
+  const drop = new Set<number>()
+  items.forEach((item, i) => {
+    if (item.type === 'agent-text' && !item.thought) {
+      streamed.set(item.runId, [...(streamed.get(item.runId) ?? []), i])
+    } else if (item.type === 'message' && item.actor === ActorKind.AGENT && item.runId) {
+      for (const j of streamed.get(item.runId) ?? []) drop.add(j)
+      streamed.delete(item.runId)
+    }
+  })
+  return drop.size ? items.filter((_, i) => !drop.has(i)) : items
 }

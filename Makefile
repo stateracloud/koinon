@@ -122,6 +122,10 @@ test-flavors: flavors ## Build the flavor images and run the flavor contract sui
 test-e2e-kind: ## Quickstart e2e on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
 	test/e2e/run.sh
 
+.PHONY: test-e2e-web
+test-e2e-web: ## Browser e2e (Playwright, web/e2e-real) against a real install on kind koinon-e1 (KEEP=1 keeps the cluster)
+	SUITE=web test/e2e/run.sh
+
 # The escape suite (ADR 0025, plan item E2). The admission cases need only envtest and helm; the
 # OpenShell cases need a gateway (KOINON_OPENSHELL_*, see test/escape) and run on the home lab.
 ENVTEST_K8S_VERSION ?= 1.37.0
