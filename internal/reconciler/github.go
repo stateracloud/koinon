@@ -11,12 +11,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/procoduck/koinon/connectors"
-	"github.com/procoduck/koinon/internal/agentconfig"
-	"github.com/procoduck/koinon/internal/connections"
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/execution"
+	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 )
 
 // The repo.read grant in the sandbox (plan item C2). An agent whose approved grant on the

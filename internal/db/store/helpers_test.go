@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/db/store"
 )
 
 var seq atomic.Int64

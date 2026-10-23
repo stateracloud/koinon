@@ -10,12 +10,12 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/procoduck/koinon/internal/agentconfig"
-	"github.com/procoduck/koinon/internal/db/store"
-	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
-	templatev1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1"
-	ticketv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/ticket/v1alpha1"
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/db/store"
+	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
+	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
+	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
+	"github.com/stateracloud/koinon/templates"
 )
 
 func idString(id pgtype.UUID) string {

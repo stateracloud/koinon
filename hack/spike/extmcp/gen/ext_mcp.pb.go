@@ -710,7 +710,7 @@ const file_ext_mcp_proto_rawDesc = "" +
 	"_mcp_error2\xcf\x01\n" +
 	"\x06ExtMcp\x12`\n" +
 	"\fCheckRequest\x12$.agentgateway.dev.ext_mcp.McpRequest\x1a*.agentgateway.dev.ext_mcp.McpRequestResult\x12c\n" +
-	"\rCheckResponse\x12%.agentgateway.dev.ext_mcp.McpResponse\x1a+.agentgateway.dev.ext_mcp.McpResponseResultB7Z5github.com/procoduck/koinon/hack/spike/extmcp/gen;genb\x06proto3"
+	"\rCheckResponse\x12%.agentgateway.dev.ext_mcp.McpResponse\x1a+.agentgateway.dev.ext_mcp.McpResponseResultB7Z5github.com/stateracloud/koinon/hack/spike/extmcp/gen;genb\x06proto3"
 
 var (
 	file_ext_mcp_proto_rawDescOnce sync.Once

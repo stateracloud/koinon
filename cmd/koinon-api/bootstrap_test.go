@@ -23,8 +23,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/procoduck/koinon/internal/auth"
-	"github.com/procoduck/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/db/migrations"
 )
 
 // docker is whether testcontainers can start containers; the Postgres specs skip without it.

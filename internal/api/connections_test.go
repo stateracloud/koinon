@@ -16,11 +16,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/procoduck/koinon/internal/connections"
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
-	"github.com/procoduck/koinon/internal/db/store"
-	connectionv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
+	"github.com/stateracloud/koinon/internal/db/store"
+	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 )
 
 // lockedBuffer collects logs from several goroutines.

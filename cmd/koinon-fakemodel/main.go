@@ -17,8 +17,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/procoduck/koinon/internal/project"
-	"github.com/procoduck/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
 func main() {

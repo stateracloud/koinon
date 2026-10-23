@@ -17,10 +17,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/procoduck/koinon/internal/execution"
-	"github.com/procoduck/koinon/internal/execution/openshell"
-	"github.com/procoduck/koinon/internal/execution/openshell/fakegateway"
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 )
 
 var _ = Describe("Exec", func() {

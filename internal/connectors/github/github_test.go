@@ -20,8 +20,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 )
 
 func TestGitHub(t *testing.T) {

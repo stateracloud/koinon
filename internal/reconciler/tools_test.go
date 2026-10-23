@@ -10,13 +10,13 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/procoduck/koinon/internal/agentconfig"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/execution/openshell"
-	"github.com/procoduck/koinon/internal/execution/openshell/fakegateway"
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/internal/reconciler"
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/templates"
 )
 
 const toolsURL = "http://koinon-api-tools.koinon.svc:8081/mcp"

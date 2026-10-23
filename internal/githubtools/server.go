@@ -49,11 +49,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/procoduck/koinon/connectors"
-	"github.com/procoduck/koinon/internal/agentconfig"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // Tool names.

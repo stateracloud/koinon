@@ -18,9 +18,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/githubtools"
 )
 
 func file(p, content string) githubtools.FileChange {

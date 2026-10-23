@@ -9,7 +9,7 @@
 package agentv1alpha1
 
 import (
-	v1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1"
+	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -917,7 +917,7 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\n" +
 	"ListAgents\x12(.koinon.agent.v1alpha1.ListAgentsRequest\x1a).koinon.agent.v1alpha1.ListAgentsResponse\"\x03\x90\x02\x01\x12j\n" +
 	"\rActivateAgent\x12+.koinon.agent.v1alpha1.ActivateAgentRequest\x1a,.koinon.agent.v1alpha1.ActivateAgentResponse\x12g\n" +
-	"\fArchiveAgent\x12*.koinon.agent.v1alpha1.ArchiveAgentRequest\x1a+.koinon.agent.v1alpha1.ArchiveAgentResponseBNZLgithub.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1;agentv1alpha1b\x06proto3"
+	"\fArchiveAgent\x12*.koinon.agent.v1alpha1.ArchiveAgentRequest\x1a+.koinon.agent.v1alpha1.ArchiveAgentResponseBQZOgithub.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1;agentv1alpha1b\x06proto3"
 
 var (
 	file_koinon_agent_v1alpha1_agent_proto_rawDescOnce sync.Once

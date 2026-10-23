@@ -21,9 +21,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/procoduck/koinon/internal/agentd"
-	"github.com/procoduck/koinon/internal/cli"
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 type config struct {

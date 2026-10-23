@@ -15,11 +15,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
-	"github.com/procoduck/koinon/internal/db/store"
-	approvalv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1"
-	"github.com/procoduck/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
+	"github.com/stateracloud/koinon/internal/db/store"
+	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
+	"github.com/stateracloud/koinon/internal/githubtools"
 )
 
 // pendingApproval records a comment_on_issue call of the fixture's run, as the tool server

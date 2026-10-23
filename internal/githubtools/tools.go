@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	approvalv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1"
+	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 )
 
 // WriteTool describes one ask-tier tool. The tool server, the API and the executor all look

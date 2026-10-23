@@ -19,23 +19,23 @@ import (
 
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 
-	"github.com/procoduck/koinon/internal/connections"
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
-	"github.com/procoduck/koinon/internal/db/store"
-	agentv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1"
-	"github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
-	approvalv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1"
-	"github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
-	"github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
-	connectionv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1"
-	"github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
-	_ "github.com/procoduck/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
-	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
-	"github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
-	"github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
-	ticketv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/ticket/v1alpha1"
-	"github.com/procoduck/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
+	"github.com/stateracloud/koinon/internal/db/store"
+	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
+	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
+	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
+	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
+	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 )
 
 // Org isolation suite (plan item D2). Every RPC is called by a user of org B

@@ -10,10 +10,10 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 
-	"github.com/procoduck/koinon/internal/auth"
-	"github.com/procoduck/koinon/internal/db/store"
-	templatev1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1"
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/db/store"
+	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // SyncTemplates records the given templates (normally templates.All(), the

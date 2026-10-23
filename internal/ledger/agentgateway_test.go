@@ -22,11 +22,11 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/internal/gateway/standalone"
-	"github.com/procoduck/koinon/internal/ledger"
-	"github.com/procoduck/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
 // agentgatewayImage is the agentgateway release Koinon targets (ADR 0048).

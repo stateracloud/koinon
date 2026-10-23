@@ -12,9 +12,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/agentd"
-	"github.com/procoduck/koinon/internal/db/store"
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/db/store"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 )
 
 // chunks returns the text of the run's agent message chunks, in order.

@@ -13,11 +13,11 @@ plugins:
   - local: ["go", "tool", "protoc-gen-go"]
     out: internal/gen/openshell
     opt: &opts
-      - module=github.com/procoduck/koinon/internal/gen/openshell
-      - Mopenshell.proto=github.com/procoduck/koinon/internal/gen/openshell/v1;openshellv1
-      - Mdatamodel.proto=github.com/procoduck/koinon/internal/gen/openshell/datamodel/v1;datamodelv1
-      - Msandbox.proto=github.com/procoduck/koinon/internal/gen/openshell/sandbox/v1;sandboxv1
-      - Moptions.proto=github.com/procoduck/koinon/internal/gen/openshell/options/v1;optionsv1
+      - module=github.com/stateracloud/koinon/internal/gen/openshell
+      - Mopenshell.proto=github.com/stateracloud/koinon/internal/gen/openshell/v1;openshellv1
+      - Mdatamodel.proto=github.com/stateracloud/koinon/internal/gen/openshell/datamodel/v1;datamodelv1
+      - Msandbox.proto=github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1;sandboxv1
+      - Moptions.proto=github.com/stateracloud/koinon/internal/gen/openshell/options/v1;optionsv1
   - local: ["go", "tool", "protoc-gen-go-grpc"]
     out: internal/gen/openshell
     opt: *opts

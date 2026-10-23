@@ -11,8 +11,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/auth"
-	authv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1"
+	"github.com/stateracloud/koinon/internal/auth"
+	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 )
 
 var _ = Describe("bootstrap password login", func() {

@@ -15,7 +15,7 @@ Instructions for coding agents working on Koinon.
 - Decisions live in `docs/adr/` (ADRs are canonical; `docs/design.md` is the overview). Read the
   relevant ADR before changing architecture; write a new one for new decisions.
 - Commits: Conventional Commits, always signed off (`git commit -s`).
-- The module path (`github.com/procoduck/koinon`) and API domain (`koinon.dev`) are defined once in
+- The module path (`github.com/stateracloud/koinon`) and API domain (`koinon.dev`) are defined once in
   `internal/project`; never hard-code them elsewhere in Go.
 - Migrations are forward-only goose files `internal/db/migrations/NNNNN_name.sql`. Never edit a
   merged migration. Tables owned by an org are keyed by `(org_id, id)` with composite foreign keys.

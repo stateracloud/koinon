@@ -12,8 +12,8 @@ import (
 	. "github.com/onsi/gomega"
 	"go.yaml.in/yaml/v3"
 
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/standalone"
 )
 
 // The chart writes agentgateway's first config file itself

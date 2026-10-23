@@ -18,20 +18,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/execution"
-	"github.com/procoduck/koinon/internal/execution/openshell"
-	"github.com/procoduck/koinon/internal/execution/openshell/fakegateway"
-	"github.com/procoduck/koinon/internal/gateway"
-	sandboxv1 "github.com/procoduck/koinon/internal/gen/openshell/sandbox/v1"
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
-	"github.com/procoduck/koinon/internal/ledger"
-	"github.com/procoduck/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/gateway"
+	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/reconciler"
 )
 
 const (
 	namespace = "koinon"
-	image     = "ghcr.io/procoduck/flavor-opencode:test"
+	image     = "ghcr.io/stateracloud/flavor-opencode:test"
 )
 
 var dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)

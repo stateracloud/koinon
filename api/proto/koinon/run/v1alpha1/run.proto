@@ -7,7 +7,7 @@ package koinon.run.v1alpha1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1;runv1alpha1";
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1;runv1alpha1";
 
 // RunService reads, cancels and streams runs (ADR 0030). Every request names
 // the org it acts in; IDs from another org are not found.

@@ -10,10 +10,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/agentconfig"
-	"github.com/procoduck/koinon/internal/execution"
-	"github.com/procoduck/koinon/internal/reconciler"
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // The repo.read grant (plan item C2) as the reconciler renders it, against a real gateway: push,

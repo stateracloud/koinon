@@ -23,7 +23,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
 
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // The NetworkPolicy probe. Koinon's chart restricts who may reach the OTLP receiver and

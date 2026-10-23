@@ -15,14 +15,14 @@ import (
 	"connectrpc.com/connect/v2/connecthttp"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/auth"
-	"github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
-	"github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
-	"github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
-	"github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
-	"github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
-	"github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
-	"github.com/procoduck/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 )
 
 // sessionTransport keeps the session cookie the way a browser would. The cookie is Secure, and

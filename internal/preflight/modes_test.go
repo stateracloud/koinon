@@ -9,7 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 	"go.yaml.in/yaml/v3"
 
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // The modes the preflight and the reconciler read from flags and config files.

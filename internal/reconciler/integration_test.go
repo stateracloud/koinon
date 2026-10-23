@@ -14,10 +14,10 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/execution"
-	"github.com/procoduck/koinon/internal/execution/openshell"
-	"github.com/procoduck/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/reconciler"
 )
 
 // The integration test reconciles one agent against a real OpenShell gateway, only when

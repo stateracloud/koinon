@@ -11,10 +11,10 @@ import (
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/procoduck/koinon/internal/db/store"
-	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
-	"github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
-	"github.com/procoduck/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/db/store"
+	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
 // watchBatch is how many events WatchRun reads per query.

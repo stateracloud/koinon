@@ -8,7 +8,7 @@ import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "koinon/run/v1alpha1/run.proto";
 
-option go_package = "github.com/procoduck/koinon/internal/gen/koinon/ticket/v1alpha1;ticketv1alpha1";
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1;ticketv1alpha1";
 
 // TicketService is the board and the conversation on each ticket (ADR 0017).
 // Every request names the org it acts in; IDs from another org are not found.

@@ -1,4 +1,4 @@
-module github.com/procoduck/koinon/hack/spike/approver
+module github.com/stateracloud/koinon/hack/spike/approver
 
 go 1.27
 

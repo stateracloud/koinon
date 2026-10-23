@@ -11,10 +11,10 @@ import (
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/procoduck/koinon/internal/approvals"
-	"github.com/procoduck/koinon/internal/db/store"
-	approvalv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1"
-	"github.com/procoduck/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/db/store"
+	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
+	"github.com/stateracloud/koinon/internal/githubtools"
 )
 
 // maxNoteBytes bounds an approver's note.

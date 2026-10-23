@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/procoduck/koinon/internal/db/store"
-	authv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1"
+	"github.com/stateracloud/koinon/internal/db/store"
+	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 )
 
 // Membership is the caller's effective role in one org, computed according to

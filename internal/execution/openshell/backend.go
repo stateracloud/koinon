@@ -17,9 +17,9 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/procoduck/koinon/internal/execution"
-	datamodelv1 "github.com/procoduck/koinon/internal/gen/openshell/datamodel/v1"
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/execution"
+	datamodelv1 "github.com/stateracloud/koinon/internal/gen/openshell/datamodel/v1"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 )
 
 // Config is how to reach the gateway. The gateway authenticates clients with mTLS by

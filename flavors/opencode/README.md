@@ -10,7 +10,7 @@ Contract test: `make test-flavors` (`test/flavors`, needs Docker).
 Source references below are to OpenCode
 [`v2.0.24`](https://github.com/anomalyco/opencode/tree/v2.0.24) (commit
 `e7a34f09bfd9134dfade5a8ddb843f7030bc9a69`). The pin and its workarounds are in ADR 0052; moving
-to a later 2.0.x is issue [#85](https://github.com/procoduck/koinon/issues/85).
+to a later 2.0.x is issue [#85](https://github.com/stateracloud/koinon/issues/85).
 
 ## Contract
 

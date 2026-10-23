@@ -8,8 +8,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	approvalv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1"
-	"github.com/procoduck/koinon/internal/githubtools"
+	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
+	"github.com/stateracloud/koinon/internal/githubtools"
 )
 
 var _ = Describe("WriteTool", func() {
