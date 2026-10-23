@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 apiVersion: v2
 name: koinon
 description: Org-and-work layer for AI agents on Kubernetes
