@@ -33,7 +33,7 @@ func main() {
 }
 
 func checkFile(path string) (int, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 G703 -- chart-check passes its own rendered files
 	if err != nil {
 		return 0, err
 	}
