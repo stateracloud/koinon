@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# charts/koinon values shared by every Tilt profile (see Tiltfile and docs/development.md).
+# charts/koinon values shared by every Tilt profile (see Tiltfile and docs/dev/loop.md).
 # The registry, OpenShell, model and flavor values come from values-kind.yaml or
 # values-homelab.yaml; the Tiltfile adds the image tags. No secret goes here: the chart generates
-# the database and bootstrap-admin passwords (the Tiltfile renders it with lookup so that they
-# survive a re-render).
+# the database and bootstrap-admin passwords (Helm's lookup does not work under `helm template`, so the Tiltfile
+# copies the existing passwords from the cluster's Secrets into each render).
 
 # Every Koinon image has this tag besides the unique one Tilt injects into the pod specs; the
 # preflight Job's probe pods name the chart's tag, so it must exist on the node.

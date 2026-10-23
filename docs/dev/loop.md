@@ -35,8 +35,9 @@ The Tiltfile refuses every other context, so a stray `tilt up` cannot touch anot
   `tilt up -- --web=false` leaves it out.
 - The API is port-forwarded to http://localhost:8080.
 
-The chart's hook Jobs run as ordinary resources under Tilt (`helm template` has no hooks), ordered
-with resource dependencies instead.
+The chart's hooks are rendered by `helm template` but applied without hook semantics: the preflight
+and migration Jobs are ordinary resources ordered with resource dependencies, and the preflight's
+`hook-delete-policy` is ignored (its Job stays after it succeeds).
 
 ## kind
 
@@ -60,19 +61,35 @@ One-time setup: the Zot login and the `dev-registry` pull secret ([registry.md](
 
 ```sh
 kubectl config use-context homelab
-tilt up
+tilt up --context homelab
 ```
 
 Tilt builds for `linux/amd64`. The home-lab profile assumes OpenShell at
 `openshell.openshell.svc:8080` and the `kata` RuntimeClass; change them without editing files:
 
 ```sh
-tilt up -- --helm-set openshell.address=openshell.other.svc:8080 --helm-set openshell.runtimeClassName=kata-qemu
-tilt up -- --openshell-tls-secret=openshell-client-tls   # copy the gateway's mTLS client Secret into koinon
-tilt up -- --openshell-namespace=openshell
+tilt up --context homelab -- --helm-set openshell.address=openshell.other.svc:8080 --helm-set openshell.runtimeClassName=kata-qemu
+tilt up --context homelab -- --openshell-tls-secret=   # no mTLS (the default copies openshell-client-tls)
+tilt up --context homelab -- --openshell-namespace=openshell
 ```
 
-mTLS is off on the home lab unless `--openshell-tls-secret` names a Secret in the OpenShell namespace.
+The home-lab gateway requires mTLS (docs/spikes/openshell.md), so both profiles copy the Secret
+`openshell-client-tls` from the OpenShell namespace into `koinon`; `--openshell-tls-secret=` turns
+that off, another name picks another Secret.
+
+### Cluster-wide objects on the home lab
+
+The sandbox ValidatingAdmissionPolicies and their bindings (ADRs 0045, 0048) are cluster-wide and
+deny writes in every `openshell.ai/managed-by=openshell` namespace, which would reach the platform's
+existing sandboxes. The home-lab profile therefore renders them off. `tilt up -- --sandbox-policy`
+turns them on; that needs a Rivet request that Andre approves first. The kind profile always has them.
+
+The cluster-scoped objects the home-lab profile still applies, both needed:
+
+- ClusterRole and ClusterRoleBinding `koinon-koinon-reconciler`: the reconciler lists, watches and
+  deletes `sandboxes.agents.x-k8s.io` in the OpenShell workspace namespaces.
+- ClusterRole and ClusterRoleBinding `koinon-koinon-preflight`: read-only `get` on the CRDs, the
+  Agent Sandbox controller, the RuntimeClass and the like that the install preflight checks.
 
 ## Logging in
 
