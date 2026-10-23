@@ -115,6 +115,28 @@ jobs:
       # helm lint, helm template for each mode and kubeconform; render only, no cluster.
       - run: make chart-check
 
+  # Docs site (plan item DOC1): builds the Starlight site and checks the quickstart against
+  # test/e2e, the chart and the web spec. No deploy while the repository is private. Not a
+  # required check.
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: docs/site/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: docs/site/pnpm-lock.yaml
+      - run: make docs-check
+      - run: make docs
+
   # Escape suite, admission part (plan item E2): the chart's ValidatingAdmissionPolicies against
   # envtest's API server. The OpenShell cases need a gateway and run on the home lab only.
   escape-admission:
