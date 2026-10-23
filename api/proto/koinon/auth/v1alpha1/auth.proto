@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.auth.v1alpha1;
+
+option go_package = "github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1;authv1alpha1";
+
+// AuthService describes the caller's session. Login and logout are plain
+// HTTP endpoints (/auth/login, /auth/oidc/start, /auth/oidc/callback,
+// /auth/logout) because they set and clear the session cookie and redirect.
+service AuthService {
+  // WhoAmI returns the authenticated principal.
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ChangePassword replaces the bootstrap admin's password. It is the only
+  // call besides WhoAmI allowed while a password change is required. Other
+  // sessions of the user are revoked.
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+}
+
+// AuthMethod is how the session was established.
+enum AuthMethod {
+  AUTH_METHOD_UNSPECIFIED = 0;
+  // The bootstrap admin's local password.
+  AUTH_METHOD_PASSWORD = 1;
+  // OpenID Connect authorization code flow.
+  AUTH_METHOD_OIDC = 2;
+}
+
+// OrgRole mirrors the org_role enum in Postgres, lowest to highest.
+enum OrgRole {
+  ORG_ROLE_UNSPECIFIED = 0;
+  ORG_ROLE_VIEWER = 1;
+  ORG_ROLE_MEMBER = 2;
+  ORG_ROLE_ADMIN = 3;
+  ORG_ROLE_OWNER = 4;
+}
+
+// User is the authenticated human.
+message User {
+  string id = 1;
+  string email = 2;
+  string display_name = 3;
+  string personal_org_id = 4;
+}
+
+// Membership is the caller's effective role in one org.
+message Membership {
+  string org_id = 1;
+  string org_slug = 2;
+  string org_display_name = 3;
+  OrgRole role = 4;
+}
+
+// WhoAmIRequest is empty.
+message WhoAmIRequest {}
+
+// WhoAmIResponse describes the caller.
+message WhoAmIResponse {
+  User user = 1;
+  bool platform_admin = 2;
+  repeated Membership memberships = 3;
+  AuthMethod auth_method = 4;
+  // True until the bootstrap admin replaces the one-time password. While set,
+  // every call except WhoAmI and ChangePassword fails with PermissionDenied.
+  bool password_change_required = 5;
+}
+
+// ChangePasswordRequest carries the current and the new password.
+message ChangePasswordRequest {
+  string current_password = 1;
+  // At least 12 characters and different from the current password.
+  string new_password = 2;
+}
+
+// ChangePasswordResponse is empty.
+message ChangePasswordResponse {}

@@ -33,6 +33,17 @@ var (
 	orgParamRE    = regexp.MustCompile(`@org_id\b`)
 )
 
+// crossOrgQueries lists the queries that deliberately span orgs and so are
+// exempt from the org_id rule, keyed by "<file>:<query>". Each entry needs a
+// one-line reason and a review in the PR that adds it; keep the list to
+// queries that act for a user across all of their orgs, before any org is
+// chosen. The test fails if an entry is stale (missing, or no longer flagged).
+var crossOrgQueries = map[string]string{
+	"auth.sql:UpsertGroupMemberships":      "login: grants the user's IdP-group roles in every org mapped to those groups",
+	"auth.sql:DeleteStaleGroupMemberships": "login: revokes the user's IdP-group roles in every org whose group they lost",
+	"auth.sql:ListEffectiveMemberships":    "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
+}
+
 func TestQueriesAreOrgScoped(t *testing.T) {
 	owned := orgOwnedTables(t, "../migrations")
 	for _, table := range []string{"agents", "agent_versions", "tickets", "ticket_events", "runs", "run_events"} {
@@ -52,13 +63,21 @@ func TestQueriesAreOrgScoped(t *testing.T) {
 		t.Fatal("no query files found")
 	}
 	checked := 0
+	exempted := map[string]bool{}
 	for _, f := range files {
 		data, err := os.ReadFile(f) // #nosec G304 -- fixed test paths
 		if err != nil {
 			t.Fatal(err)
 		}
 		for name, sql := range splitQueries(string(data)) {
-			if problem := orgScopeProblem(sql, owned); problem != "" {
+			key := filepath.Base(f) + ":" + name
+			problem := orgScopeProblem(sql, owned)
+			if _, ok := crossOrgQueries[key]; ok {
+				if problem == "" {
+					t.Errorf("%s is allowlisted as cross-org but passes the org_id check; remove it from crossOrgQueries", key)
+				}
+				exempted[key] = true
+			} else if problem != "" {
 				t.Errorf("%s: %s: %s", filepath.Base(f), name, problem)
 			}
 			checked++
@@ -66,6 +85,14 @@ func TestQueriesAreOrgScoped(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no queries found")
+	}
+	for key, reason := range crossOrgQueries {
+		if reason == "" {
+			t.Errorf("%s: allowlisted without a reason", key)
+		}
+		if !exempted[key] {
+			t.Errorf("%s is allowlisted in crossOrgQueries but no such query exists", key)
+		}
 	}
 }
 
