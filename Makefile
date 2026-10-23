@@ -64,6 +64,10 @@ migrate-lint: ## Check migration file names (and, with BASE=<ref>, that merged m
 	hack/migrate-lint-test.sh
 	hack/migrate-lint.sh $(BASE)
 
+.PHONY: chart-check
+chart-check: ## Lint and render the Helm chart in every mode and validate it with kubeconform
+	hack/chart-check.sh
+
 .PHONY: generate
 # The OpenShell client is generated after buf.gen.yaml, whose clean step empties internal/gen.
 generate: ## Regenerate protobuf and sqlc code

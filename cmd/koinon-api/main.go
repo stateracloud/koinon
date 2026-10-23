@@ -2,6 +2,9 @@
 
 // Command koinon-api serves the Koinon API and web UI.
 //
+// "koinon-api migrate" applies the database migrations and exits; the Helm
+// chart runs it as a hook Job with the migration role.
+//
 // Every flag can also be set by an environment variable: KOINON_ plus the
 // flag name in upper case with dashes as underscores (--database-url is
 // KOINON_DATABASE_URL). Secrets are read from files, never from flags.
@@ -35,6 +38,8 @@ type config struct {
 	addr           string
 	databaseURL    string
 	migrate        bool
+	migrateOnly    bool
+	wait           time.Duration
 	trustedOrigins string
 
 	publicURL string
@@ -62,6 +67,7 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.addr, "addr", ":8080", "listen address")
 	fs.StringVar(&c.databaseURL, "database-url", "", "Postgres connection string")
 	fs.BoolVar(&c.migrate, "migrate", false, "apply database migrations before starting")
+	fs.DurationVar(&c.wait, "wait", 5*time.Minute, "how long migrations wait for the database to accept connections")
 	fs.StringVar(&c.trustedOrigins, "trusted-origins", "",
 		"comma-separated extra origins allowed to make state-changing requests (CSRF)")
 
@@ -108,6 +114,13 @@ func parseFlags(args []string) (config, error) {
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
+	switch {
+	case fs.NArg() == 0:
+	case fs.NArg() == 1 && fs.Arg(0) == "migrate":
+		c.migrateOnly = true
+	default:
+		return c, fmt.Errorf("unexpected arguments %q; the only command is migrate", fs.Args())
+	}
 	if c.databaseURL == "" {
 		c.databaseURL = os.Getenv("DATABASE_URL") // as set by the dev manifests
 	}
@@ -146,8 +159,11 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if cfg.migrateOnly {
+		return migrate(ctx, cfg.databaseURL, cfg.wait)
+	}
 	if cfg.migrate {
-		if err := migrate(ctx, cfg.databaseURL); err != nil {
+		if err := migrate(ctx, cfg.databaseURL, cfg.wait); err != nil {
 			return err
 		}
 	}
@@ -235,17 +251,40 @@ func run() error {
 	return nil
 }
 
-func migrate(ctx context.Context, dsn string) error {
+// migrate applies pending migrations, first waiting up to wait for the
+// database to accept connections.
+func migrate(ctx context.Context, dsn string, wait time.Duration) error {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = db.Close() }()
+
+	// On a fresh install the database may still be starting.
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	for {
+		err = db.PingContext(waitCtx)
+		if err == nil {
+			break
+		}
+		slog.Info("waiting for the database", "err", err)
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("database not reachable: %w", err)
+		case <-time.After(2 * time.Second):
+		}
+	}
+
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
 	if err != nil {
 		return err
 	}
-	if _, err := provider.Up(ctx); err != nil {
+	results, err := provider.Up(ctx)
+	for _, r := range results {
+		slog.Info("applied migration", "version", r.Source.Version, "duration", r.Duration)
+	}
+	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil

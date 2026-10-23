@@ -1,0 +1,122 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Native ValidatingAdmissionPolicies for OpenShell sandbox namespaces (ADR 0045, ADR 0048 decision 3;
+never Kyverno). Rules key on the requesting identity, which a pod's creator cannot choose:
+- only the Agent Sandbox controller creates pods or changes their spec;
+- only the OpenShell gateway (and the controller) writes Sandbox objects, and only the gateway
+  writes Secrets;
+- everyone else is denied, cluster admins included, with no break-glass: debug through OpenShell
+  exec and logs.
+Shape rules apply to every pod: no ephemeral containers, host namespaces, hostPath or privileged
+containers, no io.katacontainers.* annotations (they can switch off guest seccomp, spike 8.16), and
+sandbox workload pods run on an allowed runtime class.
+A CEL error denies under failurePolicy Fail; test against real OpenShell pods before relying on it.
+*/ -}}
+{{- if .Values.sandboxPolicy.enabled }}
+{{- $p := .Values.sandboxPolicy }}
+{{- $base := printf "%s-%s" .Release.Namespace (include "koinon.fullname" .) }}
+{{- $pods := printf "%s-sandbox-pods" $base }}
+{{- $objects := printf "%s-sandbox-objects" $base }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $pods }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods, pods/ephemeralcontainers]
+  variables:
+    - name: trusted
+      expression: {{ printf "request.userInfo.username in %s" (toJson $p.identities.pods) | quote }}
+  validations:
+    - expression: "!has(request.subResource) || request.subResource != 'ephemeralcontainers'"
+      message: ephemeral containers are not allowed on sandbox pods
+    - expression: "request.operation != 'CREATE' || variables.trusted"
+      messageExpression: "'only the Agent Sandbox controller may create pods in sandbox namespaces, not ' + request.userInfo.username"
+    - expression: "request.operation != 'UPDATE' || variables.trusted || object.spec == oldObject.spec"
+      messageExpression: "'only the Agent Sandbox controller may change sandbox pod specs, not ' + request.userInfo.username"
+    - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
+      message: hostNetwork is not allowed
+    - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"
+      message: host PID and IPC namespaces are not allowed
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath))"
+      message: hostPath volumes are not allowed
+    - expression: >-
+        object.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) &&
+        (!has(object.spec.initContainers) || object.spec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))
+      message: privileged containers are not allowed
+    - expression: >-
+        !has(object.metadata.labels) || !('openshell.ai/boundary-role' in object.metadata.labels) ||
+        object.metadata.labels['openshell.ai/boundary-role'] != 'workload' ||
+        (has(object.spec.runtimeClassName) && object.spec.runtimeClassName in {{ toJson $p.runtimeClasses }})
+      message: {{ printf "sandbox workload pods must use runtimeClassName %s" (join " or " $p.runtimeClasses) | quote }}
+    - expression: >-
+        !has(object.metadata.annotations) ||
+        object.metadata.annotations.all(k, !k.startsWith('io.katacontainers.'))
+      message: io.katacontainers.* annotations are not allowed on sandbox pods (they can switch off guest seccomp)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $pods }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $pods }}
+  validationActions: {{ toJson $p.validationActions }}
+  matchResources:
+    namespaceSelector:
+      {{- toYaml $p.namespaceSelector | nindent 6 }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $objects }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [agents.x-k8s.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [sandboxes]
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [secrets]
+  variables:
+    - name: isSecret
+      expression: "request.resource.resource == 'secrets'"
+    - name: trusted
+      expression: {{ printf "request.userInfo.username in (variables.isSecret ? %s : %s)" (toJson $p.identities.secrets) (toJson $p.identities.sandboxes) | quote }}
+    # Metadata-only updates (labels, finalizers, owner references) stay open to system controllers.
+    - name: contentUnchanged
+      expression: >-
+        request.operation == 'UPDATE' && (variables.isSecret
+          ? (has(object.data) == has(oldObject.data) && (!has(object.data) || object.data == oldObject.data))
+          : (has(object.spec) == has(oldObject.spec) && (!has(object.spec) || object.spec == oldObject.spec)))
+  validations:
+    - expression: "variables.trusted || variables.contentUnchanged"
+      messageExpression: "'only the OpenShell gateway may write ' + request.resource.resource + ' in sandbox namespaces, not ' + request.userInfo.username"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $objects }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $objects }}
+  validationActions: {{ toJson $p.validationActions }}
+  matchResources:
+    namespaceSelector:
+      {{- toYaml $p.namespaceSelector | nindent 6 }}
+{{- end }}

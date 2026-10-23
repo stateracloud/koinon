@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: Apache-2.0
+postgres:
+  mode: external
+  external:
+    secretName: koinon-db
+gateway:
+  mode: kubernetes
+networkPolicy:
+  enabled: false
+sandboxPolicy:
+  enabled: false
