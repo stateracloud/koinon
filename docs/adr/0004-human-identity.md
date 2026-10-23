@@ -1,6 +1,6 @@
 # 0004. Human identity: generic OIDC with roles in Postgres
 
-- Status: Accepted
+- Status: Accepted; amended below
 - Date: 2026-10-21
 - Decision: [design.md#4](../design.md)
 
@@ -44,6 +44,12 @@ locked out when IdP groups are misconfigured.
 - Follow-ups: the backend-for-frontend login flow ([0022](0022-frontend-architecture.md)) and the mapping of
   `platform-admin` to OpenShell's Platform Admin role for the gateway ([0016](0016-harness-and-deployment.md))
   _(inferred)_.
+
+## Amendment (2026-10-23): org roles
+
+An org has three roles: **owner**, **admin** and **member**. Members use agents and create tickets,
+and see approvals **read-only**; admins and owners decide them, as in
+[0049](0049-v01-scope-decisions.md). A viewer role is not part of this decision.
 
 ## Open questions
 
