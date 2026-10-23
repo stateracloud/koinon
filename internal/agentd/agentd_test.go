@@ -76,21 +76,23 @@ var _ = Describe("Pool", func() {
 		Expect(args).To(Equal([][]string{{
 			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp",
 		}}))
-		// The sweep, mkdir, the instruction file, the harness, the instruction file's and link's
-		// checks before the prompt, then the sweep after the harness has ended.
-		Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(7))
+		// The sweep, mkdir, the instruction file and its check, the harness, the instruction
+		// file's and link's checks before the prompt, then the sweep after the harness has ended.
+		Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(8))
 		execs := e.gw.Execs()
 		sweep := []string{"/bin/sh", "-c", agentd.SweepScript, "sweep"}
+		read := HaveExactElements("/bin/sh", "-c", ContainSubstring("exec cat"), "sh", instructionsFile)
 		Expect(execs[0].GetCommand()).To(Equal(sweep))
 		Expect(execs[1].GetCommand()).To(Equal([]string{"/bin/mkdir", "-p", "/sandbox/work"}))
 		Expect(execs[2].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("mktemp"), "sh", "/sandbox/.koinon", instructionsFile))
-		Expect(execs[3].GetCommand()[0]).To(Equal("/usr/local/bin/koinon-opencode"))
-		Expect(execs[3].GetWorkdir()).To(Equal("/sandbox/work"))
-		Expect(execs[3].GetTty()).To(BeFalse())
-		Expect(execs[3].GetEnvironment()).To(BeEmpty(), "agentd sends nothing secret, and no environment, into the sandbox")
-		Expect(execs[4].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("exec cat"), "sh", instructionsFile))
-		Expect(execs[5].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", opencodeLink, instructionsFile))
-		Expect(execs[6].GetCommand()).To(Equal(sweep))
+		Expect(execs[3].GetCommand()).To(read)
+		Expect(execs[4].GetCommand()[0]).To(Equal("/usr/local/bin/koinon-opencode"))
+		Expect(execs[4].GetWorkdir()).To(Equal("/sandbox/work"))
+		Expect(execs[4].GetTty()).To(BeFalse())
+		Expect(execs[4].GetEnvironment()).To(BeEmpty(), "agentd sends nothing secret, and no environment, into the sandbox")
+		Expect(execs[5].GetCommand()).To(read)
+		Expect(execs[6].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", opencodeLink, instructionsFile))
+		Expect(execs[7].GetCommand()).To(Equal(sweep))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/" + model}))
 		Expect(e.gw.Sandbox(e.workspace, e.sandbox).GetSpec().GetEnvironment()).To(BeEmpty())
 
@@ -444,13 +446,39 @@ var _ = Describe("Pool", func() {
 		Expect(args).To(BeEmpty(), "the harness never starts")
 	})
 
+	It("fails the run before the harness starts when the version's config is unreadable", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		// Valid JSON, but not a config agentd can read: the instructions are no string.
+		_, err := db.Exec(ctx, `UPDATE agent_versions SET config = '{"instructions": ["not", "a", "string"]}'
+			WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("the agent version's config is unreadable: "))
+		Expect(e.gw.Execs()).To(BeEmpty(), "nothing runs in the sandbox")
+	})
+
+	It("fails the run when the written instruction file does not read back", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		// The agent's directory at the path took the file: the read finds no regular file.
+		e.files.onRead = func(data map[string][]byte) { delete(data, instructionsFile) }
+		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("does not hold the file agentd wrote"))
+		_, _, _, args := e.harness.snapshot()
+		Expect(args).To(BeEmpty(), "the harness never starts")
+	})
+
 	DescribeTable("restores the instruction file before the prompt",
 		func(ctx SpecContext, tamper func(map[string][]byte), reason string) {
 			e := newEnv(ctx, store.AgentFlavorOpencode)
-			once := false
+			// The first read checks the file agentd wrote; the agent changes it before the
+			// second, the check before the prompt.
+			reads := 0
 			e.files.onRead = func(data map[string][]byte) {
-				if !once {
-					once = true
+				if reads++; reads == 2 {
 					tamper(data)
 				}
 			}
