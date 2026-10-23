@@ -1,8 +1,9 @@
 # Spike: OpenShell, Agent Sandbox and agentgateway on the home lab
 
-- Status: Planned (not run yet)
+- Status: Run complete (steps 1–8, re-runs and gap checks on 2026-10-21); ADR 0048 proposed; teardown pending;
+  results in `hack/spike/results/`)
 - Tracking: [#3](https://github.com/procoduck/koinon/issues/3)
-- Results: ADR 0048 (written after the run)
+- Results: [ADR 0048](../adr/0048-openshell-spike-results.md)
 - Decisions it verifies: ADR 0002, 0006, 0008, 0009, 0013, 0016, 0029, 0035, 0040–0045
 
 ## Goal
@@ -22,6 +23,12 @@ approval for risky actions.** Each step below has pass/fail criteria. A result i
 - Any **fail** on credentials (step 2), isolation (step 8) or policy (step 3) **stops the spike**.
   Claude then writes up the evidence and proposes the fallback (OpenSandbox credential vault behind
   the `ExecutionBackend` interface, ADR 0016) for Andre to decide.
+- **partial** (added 2026-10-21 by Andre's decision after the code review): enforcement held, but a
+  non-enforcement part of the criterion (logging, API coverage, configuration) is missing. A partial
+  does not trigger the stop rule and is listed as a gap in ADR 0048.
+- A criterion that fails and passes on re-run after a platform fix is recorded as **pass after
+  platform fix**, keeps its fail history, and the fix becomes a Koinon install requirement.
+- Claude asks Andre before any cluster-level change not listed here, including temporary ones.
 - The spike starts once Andre reports that **Zot** (`docs/dev/registry.md`) and **OpenBao** are
   installed (both running since 2026-10-21) and gives the go-ahead. Nothing cluster-wide changes
   beyond the CRDs and namespaces listed below.
@@ -48,8 +55,24 @@ approval for risky actions.** Each step below has pass/fail criteria. A result i
 | --- | --- | --- | --- |
 | Kubernetes Agent Sandbox | v1.0.7 | `agent-sandbox-system` | core `agents.x-k8s.io` CRDs plus `extensions.agents.x-k8s.io` |
 | NVIDIA OpenShell gateway | v0.1.5 | `openshell` | Helm chart from `deploy/helm/openshell`; Kubernetes compute driver |
-| agentgateway | latest 1.6.x | `agentgateway-system` | model gateway and MCP gateway (ADR 0040) |
-| Spike tools | — | `koinon-spike` | approval stub, escape probes, ACP driver (`hack/spike/`) |
+| agentgateway | 1.6.0 | `agentgateway-system` | model gateway and MCP gateway (ADR 0040); standalone mode |
+| agentgateway controller (Kubernetes mode, 5.6 only) | 1.6.0 chart | `agentgateway-system` | its CRDs and own GatewayClass; approved 2026-10-21 |
+| Spike tools | — | `koinon-spike` | approval stub, ExtMCP processor (6.5), escape probes, ACP driver (`hack/spike/`) |
+
+### Approved deviations
+
+Recorded 2026-10-21 after the code review; all approved by Andre.
+
+- Agent Sandbox ships plain manifests, not a Helm chart: `hack/spike/agent-sandbox.sh` applies the
+  pinned release manifest after a SHA-256 check.
+- OpenBao: a dedicated KV mount `openshell-spike` and policy `openshell-spike-gateway` (see "OpenBao
+  setup"), set up by Andre.
+- Platform repo (Andre): label `openshell.ai/sandbox-attachable: "true"` on RuntimeClasses `kata`
+  and `kata-qemu`; Kata guest seccomp enabled on both workers through a Talos
+  `CRICustomizationConfig` (`kata-guest-seccomp`) pointing both handlers at copies of the Kata
+  config with `disable_guest_seccomp = false`.
+- 8.14: Pod Security `enforce=privileged` was set on `openshell-openshell-spike-b` for a few
+  minutes so that server-side dry runs reached the VAP, then removed.
 
 Exact chart versions and values are recorded in `hack/spike/` during the run; `hack/spike/teardown.sh`
 removes every component, namespace and CRD the spike created, and deletes the `koinon-spike` Gitea
@@ -57,9 +80,9 @@ org and the spike's OpenBao paths.
 
 ### Gitea setup
 
-- An admin token (Andre's, from the macOS keychain entry `gitea-kionon`) sits in secret
-  `koinon-spike/gitea-token`. It is used only by setup and teardown scripts on the Mac, never inside a
-  sandbox or by the approval stub.
+- An admin token (Andre's) is read from the macOS keychain entry `gitea-kionon` by the setup and
+  teardown scripts on the Mac; it never enters a sandbox or the approval stub. (A copy in secret
+  `koinon-spike/gitea-token` was created early on and is unused.)
 - Setup creates org `koinon-spike`, repo `koinon-spike/hello` with a protected `main`, and a
   non-admin user `koinon-spike-bot` with write access to that repo only.
 - The bot's token is the spike's real credential: it lives only in OpenBao and reaches Gitea
@@ -78,13 +101,19 @@ Created by Andre on 2026-10-21; the spike changes nothing else in OpenBao.
 
 - All spike secrets live under KV v2 mount `secret/`, path `koinon-spike/` (the bot's Gitea token and
   the random probe secrets for step 2).
-- Policy `koinon-spike-read` (read and list on that path) is bound through Kubernetes auth role
-  `openshell-spike` to the OpenShell gateway's service account `openshell/openshell`. If the chart
-  uses another name, Andre updates the role before step 2.
+- The gateway does not read `koinon-spike/`. OpenShell's `vault` driver stores every credential it
+  is given (and each sandbox's SSH identity) itself, under the fixed prefix
+  `openshell/provider-credentials/`, so it gets its own KV v2 mount `openshell-spike`, outside the
+  platform's ESO store. Policy `openshell-spike-gateway` (create, read, update on
+  `openshell-spike/data/openshell/provider-credentials/*`, delete on the matching metadata path) is
+  bound through Kubernetes auth role `openshell-spike` to service account `openshell/openshell`.
+  The driver requires HTTPS, so it uses `https://bao.apps.lab.example.invalid`. (Revised during
+  step 1; see `hack/spike/results/1-install.md`.)
 - Policy `koinon-spike-admin` (create, read, update, delete on that path only) backs an orphan token
   with a 7-day TTL in the macOS keychain entry `openbao-kionon`. Setup, rotation (2.7) and teardown
   scripts on the Mac use it; it never enters the cluster.
-- Teardown deletes `secret/koinon-spike/`; the policies and role are Andre's to remove.
+- Teardown deletes `secret/koinon-spike/`; the `openshell-spike` mount, the policies and the role are
+  Andre's to remove.
 - The platform's `openbao` ClusterSecretStore has no namespace conditions, so step 8 also checks that
   sandbox identities cannot create `ExternalSecret` objects.
 - Every rendered L7 endpoint uses `enforcement: enforce` (ADR 0045)
@@ -248,12 +277,17 @@ A probe image runs the checks from inside a sandbox as the agent user. Every ite
 | # | Attempt |
 | --- | --- |
 | 8.15 | A standard Kubernetes NetworkPolicy on sandbox namespaces allows egress only to the OpenShell gateway, agentgateway and DNS; with the supervisor proxy bypassed (a probe process that opens sockets directly), 8.1–8.6 stay blocked |
+| 8.16 | A sandbox pod annotated `io.katacontainers.config.runtime.disable_guest_seccomp: "true"` does not run with guest seccomp off: the VAP rejects `io.katacontainers.*` annotations on sandbox pods (tested with and without the rule) |
 
 ## Evidence
 
 For each criterion, record the command, the relevant output and a timestamp in
 `hack/spike/results/<step>.md`. Logs that could contain secrets are redacted before commit; the
 test secret is random and rotated after the spike.
+
+Deviation (approved 2026-10-21): the first run of steps 1–6 and 8 is recorded as summary rows.
+Every later run (re-runs, gap checks, step 7) records the full command, output and timestamp in
+`hack/spike/results/raw/`, with secrets redacted.
 
 ## Results
 
