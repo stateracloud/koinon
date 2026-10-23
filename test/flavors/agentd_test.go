@@ -207,6 +207,14 @@ var _ = Describe("koinon-agentd with the opencode flavor", Ordered, func() {
 		expectOnlyMain(ctx, sb)
 	}, SpecTimeout(4*time.Minute))
 
+	It("replaces a directory the agent put at the instruction file's path, and runs", func(ctx SpecContext) {
+		sb.run(ctx, "sh", "-c", `rm -rf "$1" && mkdir -p "$1/inner"`, "sh", instructionsPath)
+		r := runTicket(ctx, helloPrompt)
+		Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
+		Expect(sb.run(ctx, "stat", "-c", "%F", instructionsPath)).To(Equal("regular file\n"))
+		Expect(sb.run(ctx, "cat", instructionsPath)).To(ContainSubstring(instructionsMarker))
+	}, SpecTimeout(4*time.Minute))
+
 	It("rejects the harness's requests for paths outside the session directory", func(ctx SpecContext) {
 		r := runTicket(ctx, readPrompt)
 		var perms []store.RunEvent
