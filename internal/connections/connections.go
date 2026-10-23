@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package connections holds what every user of a connection needs besides its
-// Postgres row (plan item C1): the Kubernetes Secret with its secure-input
-// fields (ADR 0021, 0049), loading a GitHub App from it, and the setup guide's
-// built-in checks.
+// Postgres row (plan item C1): its secret fields, stored as an envelope in
+// connections.secret_envelope (ADR 0056, plan item PV1; before that they lived
+// in a Kubernetes Secret per connection, ADR 0021, 0049), loading a GitHub App
+// from them, and the setup guide's built-in checks.
 //
-// Secret material only ever moves between the API request, this package and
-// the Kubernetes API. It is never stored in Postgres, returned, logged or put
-// into an error.
+// Secret material moves between the API request (or a declarative Secret),
+// this package and the secret store. It is never returned, logged or put into
+// an error.
 package connections
 
 import (
@@ -19,6 +20,7 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +30,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 // Labels and annotations on connection Secrets. Values are IDs, never names.
@@ -44,6 +47,76 @@ var (
 // GitHubPrivateKeyField is the setup-guide field (and Secret data key) of the
 // GitHub App private key.
 const GitHubPrivateKeyField = "privateKey"
+
+// Opener decrypts envelopes; *secretstore.Keyring is one.
+type Opener interface {
+	Open(b secretstore.Binding, e secretstore.Envelope) ([]byte, error)
+}
+
+// Sealer encrypts values; *secretstore.Keyring is one.
+type Sealer interface {
+	Seal(b secretstore.Binding, plaintext []byte) (secretstore.Envelope, error)
+}
+
+// ErrNoKeyring is returned when Koinon runs without key-encryption keys, so secret fields
+// cannot be stored or read.
+var ErrNoKeyring = errors.New("connections: no key-encryption keys configured (mount the KEK Secret into koinon-api)")
+
+// Table and column of the envelope, as bound into its AAD.
+const (
+	Table  = "connections"
+	Column = "secret_envelope"
+)
+
+// BindingFor is the AAD binding of a connection's secret fields.
+func BindingFor(org, id pgtype.UUID) secretstore.Binding {
+	return secretstore.Binding{OrgID: org.String(), Table: Table, RowID: id.String(), Column: Column}
+}
+
+// SealFields encrypts a connection's secret fields (setup-guide field ID to value) for its
+// row. Fields must never be logged.
+func SealFields(sealer Sealer, org, id pgtype.UUID, fields map[string][]byte) ([]byte, error) {
+	if sealer == nil {
+		return nil, ErrNoKeyring
+	}
+	plain, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(plain)
+	env, err := sealer.Seal(BindingFor(org, id), plain)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(env)
+}
+
+// OpenFields decrypts the secret fields of c.
+func OpenFields(opener Opener, c store.Connection) (map[string][]byte, error) {
+	if opener == nil {
+		return nil, ErrNoKeyring
+	}
+	if len(c.SecretEnvelope) == 0 {
+		return nil, fmt.Errorf("connections: connection %s has no stored secret fields yet", c.ID.String())
+	}
+	var env secretstore.Envelope
+	if err := json.Unmarshal(c.SecretEnvelope, &env); err != nil {
+		return nil, fmt.Errorf("connections: connection %s: unreadable envelope", c.ID.String())
+	}
+	plain, err := opener.Open(BindingFor(c.OrgID, c.ID), env)
+	if err != nil {
+		return nil, fmt.Errorf("connections: connection %s: %w", c.ID.String(), err)
+	}
+	defer clear(plain)
+	var fields map[string][]byte
+	if err := json.Unmarshal(plain, &fields); err != nil {
+		return nil, fmt.Errorf("connections: connection %s: unreadable secret fields", c.ID.String())
+	}
+	return fields, nil
+}
+
+// Legacy Kubernetes Secrets. Before PV1 a connection's secret fields lived in a Secret named
+// by connections.secret_name; koinon-api moves them into the store at startup (Migrate).
 
 // Secret is a connection's secret fields as stored in a Kubernetes Secret.
 // Data must never be logged; Secret's String hides it.
@@ -70,10 +143,6 @@ type SecretStore interface {
 	// Delete removes the Secret; a missing Secret is not an error.
 	Delete(ctx context.Context, name string) error
 }
-
-// ErrNoSecretStore is returned when Koinon runs without access to Kubernetes
-// Secrets, so secure inputs cannot be stored.
-var ErrNoSecretStore = errors.New("connections: no secret store configured (koinon-api needs Kubernetes access to write connection Secrets)")
 
 // SecretName derives a connection's Secret name from its org and ID.
 func SecretName(org, id [16]byte) string {
@@ -148,28 +217,22 @@ func ParseGitHubConfig(raw []byte) (GitHubConfig, error) {
 	return c, nil
 }
 
-// LoadGitHubApp reads a GitHub connection's App from its row and Secret.
-func LoadGitHubApp(ctx context.Context, secrets SecretStore, c store.Connection) (github.App, error) {
+// LoadGitHubApp reads a GitHub connection's App from its row and stored secret fields.
+func LoadGitHubApp(_ context.Context, opener Opener, c store.Connection) (github.App, error) {
 	if c.Connector != connectors.GitHubID {
 		return github.App{}, fmt.Errorf("connections: %s is a %s connection, not GitHub", c.ID.String(), c.Connector)
-	}
-	if secrets == nil {
-		return github.App{}, ErrNoSecretStore
 	}
 	cfg, err := ParseGitHubConfig(c.Config)
 	if err != nil {
 		return github.App{}, err
 	}
-	sec, found, err := secrets.Get(ctx, c.SecretName)
+	fields, err := OpenFields(opener, c)
 	if err != nil {
 		return github.App{}, err
 	}
-	if !found {
-		return github.App{}, fmt.Errorf("connections: the Secret %s of connection %s is missing; create the connection again", c.SecretName, c.ID.String())
-	}
-	key, err := github.ParsePrivateKey(sec.Data[GitHubPrivateKeyField])
+	key, err := github.ParsePrivateKey(fields[GitHubPrivateKeyField])
 	if err != nil {
-		return github.App{}, fmt.Errorf("connections: Secret %s: %w", c.SecretName, err)
+		return github.App{}, fmt.Errorf("connections: connection %s: %w", c.ID.String(), err)
 	}
 	return github.App{AppID: cfg.AppID, InstallationID: cfg.InstallationID, Key: key}, nil
 }

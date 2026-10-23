@@ -100,9 +100,9 @@ func (s *Service) target(ctx context.Context, row store.ApprovalRequest) (github
 	if err != nil {
 		return github.Repo{}, github.App{}, fmt.Errorf("load the GitHub connection: %w", err)
 	}
-	app, err := connections.LoadGitHubApp(ctx, s.secrets, conn)
+	app, err := connections.LoadGitHubApp(ctx, s.keys, conn)
 	if err != nil {
-		if errors.Is(err, connections.ErrNoSecretStore) {
+		if errors.Is(err, connections.ErrNoKeyring) {
 			return github.Repo{}, github.App{}, permanentError{err}
 		}
 		return github.Repo{}, github.App{}, err

@@ -25,34 +25,11 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 )
 
 // markAsk makes the fake harness call create_pull_request through Koinon's tool server.
 const markAsk = "ASK"
-
-type memSecrets struct {
-	mu sync.Mutex
-	m  map[string]connections.Secret
-}
-
-func (s *memSecrets) Create(_ context.Context, sec connections.Secret) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.m == nil {
-		s.m = map[string]connections.Secret{}
-	}
-	s.m[sec.Name] = sec
-	return nil
-}
-
-func (s *memSecrets) Get(_ context.Context, name string) (connections.Secret, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sec, ok := s.m[name]
-	return sec, ok, nil
-}
-
-func (s *memSecrets) Delete(context.Context, string) error { return nil }
 
 type headerTransport struct{ agent string }
 
@@ -75,15 +52,16 @@ type ghEnv struct {
 func newGitHubEnv(ctx context.Context) *ghEnv {
 	g := &ghEnv{gh: githubtest.New()}
 	DeferCleanup(g.gh.Server.Close)
-	secrets := &memSecrets{}
+	ring := secretstoretest.Keyring()
 	g.env = newEnvWith(ctx, store.AgentFlavorOpencode, func(e *env) string {
 		connID := uuid.New()
-		name := connections.SecretName(e.org.Bytes, connID)
-		Expect(secrets.Create(ctx, connections.Secret{Name: name, Data: map[string][]byte{connections.GitHubPrivateKeyField: g.gh.PEM}})).To(Succeed())
+		id := pgtype.UUID{Bytes: connID, Valid: true}
+		env, err := connections.SealFields(ring, e.org, id, map[string][]byte{connections.GitHubPrivateKeyField: g.gh.PEM})
+		Expect(err).NotTo(HaveOccurred())
 		cfg, _ := json.Marshal(connections.GitHubConfig{AppID: g.gh.AppID, InstallationID: g.gh.InstallationID})
-		_, err := q.CreateConnection(ctx, store.CreateConnectionParams{
-			OrgID: e.org, ID: pgtype.UUID{Bytes: connID, Valid: true}, Connector: "github", DisplayName: "acme",
-			Config: cfg, SecretName: name,
+		_, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+			OrgID: e.org, ID: id, Connector: "github", DisplayName: "acme",
+			Config: cfg, SecretEnvelope: env, Source: store.ConfigSourceUi,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		return `{"instructions":"help","model":"` + model + `",` +
@@ -93,7 +71,7 @@ func newGitHubEnv(ctx context.Context) *ghEnv {
 	Expect(db.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, g.org).Scan(&g.slug)).To(Succeed())
 	log := slog.New(slog.NewTextHandler(GinkgoWriter, nil))
 	g.svc = approvals.New(db, approvals.Options{
-		Secrets: secrets, GitHub: github.NewClient(github.Options{BaseURL: g.gh.URL()}), Logger: log,
+		Keys: ring, GitHub: github.NewClient(github.Options{BaseURL: g.gh.URL()}), Logger: log,
 	})
 	tools, err := githubtools.New(db, githubtools.Options{Logger: log})
 	Expect(err).NotTo(HaveOccurred())

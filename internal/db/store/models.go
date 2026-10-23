@@ -228,6 +228,48 @@ func (ns NullAuthMethod) Value() (driver.Value, error) {
 	return string(ns.AuthMethod), nil
 }
 
+type ConfigSource string
+
+const (
+	ConfigSourceUi     ConfigSource = "ui"
+	ConfigSourceSecret ConfigSource = "secret"
+)
+
+func (e *ConfigSource) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ConfigSource(s)
+	case string:
+		*e = ConfigSource(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ConfigSource: %T", src)
+	}
+	return nil
+}
+
+type NullConfigSource struct {
+	ConfigSource ConfigSource
+	Valid        bool // Valid is true if ConfigSource is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullConfigSource) Scan(value interface{}) error {
+	if value == nil {
+		ns.ConfigSource, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ConfigSource.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullConfigSource) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ConfigSource), nil
+}
+
 type ConnectionStatus string
 
 const (
@@ -718,6 +760,20 @@ type AgentVersion struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type ApiToken struct {
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
+	Name       string
+	Prefix     string
+	TokenHash  []byte
+	Role       OrgRole
+	CreatedBy  pgtype.UUID
+	ExpiresAt  pgtype.Timestamptz
+	RevokedAt  pgtype.Timestamptz
+	LastUsedAt pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+}
+
 type ApprovalRequest struct {
 	OrgID               pgtype.UUID
 	ID                  pgtype.UUID
@@ -746,13 +802,26 @@ type ApprovalRequest struct {
 	DeliveredAt         pgtype.Timestamptz
 }
 
+type AuditEvent struct {
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
+	ActorKind  string
+	ActorID    string
+	Action     string
+	TargetKind string
+	TargetID   string
+	Summary    []byte
+	RequestID  string
+	CreatedAt  pgtype.Timestamptz
+}
+
 type Connection struct {
 	OrgID             pgtype.UUID
 	ID                pgtype.UUID
 	Connector         string
 	DisplayName       string
 	Config            []byte
-	SecretName        string
+	SecretName        pgtype.Text
 	SecretFingerprint string
 	Status            ConnectionStatus
 	LastTestedAt      pgtype.Timestamptz
@@ -760,6 +829,10 @@ type Connection struct {
 	CreatedBy         pgtype.UUID
 	CreatedAt         pgtype.Timestamptz
 	UpdatedAt         pgtype.Timestamptz
+	SecretEnvelope    []byte
+	Source            ConfigSource
+	ManagedBySecret   pgtype.Text
+	DeclaredVersion   pgtype.Text
 }
 
 type LocalCredential struct {
@@ -770,6 +843,23 @@ type LocalCredential struct {
 	PasswordChangedAt  pgtype.Timestamptz
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
+}
+
+type Model struct {
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	ProviderID      pgtype.UUID
+	Name            string
+	Guard           bool
+	InputRate       pgtype.Text
+	OutputRate      pgtype.Text
+	CacheReadRate   pgtype.Text
+	Source          ConfigSource
+	ManagedBySecret pgtype.Text
+	DisabledReason  pgtype.Text
+	CreatedBy       pgtype.UUID
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 type OidcLoginFlow struct {
@@ -825,6 +915,22 @@ type PlatformAdmin struct {
 	UserID    pgtype.UUID
 	GrantedBy pgtype.UUID
 	GrantedAt pgtype.Timestamptz
+}
+
+type Provider struct {
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	Name            string
+	Type            string
+	Url             string
+	ApiKey          []byte
+	Source          ConfigSource
+	ManagedBySecret pgtype.Text
+	DeclaredVersion pgtype.Text
+	DisabledReason  pgtype.Text
+	CreatedBy       pgtype.UUID
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 type Run struct {

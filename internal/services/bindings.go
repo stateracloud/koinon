@@ -113,9 +113,9 @@ func (s *Server) bindGrants(ctx context.Context, org pgtype.UUID, t *templates.T
 // binding stores GitHub's spelling. It returns the repositories in that spelling, in the order
 // given. Nothing is written to GitHub.
 func (s *Server) checkInstallation(ctx context.Context, conn store.Connection, field string, repos []string) ([]string, error) {
-	app, err := connections.LoadGitHubApp(ctx, s.secrets, conn)
+	app, err := connections.LoadGitHubApp(ctx, s.keys, conn)
 	if err != nil {
-		if errors.Is(err, connections.ErrNoSecretStore) {
+		if errors.Is(err, connections.ErrNoKeyring) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err.Error())
 		}
 		// The messages name the Secret or say the key is malformed; never its content.

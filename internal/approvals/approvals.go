@@ -79,8 +79,8 @@ const (
 
 // Options configures a Service.
 type Options struct {
-	// Secrets holds connections' private keys. Without it execution fails.
-	Secrets connections.SecretStore
+	// Keys opens connections' stored secret fields. Without it execution fails.
+	Keys connections.Opener
 	// GitHub defaults to a client for api.github.com.
 	GitHub *github.Client
 	// ExecutionLease is how long one executor holds a request. Default
@@ -97,7 +97,7 @@ type Options struct {
 type Service struct {
 	pool    *pgxpool.Pool
 	q       *store.Queries
-	secrets connections.SecretStore
+	keys    connections.Opener
 	gh      *github.Client
 	lease   time.Duration
 	maxExec int
@@ -119,7 +119,7 @@ func New(pool *pgxpool.Pool, opts Options) *Service {
 		opts.Logger = slog.Default()
 	}
 	return &Service{
-		pool: pool, q: store.New(pool), secrets: opts.Secrets, gh: opts.GitHub,
+		pool: pool, q: store.New(pool), keys: opts.Keys, gh: opts.GitHub,
 		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger,
 	}
 }
