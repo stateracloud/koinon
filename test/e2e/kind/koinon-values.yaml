@@ -3,6 +3,7 @@
 # charts/koinon values for the E1 quickstart e2e on kind: runc instead of Kata (kind has no VM
 # runtime), CNPG, the fake model server as the OpenAI-compatible upstream and the fake GitHub as
 # the GitHub API. Images come from ko/buildx and are loaded into the node (kind.local).
+# test/e2e/run.sh installs this file as the quickstart's values.yaml.
 image:
   registry: kind.local
   tag: e2e
@@ -20,6 +21,10 @@ gateway:
 model:
   baseUrl: http://fakemodel.koinon-e2e-fakes.svc:8080/v1
   provider: openai
+  # The quickstart's model-key block creates this Secret (with a dummy key here).
+  apiKeySecret:
+    name: koinon-openrouter
+    key: api_key
   models:
     # The fake model script test/fakemodel/scripts/repo-helper.yaml.
     - name: repo-helper
@@ -36,3 +41,8 @@ openshell:
 
 sandboxPolicy:
   runtimeClasses: [runc]
+
+# kind has no Kata, so the guest seccomp probe does not apply on runc.
+preflight:
+  seccompProbe:
+    enabled: false
