@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -272,4 +273,89 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 			}
 		}
 	}, NodeTimeout(4*time.Minute))
+
+	It("has no ServiceAccount token mounted anywhere, projected or not", func(ctx SpecContext) {
+		res := probe(ctx,
+			check{"id": "mounts", "op": "mounts", "contains": []string{"serviceaccount", "kubernetes.io", "secrets"}},
+			check{"id": "files", "op": "find", "roots": scanRoots(), "contains": []string{"/serviceaccount", "kubernetes.io", "/.kube", "/kubeconfig"}},
+			check{"id": "tokens dir", "op": "read", "path": "/var/run/secrets/tokens"},
+			check{"id": "secrets dir", "op": "read", "path": "/var/run/secrets"},
+		)
+		Expect(res["mounts"]).To(BeEmpty(), "mounts that look like Kubernetes secret volumes")
+		Expect(res["files"]).To(BeEmpty(), "files that look like Kubernetes credentials")
+		Expect(res["tokens dir"]).To(BeElementOf("ENOENT", "EACCES"))
+		Expect(res["secrets dir"]).To(BeElementOf("ENOENT", "EACCES"))
+	}, NodeTimeout(2*time.Minute))
+
+	It("cannot reach the platform's services by name or Service IP", func(ctx SpecContext) {
+		// Spike 8.4 and 8.5: the API server and the gateway's and agentgateway's ports. Names
+		// resolve to the synthetic range, so the refusal has to come from the connect.
+		deniedAtConnect(ctx, targets(envOr("KOINON_ESCAPE_INTERNAL",
+			"10.96.0.1:6443,openshell.openshell.svc.cluster.local:8080,agentgateway-mgmt.agentgateway.svc.cluster.local:4001,agentgateway.agentgateway.svc.cluster.local:8080")))
+	}, NodeTimeout(2*time.Minute))
+
+	It("runs the agent without capabilities, with no_new_privs and a seccomp filter", func(ctx SpecContext) {
+		res := probe(ctx,
+			check{"id": "status", "op": "status"},
+			check{"id": "setuid", "op": "syscall", "name": "setuid0"},
+		)
+		st := res["status"].(map[string]any)
+		Expect(st).To(HaveKeyWithValue("CapEff", MatchRegexp(`^0+$`)))
+		Expect(st).To(HaveKeyWithValue("CapPrm", MatchRegexp(`^0+$`)))
+		Expect(st).To(HaveKeyWithValue("NoNewPrivs", "1"))
+		Expect(st).To(HaveKeyWithValue("Seccomp", "2"), "seccomp filter mode")
+		Expect(res["setuid"]).To(Equal("EPERM"))
+	}, NodeTimeout(2*time.Minute))
+
+	It("denies writes outside the allowed paths (Landlock) and the filtered syscalls (seccomp)", func(ctx SpecContext) {
+		blocked := []string{"EPERM", "EACCES"}
+		res := probe(ctx,
+			check{"id": "etc", "op": "write", "path": "/etc/koinon-escape"},
+			check{"id": "usr", "op": "write", "path": "/usr/koinon-escape"},
+			check{"id": "var", "op": "write", "path": "/var/koinon-escape"},
+			check{"id": "dotdot", "op": "write", "path": "/sandbox/../etc/koinon-escape"},
+			check{"id": "tmp", "op": "write", "path": "/tmp/koinon-escape"},
+			check{"id": "mount", "op": "syscall", "name": "mount"},
+			check{"id": "unshare user", "op": "syscall", "name": "unshare_user"},
+			check{"id": "unshare mount", "op": "syscall", "name": "unshare_mount"},
+			check{"id": "bpf", "op": "syscall", "name": "bpf"},
+			check{"id": "keyctl", "op": "syscall", "name": "keyctl"},
+			check{"id": "add_key", "op": "syscall", "name": "add_key"},
+			check{"id": "perf", "op": "syscall", "name": "perf_event_open"},
+			check{"id": "raw packet", "op": "syscall", "name": "raw_packet"},
+			check{"id": "raw inet", "op": "syscall", "name": "raw_inet"},
+		)
+		Expect(res["tmp"]).To(Equal("ok"), "control: /tmp is writable")
+		for _, id := range []string{"etc", "usr", "var", "dotdot", "mount", "unshare user", "unshare mount", "bpf", "keyctl", "add_key", "perf"} {
+			Expect(res[id]).To(BeElementOf(blocked), id)
+		}
+		for _, id := range []string{"raw packet", "raw inet"} {
+			Expect(res[id]).To(BeElementOf("EPERM", "EACCES", "EPROTONOSUPPORT", "EAFNOSUPPORT"), id)
+		}
+	}, NodeTimeout(2*time.Minute))
+
+	It("cannot attach to or read the supervisor (PID 1)", func(ctx SpecContext) {
+		res := probe(ctx,
+			check{"id": "ptrace", "op": "syscall", "name": "ptrace_pid1"},
+			check{"id": "mem", "op": "syscall", "name": "proc1_mem"},
+		)
+		Expect(res["ptrace"]).To(BeElementOf("EPERM", "EACCES", "ESRCH"))
+		Expect(res["mem"]).To(BeElementOf("EPERM", "EACCES", "ENOENT"))
+	}, NodeTimeout(2*time.Minute))
+
+	// Kata is a manual release gate (ADR 0045): the home lab's dev profile may run sandboxes
+	// under another runtime class, and CI has no Kata at all.
+	It("runs in a Kata guest, not on the host kernel", func(ctx SpecContext) {
+		host := os.Getenv("KOINON_ESCAPE_HOST_KERNEL")
+		if host == "" {
+			Skip("KOINON_ESCAPE_HOST_KERNEL (the nodes' uname -r) is not set: Kata is a manual release gate")
+		}
+		res := probe(ctx, check{"id": "kernel", "op": "kernel"})
+		k := res["kernel"].(map[string]any)
+		if k["release"] == host {
+			Skip("the sandbox runs on the host kernel " + host + ", so it does not run under Kata")
+		}
+		Expect(k["release"]).NotTo(Equal(host), "guest kernel differs from the host's")
+		Expect(k["hypervisor"]).To(BeTrue(), "the guest sees a hypervisor")
+	}, NodeTimeout(2*time.Minute))
 })
