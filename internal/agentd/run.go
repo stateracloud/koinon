@@ -290,6 +290,12 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.dbErr(ctx, "load ticket", err)
 	}
+	// An unreadable config would leave the run without its instructions (and model): it fails
+	// before anything starts.
+	versionText, err := versionInstructions(version.Config)
+	if err != nil {
+		return &failure{reason: "the agent version's config is unreadable: " + err.Error()}
+	}
 	model := versionModel(version.Config)
 	if model == "" {
 		model = cfg.DefaultModel
@@ -331,7 +337,7 @@ func (r *runner) execute(ctx context.Context) error {
 	r.cwd = cwd
 	// The run's own version decides the instructions, so a version bump applies at the next
 	// run without recreating the sandbox.
-	instructions := instructionsFile(versionInstructions(version.Config))
+	instructions := instructionsFile(versionText)
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}

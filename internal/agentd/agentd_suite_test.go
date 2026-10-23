@@ -244,7 +244,7 @@ func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
 	e.workspace, e.sandbox = execution.WorkspaceName(e.org.Bytes), execution.AgentSandboxName(e.agent.ID.Bytes)
 	_, err = e.backend.EnsureWorkspace(ctx, e.workspace, nil)
 	Expect(err).NotTo(HaveOccurred())
-	_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})
+	_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "ghcr.io/procoduck/flavor-opencode:test"})
 	Expect(err).NotTo(HaveOccurred())
 
 	e.harness = newHarness()
