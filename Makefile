@@ -77,25 +77,29 @@ generate: ## Regenerate protobuf and sqlc code
 
 # Flavor images build with docker buildx and load into the local Docker image store; nothing is
 # pushed. FLAVOR_PLATFORMS=linux/amd64,linux/arm64 builds both (needs the containerd image store).
-FLAVOR_TAG       ?= dev
+# The tag is dev-<12 hex of a hash of the flavor's build context> (hack/flavor-tag.sh), so worktrees
+# on different branches never overwrite each other's image; test/flavors computes the same tag.
+# FLAVOR_TAG=x forces one tag for every flavor.
+FLAVOR_TAG       ?=
 FLAVOR_PLATFORMS ?=
+flavor_tag        = $(or $(FLAVOR_TAG),$(shell hack/flavor-tag.sh $(1)))
 
 FLAVORS          := opencode hermes pi
 
 .PHONY: flavor-opencode
-flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:$(FLAVOR_TAG))
+flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:dev-<hash>)
 	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
-		--tag koinon/flavor-opencode:$(FLAVOR_TAG) flavors/opencode
+		--tag koinon/flavor-opencode:$(call flavor_tag,opencode) flavors/opencode
 
 .PHONY: flavor-hermes
-flavor-hermes: ## Build the Hermes flavor image (koinon/flavor-hermes:$(FLAVOR_TAG))
+flavor-hermes: ## Build the Hermes flavor image (koinon/flavor-hermes:dev-<hash>)
 	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
-		--tag koinon/flavor-hermes:$(FLAVOR_TAG) flavors/hermes
+		--tag koinon/flavor-hermes:$(call flavor_tag,hermes) flavors/hermes
 
 .PHONY: flavor-pi
-flavor-pi: ## Build the pi flavor image (koinon/flavor-pi:$(FLAVOR_TAG))
+flavor-pi: ## Build the pi flavor image (koinon/flavor-pi:dev-<hash>)
 	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
-		--tag koinon/flavor-pi:$(FLAVOR_TAG) flavors/pi
+		--tag koinon/flavor-pi:$(call flavor_tag,pi) flavors/pi
 
 .PHONY: flavors
 flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images
