@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # charts/koinon values shared by every Tilt profile (see Tiltfile and docs/dev/loop.md).
-# The registry, OpenShell, model and flavor values come from values-kind.yaml or
+# The registry, OpenShell and flavor values come from values-kind.yaml or
 # values-homelab.yaml; the Tiltfile adds the image tags. No secret goes here: the chart generates
 # the database and bootstrap-admin passwords (Helm's lookup does not work under `helm template`, so the Tiltfile
 # copies the existing passwords from the cluster's Secrets into each render).

@@ -16,7 +16,7 @@ not built yet, the page says so and links the decision.
 
 ## Guides
 
-- [Models](/guides/models/). OpenRouter with the routing guard, and Ollama.
+- [Models](/guides/models/). Providers and models per org: Secrets, the admin API, OpenRouter with the routing guard, Ollama.
 - [GitHub App](/guides/github-app/). Create the App and connect it.
 - [OIDC login](/guides/oidc/). Sign in with your identity provider.
 - [Gateway modes](/guides/gateway-modes/). Standalone, Kubernetes and shared agentgateway.

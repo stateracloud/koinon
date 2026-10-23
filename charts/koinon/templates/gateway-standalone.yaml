@@ -5,38 +5,20 @@ because the budget store is SQLite on a PVC.
 
 The config ConfigMap belongs to the reconciler (plan item G1), which rewrites it with per-agent key
 hashes, budgets and MCP routes; agentgateway hot-reloads it. The chart writes a bootstrap config
-(the model upstream from values, no keys, so every request is refused) on install only. On upgrade
+(no providers and no keys, so every request is refused) on install only. On upgrade
 it renders the live data unchanged, so it never undoes the reconciler's work.
 */ -}}
 {{- if eq .Values.gateway.mode "standalone" }}
 {{- $name := include "koinon.componentName" (list . "gateway") }}
 {{- $cmName := include "koinon.gatewayConfigName" . }}
 {{- $gw := .Values.gateway.standalone }}
-{{- $keyDir := "/secrets/model" }}
 {{- $existing := lookup "v1" "ConfigMap" .Release.Namespace $cmName }}
 {{- $config := "" }}
 {{- if and $existing $existing.data (hasKey $existing.data "config.yaml") }}
 {{- $config = index $existing.data "config.yaml" }}
 {{- else }}
-{{- $models := list }}
-{{- $catalog := dict }}
-{{- /* Only priced models are served, as in the reconciler's config (ADR 0041). */ -}}
-{{- range $model := .Values.model.models }}
-{{- if $model.rates }}
-{{- $params := dict "baseUrl" (required "model.baseUrl is required when model.models is set" $.Values.model.baseUrl) }}
-{{- if $.Values.model.apiKeySecret.name }}
-{{- $_ := set $params "apiKey" (dict "file" (printf "%s/%s" $keyDir $.Values.model.apiKeySecret.key)) }}
-{{- end }}
-{{- $m := dict "name" $model.name "provider" (dict "custom" (dict "providerOverride" $.Values.model.provider "formats" (list (dict "type" "completions")))) "params" $params }}
-{{- with $model.overrides }}
-{{- $_ := set $m "overrides" . }}
-{{- end }}
-{{- $models = append $models $m }}
-{{- $_ := set $catalog $model.name (dict "rates" $model.rates) }}
-{{- end }}
-{{- end }}
 {{- /*
-Same document as internal/gateway/standalone renders for the same models and no keys, for the
+Same document as internal/gateway/standalone renders for an empty State, for the
 fixed revision "bootstrap" (standalone.BootstrapRevision) instead of a content hash
 (internal/gateway/standalone/chart_test.go compares them): agentgateway keeps the static `config`
 section of the file it started with, and refuses to reload a file with frontendPolicies.accessLog
@@ -48,16 +30,15 @@ detects reloads with each revision's probe key on the llm listener (standalone.R
 {{- $base := dict "database" (dict "url" "sqlite:///data/agentgateway.db?mode=rwc") "adminAddr" "localhost:15000" "statsAddr" "[::]:15020" "readinessAddr" "[::]:15021" "logging" (dict "format" "json") }}
 {{- $otlp := dict "host" (printf "%s.%s.svc:%v" (include "koinon.componentName" (list . "api")) .Release.Namespace .Values.api.otlpPort) "protocol" "http" }}
 {{- $accessLog := dict "add" (dict "koinon.key" "default(apiKey.name, \"\")" "koinon.agent" "default(apiKey.agent, \"\")" "koinon.request" "uuid()" "koinon.config" (quote $revision)) "otlp" $otlp }}
-{{- if $catalog }}
-{{- $_ := set $base "modelCatalog" (list (dict "inline" (dict "providers" (dict $.Values.model.provider (dict "models" $catalog))))) }}
-{{- end }}
 {{- /* The reload probe key, refused before routing by the authorization rule and its zero budget. */ -}}
 {{- $probeBudget := dict "name" "koinon-reload-probe" "limit" (dict "unit" "Tokens" "amount" 0) "window" (dict "rolling" "24h") "onBudgetExceeded" "Block" }}
 {{- $probe := dict "keyHash" (printf "sha256:%s" (sha256sum (printf "koinon-probe-%s" $revision))) "metadata" (dict "name" "koinon-reload-probe" "agent" "") "budgets" (list $probeBudget) }}
 {{- $apiKey := dict "mode" "strict" "location" (dict "header" (dict "name" "authorization" "prefix" "Bearer ")) "keys" (list $probe) }}
 {{- $authorization := dict "rules" (list "apiKey.name != \"koinon-reload-probe\"") }}
 {{- $doc := dict "config" $base "frontendPolicies" (dict "accessLog" $accessLog) "gateways" (dict "default" (dict "port" (int $gw.port))) }}
-{{- $_ := set $doc "llm" (dict "policies" (dict "apiKey" $apiKey "authorization" $authorization) "models" $models) }}
+{{- /* The org of the key goes into a header before a model is chosen (gateway.OrgHeader). */ -}}
+{{- $transformations := dict "request" (dict "set" (dict "x-koinon-org" "default(apiKey.org, \"\")")) }}
+{{- $_ := set $doc "llm" (dict "policies" (dict "apiKey" $apiKey "authorization" $authorization "transformations" $transformations) "models" (list)) }}
 {{- $config = printf "# Bootstrap config written by the Koinon chart; the reconciler owns this ConfigMap.\n%s" (toYaml $doc) }}
 {{- end }}
 apiVersion: v1
@@ -70,6 +51,17 @@ metadata:
 data:
   config.yaml: |
     {{- $config | nindent 4 }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "koinon.gatewayProvidersName" . }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+    koinon.dev/owner: reconciler
+# The reconciler fills this Secret with the opened provider keys, one data key per provider
+# (plan item PV1). The chart renders no data, so an upgrade leaves what the reconciler wrote.
+type: Opaque
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -141,11 +133,11 @@ spec:
               mountPath: /data
             - name: tmp
               mountPath: /tmp
-            {{- if .Values.model.apiKeySecret.name }}
-            - name: model-key
-              mountPath: {{ $keyDir }}
+            # Provider keys, as files in a directory (not subPath): kubelet updates the Secret
+            # volume in place, so a rotated key needs no pod restart. Only this pod mounts it.
+            - name: provider-keys
+              mountPath: /secrets/providers
               readOnly: true
-            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -156,14 +148,10 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
-        {{- if .Values.model.apiKeySecret.name }}
-        - name: model-key
+        - name: provider-keys
           secret:
-            secretName: {{ .Values.model.apiKeySecret.name }}
-            items:
-              - key: {{ .Values.model.apiKeySecret.key }}
-                path: {{ .Values.model.apiKeySecret.key }}
-        {{- end }}
+            secretName: {{ include "koinon.gatewayProvidersName" . }}
+            defaultMode: 0444
       {{- with $gw.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

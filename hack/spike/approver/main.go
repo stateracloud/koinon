@@ -94,7 +94,8 @@ func main() {
 		Description: "Status of an approval request and, once executed, the pull request URL.",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, in struct {
 		ID string `json:"id"`
-	}) (*mcp.CallToolResult, any, error) {
+	},
+	) (*mcp.CallToolResult, any, error) {
 		st.mu.Lock()
 		defer st.mu.Unlock()
 		r, ok := st.reqs[in.ID]
@@ -179,8 +180,10 @@ func createPR(ctx context.Context, token string, r *request) (string, error) {
 			if _, err := call(ctx, token, http.MethodGet, fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", a.Owner, a.Repo, f.Path, a.Head), nil); err == nil {
 				continue
 			}
-			b, _ := json.Marshal(map[string]string{"branch": a.Head, "message": "add " + f.Path + " (approved request " + r.ID + ")",
-				"content": base64.StdEncoding.EncodeToString([]byte(f.Content))})
+			b, _ := json.Marshal(map[string]string{
+				"branch": a.Head, "message": "add " + f.Path + " (approved request " + r.ID + ")",
+				"content": base64.StdEncoding.EncodeToString([]byte(f.Content)),
+			})
 			if _, err := call(ctx, token, http.MethodPost, fmt.Sprintf("/repos/%s/%s/contents/%s", a.Owner, a.Repo, f.Path), b); err != nil {
 				return "", err
 			}
@@ -201,8 +204,10 @@ func createPR(ctx context.Context, token string, r *request) (string, error) {
 			return p.HTMLURL, nil
 		}
 	}
-	body, _ := json.Marshal(map[string]string{"head": a.Head, "base": a.Base, "title": a.Title,
-		"body": a.Body + "\n\nApproved Koinon request " + r.ID + " (sha256 " + r.ArgsHash + ")"})
+	body, _ := json.Marshal(map[string]string{
+		"head": a.Head, "base": a.Base, "title": a.Title,
+		"body": a.Body + "\n\nApproved Koinon request " + r.ID + " (sha256 " + r.ArgsHash + ")",
+	})
 	out, err := call(ctx, token, http.MethodPost, fmt.Sprintf("/repos/%s/%s/pulls", a.Owner, a.Repo), body)
 	if err != nil {
 		return "", err

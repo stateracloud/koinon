@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The quickstart's model-provider.yaml on kind: the fake model server (test/fakemodel/scripts/
+# repo-helper.yaml) as the default org's OpenAI-compatible provider, declared with a labelled Secret
+# (ADR 0056). test/e2e/run.sh installs this file as the quickstart's model-provider.yaml; the
+# Tiltfile applies it for the kind profile.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fake-model
+  namespace: koinon
+  labels:
+    koinon.dev/secret-type: model-provider
+    koinon.dev/org: default
+stringData:
+  name: fake
+  provider: openai
+  url: http://fakemodel.koinon-e2e-fakes.svc:8080/v1
+  apiKey: e2e-dummy-key
+  models: |
+    - name: repo-helper
+      rates: {input: "0.30", output: "1.20"}

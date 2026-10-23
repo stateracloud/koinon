@@ -1,17 +1,18 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- /*
 Least-privilege RBAC. agentd, gateway and the migration Job get no Kubernetes API access.
-The API gets create, get and delete on Secrets in this namespace: connection secrets entered
-through the setup guide's secure inputs are written straight to a Secret (plan item C1, ADR 0021,
-0049) and read back to authenticate to GitHub; no list or watch, so it reaches only names recorded
-in Postgres.
+The API gets, in this namespace: list and watch on Secrets, to import the labelled declarative
+Secrets (koinon.dev/secret-type, plan item PV1, ADR 0056) - the verbs cannot be limited by label, so
+the API can read every Secret here, as it already could by name; get and delete, to move the
+connection Secrets of earlier versions into the secret store and remove them; update on the KEK
+Secret by name, for "koinon-api keys" (add, activate, retire); and create on Events, to report
+invalid declarative Secrets.
 The reconciler gets what it renders:
 - patch on the standalone agentgateway ConfigMap (by name; standalone.ConfigMapDeliverer sends a
   merge patch and never reads it) and the per-agent key Secrets (plan items G1, R2) in this
   namespace; Secrets have no list or watch, so it can only reach names it already knows (they are
   recorded in Postgres);
-- get on connection Secrets in this namespace (the same rule), to mint the read-only GitHub
-  installation tokens of repo.read grants with the App key (plan item C2);
+- the same Secret verbs write the provider keys Secret (koinon-gateway-providers, plan item PV1);
 - read and delete on Agent Sandbox objects cluster-wide, to garbage-collect sandboxes the OpenShell
   gateway no longer lists (ADR 0048 finding 1.8).
 Sandboxes, workspaces, providers and policies go through the OpenShell gateway, not this API.
@@ -26,7 +27,14 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    verbs: [create, get, delete]
+    verbs: [get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ include "koinon.kekSecretName" . }}]
+    verbs: [update]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
