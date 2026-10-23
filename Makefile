@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# Module path is also defined in go.mod and internal/project/project.go.
+MODULE  := github.com/procoduck/koinon
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X $(MODULE)/internal/project.Version=$(VERSION)
+
+GO   ?= go
+PNPM ?= pnpm
+
+.DEFAULT_GOAL := help
+
+.PHONY: help
+help: ## Show targets
+	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+.PHONY: web-deps
+web-deps: ## Install web dependencies
+	cd web && $(PNPM) install --frozen-lockfile
+
+.PHONY: build
+build: build-go build-web ## Build everything
+
+.PHONY: build-go
+build-go: ## Build Go binaries into bin/
+	$(GO) build -ldflags "$(LDFLAGS)" -o bin/ ./cmd/...
+
+.PHONY: build-web
+build-web: ## Build the web UI
+	cd web && $(PNPM) build
+
+.PHONY: test
+test: test-go test-web ## Run all unit tests
+
+.PHONY: test-go
+test-go: ## Run Go tests (Postgres tests need Docker)
+	$(GO) test ./...
+
+.PHONY: test-web
+test-web: ## Run web tests
+	cd web && $(PNPM) test
+
+.PHONY: lint
+lint: lint-go lint-web lint-proto migrate-lint ## Run all linters
+
+.PHONY: lint-go
+lint-go: ## Lint Go code
+	golangci-lint run
+
+.PHONY: lint-web
+lint-web: ## Lint and typecheck the web UI
+	cd web && $(PNPM) lint && $(PNPM) typecheck
+
+.PHONY: lint-proto
+lint-proto: ## Lint protobuf definitions
+	buf lint
+
+.PHONY: breaking
+breaking: ## Check protobuf changes against main
+	buf breaking --against '.git#branch=main'
+
+.PHONY: migrate-lint
+migrate-lint: ## Check migration file names (and, with BASE=<ref>, that merged migrations are unchanged)
+	hack/migrate-lint-test.sh
+	hack/migrate-lint.sh $(BASE)
+
+.PHONY: generate
+# The OpenShell client is generated after buf.gen.yaml, whose clean step empties internal/gen.
+generate: ## Regenerate protobuf and sqlc code
+	buf generate
+	buf generate --template buf.gen.openshell.yaml
+	$(GO) tool sqlc generate
+
+.PHONY: dev
+dev: ## Run the inner loop against the home lab with Tilt
+	tilt up
+
+.PHONY: clean
+clean: ## Remove build output
+	rm -rf bin web/dist

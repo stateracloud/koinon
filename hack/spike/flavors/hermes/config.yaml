@@ -1,0 +1,12 @@
+model:
+  provider: custom
+  base_url: http://agentgateway.agentgateway.svc.cluster.local:8080/v1
+  default: "deepseek/deepseek-v4.1-flash"
+  key_env: OPENAI_API_KEY
+mcp_servers:
+  koinon:
+    url: http://agentgateway.agentgateway.svc.cluster.local:8080/mcp
+    headers:
+      Authorization: "Bearer ${OPENAI_API_KEY}"
+security:
+  allow_lazy_installs: false
