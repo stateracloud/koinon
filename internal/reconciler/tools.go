@@ -8,11 +8,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/procoduck/koinon/connectors"
-	"github.com/procoduck/koinon/internal/agentconfig"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/execution"
-	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/gateway"
 )
 
 // mcpTargets renders the configured tool servers as agentgateway MCP targets, sorted by name.

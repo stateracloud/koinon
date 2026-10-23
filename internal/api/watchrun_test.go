@@ -12,8 +12,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/db/store"
-	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
+	"github.com/stateracloud/koinon/internal/db/store"
+	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 )
 
 // watcher reads one WatchRun stream in the background.

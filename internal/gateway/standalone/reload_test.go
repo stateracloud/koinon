@@ -18,7 +18,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/gateway/standalone"
 )
 
 var _ = Describe("ProbeWaiter", func() {

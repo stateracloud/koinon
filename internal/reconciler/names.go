@@ -5,8 +5,8 @@ package reconciler
 import (
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/procoduck/koinon/internal/execution"
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // Owner labels on everything the reconciler renders (workspaces, provider records, sandboxes,

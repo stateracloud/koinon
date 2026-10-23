@@ -21,7 +21,7 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway"
 )
 
 // Access-log attributes agentgateway v1.6.0 sets on LLM requests

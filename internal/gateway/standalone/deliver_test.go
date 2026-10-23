@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	"github.com/procoduck/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/gateway/standalone"
 )
 
 var _ = Describe("ConfigMapDeliverer", func() {

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/procoduck/koinon/internal/agentconfig"
-	"github.com/procoduck/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/db/store"
 )
 
 // endpoints are the per-agent values a flavor's launch command takes. None is a secret:

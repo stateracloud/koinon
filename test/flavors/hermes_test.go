@@ -14,9 +14,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/acp"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/acp"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
 // hermes is the Hermes flavor's contract (flavors/hermes/README.md).

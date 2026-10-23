@@ -9,4 +9,4 @@ appVersion: "0.0.0"
 kubeVersion: ">=1.30.0-0"
 home: https://koinon.dev
 sources:
-  - https://github.com/procoduck/koinon
+  - https://github.com/stateracloud/koinon

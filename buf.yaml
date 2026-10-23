@@ -8,3 +8,6 @@ lint:
 breaking:
   use:
     - FILE
+  except:
+    # go_package only sets the Go import path of the generated code, not anything on the wire.
+    - FILE_SAME_GO_PACKAGE

@@ -9,7 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/db/store"
 )
 
 var _ = Describe("templates", func() {

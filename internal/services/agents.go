@@ -12,12 +12,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/procoduck/koinon/internal/agentconfig"
-	"github.com/procoduck/koinon/internal/db/store"
-	agentv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1"
-	templatev1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1"
-	"github.com/procoduck/koinon/internal/scheduler"
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/db/store"
+	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
+	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
+	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/templates"
 )
 
 var agentStatusToProto = map[store.AgentStatus]agentv1alpha1.AgentStatus{

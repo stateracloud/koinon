@@ -7,7 +7,7 @@ package koinon.agent.v1alpha1;
 import "google/protobuf/timestamp.proto";
 import "koinon/template/v1alpha1/template.proto";
 
-option go_package = "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1;agentv1alpha1";
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1;agentv1alpha1";
 
 // AgentService manages an org's agents (ADR 0020). Every request names the
 // org it acts in; IDs from another org are not found.

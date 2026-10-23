@@ -11,10 +11,10 @@ import (
 
 	"github.com/pmezard/go-difflib/difflib"
 
-	"github.com/procoduck/koinon/connectors"
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/githubtools"
 )
 
 // ErrNoDiff: the request is not a create_pull_request, so it has no files to compare.

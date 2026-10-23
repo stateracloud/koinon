@@ -10,7 +10,7 @@
 package datamodelv1
 
 import (
-	_ "github.com/procoduck/koinon/internal/gen/openshell/options/v1"
+	_ "github.com/stateracloud/koinon/internal/gen/openshell/options/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"

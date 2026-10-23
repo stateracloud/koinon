@@ -13,10 +13,10 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/procoduck/koinon/internal/execution"
-	datamodelv1 "github.com/procoduck/koinon/internal/gen/openshell/datamodel/v1"
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/execution"
+	datamodelv1 "github.com/stateracloud/koinon/internal/gen/openshell/datamodel/v1"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // Keys Koinon stores on OpenShell records to make "ensure" cheap.

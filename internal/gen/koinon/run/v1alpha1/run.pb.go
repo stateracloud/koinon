@@ -908,7 +908,7 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"RunService\x12V\n" +
 	"\x06GetRun\x12\".koinon.run.v1alpha1.GetRunRequest\x1a#.koinon.run.v1alpha1.GetRunResponse\"\x03\x90\x02\x01\x12Z\n" +
 	"\tCancelRun\x12%.koinon.run.v1alpha1.CancelRunRequest\x1a&.koinon.run.v1alpha1.CancelRunResponse\x12^\n" +
-	"\bWatchRun\x12$.koinon.run.v1alpha1.WatchRunRequest\x1a%.koinon.run.v1alpha1.WatchRunResponse\"\x03\x90\x02\x010\x01BJZHgithub.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1;runv1alpha1b\x06proto3"
+	"\bWatchRun\x12$.koinon.run.v1alpha1.WatchRunRequest\x1a%.koinon.run.v1alpha1.WatchRunResponse\"\x03\x90\x02\x010\x01BMZKgithub.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1;runv1alpha1b\x06proto3"
 
 var (
 	file_koinon_run_v1alpha1_run_proto_rawDescOnce sync.Once

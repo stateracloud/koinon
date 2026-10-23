@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution"
 )
 
 var _ = Describe("UUIDString", func() {

@@ -4,7 +4,7 @@ package agentgateway.dev.ext_mcp;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/procoduck/koinon/hack/spike/extmcp/gen;gen";
+option go_package = "github.com/stateracloud/koinon/hack/spike/extmcp/gen;gen";
 
 // ExtMcp is the wire protocol for an MCP-aware external policy server.
 // Modeled on Envoy ext_authz, but at the MCP method layer.

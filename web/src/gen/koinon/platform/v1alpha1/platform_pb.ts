@@ -12,7 +12,7 @@ import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
  * Describes the file koinon/platform/v1alpha1/platform.proto.
  */
 export const file_koinon_platform_v1alpha1_platform: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vcGxhdGZvcm0vdjFhbHBoYTEvcGxhdGZvcm0ucHJvdG8SGGtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMTIRCg9QbGF0Zm9ybVNlcnZpY2VCVFpSZ2l0aHViLmNvbS9wcm9jb2R1Y2sva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vcGxhdGZvcm0vdjFhbHBoYTE7cGxhdGZvcm12MWFscGhhMWIGcHJvdG8z");
+  fileDesc("Cidrb2lub24vcGxhdGZvcm0vdjFhbHBoYTEvcGxhdGZvcm0ucHJvdG8SGGtvaW5vbi5wbGF0Zm9ybS52MWFscGhhMTIRCg9QbGF0Zm9ybVNlcnZpY2VCV1pVZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vcGxhdGZvcm0vdjFhbHBoYTE7cGxhdGZvcm12MWFscGhhMWIGcHJvdG8z");
 
 /**
  * PlatformService is the first Koinon API surface. It has no methods yet;

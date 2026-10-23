@@ -23,8 +23,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
-	"github.com/procoduck/koinon/internal/preflight"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/preflight"
 )
 
 var (

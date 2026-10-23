@@ -16,9 +16,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/procoduck/koinon/internal/cli"
-	"github.com/procoduck/koinon/internal/preflight"
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/preflight"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 type preflightConfig struct {

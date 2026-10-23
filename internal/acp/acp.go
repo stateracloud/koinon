@@ -26,7 +26,7 @@ import (
 
 	sdk "github.com/coder/acp-go-sdk"
 
-	"github.com/procoduck/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // Re-exported SDK types.

@@ -1,4 +1,4 @@
-module github.com/procoduck/koinon/hack/spike/acpdrive
+module github.com/stateracloud/koinon/hack/spike/acpdrive
 
 go 1.27
 

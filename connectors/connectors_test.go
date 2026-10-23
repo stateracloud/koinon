@@ -11,9 +11,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/connectors"
-	"github.com/procoduck/koinon/internal/project"
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/templates"
 )
 
 func githubType() *connectors.Type {
@@ -176,7 +176,7 @@ var _ = Describe("Embedded connector types", func() {
 
 	It("validates targets", func() {
 		t := githubType()
-		Expect(t.ValidTarget("procoduck/koinon")).To(BeTrue())
+		Expect(t.ValidTarget("stateracloud/koinon")).To(BeTrue())
 		Expect(t.ValidTarget("procoduck")).To(BeFalse())
 		Expect(t.ValidTarget("a/b/c")).To(BeFalse())
 		Expect(t.ValidTarget("-bad/repo")).To(BeFalse())

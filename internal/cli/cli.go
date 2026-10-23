@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/procoduck/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/execution/openshell"
 )
 
 // EnvPrefix starts the environment variable of every flag.

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Module path is also defined in go.mod and internal/project/project.go.
-MODULE  := github.com/procoduck/koinon
+MODULE  := github.com/stateracloud/koinon
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X $(MODULE)/internal/project.Version=$(VERSION)
 

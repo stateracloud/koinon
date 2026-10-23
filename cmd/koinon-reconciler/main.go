@@ -23,12 +23,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/procoduck/koinon/internal/cli"
-	"github.com/procoduck/koinon/internal/connections"
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/gateway/standalone"
-	"github.com/procoduck/koinon/internal/project"
-	"github.com/procoduck/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/reconciler"
 )
 
 func main() {

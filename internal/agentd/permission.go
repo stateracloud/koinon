@@ -6,7 +6,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/procoduck/koinon/internal/acp"
+	"github.com/stateracloud/koinon/internal/acp"
 )
 
 // Tier is the risk tier of an action (ADR 0049).
