@@ -109,11 +109,10 @@ var _ = Describe("Reconciler", func() {
 		logs = &syncBuffer{}
 		now.Store(nil)
 		cfg = reconciler.Config{
-			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-			Models: gateway.ModelUpstream{
-				Provider: "openai", BaseURL: "http://fakemodel:8080/v1",
-				Models: []gateway.Model{{Name: "fake"}},
-			},
+			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			Keys:           ring,
+			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: "koinon-gateway-providers"},
+			ProviderKeyDir: "/secrets/providers",
 			Flavors: map[store.AgentFlavor]reconciler.Flavor{
 				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
 			},
@@ -127,6 +126,7 @@ var _ = Describe("Reconciler", func() {
 			},
 		}
 		org, user = newOrg(ctx)
+		addProvider(ctx, org, user, "upstream", "", "fake")
 	})
 
 	DescribeTable("lets only the flavor's network-calling binaries use the agentgateway credential",
@@ -211,7 +211,8 @@ var _ = Describe("Reconciler", func() {
 				ID: row.GatewayKeyID.String, Hash: row.GatewayKeyHash.String,
 				Agent: gateway.AgentRef{Org: state.Keys[0].Agent.Org, Name: state.Keys[0].Agent.Name},
 			}))
-			Expect(state.Models.Models).To(HaveLen(1))
+			Expect(state.Providers).To(HaveLen(1))
+			Expect(state.Providers[0].Models).To(HaveLen(1))
 
 			By("the provider record holds the key behind a stable placeholder")
 			p := osg.Provider(ws, names.Provider)

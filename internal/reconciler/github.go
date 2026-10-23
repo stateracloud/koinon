@@ -53,15 +53,15 @@ type GitHubTokens interface {
 }
 
 // GitHubApps mints tokens as the connection's App, with the private key read from the
-// connection's Secret. Client caches tokens until they near expiry.
+// connection's stored secret fields. Client caches tokens until they near expiry.
 type GitHubApps struct {
-	Secrets connections.SecretStore
-	Client  *github.Client
+	Keys   connections.Opener
+	Client *github.Client
 }
 
 // InstallationToken implements GitHubTokens.
 func (g GitHubApps) InstallationToken(ctx context.Context, conn store.Connection, req github.TokenRequest) (github.Token, error) {
-	app, err := connections.LoadGitHubApp(ctx, g.Secrets, conn)
+	app, err := connections.LoadGitHubApp(ctx, g.Keys, conn)
 	if err != nil {
 		return github.Token{}, err
 	}

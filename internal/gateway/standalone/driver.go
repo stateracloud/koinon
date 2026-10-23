@@ -4,6 +4,8 @@ package standalone
 
 import (
 	"context"
+	"errors"
+	"sync"
 
 	"github.com/stateracloud/koinon/internal/gateway"
 )
@@ -13,6 +15,10 @@ type Driver struct {
 	Options   Options
 	Deliverer Deliverer
 	Waiter    Waiter
+
+	mu          sync.Mutex
+	rejectedRev gateway.Revision
+	redelivery  int
 }
 
 var _ gateway.ModelGateway = (*Driver)(nil)
@@ -23,9 +29,24 @@ func (d *Driver) IssueKey(_ context.Context, agent gateway.AgentRef) (gateway.Is
 	return gateway.NewKey(agent)
 }
 
-// Apply implements gateway.ModelGateway.
+// Apply implements gateway.ModelGateway. agentgateway keeps its previous config when it
+// rejects a file and does not look at the file again until it changes, so after a rejection the
+// next Apply of the same revision delivers the file with a different comment (Options.Redelivery).
 func (d *Driver) Apply(ctx context.Context, s gateway.State) (gateway.Revision, error) {
 	config, rev, err := Render(s, d.Options)
+	if err != nil {
+		return "", err
+	}
+	d.mu.Lock()
+	if rev == d.rejectedRev {
+		d.redelivery++
+		o := d.Options
+		o.Redelivery = d.redelivery
+		config, _, err = Render(s, o)
+	} else {
+		d.rejectedRev, d.redelivery = "", 0
+	}
+	d.mu.Unlock()
 	if err != nil {
 		return "", err
 	}
@@ -34,9 +55,17 @@ func (d *Driver) Apply(ctx context.Context, s gateway.State) (gateway.Revision, 
 	}
 	if d.Waiter != nil {
 		if err := d.Waiter.Wait(ctx, rev); err != nil {
+			if errors.Is(err, ErrConfigRejected) {
+				d.mu.Lock()
+				d.rejectedRev = rev
+				d.mu.Unlock()
+			}
 			return "", err
 		}
 	}
+	d.mu.Lock()
+	d.rejectedRev, d.redelivery = "", 0
+	d.mu.Unlock()
 	return rev, nil
 }
 

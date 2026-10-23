@@ -43,6 +43,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
@@ -79,8 +80,17 @@ type Endpoint struct {
 type Config struct {
 	// Gateway is agentgateway's LLM listener as sandboxes reach it.
 	Gateway Endpoint
-	// Models is the model upstream rendered into every gateway state.
-	Models gateway.ModelUpstream
+	// Keys opens the provider keys stored in Postgres (the secret store).
+	Keys catalog.Opener
+	// ProviderKeys receives the opened keys for the gateway. Required when any served
+	// provider has a key.
+	ProviderKeys ProviderKeyStore
+	// ProviderKeyDir is where the gateway mounts ProviderKeys, for the rendered config.
+	ProviderKeyDir string
+	// ProviderKeySettle is how long a pass waits, after writing a new provider key file, before it
+	// applies a config that names the file: kubelet needs about a minute to update a mounted Secret
+	// and agentgateway rejects a config whose key file is missing. Zero applies at once.
+	ProviderKeySettle time.Duration
 	// ToolServers maps a connector type ID to the URL of its MCP tool server
 	// (for github: koinon-api's tools listener, plan item C3). Each becomes an
 	// agentgateway MCP target named after the connector, and every active
@@ -124,6 +134,11 @@ type Reconciler struct {
 	mu sync.Mutex
 	// githubRevs is the token revision last pushed per GitHub provider record, to log refreshes.
 	githubRevs map[string]string
+	// unpricedLogged is the unpriced model set last logged.
+	unpricedLogged string
+	// keyWrittenAt is when each provider key file written by this process was written, until it
+	// has had ProviderKeySettle to reach the gateway.
+	keyWrittenAt map[string]time.Time
 }
 
 // New returns a Reconciler.
@@ -149,9 +164,6 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
-	}
-	if unpriced := cfg.Models.Unpriced(); len(unpriced) > 0 {
-		cfg.Logger.Warn("models without a price are not served; give free models a zero price", "models", unpriced)
 	}
 	if cfg.GitBinaries == nil {
 		cfg.GitBinaries = DefaultGitBinaries
@@ -234,8 +246,17 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 	}
 
+	// The org's providers and models (PV1). Without the list an Apply would stop serving every
+	// model, so a database error aborts the pass.
+	served, provErrs, err := r.loadProviders(ctx, orgs)
+	if err != nil {
+		return errors.Join(append(errs, fmt.Errorf("%w: %w", errAbortPass, err))...)
+	}
+	errs = append(errs, provErrs...)
+
 	// One gateway state for every agent: keys of archived agents are revoked by omission.
-	state := gateway.State{Keys: keys, Models: r.cfg.Models, MCP: r.mcpTargets(), Tools: tools}
+	state := gateway.State{Keys: keys, Providers: served.providers, MCP: r.mcpTargets(), Tools: tools}
+	r.warnUnpriced(state)
 	// Spend limits net of recorded spend (plan item L1), recomputed every pass, so a key
 	// rotation or a gateway that lost its budget counters gets the remainder, not the full
 	// limit. Without its limit an agent would be unlimited, so a failure aborts the pass and
@@ -251,9 +272,29 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 		state.SetLimit(w.key.Agent, l)
 	}
+	// Provider key files first, then the config that names them; files no provider uses go last.
+	if len(served.files) > 0 {
+		written, err := r.cfg.ProviderKeys.Put(ctx, served.files)
+		if err != nil {
+			return errors.Join(append(errs, fmt.Errorf("reconciler: deliver provider keys: %w", err))...)
+		}
+		if wait := r.keysSettling(written, now); wait > 0 {
+			r.log.Info("waiting for new provider keys to reach the gateway before applying its config", "wait", wait.Round(time.Second))
+			return errors.Join(errs...)
+		}
+	}
 	if _, err := r.gw.Apply(ctx, state); err != nil {
 		errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
 		return errors.Join(errs...)
+	}
+	if r.cfg.ProviderKeys != nil && len(provErrs) == 0 {
+		keep := map[string]bool{}
+		for name := range served.files {
+			keep[name] = true
+		}
+		if err := r.cfg.ProviderKeys.Prune(ctx, keep); err != nil {
+			errs = append(errs, fmt.Errorf("reconciler: prune provider keys: %w", err))
+		}
 	}
 
 	for _, w := range items {
@@ -264,6 +305,40 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// keysSettling records the files written in this pass and returns how much longer the newest
+// of them still needs to propagate to the gateway pod.
+func (r *Reconciler) keysSettling(written []string, now time.Time) time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.keyWrittenAt == nil {
+		r.keyWrittenAt = map[string]time.Time{}
+	}
+	for _, name := range written {
+		r.keyWrittenAt[name] = now
+	}
+	var wait time.Duration
+	for name, at := range r.keyWrittenAt {
+		if left := r.cfg.ProviderKeySettle - now.Sub(at); left > 0 {
+			wait = max(wait, left)
+		} else {
+			delete(r.keyWrittenAt, name)
+		}
+	}
+	return wait
+}
+
+// warnUnpriced logs the models the gateway does not serve for lack of a price, once per set.
+func (r *Reconciler) warnUnpriced(s gateway.State) {
+	unpriced := s.Unpriced()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := fmt.Sprint(unpriced)
+	if len(unpriced) > 0 && key != r.unpricedLogged {
+		r.log.Warn("models without a price are not served; give free models a zero price", "models", unpriced)
+	}
+	r.unpricedLogged = key
 }
 
 // prepare loads or creates the agent's row and, for an active agent, its key. It returns nil

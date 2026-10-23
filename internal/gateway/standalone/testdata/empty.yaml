@@ -10,7 +10,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"1dd949fe2ea91c75"'
+      koinon.config: '"ea95753013d6cb04"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
 gateways:
@@ -25,11 +25,15 @@ llm:
           name: authorization
           prefix: 'Bearer '
       keys:
-        - keyHash: sha256:e0d105450fcc402ecf6f36a922172cf0e5e7b7450bb58aa44c015ef9c7149194
+        - keyHash: sha256:3d321c17b0906b70665619aab61ab99723585eae00125ab00823e0120d04c63a
           metadata:
             name: koinon-reload-probe
             agent: ""
     authorization:
       rules:
         - apiKey.name != "koinon-reload-probe"
+    transformations:
+      request:
+        set:
+          x-koinon-org: default(apiKey.org, "")
   models: []
