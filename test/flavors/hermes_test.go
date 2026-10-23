@@ -21,10 +21,9 @@ import (
 
 // hermes is the Hermes flavor's contract (flavors/hermes/README.md).
 var hermes = flavor{
-	name:         "hermes",
-	storeFlavor:  store.AgentFlavorHermes,
-	defaultImage: "koinon/flavor-hermes:dev",
-	dockerfile:   "flavors/hermes",
+	name:        "hermes",
+	storeFlavor: store.AgentFlavorHermes,
+	dockerfile:  "flavors/hermes",
 	writeFile: func(path, content string) fakemodel.ToolCall {
 		return fakemodel.ToolCall{Name: "write_file", Arguments: map[string]any{"path": path, "content": content}}
 	},

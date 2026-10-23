@@ -9,10 +9,9 @@ import (
 
 // pi is the pi flavor's contract (flavors/pi/README.md).
 var pi = flavor{
-	name:         "pi",
-	storeFlavor:  store.AgentFlavorPi,
-	defaultImage: "koinon/flavor-pi:dev",
-	dockerfile:   "flavors/pi",
+	name:        "pi",
+	storeFlavor: store.AgentFlavorPi,
+	dockerfile:  "flavors/pi",
 	writeFile: func(path, content string) fakemodel.ToolCall {
 		return fakemodel.ToolCall{Name: "write", Arguments: map[string]any{"path": path, "content": content}}
 	},
