@@ -5,6 +5,7 @@ import { createConnectQueryKey, useMutation, useQuery, useTransport } from '@con
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { ApprovalView } from '@/components/approval-view'
 import { Timeline } from '@/components/timeline'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -103,7 +104,7 @@ export function TicketPage() {
 
       <RunStatus runs={active.map((r) => ({ id: r.id, state: runStateLabel(r.state), watch: watches[r.id] }))} />
 
-      <Timeline items={items} />
+      <Timeline items={items} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
 
       {canEdit && (
         <Composer

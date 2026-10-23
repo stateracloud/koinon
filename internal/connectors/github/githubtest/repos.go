@@ -30,6 +30,8 @@ type Repo struct {
 	Blobs    map[string][]byte
 	Pulls    []Pull
 	Comments map[int64][]Comment
+	// FailContents makes GET contents of a path answer with the status instead.
+	FailContents map[string]int
 	// Calls counts write calls by endpoint, e.g. "POST pulls".
 	Calls map[string]int
 }
@@ -73,7 +75,7 @@ func (f *Fake) repo(name string) *Repo {
 	r = &Repo{
 		Name: name, DefaultBranch: "main", Refs: map[string]string{}, Commits: map[string]Commit{},
 		Trees: map[string]map[string]string{}, Modes: map[string]map[string]string{}, Blobs: map[string][]byte{}, Comments: map[int64][]Comment{},
-		Calls: map[string]int{},
+		FailContents: map[string]int{}, Calls: map[string]int{},
 	}
 	readme := []byte("# " + name + "\n")
 	blob := objectID("blob", string(readme))
@@ -177,6 +179,13 @@ func (f *Fake) SetBranchModes(repo, branch, message string, files, fileModes map
 	return c.SHA
 }
 
+// FailContents makes the contents API answer status for path in repo.
+func (f *Fake) FailContents(repo, path string, status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repo(repo).FailContents[path] = status
+}
+
 func treeID(tree, modes map[string]string) string {
 	var parts []string
 	for _, p := range slices.Sorted(maps.Keys(tree)) {
@@ -186,7 +195,9 @@ func treeID(tree, modes map[string]string) string {
 }
 
 func (f *Fake) routeRepos(mux *http.ServeMux) {
+	mux.HandleFunc("GET /installation/repositories", f.listInstallationRepos)
 	mux.HandleFunc("GET /repos/{owner}/{repo}", f.withRepo("metadata", "read", f.getRepo))
+	mux.HandleFunc("GET /repos/{owner}/{repo}/contents/{path...}", f.withRepo("contents", "read", f.getContents))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/git/ref/heads/{branch...}", f.withRepo("contents", "read", f.getRef))
 	mux.HandleFunc("POST /repos/{owner}/{repo}/git/refs", f.withRepo("contents", "write", f.createRef))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/git/commits/{sha}", f.withRepo("contents", "read", f.getCommit))
@@ -244,7 +255,133 @@ func (f *Fake) withRepo(perm, level string, h func(http.ResponseWriter, *http.Re
 }
 
 func (f *Fake) getRepo(w http.ResponseWriter, _ *http.Request, r *Repo) {
-	writeJSON(w, http.StatusOK, map[string]any{"full_name": f.Account + "/" + r.Name, "default_branch": r.DefaultBranch})
+	writeJSON(w, http.StatusOK, f.repoJSON(r))
+}
+
+func (f *Fake) repoJSON(r *Repo) map[string]any {
+	return map[string]any{
+		"name": r.Name, "full_name": f.Account + "/" + r.Name, "owner": map[string]string{"login": f.Account},
+		"private": f.Private[r.Name], "default_branch": r.DefaultBranch,
+	}
+}
+
+// listInstallationRepos serves GET /installation/repositories as GitHub does: the
+// repositories the token covers, in installation order, paged by per_page (default 30, at
+// most 100) and page (1-based), with total_count and a Link header. Every token can read
+// metadata.
+func (f *Fake) listInstallationRepos(w http.ResponseWriter, req *http.Request) {
+	tok, ok := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer ")
+	if !ok || req.Header.Get("X-GitHub-Api-Version") == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Bad credentials"})
+		return
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	info, ok := f.tokens[tok]
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Bad credentials"})
+		return
+	}
+	perPage, page := 30, 1
+	if v := req.URL.Query().Get("per_page"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "per_page is invalid"})
+			return
+		}
+		perPage = min(n, 100)
+	}
+	if v := req.URL.Query().Get("page"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "page is invalid"})
+			return
+		}
+		page = n
+	}
+	f.listCalls++
+	all := info.repos
+	start := min((page-1)*perPage, len(all))
+	end := min(start+perPage, len(all))
+	repos := make([]map[string]any, 0, end-start)
+	for _, name := range all[start:end] {
+		repos = append(repos, f.repoJSON(f.repo(name)))
+	}
+	if end < len(all) {
+		next := *req.URL
+		q := next.Query()
+		q.Set("page", strconv.Itoa(page+1))
+		q.Set("per_page", strconv.Itoa(perPage))
+		next.RawQuery = q.Encode()
+		w.Header().Set("Link", fmt.Sprintf(`<%s%s>; rel="next"`, f.Server.URL, next.RequestURI()))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"total_count": len(all), "repository_selection": "selected", "repositories": repos})
+}
+
+// ListCalls returns how many GET /installation/repositories pages the fake served.
+func (f *Fake) ListCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.listCalls
+}
+
+// maxContentsSize is the largest file the contents API returns with its content (1 MB).
+const maxContentsSize = 1 << 20
+
+// getContents serves a path at ?ref= (a branch or a commit SHA; default the default
+// branch) as GitHub does: base64 content up to 1 MB, encoding "none" above, an array for a
+// directory.
+func (f *Fake) getContents(w http.ResponseWriter, req *http.Request, r *Repo) {
+	p := req.PathValue("path")
+	if status, ok := r.FailContents[p]; ok {
+		writeJSON(w, status, map[string]string{"message": http.StatusText(status)})
+		return
+	}
+	ref := req.URL.Query().Get("ref")
+	if ref == "" {
+		ref = r.DefaultBranch
+	}
+	sha, ok := r.Refs[ref]
+	if !ok {
+		sha = ref
+	}
+	c, ok := r.Commits[sha]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "No commit found for the ref " + ref})
+		return
+	}
+	tree := r.Trees[c.Tree]
+	blob, ok := tree[p]
+	if !ok {
+		var entries []map[string]any
+		for _, name := range slices.Sorted(maps.Keys(tree)) {
+			if strings.HasPrefix(name, p+"/") {
+				entries = append(entries, map[string]any{"type": "file", "path": name})
+			}
+		}
+		if entries == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, entries)
+		return
+	}
+	content := r.Blobs[blob]
+	out := map[string]any{"type": "file", "path": p, "sha": blob, "size": len(content), "encoding": "base64", "content": ""}
+	if len(content) > maxContentsSize {
+		out["encoding"] = "none"
+	} else {
+		// GitHub wraps the base64 at 60 columns.
+		enc := base64.StdEncoding.EncodeToString(content)
+		var b strings.Builder
+		for len(enc) > 60 {
+			b.WriteString(enc[:60] + "\n")
+			enc = enc[60:]
+		}
+		b.WriteString(enc)
+		out["content"] = b.String()
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (f *Fake) getRef(w http.ResponseWriter, req *http.Request, r *Repo) {
