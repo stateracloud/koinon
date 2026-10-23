@@ -48,9 +48,11 @@ func (r *runner) sweep(ctx context.Context, workspace, sandbox string) ([]string
 }
 
 // sweepAfter sweeps once the run's harness has ended. It is skipped when another worker may
-// own the run by now, whose harness it would end; the next run's sweep catches what is left.
+// own the run by now, whose harness it would end: after a park, which can be resumed at once,
+// or when fenced, but neither canceled nor finished by this worker. The next run's sweep
+// catches what is left.
 func (r *runner) sweepAfter(ctx context.Context, workspace, sandbox string) {
-	if r.isFenced() && fence(r.fenceKind.Load()) != fenceCanceled {
+	if r.parked.Load() || r.isFenced() && fence(r.fenceKind.Load()) != fenceCanceled && !r.finished.Load() {
 		return
 	}
 	ended, err := r.sweep(context.WithoutCancel(ctx), workspace, sandbox)
