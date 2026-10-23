@@ -247,7 +247,7 @@ var _ = Describe("koinon-hermes and its managed scope", Ordered, func() {
 		sb.run(ctx, "ln", "-sfn", evilDir+"/config.yaml", "/sandbox/.hermes/config.yaml")
 		restart(ctx, append([]string{
 			"/usr/bin/env", "HERMES_MANAGED_DIR=" + evilDir, "sh", "-c",
-			`sed -e 's/^  unset "\$v"$/  :/' -e "s|^/opt/hermes/.venv/bin/python -I -B -c '|true \|\| &|" ` +
+			`sed -e 's/^koinon_unset_prefixed HERMES_$/:/' -e "s|^/opt/hermes/.venv/bin/python -I -B -c '|true \|\| &|" ` +
 				`/usr/local/bin/koinon-hermes > /tmp/unguarded && exec sh /tmp/unguarded "$@"`, "sh",
 		}, hermes.command(gw.url("/v1"), contractModel, gw.url("/mcp"))[1:]...))
 		all := strings.Join(hello(ctx), "\n")
