@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Print the image tag for a flavor: dev-<first 12 hex of a sha256 over the flavor's build context>.
+# The context is flavors/<flavor> (its Dockerfile included) and flavors/common, as they are in the
+# working tree: tracked and untracked files, not ignored ones, with their executable bit. Two trees
+# with the same context get the same tag; any difference gets its own, so worktrees building from
+# different branches never overwrite each other's image. Used by the Makefile and test/flavors.
+set -euo pipefail
+
+flavor=${1:?usage: flavor-tag.sh <flavor>}
+cd "$(dirname "$0")/.."
+[ -d "flavors/$flavor" ] || { echo "flavor-tag.sh: no such flavor: $flavor" >&2; exit 2; }
+
+paths=("flavors/$flavor")
+[ -d flavors/common ] && paths+=(flavors/common)
+
+hash=$(
+	git ls-files -z --cached --others --exclude-standard --deduplicate -- "${paths[@]}" | sort -z |
+		while IFS= read -r -d '' f; do
+			[ -f "$f" ] || continue # tracked but deleted
+			mode=-
+			[ -x "$f" ] && mode=x
+			printf '%s %s %s\n' "$mode" "$(shasum -a 256 <"$f" | cut -d' ' -f1)" "$f"
+		done | shasum -a 256 | cut -d' ' -f1
+)
+echo "dev-${hash:0:12}"
