@@ -117,6 +117,47 @@ func (s *Server) GetApproval(ctx context.Context, req *approvalv1alpha1.GetAppro
 	return &approvalv1alpha1.GetApprovalResponse{Approval: approvalProto(row, c.p.HasRole(c.org, store.OrgRoleAdmin), true)}, nil
 }
 
+var fileStatusToProto = map[approvals.FileStatus]approvalv1alpha1.FileStatus{
+	approvals.StatusUnknown:  approvalv1alpha1.FileStatus_FILE_STATUS_UNSPECIFIED,
+	approvals.StatusAdded:    approvalv1alpha1.FileStatus_FILE_STATUS_ADDED,
+	approvals.StatusModified: approvalv1alpha1.FileStatus_FILE_STATUS_MODIFIED,
+	approvals.StatusDeleted:  approvalv1alpha1.FileStatus_FILE_STATUS_DELETED,
+}
+
+// GetApprovalDiff implements ApprovalService. Whoever may see the request may see its diff.
+func (s *Server) GetApprovalDiff(ctx context.Context, req *approvalv1alpha1.GetApprovalDiffRequest) (*approvalv1alpha1.GetApprovalDiffResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("approval_id", req.GetApprovalId())
+	if err != nil {
+		return nil, err
+	}
+	row, err := s.q.GetApprovalRequest(ctx, store.GetApprovalRequestParams{OrgID: c.org, ID: id})
+	if err != nil {
+		return nil, s.dbError(err, "approval")
+	}
+	if s.approvals == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, "approvals are not configured on this server")
+	}
+	d, err := s.approvals.Diff(ctx, row)
+	if errors.Is(err, approvals.ErrNoDiff) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, err.Error())
+	}
+	if err != nil {
+		return nil, s.dbError(err, "approval")
+	}
+	res := &approvalv1alpha1.GetApprovalDiffResponse{Base: d.Base}
+	for _, f := range d.Files {
+		res.Files = append(res.Files, &approvalv1alpha1.FileDiff{
+			Path: f.Path, Status: fileStatusToProto[f.Status], UnifiedDiff: f.Diff, Binary: f.Binary, FallbackReason: f.Fallback,
+			OldMode: f.OldMode, NewMode: f.NewMode,
+		})
+	}
+	return res, nil
+}
+
 // decision checks an Approve or Deny request: admins and owners only.
 func (s *Server) decision(ctx context.Context, orgID, approvalID, note string) (caller, pgtype.UUID, string, error) {
 	c, err := authorize(ctx, orgID, store.OrgRoleAdmin)
@@ -140,10 +181,13 @@ func (s *Server) decision(ctx context.Context, orgID, approvalID, note string) (
 	return c, id, note, nil
 }
 
+// approvalError maps the approvals package's errors. A hash mismatch is Aborted (HTTP 409,
+// plan item P1): the request changed since the approver loaded it, and reloading shows the
+// new version. A request that is no longer pending stays FailedPrecondition.
 func (s *Server) approvalError(err error) error {
 	switch {
 	case errors.Is(err, approvals.ErrHashMismatch):
-		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
+		return connect.NewError(connect.CodeAborted, err.Error())
 	case errors.Is(err, approvals.ErrNotPending):
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	}

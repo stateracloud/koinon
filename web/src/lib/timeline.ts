@@ -4,26 +4,31 @@
 // column moves, run notes, approvals) and the session updates of its runs,
 // by time.
 
-import type { JsonObject, JsonValue } from '@bufbuild/protobuf'
+import type { JsonObject } from '@bufbuild/protobuf'
 import { timestampMs, type Timestamp } from '@bufbuild/protobuf/wkt'
 import type { RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { ActorKind, type TicketEvent } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
+import { obj, str } from '@/lib/json'
 import { statusLabel, ticketStatusFromName } from '@/lib/labels'
 
 export type TimelineItem =
   | { key: string; at: number; type: 'message'; actor: ActorKind; text: string; runId?: string }
   | { key: string; at: number; type: 'agent-text'; runId: string; text: string; thought: boolean }
   | { key: string; at: number; type: 'tool'; runId: string; toolCallId: string; title: string; status: string }
-  | { key: string; at: number; type: 'approval'; runId?: string; approvalId: string; text: string; url?: string }
+  | {
+      key: string
+      at: number
+      type: 'approval'
+      runId?: string
+      approvalId: string
+      /** The event kind, e.g. approval.requested. */
+      kind: string
+      /** A request a human decides (not a Trusted-preset call). */
+      ask: boolean
+      text: string
+      url?: string
+    }
   | { key: string; at: number; type: 'note'; text: string; runId?: string }
-
-function str(v: JsonValue | undefined): string | undefined {
-  return typeof v === 'string' ? v : undefined
-}
-
-function obj(v: JsonValue | undefined): JsonObject | undefined {
-  return v && typeof v === 'object' && !Array.isArray(v) ? v : undefined
-}
 
 function ms(t: Timestamp | undefined): number {
   return t ? timestampMs(t) : 0
@@ -81,7 +86,8 @@ function ticketItem(ev: TicketEvent): TimelineItem {
   const p = ev.payload ?? {}
   const runId = ev.runId || undefined
   if (ev.kind.startsWith('approval.')) {
-    return { key, at, type: 'approval', runId, approvalId: str(p.approval_id) ?? '', ...approvalText(ev.kind, p) }
+    const ask = ev.kind === 'approval.requested' && str(p.decision) !== 'allow'
+    return { key, at, type: 'approval', runId, approvalId: str(p.approval_id) ?? '', kind: ev.kind, ask, ...approvalText(ev.kind, p) }
   }
   switch (ev.kind) {
     case 'message':

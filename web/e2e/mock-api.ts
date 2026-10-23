@@ -20,6 +20,8 @@ const httpStatus: Record<string, number> = {
   permission_denied: 403,
   not_found: 404,
   invalid_argument: 400,
+  failed_precondition: 400,
+  aborted: 409,
   unavailable: 503,
 }
 

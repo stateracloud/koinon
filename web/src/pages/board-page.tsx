@@ -6,12 +6,14 @@ import { createConnectQueryKey, useMutation, useQuery, useTransport } from '@con
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
-import { Board } from '@/components/board'
+import { Board, type PendingApproval } from '@/components/board'
 import { CreateTicketForm } from '@/components/create-ticket-form'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ListTicketsResponseSchema, TicketService, TicketStatus } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
+import { isApprover, targetRepo } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
 
 // The API has no ticket stream yet, so the board polls to pick up column
@@ -28,6 +30,17 @@ export function BoardPage() {
 
   const tickets = useQuery(TicketService.method.listTickets, { orgId }, { refetchInterval: boardPollMs })
   const agents = useQuery(AgentService.method.listAgents, { orgId })
+  // Waiting on you: the org's pending approvals, for those who decide them.
+  const approver = isApprover(org.role)
+  const approvals = useQuery(ApprovalService.method.listApprovals, { orgId }, { enabled: approver, refetchInterval: boardPollMs })
+  const ticketTitles = useMemo(() => new Map((tickets.data?.tickets ?? []).map((t) => [t.id, t.title])), [tickets.data])
+  const pending = useMemo<PendingApproval[]>(
+    () =>
+      (approvals.data?.approvals ?? [])
+        .filter((a) => a.canDecide)
+        .map((a) => ({ id: a.id, ticketId: a.ticketId, label: `${a.tool} on ${targetRepo(a.target)}`, ticketTitle: ticketTitles.get(a.ticketId) })),
+    [approvals.data, ticketTitles],
+  )
   const agentNames = useMemo(() => new Map((agents.data?.agents ?? []).map((a) => [a.id, a.displayName])), [agents.data])
 
   const listKey = createConnectQueryKey({ schema: TicketService.method.listTickets, input: { orgId }, transport, cardinality: 'finite' })
@@ -99,6 +112,7 @@ export function BoardPage() {
           tickets={tickets.data?.tickets ?? []}
           agentNames={agentNames}
           canEdit={canEdit}
+          approvals={pending}
           moving={moving}
           onMoveToDone={(t) => move.mutate({ orgId, ticketId: t.id, status: TicketStatus.DONE })}
         />

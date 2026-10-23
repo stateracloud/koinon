@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/approval/v1alpha1/approval.proto.
  */
 export const file_koinon_approval_v1alpha1_approval: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vYXBwcm92YWwvdjFhbHBoYTEvYXBwcm92YWwucHJvdG8SGGtvaW5vbi5hcHByb3ZhbC52MWFscGhhMSKOAQoEUmlzaxINCgVmaWxlcxgBIAEoAxINCgVieXRlcxgCIAEoAxIRCglkZWxldGlvbnMYAyADKAkSCgoCY2kYBCADKAkSDwoHc2NyaXB0cxgFIAMoCRIUCgxkZXBlbmRlbmNpZXMYBiADKAkSDgoGYmluYXJ5GAcgAygJEhIKCmV4ZWN1dGFibGUYCCADKAkiTwoKRmlsZUNoYW5nZRIMCgRwYXRoGAEgASgJEg8KB2NvbnRlbnQYAiABKAkSDgoGZGVsZXRlGAMgASgIEhIKCmV4ZWN1dGFibGUYBCABKAgigQEKD1B1bGxSZXF1ZXN0Q2FsbBIOCgZicmFuY2gYASABKAkSDAoEYmFzZRgCIAEoCRINCgV0aXRsZRgDIAEoCRIMCgRib2R5GAQgASgJEjMKBWZpbGVzGAUgAygLMiQua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkZpbGVDaGFuZ2UiMQoLQ29tbWVudENhbGwSFAoMaXNzdWVfbnVtYmVyGAEgASgDEgwKBGJvZHkYAiABKAkimwYKCEFwcHJvdmFsEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSDgoGcnVuX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhEKCWNvbm5lY3RvchgGIAEoCRIMCgR0b29sGAcgASgJEg4KBnRhcmdldBgIIAEoCRIRCglhcmdzX2pzb24YCSABKAkSEwoLYXJnc19zaGEyNTYYCiABKAkSNAoIZGVjaXNpb24YCyABKA4yIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVjaXNpb24SMAoGc3RhdHVzGAwgASgOMiAua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlN0YXR1cxIsCgRyaXNrGA0gASgLMh4ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlJpc2sSQQoMcHVsbF9yZXF1ZXN0GA4gASgLMikua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlB1bGxSZXF1ZXN0Q2FsbEgAEjgKB2NvbW1lbnQYDyABKAsyJS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQ29tbWVudENhbGxIABISCgpkZWNpZGVkX2J5GBAgASgJEi4KCmRlY2lkZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDWRlY2lzaW9uX25vdGUYEiABKAkSJwoGcmVzdWx0GBMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBINCgVlcnJvchgUIAEoCRISCgpleGVjdXRpb25zGBUgASgDEi4KCmV4cGlyZXNfYXQYFiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmNyZWF0ZWRfYXQYFyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2V4ZWN1dGVkX2F0GBggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpjYW5fZGVjaWRlGBkgASgIQgYKBGNhbGwiOQoUTGlzdEFwcHJvdmFsc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXRpY2tldF9pZBgCIAEoCSJOChVMaXN0QXBwcm92YWxzUmVzcG9uc2USNQoJYXBwcm92YWxzGAEgAygLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmFsIjkKEkdldEFwcHJvdmFsUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkiSwoTR2V0QXBwcm92YWxSZXNwb25zZRI0CghhcHByb3ZhbBgBIAEoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZhbCJYCg5BcHByb3ZlUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkSEwoLYXJnc19zaGEyNTYYAyABKAkSDAoEbm90ZRgEIAEoCSJHCg9BcHByb3ZlUmVzcG9uc2USNAoIYXBwcm92YWwYASABKAsyIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQXBwcm92YWwiQAoLRGVueVJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC2FwcHJvdmFsX2lkGAIgASgJEgwKBG5vdGUYAyABKAkiRAoMRGVueVJlc3BvbnNlEjQKCGFwcHJvdmFsGAEgASgLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmFsKq0BCgZTdGF0dXMSFgoSU1RBVFVTX1VOU1BFQ0lGSUVEEAASEgoOU1RBVFVTX1BFTkRJTkcQARITCg9TVEFUVVNfQVBQUk9WRUQQAhIRCg1TVEFUVVNfREVOSUVEEAMSEwoPU1RBVFVTX0VYRUNVVEVEEAQSEQoNU1RBVFVTX0ZBSUxFRBAFEhIKDlNUQVRVU19FWFBJUkVEEAYSEwoPU1RBVFVTX0NBTkNFTEVEEAcqSgoIRGVjaXNpb24SGAoUREVDSVNJT05fVU5TUEVDSUZJRUQQABIQCgxERUNJU0lPTl9BU0sQARISCg5ERUNJU0lPTl9BTExPVxACMrUDCg9BcHByb3ZhbFNlcnZpY2USdQoNTGlzdEFwcHJvdmFscxIuLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5MaXN0QXBwcm92YWxzUmVxdWVzdBovLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5MaXN0QXBwcm92YWxzUmVzcG9uc2UiA5ACARJvCgtHZXRBcHByb3ZhbBIsLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5HZXRBcHByb3ZhbFJlcXVlc3QaLS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuR2V0QXBwcm92YWxSZXNwb25zZSIDkAIBEmMKB0FwcHJvdmUSKC5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQXBwcm92ZVJlcXVlc3QaKS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQXBwcm92ZVJlc3BvbnNlIgOQAgISVQoERGVueRIlLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5EZW55UmVxdWVzdBomLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5EZW55UmVzcG9uc2VCVFpSZ2l0aHViLmNvbS9wcm9jb2R1Y2sva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vYXBwcm92YWwvdjFhbHBoYTE7YXBwcm92YWx2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("Cidrb2lub24vYXBwcm92YWwvdjFhbHBoYTEvYXBwcm92YWwucHJvdG8SGGtvaW5vbi5hcHByb3ZhbC52MWFscGhhMSKOAQoEUmlzaxINCgVmaWxlcxgBIAEoAxINCgVieXRlcxgCIAEoAxIRCglkZWxldGlvbnMYAyADKAkSCgoCY2kYBCADKAkSDwoHc2NyaXB0cxgFIAMoCRIUCgxkZXBlbmRlbmNpZXMYBiADKAkSDgoGYmluYXJ5GAcgAygJEhIKCmV4ZWN1dGFibGUYCCADKAkiTwoKRmlsZUNoYW5nZRIMCgRwYXRoGAEgASgJEg8KB2NvbnRlbnQYAiABKAkSDgoGZGVsZXRlGAMgASgIEhIKCmV4ZWN1dGFibGUYBCABKAgigQEKD1B1bGxSZXF1ZXN0Q2FsbBIOCgZicmFuY2gYASABKAkSDAoEYmFzZRgCIAEoCRINCgV0aXRsZRgDIAEoCRIMCgRib2R5GAQgASgJEjMKBWZpbGVzGAUgAygLMiQua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkZpbGVDaGFuZ2UiMQoLQ29tbWVudENhbGwSFAoMaXNzdWVfbnVtYmVyGAEgASgDEgwKBGJvZHkYAiABKAkimwYKCEFwcHJvdmFsEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSDgoGcnVuX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhEKCWNvbm5lY3RvchgGIAEoCRIMCgR0b29sGAcgASgJEg4KBnRhcmdldBgIIAEoCRIRCglhcmdzX2pzb24YCSABKAkSEwoLYXJnc19zaGEyNTYYCiABKAkSNAoIZGVjaXNpb24YCyABKA4yIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVjaXNpb24SMAoGc3RhdHVzGAwgASgOMiAua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlN0YXR1cxIsCgRyaXNrGA0gASgLMh4ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlJpc2sSQQoMcHVsbF9yZXF1ZXN0GA4gASgLMikua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlB1bGxSZXF1ZXN0Q2FsbEgAEjgKB2NvbW1lbnQYDyABKAsyJS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQ29tbWVudENhbGxIABISCgpkZWNpZGVkX2J5GBAgASgJEi4KCmRlY2lkZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDWRlY2lzaW9uX25vdGUYEiABKAkSJwoGcmVzdWx0GBMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBINCgVlcnJvchgUIAEoCRISCgpleGVjdXRpb25zGBUgASgDEi4KCmV4cGlyZXNfYXQYFiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmNyZWF0ZWRfYXQYFyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2V4ZWN1dGVkX2F0GBggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpjYW5fZGVjaWRlGBkgASgIQgYKBGNhbGwiOQoUTGlzdEFwcHJvdmFsc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXRpY2tldF9pZBgCIAEoCSJOChVMaXN0QXBwcm92YWxzUmVzcG9uc2USNQoJYXBwcm92YWxzGAEgAygLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmFsIjkKEkdldEFwcHJvdmFsUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkiSwoTR2V0QXBwcm92YWxSZXNwb25zZRI0CghhcHByb3ZhbBgBIAEoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZhbCI9ChZHZXRBcHByb3ZhbERpZmZSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgthcHByb3ZhbF9pZBgCIAEoCSKxAQoIRmlsZURpZmYSDAoEcGF0aBgBIAEoCRI0CgZzdGF0dXMYAiABKA4yJC5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRmlsZVN0YXR1cxIUCgx1bmlmaWVkX2RpZmYYAyABKAkSDgoGYmluYXJ5GAQgASgIEhcKD2ZhbGxiYWNrX3JlYXNvbhgFIAEoCRIQCghvbGRfbW9kZRgGIAEoCRIQCghuZXdfbW9kZRgHIAEoCSJaChdHZXRBcHByb3ZhbERpZmZSZXNwb25zZRIMCgRiYXNlGAEgASgJEjEKBWZpbGVzGAIgAygLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkZpbGVEaWZmIlgKDkFwcHJvdmVSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgthcHByb3ZhbF9pZBgCIAEoCRITCgthcmdzX3NoYTI1NhgDIAEoCRIMCgRub3RlGAQgASgJIkcKD0FwcHJvdmVSZXNwb25zZRI0CghhcHByb3ZhbBgBIAEoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZhbCJACgtEZW55UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkSDAoEbm90ZRgDIAEoCSJECgxEZW55UmVzcG9uc2USNAoIYXBwcm92YWwYASABKAsyIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQXBwcm92YWwqrQEKBlN0YXR1cxIWChJTVEFUVVNfVU5TUEVDSUZJRUQQABISCg5TVEFUVVNfUEVORElORxABEhMKD1NUQVRVU19BUFBST1ZFRBACEhEKDVNUQVRVU19ERU5JRUQQAxITCg9TVEFUVVNfRVhFQ1VURUQQBBIRCg1TVEFUVVNfRkFJTEVEEAUSEgoOU1RBVFVTX0VYUElSRUQQBhITCg9TVEFUVVNfQ0FOQ0VMRUQQBypKCghEZWNpc2lvbhIYChRERUNJU0lPTl9VTlNQRUNJRklFRBAAEhAKDERFQ0lTSU9OX0FTSxABEhIKDkRFQ0lTSU9OX0FMTE9XEAIqcwoKRmlsZVN0YXR1cxIbChdGSUxFX1NUQVRVU19VTlNQRUNJRklFRBAAEhUKEUZJTEVfU1RBVFVTX0FEREVEEAESGAoURklMRV9TVEFUVVNfTU9ESUZJRUQQAhIXChNGSUxFX1NUQVRVU19ERUxFVEVEEAMysgQKD0FwcHJvdmFsU2VydmljZRJ1Cg1MaXN0QXBwcm92YWxzEi4ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkxpc3RBcHByb3ZhbHNSZXF1ZXN0Gi8ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkxpc3RBcHByb3ZhbHNSZXNwb25zZSIDkAIBEm8KC0dldEFwcHJvdmFsEiwua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkdldEFwcHJvdmFsUmVxdWVzdBotLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5HZXRBcHByb3ZhbFJlc3BvbnNlIgOQAgESewoPR2V0QXBwcm92YWxEaWZmEjAua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkdldEFwcHJvdmFsRGlmZlJlcXVlc3QaMS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuR2V0QXBwcm92YWxEaWZmUmVzcG9uc2UiA5ACARJjCgdBcHByb3ZlEigua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmVSZXF1ZXN0Gikua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmVSZXNwb25zZSIDkAICElUKBERlbnkSJS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVueVJlcXVlc3QaJi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVueVJlc3BvbnNlQlRaUmdpdGh1Yi5jb20vcHJvY29kdWNrL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL2FwcHJvdmFsL3YxYWxwaGExO2FwcHJvdmFsdjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * Risk is the push-and-run summary the approval card leads with (plan item
@@ -439,6 +439,123 @@ export const GetApprovalResponseSchema: GenMessage<GetApprovalResponse> = /*@__P
   messageDesc(file_koinon_approval_v1alpha1_approval, 8);
 
 /**
+ * GetApprovalDiffRequest names a request.
+ *
+ * @generated from message koinon.approval.v1alpha1.GetApprovalDiffRequest
+ */
+export type GetApprovalDiffRequest = Message<"koinon.approval.v1alpha1.GetApprovalDiffRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string approval_id = 2;
+   */
+  approvalId: string;
+};
+
+/**
+ * Describes the message koinon.approval.v1alpha1.GetApprovalDiffRequest.
+ * Use `create(GetApprovalDiffRequestSchema)` to create a new message.
+ */
+export const GetApprovalDiffRequestSchema: GenMessage<GetApprovalDiffRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_approval_v1alpha1_approval, 9);
+
+/**
+ * FileDiff compares one file with its current version on the base branch.
+ *
+ * @generated from message koinon.approval.v1alpha1.FileDiff
+ */
+export type FileDiff = Message<"koinon.approval.v1alpha1.FileDiff"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * @generated from field: koinon.approval.v1alpha1.FileStatus status = 2;
+   */
+  status: FileStatus;
+
+  /**
+   * A unified diff with three lines of context: "--- a/<path>" and
+   * "+++ b/<path>" (/dev/null for an added or deleted file), then "@@"
+   * hunks of " ", "-" and "+" lines; "\ No newline at end of file" follows a
+   * last line without one. Empty when the file is unchanged, binary, or
+   * fallback_reason is set.
+   *
+   * @generated from field: string unified_diff = 3;
+   */
+  unifiedDiff: string;
+
+  /**
+   * The new or the current version is not text; no content is shown.
+   *
+   * @generated from field: bool binary = 4;
+   */
+  binary: boolean;
+
+  /**
+   * Why there is no diff, e.g. "the current version is larger than 1 MiB".
+   * The card then shows the full new content.
+   *
+   * @generated from field: string fallback_reason = 5;
+   */
+  fallbackReason: string;
+
+  /**
+   * The file's git mode on the base branch ("100644", "100755"; empty for a
+   * new file) and the mode Koinon writes it with (empty for a deleted file).
+   * Both are empty when the base tree could not be read. A modified file
+   * whose modes differ becomes executable.
+   *
+   * @generated from field: string old_mode = 6;
+   */
+  oldMode: string;
+
+  /**
+   * @generated from field: string new_mode = 7;
+   */
+  newMode: string;
+};
+
+/**
+ * Describes the message koinon.approval.v1alpha1.FileDiff.
+ * Use `create(FileDiffSchema)` to create a new message.
+ */
+export const FileDiffSchema: GenMessage<FileDiff> = /*@__PURE__*/
+  messageDesc(file_koinon_approval_v1alpha1_approval, 10);
+
+/**
+ * GetApprovalDiffResponse holds one FileDiff per file of the call, in the
+ * call's order.
+ *
+ * @generated from message koinon.approval.v1alpha1.GetApprovalDiffResponse
+ */
+export type GetApprovalDiffResponse = Message<"koinon.approval.v1alpha1.GetApprovalDiffResponse"> & {
+  /**
+   * The branch compared against: the call's base, or the repository's
+   * default branch. Empty if it could not be resolved.
+   *
+   * @generated from field: string base = 1;
+   */
+  base: string;
+
+  /**
+   * @generated from field: repeated koinon.approval.v1alpha1.FileDiff files = 2;
+   */
+  files: FileDiff[];
+};
+
+/**
+ * Describes the message koinon.approval.v1alpha1.GetApprovalDiffResponse.
+ * Use `create(GetApprovalDiffResponseSchema)` to create a new message.
+ */
+export const GetApprovalDiffResponseSchema: GenMessage<GetApprovalDiffResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_approval_v1alpha1_approval, 11);
+
+/**
  * ApproveRequest names a request and the hash the approver saw.
  *
  * @generated from message koinon.approval.v1alpha1.ApproveRequest
@@ -472,7 +589,7 @@ export type ApproveRequest = Message<"koinon.approval.v1alpha1.ApproveRequest"> 
  * Use `create(ApproveRequestSchema)` to create a new message.
  */
 export const ApproveRequestSchema: GenMessage<ApproveRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 9);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 12);
 
 /**
  * ApproveResponse holds the request after execution: executed with its
@@ -492,7 +609,7 @@ export type ApproveResponse = Message<"koinon.approval.v1alpha1.ApproveResponse"
  * Use `create(ApproveResponseSchema)` to create a new message.
  */
 export const ApproveResponseSchema: GenMessage<ApproveResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 10);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 13);
 
 /**
  * DenyRequest names a request.
@@ -523,7 +640,7 @@ export type DenyRequest = Message<"koinon.approval.v1alpha1.DenyRequest"> & {
  * Use `create(DenyRequestSchema)` to create a new message.
  */
 export const DenyRequestSchema: GenMessage<DenyRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 11);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 14);
 
 /**
  * DenyResponse holds the denied request.
@@ -542,7 +659,7 @@ export type DenyResponse = Message<"koinon.approval.v1alpha1.DenyResponse"> & {
  * Use `create(DenyResponseSchema)` to create a new message.
  */
 export const DenyResponseSchema: GenMessage<DenyResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 12);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 15);
 
 /**
  * Status is the ADR 0042 lifecycle: pending -> approved -> executed | failed,
@@ -631,6 +748,41 @@ export const DecisionSchema: GenEnum<Decision> = /*@__PURE__*/
   enumDesc(file_koinon_approval_v1alpha1_approval, 1);
 
 /**
+ * FileStatus is what a proposed pull request does to one file.
+ *
+ * @generated from enum koinon.approval.v1alpha1.FileStatus
+ */
+export enum FileStatus {
+  /**
+   * The current version could not be read (see fallback_reason).
+   *
+   * @generated from enum value: FILE_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: FILE_STATUS_ADDED = 1;
+   */
+  ADDED = 1,
+
+  /**
+   * @generated from enum value: FILE_STATUS_MODIFIED = 2;
+   */
+  MODIFIED = 2,
+
+  /**
+   * @generated from enum value: FILE_STATUS_DELETED = 3;
+   */
+  DELETED = 3,
+}
+
+/**
+ * Describes the enum koinon.approval.v1alpha1.FileStatus.
+ */
+export const FileStatusSchema: GenEnum<FileStatus> = /*@__PURE__*/
+  enumDesc(file_koinon_approval_v1alpha1_approval, 2);
+
+/**
  * ApprovalService shows and decides ask-tier tool calls (ADRs 0008, 0042,
  * 0049; plan item P1). An agent's call is recorded exactly; approving it binds
  * to the SHA-256 of its canonical arguments, and Koinon then executes exactly
@@ -666,9 +818,27 @@ export const ApprovalService: GenService<{
     output: typeof GetApprovalResponseSchema;
   },
   /**
+   * GetApprovalDiff compares a create_pull_request request with the branch
+   * its pull request will target (plan item W2: the full diff, collapsed
+   * below the risk summary). Koinon reads the current version of each file
+   * through the run's GitHub connection (contents:read, the one repository)
+   * and returns a unified diff per file. A file it cannot compare (GitHub
+   * error, larger than 1 MiB, not a file) carries a fallback_reason instead,
+   * and the card shows its full new content from GetApproval. Other tools
+   * fail with FAILED_PRECONDITION. Viewers and above.
+   *
+   * @generated from rpc koinon.approval.v1alpha1.ApprovalService.GetApprovalDiff
+   */
+  getApprovalDiff: {
+    methodKind: "unary";
+    input: typeof GetApprovalDiffRequestSchema;
+    output: typeof GetApprovalDiffResponseSchema;
+  },
+  /**
    * Approve approves a pending request and executes it. args_sha256 must be
-   * the hash shown with the request; a different hash fails with
-   * FAILED_PRECONDITION and nothing is executed. Approving again with the
+   * the hash shown with the request; a different hash fails with ABORTED
+   * (HTTP 409) and nothing is executed. A request that is no longer pending
+   * fails with FAILED_PRECONDITION. Approving again with the
    * same hash returns the request as it is (the same pull request), without
    * executing it again. Admins and owners.
    *
