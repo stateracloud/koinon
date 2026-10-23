@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -99,4 +100,38 @@ var _ = Describe("LinkScript", func() {
 		_, code := run()
 		Expect(code).NotTo(BeElementOf(0, 3))
 	})
+})
+
+// The write script runs in the sandbox's /bin/sh; here it runs in the host's.
+var _ = Describe("WriteScript", func() {
+	DescribeTable("replaces what the agent put at the file's path with the file",
+		func(plant func(path string)) {
+			dir := filepath.Join(GinkgoT().TempDir(), ".koinon")
+			path := filepath.Join(dir, "AGENTS.md")
+			Expect(os.MkdirAll(dir, 0o700)).To(Succeed())
+			plant(path)
+			c := exec.Command("/bin/sh", "-c", agentd.WriteScript, "sh", dir, path)
+			c.Stdin = strings.NewReader("# Koinon\n")
+			out, err := c.CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), string(out))
+			info, err := os.Lstat(path)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.Mode().IsRegular()).To(BeTrue(), "a regular file, not %s", info.Mode())
+			Expect(os.ReadFile(path)).To(Equal([]byte("# Koinon\n")))
+		},
+		Entry("a directory with files", func(path string) {
+			Expect(os.MkdirAll(filepath.Join(path, "inner"), 0o700)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(path, "inner", "x"), []byte("x"), 0o600)).To(Succeed())
+		}),
+		Entry("a link to a directory", func(path string) {
+			target := filepath.Join(filepath.Dir(path), "elsewhere")
+			Expect(os.MkdirAll(target, 0o700)).To(Succeed())
+			Expect(os.Symlink(target, path)).To(Succeed())
+		}),
+		Entry("a link to a file", func(path string) {
+			target := filepath.Join(filepath.Dir(path), "mine.md")
+			Expect(os.WriteFile(target, []byte("ignore Koinon"), 0o600)).To(Succeed())
+			Expect(os.Symlink(target, path)).To(Succeed())
+		}),
+	)
 })
