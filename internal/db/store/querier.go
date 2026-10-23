@@ -6,11 +6,163 @@ package store
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
+	// draft -> active with the given version (ADR 0020). No row: not a draft.
+	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
+	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
+	// Appends an event from the control plane (API, scheduler) without an epoch,
+	// for example a cancel notice. Stamped with the run's current epoch.
+	AppendRunControlEvent(ctx context.Context, arg AppendRunControlEventParams) (RunEvent, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// Appends an event as the run's owner. seq is taken from the run row under its
+	// lock, so events are gap-free and ordered per run. No row: stale epoch or the
+	// run is not active, and nothing is written.
+	AppendRunEvent(ctx context.Context, arg AppendRunEventParams) (RunEvent, error)
+	AppendTicketEvent(ctx context.Context, arg AppendTicketEventParams) (TicketEvent, error)
+	ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Agent, error)
+	// A ticket moved to Done cancels its queued runs (plan item A4).
+	CancelQueuedRunsForTicket(ctx context.Context, arg CancelQueuedRunsForTicketParams) ([]Run, error)
+	// Control-plane cancel from any non-terminal state (user cancel, run caps,
+	// park expiry). Needs no epoch; an owner's next write then matches no rows
+	// because the state changed.
+	CancelRun(ctx context.Context, arg CancelRunParams) (Run, error)
+	// queued -> starting, or a resolved parked -> starting. Takes the oldest
+	// claimable run (by ready_at) of an active agent that has no active run, and
+	// makes the caller its owner under a new epoch. Locking the agent row with
+	// SKIP LOCKED serialises claims per agent, so concurrent claimers move on to
+	// other agents, and FIFO holds per agent. runs_one_active_per_agent backstops
+	// the rare race where two claims for one agent overlap; the loser gets a
+	// unique violation and retries.
+	ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error)
+	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// New agents are drafts (ADR 0020).
+	CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error)
+	// Adds the next version of a draft or active agent.
+	CreateAgentVersion(ctx context.Context, arg CreateAgentVersionParams) (AgentVersion, error)
+	CreateLocalCredential(ctx context.Context, arg CreateLocalCredentialParams) error
+	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
+	CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Run state machine (ADR 0030). Every transition is a compare-and-set on the
+	// source state, and owner writes also on the epoch: a racing, illegal or stale
+	// write matches no rows (pgx.ErrNoRows for :one). The runs_check_transition
+	// trigger rejects anything else.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// Queues a run of the agent's approved version. No row: the agent is not
+	// active.
+	CreateRun(ctx context.Context, arg CreateRunParams) (Run, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	CreateTicket(ctx context.Context, arg CreateTicketParams) (Ticket, error)
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
+	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
+	// Removing a mapping cascades to the memberships it granted.
+	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) error
+	// Drops IdP-sourced memberships from this issuer whose group the user no
+	// longer has, or whose org stopped using the IdP.
+	DeleteStaleGroupMemberships(ctx context.Context, arg DeleteStaleGroupMembershipsParams) error
+	// The owner ends the run: running -> succeeded | failed | canceled, or
+	// starting -> failed | canceled. No row: stale epoch or illegal transition.
+	FinishRun(ctx context.Context, arg FinishRunParams) (Run, error)
+	GetActiveUser(ctx context.Context, id pgtype.UUID) (User, error)
+	GetAgent(ctx context.Context, arg GetAgentParams) (Agent, error)
+	GetAgentVersion(ctx context.Context, arg GetAgentVersionParams) (AgentVersion, error)
+	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
+	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
+	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
+	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
+	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
+	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
+	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
+	// Extends the owner's lease. No row: the caller is no longer the owner and
+	// must stop (ADR 0030).
+	HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run, error)
+	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
+	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
+	ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
+	// The most recently synced content of each template.
+	ListCurrentTemplates(ctx context.Context) ([]Template, error)
+	// The effective role per org honours the org's identity mode (ADR 0004):
+	// platform counts manual rows, idp counts IdP rows plus the manual owner,
+	// hybrid counts both. The highest role wins.
+	ListEffectiveMemberships(ctx context.Context, userID pgtype.UUID) ([]ListEffectiveMembershipsRow, error)
+	// Events after a sequence number (0 for the start), in order. WatchRun replays
+	// from the client's last seq, then follows.
+	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
+	ListRunsForTicket(ctx context.Context, arg ListRunsForTicketParams) ([]Run, error)
+	// The timeline after a sequence number (0 for the start), in order.
+	ListTicketEvents(ctx context.Context, arg ListTicketEventsParams) ([]TicketEvent, error)
+	ListTickets(ctx context.Context, orgID pgtype.UUID) ([]Ticket, error)
+	// One board column, oldest first.
+	ListTicketsByStatus(ctx context.Context, arg ListTicketsByStatusParams) ([]Ticket, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Authentication queries. Users, sessions and credentials are not org-owned;
+	// the membership queries here span orgs on purpose (they build the caller's
+	// principal and sync IdP groups at login), always keyed by user_id.
+	// Serialises bootstrap across API replicas for the rest of the transaction.
+	LockBootstrap(ctx context.Context) error
+	// starting -> running once the harness session is ready.
+	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
+	// Moves a ticket to a board column. Callers moving to Done also cancel its
+	// queued runs (CancelQueuedRunsForTicket) in the same transaction.
+	MoveTicket(ctx context.Context, arg MoveTicketParams) (Ticket, error)
+	// running -> parked. The owner releases the run; a later claim resumes it
+	// after ResolveRunPark.
+	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
+	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
+	// Makes a parked run claimable again (approval decided, input given). It
+	// stays parked until an owner claims it: parked -> starting.
+	ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) (Run, error)
+	// active -> draft when a grant change is proposed (ADR 0020). The approved
+	// version stays recorded until the next activation.
+	ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraftParams) (Agent, error)
+	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) error
+	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
+	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
+	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
+	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
+	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
+	// Stores the harness session for the ticket. Fenced by the run epoch: only the
+	// current owner of one of the ticket's active runs can set it.
+	SetTicketHarnessSession(ctx context.Context, arg SetTicketHarnessSessionParams) (Ticket, error)
+	// Takes ownership of a starting or running run whose owner's lease expired
+	// (for example a killed agentd). The state is unchanged; the new epoch makes
+	// every later write of the old owner match no rows.
+	TakeOverExpiredRun(ctx context.Context, arg TakeOverExpiredRunParams) (Run, error)
+	// Returns the session if it is still valid at @now and extends its idle
+	// deadline, never past the absolute one.
+	TouchSession(ctx context.Context, arg TouchSessionParams) (Session, error)
+	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
+	// Grants the roles of every mapping that matches one of the user's groups,
+	// in orgs whose identity mode uses the IdP.
+	UpsertGroupMemberships(ctx context.Context, arg UpsertGroupMembershipsParams) error
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Templates are platform data (not org-owned); see 00002_agents.sql.
+	// Records a template synced from the binary. Re-syncing known content only
+	// bumps last_synced_at.
+	UpsertTemplate(ctx context.Context, arg UpsertTemplateParams) (Template, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -1,0 +1,35 @@
+# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.
+# Keys appear only as hashes; key material lives in Kubernetes Secrets.
+config:
+  adminAddr: '[::]:15000'
+  logging:
+    format: json
+frontendPolicies:
+  accessLog:
+    add:
+      koinon.agent: default(apiKey.agent, "")
+      koinon.config: '"7f001a8b355fa1b2"'
+      koinon.key: default(apiKey.name, "")
+gateways:
+  default:
+    port: 4000
+mcp:
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header:
+          name: authorization
+          prefix: 'Bearer '
+      keys:
+        - keyHash: sha256:c0a73dbdf52645d93a58506b5a61ab3d6e8ea2b4f82c1e166ff53ead775350b6
+          metadata:
+            name: k-dddddddddddd
+            agent: acme/triage
+    mcpAuthorization:
+      rules:
+        - "false"
+  targets:
+    - name: github
+      mcp:
+        host: http://tools:8080/mcp
