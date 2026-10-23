@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # Dev-only Postgres (ADR 0047), managed by the home lab's CloudNativePG operator.
 # CNPG creates the secret koinon-pg-app; its uri key is the DATABASE_URL.
 apiVersion: postgresql.cnpg.io/v1
