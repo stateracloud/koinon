@@ -71,8 +71,8 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 
   const timeline = page.getByRole('list', { name: 'Timeline' })
-  const first = timeline.getByText(/I asked for approval to open the pull request/).first()
-  await expect(first).toBeVisible({ timeout: 8 * 60_000 })
+  // The reply shows exactly once: streamed live, then replaced by the persisted message.
+  await expect(timeline.getByText(/I asked for approval to open the pull request/)).toHaveCount(1, { timeout: 8 * 60_000 })
 
   // 5. The tool call parked the run on an approval; approve it in the browser.
   const card = page.getByTestId('approval-card')
@@ -81,7 +81,7 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   await card.getByRole('button', { name: 'Approve' }).click()
 
   // 6. The run resumes and posts the pull request URL; it ends in a terminal state.
-  await expect(timeline.getByText(/The pull request is open: https:\/\/github\.test\/koinon-demo\/hello\/pull\/1/)).toBeVisible({
+  await expect(timeline.getByText(/The pull request is open: https:\/\/github\.test\/koinon-demo\/hello\/pull\/1/)).toHaveCount(1, {
     timeout: 5 * 60_000,
   })
   await expect(page.getByRole('region', { name: 'Run costs' })).toContainText('succeeded')

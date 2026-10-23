@@ -26,6 +26,7 @@ NS=koinon
 FAKES=koinon-e2e-fakes
 KEEP=${KEEP:-0}
 SUITE=${SUITE:-go}
+case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; esac
 SKIP_UP=${SKIP_UP:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}
 API_PORT=${API_PORT:-18080}
@@ -149,9 +150,8 @@ web)
     PLAYWRIGHT_OUTPUT_DIR="$OUT/playwright" \
     pnpm exec playwright test -c playwright.real.config.ts) 2>&1 | tee "$OUT/web.log"
   done_step "Browser e2e"
-  echo "| Browser e2e | see web.log |" >"$OUT/quickstart-timings.md"
+  echo "Browser e2e (Playwright, web/e2e-real) passed in $(( $(date +%s) - ts )) s; details in web.log." >"$OUT/quickstart-timings.md"
   ;;
-*) echo "SUITE must be go or web" >&2; exit 2 ;;
 esac
 
 status=0
