@@ -28,6 +28,8 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"go.yaml.in/yaml/v3"
 
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/flavor"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -62,7 +64,15 @@ const (
 // AllFlavors lists every flavor. The schema's $defs.flavor enum and the
 // agent_flavor type in the migrations hold the same list; a test keeps the
 // three in step.
-var AllFlavors = []Flavor{FlavorOpenCode, FlavorHermes, FlavorPi}
+var AllFlavors = allFlavors()
+
+func allFlavors() []Flavor {
+	var out []Flavor
+	for _, n := range flavor.Names() {
+		out = append(out, Flavor(n))
+	}
+	return out
+}
 
 // Preset maps a grant's risk tiers to allow, ask or deny (ADR 0008, 0049).
 type Preset string
@@ -302,8 +312,16 @@ func (t *Template) check() error {
 	if !slices.Contains(t.Spec.Flavors.Allowed, t.Spec.Flavors.Default) {
 		return fmt.Errorf("default flavor %q is not in the allowed flavors", t.Spec.Flavors.Default)
 	}
-	if t.Spec.Harness.PluginInstalls && !slices.Contains(t.Spec.Flavors.Allowed, FlavorOpenCode) {
-		return errors.New("harness.pluginInstalls applies to the opencode flavor only, which is not allowed")
+	if t.Spec.Harness.PluginInstalls && !slices.ContainsFunc(t.Spec.Flavors.Allowed, func(f Flavor) bool {
+		return flavor.SupportsPluginInstalls(store.AgentFlavor(f))
+	}) {
+		var names []string
+		for _, d := range flavor.All() {
+			if d.PluginInstalls {
+				names = append(names, string(d.Name))
+			}
+		}
+		return fmt.Errorf("harness.pluginInstalls applies to the %s flavor only, which is not allowed", strings.Join(names, "/"))
 	}
 	if d := t.Spec.Limits.Run.MaxDuration.Duration; d > MaxRunDuration {
 		return fmt.Errorf("limits.run.maxDuration %s exceeds %s", d, MaxRunDuration)
