@@ -4,7 +4,8 @@
 
 The Starlight documentation site (ADR 0037, plan item DOC1). Astro 7.3.8 and Starlight 0.42.6, both
 pinned and locked with pnpm. No analytics, no external fonts, no deploy while the repository is
-private.
+private. Astro telemetry is off in `make docs` (`ASTRO_TELEMETRY_DISABLED=1`); set it yourself for
+`pnpm dev`, or run `pnpm astro telemetry disable`.
 
 ```sh
 make docs         # install and build into docs/site/dist

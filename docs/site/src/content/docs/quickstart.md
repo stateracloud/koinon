@@ -15,19 +15,26 @@ You need:
 - a GitHub App installed on one repository you can write to ([GitHub App](/guides/github-app/));
 - an OpenRouter API key, or an Ollama server ([Models](/guides/models/));
 - Koinon's images and chart. There is no published release yet, so work from a clone of the
-  repository and build the images with `ko`. See [Not built yet](#not-built-yet).
+  repository and [build the images](#build-the-images).
 
 Run the commands from the root of the clone. The shell commands in blocks marked `e1` are the ones
 the end-to-end test runs.
 
 ## 1. Write your values
 
-Save this as `values.yaml`. It uses OpenRouter and Kata. Change `image.registry` to the registry
-that holds your images, and `openshell.address` if your gateway lives elsewhere.
+Save this as `values.yaml`. It uses OpenRouter and Kata. Change `image.registry` and `image.tag` to
+where you pushed the images ([Build the images](#build-the-images)), and `openshell.address` if your
+gateway lives elsewhere. The chart runs only the flavors it has an entry for, so this file turns off
+Hermes and pi, whose images the build below does not make.
 
 ```yaml chart-values
 image:
   registry: registry.example.com/koinon
+  tag: v0.1.0
+
+flavors:
+  hermes: null
+  pi: null
 
 openshell:
   address: openshell.openshell.svc:8080
@@ -188,11 +195,38 @@ available.
 and [ADR 0058](https://github.com/stateracloud/koinon/blob/main/docs/adr/0058-gateway-modes.md) have
 the decisions.
 
+## Build the images
+
+There is no published release yet (plan item REL1), so you build and push the images yourself. You
+need Go, `ko`, Docker with buildx, Node and pnpm, and a registry your cluster can pull from. Run this
+from the root of the clone. Replace `registry.example.com/koinon` and `v0.1.0` with your registry and
+a tag, the same ones as `image.registry` and `image.tag` in `values.yaml`.
+
+```sh
+# 1. The web UI. koinon-api embeds web/dist when built with the webui tag.
+pnpm -C web install --frozen-lockfile
+pnpm -C web build
+
+# 2. The three Koinon images: registry.example.com/koinon/koinon-api:v0.1.0 and so on.
+KO_DOCKER_REPO=registry.example.com/koinon GOFLAGS=-tags=webui \
+  ko build --base-import-paths --tags v0.1.0 ./cmd/koinon-api ./cmd/koinon-reconciler ./cmd/koinon-agentd
+
+# 3. The OpenCode flavor image: registry.example.com/koinon/flavor-opencode:v0.1.0.
+docker buildx build --push --build-context common=flavors/common \
+  --tag registry.example.com/koinon/flavor-opencode:v0.1.0 flavors/opencode
+```
+
+Without `-tags=webui`, `koinon-api` serves no UI. Without `--base-import-paths`, `ko` gives the images
+other names than the chart expects. The chart takes the flavor image tag from `image.tag`. The images
+have to be pullable by the cluster; add `imagePullSecrets` for a private registry.
+
+The end-to-end test does not run this build. It builds with `ko` without the `webui` tag and loads
+the images straight into kind, and its browser suite goes through the Vite dev server. I checked this
+sequence by hand against a local `registry:2`, and `helm template` named exactly the pushed images.
+
 ## Not built yet
 
-- Published images and chart (plan item REL1). Build the Koinon images with `ko build
-  ./cmd/koinon-api ./cmd/koinon-reconciler ./cmd/koinon-agentd`, and a flavor image with
-  `make flavor-opencode`. Push them to your registry and set `image.registry` and `image.tag`.
+- Published images and chart (plan item REL1).
 - A recorded run on Kata with a real model (plan item REL2).
 
 ## How these steps are tested

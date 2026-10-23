@@ -59,10 +59,10 @@ Each field closes one gap:
 - `allow_fallbacks: false` stops OpenRouter from sending the request elsewhere when those hosts fail.
   The run fails instead.
 
-Create the key Secret before you install. This is the command the quickstart runs:
+Create the key Secret before you install. The quickstart's `model-key` step does this:
 
 ```sh
-kubectl -n koinon create secret generic koinon-openrouter --from-literal=api_key="$OPENROUTER_API_KEY"
+kubectl -n koinon create secret generic koinon-openrouter --from-literal=api_key="$OPENROUTER_API_KEY" --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 Set `rates` to the highest price among your allowed hosts, so the ledger never counts too little.
