@@ -10,9 +10,10 @@
 // Plain Docker has no OpenShell placeholder substitution, so the container gets a fake key
 // directly. No real key or paid model is ever used.
 //
-// The suite skips when Docker is unavailable or a flavor image is missing; build the images
-// with `make flavor-opencode` (or set KOINON_FLAVOR_BUILD=1 to build them here). Override an
-// image with KOINON_FLAVOR_IMAGE_<NAME>, for example KOINON_FLAVOR_IMAGE_OPENCODE.
+// The suite skips when Docker is unavailable and fails when a flavor image is missing. Images are
+// tagged per source tree (koinon/flavor-<name>:dev-<hash>, hack/flavor-tag.sh), so build them from
+// this tree with `make flavor-opencode` (or set KOINON_FLAVOR_BUILD=1 to build them here).
+// Override an image with KOINON_FLAVOR_IMAGE_<NAME>, for example KOINON_FLAVOR_IMAGE_OPENCODE.
 package flavors_test
 
 import (
