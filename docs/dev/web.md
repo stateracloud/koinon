@@ -10,7 +10,7 @@ Tailwind v4, and a connect-web client generated from `api/proto` (`make generate
 Run the API and the Vite dev server side by side:
 
 ```sh
-# terminal 1: the API on :8080 (needs Postgres; see hack/dev or any local Postgres)
+# terminal 1: the API on :8080 (needs Postgres; or use `tilt up`, docs/dev/loop.md)
 go run ./cmd/koinon-api --migrate --database-url "$DATABASE_URL" \
   --bootstrap-password-file ./bootstrap-password
 

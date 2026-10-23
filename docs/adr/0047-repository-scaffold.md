@@ -76,6 +76,8 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
     into namespace `koinon`: a dev-only single-instance CloudNativePG `Cluster` (Postgres 18.6,
     using the platform's operator; nothing cluster-wide installed by Koinon), `koinon-api` and
     `koinon-reconciler`. The Vite dev server runs locally.
+    _Amended (2026-10-23):_ the Tiltfile now deploys `charts/koinon` with `hack/dev/values*.yaml`,
+    on the home lab or a kind profile; see [docs/dev/loop.md](../dev/loop.md).
 13. **CI**: `.github/workflows/ci.yml` (jobs `go`, `web`, `proto`, `generated code`, `migrations`)
     and `dco.yml`, on free `ubuntu-latest` runners, every action pinned to a commit SHA.
     While the repository is private, runs use the account's free Actions minutes.
