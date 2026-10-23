@@ -57,11 +57,12 @@ func (r *runner) sweep(ctx context.Context, workspace, sandbox string) (string, 
 	return main, strings.Fields(ended), nil
 }
 
-// sweepAfter sweeps once the run's harness has ended. It is skipped when another worker may
-// own the run by now, whose harness it would end: fenced, but neither canceled nor finished by
-// this worker. The next run's sweep catches what is left.
+// sweepAfter sweeps once the run's harness has ended, while the run still holds the agent's
+// active slot. It is skipped once the worker is fenced: the run was taken over, canceled or
+// given up, its slot may be free, and the agent's next run may have started its harness. The
+// next run's sweep catches what is left.
 func (r *runner) sweepAfter(ctx context.Context, workspace, sandbox string) {
-	if r.isFenced() && fence(r.fenceKind.Load()) != fenceCanceled && !r.finished.Load() {
+	if r.isFenced() {
 		return
 	}
 	_, ended, err := r.sweep(context.WithoutCancel(ctx), workspace, sandbox)
