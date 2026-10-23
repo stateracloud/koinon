@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Hermes Agent configuration for the Koinon Hermes flavor. Read-only in the image at
+# /etc/koinon/hermes/config.yaml; koinon-hermes links it as $HERMES_HOME/config.yaml, the only
+# place Hermes reads its config from. Hermes expands ${VAR} in every string value after parsing
+# (hermes_cli/config.py, _expand_env_vars); the KOINON_* values come from koinon-hermes's
+# arguments, OPENAI_API_KEY is the agent's agentgateway key, an OpenShell placeholder inside a
+# sandbox. See flavors/hermes/README.md for the source of each switch.
+#
+# This file holds what only shapes the run: the model, the MCP server, phone-home switches.
+# Everything that decides the agent's tools is in Hermes's managed scope,
+# /etc/hermes/config.yaml, which wins over this file at every key it sets; the agent can
+# replace this file's link, not that file.
+
+# Hermes 0.22.3's config schema version (hermes_cli/config_defaults.py). Without it Hermes
+# takes the file for a pre-v12 config and tries to migrate it.
+_config_version: 51
+
+model:
+  provider: custom
+  base_url: "${KOINON_MODEL_BASE_URL}"
+  default: "${KOINON_MODEL}"
+  key_env: OPENAI_API_KEY
+
+mcp_servers:
+  koinon:
+    url: "${KOINON_MCP_URL}"
+    headers:
+      Authorization: "Bearer ${OPENAI_API_KEY}"
+    # Only the server's tools, not Hermes's resource and prompt helpers.
+    tools:
+      resources: false
+      prompts: false
+
+# Phone-home off: update and plugin update checks, shared metrics. The OpenShell policy refuses
+# these requests anyway.
+updates:
+  check: false
+plugins:
+  auto_update_check_hours: 0
+telemetry:
+  shared_metrics:
+    enabled: false
+    send: false

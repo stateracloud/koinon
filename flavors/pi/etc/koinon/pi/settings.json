@@ -1,0 +1,7 @@
+{
+  "defaultProvider": "koinon",
+  "defaultModel": "@KOINON_MODEL@",
+  "sessionDir": "/sandbox/.pi/agent/sessions",
+  "enableInstallTelemetry": false,
+  "quietStartup": true
+}

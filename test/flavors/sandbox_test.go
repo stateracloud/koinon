@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -53,6 +54,9 @@ func (s *sandbox) start(ctx context.Context) {
 		// Reaches the in-process servers; host-gateway also works on Linux runners.
 		"--add-host", "host.docker.internal:host-gateway",
 		"--entrypoint", "/bin/sleep",
+		// Tells koinon-agentd's sweep that PID 1 (sleep) is the main process, as the OpenShell
+		// supervisor's first child is in a real sandbox (internal/agentd/sweep.sh).
+		"--env", "KOINON_SANDBOX_STANDIN=1",
 	}
 	for _, e := range s.env {
 		args = append(args, "--env", e)
@@ -143,7 +147,7 @@ func (h *harness) close() {
 		_ = h.cmd.Process.Kill()
 		<-done
 	}
-	if CurrentSpecReport().Failed() {
+	if CurrentSpecReport().Failed() || os.Getenv("KOINON_FLAVOR_STDERR") == "1" {
 		GinkgoWriter.Printf("harness stderr:\n%s\n", h.stderr.String())
 	}
 }

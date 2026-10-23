@@ -1,15 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The v0.1 repo-helper flow (ADR 0049): the agent calls create_pull_request, sees the tool result
-# (the approval request), then answers. Selection is stateless: the first turn whose `when` holds
-# answers the request; an empty `when.toolResult` means "the last message is not a tool result".
+# (the approval request), then answers; once a human approved and Koinon opened the pull request,
+# the run resumes with the outcome and the agent posts the URL. Selection is stateless: the first
+# turn whose `when` holds answers the request; an empty `when.toolResult` means "the last message
+# is not a tool result". Tool names match behind a harness's MCP prefix (koinon_create_pull_request
+# in OpenCode, mcp__koinon__create_pull_request in Hermes and pi).
+#
+# The fake GitHub (internal/connectors/github/githubtest) numbers pull requests from 1 and links
+# them under https://github.test/, which is the URL the resumed run reports.
+#
+# Every turn needs the repo-helper template's instructions in the system prompt ("# Repo helper",
+# templates/repo-helper.yaml), which koinon-agentd writes into the sandbox for each run (ADR 0052).
+# A request without them, such as a harness's title request or a run whose instructions did not
+# arrive, matches no turn and gets HTTP 400, so the quickstart fails instead of passing on a
+# harness that never saw its instructions.
 model: repo-helper
 turns:
-  - toolCalls:
+  # The resumed run: agentd's prompt carries the approval's outcome (internal/agentd/park.go).
+  - when:
+      systemContains: "# Repo helper"
+      userContains: "approved and executed by Koinon"
+    text: "The pull request is open: https://github.test/koinon-demo/hello/pull/1"
+    usage:
+      inputTokens: 1500
+      cachedInputTokens: 1350
+      outputTokens: 20
+  - when:
+      systemContains: "# Repo helper"
+    toolCalls:
       - name: create_pull_request
         arguments:
-          repository: koinon-demo/hello
-          branch: agent/repo-helper-hello
+          branch: koinon/add-hello-md
           title: Add hello.md
           body: Adds hello.md as requested in the ticket.
           files:
@@ -19,6 +41,7 @@ turns:
       inputTokens: 1200
       outputTokens: 60
   - when:
+      systemContains: "# Repo helper"
       toolResult: create_pull_request
     text: I asked for approval to open the pull request "Add hello.md". It will be opened once approved.
     usage:

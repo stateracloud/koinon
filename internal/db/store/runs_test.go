@@ -339,7 +339,7 @@ var _ = Describe("runs", func() {
 		It("does not count a parked run as active", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			first := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			second := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, newTicket(ctx, f.org, f.user, f.agent.ID).ID)
 			parked, err := park(ctx, markRunning(ctx, mustClaim(ctx, f.org, "agentd-a")))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(parked.ID).To(Equal(first.ID))
@@ -356,6 +356,68 @@ var _ = Describe("runs", func() {
 			_, err = finish(ctx, active, store.RunStateFailed)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(mustClaim(ctx, f.org, "agentd-b").ID).To(Equal(first.ID))
+		})
+
+		It("keeps a ticket's next run waiting while another of its runs is owned or parked", func(ctx SpecContext) {
+			f := newFixture(ctx)
+			first := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			parked, err := park(ctx, markRunning(ctx, mustClaim(ctx, f.org, "agentd-a")))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(parked.ID).To(Equal(first.ID))
+			_, err = claim(ctx, f.org, "agentd-a")
+			Expect(err).To(MatchError(pgx.ErrNoRows), "one harness session per ticket")
+
+			_, err = q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: f.org, ID: first.ID})
+			Expect(err).NotTo(HaveOccurred())
+			resumed := markRunning(ctx, mustClaim(ctx, f.org, "agentd-a"))
+			Expect(resumed.ID).To(Equal(first.ID))
+			Expect(resumed.ParkedSeconds).To(BeNumerically(">=", 0))
+			_, err = finish(ctx, resumed, store.RunStateSucceeded)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mustClaim(ctx, f.org, "agentd-a").ID).To(Equal(second.ID))
+		})
+
+		// #27's per-ticket rule with #28's takeover columns: a run whose lease was released or
+		// expired is still owned, so the ticket's next run waits through every takeover, and
+		// the next run sees how far the taken-over run prompted.
+		It("keeps a ticket's next run waiting while another of its runs is taken over", func(ctx SpecContext) {
+			f := newFixture(ctx)
+			first := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			a := markRunning(ctx, mustClaim(ctx, f.org, "agentd-a"))
+			Expect(a.ID).To(Equal(first.ID))
+			Expect(a.Takeovers).To(BeZero())
+			_, err := q.SetRunPromptThrough(ctx, store.SetRunPromptThroughParams{OrgID: f.org, ID: a.ID, Epoch: a.Epoch, PromptThroughSeq: 3})
+			Expect(err).NotTo(HaveOccurred())
+
+			// The exec stream dropped: agentd releases the lease.
+			_, err = q.ReleaseRunLease(ctx, store.ReleaseRunLeaseParams{OrgID: f.org, ID: a.ID, Epoch: a.Epoch})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = claim(ctx, f.org, "agentd-b")
+			Expect(err).To(MatchError(pgx.ErrNoRows), "a released run still holds its ticket")
+			b, err := q.TakeOverExpiredRun(ctx, store.TakeOverExpiredRunParams{OrgID: f.org, OwnerID: "agentd-b", LeaseSeconds: lease})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b.ID).To(Equal(first.ID))
+			Expect(b.Takeovers).To(BeEquivalentTo(1))
+
+			// The new owner is killed: its lease expires and a third worker takes over.
+			expireLease(ctx, b)
+			_, err = claim(ctx, f.org, "agentd-c")
+			Expect(err).To(MatchError(pgx.ErrNoRows), "an expired run still holds its ticket")
+			c, err := q.TakeOverExpiredRun(ctx, store.TakeOverExpiredRunParams{OrgID: f.org, OwnerID: "agentd-c", LeaseSeconds: lease})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(c.Takeovers).To(BeEquivalentTo(2))
+			Expect(c.PromptThroughSeq.Int64).To(BeEquivalentTo(3))
+			_, err = finish(ctx, c, store.RunStateSucceeded)
+			Expect(err).NotTo(HaveOccurred())
+
+			next := mustClaim(ctx, f.org, "agentd-a")
+			Expect(next.ID).To(Equal(second.ID))
+			Expect(next.Takeovers).To(BeZero())
+			through, err := q.GetTicketPromptedThrough(ctx, store.GetTicketPromptedThroughParams{OrgID: f.org, TicketID: f.ticket.ID, RunID: next.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(through).To(BeEquivalentTo(3))
 		})
 
 		It("claims in FIFO order, across agents too", func(ctx SpecContext) {
@@ -403,6 +465,41 @@ var _ = Describe("runs", func() {
 			// claim skips that agent's second run and takes the other agent's.
 			Expect(mustClaim(ctx, f.org, "w").ID).To(Equal(b1.ID))
 			Expect(tx.Commit(ctx)).To(Succeed())
+		})
+
+		// A claim whose snapshot predates a concurrent winner's commit, but whose lock on the
+		// agent row comes after it, re-checks the agent row and sees the run as claimable
+		// again; the run update then matches nothing. It must not have bumped the agent's
+		// epoch on the way, or the next owner gets a skipped epoch.
+		It("bumps the agent epoch only for the claim that wins", func(ctx SpecContext) {
+			const rounds, claimers = 40, 12
+			for range rounds {
+				f := newFixture(ctx)
+				enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+				start := make(chan struct{})
+				won := make(chan store.Run, claimers)
+				var wg sync.WaitGroup
+				for i := range claimers {
+					wg.Go(func() {
+						defer GinkgoRecover()
+						<-start
+						r, err := claim(ctx, f.org, fmt.Sprintf("w%d", i))
+						if err == nil {
+							won <- r
+							return
+						}
+						Expect(err).To(MatchError(pgx.ErrNoRows))
+					})
+				}
+				close(start)
+				wg.Wait()
+				close(won)
+				Expect(won).To(HaveLen(1))
+				winner := <-won
+				agent, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: f.org, ID: f.agent.ID})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(agent.Epoch).To(Equal(winner.Epoch), "a losing claim bumped the agent epoch")
+			}
 		})
 
 		It("never claims another org's runs", func(ctx SpecContext) {

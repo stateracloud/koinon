@@ -12,35 +12,38 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/procoduck/koinon/internal/acp"
+	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/testing/fakemodel"
 )
 
 // opencode is the OpenCode flavor's contract (flavors/opencode/README.md).
 var opencode = flavor{
-	name:       "opencode",
-	dockerfile: "flavors/opencode",
-	command: func(modelBaseURL, model, mcpURL string) []string {
-		return []string{
-			"/usr/local/bin/koinon-opencode",
-			"--model-base-url", modelBaseURL,
-			"--model", model,
-			"--mcp-url", mcpURL,
-		}
-	},
+	name:        "opencode",
+	storeFlavor: store.AgentFlavorOpencode,
+	dockerfile:  "flavors/opencode",
 	writeFile: func(path, content string) fakemodel.ToolCall {
 		return fakemodel.ToolCall{Name: "write", Arguments: map[string]any{"path": path, "content": content}}
 	},
-	readFile: func(path string) fakemodel.ToolCall {
-		return fakemodel.ToolCall{Name: "read", Arguments: map[string]any{"path": path}}
-	},
-	// OpenCode asks before touching a path outside the session's directory (permission
-	// external_directory, default "ask"); its own global config directory is exempt, so the
-	// path is elsewhere. The request arrives with tool kind "read".
-	outsidePath: "/etc/passwd",
 	// OpenCode names MCP tools <server>_<tool>; the server is "koinon" in its config.
 	mcpToolName: "koinon_" + mcpTool,
-	allow:       []acp.PermissionOptionKind{acp.AllowOnce},
-	reject:      []acp.PermissionOptionKind{acp.RejectOnce},
+	// OpenCode also advertises session/resume; Koinon does not rely on it.
+	resume: true,
+	// OpenCode asks before touching a path outside the session's directory (permission
+	// external_directory, default "ask"), not for edits inside it; its own global config
+	// directory is exempt, so the path is elsewhere.
+	permissionCall: fakemodel.ToolCall{
+		Name: "read", Arguments: map[string]any{"path": "/etc/passwd"},
+	},
+	allow:  []acp.PermissionOptionKind{acp.AllowOnce},
+	reject: []acp.PermissionOptionKind{acp.RejectOnce},
+	// The request arrives with tool kind "read", which agentd's mapping allows, and the path in
+	// its locations: agentd rejects it as outside the session directory.
+	agentdVerdict: "reject",
+	// OpenCode 2.0.24's session/load error for an unknown session.
+	unknownSession: "session not found",
+	// The global AGENTS.md links to the file koinon-agentd writes.
+	instructionsInSystem: true,
+	instructionLink:      "/etc/koinon/opencode/AGENTS.md",
 	// OpenCode turns MCP prompts into commands named <server>:<prompt>.
 	readyCommand: "koinon:" + readyPrompt,
 	// OpenCode 2.0.24 reports a model of its own choosing until one is selected.
@@ -71,8 +74,6 @@ var opencode = flavor{
 	},
 }
 
-var _ = describeContract(opencode)
-
 // opencodeHarness starts koinon-opencode in sb against gw, with extra arguments, and brings a
 // new session to where koinon-agentd sends the first prompt.
 func opencodeHarness(ctx context.Context, sb *sandbox, gw *gateway, extra ...string) (*harness, acp.SessionID) {
@@ -93,18 +94,7 @@ func opencodeHarness(ctx context.Context, sb *sandbox, gw *gateway, extra ...str
 // instructions is empty, the instruction file koinon-agentd writes.
 func newOpencodeSandbox(ctx context.Context, instructions string) *sandbox {
 	GinkgoHelper()
-	if dockerErr != nil {
-		Skip("Docker is not available: " + dockerErr.Error())
-	}
-	ensureImage(opencode)
-	sb := newSandbox(opencode.image(), "OPENAI_API_KEY="+fakeKey)
-	DeferCleanup(func() { sb.remove(context.Background()) })
-	sb.start(ctx)
-	sb.run(ctx, "mkdir", "-p", workdir)
-	if instructions != "" {
-		sb.write(ctx, instructionsPath, instructions)
-	}
-	return sb
+	return newFlavorSandbox(ctx, opencode, instructions)
 }
 
 // lastBody is the last chat request the fake model received.
@@ -131,22 +121,6 @@ var _ = Describe("koinon-opencode instructions", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lastBody(gw)).To(ContainSubstring(instructionsMarker + " version two"))
 	}, SpecTimeout(3*time.Minute))
-
-	DescribeTable("refuses to start without the instruction file",
-		func(ctx SpecContext, setup string) {
-			sb := newOpencodeSandbox(ctx, "")
-			if setup != "" {
-				sb.run(ctx, "sh", "-c", setup)
-			}
-			_, stderr, code := sb.try(ctx, opencode.command("http://gw.test/v1", contractModel, "http://gw.test/mcp")...)
-			Expect(code).To(Equal(64))
-			Expect(stderr).To(ContainSubstring("missing instructions: " + instructionsPath))
-		},
-		Entry("missing", SpecTimeout(2*time.Minute), ""),
-		Entry("empty", SpecTimeout(2*time.Minute), "mkdir -p /sandbox/.koinon && : > "+instructionsPath),
-		Entry("a symbolic link", SpecTimeout(2*time.Minute),
-			"mkdir -p /sandbox/.koinon && echo x > /sandbox/x.md && ln -s /sandbox/x.md "+instructionsPath),
-	)
 })
 
 // homePlugin is an OpenCode v2 plugin (the promise form of @opencode/plugin's define) that
@@ -214,7 +188,7 @@ var _ = Describe("koinon-opencode and the agent's home", func() {
 		_, err := h.conn.Prompt(ctx, session, helloPrompt)
 		Expect(err).NotTo(HaveOccurred())
 		h.client.answerWith(opencode.reject...)
-		_, err = h.conn.Prompt(ctx, session, readPrompt)
+		_, err = h.conn.Prompt(ctx, session, permitPrompt)
 		Expect(err).NotTo(HaveOccurred())
 		_, perms := h.client.take()
 		Expect(perms).NotTo(BeEmpty(), "a seeded allow-all permission must not apply")

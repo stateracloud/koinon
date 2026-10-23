@@ -33,10 +33,12 @@ WHERE org_id = @org_id AND id = @id
 RETURNING *;
 
 -- name: SetTicketHarnessSession :one
--- Stores the harness session for the ticket. Fenced by the run epoch: only the
--- current owner of one of the ticket's active runs can set it.
+-- Stores the harness session for the ticket with the home generation of the
+-- sandbox it was created in. Fenced by the run epoch: only the current owner
+-- of one of the ticket's active runs can set it.
 UPDATE tickets t
-SET harness_session_id = @harness_session_id::text, harness_session_cwd = @harness_session_cwd::text
+SET harness_session_id = @harness_session_id::text, harness_session_cwd = @harness_session_cwd::text,
+    harness_session_generation = sqlc.narg(harness_session_generation)
 WHERE t.org_id = @org_id AND t.id = @id
   AND EXISTS (
       SELECT 1 FROM runs r
@@ -64,3 +66,22 @@ SELECT * FROM ticket_events
 WHERE org_id = @org_id AND ticket_id = @ticket_id AND seq > @after_seq
 ORDER BY seq
 LIMIT @max_events;
+
+-- name: ListTicketMessagesAfter :many
+-- The users' messages on the ticket after a timeline seq, in order: what
+-- agentd sends the harness as a run's prompt.
+SELECT * FROM ticket_events
+WHERE org_id = @org_id AND ticket_id = @ticket_id AND seq > @after_seq
+  AND kind = 'message' AND actor_kind = 'user'
+ORDER BY seq;
+
+-- name: MoveTicketFrom :one
+-- Moves a ticket between two columns other than Done, only if it is in
+-- from: parking moves In progress or To do to Waiting on you, and a resolved
+-- approval moves it back. No row: the ticket is elsewhere (for example Done,
+-- or a user moved it).
+UPDATE tickets
+SET status = @to_status::ticket_status
+WHERE org_id = @org_id AND id = @id AND status::text = ANY(@from_statuses::text[])
+  AND @to_status::ticket_status <> 'done'
+RETURNING *;

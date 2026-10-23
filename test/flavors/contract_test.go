@@ -4,9 +4,11 @@ package flavors_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,26 +16,50 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/procoduck/koinon/internal/acp"
+	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/testing/fakemodel"
 )
 
-// flavor is what the contract suite needs to know about one flavor.
+// flavor is what the contract suite needs to know about one flavor: how to drive it, and what
+// it is expected to do where harnesses legitimately differ.
 type flavor struct {
-	name string
+	name        string
+	storeFlavor store.AgentFlavor
 	// dockerfile is the build context, relative to the repository root.
 	dockerfile string
-	// command is the ACP launch command koinon-agentd execs in the sandbox.
-	command func(modelBaseURL, model, mcpURL string) []string
-	// writeFile and readFile are the harness's own tool calls for these actions, as the
-	// model would emit them.
+	// writeFile is the harness's own tool call that writes a file, as the model would emit it.
 	writeFile func(path, content string) fakemodel.ToolCall
-	readFile  func(path string) fakemodel.ToolCall
-	// outsidePath is a readable file whose access makes the harness ask for permission.
-	outsidePath string
 	// mcpToolName is how the harness presents the stand-in MCP tool to the model.
 	mcpToolName string
+	// absentTools are tools the flavor's configuration switches off; the model must not be
+	// offered them.
+	absentTools []string
+
+	// anonymousProbes is whether the harness also sends metadata GETs to the model endpoint
+	// without the key (Hermes probing for a local llama.cpp or vLLM server). They carry no
+	// credential; agentgateway answers them 401.
+	anonymousProbes bool
+	// resume is whether the harness advertises session/resume. Koinon relies on session/load
+	// only (ADR 0048), so this documents the harness rather than gating anything.
+	resume bool
+	// editAsks is whether the harness asks for permission before writeFile.
+	editAsks bool
+	// permissionCall is a tool call that makes the harness ask for permission, or nil when the
+	// harness never sends session/request_permission.
+	permissionCall fakemodel.ToolCall
 	// allow and reject are the permission option kinds to answer with.
 	allow, reject []acp.PermissionOptionKind
+	// agentdVerdict is how koinon-agentd's default tier mapping answers permissionCall.
+	agentdVerdict string
+	// unknownSession is part of the error session/load returns for an unknown session ID.
+	unknownSession string
+	// instructionsInSystem is whether the harness puts the instruction file koinon-agentd
+	// writes (instructionsPath) into the model's system prompt.
+	instructionsInSystem bool
+	// instructionLink is the path the harness reads the instructions from, a symbolic link to
+	// instructionsPath (internal/agentd, instructionLink). One in the home is put back on
+	// every start; one in the image cannot change.
+	instructionLink string
 	// readyCommand is the command the harness announces once the Koinon MCP server's tools are
 	// registered (the server's readyPrompt as a command); koinon-agentd waits for it before the
 	// first prompt. Empty means the harness announces none.
@@ -46,6 +72,9 @@ type flavor struct {
 	// projectMarker into the model's context, and it may loosen permissions, which the
 	// permission specs then catch. Empty skips the check.
 	projectConfig map[string]string
+	// plant prepares sb for a background job of the agent's that would change a later run from
+	// the home, and returns the shell command the job repeats. Nil repeats nothing.
+	plant func(ctx context.Context, sb *sandbox) string
 }
 
 // projectMarker is the text a flavor's projectConfig would bring into the model's context.
@@ -57,8 +86,9 @@ const projectMarker = "KOINON-PROJECT-CONFIG-MARKER"
 const readySettle = time.Second
 
 // instructionsPath is where koinon-agentd writes the run's instructions before it starts the
-// harness; instructionsMarker is in the contract's instructions, and the fake model answers
-// helloPrompt only when its system prompt carries it.
+// harness; instructionsMarker is in the contract's instructions, and for a flavor with
+// instructionsInSystem the fake model answers helloPrompt only when its system prompt carries
+// it.
 const (
 	instructionsPath   = "/sandbox/.koinon/AGENTS.md"
 	instructionsMarker = "KOINON-CONTRACT-INSTRUCTIONS"
@@ -85,42 +115,66 @@ func (f flavor) tag() string {
 	return strings.TrimSpace(string(out))
 }
 
+// command is the ACP launch command koinon-agentd execs in the sandbox: the same for every
+// flavor apart from the entry script (internal/agentd, flavors/README.md).
+func (f flavor) command(modelBaseURL, model, mcpURL string) []string {
+	return []string{
+		"/usr/local/bin/koinon-" + f.name,
+		"--model-base-url", modelBaseURL,
+		"--model", model,
+		"--mcp-url", mcpURL,
+	}
+}
+
+// flavors is every flavor the suite checks.
+var flavors = []flavor{opencode, hermes, pi}
+
 // Values the contract checks for. The key is fake: plain Docker has no OpenShell placeholder
 // substitution, so the harness sends exactly this value.
 const (
 	contractModel = "koinon-contract/fake-1"
 	fakeKey       = "sk-koinon-contract-fake"
-	workdir       = "/sandbox/work"
+	// fakeGitHubPlaceholder stands in for the GitHub provider's placeholder in GITHUB_TOKEN.
+	fakeGitHubPlaceholder = "koinon-contract-github-placeholder"
+	workdir               = "/sandbox/work"
 
-	helloPrompt  = "Say hello."
-	helloReply   = "Hello from the fake model."
-	writePrompt  = "KOINON-WRITE notes.txt please."
-	wroteReply   = "Wrote notes.txt."
-	readPrompt   = "KOINON-READ-OUTSIDE the config, please."
-	readReply    = "Done with the file."
-	recallPrompt = "What did you say first?"
+	helloPrompt   = "Say hello."
+	helloReply    = "Hello from the fake model."
+	writePrompt   = "KOINON-WRITE notes.txt please."
+	wroteReply    = "Wrote notes.txt."
+	permitMarker  = "KOINON-PERMIT"
+	permitPrompt  = permitMarker + " the guarded tool call, please."
+	permitReply   = "Done with the guarded tool call."
+	recallPrompt  = "What did you say first?"
+	unknownSessID = "ses_koinon_contract_unknown"
 
 	noInstructionsReply = "Koinon's instructions did not reach the system prompt."
 )
 
+// contractScript is the fake model's side of the contract. Replies to tool results are told
+// apart by the prompt that started the turn, so the scripted tool calls may use the same tool.
 func contractScript(f flavor) fakemodel.Script {
-	return fakemodel.Script{
-		Model: contractModel,
-		Turns: []fakemodel.Turn{
-			{When: fakemodel.When{ToolResult: f.writeFile("", "").Name}, Text: wroteReply},
-			{When: fakemodel.When{ToolResult: f.readFile("").Name}, Text: readReply},
-			{
-				When:      fakemodel.When{UserContains: "KOINON-WRITE"},
-				ToolCalls: []fakemodel.ToolCall{f.writeFile(workdir+"/notes.txt", "koinon\n")},
-			},
-			{
-				When:      fakemodel.When{UserContains: "KOINON-READ-OUTSIDE"},
-				ToolCalls: []fakemodel.ToolCall{f.readFile(f.outsidePath)},
-			},
-			{When: fakemodel.When{SystemContains: instructionsMarker}, Text: helloReply},
-			{Text: noInstructionsReply},
+	turns := []fakemodel.Turn{
+		{When: fakemodel.When{ToolResult: fakemodel.AnyTool, UserContains: "KOINON-WRITE"}, Text: wroteReply},
+		{When: fakemodel.When{ToolResult: fakemodel.AnyTool, UserContains: permitMarker}, Text: permitReply},
+		{
+			When:      fakemodel.When{UserContains: "KOINON-WRITE"},
+			ToolCalls: []fakemodel.ToolCall{f.writeFile(workdir+"/notes.txt", "koinon\n")},
 		},
 	}
+	if f.permissionCall.Name != "" {
+		turns = append(turns, fakemodel.Turn{
+			When: fakemodel.When{UserContains: permitMarker}, ToolCalls: []fakemodel.ToolCall{f.permissionCall},
+		})
+	}
+	if f.instructionsInSystem {
+		turns = append(turns,
+			fakemodel.Turn{When: fakemodel.When{SystemContains: instructionsMarker}, Text: helloReply},
+			fakemodel.Turn{Text: noInstructionsReply})
+	} else {
+		turns = append(turns, fakemodel.Turn{Text: helloReply})
+	}
+	return fakemodel.Script{Model: contractModel, Turns: turns}
 }
 
 // describeContract registers the contract specs for one flavor. They run in order against one
@@ -163,7 +217,7 @@ func describeContract(f flavor) bool {
 			}
 			ensureImage(f)
 			gw = newGateway(contractScript(f))
-			sb = newSandbox(f.image(), "OPENAI_API_KEY="+fakeKey)
+			sb = newSandbox(f.image(), "OPENAI_API_KEY="+fakeKey, "GITHUB_TOKEN="+fakeGitHubPlaceholder)
 			// Background: harness processes outlive a single spec's context.
 			bg, cancel := context.WithCancel(context.Background())
 			DeferCleanup(func() {
@@ -182,11 +236,65 @@ func describeContract(f flavor) bool {
 			startHarness(bg)
 		})
 
+		It("refuses launch arguments that could change its configuration", func() {
+			ctx := step()
+			for _, args := range [][]string{
+				f.command(gw.url("/v1"), `m"},"x":{"`, gw.url("/mcp")),
+				f.command(gw.url("/v1"), "${OPENAI_API_KEY}", gw.url("/mcp")),
+				f.command("file:///etc/passwd", contractModel, gw.url("/mcp")),
+				f.command(gw.url("/v1"), contractModel, "")[:5],
+			} {
+				c := exec.CommandContext(ctx, "docker", append([]string{"exec", sb.name}, args...)...) //nolint:gosec // test-controlled
+				out, err := c.CombinedOutput()
+				var exit *exec.ExitError
+				Expect(errors.As(err, &exit)).To(BeTrue(), "%v: %s", args, out)
+				Expect(exit.ExitCode()).To(Equal(64), "%v: %s", args, out)
+			}
+		})
+
+		It("gives git the GitHub placeholder through its credential helper and stores nothing", func() {
+			ctx := step()
+			// git asks its helpers as it would before a clone; without an answer it would
+			// prompt, which GIT_TERMINAL_PROMPT=0 turns into a failure.
+			credential := func(op, input string) (string, error) {
+				c := exec.CommandContext(ctx, "docker", "exec", "--interactive", "--env", "GIT_TERMINAL_PROMPT=0", //nolint:gosec // test-controlled
+					"--workdir", workdir, sb.name, "/usr/bin/git", "credential", op)
+				c.Stdin = strings.NewReader(input)
+				out, err := c.CombinedOutput()
+				return string(out), err
+			}
+			out, err := credential("fill", "protocol=https\nhost=github.com\npath=acme/widgets.git\n\n")
+			Expect(err).NotTo(HaveOccurred(), out)
+			Expect(out).To(ContainSubstring("username=x-access-token\n"))
+			Expect(out).To(ContainSubstring("password=" + fakeGitHubPlaceholder + "\n"))
+			// git hands a used credential to the helpers to store; they must not.
+			out, err = credential("approve", "protocol=https\nhost=github.com\nusername=x-access-token\npassword="+fakeGitHubPlaceholder+"\n\n")
+			Expect(err).NotTo(HaveOccurred(), out)
+
+			out, err = credential("fill", "protocol=https\nhost=example.com\n\n")
+			Expect(err).To(HaveOccurred(), "no credential for other hosts: %s", out)
+			Expect(out).NotTo(ContainSubstring(fakeGitHubPlaceholder))
+
+			// The configuration is the image's, read-only; nothing in the sandbox holds the value.
+			Expect(sb.run(ctx, "/usr/bin/git", "config", "--show-origin", "--get-all", "credential.https://github.com.helper")).
+				To(ContainSubstring("file:/etc/koinon/git/config\t/usr/local/bin/koinon-git-credential"))
+			Expect(sb.run(ctx, "stat", "-c", "%u %A", "/etc/koinon/git/config", "/usr/local/bin/koinon-git-credential")).
+				To(Equal("0 -rw-r--r--\n0 -rwxr-xr-x\n"))
+			grep := exec.CommandContext(ctx, "docker", "exec", sb.name, "grep", "-rlsF", fakeGitHubPlaceholder, "/sandbox", "/tmp", "/etc") //nolint:gosec // test-controlled
+			found, err := grep.Output()
+			Expect(err).To(HaveOccurred(), "grep found the placeholder in %s", found)
+		})
+
 		It("initializes and advertises session/load", func() {
 			init, err := h.conn.Initialize(step())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(init.ProtocolVersion).To(BeNumerically("==", acp.ProtocolVersion))
 			Expect(init.AgentCapabilities.LoadSession).To(BeTrue())
+			if f.resume {
+				Expect(init.AgentCapabilities.SessionCapabilities.Resume).NotTo(BeNil(), "advertises session/resume")
+			} else {
+				Expect(init.AgentCapabilities.SessionCapabilities.Resume).To(BeNil(), "does not advertise session/resume")
+			}
 		})
 
 		It("starts a session", func() {
@@ -198,7 +306,7 @@ func describeContract(f flavor) bool {
 			ready(ctx)
 		})
 
-		It("answers a prompt through the gateway with the agent's key, its instructions and the Koinon MCP tools", func() {
+		It("answers a prompt through the gateway with the agent's key and the Koinon MCP tools", func() {
 			stop, err := h.conn.Prompt(step(), session, helloPrompt)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(stop).To(Equal(acp.StopEndTurn))
@@ -207,10 +315,20 @@ func describeContract(f flavor) bool {
 
 			Expect(gw.authHeaders()).NotTo(BeEmpty())
 			Expect(gw.authHeaders()).To(HaveEach("Bearer " + fakeKey))
+			if f.anonymousProbes {
+				// Metadata reads only; every chat completion and MCP call carries the key.
+				Expect(gw.anonymous()).To(HaveEach(HavePrefix("GET /v1/")))
+			} else {
+				Expect(gw.anonymous()).To(BeEmpty())
+			}
 			Expect(gw.mcpMethods()).To(ContainElements("initialize", "tools/list"))
 			Expect(gw.modelBodies()).To(ContainElement(And(
 				ContainSubstring(contractModel), ContainSubstring(helloPrompt), ContainSubstring(f.mcpToolName),
 			)))
+			for _, t := range f.absentTools {
+				Expect(gw.modelBodies()).NotTo(ContainElement(MatchRegexp(`"name":\s*"`+regexp.QuoteMeta(t)+`"`)),
+					"tool %s is switched off", t)
+			}
 		})
 
 		It("ignores harness configuration in the repository", func() {
@@ -225,10 +343,16 @@ func describeContract(f flavor) bool {
 
 		It("runs a tool call from the model", func() {
 			ctx := step()
+			h.client.answerWith(f.allow...)
 			stop, err := h.conn.Prompt(ctx, session, writePrompt)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(stop).To(Equal(acp.StopEndTurn))
-			updates, _ := h.client.take()
+			updates, perms := h.client.take()
+			if f.editAsks {
+				Expect(perms).NotTo(BeEmpty(), "asks for permission before the edit")
+			} else {
+				Expect(perms).To(BeEmpty(), "asks no permission for an edit in the session directory")
+			}
 			Expect(updates).To(ContainElement(And(
 				HaveField("Kind", "tool_call_update"), HaveField("ToolStatus", acp.ToolCompleted),
 			)))
@@ -237,8 +361,11 @@ func describeContract(f flavor) bool {
 		})
 
 		It("asks for permission and honours allow", func() {
+			if f.permissionCall.Name == "" {
+				Skip(f.name + " sends no permission requests")
+			}
 			h.client.answerWith(f.allow...)
-			stop, err := h.conn.Prompt(step(), session, readPrompt)
+			stop, err := h.conn.Prompt(step(), session, permitPrompt)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(stop).To(Equal(acp.StopEndTurn))
 			updates, perms := h.client.take()
@@ -247,12 +374,15 @@ func describeContract(f flavor) bool {
 			Expect(updates).To(ContainElement(And(
 				HaveField("Kind", "tool_call_update"), HaveField("ToolStatus", acp.ToolCompleted),
 			)))
-			Expect(acp.Text(updates, "agent_message_chunk")).To(ContainSubstring(readReply))
+			Expect(acp.Text(updates, "agent_message_chunk")).To(ContainSubstring(permitReply))
 		})
 
 		It("asks for permission and honours reject", func() {
+			if f.permissionCall.Name == "" {
+				Skip(f.name + " sends no permission requests")
+			}
 			h.client.answerWith(f.reject...)
-			stop, err := h.conn.Prompt(step(), session, readPrompt)
+			stop, err := h.conn.Prompt(step(), session, permitPrompt)
 			Expect(err).NotTo(HaveOccurred())
 			updates, perms := h.client.take()
 			Expect(perms).NotTo(BeEmpty())
@@ -305,11 +435,19 @@ func describeContract(f flavor) bool {
 			)))
 		})
 
-		It("refuses to load an unknown session", func() {
-			Expect(h.conn.LoadSession(step(), "ses_koinon_contract_unknown", workdir)).NotTo(Succeed())
+		It("refuses to load an unknown session with an error, not a new session", func() {
+			err := h.conn.LoadSession(step(), unknownSessID, workdir)
+			Expect(err).To(MatchError(ContainSubstring(f.unknownSession)))
 		})
 	})
 }
+
+var _ = func() bool {
+	for _, f := range flavors {
+		describeContract(f)
+	}
+	return true
+}()
 
 // ensureImage fails the flavor's specs when its image is missing, naming the tag and the make
 // command, or builds it when KOINON_FLAVOR_BUILD=1. It never falls back to another tag.
@@ -326,10 +464,8 @@ func ensureImage(f flavor) {
 	}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	Expect(err).NotTo(HaveOccurred())
-	args := []string{"buildx", "build", "--load", "--tag", img}
-	if _, err := os.Stat(filepath.Join(root, "flavors", "common")); err == nil {
-		args = append(args, "--build-context", "common="+filepath.Join(root, "flavors", "common"))
-	}
-	out, err := exec.CommandContext(ctx, "docker", append(args, filepath.Join(root, f.dockerfile))...).CombinedOutput() //nolint:gosec // test-controlled
+	out, err := exec.CommandContext(ctx, "docker", "buildx", "build", "--load", "--tag", img, //nolint:gosec // test-controlled
+		"--build-context", "common="+filepath.Join(root, "flavors", "common"),
+		filepath.Join(root, f.dockerfile)).CombinedOutput()
 	Expect(err).NotTo(HaveOccurred(), "build %s: %s", img, out)
 }

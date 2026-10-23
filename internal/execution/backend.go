@@ -32,6 +32,10 @@ type Backend interface {
 	// DeleteProvider removes a provider record. A missing record is not an error.
 	DeleteProvider(ctx context.Context, workspace, name string) error
 
+	// DeleteProviderProfile removes a workspace-scoped provider profile. A missing profile is
+	// not an error. OpenShell refuses while a provider attached to a sandbox uses it.
+	DeleteProviderProfile(ctx context.Context, workspace, id string) error
+
 	// CreateSandbox creates a sandbox, or returns the existing one with the same name.
 	// It does not compare an existing sandbox with spec; the caller decides on drift.
 	CreateSandbox(ctx context.Context, workspace string, spec SandboxSpec) (Sandbox, error)
@@ -170,10 +174,14 @@ const (
 	AccessFull      Access = "full"
 )
 
-// L7Rule matches requests by method and path pattern.
+// L7Rule matches requests by method, path pattern and, for REST, query parameters.
 type L7Rule struct {
 	Method string
 	Path   string
+	// Query maps a query parameter name to a glob. In an allow rule every value of the
+	// parameter must match; in a deny rule the parameter must be present and one matching
+	// value is enough (OpenShell 0.1.5 policy schema).
+	Query map[string]string
 }
 
 // SandboxSpec describes a sandbox to create. There is intentionally no environment field:

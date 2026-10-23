@@ -1,0 +1,109 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# koinon-pi starts pi as an ACP agent on stdin/stdout, through the pi-acp adapter. It is the
+# flavor's entry point: koinon-agentd runs it through OpenShell's non-TTY exec (ADR 0049).
+#
+# Usage:
+#   koinon-pi --model-base-url URL --model NAME --mcp-url URL [-- PI_ACP_ARGS...]
+#
+# koinon-agentd writes the run's instructions to /sandbox/.koinon/AGENTS.md before it starts
+# this script; without that file the script refuses to start (exit 64).
+#
+# OpenShell does not pass the image's ENV to the processes it starts, PATH included (ADR 0048),
+# so everything pi needs is set here and binaries are called by absolute path. The per-agent
+# values come as arguments, are checked and rendered by koinon-pi-render from the read-only
+# templates in /etc/koinon/pi/ into pi's agent directory in the home, which pi needs writable.
+# The rendered files are checked to be non-empty JSON with the Koinon settings before pi
+# starts. The model key is never an argument: pi reads $OPENAI_API_KEY at request time, which in
+# a sandbox is an OpenShell placeholder that the proxy swaps for the real key.
+set -eu
+
+die() {
+  echo "koinon-pi: $*" >&2
+  exit 64
+}
+
+check() {
+  case $2 in
+    '' | *'"'* | *'\'* | *'$'* | *'{'* | *'}'* | *[[:space:][:cntrl:]]*) die "invalid $1: '$2'" ;;
+  esac
+}
+
+check_url() {
+  check "$1" "$2"
+  case $2 in
+    http://?* | https://?*) ;;
+    *) die "$1 must be an http or https URL: '$2'" ;;
+  esac
+}
+
+base_url='' model='' mcp_url=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    --model-base-url) [ $# -ge 2 ] || die "$1 needs a value"; base_url=$2; shift 2 ;;
+    --model) [ $# -ge 2 ] || die "$1 needs a value"; model=$2; shift 2 ;;
+    --mcp-url) [ $# -ge 2 ] || die "$1 needs a value"; mcp_url=$2; shift 2 ;;
+    --) shift; break ;;
+    *) die "unknown argument '$1'" ;;
+  esac
+done
+check_url --model-base-url "$base_url"
+check --model "$model"
+check_url --mcp-url "$mcp_url"
+
+# Drop anything the caller's environment might carry that would change where pi reads its
+# configuration, package or sessions, or which pi binary pi-acp starts: every PI_* variable
+# goes (PI_PACKAGE_DIR, PI_CODING_AGENT_SESSION_DIR, PI_ACP_* among them), the ones set below
+# come back.
+for v in $(env | sed -n 's/^\(PI_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  unset "$v"
+done
+unset NODE_OPTIONS NODE_PATH
+
+# /opt/node/bin holds node only: the image removes npm, which pi-acp would otherwise run on
+# every session/new to look for a newer pi on registry.npmjs.org.
+export PATH=/opt/pi/node_modules/.bin:/opt/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LANG=C.UTF-8
+# State lives in the sandbox home, which is the agent's volume (ADR 0048, 0049). pi-acp keeps
+# its session map in $HOME/.pi/pi-acp.
+export HOME=/sandbox
+export XDG_CACHE_HOME=/sandbox/.cache
+export PI_CODING_AGENT_DIR=/sandbox/.pi/agent
+# pi-acp starts this pi, one process per session: pi with the switches that keep the home and
+# the repository out of its tools and instructions.
+export PI_ACP_PI_COMMAND=/usr/local/lib/koinon/koinon-pi-rpc
+
+# Phone-home switches (pi 1.3.0, pi-acp 0.0.34; see README.md for the source of each).
+export PI_OFFLINE=1
+export PI_SKIP_VERSION_CHECK=1
+export PI_TELEMETRY=0
+
+export KOINON_MODEL_BASE_URL="$base_url"
+export KOINON_MODEL="$model"
+export KOINON_MCP_URL="$mcp_url"
+
+# Koinon's instructions reach the model only through APPEND_SYSTEM.md, which pi appends to its
+# system prompt and which links to this file. pi skips a missing file silently and appends an
+# empty one as nothing (dist/core/resource-loader.js), so refuse to start without real content.
+instructions=/sandbox/.koinon/AGENTS.md
+if [ ! -f "$instructions" ] || [ -L "$instructions" ] || [ ! -s "$instructions" ]; then
+  die "missing instructions: $instructions (koinon-agentd writes it before the harness starts)"
+fi
+
+# The agent directory is in the agent's writable home, so a run could leave in it what pi would
+# load at the next start: SYSTEM.md, which replaces pi's system prompt and has no switch
+# (dist/core/resource-loader.js, discoverSystemPromptFile); bin/rg and bin/fd, which pi's
+# search tools run before the ones on PATH (dist/utils/tools-manager.js, getToolPath);
+# trust.json, extensions, skills and the rest, which koinon-pi-rpc's switches already ignore.
+# Everything but the sessions goes; the configuration is rendered afresh below.
+mkdir -p "$PI_CODING_AGENT_DIR"
+find "$PI_CODING_AGENT_DIR" -mindepth 1 -maxdepth 1 ! -name sessions -exec rm -rf {} +
+
+/opt/node/bin/node /usr/local/lib/koinon/koinon-pi-render.mjs /etc/koinon/pi "$PI_CODING_AGENT_DIR" \
+  || die "rendering the configuration failed"
+# The link is put back on every start; koinon-agentd also restores it before every prompt.
+rm -rf "$PI_CODING_AGENT_DIR/APPEND_SYSTEM.md"
+ln -s "$instructions" "$PI_CODING_AGENT_DIR/APPEND_SYSTEM.md"
+mkdir -p "$PI_CODING_AGENT_DIR/sessions" "$XDG_CACHE_HOME"
+exec /opt/node/bin/node /opt/pi/node_modules/pi-acp/dist/index.js "$@"

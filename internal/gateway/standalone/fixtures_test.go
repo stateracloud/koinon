@@ -49,7 +49,7 @@ func fixtures() []fixture {
 	}
 	full.AddKey(fixedKey("k-bbbbbbbbbbbb", agentB, "test-b"))
 	full.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
-	full.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 5, Window: 24 * time.Hour})
+	full.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 4.25, Window: 24 * time.Hour, Generation: "1792627200-750000000"})
 	full.SetLimit(agentB, &gateway.Limit{Unit: gateway.Tokens, Amount: 200000, Window: 30 * 24 * time.Hour})
 	full.GrantTools(agentA,
 		gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}},
@@ -59,7 +59,7 @@ func fixtures() []fixture {
 	modelsOnly := gateway.State{Models: gateway.ModelUpstream{
 		Provider: "ollama",
 		BaseURL:  "http://ollama.example.internal:11434/v1",
-		Models:   []gateway.Model{{Name: "qwen3.5:4b"}},
+		Models:   []gateway.Model{{Name: "qwen3.5:4b", Price: &gateway.Price{Input: "0", Output: "0"}}},
 	}}
 	modelsOnly.AddKey(fixedKey("k-cccccccccccc", agentA, "test-c"))
 
@@ -68,8 +68,11 @@ func fixtures() []fixture {
 
 	return []fixture{
 		{name: "empty", state: gateway.State{}},
-		{name: "models-only", state: modelsOnly, options: standalone.Options{Port: 8080, AdminAddr: "127.0.0.1:15000"}},
-		{name: "full", state: full, options: standalone.Options{DatabaseURL: "sqlite:///data/agentgateway.db?mode=rwc"}},
+		{name: "models-only", state: modelsOnly, options: standalone.Options{Port: 8080}},
+		{name: "full", state: full, options: standalone.Options{
+			DatabaseURL:   "sqlite:///data/agentgateway.db?mode=rwc",
+			AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318"},
+		}},
 		{name: "mcp-no-grants", state: mcpNoGrants},
 	}
 }

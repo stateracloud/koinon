@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { create } from '@bufbuild/protobuf'
+import { ConnectionSchema, ConnectionStatus, ConnectorTypeSchema } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { Flavor, GrantSchema, Preset, RunLimitsSchema, TemplateSchema } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { orgId } from '@/test-utils'
+
+export function repoHelperTemplate(targets: { min: number; max: number } = { min: 1, max: 1 }) {
+  return create(TemplateSchema, {
+    id: 'tpl-1',
+    slug: 'repo-helper',
+    version: '0.1.0',
+    displayName: 'Repo helper',
+    description: 'Makes small changes to one repository.',
+    allowedFlavors: [Flavor.OPENCODE, Flavor.HERMES, Flavor.PI],
+    defaultFlavor: Flavor.OPENCODE,
+    model: 'default',
+    grants: [
+      create(GrantSchema, {
+        connector: 'github',
+        scopes: ['repo.read', 'pull_request.create', 'issue.comment'],
+        preset: Preset.STANDARD,
+        targetsMin: targets.min,
+        targetsMax: targets.max,
+        purpose: 'Clone and read the repository; propose pull requests.',
+      }),
+    ],
+    runLimits: create(RunLimitsSchema, { maxDurationSeconds: 1800n, maxTokens: 2000000n }),
+    spendLimitUsd: '10.00',
+  })
+}
+
+export function githubConnection(id = 'c-1', name = 'Acme GitHub') {
+  return create(ConnectionSchema, { id, orgId, connector: 'github', displayName: name, status: ConnectionStatus.OK })
+}
+
+/** A cut-down GitHub connector type in the shape of connectors/github/connector.yaml. */
+export function githubConnectorType() {
+  return create(ConnectorTypeSchema, {
+    id: 'github',
+    version: '0.2.0',
+    displayName: 'GitHub',
+    authType: 'app-credential',
+    document: {
+      spec: {
+        targets: { kind: 'repository', pattern: '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$' },
+        setupGuide: {
+          fields: [
+            { id: 'appId', label: 'App ID', type: 'integer', pattern: '^[1-9][0-9]{0,18}$' },
+            { id: 'installationId', label: 'Installation ID', type: 'integer', pattern: '^[1-9][0-9]{0,18}$' },
+            { id: 'privateKey', label: 'Private key', type: 'pem', secret: true },
+          ],
+          steps: [
+            {
+              id: 'create-app',
+              title: 'Create a GitHub App',
+              body: 'Set **Contents** to read and write.\n\n- Issues: **Read and write**\n- Workflows: none',
+              links: [
+                { label: 'New GitHub App', url: 'https://github.com/settings/apps/new' },
+                { label: 'Bad link', url: 'javascript:alert(1)' },
+              ],
+              fields: ['appId'],
+            },
+            { id: 'generate-key', title: 'Generate a private key', body: 'Paste the `.pem` file.', fields: ['privateKey'], check: 'github.app' },
+            { id: 'install-app', title: 'Install the App', body: 'Install it.', fields: ['installationId'], check: 'github.installation' },
+            { id: 'test-token', title: 'Test the connection', body: 'Koinon mints a token.', check: 'github.token' },
+          ],
+        },
+      },
+    },
+  })
+}
+
+/** Not a key: only the shape of a PEM block, for the secure-input tests. */
+export const fakePem = '-----BEGIN RSA PRIVATE KEY-----\nTEST-ONLY-NOT-A-KEY\n-----END RSA PRIVATE KEY-----'

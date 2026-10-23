@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.approval.v1alpha1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1;approvalv1alpha1";
+
+// ApprovalService shows and decides ask-tier tool calls (ADRs 0008, 0042,
+// 0049; plan item P1). An agent's call is recorded exactly; approving it binds
+// to the SHA-256 of its canonical arguments, and Koinon then executes exactly
+// that call (for create_pull_request: the branch, the commit and the pull
+// request through the GitHub API; the agent never pushes) and resumes the
+// parked run with the result. Viewers see every request; only admins and
+// owners decide (ADR 0049: the default approver policy).
+service ApprovalService {
+  // ListApprovals returns the org's requests, oldest first: by default those
+  // waiting for a decision (Waiting on you), or every request of one ticket.
+  // Viewers and above.
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetApproval returns one request with its canonical arguments, the
+  // push-and-run risk summary and the full change. Viewers and above.
+  rpc GetApproval(GetApprovalRequest) returns (GetApprovalResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetApprovalDiff compares a create_pull_request request with the branch
+  // its pull request will target (plan item W2: the full diff, collapsed
+  // below the risk summary). Koinon reads the current version of each file
+  // through the run's GitHub connection (contents:read, the one repository)
+  // and returns a unified diff per file. A file it cannot compare (GitHub
+  // error, larger than 1 MiB, not a file) carries a fallback_reason instead,
+  // and the card shows its full new content from GetApproval. Other tools
+  // fail with FAILED_PRECONDITION. Viewers and above.
+  rpc GetApprovalDiff(GetApprovalDiffRequest) returns (GetApprovalDiffResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Approve approves a pending request and executes it. args_sha256 must be
+  // the hash shown with the request; a different hash fails with ABORTED
+  // (HTTP 409) and nothing is executed. A request that is no longer pending
+  // fails with FAILED_PRECONDITION. Approving again with the
+  // same hash returns the request as it is (the same pull request), without
+  // executing it again. Admins and owners.
+  rpc Approve(ApproveRequest) returns (ApproveResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+
+  // Deny denies a pending request; the run resumes with the denial and the
+  // note. Admins and owners.
+  rpc Deny(DenyRequest) returns (DenyResponse);
+}
+
+// Status is the ADR 0042 lifecycle: pending -> approved -> executed | failed,
+// or pending -> denied | expired | canceled.
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_PENDING = 1;
+  STATUS_APPROVED = 2;
+  STATUS_DENIED = 3;
+  STATUS_EXECUTED = 4;
+  STATUS_FAILED = 5;
+  STATUS_EXPIRED = 6;
+  STATUS_CANCELED = 7;
+}
+
+// Decision is what the grant's preset decided for the call.
+enum Decision {
+  DECISION_UNSPECIFIED = 0;
+  // A human decides (the Standard preset).
+  DECISION_ASK = 1;
+  // Executed without a card (the Trusted preset).
+  DECISION_ALLOW = 2;
+}
+
+// Risk is the push-and-run summary the approval card leads with (plan item
+// W2). Lists hold repository paths.
+message Risk {
+  int64 files = 1;
+  int64 bytes = 2;
+  repeated string deletions = 3;
+  // CI and automation configuration (workflow files are refused outright).
+  repeated string ci = 4;
+  // Files tooling or people execute: scripts, Makefiles, hooks.
+  repeated string scripts = 5;
+  // Dependency manifests and lock files.
+  repeated string dependencies = 6;
+  repeated string binary = 7;
+  // Files the call marks executable (git mode 100755); a marked file that is
+  // already executable on the base branch is listed too. Unmarked files keep
+  // their mode.
+  repeated string executable = 8;
+}
+
+// FileChange is one file of a proposed pull request, with its full new
+// content: the diff data the card shows collapsed.
+message FileChange {
+  string path = 1;
+  string content = 2;
+  bool delete = 3;
+  // The file is written as executable (git mode 100755). Otherwise a new file
+  // is regular (100644) and a modified file keeps its mode on the base branch.
+  // Symbolic links and submodules are never written.
+  bool executable = 4;
+}
+
+// PullRequestCall is create_pull_request's arguments.
+message PullRequestCall {
+  // The new branch Koinon creates (always under koinon/).
+  string branch = 1;
+  // The branch to merge into; empty means the repository's default branch.
+  string base = 2;
+  string title = 3;
+  string body = 4;
+  repeated FileChange files = 5;
+}
+
+// CommentCall is comment_on_issue's arguments.
+message CommentCall {
+  int64 issue_number = 1;
+  string body = 2;
+}
+
+// Approval is one recorded ask-tier call.
+message Approval {
+  string id = 1;
+  string org_id = 2;
+  string ticket_id = 3;
+  string run_id = 4;
+  string agent_id = 5;
+  // Connector type, e.g. "github".
+  string connector = 6;
+  string tool = 7;
+  // What the call acts on, e.g. "github:acme/widgets".
+  string target = 8;
+  // The canonical JSON of the arguments, exactly as hashed.
+  string args_json = 9;
+  string args_sha256 = 10;
+  Decision decision = 11;
+  Status status = 12;
+  Risk risk = 13;
+  // The arguments, decoded; only set by GetApproval.
+  oneof call {
+    PullRequestCall pull_request = 14;
+    CommentCall comment = 15;
+  }
+  string decided_by = 16;
+  google.protobuf.Timestamp decided_at = 17;
+  string decision_note = 18;
+  // The executed call's outcome, e.g. {"url": ".../pull/1", "number": 1}.
+  google.protobuf.Struct result = 19;
+  // Why execution failed.
+  string error = 20;
+  int64 executions = 21;
+  google.protobuf.Timestamp expires_at = 22;
+  google.protobuf.Timestamp created_at = 23;
+  google.protobuf.Timestamp executed_at = 24;
+  // Whether the caller may approve or deny it (admins and owners, while it
+  // is pending).
+  bool can_decide = 25;
+}
+
+// ListApprovalsRequest names the org and, optionally, a ticket.
+message ListApprovalsRequest {
+  string org_id = 1;
+  // With a ticket, every request of the ticket in any status; without, the
+  // org's pending requests.
+  string ticket_id = 2;
+}
+
+// ListApprovalsResponse holds the requests, without their decoded calls.
+message ListApprovalsResponse {
+  repeated Approval approvals = 1;
+}
+
+// GetApprovalRequest names a request.
+message GetApprovalRequest {
+  string org_id = 1;
+  string approval_id = 2;
+}
+
+// GetApprovalResponse holds the request with its decoded call.
+message GetApprovalResponse {
+  Approval approval = 1;
+}
+
+// GetApprovalDiffRequest names a request.
+message GetApprovalDiffRequest {
+  string org_id = 1;
+  string approval_id = 2;
+}
+
+// FileStatus is what a proposed pull request does to one file.
+enum FileStatus {
+  // The current version could not be read (see fallback_reason).
+  FILE_STATUS_UNSPECIFIED = 0;
+  FILE_STATUS_ADDED = 1;
+  FILE_STATUS_MODIFIED = 2;
+  FILE_STATUS_DELETED = 3;
+}
+
+// FileDiff compares one file with its current version on the base branch.
+message FileDiff {
+  string path = 1;
+  FileStatus status = 2;
+  // A unified diff with three lines of context: "--- a/<path>" and
+  // "+++ b/<path>" (/dev/null for an added or deleted file), then "@@"
+  // hunks of " ", "-" and "+" lines; "\ No newline at end of file" follows a
+  // last line without one. Empty when the file is unchanged, binary, or
+  // fallback_reason is set.
+  string unified_diff = 3;
+  // The new or the current version is not text; no content is shown.
+  bool binary = 4;
+  // Why there is no diff, e.g. "the current version is larger than 1 MiB".
+  // The card then shows the full new content.
+  string fallback_reason = 5;
+  // The file's git mode on the base branch ("100644", "100755"; empty for a
+  // new file) and the mode Koinon writes it with (empty for a deleted file).
+  // Both are empty when the base tree could not be read. A modified file
+  // whose modes differ becomes executable.
+  string old_mode = 6;
+  string new_mode = 7;
+}
+
+// GetApprovalDiffResponse holds one FileDiff per file of the call, in the
+// call's order.
+message GetApprovalDiffResponse {
+  // The branch compared against: the call's base, or the repository's
+  // default branch. Empty if it could not be resolved.
+  string base = 1;
+  repeated FileDiff files = 2;
+}
+
+// ApproveRequest names a request and the hash the approver saw.
+message ApproveRequest {
+  string org_id = 1;
+  string approval_id = 2;
+  string args_sha256 = 3;
+  // Optional; shown on the ticket.
+  string note = 4;
+}
+
+// ApproveResponse holds the request after execution: executed with its
+// result, failed with an error, or still approved if execution is retried.
+message ApproveResponse {
+  Approval approval = 1;
+}
+
+// DenyRequest names a request.
+message DenyRequest {
+  string org_id = 1;
+  string approval_id = 2;
+  // Optional; sent to the agent and shown on the ticket.
+  string note = 3;
+}
+
+// DenyResponse holds the denied request.
+message DenyResponse {
+  Approval approval = 1;
+}

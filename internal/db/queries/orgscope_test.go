@@ -1,0 +1,175 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package queries_test checks the sqlc queries in this directory. It needs no
+// database, so it runs without Docker.
+package queries_test
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+)
+
+func TestQueries(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Queries Suite")
+}
+
+// The rule (ADRs 0001, 0049): every query that touches an org-owned table
+// takes the @org_id parameter, and every read or write of an org-owned table
+// is constrained by an org_id predicate, either against @org_id or, for a
+// join, against another org-scoped table's org_id.
+//
+// The check is textual on purpose: it counts references to org-owned tables
+// after FROM, JOIN and UPDATE, and requires at least as many org_id
+// predicates. It does not prove that each predicate belongs to the right
+// table, but it fails on the common mistakes (a missing filter, a positional
+// $1 instead of @org_id, a join that drops the org). Org-owned tables are
+// those whose CREATE TABLE in the migrations has an org_id column.
+
+var (
+	createTableRE = regexp.MustCompile(`(?is)create table (\w+) \((.*?)\n\);`)
+	orgColumnRE   = regexp.MustCompile(`(?im)^\s*org_id\s`)
+	queryNameRE   = regexp.MustCompile(`(?m)^-- name: (\w+)`)
+	commentRE     = regexp.MustCompile(`--[^\n]*`)
+	tableRefRE    = regexp.MustCompile(`(?i)\b(from|join|update|into)\s+(\w+)`)
+	orgPredRE     = regexp.MustCompile(`(?i)\b(?:\w+\.)?org_id\s*=\s*(?:@org_id\b|(?:\w+\.)?org_id\b)`)
+	orgParamRE    = regexp.MustCompile(`@org_id\b`)
+)
+
+// crossOrgQueries lists the queries that deliberately span orgs and so are
+// exempt from the org_id rule, keyed by "<file>:<query>". Each entry needs a
+// one-line reason and a review in the PR that adds it; keep the list to
+// queries that act for a user across all of their orgs, before any org is
+// chosen. The test fails if an entry is stale (missing, or no longer flagged).
+var crossOrgQueries = map[string]string{
+	"auth.sql:UpsertGroupMemberships":      "login: grants the user's IdP-group roles in every org mapped to those groups",
+	"auth.sql:DeleteStaleGroupMemberships": "login: revokes the user's IdP-group roles in every org whose group they lost",
+	"auth.sql:ListEffectiveMemberships":    "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
+}
+
+var _ = Describe("org scoping", func() {
+	It("scopes every query on an org-owned table by @org_id", func() {
+		owned := orgOwnedTables("../migrations")
+		for _, table := range []string{"agents", "agent_versions", "tickets", "ticket_events", "runs", "run_events"} {
+			Expect(owned).To(HaveKey(table), "expected %s to be detected as org-owned; detection is broken", table)
+		}
+		Expect(owned).NotTo(HaveKey("templates"), "templates is not org-owned; detection is broken")
+		Expect(owned).NotTo(HaveKey("orgs"), "orgs is not org-owned; detection is broken")
+
+		files, err := filepath.Glob("*.sql")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(files).NotTo(BeEmpty(), "no query files found")
+
+		var problems []string
+		checked := 0
+		exempted := map[string]bool{}
+		for _, f := range files {
+			data, err := os.ReadFile(f) // #nosec G304 -- fixed test paths
+			Expect(err).NotTo(HaveOccurred())
+			for name, sql := range splitQueries(string(data)) {
+				key := filepath.Base(f) + ":" + name
+				problem := orgScopeProblem(sql, owned)
+				if _, ok := crossOrgQueries[key]; ok {
+					if problem == "" {
+						problems = append(problems, fmt.Sprintf(
+							"%s is allowlisted as cross-org but passes the org_id check; remove it from crossOrgQueries", key))
+					}
+					exempted[key] = true
+				} else if problem != "" {
+					problems = append(problems, fmt.Sprintf("%s: %s: %s", filepath.Base(f), name, problem))
+				}
+				checked++
+			}
+		}
+		Expect(checked).NotTo(BeZero(), "no queries found")
+		for key, reason := range crossOrgQueries {
+			if reason == "" {
+				problems = append(problems, key+": allowlisted without a reason")
+			}
+			if !exempted[key] {
+				problems = append(problems, key+" is allowlisted in crossOrgQueries but no such query exists")
+			}
+		}
+		sort.Strings(problems)
+		Expect(problems).To(BeEmpty())
+	})
+
+	// Keeps the checker honest.
+	DescribeTable("catches mistakes", func(sql string, wantProblem bool) {
+		owned := map[string]bool{"runs": true, "agents": true}
+		Expect(orgScopeProblem(sql, owned) != "").To(Equal(wantProblem))
+	},
+		Entry(nil, `SELECT * FROM runs WHERE org_id = @org_id AND id = @id`, false),
+		Entry(nil, `SELECT * FROM runs WHERE id = @id`, true),
+		Entry(nil, `SELECT * FROM runs WHERE org_id = $1 AND id = $2`, true),
+		Entry(nil, `INSERT INTO runs (org_id, state) VALUES (@org_id, 'queued')`, false),
+		Entry(nil, `INSERT INTO runs (org_id, state) VALUES ($1, 'queued')`, true),
+		Entry(nil, `SELECT * FROM runs r JOIN agents a ON a.id = r.agent_id WHERE r.org_id = @org_id`, true),
+		Entry(nil, `SELECT * FROM runs r JOIN agents a ON a.org_id = r.org_id AND a.id = r.agent_id WHERE r.org_id = @org_id`, false),
+		Entry(nil, `UPDATE runs SET state = 'canceled' WHERE id = @id -- org_id = @org_id`, true),
+		Entry(nil, `SELECT * FROM templates WHERE id = $1`, false),
+	)
+})
+
+func orgOwnedTables(dir string) map[string]bool {
+	files, err := filepath.Glob(filepath.Join(dir, "*.sql"))
+	Expect(err).NotTo(HaveOccurred())
+	sort.Strings(files)
+	owned := map[string]bool{}
+	for _, f := range files {
+		data, err := os.ReadFile(f) // #nosec G304 -- fixed test paths
+		Expect(err).NotTo(HaveOccurred())
+		for _, m := range createTableRE.FindAllStringSubmatch(string(data), -1) {
+			if orgColumnRE.MatchString(m[2]) {
+				owned[strings.ToLower(m[1])] = true
+			}
+		}
+	}
+	return owned
+}
+
+// splitQueries maps sqlc query names to their SQL text.
+func splitQueries(src string) map[string]string {
+	out := map[string]string{}
+	locs := queryNameRE.FindAllStringSubmatchIndex(src, -1)
+	for i, loc := range locs {
+		end := len(src)
+		if i+1 < len(locs) {
+			end = locs[i+1][0]
+		}
+		out[src[loc[2]:loc[3]]] = src[loc[1]:end]
+	}
+	return out
+}
+
+func orgScopeProblem(sql string, owned map[string]bool) string {
+	sql = commentRE.ReplaceAllString(sql, "")
+	refs, touches := 0, false
+	for _, m := range tableRefRE.FindAllStringSubmatch(sql, -1) {
+		if !owned[strings.ToLower(m[2])] {
+			continue
+		}
+		touches = true
+		if !strings.EqualFold(m[1], "into") {
+			refs++
+		}
+	}
+	if !touches {
+		return ""
+	}
+	if !orgParamRE.MatchString(sql) {
+		return "touches an org-owned table but does not take @org_id"
+	}
+	if preds := len(orgPredRE.FindAllString(sql, -1)); preds < refs {
+		return "has fewer org_id predicates than references to org-owned tables"
+	}
+	return ""
+}

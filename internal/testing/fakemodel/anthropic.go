@@ -15,6 +15,9 @@ type anthropicRequest struct {
 	// System is a string or an array of text blocks.
 	System json.RawMessage `json:"system"`
 	Stream bool            `json:"stream"`
+	Tools  []struct {
+		Name string `json:"name"`
+	} `json:"tools"`
 }
 
 type anthropicMessage struct {
@@ -49,6 +52,9 @@ func (req anthropicRequest) conversation() conversation {
 				c.systemText += b.Text + "\n"
 			}
 		}
+	}
+	for _, t := range req.Tools {
+		c.tools = append(c.tools, t.Name)
 	}
 	names := map[string]string{}
 	for i, m := range req.Messages {

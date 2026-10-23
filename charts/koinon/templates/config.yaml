@@ -1,7 +1,8 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- include "koinon.validate" . }}
-# Koinon's non-secret configuration, read by api, reconciler and agentd from
-# /etc/koinon/config/config.yaml. Secrets are referenced by name only.
+# Koinon's non-secret configuration, read by koinon-reconciler from
+# /etc/koinon/config/config.yaml (KOINON_CONFIG). koinon-api and koinon-agentd take their settings
+# from KOINON_* environment variables instead. Secrets are referenced by name only.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,7 +15,16 @@ data:
       mode: {{ .Values.gateway.mode }}
       {{- if eq .Values.gateway.mode "standalone" }}
       configMap: {{ include "koinon.gatewayConfigName" . }}
-      url: http://{{ include "koinon.componentName" (list . "gateway") }}.{{ .Release.Namespace }}.svc:{{ .Values.gateway.standalone.port }}
+      {{- $gwHost := include "koinon.gatewayHost" . }}
+      url: http://{{ $gwHost }}:{{ .Values.gateway.standalone.port }}
+      statsUrl: http://{{ $gwHost }}:15020
+      port: {{ .Values.gateway.standalone.port }}
+      databaseUrl: sqlite:///data/agentgateway.db?mode=rwc
+      # agentgateway exports its access log here, for the spend ledger (plan item L1).
+      accessLogOtlp: {{ include "koinon.componentName" (list . "api") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.otlpPort }}
+      {{- if .Values.model.apiKeySecret.name }}
+      modelKeyFile: /secrets/model/{{ .Values.model.apiKeySecret.key }}
+      {{- end }}
       {{- else }}
       gatewayClassName: {{ .Values.gateway.kubernetes.gatewayClassName }}
       {{- end }}
@@ -24,5 +34,14 @@ data:
       address: {{ .Values.openshell.address | quote }}
       tls: {{ if .Values.openshell.clientTLSSecret }}/etc/koinon/openshell-tls{{ else }}""{{ end }}
       runtimeClassName: {{ .Values.openshell.runtimeClassName }}
-    bootstrapAdmin:
-      enabled: {{ .Values.bootstrapAdmin.enabled }}
+    reconciler:
+      idleTimeout: {{ .Values.reconciler.idleTimeout }}
+      resyncInterval: {{ .Values.reconciler.resyncInterval }}
+      homeRetention: {{ .Values.reconciler.homeRetention }}
+    githubTools:
+      url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp
+    flavors:
+      {{- range $flavor, $f := .Values.flavors }}
+      {{ $flavor }}:
+        image: {{ include "koinon.image" (list $ $f.image) }}
+      {{- end }}

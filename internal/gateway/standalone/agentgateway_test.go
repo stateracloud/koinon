@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -46,9 +48,10 @@ func skipWithoutDocker(ctx context.Context) {
 }
 
 // fakeUpstream is an OpenAI-compatible chat completions server that reports
-// 10 input and 10 output tokens per request.
-func fakeUpstream() *httptest.Server {
+// 10 input and 10 output tokens per request and counts requests in hits.
+func fakeUpstream(hits *atomic.Int64) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
 		var req struct {
 			Model string `json:"model"`
 		}
@@ -66,7 +69,8 @@ func fakeUpstream() *httptest.Server {
 }
 
 // fakeTools is an MCP server with the two parking tools and a bypass tool
-// that no agent is granted (spike step 6).
+// that no agent is granted (spike step 6). Each tool answers with the agent
+// header it received.
 func fakeTools() *httptest.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "fake-tools", Version: "0.0.1"}, nil)
 	type args struct {
@@ -74,8 +78,16 @@ func fakeTools() *httptest.Server {
 	}
 	for _, name := range []string{"create_pull_request", "get_approval_status", "direct_create_pull_request"} {
 		mcp.AddTool(srv, &mcp.Tool{Name: name, Description: name},
-			func(context.Context, *mcp.CallToolRequest, args) (*mcp.CallToolResult, any, error) {
-				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: name + " reached"}}}, nil, nil
+			func(_ context.Context, req *mcp.CallToolRequest, _ args) (*mcp.CallToolResult, any, error) {
+				agent := strings.Join(req.Extra.Header.Values(gateway.AgentHeader), ",")
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: name + " reached by " + agent}}}, nil, nil
+			})
+	}
+	// The readiness prompt every agent must see, and one no rule admits.
+	for _, name := range []string{gateway.ReadyPrompt, "hidden_prompt"} {
+		srv.AddPrompt(&mcp.Prompt{Name: name, Description: name},
+			func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+				return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: name}}}}, nil
 			})
 	}
 	// agentgateway reaches it through the testcontainers SSH tunnel, which
@@ -93,11 +105,17 @@ func port(s *httptest.Server) int {
 type bearer struct {
 	key  string
 	base http.RoundTripper
+	// spoof, when set, is sent as the agent header, which agentgateway must
+	// overwrite.
+	spoof string
 }
 
 func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
 	r.Header.Set("Authorization", "Bearer "+b.key)
+	if b.spoof != "" {
+		r.Header.Set(gateway.AgentHeader, b.spoof)
+	}
 	return b.base.RoundTrip(r)
 }
 
@@ -110,11 +128,12 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		keyA    gateway.IssuedKey // limited agent
 		keyB    gateway.IssuedKey // unlimited agent, no tool grants
 		ctr     *testcontainers.DockerContainer
+		hits    atomic.Int64 // requests that reached the upstream
 		options = standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mode=rwc"}
 	)
 
-	chat := func(ctx context.Context, key string) (int, string) {
-		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, testModel)
+	chatModel := func(ctx context.Context, key, model string) (int, string) {
+		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, model)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions", bytes.NewBufferString(body))
 		Expect(err).NotTo(HaveOccurred())
 		req.Header.Set("Content-Type", "application/json")
@@ -127,15 +146,19 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
+	chat := func(ctx context.Context, key string) (int, string) { return chatModel(ctx, key, testModel) }
 
-	mcpSession := func(ctx context.Context, key string) (*mcp.ClientSession, error) {
+	mcpSessionAs := func(ctx context.Context, key, spoof string) (*mcp.ClientSession, error) {
 		client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
 		return client.Connect(ctx, &mcp.StreamableClientTransport{
 			Endpoint:             llmURL + "/mcp",
-			HTTPClient:           &http.Client{Transport: bearer{key: key, base: http.DefaultTransport}},
+			HTTPClient:           &http.Client{Transport: bearer{key: key, base: http.DefaultTransport, spoof: spoof}},
 			DisableStandaloneSSE: true,
 			MaxRetries:           -1,
 		}, nil)
+	}
+	mcpSession := func(ctx context.Context, key string) (*mcp.ClientSession, error) {
+		return mcpSessionAs(ctx, key, "")
 	}
 
 	toolNames := func(ctx context.Context, key string) []string {
@@ -155,7 +178,7 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 	BeforeAll(func(ctx SpecContext) {
 		skipWithoutDocker(ctx)
 
-		upstream := fakeUpstream()
+		upstream := fakeUpstream(&hits)
 		DeferCleanup(upstream.Close)
 		tools := fakeTools()
 		DeferCleanup(tools.Close)
@@ -193,7 +216,7 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 
 		ctr, err = testcontainers.Run(ctx, AgentgatewayImage,
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
-			testcontainers.WithExposedPorts("4000/tcp", "15000/tcp", "15020/tcp", "15021/tcp"),
+			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
 			testcontainers.WithHostPortAccess(port(upstream), port(tools)),
 			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
 				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro")
@@ -206,15 +229,13 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 
 		llmURL, err = ctr.PortEndpoint(ctx, "4000/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
-		adminURL, err := ctr.PortEndpoint(ctx, "15000/tcp", "http")
-		Expect(err).NotTo(HaveOccurred())
 		statsURL, err := ctr.PortEndpoint(ctx, "15020/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
 
 		driver = &standalone.Driver{
 			Options:   options,
 			Deliverer: file,
-			Waiter:    standalone.AdminWaiter{AdminURL: adminURL, StatsURL: statsURL, Interval: 200 * time.Millisecond},
+			Waiter:    standalone.ProbeWaiter{GatewayURL: llmURL, StatsURL: statsURL, Interval: 200 * time.Millisecond},
 		}
 		// Same state again: confirms the waiter sees the initial revision.
 		_, err = driver.Apply(ctx, state)
@@ -229,6 +250,39 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 			}
 		}
 	})
+
+	It("detects reloads with the probe key, which never reaches the upstream", func(ctx SpecContext) {
+		// BeforeAll's Apply waited on the initial revision's probe.
+		Expect(hits.Load()).To(BeZero())
+		_, rev, err := standalone.Render(state, options)
+		Expect(err).NotTo(HaveOccurred())
+		// Not even with a served model name: the zero budget (429, with a
+		// database) or the authorization rule (403) refuses the key first.
+		code, body := chatModel(ctx, standalone.ReloadProbeKey(rev), testModel)
+		Expect(code).To(BeElementOf(http.StatusTooManyRequests, http.StatusForbidden), body)
+
+		// A new revision: its probe key is accepted only once it is live.
+		extra, err := gateway.NewKey(agentB)
+		Expect(err).NotTo(HaveOccurred())
+		state.AddKey(extra.Key)
+		next, err := driver.Apply(ctx, state)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(next).NotTo(Equal(rev))
+		code, _ = chatModel(ctx, standalone.ReloadProbeKey(rev), testModel)
+		Expect(code).To(Equal(http.StatusUnauthorized), "the previous revision's probe key is gone")
+		code, body = chatModel(ctx, extra.Material, testModel)
+		Expect(code).To(Equal(http.StatusOK), body)
+		Expect(hits.Load()).To(Equal(int64(1)), "only the real key's request reached the upstream")
+
+		// A revision that was never delivered is never live.
+		short, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		Expect(driver.Waiter.Wait(short, "0000000000000000")).To(MatchError(context.DeadlineExceeded))
+
+		Expect(state.RevokeKey(extra.ID)).To(BeTrue())
+		_, err = driver.Apply(ctx, state)
+		Expect(err).NotTo(HaveOccurred())
+	}, SpecTimeout(2*time.Minute))
 
 	It("rejects requests without a key", func(ctx SpecContext) {
 		code, _ := chat(ctx, "")
@@ -282,6 +336,33 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "get_approval_status"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.IsError).To(BeFalse())
+	})
+
+	It("lists the readiness prompt to every agent, and no other prompt", func(ctx SpecContext) {
+		for _, key := range []string{keyA.Material, keyB.Material} {
+			s, err := mcpSession(ctx, key)
+			Expect(err).NotTo(HaveOccurred())
+			res, err := s.ListPrompts(ctx, nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Prompts).To(ConsistOf(HaveField("Name", gateway.ReadyPrompt)))
+			_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: gateway.ReadyPrompt})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: "hidden_prompt"})
+			Expect(err).To(HaveOccurred())
+			_ = s.Close()
+		}
+	})
+
+	It("tells the target which agent calls, overwriting a client-supplied header", func(ctx SpecContext) {
+		for _, spoof := range []string{"", agentB.String()} {
+			s, err := mcpSessionAs(ctx, keyA.Material, spoof)
+			Expect(err).NotTo(HaveOccurred())
+			res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "get_approval_status"})
+			_ = s.Close()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.IsError).To(BeFalse())
+			Expect(res.Content[0].(*mcp.TextContent).Text).To(Equal("get_approval_status reached by " + agentA.String()))
+		}
 	})
 
 	It("rejects MCP requests without a key", func(ctx SpecContext) {

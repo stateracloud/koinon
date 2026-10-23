@@ -6,6 +6,7 @@ package api
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
 
 	connect "connectrpc.com/connect/v2"
@@ -24,6 +25,9 @@ type Options struct {
 	// Services registers further connect services behind the auth
 	// interceptor.
 	Services []func(*connect.Server)
+	// UI is the built web UI (web.Dist()), served for every path no other
+	// handler claims; nil serves none.
+	UI fs.FS
 }
 
 // NewHandler returns the API's HTTP handler.
@@ -55,6 +59,9 @@ func NewHandler(opts Options) (http.Handler, error) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	if opts.UI != nil {
+		mux.Handle("/", spaHandler(opts.UI))
+	}
 
 	cop := http.NewCrossOriginProtection()
 	for _, o := range opts.TrustedOrigins {

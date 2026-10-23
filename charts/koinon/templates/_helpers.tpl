@@ -147,7 +147,7 @@ by koinon.dbVolume).
 {{- end }}
 {{- end }}
 
-{{/* Koinon's own configuration, mounted read-only into api, reconciler and agentd. */}}
+{{/* Koinon's own configuration file, mounted read-only into the reconciler, its only reader. */}}
 {{- define "koinon.configVolumeMount" -}}
 - name: config
   mountPath: /etc/koinon/config
@@ -160,13 +160,130 @@ by koinon.dbVolume).
     name: {{ include "koinon.componentName" (list . "config") }}
 {{- end }}
 
-{{- define "koinon.commonEnv" -}}
+{{/*
+agentgateway's Service as sandboxes reach it: fully qualified, because OpenShell's policy DNS
+resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN there).
+*/}}
+{{- define "koinon.gatewayHost" -}}
+{{- printf "%s.%s.svc.%s" (include "koinon.componentName" (list . "gateway")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") -}}
+{{- end }}
+
+{{- define "koinon.configEnv" -}}
 - name: KOINON_CONFIG
   value: /etc/koinon/config/config.yaml
+{{- end }}
+
+{{- define "koinon.commonEnv" -}}
 - name: POD_NAMESPACE
   valueFrom:
     fieldRef:
       fieldPath: metadata.namespace
+{{- end }}
+
+{{/*
+The URL browsers reach Koinon at: publicUrl, else derived from the ingress, else empty (which
+koinon-api takes as https).
+*/}}
+{{- define "koinon.publicUrl" -}}
+{{- if .Values.publicUrl -}}
+{{- trimSuffix "/" .Values.publicUrl -}}
+{{- else if .Values.ingress.enabled -}}
+{{- printf "%s://%s" (ternary "https" "http" (not (empty .Values.ingress.tlsSecretName))) .Values.ingress.host -}}
+{{- end -}}
+{{- end }}
+
+{{/* The Secret holding the bootstrap admin's one-time password (key `password`). */}}
+{{- define "koinon.bootstrapSecretName" -}}
+{{- .Values.bootstrapAdmin.existingSecret | default (include "koinon.componentName" (list . "bootstrap-admin")) -}}
+{{- end }}
+
+{{/*
+koinon-api's login settings (plan items A1, A2), as KOINON_* environment variables for its flags.
+Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environment.
+*/}}
+{{- define "koinon.apiEnv" -}}
+{{- with include "koinon.publicUrl" . }}
+- name: KOINON_PUBLIC_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- if .Values.bootstrapAdmin.enabled }}
+- name: KOINON_BOOTSTRAP_ADMIN_USERNAME
+  value: {{ .Values.bootstrapAdmin.username | quote }}
+- name: KOINON_BOOTSTRAP_PASSWORD_FILE
+  value: /etc/koinon/bootstrap-admin/password
+{{- else }}
+- name: KOINON_BOOTSTRAP_LOGIN
+  value: "false"
+{{- end }}
+{{- $o := .Values.oidc }}
+{{- if $o.enabled }}
+- name: KOINON_OIDC_ISSUER_URL
+  value: {{ $o.issuerUrl | quote }}
+- name: KOINON_OIDC_CLIENT_ID
+  value: {{ $o.clientId | quote }}
+{{- if $o.clientSecret.existingSecret }}
+- name: KOINON_OIDC_CLIENT_SECRET_FILE
+  value: /etc/koinon/oidc/{{ $o.clientSecret.key }}
+{{- end }}
+{{- with $o.redirectUrl }}
+- name: KOINON_OIDC_REDIRECT_URL
+  value: {{ . | quote }}
+{{- end }}
+- name: KOINON_OIDC_SCOPES
+  value: {{ join "," $o.scopes | quote }}
+- name: KOINON_OIDC_GROUPS_CLAIM
+  value: {{ $o.groupsClaim | quote }}
+{{- $mappings := list }}
+{{- range $group, $role := $o.groupMappings }}
+{{- $mappings = append $mappings (printf "%s=%s" $group $role) }}
+{{- end }}
+- name: KOINON_DEFAULT_ORG_GROUP_MAPPINGS
+  value: {{ join "," $mappings | quote }}
+{{- end }}
+- name: KOINON_DEFAULT_ORG_IDENTITY_MODE
+  value: {{ $o.defaultOrgIdentityMode | quote }}
+- name: KOINON_SESSION_IDLE_TIMEOUT
+  value: {{ .Values.session.idleTimeout | quote }}
+- name: KOINON_SESSION_MAX_LIFETIME
+  value: {{ .Values.session.maxLifetime | quote }}
+{{- end }}
+
+{{- define "koinon.apiSecretVolumeMounts" -}}
+{{- if .Values.bootstrapAdmin.enabled }}
+- name: bootstrap-admin
+  mountPath: /etc/koinon/bootstrap-admin
+  readOnly: true
+{{- end }}
+{{- if and .Values.oidc.enabled .Values.oidc.clientSecret.existingSecret }}
+- name: oidc-client-secret
+  mountPath: /etc/koinon/oidc
+  readOnly: true
+{{- end }}
+{{- end }}
+
+{{- define "koinon.apiSecretVolumes" -}}
+{{- if .Values.bootstrapAdmin.enabled }}
+- name: bootstrap-admin
+  secret:
+    secretName: {{ include "koinon.bootstrapSecretName" . }}
+    items:
+      - key: password
+        path: password
+{{- end }}
+{{- if and .Values.oidc.enabled .Values.oidc.clientSecret.existingSecret }}
+- name: oidc-client-secret
+  secret:
+    secretName: {{ .Values.oidc.clientSecret.existingSecret }}
+    items:
+      - key: {{ .Values.oidc.clientSecret.key }}
+        path: {{ .Values.oidc.clientSecret.key }}
+{{- end }}
+{{- end }}
+
+{{/* GitHub REST API base URL, for the components that call GitHub (api and reconciler). */}}
+{{- define "koinon.githubEnv" -}}
+- name: KOINON_GITHUB_API_URL
+  value: {{ .Values.github.apiUrl | default "https://api.github.com" | quote }}
 {{- end }}
 
 {{/* OpenShell client certificate for components that call the OpenShell gateway. */}}
@@ -200,6 +317,16 @@ koinon.persistentPassword (list $ "<secret name>" "<key>").
 {{- end }}
 {{- end }}
 
+{{/*
+Hook annotations of the preflight objects: koinon.preflightHook (list $ "<weight>"). They run
+before every other hook; a failed run is kept for inspection and replaced on the next attempt.
+*/}}
+{{- define "koinon.preflightHook" -}}
+helm.sh/hook: pre-install,pre-upgrade
+helm.sh/hook-weight: {{ index . 1 | quote }}
+helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+{{- end }}
+
 {{- define "koinon.gatewayConfigName" -}}
 {{- include "koinon.componentName" (list . "gateway-config") }}
 {{- end }}
@@ -217,4 +344,40 @@ koinon.persistentPassword (list $ "<secret name>" "<key>").
 {{- if and .Values.ingress.enabled (not .Values.ingress.host) }}
 {{- fail "ingress.host is required when ingress.enabled is true" }}
 {{- end }}
+{{- if and .Values.oidc.enabled (not .Values.oidc.redirectUrl) (not (include "koinon.publicUrl" .)) }}
+{{- fail "oidc.enabled needs oidc.redirectUrl, publicUrl or an ingress to build the redirect URL from" }}
+{{- end }}
+{{- end }}
+
+{{/*
+koinon-agentd's settings (plan item AG1). The gateway URL tells sandboxes where agentgateway is;
+it carries no credentials.
+*/}}
+{{- define "koinon.agentdEnv" -}}
+- name: POD_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+- name: KOINON_OPENSHELL_ADDRESS
+  value: {{ .Values.openshell.address | quote }}
+{{- if .Values.openshell.clientTLSSecret }}
+- name: KOINON_OPENSHELL_TLS_DIR
+  value: /etc/koinon/openshell-tls
+{{- end }}
+{{- $gatewayURL := .Values.agentd.gatewayURL }}
+{{- if and (not $gatewayURL) (eq .Values.gateway.mode "standalone") }}
+{{- $gatewayURL = printf "http://%s:%v" (include "koinon.gatewayHost" .) .Values.gateway.standalone.port }}
+{{- end }}
+{{- with $gatewayURL }}
+- name: KOINON_GATEWAY_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.model.models }}
+- name: KOINON_DEFAULT_MODEL
+  value: {{ (first .).name | quote }}
+{{- end }}
+- name: KOINON_WORKERS
+  value: {{ .Values.agentd.workers | default 8 | quote }}
+- name: KOINON_LEASE
+  value: {{ .Values.agentd.lease | default "30s" | quote }}
 {{- end }}

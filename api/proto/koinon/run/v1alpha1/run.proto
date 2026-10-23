@@ -1,0 +1,143 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.run.v1alpha1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1;runv1alpha1";
+
+// RunService reads, cancels and streams runs (ADR 0030). Every request names
+// the org it acts in; IDs from another org are not found.
+service RunService {
+  // GetRun returns one run. Viewers and above.
+  rpc GetRun(GetRunRequest) returns (GetRunResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // CancelRun cancels a run that has not finished. Members and above.
+  rpc CancelRun(CancelRunRequest) returns (CancelRunResponse);
+
+  // WatchRun streams the run's events with seq greater than after_seq, first
+  // the stored ones and then new ones as they are written, each exactly once
+  // and in seq order. To resume after a dropped stream, call again with the
+  // last seq received. The first message is a snapshot of the run; another
+  // snapshot follows whenever its state changes. The stream ends after the
+  // run has finished and every event has been sent. Viewers and above.
+  rpc WatchRun(WatchRunRequest) returns (stream WatchRunResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// RunState is the ADR 0030 state machine.
+enum RunState {
+  RUN_STATE_UNSPECIFIED = 0;
+  RUN_STATE_QUEUED = 1;
+  RUN_STATE_STARTING = 2;
+  RUN_STATE_RUNNING = 3;
+  RUN_STATE_PARKED = 4;
+  RUN_STATE_SUCCEEDED = 5;
+  RUN_STATE_FAILED = 6;
+  RUN_STATE_CANCELED = 7;
+}
+
+// ParkReason says why a parked run waits.
+enum ParkReason {
+  PARK_REASON_UNSPECIFIED = 0;
+  PARK_REASON_APPROVAL = 1;
+  PARK_REASON_BUDGET = 2;
+  PARK_REASON_A2A = 3;
+  PARK_REASON_INPUT_REQUIRED = 4;
+}
+
+// Run is one execution of an agent for a ticket.
+message Run {
+  string id = 1;
+  string org_id = 2;
+  string ticket_id = 3;
+  string agent_id = 4;
+  string agent_version_id = 5;
+  RunState state = 6;
+  ParkReason park_reason = 7;
+  // Why the run failed or was canceled.
+  string outcome_reason = 8;
+  // Caps copied from the agent's template when the run was queued.
+  int64 max_wall_clock_seconds = 9;
+  int64 max_tokens = 10;
+  int64 tokens_used = 11;
+  // The seq of the newest event.
+  int64 last_event_seq = 12;
+  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp started_at = 14;
+  google.protobuf.Timestamp finished_at = 15;
+  // Model spend recorded for the run by the spend ledger (plan item L1). Set
+  // by GetRun and on the runs of GetTicket; unset elsewhere.
+  Cost cost = 16;
+}
+
+// Cost is model spend recorded by the spend ledger from agentgateway's access
+// log (plan item L1).
+message Cost {
+  // Charged model requests.
+  int64 requests = 1;
+  int64 input_tokens = 2;
+  int64 output_tokens = 3;
+  // USD as an exact decimal string with at least two fraction digits, for
+  // example "0.0021" or "0.00".
+  string usd = 4;
+  // False when some request had no price, so usd undercounts.
+  bool priced = 5;
+}
+
+// RunEvent is one session update or lifecycle note of a run.
+message RunEvent {
+  string run_id = 1;
+  // Gap-free and strictly increasing per run, from 1.
+  int64 seq = 2;
+  // For example "session.update" or "run.canceled".
+  string kind = 3;
+  google.protobuf.Struct payload = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+// GetRunRequest names a run.
+message GetRunRequest {
+  string org_id = 1;
+  string run_id = 2;
+}
+
+// GetRunResponse holds the run.
+message GetRunResponse {
+  Run run = 1;
+}
+
+// CancelRunRequest names a run.
+message CancelRunRequest {
+  string org_id = 1;
+  string run_id = 2;
+  // Shown on the ticket; defaults to "canceled by <user>".
+  string reason = 3;
+}
+
+// CancelRunResponse holds the canceled run.
+message CancelRunResponse {
+  Run run = 1;
+}
+
+// WatchRunRequest names a run and where to resume.
+message WatchRunRequest {
+  string org_id = 1;
+  string run_id = 2;
+  // Stream events with a greater seq; 0 streams from the start.
+  int64 after_seq = 3;
+}
+
+// WatchRunResponse carries either a run snapshot or one event.
+message WatchRunResponse {
+  oneof item {
+    Run run = 1;
+    RunEvent event = 2;
+  }
+}

@@ -9,6 +9,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/procoduck/koinon/internal/gateway"
 	"github.com/procoduck/koinon/internal/gateway/standalone"
@@ -66,6 +67,121 @@ var _ = Describe("Render", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(out)).To(ContainSubstring(k.Hash))
 		Expect(string(out)).NotTo(ContainSubstring(k.Material))
+	})
+
+	It("serves only priced models, so none is charged zero (L1)", func() {
+		out, _, err := standalone.Render(fixtures()[2].state, fixtures()[2].options)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fixtures()[2].state.Models.Unpriced()).To(Equal([]string{"unpriced/model"}))
+		Expect(string(out)).NotTo(ContainSubstring("unpriced/model"))
+
+		onlyUnpriced := gateway.State{Models: gateway.ModelUpstream{
+			Provider: "x", BaseURL: "http://x/v1", Models: []gateway.Model{{Name: "free"}},
+		}}
+		out, _, err = standalone.Render(onlyUnpriced, standalone.Options{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(out)).NotTo(ContainSubstring("free"))
+		Expect(string(out)).To(ContainSubstring("  models: []\n"))
+	})
+
+	Describe("the reload probe key", func() {
+		type key struct {
+			KeyHash  string `yaml:"keyHash"`
+			Metadata struct {
+				Name  string `yaml:"name"`
+				Agent string `yaml:"agent"`
+			} `yaml:"metadata"`
+			Budgets []map[string]any `yaml:"budgets"`
+		}
+		type policies struct {
+			APIKey struct {
+				Keys []key `yaml:"keys"`
+			} `yaml:"apiKey"`
+			Authorization struct {
+				Rules []string `yaml:"rules"`
+			} `yaml:"authorization"`
+		}
+		type doc struct {
+			Config struct {
+				AdminAddr string `yaml:"adminAddr"`
+			} `yaml:"config"`
+			LLM *struct {
+				Policies policies `yaml:"policies"`
+			} `yaml:"llm"`
+			MCP *struct {
+				Policies policies `yaml:"policies"`
+			} `yaml:"mcp"`
+		}
+		parse := func(s gateway.State, o standalone.Options) (doc, gateway.Revision) {
+			GinkgoHelper()
+			out, rev, err := standalone.Render(s, o)
+			Expect(err).NotTo(HaveOccurred())
+			var d doc
+			Expect(yaml.Unmarshal(out, &d)).To(Succeed())
+			return d, rev
+		}
+		probes := func(keys []key) []key {
+			var out []key
+			for _, k := range keys {
+				if k.Metadata.Name == gateway.ReloadProbeKeyName {
+					out = append(out, k)
+				}
+			}
+			return out
+		}
+
+		for _, f := range fixtures() {
+			It("is in "+f.name+" under llm only, for its revision", func() {
+				d, rev := parse(f.state, f.options)
+				Expect(d.Config.AdminAddr).To(Equal("localhost:15000"))
+				Expect(d.LLM).NotTo(BeNil())
+				p := probes(d.LLM.Policies.APIKey.Keys)
+				Expect(p).To(HaveLen(1))
+				Expect(p[0].KeyHash).To(Equal(gateway.HashKey(standalone.ReloadProbeKey(rev))))
+				Expect(p[0].Metadata.Agent).To(BeEmpty())
+				Expect(d.LLM.Policies.Authorization.Rules).To(Equal([]string{`apiKey.name != "koinon-reload-probe"`}))
+				if d.MCP != nil {
+					Expect(probes(d.MCP.Policies.APIKey.Keys)).To(BeEmpty())
+				}
+				if f.options.DatabaseURL == "" {
+					// agentgateway refuses budgets without a database.
+					Expect(p[0].Budgets).To(BeEmpty())
+				} else {
+					Expect(p[0].Budgets).To(Equal([]map[string]any{{
+						"name":             "koinon-reload-probe",
+						"limit":            map[string]any{"unit": "Tokens", "amount": 0},
+						"window":           map[string]any{"rolling": "24h"},
+						"onBudgetExceeded": "Block",
+					}}))
+				}
+			})
+		}
+
+		It("changes with the revision", func() {
+			f := fixtures()[2]
+			a, revA := parse(f.state, f.options)
+			s := f.state
+			s.Keys = append([]gateway.Key(nil), s.Keys...)
+			Expect(s.RevokeKey("k-bbbbbbbbbbbb")).To(BeTrue())
+			b, revB := parse(s, f.options)
+			Expect(revB).NotTo(Equal(revA))
+			Expect(probes(b.LLM.Policies.APIKey.Keys)[0].KeyHash).NotTo(Equal(probes(a.LLM.Policies.APIKey.Keys)[0].KeyHash))
+			Expect(standalone.ReloadProbeKey(revA)).NotTo(Equal(standalone.ReloadProbeKey(revB)))
+		})
+	})
+
+	It("names the budget after the limit's generation", func() {
+		s := gateway.State{Models: fixtures()[2].state.Models}
+		s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour, Generation: "g1"})
+		o := standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}
+		a, _, err := standalone.Render(s, o)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(a)).To(ContainSubstring("name: koinon-agent-limit-g1\n"))
+
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour, Generation: "Bad_Gen"})
+		_, _, err = standalone.Render(s, o)
+		Expect(err).To(MatchError(ContainSubstring("generation")))
 	})
 
 	It("requires a database for limits", func() {

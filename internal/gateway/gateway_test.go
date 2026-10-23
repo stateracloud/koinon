@@ -78,6 +78,12 @@ var _ = Describe("State", func() {
 		Expect(strings.Count(err.Error(), "\n")).To(BeNumerically(">=", 1))
 		Expect(err.Error()).To(And(ContainSubstring("duplicate"), ContainSubstring(`unknown mcp target "nope"`)))
 	})
+
+	It("reserves the reload probe's key name", func() {
+		var s gateway.State
+		s.AddKey(gateway.Key{ID: gateway.ReloadProbeKeyName, Agent: agent, Hash: gateway.HashKey("x")})
+		Expect(s.Validate()).To(MatchError(ContainSubstring("reserved")))
+	})
 })
 
 var _ = Describe("AgentRef", func() {
