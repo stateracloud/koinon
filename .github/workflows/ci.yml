@@ -27,7 +27,8 @@ jobs:
           version: v2.15.0
       - run: go vet ./...
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
-      - run: go test ./...
+      # test/flavors needs the flavor images, which the flavors job builds and tests.
+      - run: go test $(go list ./... | grep -v '/test/flavors$')
 
   web:
     name: web
@@ -105,3 +106,16 @@ jobs:
         with:
           fetch-depth: 0
       - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+
+  # Flavor contract suite: builds this tree's OpenCode image and drives it over ACP in Docker.
+  # Uses a fake model server and a fake key; it never reaches a real or paid model.
+  flavors:
+    name: flavors
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make test-flavors
