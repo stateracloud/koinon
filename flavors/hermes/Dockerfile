@@ -33,7 +33,7 @@ RUN /usr/bin/git --version \
 # it sets (README.md).
 COPY --chmod=0644 etc/hermes/config.yaml /etc/hermes/config.yaml
 # /opt/hermes is already world-readable; the read-only root file system keeps it unchanged.
-RUN chmod -R a+rX,go-w /etc/koinon /etc/hermes
+RUN chmod -R a+rX,go-w /etc/koinon /etc/hermes /usr/local/lib/koinon
 # The managed scope must parse with Hermes's loader and pin every shell hook event this Hermes
 # knows, and Python must be the interpreter the reconciler allows to reach agentgateway
 # (internal/reconciler, DefaultBinaries): OpenShell matches the real path of the executable.
