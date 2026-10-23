@@ -178,21 +178,18 @@ gateway:
     # Used by G2: the GatewayClass of the existing controller.
     gatewayClassName: agentgateway
 
-# One OpenAI-compatible model upstream (ADR 0049).
-model:
-  # For example https://openrouter.ai/api/v1 or http://ollama.example:11434/v1.
-  baseUrl: ""
-  # agentgateway providerOverride for the upstream (openai, openrouter, ollama, ...).
-  provider: openai
-  # Secret holding the upstream API key, mounted only into agentgateway. Empty for keyless upstreams.
-  apiKeySecret:
-    name: ""
-    key: api_key
-  # Models agents may use:
-  #   - name: deepseek/deepseek-v4.1-flash
-  #     rates: {input: "0.30", output: "1.20"}   # USD per 1M tokens, for budgets and the ledger
-  #     overrides: {}                            # request fields forced by the gateway
-  models: []
+# Model providers and models are not chart values: orgs add them in the UI or the admin API, or
+# declare them with labelled Secrets (ADR 0056, docs/site guides/models). Their keys are encrypted
+# in Postgres with the key-encryption keys below.
+secrets:
+  kek:
+    # A Secret you manage, with one file per key-encryption key named by its ID (base64 of 32 random
+    # bytes) plus a file "active" holding the active ID. Empty: the chart generates a Secret on first
+    # install and keeps it across upgrades. Back it up: without it, stored provider keys and
+    # connection secrets cannot be read.
+    existingSecret: ""
+    # "koinon-api keys status" warns when the active key is older than this.
+    activePeriod: 8760h
 
 # GitHub connector (plan item C1). The REST API base URL used to verify connections, mint
 # installation tokens and open approved pull requests; GitHub Enterprise Server uses

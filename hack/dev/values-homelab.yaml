@@ -10,14 +10,8 @@ image:
 imagePullSecrets:
   - name: dev-registry
 
-# The home-lab Ollama (docs/spikes/openshell.md). Real model, no cost.
-model:
-  baseUrl: http://ollama.lab.example.invalid:11434/v1
-  provider: ollama
-  models:
-    - name: "qwen3.5:4b"
-      # Local Ollama costs nothing per token, but a model without a price is not served.
-      rates: {input: "0", output: "0"}
+# The home-lab Ollama (docs/spikes/openshell.md) is declared by hack/dev/model-provider-homelab.yaml,
+# which the Tiltfile applies. Real model, no cost, no key.
 
 openshell:
   address: openshell.openshell.svc:8080

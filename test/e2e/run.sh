@@ -9,9 +9,11 @@
 #   3. the quickstart's shell commands (plan item DOC1): the blocks marked `sh e1=<name>` in
 #      docs/site/src/content/docs/quickstart.md, run by name through hack/docs-e1.sh, so the docs
 #      cannot drift from this test. They create the namespace, copy the OpenShell client
-#      certificate, store the model key and `helm install` charts/koinon (runc, CNPG, the fakes
-#      as model and GitHub). Only two things differ from a reader's run: values.yaml is
-#      test/e2e/kind/koinon-values.yaml, and kubectl/helm are wrappers that add the kind context;
+#      certificate, declare the model provider with a labelled Secret and `helm install`
+#      charts/koinon (runc, CNPG, the fakes as model and GitHub). Only three things differ from a
+#      reader's run: values.yaml is test/e2e/kind/koinon-values.yaml, model-provider.yaml is
+#      test/e2e/kind/model-provider.yaml (the fake model), and kubectl/helm are wrappers that add
+#      the kind context;
 #      hack/docs-check.sh (make docs-check) fails when this script and the doc disagree;
 #   4. SUITE=go (default): the Go driver in test/e2e drives the quickstart steps through the API
 #      and prints the wall clock of each step and the total from `helm install`.
@@ -73,6 +75,7 @@ fi
 # The quickstart's working directory: the repository's chart and the values file.
 ln -sfn "$root/charts" "$OUT/quickstart/charts"
 cp "$here/kind/koinon-values.yaml" "$OUT/quickstart/values.yaml"
+cp "$here/kind/model-provider.yaml" "$OUT/quickstart/model-provider.yaml"
 # e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded
 # and killed (the block's last command is exec'd).
 e1_env=(env "PATH=$OUT/bin:$PATH" "E1_WORKDIR=$OUT/quickstart")
@@ -141,13 +144,13 @@ step "fakes ($FAKES)"
 "${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub --timeout=120s
 done_step "Fakes deployed"
 
-# The quickstart blocks, as the docs show them (quickstart.md). The fake model needs no key, but
-# the doc's key step still runs, with a dummy value.
-step "quickstart: namespace, OpenShell client certificate, model key"
+# The quickstart blocks, as the docs show them (quickstart.md). The model provider is a labelled
+# Secret; here model-provider.yaml declares the fake model server instead of OpenRouter.
+step "quickstart: namespace, OpenShell client certificate, model provider"
 e1 namespace
 e1 client-cert
-OPENROUTER_API_KEY=e2e-dummy-key e1 model-key
-done_step "Namespace, client certificate and model key (quickstart blocks)"
+e1 model-provider
+done_step "Namespace, client certificate and model provider (quickstart blocks)"
 
 # The quickstart clock starts here (ADR 0049).
 step "quickstart: helm install"

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # charts/koinon values for the E1 quickstart e2e on kind: runc instead of Kata (kind has no VM
-# runtime), CNPG, the fake model server as the OpenAI-compatible upstream and the fake GitHub as
-# the GitHub API. Images come from ko/buildx and are loaded into the node (kind.local).
+# runtime), CNPG and the fake GitHub as the GitHub API. The fake model server is declared by
+# model-provider.yaml next to this file. Images come from ko/buildx and are loaded into the node (kind.local).
 # test/e2e/run.sh installs this file as the quickstart's values.yaml.
 image:
   registry: kind.local
@@ -17,18 +17,6 @@ postgres:
 
 gateway:
   mode: standalone
-
-model:
-  baseUrl: http://fakemodel.koinon-e2e-fakes.svc:8080/v1
-  provider: openai
-  # The quickstart's model-key block creates this Secret (with a dummy key here).
-  apiKeySecret:
-    name: koinon-openrouter
-    key: api_key
-  models:
-    # The fake model script test/fakemodel/scripts/repo-helper.yaml.
-    - name: repo-helper
-      rates: {input: "0.30", output: "1.20"}
 
 github:
   apiUrl: http://fakegithub.koinon-e2e-fakes.svc:8080

@@ -32,7 +32,7 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ $name }}
-      {{- /* The reconciler renders key Secrets; the API writes connection Secrets (C1). */}}
+      {{- /* The reconciler renders key Secrets; the API imports declarative Secrets and manages the KEK Secret (PV1). */}}
       automountServiceAccountToken: {{ has $component (list "reconciler" "api") }}
       enableServiceLinks: false
       {{- include "koinon.imagePullSecrets" $ | nindent 6 }}
@@ -70,6 +70,7 @@ spec:
             {{- include "koinon.dbEnv" (list $ $component) | nindent 12 }}
             {{- if has $component (list "api" "reconciler") }}
             {{- include "koinon.githubEnv" $ | nindent 12 }}
+            {{- include "koinon.kekEnv" $ | nindent 12 }}
             {{- end }}
             {{- if eq $component "api" }}
             {{- include "koinon.apiEnv" $ | trim | nindent 12 }}
@@ -86,6 +87,9 @@ spec:
             {{- include "koinon.configVolumeMount" $ | nindent 12 }}
             {{- end }}
             {{- include "koinon.dbVolumeMount" $ | nindent 12 }}
+            {{- if has $component (list "api" "reconciler") }}
+            {{- include "koinon.kekVolumeMount" $ | nindent 12 }}
+            {{- end }}
             {{- if ne $component "api" }}
             {{- include "koinon.openshellVolumeMount" $ | nindent 12 }}
             {{- else }}
@@ -100,6 +104,9 @@ spec:
         {{- include "koinon.configVolume" $ | nindent 8 }}
         {{- end }}
         {{- include "koinon.dbVolume" $ | nindent 8 }}
+        {{- if has $component (list "api" "reconciler") }}
+        {{- include "koinon.kekVolume" $ | nindent 8 }}
+        {{- end }}
         {{- if ne $component "api" }}
         {{- include "koinon.openshellVolume" $ | nindent 8 }}
         {{- else }}
