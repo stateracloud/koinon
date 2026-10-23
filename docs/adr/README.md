@@ -62,4 +62,5 @@ are in [0046](0046-adr-conventions.md).
 | [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted |
 | [0046](0046-adr-conventions.md) | ADR conventions | Accepted |
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted |
+| [0048](0048-openshell-spike-results.md) | OpenShell spike results | Proposed |
 | [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes, agentd placement | Accepted |
