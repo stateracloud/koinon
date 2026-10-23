@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Weekly, grouped version updates: one pull request per ecosystem, so CI runs a few times a
+# week at most. Security updates are separate and immediate (enabled in the repository settings).
+# Flavor Dockerfiles get a docker entry once they land on main (flavors/*).
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule: {interval: weekly, day: monday}
+    open-pull-requests-limit: 5
+    commit-message: {prefix: "chore(deps)"}
+    groups:
+      go:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /web
+    schedule: {interval: weekly, day: monday}
+    open-pull-requests-limit: 5
+    commit-message: {prefix: "chore(deps)"}
+    groups:
+      web:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly, day: monday}
+    open-pull-requests-limit: 5
+    commit-message: {prefix: "chore(ci)"}
+    groups:
+      actions:
+        patterns: ["*"]
