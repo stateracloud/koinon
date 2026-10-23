@@ -1,0 +1,57 @@
+# Spike step 5.6: the same chain as standalone mode, built from agentgateway's Kubernetes CRDs.
+# Keys appear only as hashes; the limit is a per-key token bucket (no USD budgets in this mode).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata: {name: spike, namespace: agentgateway-system}
+spec:
+  service:
+    spec: {type: ClusterIP}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: agw-k8s-spike, namespace: agentgateway-system}
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef: {group: agentgateway.dev, kind: AgentgatewayParameters, name: spike}
+  listeners:
+    - {name: http, protocol: HTTP, port: 8090, allowedRoutes: {namespaces: {from: Same}}}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata: {name: ollama, namespace: agentgateway-system}
+spec:
+  ai:
+    provider:
+      host: ollama.lab.example.invalid
+      port: 11434
+      path: /v1/chat/completions
+      openai: {model: "qwen3.5:4b"}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: ollama, namespace: agentgateway-system}
+spec:
+  parentRefs: [{name: agw-k8s-spike}]
+  rules:
+    - backendRefs: [{group: agentgateway.dev, kind: AgentgatewayBackend, name: ollama}]
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: agw-k8s-keys, namespace: agentgateway-system}
+stringData:
+  agent-a: '{"keyHash":"sha256:88768dd691fb7d05192319488989bdb37842205ec0e2dee6b26a543581a3d9f4","metadata":{"name":"agent-a"}}'
+  agent-b: '{"keyHash":"sha256:a65171f2d26d785b2c79fad0befe660ae32a0ac55cbe34734a7ab097dca63856","metadata":{"name":"agent-b"}}'
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: {name: per-key, namespace: agentgateway-system}
+spec:
+  targetRefs: [{group: gateway.networking.k8s.io, kind: Gateway, name: agw-k8s-spike}]
+  traffic:
+    apiKeyAuthentication:
+      mode: Strict
+      secretRef: {name: agw-k8s-keys}
+    rateLimit:
+      local:
+        - {tokens: 150, unit: Hours, key: 'default(apiKey.name, "none")'}
