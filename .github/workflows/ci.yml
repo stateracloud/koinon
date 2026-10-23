@@ -14,7 +14,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Which parts of the tree a pull request touches, so the slow jobs run only when they can be
+  # affected (Actions minutes are capped). Pushes to main run everything. A job skipped by its
+  # `if:` reports success, so required checks still pass when it does not apply.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.paths.outputs.go }}
+      web: ${{ steps.paths.outputs.web }}
+      generate: ${{ steps.paths.outputs.generate }}
+      chart: ${{ steps.paths.outputs.chart }}
+      docs: ${{ steps.paths.outputs.docs }}
+      escape: ${{ steps.paths.outputs.escape }}
+      flavors: ${{ steps.paths.outputs.flavors }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: paths
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: hack/ci-changes.sh "$BASE" >>"$GITHUB_OUTPUT"
+
   go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     name: go
     runs-on: ubuntu-latest
     steps:
@@ -31,6 +56,8 @@ jobs:
       - run: go test $(go list ./... | grep -v '/test/flavors$')
 
   web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     name: web
     runs-on: ubuntu-latest
     defaults:
@@ -77,6 +104,8 @@ jobs:
           fi
 
   generate:
+    needs: changes
+    if: needs.changes.outputs.generate == 'true'
     name: generated code
     runs-on: ubuntu-latest
     steps:
@@ -102,6 +131,8 @@ jobs:
           git diff --exit-code || { echo "run 'make generate' and commit the result"; exit 1; }
 
   chart:
+    needs: changes
+    if: needs.changes.outputs.chart == 'true'
     name: chart
     runs-on: ubuntu-latest
     steps:
@@ -119,6 +150,8 @@ jobs:
   # test/e2e, the chart and the web spec. No deploy while the repository is private. Not a
   # required check.
   docs:
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     name: docs
     runs-on: ubuntu-latest
     steps:
@@ -140,6 +173,8 @@ jobs:
   # Escape suite, admission part (plan item E2): the chart's ValidatingAdmissionPolicies against
   # envtest's API server. The OpenShell cases need a gateway and run on the home lab only.
   escape-admission:
+    needs: changes
+    if: needs.changes.outputs.escape == 'true'
     name: escape (admission)
     runs-on: ubuntu-latest
     steps:
@@ -167,6 +202,8 @@ jobs:
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
   # a fake key; it never reaches a real or paid model. Not a required check.
   flavors:
+    needs: changes
+    if: needs.changes.outputs.flavors == 'true'
     name: flavors
     runs-on: ubuntu-latest
     timeout-minutes: 45
