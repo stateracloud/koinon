@@ -184,10 +184,22 @@ func describeAgentd(f flavor) bool {
 			Expect(text).To(ContainSubstring(helloReply))
 			Expect(gw.authHeaders()).To(HaveEach("Bearer " + fakeKey))
 			Expect(sb.run(ctx, "cat", instructionsPath)).To(ContainSubstring(instructionsMarker))
-			if f.readyCommand != "" {
-				// agentd waited for the Koinon tools: the first request already offers them.
-				Expect(gw.modelBodies()).To(ContainElement(And(ContainSubstring(helloPrompt), ContainSubstring(f.mcpToolName))))
+			// The first chat request of the turn already offers the Koinon tools: agentd waited for
+			// OpenCode's ready command, and Hermes and pi connect their MCP server before the first
+			// prompt (internal/agentd, readyCommand).
+			// Side requests without tools (OpenCode's title generator) do not count.
+			first := ""
+			for _, b := range gw.modelBodies() {
+				var req struct {
+					Tools []json.RawMessage `json:"tools"`
+				}
+				Expect(json.Unmarshal([]byte(b), &req)).To(Succeed())
+				if strings.Contains(b, helloPrompt) && len(req.Tools) > 0 {
+					first = b
+					break
+				}
 			}
+			Expect(first).To(ContainSubstring(f.mcpToolName), "the first request offers the Koinon tools")
 		}, SpecTimeout(4*time.Minute))
 
 		It("loads the session on the next run, after the sandbox restarted", func(ctx SpecContext) {
@@ -224,6 +236,14 @@ func describeAgentd(f flavor) bool {
 			Expect(requestTools(gw)).To(Equal(before), "the run has the same tools")
 			Expect(sweptPids(eventsOf(ctx, r))).To(ContainElement(pid), "agentd ended the job before the harness started")
 			expectOnlyMain(ctx, sb)
+		}, SpecTimeout(4*time.Minute))
+
+		It("replaces a directory the agent put at the instruction file's path, and runs", func(ctx SpecContext) {
+			sb.run(ctx, "sh", "-c", `rm -rf "$1" && mkdir -p "$1/inner"`, "sh", instructionsPath)
+			r := runTicket(ctx, helloPrompt)
+			Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
+			Expect(sb.run(ctx, "stat", "-c", "%F", instructionsPath)).To(Equal("regular file\n"))
+			Expect(sb.run(ctx, "cat", instructionsPath)).To(ContainSubstring(instructionsMarker))
 		}, SpecTimeout(4*time.Minute))
 
 		It("answers the harness's permission requests from the tier mapping", func(ctx SpecContext) {
