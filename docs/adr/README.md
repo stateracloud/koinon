@@ -62,6 +62,7 @@ are in [0046](0046-adr-conventions.md).
 | [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted |
 | [0046](0046-adr-conventions.md) | ADR conventions | Accepted |
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted |
+| [0050](0050-spend-ledger-ingestion-and-net-limits.md) | Spend ledger ingestion and net limits | Proposed |
 | [0052](0052-opencode-v2-flavor.md) | OpenCode flavor on OpenCode v2 | Accepted |
 
 Some ADRs live only on another pull request's branch and have no row on the branches that lack
