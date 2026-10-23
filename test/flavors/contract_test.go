@@ -19,8 +19,7 @@ import (
 
 // flavor is what the contract suite needs to know about one flavor.
 type flavor struct {
-	name         string
-	defaultImage string
+	name string
 	// dockerfile is the build context, relative to the repository root.
 	dockerfile string
 	// command is the ACP launch command koinon-agentd execs in the sandbox.
@@ -69,7 +68,21 @@ func (f flavor) image() string {
 	if img := os.Getenv("KOINON_FLAVOR_IMAGE_" + strings.ToUpper(f.name)); img != "" {
 		return img
 	}
-	return f.defaultImage
+	return "koinon/flavor-" + f.name + ":" + f.tag()
+}
+
+// tag is the image tag for this tree's build context, from the script the Makefile uses, so an
+// image built from another branch or worktree is never picked up.
+func (f flavor) tag() string {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		Fail("repository root: " + err.Error())
+	}
+	out, err := exec.CommandContext(context.Background(), filepath.Join(root, "hack", "flavor-tag.sh"), f.name).Output() //nolint:gosec // test-controlled
+	if err != nil {
+		Fail("hack/flavor-tag.sh " + f.name + ": " + err.Error())
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // Values the contract checks for. The key is fake: plain Docker has no OpenShell placeholder
@@ -298,8 +311,8 @@ func describeContract(f flavor) bool {
 	})
 }
 
-// ensureImage skips the flavor's specs when its image is missing, or builds it when
-// KOINON_FLAVOR_BUILD=1.
+// ensureImage fails the flavor's specs when its image is missing, naming the tag and the make
+// command, or builds it when KOINON_FLAVOR_BUILD=1. It never falls back to another tag.
 func ensureImage(f flavor) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
@@ -308,11 +321,15 @@ func ensureImage(f flavor) {
 		return
 	}
 	if os.Getenv("KOINON_FLAVOR_BUILD") != "1" {
-		Skip("image " + img + " not found; run `make flavor-" + f.name + "` or set KOINON_FLAVOR_BUILD=1")
+		Fail("image " + img + " not found for this tree's flavors/" + f.name + " and flavors/common; run `make flavor-" +
+			f.name + "` (tags are per source tree) or set KOINON_FLAVOR_BUILD=1")
 	}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	Expect(err).NotTo(HaveOccurred())
-	out, err := exec.CommandContext(ctx, "docker", "buildx", "build", "--load", "--tag", img, //nolint:gosec // test-controlled
-		filepath.Join(root, f.dockerfile)).CombinedOutput()
+	args := []string{"buildx", "build", "--load", "--tag", img}
+	if _, err := os.Stat(filepath.Join(root, "flavors", "common")); err == nil {
+		args = append(args, "--build-context", "common="+filepath.Join(root, "flavors", "common"))
+	}
+	out, err := exec.CommandContext(ctx, "docker", append(args, filepath.Join(root, f.dockerfile))...).CombinedOutput() //nolint:gosec // test-controlled
 	Expect(err).NotTo(HaveOccurred(), "build %s: %s", img, out)
 }

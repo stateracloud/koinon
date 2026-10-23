@@ -17,9 +17,8 @@ import (
 
 // opencode is the OpenCode flavor's contract (flavors/opencode/README.md).
 var opencode = flavor{
-	name:         "opencode",
-	defaultImage: "koinon/flavor-opencode:dev",
-	dockerfile:   "flavors/opencode",
+	name:       "opencode",
+	dockerfile: "flavors/opencode",
 	command: func(modelBaseURL, model, mcpURL string) []string {
 		return []string{
 			"/usr/local/bin/koinon-opencode",
