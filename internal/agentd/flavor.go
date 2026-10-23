@@ -46,6 +46,18 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 // registered, or "" when it announces none. OpenCode turns the MCP prompt koinon-ready
 // (gateway.ReadyPrompt, published by Koinon's MCP server) into the command
 // <server>:<prompt>, and its server is "koinon" (flavors/opencode/README.md, ADR 0052).
+//
+// Hermes and pi announce no MCP prompt, and need no wait: their first prompt already carries
+// the Koinon tools (the contract suite checks the first chat request of every flavor).
+//   - Hermes 0.22.3 announces only its built-in commands (acp_adapter/commands.py:74). Its
+//     gateway daemon connects the MCP servers before it starts serving
+//     (gateway/run_bootstrap.py:679, awaited before runner.start at :684), and `hermes acp`
+//     waits for the daemon to be ready before session/new (hermes_cli/gateway_client.py:288).
+//   - pi 1.3.0 connects MCP servers in the background on session_start
+//     (dist/extensions/mcp/index.js:971), and the first prompt waits up to 10 s for servers
+//     with "exposure": "direct", Koinon's (index.js:1014-1036, DEFAULT_STARTUP_WAIT_MS at :39),
+//     longer than any fixed delay agentd would add. pi-acp leaves extension commands, MCP
+//     prompts among them, out of available_commands_update (pi-acp dist/index.js:2102).
 func readyCommand(f store.AgentFlavor) string {
 	if f == store.AgentFlavorOpencode {
 		return "koinon:koinon-ready"
@@ -64,8 +76,7 @@ func modelOption(f store.AgentFlavor, model string) string {
 }
 
 // versionConfig reads an agent version's config with agentconfig.Parse. A config that cannot
-// be read counts as empty: the install default model, every harness setting off and no
-// instructions of its own.
+// be read fails the run (run.go): it would run without its instructions.
 func versionConfig(raw []byte) (agentconfig.Config, error) {
 	c, err := agentconfig.Parse(raw)
 	if err != nil {
