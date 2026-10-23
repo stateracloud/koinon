@@ -119,6 +119,13 @@ func (f *files) link(path string) (string, bool) {
 	return t, ok
 }
 
+// sweepCount is how many times agentd ran the sweep script.
+func (f *files) sweepCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sweeps
+}
+
 func (f *files) get(path string) ([]byte, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

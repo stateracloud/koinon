@@ -71,6 +71,12 @@ type runner struct {
 	fenceOnce sync.Once
 	fenced    chan struct{}
 	fenceKind atomic.Int32
+	// finished is set once this worker has finished the run; a heartbeat after that fences it,
+	// though no other worker can own the run.
+	finished atomic.Bool
+	// parked is set once this worker has parked the run, which another worker may resume at
+	// once.
+	parked atomic.Bool
 
 	mu        sync.Mutex // serialises appends and srcSeq
 	srcSeq    int64
@@ -683,6 +689,7 @@ func (r *runner) finish(ctx context.Context, outcome store.RunState, reason stri
 	if err != nil {
 		return r.dbErr(ctx, "finish the run", err)
 	}
+	r.finished.Store(true)
 	r.log.Info("run finished", "outcome", outcome, "reason", reason)
 	return nil
 }
