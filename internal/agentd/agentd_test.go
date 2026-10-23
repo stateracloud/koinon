@@ -390,6 +390,17 @@ var _ = Describe("Pool", func() {
 		Expect(swept[0].Seq).To(BeNumerically("<", eventOf(evs, "run.session")[0].Seq), "before the harness starts")
 	})
 
+	It("sweeps after a run it finished even when its harness outlives the run's end", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		// The harness ignores end-of-file: closing it takes two seconds, long enough for a
+		// heartbeat to find the run finished.
+		e.harness.set(func(h *harness) { h.lingers = true })
+		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(e.files.sweepCount).WithTimeout(10*time.Second).Should(Equal(2), "before the harness and after it")
+	})
+
 	It("fails the run, without starting the harness, when processes of an earlier run keep running", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.files.sweep = func() (string, int) { return "still running: 41\n", 1 }
