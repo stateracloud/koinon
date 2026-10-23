@@ -1,0 +1,64 @@
+# 0026. Home lab for real isolation testing; Apache-2.0 with DCO
+
+- Status: Accepted
+- Date: 2026-10-21
+- Decision: [design.md#26](../design.md)
+
+## Context
+
+Kata Containers needs hardware virtualization, which GitHub-hosted runners do not offer reliably,
+and cloud clusters with nested virtualization cost money. procoduck has a Talos cluster at home with the
+Kata runtime installed. Public CI must never run untrusted pull-request code on that cluster.
+
+For licensing, Koinon reuses Apache-2.0 projects (OpenShell, Agent Sandbox, agentgateway) and wants
+a low barrier for contributors and adopters, including companies.
+
+## Decision
+
+- The home-lab Talos cluster with Kata is for development and local testing only. It is never
+  connected to public CI.
+- License: Apache-2.0.
+- Contributions are signed off under the Developer Certificate of Origin (`git commit -s`). No CLA.
+
+## Alternatives considered
+
+- Self-hosted GitHub runner on the home lab _(reconstructed)_. Rejected: PRs from forks would run on
+  a private network.
+- Paid cloud CI with nested virtualization _(reconstructed)_. Rejected for now: cost; may revisit for
+  a release gate.
+- MIT license _(reconstructed)_. Rejected: Apache-2.0 has an explicit patent grant and matches the
+  reused upstreams.
+- AGPL or source-available license _(reconstructed)_. Rejected: hinders adoption and contribution;
+  note that Multica (prior art) uses Apache-2.0 with hosting restrictions, which is the kind of
+  license Koinon avoids.
+- CLA _(reconstructed)_. Rejected: friction for contributors; DCO is enough for Apache-2.0.
+
+## Consequences
+
+- Positive: real VM isolation testing at no cloud cost; simple, well-known license.
+- Negative: Kata-specific behaviour is only tested where procoduck runs it; regressions may be found
+  late _(inferred)_.
+- Negative: no relicensing flexibility without a CLA (accepted trade-off).
+- Follow-ups: DCO check on PRs (DCO app with `.github/dco.yml`, or an Actions-based check); document
+  home-lab test steps in CONTRIBUTING.
+
+## Open questions
+
+- DCO enforcement mechanism: the DCO GitHub app or an Actions job.
+- Whether a release gate should run the escape suite on Kata in paid infrastructure later.
+
+## Upstream verification
+
+Checked 2026-10-21:
+- Talos Kata system extension registers `kata` (Cloud Hypervisor) and `kata-qemu` handlers; example
+  RuntimeClass `kata` with pod overhead 130Mi / 250m.
+  https://github.com/siderolabs/extensions/blob/main/container-runtime/kata-containers/README.md
+- Agent Sandbox Kata examples cover AKS and GKE only; Talos is untested upstream.
+  https://github.com/kubernetes-sigs/agent-sandbox
+- DCO app configuration: https://github.com/dcoapp/app
+
+## Links
+
+- [design.md](../design.md), decision 26
+- ADR [0025](0025-testing-strategy.md), [0038](0038-governance.md),
+  [0039](0039-development-setup.md)
