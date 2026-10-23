@@ -322,13 +322,13 @@ func (r *runner) execute(ctx context.Context) error {
 	log := r.log.With("sandbox", sandbox)
 	// Nothing of an earlier run may still be running when this one starts (sweep.go); a
 	// sweep that cannot end everything fails the run.
-	ended, err := r.sweep(fctx, workspace, sandbox)
+	main, ended, err := r.sweep(fctx, workspace, sandbox)
 	if err != nil {
 		return r.execErr(ctx, "end the processes left in the sandbox", err)
 	}
 	if len(ended) > 0 {
-		log.Warn("ended processes left in the sandbox", "pids", ended)
-		if err := r.record(fctx, "run.sandbox_swept", map[string]any{"pids": ended}); err != nil {
+		log.Warn("ended processes left in the sandbox", "pids", ended, "main", main)
+		if err := r.record(fctx, "run.sandbox_swept", map[string]any{"pids": ended, "main": main}); err != nil {
 			return r.dbErr(ctx, "record the sweep", err)
 		}
 	}

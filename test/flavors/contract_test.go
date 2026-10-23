@@ -23,9 +23,8 @@ import (
 // flavor is what the contract suite needs to know about one flavor: how to drive it, and what
 // it is expected to do where harnesses legitimately differ.
 type flavor struct {
-	name         string
-	storeFlavor  store.AgentFlavor
-	defaultImage string
+	name        string
+	storeFlavor store.AgentFlavor
 	// dockerfile is the build context, relative to the repository root.
 	dockerfile string
 	// writeFile is the harness's own tool call that writes a file, as the model would emit it.
@@ -99,7 +98,21 @@ func (f flavor) image() string {
 	if img := os.Getenv("KOINON_FLAVOR_IMAGE_" + strings.ToUpper(f.name)); img != "" {
 		return img
 	}
-	return f.defaultImage
+	return "koinon/flavor-" + f.name + ":" + f.tag()
+}
+
+// tag is the image tag for this tree's build context, from the script the Makefile uses, so an
+// image built from another branch or worktree is never picked up.
+func (f flavor) tag() string {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		Fail("repository root: " + err.Error())
+	}
+	out, err := exec.CommandContext(context.Background(), filepath.Join(root, "hack", "flavor-tag.sh"), f.name).Output() //nolint:gosec // test-controlled
+	if err != nil {
+		Fail("hack/flavor-tag.sh " + f.name + ": " + err.Error())
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // command is the ACP launch command koinon-agentd execs in the sandbox: the same for every
@@ -436,8 +449,8 @@ var _ = func() bool {
 	return true
 }()
 
-// ensureImage skips the flavor's specs when its image is missing, or builds it when
-// KOINON_FLAVOR_BUILD=1.
+// ensureImage fails the flavor's specs when its image is missing, naming the tag and the make
+// command, or builds it when KOINON_FLAVOR_BUILD=1. It never falls back to another tag.
 func ensureImage(f flavor) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
@@ -446,7 +459,8 @@ func ensureImage(f flavor) {
 		return
 	}
 	if os.Getenv("KOINON_FLAVOR_BUILD") != "1" {
-		Skip("image " + img + " not found; run `make flavor-" + f.name + "` or set KOINON_FLAVOR_BUILD=1")
+		Fail("image " + img + " not found for this tree's flavors/" + f.name + " and flavors/common; run `make flavor-" +
+			f.name + "` (tags are per source tree) or set KOINON_FLAVOR_BUILD=1")
 	}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	Expect(err).NotTo(HaveOccurred())
