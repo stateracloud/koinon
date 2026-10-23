@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Tilt profile "homelab" (ADR 0039): the Talos cluster with Kata, the platform's CloudNativePG
+# operator, Zot as the dev registry (docs/dev/registry.md) and the existing OpenShell gateway.
+# Override single values with `tilt up -- --helm-set key=value`.
+image:
+  registry: zot.apps.lab.example.invalid/koinon
+
+# Created once by hand, see docs/dev/registry.md.
+imagePullSecrets:
+  - name: dev-registry
+
+# The home-lab Ollama (docs/spikes/openshell.md). Real model, no cost.
+model:
+  baseUrl: http://ollama.lab.example.invalid:11434/v1
+  provider: ollama
+  models:
+    - name: "qwen3.5:4b"
+
+openshell:
+  address: openshell.openshell.svc:8080
+  runtimeClassName: kata
