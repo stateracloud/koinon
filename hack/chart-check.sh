@@ -165,6 +165,11 @@ for f in "${value_files[@]}"; do
 	echo "$name: ok (seccomp probe: $([[ $probe == 1 ]] && echo on || echo off), NetworkPolicy probe: $([[ $netpol == 1 ]] && echo on || echo off))"
 done
 
+# kubeconform's schemas do not make list entries unique; the API server rejects a pod spec
+# that repeats a volume, container, mount or env name.
+echo "== duplicate list entries"
+go run ./hack/chartlint "$out"/*.yaml
+
 echo "== kubeconform (Kubernetes $KUBERNETES_VERSION)"
 "${KUBECONFORM[@]}" \
 	-strict -summary \
