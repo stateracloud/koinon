@@ -25,7 +25,9 @@
 #
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
 #
-# The quickstart opens the API on localhost:8080 (the doc's port-forward), so that port must be free.
+# The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
+# free. API_PORT=<n> changes the local end of the port-forward for the test only; the doc's block
+# stays 8080.
 set -euo pipefail
 
 CLUSTER=${CLUSTER:-koinon-e1}
@@ -37,9 +39,12 @@ SUITE=${SUITE:-go}
 case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; esac
 SKIP_UP=${SKIP_UP:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}
-# The quickstart's port-forward (docs) uses 8080.
-API_PORT=8080
+# The quickstart's port-forward block (docs) uses 8080; run.sh checks that this port is free.
+API_PORT=${API_PORT:-8080}
 GH_PORT=${GH_PORT:-18090}
+for port in "$API_PORT" "$GH_PORT"; do
+  if nc -z 127.0.0.1 "$port" 2>/dev/null; then echo "port $port is in use; run.sh port-forwards to it" >&2; exit 1; fi
+done
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 here="$root/test/e2e"
@@ -56,6 +61,15 @@ for tool in kubectl helm; do
   printf '#!/usr/bin/env bash\nexec %s %s %s "$@"\n' "$(command -v "$tool")" "$flag" "$CTX" >"$OUT/bin/$tool"
   chmod +x "$OUT/bin/$tool"
 done
+# The doc's port-forward is 8080:8080; with API_PORT set, only its local end changes.
+if [[ $API_PORT != 8080 ]]; then
+  cat >"$OUT/bin/kubectl" <<WRAP
+#!/usr/bin/env bash
+args=()
+for a in "\$@"; do args+=("\${a/#8080:8080/$API_PORT:8080}"); done
+exec $(command -v kubectl) --context $CTX "\${args[@]}"
+WRAP
+fi
 # The quickstart's working directory: the repository's chart and the values file.
 ln -sfn "$root/charts" "$OUT/quickstart/charts"
 cp "$here/kind/koinon-values.yaml" "$OUT/quickstart/values.yaml"
@@ -141,10 +155,6 @@ T0=$(date +%s)
 e1 install
 done_step "helm install --wait"
 
-if nc -z 127.0.0.1 "$API_PORT" 2>/dev/null; then
-  echo "port $API_PORT is in use; the quickstart's port-forward needs it" >&2
-  exit 1
-fi
 "${e1_env[@]}" "$root/hack/docs-e1.sh" run open >"$OUT/pf-api.log" 2>&1 &
 pids+=($!)
 "${K[@]}" -n "$FAKES" port-forward svc/fakegithub "$GH_PORT:8080" >"$OUT/pf-fakegithub.log" 2>&1 &
