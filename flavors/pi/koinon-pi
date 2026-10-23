@@ -53,8 +53,13 @@ check --model "$model"
 check_url --mcp-url "$mcp_url"
 
 # Drop anything the caller's environment might carry that would change where pi reads its
-# configuration or sessions, or which pi binary pi-acp starts.
-unset PI_CODING_AGENT_SESSION_DIR PI_ACP_PI_COMMAND NODE_OPTIONS NODE_PATH
+# configuration, package or sessions, or which pi binary pi-acp starts: every PI_* variable
+# goes (PI_PACKAGE_DIR, PI_CODING_AGENT_SESSION_DIR, PI_ACP_* among them), the ones set below
+# come back.
+for v in $(env | sed -n 's/^\(PI_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  unset "$v"
+done
+unset NODE_OPTIONS NODE_PATH
 
 # /opt/node/bin holds node only: the image removes npm, which pi-acp would otherwise run on
 # every session/new to look for a newer pi on registry.npmjs.org.
@@ -65,8 +70,9 @@ export LANG=C.UTF-8
 export HOME=/sandbox
 export XDG_CACHE_HOME=/sandbox/.cache
 export PI_CODING_AGENT_DIR=/sandbox/.pi/agent
-# pi-acp starts this pi, one process per session.
-export PI_ACP_PI_COMMAND=/opt/pi/node_modules/.bin/pi
+# pi-acp starts this pi, one process per session: pi with the switches that keep the home and
+# the repository out of its tools and instructions.
+export PI_ACP_PI_COMMAND=/usr/local/lib/koinon/koinon-pi-rpc
 
 # Phone-home switches (pi 1.3.0, pi-acp 0.0.34; see README.md for the source of each).
 export PI_OFFLINE=1
@@ -84,6 +90,15 @@ instructions=/sandbox/.koinon/AGENTS.md
 if [ ! -f "$instructions" ] || [ -L "$instructions" ] || [ ! -s "$instructions" ]; then
   die "missing instructions: $instructions (koinon-agentd writes it before the harness starts)"
 fi
+
+# The agent directory is in the agent's writable home, so a run could leave in it what pi would
+# load at the next start: SYSTEM.md, which replaces pi's system prompt and has no switch
+# (dist/core/resource-loader.js, discoverSystemPromptFile); bin/rg and bin/fd, which pi's
+# search tools run before the ones on PATH (dist/utils/tools-manager.js, getToolPath);
+# trust.json, extensions, skills and the rest, which koinon-pi-rpc's switches already ignore.
+# Everything but the sessions goes; the configuration is rendered afresh below.
+mkdir -p "$PI_CODING_AGENT_DIR"
+find "$PI_CODING_AGENT_DIR" -mindepth 1 -maxdepth 1 ! -name sessions -exec rm -rf {} +
 
 /opt/node/bin/node /usr/local/lib/koinon/koinon-pi-render.mjs /etc/koinon/pi "$PI_CODING_AGENT_DIR" \
   || die "rendering the configuration failed"
