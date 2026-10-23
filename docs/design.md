@@ -130,6 +130,12 @@ Upstream research during the ADR work changed some of the decisions above. Detai
 | [0045](adr/0045-openshell-hardening-defaults.md) | OpenShell hardening defaults (always `enforce`, no secrets in sandbox env, Kata default) |
 | [0046](adr/0046-adr-conventions.md) | ADR conventions |
 
+## Revisions from the v0.1 planning (22 October 2026)
+
+| ADR | Change |
+| --- | --- |
+| [0049](adr/0049-v01-scope-decisions.md) | `agentd` runs in the control plane (amends 0016); Koinon reads only Kubernetes Secrets, external stores via ESO (amends 0007); agentgateway standalone or Kubernetes mode; v0.1 template, scopes, UI and approval semantics (settles 0036's open questions) |
+
 The Build-vs-reuse rows and execution layer notes that mention LiteLLM, `inference.local` or Pod
 Identity are superseded by these ADRs.
 

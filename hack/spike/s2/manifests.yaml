@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+# S2: Koinon-owned Gateway in agentgateway Kubernetes mode, with the standalone budget
+# configuration carried in Gateway-level AgentgatewayParameters.rawConfig. Keys appear only as hashes.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata: {name: koinon-s2, namespace: koinon-spike}
+spec:
+  service:
+    # The controller's Service carries only the Gateway's listener ports; expose the rawConfig bind.
+    spec:
+      type: ClusterIP
+      ports: [{name: koinon-llm, port: 4000, targetPort: 4000, protocol: TCP}]
+  rawConfig:
+    config:
+      database: {url: "sqlite:///tmp/agentgateway.db?mode=rwc"}
+      modelCatalog:
+      - inline:
+          providers:
+            ollama:
+              models:
+                "qwen3.5:4b": {rates: {input: "1", output: "2"}}
+    frontendPolicies:
+      accessLog:
+        add:
+          koinon.key: 'default(apiKey.name, "")'
+    gateways:
+      default:
+        port: 4000
+    llm:
+      policies:
+        apiKey:
+          mode: strict
+          location: {header: {name: authorization, prefix: "Bearer "}}
+          keys:
+          - keyHash: sha256:fd417b992b71d37b18839ef9376f00b7ed73bc9ba49ff728943e4d33d055fc7c
+            metadata: {name: agent-a}
+            budgets:
+            - {name: usd-daily, limit: {unit: USD, amount: 5}, window: {rolling: 24h}, onBudgetExceeded: Block}
+          - keyHash: sha256:d839fa15de0ddd54305495f5a35d6a7f84fb9f83976af060f3ceb9e4deadc01c
+            metadata: {name: agent-b}
+            budgets:
+            - {name: usd-daily, limit: {unit: USD, amount: 0.0005}, window: {rolling: 24h}, onBudgetExceeded: Block}
+      models:
+      - name: "qwen3.5:4b"
+        provider: {custom: {providerOverride: ollama, formats: [{type: completions}]}}
+        params: {baseUrl: "http://ollama.lab.example.invalid:11434/v1"}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata: {name: koinon-s2, namespace: koinon-spike}
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef: {group: agentgateway.dev, kind: AgentgatewayParameters, name: koinon-s2}
+  listeners:
+    - {name: http, protocol: HTTP, port: 8090, allowedRoutes: {namespaces: {from: Same}}}

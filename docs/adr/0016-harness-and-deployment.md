@@ -1,6 +1,7 @@
 # 0016. Harness and deployment: ExecutionBackend, agentd over ACP, dedicated agents cluster
 
 - Status: Accepted
+- Amended by: [0049](0049-v01-scope-decisions.md)
 - Date: 2026-10-21
 - Decision: [design.md#16](../design.md)
 - Verification: Pending: OpenShell spike ([#3](https://github.com/procoduck/koinon/issues/3))
@@ -42,6 +43,25 @@ flowchart LR
   subgraph SB
     SV[supervisor] --- AD[agentd]
     AD -- ACP stdio --> H[harness: opencode acp / hermes acp / pi-acp]
+  end
+```
+
+**Amendment ([0049](0049-v01-scope-decisions.md)).** `agentd` runs in the control plane, not in
+the sandbox. The OpenShell spike (step 7) drove all three harnesses over ACP through the gateway's
+non-TTY exec stream with no relay inside the sandbox. `koinon-agentd` is a Deployment that holds one
+exec stream per active run and resumes with `session/load` when a stream drops. Nothing of
+Koinon's runs inside the sandbox, and flavor images carry no Koinon binary.
+
+```mermaid
+flowchart LR
+  subgraph CP[Koinon control plane]
+    API[koinon-api] --> AD[koinon-agentd]
+    AD --> EB[ExecutionBackend]
+  end
+  EB -- gRPC exec, non-TTY stdin/stdout --> GW[OpenShell gateway]
+  GW --> SB
+  subgraph SB[Sandbox, Kata]
+    SV[supervisor] -- ACP stdio --> H[harness]
   end
 ```
 
