@@ -1,0 +1,270 @@
+{
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://koinon.dev/schemas/connectors/v1alpha1/connector.schema.json",
+  "title": "Koinon connector type",
+  "description": "A platform-curated connector type (ADR 0007): its auth type, hosts, scopes with risk tiers (ADR 0008), the presets that map tiers to allow, ask or deny, and a machine-readable setup guide (ADR 0021). Connections (per org) and grants (per agent) refer to it by metadata.id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "description": "Schema version of this document. Stays v1alpha1 until 1.0 (ADR 0027).",
+      "const": "connectors.koinon.dev/v1alpha1"
+    },
+    "kind": { "const": "ConnectorType" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "displayName", "description"],
+      "properties": {
+        "id": {
+          "description": "Stable identifier; also the directory name (connectors/<id>/). Templates name it in grants[].connector.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "maxLength": 63
+        },
+        "version": {
+          "description": "SemVer of the connector type content.",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["auth", "hosts", "targets", "scopes", "presets", "setupGuide"],
+      "properties": {
+        "auth": { "$ref": "#/$defs/auth" },
+        "hosts": {
+          "description": "Every host the connector talks to. Scope network rules may only name these.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/host" }
+        },
+        "targets": {
+          "description": "What a grant is narrowed to (for GitHub: repositories).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "pattern", "description"],
+          "properties": {
+            "kind": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+            "pattern": { "description": "RE2 pattern a target must match.", "type": "string", "minLength": 1 },
+            "description": { "type": "string", "minLength": 1, "maxLength": 500 }
+          }
+        },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/scope" }
+        },
+        "presets": {
+          "description": "Per preset, the decision for each risk tier (ADR 0008, 0049). The forbidden tier must be deny in every preset.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["read-only", "standard", "trusted"],
+          "properties": {
+            "read-only": { "$ref": "#/$defs/preset" },
+            "standard": { "$ref": "#/$defs/preset" },
+            "trusted": { "$ref": "#/$defs/preset" }
+          }
+        },
+        "setupGuide": { "$ref": "#/$defs/setupGuide" }
+      }
+    }
+  },
+  "$defs": {
+    "tier": { "enum": ["read", "reversible-write", "external-or-irreversible", "forbidden"] },
+    "decision": { "enum": ["allow", "ask", "deny"] },
+    "preset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read", "reversible-write", "external-or-irreversible", "forbidden"],
+      "properties": {
+        "read": { "$ref": "#/$defs/decision" },
+        "reversible-write": { "$ref": "#/$defs/decision" },
+        "external-or-irreversible": { "$ref": "#/$defs/decision" },
+        "forbidden": { "const": "deny" }
+      }
+    },
+    "permissionLevel": { "enum": ["read", "write"] },
+    "permissions": {
+      "description": "Provider permissions by name, for example GitHub App permissions (contents: write).",
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/permissionLevel" }
+    },
+    "auth": {
+      "description": "How Koinon authenticates to the provider (ADR 0006, 0007).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["federated", "app-credential", "delegated-user"] },
+        "permissions": {
+          "description": "The permissions the connection's app must have, and no more.",
+          "$ref": "#/$defs/permissions"
+        },
+        "forbiddenPermissions": {
+          "description": "Permissions the app must not have; the connection test fails when it does.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        },
+        "tokenLifetime": {
+          "description": "Lifetime of a minted credential, as a Go duration.",
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(h|m|s)$"
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port"],
+      "properties": {
+        "host": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "networkRule": {
+      "description": "A direct call the sandbox may make (allow-tier scopes only), compiled to OpenShell policy (plan item C2). {owner} and {repo} are filled from the grant's targets.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "methods", "paths"],
+      "properties": {
+        "host": { "type": "string" },
+        "methods": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] }
+        },
+        "paths": {
+          "description": "OpenShell REST path globs: * matches within one segment, a whole-segment ** matches one or more segments. Matching is case-sensitive.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^/" }
+        },
+        "query": {
+          "description": "Query parameters the request must carry, each with a glob its every value must match (OpenShell L7 query matcher).",
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "deny": {
+          "description": "A deny rule: requests it matches are refused even if an allow rule matches (OpenShell deny_rules). Deny rules may not use {owner} or {repo}.",
+          "type": "boolean"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "tier", "description", "permissions"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+        },
+        "tier": { "$ref": "#/$defs/tier" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "permissions": {
+          "description": "The provider permissions a credential minted for this scope is narrowed to.",
+          "$ref": "#/$defs/permissions"
+        },
+        "network": {
+          "description": "Direct network access from the sandbox. Only scopes in the read tier may have it: anything that writes goes through tools (ADR 0042).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/networkRule" }
+        },
+        "tools": {
+          "description": "MCP tools behind agentgateway that this scope grants. A grant's CEL allowlist is the union over its non-denied scopes.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" }
+        }
+      }
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "url"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "url": {
+          "description": "An https URL. {field} placeholders are filled from fields entered so far.",
+          "type": "string",
+          "pattern": "^https://"
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "type"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9]*$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "help": { "type": "string", "maxLength": 500 },
+        "type": {
+          "description": "integer and text are plain inputs; pem is a multi-line PEM block.",
+          "enum": ["integer", "text", "pem"]
+        },
+        "secret": {
+          "description": "A secure input (ADR 0021): posted once, written straight to a Kubernetes Secret, never stored in Postgres, returned by the API, logged or shown to a model.",
+          "type": "boolean",
+          "default": false
+        },
+        "required": { "type": "boolean", "default": true },
+        "pattern": { "description": "RE2 pattern the value must match.", "type": "string" }
+      }
+    },
+    "value": {
+      "description": "A setup-specific value the guide shows for copying into the provider's console.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "value"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "value": { "type": "string", "minLength": 1 }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "body"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "body": { "description": "Markdown shown in the UI and to the agent builder.", "type": "string", "minLength": 1 },
+        "links": { "type": "array", "items": { "$ref": "#/$defs/link" } },
+        "values": { "type": "array", "items": { "$ref": "#/$defs/value" } },
+        "fields": {
+          "description": "Field ids entered in this step.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "check": {
+          "description": "A built-in check (implemented in Go, referenced by name) that validates the step once its fields are entered.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9-]*)+$"
+        }
+      }
+    },
+    "setupGuide": {
+      "description": "One source for the connection page and the agent builder (ADR 0021).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields", "steps"],
+      "properties": {
+        "fields": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/field" } },
+        "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" } }
+      }
+    }
+  }
+}

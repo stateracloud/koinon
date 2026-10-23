@@ -33,7 +33,8 @@ type gateway struct {
 	model *fakemodel.Server
 
 	mu       sync.Mutex
-	auth     []string // Authorization headers seen, model and MCP
+	auth     []string // Authorization headers seen, model and MCP, empty ones left out
+	anon     []string // "METHOD /path" of requests without an Authorization header
 	mcpCalls []string // MCP methods called
 	hung     chan struct{}
 }
@@ -69,7 +70,11 @@ func (g *gateway) url(path string) string {
 func (g *gateway) record(r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.auth = append(g.auth, r.Header.Get("Authorization"))
+	if a := r.Header.Get("Authorization"); a != "" {
+		g.auth = append(g.auth, a)
+	} else {
+		g.anon = append(g.anon, r.Method+" "+r.URL.Path)
+	}
 }
 
 func (g *gateway) serveModel(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +129,13 @@ func (g *gateway) authHeaders() []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return append([]string(nil), g.auth...)
+}
+
+// anonymous returns the requests that carried no Authorization header.
+func (g *gateway) anonymous() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.anon...)
 }
 
 func (g *gateway) mcpMethods() []string {

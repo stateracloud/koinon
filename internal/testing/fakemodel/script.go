@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/procoduck/koinon/internal/project"
 )
 
 // AnyTool matches a tool result from any tool in [When.ToolResult].
@@ -52,7 +54,9 @@ type Turn struct {
 type When struct {
 	// ToolResult, when empty, requires that the request's last message is not a tool result
 	// (normally a user message). When set to a tool name, the last message must carry that
-	// tool's result; [AnyTool] accepts a result from any tool.
+	// tool's result; [AnyTool] accepts a result from any tool. A result from the tool behind a
+	// harness's prefix for Koinon's MCP server (koinon_<name>, mcp__koinon__<name>) also
+	// matches, so one script fits every harness.
 	ToolResult string `yaml:"toolResult,omitempty"`
 	// UserContains requires the latest user text to contain this substring.
 	UserContains string `yaml:"userContains,omitempty"`
@@ -67,7 +71,10 @@ type When struct {
 // ToolCall is a tool call the model makes.
 type ToolCall struct {
 	// ID is the tool call ID. Empty means a deterministic generated ID.
-	ID        string         `yaml:"id,omitempty"`
+	ID string `yaml:"id,omitempty"`
+	// Name is the tool to call. Harnesses prefix MCP tools with their server name (OpenCode
+	// koinon_<tool>, Hermes and pi mcp__koinon__<tool>): when the request declares no tool of
+	// this name but exactly one of this name behind such a prefix, the call uses that tool's name.
 	Name      string         `yaml:"name"`
 	Arguments map[string]any `yaml:"arguments,omitempty"`
 }
@@ -165,6 +172,51 @@ type conversation struct {
 	lastUserText   string
 	systemText     string
 	assistantTurns int
+	// tools are the tool names the request declares.
+	tools []string
+}
+
+// mcpPrefixes are what harnesses put before the tools of Koinon's MCP server, which every
+// flavor names project.Name: OpenCode <server>_<tool>, Hermes and pi mcp__<server>__<tool>.
+var mcpPrefixes = []string{project.Name + "_", "mcp__" + project.Name + "__"}
+
+// toolMatches reports whether a tool name is the scripted name, possibly behind a harness's
+// MCP prefix (koinon_create_pull_request, mcp__koinon__create_pull_request). Another tool that
+// merely ends in the name (foo_create_pull_request) does not match.
+func toolMatches(name, scripted string) bool {
+	if name == scripted {
+		return true
+	}
+	for _, p := range mcpPrefixes {
+		if rest, ok := strings.CutPrefix(name, p); ok && rest == scripted {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveTools returns the calls with each name replaced by the request's prefixed tool of that
+// name, when the request declares no tool of the exact name and exactly one prefixed one.
+func resolveTools(calls []ToolCall, tools []string) []ToolCall {
+	if len(calls) == 0 || len(tools) == 0 {
+		return calls
+	}
+	out := slices.Clone(calls)
+	for i, c := range out {
+		if slices.Contains(tools, c.Name) {
+			continue
+		}
+		var found []string
+		for _, t := range tools {
+			if toolMatches(t, c.Name) {
+				found = append(found, t)
+			}
+		}
+		if len(found) == 1 {
+			out[i].Name = found[0]
+		}
+	}
+	return out
 }
 
 func (w When) holds(c conversation) bool {
@@ -178,7 +230,7 @@ func (w When) holds(c conversation) bool {
 			return false
 		}
 	default:
-		if !slices.Contains(c.toolResults, w.ToolResult) {
+		if !slices.ContainsFunc(c.toolResults, func(n string) bool { return toolMatches(n, w.ToolResult) }) {
 			return false
 		}
 	}

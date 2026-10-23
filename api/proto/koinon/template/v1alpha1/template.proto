@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.template.v1alpha1;
+
+option go_package = "github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1;templatev1alpha1";
+
+// TemplateService lists the agent templates shipped with Koinon (ADR 0020).
+// Templates are platform data: they belong to no org, and every signed-in
+// user can list them.
+service TemplateService {
+  // ListTemplates returns the current content of every template.
+  rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// Flavor is the harness an agent runs on (ADR 0035).
+enum Flavor {
+  FLAVOR_UNSPECIFIED = 0;
+  FLAVOR_OPENCODE = 1;
+  FLAVOR_HERMES = 2;
+  FLAVOR_PI = 3;
+}
+
+// Preset maps a grant's risk tiers to allow, ask or deny (ADR 0008, 0049).
+enum Preset {
+  PRESET_UNSPECIFIED = 0;
+  PRESET_READ_ONLY = 1;
+  PRESET_STANDARD = 2;
+  PRESET_TRUSTED = 3;
+}
+
+// Grant is a grant on a connector type. On a template or a draft agent it is a
+// proposal; activating the agent approves it.
+message Grant {
+  // Connector type, for example "github".
+  string connector = 1;
+  repeated string scopes = 2;
+  Preset preset = 3;
+  // How many targets (for GitHub: repositories) the user picks. Both zero when
+  // the template sets no bound.
+  int32 targets_min = 4;
+  int32 targets_max = 5;
+  string purpose = 6;
+  // On an agent, the connection the grant uses and the targets (for GitHub:
+  // repositories, owner/name) it is narrowed to; activating the agent approves
+  // them with the grant. Empty on a template.
+  string connection_id = 7;
+  repeated string repositories = 8;
+}
+
+// RunLimits cap a single run; hitting one cancels the run (plan item A4).
+message RunLimits {
+  // Wall-clock time a run may be owned (starting or running), in seconds.
+  int64 max_duration_seconds = 1;
+  int64 max_tokens = 2;
+}
+
+// Template is one version of an agent template.
+message Template {
+  // Identifies this exact content; agents are created from it.
+  string id = 1;
+  // Stable template name, for example "repo-helper".
+  string slug = 2;
+  // Hex SHA-256 of the canonical template document.
+  string content_hash = 3;
+  // The template's own version label, for example "0.1.0".
+  string version = 4;
+  string display_name = 5;
+  string description = 6;
+  repeated Flavor allowed_flavors = 7;
+  Flavor default_flavor = 8;
+  // Logical model name; "default" is the install's default model.
+  string model = 9;
+  string instructions = 10;
+  repeated Grant grants = 11;
+  RunLimits run_limits = 12;
+  // Spend limit as a decimal string, for example "10.00".
+  string spend_limit_usd = 13;
+}
+
+// ListTemplatesRequest is empty.
+message ListTemplatesRequest {}
+
+// ListTemplatesResponse lists the templates, sorted by slug.
+message ListTemplatesResponse {
+  repeated Template templates = 1;
+}

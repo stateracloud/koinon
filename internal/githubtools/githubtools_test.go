@@ -1,0 +1,427 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package githubtools_test
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/procoduck/koinon/internal/db/store"
+	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/procoduck/koinon/internal/githubtools"
+)
+
+func file(p, content string) githubtools.FileChange {
+	return githubtools.FileChange{Path: p, Content: content}
+}
+
+func validPR() githubtools.PullRequestArgs {
+	return githubtools.PullRequestArgs{
+		Branch: "koinon/fix-typo", Title: "Fix a typo in the README", Body: "Fixes the typo.",
+		Files: []githubtools.FileChange{file("README.md", "# Widgets\n")},
+	}
+}
+
+func manyFiles(n int) []githubtools.FileChange {
+	out := make([]githubtools.FileChange, n)
+	for i := range out {
+		out[i] = file(strings.Repeat("d/", 1)+"f"+string(rune('a'+i%26))+strings.Repeat("x", i/26)+".txt", "x")
+	}
+	return out
+}
+
+var _ = DescribeTable("ValidatePullRequest",
+	func(mutate func(*githubtools.PullRequestArgs), want string) {
+		a := validPR()
+		mutate(&a)
+		err := githubtools.ValidatePullRequest(a)
+		if want == "" {
+			Expect(err).NotTo(HaveOccurred())
+			return
+		}
+		Expect(err).To(MatchError(ContainSubstring(want)))
+	},
+	Entry("accepts a small change", func(*githubtools.PullRequestArgs) {}, ""),
+	Entry("accepts a deletion", func(a *githubtools.PullRequestArgs) {
+		a.Files = append(a.Files, githubtools.FileChange{Path: "old.txt", Delete: true})
+	}, ""),
+	Entry("accepts exactly 100 files", func(a *githubtools.PullRequestArgs) { a.Files = manyFiles(100) }, ""),
+	Entry("accepts exactly 1 MiB", func(a *githubtools.PullRequestArgs) {
+		a.Files = []githubtools.FileChange{file("a.txt", strings.Repeat("a", 1<<19)), file("b.txt", strings.Repeat("b", 1<<19))}
+	}, ""),
+	Entry("refuses a workflow", func(a *githubtools.PullRequestArgs) {
+		a.Files = append(a.Files, file(".github/workflows/ci.yml", "on: push"))
+	}, "under .github/workflows/"),
+	Entry("refuses a workflow in another case", func(a *githubtools.PullRequestArgs) {
+		a.Files = append(a.Files, file(".GitHub/Workflows/ci.yml", "on: push"))
+	}, "under .github/workflows/"),
+	Entry("refuses deleting a workflow", func(a *githubtools.PullRequestArgs) {
+		a.Files = append(a.Files, githubtools.FileChange{Path: ".github/workflows/ci.yml", Delete: true})
+	}, "under .github/workflows/"),
+	Entry("refuses 101 files", func(a *githubtools.PullRequestArgs) { a.Files = manyFiles(101) }, "101 files is more than the limit of 100"),
+	Entry("refuses more than 1 MiB", func(a *githubtools.PullRequestArgs) {
+		a.Files = []githubtools.FileChange{file("a.txt", strings.Repeat("a", 1<<20)), file("b.txt", "b")}
+	}, "more than the limit of 1048576"),
+	Entry("refuses ../ traversal", func(a *githubtools.PullRequestArgs) { a.Files[0].Path = "../etc/passwd" }, "path traversal"),
+	Entry("refuses traversal in the middle", func(a *githubtools.PullRequestArgs) { a.Files[0].Path = "docs/../../x" }, "path traversal"),
+	Entry("refuses an absolute path", func(a *githubtools.PullRequestArgs) { a.Files[0].Path = "/etc/passwd" }, "absolute"),
+	Entry("refuses a backslash", func(a *githubtools.PullRequestArgs) { a.Files[0].Path = `docs\..\x` }, "backslash"),
+	Entry("refuses an unclean path", func(a *githubtools.PullRequestArgs) { a.Files[0].Path = "docs//x" }, "not clean"),
+	Entry("refuses ./", func(a *githubtools.PullRequestArgs) { a.Files[0].Path = "./x" }, "not clean"),
+	Entry("refuses .git", func(a *githubtools.PullRequestArgs) { a.Files[0].Path = ".git/hooks/pre-commit" }, "inside .git"),
+	Entry("refuses a NUL in a path", func(a *githubtools.PullRequestArgs) { a.Files[0].Path = "a\x00b" }, "control characters"),
+	Entry("refuses an empty path", func(a *githubtools.PullRequestArgs) { a.Files[0].Path = "" }, "empty path"),
+	Entry("refuses a path listed twice", func(a *githubtools.PullRequestArgs) { a.Files = append(a.Files, a.Files[0]) }, "listed twice"),
+	Entry("refuses a deletion with content", func(a *githubtools.PullRequestArgs) { a.Files[0].Delete = true }, "deleted but has content"),
+	Entry("accepts an executable file", func(a *githubtools.PullRequestArgs) {
+		a.Files = append(a.Files, githubtools.FileChange{Path: "scripts/check.sh", Content: "#!/bin/sh\n", Executable: true})
+	}, ""),
+	Entry("refuses an executable deletion", func(a *githubtools.PullRequestArgs) {
+		a.Files = append(a.Files, githubtools.FileChange{Path: "old.sh", Delete: true, Executable: true})
+	}, "deleted but marked executable"),
+	Entry("refuses an executable workflow", func(a *githubtools.PullRequestArgs) {
+		a.Files = append(a.Files, githubtools.FileChange{Path: ".github/workflows/ci.yml", Content: "on: push", Executable: true})
+	}, "under .github/workflows/"),
+	Entry("refuses no files", func(a *githubtools.PullRequestArgs) { a.Files = nil }, "files is empty"),
+	Entry("refuses a branch outside koinon/", func(a *githubtools.PullRequestArgs) { a.Branch = "main" }, "must be a new branch name starting with koinon/"),
+	Entry("refuses the bare prefix", func(a *githubtools.PullRequestArgs) { a.Branch = "koinon/" }, "starting with koinon/"),
+	Entry("refuses a bad ref", func(a *githubtools.PullRequestArgs) { a.Branch = "koinon/a..b" }, "starting with koinon/"),
+	Entry("refuses a .lock ref", func(a *githubtools.PullRequestArgs) { a.Branch = "koinon/x.lock" }, "starting with koinon/"),
+	Entry("refuses a bad base", func(a *githubtools.PullRequestArgs) { a.Base = "-main" }, "base"),
+	Entry("refuses a multi-line title", func(a *githubtools.PullRequestArgs) { a.Title = "a\nb" }, "title must be one line"),
+	Entry("refuses an empty title", func(a *githubtools.PullRequestArgs) { a.Title = "" }, "title must be one line"),
+	Entry("refuses a huge body", func(a *githubtools.PullRequestArgs) { a.Body = strings.Repeat("b", 65537) }, "body"),
+)
+
+var _ = Describe("ValidatePullRequest", func() {
+	It("reports every problem at once", func() {
+		a := validPR()
+		a.Branch = "main"
+		a.Files = append(a.Files, file(".github/workflows/x.yml", ""), file("../x", ""))
+		var ve *githubtools.ValidationError
+		Expect(errors.As(githubtools.ValidatePullRequest(a), &ve)).To(BeTrue())
+		Expect(ve.Reasons).To(HaveLen(3))
+	})
+})
+
+var _ = DescribeTable("ValidateComment",
+	func(a githubtools.CommentArgs, want string) {
+		err := githubtools.ValidateComment(a)
+		if want == "" {
+			Expect(err).NotTo(HaveOccurred())
+			return
+		}
+		Expect(err).To(MatchError(ContainSubstring(want)))
+	},
+	Entry("accepts a comment", githubtools.CommentArgs{IssueNumber: 7, Body: "Thanks!"}, ""),
+	Entry("refuses issue 0", githubtools.CommentArgs{IssueNumber: 0, Body: "x"}, "issue_number"),
+	Entry("refuses an empty body", githubtools.CommentArgs{IssueNumber: 1, Body: "  "}, "body"),
+)
+
+var _ = Describe("AssessRisk", func() {
+	It("flags push-and-run risk", func() {
+		r := githubtools.AssessRisk(githubtools.PullRequestArgs{Files: []githubtools.FileChange{
+			file("README.md", "hi"),
+			file(".github/dependabot.yml", "version: 2"),
+			file("scripts/release.sh", "echo"),
+			file("tools/run", "#!/bin/sh\necho"),
+			file("Makefile", "all:"),
+			file("go.mod", "module x"),
+			file("web/package.json", "{}"),
+			file("logo.png", "x"),
+			file("data.bin.txt", "a\x00b"),
+			{Path: "old.txt", Delete: true},
+			{Path: "bin/tool", Content: "x", Executable: true},
+		}})
+		Expect(r.Files).To(Equal(11))
+		Expect(r.CI).To(Equal([]string{".github/dependabot.yml"}))
+		Expect(r.Scripts).To(Equal([]string{"scripts/release.sh", "tools/run", "Makefile"}))
+		Expect(r.Dependencies).To(Equal([]string{"go.mod", "web/package.json"}))
+		Expect(r.Binary).To(Equal([]string{"logo.png", "data.bin.txt"}))
+		Expect(r.Deletions).To(Equal([]string{"old.txt"}))
+		Expect(r.Executable).To(Equal([]string{"bin/tool"}))
+	})
+})
+
+var _ = Describe("Canonical", func() {
+	It("sorts keys and keeps text unescaped", func() {
+		b, err := githubtools.Canonical(map[string]any{"b": 1, "a": "<x> & é", "c": map[string]any{"z": true, "y": nil}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(b)).To(Equal(`{"a":"<x> & é","b":1,"c":{"y":null,"z":true}}`))
+	})
+})
+
+// agentHeader sets the agent header the way agentgateway does.
+type agentHeader struct {
+	agent string
+	base  http.RoundTripper
+}
+
+func (a agentHeader) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	if a.agent != "" {
+		r.Header.Set(gateway.AgentHeader, a.agent)
+	}
+	return a.base.RoundTrip(r)
+}
+
+const standardGrant = `{"instructions":"help",` +
+	`"grants":[{"connector":"github","scopes":["repo.read","pull_request.create","issue.comment"],"preset":"standard"}],` +
+	`"bindings":[{"connector":"github","connectionId":"00000000-0000-0000-0000-000000000000","targets":["acme/widgets"]}]}`
+
+var _ = Describe("Server", func() {
+	var (
+		srv  *httptest.Server
+		logs *bytes.Buffer
+	)
+
+	BeforeEach(func() {
+		needDB()
+		logs = &bytes.Buffer{}
+		s, err := githubtools.New(pool, githubtools.Options{Logger: slog.New(slog.NewJSONHandler(logs, nil))})
+		Expect(err).NotTo(HaveOccurred())
+		srv = httptest.NewServer(s.Handler())
+		DeferCleanup(srv.Close)
+	})
+
+	session := func(ctx context.Context, agent string) *mcp.ClientSession {
+		GinkgoHelper()
+		client := mcp.NewClient(&mcp.Implementation{Name: "test-agent", Version: "0.0.1"}, nil)
+		s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+			Endpoint:             srv.URL,
+			HTTPClient:           &http.Client{Transport: agentHeader{agent: agent, base: http.DefaultTransport}},
+			DisableStandaloneSSE: true,
+			MaxRetries:           -1,
+		}, nil)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = s.Close() })
+		return s
+	}
+
+	call := func(ctx context.Context, s *mcp.ClientSession, tool string, args any) (*mcp.CallToolResult, string) {
+		GinkgoHelper()
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
+		Expect(err).NotTo(HaveOccurred())
+		var text []string
+		for _, c := range res.Content {
+			if t, ok := c.(*mcp.TextContent); ok {
+				text = append(text, t.Text)
+			}
+		}
+		return res, strings.Join(text, "\n")
+	}
+
+	result := func(res *mcp.CallToolResult) githubtools.Result {
+		GinkgoHelper()
+		b, err := json.Marshal(res.StructuredContent)
+		Expect(err).NotTo(HaveOccurred())
+		var out githubtools.Result
+		Expect(json.Unmarshal(b, &out)).To(Succeed())
+		return out
+	}
+
+	It("lists the three tools", func(ctx SpecContext) {
+		f := newFixture(ctx, standardGrant)
+		res, err := session(ctx, f.agentID).ListTools(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		var names []string
+		for _, t := range res.Tools {
+			names = append(names, t.Name)
+		}
+		Expect(names).To(ConsistOf("create_pull_request", "comment_on_issue", "get_approval_status"))
+	})
+
+	It("advertises the optional executable flag on create_pull_request's files", func(ctx SpecContext) {
+		f := newFixture(ctx, standardGrant)
+		res, err := session(ctx, f.agentID).ListTools(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		var schema struct {
+			Properties struct {
+				Files struct {
+					Items struct {
+						Properties map[string]struct {
+							Type        string `json:"type"`
+							Description string `json:"description"`
+						} `json:"properties"`
+						Required []string `json:"required"`
+					} `json:"items"`
+				} `json:"files"`
+			} `json:"properties"`
+		}
+		for _, t := range res.Tools {
+			if t.Name != "create_pull_request" {
+				continue
+			}
+			b, err := json.Marshal(t.InputSchema)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(json.Unmarshal(b, &schema)).To(Succeed())
+		}
+		items := schema.Properties.Files.Items
+		Expect(items.Properties).To(HaveKey("executable"))
+		Expect(items.Properties["executable"].Type).To(Equal("boolean"))
+		Expect(items.Properties["executable"].Description).To(ContainSubstring("100755"))
+		Expect(items.Required).NotTo(ContainElement("executable"))
+	})
+
+	It("publishes the readiness prompt", func(ctx SpecContext) {
+		f := newFixture(ctx, standardGrant)
+		res, err := session(ctx, f.agentID).ListPrompts(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Prompts).To(ConsistOf(HaveField("Name", gateway.ReadyPrompt)))
+		got, err := session(ctx, f.agentID).GetPrompt(ctx, &mcp.GetPromptParams{Name: gateway.ReadyPrompt})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Messages).To(HaveLen(1))
+	})
+
+	It("records a pending approval with a stable hash and returns at once", func(ctx SpecContext) {
+		f := newFixture(ctx, standardGrant)
+		s := session(ctx, f.agentID)
+
+		// The same call twice, with keys and files in another order and different
+		// whitespace: the hash covers the canonical form, so it is one request.
+		raw1 := json.RawMessage(`{"branch":"koinon/fix","title":"Fix","files":[{"path":"b.txt","content":"B"},{"path":"a.txt","content":"A"}]}`)
+		raw2 := json.RawMessage(`{ "files": [ {"content":"A","path":"a.txt"}, {"path":"b.txt", "content":"B"} ],
+			"title":"Fix", "branch":"koinon/fix" }`)
+		res1, text := call(ctx, s, "create_pull_request", raw1)
+		Expect(res1.IsError).To(BeFalse(), text)
+		Expect(text).To(MatchRegexp(`^approval requested: id=[0-9a-f-]{36} status=pending args_sha256=[0-9a-f]{64}\.`))
+		r1 := result(res1)
+		res2, _ := call(ctx, s, "create_pull_request", raw2)
+		r2 := result(res2)
+		Expect(r2.ID).To(Equal(r1.ID))
+		Expect(r2.ArgsSHA256).To(Equal(r1.ArgsSHA256))
+
+		By("the record holds the exact canonical call")
+		rows, err := q.ListApprovalRequestsForTicket(ctx, store.ListApprovalRequestsForTicketParams{OrgID: f.org.ID, TicketID: f.run.TicketID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rows).To(HaveLen(1))
+		row := rows[0]
+		Expect(row.ArgsJson).To(Equal(`{"branch":"koinon/fix","files":[{"content":"A","path":"a.txt"},{"content":"B","path":"b.txt"}],"title":"Fix"}`))
+		Expect(row.ArgsSha256).To(Equal(githubtools.HashArgs([]byte(row.ArgsJson))))
+		Expect(row.ArgsSha256).To(Equal(r1.ArgsSHA256))
+		Expect(row.Tool).To(Equal("create_pull_request"))
+		Expect(row.Target).To(Equal("github:acme/widgets"))
+		Expect(row.AgentID).To(Equal(f.agent.ID))
+		Expect(row.RunID).To(Equal(f.run.ID))
+		Expect(row.TicketID).To(Equal(f.run.TicketID))
+		Expect(row.Status).To(Equal(store.ApprovalStatusPending))
+		Expect(row.Decision).To(Equal(store.ApprovalDecisionAsk))
+		Expect(row.ExpiresAt.Time).To(BeTemporally("~", row.CreatedAt.Time.Add(githubtools.DefaultApprovalTTL), 5e9))
+		var risk githubtools.Risk
+		Expect(json.Unmarshal(row.Risk, &risk)).To(Succeed())
+		Expect(risk.Files).To(Equal(2))
+
+		By("different arguments are a different request")
+		res3, _ := call(ctx, s, "create_pull_request", json.RawMessage(`{"branch":"koinon/fix","title":"Fix","base":"release","files":[{"path":"a.txt","content":"A"},{"path":"b.txt","content":"B"}]}`))
+		Expect(result(res3).ID).NotTo(Equal(r1.ID))
+		Expect(result(res3).ArgsSHA256).NotTo(Equal(r1.ArgsSHA256))
+
+		By("arguments are not logged")
+		Expect(logs.String()).To(ContainSubstring(`"msg":"approval requested"`))
+		Expect(logs.String()).NotTo(ContainSubstring("a.txt"))
+	})
+
+	It("pins the hash of a known call", func(ctx SpecContext) {
+		f := newFixture(ctx, standardGrant)
+		res, text := call(ctx, session(ctx, f.agentID), "comment_on_issue", map[string]any{"issue_number": 7, "body": "Thanks <3"})
+		Expect(res.IsError).To(BeFalse(), text)
+		// Computed independently of the package: SHA-256 of the canonical bytes.
+		sum := sha256.Sum256([]byte(`{"body":"Thanks <3","issue_number":7}`))
+		Expect(result(res).ArgsSHA256).To(Equal(hex.EncodeToString(sum[:])))
+	})
+
+	It("refuses invalid calls with the reason, recording nothing", func(ctx SpecContext) {
+		f := newFixture(ctx, standardGrant)
+		s := session(ctx, f.agentID)
+		res, text := call(ctx, s, "create_pull_request", map[string]any{
+			"branch": "koinon/ci", "title": "CI",
+			"files": []map[string]any{{"path": ".github/workflows/ci.yml", "content": "on: push"}},
+		})
+		Expect(res.IsError).To(BeTrue())
+		Expect(text).To(ContainSubstring("under .github/workflows/"))
+
+		res, text = call(ctx, s, "create_pull_request", map[string]any{
+			"branch": "koinon/x", "title": "X", "files": []map[string]any{{"path": "../x", "content": "x"}},
+		})
+		Expect(res.IsError).To(BeTrue())
+		Expect(text).To(ContainSubstring("path traversal"))
+
+		res, _ = call(ctx, s, "create_pull_request", map[string]any{"branch": "koinon/x", "title": "X", "files": []any{}, "extra": 1})
+		Expect(res.IsError).To(BeTrue())
+
+		rows, err := q.ListApprovalRequestsForTicket(ctx, store.ListApprovalRequestsForTicketParams{OrgID: f.org.ID, TicketID: f.run.TicketID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rows).To(BeEmpty())
+	})
+
+	It("answers get_approval_status for the agent's own requests only", func(ctx SpecContext) {
+		f := newFixture(ctx, standardGrant)
+		s := session(ctx, f.agentID)
+		res, _ := call(ctx, s, "comment_on_issue", map[string]any{"issue_number": 3, "body": "Done."})
+		id := result(res).ID
+
+		res, text := call(ctx, s, "get_approval_status", map[string]any{"id": id})
+		Expect(res.IsError).To(BeFalse(), text)
+		Expect(result(res).Status).To(Equal("pending"))
+		Expect(result(res).Tool).To(Equal("comment_on_issue"))
+
+		other := newFixture(ctx, standardGrant)
+		res, text = call(ctx, session(ctx, other.agentID), "get_approval_status", map[string]any{"id": id})
+		Expect(res.IsError).To(BeTrue())
+		Expect(text).To(ContainSubstring("no approval request"))
+	})
+
+	It("refuses calls without the gateway's agent header", func(ctx SpecContext) {
+		res, text := call(ctx, session(ctx, ""), "comment_on_issue", map[string]any{"issue_number": 3, "body": "Done."})
+		Expect(res.IsError).To(BeTrue())
+		Expect(text).To(ContainSubstring("routed through Koinon's agentgateway"))
+		res, _ = call(ctx, session(ctx, "nope/00000000-0000-0000-0000-000000000000"), "comment_on_issue", map[string]any{"issue_number": 3, "body": "Done."})
+		Expect(res.IsError).To(BeTrue())
+	})
+
+	It("refuses tools the grant does not allow", func(ctx SpecContext) {
+		f := newFixture(ctx, `{"instructions":"help","grants":[{"connector":"github","scopes":["repo.read","pull_request.create"],"preset":"read-only"}],`+
+			`"bindings":[{"connector":"github","connectionId":"x","targets":["acme/widgets"]}]}`)
+		s := session(ctx, f.agentID)
+		res, text := call(ctx, s, "create_pull_request", validPRMap())
+		Expect(res.IsError).To(BeTrue())
+		Expect(text).To(ContainSubstring("does not allow create_pull_request"))
+		res, text = call(ctx, s, "comment_on_issue", map[string]any{"issue_number": 3, "body": "x"})
+		Expect(res.IsError).To(BeTrue())
+		Expect(text).To(ContainSubstring("does not allow comment_on_issue"))
+	})
+
+	It("refuses a grant without a repository", func(ctx SpecContext) {
+		f := newFixture(ctx, `{"instructions":"help","grants":[{"connector":"github","scopes":["pull_request.create"],"preset":"standard"}]}`)
+		res, text := call(ctx, session(ctx, f.agentID), "create_pull_request", validPRMap())
+		Expect(res.IsError).To(BeTrue())
+		Expect(text).To(ContainSubstring("no repository"))
+	})
+
+	It("marks calls the Trusted preset allows as approved", func(ctx SpecContext) {
+		f := newFixture(ctx, strings.Replace(standardGrant, `"standard"`, `"trusted"`, 1))
+		res, text := call(ctx, session(ctx, f.agentID), "create_pull_request", validPRMap())
+		Expect(res.IsError).To(BeFalse(), text)
+		Expect(text).To(HavePrefix("accepted: id="))
+		Expect(result(res).Status).To(Equal("approved"))
+	})
+})
+
+func validPRMap() map[string]any {
+	return map[string]any{
+		"branch": "koinon/fix-typo", "title": "Fix a typo",
+		"files": []map[string]any{{"path": "README.md", "content": "# Widgets\n"}},
+	}
+}

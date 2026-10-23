@@ -19,11 +19,16 @@ web-deps: ## Install web dependencies
 	cd web && $(PNPM) install --frozen-lockfile
 
 .PHONY: build
-build: build-go build-web ## Build everything
+build: build-web ## Build everything; koinon-api embeds the web UI
+	$(MAKE) build-go GO_TAGS=webui
+
+# GO_TAGS=webui embeds web/dist into koinon-api (build the UI first); without
+# it koinon-api serves the API only, and the UI runs on the Vite dev server.
+GO_TAGS ?=
 
 .PHONY: build-go
 build-go: ## Build Go binaries into bin/
-	$(GO) build -ldflags "$(LDFLAGS)" -o bin/ ./cmd/...
+	$(GO) build -tags "$(GO_TAGS)" -ldflags "$(LDFLAGS)" -o bin/ ./cmd/...
 
 .PHONY: build-web
 build-web: ## Build the web UI
@@ -83,15 +88,54 @@ generate: ## Regenerate protobuf and sqlc code
 FLAVOR_TAG       ?=
 FLAVOR_PLATFORMS ?=
 flavor_tag        = $(or $(FLAVOR_TAG),$(shell hack/flavor-tag.sh $(1)))
+# FLAVOR_CACHE=<dir> keeps each flavor's build cache in <dir>/<flavor> (CI saves it between runs);
+# it needs a buildx builder with the docker-container driver.
+FLAVOR_CACHE     ?=
+comma            := ,
+flavor_cache      = $(if $(FLAVOR_CACHE),--cache-from type=local$(comma)src=$(FLAVOR_CACHE)/$(1) --cache-to type=local$(comma)dest=$(FLAVOR_CACHE)/$(1)$(comma)mode=max)
+
+FLAVORS          := opencode hermes pi
 
 .PHONY: flavor-opencode
 flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:dev-<hash>)
-	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) \
-		--tag koinon/flavor-opencode:$(call flavor_tag,opencode) flavors/opencode
+	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,opencode) \
+		--build-context common=flavors/common --tag koinon/flavor-opencode:$(call flavor_tag,opencode) flavors/opencode
+
+.PHONY: flavor-hermes
+flavor-hermes: ## Build the Hermes flavor image (koinon/flavor-hermes:dev-<hash>)
+	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,hermes) \
+		--build-context common=flavors/common --tag koinon/flavor-hermes:$(call flavor_tag,hermes) flavors/hermes
+
+.PHONY: flavor-pi
+flavor-pi: ## Build the pi flavor image (koinon/flavor-pi:dev-<hash>)
+	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,pi) \
+		--build-context common=flavors/common --tag koinon/flavor-pi:$(call flavor_tag,pi) flavors/pi
+
+.PHONY: flavors
+flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images
 
 .PHONY: test-flavors
-test-flavors: flavor-opencode ## Build the flavor images and run the flavor contract suite
+test-flavors: flavors ## Build the flavor images and run the flavor contract suite
 	$(GO) test -count=1 ./test/flavors/...
+
+.PHONY: test-e2e-kind
+test-e2e-kind: ## Quickstart e2e on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
+	test/e2e/run.sh
+
+# The escape suite (ADR 0025, plan item E2). The admission cases need only envtest and helm; the
+# OpenShell cases need a gateway (KOINON_OPENSHELL_*, see test/escape) and run on the home lab.
+ENVTEST_K8S_VERSION ?= 1.37.0
+SETUP_ENVTEST       ?= $(GO) run sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2
+
+.PHONY: test-admission
+test-admission: ## Run the escape suite's admission policy cases against envtest (needs helm)
+	assets="$$($(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" && test -n "$$assets" && \
+		KUBEBUILDER_ASSETS="$$assets" $(GO) test -count=1 -v ./test/escape/ -ginkgo.label-filter=admission
+
+.PHONY: test-escape
+test-escape: ## Run the escape suite's OpenShell cases against a real gateway (home lab)
+	@test -n "$$KOINON_OPENSHELL_ENDPOINT" || { echo "set KOINON_OPENSHELL_* (see test/escape)"; exit 1; }
+	$(GO) test -count=1 -v -timeout 20m ./test/escape/ -ginkgo.label-filter=openshell
 
 .PHONY: dev
 dev: ## Run the inner loop against the home lab with Tilt

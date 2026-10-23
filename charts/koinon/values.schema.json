@@ -41,6 +41,12 @@
         "affinity": {"$ref": "#/definitions/map"}
       }
     },
+    "flavor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image"],
+      "properties": {"image": {"$ref": "#/definitions/koinonImage"}}
+    },
     "secretKeyRef": {
       "type": "object",
       "additionalProperties": false,
@@ -62,6 +68,7 @@
     }
   },
   "properties": {
+    "clusterDomain": {"$ref": "#/definitions/nonEmpty"},
     "nameOverride": {"type": "string"},
     "fullnameOverride": {"type": "string"},
     "image": {
@@ -81,9 +88,57 @@
         "properties": {"name": {"$ref": "#/definitions/nonEmpty"}}
       }
     },
-    "api": {"allOf": [{"$ref": "#/definitions/component"}], "required": ["port"]},
-    "reconciler": {"$ref": "#/definitions/component"},
-    "agentd": {"$ref": "#/definitions/component"},
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "replicas", "port", "otlpPort", "toolsPort"],
+      "properties": {
+        "image": {"$ref": "#/definitions/koinonImage"},
+        "replicas": {"type": "integer", "minimum": 0},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "otlpPort": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "the spend ledger's OTLP/HTTP receiver for agentgateway's access log"},
+        "toolsPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "resources": {"$ref": "#/definitions/resources"},
+        "podAnnotations": {"$ref": "#/definitions/map"},
+        "nodeSelector": {"$ref": "#/definitions/map"},
+        "tolerations": {"type": "array"},
+        "affinity": {"$ref": "#/definitions/map"}
+      }
+    },
+    "reconciler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "replicas"],
+      "properties": {
+        "image": {"$ref": "#/definitions/koinonImage"},
+        "replicas": {"type": "integer", "minimum": 0},
+        "resources": {"$ref": "#/definitions/resources"},
+        "podAnnotations": {"$ref": "#/definitions/map"},
+        "nodeSelector": {"$ref": "#/definitions/map"},
+        "tolerations": {"type": "array"},
+        "affinity": {"$ref": "#/definitions/map"},
+        "idleTimeout": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "resyncInterval": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "homeRetention": {"enum": ["delete", "retain"]}
+      }
+    },
+    "agentd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "replicas"],
+      "properties": {
+        "image": {"$ref": "#/definitions/koinonImage"},
+        "replicas": {"type": "integer", "minimum": 0},
+        "workers": {"type": "integer", "minimum": 1},
+        "lease": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "gatewayURL": {"type": "string", "pattern": "^(https?://[^\\s@?#]+)?$"},
+        "resources": {"$ref": "#/definitions/resources"},
+        "podAnnotations": {"$ref": "#/definitions/map"},
+        "nodeSelector": {"$ref": "#/definitions/map"},
+        "tolerations": {"type": "array"},
+        "affinity": {"$ref": "#/definitions/map"}
+      }
+    },
     "migrations": {
       "type": "object",
       "additionalProperties": false,
@@ -91,6 +146,39 @@
         "backoffLimit": {"type": "integer", "minimum": 0},
         "activeDeadlineSeconds": {"type": "integer", "minimum": 1},
         "wait": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "resources": {"$ref": "#/definitions/resources"}
+      }
+    },
+    "preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "activeDeadlineSeconds": {"type": "integer", "minimum": 1},
+        "agentSandbox": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "namespace": {"$ref": "#/definitions/nonEmpty"},
+            "controller": {"$ref": "#/definitions/nonEmpty"}
+          }
+        },
+        "seccompProbe": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "timeout": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"}
+          }
+        },
+        "networkPolicyProbe": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "timeout": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"}
+          }
+        },
         "resources": {"$ref": "#/definitions/resources"}
       }
     },
@@ -190,6 +278,13 @@
         }
       }
     },
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apiUrl": {"type": "string", "pattern": "^https?://[^/]+(/.*)?$"}
+      }
+    },
     "model": {
       "type": "object",
       "additionalProperties": false,
@@ -218,6 +313,16 @@
       "if": {"properties": {"models": {"minItems": 1}}, "required": ["models"]},
       "then": {"properties": {"baseUrl": {"minLength": 1}}}
     },
+    "flavors": {
+      "description": "Flavor images (ADR 0035). Agents of a flavor without an image are reported as reconcile errors.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "opencode": {"$ref": "#/definitions/flavor"},
+        "hermes": {"$ref": "#/definitions/flavor"},
+        "pi": {"$ref": "#/definitions/flavor"}
+      }
+    },
     "openshell": {
       "type": "object",
       "additionalProperties": false,
@@ -227,12 +332,53 @@
         "runtimeClassName": {"$ref": "#/definitions/nonEmpty"}
       }
     },
+    "publicUrl": {"type": "string", "pattern": "^(https?://[^/?#\\s]+/?)?$"},
     "bootstrapAdmin": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "enabled": {"type": "boolean"},
-        "username": {"$ref": "#/definitions/nonEmpty"}
+        "username": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^\\S(.*\\S)?$"},
+        "existingSecret": {"type": "string"}
+      }
+    },
+    "oidc": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "issuerUrl": {"type": "string", "pattern": "^(https?://.+)?$"},
+        "clientId": {"type": "string"},
+        "clientSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"},
+            "key": {"$ref": "#/definitions/nonEmpty"}
+          }
+        },
+        "redirectUrl": {"type": "string", "pattern": "^(https?://.+)?$"},
+        "scopes": {"type": "array", "items": {"type": "string", "pattern": "^[^,\\s]+$"}},
+        "groupsClaim": {"$ref": "#/definitions/nonEmpty"},
+        "groupMappings": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[^,=]+$"},
+          "additionalProperties": {"enum": ["viewer", "member", "admin", "owner"]}
+        },
+        "defaultOrgIdentityMode": {"enum": ["platform", "idp", "hybrid"]}
+      },
+      "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
+      "then": {
+        "required": ["issuerUrl", "clientId"],
+        "properties": {"issuerUrl": {"minLength": 1}, "clientId": {"minLength": 1}}
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "idleTimeout": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "maxLifetime": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"}
       }
     },
     "ingress": {
@@ -277,6 +423,11 @@
           "minItems": 1,
           "items": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"}
         },
+        "supervisorImages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
         "validationActions": {
           "type": "array",
           "minItems": 1,
@@ -289,6 +440,7 @@
           "required": ["pods", "sandboxes", "secrets"],
           "properties": {
             "pods": {"$ref": "#/definitions/identities"},
+            "supervisorPods": {"$ref": "#/definitions/identities"},
             "sandboxes": {"$ref": "#/definitions/identities"},
             "secrets": {"$ref": "#/definitions/identities"}
           }

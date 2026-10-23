@@ -1,15 +1,27 @@
 # Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.
 # Keys appear only as hashes; key material lives in Kubernetes Secrets.
 config:
-  adminAddr: 127.0.0.1:15000
+  adminAddr: localhost:15000
+  statsAddr: '[::]:15020'
+  readinessAddr: '[::]:15021'
   logging:
     format: json
+  modelCatalog:
+    - inline:
+        providers:
+          ollama:
+            models:
+              qwen3.5:4b:
+                rates:
+                  input: "0"
+                  output: "0"
 frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"3202bffb15a48b62"'
+      koinon.config: '"f8e8af6ca3708756"'
       koinon.key: default(apiKey.name, "")
+      koinon.request: uuid()
 gateways:
   default:
     port: 8080
@@ -26,6 +38,13 @@ llm:
           metadata:
             name: k-cccccccccccc
             agent: acme/repo-helper
+        - keyHash: sha256:28be57505d5c9e75687b4c2f7a2032b79434dfe4a0b35ceeadd801c31e4c6bc2
+          metadata:
+            name: koinon-reload-probe
+            agent: ""
+    authorization:
+      rules:
+        - apiKey.name != "koinon-reload-probe"
   models:
     - name: qwen3.5:4b
       provider:

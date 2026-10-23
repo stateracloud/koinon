@@ -7,6 +7,8 @@ package store
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getOrgBySlug = `-- name: GetOrgBySlug :one
@@ -30,4 +32,32 @@ func (q *Queries) GetOrgBySlug(ctx context.Context, slug string) (Org, error) {
 		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const listOrgIDs = `-- name: ListOrgIDs :many
+SELECT id FROM orgs
+WHERE deleted_at IS NULL
+ORDER BY id
+`
+
+// Every live org, for control-plane sweeps and workers that then work org by
+// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
+func (q *Queries) ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

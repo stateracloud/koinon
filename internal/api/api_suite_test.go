@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
@@ -29,13 +31,21 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/procoduck/koinon/internal/api"
+	"github.com/procoduck/koinon/internal/approvals"
 	"github.com/procoduck/koinon/internal/auth"
 	"github.com/procoduck/koinon/internal/auth/oidctest"
+	"github.com/procoduck/koinon/internal/connections"
+	"github.com/procoduck/koinon/internal/connectors/github"
+	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
 	"github.com/procoduck/koinon/internal/db/migrations"
 	"github.com/procoduck/koinon/internal/db/store"
 	"github.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
+	"github.com/procoduck/koinon/internal/runwatch"
+	"github.com/procoduck/koinon/internal/services"
+	"github.com/procoduck/koinon/templates"
 )
 
 // PostgresImage is the minimum supported Postgres version (ADR 0047).
@@ -130,6 +140,21 @@ type envOptions struct {
 	groupMappings          []auth.GroupMapping
 	defaultOrgMode         store.IdentityMode
 	trustedOrigins         []string
+	// watchPoll is WatchRun's backstop poll interval; tests that check
+	// NOTIFY delivery set it long so that polling cannot hide a failure.
+	watchPoll time.Duration
+	// ui is the web UI to serve, if any.
+	ui fs.FS
+	// secrets and github back ConnectionService and the repository binding
+	// of CreateAgentFromTemplate. Unset, the env uses a fake Kubernetes
+	// Secret store and the suite's fake GitHub; ghFake names the fake that
+	// github talks to, for fixtures that create connections.
+	secrets   connections.SecretStore
+	github    *github.Client
+	ghFake    *githubtest.Fake
+	noSecrets bool
+	// logs, when set, receives the services' and auth's logs as well.
+	logs io.Writer
 	// plainHTTP serves over http:// instead of TLS, with a matching PublicURL.
 	plainHTTP bool
 	// username is the bootstrap admin's login name; empty means the default.
@@ -143,10 +168,18 @@ type env struct {
 	issuer   *oidctest.Issuer
 	srv      *httptest.Server
 	svc      *auth.Service
+	hub      *runwatch.Hub
 	pwFile   string
 	opts     envOptions
 	bootstrp auth.BootstrapResult
+
+	mu    sync.Mutex
+	conns map[string]string // org ID -> GitHub connection ID made by githubConnection
 }
+
+// suiteGitHub is the fake GitHub of envs that bring none: App 4242,
+// installation 777 on account acme with repositories widgets and gadgets.
+var suiteGitHub = sync.OnceValue(func() *githubtest.Fake { return githubtest.New() })
 
 func newEnv(ctx context.Context, opts envOptions) *env { return newEnvOn(ctx, nil, opts) }
 
@@ -155,7 +188,18 @@ func timeNow() time.Time { return time.Now() }
 // newEnvOn starts an API server. With base, it shares base's database and
 // clock, like a restart with new settings.
 func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
-	e := &env{opts: opts}
+	if opts.github == nil {
+		opts.ghFake = suiteGitHub()
+		opts.github = github.NewClient(github.Options{BaseURL: opts.ghFake.URL()})
+	}
+	if opts.secrets == nil && !opts.noSecrets {
+		if base != nil && base.opts.secrets != nil {
+			opts.secrets = base.opts.secrets
+		} else {
+			opts.secrets = connections.KubeSecrets{Client: fake.NewClientset(), Namespace: "koinon"}
+		}
+	}
+	e := &env{opts: opts, conns: map[string]string{}}
 	if base != nil {
 		e.pool, e.clock, e.pwFile = base.pool, base.clock, base.pwFile
 	} else {
@@ -182,12 +226,16 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	}
 	e.bootstrap(ctx)
 
+	var logOut io.Writer = GinkgoWriter
+	if opts.logs != nil {
+		logOut = io.MultiWriter(GinkgoWriter, opts.logs)
+	}
 	cfg := auth.Config{
 		SessionIdleTimeout: idleTimeout,
 		SessionMaxLifetime: maxLifetime,
 		BootstrapLogin:     !opts.bootstrapLoginDisabled,
 		PublicURL:          e.srv.URL,
-		Logger:             slog.New(slog.NewTextHandler(GinkgoWriter, nil)),
+		Logger:             slog.New(slog.NewTextHandler(logOut, nil)),
 		Now:                e.clock.Now,
 	}
 	if opts.oidc {
@@ -201,10 +249,29 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	svc, err := auth.New(e.pool, cfg)
 	Expect(err).NotTo(HaveOccurred())
 	e.svc = svc
+
+	_, err = services.SyncTemplates(ctx, e.pool, mustTemplates())
+	Expect(err).NotTo(HaveOccurred())
+	hubCtx, stopHub := context.WithCancel(context.Background())
+	e.hub = runwatch.New(e.pool.Config().ConnConfig, slog.New(slog.NewTextHandler(GinkgoWriter, nil)))
+	hubDone := make(chan struct{})
+	go func() { defer close(hubDone); e.hub.Run(hubCtx) }()
+	DeferCleanup(func() { stopHub(); <-hubDone })
+	Eventually(e.hub.Listening()).Should(BeClosed())
+	rpc := services.New(e.pool, services.Options{
+		Hub: e.hub, WatchPollInterval: opts.watchPoll,
+		Logger:  slog.New(slog.NewTextHandler(logOut, nil)),
+		Secrets: opts.secrets, GitHub: opts.github,
+		Approvals: approvals.New(e.pool, approvals.Options{
+			Secrets: opts.secrets, GitHub: opts.github, Logger: slog.New(slog.NewTextHandler(logOut, nil)),
+		}),
+	})
+
 	handler, err = api.NewHandler(api.Options{
 		Auth:           svc,
 		TrustedOrigins: opts.trustedOrigins,
-		Services:       []func(*connect.Server){registerProbe},
+		Services:       []func(*connect.Server){registerProbe, rpc.Register},
+		UI:             opts.ui,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return e
@@ -309,4 +376,10 @@ func (b *browser) setSessionToken(token string) {
 
 func codeOf(err error) connect.Code {
 	return connect.CodeOf(err)
+}
+
+func mustTemplates() []*templates.Template {
+	ts, err := templates.All()
+	Expect(err).NotTo(HaveOccurred())
+	return ts
 }

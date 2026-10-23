@@ -1,18 +1,42 @@
 # Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.
 # Keys appear only as hashes; key material lives in Kubernetes Secrets.
 config:
-  adminAddr: '[::]:15000'
+  adminAddr: localhost:15000
+  statsAddr: '[::]:15020'
+  readinessAddr: '[::]:15021'
   logging:
     format: json
 frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"7f001a8b355fa1b2"'
+      koinon.config: '"b6858c95813d2ebf"'
       koinon.key: default(apiKey.name, "")
+      koinon.request: uuid()
 gateways:
   default:
     port: 4000
+llm:
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header:
+          name: authorization
+          prefix: 'Bearer '
+      keys:
+        - keyHash: sha256:c0a73dbdf52645d93a58506b5a61ab3d6e8ea2b4f82c1e166ff53ead775350b6
+          metadata:
+            name: k-dddddddddddd
+            agent: acme/triage
+        - keyHash: sha256:920e79d4cda03923cfeedaf37771f1f1eb12e5aff7ed6398664b35088730fa6e
+          metadata:
+            name: koinon-reload-probe
+            agent: ""
+    authorization:
+      rules:
+        - apiKey.name != "koinon-reload-probe"
+  models: []
 mcp:
   policies:
     apiKey:
@@ -28,7 +52,11 @@ mcp:
             agent: acme/triage
     mcpAuthorization:
       rules:
-        - "false"
+        - mcp.prompt.name == "koinon-ready"
+    transformations:
+      request:
+        set:
+          x-koinon-agent: apiKey.agent
   targets:
     - name: github
       mcp:

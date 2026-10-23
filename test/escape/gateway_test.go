@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package escape_test
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/procoduck/koinon/internal/execution"
+	"github.com/procoduck/koinon/internal/execution/openshell"
+)
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// gateway is a real OpenShell gateway from the KOINON_OPENSHELL_* variables.
+type gateway struct {
+	b         *openshell.Backend
+	workspace string
+	image     string
+}
+
+// dialGateway connects to the gateway and ensures the workspace, or skips the calling
+// container without KOINON_OPENSHELL_ENDPOINT. Call it from a BeforeAll.
+func dialGateway(ctx context.Context) *gateway {
+	GinkgoHelper()
+	endpoint := os.Getenv("KOINON_OPENSHELL_ENDPOINT")
+	if endpoint == "" {
+		Skip("KOINON_OPENSHELL_ENDPOINT is not set")
+	}
+	dir := os.Getenv("KOINON_OPENSHELL_MTLS_DIR")
+	image := os.Getenv("KOINON_OPENSHELL_IMAGE")
+	Expect(dir).NotTo(BeEmpty(), "KOINON_OPENSHELL_MTLS_DIR")
+	Expect(image).NotTo(BeEmpty(), "KOINON_OPENSHELL_IMAGE")
+	g := &gateway{workspace: envOr("KOINON_OPENSHELL_WORKSPACE", "koinon-escape"), image: image}
+
+	var err error
+	g.b, err = openshell.Dial(openshell.Config{
+		Endpoint: endpoint,
+		CertFile: filepath.Join(dir, "tls.crt"),
+		KeyFile:  filepath.Join(dir, "tls.key"),
+		CAFile:   filepath.Join(dir, "ca.crt"),
+	})
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(g.b.Close)
+	_, err = g.b.EnsureWorkspace(ctx, g.workspace, nil)
+	Expect(err).NotTo(HaveOccurred())
+	return g
+}
+
+// suffix makes the names of one run unique; OpenShell 0.1.5 allows at most 19 characters in a
+// sandbox name.
+func suffix() int64 { return time.Now().UnixNano() / int64(time.Millisecond) % 100_000_000 }
+
+// provider imports p with its profile and deletes both when the container ends.
+func (g *gateway) provider(ctx context.Context, p execution.Provider) {
+	GinkgoHelper()
+	Expect(g.b.EnsureProvider(ctx, g.workspace, p)).To(Succeed())
+	DeferCleanup(func(ctx context.Context) error {
+		if err := g.b.DeleteProvider(ctx, g.workspace, p.Name); err != nil {
+			return err
+		}
+		return g.b.DeleteProviderProfile(ctx, g.workspace, p.Profile.ID)
+	})
+}
+
+// sandbox creates spec, deletes it when the container ends, and waits until it is ready.
+func (g *gateway) sandbox(ctx context.Context, spec execution.SandboxSpec) {
+	GinkgoHelper()
+	if spec.Image == "" {
+		spec.Image = g.image
+	}
+	if spec.Command == nil {
+		spec.Command = []string{"sleep", "infinity"}
+	}
+	_, err := g.b.CreateSandbox(ctx, g.workspace, spec)
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(func(ctx context.Context) error { return g.b.DeleteSandbox(ctx, g.workspace, spec.Name) })
+	Eventually(func(gm Gomega) {
+		sb, err := g.b.GetSandbox(ctx, g.workspace, spec.Name)
+		gm.Expect(err).NotTo(HaveOccurred())
+		gm.Expect(sb.Phase).To(Equal(execution.PhaseReady))
+	}).WithContext(ctx).WithTimeout(5 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+}
+
+// exec runs command in the sandbox with stdin as its standard input and returns stdout,
+// stderr and the exit code.
+func (g *gateway) exec(ctx context.Context, sandbox, stdin string, command ...string) (string, string, int) {
+	GinkgoHelper()
+	var stderr bytes.Buffer
+	p, err := g.b.Exec(ctx, g.workspace, sandbox, execution.ExecRequest{
+		Command: command, Timeout: 2 * time.Minute, Stderr: &stderr,
+	})
+	Expect(err).NotTo(HaveOccurred())
+	go func() {
+		defer GinkgoRecover()
+		_, _ = io.Copy(p.Stdin(), strings.NewReader(stdin))
+		_ = p.Stdin().Close()
+	}()
+	out, err := io.ReadAll(p.Stdout())
+	Expect(err).NotTo(HaveOccurred())
+	code, err := p.Wait()
+	Expect(err).NotTo(HaveOccurred())
+	return string(out), stderr.String(), code
+}
+
+// sh runs script with sh in the sandbox.
+func (g *gateway) sh(ctx context.Context, sandbox, script string) (string, string, int) {
+	GinkgoHelper()
+	return g.exec(ctx, sandbox, "", "sh", "-c", script)
+}
+
+// curl makes one request with curl from the sandbox and returns the status code ("000" when
+// no response arrived), the body and curl's exit code. The placeholder goes in the
+// Authorization header, as a client of the grant would send it.
+func (g *gateway) curl(ctx context.Context, sandbox, method, url string) (string, string, int) {
+	GinkgoHelper()
+	out, stderr, exit := g.sh(ctx, sandbox, fmt.Sprintf(
+		`curl -sS -m 20 -X %s -H "Authorization: Bearer $GITHUB_TOKEN" -o /tmp/body -w '%%{http_code}' '%s'; rc=$?; echo; cat /tmp/body 2>/dev/null; rm -f /tmp/body; exit $rc`, method, url))
+	code, body, _ := strings.Cut(out, "\n")
+	GinkgoWriter.Printf("%s %s -> %s (curl %d) %s %s\n", method, url, code, exit, body, stderr)
+	return code, body, exit
+}

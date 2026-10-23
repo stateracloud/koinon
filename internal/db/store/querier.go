@@ -14,6 +14,9 @@ type Querier interface {
 	// draft -> active with the given version (ADR 0020). No row: not a draft.
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
+	// Adds reported token usage to an unfinished run. The caller cancels the run
+	// when tokens_used reaches max_tokens. No row: the run is finished or absent.
+	AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run, error)
 	// Appends an event from the control plane (API, scheduler) without an epoch,
 	// for example a cancel notice. Stamped with the run's current epoch.
 	AppendRunControlEvent(ctx context.Context, arg AppendRunControlEventParams) (RunEvent, error)
@@ -25,22 +28,50 @@ type Querier interface {
 	// lock, so events are gap-free and ordered per run. No row: stale epoch or the
 	// run is not active, and nothing is written.
 	AppendRunEvent(ctx context.Context, arg AppendRunEventParams) (RunEvent, error)
+	// AppendRunEvent with the writer's own sequence number: an event already
+	// recorded under (run, epoch, source_seq) is not recorded again, so retrying
+	// after an ambiguous failure is safe. No row: stale epoch, the run is not
+	// active, or the event exists (GetRunEventBySource tells which).
+	AppendRunEventOnce(ctx context.Context, arg AppendRunEventOnceParams) (RunEvent, error)
 	AppendTicketEvent(ctx context.Context, arg AppendTicketEventParams) (TicketEvent, error)
 	ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Agent, error)
+	// Archiving an agent cancels every run it has not finished.
+	CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRunsForAgentParams) ([]Run, error)
+	// pending -> canceled, for a run that finished without them (for example a
+	// user canceled the parked run).
+	CancelPendingApprovalRequestsForRun(ctx context.Context, arg CancelPendingApprovalRequestsForRunParams) ([]ApprovalRequest, error)
 	// A ticket moved to Done cancels its queued runs (plan item A4).
 	CancelQueuedRunsForTicket(ctx context.Context, arg CancelQueuedRunsForTicketParams) ([]Run, error)
 	// Control-plane cancel from any non-terminal state (user cancel, run caps,
 	// park expiry). Needs no epoch; an owner's next write then matches no rows
 	// because the state changed.
 	CancelRun(ctx context.Context, arg CancelRunParams) (Run, error)
+	// Cancels owned runs that have been owned longer than their wall-clock cap
+	// (plan item A4). Parked time is excluded through parked_seconds. Safe to run
+	// from every API replica: a run canceled by one sweep no longer matches.
+	CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOverWallClockParams) ([]Run, error)
+	// Takes an approved request for execution for lease_seconds. No row: it is
+	// not approved, or another executor holds it.
+	ClaimApprovalExecution(ctx context.Context, arg ClaimApprovalExecutionParams) (ApprovalRequest, error)
 	// queued -> starting, or a resolved parked -> starting. Takes the oldest
-	// claimable run (by ready_at) of an active agent that has no active run, and
+	// claimable run (by ready_at) of an active agent that has no active run and
+	// whose ticket has no other owned or parked run, and
 	// makes the caller its owner under a new epoch. Locking the agent row with
 	// SKIP LOCKED serialises claims per agent, so concurrent claimers move on to
 	// other agents, and FIFO holds per agent. runs_one_active_per_agent backstops
 	// the rare race where two claims for one agent overlap; the loser gets a
 	// unique violation and retries.
+	//
+	// The run row is locked too. A claim whose snapshot predates a concurrent
+	// winner's commit, but which locks the agent row after it, re-checks only the
+	// rows it locks against their latest version. Were the run not among them, the
+	// claim would still see it as claimable, bump the agent's epoch, and then
+	// update no run: the next owner would get a skipped epoch.
 	ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error)
+	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
+	// approved -> executed | failed, by the executor that claimed it (fenced on
+	// executions). No row: another executor took it over.
+	CompleteApprovalExecution(ctx context.Context, arg CompleteApprovalExecutionParams) (ApprovalRequest, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -48,8 +79,20 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	// New agents are drafts (ADR 0020).
 	CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error)
+	CreateAgentSandbox(ctx context.Context, arg CreateAgentSandboxParams) (AgentSandbox, error)
 	// Adds the next version of a draft or active agent.
 	CreateAgentVersion(ctx context.Context, arg CreateAgentVersionParams) (AgentVersion, error)
+	// No row: the same call was already recorded in this run (see
+	// GetApprovalRequestByCall).
+	CreateApprovalRequest(ctx context.Context, arg CreateApprovalRequestParams) (ApprovalRequest, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Connections (plan item C1). No query reads or writes secret material: it
+	// lives in the Kubernetes Secret named by secret_name.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	CreateConnection(ctx context.Context, arg CreateConnectionParams) (Connection, error)
 	CreateLocalCredential(ctx context.Context, arg CreateLocalCredentialParams) error
 	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
 	CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, error)
@@ -72,6 +115,8 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	CreateTicket(ctx context.Context, arg CreateTicketParams) (Ticket, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// pending -> approved | denied by a human. No row: already decided.
+	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
 	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	// Removing a mapping cascades to the memberships it granted.
@@ -79,42 +124,126 @@ type Querier interface {
 	// Drops IdP-sourced memberships from this issuer whose group the user no
 	// longer has, or whose org stopped using the IdP.
 	DeleteStaleGroupMemberships(ctx context.Context, arg DeleteStaleGroupMembershipsParams) error
+	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
+	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The spend ledger (plan item L1). USD amounts cross the Go boundary as
+	// decimal text, never as floats.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// The run an agent was executing at @at: the latest-started run that had
+	// started by then and had not finished more than @grace_seconds earlier. One
+	// run per agent is owned at a time (ADR 0009), so the latest start wins when a
+	// parked run's window overlaps a later run. The grace covers a response that
+	// completes just after its run was canceled (for example by the token cap).
+	FindRunAt(ctx context.Context, arg FindRunAtParams) (FindRunAtRow, error)
 	// The owner ends the run: running -> succeeded | failed | canceled, or
 	// starting -> failed | canceled. No row: stale epoch or illegal transition.
 	FinishRun(ctx context.Context, arg FinishRunParams) (Run, error)
 	GetActiveUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetAgent(ctx context.Context, arg GetAgentParams) (Agent, error)
+	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
+	// holds the agent, whether one is waiting to be claimed (queued, or parked
+	// with its park resolved), and when a run last finished or parked. Parked runs
+	// do not keep the sandbox up, but they hold off its recreation (has_held):
+	// a parked run resumes its session in the same home volume.
+	GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error)
+	GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams) (AgentSandbox, error)
+	// An agent's recorded USD spend since @since, for its spend limit.
+	GetAgentSpendSince(ctx context.Context, arg GetAgentSpendSinceParams) (string, error)
 	GetAgentVersion(ctx context.Context, arg GetAgentVersionParams) (AgentVersion, error)
+	GetApprovalRequest(ctx context.Context, arg GetApprovalRequestParams) (ApprovalRequest, error)
+	GetApprovalRequestByCall(ctx context.Context, arg GetApprovalRequestByCallParams) (ApprovalRequest, error)
+	// An agent may only read its own requests.
+	GetApprovalRequestForAgent(ctx context.Context, arg GetApprovalRequestForAgentParams) (ApprovalRequest, error)
+	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
+	GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWorkspace, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
+	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Ask-tier approval requests (plan item C3, ADR 0042). C3 records them; P1
+	// decides, executes and expires them.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// The run an agent's tool call belongs to: one active run per agent
+	// (runs_one_active_per_agent), and tools are only called while it runs.
+	GetRunningRunForAgent(ctx context.Context, arg GetRunningRunForAgentParams) (Run, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
+	// The highest ticket timeline seq already sent to the harness by the ticket's
+	// other runs; messages after it are new for the next run.
+	GetTicketPromptedThrough(ctx context.Context, arg GetTicketPromptedThroughParams) (int64, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
+	// Whether the ticket already has a queued run, which will see every message
+	// appended before it starts (plan item A4).
+	HasQueuedRunForTicket(ctx context.Context, arg HasQueuedRunForTicketParams) (bool, error)
 	// Extends the owner's lease. No row: the caller is no longer the owner and
 	// must stop (ADR 0030).
 	HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run, error)
+	// Records one request. Returns no row when the request id is already
+	// recorded, so a replayed export is not charged twice.
+	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
 	ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
+	// Agents that are not archived, plus archived agents whose sandbox is not
+	// cleaned up yet.
+	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
+	ListApprovalRequestsForTicket(ctx context.Context, arg ListApprovalRequestsForTicketParams) ([]ApprovalRequest, error)
+	ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Connection, error)
+	ListConnectionsByConnector(ctx context.Context, arg ListConnectionsByConnectorParams) ([]Connection, error)
 	// The most recently synced content of each template.
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// The effective role per org honours the org's identity mode (ADR 0004):
 	// platform counts manual rows, idp counts IdP rows plus the manual owner,
 	// hybrid counts both. The highest role wins.
 	ListEffectiveMemberships(ctx context.Context, userID pgtype.UUID) ([]ListEffectiveMembershipsRow, error)
+	// Approved requests no executor holds: Trusted-preset calls, and calls whose
+	// executor died or failed to record the outcome.
+	ListExecutableApprovalRequests(ctx context.Context, arg ListExecutableApprovalRequestsParams) ([]ApprovalRequest, error)
+	// Parked runs whose park has expired (ADR 0049: 7 days for an approval).
+	ListExpiredParkedRuns(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
+	// Every live org, for control-plane sweeps and workers that then work org by
+	// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
+	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Execution state rendered by koinon-reconciler (plan item R2) and read by
+	// koinon-agentd.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// The reconciler walks orgs one at a time, so every later query is org-scoped.
+	ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcileRow, error)
+	// The org's requests waiting for a human (Waiting on you), oldest first.
+	// Trusted-preset calls are recorded as approved and never listed here.
+	ListPendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
+	ListPendingApprovalRequestsOfFinishedRuns(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
 	ListRunsForTicket(ctx context.Context, arg ListRunsForTicketParams) ([]Run, error)
 	// The timeline after a sequence number (0 for the start), in order.
 	ListTicketEvents(ctx context.Context, arg ListTicketEventsParams) ([]TicketEvent, error)
+	// The users' messages on the ticket after a timeline seq, in order: what
+	// agentd sends the harness as a run's prompt.
+	ListTicketMessagesAfter(ctx context.Context, arg ListTicketMessagesAfterParams) ([]TicketEvent, error)
 	ListTickets(ctx context.Context, orgID pgtype.UUID) ([]Ticket, error)
 	// One board column, oldest first.
 	ListTicketsByStatus(ctx context.Context, arg ListTicketsByStatusParams) ([]Ticket, error)
+	// A run's requests whose outcome the agent has not been sent yet.
+	ListUndeliveredApprovalRequestsForRun(ctx context.Context, arg ListUndeliveredApprovalRequestsForRunParams) ([]ApprovalRequest, error)
+	// Serialises decisions on one request.
+	LockApprovalRequest(ctx context.Context, arg LockApprovalRequestParams) (ApprovalRequest, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Authentication queries. Users, sessions and credentials are not org-owned;
@@ -122,15 +251,38 @@ type Querier interface {
 	// principal and sync IdP groups at login), always keyed by user_id.
 	// Serialises bootstrap across API replicas for the rest of the transaction.
 	LockBootstrap(ctx context.Context) error
+	// Serialises a park decision (agentd) with the resolution of the run's
+	// approvals (the executor), so neither misses the other.
+	LockRun(ctx context.Context, arg LockRunParams) (Run, error)
+	// Records that the outcomes were sent to the agent.
+	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
 	// Moves a ticket to a board column. Callers moving to Done also cancel its
 	// queued runs (CancelQueuedRunsForTicket) in the same transaction.
 	MoveTicket(ctx context.Context, arg MoveTicketParams) (Ticket, error)
+	// Moves a ticket between two columns other than Done, only if it is in
+	// from: parking moves In progress or To do to Waiting on you, and a resolved
+	// approval moves it back. No row: the ticket is elsewhere (for example Done,
+	// or a user moved it).
+	MoveTicketFrom(ctx context.Context, arg MoveTicketFromParams) (Ticket, error)
+	// Wakes the reconciler for an org, as the agents and runs triggers do. agentd
+	// sends it while it waits for a sandbox that is not ready, so the reconciler
+	// starts it (the waiting run is the demand) without waiting for a resync.
+	NotifyReconciler(ctx context.Context, orgID pgtype.UUID) error
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
+	// Records the observed sandbox. started_at and stopped_at are stamped on the
+	// transition into ready and stopped. An empty home_generation (no sandbox
+	// observed) keeps the recorded one.
+	RecordAgentSandbox(ctx context.Context, arg RecordAgentSandboxParams) (AgentSandbox, error)
+	RecordConnectionTest(ctx context.Context, arg RecordConnectionTestParams) (Connection, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
+	// The owner gives the run up without finishing it, for example because the
+	// exec stream to the harness dropped: the lease ends now, so any agentd can
+	// take the run over at once (TakeOverExpiredRun) and resume the session.
+	ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams) (Run, error)
 	// Makes a parked run claimable again (approval decided, input given). It
 	// stays parked until an owner claims it: parked -> starting.
 	ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) (Run, error)
@@ -140,12 +292,22 @@ type Querier interface {
 	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
+	// Records a newly issued agentgateway key by ID and hash.
+	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
-	// Stores the harness session for the ticket. Fenced by the run epoch: only the
-	// current owner of one of the ticket's active runs can set it.
+	// Records, before the prompt is sent, the ticket timeline seq through which
+	// the ticket's messages are in it.
+	SetRunPromptThrough(ctx context.Context, arg SetRunPromptThroughParams) (Run, error)
+	// Stores the harness session for the ticket with the home generation of the
+	// sandbox it was created in. Fenced by the run epoch: only the current owner
+	// of one of the ticket's active runs can set it.
 	SetTicketHarnessSession(ctx context.Context, arg SetTicketHarnessSessionParams) (Ticket, error)
+	// Totals per run, for the runs in @run_ids that have spend.
+	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
+	// Totals per ticket, for the tickets in @ticket_ids that have spend.
+	SumTicketCosts(ctx context.Context, arg SumTicketCostsParams) ([]SumTicketCostsRow, error)
 	// Takes ownership of a starting or running run whose owner's lease expired
 	// (for example a killed agentd). The state is unchanged; the new epoch makes
 	// every later write of the old owner match no rows.
@@ -157,6 +319,7 @@ type Querier interface {
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.
 	UpsertGroupMemberships(ctx context.Context, arg UpsertGroupMembershipsParams) error
+	UpsertOrgWorkspace(ctx context.Context, arg UpsertOrgWorkspaceParams) (OrgWorkspace, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Templates are platform data (not org-owned); see 00002_agents.sql.

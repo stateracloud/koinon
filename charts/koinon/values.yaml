@@ -6,6 +6,10 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# The cluster's DNS domain. Sandboxes reach agentgateway by its fully qualified Service name,
+# because OpenShell's policy DNS resolves names without the pod's search domains.
+clusterDomain: cluster.local
+
 # Koinon images: <registry>/<repository>:<tag>[@<digest>]. The tag defaults to .Chart.AppVersion.
 image:
   registry: ghcr.io/procoduck
@@ -20,6 +24,12 @@ api:
     digest: ""
   replicas: 1
   port: 8080
+  # The spend ledger's OTLP/HTTP receiver (plan item L1). agentgateway exports its access log
+  # here; the NetworkPolicy admits only the gateway, since the receiver has no authentication.
+  otlpPort: 4318
+  # The GitHub tools MCP server (plan item C3): its own listener and Service, reachable only from
+  # agentgateway (NetworkPolicy), never through the API Service or ingress.
+  toolsPort: 8081
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}
@@ -33,7 +43,17 @@ reconciler:
     repository: koinon-reconciler
     tag: ""
     digest: ""
+  # Extra replicas stand by: one reconciles at a time, holding a Postgres advisory lock.
   replicas: 1
+  # Stop a sandbox after this long without an active run, parked runs included (ADR 0049). It
+  # starts again when a run is queued or a park is resolved.
+  idleTimeout: 10m
+  # Time between full passes. Postgres NOTIFY wakes the reconciler earlier for new runs and
+  # agent changes; the timer covers idle timeouts and drift.
+  resyncInterval: 30s
+  # Home volume of an archived agent: delete (with its sandbox) or retain (the stopped sandbox,
+  # and so its OpenShell workspace PVC, is kept; its key and provider record are deleted).
+  homeRetention: delete
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}
@@ -48,6 +68,13 @@ agentd:
     tag: ""
     digest: ""
   replicas: 1
+  # Runs each replica drives at once (one exec stream each).
+  workers: 8
+  # Run lease; when a replica dies, another takes its runs over after this long.
+  lease: 30s
+  # agentgateway's base URL as sandboxes reach it. Empty in standalone mode uses the chart's
+  # gateway Service; required in kubernetes mode until plan item G2.
+  gatewayURL: ""
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}
@@ -65,6 +92,37 @@ migrations:
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}
+
+# Install preflight ("koinon-api preflight", plan item H2): a pre-install and pre-upgrade hook Job
+# that fails the release when Agent Sandbox, the OpenShell gateway, openshell.runtimeClassName,
+# the CNPG operator (postgres.mode=cnpg) or the agentgateway GatewayClass (gateway.mode=kubernetes)
+# is missing or unsupported, and warns when Kata guest seccomp is off (ADR 0048 decision 2).
+preflight:
+  enabled: true
+  # Kills the Job after this long; keep it below helm's --timeout (default 5m).
+  activeDeadlineSeconds: 240
+  # Where the Agent Sandbox controller runs; its image tag must be v1.0.x.
+  agentSandbox:
+    namespace: agent-sandbox-system
+    controller: agent-sandbox-controller
+  # Guest seccomp check: one short-lived unprivileged pod in the release namespace with
+  # openshell.runtimeClassName and seccompProfile RuntimeDefault (the koinon-api image) reports
+  # its /proc/self/status Seccomp and whether keyctl is denied. Off only warns.
+  seccompProbe:
+    enabled: true
+    timeout: 2m
+  # NetworkPolicy enforcement check, functional so that it works with any network plugin: a
+  # server pod, a client pod (both the koinon-api image, the cluster's default runtime) and a
+  # NetworkPolicy denying ingress to the server, all in the release namespace and deleted
+  # afterwards. If the client still connects, the preflight warns that the chart's
+  # NetworkPolicies (OTLP receiver, gateway access) are advisory. It never fails the install.
+  # Runs alongside the seccomp probe.
+  networkPolicyProbe:
+    enabled: true
+    timeout: 90s
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
 
 postgres:
   # cnpg: render a CloudNativePG Cluster (the operator is a prerequisite).
@@ -92,8 +150,9 @@ postgres:
       agentd: agentd-uri
 
 gateway:
-  # standalone: the chart installs agentgateway, configured by the reconciler (ADR 0048).
-  # kubernetes: use an existing agentgateway controller (ADR 0049). The chart renders nothing for
+  # The two gateway modes are decided in ADR 0049 (standalone first chosen in ADR 0048 decision 6).
+  # standalone: the chart installs agentgateway, configured by the reconciler.
+  # kubernetes: use an existing agentgateway controller. The chart renders nothing for
   # the gateway in v0.1; plan item G2 adds the Gateway, AgentgatewayBackend, AgentgatewayPolicy
   # and AgentgatewayParameters in this namespace.
   mode: standalone
@@ -135,6 +194,32 @@ model:
   #     overrides: {}                            # request fields forced by the gateway
   models: []
 
+# GitHub connector (plan item C1). The REST API base URL used to verify connections, mint
+# installation tokens and open approved pull requests; GitHub Enterprise Server uses
+# https://<host>/api/v3. The e2e test points it at a fake.
+github:
+  apiUrl: https://api.github.com
+
+# Flavor images (ADR 0035): <image.registry>/<repository>:<tag>[@<digest>], the tag defaulting to
+# .Chart.AppVersion. Every entry becomes a flavor the reconciler can run; an agent whose flavor has
+# no entry is reported as a reconcile error. Remove an entry to turn that flavor off.
+flavors:
+  opencode:
+    image:
+      repository: flavor-opencode
+      tag: ""
+      digest: ""
+  hermes:
+    image:
+      repository: flavor-hermes
+      tag: ""
+      digest: ""
+  pi:
+    image:
+      repository: flavor-pi
+      tag: ""
+      digest: ""
+
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:
   address: ""
@@ -143,11 +228,55 @@ openshell:
   # Default sandbox runtime class (ADR 0045).
   runtimeClassName: kata
 
+# URL browsers reach Koinon at, for example https://koinon.example.com. Its scheme sets the
+# session cookies' Secure attribute (http:// turns it off, so logins work without TLS) and it is
+# the base of the default OIDC redirect URL. Empty derives it from the ingress (https with
+# ingress.tlsSecretName, else http); with the ingress off it stays empty, which means https:
+# fine for `kubectl port-forward`, since browsers treat localhost as secure. Set it when you
+# expose the API another way.
+publicUrl: ""
+
 # Bootstrap platform admin (plan item A1). The one-time password is generated once into the Secret
-# <fullname>-bootstrap-admin and kept across upgrades. Disable once OIDC works.
+# <fullname>-bootstrap-admin and kept across upgrades. Disable once OIDC works: enabled=false
+# turns the API's password login off and revokes the bootstrap sessions.
 bootstrapAdmin:
   enabled: true
+  # Login name, applied on every start (changing it renames the login).
   username: admin
+  # Existing Secret holding the one-time password under the key `password`; the chart then renders
+  # no Secret of its own. Use it with `helm template` and GitOps tools (Argo CD, Flux): they render
+  # without cluster access, so the chart cannot read back the generated password and would produce
+  # a new one on every render.
+  existingSecret: ""
+
+# Generic OIDC login (plan item A2, ADR 0004). Users log in with the IdP; roles in the default org
+# come from groupMappings, every other role from Postgres.
+oidc:
+  enabled: false
+  issuerUrl: ""
+  clientId: ""
+  # Secret with the client secret. Empty name: a public client (PKCE only).
+  clientSecret:
+    existingSecret: ""
+    key: client-secret
+  # Empty defaults to <publicUrl>/auth/oidc/callback; one of the two is required.
+  redirectUrl: ""
+  # Requested besides openid.
+  scopes: [email, profile]
+  # ID token claim holding the user's groups.
+  groupsClaim: groups
+  # IdP group -> role in the default org (viewer, member, admin or owner), for example
+  # {koinon-admins: admin, staff: member}. Reconciled on every start.
+  groupMappings: {}
+  # Identity mode of the default org: platform (roles from Koinon only), idp (from groupMappings)
+  # or hybrid (both).
+  defaultOrgIdentityMode: hybrid
+
+# Session lifetimes, for password and OIDC logins alike. IdP group changes take effect at the next
+# login, so maxLifetime bounds how long a removed group keeps granting access.
+session:
+  idleTimeout: 2h
+  maxLifetime: 12h
 
 ingress:
   enabled: false
@@ -173,6 +302,12 @@ sandboxPolicy:
       openshell.ai/managed-by: openshell
   # Runtime classes allowed for sandbox workload pods.
   runtimeClasses: [kata, kata-qemu]
+  # Images allowed in OpenShell supervisor pods (label openshell.ai/boundary-role=supervisor),
+  # for every container and init container (ADR 0045: a pinned supervisor image). The default is
+  # OpenShell 0.1.5's own; change it with the OpenShell version, and add your mirror's reference
+  # (by tag or digest) when the gateway pulls the image from one.
+  supervisorImages:
+    - ghcr.io/nvidia/openshell/supervisor:0.1.5
   validationActions: [Deny]
   # Requesting identities (request.userInfo.username) allowed to write each kind of object in
   # sandbox namespaces. Everyone else is denied, cluster admins included; there is no break-glass.
@@ -180,6 +315,13 @@ sandboxPolicy:
     # Pods: the Agent Sandbox controller.
     pods:
       - system:serviceaccount:agent-sandbox-system:agent-sandbox-controller
+    # Supervisor pods: OpenShell 0.1.5's gateway creates each sandbox's supervisor pod itself
+    # (os-supervisor-*, label openshell.ai/boundary-role=supervisor) and starts both pods by
+    # removing their openshell.ai/bootstrap scheduling gate. These identities may create pods
+    # with that label only, never workload pods, and change pod specs only by removing
+    # scheduling gates; the shape rules still apply.
+    supervisorPods:
+      - system:serviceaccount:openshell:openshell
     # agents.x-k8s.io Sandboxes: the OpenShell gateway and the Agent Sandbox controller.
     sandboxes:
       - system:serviceaccount:openshell:openshell

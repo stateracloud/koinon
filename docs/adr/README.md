@@ -64,3 +64,6 @@ are in [0046](0046-adr-conventions.md).
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted |
 | [0048](0048-openshell-spike-results.md) | OpenShell spike results | Proposed |
 | [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes, agentd placement | Accepted |
+| [0050](0050-spend-ledger-ingestion-and-net-limits.md) | Spend ledger ingestion and net limits | Proposed |
+| [0051](0051-session-home-generations.md) | Session home generations | Accepted |
+| [0052](0052-opencode-v2-flavor.md) | OpenCode flavor on OpenCode v2 | Accepted |

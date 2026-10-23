@@ -1,7 +1,9 @@
 # Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.
 # Keys appear only as hashes; key material lives in Kubernetes Secrets.
 config:
-  adminAddr: '[::]:15000'
+  adminAddr: localhost:15000
+  statsAddr: '[::]:15020'
+  readinessAddr: '[::]:15021'
   database:
     url: sqlite:///data/agentgateway.db?mode=rwc
   logging:
@@ -20,8 +22,12 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"9cc1487646dafd10"'
+      koinon.config: '"9c1500320f8e5299"'
       koinon.key: default(apiKey.name, "")
+      koinon.request: uuid()
+    otlp:
+      host: koinon-api.koinon.svc:4318
+      protocol: http
 gateways:
   default:
     port: 4000
@@ -39,10 +45,10 @@ llm:
             name: k-aaaaaaaaaaaa
             agent: acme/repo-helper
           budgets:
-            - name: koinon-agent-limit
+            - name: koinon-agent-limit-1792627200-750000000
               limit:
                 unit: USD
-                amount: 5
+                amount: 4.25
               window:
                 rolling: 24h
               onBudgetExceeded: Block
@@ -58,26 +64,23 @@ llm:
               window:
                 rolling: 30d
               onBudgetExceeded: Block
+        - keyHash: sha256:213afb2aa5a9aae0fc71ff868b6109997f6b0936cd894394a1e224da0950209c
+          metadata:
+            name: koinon-reload-probe
+            agent: ""
+          budgets:
+            - name: koinon-reload-probe
+              limit:
+                unit: Tokens
+                amount: 0
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+    authorization:
+      rules:
+        - apiKey.name != "koinon-reload-probe"
   models:
     - name: deepseek/deepseek-v4.1-flash
-      provider:
-        custom:
-          providerOverride: openrouter
-          formats:
-            - type: completions
-      params:
-        baseUrl: https://openrouter.ai/api/v1
-        apiKey:
-          file: /secrets/upstream/api_key
-      overrides:
-        provider:
-          allow_fallbacks: false
-          data_collection: deny
-          only:
-            - fireworks
-            - deepinfra
-          zdr: true
-    - name: unpriced/model
       provider:
         custom:
           providerOverride: openrouter
@@ -115,6 +118,11 @@ mcp:
     mcpAuthorization:
       rules:
         - apiKey.agent == "acme/repo-helper" && ((mcp.tool.target == "github" && mcp.tool.name in ["create_pull_request", "get_approval_status"]) || (mcp.tool.target == "docs" && mcp.tool.name in ["search"]))
+        - mcp.prompt.name == "koinon-ready"
+    transformations:
+      request:
+        set:
+          x-koinon-agent: apiKey.agent
   targets:
     - name: github
       mcp:

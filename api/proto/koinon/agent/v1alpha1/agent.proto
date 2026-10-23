@@ -1,0 +1,149 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.agent.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "koinon/template/v1alpha1/template.proto";
+
+option go_package = "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1;agentv1alpha1";
+
+// AgentService manages an org's agents (ADR 0020). Every request names the
+// org it acts in; IDs from another org are not found.
+service AgentService {
+  // CreateAgentFromTemplate creates a draft agent from a template. Members
+  // and above.
+  rpc CreateAgentFromTemplate(CreateAgentFromTemplateRequest) returns (CreateAgentFromTemplateResponse);
+
+  // GetAgent returns one agent. Viewers and above.
+  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListAgents returns the org's agents, oldest first. Viewers and above.
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ActivateAgent activates a draft and so approves the grants its version
+  // proposes. Admins and owners only.
+  rpc ActivateAgent(ActivateAgentRequest) returns (ActivateAgentResponse);
+
+  // ArchiveAgent archives a draft or active agent and cancels its unfinished
+  // runs. Admins and owners only.
+  rpc ArchiveAgent(ArchiveAgentRequest) returns (ArchiveAgentResponse);
+}
+
+// AgentStatus is the agent lifecycle (ADR 0020).
+enum AgentStatus {
+  AGENT_STATUS_UNSPECIFIED = 0;
+  AGENT_STATUS_DRAFT = 1;
+  AGENT_STATUS_ACTIVE = 2;
+  AGENT_STATUS_ARCHIVED = 3;
+}
+
+// Agent is an agent and the definition it runs.
+message Agent {
+  string id = 1;
+  string org_id = 2;
+  string display_name = 3;
+  AgentStatus status = 4;
+  koinon.template.v1alpha1.Flavor flavor = 5;
+  // The template content the agent was created from, if any.
+  string template_id = 6;
+  string template_slug = 7;
+  // The newest version. ActivateAgent must name it.
+  int32 latest_version = 8;
+  // The approved version runs execute; 0 before the first activation.
+  int32 active_version = 9;
+  // Grants the latest version proposes.
+  repeated koinon.template.v1alpha1.Grant proposed_grants = 10;
+  // Grants approved with the active version.
+  repeated koinon.template.v1alpha1.Grant approved_grants = 11;
+  string instructions = 12;
+  string model = 13;
+  koinon.template.v1alpha1.RunLimits run_limits = 14;
+  google.protobuf.Timestamp created_at = 15;
+  google.protobuf.Timestamp activated_at = 16;
+  google.protobuf.Timestamp archived_at = 17;
+}
+
+// CreateAgentFromTemplateRequest names the template and the user's choices.
+message CreateAgentFromTemplateRequest {
+  string org_id = 1;
+  // A Template.id from ListTemplates.
+  string template_id = 2;
+  string display_name = 3;
+  // One of the template's allowed flavors; unspecified picks its default.
+  koinon.template.v1alpha1.Flavor flavor = 4;
+  // Where the template's grants apply: one entry per grant on a connector
+  // type with targets. A grant whose template sets targets min above zero
+  // needs one. Stored with the agent's version; ActivateAgent approves it with
+  // the grant.
+  repeated GrantBinding grants = 5;
+}
+
+// GrantBinding binds a template grant to one of the org's connections and
+// the targets it is narrowed to.
+message GrantBinding {
+  // The grant's connector type, for example "github".
+  string connector = 1;
+  // A connection of that type in the org (ConnectionService).
+  string connection_id = 2;
+  // For GitHub: repositories as owner/name. Their number must be within the
+  // template grant's targets min and max, and the connection's installation
+  // must be able to access each of them.
+  repeated string repositories = 3;
+}
+
+// CreateAgentFromTemplateResponse holds the new draft.
+message CreateAgentFromTemplateResponse {
+  Agent agent = 1;
+}
+
+// GetAgentRequest names an agent.
+message GetAgentRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+// GetAgentResponse holds the agent.
+message GetAgentResponse {
+  Agent agent = 1;
+}
+
+// ListAgentsRequest names the org.
+message ListAgentsRequest {
+  string org_id = 1;
+}
+
+// ListAgentsResponse lists the org's agents.
+message ListAgentsResponse {
+  repeated Agent agents = 1;
+}
+
+// ActivateAgentRequest names the draft and the version the caller reviewed.
+message ActivateAgentRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // Must equal the agent's latest_version, so the caller approves exactly the
+  // grants they saw; otherwise the call fails with FailedPrecondition.
+  int32 version = 3;
+}
+
+// ActivateAgentResponse holds the active agent.
+message ActivateAgentResponse {
+  Agent agent = 1;
+}
+
+// ArchiveAgentRequest names the agent.
+message ArchiveAgentRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+// ArchiveAgentResponse holds the archived agent.
+message ArchiveAgentResponse {
+  Agent agent = 1;
+}

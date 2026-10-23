@@ -20,14 +20,20 @@ spec:
     metadata:
       labels:
         {{- include "koinon.labels" (list $ $component) | nindent 8 }}
+      {{- if or (eq $component "reconciler") $v.podAnnotations }}
       annotations:
+        {{- if eq $component "reconciler" }}
+        {{- /* Only the reconciler reads config.yaml; roll it when the file changes. */}}
         checksum/config: {{ $configHash }}
+        {{- end }}
         {{- with $v.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      {{- end }}
     spec:
       serviceAccountName: {{ $name }}
-      automountServiceAccountToken: {{ eq $component "reconciler" }}
+      {{- /* The reconciler renders key Secrets; the API writes connection Secrets (C1). */}}
+      automountServiceAccountToken: {{ has $component (list "reconciler" "api") }}
       enableServiceLinks: false
       {{- include "koinon.imagePullSecrets" $ | nindent 6 }}
       securityContext:
@@ -37,36 +43,55 @@ spec:
           image: {{ include "koinon.image" (list $ $v.image) }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           {{- if eq $component "api" }}
-          args: ["-addr", ":{{ $v.port }}"]
+          args: ["-addr", ":{{ $v.port }}", "-otlp-addr", ":{{ $v.otlpPort }}", "-tools-addr", ":{{ $v.toolsPort }}"]
           ports:
             - name: http
               containerPort: {{ $v.port }}
+            - name: otlp
+              containerPort: {{ $v.otlpPort }}
+            - name: tools
+              containerPort: {{ $v.toolsPort }}
+          # Until the first migration has run, koinon-api retries its bootstrap without serving;
+          # the startup probe keeps the liveness probe from restarting it meanwhile.
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 2
+            failureThreshold: 150
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           livenessProbe:
             httpGet: {path: /healthz, port: http}
           {{- end }}
           env:
+            {{- if eq $component "reconciler" }}
+            {{- include "koinon.configEnv" $ | nindent 12 }}
+            {{- end }}
             {{- include "koinon.commonEnv" $ | nindent 12 }}
             {{- include "koinon.dbEnv" (list $ $component) | nindent 12 }}
-            {{- if and (eq $component "api") $.Values.bootstrapAdmin.enabled }}
-            - name: KOINON_BOOTSTRAP_ADMIN_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "koinon.componentName" (list $ "bootstrap-admin") }}
-                  key: username
-            - name: KOINON_BOOTSTRAP_PASSWORD_FILE
-              value: /etc/koinon/bootstrap-admin/password
+            {{- if has $component (list "api" "reconciler") }}
+            {{- include "koinon.githubEnv" $ | nindent 12 }}
+            {{- end }}
+            {{- if eq $component "api" }}
+            {{- include "koinon.apiEnv" $ | trim | nindent 12 }}
+            {{- end }}
+            {{- if eq $component "agentd" }}
+            {{- include "koinon.agentdEnv" $ | nindent 12 }}
             {{- end }}
           securityContext:
             {{- include "koinon.containerSecurityContext" $ | nindent 12 }}
           resources:
             {{- toYaml $v.resources | nindent 12 }}
           volumeMounts:
+            {{- if eq $component "reconciler" }}
             {{- include "koinon.configVolumeMount" $ | nindent 12 }}
+            {{- end }}
             {{- include "koinon.dbVolumeMount" $ | nindent 12 }}
             {{- if ne $component "api" }}
             {{- include "koinon.openshellVolumeMount" $ | nindent 12 }}
+            {{- else }}
+            {{- with include "koinon.apiSecretVolumeMounts" $ | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- end }}
             {{- if and (eq $component "api") $.Values.bootstrapAdmin.enabled }}
             - name: bootstrap-admin
@@ -76,10 +101,16 @@ spec:
             - name: tmp
               mountPath: /tmp
       volumes:
+        {{- if eq $component "reconciler" }}
         {{- include "koinon.configVolume" $ | nindent 8 }}
+        {{- end }}
         {{- include "koinon.dbVolume" $ | nindent 8 }}
         {{- if ne $component "api" }}
         {{- include "koinon.openshellVolume" $ | nindent 8 }}
+        {{- else }}
+        {{- with include "koinon.apiSecretVolumes" $ | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
         {{- end }}
         {{- if and (eq $component "api") $.Values.bootstrapAdmin.enabled }}
         {{- /* Only the password key is projected; the API reads secrets from files. */}}
@@ -119,3 +150,22 @@ spec:
     - name: http
       port: {{ .Values.api.port }}
       targetPort: http
+    - name: otlp
+      port: {{ .Values.api.otlpPort }}
+      targetPort: otlp
+---
+# The GitHub tools MCP server, for agentgateway only (see networkpolicy.yaml). A Service of its own
+# keeps it off the API Service, which the ingress exposes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "koinon.componentName" (list . "api-tools") }}
+  labels:
+    {{- include "koinon.labels" (list . "api") | nindent 4 }}
+spec:
+  selector:
+    {{- include "koinon.selectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - name: tools
+      port: {{ .Values.api.toolsPort }}
+      targetPort: tools

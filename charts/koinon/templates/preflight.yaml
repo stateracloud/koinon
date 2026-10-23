@@ -1,0 +1,212 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Install preflight ("koinon-api preflight", plan item H2) as a pre-install and pre-upgrade hook that
+runs before everything else, the migration Job included. It fails the install with a clear message
+when Agent Sandbox, the OpenShell gateway, the sandbox RuntimeClass, the CNPG operator (cnpg mode)
+or agentgateway's GatewayClass (kubernetes mode) is missing, and warns when Kata guest seccomp is
+off (ADRs 0048, 0049) or when the cluster does not enforce NetworkPolicy. helm.sh/hook-output-log-policy makes Helm 4 print the Job's output; a
+failed Job is kept for `kubectl logs job/<name>`.
+
+RBAC is read-only get on exactly the objects checked, by name. The seccomp probe additionally
+creates, reads and deletes one short-lived unprivileged pod in the release namespace; the
+NetworkPolicy probe two such pods (koinon-api's image, the default runtime) and one NetworkPolicy
+that selects only its own server pod, all deleted when it ends.
+*/ -}}
+{{- if .Values.preflight.enabled }}
+{{- include "koinon.validate" . }}
+{{- $name := include "koinon.componentName" (list . "preflight") }}
+{{- $clusterName := printf "%s-%s" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
+{{- $probe := .Values.preflight.seccompProbe.enabled }}
+{{- $netpol := .Values.preflight.networkPolicyProbe.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "preflight") | nindent 4 }}
+  annotations:
+    {{- include "koinon.preflightHook" (list . "-30") | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $clusterName }}
+  labels:
+    {{- include "koinon.labels" (list . "preflight") | nindent 4 }}
+  annotations:
+    {{- include "koinon.preflightHook" (list . "-30") | nindent 4 }}
+rules:
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    resourceNames:
+      - sandboxes.agents.x-k8s.io
+      {{- if eq .Values.postgres.mode "cnpg" }}
+      - clusters.postgresql.cnpg.io
+      {{- end }}
+    verbs: [get]
+  # The Agent Sandbox controller, for its release version (its namespace is checked by name).
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [{{ .Values.preflight.agentSandbox.controller }}]
+    verbs: [get]
+  {{- if eq .Values.postgres.mode "cnpg" }}
+  # The CNPG operator: the webhook that validates its Clusters names the operator's Service,
+  # whose ready endpoints say the operator runs (wherever it was installed).
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingwebhookconfigurations]
+    verbs: [list]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [list]
+  {{- end }}
+  - apiGroups: [node.k8s.io]
+    resources: [runtimeclasses]
+    resourceNames: [{{ .Values.openshell.runtimeClassName }}]
+    verbs: [get]
+  {{- if eq .Values.gateway.mode "kubernetes" }}
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses]
+    resourceNames: [{{ .Values.gateway.kubernetes.gatewayClassName }}]
+    verbs: [get]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $clusterName }}
+  labels:
+    {{- include "koinon.labels" (list . "preflight") | nindent 4 }}
+  annotations:
+    {{- include "koinon.preflightHook" (list . "-29") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $clusterName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- if or $probe $netpol }}
+---
+# The probe pods (and the NetworkPolicy probe's policy). Pods and NetworkPolicies have no
+# create-by-name, so create and delete cover any of them in the release namespace for as long as
+# the hook lives. Namespaced only: the probes never touch another namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "preflight") | nindent 4 }}
+  annotations:
+    {{- include "koinon.preflightHook" (list . "-30") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, get, delete]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  {{- if $netpol }}
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [create, delete]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "preflight") | nindent 4 }}
+  annotations:
+    {{- include "koinon.preflightHook" (list . "-29") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "preflight") | nindent 4 }}
+  annotations:
+    {{- include "koinon.preflightHook" (list . "-20") | nindent 4 }}
+    helm.sh/hook-output-log-policy: hook-failed,hook-succeeded
+spec:
+  # The checks are deterministic: one attempt, so a failure reaches helm without retries.
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.preflight.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "koinon.labels" (list . "preflight") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      {{- include "koinon.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "koinon.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: preflight
+          image: {{ include "koinon.image" (list . .Values.api.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - preflight
+            - --postgres-mode={{ .Values.postgres.mode }}
+            - --gateway-mode={{ .Values.gateway.mode }}
+            - --gateway-class={{ .Values.gateway.kubernetes.gatewayClassName }}
+            - --runtime-class={{ .Values.openshell.runtimeClassName }}
+            - --openshell-address={{ .Values.openshell.address }}
+            {{- if .Values.openshell.clientTLSSecret }}
+            - --openshell-tls-dir=/etc/koinon/openshell-tls
+            {{- end }}
+            - --agent-sandbox-namespace={{ .Values.preflight.agentSandbox.namespace }}
+            - --agent-sandbox-controller={{ .Values.preflight.agentSandbox.controller }}
+            - --seccomp-probe={{ $probe }}
+            - --netpol-probe={{ $netpol }}
+            {{- if or $probe $netpol }}
+            - --probe-image={{ include "koinon.image" (list . .Values.api.image) }}
+            {{- with .Values.imagePullSecrets }}
+            {{- $secrets := list }}
+            {{- range . }}{{ $secrets = append $secrets .name }}{{ end }}
+            - --probe-image-pull-secrets={{ join "," $secrets }}
+            {{- end }}
+            - --probe-instance={{ .Release.Name }}
+            {{- end }}
+            {{- if $probe }}
+            - --probe-timeout={{ .Values.preflight.seccompProbe.timeout }}
+            - --probe-name-prefix={{ include "koinon.componentName" (list . "preflight-probe") }}
+            {{- end }}
+            {{- if $netpol }}
+            - --netpol-probe-timeout={{ .Values.preflight.networkPolicyProbe.timeout }}
+            - --netpol-probe-name-prefix={{ include "koinon.componentName" (list . "preflight-netpol") }}
+            {{- end }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            {{- include "koinon.containerSecurityContext" . | nindent 12 }}
+          terminationMessagePolicy: FallbackToLogsOnError
+          resources:
+            {{- toYaml .Values.preflight.resources | nindent 12 }}
+          {{- with (include "koinon.openshellVolumeMount" .) }}
+          volumeMounts:
+            {{- . | nindent 12 }}
+          {{- end }}
+      {{- with (include "koinon.openshellVolume" .) }}
+      volumes:
+        {{- . | nindent 8 }}
+      {{- end }}
+{{- end }}

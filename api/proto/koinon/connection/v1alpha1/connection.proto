@@ -1,0 +1,217 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.connection.v1alpha1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1;connectionv1alpha1";
+
+// ConnectionService manages an org's connections to external systems
+// (ADR 0007): one configured instance of a connector type, such as one GitHub
+// App installation. Secrets entered here are written straight to a Kubernetes
+// Secret (ADR 0021, 0049); no response ever contains them.
+service ConnectionService {
+  // ListConnectorTypes returns the connector types this install ships, with
+  // their scopes and setup guides. Any signed-in user.
+  rpc ListConnectorTypes(ListConnectorTypesRequest) returns (ListConnectorTypesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // CreateGitHubConnection creates a GitHub App connection. The private key
+  // is written to a Kubernetes Secret and never returned. Admins and owners.
+  rpc CreateGitHubConnection(CreateGitHubConnectionRequest) returns (CreateGitHubConnectionResponse);
+
+  // GetConnection returns one connection. Viewers and above.
+  rpc GetConnection(GetConnectionRequest) returns (GetConnectionResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListConnections returns the org's connections, oldest first. Viewers and
+  // above.
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // TestConnection runs the setup guide's checks against the provider and
+  // records the result. Nothing is written to the provider. Admins and owners.
+  rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse);
+
+  // ListInstallationRepos lists the repositories a GitHub connection's App
+  // installation can access, for choosing what to bind an agent to. Koinon
+  // asks GitHub with a metadata-read installation token; nothing is written.
+  // Admins and owners.
+  rpc ListInstallationRepos(ListInstallationReposRequest) returns (ListInstallationReposResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// Tier is a scope's risk tier (ADR 0008).
+enum Tier {
+  TIER_UNSPECIFIED = 0;
+  TIER_READ = 1;
+  TIER_REVERSIBLE_WRITE = 2;
+  TIER_EXTERNAL_OR_IRREVERSIBLE = 3;
+  TIER_FORBIDDEN = 4;
+}
+
+// Scope is a grantable capability of a connector type.
+message Scope {
+  string id = 1;
+  Tier tier = 2;
+  string description = 3;
+  // MCP tools the scope exposes behind agentgateway.
+  repeated string tools = 4;
+}
+
+// ConnectorType is a platform-curated connector type.
+message ConnectorType {
+  string id = 1;
+  string version = 2;
+  string display_name = 3;
+  string description = 4;
+  // "app-credential", "federated" or "delegated-user".
+  string auth_type = 5;
+  repeated Scope scopes = 6;
+  // The whole connector type document as JSON, setup guide included; its
+  // shape is connectors/schema/connector.schema.json.
+  google.protobuf.Struct document = 7;
+}
+
+// ListConnectorTypesRequest is empty.
+message ListConnectorTypesRequest {}
+
+// ListConnectorTypesResponse lists the connector types.
+message ListConnectorTypesResponse {
+  repeated ConnectorType connector_types = 1;
+}
+
+// ConnectionStatus is the outcome of the last test.
+enum ConnectionStatus {
+  CONNECTION_STATUS_UNSPECIFIED = 0;
+  CONNECTION_STATUS_UNTESTED = 1;
+  CONNECTION_STATUS_OK = 2;
+  CONNECTION_STATUS_FAILING = 3;
+}
+
+// CheckResult is one setup-guide check.
+message CheckResult {
+  // The check's name, e.g. github.installation.
+  string check = 1;
+  // The setup-guide step it validates, so the UI can point at it.
+  string step = 2;
+  bool ok = 3;
+  // What went wrong, or what was found. Never contains secrets.
+  string message = 4;
+}
+
+// GitHubConnection is the non-secret part of a GitHub App connection.
+message GitHubConnection {
+  int64 app_id = 1;
+  int64 installation_id = 2;
+  // SHA-256 fingerprint of the private key's public half, as GitHub shows it
+  // under the App's private keys.
+  string key_fingerprint = 3;
+}
+
+// Connection is a configured connector instance.
+message Connection {
+  string id = 1;
+  string org_id = 2;
+  // Connector type ID, e.g. github.
+  string connector = 3;
+  string display_name = 4;
+  ConnectionStatus status = 5;
+  google.protobuf.Timestamp last_tested_at = 6;
+  repeated CheckResult last_test = 7;
+  google.protobuf.Timestamp created_at = 8;
+
+  oneof settings {
+    GitHubConnection github = 10;
+  }
+}
+
+// CreateGitHubConnectionRequest carries the setup guide's fields.
+message CreateGitHubConnectionRequest {
+  string org_id = 1;
+  string display_name = 2;
+  int64 app_id = 3;
+  int64 installation_id = 4;
+  // Secure input (ADR 0021): the App's PEM private key. Written to a
+  // Kubernetes Secret, never stored in Postgres, returned or logged.
+  string private_key = 5 [debug_redact = true];
+  // Run TestConnection right after creating it.
+  bool test = 6;
+}
+
+// CreateGitHubConnectionResponse holds the new connection and, when asked
+// for, the test results.
+message CreateGitHubConnectionResponse {
+  Connection connection = 1;
+  repeated CheckResult results = 2;
+}
+
+// GetConnectionRequest names a connection.
+message GetConnectionRequest {
+  string org_id = 1;
+  string connection_id = 2;
+}
+
+// GetConnectionResponse holds the connection.
+message GetConnectionResponse {
+  Connection connection = 1;
+}
+
+// ListConnectionsRequest names the org.
+message ListConnectionsRequest {
+  string org_id = 1;
+}
+
+// ListConnectionsResponse lists the org's connections.
+message ListConnectionsResponse {
+  repeated Connection connections = 1;
+}
+
+// TestConnectionRequest names a connection.
+message TestConnectionRequest {
+  string org_id = 1;
+  string connection_id = 2;
+}
+
+// TestConnectionResponse holds the checks in setup-guide order.
+message TestConnectionResponse {
+  Connection connection = 1;
+  repeated CheckResult results = 2;
+}
+
+// ListInstallationReposRequest names a GitHub connection and a page.
+message ListInstallationReposRequest {
+  string org_id = 1;
+  string connection_id = 2;
+  // Empty for the first page; otherwise next_page_token of the previous
+  // response, sent with the same query.
+  string page_token = 3;
+  // Keeps only repositories whose owner/name contains it, ignoring case.
+  // At most 200 characters.
+  string query = 4;
+}
+
+// InstallationRepo is one repository the installation can access.
+message InstallationRepo {
+  // owner/name as GitHub spells it: the name to bind.
+  string full_name = 1;
+  bool private = 2;
+  string default_branch = 3;
+}
+
+// ListInstallationReposResponse is one page, in GitHub's order.
+message ListInstallationReposResponse {
+  repeated InstallationRepo repos = 1;
+  // Empty on the last page. A filtered page can hold fewer repositories than
+  // an unfiltered one, or none, and still have a next page.
+  string next_page_token = 2;
+  // How many repositories the installation can access, before the query.
+  int64 total_count = 3;
+}
