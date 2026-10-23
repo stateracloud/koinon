@@ -1,0 +1,37 @@
+# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.
+# Keys appear only as hashes; key material lives in Kubernetes Secrets.
+config:
+  adminAddr: 127.0.0.1:15000
+  logging:
+    format: json
+frontendPolicies:
+  accessLog:
+    add:
+      koinon.agent: default(apiKey.agent, "")
+      koinon.config: '"3202bffb15a48b62"'
+      koinon.key: default(apiKey.name, "")
+gateways:
+  default:
+    port: 8080
+llm:
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header:
+          name: authorization
+          prefix: 'Bearer '
+      keys:
+        - keyHash: sha256:dd3dc2ed2e4c04cd357da0c28881ae0b193c64f1b2c6efab07f0a5534468a34f
+          metadata:
+            name: k-cccccccccccc
+            agent: acme/repo-helper
+  models:
+    - name: qwen3.5:4b
+      provider:
+        custom:
+          providerOverride: ollama
+          formats:
+            - type: completions
+      params:
+        baseUrl: http://ollama.example.internal:11434/v1

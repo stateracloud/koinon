@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: koinon-api
+  labels: {app.kubernetes.io/name: koinon-api}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: koinon-api}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: koinon-api}
+    spec:
+      imagePullSecrets:
+        - name: dev-registry
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: api
+          image: koinon-api
+          # No migration Job yet (plan H1); the API migrates on start. Bootstrap
+          # login needs KOINON_BOOTSTRAP_PASSWORD_FILE pointing at a mounted Secret.
+          args: ["--migrate"]
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: koinon-pg-app, key: uri}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: koinon-reconciler
+  labels: {app.kubernetes.io/name: koinon-reconciler}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: koinon-reconciler}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: koinon-reconciler}
+    spec:
+      imagePullSecrets:
+        - name: dev-registry
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: reconciler
+          image: koinon-reconciler
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: koinon-pg-app, key: uri}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
