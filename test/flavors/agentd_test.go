@@ -181,10 +181,22 @@ func describeAgentd(f flavor) bool {
 			Expect(text).To(ContainSubstring(helloReply))
 			Expect(gw.authHeaders()).To(HaveEach("Bearer " + fakeKey))
 			Expect(sb.run(ctx, "cat", instructionsPath)).To(ContainSubstring(instructionsMarker))
-			if f.readyCommand != "" {
-				// agentd waited for the Koinon tools: the first request already offers them.
-				Expect(gw.modelBodies()).To(ContainElement(And(ContainSubstring(helloPrompt), ContainSubstring(f.mcpToolName))))
+			// The first chat request of the turn already offers the Koinon tools: agentd waited for
+			// OpenCode's ready command, and Hermes and pi connect their MCP server before the first
+			// prompt (internal/agentd, readyCommand).
+			// Side requests without tools (OpenCode's title generator) do not count.
+			first := ""
+			for _, b := range gw.modelBodies() {
+				var req struct {
+					Tools []json.RawMessage `json:"tools"`
+				}
+				Expect(json.Unmarshal([]byte(b), &req)).To(Succeed())
+				if strings.Contains(b, helloPrompt) && len(req.Tools) > 0 {
+					first = b
+					break
+				}
 			}
+			Expect(first).To(ContainSubstring(f.mcpToolName), "the first request offers the Koinon tools")
 		}, SpecTimeout(4*time.Minute))
 
 		It("loads the session on the next run, after the sandbox restarted", func(ctx SpecContext) {
