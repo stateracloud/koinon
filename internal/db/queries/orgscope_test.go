@@ -50,9 +50,11 @@ var (
 // queries that act for a user across all of their orgs, before any org is
 // chosen. The test fails if an entry is stale (missing, or no longer flagged).
 var crossOrgQueries = map[string]string{
-	"auth.sql:UpsertGroupMemberships":      "login: grants the user's IdP-group roles in every org mapped to those groups",
-	"auth.sql:DeleteStaleGroupMemberships": "login: revokes the user's IdP-group roles in every org whose group they lost",
-	"auth.sql:ListEffectiveMemberships":    "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
+	"auth.sql:UpsertGroupMemberships":          "login: grants the user's IdP-group roles in every org mapped to those groups",
+	"auth.sql:DeleteStaleGroupMemberships":     "login: revokes the user's IdP-group roles in every org whose group they lost",
+	"api_tokens.sql:GetAPITokenByPrefix":       "admin API: authenticates a bearer token, which names its org only after it is looked up",
+	"connections.sql:ListConnectionsToMigrate": "startup: moves every org's connection secrets from Kubernetes Secrets into the store",
+	"auth.sql:ListEffectiveMemberships":        "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
 }
 
 var _ = Describe("org scoping", func() {

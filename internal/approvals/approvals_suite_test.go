@@ -35,6 +35,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 )
 
 // postgresImage is the minimum supported Postgres version (ADR 0047).
@@ -72,36 +73,6 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 var seq atomic.Int64
 
 func uniq(prefix string) string { return fmt.Sprintf("%s-%d", prefix, seq.Add(1)) }
-
-// memSecrets is an in-memory connections.SecretStore.
-type memSecrets struct {
-	mu sync.Mutex
-	m  map[string]connections.Secret
-}
-
-func (s *memSecrets) Create(_ context.Context, sec connections.Secret) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.m == nil {
-		s.m = map[string]connections.Secret{}
-	}
-	s.m[sec.Name] = sec
-	return nil
-}
-
-func (s *memSecrets) Get(_ context.Context, name string) (connections.Secret, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sec, ok := s.m[name]
-	return sec, ok, nil
-}
-
-func (s *memSecrets) Delete(_ context.Context, name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.m, name)
-	return nil
-}
 
 // fixture is an org with a GitHub connection to the fake, three users, an active agent
 // bound to acme/widgets, a ticket created by the owner and its running run, the tool server
@@ -170,14 +141,15 @@ func newFixture(ctx context.Context, preset string) *fixture {
 		return nil
 	})).To(Succeed())
 
-	secrets := &memSecrets{}
+	ring := secretstoretest.Keyring()
 	connID := uuid.New()
-	name := connections.SecretName(f.org.Bytes, connID)
-	Expect(secrets.Create(ctx, connections.Secret{Name: name, Data: map[string][]byte{connections.GitHubPrivateKeyField: f.gh.PEM}})).To(Succeed())
+	connPG := pgtype.UUID{Bytes: connID, Valid: true}
+	env, err := connections.SealFields(ring, f.org, connPG, map[string][]byte{connections.GitHubPrivateKeyField: f.gh.PEM})
+	Expect(err).NotTo(HaveOccurred())
 	cfg, _ := json.Marshal(connections.GitHubConfig{AppID: f.gh.AppID, InstallationID: f.gh.InstallationID})
-	_, err := q.CreateConnection(ctx, store.CreateConnectionParams{
-		OrgID: f.org, ID: pgtype.UUID{Bytes: connID, Valid: true}, Connector: "github", DisplayName: "acme",
-		Config: cfg, SecretName: name, CreatedBy: f.owner,
+	_, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+		OrgID: f.org, ID: connPG, Connector: "github", DisplayName: "acme",
+		Config: cfg, SecretEnvelope: env, Source: store.ConfigSourceUi, CreatedBy: f.owner,
 	})
 	Expect(err).NotTo(HaveOccurred())
 
@@ -201,7 +173,7 @@ func newFixture(ctx context.Context, preset string) *fixture {
 
 	log := slog.New(slog.NewTextHandler(f.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	f.svc = approvals.New(pool, approvals.Options{
-		Secrets: secrets, GitHub: github.NewClient(github.Options{BaseURL: f.gh.URL()}), Logger: log,
+		Keys: ring, GitHub: github.NewClient(github.Options{BaseURL: f.gh.URL()}), Logger: log,
 		ExecutionLease: 2 * time.Second,
 	})
 	tools, err := githubtools.New(pool, githubtools.Options{

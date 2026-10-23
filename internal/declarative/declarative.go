@@ -1,0 +1,426 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package declarative imports Kubernetes Secrets that declare an org's model providers and
+// connections (ADR 0056, plan item PV1), in the style of Argo CD's declarative setup
+// (https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/):
+//
+//	apiVersion: v1
+//	kind: Secret
+//	metadata:
+//	  name: openrouter
+//	  labels:
+//	    koinon.dev/secret-type: model-provider   # or: connection
+//	    koinon.dev/org: acme                     # the org's slug
+//	stringData:
+//	  name: openrouter
+//	  provider: openrouter
+//	  url: https://openrouter.ai/api/v1
+//	  apiKey: sk-or-...
+//	  models: |
+//	    - name: deepseek/deepseek-v4.1-flash
+//	      guard: true
+//	      rates: {input: "0.30", output: "1.20"}
+//
+// A Secret that parses becomes a provider (with its models) or a connection with source
+// "secret": read-only through the UI and admin API, winning a name collision with a UI entry
+// (which is disabled, with a visible reason), and removed when the Secret is deleted. A
+// Secret that does not parse is ignored: a Warning Event on the Secret and a log line say why,
+// and what it declared before stays. Every apply and removal is audited with the actor
+// "secret <name>".
+//
+// # Where it runs
+//
+// In koinon-api, not the reconciler. The importer writes through the same service layer as the
+// UI and admin API (audit, validation, sealing with the KEK), and koinon-api already holds the
+// Kubernetes client and namespace for Secrets and the KEKs. The reconciler is single-active and
+// renders gateway state; it picks the imported rows up on its next pass like any other row.
+// koinon-api runs several replicas: every replica imports, and the version check and the
+// transactions make that idempotent.
+//
+// # Trust boundary
+//
+// Write access to Koinon's namespace is platform-admin level: anyone who can create a
+// labelled Secret there can define providers and credentials for any org. Grant it as you
+// would grant cluster administration.
+package declarative
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
+
+	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/project"
+)
+
+// Event reasons.
+const (
+	ReasonInvalid = "InvalidKoinonSecret"
+	ReasonApplied = "AppliedByKoinon"
+)
+
+// Importer imports the declarative Secrets of one namespace.
+type Importer struct {
+	Client    kubernetes.Interface
+	Namespace string
+	Pool      *pgxpool.Pool
+	Catalog   *catalog.Service
+	// Sealer seals declared connections' secret fields.
+	Sealer connections.Sealer
+	Log    *slog.Logger
+	// Resync is the time between full passes without a change event. Default 5 minutes.
+	Resync time.Duration
+
+	mu     sync.Mutex
+	warned map[string]string // secret -> version already warned about
+}
+
+// Selector selects the Secrets the importer reads.
+func Selector() string {
+	return LabelSecretType + " in (" + TypeModelProvider + "," + TypeConnection + ")"
+}
+
+// Run imports on every change to a labelled Secret and on a timer, until ctx ends.
+func (i *Importer) Run(ctx context.Context) {
+	resync := i.Resync
+	if resync <= 0 {
+		resync = 5 * time.Minute
+	}
+	wake := make(chan struct{}, 1)
+	kick := func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+	factory := informers.NewSharedInformerFactoryWithOptions(i.Client, 0,
+		informers.WithNamespace(i.Namespace),
+		informers.WithTweakListOptions(func(o *metav1.ListOptions) { o.LabelSelector = Selector() }))
+	inf := factory.Core().V1().Secrets().Informer()
+	_, _ = inf.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(any) { kick() },
+		UpdateFunc: func(_, _ any) { kick() },
+		DeleteFunc: func(any) { kick() },
+	})
+	factory.Start(ctx.Done())
+
+	t := time.NewTicker(resync)
+	defer t.Stop()
+	kick()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-wake:
+			time.Sleep(200 * time.Millisecond) // coalesce a burst of events
+		case <-t.C:
+		}
+		select {
+		case <-wake:
+		default:
+		}
+		if err := i.Sync(ctx); err != nil && ctx.Err() == nil {
+			i.Log.Error("importing declarative Secrets failed", "err", err)
+		}
+	}
+}
+
+func (i *Importer) log() *slog.Logger {
+	if i.Log == nil {
+		return slog.Default()
+	}
+	return i.Log
+}
+
+type present struct {
+	org, typ, name string
+}
+
+// Sync reads every labelled Secret and converges the database to them. Per-Secret problems
+// are reported on the Secret and do not stop the others; the returned error is for failures
+// that stopped the whole pass.
+func (i *Importer) Sync(ctx context.Context) error {
+	// One replica imports at a time; the others wait, then find nothing changed.
+	lock, err := i.Pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("lock the import: %w", err)
+	}
+	defer lock.Release()
+	if _, err := lock.Exec(ctx, `SELECT pg_advisory_lock($1)`, int64(syncLockKey)); err != nil {
+		return fmt.Errorf("lock the import: %w", err)
+	}
+	defer func() {
+		_, _ = lock.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, int64(syncLockKey))
+	}()
+
+	list, err := i.Client.CoreV1().Secrets(i.Namespace).List(ctx, metav1.ListOptions{LabelSelector: Selector()})
+	if err != nil {
+		// Not listing means not knowing which Secrets exist: remove nothing.
+		return fmt.Errorf("list declarative Secrets: %w", err)
+	}
+	secrets := list.Items
+	sort.SliceStable(secrets, func(a, b int) bool {
+		ta, tb := secrets[a].CreationTimestamp, secrets[b].CreationTimestamp
+		if !ta.Equal(&tb) {
+			return ta.Before(&tb)
+		}
+		return secrets[a].Name < secrets[b].Name
+	})
+
+	q := store.New(i.Pool)
+	orgs := map[string]pgtype.UUID{}
+	orgOf := func(slug string) (pgtype.UUID, bool, error) {
+		if id, ok := orgs[slug]; ok {
+			return id, true, nil
+		}
+		o, err := q.GetOrgBySlug(ctx, slug)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, false, nil
+		}
+		if err != nil {
+			return pgtype.UUID{}, false, err
+		}
+		orgs[slug] = o.ID
+		return o.ID, true, nil
+	}
+
+	seen := map[present]bool{}
+	for k := range secrets {
+		sec := &secrets[k]
+		typ, slug := sec.Labels[LabelSecretType], sec.Labels[LabelOrg]
+		version := string(sec.UID) + "/" + sec.ResourceVersion
+		org, ok, err := orgOf(slug)
+		if err != nil {
+			return fmt.Errorf("look up org %q: %w", slug, err)
+		}
+		if !ok {
+			i.reject(ctx, sec, version, fmt.Errorf("label %s=%q names no org", LabelOrg, slug))
+			continue
+		}
+		seen[present{slug, typ, sec.Name}] = true
+		var applyErr error
+		switch typ {
+		case TypeModelProvider:
+			applyErr = i.applyProvider(ctx, org, sec, version)
+		case TypeConnection:
+			applyErr = i.applyConnection(ctx, org, sec, version)
+		}
+		if applyErr != nil {
+			var ie *invalidError
+			if !errors.As(applyErr, &ie) && !isUserError(applyErr) {
+				return fmt.Errorf("apply Secret %s: %w", sec.Name, applyErr)
+			}
+			i.reject(ctx, sec, version, applyErr)
+		}
+	}
+	return i.removeAbsent(ctx, q, seen)
+}
+
+type invalidError struct{ err error }
+
+func (e *invalidError) Error() string { return e.err.Error() }
+func (e *invalidError) Unwrap() error { return e.err }
+
+// isUserError reports whether err is about the Secret's content or the install's setup, which
+// the Secret's Event can say, rather than a failure that stops the pass.
+func isUserError(err error) bool {
+	var inv *catalog.InvalidError
+	return errors.As(err, &inv) || errors.Is(err, catalog.ErrConflict) ||
+		errors.Is(err, catalog.ErrNoKeys) || errors.Is(err, connections.ErrNoKeyring)
+}
+
+// syncLockKey is the Postgres advisory lock that serialises Sync across koinon-api replicas.
+const syncLockKey = 0x6b6f696e6f6e5359 // "koinonSY"
+
+func (i *Importer) applyProvider(ctx context.Context, org pgtype.UUID, sec *corev1.Secret, version string) error {
+	d, err := ParseProvider(sec, version)
+	if err != nil {
+		return &invalidError{err}
+	}
+	changed, err := i.Catalog.ApplyDeclaredProvider(ctx, org, d)
+	if err != nil {
+		return err
+	}
+	if changed {
+		i.log().Info("applied a declarative provider", "secret", sec.Name, "org", sec.Labels[LabelOrg], "provider", d.Name, "models", len(d.Models))
+		i.event(ctx, sec, corev1.EventTypeNormal, ReasonApplied, "Provider "+d.Name+" imported for org "+sec.Labels[LabelOrg])
+	}
+	return nil
+}
+
+func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *corev1.Secret, version string) error {
+	d, err := ParseConnection(sec, version)
+	if err != nil {
+		return &invalidError{err}
+	}
+	if i.Sealer == nil {
+		return connections.ErrNoKeyring
+	}
+	q := store.New(i.Pool)
+	all, err := q.ListConnections(ctx, org)
+	if err != nil {
+		return err
+	}
+	var cur *store.Connection
+	for k, c := range all {
+		if c.Source == store.ConfigSourceSecret && c.ManagedBySecret.String == sec.Name {
+			cur = &all[k]
+		}
+	}
+	if cur != nil && cur.DeclaredVersion.String == version {
+		return nil
+	}
+	config, err := connectionConfig(d)
+	if err != nil {
+		return err
+	}
+	actor := audit.Secret(sec.Name)
+	err = pgx.BeginFunc(ctx, i.Pool, func(tx pgx.Tx) error {
+		tq := store.New(tx)
+		after := map[string]any{
+			"connector": d.Connector, "displayName": d.DisplayName, "appId": d.AppID,
+			"installationId": d.InstallationID, "keyFingerprint": d.Fingerprint, "source": "secret",
+		}
+		if cur == nil {
+			id, err := newConnID()
+			if err != nil {
+				return err
+			}
+			env, err := connections.SealFields(i.Sealer, org, id, map[string][]byte{connections.GitHubPrivateKeyField: d.PrivateKeyPEM})
+			if err != nil {
+				return err
+			}
+			if _, err := tq.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+				OrgID: org, ID: id, Connector: d.Connector, DisplayName: d.DisplayName, Config: config,
+				SecretEnvelope: env, SecretFingerprint: d.Fingerprint, Source: store.ConfigSourceSecret,
+				ManagedBySecret: pgtype.Text{String: sec.Name, Valid: true}, DeclaredVersion: pgtype.Text{String: version, Valid: true},
+			}); err != nil {
+				return err
+			}
+			return audit.RecordErr(ctx, tq, audit.Event{Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: id.String(), After: after})
+		}
+		env, err := connections.SealFields(i.Sealer, org, cur.ID, map[string][]byte{connections.GitHubPrivateKeyField: d.PrivateKeyPEM})
+		if err != nil {
+			return err
+		}
+		if _, err := tq.UpdateDeclaredConnection(ctx, store.UpdateDeclaredConnectionParams{
+			OrgID: org, ID: cur.ID, DisplayName: d.DisplayName, Config: config, SecretEnvelope: env,
+			SecretFingerprint: d.Fingerprint, DeclaredVersion: pgtype.Text{String: version, Valid: true},
+		}); err != nil {
+			return err
+		}
+		return audit.RecordErr(ctx, tq, audit.Event{
+			Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: cur.ID.String(),
+			Before: map[string]any{"displayName": cur.DisplayName, "keyFingerprint": cur.SecretFingerprint}, After: after,
+		})
+	})
+	if err != nil {
+		return err
+	}
+	i.log().Info("applied a declarative connection", "secret", sec.Name, "org", sec.Labels[LabelOrg], "key_fingerprint", d.Fingerprint)
+	i.event(ctx, sec, corev1.EventTypeNormal, ReasonApplied, "Connection "+d.DisplayName+" imported for org "+sec.Labels[LabelOrg])
+	return nil
+}
+
+// removeAbsent deletes what a Secret declared when the Secret is gone (or no longer carries
+// the label, org or type that declared it).
+func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[present]bool) error {
+	orgIDs, err := q.ListOrgIDs(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range orgIDs {
+		slug, err := orgSlug(ctx, i.Pool, id)
+		if err != nil {
+			return err
+		}
+		names, err := i.Catalog.DeclaredProviderSecrets(ctx, id)
+		if err != nil {
+			return err
+		}
+		for _, name := range names {
+			if !seen[present{slug, TypeModelProvider, name}] {
+				if err := i.Catalog.RemoveDeclared(ctx, id, name); err != nil {
+					return err
+				}
+				i.log().Info("removed the providers of a deleted Secret", "secret", name, "org", slug)
+			}
+		}
+		conns, err := q.ListConnections(ctx, id)
+		if err != nil {
+			return err
+		}
+		for _, c := range conns {
+			if c.Source != store.ConfigSourceSecret || seen[present{slug, TypeConnection, c.ManagedBySecret.String}] {
+				continue
+			}
+			err := pgx.BeginFunc(ctx, i.Pool, func(tx pgx.Tx) error {
+				tq := store.New(tx)
+				if _, err := tq.DeleteConnection(ctx, store.DeleteConnectionParams{OrgID: id, ID: c.ID}); err != nil {
+					return err
+				}
+				return audit.RecordErr(ctx, tq, audit.Event{
+					Org: id, Actor: audit.Secret(c.ManagedBySecret.String), Action: "connection.undeclare", TargetKind: "connection",
+					TargetID: c.ID.String(), Before: map[string]any{"displayName": c.DisplayName, "keyFingerprint": c.SecretFingerprint},
+				})
+			})
+			if err != nil {
+				return err
+			}
+			i.log().Info("removed the connection of a deleted Secret", "secret", c.ManagedBySecret.String, "org", slug)
+		}
+	}
+	return nil
+}
+
+// reject reports an invalid Secret once per version.
+func (i *Importer) reject(ctx context.Context, sec *corev1.Secret, version string, err error) {
+	i.mu.Lock()
+	if i.warned == nil {
+		i.warned = map[string]string{}
+	}
+	already := i.warned[sec.Name] == version
+	i.warned[sec.Name] = version
+	i.mu.Unlock()
+	if already {
+		return
+	}
+	// The messages never quote a value, so they are safe in a log and an Event.
+	i.log().Warn("ignoring an invalid declarative Secret", "secret", sec.Name, "type", sec.Labels[LabelSecretType], "org", sec.Labels[LabelOrg], "err", err)
+	i.event(ctx, sec, corev1.EventTypeWarning, ReasonInvalid, "Ignored: "+err.Error())
+}
+
+// event records a Kubernetes Event on the Secret. Failing to record one is only logged.
+func (i *Importer) event(ctx context.Context, sec *corev1.Secret, typ, reason, msg string) {
+	if len(msg) > 1000 {
+		msg = msg[:1000]
+	}
+	now := metav1.NewTime(time.Now())
+	ev := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s.%x", sec.Name, time.Now().UnixNano()), Namespace: i.Namespace},
+		InvolvedObject: corev1.ObjectReference{
+			Kind: "Secret", Namespace: i.Namespace, Name: sec.Name, UID: sec.UID, APIVersion: "v1",
+		},
+		Type: typ, Reason: reason, Message: msg, FirstTimestamp: now, LastTimestamp: now, Count: 1,
+		Source: corev1.EventSource{Component: project.Name + "-api"},
+	}
+	if _, err := i.Client.CoreV1().Events(i.Namespace).Create(ctx, ev, metav1.CreateOptions{}); err != nil {
+		i.log().Warn("could not record a Kubernetes Event", "secret", sec.Name, "err", err)
+	}
+}

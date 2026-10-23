@@ -94,7 +94,8 @@ type Config struct {
 	// http://koinon-gateway.koinon.svc:8080. Flavors get <GatewayURL>/v1 for models and
 	// <GatewayURL>/mcp for tools. Required; it must not carry credentials.
 	GatewayURL string
-	// DefaultModel is the model of agents whose version names none, or "default".
+	// DefaultModel is the model of agents whose version names none, or "default", when set;
+	// otherwise the org's first served model is used (plan item PV1).
 	DefaultModel string
 	// SessionCwd is the harness session's working directory in the sandbox. Default
 	// /sandbox/work.

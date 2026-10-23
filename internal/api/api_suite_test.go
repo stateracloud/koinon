@@ -31,7 +31,6 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/approvals"
@@ -44,6 +43,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/runwatch"
+	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/templates"
 )
@@ -145,14 +146,14 @@ type envOptions struct {
 	watchPoll time.Duration
 	// ui is the web UI to serve, if any.
 	ui fs.FS
-	// secrets and github back ConnectionService and the repository binding
-	// of CreateAgentFromTemplate. Unset, the env uses a fake Kubernetes
-	// Secret store and the suite's fake GitHub; ghFake names the fake that
-	// github talks to, for fixtures that create connections.
-	secrets   connections.SecretStore
-	github    *github.Client
-	ghFake    *githubtest.Fake
-	noSecrets bool
+	// keys and github back ConnectionService and the repository binding
+	// of CreateAgentFromTemplate. Unset, the env uses a random keyring and the
+	// suite's fake GitHub; ghFake names the fake that github talks to, for
+	// fixtures that create connections.
+	keys   *secretstore.Keyring
+	github *github.Client
+	ghFake *githubtest.Fake
+	noKeys bool
 	// logs, when set, receives the services' and auth's logs as well.
 	logs io.Writer
 	// plainHTTP serves over http:// instead of TLS, with a matching PublicURL.
@@ -192,11 +193,11 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 		opts.ghFake = suiteGitHub()
 		opts.github = github.NewClient(github.Options{BaseURL: opts.ghFake.URL()})
 	}
-	if opts.secrets == nil && !opts.noSecrets {
-		if base != nil && base.opts.secrets != nil {
-			opts.secrets = base.opts.secrets
+	if opts.keys == nil && !opts.noKeys {
+		if base != nil && base.opts.keys != nil {
+			opts.keys = base.opts.keys
 		} else {
-			opts.secrets = connections.KubeSecrets{Client: fake.NewClientset(), Namespace: "koinon"}
+			opts.keys = secretstoretest.Keyring()
 		}
 	}
 	e := &env{opts: opts, conns: map[string]string{}}
@@ -260,10 +261,10 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	Eventually(e.hub.Listening()).Should(BeClosed())
 	rpc := services.New(e.pool, services.Options{
 		Hub: e.hub, WatchPollInterval: opts.watchPoll,
-		Logger:  slog.New(slog.NewTextHandler(logOut, nil)),
-		Secrets: opts.secrets, GitHub: opts.github,
+		Logger: slog.New(slog.NewTextHandler(logOut, nil)),
+		Keys:   servicesKeys(opts.keys), GitHub: opts.github,
 		Approvals: approvals.New(e.pool, approvals.Options{
-			Secrets: opts.secrets, GitHub: opts.github, Logger: slog.New(slog.NewTextHandler(logOut, nil)),
+			Keys: openerOf(opts.keys), GitHub: opts.github, Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 		}),
 	})
 
@@ -382,4 +383,19 @@ func mustTemplates() []*templates.Template {
 	ts, err := templates.All()
 	Expect(err).NotTo(HaveOccurred())
 	return ts
+}
+
+// servicesKeys and openerOf turn a nil *Keyring into a nil interface, which the services check.
+func servicesKeys(k *secretstore.Keyring) services.Keys {
+	if k == nil {
+		return nil
+	}
+	return k
+}
+
+func openerOf(k *secretstore.Keyring) connections.Opener {
+	if k == nil {
+		return nil
+	}
+	return k
 }

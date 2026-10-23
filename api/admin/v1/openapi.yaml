@@ -1,0 +1,425 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Koinon admin API (ADR 0056, plan item PV1). REST under /admin/v1, apart from the UI's
+# connect-rpc API. Bearer tokens only: an org-scoped token with the role admin or owner,
+# created in the UI or with this API. Every call is audited with the token's ID.
+#
+# The file declares OpenAPI 3.1 but uses only constructs that also exist in 3.0 (no type
+# arrays, no `null` types): the code generator pinned in go.mod (oapi-codegen) reads 3.0 and
+# warns on 3.1 documents.
+openapi: 3.1.0
+info:
+  title: Koinon admin API
+  version: 1.0.0
+  description: |
+    Manage an org's model providers, models and API tokens. The org is the token's org.
+    Providers and models declared by a labelled Kubernetes Secret (`koinon.dev/secret-type:
+    model-provider`) are read-only here: changing or deleting them answers 409 and names the
+    Secret. Secret values are never returned.
+  license:
+    name: Apache-2.0
+servers:
+  - url: /admin/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: providers
+  - name: models
+  - name: tokens
+paths:
+  /providers:
+    get:
+      tags: [providers]
+      operationId: listProviders
+      summary: List the org's providers, entered and declared.
+      responses:
+        "200":
+          description: The providers, by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [providers]
+      operationId: createProvider
+      summary: Add a provider.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderCreate"
+      responses:
+        "201":
+          description: The provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Provider"
+        default:
+          $ref: "#/components/responses/Error"
+  /providers/{providerId}:
+    parameters:
+      - $ref: "#/components/parameters/providerId"
+    get:
+      tags: [providers]
+      operationId: getProvider
+      summary: Get a provider.
+      responses:
+        "200":
+          description: The provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Provider"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [providers]
+      operationId: updateProvider
+      summary: Change a provider's type, URL or key. Declared providers answer 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderUpdate"
+      responses:
+        "200":
+          description: The provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Provider"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [providers]
+      operationId: deleteProvider
+      summary: Delete a provider and its models. Declared providers answer 409.
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+  /models:
+    get:
+      tags: [models]
+      operationId: listModels
+      summary: List the org's models, entered and declared.
+      responses:
+        "200":
+          description: The models, by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [models]
+      operationId: createModel
+      summary: Add a model to a provider. A model without rates is not served.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelCreate"
+      responses:
+        "201":
+          description: The model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Model"
+        default:
+          $ref: "#/components/responses/Error"
+  /models/{modelId}:
+    parameters:
+      - $ref: "#/components/parameters/modelId"
+    get:
+      tags: [models]
+      operationId: getModel
+      summary: Get a model.
+      responses:
+        "200":
+          description: The model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Model"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [models]
+      operationId: updateModel
+      summary: Change a model's routing guard or rates. Declared models answer 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelUpdate"
+      responses:
+        "200":
+          description: The model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Model"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [models]
+      operationId: deleteModel
+      summary: Delete a model. Declared models answer 409.
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+  /tokens:
+    get:
+      tags: [tokens]
+      operationId: listTokens
+      summary: List the org's API tokens, newest first.
+      responses:
+        "200":
+          description: The tokens, without their secrets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [tokens]
+      operationId: createToken
+      summary: Create an API token. The secret is shown once.
+      description: |
+        The token carries the role you ask for, at most the calling token's role. It expires
+        after `expiresIn` seconds: 30 days by default, between 1 hour and 90 days.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenCreate"
+      responses:
+        "201":
+          description: The token and its secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenCreated"
+        default:
+          $ref: "#/components/responses/Error"
+  /tokens/{tokenId}:
+    parameters:
+      - $ref: "#/components/parameters/tokenId"
+    delete:
+      tags: [tokens]
+      operationId: revokeToken
+      summary: Revoke a token. Revoking twice is fine.
+      responses:
+        "204":
+          description: Revoked.
+        default:
+          $ref: "#/components/responses/Error"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: An admin API token, `koinon_<prefix>_<secret>`.
+  parameters:
+    providerId:
+      name: providerId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    modelId:
+      name: modelId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    tokenId:
+      name: tokenId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+  responses:
+    Error:
+      description: |
+        An error. 400 invalid request, 401 missing, wrong, expired or revoked token, 403 the
+        token's role is too low, 404 not found, 409 the entry is declared by a Secret or
+        the name is taken.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {$ref: "#/components/schemas/ErrorCode"}
+            message: {type: string}
+    ErrorCode:
+      type: string
+      enum: [invalid_request, unauthenticated, permission_denied, not_found, conflict, internal]
+    Source:
+      type: string
+      enum: [ui, secret]
+      description: '`secret` entries are declared by a Kubernetes Secret and read-only here.'
+    Provider:
+      type: object
+      required: [id, name, type, url, hasKey, source, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string, example: openrouter}
+        type:
+          type: string
+          description: The upstream's provider type (agentgateway providerOverride).
+          example: openrouter
+        url: {type: string, example: "https://openrouter.ai/api/v1"}
+        hasKey:
+          type: boolean
+          description: Whether an API key is stored. The key itself is never returned.
+        source: {$ref: "#/components/schemas/Source"}
+        managedBySecret:
+          type: string
+          description: The declaring Secret, for source `secret`.
+        disabledReason:
+          type: string
+          description: Set while a declared provider of the same name shadows this one; it is not served.
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    ProviderList:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items: {$ref: "#/components/schemas/Provider"}
+    ProviderCreate:
+      type: object
+      required: [name, type, url]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$'
+        type:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{0,62}$'
+        url: {type: string}
+        apiKey:
+          type: string
+          description: Omit for keyless upstreams such as Ollama.
+    ProviderUpdate:
+      type: object
+      properties:
+        type: {type: string}
+        url: {type: string}
+        apiKey:
+          type: string
+          description: Replaces the key; an empty string removes it.
+    Rates:
+      type: object
+      required: [input, output]
+      description: USD per million tokens, as decimal strings.
+      properties:
+        input: {type: string, example: "0.30"}
+        output: {type: string, example: "1.20"}
+        cacheRead: {type: string, example: "0.03"}
+    Model:
+      type: object
+      required: [id, providerId, name, guard, source, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        providerId: {type: string, format: uuid}
+        name:
+          type: string
+          description: The name agents use. The gateway serves it per org as `<org slug>/<name>`.
+        guard:
+          type: boolean
+          description: The routing guard (ADR 0048), for OpenRouter providers.
+        rates: {$ref: "#/components/schemas/Rates"}
+        source: {$ref: "#/components/schemas/Source"}
+        managedBySecret: {type: string}
+        disabledReason: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    ModelList:
+      type: object
+      required: [models]
+      properties:
+        models:
+          type: array
+          items: {$ref: "#/components/schemas/Model"}
+    ModelCreate:
+      type: object
+      required: [providerId, name]
+      properties:
+        providerId: {type: string, format: uuid}
+        name: {type: string}
+        guard: {type: boolean}
+        rates: {$ref: "#/components/schemas/Rates"}
+    ModelUpdate:
+      type: object
+      properties:
+        guard: {type: boolean}
+        rates: {$ref: "#/components/schemas/Rates"}
+        clearRates:
+          type: boolean
+          description: Remove the rates, so the model is no longer served.
+    Role:
+      type: string
+      enum: [admin, owner]
+    Token:
+      type: object
+      required: [id, name, prefix, role, createdAt, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        prefix:
+          type: string
+          description: The public part of the token, to tell tokens apart.
+        role: {$ref: "#/components/schemas/Role"}
+        createdAt: {type: string, format: date-time}
+        expiresAt: {type: string, format: date-time}
+        revokedAt: {type: string, format: date-time}
+        lastUsedAt: {type: string, format: date-time}
+    TokenList:
+      type: object
+      required: [tokens]
+      properties:
+        tokens:
+          type: array
+          items: {$ref: "#/components/schemas/Token"}
+    TokenCreate:
+      type: object
+      required: [name, role]
+      properties:
+        name: {type: string, maxLength: 200}
+        role: {$ref: "#/components/schemas/Role"}
+        expiresIn:
+          type: integer
+          minimum: 3600
+          maximum: 7776000
+          description: Seconds until the token expires. Default 2592000 (30 days).
+    TokenCreated:
+      type: object
+      required: [token, secret]
+      properties:
+        token: {$ref: "#/components/schemas/Token"}
+        secret:
+          type: string
+          description: "Send as `Authorization: Bearer <secret>`. Shown only here."

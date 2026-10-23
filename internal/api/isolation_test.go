@@ -17,9 +17,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
-	k8sfake "k8s.io/client-go/kubernetes/fake"
-
-	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -27,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
+	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
@@ -36,6 +34,9 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
+	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 )
 
 // Org isolation suite (plan item D2). Every RPC is called by a user of org B
@@ -186,6 +187,26 @@ var isolationCases = map[string]isolationCase{
 		},
 	},
 
+	tokenv1alpha1connect.TokenServiceCreateTokenProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{
+				OrgId: org, Name: "intruder", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN,
+			})
+		},
+	},
+	tokenv1alpha1connect.TokenServiceListTokensProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.tokens.ListTokens(ctx, &tokenv1alpha1.ListTokensRequest{OrgId: org})
+		},
+	},
+	tokenv1alpha1connect.TokenServiceRevokeTokenProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.tokens.RevokeToken(ctx, &tokenv1alpha1.RevokeTokenRequest{OrgId: org, TokenId: f.token})
+		},
+	},
+
 	runv1alpha1connect.RunServiceWatchRunProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			stream, err := c.runs.WatchRun(ctx, &runv1alpha1.WatchRunRequest{OrgId: org, RunId: f.run.GetId()})
@@ -213,9 +234,9 @@ var _ = Describe("org isolation", func() {
 		gh := githubtest.New()
 		DeferCleanup(gh.Server.Close)
 		e := newEnv(ctx, envOptions{
-			secrets: connections.KubeSecrets{Client: k8sfake.NewClientset(), Namespace: "koinon"},
-			github:  github.NewClient(github.Options{BaseURL: gh.URL()}),
-			ghFake:  gh,
+			keys:   secretstoretest.Keyring(),
+			github: github.NewClient(github.Options{BaseURL: gh.URL()}),
+			ghFake: gh,
 		})
 		a := e.newIsolationFixture(ctx, gh.PEM)
 		b := e.newIsolationFixture(ctx, gh.PEM)
@@ -265,6 +286,11 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	Expect(err).NotTo(HaveOccurred())
 	f.connection = res.GetConnection().GetId()
 	f.approval = e.pendingApproval(ctx, f)
+	tok, err := f.owner.tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{
+		OrgId: f.org, Name: "ci", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN,
+	})
+	Expect(err).NotTo(HaveOccurred())
+	f.token = tok.GetToken().GetId()
 	return f
 }
 
@@ -284,6 +310,8 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1 AND status = 'untested'`, org),
 		count(ctx, e, `SELECT count(*) FROM approval_requests WHERE org_id = $1 AND status = 'pending'`, org),
+		count(ctx, e, `SELECT count(*) FROM api_tokens WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM api_tokens WHERE org_id = $1 AND revoked_at IS NULL`, org),
 	}
 }
 
