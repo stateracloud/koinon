@@ -27,7 +27,8 @@ jobs:
           version: v2.15.0
       - run: go vet ./...
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
-      - run: go test ./...
+      # test/flavors needs the flavor images, which the flavors job builds and tests.
+      - run: go test $(go list ./... | grep -v '/test/flavors$')
 
   web:
     name: web
