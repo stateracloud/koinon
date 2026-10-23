@@ -11,8 +11,8 @@ option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/connecti
 
 // ConnectionService manages an org's connections to external systems
 // (ADR 0007): one configured instance of a connector type, such as one GitHub
-// App installation. Secrets entered here are written straight to a Kubernetes
-// Secret (ADR 0021, 0049); no response ever contains them.
+// App installation. Secrets entered here are sealed straight into the encrypted
+// secret store (ADR 0021, 0056); no response ever contains them.
 service ConnectionService {
   // ListConnectorTypes returns the connector types this install ships, with
   // their scopes and setup guides. Any signed-in user.
@@ -21,7 +21,7 @@ service ConnectionService {
   }
 
   // CreateGitHubConnection creates a GitHub App connection. The private key
-  // is written to a Kubernetes Secret and never returned. Admins and owners.
+  // is stored encrypted and never returned. Admins and owners.
   rpc CreateGitHubConnection(CreateGitHubConnectionRequest) returns (CreateGitHubConnectionResponse);
 
   // GetConnection returns one connection. Viewers and above.
@@ -139,8 +139,8 @@ message CreateGitHubConnectionRequest {
   string display_name = 2;
   int64 app_id = 3;
   int64 installation_id = 4;
-  // Secure input (ADR 0021): the App's PEM private key. Written to a
-  // Kubernetes Secret, never stored in Postgres, returned or logged.
+  // Secure input (ADR 0021): the App's PEM private key. Stored only as an
+  // envelope in Postgres (ADR 0056), never returned or logged.
   string private_key = 5 [debug_redact = true];
   // Run TestConnection right after creating it.
   bool test = 6;

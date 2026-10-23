@@ -21,7 +21,7 @@ keys in Secret {{ include "koinon.kekSecretName" . }}. Back it up now; without i
 Rotation and the compromise procedure: docs/ops/secret-keys.md.
 
 Models: add a provider and its models in the UI, with the admin API, or declare them with a labelled
-Secret (koinon.dev/secret-type: model-provider); see the docs site, guide "Model providers".
+Secret (koinon.dev/secret-type: model-provider); see the docs site, guide "Models".
 
 Open the UI:
 {{- if .Values.ingress.enabled }}

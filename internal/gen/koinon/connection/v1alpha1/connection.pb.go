@@ -656,8 +656,8 @@ type CreateGitHubConnectionRequest struct {
 	DisplayName    string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
 	AppId          int64                  `protobuf:"varint,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	InstallationId int64                  `protobuf:"varint,4,opt,name=installation_id,json=installationId,proto3" json:"installation_id,omitempty"`
-	// Secure input (ADR 0021): the App's PEM private key. Written to a
-	// Kubernetes Secret, never stored in Postgres, returned or logged.
+	// Secure input (ADR 0021): the App's PEM private key. Stored only as an
+	// envelope in Postgres (ADR 0056), never returned or logged.
 	PrivateKey string `protobuf:"bytes,5,opt,name=private_key,json=privateKey,proto3" json:"private_key,omitempty"`
 	// Run TestConnection right after creating it.
 	Test          bool `protobuf:"varint,6,opt,name=test,proto3" json:"test,omitempty"`
