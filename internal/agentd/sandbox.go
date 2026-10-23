@@ -16,7 +16,8 @@ import (
 	"github.com/procoduck/koinon/internal/execution"
 )
 
-// waitSandbox waits until the agent's sandbox is ready and returns its workspace and name.
+// waitSandbox waits until the agent's sandbox is ready and returns its row: the workspace, the
+// name and the home generation the harness session must belong to.
 //
 // koinon-reconciler is the one source of sandbox state: it renders the sandbox, records what
 // it observes in agent_sandboxes and is the only component that starts or stops it. agentd
@@ -26,7 +27,7 @@ import (
 // rather than a resync interval (a takeover, for example, changes no run state and so fires no
 // trigger). A missing row is waited for, since the reconciler creates it when the agent is
 // activated. The run fails if the sandbox is not ready within SandboxTimeout.
-func (r *runner) waitSandbox(ctx context.Context) (workspace, name string, err error) {
+func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 	deadline := time.Now().Add(r.p.cfg.SandboxTimeout)
 	var nudged time.Time
 	var last string
@@ -37,11 +38,11 @@ func (r *runner) waitSandbox(ctx context.Context) (workspace, name string, err e
 			last = "not rendered yet"
 		case err != nil:
 			if ctx.Err() != nil {
-				return "", "", ctx.Err()
+				return store.AgentSandbox{}, ctx.Err()
 			}
 			last = err.Error()
 		case sb.State == store.SandboxStateReady:
-			return sb.Workspace, sb.SandboxName, nil
+			return sb, nil
 		case sb.State == store.SandboxStateError, sb.State == store.SandboxStateDeleted,
 			sb.State == store.SandboxStateRetained:
 			reason := "sandbox " + string(sb.State)
@@ -51,7 +52,7 @@ func (r *runner) waitSandbox(ctx context.Context) (workspace, name string, err e
 			if sb.Message != "" {
 				reason += ": " + sb.Message
 			}
-			return "", "", &failure{reason: reason}
+			return store.AgentSandbox{}, &failure{reason: reason}
 		default: // pending, starting, stopping, stopped, deleting (recreated with a new spec)
 			last = string(sb.State)
 		}
@@ -65,10 +66,10 @@ func (r *runner) waitSandbox(ctx context.Context) (workspace, name string, err e
 			}
 		}
 		if time.Now().After(deadline) {
-			return "", "", &failure{reason: fmt.Sprintf("sandbox not ready after %s (%s)", r.p.cfg.SandboxTimeout, last)}
+			return store.AgentSandbox{}, &failure{reason: fmt.Sprintf("sandbox not ready after %s (%s)", r.p.cfg.SandboxTimeout, last)}
 		}
 		if !sleep(ctx, r.p.cfg.Poll) {
-			return "", "", ctx.Err()
+			return store.AgentSandbox{}, ctx.Err()
 		}
 	}
 }

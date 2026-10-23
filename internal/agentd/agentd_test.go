@@ -160,6 +160,87 @@ var _ = Describe("Pool", func() {
 		expectOrdered(evs)
 		Expect(kinds(evs)).To(Equal([]string{"run.session", "run.prompt", "acp.agent_message_chunk", "run.succeeded"}))
 		Expect(payload(evs[0])).To(HaveKeyWithValue("loaded", true))
+
+		// The session was stored in the sandbox's home generation, which still matches.
+		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.HarnessSessionGeneration.String).To(Equal(e.gw.Sandbox(e.workspace, e.sandbox).GetMetadata().GetId()))
+		Expect(got.HarnessSessionGeneration.String).NotTo(BeEmpty())
+		Expect(kindsOf(ticketEvents(ctx, e, t))).NotTo(ContainElement("run.session_reset"))
+	})
+
+	It("starts a new session when the sandbox home was replaced since the session was stored", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		t := e.ticket(ctx, "first")
+		r1 := e.enqueue(ctx, t)
+		stop := e.pool("agentd-a")
+		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		stop()
+		before, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		Expect(err).NotTo(HaveOccurred())
+
+		// The reconciler recreates the sandbox (a spec change); OpenShell deletes its home.
+		e.recreateSandbox(ctx)
+		home := e.gw.Sandbox(e.workspace, e.sandbox).GetMetadata().GetId()
+		Expect(home).NotTo(Equal(before.HarnessSessionGeneration.String))
+
+		e.message(ctx, t, "second")
+		r2 := e.enqueue(ctx, t)
+		e.pool("agentd-b")
+		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+
+		prompts, loads, _, _ := e.harness.snapshot()
+		Expect(loads).To(BeEmpty(), "no session/load into an empty home")
+		Expect(prompts).To(Equal([]string{
+			"Ticket: " + t.Title + "\n\nfirst",
+			"Ticket: " + t.Title + "\n\nfirst\n\nsecond",
+		}), "the new session gets the whole ticket")
+
+		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.HarnessSessionID.String).To(Equal("ses_2"))
+		Expect(got.HarnessSessionGeneration.String).To(Equal(home))
+
+		evs := events(ctx, r2)
+		Expect(payload(evs[0])).To(HaveKeyWithValue("loaded", false))
+		Expect(payload(evs[0])).To(HaveKeyWithValue("reset", true))
+
+		var reset []store.TicketEvent
+		for _, ev := range ticketEvents(ctx, e, t) {
+			if ev.Kind == "run.session_reset" {
+				reset = append(reset, ev)
+			}
+		}
+		Expect(reset).To(HaveLen(1))
+		Expect(reset[0].ActorKind).To(Equal(store.TicketActorKindSystem))
+		Expect(reset[0].RunID).To(Equal(r2.ID))
+		var p map[string]string
+		Expect(json.Unmarshal(reset[0].Payload, &p)).To(Succeed())
+		Expect(p).To(HaveKeyWithValue("message", "The agent's workspace was reset, so this run starts a new session."))
+		Expect(p).To(HaveKeyWithValue("previousSessionId", "ses_1"))
+		Expect(p).To(HaveKeyWithValue("sessionId", "ses_2"))
+	})
+
+	It("starts a new session for a session stored without a home generation", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		t := e.ticket(ctx, "first")
+		r1 := e.enqueue(ctx, t)
+		stop := e.pool("agentd-a")
+		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		stop()
+		// A ticket from before home generations existed.
+		_, err := db.Exec(ctx, `UPDATE tickets SET harness_session_generation = NULL WHERE org_id = $1 AND id = $2`, e.org, t.ID)
+		Expect(err).NotTo(HaveOccurred())
+
+		r2 := e.enqueue(ctx, t)
+		e.pool("agentd-b")
+		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		_, loads, _, _ := e.harness.snapshot()
+		Expect(loads).To(BeEmpty())
+		Expect(kindsOf(ticketEvents(ctx, e, t))).To(ContainElement("run.session_reset"))
+		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.HarnessSessionGeneration.Valid).To(BeTrue())
 	})
 
 	It("asks the reconciler to start a stopped sandbox and waits for it before it execs", func(ctx SpecContext) {
@@ -310,8 +391,10 @@ var _ = Describe("Pool", func() {
 	It("fails the run with a reason when the session cannot be loaded", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		t := e.ticket(ctx, "hello")
-		_, err := db.Exec(ctx, `UPDATE tickets SET harness_session_id = 'ses_gone', harness_session_cwd = '/sandbox/work'
-			WHERE org_id = $1 AND id = $2`, e.org, t.ID)
+		// Stored in the current home, so agentd loads it, but the harness does not know it.
+		_, err := db.Exec(ctx, `UPDATE tickets SET harness_session_id = 'ses_gone', harness_session_cwd = '/sandbox/work',
+			harness_session_generation = $3 WHERE org_id = $1 AND id = $2`,
+			e.org, t.ID, e.gw.Sandbox(e.workspace, e.sandbox).GetMetadata().GetId())
 		Expect(err).NotTo(HaveOccurred())
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")

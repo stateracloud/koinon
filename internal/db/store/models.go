@@ -705,6 +705,7 @@ type AgentSandbox struct {
 	ObservedAt     pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+	HomeGeneration pgtype.Text
 }
 
 type AgentVersion struct {
@@ -908,18 +909,19 @@ type Template struct {
 }
 
 type Ticket struct {
-	OrgID             pgtype.UUID
-	ID                pgtype.UUID
-	Title             string
-	Status            TicketStatus
-	AgentID           pgtype.UUID
-	CreatedBy         pgtype.UUID
-	HarnessSessionID  pgtype.Text
-	HarnessSessionCwd pgtype.Text
-	LastEventSeq      int64
-	DoneAt            pgtype.Timestamptz
-	CreatedAt         pgtype.Timestamptz
-	UpdatedAt         pgtype.Timestamptz
+	OrgID                    pgtype.UUID
+	ID                       pgtype.UUID
+	Title                    string
+	Status                   TicketStatus
+	AgentID                  pgtype.UUID
+	CreatedBy                pgtype.UUID
+	HarnessSessionID         pgtype.Text
+	HarnessSessionCwd        pgtype.Text
+	LastEventSeq             int64
+	DoneAt                   pgtype.Timestamptz
+	CreatedAt                pgtype.Timestamptz
+	UpdatedAt                pgtype.Timestamptz
+	HarnessSessionGeneration pgtype.Text
 }
 
 type TicketEvent struct {

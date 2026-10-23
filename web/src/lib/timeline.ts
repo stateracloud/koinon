@@ -107,6 +107,11 @@ function ticketItem(ev: TicketEvent): TimelineItem {
       const n = Array.isArray(p.approvals) ? p.approvals.length : 0
       return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} paused for ${n === 1 ? '1 approval' : `${n} approvals`}`, runId }
     }
+    case 'run.session_reset':
+      // agentd starts a new harness session when the sandbox's home volume was
+      // replaced since the ticket's session was stored: {message,
+      // previousSessionId, sessionId}.
+      return { key, at, type: 'note', text: str(p.message) || "The agent's workspace was reset, so this run starts a new session.", runId }
     case 'run.canceled':
     case 'run.failed': {
       // scheduler.RecordCancel writes {reason, message}; agentd's finish writes {reason}.
