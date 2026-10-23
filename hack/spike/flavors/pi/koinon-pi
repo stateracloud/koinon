@@ -1,0 +1,10 @@
+#!/bin/sh
+# Start pi-acp with Koinon's config in the sandbox workspace (pi-acp keeps its session map in $HOME/.pi).
+set -eu
+# OpenShell does not pass the image's ENV to the processes it starts.
+export PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0
+mkdir -p "$HOME/.pi/agent"
+for f in models.json settings.json mcp.json; do
+  [ -f "$HOME/.pi/agent/$f" ] || cp "/etc/koinon/pi/$f" "$HOME/.pi/agent/$f"
+done
+exec pi-acp "$@"

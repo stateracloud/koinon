@@ -1,0 +1,23 @@
+# Spike values for the OpenShell gateway chart (oci://ghcr.io/nvidia/openshell/helm-chart 0.1.5).
+# See docs/spikes/openshell.md, "OpenShell configuration".
+server:
+  telemetryEnabled: false
+  defaultRuntimeClassName: kata
+  # Copied by OpenShell into each managed workspace namespace; pulls koinon/* from Zot.
+  sandboxImagePullSecrets: [{name: zot-pull}]
+  drivers:
+    kubernetes:
+      workspaceMode: managed
+  credentialDrivers:
+    vault:
+      enabled: true
+      # The vault driver refuses plain HTTP to non-loopback addresses, so the
+      # spike uses the platform's public HTTPS route instead of the in-cluster service.
+      address: https://bao.apps.lab.example.invalid
+      mount: openshell-spike
+      kvVersion: "2"
+      authMethod: kubernetes
+      kubernetesAuthMount: kubernetes
+      role: openshell-spike
+networkPolicy:
+  enabled: true
