@@ -1,0 +1,16 @@
+Error handling request {
+  jsonrpc: "2.0",
+  id: 2,
+  method: "session/load",
+  params: {
+    cwd: "/sandbox/work",
+    mcpServers: [],
+    sessionId: "ses_doesnotexist000000000000",
+  },
+} {
+  code: -32603,
+  message: "Internal error: OpenCode service failure",
+  data: {
+    service: "session",
+  },
+}

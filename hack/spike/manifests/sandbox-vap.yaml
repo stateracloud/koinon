@@ -1,0 +1,44 @@
+# Spike step 8.13/8.14: native ValidatingAdmissionPolicy for OpenShell-managed
+# namespaces only (ADR 0045). Bound by namespace label, so no other workload is affected.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata: {name: koinon-spike-sandbox-pods}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods, pods/ephemeralcontainers]
+  validations:
+    - expression: "!has(request.subResource) || request.subResource != 'ephemeralcontainers'"
+      message: ephemeral containers are not allowed on sandbox pods
+    - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
+      message: hostNetwork is not allowed
+    - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC)"
+      message: host PID and IPC namespaces are not allowed
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath))"
+      message: hostPath volumes are not allowed
+    - expression: >-
+        object.spec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)
+      message: privileged containers are not allowed
+    - expression: >-
+        !has(object.metadata.labels) || !('openshell.ai/boundary-role' in object.metadata.labels) ||
+        object.metadata.labels['openshell.ai/boundary-role'] != 'workload' ||
+        (has(object.spec.runtimeClassName) && object.spec.runtimeClassName in ['kata', 'kata-qemu'])
+      message: sandbox workload pods must use runtimeClassName kata or kata-qemu
+    - expression: >-
+        !has(object.metadata.annotations) ||
+        object.metadata.annotations.all(k, !k.startsWith('io.katacontainers.'))
+      message: io.katacontainers.* annotations are not allowed on sandbox pods (they can switch off guest seccomp)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata: {name: koinon-spike-sandbox-pods}
+spec:
+  policyName: koinon-spike-sandbox-pods
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels: {openshell.ai/managed-by: openshell}

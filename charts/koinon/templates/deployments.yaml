@@ -55,11 +55,8 @@ spec:
                 secretKeyRef:
                   name: {{ include "koinon.componentName" (list $ "bootstrap-admin") }}
                   key: username
-            - name: KOINON_BOOTSTRAP_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "koinon.componentName" (list $ "bootstrap-admin") }}
-                  key: password
+            - name: KOINON_BOOTSTRAP_PASSWORD_FILE
+              value: /etc/koinon/bootstrap-admin/password
             {{- end }}
           securityContext:
             {{- include "koinon.containerSecurityContext" $ | nindent 12 }}
@@ -71,6 +68,11 @@ spec:
             {{- if ne $component "api" }}
             {{- include "koinon.openshellVolumeMount" $ | nindent 12 }}
             {{- end }}
+            {{- if and (eq $component "api") $.Values.bootstrapAdmin.enabled }}
+            - name: bootstrap-admin
+              mountPath: /etc/koinon/bootstrap-admin
+              readOnly: true
+            {{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -78,6 +80,14 @@ spec:
         {{- include "koinon.dbVolume" $ | nindent 8 }}
         {{- if ne $component "api" }}
         {{- include "koinon.openshellVolume" $ | nindent 8 }}
+        {{- end }}
+        {{- if and (eq $component "api") $.Values.bootstrapAdmin.enabled }}
+        {{- /* Only the password key is projected; the API reads secrets from files. */}}
+        - name: bootstrap-admin
+          secret:
+            secretName: {{ include "koinon.componentName" (list $ "bootstrap-admin") }}
+            items:
+              - {key: password, path: password}
         {{- end }}
         - name: tmp
           emptyDir:

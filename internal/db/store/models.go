@@ -11,6 +11,134 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AgentFlavor string
+
+const (
+	AgentFlavorOpencode AgentFlavor = "opencode"
+	AgentFlavorHermes   AgentFlavor = "hermes"
+	AgentFlavorPi       AgentFlavor = "pi"
+)
+
+func (e *AgentFlavor) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AgentFlavor(s)
+	case string:
+		*e = AgentFlavor(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AgentFlavor: %T", src)
+	}
+	return nil
+}
+
+type NullAgentFlavor struct {
+	AgentFlavor AgentFlavor
+	Valid       bool // Valid is true if AgentFlavor is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAgentFlavor) Scan(value interface{}) error {
+	if value == nil {
+		ns.AgentFlavor, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AgentFlavor.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAgentFlavor) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AgentFlavor), nil
+}
+
+type AgentStatus string
+
+const (
+	AgentStatusDraft    AgentStatus = "draft"
+	AgentStatusActive   AgentStatus = "active"
+	AgentStatusArchived AgentStatus = "archived"
+)
+
+func (e *AgentStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AgentStatus(s)
+	case string:
+		*e = AgentStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AgentStatus: %T", src)
+	}
+	return nil
+}
+
+type NullAgentStatus struct {
+	AgentStatus AgentStatus
+	Valid       bool // Valid is true if AgentStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAgentStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.AgentStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AgentStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAgentStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AgentStatus), nil
+}
+
+type AuthMethod string
+
+const (
+	AuthMethodPassword AuthMethod = "password"
+	AuthMethodOidc     AuthMethod = "oidc"
+)
+
+func (e *AuthMethod) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AuthMethod(s)
+	case string:
+		*e = AuthMethod(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AuthMethod: %T", src)
+	}
+	return nil
+}
+
+type NullAuthMethod struct {
+	AuthMethod AuthMethod
+	Valid      bool // Valid is true if AuthMethod is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAuthMethod) Scan(value interface{}) error {
+	if value == nil {
+		ns.AuthMethod, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AuthMethod.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAuthMethod) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AuthMethod), nil
+}
+
 type IdentityMode string
 
 const (
@@ -182,6 +310,231 @@ func (ns NullOrgRole) Value() (driver.Value, error) {
 	return string(ns.OrgRole), nil
 }
 
+type RunParkReason string
+
+const (
+	RunParkReasonApproval      RunParkReason = "approval"
+	RunParkReasonBudget        RunParkReason = "budget"
+	RunParkReasonA2a           RunParkReason = "a2a"
+	RunParkReasonInputRequired RunParkReason = "input_required"
+)
+
+func (e *RunParkReason) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RunParkReason(s)
+	case string:
+		*e = RunParkReason(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RunParkReason: %T", src)
+	}
+	return nil
+}
+
+type NullRunParkReason struct {
+	RunParkReason RunParkReason
+	Valid         bool // Valid is true if RunParkReason is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRunParkReason) Scan(value interface{}) error {
+	if value == nil {
+		ns.RunParkReason, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RunParkReason.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRunParkReason) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RunParkReason), nil
+}
+
+type RunState string
+
+const (
+	RunStateQueued    RunState = "queued"
+	RunStateStarting  RunState = "starting"
+	RunStateRunning   RunState = "running"
+	RunStateParked    RunState = "parked"
+	RunStateSucceeded RunState = "succeeded"
+	RunStateFailed    RunState = "failed"
+	RunStateCanceled  RunState = "canceled"
+)
+
+func (e *RunState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RunState(s)
+	case string:
+		*e = RunState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RunState: %T", src)
+	}
+	return nil
+}
+
+type NullRunState struct {
+	RunState RunState
+	Valid    bool // Valid is true if RunState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRunState) Scan(value interface{}) error {
+	if value == nil {
+		ns.RunState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RunState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRunState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RunState), nil
+}
+
+type TicketActorKind string
+
+const (
+	TicketActorKindUser   TicketActorKind = "user"
+	TicketActorKindAgent  TicketActorKind = "agent"
+	TicketActorKindSystem TicketActorKind = "system"
+)
+
+func (e *TicketActorKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TicketActorKind(s)
+	case string:
+		*e = TicketActorKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TicketActorKind: %T", src)
+	}
+	return nil
+}
+
+type NullTicketActorKind struct {
+	TicketActorKind TicketActorKind
+	Valid           bool // Valid is true if TicketActorKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTicketActorKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.TicketActorKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TicketActorKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTicketActorKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TicketActorKind), nil
+}
+
+type TicketStatus string
+
+const (
+	TicketStatusTodo         TicketStatus = "todo"
+	TicketStatusInProgress   TicketStatus = "in_progress"
+	TicketStatusWaitingOnYou TicketStatus = "waiting_on_you"
+	TicketStatusDone         TicketStatus = "done"
+)
+
+func (e *TicketStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TicketStatus(s)
+	case string:
+		*e = TicketStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TicketStatus: %T", src)
+	}
+	return nil
+}
+
+type NullTicketStatus struct {
+	TicketStatus TicketStatus
+	Valid        bool // Valid is true if TicketStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTicketStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.TicketStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TicketStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTicketStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TicketStatus), nil
+}
+
+type Agent struct {
+	OrgID           pgtype.UUID
+	ID              pgtype.UUID
+	DisplayName     string
+	Status          AgentStatus
+	Flavor          AgentFlavor
+	TemplateID      pgtype.UUID
+	ActiveVersionID pgtype.UUID
+	LatestVersion   int32
+	Epoch           int64
+	CreatedBy       pgtype.UUID
+	ActivatedBy     pgtype.UUID
+	ActivatedAt     pgtype.Timestamptz
+	ArchivedAt      pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
+type AgentVersion struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	AgentID   pgtype.UUID
+	Version   int32
+	Config    []byte
+	CreatedBy pgtype.UUID
+	CreatedAt pgtype.Timestamptz
+}
+
+type LocalCredential struct {
+	UserID             pgtype.UUID
+	Username           string
+	PasswordHash       string
+	MustChangePassword bool
+	PasswordChangedAt  pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+}
+
+type OidcLoginFlow struct {
+	StateHash    []byte
+	CodeVerifier string
+	Nonce        string
+	ReturnTo     string
+	CreatedAt    pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
+}
+
 type Org struct {
 	ID           pgtype.UUID
 	Slug         string
@@ -218,6 +571,94 @@ type PlatformAdmin struct {
 	UserID    pgtype.UUID
 	GrantedBy pgtype.UUID
 	GrantedAt pgtype.Timestamptz
+}
+
+type Run struct {
+	OrgID               pgtype.UUID
+	ID                  pgtype.UUID
+	AgentID             pgtype.UUID
+	AgentVersionID      pgtype.UUID
+	TicketID            pgtype.UUID
+	State               RunState
+	Epoch               int64
+	OwnerID             pgtype.Text
+	LeaseExpiresAt      pgtype.Timestamptz
+	HeartbeatAt         pgtype.Timestamptz
+	ReadyAt             pgtype.Timestamptz
+	ParkReason          NullRunParkReason
+	ParkedAt            pgtype.Timestamptz
+	ParkExpiresAt       pgtype.Timestamptz
+	OutcomeReason       pgtype.Text
+	MaxWallClockSeconds int32
+	MaxTokens           int64
+	LastEventSeq        int64
+	StartedAt           pgtype.Timestamptz
+	FinishedAt          pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+}
+
+type RunEvent struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	RunID     pgtype.UUID
+	Seq       int64
+	Epoch     int64
+	Kind      string
+	Payload   []byte
+	CreatedAt pgtype.Timestamptz
+}
+
+type Session struct {
+	ID            pgtype.UUID
+	TokenHash     []byte
+	UserID        pgtype.UUID
+	AuthMethod    AuthMethod
+	CreatedAt     pgtype.Timestamptz
+	LastSeenAt    pgtype.Timestamptz
+	IdleExpiresAt pgtype.Timestamptz
+	ExpiresAt     pgtype.Timestamptz
+	RevokedAt     pgtype.Timestamptz
+}
+
+type Template struct {
+	ID           pgtype.UUID
+	Slug         string
+	ContentHash  string
+	DisplayName  string
+	Description  string
+	Spec         []byte
+	CreatedAt    pgtype.Timestamptz
+	LastSyncedAt pgtype.Timestamptz
+}
+
+type Ticket struct {
+	OrgID             pgtype.UUID
+	ID                pgtype.UUID
+	Title             string
+	Status            TicketStatus
+	AgentID           pgtype.UUID
+	CreatedBy         pgtype.UUID
+	HarnessSessionID  pgtype.Text
+	HarnessSessionCwd pgtype.Text
+	LastEventSeq      int64
+	DoneAt            pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+}
+
+type TicketEvent struct {
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+	TicketID     pgtype.UUID
+	Seq          int64
+	Kind         string
+	ActorKind    TicketActorKind
+	ActorUserID  pgtype.UUID
+	ActorAgentID pgtype.UUID
+	RunID        pgtype.UUID
+	Payload      []byte
+	CreatedAt    pgtype.Timestamptz
 }
 
 type User struct {
