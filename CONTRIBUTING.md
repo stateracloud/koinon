@@ -33,7 +33,7 @@ make test       # Go and web unit tests
 make lint       # golangci-lint, oxlint, tsc, buf lint, migration lint
 make generate   # regenerate protobuf and sqlc code; commit the result
 make breaking   # buf breaking against main
-make dev        # Tilt against the home-lab cluster (docs/dev/)
+make dev        # Tilt against the home lab, or kind after `make dev-kind-up` (docs/dev/loop.md)
 ```
 
 ## Pull requests

@@ -26,13 +26,14 @@ kubectl --context homelab -n koinon create secret docker-registry dev-registry \
   --docker-username=<pull user> --docker-password="$(security find-generic-password -s <pull entry> -w)"
 ```
 
-Then `make dev`. The Tiltfile only allows the `homelab` kube context.
+Then `make dev` (see [loop.md](loop.md)). The Tiltfile allows the contexts `homelab`, `homelab-koinon`
+and `kind-koinon-*`.
 
 ## Dev database
 
-`hack/dev/postgres.yaml` is a single-instance CloudNativePG `Cluster` named `koinon-pg`, using the
-platform's operator. CNPG writes the connection string to the `uri` key of secret `koinon-pg-app`;
-the api and reconciler read it as `DATABASE_URL`.
+The chart renders the single-instance CloudNativePG `Cluster` `koinon-pg` (`postgres.mode: cnpg`),
+using the platform's operator, and generates one password Secret per component role
+([loop.md](loop.md)).
 
 ## Troubleshooting
 
