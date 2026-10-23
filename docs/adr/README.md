@@ -62,3 +62,10 @@ are in [0046](0046-adr-conventions.md).
 | [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted |
 | [0046](0046-adr-conventions.md) | ADR conventions | Accepted |
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted |
+| [0052](0052-opencode-v2-flavor.md) | OpenCode flavor on OpenCode v2 | Accepted |
+
+Some ADRs live only on another pull request's branch and have no row on the branches that lack
+them: 0048 (OpenShell spike results) is on PR #15 (`spike/openshell-run`), 0049 (v0.1 scope
+decisions) is on PR #16 (`docs/plan-v0.1`), 0050 (spend ledger ingestion and net limits) is on
+PR #32 (`feat/spend-ledger`) and 0051 (session home generations) is on PR #38
+(`fix/session-generation`). Their rows come with them when those pull requests merge.
