@@ -103,4 +103,40 @@ describe('buildTimeline', () => {
       { key: 't:2', at: 200, type: 'note', text: message, runId: run },
     ])
   })
+
+  const chunk = (seq: number, t: string) => runEvent(seq, 'acp.agent_message_chunk', { sessionUpdate: 'agent_message_chunk', content: text(t) })
+  const agentTexts = (items: ReturnType<typeof buildTimeline>) =>
+    items.flatMap((i) => (i.type === 'agent-text' || (i.type === 'message' && i.actor === ActorKind.AGENT) ? [i.text] : []))
+
+  it('shows a streamed reply that is not persisted yet', () => {
+    const items = buildTimeline([], { [run]: [chunk(1, 'Hello '), chunk(2, 'there')] })
+    expect(agentTexts(items)).toEqual(['Hello there'])
+  })
+
+  it('shows a streamed reply once when the persisted message arrives', () => {
+    const items = buildTimeline([ticketEvent(1, 1100, 'message', { text: 'Hello there' }, ActorKind.AGENT)], {
+      [run]: [chunk(1, 'Hello '), chunk(2, 'there')],
+    })
+    expect(agentTexts(items)).toEqual(['Hello there'])
+    expect(items.map((i) => i.type)).toEqual(['message'])
+  })
+
+  it('shows each reply once across a park and resume', () => {
+    const items = buildTimeline(
+      [
+        ticketEvent(1, 1100, 'message', { text: 'Asked for approval.' }, ActorKind.AGENT),
+        ticketEvent(2, 1200, 'run.parked', { reason: 'approval', approvals: ['a'] }),
+        ticketEvent(3, 1500, 'message', { text: 'The pull request is open.' }, ActorKind.AGENT),
+      ],
+      { [run]: [chunk(1, 'Asked for '), chunk(2, 'approval.'), chunk(30, 'The pull request '), chunk(31, 'is open.')] },
+    )
+    expect(agentTexts(items)).toEqual(['Asked for approval.', 'The pull request is open.'])
+  })
+
+  it('keeps the live text of a resumed turn until its message is persisted', () => {
+    const items = buildTimeline([ticketEvent(1, 1100, 'message', { text: 'Asked for approval.' }, ActorKind.AGENT)], {
+      [run]: [chunk(1, 'Asked for approval.'), chunk(30, 'Resumed, still typing')],
+    })
+    expect(agentTexts(items)).toEqual(['Asked for approval.', 'Resumed, still typing'])
+  })
 })

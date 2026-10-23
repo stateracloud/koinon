@@ -22,7 +22,8 @@ export default defineConfig({
   expect: { timeout: 30_000 },
   forbidOnly: !!process.env.CI,
   reporter: process.env.CI ? 'github' : 'list',
-  use: { baseURL: `http://localhost:${port}`, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
+  use: { baseURL: `http://localhost:${port}`, // Traces record fill() text (passwords, the fake app's key) and CI uploads test output.
+    trace: process.env.CI ? 'off' : 'retain-on-failure', screenshot: 'only-on-failure' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
     command: `pnpm exec vite --port ${port} --strictPort`,
