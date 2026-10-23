@@ -137,7 +137,7 @@ test-escape: ## Run the escape suite's OpenShell cases against a real gateway (h
 	@test -n "$$KOINON_OPENSHELL_ENDPOINT" || { echo "set KOINON_OPENSHELL_* (see test/escape)"; exit 1; }
 	$(GO) test -count=1 -v -timeout 20m ./test/escape/ -ginkgo.label-filter=openshell
 
-# Dev loop (ADR 0039, docs/development.md). `make dev` picks the profile from the kube context:
+# Dev loop (ADR 0039, docs/dev/loop.md). `make dev` picks the profile from the kube context:
 # homelab/homelab-koinon, or kind-koinon-dev after `make dev-kind-up`.
 DEV_KIND_CLUSTER ?= koinon-dev
 

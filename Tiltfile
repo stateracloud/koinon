@@ -8,7 +8,7 @@
 #   kind     context kind-koinon-*: images loaded into the node, runc, the fake model server and the
 #            fake GitHub. Prerequisites: `make dev-kind-up`.
 #
-# `tilt up`, or for example `tilt up -- --flavors=opencode,hermes,pi`. See docs/development.md.
+# `tilt up`, or for example `tilt up -- --flavors=opencode,hermes,pi`. See docs/dev/loop.md.
 
 config.define_string('mode', usage='homelab or kind; default: from the kube context')
 config.define_string('flavors', usage='comma-separated flavor images to build (default: opencode)')
@@ -16,6 +16,7 @@ config.define_string('platform', usage='linux/amd64 or linux/arm64; default: amd
 config.define_string('openshell-tls-secret', usage='Secret in the openshell namespace holding the client certificate (tls.crt, tls.key, ca.crt); copied into koinon. Empty: no mTLS')
 config.define_string('openshell-namespace', usage='namespace of the OpenShell gateway (default: openshell)')
 config.define_string_list('helm-set', usage='extra chart values, key=value (helm --set)')
+config.define_bool('sandbox-policy', usage='render the chart\'s cluster-wide sandbox ValidatingAdmissionPolicies on the home lab (needs an approved Rivet request; always on for kind)')
 config.define_bool('web', usage='run the Vite dev server for web/ (default: true)')
 cfg = config.parse()
 
@@ -26,12 +27,12 @@ mode = cfg.get('mode', '')
 if not mode:
     if ctx in HOMELAB_CONTEXTS:
         mode = 'homelab'
-    elif ctx.startswith('kind-koinon'):
+    elif ctx.startswith('kind-koinon-'):
         mode = 'kind'
 if mode == 'homelab' and ctx not in HOMELAB_CONTEXTS:
     fail('mode homelab needs the kube context homelab or homelab-koinon, not %s' % ctx)
-if mode == 'kind' and not ctx.startswith('kind-koinon'):
-    fail('mode kind needs a kube context named kind-koinon* (make dev-kind-up creates kind-koinon-dev), not %s' % ctx)
+if mode == 'kind' and not ctx.startswith('kind-koinon-'):
+    fail('mode kind needs a kube context named kind-koinon-* (make dev-kind-up creates kind-koinon-dev), not %s' % ctx)
 if mode not in ['homelab', 'kind']:
     fail('kube context %s is not a Koinon dev cluster: use homelab, homelab-koinon or kind-koinon-*' % ctx)
 
@@ -43,7 +44,7 @@ platform = cfg.get('platform', '') or ('linux/' + str(local('go env GOARCH', qui
 registry = 'kind.local' if KIND else 'zot.apps.lab.example.invalid/koinon'
 kind_cluster = ctx[len('kind-'):]
 os_ns = cfg.get('openshell-namespace', 'openshell')
-os_tls = cfg.get('openshell-tls-secret', 'openshell-client-tls' if KIND else '')
+os_tls = cfg.get('openshell-tls-secret', 'openshell-client-tls')
 flavors = [f for f in cfg.get('flavors', 'opencode').split(',') if f]
 ALL_FLAVORS = ['opencode', 'hermes', 'pi']
 for f in flavors:
@@ -79,13 +80,15 @@ for n in ['koinon-api', 'koinon-reconciler', 'koinon-agentd']:
 watch_file('flavors')
 flavor_tags = {}
 for f in flavors:
+    # The load-time tag is only the chart's value; the build computes its own, so a flavor edit
+    # that has not reloaded the Tiltfile yet is still built and tagged consistently.
     flavor_tags[f] = str(local('hack/flavor-tag.sh ' + f, quiet=True)).strip()
-    ref = '%s/flavor-%s:%s' % (registry, f, flavor_tags[f])
+    ref = '%s/flavor-%s:$T' % (registry, f)
     publish = ('kind load docker-image --name %s %s' % (kind_cluster, ref)) if KIND else ('docker push %s' % ref)
     local_resource(
         'flavor-' + f,
-        'make flavor-%s FLAVOR_TAG=%s FLAVOR_PLATFORMS=%s && docker tag koinon/flavor-%s:%s %s && %s' %
-        (f, flavor_tags[f], platform, f, flavor_tags[f], ref, publish),
+        'T=$(hack/flavor-tag.sh %s) && make flavor-%s FLAVOR_TAG=$T FLAVOR_PLATFORMS=%s && docker tag koinon/flavor-%s:$T %s && %s' %
+        (f, f, platform, f, ref, publish),
         deps=['flavors/' + f, 'flavors/common'],
         labels=['flavors'],
     )
@@ -130,6 +133,10 @@ if KIND:
 # chart leaves without one, because Tilt applies the objects one by one.
 values = ['hack/dev/values.yaml', 'hack/dev/values-%s.yaml' % mode]
 sets = ['image.tag=dev']
+if not KIND and not cfg.get('sandbox-policy', False):
+    # The policy's ValidatingAdmissionPolicy bindings are cluster-wide and would also deny writes in
+    # the platform's existing OpenShell sandbox namespaces.
+    sets.append('sandboxPolicy.enabled=false')
 for f in ALL_FLAVORS:
     if f in flavors:
         sets.append('flavors.%s.image.tag=%s' % (f, flavor_tags[f]))
@@ -148,9 +155,15 @@ for v in values:
 for s in sets:
     cmd += ['--set', s]
 objs = decode_yaml_stream(local(cmd, quiet=True))
-CLUSTER_SCOPED = ['ClusterRole', 'ClusterRoleBinding', 'ValidatingAdmissionPolicy', 'ValidatingAdmissionPolicyBinding', 'Namespace']
+CLUSTER_SCOPED = ['ClusterRole', 'ClusterRoleBinding', 'ValidatingAdmissionPolicy', 'ValidatingAdmissionPolicyBinding']
+NAMESPACED = ['ServiceAccount', 'Role', 'RoleBinding', 'PersistentVolumeClaim', 'ConfigMap', 'Secret',
+              'NetworkPolicy', 'Service', 'Deployment', 'Job', 'Cluster']
 for o in objs:
-    if o['kind'] not in CLUSTER_SCOPED and not o['metadata'].get('namespace'):
+    if o['kind'] in CLUSTER_SCOPED:
+        continue
+    if o['kind'] not in NAMESPACED:
+        fail('the chart renders a %s, which the Tiltfile does not know to be namespaced or cluster-scoped; add it to NAMESPACED or CLUSTER_SCOPED' % o['kind'])
+    if not o['metadata'].get('namespace'):
         o['metadata']['namespace'] = NS
     if o['kind'] == 'Secret' and 'password' in o.get('stringData', {}):
         live = str(local(['kubectl', '--context', ctx, '-n', NS, 'get', 'secret', o['metadata']['name'],
