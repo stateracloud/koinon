@@ -21,7 +21,7 @@ are in [0046](0046-adr-conventions.md).
 | [0004](0004-human-identity.md) | Human identity | Accepted |
 | [0005](0005-agent-identity.md) | Agent identity | Accepted |
 | [0006](0006-identity-layers.md) | Identity layers | Accepted, amended by 0043, 0044 |
-| [0007](0007-connector-model.md) | Connector model | Accepted |
+| [0007](0007-connector-model.md) | Connector model | Accepted, amended by 0049 |
 | [0008](0008-approvals-and-risk-tiers.md) | Approvals | Accepted, amended by 0042 |
 | [0009](0009-agent-runtime.md) | Agent runtime | Accepted |
 | [0010](0010-eventing.md) | Eventing | Accepted |
@@ -30,7 +30,7 @@ are in [0046](0046-adr-conventions.md).
 | [0013](0013-model-access.md) | Model access | Accepted, amended by 0040, 0041, 0044 |
 | [0014](0014-mcp-and-tools.md) | MCP and tools | Accepted, amended by 0040 |
 | [0015](0015-agent-environment-and-browser.md) | Agent environment and browser | Accepted, amended by 0044 |
-| [0016](0016-harness-and-deployment.md) | Harness and deployment | Accepted |
+| [0016](0016-harness-and-deployment.md) | Harness and deployment | Accepted, amended by 0049 |
 | [0017](0017-board-and-chat-interaction-model.md) | Interaction model | Accepted |
 | [0018](0018-v1-screens.md) | v1 screens | Accepted |
 | [0019](0019-personal-agents-and-teams.md) | Personal agents and teams | Accepted |
@@ -50,7 +50,7 @@ are in [0046](0046-adr-conventions.md).
 | [0033](0033-file-based-memory.md) | Memory | Accepted |
 | [0034](0034-project-identity.md) | Identity (repo, module, domain) | Accepted |
 | [0035](0035-v01-flavors.md) | v0.1 flavors | Accepted |
-| [0036](0036-v01-demo.md) | v0.1 demo | Accepted |
+| [0036](0036-v01-demo.md) | v0.1 demo | Accepted, amended by 0049 |
 | [0037](0037-tooling.md) | Tooling | Accepted |
 | [0038](0038-governance.md) | Governance | Accepted |
 | [0039](0039-development-setup.md) | Development setup | Accepted |
@@ -62,3 +62,5 @@ are in [0046](0046-adr-conventions.md).
 | [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted |
 | [0046](0046-adr-conventions.md) | ADR conventions | Accepted |
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted |
+| [0048](0048-openshell-spike-results.md) | OpenShell spike results | Proposed |
+| [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes, agentd placement | Accepted |
