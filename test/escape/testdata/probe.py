@@ -125,18 +125,20 @@ SKIP_FIND = ("/proc", "/sys", "/dev")
 
 
 def find(c):
-    """Paths under the roots (outside /proc, /sys and /dev) with any of the substrings in them."""
-    found = []
+    """Paths under the roots (outside /proc, /sys and /dev) with any of the substrings in them,
+    and how many entries were visited (a walk that cannot read a directory skips it silently)."""
+    found, visited = [], 0
     for top in c["roots"]:
         if top in SKIP_FIND:
             continue
         for root, dirs, names in os.walk(top, followlinks=False):
             dirs[:] = [d for d in dirs if os.path.join(root, d) not in SKIP_FIND]
             for name in dirs + names:
+                visited += 1
                 path = os.path.join(root, name)
                 if any(s in path for s in c["contains"]):
                     found.append(path)
-    return sorted(found)
+    return {"found": sorted(found), "visited": visited}
 
 
 def mounts(c):

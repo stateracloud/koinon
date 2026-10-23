@@ -330,6 +330,18 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		denied(err, "may change sandbox pod specs")
 		_, err = as[gatewayUser].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
 		Expect(err).NotTo(HaveOccurred(), "removing the scheduling gate is what the gateway needs")
+
+		By("not by swapping the container image, with or without the gate")
+		for _, ungate := range []bool{false, true} {
+			p, err = admin.CoreV1().Pods(ns).Get(ctx, "sup-gated", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			p.Spec.Containers[0].Image = "registry.invalid/koinon-escape/evil:1"
+			if ungate {
+				p.Spec.SchedulingGates = nil
+			}
+			_, err = as[gatewayUser].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
+			denied(err, "may change sandbox pod specs")
+		}
 	})
 
 	It("lets only the OpenShell gateway write Secrets in sandbox namespaces", func(ctx SpecContext) {

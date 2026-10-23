@@ -20,6 +20,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
@@ -89,7 +91,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	)
 
 	// probe runs checks in the sandbox and returns each check's result by id.
-	probe := func(ctx context.Context, checks ...check) map[string]any {
+	probeIn := func(ctx context.Context, sandbox string, checks ...check) map[string]any {
 		GinkgoHelper()
 		cfg, err := json.Marshal(checks)
 		Expect(err).NotTo(HaveOccurred())
@@ -104,6 +106,10 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 			}
 		}
 		return res
+	}
+	probe := func(ctx context.Context, checks ...check) map[string]any {
+		GinkgoHelper()
+		return probeIn(ctx, sandbox, checks...)
 	}
 	tcp := func(t target) check {
 		return check{"id": "tcp " + t.String(), "op": "tcp", "host": t.host, "port": t.port}
@@ -282,7 +288,9 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 			check{"id": "secrets dir", "op": "read", "path": "/var/run/secrets"},
 		)
 		Expect(res["mounts"]).To(BeEmpty(), "mounts that look like Kubernetes secret volumes")
-		Expect(res["files"]).To(BeEmpty(), "files that look like Kubernetes credentials")
+		files := res["files"].(map[string]any)
+		Expect(files["visited"]).To(BeNumerically(">", 1000), "the walk read too few entries to mean anything")
+		Expect(files["found"]).To(BeEmpty(), "files that look like Kubernetes credentials")
 		Expect(res["tokens dir"]).To(BeElementOf("ENOENT", "EACCES"))
 		Expect(res["secrets dir"]).To(BeElementOf("ENOENT", "EACCES"))
 	}, NodeTimeout(2*time.Minute))
@@ -293,6 +301,52 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		deniedAtConnect(ctx, targets(envOr("KOINON_ESCAPE_INTERNAL",
 			"10.96.0.1:6443,openshell.openshell.svc.cluster.local:8080,agentgateway-mgmt.agentgateway.svc.cluster.local:4001,agentgateway.agentgateway.svc.cluster.local:8080")))
 	}, NodeTimeout(2*time.Minute))
+
+	It("cannot reach the platform Services' ClusterIPs", func(ctx SpecContext) {
+		// The Services are looked up with the cluster client (see admission_live_test.go);
+		// KOINON_ESCAPE_SERVICES is a comma-separated namespace/name:port list.
+		cs := kubeClient()
+		if cs == nil {
+			Skip("no cluster client: set KOINON_ESCAPE_NAMESPACE (and KOINON_ESCAPE_KUBECONFIG) to look up Service IPs")
+		}
+		var ts []target
+		for _, s := range strings.Split(envOr("KOINON_ESCAPE_SERVICES", "openshell/openshell:8080,agentgateway/agentgateway-mgmt:4001,agentgateway/agentgateway:8080"), ",") {
+			nsName, port, _ := strings.Cut(strings.TrimSpace(s), ":")
+			ns, name, _ := strings.Cut(nsName, "/")
+			svc, err := cs.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				GinkgoWriter.Printf("service %s: %v\n", nsName, err)
+				continue
+			}
+			p, err := strconv.Atoi(port)
+			Expect(err).NotTo(HaveOccurred(), s)
+			ts = append(ts, target{svc.Spec.ClusterIP, p})
+		}
+		if len(ts) == 0 {
+			Skip("none of the platform Services could be read with the cluster client")
+		}
+		deniedAtConnect(ctx, ts)
+	}, NodeTimeout(2*time.Minute))
+
+	It("cannot reach another sandbox in the workspace", func(ctx SpecContext) {
+		// Spike 8.6. The second sandbox listens on 8099; its pod IP is what it reports for its
+		// own host name.
+		other := fmt.Sprintf("kesb-%d", n)
+		g.sandbox(ctx, execution.SandboxSpec{
+			Name: other, Policy: reconciler.SandboxPolicy(nil),
+			Command: []string{"python3", "-m", "http.server", "8099", "--bind", "0.0.0.0"},
+		})
+		res := probeIn(ctx, other,
+			check{"id": "local", "op": "tcp", "host": "127.0.0.1", "port": 8099},
+		)
+		Expect(res["local"]).To(Equal("open"), "control: the second sandbox's listener is up")
+		out, stderr, code := g.exec(ctx, other, "", "python3", "-c", "import socket;print(socket.gethostbyname(socket.gethostname()))")
+		Expect(code).To(Equal(0), stderr)
+		ip := strings.TrimSpace(out)
+		Expect(netip.ParseAddr(ip)).NotTo(BeZero(), "the second sandbox's address: %q", out)
+		Expect(netip.MustParseAddr(ip).IsLoopback()).To(BeFalse(), "a pod IP, not loopback")
+		deniedAtConnect(ctx, []target{{ip, 8099}})
+	}, NodeTimeout(8*time.Minute))
 
 	It("runs the agent without capabilities, with no_new_privs and a seccomp filter", func(ctx SpecContext) {
 		res := probe(ctx,
@@ -307,13 +361,14 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		Expect(res["setuid"]).To(Equal("EPERM"))
 	}, NodeTimeout(2*time.Minute))
 
-	It("denies writes outside the allowed paths (Landlock) and the filtered syscalls (seccomp)", func(ctx SpecContext) {
-		blocked := []string{"EPERM", "EACCES"}
+	// The writes go to places file permissions allow (sticky, world-writable directories), so
+	// only Landlock's read-write list (/tmp, /dev/null, the workdir) stops them. The syscalls
+	// and raw sockets fail for want of capabilities as well as by seccomp; the spec above
+	// checks both are in force, and this one checks the operations really fail.
+	It("denies writes outside Landlock's read-write list, and privileged syscalls", func(ctx SpecContext) {
 		res := probe(ctx,
-			check{"id": "etc", "op": "write", "path": "/etc/koinon-escape"},
-			check{"id": "usr", "op": "write", "path": "/usr/koinon-escape"},
-			check{"id": "var", "op": "write", "path": "/var/koinon-escape"},
-			check{"id": "dotdot", "op": "write", "path": "/sandbox/../etc/koinon-escape"},
+			check{"id": "shm", "op": "write", "path": "/dev/shm/koinon-escape"},
+			check{"id": "vartmp", "op": "write", "path": "/var/tmp/koinon-escape"},
 			check{"id": "tmp", "op": "write", "path": "/tmp/koinon-escape"},
 			check{"id": "mount", "op": "syscall", "name": "mount"},
 			check{"id": "unshare user", "op": "syscall", "name": "unshare_user"},
@@ -326,8 +381,11 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 			check{"id": "raw inet", "op": "syscall", "name": "raw_inet"},
 		)
 		Expect(res["tmp"]).To(Equal("ok"), "control: /tmp is writable")
-		for _, id := range []string{"etc", "usr", "var", "dotdot", "mount", "unshare user", "unshare mount", "bpf", "keyctl", "add_key", "perf"} {
-			Expect(res[id]).To(BeElementOf(blocked), id)
+		for _, id := range []string{"shm", "vartmp"} {
+			Expect(res[id]).To(BeElementOf("EACCES", "EPERM"), id)
+		}
+		for _, id := range []string{"mount", "unshare user", "unshare mount", "bpf", "keyctl", "add_key", "perf"} {
+			Expect(res[id]).To(BeElementOf("EPERM", "EACCES"), id)
 		}
 		for _, id := range []string{"raw packet", "raw inet"} {
 			Expect(res[id]).To(BeElementOf("EPERM", "EACCES", "EPROTONOSUPPORT", "EAFNOSUPPORT"), id)
@@ -338,8 +396,10 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		res := probe(ctx,
 			check{"id": "ptrace", "op": "syscall", "name": "ptrace_pid1"},
 			check{"id": "mem", "op": "syscall", "name": "proc1_mem"},
+			check{"id": "visible", "op": "read", "path": "/proc/1/status"},
 		)
-		Expect(res["ptrace"]).To(BeElementOf("EPERM", "EACCES", "ESRCH"))
+		Expect(res["visible"]).To(Equal("ok"), "control: PID 1 is visible, so ESRCH would not mean it is hidden")
+		Expect(res["ptrace"]).To(BeElementOf("EPERM", "EACCES"))
 		Expect(res["mem"]).To(BeElementOf("EPERM", "EACCES", "ENOENT"))
 	}, NodeTimeout(2*time.Minute))
 
@@ -348,14 +408,11 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	It("runs in a Kata guest, not on the host kernel", func(ctx SpecContext) {
 		host := os.Getenv("KOINON_ESCAPE_HOST_KERNEL")
 		if host == "" {
-			Skip("KOINON_ESCAPE_HOST_KERNEL (the nodes' uname -r) is not set: Kata is a manual release gate")
+			Skip("KOINON_ESCAPE_HOST_KERNEL (the nodes' uname -r) is not set: Kata is a manual release gate; set it to require a Kata guest")
 		}
 		res := probe(ctx, check{"id": "kernel", "op": "kernel"})
 		k := res["kernel"].(map[string]any)
-		if k["release"] == host {
-			Skip("the sandbox runs on the host kernel " + host + ", so it does not run under Kata")
-		}
-		Expect(k["release"]).NotTo(Equal(host), "guest kernel differs from the host's")
+		Expect(k["release"]).NotTo(Equal(host), "the sandbox runs on the host kernel, so not under Kata")
 		Expect(k["hypervisor"]).To(BeTrue(), "the guest sees a hypervisor")
 	}, NodeTimeout(2*time.Minute))
 })
