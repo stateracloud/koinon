@@ -2,14 +2,14 @@
 
 - Status: Accepted
 - Date: 2026-10-22
-- Amends: [0048](0048-openshell-spike-results.md) (the OpenCode version and the OpenCode details
-  of decision 4; decision 4's flavor contract stands)
+- Amends: [0048](0048-openshell-spike-results.md) (on PR #15) (the OpenCode version and the
+  OpenCode details of decision 4; decision 4's flavor contract stands)
 - Verification: spike on 2026-10-22 (below); re-pin tracked in
   [#85](https://github.com/procoduck/koinon/issues/85)
 
 ## Context
 
-ADR 0048 verified the flavors with OpenCode 1.19.3. OpenCode's current release line is v2
+ADR 0048 (on PR #15) verified the flavors with OpenCode 1.19.3. OpenCode's current release line is v2
 (`@opencode/cli`), which reworks configuration, providers, plugins and the ACP agent. procoduck
 decided on 2026-10-22 to build the v0.1 flavor on v2 rather than ship on 1.x and replace it
 shortly after.
@@ -62,12 +62,17 @@ A spike on 2026-10-22 rebuilt the flavor on `@opencode/cli` 2.0.24 (tag `v2.0.24
    `/sandbox/.koinon/AGENTS.md` from the run's agent version, through a temporary file and a
    rename, and records its hash in the run's session data; a failed write fails the run. Before
    every prompt it checks the hash and restores a changed or missing file (event
-   `run.instructions_restored`). The image links the global `AGENTS.md` to it. The entry script
-   refuses to start (exit 64) when the file is missing, empty or a link.
+   `run.instructions_restored`). The image links the global `AGENTS.md` to it; before every prompt
+   agentd also checks that the link is still a symbolic link to the file and restores it if not
+   (same event; a link that cannot be restored fails the run). The entry script refuses to start
+   (exit 64) when the file is missing, empty or a link.
 4. **Readiness:** Koinon's MCP server publishes the prompt `koinon-ready`, which agentgateway
    admits for every key. After `session/new` or `session/load`, agentd waits (bounded) for the
-   command `koinon:koinon-ready` and then one second for OpenCode's tool registration; a timeout
-   fails the run.
+   command `koinon:koinon-ready` and then, as a fixed settle, one second for OpenCode's tool
+   registration; a timeout fails the run. procoduck's decision (2026-10-22) is the `koinon-ready`
+   prompt, with a fixed delay as the fallback if the prompt does not get through. That fallback is
+   not built: today a prompt that does not arrive fails the run, and the only fixed delay is the
+   one-second settle after the ready signal.
 5. **Model:** agentd selects `koinon/<model>` with `session/set_config_option` after every
    session start or load and fails the run unless the answer shows it. It never records or trusts
    the model a session reports on its own.
@@ -96,9 +101,11 @@ These go away or change when the flavor is re-pinned ([#85](https://github.com/p
   verified 2.0.24 end to end and later releases change semantics again (see risks); re-pinning is
   #85.
 - **A fixed delay instead of the readiness prompt:** simpler, but a guess; the prompt shows that
-  the server is actually connected, and the short settle covers only a documented debounce.
+  the server is actually connected, so it is the primary mechanism. A fixed delay stays the
+  fallback if the prompt does not get through (decision 4); the short settle after the ready
+  signal covers only a documented debounce.
 - **Pass the MCP server in `session/new`'s `mcpServers`:** OpenCode builds that config without
-  `codemode: false`, and Hermes and pi take no client MCP servers (ADR 0048).
+  `codemode: false`, and Hermes and pi take no client MCP servers (ADR 0048, on PR #15).
 - **Instructions in the image or in config:** they are per agent version; only a file agentd
   writes per run follows a version bump without recreating the sandbox.
 
@@ -135,8 +142,8 @@ home-lab run described in Context. Source references are in `flavors/opencode/RE
 
 ## Links
 
-- [0035](0035-v01-flavors.md), [0048](0048-openshell-spike-results.md),
-  [0049](0049-v01-scope-decisions.md)
+- [0035](0035-v01-flavors.md), [0048](0048-openshell-spike-results.md) (on PR #15),
+  [0049](0049-v01-scope-decisions.md) (on PR #16)
 - [flavors/opencode/README.md](../../flavors/opencode/README.md)
 - https://github.com/anomalyco/opencode/tree/v2.0.24
 - https://www.npmjs.com/package/@opencode/cli
