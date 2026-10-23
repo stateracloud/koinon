@@ -16,7 +16,7 @@ Contract test: `make test-flavors` (`test/flavors`, needs Docker).
 | Unknown session ID | `session/load` fails with JSON-RPC `-32602` `Unknown sessionId: <id>` |
 | Model endpoint | `--model-base-url` and `--model` as provider `koinon` (`openai-completions`) in pi's `models.json`; key from `$OPENAI_API_KEY`, resolved by pi at request time |
 | MCP | `--mcp-url`, server `koinon` in pi's `mcp.json` with `"exposure": "direct"` and `Authorization: Bearer ${OPENAI_API_KEY}`; pi-acp takes no client MCP servers. Tools reach the model as `mcp__koinon__<tool>` |
-| State | `/sandbox/.pi/agent` (`PI_CODING_AGENT_DIR`): sessions in `sessions/`, rendered config, `auth.json` (empty); pi-acp's session map in `/sandbox/.pi/pi-acp` |
+| State | `/sandbox/.pi/agent` (`PI_CODING_AGENT_DIR`): sessions in `sessions/`, kept across starts; everything else there is deleted and the config rendered afresh on every start. pi-acp's session map in `/sandbox/.pi/pi-acp` |
 | Home exclude paths | `/sandbox/.pi/agent/models-store.json`, `/sandbox/.cache` |
 | Instructions | `/sandbox/.koinon/AGENTS.md`, written by koinon-agentd before every harness start, appended to pi's system prompt as `/sandbox/.pi/agent/APPEND_SYSTEM.md`, a link to it (see [Instructions](#instructions)). The entry script refuses to start (exit 64) when the file is missing, empty or a symbolic link |
 | Permission requests | none: pi has no permission prompts for its tools, and pi-acp sends `session/request_permission` only for extension dialogs (none are installed). The sandbox is the boundary |
@@ -47,8 +47,9 @@ silently (pi ignores a missing or empty `mcp.json`, `dist/extensions/mcp/config.
 exposure lists them only to its code mode, where the model never found them (spike 7 finding 3;
 `docs/mcp.md` in the package).
 
-pi-acp starts one `pi --mode rpc` per session; `PI_ACP_PI_COMMAND` points it at the pinned pi
-by absolute path.
+pi-acp starts one `pi --mode rpc` per session; `PI_ACP_PI_COMMAND` points it at
+[`koinon-pi-rpc`](koinon-pi-rpc), which runs the pinned pi by absolute path (see
+[Repository and home](#repository-and-home)).
 
 ## Instructions
 
@@ -60,6 +61,30 @@ version; koinon-agentd checks and restores the link before every prompt (event
 `run.instructions_restored`). pi skips a missing file and appends an empty one as nothing, so
 the entry script refuses to start without real content. pi-acp starts one pi per session, which
 reads the file when it starts.
+
+## Repository and home
+
+A repository cannot change the agent's tools, permissions or instructions, and neither can what
+a run leaves in its home for the next one. Left alone, pi 1.3.0 would load (paths in the package):
+
+| What pi reads | From | Closed by |
+| --- | --- | --- |
+| `AGENTS.override.md`, `AGENTS.md`, `CLAUDE.md` into the system prompt | the agent directory, then the session directory and every parent (`dist/core/resource-loader.js`, `loadProjectContextFiles`), regardless of project trust | `--no-context-files` |
+| Extensions (code run at start, may register tools) | `$PI_CODING_AGENT_DIR/extensions`, settings `packages` and `extensions`, a trusted project's `.pi/extensions` (`dist/core/package-manager.js`, `resolve`, `addAutoDiscoveredResources`) | `--no-extensions`, then `-e builtin:NAME` for pi's four built-ins (llama.cpp, codemode, tool-search, mcp), which `--no-extensions` also drops |
+| Skills, prompt templates, themes | the agent directory, `~/.agents/skills`, a trusted project's `.pi/` and `.agents/skills` | `--no-skills`, `--no-prompt-templates`, `--no-themes` |
+| A project's `.pi/settings.json`, `mcp.json`, `SYSTEM.md`, `APPEND_SYSTEM.md` | the session directory, when the project is trusted: `trust.json` in the agent directory decides without a prompt (`dist/main.js`, `createRuntime`; `dist/core/project-trust.js`) | `--no-approve` |
+| `SYSTEM.md`, which replaces pi's system prompt | the agent directory (`dist/core/resource-loader.js`, `discoverSystemPromptFile`), no switch | deleted on start |
+| `bin/rg`, `bin/fd`, run by pi's search tools before the ones on `PATH` | the agent directory (`dist/utils/tools-manager.js`, `getToolPath`) | deleted on start |
+
+pi-acp starts pi with fixed arguments (`--mode rpc --no-themes`, plus `--session`), so
+`PI_ACP_PI_COMMAND` points it at [`koinon-pi-rpc`](koinon-pi-rpc), which adds the switches.
+Before rendering the configuration, [`koinon-pi`](koinon-pi) deletes everything in
+`/sandbox/.pi/agent` but `sessions/`, and it drops every `PI_*` variable the caller's environment
+carries (`PI_PACKAGE_DIR` would move pi's package). `APPEND_SYSTEM.md` in the agent directory is
+not a context file and has no trust gate, so Koinon's instructions still arrive. The contract
+suite plants all of the above and checks that none reaches the model, and that it does with the
+guards taken out (`test/flavors/pi_test.go`). Koinon's instructions tell the agent to read the
+repository's `AGENTS.md`, `CONTRIBUTING.md` and README as content.
 
 ## Phone-home, updates and telemetry
 
