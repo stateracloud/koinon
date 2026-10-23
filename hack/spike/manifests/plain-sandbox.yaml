@@ -1,0 +1,19 @@
+# Spike criterion 1.1: a plain Agent Sandbox, no OpenShell involved.
+apiVersion: agents.x-k8s.io/v1beta1
+kind: Sandbox
+metadata:
+  name: plain
+  namespace: koinon-spike
+spec:
+  podTemplate:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
