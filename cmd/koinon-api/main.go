@@ -42,6 +42,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
+	"github.com/pressly/goose/v3"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -439,9 +440,16 @@ func migrate(ctx context.Context, dsn string, wait time.Duration) error {
 		}
 	}
 
-	results, err := migrations.Up(ctx, db)
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		return err
+	}
+	results, err := provider.Up(ctx)
 	for _, r := range results {
 		slog.Info("applied migration", "version", r.Source.Version, "duration", r.Duration)
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	return nil
 }
