@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# sweep ends every process in the sandbox that runs as this script's user, apart from the
-# sandbox's main process and this script with its ancestors (the exec that runs it). koinon-agentd
-# runs it before it starts a harness and after a run's harness has ended, so nothing the agent
+# sweep ends every process in the sandbox that runs as this script's user, apart from PID 1,
+# the sandbox's main process and this script with its ancestors (the exec that runs it).
+# koinon-agentd runs it before it starts a harness and after a run's harness has ended, so nothing the agent
 # started in one run (a harness's daemon, a background job) lives into the next (sweep.go).
 #
 # POSIX sh with builtins and /proc only, so it works in every flavor image; no command
-# substitution or pipeline, whose processes it would see. Prints what it ended on stdout; exits
-# 1 when processes are still running after the last round.
+# substitution or pipeline, whose processes it would see. Prints the main process it kept
+# ("main: PID") and what it ended ("ended: PID..." or "ended: none") on stdout; exits 1 when
+# processes are still running after the last round, 2 when it cannot tell what to keep.
 set -u
 
 uid=
@@ -29,14 +30,39 @@ while [ "$p" -gt 1 ]; do
   p=$pp
 done
 
-# scan sets found to this user's live processes outside keep. The oldest of the user's
-# processes is the sandbox's main process, started before any exec; it is kept too.
+# The sandbox's main process stays. Under OpenShell, PID 1 is the supervisor
+# (openshell-sandbox, as the sandbox user too) and the main process is its first child: the
+# command the sandbox was created with, launched once before the sandbox is ready, so before
+# any exec. Ending it ends the sandbox (ReportMainProcessExit) and OpenShell refuses every
+# exec after. Without the supervisor (the contract suite's Docker stand-in), PID 1 is the main
+# process. Children of PID 1 started later are execs, or processes an exec left behind.
+main=1
+{ read -r comm </proc/1/comm; } 2>/dev/null || comm=
+if [ "$comm" = openshell-sandb ]; then
+  main=
+  main_start=
+  for d in /proc/[0-9]*; do
+    { read -r line <"$d/stat"; } 2>/dev/null || continue
+    # Fields after "pid (comm) ": state, ppid, ..., start time the 20th.
+    set -- ${line##*") "}
+    [ $# -ge 20 ] && [ "$2" = 1 ] || continue
+    shift 19
+    if [ -z "$main_start" ] || [ "$1" -lt "$main_start" ]; then
+      main=${d#/proc/}
+      main_start=$1
+    fi
+  done
+  [ -n "$main" ] || { echo "sweep: the supervisor has no main process" >&2; exit 2; }
+fi
+keep="$keep$main "
+echo "main: $main"
+
+# scan sets found to this user's live processes outside keep.
 scan() {
   found=
-  oldest=
-  oldest_start=
   for d in /proc/[0-9]*; do
     pid=${d#/proc/}
+    case $keep in *" $pid "*) continue ;; esac
     u=
     st=
     { while read -r k v _; do
@@ -47,25 +73,8 @@ scan() {
     done <"$d/status"; } 2>/dev/null || continue
     [ "$u" = "$uid" ] || continue
     [ "$st" = Z ] && continue
-    { read -r line <"$d/stat"; } 2>/dev/null || continue
-    # Fields after "pid (comm) ": state is the first, start time the 20th.
-    set -- ${line##*") "}
-    [ $# -ge 20 ] || continue
-    shift 19
-    if [ -z "$oldest_start" ] || [ "$1" -lt "$oldest_start" ]; then
-      oldest=$pid
-      oldest_start=$1
-    fi
-    case $keep in *" $pid "*) continue ;; esac
     found="$found $pid"
   done
-  if [ -n "$oldest" ]; then
-    rest=
-    for pid in $found; do
-      [ "$pid" = "$oldest" ] || rest="$rest $pid"
-    done
-    found=$rest
-  fi
 }
 
 # alive reports whether any of found is still running (not yet a zombie).
