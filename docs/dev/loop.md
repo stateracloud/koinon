@@ -83,13 +83,18 @@ The sandbox ValidatingAdmissionPolicies and their bindings (ADRs 0045, 0048) are
 deny writes in every `openshell.ai/managed-by=openshell` namespace, which would reach the platform's
 existing sandboxes. The home-lab profile therefore renders them off. `tilt up -- --sandbox-policy`
 turns them on; that needs a Rivet request that procoduck approves first. The kind profile always has them.
+With them off, nothing at admission enforces the Kata runtime class on home-lab dev sandboxes: that
+rests on OpenShell's `default_runtime_class_name: kata` and the reconciler's `runtimeClassName`, so
+the escape suite's admission cases don't hold there.
 
 The cluster-scoped objects the home-lab profile still applies, both needed:
 
-- ClusterRole and ClusterRoleBinding `koinon-koinon-reconciler`: the reconciler lists, watches and
-  deletes `sandboxes.agents.x-k8s.io` in the OpenShell workspace namespaces.
-- ClusterRole and ClusterRoleBinding `koinon-koinon-preflight`: read-only `get` on the CRDs, the
-  Agent Sandbox controller, the RuntimeClass and the like that the install preflight checks.
+- ClusterRole and ClusterRoleBinding `koinon-koinon-reconciler`: the reconciler gets, lists, watches
+  and deletes `sandboxes.agents.x-k8s.io`. The binding is cluster-wide, so this holds in every
+  namespace, not only the OpenShell workspace namespaces.
+- ClusterRole and ClusterRoleBinding `koinon-koinon-preflight`: read-only. `get` on the CRDs, the
+  Agent Sandbox controller, the RuntimeClass and the like that the install preflight checks, and
+  in cnpg mode `list` on `validatingwebhookconfigurations` and `endpointslices` cluster-wide.
 
 ## Logging in
 
