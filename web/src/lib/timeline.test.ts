@@ -88,4 +88,19 @@ describe('buildTimeline', () => {
     expect(items[9]).toMatchObject({ kind: 'approval.requested', ask: false })
     expect(items[3]).toMatchObject({ ask: false })
   })
+
+  it('shows a session reset as a note', () => {
+    const message = "The agent's workspace was reset, so this run starts a new session."
+    const items = buildTimeline(
+      [
+        ticketEvent(1, 100, 'run.session_reset', { message, previousSessionId: 'ses_1', sessionId: 'ses_2' }),
+        ticketEvent(2, 200, 'run.session_reset', {}),
+      ],
+      {},
+    )
+    expect(items).toEqual([
+      { key: 't:1', at: 100, type: 'note', text: message, runId: run },
+      { key: 't:2', at: 200, type: 'note', text: message, runId: run },
+    ])
+  })
 })

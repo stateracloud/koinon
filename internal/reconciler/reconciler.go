@@ -485,9 +485,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	if sb.Labels[LabelSpecHash] != hash {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
 		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
-		// also replaces its home volume. Never while a run holds the agent.
-		if act.HasActive {
-			return r.record(ctx, w, sb, hash, "sandbox spec changed; recreating it after the active run")
+		// also replaces its home volume. Never while a run holds the agent, parked runs
+		// included: a parked run resumes its harness session, which lives in that volume.
+		// (agentd starts a new session when the volume was replaced anyway, see
+		// agent_sandboxes.home_generation.)
+		if act.HasHeld {
+			return r.record(ctx, w, sb, hash, "sandbox spec changed; recreating it after the active and parked runs finish")
 		}
 		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
 			return err
@@ -612,22 +615,30 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 	return r.recordState(ctx, w, final, phase, "")
 }
 
+// record stores the observed sandbox. Its OpenShell ID is the home generation: OpenShell
+// deletes the home volume with the sandbox, so a new sandbox (a new ID) means a new, empty home,
+// while stop and start keep both.
 func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, hash, note string) error {
 	msg := sb.Message
 	if note != "" {
 		msg = note
 	}
-	return r.recordState(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, hash)
+	return r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, hash, sb.ID)
 }
 
+// recordState stores a state without an observed sandbox; the recorded home generation is kept.
 func (r *Reconciler) recordState(ctx context.Context, w *work, state store.SandboxState, phase, msg string, hash ...string) error {
 	h := w.sb.SpecHash
 	if len(hash) > 0 {
 		h = hash[0]
 	}
+	return r.recordRow(ctx, w, state, phase, msg, h, "")
+}
+
+func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, hash, generation string) error {
 	sb, err := r.q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
 		OrgID: w.org.ID, AgentID: w.agent.ID,
-		State: state, Phase: phase, Message: msg, SpecHash: h,
+		State: state, Phase: phase, Message: msg, SpecHash: hash, HomeGeneration: generation,
 	})
 	if err != nil {
 		return fmt.Errorf("record sandbox state: %w", err)

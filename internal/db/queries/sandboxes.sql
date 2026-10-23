@@ -58,12 +58,14 @@ RETURNING *;
 
 -- name: RecordAgentSandbox :one
 -- Records the observed sandbox. started_at and stopped_at are stamped on the
--- transition into ready and stopped.
+-- transition into ready and stopped. An empty home_generation (no sandbox
+-- observed) keeps the recorded one.
 UPDATE agent_sandboxes
 SET state = @state::sandbox_state,
     phase = @phase,
     message = @message,
     spec_hash = @spec_hash,
+    home_generation = coalesce(nullif(@home_generation::text, ''), agent_sandboxes.home_generation),
     started_at = CASE WHEN @state::sandbox_state = 'ready' AND agent_sandboxes.state <> 'ready'
                       THEN now() ELSE agent_sandboxes.started_at END,
     stopped_at = CASE WHEN @state::sandbox_state = 'stopped' AND agent_sandboxes.state <> 'stopped'
@@ -76,9 +78,11 @@ RETURNING *;
 -- What the idle timeout and start-on-demand need (ADR 0049): whether a run
 -- holds the agent, whether one is waiting to be claimed (queued, or parked
 -- with its park resolved), and when a run last finished or parked. Parked runs
--- do not keep the sandbox up.
+-- do not keep the sandbox up, but they hold off its recreation (has_held):
+-- a parked run resumes its session in the same home volume.
 SELECT
     coalesce(bool_or(state IN ('starting', 'running')), false)::boolean AS has_active,
+    coalesce(bool_or(state IN ('starting', 'running', 'parked')), false)::boolean AS has_held,
     coalesce(bool_or(ready_at IS NOT NULL), false)::boolean AS has_demand,
     max(greatest(finished_at, parked_at))::timestamptz AS last_activity
 FROM runs

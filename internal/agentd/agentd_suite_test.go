@@ -280,12 +280,23 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 	return e
 }
 
-// recordSandbox writes the sandbox state as koinon-reconciler would.
+// recordSandbox writes the sandbox state as koinon-reconciler would, with the sandbox's
+// OpenShell ID as its home generation.
 func (e *env) recordSandbox(ctx context.Context, state store.SandboxState, message string) {
 	_, err := q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
 		OrgID: e.org, AgentID: e.agent.ID, State: state, Phase: "", Message: message,
+		HomeGeneration: e.gw.Sandbox(e.workspace, e.sandbox).GetMetadata().GetId(),
 	})
 	Expect(err).NotTo(HaveOccurred())
+}
+
+// recreateSandbox replaces the sandbox, and so its home volume, as the reconciler does on a
+// spec change, and records the new one ready.
+func (e *env) recreateSandbox(ctx context.Context) {
+	Expect(e.backend.DeleteSandbox(ctx, e.workspace, e.sandbox)).To(Succeed())
+	_, err := e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})
+	Expect(err).NotTo(HaveOccurred())
+	e.recordSandbox(ctx, store.SandboxStateReady, "")
 }
 
 // ticket creates a ticket for the agent with one user message.
@@ -371,6 +382,14 @@ func events(ctx context.Context, r store.Run) []store.RunEvent {
 }
 
 func kinds(evs []store.RunEvent) []string {
+	out := make([]string, len(evs))
+	for i, e := range evs {
+		out[i] = e.Kind
+	}
+	return out
+}
+
+func kindsOf(evs []store.TicketEvent) []string {
 	out := make([]string, len(evs))
 	for i, e := range evs {
 		out[i] = e.Kind

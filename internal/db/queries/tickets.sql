@@ -33,10 +33,12 @@ WHERE org_id = @org_id AND id = @id
 RETURNING *;
 
 -- name: SetTicketHarnessSession :one
--- Stores the harness session for the ticket. Fenced by the run epoch: only the
--- current owner of one of the ticket's active runs can set it.
+-- Stores the harness session for the ticket with the home generation of the
+-- sandbox it was created in. Fenced by the run epoch: only the current owner
+-- of one of the ticket's active runs can set it.
 UPDATE tickets t
-SET harness_session_id = @harness_session_id::text, harness_session_cwd = @harness_session_cwd::text
+SET harness_session_id = @harness_session_id::text, harness_session_cwd = @harness_session_cwd::text,
+    harness_session_generation = sqlc.narg(harness_session_generation)
 WHERE t.org_id = @org_id AND t.id = @id
   AND EXISTS (
       SELECT 1 FROM runs r
