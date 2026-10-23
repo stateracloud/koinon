@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Go gRPC client for the vendored OpenShell gateway API (third_party/openshell; ADR 0048:
+# generated client, not sdk/go). Kept apart from buf.gen.yaml so that Koinon's protos stay the
+# only buf workspace module (`buf lint` and `buf breaking` never see these files) and no
+# TypeScript or connect code is generated for them. The upstream files have no go_package
+# option, so the M options assign Go import paths.
+version: v2
+clean: true
+inputs:
+  - directory: third_party/openshell/proto
+plugins:
+  - local: ["go", "tool", "protoc-gen-go"]
+    out: internal/gen/openshell
+    opt: &opts
+      - module=github.com/procoduck/koinon/internal/gen/openshell
+      - Mopenshell.proto=github.com/procoduck/koinon/internal/gen/openshell/v1;openshellv1
+      - Mdatamodel.proto=github.com/procoduck/koinon/internal/gen/openshell/datamodel/v1;datamodelv1
+      - Msandbox.proto=github.com/procoduck/koinon/internal/gen/openshell/sandbox/v1;sandboxv1
+      - Moptions.proto=github.com/procoduck/koinon/internal/gen/openshell/options/v1;optionsv1
+  - local: ["go", "tool", "protoc-gen-go-grpc"]
+    out: internal/gen/openshell
+    opt: *opts

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,6 +20,9 @@ spec:
       containers:
         - name: api
           image: koinon-api
+          # No migration Job yet (plan H1); the API migrates on start. Bootstrap
+          # login needs KOINON_BOOTSTRAP_PASSWORD_FILE pointing at a mounted Secret.
+          args: ["--migrate"]
           ports:
             - containerPort: 8080
           env:

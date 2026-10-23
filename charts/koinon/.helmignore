@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+.DS_Store
+*.swp
+*.tmp
+# Value files for hack/chart-check.sh only.
+ci/

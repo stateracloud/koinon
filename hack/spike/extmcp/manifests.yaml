@@ -1,0 +1,37 @@
+# Spike step 6.5: the ExtMCP processor. gRPC on 9000; only agentgateway may connect.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: extmcp, namespace: koinon-spike}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: extmcp}}
+  template:
+    metadata: {labels: {app: extmcp}}
+    spec:
+      imagePullSecrets: [{name: zot-pull}]
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: extmcp
+          image: zot.apps.lab.example.invalid/koinon/spike-extmcp:1
+          ports: [{name: grpc, containerPort: 9000}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: extmcp, namespace: koinon-spike}
+spec:
+  selector: {app: extmcp}
+  ports: [{name: grpc, port: 9000, targetPort: grpc, appProtocol: kubernetes.io/h2c}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: extmcp, namespace: koinon-spike}
+spec:
+  podSelector: {matchLabels: {app: extmcp}}
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agentgateway-system}}}]
+      ports: [{port: 9000}]
