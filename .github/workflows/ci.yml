@@ -120,3 +120,27 @@ jobs:
           fetch-depth: 0
       - run: hack/migrate-lint-test.sh
       - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+
+  # Flavor contract suite (plan item E3, issue #76): the three flavor images are built from this
+  # tree (tags are per source tree, hack/flavor-tag.sh) and each is driven over ACP in Docker as
+  # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
+  # a fake key; it never reaches a real or paid model. Not a required check.
+  flavors:
+    name: flavors
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The docker-container driver is needed for the local layer cache below; --load still puts
+      # the images in the runner's Docker store, where the suite looks for them.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/flavor-cache
+          key: flavors-${{ hashFiles('flavors/**') }}
+          restore-keys: flavors-
+      - run: make flavors FLAVOR_CACHE=${{ runner.temp }}/flavor-cache
+      - run: go test -count=1 ./test/flavors/...
