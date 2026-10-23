@@ -18,10 +18,9 @@ import (
 
 // opencode is the OpenCode flavor's contract (flavors/opencode/README.md).
 var opencode = flavor{
-	name:         "opencode",
-	storeFlavor:  store.AgentFlavorOpencode,
-	defaultImage: "koinon/flavor-opencode:dev",
-	dockerfile:   "flavors/opencode",
+	name:        "opencode",
+	storeFlavor: store.AgentFlavorOpencode,
+	dockerfile:  "flavors/opencode",
 	writeFile: func(path, content string) fakemodel.ToolCall {
 		return fakemodel.ToolCall{Name: "write", Arguments: map[string]any{"path": path, "content": content}}
 	},
