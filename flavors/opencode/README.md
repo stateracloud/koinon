@@ -4,7 +4,7 @@
 `koinon-agentd` through OpenShell's non-TTY exec (ADR 0035, 0048, 0049, 0052). The image holds no
 Koinon binary.
 
-Build: `make flavor-opencode` (loads `koinon/flavor-opencode:dev-<hash>`, a hash of this tree's `flavors/opencode`, so other worktrees' builds cannot replace it; `hack/flavor-tag.sh opencode` prints the tag; nothing is pushed).
+Build: `make flavor-opencode` (loads `koinon/flavor-opencode:dev-<hash>`, a hash of this tree's `flavors/opencode` and `flavors/common`, so other worktrees' builds cannot replace it; `hack/flavor-tag.sh opencode` prints the tag; nothing is pushed).
 Contract test: `make test-flavors` (`test/flavors`, needs Docker).
 
 Source references below are to OpenCode

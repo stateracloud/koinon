@@ -4,7 +4,7 @@
 [pi-acp](https://www.npmjs.com/package/pi-acp) 0.0.34 adapter by `koinon-agentd` through
 OpenShell's non-TTY exec (ADR 0035, 0048, 0049). The image holds no Koinon binary.
 
-Build: `make flavor-pi` (loads `koinon/flavor-pi:dev-<hash>`, a hash of this tree's `flavors/pi`, so other worktrees' builds cannot replace it; `hack/flavor-tag.sh pi` prints the tag; nothing is pushed).
+Build: `make flavor-pi` (loads `koinon/flavor-pi:dev-<hash>`, a hash of this tree's `flavors/pi` and `flavors/common`, so other worktrees' builds cannot replace it; `hack/flavor-tag.sh pi` prints the tag; nothing is pushed).
 Contract test: `make test-flavors` (`test/flavors`, needs Docker).
 
 ## Contract

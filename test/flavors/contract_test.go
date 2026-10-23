@@ -459,7 +459,7 @@ func ensureImage(f flavor) {
 		return
 	}
 	if os.Getenv("KOINON_FLAVOR_BUILD") != "1" {
-		Fail("image " + img + " not found for this tree's flavors/" + f.name + " build context; run `make flavor-" +
+		Fail("image " + img + " not found for this tree's flavors/" + f.name + " and flavors/common; run `make flavor-" +
 			f.name + "` (tags are per source tree) or set KOINON_FLAVOR_BUILD=1")
 	}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
