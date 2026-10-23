@@ -22,9 +22,21 @@
 //	                            octocat/Hello-World)
 //	KOINON_ESCAPE_OTHER_REPO    a repository it is not bound to (default octocat/Spoon-Knife)
 //	KOINON_ESCAPE_CLUSTER_DNS   the cluster DNS Service IP (default 10.96.0.10)
-//	KOINON_ESCAPE_EGRESS, KOINON_ESCAPE_METADATA, KOINON_ESCAPE_API
+//	KOINON_ESCAPE_EGRESS, KOINON_ESCAPE_METADATA, KOINON_ESCAPE_API, KOINON_ESCAPE_INTERNAL
 //	                            comma-separated host:port lists that replace the default
-//	                            targets of the egress, metadata and API server cases
+//	                            targets of the egress, metadata, API server and platform
+//	                            service cases
+//	KOINON_ESCAPE_HOST_KERNEL   the nodes' uname -r; enables the Kata guest case (a manual
+//	                            release gate); the case is skipped without it
+//	KOINON_ESCAPE_NAMESPACE     the workspace's Kubernetes namespace; enables the live
+//	                            admission case, with KOINON_ESCAPE_KUBECONFIG and
+//	                            KOINON_ESCAPE_KUBE_CONTEXT (default $KUBECONFIG, current
+//	                            context), KOINON_ESCAPE_POLICY (the chart's pods policy) and
+//	                            KOINON_ESCAPE_SERVICES (namespace/name:port list whose
+//	                            ClusterIPs must be unreachable). The live admission case skips
+//	                            unless the chart's policy is bound to the namespace. The Kata
+//	                            case fails when the variable is set and the sandbox is not
+//	                            under Kata.
 //
 // Provider records hold dummy values, not real credentials: every request these specs make
 // outside the grant must be refused by the sandbox before it leaves the sandbox, and a refusal

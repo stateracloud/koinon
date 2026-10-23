@@ -53,7 +53,24 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		dryRun                  = metav1.CreateOptions{DryRun: []string{metav1.DryRunAll}}
 		dryRunUpdate            = metav1.UpdateOptions{DryRun: []string{metav1.DryRunAll}}
 		existingPod, existingSc = "existing", "existing"
+		policies                []*admissionv1.ValidatingAdmissionPolicy
+		bindings                []*admissionv1.ValidatingAdmissionPolicyBinding
 	)
+
+	// supervisor is an OpenShell supervisor pod as the gateway creates it (chart default image).
+	supervisor := func(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
+		p := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"openshell.ai/boundary-role": "supervisor"}},
+			Spec: corev1.PodSpec{
+				SchedulingGates: []corev1.PodSchedulingGate{{Name: "openshell.ai/bootstrap"}},
+				Containers:      []corev1.Container{{Name: "supervisor", Image: "ghcr.io/nvidia/openshell/supervisor:0.1.5"}},
+			},
+		}
+		for _, m := range mutate {
+			m(p)
+		}
+		return p
+	}
 
 	// workload is a sandbox workload pod as the Agent Sandbox controller creates it.
 	workload := func(name string, mutate ...func(*corev1.Pod)) *corev1.Pod {
@@ -86,7 +103,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 			Skip("KUBEBUILDER_ASSETS is not set (setup-envtest use -p path)")
 		}
-		policies, bindings := renderSandboxPolicy(ctx)
+		policies, bindings = renderSandboxPolicy(ctx)
 
 		env := &envtest.Environment{CRDs: []*apiextensionsv1.CustomResourceDefinition{sandboxCRD()}}
 		cfg, err := env.Start()
@@ -176,7 +193,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		kata := map[string]string{"io.katacontainers.config.runtime.disable_guest_seccomp": "true"}
 		denied(createPod(ctx, controllerUser, ns, workload("kata-annotation", func(p *corev1.Pod) { p.Annotations = kata })), "io.katacontainers.* annotations are not allowed")
 
-		for _, user := range []string{controllerUser, "admin"} {
+		for _, user := range []string{controllerUser, gatewayUser, otherUser, "admin"} {
 			p, err := admin.CoreV1().Pods(ns).Get(ctx, existingPod, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			p.Annotations = kata
@@ -212,7 +229,7 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 	})
 
 	It("denies ephemeral containers, the controller's included", func(ctx SpecContext) {
-		for _, user := range []string{controllerUser, "admin"} {
+		for _, user := range []string{controllerUser, gatewayUser, otherUser, "admin"} {
 			p, err := admin.CoreV1().Pods(ns).Get(ctx, existingPod, metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			p.Spec.EphemeralContainers = []corev1.EphemeralContainer{{
@@ -238,6 +255,93 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		p.Labels["koinon-escape"] = "label"
 		_, err = admin.CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("enforces the policies: Deny actions, failurePolicy Fail, bound to OpenShell namespaces only", func() {
+		for _, p := range policies {
+			Expect(p.Spec.FailurePolicy).To(HaveValue(Equal(admissionv1.Fail)), p.Name)
+		}
+		for _, b := range bindings {
+			Expect(b.Spec.ValidationActions).To(Equal([]admissionv1.ValidationAction{admissionv1.Deny}), b.Name)
+			Expect(b.Spec.MatchResources).NotTo(BeNil(), b.Name)
+			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/managed-by", "openshell"), b.Name)
+		}
+	})
+
+	It("denies every io.katacontainers.* annotation on every pod kind, not one known key", func(ctx SpecContext) {
+		for _, key := range []string{
+			"io.katacontainers.config.runtime.disable_guest_seccomp",
+			"io.katacontainers.config.hypervisor.kernel_params",
+			"io.katacontainers.config.agent.kernel_modules",
+			"io.katacontainers.config.hypervisor.default_memory",
+		} {
+			kata := map[string]string{key: "true"}
+			denied(createPod(ctx, controllerUser, ns, workload("kata-workload", func(p *corev1.Pod) { p.Annotations = kata })), "io.katacontainers.* annotations are not allowed")
+			denied(createPod(ctx, gatewayUser, ns, supervisor("kata-supervisor", func(p *corev1.Pod) { p.Annotations = kata })), "io.katacontainers.* annotations are not allowed")
+		}
+		By("annotations that merely mention Kata are untouched (control)")
+		Expect(createPod(ctx, controllerUser, ns, workload("kata-lookalike", func(p *corev1.Pod) {
+			p.Annotations = map[string]string{"example.com/io.katacontainers.config": "x", "koinon.dev/runtime": "kata"}
+		}))).To(Succeed())
+	})
+
+	It("lets the gateway create supervisor pods with the pinned image only", func(ctx SpecContext) {
+		Expect(createPod(ctx, gatewayUser, ns, supervisor("sup-ok"))).To(Succeed())
+		for _, c := range []struct {
+			message string
+			mutate  func(*corev1.Pod)
+		}{
+			{"must use the pinned supervisor image", func(p *corev1.Pod) { p.Spec.Containers[0].Image = "registry.invalid/koinon-escape/evil:1" }},
+			{"must use the pinned supervisor image", func(p *corev1.Pod) {
+				p.Spec.InitContainers = []corev1.Container{{Name: "init", Image: "registry.invalid/koinon-escape/evil:1"}}
+			}},
+			{"hostNetwork is not allowed", func(p *corev1.Pod) { p.Spec.HostNetwork = true }},
+			{"hostPath volumes are not allowed", func(p *corev1.Pod) {
+				p.Spec.Volumes = []corev1.Volume{{Name: "host", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}}}
+			}},
+			{"privileged containers are not allowed", func(p *corev1.Pod) {
+				p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: new(true)}
+			}},
+		} {
+			denied(createPod(ctx, gatewayUser, ns, supervisor("sup-bad", c.mutate)), c.message)
+		}
+		By("the gateway may not create a workload pod, nor may anyone else create a supervisor pod")
+		denied(createPod(ctx, gatewayUser, ns, workload("gw-workload")), "may create pods in sandbox namespaces")
+		for _, user := range []string{"admin", otherUser} {
+			denied(createPod(ctx, user, ns, supervisor("sup-other")), "may create pods in sandbox namespaces")
+		}
+	})
+
+	It("lets the gateway change a supervisor pod only by removing scheduling gates", func(ctx SpecContext) {
+		_, err := as[gatewayUser].CoreV1().Pods(ns).Create(ctx, supervisor("sup-gated"), metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		p, err := admin.CoreV1().Pods(ns).Get(ctx, "sup-gated", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		p.Spec.SchedulingGates = nil
+		p.Spec.ActiveDeadlineSeconds = new(int64(60))
+		_, err = as[gatewayUser].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
+		denied(err, "may change sandbox pod specs")
+
+		p, err = admin.CoreV1().Pods(ns).Get(ctx, "sup-gated", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		p.Spec.SchedulingGates = nil
+		_, err = as[otherUser].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
+		denied(err, "may change sandbox pod specs")
+		_, err = as[gatewayUser].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
+		Expect(err).NotTo(HaveOccurred(), "removing the scheduling gate is what the gateway needs")
+
+		By("not by swapping the container image, with or without the gate")
+		for _, ungate := range []bool{false, true} {
+			p, err = admin.CoreV1().Pods(ns).Get(ctx, "sup-gated", metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			p.Spec.Containers[0].Image = "registry.invalid/koinon-escape/evil:1"
+			if ungate {
+				p.Spec.SchedulingGates = nil
+			}
+			_, err = as[gatewayUser].CoreV1().Pods(ns).Update(ctx, p, dryRunUpdate)
+			denied(err, "may change sandbox pod specs")
+		}
 	})
 
 	It("lets only the OpenShell gateway write Secrets in sandbox namespaces", func(ctx SpecContext) {
