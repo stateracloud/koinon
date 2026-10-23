@@ -5,7 +5,7 @@
 image is the official `nousresearch/hermes-agent:v0.22.3`, pinned by digest, with Koinon's
 entry script, read-only config and managed scope added. It holds no Koinon binary.
 
-Build: `make flavor-hermes` (loads `koinon/flavor-hermes:dev`; nothing is pushed).
+Build: `make flavor-hermes` (loads `koinon/flavor-hermes:dev-<hash>`, a hash of this tree's `flavors/hermes` and `flavors/common`, so other worktrees' builds cannot replace it; `hack/flavor-tag.sh hermes` prints the tag; nothing is pushed).
 Contract test: `make test-flavors` (`test/flavors`, needs Docker).
 
 ## Contract
