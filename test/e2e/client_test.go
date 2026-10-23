@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 )
 
 // sessionTransport keeps the session cookie the way a browser would. The cookie is Secure, and
@@ -66,6 +67,7 @@ type client struct {
 	tickets     ticketv1alpha1connect.TicketServiceClient
 	runs        runv1alpha1connect.RunServiceClient
 	approvals   approvalv1alpha1connect.ApprovalServiceClient
+	tokens      tokenv1alpha1connect.TokenServiceClient
 }
 
 func newClient(base string) *client {
@@ -81,6 +83,7 @@ func newClient(base string) *client {
 		tickets:     ticketv1alpha1connect.NewTicketServiceClient(c),
 		runs:        runv1alpha1connect.NewRunServiceClient(c),
 		approvals:   approvalv1alpha1connect.NewApprovalServiceClient(c),
+		tokens:      tokenv1alpha1connect.NewTokenServiceClient(c),
 	}
 }
 
