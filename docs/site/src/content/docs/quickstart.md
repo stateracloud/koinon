@@ -147,7 +147,8 @@ Create a GitHub App first. [GitHub App](/guides/github-app/) lists the permissio
 2. Choose **Repo helper**, then **Next**. The template gives the agent read access to one
    repository, the right to propose pull requests and issue comments (each needs your approval), a
    30-minute cap on a run and a spend limit of $10.00 per day.
-3. Choose the **OpenCode** flavor, then **Next**. Hermes and pi are also available.
+3. Choose the **OpenCode** flavor, then **Next**. The wizard also lists Hermes and pi; this install
+   has no images for them, so pick OpenCode.
 4. Pick the repository in **Repository 1**, then **Next**.
 5. Press **Create draft**, then **Activate**.
 
@@ -221,8 +222,7 @@ other names than the chart expects. The chart takes the flavor image tag from `i
 have to be pullable by the cluster; add `imagePullSecrets` for a private registry.
 
 The end-to-end test does not run this build. It builds with `ko` without the `webui` tag and loads
-the images straight into kind, and its browser suite goes through the Vite dev server. I checked this
-sequence by hand against a local `registry:2`, and `helm template` named exactly the pushed images.
+the images straight into kind, and its browser suite goes through the Vite dev server.
 
 ## Not built yet
 
