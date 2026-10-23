@@ -385,6 +385,31 @@ var _ = Describe("Pool", func() {
 		Eventually(e.files.sweepCount).WithTimeout(10*time.Second).Should(Equal(2), "before the harness and after it")
 	})
 
+	It("sweeps after a run before the agent's next run starts its harness", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		// Closing each harness takes two seconds: long enough for the next run to start its
+		// own if the run gave up the agent's slot before its sweep.
+		e.harness.set(func(h *harness) { h.lingers = true })
+		a := e.enqueue(ctx, e.ticket(ctx, "first"))
+		b := e.enqueue(ctx, e.ticket(ctx, "second"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, a)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, b)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(e.files.sweepCount).WithTimeout(10 * time.Second).Should(Equal(4))
+		var order []string
+		for _, x := range e.gw.Execs() {
+			switch c := x.GetCommand(); {
+			case c[0] == "/usr/local/bin/koinon-opencode":
+				order = append(order, "harness")
+			case len(c) == 4 && c[2] == agentd.SweepScript:
+				order = append(order, "sweep")
+			}
+		}
+		// Each run: a sweep, its harness, a sweep; the first run's last sweep comes before the
+		// second run's harness, which it would otherwise end.
+		Expect(order).To(Equal([]string{"sweep", "harness", "sweep", "sweep", "harness", "sweep"}))
+	})
+
 	It("fails the run, without starting the harness, when processes of an earlier run keep running", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.files.sweep = func() (string, int) { return "still running: 41\n", 1 }
@@ -393,6 +418,17 @@ var _ = Describe("Pool", func() {
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(And(
 			ContainSubstring("end the processes left in the sandbox"), ContainSubstring("still running: 41")))
+		_, _, _, args := e.harness.snapshot()
+		Expect(args).To(BeEmpty(), "the harness never starts")
+	})
+
+	It("fails the run, without starting the harness, when the sweep cannot tell the sandbox's main process", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.files.sweep = func() (string, int) { return "sweep: unknown PID 1 (tini)\n", 2 }
+		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("unknown PID 1 (tini)"))
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(BeEmpty(), "the harness never starts")
 	})

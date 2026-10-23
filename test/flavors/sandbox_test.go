@@ -53,6 +53,9 @@ func (s *sandbox) start(ctx context.Context) {
 		// Reaches the in-process servers; host-gateway also works on Linux runners.
 		"--add-host", "host.docker.internal:host-gateway",
 		"--entrypoint", "/bin/sleep",
+		// Tells koinon-agentd's sweep that PID 1 (sleep) is the main process, as the OpenShell
+		// supervisor's first child is in a real sandbox (internal/agentd/sweep.sh).
+		"--env", "KOINON_SANDBOX_STANDIN=1",
 	}
 	for _, e := range s.env {
 		args = append(args, "--env", e)
