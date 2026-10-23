@@ -1,0 +1,15 @@
+# Spike S1 values for the OpenShell gateway chart (oci://ghcr.io/nvidia/openshell/helm-chart 0.1.5)
+# on a single-node kind cluster. See docs/spikes/kind.md.
+server:
+  telemetryEnabled: false
+  # RuntimeClass `runc` (handler runc) is created by up.sh with the
+  # openshell.ai/sandbox-attachable label that resource admission requires.
+  defaultRuntimeClassName: runc
+  drivers:
+    kubernetes:
+      workspaceMode: managed
+  # No credentialDrivers: the gateway's default store (provider credentials and
+  # sandbox SSH identities encrypted in its SQLite database with AES-256-GCM,
+  # key-encryption key in a chart-generated Secret). No external secret store.
+networkPolicy:
+  enabled: true
