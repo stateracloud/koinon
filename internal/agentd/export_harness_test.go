@@ -11,6 +11,7 @@ var Within = within
 // LinkScript and InstructionLink expose the instruction link's restore script and paths.
 var (
 	LinkScript      = linkScript
+	WriteScript     = writeScript
 	InstructionLink = instructionLink
 )
 
