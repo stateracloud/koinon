@@ -11,3 +11,8 @@ web/dist/
 # Tilt
 tilt_modules/
 .tilt-ko-*
+
+# Docs site
+docs/site/node_modules/
+docs/site/dist/
+docs/site/.astro/

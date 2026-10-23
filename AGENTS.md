@@ -7,6 +7,8 @@ Instructions for coding agents working on Koinon.
 - Build: `make build` · Test: `make test` · Lint: `make lint` · Codegen: `make generate`
 - Go only: `go test ./...` (Postgres tests need Docker; they skip without it)
 - Web only: `cd web && pnpm lint && pnpm typecheck && pnpm test`
+- Docs site: `make docs` · `make docs-check`. The quickstart's `sh e1=<name>` blocks are what
+  `test/e2e/run.sh` runs; after changing one, run `hack/docs-check.sh --update`.
 - After changing `.proto` files or `internal/db/queries/*.sql`, run `make generate` and commit the
   output. CI fails if generated code is stale.
 

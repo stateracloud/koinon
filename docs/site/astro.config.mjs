@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+import { defineConfig } from 'astro/config'
+import starlight from '@astrojs/starlight'
+
+// No analytics, no external fonts, no deploy: the repository is private (plan item DOC1).
+export default defineConfig({
+  integrations: [
+    starlight({
+      title: 'Koinon',
+      description: 'Install Koinon and run your first agent.',
+      sidebar: [
+        { label: 'Start here', items: ['prerequisites', 'quickstart'] },
+        {
+          label: 'Guides',
+          items: ['guides/models', 'guides/github-app', 'guides/oidc', 'guides/gateway-modes'],
+        },
+      ],
+    }),
+  ],
+})
