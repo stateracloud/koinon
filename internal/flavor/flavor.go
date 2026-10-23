@@ -99,8 +99,20 @@ var table = []Descriptor{
 	},
 }
 
-// All returns the descriptors of every flavor, in a fixed order. Treat them as read-only.
-func All() []Descriptor { return slices.Clone(table) }
+// All returns copies of the descriptors of every flavor, in a fixed order.
+func All() []Descriptor {
+	out := make([]Descriptor, len(table))
+	for i, d := range table {
+		out[i] = d.clone()
+	}
+	return out
+}
+
+// clone returns d with its own copy of the slices, so callers cannot change the table.
+func (d Descriptor) clone() Descriptor {
+	d.DefaultBinaries = slices.Clone(d.DefaultBinaries)
+	return d
+}
 
 // Names returns every flavor's name, in the order of All.
 func Names() []store.AgentFlavor {
@@ -115,7 +127,7 @@ func Names() []store.AgentFlavor {
 func Lookup(name store.AgentFlavor) (Descriptor, bool) {
 	for _, d := range table {
 		if d.Name == name {
-			return d, true
+			return d.clone(), true
 		}
 	}
 	return Descriptor{}, false
@@ -125,7 +137,7 @@ func Lookup(name store.AgentFlavor) (Descriptor, bool) {
 func FromProto(p templatev1alpha1.Flavor) (Descriptor, bool) {
 	for _, d := range table {
 		if d.Proto == p {
-			return d, true
+			return d.clone(), true
 		}
 	}
 	return Descriptor{}, false
