@@ -101,7 +101,7 @@ type ConnectionServiceClient interface {
 	// their scopes and setup guides. Any signed-in user.
 	ListConnectorTypes(context.Context, *v1alpha1.ListConnectorTypesRequest) (*v1alpha1.ListConnectorTypesResponse, error)
 	// CreateGitHubConnection creates a GitHub App connection. The private key
-	// is written to a Kubernetes Secret and never returned. Admins and owners.
+	// is stored encrypted and never returned. Admins and owners.
 	CreateGitHubConnection(context.Context, *v1alpha1.CreateGitHubConnectionRequest) (*v1alpha1.CreateGitHubConnectionResponse, error)
 	// GetConnection returns one connection. Viewers and above.
 	GetConnection(context.Context, *v1alpha1.GetConnectionRequest) (*v1alpha1.GetConnectionResponse, error)
@@ -132,7 +132,7 @@ type ConnectionServiceHandler interface {
 	// their scopes and setup guides. Any signed-in user.
 	ListConnectorTypes(context.Context, *v1alpha1.ListConnectorTypesRequest) (*v1alpha1.ListConnectorTypesResponse, error)
 	// CreateGitHubConnection creates a GitHub App connection. The private key
-	// is written to a Kubernetes Secret and never returned. Admins and owners.
+	// is stored encrypted and never returned. Admins and owners.
 	CreateGitHubConnection(context.Context, *v1alpha1.CreateGitHubConnectionRequest) (*v1alpha1.CreateGitHubConnectionResponse, error)
 	// GetConnection returns one connection. Viewers and above.
 	GetConnection(context.Context, *v1alpha1.GetConnectionRequest) (*v1alpha1.GetConnectionResponse, error)

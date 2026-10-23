@@ -307,8 +307,8 @@ export type CreateGitHubConnectionRequest = Message<"koinon.connection.v1alpha1.
   installationId: bigint;
 
   /**
-   * Secure input (ADR 0021): the App's PEM private key. Written to a
-   * Kubernetes Secret, never stored in Postgres, returned or logged.
+   * Secure input (ADR 0021): the App's PEM private key. Stored only as an
+   * envelope in Postgres (ADR 0056), never returned or logged.
    *
    * @generated from field: string private_key = 5;
    */
@@ -662,8 +662,8 @@ export const ConnectionStatusSchema: GenEnum<ConnectionStatus> = /*@__PURE__*/
 /**
  * ConnectionService manages an org's connections to external systems
  * (ADR 0007): one configured instance of a connector type, such as one GitHub
- * App installation. Secrets entered here are written straight to a Kubernetes
- * Secret (ADR 0021, 0049); no response ever contains them.
+ * App installation. Secrets entered here are sealed straight into the encrypted
+ * secret store (ADR 0021, 0056); no response ever contains them.
  *
  * @generated from service koinon.connection.v1alpha1.ConnectionService
  */
@@ -681,7 +681,7 @@ export const ConnectionService: GenService<{
   },
   /**
    * CreateGitHubConnection creates a GitHub App connection. The private key
-   * is written to a Kubernetes Secret and never returned. Admins and owners.
+   * is stored encrypted and never returned. Admins and owners.
    *
    * @generated from rpc koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection
    */

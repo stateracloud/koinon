@@ -69,7 +69,7 @@ export function ConnectionPage() {
           <dd>{gh.installationId.toString()}</dd>
           <dt className="text-muted-foreground">Private key</dt>
           <dd>
-            Stored in a Kubernetes Secret{gh.keyFingerprint && <> · fingerprint <code className="text-xs">{gh.keyFingerprint}</code></>}
+            Stored encrypted{gh.keyFingerprint && <> · fingerprint <code className="text-xs">{gh.keyFingerprint}</code></>}
           </dd>
           {c.lastTestedAt && (
             <>

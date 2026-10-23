@@ -32,7 +32,7 @@ for Koinon's calls.
 ## 2. Generate a private key
 
 On the App's General page, under Private keys, choose Generate a private key. Keep the `.pem` file
-for the next step, then delete it. Koinon writes the key to a Kubernetes Secret and never shows it
+for the next step, then delete it. Koinon stores the key encrypted in its database and never shows it
 again.
 
 ## 3. Install the App
