@@ -8,7 +8,7 @@
 // The cluster, images and install come from test/e2e/run.sh, which port-forwards the services
 // and runs this suite with:
 //
-//	KOINON_E2E_API_URL         koinon-api, e.g. http://127.0.0.1:18080
+//	KOINON_E2E_API_URL         koinon-api, e.g. http://127.0.0.1:8080
 //	KOINON_E2E_FAKEGITHUB_URL  the fake GitHub, e.g. http://127.0.0.1:18090
 //	KOINON_E2E_PASSWORD        the bootstrap admin's one-time password
 //	KOINON_E2E_T0              optional: Unix time `helm install` started, for the total and the 15-minute bound
