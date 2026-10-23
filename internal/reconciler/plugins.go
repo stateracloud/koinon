@@ -8,6 +8,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	flavordesc "github.com/stateracloud/koinon/internal/flavor"
 )
 
 // Plugin installs (template option harness.pluginInstalls, off by default). An OpenCode agent
@@ -23,9 +24,9 @@ const NPMRegistryHost = "registry.npmjs.org"
 
 // PluginInstallRule returns the npm_registry policy entry for an agent of flavor whose
 // version is cfg, running the binaries of f. ok is false when the version does not turn
-// plugin installs on or the flavor is not OpenCode (the only flavor with the option).
-func PluginInstallRule(cfg agentconfig.Config, flavor store.AgentFlavor, f Flavor) (rule execution.NetworkRule, ok bool) {
-	if !cfg.Harness.PluginInstalls || flavor != store.AgentFlavorOpencode || len(f.Binaries) == 0 {
+// plugin installs on or the flavor lacks the option (flavor.Descriptor.PluginInstalls).
+func PluginInstallRule(cfg agentconfig.Config, name store.AgentFlavor, f Flavor) (rule execution.NetworkRule, ok bool) {
+	if !cfg.Harness.PluginInstalls || !flavordesc.SupportsPluginInstalls(name) || len(f.Binaries) == 0 {
 		return execution.NetworkRule{}, false
 	}
 	return execution.NetworkRule{

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/flavor"
 )
 
 // instructionsPath is where a flavor reads Koinon's instructions for the run (for OpenCode,
@@ -23,19 +24,8 @@ const instructionsPath = "/sandbox/.koinon/AGENTS.md"
 // the agent changed it. A link in the image's read-only file system cannot change; one in the
 // home can.
 func instructionLink(f store.AgentFlavor) string {
-	switch f {
-	case store.AgentFlavorOpencode:
-		// The global config directory's AGENTS.md (flavors/opencode/Dockerfile).
-		return "/etc/koinon/opencode/AGENTS.md"
-	case store.AgentFlavorHermes:
-		// SOUL.md opens Hermes's system prompt (flavors/hermes/README.md).
-		return "/sandbox/.hermes/SOUL.md"
-	case store.AgentFlavorPi:
-		// pi appends APPEND_SYSTEM.md to its system prompt (flavors/pi/README.md).
-		return "/sandbox/.pi/agent/APPEND_SYSTEM.md"
-	default:
-		return ""
-	}
+	d, _ := flavor.Lookup(f)
+	return d.InstructionLink
 }
 
 // instructionsPreamble opens the file, ahead of the agent version's instructions.

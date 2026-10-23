@@ -12,6 +12,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/flavor"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
@@ -49,21 +50,14 @@ func payloadProto(raw []byte) *structpb.Struct {
 	return s
 }
 
-var flavorsToProto = map[store.AgentFlavor]templatev1alpha1.Flavor{
-	store.AgentFlavorOpencode: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
-	store.AgentFlavorHermes:   templatev1alpha1.Flavor_FLAVOR_HERMES,
-	store.AgentFlavorPi:       templatev1alpha1.Flavor_FLAVOR_PI,
+func flavorProto(f string) templatev1alpha1.Flavor {
+	d, _ := flavor.Lookup(store.AgentFlavor(f))
+	return d.Proto
 }
 
-func flavorProto(f string) templatev1alpha1.Flavor { return flavorsToProto[store.AgentFlavor(f)] }
-
 func flavorFromProto(f templatev1alpha1.Flavor) (store.AgentFlavor, bool) {
-	for k, v := range flavorsToProto {
-		if v == f {
-			return k, true
-		}
-	}
-	return "", false
+	d, ok := flavor.FromProto(f)
+	return d.Name, ok
 }
 
 var presetsToProto = map[templates.Preset]templatev1alpha1.Preset{
