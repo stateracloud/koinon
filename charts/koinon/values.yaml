@@ -201,11 +201,22 @@ github:
   apiUrl: https://api.github.com
 
 # Flavor images (ADR 0035): <image.registry>/<repository>:<tag>[@<digest>], the tag defaulting to
-# .Chart.AppVersion. Hermes and pi follow in plan items F2 and F3.
+# .Chart.AppVersion. Every entry becomes a flavor the reconciler can run; an agent whose flavor has
+# no entry is reported as a reconcile error. Remove an entry to turn that flavor off.
 flavors:
   opencode:
     image:
       repository: flavor-opencode
+      tag: ""
+      digest: ""
+  hermes:
+    image:
+      repository: flavor-hermes
+      tag: ""
+      digest: ""
+  pi:
+    image:
+      repository: flavor-pi
       tag: ""
       digest: ""
 
