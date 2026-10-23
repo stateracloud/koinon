@@ -26,25 +26,35 @@ const sweepTimeout = 30 * time.Second
 // agent's home between the entry script's checks and the harness reading it, which would let
 // the agent change its own tools or instructions for a later run (#84).
 //
-// It returns the IDs of the processes it ended, or a failure when some are still running.
-func (r *runner) sweep(ctx context.Context, workspace, sandbox string) ([]string, error) {
+// It returns the main process it kept and the IDs of the processes it ended, or a failure
+// when some are still running.
+func (r *runner) sweep(ctx context.Context, workspace, sandbox string) (string, []string, error) {
 	ctx, cancel := context.WithTimeout(ctx, sweepTimeout)
 	defer cancel()
 	out, code, stderr, err := r.sandboxExec(ctx, workspace, sandbox, []string{"/bin/sh", "-c", sweepScript, "sweep"}, nil)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	if code != 0 {
-		return nil, &failure{reason: fmt.Sprintf("end the processes left in the sandbox: exit %d: %s", code, strings.TrimSpace(stderr))}
+		return "", nil, &failure{reason: fmt.Sprintf("end the processes left in the sandbox: exit %d: %s", code, strings.TrimSpace(stderr))}
 	}
-	ended, ok := strings.CutPrefix(strings.TrimSpace(string(out)), "ended:")
-	if !ok {
-		return nil, &failure{reason: fmt.Sprintf("end the processes left in the sandbox: unexpected output %q", out)}
+	var main, ended string
+	found := false
+	for line := range strings.Lines(string(out)) {
+		if v, ok := strings.CutPrefix(line, "main:"); ok {
+			main = strings.TrimSpace(v)
+		}
+		if v, ok := strings.CutPrefix(line, "ended:"); ok {
+			ended, found = strings.TrimSpace(v), true
+		}
 	}
-	if ended = strings.TrimSpace(ended); ended == "none" {
-		return nil, nil
+	if !found {
+		return "", nil, &failure{reason: fmt.Sprintf("end the processes left in the sandbox: unexpected output %q", out)}
 	}
-	return strings.Fields(ended), nil
+	if ended == "none" {
+		return main, nil, nil
+	}
+	return main, strings.Fields(ended), nil
 }
 
 // sweepAfter sweeps once the run's harness has ended. It is skipped when another worker may
@@ -55,7 +65,7 @@ func (r *runner) sweepAfter(ctx context.Context, workspace, sandbox string) {
 	if r.parked.Load() || r.isFenced() && fence(r.fenceKind.Load()) != fenceCanceled && !r.finished.Load() {
 		return
 	}
-	ended, err := r.sweep(context.WithoutCancel(ctx), workspace, sandbox)
+	_, ended, err := r.sweep(context.WithoutCancel(ctx), workspace, sandbox)
 	switch {
 	case err != nil:
 		r.log.Warn("ending the processes left in the sandbox failed", "err", err)
