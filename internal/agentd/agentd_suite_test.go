@@ -244,7 +244,7 @@ func newEnv(ctx context.Context, flavor store.AgentFlavor) *env {
 	e.workspace, e.sandbox = execution.WorkspaceName(e.org.Bytes), execution.AgentSandboxName(e.org.Bytes, e.agent.ID.Bytes)
 	_, err = e.backend.EnsureWorkspace(ctx, e.workspace, nil)
 	Expect(err).NotTo(HaveOccurred())
-	_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})
+	_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "ghcr.io/procoduck/flavor-opencode:test"})
 	Expect(err).NotTo(HaveOccurred())
 	// What koinon-reconciler records for the sandbox, which is all agentd reads about it.
 	_, err = q.UpsertOrgWorkspace(ctx, store.UpsertOrgWorkspaceParams{OrgID: e.org, Workspace: e.workspace})

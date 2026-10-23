@@ -290,9 +290,11 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.dbErr(ctx, "load ticket", err)
 	}
+	// An unreadable config would leave the run without its instructions (and model): it fails
+	// before anything starts.
 	vc, err := versionConfig(version.Config)
 	if err != nil {
-		r.log.Warn("agent version config unreadable: no model, harness settings or instructions of its own", "err", err)
+		return &failure{reason: "the agent version's config is unreadable: " + err.Error()}
 	}
 	model := versionModel(vc)
 	if model == "" {
