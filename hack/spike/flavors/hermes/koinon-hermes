@@ -1,0 +1,8 @@
+#!/bin/sh
+# Start Hermes as an ACP agent with Koinon's config in the sandbox workspace.
+set -eu
+# OpenShell does not pass the image's ENV to the processes it starts.
+export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+mkdir -p "$HERMES_HOME"
+[ -f "$HERMES_HOME/config.yaml" ] || cp /etc/koinon/hermes/config.yaml "$HERMES_HOME/config.yaml"
+exec /opt/hermes/bin/hermes acp "$@"
