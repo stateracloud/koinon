@@ -1,0 +1,14 @@
+Error handling request {
+  jsonrpc: '2.0',
+  id: 2,
+  method: 'session/load',
+  params: {
+    cwd: '/sandbox/work',
+    mcpServers: [],
+    sessionId: '00000000-0000-0000-0000-000000000000'
+  }
+} {
+  code: -32602,
+  message: 'Invalid params',
+  data: 'Unknown sessionId: 00000000-0000-0000-0000-000000000000'
+}
