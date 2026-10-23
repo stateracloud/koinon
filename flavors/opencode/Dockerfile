@@ -54,7 +54,7 @@ RUN printf '[include]\n\tpath = /etc/koinon/git/config\n' >> /etc/gitconfig
 # instructions are per run, so koinon-agentd writes them into the home and this link points there
 # (2.0.24 ignores the "instructions" config key, see README.md).
 RUN ln -s /sandbox/.koinon/AGENTS.md /etc/koinon/opencode/AGENTS.md \
- && chmod -R a+rX,go-w /etc/koinon
+ && chmod -R a+rX,go-w /etc/koinon /usr/local/lib/koinon
 USER 10001:10001
 WORKDIR /sandbox
 ENTRYPOINT ["/usr/local/bin/koinon-opencode"]
