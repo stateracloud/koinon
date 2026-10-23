@@ -19,6 +19,8 @@ RUN groupadd --gid 10001 sandbox \
  && useradd --uid 10001 --gid 10001 --home-dir /sandbox --no-create-home --shell /bin/bash sandbox \
  && install -d -o 10001 -g 10001 -m 0750 /sandbox \
  && /opt/hermes/.venv/bin/hermes --version | grep -q 'v0\.22\.3'
+# The entry scripts' shared helpers (flavors/common, build context "common").
+COPY --from=common --chmod=0755 koinon-entry-lib.sh /usr/local/lib/koinon/koinon-entry-lib.sh
 COPY --chmod=0755 koinon-hermes /usr/local/bin/koinon-hermes
 COPY --chmod=0644 etc/koinon/hermes/config.yaml /etc/koinon/hermes/config.yaml
 # git's GitHub credential helper, shared by every flavor (flavors/common, build context

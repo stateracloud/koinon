@@ -20,7 +20,13 @@ flavor-<name>` passes it): `koinon-git-credential`, git's credential helper for
 which OpenShell swaps for the installation token on the wire, and stores nothing
 (`connectors/README.md`).
 
-`internal/agentd` maps each flavor to its entry script. `test/flavors` checks each flavor with
+The entry scripts source `common/koinon-entry-lib.sh` (installed as
+`/usr/local/lib/koinon/koinon-entry-lib.sh`): `koinon_die` (exit 64), argument parsing, URL
+checks, the instruction-file check, the instruction link and the `KOINON_*` exports. Each script
+keeps what differs: its value check, PATH, the harness's variables, home clean-up and the exec.
+
+`internal/flavor` holds one descriptor per flavor (entry script, ready command, instruction
+link, default binaries, plugin option); `internal/agentd` and the reconciler read it. `test/flavors` checks each flavor with
 the same specs and per-flavor expectations (`make test-flavors`; `make flavor-<name>` builds
 one image).
 

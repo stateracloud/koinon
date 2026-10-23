@@ -22,41 +22,31 @@
 # placeholder that the proxy swaps for the real key on the way to agentgateway.
 set -eu
 
-die() {
-  echo "koinon-opencode: $*" >&2
-  exit 64
-}
+KOINON_FLAVOR=opencode
+# The shared helpers (flavors/common/koinon-entry-lib.sh, copied to /usr/local/lib/koinon/ by
+# the Dockerfile): koinon_die, argument parsing, the instruction-file check, the instruction link.
+# shellcheck source=../common/koinon-entry-lib.sh
+. /usr/local/lib/koinon/koinon-entry-lib.sh
 
 # OpenCode substitutes {env:...} values into the config text before parsing it as JSON, so a
 # value must not be able to break out of its string.
 check() {
   case $2 in
-    '' | *'"'* | *'\'* | *'{'* | *'}'* | *[[:space:][:cntrl:]]*) die "invalid $1: '$2'" ;;
+    '' | *'"'* | *'\'* | *'{'* | *'}'* | *[[:space:][:cntrl:]]*) koinon_die "invalid $1: '$2'" ;;
   esac
 }
 
-check_url() {
-  check "$1" "$2"
-  case $2 in
-    http://?* | https://?*) ;;
-    *) die "$1 must be an http or https URL: '$2'" ;;
-  esac
-}
-
-base_url='' model='' mcp_url='' plugin_installs=''
-while [ $# -gt 0 ]; do
+# --plugin-installs is the one switch only this flavor takes.
+plugin_installs=''
+koinon_extra_arg() {
   case $1 in
-    --model-base-url) [ $# -ge 2 ] || die "$1 needs a value"; base_url=$2; shift 2 ;;
-    --model) [ $# -ge 2 ] || die "$1 needs a value"; model=$2; shift 2 ;;
-    --mcp-url) [ $# -ge 2 ] || die "$1 needs a value"; mcp_url=$2; shift 2 ;;
-    --plugin-installs) plugin_installs=1; shift ;;
-    --) shift; break ;;
-    *) die "unknown argument '$1'" ;;
+    --plugin-installs) plugin_installs=1 ;;
+    *) return 1 ;;
   esac
-done
-check_url --model-base-url "$base_url"
-check --model "$model"
-check_url --mcp-url "$mcp_url"
+}
+
+koinon_parse_args "$@"
+shift "$koinon_shift"
 
 # Drop anything the caller's environment might carry that would change where OpenCode reads its
 # configuration, its database or its server credentials, or where it sends telemetry
@@ -68,12 +58,10 @@ unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR OPENCODE_CONFIG_CONTENT OPENCODE_CLI_C
   OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-export LANG=C.UTF-8
 # State lives in the sandbox home, which is the agent's volume (ADR 0048, 0049).
-export HOME=/sandbox
+koinon_export_base_env
 export XDG_DATA_HOME=/sandbox/.local/share
 export XDG_STATE_HOME=/sandbox/.local/state
-export XDG_CACHE_HOME=/sandbox/.cache
 export XDG_CONFIG_HOME=/sandbox/.config
 # OpenCode's global config directory: read-only in the image, so neither the agent nor a
 # repository can change it.
@@ -105,9 +93,7 @@ fi
 # set, OpenCode's built-in openai provider activates on its own.
 export KOINON_MODEL_KEY="${OPENAI_API_KEY:-}"
 unset OPENAI_API_KEY
-export KOINON_MODEL_BASE_URL="$base_url"
-export KOINON_MODEL="$model"
-export KOINON_MCP_URL="$mcp_url"
+koinon_export_endpoints
 
 # opencode acp talks to its own server (opencode serve --stdio --port 0 on 127.0.0.1) over HTTP;
 # that traffic must not go to the sandbox proxy.
@@ -116,11 +102,8 @@ export no_proxy="127.0.0.1,localhost${no_proxy:+,$no_proxy}"
 
 # Koinon's instructions reach the model only through this file (the AGENTS.md link in the
 # global config directory). OpenCode skips a missing file silently and loads an empty one as
-# empty instructions, so refuse to start without real content.
-instructions=/sandbox/.koinon/AGENTS.md
-if [ ! -f "$instructions" ] || [ -L "$instructions" ] || [ ! -s "$instructions" ]; then
-  die "missing instructions: $instructions (koinon-agentd writes it before the harness starts)"
-fi
+# empty instructions.
+koinon_require_instructions
 
 mkdir -p "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 exec /usr/local/bin/opencode acp "$@"
