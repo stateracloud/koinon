@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-22
+- Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md) (models and budgets),
+  [0058](0058-gateway-modes.md) (gateway modes)
 - Amends: [0007](0007-connector-model.md), [0016](0016-harness-and-deployment.md),
   [0036](0036-v01-demo.md); extends [0048](0048-openshell-spike-results.md) (Proposed, #15)
 - Verification: agentgateway Kubernetes-mode `rawConfig` budgets verified by spike S2
@@ -160,6 +162,15 @@ Andre answered these in a grilling session on 2026-10-21/22. This ADR records th
 - Negative: approvers see agent PRs twice (Koinon card, GitHub review), for different questions.
 - Follow-ups: the issues in [docs/plans/v0.1.md](../plans/v0.1.md); ADR 0048 decision 6 (standalone
   mode) gains the Kubernetes mode above when #15 merges.
+
+## Amendment (2026-10-23)
+
+- **Models:** the single Helm-configured upstream is no longer the only source. Orgs manage their own
+  providers and models ([0056](0056-model-providers-pricing-and-budgets-per-org.md)).
+- **Budgets:** the template's `spendUSD` is only a default; admins set the org monthly cap and the
+  per-agent daily limits ([0056](0056-model-providers-pricing-and-budgets-per-org.md)).
+- **Gateway modes:** a third, *shared* mode joins standalone and kubernetes in v0.2
+  ([0058](0058-gateway-modes.md)).
 
 ## Open questions
 

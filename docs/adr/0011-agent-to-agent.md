@@ -1,6 +1,6 @@
 # 0011. Agent-to-agent: A2A, persisted as tickets
 
-- Status: Accepted
+- Status: Accepted; amended by [0055](0055-chat-as-its-own-object.md)
 - Date: 2026-10-21
 - Decision: [design.md#11](../design.md)
 
@@ -55,6 +55,13 @@ sequenceDiagram
   streaming (SSE) and push notifications _(inferred)_.
 - Negative: depth and cycle limits must be enforced in the gateway, not trusted to agents.
 - Follow-ups: A2A lands in v0.3 ([0024](0024-roadmap.md)).
+
+## Amendment (2026-10-23): read-only delegation from a chat
+
+[0055](0055-chat-as-its-own-object.md) makes chat its own object. A read-only delegation from a
+chat to a specialist agent is **ephemeral**: it is not persisted as a ticket (this narrows "every
+A2A task is persisted as a ticket" above). The caller pays for it, and only metadata is audited.
+Delegations that write, and delegations from tickets, are persisted as tickets as before.
 
 ## Open questions
 
