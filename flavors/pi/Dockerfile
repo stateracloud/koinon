@@ -56,6 +56,7 @@ RUN groupadd --gid 10001 sandbox \
 COPY --from=node /node/bin/node /opt/node/bin/node
 COPY --from=pi /opt/pi /opt/pi
 COPY --chmod=0755 koinon-pi /usr/local/bin/koinon-pi
+COPY --chmod=0755 koinon-pi-rpc /usr/local/lib/koinon/koinon-pi-rpc
 COPY --chmod=0644 koinon-pi-render.mjs /usr/local/lib/koinon/koinon-pi-render.mjs
 COPY --chmod=0644 etc/koinon/pi/ /etc/koinon/pi/
 RUN chmod -R a+rX,go-w /etc/koinon /opt/node /opt/pi /usr/local/lib/koinon
