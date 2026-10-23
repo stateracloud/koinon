@@ -9,9 +9,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/internal/ledger"
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/templates"
 )
 
 var _ = Describe("NetLimit", func() {

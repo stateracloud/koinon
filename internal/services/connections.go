@@ -16,12 +16,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/procoduck/koinon/connectors"
-	"github.com/procoduck/koinon/internal/auth"
-	"github.com/procoduck/koinon/internal/connections"
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/db/store"
-	connectionv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1"
+	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/db/store"
+	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 )
 
 var tierToProto = map[connectors.Tier]connectionv1alpha1.Tier{

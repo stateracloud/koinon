@@ -26,8 +26,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/standalone"
 )
 
 // AgentgatewayImage is the agentgateway release Koinon targets (ADR 0048).

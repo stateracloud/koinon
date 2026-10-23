@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/procoduck/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway"
 )
 
 // Waiter blocks until agentgateway serves a revision.

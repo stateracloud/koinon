@@ -11,8 +11,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/reconciler"
 )
 
 // chartConfig is config.yaml as charts/koinon renders it (standalone gateway, one model).
@@ -44,7 +44,7 @@ reconciler:
   homeRetention: delete
 flavors:
   opencode:
-    image: ghcr.io/procoduck/flavor-opencode:0.1.0
+    image: ghcr.io/stateracloud/flavor-opencode:0.1.0
 bootstrapAdmin:
   enabled: true
 `
@@ -86,7 +86,7 @@ var _ = Describe("parseConfig", func() {
 		Expect(c.models.Overrides).NotTo(BeNil())
 
 		f := c.flavors()[store.AgentFlavorOpencode]
-		Expect(f.Image).To(Equal("ghcr.io/procoduck/flavor-opencode:0.1.0"))
+		Expect(f.Image).To(Equal("ghcr.io/stateracloud/flavor-opencode:0.1.0"))
 		Expect(f.Binaries).To(HaveLen(1))
 	})
 

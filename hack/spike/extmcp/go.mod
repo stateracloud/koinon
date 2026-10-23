@@ -1,4 +1,4 @@
-module github.com/procoduck/koinon/hack/spike/extmcp
+module github.com/stateracloud/koinon/hack/spike/extmcp
 
 go 1.27
 

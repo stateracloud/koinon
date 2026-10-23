@@ -1,4 +1,4 @@
-module github.com/procoduck/koinon/hack/spike/gatewayctl
+module github.com/stateracloud/koinon/hack/spike/gatewayctl
 
 go 1.27
 

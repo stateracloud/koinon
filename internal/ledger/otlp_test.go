@@ -20,8 +20,8 @@ import (
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/ledger"
 )
 
 // fixture is one OTLP/HTTP export captured from agentgateway v1.6.0; see

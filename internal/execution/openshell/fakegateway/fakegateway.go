@@ -34,9 +34,9 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
-	datamodelv1 "github.com/procoduck/koinon/internal/gen/openshell/datamodel/v1"
-	sandboxv1 "github.com/procoduck/koinon/internal/gen/openshell/sandbox/v1"
-	openshellv1 "github.com/procoduck/koinon/internal/gen/openshell/v1"
+	datamodelv1 "github.com/stateracloud/koinon/internal/gen/openshell/datamodel/v1"
+	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 )
 
 // Command stands in for a program run by exec. It reads stdin until EOF or until it has

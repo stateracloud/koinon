@@ -11,15 +11,15 @@ import (
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/procoduck/koinon/internal/connectors/github"
-	"github.com/procoduck/koinon/internal/connectors/github/githubtest"
-	"github.com/procoduck/koinon/internal/db/store"
-	agentv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/agent/v1alpha1"
-	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
-	templatev1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1"
-	ticketv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/ticket/v1alpha1"
-	"github.com/procoduck/koinon/internal/services"
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
+	"github.com/stateracloud/koinon/internal/db/store"
+	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
+	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
+	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
+	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
+	"github.com/stateracloud/koinon/internal/services"
+	"github.com/stateracloud/koinon/templates"
 )
 
 var _ = Describe("template sync", func() {

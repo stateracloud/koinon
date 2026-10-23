@@ -15,12 +15,12 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/procoduck/koinon/connectors"
-	"github.com/procoduck/koinon/internal/cli"
-	"github.com/procoduck/koinon/internal/db/store"
-	"github.com/procoduck/koinon/internal/gateway"
-	"github.com/procoduck/koinon/internal/project"
-	"github.com/procoduck/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/reconciler"
 )
 
 // fileConfig is the part of the chart's config.yaml (charts/koinon/templates/config.yaml) the

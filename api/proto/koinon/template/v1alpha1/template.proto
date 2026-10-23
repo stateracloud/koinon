@@ -4,7 +4,7 @@ syntax = "proto3";
 
 package koinon.template.v1alpha1;
 
-option go_package = "github.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1;templatev1alpha1";
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1;templatev1alpha1";
 
 // TemplateService lists the agent templates shipped with Koinon (ADR 0020).
 // Templates are platform data: they belong to no org, and every signed-in

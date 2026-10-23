@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/procoduck/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/db/store"
 )
 
 // instructionsPath is where a flavor reads Koinon's instructions for the run (for OpenCode,

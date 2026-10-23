@@ -517,7 +517,7 @@ const file_koinon_auth_v1alpha1_auth_proto_rawDesc = "" +
 	"\x0eORG_ROLE_OWNER\x10\x042\xd4\x01\n" +
 	"\vAuthService\x12X\n" +
 	"\x06WhoAmI\x12#.koinon.auth.v1alpha1.WhoAmIRequest\x1a$.koinon.auth.v1alpha1.WhoAmIResponse\"\x03\x90\x02\x01\x12k\n" +
-	"\x0eChangePassword\x12+.koinon.auth.v1alpha1.ChangePasswordRequest\x1a,.koinon.auth.v1alpha1.ChangePasswordResponseBLZJgithub.com/procoduck/koinon/internal/gen/koinon/auth/v1alpha1;authv1alpha1b\x06proto3"
+	"\x0eChangePassword\x12+.koinon.auth.v1alpha1.ChangePasswordRequest\x1a,.koinon.auth.v1alpha1.ChangePasswordResponseBOZMgithub.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1;authv1alpha1b\x06proto3"
 
 var (
 	file_koinon_auth_v1alpha1_auth_proto_rawDescOnce sync.Once

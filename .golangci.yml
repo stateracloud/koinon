@@ -31,4 +31,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/procoduck/koinon
+        - github.com/stateracloud/koinon

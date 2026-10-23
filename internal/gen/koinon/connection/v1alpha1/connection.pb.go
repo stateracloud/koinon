@@ -1393,7 +1393,7 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\rGetConnection\x120.koinon.connection.v1alpha1.GetConnectionRequest\x1a1.koinon.connection.v1alpha1.GetConnectionResponse\"\x03\x90\x02\x01\x12\x7f\n" +
 	"\x0fListConnections\x122.koinon.connection.v1alpha1.ListConnectionsRequest\x1a3.koinon.connection.v1alpha1.ListConnectionsResponse\"\x03\x90\x02\x01\x12w\n" +
 	"\x0eTestConnection\x121.koinon.connection.v1alpha1.TestConnectionRequest\x1a2.koinon.connection.v1alpha1.TestConnectionResponse\x12\x91\x01\n" +
-	"\x15ListInstallationRepos\x128.koinon.connection.v1alpha1.ListInstallationReposRequest\x1a9.koinon.connection.v1alpha1.ListInstallationReposResponse\"\x03\x90\x02\x01BXZVgithub.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1;connectionv1alpha1b\x06proto3"
+	"\x15ListInstallationRepos\x128.koinon.connection.v1alpha1.ListInstallationReposRequest\x1a9.koinon.connection.v1alpha1.ListInstallationReposResponse\"\x03\x90\x02\x01B[ZYgithub.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1;connectionv1alpha1b\x06proto3"
 
 var (
 	file_koinon_connection_v1alpha1_connection_proto_rawDescOnce sync.Once

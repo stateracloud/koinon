@@ -27,7 +27,7 @@ var File_koinon_platform_v1alpha1_platform_proto protoreflect.FileDescriptor
 const file_koinon_platform_v1alpha1_platform_proto_rawDesc = "" +
 	"\n" +
 	"'koinon/platform/v1alpha1/platform.proto\x12\x18koinon.platform.v1alpha12\x11\n" +
-	"\x0fPlatformServiceBTZRgithub.com/procoduck/koinon/internal/gen/koinon/platform/v1alpha1;platformv1alpha1b\x06proto3"
+	"\x0fPlatformServiceBWZUgithub.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1;platformv1alpha1b\x06proto3"
 
 var file_koinon_platform_v1alpha1_platform_proto_goTypes = []any{}
 var file_koinon_platform_v1alpha1_platform_proto_depIdxs = []int32{

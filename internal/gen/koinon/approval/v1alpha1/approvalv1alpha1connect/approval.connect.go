@@ -9,7 +9,7 @@ package approvalv1alpha1connect
 import (
 	connect "connectrpc.com/connect/v2"
 	context "context"
-	v1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/approval/v1alpha1"
+	v1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	sync "sync"
 )
 

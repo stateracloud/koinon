@@ -30,8 +30,8 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"go.yaml.in/yaml/v3"
 
-	"github.com/procoduck/koinon/internal/project"
-	"github.com/procoduck/koinon/templates"
+	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // Version is the connector type schema version.

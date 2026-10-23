@@ -11,7 +11,7 @@ package openshellv1
 
 import (
 	context "context"
-	v1 "github.com/procoduck/koinon/internal/gen/openshell/sandbox/v1"
+	v1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"

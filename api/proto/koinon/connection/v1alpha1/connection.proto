@@ -7,7 +7,7 @@ package koinon.connection.v1alpha1;
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/procoduck/koinon/internal/gen/koinon/connection/v1alpha1;connectionv1alpha1";
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1;connectionv1alpha1";
 
 // ConnectionService manages an org's connections to external systems
 // (ADR 0007): one configured instance of a connector type, such as one GitHub

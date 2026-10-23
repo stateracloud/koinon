@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/procoduck/koinon/connectors"
-	"github.com/procoduck/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/connectors/github"
 )
 
 // CheckResult is one setup-guide check's outcome. Message never contains

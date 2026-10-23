@@ -11,10 +11,10 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 
-	"github.com/procoduck/koinon/internal/db/store"
-	runv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/run/v1alpha1"
-	ticketv1alpha1 "github.com/procoduck/koinon/internal/gen/koinon/ticket/v1alpha1"
-	"github.com/procoduck/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/db/store"
+	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
+	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
+	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
 // Ticket event kinds written by the API.

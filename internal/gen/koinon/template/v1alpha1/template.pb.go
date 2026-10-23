@@ -570,7 +570,7 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\x0fPRESET_STANDARD\x10\x02\x12\x12\n" +
 	"\x0ePRESET_TRUSTED\x10\x032\x88\x01\n" +
 	"\x0fTemplateService\x12u\n" +
-	"\rListTemplates\x12..koinon.template.v1alpha1.ListTemplatesRequest\x1a/.koinon.template.v1alpha1.ListTemplatesResponse\"\x03\x90\x02\x01BTZRgithub.com/procoduck/koinon/internal/gen/koinon/template/v1alpha1;templatev1alpha1b\x06proto3"
+	"\rListTemplates\x12..koinon.template.v1alpha1.ListTemplatesRequest\x1a/.koinon.template.v1alpha1.ListTemplatesResponse\"\x03\x90\x02\x01BWZUgithub.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1;templatev1alpha1b\x06proto3"
 
 var (
 	file_koinon_template_v1alpha1_template_proto_rawDescOnce sync.Once

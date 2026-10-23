@@ -11,7 +11,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/procoduck/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/cli"
 )
 
 func TestCLI(t *testing.T) {

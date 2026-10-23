@@ -8,7 +8,7 @@ package platformv1alpha1connect
 
 import (
 	connect "connectrpc.com/connect/v2"
-	_ "github.com/procoduck/koinon/internal/gen/koinon/platform/v1alpha1"
+	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1"
 )
 
 const (
