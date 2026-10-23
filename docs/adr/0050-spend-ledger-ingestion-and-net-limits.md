@@ -1,6 +1,6 @@
 # 0050. Spend ledger ingestion and net limits
 
-- Status: Proposed
+- Status: Proposed; amended by [0056](0056-model-providers-pricing-and-budgets-per-org.md)
 - Date: 2026-10-22
 - Amends: [0041](0041-koinon-spend-ledger-and-budget-stops.md) (answers its open questions on the
   transport and on unpriced models, for v0.1)
@@ -89,6 +89,13 @@ Facts checked against agentgateway v1.6.0 (source tag `v1.6.0`) on 2026-10-22:
   enforcement any pod can add spend entries (it cannot read or remove any).
 - Follow-ups: G2 renders the same access-log fields and OTLP export into `rawConfig`; metrics for
   ingestion lag and rejected records (ADR 0041); the web ticket view shows `Cost`.
+
+## Amendment (2026-10-23)
+
+[0056](0056-model-providers-pricing-and-budgets-per-org.md) changes decisions 4 and 6 above: the
+per-agent daily limit is set by admins (`limits.spendUSD` is its default), an org monthly cap is
+added, and a model's price comes from the org's dated price schema. Entries without usage are
+estimated and flagged rather than dropped.
 
 ## Open questions
 

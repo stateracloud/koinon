@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-21
 - Amends: ADR 0013 (model access)
+- Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md)
 
 ## Context
 
@@ -60,6 +61,13 @@ not depend on one gateway's deployment mode.
 - Negative: Koinon owns ingestion, reconciliation with the gateway and price-catalog gaps.
 - Follow-ups: ledger tables in the data model; ingestion worker; limit-push reconciler; budget
   park reason in the run state machine; metrics for ingestion lag.
+
+## Amendment (2026-10-23)
+
+[0056](0056-model-providers-pricing-and-budgets-per-org.md) adds to the ledger: the price version
+on each entry, the raw usage next to the gateway's cost, and tokenizer estimates (flagged, counted
+toward limits). The budget levels in v0.1 are an org monthly cap and per-agent daily limits; the
+80% warning and the 100% stop stay.
 
 ## Open questions
 

@@ -82,7 +82,7 @@ there first, and this page stays the one-page overview.
 
 | # | Area | Decision | Why |
 | --- | --- | --- | --- |
-| [17](adr/0017-board-and-chat-interaction-model.md) | Interaction model | Board and chat are two views of one thing: board is home, every conversation is a ticket, `waiting on you` is the key column, Slack and Teams mirror tickets, configuration is secondary | Board stays the queue; agents feel like colleagues |
+| [17](adr/0017-board-and-chat-interaction-model.md) | Interaction model (superseded by [0055](adr/0055-chat-as-its-own-object.md)) | Board and chat are two views of one thing: board is home, every conversation is a ticket, `waiting on you` is the key column, Slack and Teams mirror tickets, configuration is secondary | Board stays the queue; agents feel like colleagues |
 | [18](adr/0018-v1-screens.md) | v1 screens | Board, Ticket, Agents, Agent editor, Connections, MCP servers, Org settings, Platform admin, Audit; every user gets an automatic personal org | Personal agents need no special code path |
 | [19](adr/0019-personal-agents-and-teams.md) | Personal agents and teams | Membership-implied access: personal agents may call team agents that accept "org members' personal agents", capped by exposure profile and the user's role; personal org pays; default on for read-tier work only | Personal agents act like employees asking the experts |
 | [20](adr/0020-agent-builder-and-templates.md) | Creating agents | Agent builder (a platform agent) is the main path, templates are building blocks; result is always a draft; only an org admin or owner activates and grants | Builder proposes access, never grants it |
@@ -135,6 +135,17 @@ Upstream research during the ADR work changed some of the decisions above. Detai
 | ADR | Change |
 | --- | --- |
 | [0049](adr/0049-v01-scope-decisions.md) | `agentd` runs in the control plane (amends 0016); Koinon reads only Kubernetes Secrets, external stores via ESO (amends 0007); agentgateway standalone or Kubernetes mode; v0.1 template, scopes, UI and approval semantics (settles 0036's open questions) |
+
+## Revisions from the 23 October 2026 decisions
+
+| ADR | Change |
+| --- | --- |
+| [0053](adr/0053-hermes-context-file-patch.md) | Hermes context-file build patch is redone on every upgrade, with a guard test |
+| [0054](adr/0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is marked unhealthy after 60 s and recreated |
+| [0055](adr/0055-chat-as-its-own-object.md) | Chat is its own object; supersedes 0017 (v0.2) |
+| [0056](adr/0056-model-providers-pricing-and-budgets-per-org.md) | Providers, models, pricing and budgets per org, with an admin API |
+| [0057](adr/0057-mcp-servers.md) | MCP servers: remote and container, catalog, per-agent allowlists |
+| [0058](adr/0058-gateway-modes.md) | Gateway modes: standalone, kubernetes, shared |
 
 The Build-vs-reuse rows and execution layer notes that mention LiteLLM, `inference.local` or Pod
 Identity are superseded by these ADRs.
