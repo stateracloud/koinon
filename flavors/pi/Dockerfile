@@ -55,6 +55,8 @@ RUN groupadd --gid 10001 sandbox \
 # a newer pi (no switch), and nothing in the sandbox should install packages.
 COPY --from=node /node/bin/node /opt/node/bin/node
 COPY --from=pi /opt/pi /opt/pi
+# The entry scripts' shared helpers (flavors/common, build context "common").
+COPY --from=common --chmod=0755 koinon-entry-lib.sh /usr/local/lib/koinon/koinon-entry-lib.sh
 COPY --chmod=0755 koinon-pi /usr/local/bin/koinon-pi
 COPY --chmod=0755 koinon-pi-rpc /usr/local/lib/koinon/koinon-pi-rpc
 COPY --chmod=0644 koinon-pi-render.mjs /usr/local/lib/koinon/koinon-pi-render.mjs

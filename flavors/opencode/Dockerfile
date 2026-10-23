@@ -41,6 +41,8 @@ RUN groupadd --gid 10001 sandbox \
  && useradd --uid 10001 --gid 10001 --home-dir /sandbox --no-create-home --shell /bin/bash sandbox \
  && install -d -o 10001 -g 10001 -m 0750 /sandbox
 COPY --from=fetch /opencode /usr/local/bin/opencode
+# The entry scripts' shared helpers (flavors/common, build context "common").
+COPY --from=common --chmod=0755 koinon-entry-lib.sh /usr/local/lib/koinon/koinon-entry-lib.sh
 COPY --chmod=0755 koinon-opencode /usr/local/bin/koinon-opencode
 COPY --chmod=0644 etc/koinon/opencode/opencode.jsonc /etc/koinon/opencode/opencode.jsonc
 # git's GitHub credential helper, shared by every flavor (flavors/common, build context
