@@ -40,6 +40,12 @@ make dev        # Tilt against the home-lab cluster (docs/dev/)
 
 - Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages and PR titles.
 - These checks must pass: Go lint and tests, web lint, typecheck and tests, `buf lint` and
-  `buf breaking`, generated code up to date, migration lint, DCO.
+  `buf breaking`, generated code up to date, migration lint, DCO, and the gitleaks secret scan.
+- `main` is protected by a ruleset: changes land only through pull requests, with the checks
+  above passing and every review thread resolved; force-pushes and deletion are blocked, with no
+  bypass. Merge with a merge commit (keeps stacked pull requests intact) or squash; rebase merges
+  are off. CODEOWNERS requests the maintainer's review on every pull request.
+- Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions) each Monday;
+  security updates arrive as soon as they are published.
 - Migrations are forward-only: add a new `NNNNN_name.sql` file; never edit a merged one.
 - Decisions that change architecture get an ADR (copy `docs/adr/0000-template.md`).
