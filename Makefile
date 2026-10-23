@@ -118,6 +118,16 @@ flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images
 test-flavors: flavors ## Build the flavor images and run the flavor contract suite
 	$(GO) test -count=1 ./test/flavors/...
 
+# Docs site (plan item DOC1): Starlight in docs/site. The quickstart's `sh e1=<name>` blocks are
+# what test/e2e/run.sh runs; docs-check keeps the doc, the e2e script and the code in step.
+.PHONY: docs
+docs: ## Build the docs site into docs/site/dist
+	cd docs/site && $(PNPM) install --frozen-lockfile && ASTRO_TELEMETRY_DISABLED=1 $(PNPM) build
+
+.PHONY: docs-check
+docs-check: ## Check the docs against test/e2e, the chart and the web spec (needs helm; "hack/docs-check.sh --update" rewrites the golden file)
+	hack/docs-check.sh
+
 .PHONY: test-e2e-kind
 test-e2e-kind: ## Quickstart e2e on a local kind cluster koinon-e1 (KEEP=1 keeps the cluster)
 	test/e2e/run.sh

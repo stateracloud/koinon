@@ -6,7 +6,13 @@
 #   1. prerequisites (not on the quickstart clock): kind/up.sh;
 #   2. images: Koinon, the fake model server and the fake GitHub with ko, the OpenCode flavor
 #      with buildx, all loaded into the kind node; the fakes deployed in koinon-e2e-fakes;
-#   3. `helm install` of charts/koinon (runc, CNPG, the fakes as model and GitHub);
+#   3. the quickstart's shell commands (plan item DOC1): the blocks marked `sh e1=<name>` in
+#      docs/site/src/content/docs/quickstart.md, run by name through hack/docs-e1.sh, so the docs
+#      cannot drift from this test. They create the namespace, copy the OpenShell client
+#      certificate, store the model key and `helm install` charts/koinon (runc, CNPG, the fakes
+#      as model and GitHub). Only two things differ from a reader's run: values.yaml is
+#      test/e2e/kind/koinon-values.yaml, and kubectl/helm are wrappers that add the kind context;
+#      hack/docs-check.sh (make docs-check) fails when this script and the doc disagree;
 #   4. SUITE=go (default): the Go driver in test/e2e drives the quickstart steps through the API
 #      and prints the wall clock of each step and the total from `helm install`.
 #      SUITE=web: Playwright (web/e2e-real, issue #50) drives the same install through the
@@ -18,6 +24,10 @@
 # deleted at the end unless KEEP=1.
 #
 #   CLUSTER=koinon-e1  SUITE=go|web  KEEP=0  SKIP_UP=0  SKIP_BUILD=0  OUT=<dir for logs and timings>
+#
+# The quickstart opens the API on localhost:8080 (the doc's port-forward block), so that port must be
+# free. API_PORT=<n> changes the local end of the port-forward for the test only; the doc's block
+# stays 8080.
 set -euo pipefail
 
 CLUSTER=${CLUSTER:-koinon-e1}
@@ -29,16 +39,44 @@ SUITE=${SUITE:-go}
 case "$SUITE" in go | web) ;; *) echo "SUITE must be go or web" >&2; exit 2 ;; esac
 SKIP_UP=${SKIP_UP:-0}
 SKIP_BUILD=${SKIP_BUILD:-0}
-API_PORT=${API_PORT:-18080}
+# The quickstart's port-forward block (docs) uses 8080; run.sh checks that this port is free.
+API_PORT=${API_PORT:-8080}
 GH_PORT=${GH_PORT:-18090}
+for port in "$API_PORT" "$GH_PORT"; do
+  if nc -z 127.0.0.1 "$port" 2>/dev/null; then echo "port $port is in use; run.sh port-forwards to it" >&2; exit 1; fi
+done
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 here="$root/test/e2e"
 OUT=${OUT:-$(mktemp -d)}
 mkdir -p "$OUT"
 K=(kubectl --context "$CTX")
-H=(helm --kube-context "$CTX")
 cd "$root"
+
+# The quickstart blocks call plain `kubectl` and `helm`. These wrappers (first on PATH for
+# docs-e1.sh only) pin them to the kind context, so a stray current context is never touched.
+mkdir -p "$OUT/bin" "$OUT/quickstart"
+for tool in kubectl helm; do
+  flag=--context; [[ $tool == helm ]] && flag=--kube-context
+  printf '#!/usr/bin/env bash\nexec %s %s %s "$@"\n' "$(command -v "$tool")" "$flag" "$CTX" >"$OUT/bin/$tool"
+  chmod +x "$OUT/bin/$tool"
+done
+# The doc's port-forward is 8080:8080; with API_PORT set, only its local end changes.
+if [[ $API_PORT != 8080 ]]; then
+  cat >"$OUT/bin/kubectl" <<WRAP
+#!/usr/bin/env bash
+args=()
+for a in "\$@"; do args+=("\${a/#8080:8080/$API_PORT:8080}"); done
+exec $(command -v kubectl) --context $CTX "\${args[@]}"
+WRAP
+fi
+# The quickstart's working directory: the repository's chart and the values file.
+ln -sfn "$root/charts" "$OUT/quickstart/charts"
+cp "$here/kind/koinon-values.yaml" "$OUT/quickstart/values.yaml"
+# e1 runs one quickstart block by name; `e1 run <name>` is a plain command, so it can be backgrounded
+# and killed (the block's last command is exec'd).
+e1_env=(env "PATH=$OUT/bin:$PATH" "E1_WORKDIR=$OUT/quickstart")
+e1() { "${e1_env[@]}" "$root/hack/docs-e1.sh" run "$1"; }
 
 pids=()
 status=1
@@ -97,30 +135,27 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
   done_step "Image: OpenCode flavor buildx and kind load"
 fi
 
-step "fakes ($FAKES) and the OpenShell client certificate"
+step "fakes ($FAKES)"
 "${K[@]}" apply -f "$here/kind/fakes.yaml"
 "${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub >/dev/null
 "${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub --timeout=120s
-"${K[@]}" create namespace "$NS" --dry-run=client -o yaml | "${K[@]}" apply -f -
-# The OpenShell chart generates the client bundle in its own namespace; Koinon mounts a copy.
-"${K[@]}" -n openshell get secret openshell-client-tls -o json \
-  | jq --arg ns "$NS" '{apiVersion, kind, type, data, metadata: {name: .metadata.name, namespace: $ns}}' \
-  | "${K[@]}" apply -f -
-done_step "Fakes deployed, OpenShell client certificate copied"
+done_step "Fakes deployed"
+
+# The quickstart blocks, as the docs show them (quickstart.md). The fake model needs no key, but
+# the doc's key step still runs, with a dummy value.
+step "quickstart: namespace, OpenShell client certificate, model key"
+e1 namespace
+e1 client-cert
+OPENROUTER_API_KEY=e2e-dummy-key e1 model-key
+done_step "Namespace, client certificate and model key (quickstart blocks)"
 
 # The quickstart clock starts here (ADR 0049).
-extra=()
-if grep -q '^preflight:' charts/koinon/values.yaml; then
-  # Plan item H2. kind has no Kata, so the guest seccomp probe does not apply on runc.
-  extra+=(--set preflight.enabled=true --set preflight.seccompProbe.enabled=false)
-fi
-step "helm install koinon"
+step "quickstart: helm install"
 T0=$(date +%s)
-"${H[@]}" install koinon charts/koinon --namespace "$NS" -f "$here/kind/koinon-values.yaml" \
-  ${extra[@]+"${extra[@]}"} --wait --timeout 10m
+e1 install
 done_step "helm install --wait"
 
-"${K[@]}" -n "$NS" port-forward svc/koinon-api "$API_PORT:8080" >"$OUT/pf-api.log" 2>&1 &
+"${e1_env[@]}" "$root/hack/docs-e1.sh" run open >"$OUT/pf-api.log" 2>&1 &
 pids+=($!)
 "${K[@]}" -n "$FAKES" port-forward svc/fakegithub "$GH_PORT:8080" >"$OUT/pf-fakegithub.log" 2>&1 &
 pids+=($!)
@@ -129,7 +164,7 @@ for port in "$API_PORT" "$GH_PORT"; do
   nc -z 127.0.0.1 "$port" || { echo "port-forward to $port did not come up" >&2; exit 1; }
 done
 
-password=$("${K[@]}" -n "$NS" get secret koinon-bootstrap-admin -o jsonpath='{.data.password}' | base64 -d)
+password=$(e1 password)
 case "$SUITE" in
 go)
   step "quickstart driver (go test ./test/e2e)"
