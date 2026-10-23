@@ -21,9 +21,12 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 )
 
 // postgresImage is the minimum supported Postgres version (ADR 0047).
@@ -32,6 +35,9 @@ const postgresImage = "postgres:18-alpine"
 var (
 	pool *pgxpool.Pool
 	q    *store.Queries
+	// ring seals the providers' and connections' secrets of every spec; one keyring for the
+	// suite, because a pass reads the providers of every org in the shared database.
+	ring = secretstoretest.Keyring()
 )
 
 func TestReconciler(t *testing.T) {
@@ -208,4 +214,21 @@ func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+// addProvider gives the org an OpenAI-compatible provider with one priced model, as the
+// admin API would.
+func addProvider(ctx context.Context, org, user pgtype.UUID, name, key, model string) catalog.Provider {
+	GinkgoHelper()
+	svc := catalog.New(pool, ring, nil)
+	actor := audit.User(user)
+	p, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
+		Name: name, Type: "openai", URL: "http://fakemodel:8080/v1", APIKey: key,
+	})
+	Expect(err).NotTo(HaveOccurred())
+	_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{
+		ProviderID: p.ID, Name: model, Rates: &catalog.Rates{Input: "1", Output: "2"},
+	})
+	Expect(err).NotTo(HaveOccurred())
+	return p
 }

@@ -37,6 +37,11 @@ type Options struct {
 	// AccessLogOTLP exports the access log to the spend ledger's OTLP/HTTP
 	// receiver in koinon-api (plan item L1). Nil exports nothing.
 	AccessLogOTLP *OTLPExport
+	// Redelivery, when above zero, adds a comment to the file so that it differs from the
+	// rejected one with the same content (agentgateway reloads on a file change, and does not
+	// retry a config it rejected, for example one naming a key file that kubelet had not
+	// mounted yet). It is not part of the revision.
+	Redelivery int
 }
 
 // OTLPExport is an OTLP/HTTP (protobuf) logs endpoint.
@@ -108,7 +113,11 @@ func Render(s gateway.State, o Options) ([]byte, gateway.Revision, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	return append([]byte(header), body...), rev, nil
+	head := header
+	if o.Redelivery > 0 {
+		head += fmt.Sprintf("# Redelivery %d: the previous copy of this revision was rejected.\n", o.Redelivery)
+	}
+	return append([]byte(head), body...), rev, nil
 }
 
 // ReloadProbeKey is the key material of the reload probe for rev. Every
@@ -231,12 +240,18 @@ type headerLocation struct {
 type apiKey struct {
 	KeyHash  string      `yaml:"keyHash"`
 	Metadata keyMetadata `yaml:"metadata"`
-	Budgets  []budget    `yaml:"budgets,omitempty"`
+	// AllowedModels lists the plain model names the key may request (llm only). A pointer so
+	// an empty list is rendered: it denies every model. agentgateway v1.6.0 schema/config.md
+	// llm.policies.apiKey.keys[].allowedModels.
+	AllowedModels *[]string `yaml:"allowedModels,omitempty"`
+	Budgets       []budget  `yaml:"budgets,omitempty"`
 }
 
 type keyMetadata struct {
 	Name  string `yaml:"name"`
 	Agent string `yaml:"agent"`
+	// Org is the key's org slug; llm requests carry it in gateway.OrgHeader.
+	Org string `yaml:"org,omitempty"`
 }
 
 type budget struct {
@@ -263,6 +278,9 @@ type llmSection struct {
 type llmPolicies struct {
 	APIKey        apiKeyPolicy  `yaml:"apiKey"`
 	Authorization authorization `yaml:"authorization"`
+	// Transformations run before a model is chosen (schema/config.md: llm.policies "before a
+	// model is selected") and stamp the key's org into gateway.OrgHeader.
+	Transformations transformations `yaml:"transformations"`
 }
 
 // authorization admits a request when any rule matches.
@@ -271,10 +289,28 @@ type authorization struct {
 }
 
 type llmModel struct {
+	// ID is "<org>/<model>", the gateway-wide name; Name is the plain name agents request.
+	ID string `yaml:"id"`
+	// Name is what clients request; Matches narrows the entry to one org's keys, so each org's
+	// plain name routes to its own provider (schema/config.md llm.models[].matches).
 	Name      string         `yaml:"name"`
+	Matches   []modelMatch   `yaml:"matches"`
 	Provider  llmProvider    `yaml:"provider"`
 	Params    llmParams      `yaml:"params"`
 	Overrides map[string]any `yaml:"overrides,omitempty"`
+}
+
+type modelMatch struct {
+	Headers []headerMatch `yaml:"headers"`
+}
+
+type headerMatch struct {
+	Name  string     `yaml:"name"`
+	Value exactValue `yaml:"value"`
+}
+
+type exactValue struct {
+	Exact string `yaml:"exact"`
 }
 
 type llmProvider struct {
@@ -368,12 +404,28 @@ func build(s gateway.State, o Options) document {
 	keys := slices.Clone(s.Keys)
 	slices.SortFunc(keys, func(a, b gateway.Key) int { return strings.Compare(a.ID, b.ID) })
 
+	allowed := map[string][]string{}
+	var catalogs map[string]catalogProvider
+	for _, p := range s.Providers {
+		for _, m := range p.Models {
+			if m.Price != nil {
+				allowed[p.Org] = append(allowed[p.Org], m.Name)
+			}
+		}
+	}
+	for org := range allowed {
+		slices.Sort(allowed[org])
+	}
+
 	// The llm section is always rendered, models or not, because it carries
 	// the reload probe key (stamp fills in its hash).
 	doc.LLM = &llmSection{
 		Policies: llmPolicies{
-			APIKey:        keyPolicy(keys, s.Limits),
+			APIKey:        keyPolicy(keys, s.Limits, allowed),
 			Authorization: authorization{Rules: []string{probeRule}},
+			Transformations: transformations{Request: headerTransform{Set: map[string]string{
+				gateway.OrgHeader: `default(apiKey.org, "")`,
+			}}},
 		},
 		Models: []llmModel{},
 	}
@@ -382,34 +434,52 @@ func build(s gateway.State, o Options) document {
 	// Only priced models are served. agentgateway answers a request for any
 	// other model with 404 model_not_found, so an unpriced model can never be
 	// charged zero (ADR 0041 decision 7, plan item L1).
-	priced := slices.DeleteFunc(slices.Clone(s.Models.Models), func(m gateway.Model) bool { return m.Price == nil })
-	if len(priced) > 0 {
-		prices := map[string]catalogModel{}
-		for _, m := range priced {
+	//
+	// Each served model becomes one entry named by its plain name, narrowed to its org by
+	// a header match, with the org's own provider; the catalog (prices) is per org and
+	// provider type. Keys may request their org's plain names only (allowedModels).
+	for _, p := range sortedProviders(s) {
+		for _, m := range p.Models {
+			if m.Price == nil {
+				continue
+			}
+			override := p.Org + "." + p.Type
 			lm := llmModel{
-				Name: m.Name,
+				ID:      gateway.ModelRef(p.Org, m.Name),
+				Name:    m.Name,
+				Matches: []modelMatch{{Headers: []headerMatch{{Name: gateway.OrgHeader, Value: exactValue{Exact: p.Org}}}}},
 				Provider: llmProvider{Custom: customProvider{
-					ProviderOverride: s.Models.Provider,
+					ProviderOverride: override,
 					Formats:          []format{{Type: "completions"}},
 				}},
-				Params:    llmParams{BaseURL: s.Models.BaseURL},
-				Overrides: s.Models.Overrides,
+				Params: llmParams{BaseURL: p.BaseURL},
 			}
-			if s.Models.APIKeyFile != "" {
-				lm.Params.APIKey = &fileSource{File: s.Models.APIKeyFile}
+			if p.APIKeyFile != "" {
+				lm.Params.APIKey = &fileSource{File: p.APIKeyFile}
+			}
+			if m.Guard {
+				lm.Overrides = gateway.GuardOverrides()
 			}
 			doc.LLM.Models = append(doc.LLM.Models, lm)
-			prices[m.Name] = catalogModel{Rates: rates{Input: m.Price.Input, Output: m.Price.Output, CacheRead: m.Price.CacheRead}}
+			if catalogs == nil {
+				catalogs = map[string]catalogProvider{}
+			}
+			cp := catalogs[override]
+			if cp.Models == nil {
+				cp.Models = map[string]catalogModel{}
+			}
+			cp.Models[m.Name] = catalogModel{Rates: rates{Input: m.Price.Input, Output: m.Price.Output, CacheRead: m.Price.CacheRead}}
+			catalogs[override] = cp
 		}
-		doc.Config.ModelCatalog = []catalogEntry{{Inline: catalog{Providers: map[string]catalogProvider{
-			s.Models.Provider: {Models: prices},
-		}}}}
+	}
+	if len(catalogs) > 0 {
+		doc.Config.ModelCatalog = []catalogEntry{{Inline: catalog{Providers: catalogs}}}
 	}
 
 	if len(s.MCP) > 0 {
 		doc.MCP = &mcpSection{
 			Policies: mcpPolicies{
-				APIKey:           keyPolicy(keys, nil),
+				APIKey:           keyPolicy(keys, nil, nil),
 				MCPAuthorization: mcpAuthorization{Rules: toolRules(s.Tools)},
 				// Targets learn which agent calls from this header (gateway.AgentHeader);
 				// set overwrites whatever the client sent.
@@ -442,14 +512,19 @@ func probeKey(withBudget bool) apiKey {
 	return k
 }
 
-func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit) apiKeyPolicy {
+func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit, allowed map[string][]string) apiKeyPolicy {
 	p := apiKeyPolicy{
 		Mode:     "strict",
 		Location: keyLocation{Header: headerLocation{Name: "authorization", Prefix: "Bearer "}},
 		Keys:     []apiKey{},
 	}
 	for _, k := range keys {
-		ak := apiKey{KeyHash: k.Hash, Metadata: keyMetadata{Name: k.ID, Agent: k.Agent.String()}}
+		ak := apiKey{KeyHash: k.Hash, Metadata: keyMetadata{Name: k.ID, Agent: k.Agent.String(), Org: k.Agent.Org}}
+		if allowed != nil {
+			// An org without served models gets the empty list: it can request nothing.
+			names := append([]string{}, allowed[k.Agent.Org]...)
+			ak.AllowedModels = &names
+		}
 		if l, ok := limits[k.Agent]; ok {
 			// agentgateway keys budget usage by key name and budget name
 			// (http/budget budget_id), so the generation selects the counter.
@@ -516,4 +591,18 @@ func formatWindow(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%ds", (d+time.Second-1)/time.Second)
 	}
+}
+
+// sortedProviders orders providers by org and name and each one's models by name, so equal
+// States render byte-identical config whatever order the caller listed them in.
+func sortedProviders(s gateway.State) []gateway.Provider {
+	out := slices.Clone(s.Providers)
+	for i := range out {
+		out[i].Models = slices.Clone(out[i].Models)
+		slices.SortFunc(out[i].Models, func(a, b gateway.Model) int { return strings.Compare(a.Name, b.Name) })
+	}
+	slices.SortFunc(out, func(a, b gateway.Provider) int {
+		return strings.Compare(a.Org+"/"+a.Name, b.Org+"/"+b.Name)
+	})
+	return out
 }

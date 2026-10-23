@@ -9,7 +9,7 @@ config:
   modelCatalog:
     - inline:
         providers:
-          ollama:
+          acme.ollama:
             models:
               qwen3.5:4b:
                 rates:
@@ -19,7 +19,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"f8e8af6ca3708756"'
+      koinon.config: '"c0ec08a242eaf070"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
 gateways:
@@ -38,18 +38,31 @@ llm:
           metadata:
             name: k-cccccccccccc
             agent: acme/repo-helper
-        - keyHash: sha256:28be57505d5c9e75687b4c2f7a2032b79434dfe4a0b35ceeadd801c31e4c6bc2
+            org: acme
+          allowedModels:
+            - qwen3.5:4b
+        - keyHash: sha256:1cd7f511e20744528f20c076ae31efc63886e8a487fe91596eea735de70bdf6e
           metadata:
             name: koinon-reload-probe
             agent: ""
     authorization:
       rules:
         - apiKey.name != "koinon-reload-probe"
+    transformations:
+      request:
+        set:
+          x-koinon-org: default(apiKey.org, "")
   models:
-    - name: qwen3.5:4b
+    - id: acme/qwen3.5:4b
+      name: qwen3.5:4b
+      matches:
+        - headers:
+            - name: x-koinon-org
+              value:
+                exact: acme
       provider:
         custom:
-          providerOverride: ollama
+          providerOverride: acme.ollama
           formats:
             - type: completions
       params:

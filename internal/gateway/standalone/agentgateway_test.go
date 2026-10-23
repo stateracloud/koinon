@@ -68,6 +68,43 @@ func fakeUpstream(hits *atomic.Int64) *httptest.Server {
 	}))
 }
 
+// taggedUpstream is fakeUpstream that names itself in every answer, counts its requests
+// and keeps the last request body, so a spec can tell which org's provider answered and
+// what the gateway forced into the request.
+type taggedUpstream struct {
+	*httptest.Server
+	hits atomic.Int64
+	last atomic.Value // string: the last request body
+}
+
+func newTaggedUpstream(tag string) *taggedUpstream {
+	u := &taggedUpstream{}
+	u.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u.hits.Add(1)
+		raw, _ := io.ReadAll(r.Body)
+		u.last.Store(string(raw))
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = json.Unmarshal(raw, &req)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-test", "object": "chat.completion", "created": time.Now().Unix(), "model": req.Model,
+			"choices": []any{map[string]any{
+				"index": 0, "finish_reason": "stop",
+				"message": map[string]any{"role": "assistant", "content": "answered by " + tag},
+			}},
+			"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+		})
+	}))
+	return u
+}
+
+func (u *taggedUpstream) lastBody() string {
+	b, _ := u.last.Load().(string)
+	return b
+}
+
 // fakeTools is an MCP server with the two parking tools and a bypass tool
 // that no agent is granted (spike step 6). Each tool answers with the agent
 // header it received.
@@ -127,6 +164,8 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		llmURL  string
 		keyA    gateway.IssuedKey // limited agent
 		keyB    gateway.IssuedKey // unlimited agent, no tool grants
+		keyG    gateway.IssuedKey // an agent of the second org, globex
+		ups     map[string]*taggedUpstream
 		ctr     *testcontainers.DockerContainer
 		hits    atomic.Int64 // requests that reached the upstream
 		options = standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mode=rwc"}
@@ -180,6 +219,11 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 
 		upstream := fakeUpstream(&hits)
 		DeferCleanup(upstream.Close)
+		// Two orgs, each with its own upstream; both call their model testModel.
+		ups = map[string]*taggedUpstream{"globex": newTaggedUpstream("globex"), "guarded": newTaggedUpstream("guarded")}
+		for _, u := range ups {
+			DeferCleanup(u.Close)
+		}
 		tools := fakeTools()
 		DeferCleanup(tools.Close)
 
@@ -188,14 +232,33 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		keyB, err = gateway.NewKey(agentB)
 		Expect(err).NotTo(HaveOccurred())
+		keyG, err = gateway.NewKey(agentG)
+		Expect(err).NotTo(HaveOccurred())
 
+		hostURL := func(p int) string { return fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, p) }
 		state = gateway.State{
-			Models: gateway.ModelUpstream{
-				Provider: "fake",
-				BaseURL:  fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, port(upstream)),
-				// $50 per 1M tokens: 20 tokens cost $0.001 per request.
-				Models:    []gateway.Model{{Name: testModel, Price: &gateway.Price{Input: "50", Output: "50"}}},
-				Overrides: map[string]any{"temperature": 0},
+			Providers: []gateway.Provider{
+				{
+					Org: "acme", Name: "upstream", Type: "fake", BaseURL: hostURL(port(upstream)),
+					// $50 per 1M tokens: 20 tokens cost $0.001 per request.
+					Models: []gateway.Model{
+						{Name: testModel, Price: &gateway.Price{Input: "50", Output: "50"}},
+						{Name: "acme-only", Price: &gateway.Price{Input: "1", Output: "1"}},
+						{Name: "unpriced"},
+					},
+				},
+				{
+					Org: "globex", Name: "upstream", Type: "fake", BaseURL: hostURL(port(ups["globex"].Server)),
+					APIKeyFile: "/secrets/upstream/globex_key",
+					Models:     []gateway.Model{{Name: testModel, Price: &gateway.Price{Input: "1", Output: "1"}}},
+				},
+				{
+					Org: "globex", Name: "guarded", Type: "openrouter", BaseURL: hostURL(port(ups["guarded"].Server)),
+					Models: []gateway.Model{
+						{Name: "guarded-model", Guard: true, Price: &gateway.Price{Input: "1", Output: "1"}},
+						{Name: "open-model", Price: &gateway.Price{Input: "1", Output: "1"}},
+					},
+				},
 			},
 			MCP: []gateway.MCPTarget{{
 				Name: "github",
@@ -204,11 +267,15 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		}
 		state.AddKey(keyA.Key)
 		state.AddKey(keyB.Key)
+		state.AddKey(keyG.Key)
 		state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 0.0015, Window: 24 * time.Hour})
 		state.GrantTools(agentA, gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}})
 
 		cfgDir = GinkgoT().TempDir()
 		Expect(os.Chmod(cfgDir, 0o755)).To(Succeed())
+		secretsDir := GinkgoT().TempDir()
+		Expect(os.Chmod(secretsDir, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(secretsDir, "globex_key"), []byte("globex-upstream-key"), 0o644)).To(Succeed()) //nolint:gosec // dummy
 		file := standalone.FileDeliverer{Path: filepath.Join(cfgDir, "config.yaml")}
 		first, _, err := standalone.Render(state, options)
 		Expect(err).NotTo(HaveOccurred())
@@ -217,9 +284,9 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		ctr, err = testcontainers.Run(ctx, AgentgatewayImage,
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
 			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
-			testcontainers.WithHostPortAccess(port(upstream), port(tools)),
+			testcontainers.WithHostPortAccess(port(upstream), port(tools), port(ups["globex"].Server), port(ups["guarded"].Server)),
 			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
-				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro")
+				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro", secretsDir+":/secrets/upstream:ro")
 			}),
 			testcontainers.WithWaitStrategyAndDeadline(time.Minute,
 				wait.ForHTTP("/healthz/ready").WithPort("15021/tcp")),
@@ -283,6 +350,68 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		_, err = driver.Apply(ctx, state)
 		Expect(err).NotTo(HaveOccurred())
 	}, SpecTimeout(2*time.Minute))
+
+	Describe("org-scoped models (plan item PV1)", func() {
+		It("routes each org's plain model name to its own provider", func(ctx SpecContext) {
+			code, body := chat(ctx, keyG.Material)
+			Expect(code).To(Equal(http.StatusOK), body)
+			Expect(body).To(ContainSubstring("answered by globex"))
+			code, body = chat(ctx, keyB.Material)
+			Expect(code).To(Equal(http.StatusOK), body)
+			Expect(body).NotTo(ContainSubstring("globex"))
+		})
+
+		It("keeps an org's key off another org's models", func(ctx SpecContext) {
+			before := ups["globex"].hits.Load()
+			// acme-only exists only in acme: the globex key may not ask for it.
+			code, body := chatModel(ctx, keyG.Material, "acme-only")
+			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
+			// and an acme key cannot reach globex's models.
+			code, body = chatModel(ctx, keyB.Material, "open-model")
+			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
+			Expect(ups["globex"].hits.Load()).To(Equal(before))
+		})
+
+		It("does not let the client pick another org by header", func(ctx SpecContext) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions",
+				bytes.NewBufferString(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, testModel)))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+keyB.Material)
+			req.Header.Set(gateway.OrgHeader, "globex")
+			resp, err := http.DefaultClient.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = resp.Body.Close() }()
+			b, _ := io.ReadAll(resp.Body)
+			Expect(string(b)).NotTo(ContainSubstring("globex"))
+		})
+
+		It("serves no unpriced model", func(ctx SpecContext) {
+			code, body := chatModel(ctx, keyB.Material, "unpriced")
+			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
+		})
+
+		It("forces the routing guard into the request only for guarded models", func(ctx SpecContext) {
+			code, body := chatModel(ctx, keyG.Material, "guarded-model")
+			Expect(code).To(Equal(http.StatusOK), body)
+			var got map[string]any
+			Expect(json.Unmarshal([]byte(ups["guarded"].lastBody()), &got)).To(Succeed())
+			Expect(got).To(HaveKeyWithValue("provider", map[string]any{"zdr": true, "data_collection": "deny"}))
+
+			code, body = chatModel(ctx, keyG.Material, "open-model")
+			Expect(code).To(Equal(http.StatusOK), body)
+			got = nil
+			Expect(json.Unmarshal([]byte(ups["guarded"].lastBody()), &got)).To(Succeed())
+			Expect(got).NotTo(HaveKey("provider"))
+		})
+
+		It("sends the provider's key file content as the upstream credential", func(ctx SpecContext) {
+			// The fake upstream does not check credentials; the config names the file and
+			// agentgateway accepted it (--validate-only and the reload would fail on a missing file).
+			code, body := chat(ctx, keyG.Material)
+			Expect(code).To(Equal(http.StatusOK), body)
+		})
+	})
 
 	It("rejects requests without a key", func(ctx SpecContext) {
 		code, _ := chat(ctx, "")

@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"k8s.io/client-go/kubernetes"
@@ -24,11 +25,11 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/stateracloud/koinon/internal/cli"
-	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 func main() {
@@ -94,22 +95,31 @@ func run() error {
 	// admin listener stays on localhost.
 	driver.Waiter = standalone.ProbeWaiter{GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log}
 
+	keyring, err := secretstore.LoadDir(cfg.kekDir)
+	if err != nil {
+		return err
+	}
+	go keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log)
+
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
-			Gateway:          endpoint,
-			Models:           cfg.models,
-			Flavors:          cfg.flavors(),
-			RuntimeClassName: cfg.runtimeClass,
-			IdleTimeout:      cfg.idleTimeout,
-			ResyncInterval:   cfg.resyncInterval,
-			HomeRetention:    reconciler.Retention(cfg.homeRetention),
-			ToolServers:      cfg.toolServers(),
-			// repo.read grants (plan item C2): tokens minted with the App key from the
-			// connection's Secret, which lives in Koinon's namespace like the key Secrets.
+			Gateway:           endpoint,
+			Keys:              keyring,
+			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
+			ProviderKeyDir:    cfg.providerKeysDir,
+			ProviderKeySettle: cfg.keySettle,
+			Flavors:           cfg.flavors(),
+			RuntimeClassName:  cfg.runtimeClass,
+			IdleTimeout:       cfg.idleTimeout,
+			ResyncInterval:    cfg.resyncInterval,
+			HomeRetention:     reconciler.Retention(cfg.homeRetention),
+			ToolServers:       cfg.toolServers(),
+			// repo.read grants (plan item C2): tokens minted with the App key opened from the
+			// connection's stored secret fields.
 			GitHub: reconciler.GitHubApps{
-				Secrets: connections.KubeSecrets{Client: kube, Namespace: cfg.namespace},
-				Client:  github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
+				Keys:   keyring,
+				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
 			},
 			Logger: log,
 		})
