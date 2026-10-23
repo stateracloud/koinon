@@ -61,11 +61,18 @@ breaking: ## Check protobuf changes against main
 
 .PHONY: migrate-lint
 migrate-lint: ## Check migration file names (and, with BASE=<ref>, that merged migrations are unchanged)
+	hack/migrate-lint-test.sh
 	hack/migrate-lint.sh $(BASE)
 
+.PHONY: chart-check
+chart-check: ## Lint and render the Helm chart in every mode and validate it with kubeconform
+	hack/chart-check.sh
+
 .PHONY: generate
+# The OpenShell client is generated after buf.gen.yaml, whose clean step empties internal/gen.
 generate: ## Regenerate protobuf and sqlc code
 	buf generate
+	buf generate --template buf.gen.openshell.yaml
 	$(GO) tool sqlc generate
 
 # Flavor images build with docker buildx and load into the local Docker image store; nothing is

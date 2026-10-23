@@ -1,0 +1,183 @@
+{
+  "$comment": "SPDX-License-Identifier: Apache-2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://koinon.dev/schemas/templates/v1alpha1/template.schema.json",
+  "title": "Koinon agent template",
+  "description": "A building block for an agent draft (ADR 0020): flavor choices, instructions, model, suggested grants and limits. Creating an agent from a template always yields a draft; an org admin or owner activates it and approves its grants.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "description": "Schema version of this document. Stays v1alpha1 until 1.0 (ADR 0027).",
+      "const": "templates.koinon.dev/v1alpha1"
+    },
+    "kind": {
+      "const": "Template"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "displayName", "description"],
+      "properties": {
+        "id": {
+          "description": "Stable identifier; also the file name (<id>.yaml). Never reused for a different template.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "maxLength": 63
+        },
+        "version": {
+          "description": "SemVer of the template content. Bump it whenever the content hash changes.",
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "description": {
+          "description": "One or two sentences shown in the template picker.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flavors", "model", "instructions", "grants", "limits"],
+      "properties": {
+        "flavors": {
+          "description": "Harnesses the agent may run on (ADR 0035). The default must be one of the allowed flavors.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["allowed", "default"],
+          "properties": {
+            "allowed": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/flavor" }
+            },
+            "default": { "$ref": "#/$defs/flavor" }
+          }
+        },
+        "model": {
+          "description": "Model reference. The name is logical and is resolved against the install's model list when the agent is created; \"default\" means the install's default model.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "maxLength": 128
+            }
+          }
+        },
+        "harness": {
+          "description": "Harness settings beyond the flavor choice. Omitted means every setting is off.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pluginInstalls": {
+              "description": "Let the agent install OpenCode plugins: the sandbox may read the npm registry (registry.npmjs.org, GET and HEAD only, no credentials) from the OpenCode binary, and OpenCode loads the plugins in the agent's home and its config. Off by default. Applies to the OpenCode flavor only, so opencode must be an allowed flavor.",
+              "type": "boolean",
+              "default": false
+            }
+          }
+        },
+        "instructions": {
+          "description": "Markdown instructions for the agent, written to the flavor's instruction file.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32768
+        },
+        "grants": {
+          "description": "Suggested grants. The template proposes; an admin or owner approves on activation (ADR 0020). Each scope must exist on the connector type, which is checked when the template is synced.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/grant" }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["run", "spendUSD"],
+          "properties": {
+            "run": {
+              "description": "Per-run caps (ADR 0049). Hitting one cancels the run with a ticket event.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["maxDuration", "maxTokens"],
+              "properties": {
+                "maxDuration": {
+                  "description": "Wall-clock cap as a Go duration in whole hours, minutes or seconds, for example 30m. At most 24h.",
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*(h|m|s)$"
+                },
+                "maxTokens": {
+                  "description": "Total model tokens (input plus output) per run.",
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 100000000
+                }
+              }
+            },
+            "spendUSD": {
+              "description": "Per-agent spend limit in USD, pushed to agentgateway (plan item L1). A decimal string with at most two fraction digits, so it never goes through a float.",
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,5})(\\.[0-9]{1,2})?$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "flavor": {
+      "enum": ["opencode", "hermes", "pi"]
+    },
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connector", "scopes", "preset"],
+      "properties": {
+        "connector": {
+          "description": "Connector type ID (ADR 0007), for example github.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+        },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+          }
+        },
+        "preset": {
+          "description": "Approval preset mapping risk tiers to allow, ask or deny (ADR 0008, 0049).",
+          "enum": ["read-only", "standard", "trusted"]
+        },
+        "targets": {
+          "description": "How many targets of the connection (for GitHub: repositories) the user picks when creating the agent. Omitted means the connector type decides.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min", "max"],
+          "properties": {
+            "min": { "type": "integer", "minimum": 0 },
+            "max": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "purpose": {
+          "description": "Why the agent needs this grant, shown to the admin who activates it.",
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    }
+  }
+}

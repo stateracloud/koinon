@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+# Koinon-owned config for the platform agentgateway (namespace agentgateway, Argo app
+# 'agentgateway' with ignoreDifferences on this ConfigMap's data). Keys appear only as hashes.
+config:
+  database: {url: "sqlite:///data/agentgateway.db?mode=rwc"}
+  logging:
+    format: json
+  modelCatalog:
+  - inline:
+      providers:
+        ollama:
+          models:
+            "qwen3.5:4b": {rates: {input: "1", output: "2"}}   # nominal, local model
+        openrouter:
+          models:
+            # Highest price among the allowlisted ZDR hosts (Fireworks), so the ledger never under-counts.
+            "deepseek/deepseek-v4.1-flash": {rates: {input: "0.30", output: "1.20", cacheRead: "0.006"}}
+frontendPolicies:
+  accessLog:
+    add:
+      # Koinon's spend ledger needs the charged key; key metadata is flattened into apiKey.
+      koinon.key: 'default(apiKey.name, "")'
+      koinon.agent: 'default(apiKey.agent, "")'
+# LLM and MCP share the one listener the platform Service exposes (:4000).
+gateways:
+  default:
+    port: 4000
+llm:
+  policies:
+    apiKey:
+      mode: strict
+      location: {header: {name: authorization, prefix: "Bearer "}}
+      keys:
+      - keyHash: sha256:88768dd691fb7d05192319488989bdb37842205ec0e2dee6b26a543581a3d9f4
+        metadata: {name: agent-a, agent: spike-a/agent-a}
+        budgets:
+        - {name: usd-daily, limit: {unit: USD, amount: 5}, window: {rolling: 24h}, onBudgetExceeded: Block}
+  models:
+  - name: "qwen3.5:4b"
+    provider: {custom: {providerOverride: ollama, formats: [{type: completions}]}}
+    params: {baseUrl: "http://ollama.lab.example.invalid:11434/v1"}
+  - name: "deepseek/deepseek-v4.1-flash"
+    provider: {custom: {providerOverride: openrouter, formats: [{type: completions}]}}
+    params:
+      baseUrl: https://openrouter.ai/api/v1
+      apiKey: {file: /secrets/openrouter/api_key}
+    # Second guard next to the OpenRouter account settings: only zero-retention, no-training
+    # endpoints on the allowlisted hosts, no fallback elsewhere. Overrides beat client values.
+    overrides:
+      provider:
+        zdr: true
+        data_collection: deny
+        only: [fireworks, together, deepinfra, amazon-bedrock, google-vertex]
+        allow_fallbacks: false
+mcp:
+  policies:
+    apiKey:
+      mode: strict
+      location: {header: {name: authorization, prefix: "Bearer "}}
+      keys:
+      - keyHash: sha256:88768dd691fb7d05192319488989bdb37842205ec0e2dee6b26a543581a3d9f4
+        metadata: {name: agent-a, agent: spike-a/agent-a}
+    # Ask tier (ADR 0042): only the approval stub's parking tools are visible.
+    mcpAuthorization:
+      rules:
+      - 'mcp.tool.name == "create_pull_request"'
+      - 'mcp.tool.name == "get_approval_status"'
+  targets:
+  - name: approver
+    mcp:
+      host: http://approver.koinon-spike.svc.cluster.local:8080/mcp

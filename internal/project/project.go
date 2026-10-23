@@ -17,6 +17,10 @@ const (
 
 	// AgentsGroup is the API group for agent resources.
 	AgentsGroup = "agents." + Domain
+
+	// TemplatesGroup is the API group of agent template documents
+	// (templates/*.yaml).
+	TemplatesGroup = "templates." + Domain
 )
 
 // Version is the release version, set at build time with

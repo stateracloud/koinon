@@ -1,1 +1,189 @@
-# Koinon Helm values. The chart is a skeleton until the v0.1 milestone.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Koinon Helm values (v0.1 skeleton, plan item H1). No secret goes in here: credentials are
+# referenced by Secret name, and the chart generates the database and bootstrap-admin passwords.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Koinon images: <registry>/<repository>:<tag>[@<digest>]. The tag defaults to .Chart.AppVersion.
+image:
+  registry: ghcr.io/procoduck
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+api:
+  image:
+    repository: koinon-api
+    tag: ""
+    digest: ""
+  replicas: 1
+  port: 8080
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+reconciler:
+  image:
+    repository: koinon-reconciler
+    tag: ""
+    digest: ""
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+agentd:
+  image:
+    repository: koinon-agentd
+    tag: ""
+    digest: ""
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# The goose migration Job ("koinon-api migrate"), run as a Helm hook with the migration role.
+migrations:
+  backoffLimit: 4
+  activeDeadlineSeconds: 900
+  # How long the Job waits for the database to accept connections.
+  wait: 5m
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+postgres:
+  # cnpg: render a CloudNativePG Cluster (the operator is a prerequisite).
+  # external: connect to an existing Postgres 18+ through DSNs in a Secret.
+  mode: cnpg
+  cnpg:
+    instances: 1
+    # Pinned by digest (multi-arch index).
+    imageName: ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie@sha256:f7e00138159bb45d70b624ba25e446924cb3ed1bf366d13e936c3f81b914064e
+    database: koinon
+    storage:
+      size: 5Gi
+      storageClass: ""
+    resources: {}
+    # Namespace of the CNPG operator, allowed through the database NetworkPolicy.
+    operatorNamespace: cnpg-system
+  external:
+    # Secret with one libpq URI per role (sslmode=verify-full recommended). The migration role owns
+    # the schema; the component roles need only DML. Components may share one role.
+    secretName: ""
+    keys:
+      migrate: migrate-uri
+      api: api-uri
+      reconciler: reconciler-uri
+      agentd: agentd-uri
+
+gateway:
+  # standalone: the chart installs agentgateway, configured by the reconciler (ADR 0048).
+  # kubernetes: use an existing agentgateway controller (ADR 0049). The chart renders nothing for
+  # the gateway in v0.1; plan item G2 adds the Gateway, AgentgatewayBackend, AgentgatewayPolicy
+  # and AgentgatewayParameters in this namespace.
+  mode: standalone
+  standalone:
+    image:
+      repository: ghcr.io/agentgateway/agentgateway
+      tag: v1.6.0
+      digest: sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c
+    # LLM and MCP listener.
+    port: 8080
+    # SQLite budget store; one replica only.
+    persistence:
+      size: 1Gi
+      storageClass: ""
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {memory: 512Mi}
+    podAnnotations: {}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+  kubernetes:
+    # Used by G2: the GatewayClass of the existing controller.
+    gatewayClassName: agentgateway
+
+# One OpenAI-compatible model upstream (ADR 0049).
+model:
+  # For example https://openrouter.ai/api/v1 or http://ollama.example:11434/v1.
+  baseUrl: ""
+  # agentgateway providerOverride for the upstream (openai, openrouter, ollama, ...).
+  provider: openai
+  # Secret holding the upstream API key, mounted only into agentgateway. Empty for keyless upstreams.
+  apiKeySecret:
+    name: ""
+    key: api_key
+  # Models agents may use:
+  #   - name: deepseek/deepseek-v4.1-flash
+  #     rates: {input: "0.30", output: "1.20"}   # USD per 1M tokens, for budgets and the ledger
+  #     overrides: {}                            # request fields forced by the gateway
+  models: []
+
+# OpenShell gateway that the reconciler and agentd talk to over gRPC.
+openshell:
+  address: ""
+  # Secret with the client certificate (tls.crt, tls.key, ca.crt) for mTLS. Empty disables mTLS.
+  clientTLSSecret: ""
+  # Default sandbox runtime class (ADR 0045).
+  runtimeClassName: kata
+
+# Bootstrap platform admin (plan item A1). The one-time password is generated once into the Secret
+# <fullname>-bootstrap-admin and kept across upgrades. Disable once OIDC works.
+bootstrapAdmin:
+  enabled: true
+  username: admin
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  # Secret with the TLS certificate for host. Empty serves plain HTTP.
+  tlsSecretName: ""
+
+networkPolicy:
+  enabled: true
+  # Extra peers allowed to reach the API port (for example the ingress controller's namespace).
+  # Empty allows every source.
+  apiFrom: []
+  # Peers allowed to scrape agentgateway's stats port.
+  metricsFrom: []
+
+# ValidatingAdmissionPolicy for OpenShell sandbox namespaces (ADRs 0045, 0048).
+sandboxPolicy:
+  enabled: true
+  namespaceSelector:
+    matchLabels:
+      openshell.ai/managed-by: openshell
+  # Runtime classes allowed for sandbox workload pods.
+  runtimeClasses: [kata, kata-qemu]
+  validationActions: [Deny]
+  # Requesting identities (request.userInfo.username) allowed to write each kind of object in
+  # sandbox namespaces. Everyone else is denied, cluster admins included; there is no break-glass.
+  identities:
+    # Pods: the Agent Sandbox controller.
+    pods:
+      - system:serviceaccount:agent-sandbox-system:agent-sandbox-controller
+    # agents.x-k8s.io Sandboxes: the OpenShell gateway and the Agent Sandbox controller.
+    sandboxes:
+      - system:serviceaccount:openshell:openshell
+      - system:serviceaccount:agent-sandbox-system:agent-sandbox-controller
+    # Secrets: the OpenShell gateway.
+    secrets:
+      - system:serviceaccount:openshell:openshell
