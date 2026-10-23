@@ -1,0 +1,29 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# koinon-pi-rpc is the pi that pi-acp starts, one per session ($PI_ACP_PI_COMMAND, set by
+# koinon-pi). pi-acp passes fixed arguments only (`--mode rpc --no-themes [--session FILE]`,
+# pi-acp dist/index.js, PiRpcProcess.spawn), so the switches that keep the agent's home and the
+# repository from changing pi's tools and instructions are added here (pi 1.3.0, dist/cli/args.js):
+#
+#   --no-extensions      no extension from $PI_CODING_AGENT_DIR/extensions, a project's
+#                        .pi/extensions or settings packages (dist/core/resource-loader.js,
+#                        reload; dist/core/package-manager.js, addAutoDiscoveredResources); it
+#                        also drops the built-in extensions, so the four pi ships are named
+#                        again with -e builtin:NAME, MCP among them
+#   --no-skills          no skill from the agent directory, ~/.agents/skills or a project
+#   --no-prompt-templates, --no-themes   likewise for prompts and themes
+#   --no-context-files   no AGENTS.md or CLAUDE.md from the agent directory or from the session
+#                        directory upward (dist/core/resource-loader.js,
+#                        loadProjectContextFiles); APPEND_SYSTEM.md is not a context file and
+#                        still reaches the system prompt
+#   --no-approve         the project is never trusted, whatever trust.json in the agent
+#                        directory says (dist/main.js, createRuntime): no .pi/settings.json,
+#                        .pi/mcp.json, .pi/SYSTEM.md or .pi/APPEND_SYSTEM.md from a repository
+#
+# What the switches do not cover in the agent directory (SYSTEM.md, bin/, trust.json and the
+# rest) koinon-pi deletes before it starts pi-acp. See flavors/pi/README.md.
+set -eu
+exec /opt/node/bin/node /opt/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js \
+  --no-extensions -e builtin:llama.cpp -e builtin:codemode -e builtin:tool-search -e builtin:mcp \
+  --no-skills --no-prompt-templates --no-themes --no-context-files --no-approve "$@"
