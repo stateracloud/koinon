@@ -46,15 +46,23 @@ const instructionsPreamble = "# Koinon\n\n" +
 // writeScript replaces the file in one rename, so a harness never reads a half-written file;
 // umask 077 keeps it and its directory private to the sandbox user. $1 is the directory, $2
 // the file; the content arrives on stdin.
-const writeScript = `umask 077 && mkdir -p "$1" && t=$(mktemp "$1/.AGENTS.md.XXXXXX") && cat > "$t" && mv -f "$t" "$2"`
+//
+// Whatever the agent put at $2 goes first, a directory or a link included: mv would move the
+// file into a directory, or through a link. writeInstructions reads the file back and checks
+// its hash, which catches a directory the agent recreates between rm and mv.
+const writeScript = `umask 077 && mkdir -p "$1" && t=$(mktemp "$1/.AGENTS.md.XXXXXX") && cat > "$t" && ` +
+	`rm -rf -- "$2" && mv -f -- "$t" "$2"`
 
 // readScript prints the file if it is a regular file, not a link.
 const readScript = `test -f "$1" && test ! -L "$1" && exec cat "$1"`
 
 // linkScript makes $1 a symbolic link to $2. It exits 0 when it already is, and 3 when it
-// replaced what was there, printing the old link's target (nothing if $1 was no link).
+// replaced what was there, printing the old link's target (nothing if $1 was no link). It
+// removes whatever is at $1 first, and checks the new link before it reports the restore: ln
+// would put the link inside a directory recreated meanwhile.
 const linkScript = `t=$(readlink -- "$1") && [ "$t" = "$2" ] && exit 0; ` +
-	`mkdir -p -- "$(dirname -- "$1")" && rm -rf -- "$1" && ln -s -- "$2" "$1" && printf '%s' "$t" && exit 3`
+	`mkdir -p -- "$(dirname -- "$1")" && rm -rf -- "$1" && ln -s -- "$2" "$1" && ` +
+	`[ "$(readlink -- "$1")" = "$2" ] && printf '%s' "$t" && exit 3`
 
 // instructionsFile is the file's content for a version's instructions. It is never empty,
 // which the flavors' entry scripts require.
@@ -80,6 +88,14 @@ func (r *runner) writeInstructions(ctx context.Context, workspace, sandbox strin
 	}
 	if code != 0 {
 		return &failure{reason: fmt.Sprintf("write the instructions to %s: exit %d: %s", instructionsPath, code, strings.TrimSpace(stderr))}
+	}
+	// Only a regular file with this content counts as written.
+	got, code, _, err := r.sandboxExec(ctx, workspace, sandbox, []string{"/bin/sh", "-c", readScript, "sh", instructionsPath}, nil)
+	if err != nil {
+		return err
+	}
+	if code != 0 || sha256Hex(got) != sha256Hex(content) {
+		return &failure{reason: fmt.Sprintf("write the instructions to %s: the path does not hold the file agentd wrote", instructionsPath)}
 	}
 	return nil
 }
