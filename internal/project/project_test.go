@@ -21,8 +21,10 @@ func TestModulePathMatchesGoMod(t *testing.T) {
 	}
 }
 
-func TestAgentsGroupUnderDomain(t *testing.T) {
-	if !strings.HasSuffix(project.AgentsGroup, "."+project.Domain) {
-		t.Fatalf("%q is not under %q", project.AgentsGroup, project.Domain)
+func TestGroupsUnderDomain(t *testing.T) {
+	for _, group := range []string{project.AgentsGroup, project.TemplatesGroup} {
+		if !strings.HasSuffix(group, "."+project.Domain) {
+			t.Fatalf("%q is not under %q", group, project.Domain)
+		}
 	}
 }
