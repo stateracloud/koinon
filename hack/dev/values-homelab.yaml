@@ -16,6 +16,8 @@ model:
   provider: ollama
   models:
     - name: "qwen3.5:4b"
+      # Local Ollama costs nothing per token, but a model without a price is not served.
+      rates: {input: "0", output: "0"}
 
 openshell:
   address: openshell.openshell.svc:8080
