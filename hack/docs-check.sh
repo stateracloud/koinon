@@ -9,7 +9,8 @@
 #      `hack/docs-check.sh --update` after you change a command on purpose.
 #   2. test/e2e/run.sh runs every e1 block, and only blocks that exist.
 #   3. Every `yaml chart-values` block in the docs is valid chart values (helm lint --strict).
-#   4. Every bold label in the quickstart's browser steps appears in the Playwright spec.
+#   4. Every bold label in the quickstart's browser steps appears in the Playwright spec as a whole
+#      quoted string or regexp.
 #   5. The versions on the Prerequisites page equal the ones test/e2e/kind/up.sh, the preflight,
 #      the chart and the e2e workflow use.
 #   6. Every repository file the docs link to exists.
@@ -94,7 +95,8 @@ spec=$(cat web/e2e-real/*.spec.ts)
 awk '/^## 3\./ {on=1} /^## Changing in v0.1/ {on=0} on' "$quickstart" | grep -oE '\*\*[^*]+\*\*' | sort -u | sed -e 's/^\*\*//' -e 's/\*\*$//' >"$tmp/labels"
 [[ -s $tmp/labels ]] || fail "no bold UI labels found in the quickstart's browser steps"
 while IFS= read -r label; do
-  grep -qF -- "$label" <<<"$spec" || fail "the quickstart names '$label', which web/e2e-real/*.spec.ts does not contain"
+  # The label must be a whole quoted string ('Label') or a regexp ( /Label/ ) in the spec.
+  grep -qF -e "'$label'" -e "/$label/" <<<"$spec" || fail "the quickstart names '$label', which web/e2e-real/*.spec.ts does not contain"
 done <"$tmp/labels"
 ok "$(wc -l <"$tmp/labels" | tr -d ' ') UI labels are in the Playwright spec"
 

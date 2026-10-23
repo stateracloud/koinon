@@ -122,7 +122,7 @@ test-flavors: flavors ## Build the flavor images and run the flavor contract sui
 # what test/e2e/run.sh runs; docs-check keeps the doc, the e2e script and the code in step.
 .PHONY: docs
 docs: ## Build the docs site into docs/site/dist
-	cd docs/site && $(PNPM) install --frozen-lockfile && $(PNPM) build
+	cd docs/site && $(PNPM) install --frozen-lockfile && ASTRO_TELEMETRY_DISABLED=1 $(PNPM) build
 
 .PHONY: docs-check
 docs-check: ## Check the docs against test/e2e, the chart and the web spec (needs helm; "hack/docs-check.sh --update" rewrites the golden file)

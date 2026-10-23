@@ -132,5 +132,5 @@ on `runc`, where it does not apply.
 ## Not built yet
 
 Koinon has no published images or chart yet. They arrive with the release workflow (plan item REL1).
-Until then, install from a clone of the repository (`charts/koinon`) and build the images with `ko`.
-The [quickstart](/quickstart/) says where this shows.
+Until then, install from a clone of the repository (`charts/koinon`) and build the images yourself.
+The [quickstart](/quickstart/#build-the-images) has the build steps.
