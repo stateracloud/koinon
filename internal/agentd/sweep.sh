@@ -2,13 +2,16 @@
 #
 # sweep ends every process in the sandbox that runs as this script's user, apart from PID 1,
 # the sandbox's main process and this script with its ancestors (the exec that runs it).
-# koinon-agentd runs it before it starts a harness and after a run's harness has ended, so nothing the agent
-# started in one run (a harness's daemon, a background job) lives into the next (sweep.go).
+# koinon-agentd runs it before it starts a harness and after a run's harness has ended, so
+# nothing the agent started in one run (a harness's daemon, a background job) lives into the
+# next (sweep.go).
 #
-# POSIX sh with builtins and /proc only, so it works in every flavor image; no command
-# substitution or pipeline, whose processes it would see. Prints the main process it kept
+# POSIX sh, /proc, and grep and sleep from the flavor image (every image has them): grep runs
+# once before the scan, sleep only between rounds, and no command substitution or pipeline
+# runs while it scans, so it never finds its own helpers. Prints the main process it kept
 # ("main: PID") and what it ended ("ended: PID..." or "ended: none") on stdout; exits 1 when
-# processes are still running after the last round, 2 when it cannot tell what to keep.
+# processes are still running after the last round, 2 when it cannot tell which process is
+# the sandbox's main one, ending nothing.
 set -u
 
 uid=
@@ -34,11 +37,20 @@ done
 # (openshell-sandbox, as the sandbox user too) and the main process is its first child: the
 # command the sandbox was created with, launched once before the sandbox is ready, so before
 # any exec. Ending it ends the sandbox (ReportMainProcessExit) and OpenShell refuses every
-# exec after. Without the supervisor (the contract suite's Docker stand-in), PID 1 is the main
-# process. Children of PID 1 started later are execs, or processes an exec left behind.
-main=1
+# exec after. Children of PID 1 started later are execs, or processes an exec left behind.
+# The contract suite's Docker stand-in says so in PID 1's environment
+# (KOINON_SANDBOX_STANDIN=1); its PID 1 is the main process. Any other PID 1 is not known, and
+# the sweep refuses rather than guess.
+main=
 { read -r comm </proc/1/comm; } 2>/dev/null || comm=
-if [ "$comm" = openshell-sandb ]; then
+if [ "$comm" != openshell-sandb ]; then
+  if grep -qaz '^KOINON_SANDBOX_STANDIN=1$' /proc/1/environ 2>/dev/null; then
+    main=1
+  else
+    echo "sweep: unknown PID 1 (${comm:-unreadable}), neither the OpenShell supervisor nor the stand-in; cannot tell the sandbox's main process" >&2
+    exit 2
+  fi
+else
   main=
   main_start=
   for d in /proc/[0-9]*; do

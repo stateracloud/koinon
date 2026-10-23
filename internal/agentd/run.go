@@ -31,6 +31,9 @@ var (
 	errDropped = errors.New("harness connection lost")
 	// errShutdown: the pool is stopping.
 	errShutdown = errors.New("shutting down")
+	// errEndTurn: the turn ended with end_turn; execute closes the harness and sweeps before
+	// it ends the run.
+	errEndTurn = errors.New("the turn ended")
 )
 
 // failure fails the run with a reason.
@@ -71,12 +74,6 @@ type runner struct {
 	fenceOnce sync.Once
 	fenced    chan struct{}
 	fenceKind atomic.Int32
-	// finished is set once this worker has finished the run; a heartbeat after that fences it,
-	// though no other worker can own the run.
-	finished atomic.Bool
-	// parked is set once this worker has parked the run, which another worker may resume at
-	// once.
-	parked atomic.Bool
 
 	mu        sync.Mutex // serialises appends and srcSeq
 	srcSeq    int64
@@ -360,10 +357,15 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.execErr(ctx, "exec the harness", err)
 	}
-	// Deferred in this order, the sweep runs after the harness is closed: it ends whatever
-	// the harness or the agent left running.
-	defer r.sweepAfter(ctx, workspace, sandbox)
-	defer closeProcess(proc)
+	// The sweep runs after the harness is closed and ends whatever the harness or the agent
+	// left running. It must end before the run gives up the agent's active slot
+	// (runs_one_active_per_agent), or the agent's next run could start its harness first and
+	// have it ended: on end_turn below, before the run is finished; otherwise deferred, before
+	// conclude finishes or releases the run.
+	closeHarness := sync.OnceFunc(func() { closeProcess(proc) })
+	sweepOnce := sync.OnceFunc(func() { r.sweepAfter(ctx, workspace, sandbox) })
+	defer sweepOnce()
+	defer closeHarness()
 	conn := acp.NewConn(handler{r: r}, proc.Stdin(), proc.Stdout())
 	conn.SetLogger(log)
 	harnessErr := func(what string, err error) error {
@@ -452,7 +454,14 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.checkInstructions(fctx, workspace, sandbox, agent.Flavor, instructions); err != nil {
 		return r.execErr(ctx, "check the instructions", err)
 	}
-	return r.turn(ctx, conn, proc, &stderr, session, text)
+	err = r.turn(ctx, conn, proc, &stderr, session, text)
+	if !errors.Is(err, errEndTurn) {
+		return err
+	}
+	closeHarness()
+	sweepOnce()
+	// Finishes the run, or parks it on its approvals.
+	return r.endTurn(ctx)
 }
 
 // kindSessionReset is the ticket event of a run that started a new session because the ticket's
@@ -522,7 +531,7 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 		}
 		switch res.stop {
 		case acp.StopEndTurn:
-			return r.endTurn(ctx)
+			return errEndTurn
 		case acp.StopCancelled:
 			return &failure{reason: "the harness cancelled the turn"}
 		default:
@@ -750,7 +759,6 @@ func (r *runner) finish(ctx context.Context, outcome store.RunState, reason stri
 	if err != nil {
 		return r.dbErr(ctx, "finish the run", err)
 	}
-	r.finished.Store(true)
 	r.log.Info("run finished", "outcome", outcome, "reason", reason)
 	return nil
 }

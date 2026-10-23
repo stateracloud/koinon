@@ -41,8 +41,13 @@ starts, the entry script refuses to start (exit 64) when it is missing, empty or
 link, and before every prompt agentd checks the file's hash and the flavor's link
 (`internal/agentd`, `instructionLink`) and restores either (event `run.instructions_restored`).
 
-Before agentd starts a harness, and again once the run's harness has ended, it ends every
-process the sandbox user runs except the sandbox's main process (`internal/agentd/sweep.sh`),
-so a run starts with nothing left of an earlier one: no harness daemon, no background job of the
-agent's that could change the home between the entry script's checks and the harness reading
-it. The script needs `/bin/sh`, `sleep` and `/proc`, which every flavor image has.
+Before agentd starts a harness, it ends every process the sandbox user runs except PID 1 and
+the sandbox's main process (`internal/agentd/sweep.sh`), so a run starts with nothing left of an
+earlier one: no harness daemon, no background job of the agent's that could change the home
+between the entry script's checks and the harness reading it. It sweeps again once the run's
+harness has ended, before the run is finished or parked and so while it still holds the agent;
+a fenced worker (taken over, canceled, given up) skips that sweep, and the next run's sweep
+catches what is left. Under OpenShell, PID 1 is the supervisor and the main process its first
+child; the contract suite's Docker stand-in marks its PID 1 as the main process
+(`KOINON_SANDBOX_STANDIN=1`). Under any other PID 1 the sweep ends nothing and the run fails.
+The script needs `/bin/sh`, `grep`, `sleep` and `/proc`, which every flavor image has.
