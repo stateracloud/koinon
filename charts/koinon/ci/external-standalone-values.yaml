@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+postgres:
+  mode: external
+  external:
+    secretName: koinon-db
+bootstrapAdmin:
+  enabled: false
+model:
+  baseUrl: http://ollama.example.com:11434/v1
+  provider: ollama
+  models:
+    - name: "qwen3.5:4b"

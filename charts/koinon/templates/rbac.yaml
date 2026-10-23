@@ -1,0 +1,68 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Least-privilege RBAC. api, agentd, gateway and the migration Job get no Kubernetes API access.
+The reconciler gets what it renders:
+- the standalone agentgateway ConfigMap (by name) and the per-agent key Secrets (plan item G1) in
+  this namespace; Secrets have no list or watch, so it can only reach names it already knows;
+- read and delete on Agent Sandbox objects cluster-wide, to garbage-collect sandboxes the OpenShell
+  gateway no longer lists (ADR 0048 finding 1.8).
+Sandboxes, workspaces, providers and policies go through the OpenShell gateway, not this API.
+*/ -}}
+{{- $name := include "koinon.componentName" (list . "reconciler") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
+rules:
+  {{- if eq .Values.gateway.mode "standalone" }}
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [{{ include "koinon.gatewayConfigName" . }}]
+    verbs: [get, watch, update, patch]
+  {{- end }}
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create, get, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-%s" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
+rules:
+  - apiGroups: [agents.x-k8s.io]
+    resources: [sandboxes]
+    verbs: [get, list, watch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-%s" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-%s" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
