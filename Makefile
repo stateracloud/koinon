@@ -137,9 +137,21 @@ test-escape: ## Run the escape suite's OpenShell cases against a real gateway (h
 	@test -n "$$KOINON_OPENSHELL_ENDPOINT" || { echo "set KOINON_OPENSHELL_* (see test/escape)"; exit 1; }
 	$(GO) test -count=1 -v -timeout 20m ./test/escape/ -ginkgo.label-filter=openshell
 
+# Dev loop (ADR 0039, docs/development.md). `make dev` picks the profile from the kube context:
+# homelab/homelab-koinon, or kind-koinon-dev after `make dev-kind-up`.
+DEV_KIND_CLUSTER ?= koinon-dev
+
 .PHONY: dev
-dev: ## Run the inner loop against the home lab with Tilt
+dev: ## Run the inner loop with Tilt against the current kube context (home lab or dev-kind-up's kind)
 	tilt up
+
+.PHONY: dev-kind-up
+dev-kind-up: ## Create the kind cluster kind-koinon-dev with Koinon's prerequisites (CNPG, Agent Sandbox, OpenShell)
+	CLUSTER=$(DEV_KIND_CLUSTER) test/e2e/kind/up.sh
+
+.PHONY: dev-kind-down
+dev-kind-down: ## Delete the kind cluster kind-koinon-dev
+	CLUSTER=$(DEV_KIND_CLUSTER) test/e2e/kind/down.sh
 
 .PHONY: clean
 clean: ## Remove build output
