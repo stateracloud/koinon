@@ -1,6 +1,6 @@
 # 0017. Board and chat are two views of one ticket
 
-- Status: Accepted
+- Status: Superseded by [0055](0055-chat-as-its-own-object.md)
 - Date: 2026-10-21
 - Decision: [design.md#17](../design.md)
 

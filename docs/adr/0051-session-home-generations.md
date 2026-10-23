@@ -1,6 +1,6 @@
 # 0051. Session home generations
 
-- Status: Accepted
+- Status: Accepted; amended by [0054](0054-unkillable-sandbox-process.md) and below
 - Date: 2026-10-22
 - Amends: ADR 0029 (when a ticket's session is loaded) and ADR 0049 (what holds off a sandbox
   recreation)
@@ -41,3 +41,12 @@ home.
 - The generation is only as fresh as the reconciler's last observation. A sandbox replaced by hand
   between a pass and a run's exec is detected on the next pass; until then that run's
   `session/load` can still fail.
+
+## Amendment (2026-10-23): resume by default
+
+Sessions resume by default: `session/load` is the normal path ([0029](0029-run-level-resume.md)).
+A new agent version can be marked **apply to open tickets** (opt-in). Open tickets of that agent
+then start a **new session plus a handoff** instead of resuming: the agent's earlier replies on the
+ticket and an end-of-turn summary.
+
+Open: the size limit of the handoff, and who writes the end-of-turn summary.
