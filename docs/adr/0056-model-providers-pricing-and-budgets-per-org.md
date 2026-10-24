@@ -53,7 +53,9 @@ answers the open questions on KEK rotation and on role tokens.
    with audit and the KEKs; the single-active reconciler picks the rows up like any other). Declared
    entries have `source = secret`, are **read-only** through the UI and admin API ("managed by Secret
    X"), and **win a name collision**: a UI entry of the same name is disabled with a visible reason.
-   Deleting the Secret removes the entry and re-enables what it shadowed. An invalid Secret is
+   Deleting the Secret does not delete the entry: it is marked removed (disabled, kept for the audit log
+   and for what refers to it), bound agents and runs report why, restoring the Secret restores it, and
+   an admin may delete it for good; what it shadowed is re-enabled. An invalid Secret is
    ignored (previous state stays) with a Warning Event on the Secret and a log line. Every apply and
    removal is audited with the actor `secret <name>`. The trust boundary: write access to Koinon's
    namespace is platform-admin level.
@@ -63,8 +65,10 @@ answers the open questions on KEK rotation and on role tokens.
    (AES-256-GCM). The stored envelope has `fmt`, `alg`, `kek_id`, `wrapped_dek`, `dek_nonce`, `nonce`
    and `ciphertext`. The AAD binds org ID, table, row ID and column, for the payload and the wrapped
    DEK, so a copied envelope does not open. KEKs come from a Kubernetes Secret with several keys and
-   one active ID (the chart generates it and keeps it across upgrades, or `secrets.kek.existingSecret`
-   names one), mounted as files into `koinon-api` and `koinon-reconciler` only. Because every value has
+   one active ID (`koinon-api` creates it on its first start and never overwrites it, because the chart cannot render
+   key material that survives `helm template`, Argo CD or Flux; or `secrets.kek.existingSecret` names
+   one). `koinon-api` reads it through the Kubernetes API and `koinon-reconciler` mounts it, and nothing
+   else sees it. Because every value has
    its own DEK, DEKs need no scheduled rotation. The default KEK active period is **365 days**
    (`koinon-api keys status` warns after). `koinon-api keys status|add|activate|rewrap|retire|reencrypt`
    run the rotation: add and activate a new KEK, `rewrap` re-wraps the stored DEKs without
@@ -94,16 +98,27 @@ answers the open questions on KEK rotation and on role tokens.
    one org, has the role admin or owner and never more than its creator's, expires after 30 days by
    default and at most 90, is shown once, is stored as a SHA-256 hash with a lookup prefix, can be
    revoked, and records its last use. Every call is audited with the token's ID. Tokens are created
-   through the UI's connect-rpc API (session, admin or owner) or with an existing token.
+   through the UI's connect-rpc API (session, admin or owner), which starts a chain, or with an existing
+   token. A child has the same or a lower role and expires no later than its parent, carries the
+   chain's root user, and dies with its parent (revoking cascades). Authentication checks the root user
+   still holds at least the token's role. Bad tokens go to a structured security log, never an org's
+   audit trail, slow the client IP down (backoff), and, when the prefix names a real token, are also
+   recorded in that token's org audit.
 6. **Audit.** `audit_events` is org-scoped and append-only (the app role has no UPDATE, DELETE or
    TRUNCATE, and a trigger refuses UPDATE and DELETE for every role). The shared service layer writes
    it in the same transaction as the change, so UI and admin API changes are audited alike.
 7. **Connections move into the store.** A connection's secret fields (the GitHub App private key) are
    an envelope in `connections.secret_envelope`, not a Kubernetes Secret per connection.
-   `koinon-api` moves existing rows at startup: read the old Secret, seal, record, and delete the old
-   Secret only after the row is updated. The reconciler's token minting reads the store. The
+   `koinon-api` moves existing rows at startup: read the old Secret, seal, record, delete the old
+   Secret, and clear `secret_name` only when the delete succeeded (a row with an envelope and a name
+   is finished at the next start). `koinon-api` can delete Secrets only while the chart value
+   `secrets.migrateLegacyConnections` is set. The reconciler's token minting reads the store. The
    connection API is unchanged.
-8. **Other.** Model rates stay on the model for now (PV2 replaces them); a model without rates is
+8. **Upstream URLs** may not name loopback, link-local or metadata addresses, names without a dot or
+   hosts in Koinon's namespace, checked by resolving the name when the provider is saved and when it is
+   rendered; a platform admin lists exceptions in `providers.allowedInternalHosts`. DNS rebinding in
+   between stays open (the gateway resolves the name itself).
+9. **Other.** Model rates stay on the model for now (PV2 replaces them); a model without rates is
    not served. The routing guard exists for OpenRouter providers and forces
    `{"provider": {"zdr": true, "data_collection": "deny"}}`.
 
@@ -128,7 +143,7 @@ answers the open questions on KEK rotation and on role tokens.
 - Follow-ups: plan items PV2, BG1 and W4 (PV1 is built). ADR 0049's Helm-configured upstream is
   dropped instead of seeding the default org: nobody had installed Koinon, so there is nothing to
   migrate (see the amendment).
-- Negative (PV1): `koinon-api` can read every Secret in its namespace (the importer needs list and
+- Negative (PV1): `koinon-api` can read every Secret in its namespace and create Secrets (the importer needs list and
   watch, which RBAC cannot limit by label); losing the KEK Secret loses every stored secret, so it
   must be backed up.
 

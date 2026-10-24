@@ -84,6 +84,44 @@ var _ = Describe("Keyring", func() {
 		Expect(err).To(MatchError(secretstore.ErrOpen))
 	})
 
+	It("rejects parts swapped between two envelopes sealed under the same binding", func() {
+		a, _ := ring.Seal(bind, []byte("aaaa"))
+		b, _ := ring.Seal(bind, []byte("bbbb"))
+		for name, swap := range map[string]func(x, y secretstore.Envelope) secretstore.Envelope{
+			"wrapped DEK and its nonce": func(x, y secretstore.Envelope) secretstore.Envelope {
+				x.WrappedDEK, x.DEKNonce = y.WrappedDEK, y.DEKNonce
+				return x
+			},
+			"payload nonce": func(x, y secretstore.Envelope) secretstore.Envelope {
+				x.Nonce = y.Nonce
+				return x
+			},
+			"ciphertext": func(x, y secretstore.Envelope) secretstore.Envelope {
+				x.Ciphertext = y.Ciphertext
+				return x
+			},
+			"wrapped DEK and payload nonce": func(x, y secretstore.Envelope) secretstore.Envelope {
+				x.WrappedDEK, x.DEKNonce, x.Nonce = y.WrappedDEK, y.DEKNonce, y.Nonce
+				return x
+			},
+		} {
+			_, err := ring.Open(bind, swap(a, b))
+			Expect(err).To(MatchError(secretstore.ErrOpen), name)
+			_, err = ring.Open(bind, swap(b, a))
+			Expect(err).To(MatchError(secretstore.ErrOpen), name)
+		}
+	})
+
+	It("rejects an envelope relabelled with another KEK of the keyring", func() {
+		env, _ := ring.Seal(bind, []byte("x"))
+		Expect(env.KEKID).To(Equal("k1"))
+		env.KEKID = "k2"
+		_, err := ring.Open(bind, env)
+		Expect(err).To(MatchError(secretstore.ErrOpen))
+		_, err = ring.Rewrap(bind, env)
+		Expect(err).To(MatchError(secretstore.ErrOpen))
+	})
+
 	It("rewraps under the active KEK without touching the payload", func() {
 		k1, k2 := key(), key()
 		both, _ := secretstore.NewKeyring(map[string][]byte{"k1": k1, "k2": k2}, "k1")

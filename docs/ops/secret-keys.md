@@ -10,9 +10,15 @@ numbers and the procedure are in [the research](../research/kek-rotation.md).
 
 | What | Where | Who can read it |
 | --- | --- | --- |
-| KEKs | Secret `koinon-kek` (or `secrets.kek.existingSecret`): one file per KEK, named by its ID, plus `active` | `koinon-api` and `koinon-reconciler` mount it. Nothing else does. |
+| KEKs | Secret `koinon-kek` (or `secrets.kek.existingSecret`): one file per KEK, named by its ID, plus `active` | `koinon-api` reads it through the Kubernetes API; `koinon-reconciler` mounts it. Nothing else does. |
 | Wrapped DEKs and ciphertext | `providers.api_key`, `connections.secret_envelope` in Postgres | Anyone with the database, but they need the KEK to open them. |
 | Opened provider keys | Secret `koinon-gateway-providers` | Only the gateway pod mounts it. |
+
+**The chart does not generate the keys.** A Helm render that made key material would make new keys
+every time it ran (`helm template`, Argo CD and Flux do not have the live Secret to look at), and a new
+KEK loses every stored secret. Instead `koinon-api` creates the Secret `koinon-kek` on its first start,
+with one new KEK, and never overwrites it. If you set `secrets.kek.existingSecret`, `koinon-api` creates
+nothing and fails to start when the Secret is missing. The reconciler waits for the Secret to appear.
 
 A KEK file holds the base64 of 32 random bytes (64 hex characters also work). KEK IDs made by Koinon
 look like `kek-20261023-a1b2`; the date lets `keys status` tell the key's age.
@@ -30,7 +36,8 @@ database (`DATABASE_URL`), both set in the `koinon-api` pod.
 
 ## Back up the KEK Secret
 
-Do this at install and after every `keys add`:
+Do this once the install is up (the Secret exists after `koinon-api` has started) and after every
+`keys add`:
 
 ```sh
 kubectl -n koinon get secret koinon-kek -o yaml > koinon-kek-backup.yaml
@@ -41,7 +48,8 @@ KEKs that wrapped it.** Keep every KEK, including retired ones, for as long as a
 used it exists. Retiring a KEK removes it from the Secret, not from your escrow. If every copy of a KEK
 is lost, the values wrapped by it are lost: add the providers and connections again.
 
-The chart marks the generated Secret `helm.sh/resource-policy: keep`, so `helm uninstall` leaves it.
+The Secret is not part of the Helm release, so `helm uninstall` leaves it, and so does a GitOps prune.
+Delete it yourself when you delete the database.
 
 ## Rotate on schedule
 
@@ -54,8 +62,9 @@ Do it once a year, or when `keys status` warns. No downtime, no restart.
    DEK under the active KEK. It never decrypts a payload and can be run again.
 4. Check `keys status`: no value should use the old KEK. If one does (a pod wrote a value with the old KEK
    before it saw the change), run `keys rewrap` again.
-5. Retire the old key: `koinon-api keys retire <old-id>`. It refuses while any value uses the KEK.
-   Keep a copy of the old key in your backup escrow.
+5. Retire the old key: `koinon-api keys retire <old-id>`. It refuses while any value uses the KEK, and
+   until the active KEK has been active for five minutes (so every pod wraps with it). Keep a copy of the
+   old key in your backup escrow.
 
 DEKs need no schedule: every write makes a new one.
 
@@ -80,9 +89,56 @@ If a **database backup** leaked but not the KEKs, nothing opens, but plan a norm
 ## Declarative Secrets
 
 Providers and connections declared by labelled Secrets (see the Models guide) carry their credentials
-in the Secret's `stringData`, which Kubernetes stores unencrypted unless you enable encryption at rest
-for Secrets. Koinon copies them into the store and does not clear the Secret. Treat write and read access
-to Koinon's namespace as platform-admin level.
+in the Secret's `stringData`, as in Argo CD's declarative setup. Koinon copies them into the store and
+leaves the Secret as it is. Kubernetes stores Secrets unencrypted in etcd unless you turn on
+[encryption at rest](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/), so do that, and
+do not keep the manifests in git in clear text: use External Secrets Operator or Sealed Secrets to
+produce the labelled Secret from a store you trust. Treat write and read access to Koinon's namespace as
+platform-admin level.
+
+When such a Secret is deleted, Koinon does not delete what it declared. A provider (and its models) or
+connection is marked removed: it is no longer served or usable, agents bound to a removed connection
+report why, runs that need it fail with that reason, and creating the Secret again restores it. An org
+admin can delete a removed entry for good.
+
+## Append-only audit log with an external database
+
+`audit_events` refuses UPDATE and DELETE for every role through a trigger. The migration also revokes
+UPDATE, DELETE and TRUNCATE on it from the role `koinon_app`, which the chart's CloudNativePG setup
+creates. With `postgres.mode: external` the roles are yours: the migration cannot know their names, so
+run this once as the schema owner, for the role `koinon-api`, `koinon-reconciler` and `koinon-agentd`
+log in as (or the group role they share):
+
+```sql
+REVOKE UPDATE, DELETE, TRUNCATE ON audit_events FROM <app role>;
+```
+
+and make sure that role is not the table owner.
+
+## Admin API tokens
+
+A token made from a session starts a chain: 30 days by default, at most 90. A token may create tokens
+only with the same or a lower role and an expiry no later than its own, so a stolen token cannot extend
+itself. Every token carries the root user of its chain. Authentication checks that this user still holds
+at least the token's role in the org (or is a platform admin); when they are demoted or removed, the
+whole chain stops working. Revoking a token revokes every token below it. A token can revoke tokens
+of its own role or lower.
+
+Failed use is not written to an org's audit trail (anyone can send a bad token). It goes to the
+`koinon-api` log as a structured line with the client IP and the token's public prefix, never its secret,
+and the client IP is slowed down after five failures, with growing backoff up to 15 minutes. When the
+prefix belongs to a real token, "failed use of token" is also written to that org's audit log. The client
+IP is the connection's peer; behind an ingress that is the ingress.
+
+## Provider URLs
+
+Providers may not name loopback, link-local or cloud metadata addresses, names without a dot, or hosts
+in Koinon's own namespace, because the gateway would send requests there with the provider's key. The
+names are resolved when a provider is saved and again each time the reconciler renders it. DNS
+rebinding between the two checks is not closed (the gateway resolves the name itself); restrict the
+gateway pod's egress with a NetworkPolicy for a hard limit. To allow an internal upstream such as the
+home lab's Ollama, a platform admin lists it in the chart value `providers.allowedInternalHosts`, for
+example `["ollama.lab.example.com:11434"]`.
 
 ## Limits and notes
 

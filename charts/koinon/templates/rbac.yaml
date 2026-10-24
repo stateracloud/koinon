@@ -4,9 +4,11 @@ Least-privilege RBAC. agentd, gateway and the migration Job get no Kubernetes AP
 The API gets, in this namespace: list and watch on Secrets, to import the labelled declarative
 Secrets (koinon.dev/secret-type, plan item PV1, ADR 0056) - the verbs cannot be limited by label, so
 the API can read every Secret here, as it already could by name; get and delete, to move the
-connection Secrets of earlier versions into the secret store and remove them; update on the KEK
-Secret by name, for "koinon-api keys" (add, activate, retire); and create on Events, to report
-invalid declarative Secrets.
+connection Secrets of earlier versions into the secret store; create, to make the KEK Secret on
+its first start (create cannot be limited by name); update on the KEK Secret by name, for
+"koinon-api keys" (add, activate, retire); create on Events, to report invalid declarative
+Secrets; and delete on Secrets only while secrets.migrateLegacyConnections is set, to remove a
+legacy connection Secret after its fields were moved.
 The reconciler gets what it renders:
 - patch on the standalone agentgateway ConfigMap (by name; standalone.ConfigMapDeliverer sends a
   merge patch and never reads it) and the per-agent key Secrets (plan items G1, R2) in this
@@ -27,7 +29,12 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    verbs: [get, list, watch, delete]
+    verbs: [get, list, watch, create]
+  {{- if .Values.secrets.migrateLegacyConnections }}
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [delete]
+  {{- end }}
   - apiGroups: [""]
     resources: [secrets]
     resourceNames: [{{ include "koinon.kekSecretName" . }}]

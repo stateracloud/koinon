@@ -3,8 +3,10 @@
 package catalog_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
@@ -17,6 +19,67 @@ import (
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
 
+var _ = Describe("URLPolicy", func() {
+	resolver := func(m map[string][]string) func(context.Context, string) ([]netip.Addr, error) {
+		return func(_ context.Context, h string) ([]netip.Addr, error) {
+			ips, ok := m[h]
+			if !ok {
+				return nil, errors.New("no such host")
+			}
+			var out []netip.Addr
+			for _, ip := range ips {
+				out = append(out, netip.MustParseAddr(ip))
+			}
+			return out, nil
+		}
+	}
+	p := catalog.URLPolicy{
+		Namespace:    "koinon",
+		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com"},
+		Resolver: resolver(map[string][]string{
+			"api.openai.com":         {"104.18.6.192"},
+			"ollama.lab.example.com": {"127.0.0.1"},
+			"rebind.example.com":     {"203.0.113.9", "127.0.0.1"},
+			"meta.example.com":       {"169.254.169.254"},
+			"fakemodel.fakes.svc":    {"10.96.4.4"},
+			"internal.example.com":   {"10.1.2.3"},
+			"v6.example.com":         {"fe80::1"},
+		}),
+	}
+	DescribeTable("denies",
+		func(ctx SpecContext, u string) {
+			err := p.Check(ctx, u)
+			var inv *catalog.InvalidError
+			Expect(errors.As(err, &inv)).To(BeTrue(), u)
+			Expect(err.Error()).To(ContainSubstring("providers.allowedInternalHosts"))
+		},
+		Entry("localhost", "http://localhost:8080/v1"),
+		Entry("loopback", "http://127.0.0.1/v1"),
+		Entry("loopback v6", "http://[::1]/v1"),
+		Entry("metadata", "http://169.254.169.254/latest"),
+		Entry("link-local v6", "http://[fe80::1]/v1"),
+		Entry("unspecified", "http://0.0.0.0/v1"),
+		Entry("v4-mapped loopback", "http://[::ffff:127.0.0.1]/v1"),
+		Entry("a single-label Service name", "http://ollama:11434/v1"),
+		Entry("the release's own Service", "http://koinon-api.koinon.svc:8080/v1"),
+		Entry("the release's own Service, full name", "http://koinon-api.koinon.svc.cluster.local/v1"),
+		Entry("namespace shorthand", "http://koinon-api.koinon/v1"),
+		Entry("a name that resolves to loopback", "http://rebind.example.com/v1"),
+		Entry("a name that resolves to metadata", "http://meta.example.com/v1"),
+		Entry("a name that resolves to link-local v6", "http://v6.example.com/v1"),
+		Entry("localhost on another port than the allowed one", "http://localhost:9999/v1"),
+	)
+	DescribeTable("allows",
+		func(ctx SpecContext, u string) { Expect(p.Check(ctx, u)).To(Succeed(), u) },
+		Entry("a public API", "https://api.openai.com/v1"),
+		Entry("a private upstream", "http://internal.example.com:11434/v1"),
+		Entry("another namespace's Service", "http://fakemodel.fakes.svc:8080/v1"),
+		Entry("an allow-listed host even though it resolves to loopback", "http://ollama.lab.example.com:11434/v1"),
+		Entry("an allow-listed host:port", "http://localhost:11434/v1"),
+		Entry("a name that does not resolve (checked again at render)", "https://future.example.com/v1"),
+	)
+})
+
 var _ = Describe("Service", func() {
 	var (
 		svc   *catalog.Service
@@ -25,7 +88,7 @@ var _ = Describe("Service", func() {
 		actor audit.Actor
 	)
 	BeforeEach(func(ctx SpecContext) {
-		svc = catalog.New(pool, ring, nil)
+		svc = catalog.New(pool, ring, nil).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"})
 		org, user, _ = pgtest.NewOrg(ctx, pool)
 		actor = audit.User(user)
 	})
@@ -95,10 +158,10 @@ var _ = Describe("Service", func() {
 
 		It("keeps names unique per org, not across orgs", func(ctx SpecContext) {
 			create(ctx, "dup", "")
-			_, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "dup", Type: "ollama", URL: "http://x/v1"})
+			_, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "dup", Type: "ollama", URL: "http://x.example.com/v1"})
 			Expect(err).To(MatchError(catalog.ErrConflict))
 			other, otherUser, _ := pgtest.NewOrg(ctx, pool)
-			_, err = svc.CreateProvider(ctx, other, audit.User(otherUser), otherUser, catalog.ProviderInput{Name: "dup", Type: "ollama", URL: "http://x/v1"})
+			_, err = svc.CreateProvider(ctx, other, audit.User(otherUser), otherUser, catalog.ProviderInput{Name: "dup", Type: "ollama", URL: "http://x.example.com/v1"})
 			Expect(err).NotTo(HaveOccurred())
 		})
 
@@ -107,17 +170,29 @@ var _ = Describe("Service", func() {
 			var inv *catalog.InvalidError
 			Expect(errors.As(err, &inv)).To(BeTrue(), "%v", err)
 		},
-			Entry("a bad name", catalog.ProviderInput{Name: "Bad Name", Type: "openai", URL: "https://x/v1"}),
+			Entry("a bad name", catalog.ProviderInput{Name: "Bad Name", Type: "openai", URL: "https://x.example.com/v1"}),
 			Entry("a URL with credentials", catalog.ProviderInput{Name: "a", Type: "openai", URL: "https://user:pw@x/v1"}),
-			Entry("a non-http URL", catalog.ProviderInput{Name: "a", Type: "openai", URL: "ftp://x/v1"}),
-			Entry("a bad type", catalog.ProviderInput{Name: "a", Type: "Open AI", URL: "https://x/v1"}),
+			Entry("a non-http URL", catalog.ProviderInput{Name: "a", Type: "openai", URL: "ftp://x.example.com/v1"}),
+			Entry("a bad type", catalog.ProviderInput{Name: "a", Type: "Open AI", URL: "https://x.example.com/v1"}),
 		)
+
+		It("refuses an upstream the URL policy denies, on create, update and declare", func(ctx SpecContext) {
+			_, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "ssrf", Type: "openai", URL: "http://169.254.169.254/latest"})
+			var inv *catalog.InvalidError
+			Expect(errors.As(err, &inv)).To(BeTrue())
+			p := create(ctx, "fine", "")
+			bad := "http://localhost:6379/"
+			_, err = svc.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{URL: &bad})
+			Expect(errors.As(err, &inv)).To(BeTrue())
+			_, err = svc.ApplyDeclaredProvider(ctx, org, catalog.DeclaredProvider{SecretName: "s", Version: "v", Name: "d", Type: "openai", URL: "http://koinon-api.koinon.svc/v1"})
+			Expect(errors.As(err, &inv)).To(BeTrue())
+		})
 
 		It("cannot store a key without key-encryption keys", func(ctx SpecContext) {
 			noKeys := catalog.New(pool, nil, nil)
-			_, err := noKeys.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "k", Type: "openai", URL: "https://x/v1", APIKey: "sk"})
+			_, err := noKeys.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "k", Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk"})
 			Expect(err).To(MatchError(catalog.ErrNoKeys))
-			_, err = noKeys.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "keyless", Type: "ollama", URL: "http://x/v1"})
+			_, err = noKeys.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "keyless", Type: "ollama", URL: "http://x.example.com/v1"})
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -137,7 +212,7 @@ var _ = Describe("Service", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(m.Rates).To(Equal(&catalog.Rates{Input: "0.30", Output: "1.20"}))
 
-			ollama, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "ollama", Type: "ollama", URL: "http://x/v1"})
+			ollama, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "ollama", Type: "ollama", URL: "http://x.example.com/v1"})
 			Expect(err).NotTo(HaveOccurred())
 			_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: ollama.ID, Name: "q", Guard: true})
 			var inv *catalog.InvalidError
@@ -240,8 +315,49 @@ var _ = Describe("Service", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(gm.DisabledReason).To(BeEmpty())
 			list, _ := svc.ListProviders(ctx, org)
-			Expect(list).To(HaveLen(1))
+			Expect(list).To(HaveLen(2), "the removed declared provider stays")
 			Expect(events(ctx, "provider.undeclare")).To(HaveLen(1))
+		})
+
+		It("disables, not deletes, what a deleted Secret declared; restoring the Secret restores it; an admin may delete it", func(ctx SpecContext) {
+			_, err := svc.ApplyDeclaredProvider(ctx, org, declared("v1", flash))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(svc.RemoveDeclared(ctx, org, "openrouter-secret")).To(Succeed())
+			Expect(svc.RemoveDeclared(ctx, org, "openrouter-secret")).To(Succeed(), "idempotent")
+			Expect(events(ctx, "provider.undeclare")).To(HaveLen(1))
+
+			list, _ := svc.ListProviders(ctx, org)
+			Expect(list).To(HaveLen(1))
+			Expect(list[0].Removed).To(BeTrue())
+			Expect(list[0].DisabledReason).To(Equal(catalog.ReasonRemoved))
+			models, _ := svc.ListModels(ctx, org)
+			Expect(models).To(HaveLen(1))
+			Expect(models[0].DisabledReason).To(Equal(catalog.ReasonRemoved))
+			served, err := store.New(pool).ListServedCatalog(ctx, org)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(served).To(BeEmpty())
+			newURL := "https://elsewhere.example.com/v1"
+			_, err = svc.UpdateProvider(ctx, org, actor, list[0].ID, catalog.ProviderPatch{URL: &newURL})
+			Expect(err).To(MatchError(catalog.ErrReadOnly))
+
+			By("restoring the Secret, even with the same version, serves it again")
+			changed, err := svc.ApplyDeclaredProvider(ctx, org, declared("v1", flash))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(changed).To(BeTrue())
+			list, _ = svc.ListProviders(ctx, org)
+			Expect(list[0].Removed).To(BeFalse())
+			Expect(list[0].DisabledReason).To(BeEmpty())
+			served, _ = store.New(pool).ListServedCatalog(ctx, org)
+			Expect(served).To(HaveLen(1))
+
+			By("a removed entry can be deleted for good, a live one cannot")
+			Expect(svc.DeleteProvider(ctx, org, actor, list[0].ID)).To(MatchError(catalog.ErrReadOnly))
+			Expect(svc.RemoveDeclared(ctx, org, "openrouter-secret")).To(Succeed())
+			Expect(svc.DeleteProvider(ctx, org, actor, list[0].ID)).To(Succeed())
+			list, _ = svc.ListProviders(ctx, org)
+			Expect(list).To(BeEmpty())
+			models, _ = svc.ListModels(ctx, org)
+			Expect(models).To(BeEmpty())
 		})
 
 		It("updates models with the Secret and drops the ones it no longer lists", func(ctx SpecContext) {

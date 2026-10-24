@@ -119,6 +119,10 @@ func (k KubeProviderKeys) Prune(ctx context.Context, keep map[string]bool) error
 // files they need.
 type servedProviders struct {
 	providers []gateway.Provider
+	// ids and fileNames are parallel to providers: the provider's ID and its key file's data key
+	// ("" for a keyless provider).
+	ids       []string
+	fileNames []string
 	files     map[string][]byte
 }
 
@@ -128,6 +132,7 @@ type servedProviders struct {
 // and aborts the pass.
 func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToReconcileRow) (servedProviders, []error, error) {
 	out := servedProviders{files: map[string][]byte{}}
+	fileOf := map[string]string{}
 	var errs []error
 	for _, org := range orgs {
 		rows, err := r.q.ListServedCatalog(ctx, org.ID)
@@ -144,6 +149,11 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 			}
 			p, ok := byID[id]
 			if !ok {
+				if err := r.cfg.URLPolicy.Check(ctx, row.Url); err != nil {
+					errs = append(errs, fmt.Errorf("provider %s/%s not served: %w", org.Slug, row.ProviderName, err))
+					skip[id] = true
+					continue
+				}
 				p = &gateway.Provider{Org: org.Slug, Name: row.ProviderName, Type: row.ProviderType, BaseURL: row.Url}
 				if len(row.ApiKey) > 0 {
 					key, err := catalog.OpenKey(r.cfg.Keys, org.ID, row.ProviderID, row.ApiKey)
@@ -156,6 +166,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 					sum := sha256.Sum256(row.ApiKey)
 					name := id + "-" + hex.EncodeToString(sum[:4])
 					out.files[name] = []byte(key)
+					fileOf[id] = name
 					p.APIKeyFile = path.Join(r.cfg.ProviderKeyDir, name)
 				}
 				byID[id] = p
@@ -169,6 +180,8 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 		}
 		for _, id := range order {
 			out.providers = append(out.providers, *byID[id])
+			out.ids = append(out.ids, id)
+			out.fileNames = append(out.fileNames, fileOf[id])
 		}
 	}
 	if len(out.files) > 0 && r.cfg.ProviderKeys == nil {

@@ -79,7 +79,7 @@ var _ = Describe("MigrateLegacy", func() {
 
 		got, err := q.GetConnection(ctx, store.GetConnectionParams{OrgID: org, ID: c.ID})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(got.SecretName.Valid).To(BeFalse())
+		Expect(got.SecretName.Valid).To(BeFalse(), "cleared once the old Secret was deleted")
 		fields, err := connections.OpenFields(ring, got)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(fields[connections.GitHubPrivateKeyField])).To(Equal("the-pem"))
@@ -104,15 +104,43 @@ var _ = Describe("MigrateLegacy", func() {
 		Expect(n).To(Equal(1))
 	})
 
-	It("moves the row even when the old Secret cannot be deleted, and reports it", func(ctx SpecContext) {
-		oldConnection(ctx, "the-pem", true)
+	It("moves the fields even when the old Secret cannot be deleted, keeps secret_name, and finishes at the next start", func(ctx SpecContext) {
+		c := oldConnection(ctx, "the-pem", true)
+		ring := secretstoretest.Keyring()
 		legacy.deleteErr = errors.New("forbidden")
 		var logs capture
-		n, err := connections.MigrateLegacy(ctx, q, legacy, secretstoretest.Keyring(), slog.New(slog.NewTextHandler(&logs, nil)))
+		n, err := connections.MigrateLegacy(ctx, q, legacy, ring, slog.New(slog.NewTextHandler(&logs, nil)))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(n).To(Equal(1))
 		Expect(logs.String()).To(ContainSubstring("could not delete its Kubernetes Secret"))
 		Expect(logs.String()).NotTo(ContainSubstring("the-pem"))
+		got, _ := q.GetConnection(ctx, store.GetConnectionParams{OrgID: org, ID: c.ID})
+		Expect(got.SecretEnvelope).NotTo(BeEmpty())
+		Expect(got.SecretName.Valid).To(BeTrue(), "the name stays while the Secret does")
+		Expect(legacy.secrets).To(HaveLen(1))
+
+		legacy.deleteErr = nil
+		n, err = connections.MigrateLegacy(ctx, q, legacy, ring, slog.New(slog.DiscardHandler))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeZero(), "the fields were not sealed twice")
+		Expect(legacy.secrets).To(BeEmpty())
+		got, _ = q.GetConnection(ctx, store.GetConnectionParams{OrgID: org, ID: c.ID})
+		Expect(got.SecretName.Valid).To(BeFalse())
+		fields, err := connections.OpenFields(ring, got)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(fields[connections.GitHubPrivateKeyField])).To(Equal("the-pem"))
+	})
+
+	It("finishes a move whose Secret is already gone by clearing the name", func(ctx SpecContext) {
+		ring := secretstoretest.Keyring()
+		c := oldConnection(ctx, "x", true)
+		_, err := connections.MigrateLegacy(ctx, q, &memLegacy{secrets: legacy.secrets, deleteErr: errors.New("no")}, ring, slog.New(slog.DiscardHandler))
+		Expect(err).NotTo(HaveOccurred())
+		legacy.secrets = map[string]connections.Secret{} // someone deleted it by hand
+		_, err = connections.MigrateLegacy(ctx, q, legacy, ring, slog.New(slog.DiscardHandler))
+		Expect(err).NotTo(HaveOccurred())
+		got, _ := q.GetConnection(ctx, store.GetConnectionParams{OrgID: org, ID: c.ID})
+		Expect(got.SecretName.Valid).To(BeFalse())
 	})
 
 	It("skips a connection whose Secret is already gone and migrates the others", func(ctx SpecContext) {

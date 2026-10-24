@@ -283,7 +283,7 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 			cur = &all[k]
 		}
 	}
-	if cur != nil && cur.DeclaredVersion.String == version {
+	if cur != nil && cur.DeclaredVersion.String == version && !cur.RemovedAt.Valid {
 		return nil
 	}
 	config, err := connectionConfig(d)
@@ -367,23 +367,25 @@ func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[
 			return err
 		}
 		for _, c := range conns {
-			if c.Source != store.ConfigSourceSecret || seen[present{slug, TypeConnection, c.ManagedBySecret.String}] {
+			if c.Source != store.ConfigSourceSecret || c.RemovedAt.Valid || seen[present{slug, TypeConnection, c.ManagedBySecret.String}] {
 				continue
 			}
+			// Marked removed, not deleted: agents are bound to it and the audit log names it.
 			err := pgx.BeginFunc(ctx, i.Pool, func(tx pgx.Tx) error {
 				tq := store.New(tx)
-				if _, err := tq.DeleteConnection(ctx, store.DeleteConnectionParams{OrgID: id, ID: c.ID}); err != nil {
+				if err := tq.MarkConnectionRemoved(ctx, store.MarkConnectionRemovedParams{OrgID: id, ID: c.ID}); err != nil {
 					return err
 				}
 				return audit.RecordErr(ctx, tq, audit.Event{
 					Org: id, Actor: audit.Secret(c.ManagedBySecret.String), Action: "connection.undeclare", TargetKind: "connection",
 					TargetID: c.ID.String(), Before: map[string]any{"displayName": c.DisplayName, "keyFingerprint": c.SecretFingerprint},
+					After: map[string]any{"removed": true},
 				})
 			})
 			if err != nil {
 				return err
 			}
-			i.log().Info("removed the connection of a deleted Secret", "secret", c.ManagedBySecret.String, "org", slug)
+			i.log().Warn("marked the connection of a deleted Secret removed; agents bound to it report why, and restoring the Secret restores it", "secret", c.ManagedBySecret.String, "org", slug)
 		}
 	}
 	return nil

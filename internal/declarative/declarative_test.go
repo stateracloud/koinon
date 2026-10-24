@@ -127,19 +127,39 @@ var _ = Describe("Importer", func() {
 		Expect(auditOf(ctx, "provider.declare")).To(HaveLen(1))
 	})
 
-	It("removes the entries when the Secret is deleted, audited as the Secret", func(ctx SpecContext) {
+	It("disables the entries when the Secret is deleted, audited as the Secret, and restores them with it", func(ctx SpecContext) {
 		put(ctx, "openrouter", declarative.TypeModelProvider, slug, provider("openrouter"))
 		Expect(imp.Sync(ctx)).To(Succeed())
 		Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "openrouter", metav1.DeleteOptions{})).To(Succeed())
 		Expect(imp.Sync(ctx)).To(Succeed())
 		list, _ := svc.ListProviders(ctx, org)
-		Expect(list).To(BeEmpty())
+		Expect(list).To(HaveLen(1))
+		Expect(list[0].Removed).To(BeTrue())
+		models, _ := svc.ListModels(ctx, org)
+		Expect(models).To(HaveLen(2))
+		for _, m := range models {
+			Expect(m.DisabledReason).To(Equal(catalog.ReasonRemoved))
+		}
+		Expect(imp.Sync(ctx)).To(Succeed())
+		Expect(auditOf(ctx, "provider.undeclare")).To(HaveLen(1), "not repeated")
+
+		put(ctx, "openrouter", declarative.TypeModelProvider, slug, provider("openrouter"))
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ = svc.ListProviders(ctx, org)
+		Expect(list).To(HaveLen(1))
+		Expect(list[0].Removed).To(BeFalse())
+		models, _ = svc.ListModels(ctx, org)
+		for _, m := range models {
+			Expect(m.DisabledReason).To(BeEmpty())
+		}
+		Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "openrouter", metav1.DeleteOptions{})).To(Succeed())
+		Expect(imp.Sync(ctx)).To(Succeed())
 		ev := auditOf(ctx, "provider.undeclare")
-		Expect(ev).To(HaveLen(1))
+		Expect(ev).To(HaveLen(2))
 		Expect(ev[0].ActorID).To(Equal("openrouter"))
 	})
 
-	It("removes the entries when the label no longer selects the Secret", func(ctx SpecContext) {
+	It("disables the entries when the label no longer selects the Secret", func(ctx SpecContext) {
 		put(ctx, "openrouter", declarative.TypeModelProvider, slug, provider("openrouter"))
 		Expect(imp.Sync(ctx)).To(Succeed())
 		sec, _ := kube.CoreV1().Secrets(ns).Get(ctx, "openrouter", metav1.GetOptions{})
@@ -148,7 +168,8 @@ var _ = Describe("Importer", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(imp.Sync(ctx)).To(Succeed())
 		list, _ := svc.ListProviders(ctx, org)
-		Expect(list).To(BeEmpty())
+		Expect(list).To(HaveLen(1))
+		Expect(list[0].Removed).To(BeTrue())
 	})
 
 	It("ignores an invalid Secret with a Warning Event and a log line, and keeps what it declared before", func(ctx SpecContext) {
@@ -257,7 +278,7 @@ var _ = Describe("Importer", func() {
 	})
 
 	It("disables a UI provider of the same name, and enables it again when the Secret goes", func(ctx SpecContext) {
-		ui, err := svc.CreateProvider(ctx, org, audit.User(user), user, catalog.ProviderInput{Name: "openrouter", Type: "openrouter", URL: "https://x/v1"})
+		ui, err := svc.CreateProvider(ctx, org, audit.User(user), user, catalog.ProviderInput{Name: "openrouter", Type: "openrouter", URL: "https://x.example.com/v1"})
 		Expect(err).NotTo(HaveOccurred())
 		put(ctx, "openrouter", declarative.TypeModelProvider, slug, provider("openrouter"))
 		Expect(imp.Sync(ctx)).To(Succeed())
@@ -267,7 +288,7 @@ var _ = Describe("Importer", func() {
 		Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "openrouter", metav1.DeleteOptions{})).To(Succeed())
 		Expect(imp.Sync(ctx)).To(Succeed())
 		got, _ = svc.GetProvider(ctx, org, ui.ID)
-		Expect(got.DisabledReason).To(BeEmpty())
+		Expect(got.DisabledReason).To(BeEmpty(), "a removed declared provider no longer shadows it")
 	})
 
 	Describe("connection Secrets", func() {
@@ -305,8 +326,24 @@ var _ = Describe("Importer", func() {
 			Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "gh", metav1.DeleteOptions{})).To(Succeed())
 			Expect(imp.Sync(ctx)).To(Succeed())
 			rows, _ = store.New(pool).ListConnections(ctx, org)
-			Expect(rows).To(BeEmpty())
+			Expect(rows).To(HaveLen(1), "the connection stays, for the audit log and the agents bound to it")
+			Expect(rows[0].RemovedAt.Valid).To(BeTrue())
 			Expect(auditOf(ctx, "connection.undeclare")).To(HaveLen(1))
+			Expect(imp.Sync(ctx)).To(Succeed())
+			Expect(auditOf(ctx, "connection.undeclare")).To(HaveLen(1), "not repeated")
+
+			By("using it fails with a reason that names the Secret")
+			_, err = connections.LoadGitHubApp(ctx, secretstoretest.Keyring(), rows[0])
+			Expect(err).To(MatchError(connections.ErrRemoved))
+			Expect(err.Error()).To(ContainSubstring(`Secret gh`))
+
+			By("restoring the Secret restores the same connection")
+			put(ctx, "gh", declarative.TypeConnection, slug, conn())
+			Expect(imp.Sync(ctx)).To(Succeed())
+			again, _ := store.New(pool).ListConnections(ctx, org)
+			Expect(again).To(HaveLen(1))
+			Expect(again[0].ID).To(Equal(rows[0].ID))
+			Expect(again[0].RemovedAt.Valid).To(BeFalse())
 		})
 
 		It("can be read back with the keys", func(ctx SpecContext) {

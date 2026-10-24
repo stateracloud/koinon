@@ -244,6 +244,8 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 					Models: []gateway.Model{
 						{Name: testModel, Price: &gateway.Price{Input: "50", Output: "50"}},
 						{Name: "acme-only", Price: &gateway.Price{Input: "1", Output: "1"}},
+						// A plain name that is spelled like globex's gateway-wide id.
+						{Name: "globex/" + testModel, Price: &gateway.Price{Input: "1", Output: "1"}},
 						{Name: "unpriced"},
 					},
 				},
@@ -370,6 +372,33 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 			code, body = chatModel(ctx, keyB.Material, "open-model")
 			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
 			Expect(ups["globex"].hits.Load()).To(Equal(before))
+		})
+
+		It("does not serve another org's gateway-wide id to a key, however the name is spelled", func(ctx SpecContext) {
+			g := ups["globex"].hits.Load() + ups["guarded"].hits.Load()
+			// acme asks for globex's models by their <org>/<model> ids.
+			for _, id := range []string{"globex/" + testModel, "globex/guarded-model", "globex/open-model"} {
+				if id == "globex/"+testModel {
+					continue // acme declared a plain model with this name; see below
+				}
+				code, body := chatModel(ctx, keyB.Material, id)
+				Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), id+": "+body)
+			}
+			Expect(ups["globex"].hits.Load() + ups["guarded"].hits.Load()).To(Equal(g))
+
+			// acme declared a plain model named like globex's id. It is acme's model: acme's upstream
+			// answers, and globex's upstream sees nothing.
+			before := hits.Load()
+			code, body := chatModel(ctx, keyB.Material, "globex/"+testModel)
+			Expect(code).To(Equal(http.StatusOK), body)
+			Expect(hits.Load()).To(Equal(before + 1))
+			Expect(ups["globex"].hits.Load() + ups["guarded"].hits.Load()).To(Equal(g))
+
+			// and globex's key cannot reach acme's model of that name.
+			code, body = chatModel(ctx, keyG.Material, "globex/"+testModel)
+			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
+			Expect(ups["globex"].hits.Load() + ups["guarded"].hits.Load()).To(Equal(g))
+			Expect(hits.Load()).To(Equal(before + 1))
 		})
 
 		It("does not let the client pick another org by header", func(ctx SpecContext) {

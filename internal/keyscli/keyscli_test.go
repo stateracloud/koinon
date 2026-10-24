@@ -86,7 +86,7 @@ var _ = Describe("koinon-api keys", func() {
 		var ids []string
 		for i := range n {
 			p, err := svc.CreateProvider(ctx, org, audit.User(user), user, catalog.ProviderInput{
-				Name: pgtest.Uniq("p"), Type: "openai", URL: "https://x/v1", APIKey: "sk-" + string(rune('a'+i)),
+				Name: pgtest.Uniq("p"), Type: "openai", URL: "https://x.example.com/v1", APIKey: "sk-" + string(rune('a'+i)),
 			})
 			Expect(err).NotTo(HaveOccurred())
 			ids = append(ids, p.ID)
@@ -155,6 +155,8 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(set.Active).To(Equal(next))
 		Expect(set.ActivatedAt).To(BeTemporally("==", now))
 
+		Expect(tool.Retire(ctx, old)).To(MatchError(ContainSubstring("was activated")), "pods may not wrap with the new KEK yet")
+		now = now.Add(6 * time.Minute)
 		Expect(tool.Retire(ctx, old)).To(MatchError(ContainSubstring("2 value(s) still use")))
 		Expect(tool.Retire(ctx, next)).To(MatchError(ContainSubstring("active KEK")))
 
@@ -221,5 +223,32 @@ var _ = Describe("koinon-api keys", func() {
 	It("refuses an existing or invalid KEK ID", func(ctx SpecContext) {
 		Expect(tool.Add(ctx, "kek-20260101-aaaa")).To(MatchError(ContainSubstring("already exists")))
 		Expect(tool.Add(ctx, "active")).To(MatchError(ContainSubstring("not a valid KEK ID")))
+	})
+
+	It("creates the KEK Secret once and never overwrites it", func(ctx SpecContext) {
+		fresh := fake.NewClientset()
+		created, err := keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+		store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}
+		first, err := store.Load(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(first.Keys).To(HaveLen(1))
+		Expect(first.Active).To(MatchRegexp(`^kek-20261023-[0-9a-f]{4}$`))
+
+		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now.Add(24*time.Hour))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeFalse())
+		again, _ := store.Load(ctx)
+		Expect(again.Keys).To(Equal(first.Keys))
+
+		By("a Secret someone else made is left alone, whatever it holds")
+		_, err = fresh.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "mine", Namespace: ns}, Data: map[string][]byte{"x": []byte("y")}}, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "mine", now)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeFalse())
+		got, _ := fresh.CoreV1().Secrets(ns).Get(ctx, "mine", metav1.GetOptions{})
+		Expect(got.Data).To(HaveLen(1))
 	})
 })

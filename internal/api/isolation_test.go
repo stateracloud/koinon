@@ -137,6 +137,11 @@ var isolationCases = map[string]isolationCase{
 			})
 		},
 	},
+	connectionv1alpha1connect.ConnectionServiceDeleteConnectionProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: f.connection})
+		},
+	},
 	connectionv1alpha1connect.ConnectionServiceGetConnectionProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: f.connection})

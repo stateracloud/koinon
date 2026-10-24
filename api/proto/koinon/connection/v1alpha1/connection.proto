@@ -39,6 +39,10 @@ service ConnectionService {
   // records the result. Nothing is written to the provider. Admins and owners.
   rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse);
 
+  // DeleteConnection deletes a connection for good. Only a connection whose declaring Secret was
+  // deleted (removed) can be deleted; one that is in use changes in its Secret. Admins and owners.
+  rpc DeleteConnection(DeleteConnectionRequest) returns (DeleteConnectionResponse);
+
   // ListInstallationRepos lists the repositories a GitHub connection's App
   // installation can access, for choosing what to bind an agent to. Koinon
   // asks GitHub with a metadata-read installation token; nothing is written.
@@ -127,6 +131,14 @@ message Connection {
   google.protobuf.Timestamp last_tested_at = 6;
   repeated CheckResult last_test = 7;
   google.protobuf.Timestamp created_at = 8;
+  // source is "ui" for a connection entered here and "secret" for one declared by a
+  // labelled Kubernetes Secret (ADR 0056), which is managed_by_secret.
+  string source = 11;
+  string managed_by_secret = 12;
+  // removed is set when the declaring Secret was deleted. The connection stays, for the audit log and
+  // the agents bound to it, but is not usable: bound agents report why and runs that need it fail
+  // with that reason. Restoring the Secret restores the connection.
+  bool removed = 13;
 
   oneof settings {
     GitHubConnection github = 10;
@@ -163,6 +175,13 @@ message GetConnectionRequest {
 message GetConnectionResponse {
   Connection connection = 1;
 }
+
+message DeleteConnectionRequest {
+  string org_id = 1;
+  string connection_id = 2;
+}
+
+message DeleteConnectionResponse {}
 
 // ListConnectionsRequest names the org.
 message ListConnectionsRequest {

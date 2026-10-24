@@ -36,6 +36,10 @@ import (
 // default rotation; NIST SP 800-57 allows up to two for a key-wrapping key).
 const DefaultActivePeriod = 365 * 24 * time.Hour
 
+// MinActiveBeforeRetire is how long the active KEK must have been active before another one can
+// be retired.
+const MinActiveBeforeRetire = 5 * time.Minute
+
 // Column is a column that holds envelopes. The table and column names are part of every
 // envelope's AAD, so they must match what the writers bind.
 type Column struct {
@@ -358,6 +362,12 @@ func (t *Tool) Retire(ctx context.Context, id string) error {
 	}
 	if id == ks.Active {
 		return fmt.Errorf("KEK %s is the active KEK; activate another one first", id)
+	}
+	// Pods pick up an activation within about a minute (kubelet propagation, then the reload tick).
+	// Until then they may still wrap with the previous KEK, and retiring it would strand those values.
+	if !ks.ActivatedAt.IsZero() && t.now().Sub(ks.ActivatedAt) < MinActiveBeforeRetire {
+		return fmt.Errorf("the active KEK %s was activated %s ago; wait until it has been active for %s so every pod wraps with it, rewrap, then retire",
+			ks.Active, t.now().Sub(ks.ActivatedAt).Round(time.Second), MinActiveBeforeRetire)
 	}
 	usage, err := t.Usage(ctx)
 	if err != nil {

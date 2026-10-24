@@ -59,6 +59,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
@@ -106,6 +107,12 @@ type config struct {
 	githubAPIURL     string
 
 	kekDir string
+	// kekSecret names the Secret with the key-encryption keys. koinon-api creates it on its first
+	// start when kekCreate is set and it is missing, and never overwrites it.
+	kekSecret string
+	kekCreate bool
+
+	providerAllowedHosts string
 }
 
 func parseFlags(args []string) (config, error) {
@@ -160,6 +167,12 @@ func parseFlags(args []string) (config, error) {
 		"namespace of connection Secrets (default $POD_NAMESPACE); without one, connections cannot be created")
 	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config when in a cluster")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", github.DefaultBaseURL, "GitHub REST API base URL")
+	fs.StringVar(&c.kekSecret, "kek-secret", "",
+		"Secret with the key-encryption keys, read through the Kubernetes API; takes precedence over --kek-dir")
+	fs.StringVar(&c.providerAllowedHosts, "provider-allowed-hosts", "",
+		"comma-separated hosts (optionally host:port) that providers may name although they are internal "+
+			"(loopback, link-local, metadata and Koinon's own namespace are denied otherwise); platform-level")
+	fs.BoolVar(&c.kekCreate, "kek-create", true, "create the --kek-secret Secret with a new key when it does not exist")
 	fs.StringVar(&c.kekDir, "kek-dir", "",
 		"directory with the mounted key-encryption keys Secret (files named by KEK ID plus \"active\"); "+
 			"without it, provider keys and connection secrets cannot be stored")
@@ -347,13 +360,31 @@ func run() error {
 	// The secret store (ADR 0056): provider keys and connection secrets are envelopes in
 	// Postgres, wrapped by the KEKs of a mounted Secret.
 	var keyring *secretstore.Keyring
-	if cfg.kekDir != "" {
+	switch {
+	case cfg.kekSecret != "" && kube != nil:
+		// The chart renders no key material (a render would make new keys every time, and a new
+		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
+		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret}
+		if cfg.kekCreate {
+			created, err := keyscli.EnsureKubeSecret(ctx, kube, cfg.secretsNamespace, cfg.kekSecret, time.Now())
+			if err != nil {
+				return err
+			}
+			if created {
+				slog.Warn("created the key-encryption key Secret; back it up now (docs/ops/secret-keys.md)", "secret", cfg.kekSecret)
+			}
+		}
+		if keyring, err = loadKeyring(ctx, kekStore); err != nil {
+			return err
+		}
+		go watchKeyring(bgCtx, keyring, kekStore, time.Minute)
+	case cfg.kekDir != "":
 		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
 			return err
 		}
 		go keyring.WatchDir(bgCtx, cfg.kekDir, time.Minute, slog.Default())
-	} else {
-		slog.Warn("no --kek-dir: provider keys and connections cannot be stored")
+	default:
+		slog.Warn("no --kek-secret or --kek-dir: provider keys and connections cannot be stored")
 	}
 	// Connections created before the secret store kept their fields in Kubernetes Secrets: move them.
 	if kube != nil && keyring != nil {
@@ -378,7 +409,8 @@ func run() error {
 	if keyring != nil {
 		catalogKeys = keyring
 	}
-	catalogSvc := catalog.New(pool, catalogKeys, slog.Default())
+	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).
+		WithURLPolicy(catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.providerAllowedHosts)})
 	svc := services.New(pool, services.Options{
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc,
 	})

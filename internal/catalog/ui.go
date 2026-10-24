@@ -68,6 +68,9 @@ func (s *Service) CreateProvider(ctx context.Context, org pgtype.UUID, actor aud
 	if err := ValidateProvider(in.Name, in.Type, in.URL); err != nil {
 		return Provider{}, err
 	}
+	if err := s.policy.Check(ctx, in.URL); err != nil {
+		return Provider{}, err
+	}
 	id, err := newID()
 	if err != nil {
 		return Provider{}, err
@@ -122,6 +125,9 @@ func (s *Service) UpdateProvider(ctx context.Context, org pgtype.UUID, actor aud
 		if err := validateTypeURL(typ, u); err != nil {
 			return err
 		}
+		if err := s.policy.Check(ctx, u); err != nil {
+			return err
+		}
 		if patch.APIKey != nil {
 			if key, err = s.seal(org, pid, *patch.APIKey); err != nil {
 				return err
@@ -167,7 +173,9 @@ func (s *Service) DeleteProvider(ctx context.Context, org pgtype.UUID, actor aud
 		if err != nil {
 			return err
 		}
-		if cur.Source != store.ConfigSourceUi {
+		// A declared provider whose Secret is gone may be deleted for good; a live one only changes
+		// in its Secret.
+		if cur.Source != store.ConfigSourceUi && !cur.RemovedAt.Valid {
 			return readOnly(cur.ManagedBySecret.String)
 		}
 		if _, err := q.DeleteProvider(ctx, store.DeleteProviderParams{OrgID: org, ID: pid}); err != nil {

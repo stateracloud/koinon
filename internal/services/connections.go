@@ -84,6 +84,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 	out := &connectionv1alpha1.Connection{
 		Id: idString(c.ID), OrgId: idString(c.OrgID), Connector: c.Connector, DisplayName: c.DisplayName,
 		Status: connectionStatusToProto[c.Status], LastTestedAt: tsProto(c.LastTestedAt), CreatedAt: tsProto(c.CreatedAt),
+		Source: string(c.Source), ManagedBySecret: c.ManagedBySecret.String, Removed: c.RemovedAt.Valid,
 	}
 	var results []connections.CheckResult
 	if err := json.Unmarshal(c.LastTest, &results); err == nil {
@@ -192,6 +193,40 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil
+}
+
+// DeleteConnection implements ConnectionService. Only a removed connection (its declaring Secret
+// was deleted) can be deleted.
+func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.DeleteConnectionRequest) (*connectionv1alpha1.DeleteConnectionResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("connection_id", req.GetConnectionId())
+	if err != nil {
+		return nil, err
+	}
+	rctx := requestCtx(ctx)
+	err = s.inTx(rctx, func(q *store.Queries) error {
+		row, err := q.GetConnection(rctx, store.GetConnectionParams{OrgID: c.org, ID: id})
+		if err != nil {
+			return err
+		}
+		if !row.RemovedAt.Valid {
+			return connect.NewError(connect.CodeFailedPrecondition, "only a connection whose Kubernetes Secret was deleted can be deleted; change or delete its Secret instead")
+		}
+		if _, err := q.DeleteConnection(rctx, store.DeleteConnectionParams{OrgID: c.org, ID: id}); err != nil {
+			return err
+		}
+		return audit.RecordErr(rctx, q, audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: "connection.delete", TargetKind: "connection", TargetID: id.String(),
+			Before: map[string]any{"displayName": row.DisplayName, "source": string(row.Source), "keyFingerprint": row.SecretFingerprint},
+		})
+	})
+	if err != nil {
+		return nil, s.dbError(err, "connection")
+	}
+	return &connectionv1alpha1.DeleteConnectionResponse{}, nil
 }
 
 // GetConnection implements ConnectionService.

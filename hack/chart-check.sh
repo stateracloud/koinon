@@ -107,12 +107,20 @@ has "agentgateway admin listener on localhost" 'adminAddr: localhost:15000$' --s
 	--show-only templates/gateway-standalone.yaml
 # The key-encryption keys (plan item PV1): a generated Secret kept on uninstall, or an existing one;
 # mounted into koinon-api and koinon-reconciler only, never into agentd or the gateway.
-has "a generated KEK Secret by default" 'name: koinon-kek$' --show-only templates/kek-secret.yaml
-has "the generated KEK Secret is kept on uninstall" 'helm.sh/resource-policy: keep' --show-only templates/kek-secret.yaml
-lacks "no generated KEK Secret with existingSecret" 'kind: Secret' --set secrets.kek.existingSecret=mine --show-only templates/kek-secret.yaml
+# The chart renders no key material (a render makes new keys every time): koinon-api creates the Secret.
+for f in "${value_files[@]}"; do
+	if grep -Eq -- 'kek-[0-9]{8}' "$out/$(basename "$f" .yaml).yaml"; then fail "key material rendered with $(basename "$f")"; fi
+done
+env_is KOINON_KEK_SECRET '"koinon-kek"'
+env_is KOINON_KEK_CREATE '"true"'
+env_is KOINON_KEK_CREATE '"false"' --set secrets.kek.existingSecret=mine
+env_is KOINON_KEK_SECRET '"mine"' --set secrets.kek.existingSecret=mine
 has "existing KEK Secret mounted" 'secretName: mine$' --set secrets.kek.existingSecret=mine --show-only templates/deployments.yaml
 n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /secrets/kek$' || true)
-[ "$n" = 2 ] || fail "KEK mounted into $n components, want koinon-api and koinon-reconciler"
+[ "$n" = 1 ] || fail "KEK mounted into $n components, want only koinon-reconciler"
+# koinon-api cannot delete Secrets unless the legacy connection migration is on.
+lacks "no Secret delete by default" 'verbs: \[delete\]'
+has "Secret delete with the legacy migration" 'verbs: \[delete\]' --set secrets.migrateLegacyConnections=true
 n=$(render --show-only templates/gateway-standalone.yaml | grep -c 'kek' || true)
 [ "$n" = 0 ] || fail "the gateway references the KEK Secret"
 # The gateway mounts the provider keys Secret, and that Secret only.

@@ -12,11 +12,12 @@ import (
 )
 
 // MigrateLegacy moves the secret fields of connections that still live in their own
-// Kubernetes Secret into the store (plan item PV1): it reads the Secret, seals its fields
-// into connections.secret_envelope, and deletes the Secret only after the row is updated. A
-// connection whose Secret is missing is logged and skipped. It is idempotent, so a crash
-// between the update and the delete is repaired by the next start. It returns the number of
-// connections moved.
+// Kubernetes Secret into the store (plan item PV1): it reads the Secret, seals its fields into
+// connections.secret_envelope, deletes the Secret, and only when that delete succeeded clears
+// connections.secret_name. A row with an envelope and a secret_name is a move that did not finish
+// (the delete failed, or the process stopped); the next start finishes it, so a Secret that could
+// not be deleted is never forgotten. A connection whose Secret is missing and which has no envelope
+// is logged and skipped. It returns the number of connections whose fields it moved.
 func MigrateLegacy(ctx context.Context, q *store.Queries, legacy SecretStore, sealer Sealer, log *slog.Logger) (int, error) {
 	rows, err := q.ListConnectionsToMigrate(ctx)
 	if err != nil {
@@ -31,33 +32,40 @@ func MigrateLegacy(ctx context.Context, q *store.Queries, legacy SecretStore, se
 	var errs []error
 	moved := 0
 	for _, c := range rows {
-		sec, found, err := legacy.Get(ctx, c.SecretName.String)
+		name := c.SecretName.String
+		sec, found, err := legacy.Get(ctx, name)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		if !found {
-			log.Warn("a connection's Kubernetes Secret is missing; create the connection again",
-				"org", c.OrgID.String(), "connection", c.ID.String(), "secret", c.SecretName.String)
-			continue
+		if len(c.SecretEnvelope) == 0 {
+			if !found {
+				log.Warn("a connection's Kubernetes Secret is missing; create the connection again",
+					"org", c.OrgID.String(), "connection", c.ID.String(), "secret", name)
+				continue
+			}
+			env, err := SealFields(sealer, c.OrgID, c.ID, sec.Data)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("connection %s: %w", c.ID.String(), err))
+				continue
+			}
+			if _, err := q.SetConnectionEnvelope(ctx, store.SetConnectionEnvelopeParams{OrgID: c.OrgID, ID: c.ID, SecretEnvelope: env}); err != nil {
+				errs = append(errs, fmt.Errorf("connection %s: %w", c.ID.String(), err))
+				continue
+			}
+			moved++
+			log.Info("moved a connection's secret fields into the store", "org", c.OrgID.String(), "connection", c.ID.String())
 		}
-		env, err := SealFields(sealer, c.OrgID, c.ID, sec.Data)
-		if err != nil {
+		if found {
+			if err := legacy.Delete(ctx, name); err != nil {
+				log.Warn("moved a connection's secret fields but could not delete its Kubernetes Secret; the next start tries again, or delete it by hand",
+					"connection", c.ID.String(), "secret", name, "err", err)
+				continue
+			}
+		}
+		if err := q.ClearConnectionSecretName(ctx, store.ClearConnectionSecretNameParams{OrgID: c.OrgID, ID: c.ID}); err != nil {
 			errs = append(errs, fmt.Errorf("connection %s: %w", c.ID.String(), err))
-			continue
 		}
-		if _, err := q.SetConnectionEnvelope(ctx, store.SetConnectionEnvelopeParams{OrgID: c.OrgID, ID: c.ID, SecretEnvelope: env}); err != nil {
-			errs = append(errs, fmt.Errorf("connection %s: %w", c.ID.String(), err))
-			continue
-		}
-		if err := legacy.Delete(ctx, c.SecretName.String); err != nil {
-			// The row is moved; the next start finds no work for it, so the stray Secret
-			// stays. Say so.
-			log.Warn("moved a connection's secret fields but could not delete its Kubernetes Secret; delete it by hand",
-				"connection", c.ID.String(), "secret", c.SecretName.String, "err", err)
-		}
-		moved++
-		log.Info("moved a connection's secret fields into the store", "org", c.OrgID.String(), "connection", c.ID.String())
 	}
 	return moved, errors.Join(errs...)
 }
