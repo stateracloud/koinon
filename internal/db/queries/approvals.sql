@@ -16,9 +16,11 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND state = 'running';
 -- No row: the same call was already recorded in this run (see
 -- GetApprovalRequestByCall).
 INSERT INTO approval_requests (org_id, ticket_id, run_id, agent_id, connector, tool, target,
-                               args_json, args_sha256, risk, decision, status, expires_at)
+                               args_json, args_sha256, risk, decision, status, expires_at,
+                               approvals_required, call_binding)
 VALUES (@org_id, @ticket_id, @run_id, @agent_id, @connector, @tool, @target,
-        @args_json, @args_sha256, @risk, @decision, @status, @expires_at)
+        @args_json, @args_sha256, @risk, @decision, @status, @expires_at,
+        COALESCE(sqlc.narg(approvals_required)::smallint, 1), COALESCE(sqlc.narg(call_binding)::jsonb, '{}'))
 ON CONFLICT (org_id, run_id, tool, target, args_sha256) DO NOTHING
 RETURNING *;
 
@@ -131,3 +133,17 @@ UPDATE approval_requests
 SET delivered_at = now()
 WHERE org_id = @org_id AND id = ANY(@ids::uuid[]) AND delivered_at IS NULL
   AND status IN ('executed', 'failed', 'denied', 'expired', 'canceled');
+
+-- name: SetApprovalFirstApprover :one
+-- The first of two approvals: remembered, the request stays pending.
+UPDATE approval_requests
+SET first_approver = @approver::uuid
+WHERE org_id = @org_id AND id = @id AND status = 'pending' AND first_approver IS NULL AND approvals_required = 2
+RETURNING *;
+
+-- name: RaiseApprovalsRequired :one
+-- A tool turned two-approver on after the request was recorded: the pending request needs two too.
+UPDATE approval_requests
+SET approvals_required = 2
+WHERE org_id = @org_id AND id = @id AND status = 'pending' AND approvals_required < 2
+RETURNING *;

@@ -104,6 +104,9 @@ function Shell({ who }: { who: WhoAmIResponse }) {
             <Link to="/settings/providers" className={navLink} activeProps={active}>
               Providers
             </Link>
+            <Link to="/servers" className={navLink} activeProps={active}>
+              Servers
+            </Link>
             <Link to="/settings/prices" className={navLink} activeProps={active}>
               Prices
             </Link>

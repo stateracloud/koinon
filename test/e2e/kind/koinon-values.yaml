@@ -18,10 +18,10 @@ postgres:
 gateway:
   mode: standalone
 
-# The fake model server is a Service in another namespace (a ClusterIP, which the default provider
-# URL policy and the gateway's egress policy deny).
-providers:
-  allowedInternalHosts: ["fakemodel.koinon-e2e-fakes.svc:8080"]
+# The fake model server and the fake MCP server are Services in another namespace (a ClusterIP, which
+# the default URL policy and the gateway's egress policy deny).
+egress:
+  allowedInternalHosts: ["fakemodel.koinon-e2e-fakes.svc:8080", "fakemcp.koinon-e2e-fakes.svc:8080"]
 
 networkPolicy:
   gatewayEgressTo:

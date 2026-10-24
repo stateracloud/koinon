@@ -115,7 +115,7 @@ describe('Providers page', () => {
   })
 
   it('shows the server\'s URL refusal plainly and keeps the form open without the key', async () => {
-    const msg = 'the url\'s host "127.0.0.1" is not allowed: it is a loopback, link-local, private, shared or metadata address (a platform admin can allow it with providers.allowedInternalHosts)'
+    const msg = 'the url\'s host "127.0.0.1" is not allowed: it is a loopback, link-local, private, shared or metadata address (a platform admin can allow it with egress.allowedInternalHosts)'
     setup({ failCreate: msg })
     await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
     const form = screen.getByRole('form', { name: 'Add provider' })

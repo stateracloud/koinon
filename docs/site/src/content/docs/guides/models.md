@@ -96,10 +96,10 @@ in git in clear text.
 **Upstream hosts.** A provider URL may not point at loopback, link-local, private (including Kubernetes
 Services' ClusterIPs), shared or cloud metadata addresses, at a name without a dot, or at a Service in
 Koinon's own namespace; odd spellings such as `127.1` or `0x7f.0.0.1` are read as the addresses they are.
-A platform admin allows an internal upstream in the chart value `providers.allowedInternalHosts` (names,
+A platform admin allows an internal upstream in the chart value `egress.allowedInternalHosts` (`providers.allowedInternalHosts` is its deprecated old name; both are read for one more release; names,
 IPs or CIDRs, for example `ollama.lab.example.com:11434`) and, when the chart's gateway egress policy is
-on, in `networkPolicy.gatewayEgressTo`. The runbook has the details and limits. Any other target the gateway must reach on a private address,
-such as a remote MCP server, needs a `networkPolicy.gatewayEgressTo` entry as well.
+on, in `networkPolicy.gatewayEgressTo`. The runbook has the details and limits. The same list and the same egress policy cover the
+[remote MCP servers](/guides/mcp-servers/) an org adds.
 
 **Trust boundary.** Write access to Koinon's namespace is platform-admin level. Anyone who can create
 a labelled Secret there can define providers and credentials for any org. Grant it as you would

@@ -88,3 +88,45 @@ spec:
   selector: {app: fakegithub}
   ports:
     - {name: http, port: 8080, targetPort: http}
+---
+# A remote MCP server (plan item MC1): two tools over Streamable HTTP at /mcp, refusing requests
+# without the X-Api-Key credential, and a record of what it received at /_fake/requests.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fakemcp
+  namespace: koinon-e2e-fakes
+  labels: {app: fakemcp}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fakemcp}
+  template:
+    metadata:
+      labels: {app: fakemcp}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: fakemcp
+          image: kind.local/koinon-fakemcp:e2e
+          imagePullPolicy: IfNotPresent
+          args: ["-addr", ":8080", "-header", "X-Api-Key", "-value", "not-a-real-token"]
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fakemcp
+  namespace: koinon-e2e-fakes
+spec:
+  selector: {app: fakemcp}
+  ports:
+    - {name: http, port: 8080, targetPort: http}

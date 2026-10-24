@@ -56,7 +56,8 @@ spec:
        unrelated things; mention them in the pull request body instead.
     5. Run the project's tests or linters if they run offline in your sandbox. Say in the body what
        you ran and what you could not run.
-    6. Call `create_pull_request` with:
+    6. Call `create_pull_request` (your tool list may show it as `github_create_pull_request`, with your
+       harness's prefix in front) with:
        - `branch`: a new branch name, `koinon/<short-slug>`;
        - `title`: a short summary in the repository's commit style;
        - `body`: what changed, why, how you checked it, and anything the reviewer should know;

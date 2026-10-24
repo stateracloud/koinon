@@ -68,6 +68,22 @@ func fixtures() []fixture {
 	mcpNoGrants := gateway.State{MCP: []gateway.MCPTarget{{Name: "github", URL: "http://tools:8080/mcp"}}}
 	mcpNoGrants.AddKey(fixedKey("k-dddddddddddd", agentB, "test-d"))
 
+	// Org MCP servers (plan item MC1): scoped by condition, one with a bearer credential, one with a custom
+	// header, one over SSE with none; agent A is allowed two of them, narrowed to tools.
+	mcpServers := gateway.State{MCP: []gateway.MCPTarget{
+		{Name: "github", URL: "http://koinon-github-tools.koinon.svc:8080/mcp"},
+		{Name: "acme-wiki", Org: "acme", URL: "https://mcp.wiki.example.com/mcp", CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: "/secrets/upstream/mcp_wiki"},
+		{Name: "acme-legacy", Org: "acme", URL: "https://legacy.example.com/sse", SSE: true},
+		{Name: "globex-search", Org: "globex", URL: "https://search.example.org/mcp", CredentialHeader: "X-Api-Key", CredentialFile: "/secrets/upstream/mcp_search"},
+	}}
+	mcpServers.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+	mcpServers.AddKey(fixedKey("k-gggggggggggg", agentG, "test-g"))
+	mcpServers.GrantTools(agentA,
+		gateway.ToolGrant{Target: "acme-wiki", Tools: []string{"read_page", "search"}},
+		gateway.ToolGrant{Target: "acme-legacy", Tools: []string{"ping"}},
+	)
+	mcpServers.GrantTools(agentG, gateway.ToolGrant{Target: "globex-search", Tools: []string{"query"}})
+
 	return []fixture{
 		{name: "empty", state: gateway.State{}},
 		{name: "models-only", state: modelsOnly, options: standalone.Options{Port: 8080}},
@@ -76,5 +92,6 @@ func fixtures() []fixture {
 			AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318"},
 		}},
 		{name: "mcp-no-grants", state: mcpNoGrants},
+		{name: "mcp-servers", state: mcpServers},
 	}
 }

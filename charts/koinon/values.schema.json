@@ -292,6 +292,13 @@
         "allowedInternalHosts": {"type": "array", "items": {"type": "string", "minLength": 1}}
       }
     },
+    "egress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowedInternalHosts": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
     "secrets": {
       "type": "object",
       "additionalProperties": false,
