@@ -17,11 +17,13 @@ import (
 	"github.com/stateracloud/koinon/internal/tokens"
 )
 
-func tokenProto(t tokens.Token) *tokenv1alpha1.Token {
+// tokenProto converts a token; names maps user IDs to what the UI shows for them.
+func tokenProto(t tokens.Token, names map[string]string) *tokenv1alpha1.Token {
 	role, _ := roleOf(t.Role)
 	out := &tokenv1alpha1.Token{
 		Id: t.ID, Name: t.Name, Prefix: t.Prefix, Role: auth.RoleToProto(role),
 		CreatedAt: timestamppb.New(t.CreatedAt), ExpiresAt: timestamppb.New(t.ExpiresAt),
+		CreatedBy: t.CreatedBy, CreatedByName: names[t.CreatedBy], ParentTokenId: t.ParentID,
 	}
 	if t.RevokedAt != nil {
 		out.RevokedAt = timestamppb.New(*t.RevokedAt)
@@ -30,6 +32,30 @@ func tokenProto(t tokens.Token) *tokenv1alpha1.Token {
 		out.LastUsedAt = timestamppb.New(*t.LastUsedAt)
 	}
 	return out
+}
+
+// userNames maps the IDs of the users who created the tokens to their display name or email.
+func (s *Server) userNames(ctx context.Context, list []tokens.Token) map[string]string {
+	names := map[string]string{}
+	for _, t := range list {
+		if t.CreatedBy == "" || names[t.CreatedBy] != "" {
+			continue
+		}
+		id, err := parseID("user", t.CreatedBy)
+		if err != nil {
+			continue
+		}
+		u, err := s.q.GetActiveUser(ctx, id)
+		switch {
+		case err != nil:
+			names[t.CreatedBy] = "a deleted user"
+		case u.DisplayName != "":
+			names[t.CreatedBy] = u.DisplayName
+		default:
+			names[t.CreatedBy] = u.Email.String
+		}
+	}
+	return names
 }
 
 func roleOf(s string) (store.OrgRole, bool) {
@@ -86,7 +112,7 @@ func (s *Server) CreateToken(ctx context.Context, req *tokenv1alpha1.CreateToken
 		return nil, s.tokenError(err)
 	}
 	s.log.Info("admin API token created", "org", c.org.String(), "token", created.ID, "prefix", created.Prefix, "role", created.Role, "by", c.actor().String())
-	return &tokenv1alpha1.CreateTokenResponse{Token: tokenProto(created.Token), Secret: created.Secret}, nil
+	return &tokenv1alpha1.CreateTokenResponse{Token: tokenProto(created.Token, s.userNames(ctx, []tokens.Token{created.Token})), Secret: created.Secret}, nil
 }
 
 // ListTokens implements TokenService. Admins and owners.
@@ -100,8 +126,9 @@ func (s *Server) ListTokens(ctx context.Context, req *tokenv1alpha1.ListTokensRe
 		return nil, s.tokenError(err)
 	}
 	res := &tokenv1alpha1.ListTokensResponse{}
+	names := s.userNames(ctx, list)
 	for _, t := range list {
-		res.Tokens = append(res.Tokens, tokenProto(t))
+		res.Tokens = append(res.Tokens, tokenProto(t, names))
 	}
 	return res, nil
 }
@@ -116,5 +143,5 @@ func (s *Server) RevokeToken(ctx context.Context, req *tokenv1alpha1.RevokeToken
 	if err != nil {
 		return nil, s.tokenError(err)
 	}
-	return &tokenv1alpha1.RevokeTokenResponse{Token: tokenProto(t)}, nil
+	return &tokenv1alpha1.RevokeTokenResponse{Token: tokenProto(t, s.userNames(ctx, []tokens.Token{t}))}, nil
 }

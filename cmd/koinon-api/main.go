@@ -413,7 +413,7 @@ func run() error {
 	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).
 		WithURLPolicy(catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.providerAllowedHosts)})
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc, Catalog: catalogSvc,
 	})
 	if kube != nil {
 		var sealer connections.Sealer
