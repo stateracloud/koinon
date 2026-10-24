@@ -34,7 +34,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"febf4b11c06f0fd4"'
+      koinon.config: '"e5924da00f84297d"'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -97,7 +97,7 @@ llm:
             org: globex
           allowedModels:
             - deepseek/deepseek-v4.1-flash
-        - keyHash: sha256:6cdae9bf858aeeb51b378e83b41424223a3fe9c60ff62438852026db62692b48
+        - keyHash: sha256:3fc96c1675689c044ff5567c005e3b2ac034b2d3d116928dfb69e7227e3672b8
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -137,6 +137,8 @@ llm:
         provider:
           data_collection: deny
           zdr: true
+      transformation:
+        stream_options: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
     - id: acme/open/model
       name: open/model
       matches:
@@ -153,6 +155,8 @@ llm:
         baseUrl: https://openrouter.ai/api/v1
         apiKey:
           file: /secrets/upstream/api_key
+      transformation:
+        stream_options: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
     - id: globex/deepseek/deepseek-v4.1-flash
       name: deepseek/deepseek-v4.1-flash
       matches:
@@ -167,6 +171,8 @@ llm:
             - type: completions
       params:
         baseUrl: http://ollama.globex.internal:11434/v1
+      transformation:
+        stream_options: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
 mcp:
   policies:
     apiKey:

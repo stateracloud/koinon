@@ -55,6 +55,15 @@ type Rates struct {
 	Input, Output, CacheRead, CacheWrite, Reasoning *money.Rate
 }
 
+func (r Rates) nonzero() bool {
+	for _, p := range []*money.Rate{r.Input, r.Output, r.CacheRead, r.CacheWrite, r.Reasoning} {
+		if p != nil && *p != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Tier is a parsed tier. Its rates overlay the base rates.
 type Tier struct {
 	ContextOver int64
@@ -390,6 +399,9 @@ func (e Entry) Resolve(orgEntry bool) (Resolved, error) {
 	}
 	if e.MaxOutput < 0 || e.MaxOutput > maxOutputTokens {
 		bad("max_output out of range")
+	}
+	if e.MaxOutput == 0 && price.Base.nonzero() {
+		bad("max_output is required for a priced entry: an aborted response settles at no more than it")
 	}
 	if !orgEntry {
 		if !strings.HasPrefix(e.Source.URL, "https://") {

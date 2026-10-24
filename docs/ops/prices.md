@@ -23,7 +23,7 @@ entries keep citing the price version they used (`default@<version>#<id>`). Add 
 way. Review the list against the pages at least once a month; the date in each entry's `source` says
 how old it is.
 
-`max_output` is the model's largest output in tokens (an aborted response without usage settles at the
+`max_output` is required for every entry with a non-zero price (the price-list test and the org price API enforce it). It is the model's largest output in tokens (an aborted response without usage settles at the
 request's `max_tokens`, or at this when the request's limit was not logged); `hidden_thinking` marks
 models that bill reasoning the response may not show. A monthly workflow (`review-prices`) opens a
 "Review default prices" issue listing every entry with its source and last-checked date, unless one is

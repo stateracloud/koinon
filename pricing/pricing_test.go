@@ -20,6 +20,9 @@ func TestDefaultListIsValid(t *testing.T) {
 		if e.Source.URL == "" || e.Source.Accessed == "" {
 			t.Errorf("%s: no source", e.ID)
 		}
+		if e.MaxOutput == 0 && e.Prices.Input != "0" {
+			t.Errorf("%s: a priced entry needs max_output", e.ID)
+		}
 		if e.Note == "" {
 			t.Errorf("%s: no note quoting the page", e.ID)
 		}
@@ -68,7 +71,7 @@ func TestSelectPrefersExactProviderThenSpecificThenLater(t *testing.T) {
 		r, err := pricing.Entry{
 			ID: id, Provider: prov, Match: pricing.Match{Glob: glob}, ValidFrom: from,
 			Spec:      pricing.Spec{Prices: pricing.Wire{Input: in, Output: in}},
-			Tokenizer: "bytes", Ratio: "3.0",
+			Tokenizer: "bytes", Ratio: "3.0", MaxOutput: 1000,
 		}.Resolve(true)
 		if err != nil {
 			t.Fatal(err)
@@ -95,6 +98,25 @@ func TestSelectPrefersExactProviderThenSpecificThenLater(t *testing.T) {
 	}
 	if _, ok := pricing.Select(rs, "openrouter", "x", at("2025-01-01")); ok {
 		t.Error("an entry before its valid_from matched")
+	}
+}
+
+func TestPricedEntryNeedsMaxOutput(t *testing.T) {
+	e := pricing.Entry{
+		ID: "a", Provider: "x", Match: pricing.Match{Glob: "a"}, ValidFrom: "2026-01-01",
+		Spec: pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "1"}}, Tokenizer: "bytes", Ratio: "3",
+	}
+	if _, err := e.Resolve(true); err == nil {
+		t.Fatal("a priced entry without max_output was accepted")
+	}
+	e.MaxOutput = 4096
+	if _, err := e.Resolve(true); err != nil {
+		t.Fatal(err)
+	}
+	e.MaxOutput = 0
+	e.Prices = pricing.Wire{Input: "0", Output: "0"}
+	if _, err := e.Resolve(true); err != nil {
+		t.Fatal("a free entry needs no max_output:", err)
 	}
 }
 

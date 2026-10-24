@@ -87,7 +87,7 @@ var _ = Describe("BudgetService and PriceService", func() {
 		member := e.userIn(ctx, org, store.OrgRoleMember)
 		req := &budgetv1alpha1.SetPriceRequest{
 			OrgId: org, Name: "contract", Provider: "openrouter", Match: &budgetv1alpha1.PriceMatch{Glob: "deepseek/*"},
-			Rates: &budgetv1alpha1.Rates{Input: "0.5", Output: "1.5"},
+			Rates: &budgetv1alpha1.Rates{Input: "0.5", Output: "1.5"}, MaxOutput: 4096,
 			Tiers: []*budgetv1alpha1.PriceTier{{ContextOver: 100000, Rates: &budgetv1alpha1.Rates{Input: "1"}}},
 		}
 		_, err := priceSvc(member).SetPrice(ctx, req)

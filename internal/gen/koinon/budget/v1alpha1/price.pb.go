@@ -224,6 +224,7 @@ type PriceEntry struct {
 	SourceUrl          string                 `protobuf:"bytes,11,opt,name=source_url,json=sourceUrl,proto3" json:"source_url,omitempty"`
 	SourceAccessed     string                 `protobuf:"bytes,12,opt,name=source_accessed,json=sourceAccessed,proto3" json:"source_accessed,omitempty"`
 	Note               string                 `protobuf:"bytes,13,opt,name=note,proto3" json:"note,omitempty"`
+	MaxOutput          int32                  `protobuf:"varint,14,opt,name=max_output,json=maxOutput,proto3" json:"max_output,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -349,6 +350,13 @@ func (x *PriceEntry) GetNote() string {
 	return ""
 }
 
+func (x *PriceEntry) GetMaxOutput() int32 {
+	if x != nil {
+		return x.MaxOutput
+	}
+	return 0
+}
+
 type PriceVersion struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// id is cited by ledger entries as org#<id>.
@@ -364,6 +372,7 @@ type PriceVersion struct {
 	RetiredAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=retired_at,json=retiredAt,proto3" json:"retired_at,omitempty"`
 	CreatedBy     string                 `protobuf:"bytes,11,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	MaxOutput     int32                  `protobuf:"varint,13,opt,name=max_output,json=maxOutput,proto3" json:"max_output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -482,6 +491,13 @@ func (x *PriceVersion) GetCreatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *PriceVersion) GetMaxOutput() int32 {
+	if x != nil {
+		return x.MaxOutput
+	}
+	return 0
+}
+
 type ListPricesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
@@ -585,7 +601,10 @@ type SetPriceRequest struct {
 	ToolOverheadTokens int32  `protobuf:"varint,9,opt,name=tool_overhead_tokens,json=toolOverheadTokens,proto3" json:"tool_overhead_tokens,omitempty"`
 	HiddenThinking     bool   `protobuf:"varint,10,opt,name=hidden_thinking,json=hiddenThinking,proto3" json:"hidden_thinking,omitempty"`
 	// valid_from defaults to now.
-	ValidFrom     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=valid_from,json=validFrom,proto3" json:"valid_from,omitempty"`
+	ValidFrom *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=valid_from,json=validFrom,proto3" json:"valid_from,omitempty"`
+	// max_output is the largest output in tokens; required unless every rate is "0". An aborted
+	// response without usage settles at no more than this.
+	MaxOutput     int32 `protobuf:"varint,12,opt,name=max_output,json=maxOutput,proto3" json:"max_output,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -695,6 +714,13 @@ func (x *SetPriceRequest) GetValidFrom() *timestamppb.Timestamp {
 		return x.ValidFrom
 	}
 	return nil
+}
+
+func (x *SetPriceRequest) GetMaxOutput() int32 {
+	if x != nil {
+		return x.MaxOutput
+	}
+	return 0
 }
 
 type SetPriceResponse struct {
@@ -1338,7 +1364,7 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\n" +
 	"PriceMatch\x12\x12\n" +
 	"\x04glob\x18\x01 \x01(\tR\x04glob\x12\x14\n" +
-	"\x05regex\x18\x02 \x01(\tR\x05regex\"\xea\x03\n" +
+	"\x05regex\x18\x02 \x01(\tR\x05regex\"\x89\x04\n" +
 	"\n" +
 	"PriceEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
@@ -1356,7 +1382,9 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\n" +
 	"source_url\x18\v \x01(\tR\tsourceUrl\x12'\n" +
 	"\x0fsource_accessed\x18\f \x01(\tR\x0esourceAccessed\x12\x12\n" +
-	"\x04note\x18\r \x01(\tR\x04note\"\xfa\x03\n" +
+	"\x04note\x18\r \x01(\tR\x04note\x12\x1d\n" +
+	"\n" +
+	"max_output\x18\x0e \x01(\x05R\tmaxOutput\"\x99\x04\n" +
 	"\fPriceVersion\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -1374,11 +1402,13 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\n" +
 	"created_by\x18\v \x01(\tR\tcreatedBy\x129\n" +
 	"\n" +
-	"created_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"*\n" +
+	"created_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"max_output\x18\r \x01(\x05R\tmaxOutput\"*\n" +
 	"\x11ListPricesRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"R\n" +
 	"\x12ListPricesResponse\x12<\n" +
-	"\x06prices\x18\x01 \x03(\v2$.koinon.budget.v1alpha1.PriceVersionR\x06prices\"\xca\x03\n" +
+	"\x06prices\x18\x01 \x03(\v2$.koinon.budget.v1alpha1.PriceVersionR\x06prices\"\xe9\x03\n" +
 	"\x0fSetPriceRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -1392,7 +1422,9 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\x0fhidden_thinking\x18\n" +
 	" \x01(\bR\x0ehiddenThinking\x129\n" +
 	"\n" +
-	"valid_from\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tvalidFrom\"N\n" +
+	"valid_from\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tvalidFrom\x12\x1d\n" +
+	"\n" +
+	"max_output\x18\f \x01(\x05R\tmaxOutput\"N\n" +
 	"\x10SetPriceResponse\x12:\n" +
 	"\x05price\x18\x01 \x01(\v2$.koinon.budget.v1alpha1.PriceVersionR\x05price\"?\n" +
 	"\x12RetirePriceRequest\x12\x15\n" +

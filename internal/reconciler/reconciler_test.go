@@ -537,6 +537,31 @@ var _ = Describe("Reconciler", func() {
 		Expect(mg.last().Limits[ref]).To(Equal(net))
 	})
 
+	It("fails one agent's key closed when its budget cannot be computed, and still serves every other agent", func(ctx SpecContext) {
+		good := newAgentWithConfig(ctx, org, user, `{"instructions":"help","limits":{"spendUSD":"10.00"}}`)
+		broken := newAgentWithConfig(ctx, org, user, `{"instructions":"help","limits":{"spendUSD":"20.00"}}`)
+		cfg2 := cfg
+		cfg2.AgentLimit = func(ctx context.Context, q *store.Queries, a store.Agent, at time.Time) (*gateway.Limit, error) {
+			if a.ID == broken.ID {
+				return nil, errors.New("simulated budget failure")
+			}
+			return ledger.AgentLimit(ctx, q, a, at)
+		}
+		r, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg2)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = r.ReconcileAll(ctx)
+		Expect(err).To(HaveOccurred(), "the failure is reported")
+		Expect(err.Error()).To(ContainSubstring("fails closed"))
+		st := mg.last()
+		byAgent := map[string]gateway.Limit{}
+		for _, k := range st.Keys {
+			byAgent[k.Agent.Name] = st.Limits[k.Agent]
+		}
+		Expect(byAgent[good.ID.String()].Amount).To(BeNumerically("==", 10), "the other agent is served with its budget")
+		Expect(byAgent[broken.ID.String()].Amount).To(BeZero(), "no earlier limit: the key is blocked")
+	})
+
 	It("uses one workspace per org", func(ctx SpecContext) {
 		a1 := newAgent(ctx, org, user)
 		a2 := newAgent(ctx, org, user)

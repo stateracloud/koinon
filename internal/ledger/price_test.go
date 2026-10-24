@@ -99,7 +99,7 @@ var _ = Describe("Cost truth", func() {
 			Entry: pricing.Entry{
 				ID: "ds-contract", Provider: "openrouter", Match: pricing.Match{Glob: "deepseek/*"},
 				Spec:      pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2"}},
-				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0",
+				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
 			},
 			ValidFrom: time.Now().Add(-time.Hour),
 		})
@@ -214,6 +214,48 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Recorded).To(Equal(1))
 		Expect(good.lastEntry(ctx).CostFlagged).To(BeTrue())
+	})
+
+	It("caps a settled output, so an absurd max_tokens blocks neither ingest nor the budgets of anyone else", func(ctx SpecContext) {
+		abuser := newEnv(ctx, uniq("org"), "", "10.00", 1<<62)
+		other := newEnv(ctx, uniq("org"), "", "10.00", 1<<62)
+		abuser.model(ctx, "openrouter", "anthropic/claude-fable-5.1")
+		other.model(ctx, "openrouter", deepseek)
+		var batch []ledger.Entry
+		for i := 0; i < 5; i++ {
+			batch = append(batch, ledger.Entry{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: abuser.ref(), Model: "anthropic/claude-fable-5.1", Status: 200,
+				MaxTokens: 9_000_000_000_000, RequestBytes: 100, ResponseBytes: -1, Time: time.Now(),
+			})
+		}
+		batch = append(batch, other.usage(time.Now(), deepseek, 1_000_000, 0, 0, ""))
+		res, err := ing.Ingest(ctx, batch)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Recorded).To(Equal(6))
+		s := abuser.lastEntry(ctx)
+		Expect(s.Estimated).To(BeTrue())
+		Expect(s.CostFlagged).To(BeTrue(), "a 2xx without usage is flagged")
+		Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
+		Expect(string(s.Estimate)).To(ContainSubstring(`"max_output_capped": true`))
+		// 128000 output tokens at $50 per million, five times, is $32; nothing near overflow.
+		var sum string
+		Expect(db.QueryRow(ctx, `SELECT sum(cost_usd)::text FROM spend_entries WHERE org_id = $1`, abuser.org).Scan(&sum)).To(Succeed())
+		Expect(sum).To(HavePrefix("32.0"))
+
+		// The budgets of both orgs still compute.
+		_, err = ledger.AgentLimit(ctx, q, abuser.agent, time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		l, err := ledger.AgentLimit(ctx, q, other.agent, time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(l.Amount).To(BeNumerically("~", 9.98, 0.001))
+
+		// A sum beyond what a field could hold saturates instead of failing.
+		_, err = db.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)
+			VALUES ($1, $2, 'huge', 'k', 'm', 1, 1, 999999999999.5, true, now())`, abuser.org, abuser.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		l, err = ledger.AgentLimit(ctx, q, abuser.agent, time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(l.Amount).To(BeZero())
 	})
 
 	It("settles an aborted response without usage at max_tokens, or at the entry's max_output when it is not logged", func(ctx SpecContext) {

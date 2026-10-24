@@ -181,7 +181,7 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    Anthropic's `message_start` `input_tokens`, are used as reported and are not estimates. (2) Otherwise
    UTF-8 bytes divided by the entry's ratio (Claude before Opus 4.7: 3.0; Opus 4.7 and later: 2.3;
    others: 3.0), plus the entry's fixed tool overhead, images (`ceil(w/28) * ceil(h/28)`) and PDF pages
-   when the request says it has them. (3) An aborted response without usage settles its output at the request's `max_tokens`, marked
+   when the request says it has them. (3) An aborted response without usage settles its output at the request's `max_tokens`, capped at the entry's `max_output` (or a hard ceiling of 1M tokens when the entry has none; `max_output` is required on every entry with a non-zero price), marked
    estimated, whether or not the model bills hidden thinking (hidden thinking is flagged
    `thinking_unmeasured`); when `max_tokens` is not logged (OpenAI's `max_completion_tokens`), the price
    entry's `max_output` stands in and the entry is flagged `max_output_fallback`. (4) OpenAI-family text
@@ -197,7 +197,15 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    `Content-Length` and the token counts, but not the response bytes, and Koinon does not copy text into
    the log (`llm.prompt` and `llm.completion` would, and cost CPU), so the live path estimates input from
    request bytes and settles output as in (3). A provider that returns 2xx without usage is
-   indistinguishable from an aborted one and settles the same way, which overestimates.
+   indistinguishable from an aborted one and settles the same way, which overestimates; such an entry
+   is recorded with `usage_missing` and flagged so admins can see why it was charged at max. To keep
+   that rare, every model's request transformation sets `stream_options.include_usage: true` on
+   streaming chat completions (agentgateway v1.6.0 adds it only when the client sent no
+   `stream_options` at all, so a client sending `include_usage: false` would otherwise get its streams
+   charged at max; verified against the real binary in the gateway spec suite, and the kind e2e checks
+   that a run's streamed requests carry usage). Sums read from the database saturate at the largest
+   limit instead of failing to parse, and an agent whose budget cannot be computed fails closed (its
+   key keeps its last pushed limit, or zero) and is reported, without stopping the reconcile pass.
 7. **Gateway catalog.** The reconciler renders each model's current price, with cache write, reasoning
    and tiers, into agentgateway's `modelCatalog` under the existing `<org>.<type>` provider key, for the
    gateway's own budget backstop. The access log gains `koinon.in`, `koinon.out`, `koinon.cache_read`,

@@ -23,7 +23,7 @@ func TestReportedCountsAreNotEstimates(t *testing.T) {
 func TestEarlyInputOnlyOutputEstimated(t *testing.T) {
 	// message_start gave the input; the stream was aborted after 460 visible bytes.
 	r := estimate.Estimate(estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 2.3},
-		estimate.Input{ReportedInput: ptr(1000), ResponseBytes: 459, Aborted: true})
+		estimate.Input{ReportedInput: ptr(1000), ResponseBytes: 459})
 	if !r.Estimated || !r.InputReported || r.InputTokens != 1000 || r.OutputTokens != 200 || r.Method != "bytes" {
 		t.Fatalf("%+v", r)
 	}
@@ -84,5 +84,22 @@ func TestTiktokenOfflineAndExact(t *testing.T) {
 	n, err = estimate.CountTiktoken("cl100k_base", strings.Repeat("a", 10))
 	if err != nil || n < 1 {
 		t.Fatalf("%d %v", n, err)
+	}
+}
+
+func TestAbsurdMaxTokensIsCapped(t *testing.T) {
+	p := estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 3, MaxOutput: 128000}
+	r := estimate.Estimate(p, estimate.Input{Aborted: true, MaxTokens: 9_000_000_000_000})
+	if r.OutputTokens != 128000 || !r.MaxOutputCapped {
+		t.Fatalf("%+v", r)
+	}
+	// Without a max_output the hard ceiling applies.
+	r = estimate.Estimate(estimate.Params{Ratio: 3}, estimate.Input{Aborted: true, MaxTokens: 9_000_000_000_000})
+	if r.OutputTokens != estimate.HardMaxOutput {
+		t.Fatalf("%+v", r)
+	}
+	r = estimate.Estimate(estimate.Params{Ratio: 3}, estimate.Input{RequestBytes: 1 << 60, Aborted: true, MaxTokens: 5})
+	if r.InputTokens != estimate.HardMaxInput || r.OutputTokens != 5 {
+		t.Fatalf("%+v", r)
 	}
 }

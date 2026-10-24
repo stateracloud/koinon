@@ -69,23 +69,35 @@ func MustParse(s string) USD {
 // FromCents converts cents (the unit of template limits) to USD.
 func FromCents(c int64) USD { return USD(c) * (PerUSD / 100) }
 
-// ParseNumeric reads a Postgres numeric rendered as text, such as "3.0000000000". Digits
-// beyond the twelfth must be zero.
+var numericRE = regexp.MustCompile(`^[0-9]{1,18}(\.[0-9]+)?$`)
+
+// ParseNumeric reads a Postgres numeric rendered as text, such as "3.0000000000", for a sum read
+// from the database. It never fails on size: a value above [MaxLimit] saturates at MaxLimit, which
+// is at or above every limit Koinon accepts, so a huge sum cannot make a budget check fail.
+// Digits beyond the twelfth fraction digit are ignored (they are zero in numeric(24,12)).
 func ParseNumeric(s string) (USD, error) {
-	whole, frac, ok := strings.Cut(s, ".")
-	if ok {
-		if len(frac) > 12 {
-			if strings.Trim(frac[12:], "0") != "" {
-				return 0, fmt.Errorf("money: %q has more than 12 fraction digits", s)
-			}
-			frac = frac[:12]
-		}
-		s = whole + "." + frac
-		if frac == "" {
-			s = whole
-		}
+	if !numericRE.MatchString(s) {
+		return 0, fmt.Errorf("money: invalid numeric %q", s)
 	}
-	return Parse(s)
+	whole, frac, _ := strings.Cut(s, ".")
+	whole = strings.TrimLeft(whole, "0")
+	if len(whole) > 7 || (len(whole) == 7 && whole >= "1000000") {
+		return MaxLimit, nil
+	}
+	if whole == "" {
+		whole = "0"
+	}
+	if len(frac) > 12 {
+		frac = frac[:12]
+	}
+	if frac != "" {
+		whole += "." + frac
+	}
+	u, err := Parse(whole)
+	if err != nil {
+		return 0, err
+	}
+	return min(u, MaxLimit), nil
 }
 
 // String formats the amount exactly, trimming trailing zeros but keeping two fraction digits.

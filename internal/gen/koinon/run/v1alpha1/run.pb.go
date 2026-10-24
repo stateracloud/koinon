@@ -328,9 +328,12 @@ type Cost struct {
 	// example "0.0021" or "0.00".
 	Usd string `protobuf:"bytes,4,opt,name=usd,proto3" json:"usd,omitempty"`
 	// False when some request had no price, so usd undercounts.
-	Priced        bool `protobuf:"varint,5,opt,name=priced,proto3" json:"priced,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Priced bool `protobuf:"varint,5,opt,name=priced,proto3" json:"priced,omitempty"`
+	// Requests whose usage the provider did not report and Koinon estimated (included in
+	// requests, tokens and usd). Zero when every request reported its usage.
+	EstimatedRequests int64 `protobuf:"varint,6,opt,name=estimated_requests,json=estimatedRequests,proto3" json:"estimated_requests,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Cost) Reset() {
@@ -396,6 +399,13 @@ func (x *Cost) GetPriced() bool {
 		return x.Priced
 	}
 	return false
+}
+
+func (x *Cost) GetEstimatedRequests() int64 {
+	if x != nil {
+		return x.EstimatedRequests
+	}
+	return 0
 }
 
 // RunEvent is one session update or lifecycle note of a run.
@@ -855,13 +865,14 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"started_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12;\n" +
 	"\vfinished_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"finishedAt\x12-\n" +
-	"\x04cost\x18\x10 \x01(\v2\x19.koinon.run.v1alpha1.CostR\x04cost\"\x94\x01\n" +
+	"\x04cost\x18\x10 \x01(\v2\x19.koinon.run.v1alpha1.CostR\x04cost\"\xc3\x01\n" +
 	"\x04Cost\x12\x1a\n" +
 	"\brequests\x18\x01 \x01(\x03R\brequests\x12!\n" +
 	"\finput_tokens\x18\x02 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x03 \x01(\x03R\foutputTokens\x12\x10\n" +
 	"\x03usd\x18\x04 \x01(\tR\x03usd\x12\x16\n" +
-	"\x06priced\x18\x05 \x01(\bR\x06priced\"\xb5\x01\n" +
+	"\x06priced\x18\x05 \x01(\bR\x06priced\x12-\n" +
+	"\x12estimated_requests\x18\x06 \x01(\x03R\x11estimatedRequests\"\xb5\x01\n" +
 	"\bRunEvent\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x03R\x03seq\x12\x12\n" +

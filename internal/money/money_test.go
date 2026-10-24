@@ -62,6 +62,19 @@ func TestParseRefusesWhatWouldOverflow(t *testing.T) {
 	}
 }
 
+func TestParseNumericSaturatesInsteadOfFailing(t *testing.T) {
+	for _, in := range []string{"1000000.000000000000", "99999999999.5", "123456789012345678", "9999999.999999999999"} {
+		u, err := money.ParseNumeric(in)
+		if err != nil || u != money.MaxLimit {
+			t.Errorf("%s: %v %v", in, u, err)
+		}
+	}
+	u, err := money.ParseNumeric("0000.500000000000")
+	if err != nil || u.String() != "0.50" {
+		t.Errorf("%v %v", u, err)
+	}
+}
+
 func TestCents(t *testing.T) {
 	if money.FromCents(1050).String() != "10.50" {
 		t.Fatal(money.FromCents(1050))

@@ -80,12 +80,22 @@ type Result struct {
 	ThinkingUnmeasured            bool
 	// MaxOutputFallback is set when output was settled at the entry's max_output because the
 	// request's max_tokens was not logged.
-	MaxOutputFallback           bool
+	MaxOutputFallback bool
+	// MaxOutputCapped is set when the request's max_tokens exceeded the entry's max_output.
+	MaxOutputCapped             bool
 	Method                      string // reported, bytes, max_tokens, max_output
 	RatioStatic, RatioEffective float64
 	LearnedP90TokensPerByte     float64
 	OverheadTokens              int64
 }
+
+// HardMaxOutput bounds what an aborted response can be settled at when neither the request's
+// max_tokens nor the entry's max_output limits it (1M tokens), and HardMaxInput bounds an input
+// estimated from bytes. A request that claims max_tokens of 9e12 must not record a huge entry.
+const (
+	HardMaxOutput = 1_000_000
+	HardMaxInput  = 10_000_000
+)
 
 // MinRatio is the smallest bytes-per-token ratio (the lower bound of pricing.ParseRatio).
 const MinRatio = 0.5
@@ -107,7 +117,7 @@ func (p Params) Tokens(bytes int64) int64 {
 	if bytes <= 0 {
 		return 0
 	}
-	return int64(math.Ceil(float64(bytes) / p.EffectiveRatio()))
+	return min(int64(math.Ceil(float64(bytes)/p.EffectiveRatio())), HardMaxInput)
 }
 
 // ImageTokens is the visual token count of an image: ceil(w/28) * ceil(h/28) (Anthropic vision
@@ -170,10 +180,20 @@ func Estimate(p Params, in Input) Result {
 	switch {
 	case in.ReportedOutput != nil:
 		res.OutputTokens, res.OutputReported = *in.ReportedOutput, true
-	case in.Aborted && (in.MaxTokens > 0 || p.MaxOutput > 0):
-		res.OutputTokens, res.Estimated, res.Method = in.MaxTokens, true, "max_tokens"
-		if in.MaxTokens <= 0 {
-			res.OutputTokens, res.MaxOutputFallback, res.Method = p.MaxOutput, true, "max_output"
+	case in.Aborted:
+		// Settle at the request's max_tokens, but never above the entry's max_output (or the hard
+		// ceiling when the entry has none): a lenient upstream answers a huge max_tokens with 2xx.
+		bound := int64(HardMaxOutput)
+		if p.MaxOutput > 0 {
+			bound = min(bound, p.MaxOutput)
+		}
+		res.Estimated, res.Method = true, "max_tokens"
+		res.OutputTokens = bound
+		if in.MaxTokens > 0 {
+			res.OutputTokens = min(in.MaxTokens, bound)
+			res.MaxOutputCapped = in.MaxTokens > bound
+		} else {
+			res.MaxOutputFallback, res.Method = true, "max_output"
 		}
 		res.ThinkingUnmeasured = p.HiddenThinking
 	default:
