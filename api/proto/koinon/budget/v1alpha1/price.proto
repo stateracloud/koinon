@@ -1,0 +1,190 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.budget.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1;budgetv1alpha1";
+
+// PriceService manages an org's own prices and shows the default price list (plan item PV2,
+// ADR 0056). A price is a rate per usage type, in USD per million tokens, for non-overlapping
+// buckets of a request; org prices win over the default list. Admins and owners.
+service PriceService {
+  // ListPrices returns every version of the org's prices, newest first per name.
+  rpc ListPrices(ListPricesRequest) returns (ListPricesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // SetPrice adds a version of a named price. Earlier versions never change, and requests
+  // before valid_from keep the price they were charged at.
+  rpc SetPrice(SetPriceRequest) returns (SetPriceResponse);
+
+  // RetirePrice ends a named price now. Its versions stay for the ledger entries that cite them.
+  rpc RetirePrice(RetirePriceRequest) returns (RetirePriceResponse);
+
+  // GetDefaultPrices returns the default list this installation runs.
+  rpc GetDefaultPrices(GetDefaultPricesRequest) returns (GetDefaultPricesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetDefaultPriceChanges returns what changed between two versions of the default list. An
+  // empty from_version means the version before to_version; an empty to_version the current one.
+  rpc GetDefaultPriceChanges(GetDefaultPriceChangesRequest) returns (GetDefaultPriceChangesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListFlaggedPrices returns price entries whose recomputed cost differs from the gateway's
+  // by more than 1%.
+  rpc ListFlaggedPrices(ListFlaggedPricesRequest) returns (ListFlaggedPricesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// Rates are USD per million tokens as decimal strings with at most 6 fraction digits. Empty
+// means unset; a free model needs an explicit "0".
+message Rates {
+  string input = 1;
+  string output = 2;
+  string cache_read = 3;
+  string cache_write = 4;
+  string reasoning = 5;
+}
+
+// PriceTier replaces the rates it names once the input side of a request (input, cache reads
+// and cache writes) exceeds context_over tokens.
+message PriceTier {
+  int64 context_over = 1;
+  Rates rates = 2;
+}
+
+// PriceMatch holds exactly one of glob and regex.
+message PriceMatch {
+  string glob = 1;
+  string regex = 2;
+}
+
+message PriceEntry {
+  string id = 1;
+  string provider = 2;
+  PriceMatch match = 3;
+  string valid_from = 4;
+  Rates rates = 5;
+  repeated PriceTier tiers = 6;
+  string tokenizer = 7;
+  string ratio = 8;
+  int32 tool_overhead_tokens = 9;
+  bool hidden_thinking = 10;
+  string source_url = 11;
+  string source_accessed = 12;
+  string note = 13;
+  int32 max_output = 14;
+}
+
+message PriceVersion {
+  // id is cited by ledger entries as org#<id>.
+  string id = 1;
+  string name = 2;
+  string provider = 3;
+  PriceMatch match = 4;
+  Rates rates = 5;
+  repeated PriceTier tiers = 6;
+  string tokenizer = 7;
+  string ratio = 8;
+  google.protobuf.Timestamp valid_from = 9;
+  google.protobuf.Timestamp retired_at = 10;
+  string created_by = 11;
+  google.protobuf.Timestamp created_at = 12;
+  int32 max_output = 13;
+}
+
+message ListPricesRequest {
+  string org_id = 1;
+}
+
+message ListPricesResponse {
+  repeated PriceVersion prices = 1;
+}
+
+message SetPriceRequest {
+  string org_id = 1;
+  string name = 2;
+  string provider = 3;
+  PriceMatch match = 4;
+  Rates rates = 5;
+  repeated PriceTier tiers = 6;
+  // tokenizer is bytes (default), tiktoken:o200k_base or tiktoken:cl100k_base.
+  string tokenizer = 7;
+  // ratio is UTF-8 bytes per token for estimates; default 3.0.
+  string ratio = 8;
+  int32 tool_overhead_tokens = 9;
+  bool hidden_thinking = 10;
+  // valid_from defaults to now.
+  google.protobuf.Timestamp valid_from = 11;
+  // max_output is the largest output in tokens; required unless every rate is "0". An aborted
+  // response without usage settles at no more than this.
+  int32 max_output = 12;
+}
+
+message SetPriceResponse {
+  PriceVersion price = 1;
+}
+
+message RetirePriceRequest {
+  string org_id = 1;
+  string name = 2;
+}
+
+message RetirePriceResponse {}
+
+message GetDefaultPricesRequest {
+  string org_id = 1;
+}
+
+message GetDefaultPricesResponse {
+  string version = 1;
+  repeated string previous_versions = 2;
+  repeated PriceEntry entries = 3;
+}
+
+message GetDefaultPriceChangesRequest {
+  string org_id = 1;
+  string from_version = 2;
+  string to_version = 3;
+}
+
+message PriceChange {
+  // kind is added, removed or changed.
+  string kind = 1;
+  string id = 2;
+  string valid_from = 3;
+  PriceEntry before = 4;
+  PriceEntry after = 5;
+  repeated string fields = 6;
+}
+
+message GetDefaultPriceChangesResponse {
+  string from_version = 1;
+  string to_version = 2;
+  repeated PriceChange changes = 3;
+}
+
+message FlaggedPrice {
+  string price_ref = 1;
+  string model = 2;
+  int64 requests = 3;
+  google.protobuf.Timestamp last_seen = 4;
+  string cost_usd = 5;
+  string gateway_cost_usd = 6;
+}
+
+message ListFlaggedPricesRequest {
+  string org_id = 1;
+  // since defaults to 7 days ago.
+  google.protobuf.Timestamp since = 2;
+}
+
+message ListFlaggedPricesResponse {
+  repeated FlaggedPrice flagged = 1;
+}

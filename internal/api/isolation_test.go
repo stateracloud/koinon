@@ -27,6 +27,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
+	budgetv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1/budgetv1alpha1connect"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
@@ -212,6 +214,82 @@ var isolationCases = map[string]isolationCase{
 	tokenv1alpha1connect.TokenServiceRevokeTokenProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.tokens.RevokeToken(ctx, &tokenv1alpha1.RevokeTokenRequest{OrgId: org, TokenId: f.token})
+		},
+	},
+
+	budgetv1alpha1connect.BudgetServiceGetOrgBudgetProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return budgetClient(c).GetOrgBudget(ctx, &budgetv1alpha1.GetOrgBudgetRequest{OrgId: org})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceSetMonthlyCapProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return budgetClient(c).SetMonthlyCap(ctx, &budgetv1alpha1.SetMonthlyCapRequest{OrgId: org, MonthlyCapUsd: "5"})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceSetPlatformCeilingProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return budgetClient(c).SetPlatformCeiling(ctx, &budgetv1alpha1.SetPlatformCeilingRequest{OrgId: org, PlatformCeilingUsd: "5"})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceGetAgentBudgetProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return budgetClient(c).GetAgentBudget(ctx, &budgetv1alpha1.GetAgentBudgetRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceSetAgentBudgetProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return budgetClient(c).SetAgentBudget(ctx, &budgetv1alpha1.SetAgentBudgetRequest{OrgId: org, AgentId: f.agent.GetId(), DailyLimitUsd: "1"})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceListNotificationsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return budgetClient(c).ListNotifications(ctx, &budgetv1alpha1.ListNotificationsRequest{OrgId: org})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceMarkNotificationReadProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return budgetClient(c).MarkNotificationRead(ctx, &budgetv1alpha1.MarkNotificationReadRequest{OrgId: org, NotificationId: "019a0000-0000-7000-8000-00000000ffff"})
+		},
+	},
+	budgetv1alpha1connect.PriceServiceListPricesProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return priceClient(c).ListPrices(ctx, &budgetv1alpha1.ListPricesRequest{OrgId: org})
+		},
+	},
+	budgetv1alpha1connect.PriceServiceSetPriceProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return priceClient(c).SetPrice(ctx, &budgetv1alpha1.SetPriceRequest{
+				OrgId: org, Name: "intruder", Provider: "*", Match: &budgetv1alpha1.PriceMatch{Glob: "x"}, Rates: &budgetv1alpha1.Rates{Input: "1", Output: "1"}, MaxOutput: 100,
+			})
+		},
+	},
+	budgetv1alpha1connect.PriceServiceRetirePriceProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return priceClient(c).RetirePrice(ctx, &budgetv1alpha1.RetirePriceRequest{OrgId: org, Name: "nothing"})
+		},
+	},
+	budgetv1alpha1connect.PriceServiceGetDefaultPricesProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return priceClient(c).GetDefaultPrices(ctx, &budgetv1alpha1.GetDefaultPricesRequest{OrgId: org})
+		},
+	},
+	budgetv1alpha1connect.PriceServiceGetDefaultPriceChangesProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return priceClient(c).GetDefaultPriceChanges(ctx, &budgetv1alpha1.GetDefaultPriceChangesRequest{OrgId: org})
+		},
+	},
+	budgetv1alpha1connect.PriceServiceListFlaggedPricesProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return priceClient(c).ListFlaggedPrices(ctx, &budgetv1alpha1.ListFlaggedPricesRequest{OrgId: org})
 		},
 	},
 

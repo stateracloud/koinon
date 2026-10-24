@@ -281,6 +281,46 @@ func (q *Queries) GetProvider(ctx context.Context, arg GetProviderParams) (Provi
 	return i, err
 }
 
+const listModelRatesForAudit = `-- name: ListModelRatesForAudit :many
+SELECT org_id, name, input_rate, output_rate, cache_read_rate FROM models
+WHERE input_rate IS NOT NULL
+`
+
+type ListModelRatesForAuditRow struct {
+	OrgID         pgtype.UUID
+	Name          string
+	InputRate     pgtype.Text
+	OutputRate    pgtype.Text
+	CacheReadRate pgtype.Text
+}
+
+// Every model with rates, across orgs, to log rates the stricter validation would refuse.
+func (q *Queries) ListModelRatesForAudit(ctx context.Context) ([]ListModelRatesForAuditRow, error) {
+	rows, err := q.db.Query(ctx, listModelRatesForAudit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListModelRatesForAuditRow
+	for rows.Next() {
+		var i ListModelRatesForAuditRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.Name,
+			&i.InputRate,
+			&i.OutputRate,
+			&i.CacheReadRate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listModels = `-- name: ListModels :many
 SELECT org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at FROM models
 WHERE org_id = $1
@@ -365,7 +405,7 @@ func (q *Queries) ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provi
 
 const listServedCatalog = `-- name: ListServedCatalog :many
 SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.url, p.api_key,
-       m.name AS model_name, m.guard, m.input_rate, m.output_rate, m.cache_read_rate
+       m.id AS model_id, m.name AS model_name, m.guard, m.input_rate, m.output_rate, m.cache_read_rate, m.updated_at AS model_updated_at
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
 WHERE p.org_id = $1 AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND m.disabled_reason IS NULL
@@ -373,16 +413,18 @@ ORDER BY p.name, m.name
 `
 
 type ListServedCatalogRow struct {
-	ProviderID    pgtype.UUID
-	ProviderName  string
-	ProviderType  string
-	Url           string
-	ApiKey        []byte
-	ModelName     string
-	Guard         bool
-	InputRate     pgtype.Text
-	OutputRate    pgtype.Text
-	CacheReadRate pgtype.Text
+	ProviderID     pgtype.UUID
+	ProviderName   string
+	ProviderType   string
+	Url            string
+	ApiKey         []byte
+	ModelID        pgtype.UUID
+	ModelName      string
+	Guard          bool
+	InputRate      pgtype.Text
+	OutputRate     pgtype.Text
+	CacheReadRate  pgtype.Text
+	ModelUpdatedAt pgtype.Timestamptz
 }
 
 // Every enabled provider of the org with its enabled models, for the gateway.
@@ -401,11 +443,13 @@ func (q *Queries) ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]L
 			&i.ProviderType,
 			&i.Url,
 			&i.ApiKey,
+			&i.ModelID,
 			&i.ModelName,
 			&i.Guard,
 			&i.InputRate,
 			&i.OutputRate,
 			&i.CacheReadRate,
+			&i.ModelUpdatedAt,
 		); err != nil {
 			return nil, err
 		}

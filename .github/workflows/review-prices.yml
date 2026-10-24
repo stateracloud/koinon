@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Once a month, opens a "Review default prices" issue that lists every entry of
+# pricing/default.yaml with its source URL and last-checked date, so someone compares the
+# provider pricing pages with the list (docs/ops/prices.md). It does nothing when such an issue is
+# already open. It only reads the one file; no build tooling and no tests run.
+name: review-prices
+
+on:
+  schedule:
+    - cron: "17 6 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  issue:
+    name: open the review issue
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: pricing/default.yaml
+          sparse-checkout-cone-mode: false
+      - name: open the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          title="Review default prices"
+          open=$(gh issue list --state open --search "\"$title\" in:title" --json title --jq "[.[] | select(.title == \"$title\")] | length")
+          if [ "$open" != "0" ]; then
+            echo "A \"$title\" issue is already open."
+            exit 0
+          fi
+          {
+            echo "Compare each entry of \`pricing/default.yaml\` with its provider pricing page, then update the list as described in docs/ops/prices.md (a changed price is a new entry with a later \`valid_from\`, and \`version\` is bumped). Close this issue when done."
+            echo
+            echo "List version: $(yq '.version' pricing/default.yaml)"
+            echo
+            echo "| Entry | Source | Last checked |"
+            echo "| --- | --- | --- |"
+            yq -r '.entries[] | "| " + .id + " | " + .source.url + " | " + (.source.accessed | tostring) + " |"' pricing/default.yaml
+          } > body.md
+          gh issue create --title "$title" --body-file body.md

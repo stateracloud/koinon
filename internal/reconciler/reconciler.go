@@ -36,6 +36,8 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +46,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
@@ -88,6 +91,8 @@ type Config struct {
 	ProviderKeys ProviderKeyStore
 	// ProviderKeyDir is where the gateway mounts ProviderKeys, for the rendered config.
 	ProviderKeyDir string
+	// AgentLimit computes an agent's budget; nil is ledger.AgentLimit. It is a seam for tests.
+	AgentLimit func(ctx context.Context, q *store.Queries, agent store.Agent, now time.Time) (*gateway.Limit, error)
 	// URLPolicy is checked again, with a fresh lookup, for every provider URL before it is served.
 	URLPolicy catalog.URLPolicy
 	// ProviderKeySettle is how long a pass waits, after writing a new provider key file, before it
@@ -142,6 +147,9 @@ type Reconciler struct {
 	// keyWrittenAt is when each provider key file written by this process was written, until it
 	// has had ProviderKeySettle to reach the gateway.
 	keyWrittenAt map[string]time.Time
+	// lastLimit is the budget last pushed per agent key, so one agent whose budget cannot be
+	// computed keeps it (and never gets more) instead of stopping the pass for everyone.
+	lastLimit map[gateway.AgentRef]gateway.Limit
 	// appliedFile is the key file (data key) each provider ID was last applied with.
 	appliedFile map[string]string
 }
@@ -264,17 +272,27 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	r.warnUnpriced(state)
 	// Spend limits net of recorded spend (plan item L1), recomputed every pass, so a key
 	// rotation or a gateway that lost its budget counters gets the remainder, not the full
-	// limit. Without its limit an agent would be unlimited, so a failure aborts the pass and
-	// the gateway keeps serving the last applied state.
+	// limit. An agent whose budget cannot be computed fails closed (its last pushed limit, or
+	// zero) and is reported; it never stops the pass for the other agents and orgs.
 	now := r.cfg.Now()
 	for _, w := range items {
 		if w.key.ID == "" {
 			continue
 		}
-		l, err := ledger.AgentLimit(ctx, r.q, w.agent, now)
-		if err != nil {
-			return errors.Join(append(errs, fmt.Errorf("%w: spend limit of agent %s: %w", errAbortPass, execution.UUIDString(w.agent.ID.Bytes), err))...)
+		limitFor := r.cfg.AgentLimit
+		if limitFor == nil {
+			limitFor = ledger.AgentLimit
 		}
+		l, err := limitFor(ctx, r.q, w.agent, now)
+		if err != nil {
+			failed := r.failClosedLimit(w.key.Agent, now)
+			r.log.Error("agent budget not computed; its key keeps its last pushed limit, or zero if it had none",
+				"agent", execution.UUIDString(w.agent.ID.Bytes), "org", w.key.Agent.Org, "err", err)
+			errs = append(errs, fmt.Errorf("spend limit of agent %s not computed (key fails closed): %w", execution.UUIDString(w.agent.ID.Bytes), err))
+			state.SetLimit(w.key.Agent, failed)
+			continue
+		}
+		r.rememberLimit(w.key.Agent, l)
 		state.SetLimit(w.key.Agent, l)
 	}
 	// Provider key files first, then the config that names them; files no provider uses go last.
@@ -778,4 +796,34 @@ func (r *Reconciler) recordMessage(ctx context.Context, w *work, err error) {
 		return
 	}
 	_ = r.recordState(ctx, w, w.sb.State, w.sb.Phase, err.Error())
+}
+
+// rememberLimit records the budget pushed for agent.
+func (r *Reconciler) rememberLimit(agent gateway.AgentRef, l *gateway.Limit) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lastLimit == nil {
+		r.lastLimit = map[gateway.AgentRef]gateway.Limit{}
+	}
+	if l == nil {
+		delete(r.lastLimit, agent)
+		return
+	}
+	r.lastLimit[agent] = *l
+}
+
+// failClosedLimit is the budget for an agent whose budget could not be computed: the last one
+// pushed while it is still from the current UTC day, else zero. A pushed limit only ever shrinks
+// as the gateway charges against it, but it must not be regranted every day by a computation that
+// keeps failing; zero blocks the key until a pass computes it.
+func (r *Reconciler) failClosedLimit(agent gateway.AgentRef, now time.Time) *gateway.Limit {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if l, ok := r.lastLimit[agent]; ok {
+		day, _, _ := strings.Cut(l.Generation, "-")
+		if day == strconv.FormatInt(budget.DayStart(now).Unix(), 10) {
+			return &l
+		}
+	}
+	return &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: ledger.Window, Generation: "failed"}
 }

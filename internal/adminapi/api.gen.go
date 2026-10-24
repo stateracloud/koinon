@@ -31,6 +31,27 @@ const (
 	Unauthenticated  ErrorCode = "unauthenticated"
 )
 
+// Defines values for PriceChangeKind.
+const (
+	Added   PriceChangeKind = "added"
+	Changed PriceChangeKind = "changed"
+	Removed PriceChangeKind = "removed"
+)
+
+// Defines values for PriceEntryTokenizer.
+const (
+	PriceEntryTokenizerBytes              PriceEntryTokenizer = "bytes"
+	PriceEntryTokenizerTiktokenCl100kBase PriceEntryTokenizer = "tiktoken:cl100k_base"
+	PriceEntryTokenizerTiktokenO200kBase  PriceEntryTokenizer = "tiktoken:o200k_base"
+)
+
+// Defines values for PriceInputTokenizer.
+const (
+	PriceInputTokenizerBytes              PriceInputTokenizer = "bytes"
+	PriceInputTokenizerTiktokenCl100kBase PriceInputTokenizer = "tiktoken:cl100k_base"
+	PriceInputTokenizerTiktokenO200kBase  PriceInputTokenizer = "tiktoken:o200k_base"
+)
+
 // Defines values for Role.
 const (
 	Admin Role = "admin"
@@ -43,6 +64,33 @@ const (
 	Ui     Source = "ui"
 )
 
+// AgentBudget defines model for AgentBudget.
+type AgentBudget struct {
+	AgentId       openapi_types.UUID `json:"agentId"`
+	DailyLimitUsd string             `json:"dailyLimitUsd"`
+	DayStart      time.Time          `json:"dayStart"`
+	SpentTodayUsd string             `json:"spentTodayUsd"`
+}
+
+// AgentBudgetUpdate defines model for AgentBudgetUpdate.
+type AgentBudgetUpdate struct {
+	DailyLimitUsd string `json:"dailyLimitUsd"`
+}
+
+// DefaultPriceChanges defines model for DefaultPriceChanges.
+type DefaultPriceChanges struct {
+	Changes []PriceChange `json:"changes"`
+	From    *string       `json:"from,omitempty"`
+	To      string        `json:"to"`
+}
+
+// DefaultPrices defines model for DefaultPrices.
+type DefaultPrices struct {
+	Entries          []PriceEntry `json:"entries"`
+	PreviousVersions []string     `json:"previousVersions"`
+	Version          string       `json:"version"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	Error struct {
@@ -53,6 +101,22 @@ type Error struct {
 
 // ErrorCode defines model for ErrorCode.
 type ErrorCode string
+
+// FlaggedPrice defines model for FlaggedPrice.
+type FlaggedPrice struct {
+	// CostUsd What Koinon computed (counts for limits and reports).
+	CostUsd        string    `json:"costUsd"`
+	GatewayCostUsd string    `json:"gatewayCostUsd"`
+	LastSeen       time.Time `json:"lastSeen"`
+	Model          string    `json:"model"`
+	PriceRef       string    `json:"priceRef"`
+	Requests       int64     `json:"requests"`
+}
+
+// FlaggedPriceList defines model for FlaggedPriceList.
+type FlaggedPriceList struct {
+	Flagged []FlaggedPrice `json:"flagged"`
+}
 
 // Model defines model for Model.
 type Model struct {
@@ -99,6 +163,151 @@ type ModelUpdate struct {
 
 	// Rates USD per million tokens, as decimal strings.
 	Rates *Rates `json:"rates,omitempty"`
+}
+
+// OrgBudget defines model for OrgBudget.
+type OrgBudget struct {
+	MonthStart time.Time `json:"monthStart"`
+
+	// MonthlyCapUsd Calendar month in UTC. Absent: no cap.
+	MonthlyCapUsd *string `json:"monthlyCapUsd,omitempty"`
+
+	// PlatformCeilingUsd Set by a platform admin; absent: off.
+	PlatformCeilingUsd *string `json:"platformCeilingUsd,omitempty"`
+	SpentThisMonthUsd  string  `json:"spentThisMonthUsd"`
+}
+
+// OrgBudgetUpdate defines model for OrgBudgetUpdate.
+type OrgBudgetUpdate struct {
+	// MonthlyCapUsd Decimal with at most 12 fraction digits, above 0 and at most 1000000. Leave out to clear.
+	MonthlyCapUsd *string `json:"monthlyCapUsd,omitempty"`
+}
+
+// PriceChange defines model for PriceChange.
+type PriceChange struct {
+	After     *PriceEntry     `json:"after,omitempty"`
+	Before    *PriceEntry     `json:"before,omitempty"`
+	Fields    *[]string       `json:"fields,omitempty"`
+	Id        string          `json:"id"`
+	Kind      PriceChangeKind `json:"kind"`
+	ValidFrom string          `json:"validFrom"`
+}
+
+// PriceChangeKind defines model for PriceChange.Kind.
+type PriceChangeKind string
+
+// PriceEntry defines model for PriceEntry.
+type PriceEntry struct {
+	HiddenThinking *bool  `json:"hiddenThinking,omitempty"`
+	Id             string `json:"id"`
+
+	// Match Exactly one of glob (`*` any characters, `?` one, case-insensitive) and regex (RE2, whole name).
+	Match PriceMatch `json:"match"`
+
+	// MaxOutput Largest output in tokens; an aborted response without usage settles at the request max_tokens, or at this when it was not logged.
+	MaxOutput *int    `json:"maxOutput,omitempty"`
+	Note      *string `json:"note,omitempty"`
+
+	// Prices USD per million tokens as decimal strings with at most 6 fraction digits. A free model needs an explicit "0".
+	Prices PriceRates `json:"prices"`
+
+	// Provider Provider type the price applies to, or *.
+	Provider string `json:"provider"`
+
+	// Ratio UTF-8 bytes per token, used to estimate usage a provider did not report.
+	Ratio  string `json:"ratio"`
+	Source struct {
+		Accessed string `json:"accessed"`
+		Url      string `json:"url"`
+	} `json:"source"`
+	Tiers              *[]PriceTier        `json:"tiers,omitempty"`
+	Tokenizer          PriceEntryTokenizer `json:"tokenizer"`
+	ToolOverheadTokens *int                `json:"toolOverheadTokens,omitempty"`
+
+	// ValidFrom Date yyyy-mm-dd (UTC).
+	ValidFrom string `json:"validFrom"`
+}
+
+// PriceEntryTokenizer defines model for PriceEntry.Tokenizer.
+type PriceEntryTokenizer string
+
+// PriceInput defines model for PriceInput.
+type PriceInput struct {
+	HiddenThinking *bool `json:"hiddenThinking,omitempty"`
+
+	// Match Exactly one of glob (`*` any characters, `?` one, case-insensitive) and regex (RE2, whole name).
+	Match PriceMatch `json:"match"`
+
+	// MaxOutput Largest output in tokens; an aborted response without usage settles at the request max_tokens, or at this when it was not logged.
+	MaxOutput *int `json:"maxOutput,omitempty"`
+
+	// Name Names the price; a new version of the same name replaces it from validFrom on.
+	Name string `json:"name"`
+
+	// Prices USD per million tokens as decimal strings with at most 6 fraction digits. A free model needs an explicit "0".
+	Prices             PriceRates           `json:"prices"`
+	Provider           string               `json:"provider"`
+	Ratio              *string              `json:"ratio,omitempty"`
+	Tiers              *[]PriceTier         `json:"tiers,omitempty"`
+	Tokenizer          *PriceInputTokenizer `json:"tokenizer,omitempty"`
+	ToolOverheadTokens *int                 `json:"toolOverheadTokens,omitempty"`
+
+	// ValidFrom Default now.
+	ValidFrom *time.Time `json:"validFrom,omitempty"`
+}
+
+// PriceInputTokenizer defines model for PriceInput.Tokenizer.
+type PriceInputTokenizer string
+
+// PriceList defines model for PriceList.
+type PriceList struct {
+	Prices []PriceVersion `json:"prices"`
+}
+
+// PriceMatch Exactly one of glob (`*` any characters, `?` one, case-insensitive) and regex (RE2, whole name).
+type PriceMatch struct {
+	Glob  *string `json:"glob,omitempty"`
+	Regex *string `json:"regex,omitempty"`
+}
+
+// PriceRates USD per million tokens as decimal strings with at most 6 fraction digits. A free model needs an explicit "0".
+type PriceRates struct {
+	CacheRead  *string `json:"cacheRead,omitempty"`
+	CacheWrite *string `json:"cacheWrite,omitempty"`
+	Input      *string `json:"input,omitempty"`
+	Output     *string `json:"output,omitempty"`
+	Reasoning  *string `json:"reasoning,omitempty"`
+}
+
+// PriceTier defines model for PriceTier.
+type PriceTier struct {
+	// ContextOver The tier applies when the input side of a request (input, cache reads and writes) exceeds this many tokens; its rates replace the base rates they name.
+	ContextOver int64 `json:"contextOver"`
+
+	// Prices USD per million tokens as decimal strings with at most 6 fraction digits. A free model needs an explicit "0".
+	Prices PriceRates `json:"prices"`
+}
+
+// PriceVersion defines model for PriceVersion.
+type PriceVersion struct {
+	CreatedAt time.Time `json:"createdAt"`
+	CreatedBy string    `json:"createdBy"`
+
+	// Id The ledger cites it as org#<id>.
+	Id openapi_types.UUID `json:"id"`
+
+	// Match Exactly one of glob (`*` any characters, `?` one, case-insensitive) and regex (RE2, whole name).
+	Match PriceMatch `json:"match"`
+	Name  string     `json:"name"`
+
+	// Prices USD per million tokens as decimal strings with at most 6 fraction digits. A free model needs an explicit "0".
+	Prices    PriceRates   `json:"prices"`
+	Provider  string       `json:"provider"`
+	Ratio     *string      `json:"ratio,omitempty"`
+	RetiredAt *time.Time   `json:"retiredAt,omitempty"`
+	Tiers     *[]PriceTier `json:"tiers,omitempty"`
+	Tokenizer *string      `json:"tokenizer,omitempty"`
+	ValidFrom time.Time    `json:"validFrom"`
 }
 
 // Provider defines model for Provider.
@@ -160,6 +369,27 @@ type Role string
 // Source `secret` entries are declared by a Kubernetes Secret and read-only here.
 type Source string
 
+// SpendLine defines model for SpendLine.
+type SpendLine struct {
+	EstimatedRequests int64 `json:"estimatedRequests"`
+
+	// EstimatedUsd Cost of requests whose usage was estimated. Counts toward limits.
+	EstimatedUsd string `json:"estimatedUsd"`
+	InputTokens  int64  `json:"inputTokens"`
+	Model        string `json:"model"`
+	OutputTokens int64  `json:"outputTokens"`
+
+	// ReportedUsd Cost of requests whose usage the provider reported.
+	ReportedUsd string `json:"reportedUsd"`
+	Requests    int64  `json:"requests"`
+}
+
+// SpendReport defines model for SpendReport.
+type SpendReport struct {
+	Models []SpendLine `json:"models"`
+	Since  time.Time   `json:"since"`
+}
+
 // Token defines model for Token.
 type Token struct {
 	CreatedAt  time.Time          `json:"createdAt"`
@@ -203,11 +433,38 @@ type ProviderId = openapi_types.UUID
 // TokenId defines model for tokenId.
 type TokenId = openapi_types.UUID
 
+// GetDefaultPriceChangesParams defines parameters for GetDefaultPriceChanges.
+type GetDefaultPriceChangesParams struct {
+	From *string `form:"from,omitempty" json:"from,omitempty"`
+	To   *string `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// ListFlaggedPricesParams defines parameters for ListFlaggedPrices.
+type ListFlaggedPricesParams struct {
+	// Since RFC 3339 time; default 7 days ago.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+}
+
+// GetSpendReportParams defines parameters for GetSpendReport.
+type GetSpendReportParams struct {
+	// Since RFC 3339 time; default the start of the current month (UTC).
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+}
+
+// SetAgentBudgetJSONRequestBody defines body for SetAgentBudget for application/json ContentType.
+type SetAgentBudgetJSONRequestBody = AgentBudgetUpdate
+
+// SetBudgetJSONRequestBody defines body for SetBudget for application/json ContentType.
+type SetBudgetJSONRequestBody = OrgBudgetUpdate
+
 // CreateModelJSONRequestBody defines body for CreateModel for application/json ContentType.
 type CreateModelJSONRequestBody = ModelCreate
 
 // UpdateModelJSONRequestBody defines body for UpdateModel for application/json ContentType.
 type UpdateModelJSONRequestBody = ModelUpdate
+
+// SetPriceJSONRequestBody defines body for SetPrice for application/json ContentType.
+type SetPriceJSONRequestBody = PriceInput
 
 // CreateProviderJSONRequestBody defines body for CreateProvider for application/json ContentType.
 type CreateProviderJSONRequestBody = ProviderCreate
@@ -220,6 +477,18 @@ type CreateTokenJSONRequestBody = TokenCreate
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// An agent's daily limit (UTC day) and today's spend.
+	// (GET /agents/{agentId}/budget)
+	GetAgentBudget(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// Set an agent's daily limit. A template's spendUSD is only the default for a new agent.
+	// (PUT /agents/{agentId}/budget)
+	SetAgentBudget(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// The org's monthly cap (calendar month, UTC), its platform ceiling and this month's spend.
+	// (GET /budget)
+	GetBudget(w http.ResponseWriter, r *http.Request)
+	// Set the org's monthly cap, or clear it by leaving `monthlyCapUsd` out.
+	// (PUT /budget)
+	SetBudget(w http.ResponseWriter, r *http.Request)
 	// List the org's models, entered and declared.
 	// (GET /models)
 	ListModels(w http.ResponseWriter, r *http.Request)
@@ -235,6 +504,24 @@ type ServerInterface interface {
 	// Change a model's routing guard or rates. Declared models answer 409.
 	// (PATCH /models/{modelId})
 	UpdateModel(w http.ResponseWriter, r *http.Request, modelId ModelId)
+	// List the org's own prices, every version, newest first per name.
+	// (GET /prices)
+	ListPrices(w http.ResponseWriter, r *http.Request)
+	// Add a version of a named price. Earlier versions never change.
+	// (POST /prices)
+	SetPrice(w http.ResponseWriter, r *http.Request)
+	// The default price list this installation runs and the versions before it.
+	// (GET /prices/defaults)
+	GetDefaultPrices(w http.ResponseWriter, r *http.Request)
+	// What changed in the default price list between two versions (after an upgrade).
+	// (GET /prices/defaults/changes)
+	GetDefaultPriceChanges(w http.ResponseWriter, r *http.Request, params GetDefaultPriceChangesParams)
+	// Price entries whose recomputed cost differs from the gateway's by more than 1%.
+	// (GET /prices/flagged)
+	ListFlaggedPrices(w http.ResponseWriter, r *http.Request, params ListFlaggedPricesParams)
+	// End a named price now. Its versions stay for the ledger entries that cite them.
+	// (DELETE /prices/{name})
+	RetirePrice(w http.ResponseWriter, r *http.Request, name string)
 	// List the org's providers, entered and declared.
 	// (GET /providers)
 	ListProviders(w http.ResponseWriter, r *http.Request)
@@ -250,6 +537,9 @@ type ServerInterface interface {
 	// Change a provider's type, URL or key. Declared providers answer 409.
 	// (PATCH /providers/{providerId})
 	UpdateProvider(w http.ResponseWriter, r *http.Request, providerId ProviderId)
+	// Spend per model, with estimated usage shown apart from reported usage.
+	// (GET /spend)
+	GetSpendReport(w http.ResponseWriter, r *http.Request, params GetSpendReportParams)
 	// List the org's API tokens, newest first.
 	// (GET /tokens)
 	ListTokens(w http.ResponseWriter, r *http.Request)
@@ -269,6 +559,108 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// GetAgentBudget operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentBudget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "agentId" -------------
+	var agentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agentId", r.PathValue("agentId"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agentId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentBudget(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentBudget operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentBudget(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "agentId" -------------
+	var agentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agentId", r.PathValue("agentId"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agentId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentBudget(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetBudget operation middleware
+func (siw *ServerInterfaceWrapper) GetBudget(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBudget(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetBudget operation middleware
+func (siw *ServerInterfaceWrapper) SetBudget(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetBudget(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListModels operation middleware
 func (siw *ServerInterfaceWrapper) ListModels(w http.ResponseWriter, r *http.Request) {
@@ -403,6 +795,171 @@ func (siw *ServerInterfaceWrapper) UpdateModel(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// ListPrices operation middleware
+func (siw *ServerInterfaceWrapper) ListPrices(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPrices(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetPrice operation middleware
+func (siw *ServerInterfaceWrapper) SetPrice(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetPrice(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDefaultPrices operation middleware
+func (siw *ServerInterfaceWrapper) GetDefaultPrices(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDefaultPrices(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDefaultPriceChanges operation middleware
+func (siw *ServerInterfaceWrapper) GetDefaultPriceChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDefaultPriceChangesParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "from", r.URL.Query(), &params.From)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "to", r.URL.Query(), &params.To)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDefaultPriceChanges(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListFlaggedPrices operation middleware
+func (siw *ServerInterfaceWrapper) ListFlaggedPrices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListFlaggedPricesParams
+
+	// ------------- Optional query parameter "since" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "since", r.URL.Query(), &params.Since)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "since", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFlaggedPrices(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetirePrice operation middleware
+func (siw *ServerInterfaceWrapper) RetirePrice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetirePrice(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListProviders operation middleware
 func (siw *ServerInterfaceWrapper) ListProviders(w http.ResponseWriter, r *http.Request) {
 
@@ -527,6 +1084,39 @@ func (siw *ServerInterfaceWrapper) UpdateProvider(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateProvider(w, r, providerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSpendReport operation middleware
+func (siw *ServerInterfaceWrapper) GetSpendReport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSpendReportParams
+
+	// ------------- Optional query parameter "since" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "since", r.URL.Query(), &params.Since)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "since", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSpendReport(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -727,16 +1317,27 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc("GET "+options.BaseURL+"/agents/{agentId}/budget", wrapper.GetAgentBudget)
+	m.HandleFunc("PUT "+options.BaseURL+"/agents/{agentId}/budget", wrapper.SetAgentBudget)
+	m.HandleFunc("GET "+options.BaseURL+"/budget", wrapper.GetBudget)
+	m.HandleFunc("PUT "+options.BaseURL+"/budget", wrapper.SetBudget)
 	m.HandleFunc("GET "+options.BaseURL+"/models", wrapper.ListModels)
 	m.HandleFunc("POST "+options.BaseURL+"/models", wrapper.CreateModel)
 	m.HandleFunc("DELETE "+options.BaseURL+"/models/{modelId}", wrapper.DeleteModel)
 	m.HandleFunc("GET "+options.BaseURL+"/models/{modelId}", wrapper.GetModel)
 	m.HandleFunc("PATCH "+options.BaseURL+"/models/{modelId}", wrapper.UpdateModel)
+	m.HandleFunc("GET "+options.BaseURL+"/prices", wrapper.ListPrices)
+	m.HandleFunc("POST "+options.BaseURL+"/prices", wrapper.SetPrice)
+	m.HandleFunc("GET "+options.BaseURL+"/prices/defaults", wrapper.GetDefaultPrices)
+	m.HandleFunc("GET "+options.BaseURL+"/prices/defaults/changes", wrapper.GetDefaultPriceChanges)
+	m.HandleFunc("GET "+options.BaseURL+"/prices/flagged", wrapper.ListFlaggedPrices)
+	m.HandleFunc("DELETE "+options.BaseURL+"/prices/{name}", wrapper.RetirePrice)
 	m.HandleFunc("GET "+options.BaseURL+"/providers", wrapper.ListProviders)
 	m.HandleFunc("POST "+options.BaseURL+"/providers", wrapper.CreateProvider)
 	m.HandleFunc("DELETE "+options.BaseURL+"/providers/{providerId}", wrapper.DeleteProvider)
 	m.HandleFunc("GET "+options.BaseURL+"/providers/{providerId}", wrapper.GetProvider)
 	m.HandleFunc("PATCH "+options.BaseURL+"/providers/{providerId}", wrapper.UpdateProvider)
+	m.HandleFunc("GET "+options.BaseURL+"/spend", wrapper.GetSpendReport)
 	m.HandleFunc("GET "+options.BaseURL+"/tokens", wrapper.ListTokens)
 	m.HandleFunc("POST "+options.BaseURL+"/tokens", wrapper.CreateToken)
 	m.HandleFunc("DELETE "+options.BaseURL+"/tokens/{tokenId}", wrapper.RevokeToken)
@@ -745,6 +1346,122 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 }
 
 type ErrorJSONResponse Error
+
+type GetAgentBudgetRequestObject struct {
+	AgentId openapi_types.UUID `json:"agentId"`
+}
+
+type GetAgentBudgetResponseObject interface {
+	VisitGetAgentBudgetResponse(w http.ResponseWriter) error
+}
+
+type GetAgentBudget200JSONResponse AgentBudget
+
+func (response GetAgentBudget200JSONResponse) VisitGetAgentBudgetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentBudgetdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetAgentBudgetdefaultJSONResponse) VisitGetAgentBudgetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetAgentBudgetRequestObject struct {
+	AgentId openapi_types.UUID `json:"agentId"`
+	Body    *SetAgentBudgetJSONRequestBody
+}
+
+type SetAgentBudgetResponseObject interface {
+	VisitSetAgentBudgetResponse(w http.ResponseWriter) error
+}
+
+type SetAgentBudget200JSONResponse AgentBudget
+
+func (response SetAgentBudget200JSONResponse) VisitSetAgentBudgetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetAgentBudgetdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetAgentBudgetdefaultJSONResponse) VisitSetAgentBudgetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetBudgetRequestObject struct {
+}
+
+type GetBudgetResponseObject interface {
+	VisitGetBudgetResponse(w http.ResponseWriter) error
+}
+
+type GetBudget200JSONResponse OrgBudget
+
+func (response GetBudget200JSONResponse) VisitGetBudgetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetBudgetdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetBudgetdefaultJSONResponse) VisitGetBudgetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetBudgetRequestObject struct {
+	Body *SetBudgetJSONRequestBody
+}
+
+type SetBudgetResponseObject interface {
+	VisitSetBudgetResponse(w http.ResponseWriter) error
+}
+
+type SetBudget200JSONResponse OrgBudget
+
+func (response SetBudget200JSONResponse) VisitSetBudgetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetBudgetdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetBudgetdefaultJSONResponse) VisitSetBudgetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
 
 type ListModelsRequestObject struct {
 }
@@ -884,6 +1601,177 @@ type UpdateModeldefaultJSONResponse struct {
 }
 
 func (response UpdateModeldefaultJSONResponse) VisitUpdateModelResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListPricesRequestObject struct {
+}
+
+type ListPricesResponseObject interface {
+	VisitListPricesResponse(w http.ResponseWriter) error
+}
+
+type ListPrices200JSONResponse PriceList
+
+func (response ListPrices200JSONResponse) VisitListPricesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListPricesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListPricesdefaultJSONResponse) VisitListPricesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetPriceRequestObject struct {
+	Body *SetPriceJSONRequestBody
+}
+
+type SetPriceResponseObject interface {
+	VisitSetPriceResponse(w http.ResponseWriter) error
+}
+
+type SetPrice201JSONResponse PriceVersion
+
+func (response SetPrice201JSONResponse) VisitSetPriceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetPricedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetPricedefaultJSONResponse) VisitSetPriceResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetDefaultPricesRequestObject struct {
+}
+
+type GetDefaultPricesResponseObject interface {
+	VisitGetDefaultPricesResponse(w http.ResponseWriter) error
+}
+
+type GetDefaultPrices200JSONResponse DefaultPrices
+
+func (response GetDefaultPrices200JSONResponse) VisitGetDefaultPricesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetDefaultPricesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetDefaultPricesdefaultJSONResponse) VisitGetDefaultPricesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetDefaultPriceChangesRequestObject struct {
+	Params GetDefaultPriceChangesParams
+}
+
+type GetDefaultPriceChangesResponseObject interface {
+	VisitGetDefaultPriceChangesResponse(w http.ResponseWriter) error
+}
+
+type GetDefaultPriceChanges200JSONResponse DefaultPriceChanges
+
+func (response GetDefaultPriceChanges200JSONResponse) VisitGetDefaultPriceChangesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetDefaultPriceChangesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetDefaultPriceChangesdefaultJSONResponse) VisitGetDefaultPriceChangesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListFlaggedPricesRequestObject struct {
+	Params ListFlaggedPricesParams
+}
+
+type ListFlaggedPricesResponseObject interface {
+	VisitListFlaggedPricesResponse(w http.ResponseWriter) error
+}
+
+type ListFlaggedPrices200JSONResponse FlaggedPriceList
+
+func (response ListFlaggedPrices200JSONResponse) VisitListFlaggedPricesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListFlaggedPricesdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListFlaggedPricesdefaultJSONResponse) VisitListFlaggedPricesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RetirePriceRequestObject struct {
+	Name string `json:"name"`
+}
+
+type RetirePriceResponseObject interface {
+	VisitRetirePriceResponse(w http.ResponseWriter) error
+}
+
+type RetirePrice204Response struct {
+}
+
+func (response RetirePrice204Response) VisitRetirePriceResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RetirePricedefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RetirePricedefaultJSONResponse) VisitRetirePriceResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 
@@ -1034,6 +1922,35 @@ func (response UpdateProviderdefaultJSONResponse) VisitUpdateProviderResponse(w 
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type GetSpendReportRequestObject struct {
+	Params GetSpendReportParams
+}
+
+type GetSpendReportResponseObject interface {
+	VisitGetSpendReportResponse(w http.ResponseWriter) error
+}
+
+type GetSpendReport200JSONResponse SpendReport
+
+func (response GetSpendReport200JSONResponse) VisitGetSpendReportResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetSpendReportdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetSpendReportdefaultJSONResponse) VisitGetSpendReportResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type ListTokensRequestObject struct {
 }
 
@@ -1121,6 +2038,18 @@ func (response RevokeTokendefaultJSONResponse) VisitRevokeTokenResponse(w http.R
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// An agent's daily limit (UTC day) and today's spend.
+	// (GET /agents/{agentId}/budget)
+	GetAgentBudget(ctx context.Context, request GetAgentBudgetRequestObject) (GetAgentBudgetResponseObject, error)
+	// Set an agent's daily limit. A template's spendUSD is only the default for a new agent.
+	// (PUT /agents/{agentId}/budget)
+	SetAgentBudget(ctx context.Context, request SetAgentBudgetRequestObject) (SetAgentBudgetResponseObject, error)
+	// The org's monthly cap (calendar month, UTC), its platform ceiling and this month's spend.
+	// (GET /budget)
+	GetBudget(ctx context.Context, request GetBudgetRequestObject) (GetBudgetResponseObject, error)
+	// Set the org's monthly cap, or clear it by leaving `monthlyCapUsd` out.
+	// (PUT /budget)
+	SetBudget(ctx context.Context, request SetBudgetRequestObject) (SetBudgetResponseObject, error)
 	// List the org's models, entered and declared.
 	// (GET /models)
 	ListModels(ctx context.Context, request ListModelsRequestObject) (ListModelsResponseObject, error)
@@ -1136,6 +2065,24 @@ type StrictServerInterface interface {
 	// Change a model's routing guard or rates. Declared models answer 409.
 	// (PATCH /models/{modelId})
 	UpdateModel(ctx context.Context, request UpdateModelRequestObject) (UpdateModelResponseObject, error)
+	// List the org's own prices, every version, newest first per name.
+	// (GET /prices)
+	ListPrices(ctx context.Context, request ListPricesRequestObject) (ListPricesResponseObject, error)
+	// Add a version of a named price. Earlier versions never change.
+	// (POST /prices)
+	SetPrice(ctx context.Context, request SetPriceRequestObject) (SetPriceResponseObject, error)
+	// The default price list this installation runs and the versions before it.
+	// (GET /prices/defaults)
+	GetDefaultPrices(ctx context.Context, request GetDefaultPricesRequestObject) (GetDefaultPricesResponseObject, error)
+	// What changed in the default price list between two versions (after an upgrade).
+	// (GET /prices/defaults/changes)
+	GetDefaultPriceChanges(ctx context.Context, request GetDefaultPriceChangesRequestObject) (GetDefaultPriceChangesResponseObject, error)
+	// Price entries whose recomputed cost differs from the gateway's by more than 1%.
+	// (GET /prices/flagged)
+	ListFlaggedPrices(ctx context.Context, request ListFlaggedPricesRequestObject) (ListFlaggedPricesResponseObject, error)
+	// End a named price now. Its versions stay for the ledger entries that cite them.
+	// (DELETE /prices/{name})
+	RetirePrice(ctx context.Context, request RetirePriceRequestObject) (RetirePriceResponseObject, error)
 	// List the org's providers, entered and declared.
 	// (GET /providers)
 	ListProviders(ctx context.Context, request ListProvidersRequestObject) (ListProvidersResponseObject, error)
@@ -1151,6 +2098,9 @@ type StrictServerInterface interface {
 	// Change a provider's type, URL or key. Declared providers answer 409.
 	// (PATCH /providers/{providerId})
 	UpdateProvider(ctx context.Context, request UpdateProviderRequestObject) (UpdateProviderResponseObject, error)
+	// Spend per model, with estimated usage shown apart from reported usage.
+	// (GET /spend)
+	GetSpendReport(ctx context.Context, request GetSpendReportRequestObject) (GetSpendReportResponseObject, error)
 	// List the org's API tokens, newest first.
 	// (GET /tokens)
 	ListTokens(ctx context.Context, request ListTokensRequestObject) (ListTokensResponseObject, error)
@@ -1189,6 +2139,120 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// GetAgentBudget operation middleware
+func (sh *strictHandler) GetAgentBudget(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	var request GetAgentBudgetRequestObject
+
+	request.AgentId = agentId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentBudget(ctx, request.(GetAgentBudgetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentBudget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentBudgetResponseObject); ok {
+		if err := validResponse.VisitGetAgentBudgetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetAgentBudget operation middleware
+func (sh *strictHandler) SetAgentBudget(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	var request SetAgentBudgetRequestObject
+
+	request.AgentId = agentId
+
+	var body SetAgentBudgetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetAgentBudget(ctx, request.(SetAgentBudgetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetAgentBudget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetAgentBudgetResponseObject); ok {
+		if err := validResponse.VisitSetAgentBudgetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetBudget operation middleware
+func (sh *strictHandler) GetBudget(w http.ResponseWriter, r *http.Request) {
+	var request GetBudgetRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetBudget(ctx, request.(GetBudgetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetBudget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetBudgetResponseObject); ok {
+		if err := validResponse.VisitGetBudgetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetBudget operation middleware
+func (sh *strictHandler) SetBudget(w http.ResponseWriter, r *http.Request) {
+	var request SetBudgetRequestObject
+
+	var body SetBudgetJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetBudget(ctx, request.(SetBudgetRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetBudget")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetBudgetResponseObject); ok {
+		if err := validResponse.VisitSetBudgetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListModels operation middleware
@@ -1331,6 +2395,163 @@ func (sh *strictHandler) UpdateModel(w http.ResponseWriter, r *http.Request, mod
 	}
 }
 
+// ListPrices operation middleware
+func (sh *strictHandler) ListPrices(w http.ResponseWriter, r *http.Request) {
+	var request ListPricesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPrices(ctx, request.(ListPricesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPrices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPricesResponseObject); ok {
+		if err := validResponse.VisitListPricesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetPrice operation middleware
+func (sh *strictHandler) SetPrice(w http.ResponseWriter, r *http.Request) {
+	var request SetPriceRequestObject
+
+	var body SetPriceJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetPrice(ctx, request.(SetPriceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetPrice")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetPriceResponseObject); ok {
+		if err := validResponse.VisitSetPriceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetDefaultPrices operation middleware
+func (sh *strictHandler) GetDefaultPrices(w http.ResponseWriter, r *http.Request) {
+	var request GetDefaultPricesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDefaultPrices(ctx, request.(GetDefaultPricesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDefaultPrices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDefaultPricesResponseObject); ok {
+		if err := validResponse.VisitGetDefaultPricesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetDefaultPriceChanges operation middleware
+func (sh *strictHandler) GetDefaultPriceChanges(w http.ResponseWriter, r *http.Request, params GetDefaultPriceChangesParams) {
+	var request GetDefaultPriceChangesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDefaultPriceChanges(ctx, request.(GetDefaultPriceChangesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDefaultPriceChanges")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDefaultPriceChangesResponseObject); ok {
+		if err := validResponse.VisitGetDefaultPriceChangesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListFlaggedPrices operation middleware
+func (sh *strictHandler) ListFlaggedPrices(w http.ResponseWriter, r *http.Request, params ListFlaggedPricesParams) {
+	var request ListFlaggedPricesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListFlaggedPrices(ctx, request.(ListFlaggedPricesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListFlaggedPrices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListFlaggedPricesResponseObject); ok {
+		if err := validResponse.VisitListFlaggedPricesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RetirePrice operation middleware
+func (sh *strictHandler) RetirePrice(w http.ResponseWriter, r *http.Request, name string) {
+	var request RetirePriceRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RetirePrice(ctx, request.(RetirePriceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RetirePrice")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RetirePriceResponseObject); ok {
+		if err := validResponse.VisitRetirePriceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListProviders operation middleware
 func (sh *strictHandler) ListProviders(w http.ResponseWriter, r *http.Request) {
 	var request ListProvidersRequestObject
@@ -1464,6 +2685,32 @@ func (sh *strictHandler) UpdateProvider(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateProviderResponseObject); ok {
 		if err := validResponse.VisitUpdateProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSpendReport operation middleware
+func (sh *strictHandler) GetSpendReport(w http.ResponseWriter, r *http.Request, params GetSpendReportParams) {
+	var request GetSpendReportRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSpendReport(ctx, request.(GetSpendReportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSpendReport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSpendReportResponseObject); ok {
+		if err := validResponse.VisitGetSpendReportResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

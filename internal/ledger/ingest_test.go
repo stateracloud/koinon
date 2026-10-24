@@ -97,7 +97,7 @@ var _ = Describe("Ingester", func() {
 		Expect(err).NotTo(HaveOccurred())
 		run := e.run(ctx, r.ID)
 		Expect(run.State).To(Equal(store.RunStateCanceled))
-		Expect(run.OutcomeReason.String).To(HavePrefix("agent spend limit reached ($0.055 of $0.05"))
+		Expect(run.OutcomeReason.String).To(HavePrefix("agent daily limit reached ($0.055 of $0.05"))
 
 		events, err := q.ListTicketEvents(ctx, store.ListTicketEventsParams{OrgID: e.org, TicketID: t.ID, MaxEvents: 100})
 		Expect(err).NotTo(HaveOccurred())
@@ -109,6 +109,7 @@ var _ = Describe("Ingester", func() {
 		}
 		Expect(payload).To(HaveKeyWithValue("reason", string(scheduler.ReasonSpendLimit)))
 		Expect(payload).To(HaveKeyWithValue("spend_limit_usd", "0.05"))
+		Expect(payload).To(HaveKeyWithValue("limit", "agent_daily"))
 	})
 
 	It("counts entries of unknown orgs and agents as unattributed", func(ctx SpecContext) {

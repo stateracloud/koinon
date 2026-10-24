@@ -174,6 +174,7 @@ type Querier interface {
 	GetAPITokenByPrefix(ctx context.Context, prefix string) (GetAPITokenByPrefixRow, error)
 	GetActiveUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetAgent(ctx context.Context, arg GetAgentParams) (Agent, error)
+	GetAgentBudget(ctx context.Context, arg GetAgentBudgetParams) (GetAgentBudgetRow, error)
 	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
 	// holds the agent, whether one is waiting to be claimed (queued, or parked
 	// with its park resolved), and when a run last finished or parked. Parked runs
@@ -188,13 +189,29 @@ type Querier interface {
 	GetApprovalRequestByCall(ctx context.Context, arg GetApprovalRequestByCallParams) (ApprovalRequest, error)
 	// An agent may only read its own requests.
 	GetApprovalRequestForAgent(ctx context.Context, arg GetApprovalRequestForAgentParams) (ApprovalRequest, error)
+	// The p90 of provider-reported input tokens per request byte over the newest 500 real
+	// (not estimated) requests of a model, and how many there were.
+	GetCalibration(ctx context.Context, arg GetCalibrationParams) (GetCalibrationRow, error)
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
+	GetDefaultPriceList(ctx context.Context, version string) (DefaultPriceList, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	GetModel(ctx context.Context, arg GetModelParams) (Model, error)
+	// The enabled model an agent asks for by its plain name, with its provider's type, for
+	// finding its price.
+	GetModelForPricing(ctx context.Context, arg GetModelForPricingParams) (GetModelForPricingRow, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Org and agent budgets and in-app notifications (plan item BG1). Every query on an org-owned
+	// table takes @org_id and filters on it (TestQueriesAreOrgScoped).
+	GetOrgBudget(ctx context.Context, orgID pgtype.UUID) (GetOrgBudgetRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
+	// An org's recorded USD spend since @since (the start of the calendar month in UTC), for its
+	// monthly cap and the platform ceiling.
+	GetOrgSpendSince(ctx context.Context, arg GetOrgSpendSinceParams) (string, error)
 	GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWorkspace, error)
+	GetPriceOverride(ctx context.Context, arg GetPriceOverrideParams) (PriceOverride, error)
 	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
@@ -221,6 +238,8 @@ type Querier interface {
 	// Extends the owner's lease. No row: the caller is no longer the owner and
 	// must stop (ADR 0030).
 	HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run, error)
+	// Gives a new agent its template's limit as its own editable limit.
+	InsertAgentBudgetDefault(ctx context.Context, arg InsertAgentBudgetDefaultParams) error
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The audit log (plan item PV1, ADR 0023). Append-only: there is no update or
@@ -229,11 +248,18 @@ type Querier interface {
 	// Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
 	InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) (AuditEvent, error)
+	InsertDefaultPriceList(ctx context.Context, arg InsertDefaultPriceListParams) (int64, error)
+	// One notification per user, kind and window: a repeat does nothing.
+	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
+	InsertPriceOverride(ctx context.Context, arg InsertPriceOverrideParams) (PriceOverride, error)
 	// Records one request. Returns no row when the request id is already
-	// recorded, so a replayed export is not charged twice.
+	// recorded, so a replayed export is not charged twice. cost_usd is Koinon's
+	// own computation from the raw usage and the dated price; gateway_cost_usd is
+	// what agentgateway logged (NULL when it could not price the request).
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
 	ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiToken, error)
+	ListAgentBudgets(ctx context.Context, orgID pgtype.UUID) ([]ListAgentBudgetsRow, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
 	ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
 	// Agents that are not archived and whose active or latest version binds the connection
@@ -251,6 +277,8 @@ type Querier interface {
 	ListConnectionsToMigrate(ctx context.Context) ([]Connection, error)
 	// The most recently synced content of each template.
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
+	// Every default list version this installation has run, newest first.
+	ListDefaultPriceLists(ctx context.Context) ([]DefaultPriceList, error)
 	// The effective role per org honours the org's identity mode (ADR 0004):
 	// platform counts manual rows, idp counts IdP rows plus the manual owner,
 	// hybrid counts both. The highest role wins.
@@ -260,7 +288,17 @@ type Querier interface {
 	ListExecutableApprovalRequests(ctx context.Context, arg ListExecutableApprovalRequestsParams) ([]ApprovalRequest, error)
 	// Parked runs whose park has expired (ADR 0049: 7 days for an approval).
 	ListExpiredParkedRuns(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
+	// Price entries whose recomputed cost differs from the gateway's by more than 1% since
+	// @since, with how often and by how much.
+	ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error)
+	// Every model with rates, across orgs, to log rates the stricter validation would refuse.
+	ListModelRatesForAudit(ctx context.Context) ([]ListModelRatesForAuditRow, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
+	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
+	// Runs that can still be canceled, when an org-wide limit is reached.
+	ListOpenRunsOfOrg(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
+	// The users who are told about an org's budget: owners and admins.
+	ListOrgBudgetRecipients(ctx context.Context, orgID pgtype.UUID) ([]pgtype.UUID, error)
 	// Every live org, for control-plane sweeps and workers that then work org by
 	// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
@@ -277,6 +315,13 @@ type Querier interface {
 	// Trusted-preset calls are recorded as approved and never listed here.
 	ListPendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	ListPendingApprovalRequestsOfFinishedRuns(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
+	ListPlatformAdminIDs(ctx context.Context) ([]pgtype.UUID, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Org price overrides, default list versions and the model lookup that prices a request
+	// (plan item PV2). Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	ListPriceOverrides(ctx context.Context, orgID pgtype.UUID) ([]PriceOverride, error)
 	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
@@ -318,6 +363,7 @@ type Querier interface {
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
+	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error)
 	// The declaring Secret was deleted: keep the row, stop serving it.
 	MarkProviderRemoved(ctx context.Context, arg MarkProviderRemovedParams) error
 	// starting -> running once the harness session is ready.
@@ -354,6 +400,8 @@ type Querier interface {
 	// Makes a parked run claimable again (approval decided, input given). It
 	// stays parked until an owner claims it: parked -> starting.
 	ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) (Run, error)
+	// Ends every live version of a named price at @at. The rows stay: ledger entries cite them.
+	RetirePriceOverrides(ctx context.Context, arg RetirePriceOverridesParams) (int64, error)
 	// active -> draft when a grant change is proposed (ADR 0020). The approved
 	// version stays recorded until the next activation.
 	ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraftParams) (Agent, error)
@@ -362,6 +410,7 @@ type Querier interface {
 	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
+	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
 	// Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays
@@ -372,6 +421,10 @@ type Querier interface {
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
+	// Sets or clears (NULL) the org's monthly cap, keeping its platform ceiling.
+	SetOrgMonthlyCap(ctx context.Context, arg SetOrgMonthlyCapParams) (SetOrgMonthlyCapRow, error)
+	// Sets or clears (NULL) the platform ceiling of an org, keeping its monthly cap.
+	SetOrgPlatformCeiling(ctx context.Context, arg SetOrgPlatformCeilingParams) (SetOrgPlatformCeilingRow, error)
 	SetProviderDisabled(ctx context.Context, arg SetProviderDisabledParams) error
 	// Records, before the prompt is sent, the ticket timeline seq through which
 	// the ticket's messages are in it.
@@ -383,6 +436,8 @@ type Querier interface {
 	ShadowUIModels(ctx context.Context, arg ShadowUIModelsParams) error
 	// A declared provider of this name now exists: disable the UI ones.
 	ShadowUIProviders(ctx context.Context, arg ShadowUIProvidersParams) error
+	// Spend per model since @since, with estimated usage kept apart.
+	SpendReport(ctx context.Context, arg SpendReportParams) ([]SpendReportRow, error)
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// Totals per ticket, for the tickets in @ticket_ids that have spend.

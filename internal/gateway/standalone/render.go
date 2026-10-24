@@ -194,13 +194,21 @@ type catalogProvider struct {
 }
 
 type catalogModel struct {
-	Rates rates `yaml:"rates"`
+	Rates rates         `yaml:"rates"`
+	Tiers []catalogTier `yaml:"tiers,omitempty"`
+}
+
+type catalogTier struct {
+	ContextOver int64 `yaml:"contextOver"`
+	Rates       rates `yaml:"rates"`
 }
 
 type rates struct {
-	Input     string `yaml:"input,omitempty"`
-	Output    string `yaml:"output,omitempty"`
-	CacheRead string `yaml:"cacheRead,omitempty"`
+	Input      string `yaml:"input,omitempty"`
+	Output     string `yaml:"output,omitempty"`
+	CacheRead  string `yaml:"cacheRead,omitempty"`
+	CacheWrite string `yaml:"cacheWrite,omitempty"`
+	Reasoning  string `yaml:"reasoning,omitempty"`
 }
 
 type frontendPolicies struct {
@@ -298,7 +306,18 @@ type llmModel struct {
 	Provider  llmProvider    `yaml:"provider"`
 	Params    llmParams      `yaml:"params"`
 	Overrides map[string]any `yaml:"overrides,omitempty"`
+	// Transformation sets request body fields from CEL expressions, replacing client values
+	// (schema/config.md llm.models[].transformation).
+	Transformation map[string]string `yaml:"transformation,omitempty"`
 }
+
+// streamUsageExpr makes every streamed chat completion ask the upstream for usage. agentgateway
+// v1.6.0 adds stream_options.include_usage itself only when the client sent no stream_options at
+// all (llm/mod.rs, process_completions_request), so a client sending {"include_usage": false} or
+// an empty object would otherwise get its streamed requests charged without usage. For a request
+// that is not streamed the expression is null, which OpenAI-compatible upstreams accept and
+// which drops the field (stream_options is an error without stream).
+const streamUsageExpr = `has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null`
 
 type modelMatch struct {
 	Headers []headerMatch `yaml:"headers"`
@@ -387,7 +406,17 @@ func build(s gateway.State, o Options) document {
 			gateway.LogFieldKey:     `default(apiKey.name, "")`,
 			gateway.LogFieldAgent:   `default(apiKey.agent, "")`,
 			gateway.LogFieldRequest: `uuid()`,
-			MarkerField:             `""`,
+			// Usage in agentgateway's consistent semantics, for the ledger's own pricing
+			// (plan item PV2). A field whose expression fails is left out of the record.
+			gateway.LogFieldInput:        `llm.inputTokens`,
+			gateway.LogFieldOutput:       `llm.outputTokens`,
+			gateway.LogFieldCacheRead:    `llm.cachedInputTokens`,
+			gateway.LogFieldCacheWrite:   `llm.cacheCreationInputTokens`,
+			gateway.LogFieldReasoning:    `llm.reasoningTokens`,
+			gateway.LogFieldStatus:       `response.code`,
+			gateway.LogFieldMaxTokens:    `llm.params.max_tokens`,
+			gateway.LogFieldRequestBytes: `int(request.headers["content-length"])`,
+			MarkerField:                  `""`,
 		}}},
 		Gateways: map[string]listener{"default": {Port: o.Port}},
 	}
@@ -452,7 +481,8 @@ func build(s gateway.State, o Options) document {
 					ProviderOverride: override,
 					Formats:          []format{{Type: "completions"}},
 				}},
-				Params: llmParams{BaseURL: p.BaseURL},
+				Params:         llmParams{BaseURL: p.BaseURL},
+				Transformation: map[string]string{"stream_options": streamUsageExpr},
 			}
 			if p.APIKeyFile != "" {
 				lm.Params.APIKey = &fileSource{File: p.APIKeyFile}
@@ -468,7 +498,16 @@ func build(s gateway.State, o Options) document {
 			if cp.Models == nil {
 				cp.Models = map[string]catalogModel{}
 			}
-			cp.Models[m.Name] = catalogModel{Rates: rates{Input: m.Price.Input, Output: m.Price.Output, CacheRead: m.Price.CacheRead}}
+			cm := catalogModel{Rates: rates{
+				Input: m.Price.Input, Output: m.Price.Output, CacheRead: m.Price.CacheRead,
+				CacheWrite: m.Price.CacheWrite, Reasoning: m.Price.Reasoning,
+			}}
+			for _, t := range m.Price.Tiers {
+				cm.Tiers = append(cm.Tiers, catalogTier{ContextOver: t.ContextOver, Rates: rates{
+					Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, Reasoning: t.Reasoning,
+				}})
+			}
+			cp.Models[m.Name] = cm
 			catalogs[override] = cp
 		}
 	}

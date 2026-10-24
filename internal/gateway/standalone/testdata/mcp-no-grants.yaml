@@ -10,9 +10,17 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"4424646354a26595"'
+      koinon.cache_read: llm.cachedInputTokens
+      koinon.cache_write: llm.cacheCreationInputTokens
+      koinon.config: '"93d5b0e60904a347"'
+      koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
+      koinon.max_tokens: llm.params.max_tokens
+      koinon.out: llm.outputTokens
+      koinon.reasoning: llm.reasoningTokens
+      koinon.req_bytes: int(request.headers["content-length"])
       koinon.request: uuid()
+      koinon.status: response.code
 gateways:
   default:
     port: 4000
@@ -31,7 +39,7 @@ llm:
             agent: acme/triage
             org: acme
           allowedModels: []
-        - keyHash: sha256:7c66a75eb5a3c1f2938ceff2f9f491d2712cd4e2bd9b8ec8218ade3b9d97cbd8
+        - keyHash: sha256:475d89b8ec66df899029bdd1309084276879e8937ea87675e6e17a5b0792f638
           metadata:
             name: koinon-reload-probe
             agent: ""
