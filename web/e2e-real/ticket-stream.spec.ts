@@ -56,6 +56,11 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   await modelForm.getByLabel('Output rate').fill('1.20')
   await modelForm.getByRole('button', { name: 'Add model', exact: true }).click()
   await expect(provider.getByRole('list', { name: 'Models of fake' })).toContainText('default/repo-helper')
+  // A UI-added provider is not served at once: the reconciler picks the row up on its 30 s resync, then
+  // the key reaches agentgateway through the kubelet's Secret sync. That took about 170 s on kind. A run
+  // that starts first fails with "provider authentication required". Nothing in the UI shows when the
+  // gateway has it yet, so wait it out before the agent's first run.
+  await page.waitForTimeout(240_000)
 
   // 3. GitHub connection to the fake GitHub App.
   const app = (await (await request.get(`${fakeGitHub}/_fake/app`)).json()) as {
