@@ -136,6 +136,25 @@ var _ = Describe("Provider delivery", func() {
 		Expect(st.Validate()).To(Succeed())
 	})
 
+	It("checks the URL policy again at render and serves no provider that now names a denied host", func(ctx SpecContext) {
+		orgA, userA := newOrg(ctx)
+		orgB, userB := newOrg(ctx)
+		bad := addProvider(ctx, orgA, userA, "up", "", "m")
+		good := addProvider(ctx, orgB, userB, "up", "", "m")
+		cleanup(ctx, orgA, bad.ID)
+		cleanup(ctx, orgB, good.ID)
+		// Saved while the host was fine, or written around the service layer.
+		_, err := pool.Exec(ctx, `UPDATE providers SET url = 'http://169.254.169.254/latest' WHERE id = $1`, bad.ID)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = r.ReconcileAll(ctx)
+		Expect(err).To(MatchError(ContainSubstring("not allowed")))
+		_, okBad := providerOf(mg.last(), orgSlug(ctx, orgA))
+		_, okGood := providerOf(mg.last(), orgSlug(ctx, orgB))
+		Expect(okBad).To(BeFalse())
+		Expect(okGood).To(BeTrue())
+	})
+
 	It("does not serve a provider whose key cannot be opened, and serves the rest", func(ctx SpecContext) {
 		orgA, userA := newOrg(ctx)
 		orgB, userB := newOrg(ctx)
@@ -159,38 +178,79 @@ var _ = Describe("Provider delivery", func() {
 		Expect(slices.ContainsFunc(st.Providers, func(p gateway.Provider) bool { return p.Org == orgSlug(ctx, orgB) })).To(BeTrue())
 	})
 
-	It("holds back the config for a new key file until the file has had time to reach the gateway", func(ctx SpecContext) {
-		org, user := newOrg(ctx)
-		p := addProvider(ctx, org, user, "openrouter", "sk-settle", "m")
-		cleanup(ctx, org, p.ID)
-
-		t0 := time.Now()
-		clock := t0
-		osg := fakegateway.New()
-		cc, err := osg.Start()
-		Expect(err).NotTo(HaveOccurred())
-		DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
-		mg := &fakeModelGateway{}
-		r, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
-			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-			Keys:    ring, ProviderKeys: reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
-			ProviderKeyDir: "/secrets/providers", ProviderKeySettle: time.Minute,
-			Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return clock },
+	Describe("a new key file still reaching the gateway", func() {
+		var (
+			r     *reconciler.Reconciler
+			clock time.Time
+			t0    time.Time
+		)
+		BeforeEach(func() {
+			t0 = time.Now()
+			clock = t0
+			osg := fakegateway.New()
+			cc, err := osg.Start()
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
+			r, err = reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+				Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+				Keys:    ring, ProviderKeys: reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
+				ProviderKeyDir: "/secrets/providers", ProviderKeySettle: time.Minute,
+				Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return clock },
+			})
+			Expect(err).NotTo(HaveOccurred())
 		})
-		Expect(err).NotTo(HaveOccurred())
 
-		Expect(r.ReconcileAll(ctx)).To(Succeed())
-		Expect(mg.applied).To(BeEmpty(), "the config naming the new file is not applied at once")
-		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(sec.Data).To(HaveLen(1), "but the file is already written")
+		It("leaves that provider out but still applies the others", func(ctx SpecContext) {
+			orgA, userA := newOrg(ctx)
+			orgB, userB := newOrg(ctx)
+			keyed := addProvider(ctx, orgA, userA, "openrouter", "sk-settle", "m")
+			keyless := addProvider(ctx, orgB, userB, "ollama", "", "m")
+			cleanup(ctx, orgA, keyed.ID)
+			cleanup(ctx, orgB, keyless.ID)
 
-		clock = t0.Add(30 * time.Second)
-		Expect(r.ReconcileAll(ctx)).To(Succeed())
-		Expect(mg.applied).To(BeEmpty())
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			Expect(mg.applied).NotTo(BeEmpty(), "one org's settling key must not block the gateway config of every org")
+			_, okA := providerOf(mg.last(), orgSlug(ctx, orgA))
+			_, okB := providerOf(mg.last(), orgSlug(ctx, orgB))
+			Expect(okA).To(BeFalse(), "no previous file to fall back on")
+			Expect(okB).To(BeTrue())
+			sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(sec.Data).To(HaveLen(1), "but the file is already written")
 
-		clock = t0.Add(61 * time.Second)
-		Expect(r.ReconcileAll(ctx)).To(Succeed())
-		Expect(mg.applied).NotTo(BeEmpty())
+			clock = t0.Add(61 * time.Second)
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			_, okA = providerOf(mg.last(), orgSlug(ctx, orgA))
+			Expect(okA).To(BeTrue())
+		})
+
+		It("keeps serving with the previous file while a rotated key travels", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			p := addProvider(ctx, org, user, "openrouter", "sk-old", "m")
+			cleanup(ctx, org, p.ID)
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			clock = t0.Add(2 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			slug := orgSlug(ctx, org)
+			old, ok := providerOf(mg.last(), slug)
+			Expect(ok).To(BeTrue())
+
+			next := "sk-new"
+			_, err := svc.UpdateProvider(ctx, org, audit.User(user), p.ID, catalog.ProviderPatch{APIKey: &next})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			during, ok := providerOf(mg.last(), slug)
+			Expect(ok).To(BeTrue())
+			Expect(during.APIKeyFile).To(Equal(old.APIKeyFile))
+			sec, _ := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+			Expect(sec.Data).To(HaveLen(2), "the old file is not pruned yet")
+
+			clock = t0.Add(4 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			after, _ := providerOf(mg.last(), slug)
+			Expect(after.APIKeyFile).NotTo(Equal(old.APIKeyFile))
+			sec, _ = kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+			Expect(sec.Data).To(HaveLen(1))
+		})
 	})
 })

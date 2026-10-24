@@ -303,6 +303,33 @@ var _ = Describe("ConnectionService", func() {
 		})
 	})
 
+	It("deletes a connection only when its declaring Secret was deleted", func(ctx SpecContext) {
+		res, err := create(ctx, owner, gh.PEM, false)
+		Expect(err).NotTo(HaveOccurred())
+		id := res.GetConnection().GetId()
+		del := func(c *client) error {
+			_, err := c.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: id})
+			return err
+		}
+		Expect(codeOf(del(owner))).To(Equal(connect.CodeFailedPrecondition), "a live connection")
+		Expect(codeOf(del(e.userIn(ctx, org, store.OrgRoleMember)))).To(Equal(connect.CodePermissionDenied))
+
+		// The importer marks a declared connection removed when its Secret goes away.
+		_, err = e.pool.Exec(ctx, `UPDATE connections SET source = 'secret', managed_by_secret = 'gh', removed_at = now() WHERE id = $1`, id)
+		Expect(err).NotTo(HaveOccurred())
+		got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetConnection().GetRemoved()).To(BeTrue())
+		Expect(got.GetConnection().GetManagedBySecret()).To(Equal("gh"))
+		_, err = owner.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: id})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(del(owner)).To(Succeed())
+		_, err = owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
+		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+		Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'connection.delete'`, org)).To(Equal(1))
+	})
+
 	It("refuses to create connections without a secret store", func(ctx SpecContext) {
 		e2 := newEnvOn(ctx, e, envOptions{noKeys: true})
 		_, err := create(ctx, owner.on(e2), gh.PEM, false)

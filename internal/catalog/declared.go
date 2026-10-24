@@ -42,6 +42,9 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 	if err := ValidateProvider(d.Name, d.Type, d.URL); err != nil {
 		return false, err
 	}
+	if err := s.policy.Check(ctx, d.URL); err != nil {
+		return false, err
+	}
 	seen := map[string]bool{}
 	for _, m := range d.Models {
 		if err := ValidateModel(m.Name, m.Guard, m.Rates, d.Type); err != nil {
@@ -75,7 +78,7 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 				}
 			}
 		}
-		if cur != nil && cur.DeclaredVersion.String == d.Version {
+		if cur != nil && cur.DeclaredVersion.String == d.Version && !cur.RemovedAt.Valid {
 			return nil
 		}
 		if err := q.ShadowUIProviders(ctx, store.ShadowUIProvidersParams{OrgID: org, Name: d.Name, Reason: pgtype.Text{String: ReasonShadowedProvider, Valid: true}}); err != nil {
@@ -162,6 +165,10 @@ func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org 
 			}); err != nil {
 				return err
 			}
+			// A model of a provider that was removed and came back is served again.
+			if err := q.EnableModel(ctx, store.EnableModelParams{OrgID: org, ID: cur.ID}); err != nil {
+				return err
+			}
 			continue
 		}
 		id, err := newID()
@@ -198,13 +205,23 @@ func refreshShadows(ctx context.Context, q *store.Queries, org pgtype.UUID) erro
 	return q.ReenableUIModels(ctx, org)
 }
 
+// removeProvider marks a declared provider removed: it and its models stay as rows, disabled, so
+// the audit trail and anything that refers to them keep a target, and the Secret coming back
+// restores them.
 func (s *Service) removeProvider(ctx context.Context, q *store.Queries, org pgtype.UUID, p store.Provider) error {
-	if _, err := q.DeleteProvider(ctx, store.DeleteProviderParams{OrgID: org, ID: p.ID}); err != nil {
+	if p.RemovedAt.Valid {
+		return nil
+	}
+	reason := pgtype.Text{String: ReasonRemoved, Valid: true}
+	if err := q.MarkProviderRemoved(ctx, store.MarkProviderRemovedParams{OrgID: org, ID: p.ID, Reason: reason}); err != nil {
+		return err
+	}
+	if err := q.DisableModelsOfProvider(ctx, store.DisableModelsOfProviderParams{OrgID: org, ProviderID: p.ID, Reason: reason}); err != nil {
 		return err
 	}
 	return audit.RecordErr(ctx, q, audit.Event{
 		Org: org, Actor: audit.Secret(p.ManagedBySecret.String), Action: "provider.undeclare", TargetKind: "provider",
-		TargetID: p.ID.String(), Before: providerSummary(p),
+		TargetID: p.ID.String(), Before: providerSummary(p), After: map[string]any{"removed": true},
 	})
 }
 
@@ -216,15 +233,16 @@ func (s *Service) DeclaredProviderSecrets(ctx context.Context, org pgtype.UUID) 
 	}
 	var out []string
 	for _, p := range rows {
-		if p.Source == store.ConfigSourceSecret && !slices.Contains(out, p.ManagedBySecret.String) {
+		if p.Source == store.ConfigSourceSecret && !p.RemovedAt.Valid && !slices.Contains(out, p.ManagedBySecret.String) {
 			out = append(out, p.ManagedBySecret.String)
 		}
 	}
 	return out, nil
 }
 
-// RemoveDeclared removes what the Secret declared in org (its Secret was deleted), and
-// re-enables the UI entries it shadowed.
+// RemoveDeclared marks what the Secret declared in org removed (its Secret was deleted), and
+// re-enables the UI entries it shadowed. The rows stay until the Secret returns or an admin
+// deletes them.
 func (s *Service) RemoveDeclared(ctx context.Context, org pgtype.UUID, secretName string) error {
 	return mapErr(s.tx(ctx, func(q *store.Queries) error {
 		all, err := q.ListProviders(ctx, org)

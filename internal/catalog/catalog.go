@@ -81,6 +81,9 @@ const (
 	ReasonShadowedProvider = "shadowed by a provider of the same name declared in a Kubernetes Secret"
 	ReasonShadowedModel    = "shadowed by a model of the same name declared in a Kubernetes Secret"
 	ReasonProviderDisabled = "its provider is disabled"
+	// ReasonRemoved marks a declared entry whose Secret was deleted. The row stays (audit, anything
+	// that refers to it); restoring the Secret brings it back, and an admin may delete it.
+	ReasonRemoved = "its Kubernetes Secret was deleted; restore the Secret or delete this entry"
 )
 
 // GuardProviderType is the only provider type with a routing guard: OpenRouter's
@@ -103,16 +106,18 @@ type Rates struct {
 
 // Provider is a provider as callers see it: never its key.
 type Provider struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Type            string    `json:"type"`
-	URL             string    `json:"url"`
-	HasKey          bool      `json:"hasKey"`
-	Source          string    `json:"source"`
-	ManagedBySecret string    `json:"managedBySecret,omitempty"`
-	DisabledReason  string    `json:"disabledReason,omitempty"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Type            string `json:"type"`
+	URL             string `json:"url"`
+	HasKey          bool   `json:"hasKey"`
+	Source          string `json:"source"`
+	ManagedBySecret string `json:"managedBySecret,omitempty"`
+	DisabledReason  string `json:"disabledReason,omitempty"`
+	// Removed is set when the declaring Secret was deleted.
+	Removed   bool      `json:"removed,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Model is a model as callers see it.
@@ -131,9 +136,17 @@ type Model struct {
 
 // Service is the catalog service layer.
 type Service struct {
-	pool *pgxpool.Pool
-	keys Keys
-	log  *slog.Logger
+	pool   *pgxpool.Pool
+	keys   Keys
+	log    *slog.Logger
+	policy URLPolicy
+}
+
+// WithURLPolicy sets which upstream hosts providers may name. The zero policy still denies
+// loopback, link-local and metadata addresses and names without a dot.
+func (s *Service) WithURLPolicy(p URLPolicy) *Service {
+	s.policy = p
+	return s
 }
 
 // New returns a Service. keys may be nil; providers with a key then cannot be written.
@@ -167,7 +180,7 @@ func toProvider(p store.Provider) Provider {
 	return Provider{
 		ID: p.ID.String(), Name: p.Name, Type: p.Type, URL: p.Url, HasKey: len(p.ApiKey) > 0,
 		Source: string(p.Source), ManagedBySecret: p.ManagedBySecret.String, DisabledReason: p.DisabledReason.String,
-		CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
+		Removed: p.RemovedAt.Valid, CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
 	}
 }
 

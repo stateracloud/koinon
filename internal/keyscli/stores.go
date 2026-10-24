@@ -4,10 +4,13 @@ package keyscli
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
@@ -81,4 +84,41 @@ func (d DirStore) Load(context.Context) (KeySet, error) {
 // Save implements Store.
 func (DirStore) Save(context.Context, KeySet) error {
 	return errors.New("the key set is read from a mounted directory and cannot be changed here; set --kek-secret to change it through the Kubernetes API")
+}
+
+// EnsureKubeSecret creates the KEK Secret with one new active KEK when it does not exist, and
+// reports whether it did. It never overwrites an existing Secret, so a restart, a second replica
+// or a re-render of the chart cannot replace the keys (which would make every stored secret
+// unreadable). Two replicas starting together race on Create; the loser reads the winner's Secret.
+func EnsureKubeSecret(ctx context.Context, client kubernetes.Interface, namespace, name string, now time.Time) (bool, error) {
+	secrets := client.CoreV1().Secrets(namespace)
+	if _, err := secrets.Get(ctx, name, metav1.GetOptions{}); err == nil {
+		return false, nil
+	} else if !apierrors.IsNotFound(err) {
+		return false, fmt.Errorf("read the KEK Secret %s/%s: %w", namespace, name, err)
+	}
+	id, err := NewID(now)
+	if err != nil {
+		return false, err
+	}
+	key := make([]byte, secretstore.KeySize)
+	if _, err := rand.Read(key); err != nil {
+		return false, err
+	}
+	_, err = secrets.Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: namespace,
+			Labels:      map[string]string{project.Domain + "/managed-by": "koinon-api"},
+			Annotations: map[string]string{ActivatedAnnotation: now.UTC().Format(time.RFC3339)},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{id: secretstore.EncodeKey(key), secretstore.ActiveFile: []byte(id)},
+	}, metav1.CreateOptions{FieldManager: "koinon-api"})
+	if apierrors.IsAlreadyExists(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("create the KEK Secret %s/%s: %w", namespace, name, err)
+	}
+	return true, nil
 }

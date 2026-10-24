@@ -285,10 +285,18 @@
         "apiUrl": {"type": "string", "pattern": "^https?://[^/]+(/.*)?$"}
       }
     },
+    "providers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowedInternalHosts": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
     "secrets": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "migrateLegacyConnections": {"type": "boolean"},
         "kek": {
           "description": "Key-encryption keys for stored provider keys and connection secrets (ADR 0056).",
           "type": "object",

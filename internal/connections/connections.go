@@ -217,10 +217,17 @@ func ParseGitHubConfig(raw []byte) (GitHubConfig, error) {
 	return c, nil
 }
 
+// ErrRemoved means the connection was declared by a Secret that has been deleted.
+var ErrRemoved = errors.New("connections: the connection was removed")
+
 // LoadGitHubApp reads a GitHub connection's App from its row and stored secret fields.
 func LoadGitHubApp(_ context.Context, opener Opener, c store.Connection) (github.App, error) {
 	if c.Connector != connectors.GitHubID {
 		return github.App{}, fmt.Errorf("connections: %s is a %s connection, not GitHub", c.ID.String(), c.Connector)
+	}
+	if c.RemovedAt.Valid {
+		return github.App{}, fmt.Errorf("%w: the Kubernetes Secret %s that declared %q was deleted; restore the Secret, or bind the agent to another connection",
+			ErrRemoved, c.ManagedBySecret.String, c.DisplayName)
 	}
 	cfg, err := ParseGitHubConfig(c.Config)
 	if err != nil {

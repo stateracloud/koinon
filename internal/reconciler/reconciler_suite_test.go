@@ -223,7 +223,7 @@ func addProvider(ctx context.Context, org, user pgtype.UUID, name, key, model st
 	svc := catalog.New(pool, ring, nil)
 	actor := audit.User(user)
 	p, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
-		Name: name, Type: "openai", URL: "http://fakemodel:8080/v1", APIKey: key,
+		Name: name, Type: "openai", URL: "http://fakemodel.example.com:8080/v1", APIKey: key,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{

@@ -211,8 +211,9 @@ the decisions.
 
 ## Back up the encryption keys
 
-The chart created a Secret, `koinon-kek`, with the key that encrypts the provider keys and connection
-secrets in the database. Back it up now. Without it those values cannot be read, and the backup of
+`koinon-api` created a Secret, `koinon-kek`, on its first start, with the key that encrypts the provider
+keys and connection secrets in the database. (The chart renders no key material, so a re-render can
+never replace it.) Back it up now. Without it those values cannot be read, and the backup of
 the database does not help.
 
 ```sh

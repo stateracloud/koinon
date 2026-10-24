@@ -62,12 +62,24 @@ stringData:
   manages it. Change the Secret instead.
 - A declared entry wins a name clash. If someone already added a provider or model of the same name
   in the UI, that entry is **disabled** and shows why, until the Secret is deleted.
-- Deleting the Secret removes what it declared.
+- Deleting the Secret does not delete what it declared: the provider, its models or the connection are
+  marked **removed** and kept. They are not served or usable, agents bound to a removed connection
+  report why, and runs that need it fail with that reason. Creating the Secret again restores them. An
+  org admin can delete a removed entry for good.
 - A Secret that does not parse is ignored. The previous state stays, and a Warning Event on the
   Secret and a line in the `koinon-api` log say why. Run `kubectl -n koinon describe secret <name>`.
 - Every apply and removal is written to the audit log with the actor `secret <name>`.
 - The same labels and mechanism declare a GitHub connection: `koinon.dev/secret-type: connection`
   with `name`, `connector: github`, `appId`, `installationId` and `privateKey`.
+
+`apiKey` and the other values stay in the Secret's `stringData`, as in Argo CD. Turn on etcd encryption
+at rest, and generate the Secret with External Secrets Operator or Sealed Secrets instead of keeping it
+in git in clear text.
+
+**Upstream hosts.** A provider URL may not point at loopback, link-local or cloud metadata addresses, at
+a name without a dot, or at a Service in Koinon's own namespace. A platform admin allows an internal
+upstream in the chart value `providers.allowedInternalHosts` (for example
+`ollama.lab.example.com:11434`).
 
 **Trust boundary.** Write access to Koinon's namespace is platform-admin level. Anyone who can create
 a labelled Secret there can define providers and credentials for any org. Grant it as you would
@@ -137,6 +149,10 @@ It takes bearer tokens only. A token belongs to one org and has the role `admin`
 more than the role of whoever created it. It expires: after 30 days by default, after at most 90.
 The token is shown once, when you create it, and Koinon keeps only a hash. You can revoke it, and
 the list shows when it was last used. Every call is written to the audit log with the token's ID.
+
+A token can create tokens, but only with the same or a lower role and an expiry no later than its own.
+Revoking a token revokes every token it created. A token works only while the user whose session began
+its chain still holds at least its role in the org. Bad tokens slow a client down (HTTP 429).
 
 Until the UI page exists, an org admin creates the first token through the UI's connect-rpc API
 (`koinon.token.v1alpha1.TokenService/CreateToken`, signed in as an admin or owner). A token can then

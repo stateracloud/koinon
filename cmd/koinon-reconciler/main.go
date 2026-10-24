@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
@@ -95,9 +97,21 @@ func run() error {
 	// admin listener stays on localhost.
 	driver.Waiter = standalone.ProbeWaiter{GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log}
 
-	keyring, err := secretstore.LoadDir(cfg.kekDir)
-	if err != nil {
-		return err
+	// koinon-api creates the KEK Secret on its first start, so on a fresh install it may not be there
+	// (or mounted) yet: wait for it.
+	var keyring *secretstore.Keyring
+	for waited := false; keyring == nil; {
+		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
+			if !waited {
+				log.Info("waiting for the key-encryption keys (koinon-api creates them on its first start)", "err", err)
+				waited = true
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
+		}
 	}
 	go keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log)
 
@@ -108,6 +122,7 @@ func run() error {
 			Keys:              keyring,
 			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
 			ProviderKeyDir:    cfg.providerKeysDir,
+			URLPolicy:         catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.allowedHosts)},
 			ProviderKeySettle: cfg.keySettle,
 			Flavors:           cfg.flavors(),
 			RuntimeClassName:  cfg.runtimeClass,
@@ -145,4 +160,14 @@ func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
 		return nil, fmt.Errorf("kubernetes client config: %w", err)
 	}
 	return kubernetes.NewForConfig(rc)
+}
+
+func splitHosts(s string) []string {
+	var out []string
+	for h := range strings.SplitSeq(s, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
 }

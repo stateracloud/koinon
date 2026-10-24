@@ -102,7 +102,7 @@ func (s *Service) target(ctx context.Context, row store.ApprovalRequest) (github
 	}
 	app, err := connections.LoadGitHubApp(ctx, s.keys, conn)
 	if err != nil {
-		if errors.Is(err, connections.ErrNoKeyring) {
+		if errors.Is(err, connections.ErrNoKeyring) || errors.Is(err, connections.ErrRemoved) {
 			return github.Repo{}, github.App{}, permanentError{err}
 		}
 		return github.Repo{}, github.App{}, err

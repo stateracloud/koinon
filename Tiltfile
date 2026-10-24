@@ -165,16 +165,6 @@ for o in objs:
         fail('the chart renders a %s, which the Tiltfile does not know to be namespaced or cluster-scoped; add it to NAMESPACED or CLUSTER_SCOPED' % o['kind'])
     if not o['metadata'].get('namespace'):
         o['metadata']['namespace'] = NS
-    if o['kind'] == 'Secret' and o['metadata'].get('annotations', {}).get('helm.sh/resource-policy') == 'keep':
-        # The key-encryption keys: a new render would generate new ones and lose every stored secret.
-        live = str(local(['kubectl', '--context', ctx, '-n', NS, 'get', 'secret', o['metadata']['name'],
-                          '--ignore-not-found', '-o', 'json'], quiet=True)).strip()
-        if live:
-            cur = decode_json(live)
-            o['data'] = cur.get('data', {})
-            activated = cur['metadata'].get('annotations', {}).get('koinon.dev/kek-activated-at')
-            if activated:
-                o['metadata']['annotations']['koinon.dev/kek-activated-at'] = activated
     if o['kind'] == 'Secret' and 'password' in o.get('stringData', {}):
         live = str(local(['kubectl', '--context', ctx, '-n', NS, 'get', 'secret', o['metadata']['name'],
                           '--ignore-not-found', '-o', 'jsonpath={.data.password}'], quiet=True)).strip()

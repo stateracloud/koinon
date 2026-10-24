@@ -70,7 +70,10 @@ spec:
             {{- include "koinon.dbEnv" (list $ $component) | nindent 12 }}
             {{- if has $component (list "api" "reconciler") }}
             {{- include "koinon.githubEnv" $ | nindent 12 }}
-            {{- include "koinon.kekEnv" $ | nindent 12 }}
+            {{- include "koinon.kekEnv" (dict "root" $ "component" $component) | nindent 12 }}
+            {{- with include "koinon.providerEnv" $ | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
             {{- end }}
             {{- if eq $component "api" }}
             {{- include "koinon.apiEnv" $ | trim | nindent 12 }}
@@ -87,7 +90,7 @@ spec:
             {{- include "koinon.configVolumeMount" $ | nindent 12 }}
             {{- end }}
             {{- include "koinon.dbVolumeMount" $ | nindent 12 }}
-            {{- if has $component (list "api" "reconciler") }}
+            {{- if eq $component "reconciler" }}
             {{- include "koinon.kekVolumeMount" $ | nindent 12 }}
             {{- end }}
             {{- if ne $component "api" }}
@@ -104,7 +107,7 @@ spec:
         {{- include "koinon.configVolume" $ | nindent 8 }}
         {{- end }}
         {{- include "koinon.dbVolume" $ | nindent 8 }}
-        {{- if has $component (list "api" "reconciler") }}
+        {{- if eq $component "reconciler" }}
         {{- include "koinon.kekVolume" $ | nindent 8 }}
         {{- end }}
         {{- if ne $component "api" }}

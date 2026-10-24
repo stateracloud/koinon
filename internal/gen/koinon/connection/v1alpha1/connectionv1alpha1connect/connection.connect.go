@@ -41,6 +41,9 @@ const (
 	// ConnectionServiceTestConnectionProcedure is the procedure name of the ConnectionService's
 	// TestConnection RPC.
 	ConnectionServiceTestConnectionProcedure = "/koinon.connection.v1alpha1.ConnectionService/TestConnection"
+	// ConnectionServiceDeleteConnectionProcedure is the procedure name of the ConnectionService's
+	// DeleteConnection RPC.
+	ConnectionServiceDeleteConnectionProcedure = "/koinon.connection.v1alpha1.ConnectionService/DeleteConnection"
 	// ConnectionServiceListInstallationReposProcedure is the procedure name of the ConnectionService's
 	// ListInstallationRepos RPC.
 	ConnectionServiceListInstallationReposProcedure = "/koinon.connection.v1alpha1.ConnectionService/ListInstallationRepos"
@@ -85,6 +88,13 @@ var (
 			Procedure:  ConnectionServiceTestConnectionProcedure,
 		}
 	})
+	connectionServiceDeleteConnectionSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_connection_v1alpha1_connection_proto.Services().ByName("ConnectionService").Methods().ByName("DeleteConnection"),
+			Procedure:  ConnectionServiceDeleteConnectionProcedure,
+		}
+	})
 	connectionServiceListInstallationReposSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType:       connect.StreamTypeUnary,
@@ -111,6 +121,9 @@ type ConnectionServiceClient interface {
 	// TestConnection runs the setup guide's checks against the provider and
 	// records the result. Nothing is written to the provider. Admins and owners.
 	TestConnection(context.Context, *v1alpha1.TestConnectionRequest) (*v1alpha1.TestConnectionResponse, error)
+	// DeleteConnection deletes a connection for good. Only a connection whose declaring Secret was
+	// deleted (removed) can be deleted; one that is in use changes in its Secret. Admins and owners.
+	DeleteConnection(context.Context, *v1alpha1.DeleteConnectionRequest) (*v1alpha1.DeleteConnectionResponse, error)
 	// ListInstallationRepos lists the repositories a GitHub connection's App
 	// installation can access, for choosing what to bind an agent to. Koinon
 	// asks GitHub with a metadata-read installation token; nothing is written.
@@ -142,6 +155,9 @@ type ConnectionServiceHandler interface {
 	// TestConnection runs the setup guide's checks against the provider and
 	// records the result. Nothing is written to the provider. Admins and owners.
 	TestConnection(context.Context, *v1alpha1.TestConnectionRequest) (*v1alpha1.TestConnectionResponse, error)
+	// DeleteConnection deletes a connection for good. Only a connection whose declaring Secret was
+	// deleted (removed) can be deleted; one that is in use changes in its Secret. Admins and owners.
+	DeleteConnection(context.Context, *v1alpha1.DeleteConnectionRequest) (*v1alpha1.DeleteConnectionResponse, error)
 	// ListInstallationRepos lists the repositories a GitHub connection's App
 	// installation can access, for choosing what to bind an agent to. Koinon
 	// asks GitHub with a metadata-read installation token; nothing is written.
@@ -159,6 +175,7 @@ func RegisterConnectionServiceHandler(server *connect.Server, svc ConnectionServ
 		connect.Method{Spec: connectionServiceGetConnectionSpec(), Handler: adapter.getConnection},
 		connect.Method{Spec: connectionServiceListConnectionsSpec(), Handler: adapter.listConnections},
 		connect.Method{Spec: connectionServiceTestConnectionSpec(), Handler: adapter.testConnection},
+		connect.Method{Spec: connectionServiceDeleteConnectionSpec(), Handler: adapter.deleteConnection},
 		connect.Method{Spec: connectionServiceListInstallationReposSpec(), Handler: adapter.listInstallationRepos},
 	)
 }
@@ -184,6 +201,10 @@ func (UnimplementedConnectionServiceHandler) ListConnections(context.Context, *v
 
 func (UnimplementedConnectionServiceHandler) TestConnection(context.Context, *v1alpha1.TestConnectionRequest) (*v1alpha1.TestConnectionResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.TestConnection is not implemented")
+}
+
+func (UnimplementedConnectionServiceHandler) DeleteConnection(context.Context, *v1alpha1.DeleteConnectionRequest) (*v1alpha1.DeleteConnectionResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.connection.v1alpha1.ConnectionService.DeleteConnection is not implemented")
 }
 
 func (UnimplementedConnectionServiceHandler) ListInstallationRepos(context.Context, *v1alpha1.ListInstallationReposRequest) (*v1alpha1.ListInstallationReposResponse, error) {
@@ -229,6 +250,14 @@ func (c *connectionServiceClient) ListConnections(ctx context.Context, req *v1al
 func (c *connectionServiceClient) TestConnection(ctx context.Context, req *v1alpha1.TestConnectionRequest) (*v1alpha1.TestConnectionResponse, error) {
 	var res v1alpha1.TestConnectionResponse
 	if err := c.client.CallUnary(ctx, connectionServiceTestConnectionSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *connectionServiceClient) DeleteConnection(ctx context.Context, req *v1alpha1.DeleteConnectionRequest) (*v1alpha1.DeleteConnectionResponse, error) {
+	var res v1alpha1.DeleteConnectionResponse
+	if err := c.client.CallUnary(ctx, connectionServiceDeleteConnectionSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -298,6 +327,18 @@ func (h connectionServiceHandler) testConnection(ctx context.Context, _ connect.
 		return err
 	}
 	res, err := h.svc.TestConnection(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h connectionServiceHandler) deleteConnection(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.DeleteConnectionRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.DeleteConnection(ctx, &req)
 	if err != nil {
 		return err
 	}
