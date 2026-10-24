@@ -413,3 +413,72 @@ var _ = Describe("Budgets", func() {
 })
 
 func ptr[T any](v T) *T { return &v }
+
+var _ = Describe("Prices migrated from model rates", func() {
+	BeforeEach(needDocker)
+
+	// What migration 00014 writes: the model's rates, generic settings and a pending note.
+	migrated := func(ctx SpecContext, org pgtype.UUID, provider, model, prices string) {
+		GinkgoHelper()
+		_, err := db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, $2,
+			jsonb_build_object('provider', $3::text, 'match', jsonb_build_object('regex', '(?-i:' || replace($4::text, '.', '\.') || ')'),
+			'validFrom', '2026-10-01', 'prices', $5::jsonb, 'tokenizer', 'bytes', 'ratio', '3.0', 'maxOutput', 131072,
+			'source', jsonb_build_object('url', '', 'accessed', ''), 'note', 'migrated:pending:' || $4::text),
+			'2026-10-01T00:00:00Z', 'migration 00014')`, org, "model-"+uniq("m"), provider, model, prices)
+		Expect(err).NotTo(HaveOccurred())
+	}
+	read := func(ctx SpecContext, org pgtype.UUID) pricing.Entry {
+		GinkgoHelper()
+		var raw []byte
+		Expect(db.QueryRow(ctx, `SELECT entry FROM price_overrides WHERE org_id = $1`, org).Scan(&raw)).To(Succeed())
+		var e pricing.Entry
+		Expect(json.Unmarshal(raw, &e)).To(Succeed())
+		return e
+	}
+
+	It("takes what the model's rates never set from the matching default entry, once", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		migrated(ctx, e.org, "openrouter", "anthropic/claude-sonnet-5.5", `{"input":"2","output":"10"}`)
+		svc := prices.New(db, nil)
+		n, err := svc.CompleteMigrated(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeNumerically(">=", 1))
+		got := read(ctx, e.org)
+		_, defs := pricing.Default()
+		d, ok := pricing.Select(defs, "openrouter", "anthropic/claude-sonnet-5.5", time.Now())
+		Expect(ok).To(BeTrue())
+		Expect(got.Prices.Input).To(Equal("2"), "the model's own rates stay")
+		Expect(got.Prices.Output).To(Equal("10"))
+		Expect(got.Prices.CacheWrite).To(Equal(d.Entry.Prices.CacheWrite))
+		Expect(got.Prices.CacheWrite).NotTo(BeEmpty(), "Claude bills cache writes above the input rate")
+		Expect(got.Ratio).To(Equal(d.Entry.Ratio))
+		Expect(got.HiddenThinking).To(Equal(d.Entry.HiddenThinking))
+		Expect(got.MaxOutput).To(Equal(d.Entry.MaxOutput))
+		Expect(got.Note).To(HavePrefix("Migrated from the rates set on the model; the other settings come from the default entry"))
+		Expect(prices.NeedsReview("migration 00014", got.Note)).To(BeFalse())
+		checked := got
+		checked.ID = "x"
+		_, err = checked.Resolve(true)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("a second run changes nothing")
+		again, err := svc.CompleteMigrated(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(read(ctx, e.org)).To(Equal(got))
+		Expect(again).To(BeNumerically(">=", 0))
+	})
+
+	It("keeps generic settings and asks for a review when no default entry matches", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		migrated(ctx, e.org, "openai", "acme/custom-model", `{"input":"1","output":"2"}`)
+		_, err := prices.New(db, nil).CompleteMigrated(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		got := read(ctx, e.org)
+		Expect(got.Tokenizer).To(Equal(pricing.TokenizerBytes))
+		Expect(got.Ratio).To(Equal("3.0"))
+		Expect(got.MaxOutput).To(Equal(131072))
+		Expect(got.Prices.CacheWrite).To(BeEmpty())
+		Expect(got.Note).To(Equal(prices.NoteReview))
+		Expect(prices.NeedsReview("migration 00014", got.Note)).To(BeTrue())
+	})
+})

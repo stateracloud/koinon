@@ -365,6 +365,8 @@ var isolationCases = map[string]isolationCase{
 var isolationExempt = map[string]string{
 	authv1alpha1connect.AuthServiceWhoAmIProcedure:         "describes the caller's own session; takes no IDs",
 	authv1alpha1connect.AuthServiceChangePasswordProcedure: "changes the caller's own password; takes no IDs",
+	budgetv1alpha1connect.BudgetServiceListOrgBudgetsProcedure: "lists every org, for platform admins only; the server " +
+		"refuses everyone else (TestListOrgBudgets in budgets_test.go)",
 	templatev1alpha1connect.TemplateServiceListTemplatesProcedure: "templates are platform data shared by every org; " +
 		"takes no IDs",
 	connectionv1alpha1connect.ConnectionServiceListConnectorTypesProcedure: "connector types are platform data shared by " +

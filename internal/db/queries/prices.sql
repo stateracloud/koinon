@@ -46,3 +46,14 @@ FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
 WHERE m.org_id = @org_id AND m.name = @name AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL
 LIMIT 1;
+
+-- name: ListPendingMigratedPrices :many
+-- Org prices that migration 00014 made from model rates and that still wait for the settings of
+-- the matching default entry, in every org (startup: prices.CompleteMigrated).
+SELECT org_id, id, name, entry, valid_from FROM price_overrides
+WHERE created_by = 'migration 00014' AND entry->>'note' LIKE 'migrated:pending:%';
+
+-- name: CompleteMigratedPrice :execrows
+-- Fills a migrated price in place, once.
+UPDATE price_overrides SET entry = @entry
+WHERE org_id = @org_id AND id = @id AND created_by = 'migration 00014' AND entry->>'note' LIKE 'migrated:pending:%';

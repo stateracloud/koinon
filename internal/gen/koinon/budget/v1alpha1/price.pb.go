@@ -375,8 +375,12 @@ type PriceVersion struct {
 	MaxOutput          int32                  `protobuf:"varint,13,opt,name=max_output,json=maxOutput,proto3" json:"max_output,omitempty"`
 	ToolOverheadTokens int32                  `protobuf:"varint,14,opt,name=tool_overhead_tokens,json=toolOverheadTokens,proto3" json:"tool_overhead_tokens,omitempty"`
 	HiddenThinking     bool                   `protobuf:"varint,15,opt,name=hidden_thinking,json=hiddenThinking,proto3" json:"hidden_thinking,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	Note               string                 `protobuf:"bytes,16,opt,name=note,proto3" json:"note,omitempty"`
+	// needs_review is set for a price migrated from a model's rates whose estimation settings are
+	// generic because no default entry matched; an admin should check them.
+	NeedsReview   bool `protobuf:"varint,17,opt,name=needs_review,json=needsReview,proto3" json:"needs_review,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PriceVersion) Reset() {
@@ -510,6 +514,20 @@ func (x *PriceVersion) GetToolOverheadTokens() int32 {
 func (x *PriceVersion) GetHiddenThinking() bool {
 	if x != nil {
 		return x.HiddenThinking
+	}
+	return false
+}
+
+func (x *PriceVersion) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
+func (x *PriceVersion) GetNeedsReview() bool {
+	if x != nil {
+		return x.NeedsReview
 	}
 	return false
 }
@@ -1436,7 +1454,7 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\x0fsource_accessed\x18\f \x01(\tR\x0esourceAccessed\x12\x12\n" +
 	"\x04note\x18\r \x01(\tR\x04note\x12\x1d\n" +
 	"\n" +
-	"max_output\x18\x0e \x01(\x05R\tmaxOutput\"\xf4\x04\n" +
+	"max_output\x18\x0e \x01(\x05R\tmaxOutput\"\xab\x05\n" +
 	"\fPriceVersion\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -1458,7 +1476,9 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\n" +
 	"max_output\x18\r \x01(\x05R\tmaxOutput\x120\n" +
 	"\x14tool_overhead_tokens\x18\x0e \x01(\x05R\x12toolOverheadTokens\x12'\n" +
-	"\x0fhidden_thinking\x18\x0f \x01(\bR\x0ehiddenThinking\"*\n" +
+	"\x0fhidden_thinking\x18\x0f \x01(\bR\x0ehiddenThinking\x12\x12\n" +
+	"\x04note\x18\x10 \x01(\tR\x04note\x12!\n" +
+	"\fneeds_review\x18\x11 \x01(\bR\vneedsReview\"*\n" +
 	"\x11ListPricesRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"R\n" +
 	"\x12ListPricesResponse\x12<\n" +

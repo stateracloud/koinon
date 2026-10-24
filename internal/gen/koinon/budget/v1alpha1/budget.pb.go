@@ -103,6 +103,179 @@ func (x *OrgBudget) GetEstimatedThisMonthUsd() string {
 	return ""
 }
 
+type ListOrgBudgetsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListOrgBudgetsRequest) Reset() {
+	*x = ListOrgBudgetsRequest{}
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListOrgBudgetsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListOrgBudgetsRequest) ProtoMessage() {}
+
+func (x *ListOrgBudgetsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListOrgBudgetsRequest.ProtoReflect.Descriptor instead.
+func (*ListOrgBudgetsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{1}
+}
+
+type OrgBudgetSummary struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	OrgId   string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	OrgSlug string                 `protobuf:"bytes,2,opt,name=org_slug,json=orgSlug,proto3" json:"org_slug,omitempty"`
+	OrgName string                 `protobuf:"bytes,3,opt,name=org_name,json=orgName,proto3" json:"org_name,omitempty"`
+	// monthly_cap_usd and platform_ceiling_usd are empty when unset.
+	MonthlyCapUsd      string `protobuf:"bytes,4,opt,name=monthly_cap_usd,json=monthlyCapUsd,proto3" json:"monthly_cap_usd,omitempty"`
+	PlatformCeilingUsd string `protobuf:"bytes,5,opt,name=platform_ceiling_usd,json=platformCeilingUsd,proto3" json:"platform_ceiling_usd,omitempty"`
+	SpentThisMonthUsd  string `protobuf:"bytes,6,opt,name=spent_this_month_usd,json=spentThisMonthUsd,proto3" json:"spent_this_month_usd,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *OrgBudgetSummary) Reset() {
+	*x = OrgBudgetSummary{}
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrgBudgetSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrgBudgetSummary) ProtoMessage() {}
+
+func (x *OrgBudgetSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrgBudgetSummary.ProtoReflect.Descriptor instead.
+func (*OrgBudgetSummary) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *OrgBudgetSummary) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *OrgBudgetSummary) GetOrgSlug() string {
+	if x != nil {
+		return x.OrgSlug
+	}
+	return ""
+}
+
+func (x *OrgBudgetSummary) GetOrgName() string {
+	if x != nil {
+		return x.OrgName
+	}
+	return ""
+}
+
+func (x *OrgBudgetSummary) GetMonthlyCapUsd() string {
+	if x != nil {
+		return x.MonthlyCapUsd
+	}
+	return ""
+}
+
+func (x *OrgBudgetSummary) GetPlatformCeilingUsd() string {
+	if x != nil {
+		return x.PlatformCeilingUsd
+	}
+	return ""
+}
+
+func (x *OrgBudgetSummary) GetSpentThisMonthUsd() string {
+	if x != nil {
+		return x.SpentThisMonthUsd
+	}
+	return ""
+}
+
+type ListOrgBudgetsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Orgs          []*OrgBudgetSummary    `protobuf:"bytes,1,rep,name=orgs,proto3" json:"orgs,omitempty"`
+	MonthStart    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=month_start,json=monthStart,proto3" json:"month_start,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListOrgBudgetsResponse) Reset() {
+	*x = ListOrgBudgetsResponse{}
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListOrgBudgetsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListOrgBudgetsResponse) ProtoMessage() {}
+
+func (x *ListOrgBudgetsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListOrgBudgetsResponse.ProtoReflect.Descriptor instead.
+func (*ListOrgBudgetsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ListOrgBudgetsResponse) GetOrgs() []*OrgBudgetSummary {
+	if x != nil {
+		return x.Orgs
+	}
+	return nil
+}
+
+func (x *ListOrgBudgetsResponse) GetMonthStart() *timestamppb.Timestamp {
+	if x != nil {
+		return x.MonthStart
+	}
+	return nil
+}
+
 type GetOrgBudgetRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
@@ -112,7 +285,7 @@ type GetOrgBudgetRequest struct {
 
 func (x *GetOrgBudgetRequest) Reset() {
 	*x = GetOrgBudgetRequest{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[1]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -124,7 +297,7 @@ func (x *GetOrgBudgetRequest) String() string {
 func (*GetOrgBudgetRequest) ProtoMessage() {}
 
 func (x *GetOrgBudgetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[1]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -137,7 +310,7 @@ func (x *GetOrgBudgetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetOrgBudgetRequest.ProtoReflect.Descriptor instead.
 func (*GetOrgBudgetRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{1}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetOrgBudgetRequest) GetOrgId() string {
@@ -156,7 +329,7 @@ type GetOrgBudgetResponse struct {
 
 func (x *GetOrgBudgetResponse) Reset() {
 	*x = GetOrgBudgetResponse{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[2]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -168,7 +341,7 @@ func (x *GetOrgBudgetResponse) String() string {
 func (*GetOrgBudgetResponse) ProtoMessage() {}
 
 func (x *GetOrgBudgetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[2]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -181,7 +354,7 @@ func (x *GetOrgBudgetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetOrgBudgetResponse.ProtoReflect.Descriptor instead.
 func (*GetOrgBudgetResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{2}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetOrgBudgetResponse) GetBudget() *OrgBudget {
@@ -201,7 +374,7 @@ type SetMonthlyCapRequest struct {
 
 func (x *SetMonthlyCapRequest) Reset() {
 	*x = SetMonthlyCapRequest{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[3]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -213,7 +386,7 @@ func (x *SetMonthlyCapRequest) String() string {
 func (*SetMonthlyCapRequest) ProtoMessage() {}
 
 func (x *SetMonthlyCapRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[3]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -226,7 +399,7 @@ func (x *SetMonthlyCapRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetMonthlyCapRequest.ProtoReflect.Descriptor instead.
 func (*SetMonthlyCapRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{3}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SetMonthlyCapRequest) GetOrgId() string {
@@ -252,7 +425,7 @@ type SetMonthlyCapResponse struct {
 
 func (x *SetMonthlyCapResponse) Reset() {
 	*x = SetMonthlyCapResponse{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[4]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -264,7 +437,7 @@ func (x *SetMonthlyCapResponse) String() string {
 func (*SetMonthlyCapResponse) ProtoMessage() {}
 
 func (x *SetMonthlyCapResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[4]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -277,7 +450,7 @@ func (x *SetMonthlyCapResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetMonthlyCapResponse.ProtoReflect.Descriptor instead.
 func (*SetMonthlyCapResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{4}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SetMonthlyCapResponse) GetBudget() *OrgBudget {
@@ -297,7 +470,7 @@ type SetPlatformCeilingRequest struct {
 
 func (x *SetPlatformCeilingRequest) Reset() {
 	*x = SetPlatformCeilingRequest{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[5]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -309,7 +482,7 @@ func (x *SetPlatformCeilingRequest) String() string {
 func (*SetPlatformCeilingRequest) ProtoMessage() {}
 
 func (x *SetPlatformCeilingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[5]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -322,7 +495,7 @@ func (x *SetPlatformCeilingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPlatformCeilingRequest.ProtoReflect.Descriptor instead.
 func (*SetPlatformCeilingRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{5}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SetPlatformCeilingRequest) GetOrgId() string {
@@ -348,7 +521,7 @@ type SetPlatformCeilingResponse struct {
 
 func (x *SetPlatformCeilingResponse) Reset() {
 	*x = SetPlatformCeilingResponse{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[6]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -360,7 +533,7 @@ func (x *SetPlatformCeilingResponse) String() string {
 func (*SetPlatformCeilingResponse) ProtoMessage() {}
 
 func (x *SetPlatformCeilingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[6]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -373,7 +546,7 @@ func (x *SetPlatformCeilingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPlatformCeilingResponse.ProtoReflect.Descriptor instead.
 func (*SetPlatformCeilingResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{6}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SetPlatformCeilingResponse) GetBudget() *OrgBudget {
@@ -399,7 +572,7 @@ type AgentBudget struct {
 
 func (x *AgentBudget) Reset() {
 	*x = AgentBudget{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[7]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -411,7 +584,7 @@ func (x *AgentBudget) String() string {
 func (*AgentBudget) ProtoMessage() {}
 
 func (x *AgentBudget) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[7]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -424,7 +597,7 @@ func (x *AgentBudget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentBudget.ProtoReflect.Descriptor instead.
 func (*AgentBudget) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{7}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *AgentBudget) GetAgentId() string {
@@ -479,7 +652,7 @@ type GetAgentBudgetRequest struct {
 
 func (x *GetAgentBudgetRequest) Reset() {
 	*x = GetAgentBudgetRequest{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[8]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -491,7 +664,7 @@ func (x *GetAgentBudgetRequest) String() string {
 func (*GetAgentBudgetRequest) ProtoMessage() {}
 
 func (x *GetAgentBudgetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[8]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -504,7 +677,7 @@ func (x *GetAgentBudgetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentBudgetRequest.ProtoReflect.Descriptor instead.
 func (*GetAgentBudgetRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{8}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GetAgentBudgetRequest) GetOrgId() string {
@@ -530,7 +703,7 @@ type GetAgentBudgetResponse struct {
 
 func (x *GetAgentBudgetResponse) Reset() {
 	*x = GetAgentBudgetResponse{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[9]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -542,7 +715,7 @@ func (x *GetAgentBudgetResponse) String() string {
 func (*GetAgentBudgetResponse) ProtoMessage() {}
 
 func (x *GetAgentBudgetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[9]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -555,7 +728,7 @@ func (x *GetAgentBudgetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAgentBudgetResponse.ProtoReflect.Descriptor instead.
 func (*GetAgentBudgetResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{9}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetAgentBudgetResponse) GetBudget() *AgentBudget {
@@ -574,7 +747,7 @@ type ListAgentBudgetsRequest struct {
 
 func (x *ListAgentBudgetsRequest) Reset() {
 	*x = ListAgentBudgetsRequest{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[10]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -586,7 +759,7 @@ func (x *ListAgentBudgetsRequest) String() string {
 func (*ListAgentBudgetsRequest) ProtoMessage() {}
 
 func (x *ListAgentBudgetsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[10]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -599,7 +772,7 @@ func (x *ListAgentBudgetsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentBudgetsRequest.ProtoReflect.Descriptor instead.
 func (*ListAgentBudgetsRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{10}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ListAgentBudgetsRequest) GetOrgId() string {
@@ -618,7 +791,7 @@ type ListAgentBudgetsResponse struct {
 
 func (x *ListAgentBudgetsResponse) Reset() {
 	*x = ListAgentBudgetsResponse{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[11]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -630,7 +803,7 @@ func (x *ListAgentBudgetsResponse) String() string {
 func (*ListAgentBudgetsResponse) ProtoMessage() {}
 
 func (x *ListAgentBudgetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[11]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -643,7 +816,7 @@ func (x *ListAgentBudgetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAgentBudgetsResponse.ProtoReflect.Descriptor instead.
 func (*ListAgentBudgetsResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{11}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ListAgentBudgetsResponse) GetBudgets() []*AgentBudget {
@@ -664,7 +837,7 @@ type SetAgentBudgetRequest struct {
 
 func (x *SetAgentBudgetRequest) Reset() {
 	*x = SetAgentBudgetRequest{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[12]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -676,7 +849,7 @@ func (x *SetAgentBudgetRequest) String() string {
 func (*SetAgentBudgetRequest) ProtoMessage() {}
 
 func (x *SetAgentBudgetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[12]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -689,7 +862,7 @@ func (x *SetAgentBudgetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentBudgetRequest.ProtoReflect.Descriptor instead.
 func (*SetAgentBudgetRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{12}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SetAgentBudgetRequest) GetOrgId() string {
@@ -722,7 +895,7 @@ type SetAgentBudgetResponse struct {
 
 func (x *SetAgentBudgetResponse) Reset() {
 	*x = SetAgentBudgetResponse{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[13]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -734,7 +907,7 @@ func (x *SetAgentBudgetResponse) String() string {
 func (*SetAgentBudgetResponse) ProtoMessage() {}
 
 func (x *SetAgentBudgetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[13]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -747,7 +920,7 @@ func (x *SetAgentBudgetResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetAgentBudgetResponse.ProtoReflect.Descriptor instead.
 func (*SetAgentBudgetResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{13}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SetAgentBudgetResponse) GetBudget() *AgentBudget {
@@ -780,7 +953,7 @@ type Notification struct {
 
 func (x *Notification) Reset() {
 	*x = Notification{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[14]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -792,7 +965,7 @@ func (x *Notification) String() string {
 func (*Notification) ProtoMessage() {}
 
 func (x *Notification) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[14]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -805,7 +978,7 @@ func (x *Notification) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Notification.ProtoReflect.Descriptor instead.
 func (*Notification) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{14}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *Notification) GetId() string {
@@ -889,7 +1062,7 @@ type ListNotificationsRequest struct {
 
 func (x *ListNotificationsRequest) Reset() {
 	*x = ListNotificationsRequest{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[15]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -901,7 +1074,7 @@ func (x *ListNotificationsRequest) String() string {
 func (*ListNotificationsRequest) ProtoMessage() {}
 
 func (x *ListNotificationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[15]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -914,7 +1087,7 @@ func (x *ListNotificationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNotificationsRequest.ProtoReflect.Descriptor instead.
 func (*ListNotificationsRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{15}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListNotificationsRequest) GetOrgId() string {
@@ -940,7 +1113,7 @@ type ListNotificationsResponse struct {
 
 func (x *ListNotificationsResponse) Reset() {
 	*x = ListNotificationsResponse{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[16]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -952,7 +1125,7 @@ func (x *ListNotificationsResponse) String() string {
 func (*ListNotificationsResponse) ProtoMessage() {}
 
 func (x *ListNotificationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[16]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -965,7 +1138,7 @@ func (x *ListNotificationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNotificationsResponse.ProtoReflect.Descriptor instead.
 func (*ListNotificationsResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{16}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListNotificationsResponse) GetNotifications() []*Notification {
@@ -985,7 +1158,7 @@ type MarkNotificationReadRequest struct {
 
 func (x *MarkNotificationReadRequest) Reset() {
 	*x = MarkNotificationReadRequest{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[17]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -997,7 +1170,7 @@ func (x *MarkNotificationReadRequest) String() string {
 func (*MarkNotificationReadRequest) ProtoMessage() {}
 
 func (x *MarkNotificationReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[17]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1010,7 +1183,7 @@ func (x *MarkNotificationReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkNotificationReadRequest.ProtoReflect.Descriptor instead.
 func (*MarkNotificationReadRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{17}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *MarkNotificationReadRequest) GetOrgId() string {
@@ -1035,7 +1208,7 @@ type MarkNotificationReadResponse struct {
 
 func (x *MarkNotificationReadResponse) Reset() {
 	*x = MarkNotificationReadResponse{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[18]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1047,7 +1220,7 @@ func (x *MarkNotificationReadResponse) String() string {
 func (*MarkNotificationReadResponse) ProtoMessage() {}
 
 func (x *MarkNotificationReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[18]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1060,7 +1233,7 @@ func (x *MarkNotificationReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkNotificationReadResponse.ProtoReflect.Descriptor instead.
 func (*MarkNotificationReadResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{18}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{21}
 }
 
 var File_koinon_budget_v1alpha1_budget_proto protoreflect.FileDescriptor
@@ -1074,7 +1247,19 @@ const file_koinon_budget_v1alpha1_budget_proto_rawDesc = "" +
 	"\x14spent_this_month_usd\x18\x03 \x01(\tR\x11spentThisMonthUsd\x12;\n" +
 	"\vmonth_start\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"monthStart\x127\n" +
-	"\x18estimated_this_month_usd\x18\x05 \x01(\tR\x15estimatedThisMonthUsd\",\n" +
+	"\x18estimated_this_month_usd\x18\x05 \x01(\tR\x15estimatedThisMonthUsd\"\x17\n" +
+	"\x15ListOrgBudgetsRequest\"\xea\x01\n" +
+	"\x10OrgBudgetSummary\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\borg_slug\x18\x02 \x01(\tR\aorgSlug\x12\x19\n" +
+	"\borg_name\x18\x03 \x01(\tR\aorgName\x12&\n" +
+	"\x0fmonthly_cap_usd\x18\x04 \x01(\tR\rmonthlyCapUsd\x120\n" +
+	"\x14platform_ceiling_usd\x18\x05 \x01(\tR\x12platformCeilingUsd\x12/\n" +
+	"\x14spent_this_month_usd\x18\x06 \x01(\tR\x11spentThisMonthUsd\"\x93\x01\n" +
+	"\x16ListOrgBudgetsResponse\x12<\n" +
+	"\x04orgs\x18\x01 \x03(\v2(.koinon.budget.v1alpha1.OrgBudgetSummaryR\x04orgs\x12;\n" +
+	"\vmonth_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"monthStart\",\n" +
 	"\x13GetOrgBudgetRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"Q\n" +
 	"\x14GetOrgBudgetResponse\x129\n" +
@@ -1134,9 +1319,10 @@ const file_koinon_budget_v1alpha1_budget_proto_rawDesc = "" +
 	"\x1bMarkNotificationReadRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12'\n" +
 	"\x0fnotification_id\x18\x02 \x01(\tR\x0enotificationId\"\x1e\n" +
-	"\x1cMarkNotificationReadResponse2\xd0\a\n" +
+	"\x1cMarkNotificationReadResponse2\xc6\b\n" +
 	"\rBudgetService\x12n\n" +
-	"\fGetOrgBudget\x12+.koinon.budget.v1alpha1.GetOrgBudgetRequest\x1a,.koinon.budget.v1alpha1.GetOrgBudgetResponse\"\x03\x90\x02\x01\x12l\n" +
+	"\fGetOrgBudget\x12+.koinon.budget.v1alpha1.GetOrgBudgetRequest\x1a,.koinon.budget.v1alpha1.GetOrgBudgetResponse\"\x03\x90\x02\x01\x12t\n" +
+	"\x0eListOrgBudgets\x12-.koinon.budget.v1alpha1.ListOrgBudgetsRequest\x1a..koinon.budget.v1alpha1.ListOrgBudgetsResponse\"\x03\x90\x02\x01\x12l\n" +
 	"\rSetMonthlyCap\x12,.koinon.budget.v1alpha1.SetMonthlyCapRequest\x1a-.koinon.budget.v1alpha1.SetMonthlyCapResponse\x12{\n" +
 	"\x12SetPlatformCeiling\x121.koinon.budget.v1alpha1.SetPlatformCeilingRequest\x1a2.koinon.budget.v1alpha1.SetPlatformCeilingResponse\x12t\n" +
 	"\x0eGetAgentBudget\x12-.koinon.budget.v1alpha1.GetAgentBudgetRequest\x1a..koinon.budget.v1alpha1.GetAgentBudgetResponse\"\x03\x90\x02\x01\x12z\n" +
@@ -1157,63 +1343,70 @@ func file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP() []byte {
 	return file_koinon_budget_v1alpha1_budget_proto_rawDescData
 }
 
-var file_koinon_budget_v1alpha1_budget_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_koinon_budget_v1alpha1_budget_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_koinon_budget_v1alpha1_budget_proto_goTypes = []any{
 	(*OrgBudget)(nil),                    // 0: koinon.budget.v1alpha1.OrgBudget
-	(*GetOrgBudgetRequest)(nil),          // 1: koinon.budget.v1alpha1.GetOrgBudgetRequest
-	(*GetOrgBudgetResponse)(nil),         // 2: koinon.budget.v1alpha1.GetOrgBudgetResponse
-	(*SetMonthlyCapRequest)(nil),         // 3: koinon.budget.v1alpha1.SetMonthlyCapRequest
-	(*SetMonthlyCapResponse)(nil),        // 4: koinon.budget.v1alpha1.SetMonthlyCapResponse
-	(*SetPlatformCeilingRequest)(nil),    // 5: koinon.budget.v1alpha1.SetPlatformCeilingRequest
-	(*SetPlatformCeilingResponse)(nil),   // 6: koinon.budget.v1alpha1.SetPlatformCeilingResponse
-	(*AgentBudget)(nil),                  // 7: koinon.budget.v1alpha1.AgentBudget
-	(*GetAgentBudgetRequest)(nil),        // 8: koinon.budget.v1alpha1.GetAgentBudgetRequest
-	(*GetAgentBudgetResponse)(nil),       // 9: koinon.budget.v1alpha1.GetAgentBudgetResponse
-	(*ListAgentBudgetsRequest)(nil),      // 10: koinon.budget.v1alpha1.ListAgentBudgetsRequest
-	(*ListAgentBudgetsResponse)(nil),     // 11: koinon.budget.v1alpha1.ListAgentBudgetsResponse
-	(*SetAgentBudgetRequest)(nil),        // 12: koinon.budget.v1alpha1.SetAgentBudgetRequest
-	(*SetAgentBudgetResponse)(nil),       // 13: koinon.budget.v1alpha1.SetAgentBudgetResponse
-	(*Notification)(nil),                 // 14: koinon.budget.v1alpha1.Notification
-	(*ListNotificationsRequest)(nil),     // 15: koinon.budget.v1alpha1.ListNotificationsRequest
-	(*ListNotificationsResponse)(nil),    // 16: koinon.budget.v1alpha1.ListNotificationsResponse
-	(*MarkNotificationReadRequest)(nil),  // 17: koinon.budget.v1alpha1.MarkNotificationReadRequest
-	(*MarkNotificationReadResponse)(nil), // 18: koinon.budget.v1alpha1.MarkNotificationReadResponse
-	(*timestamppb.Timestamp)(nil),        // 19: google.protobuf.Timestamp
+	(*ListOrgBudgetsRequest)(nil),        // 1: koinon.budget.v1alpha1.ListOrgBudgetsRequest
+	(*OrgBudgetSummary)(nil),             // 2: koinon.budget.v1alpha1.OrgBudgetSummary
+	(*ListOrgBudgetsResponse)(nil),       // 3: koinon.budget.v1alpha1.ListOrgBudgetsResponse
+	(*GetOrgBudgetRequest)(nil),          // 4: koinon.budget.v1alpha1.GetOrgBudgetRequest
+	(*GetOrgBudgetResponse)(nil),         // 5: koinon.budget.v1alpha1.GetOrgBudgetResponse
+	(*SetMonthlyCapRequest)(nil),         // 6: koinon.budget.v1alpha1.SetMonthlyCapRequest
+	(*SetMonthlyCapResponse)(nil),        // 7: koinon.budget.v1alpha1.SetMonthlyCapResponse
+	(*SetPlatformCeilingRequest)(nil),    // 8: koinon.budget.v1alpha1.SetPlatformCeilingRequest
+	(*SetPlatformCeilingResponse)(nil),   // 9: koinon.budget.v1alpha1.SetPlatformCeilingResponse
+	(*AgentBudget)(nil),                  // 10: koinon.budget.v1alpha1.AgentBudget
+	(*GetAgentBudgetRequest)(nil),        // 11: koinon.budget.v1alpha1.GetAgentBudgetRequest
+	(*GetAgentBudgetResponse)(nil),       // 12: koinon.budget.v1alpha1.GetAgentBudgetResponse
+	(*ListAgentBudgetsRequest)(nil),      // 13: koinon.budget.v1alpha1.ListAgentBudgetsRequest
+	(*ListAgentBudgetsResponse)(nil),     // 14: koinon.budget.v1alpha1.ListAgentBudgetsResponse
+	(*SetAgentBudgetRequest)(nil),        // 15: koinon.budget.v1alpha1.SetAgentBudgetRequest
+	(*SetAgentBudgetResponse)(nil),       // 16: koinon.budget.v1alpha1.SetAgentBudgetResponse
+	(*Notification)(nil),                 // 17: koinon.budget.v1alpha1.Notification
+	(*ListNotificationsRequest)(nil),     // 18: koinon.budget.v1alpha1.ListNotificationsRequest
+	(*ListNotificationsResponse)(nil),    // 19: koinon.budget.v1alpha1.ListNotificationsResponse
+	(*MarkNotificationReadRequest)(nil),  // 20: koinon.budget.v1alpha1.MarkNotificationReadRequest
+	(*MarkNotificationReadResponse)(nil), // 21: koinon.budget.v1alpha1.MarkNotificationReadResponse
+	(*timestamppb.Timestamp)(nil),        // 22: google.protobuf.Timestamp
 }
 var file_koinon_budget_v1alpha1_budget_proto_depIdxs = []int32{
-	19, // 0: koinon.budget.v1alpha1.OrgBudget.month_start:type_name -> google.protobuf.Timestamp
-	0,  // 1: koinon.budget.v1alpha1.GetOrgBudgetResponse.budget:type_name -> koinon.budget.v1alpha1.OrgBudget
-	0,  // 2: koinon.budget.v1alpha1.SetMonthlyCapResponse.budget:type_name -> koinon.budget.v1alpha1.OrgBudget
-	0,  // 3: koinon.budget.v1alpha1.SetPlatformCeilingResponse.budget:type_name -> koinon.budget.v1alpha1.OrgBudget
-	19, // 4: koinon.budget.v1alpha1.AgentBudget.day_start:type_name -> google.protobuf.Timestamp
-	7,  // 5: koinon.budget.v1alpha1.GetAgentBudgetResponse.budget:type_name -> koinon.budget.v1alpha1.AgentBudget
-	7,  // 6: koinon.budget.v1alpha1.ListAgentBudgetsResponse.budgets:type_name -> koinon.budget.v1alpha1.AgentBudget
-	7,  // 7: koinon.budget.v1alpha1.SetAgentBudgetResponse.budget:type_name -> koinon.budget.v1alpha1.AgentBudget
-	19, // 8: koinon.budget.v1alpha1.Notification.window_start:type_name -> google.protobuf.Timestamp
-	19, // 9: koinon.budget.v1alpha1.Notification.created_at:type_name -> google.protobuf.Timestamp
-	19, // 10: koinon.budget.v1alpha1.Notification.read_at:type_name -> google.protobuf.Timestamp
-	14, // 11: koinon.budget.v1alpha1.ListNotificationsResponse.notifications:type_name -> koinon.budget.v1alpha1.Notification
-	1,  // 12: koinon.budget.v1alpha1.BudgetService.GetOrgBudget:input_type -> koinon.budget.v1alpha1.GetOrgBudgetRequest
-	3,  // 13: koinon.budget.v1alpha1.BudgetService.SetMonthlyCap:input_type -> koinon.budget.v1alpha1.SetMonthlyCapRequest
-	5,  // 14: koinon.budget.v1alpha1.BudgetService.SetPlatformCeiling:input_type -> koinon.budget.v1alpha1.SetPlatformCeilingRequest
-	8,  // 15: koinon.budget.v1alpha1.BudgetService.GetAgentBudget:input_type -> koinon.budget.v1alpha1.GetAgentBudgetRequest
-	10, // 16: koinon.budget.v1alpha1.BudgetService.ListAgentBudgets:input_type -> koinon.budget.v1alpha1.ListAgentBudgetsRequest
-	12, // 17: koinon.budget.v1alpha1.BudgetService.SetAgentBudget:input_type -> koinon.budget.v1alpha1.SetAgentBudgetRequest
-	15, // 18: koinon.budget.v1alpha1.BudgetService.ListNotifications:input_type -> koinon.budget.v1alpha1.ListNotificationsRequest
-	17, // 19: koinon.budget.v1alpha1.BudgetService.MarkNotificationRead:input_type -> koinon.budget.v1alpha1.MarkNotificationReadRequest
-	2,  // 20: koinon.budget.v1alpha1.BudgetService.GetOrgBudget:output_type -> koinon.budget.v1alpha1.GetOrgBudgetResponse
-	4,  // 21: koinon.budget.v1alpha1.BudgetService.SetMonthlyCap:output_type -> koinon.budget.v1alpha1.SetMonthlyCapResponse
-	6,  // 22: koinon.budget.v1alpha1.BudgetService.SetPlatformCeiling:output_type -> koinon.budget.v1alpha1.SetPlatformCeilingResponse
-	9,  // 23: koinon.budget.v1alpha1.BudgetService.GetAgentBudget:output_type -> koinon.budget.v1alpha1.GetAgentBudgetResponse
-	11, // 24: koinon.budget.v1alpha1.BudgetService.ListAgentBudgets:output_type -> koinon.budget.v1alpha1.ListAgentBudgetsResponse
-	13, // 25: koinon.budget.v1alpha1.BudgetService.SetAgentBudget:output_type -> koinon.budget.v1alpha1.SetAgentBudgetResponse
-	16, // 26: koinon.budget.v1alpha1.BudgetService.ListNotifications:output_type -> koinon.budget.v1alpha1.ListNotificationsResponse
-	18, // 27: koinon.budget.v1alpha1.BudgetService.MarkNotificationRead:output_type -> koinon.budget.v1alpha1.MarkNotificationReadResponse
-	20, // [20:28] is the sub-list for method output_type
-	12, // [12:20] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	22, // 0: koinon.budget.v1alpha1.OrgBudget.month_start:type_name -> google.protobuf.Timestamp
+	2,  // 1: koinon.budget.v1alpha1.ListOrgBudgetsResponse.orgs:type_name -> koinon.budget.v1alpha1.OrgBudgetSummary
+	22, // 2: koinon.budget.v1alpha1.ListOrgBudgetsResponse.month_start:type_name -> google.protobuf.Timestamp
+	0,  // 3: koinon.budget.v1alpha1.GetOrgBudgetResponse.budget:type_name -> koinon.budget.v1alpha1.OrgBudget
+	0,  // 4: koinon.budget.v1alpha1.SetMonthlyCapResponse.budget:type_name -> koinon.budget.v1alpha1.OrgBudget
+	0,  // 5: koinon.budget.v1alpha1.SetPlatformCeilingResponse.budget:type_name -> koinon.budget.v1alpha1.OrgBudget
+	22, // 6: koinon.budget.v1alpha1.AgentBudget.day_start:type_name -> google.protobuf.Timestamp
+	10, // 7: koinon.budget.v1alpha1.GetAgentBudgetResponse.budget:type_name -> koinon.budget.v1alpha1.AgentBudget
+	10, // 8: koinon.budget.v1alpha1.ListAgentBudgetsResponse.budgets:type_name -> koinon.budget.v1alpha1.AgentBudget
+	10, // 9: koinon.budget.v1alpha1.SetAgentBudgetResponse.budget:type_name -> koinon.budget.v1alpha1.AgentBudget
+	22, // 10: koinon.budget.v1alpha1.Notification.window_start:type_name -> google.protobuf.Timestamp
+	22, // 11: koinon.budget.v1alpha1.Notification.created_at:type_name -> google.protobuf.Timestamp
+	22, // 12: koinon.budget.v1alpha1.Notification.read_at:type_name -> google.protobuf.Timestamp
+	17, // 13: koinon.budget.v1alpha1.ListNotificationsResponse.notifications:type_name -> koinon.budget.v1alpha1.Notification
+	4,  // 14: koinon.budget.v1alpha1.BudgetService.GetOrgBudget:input_type -> koinon.budget.v1alpha1.GetOrgBudgetRequest
+	1,  // 15: koinon.budget.v1alpha1.BudgetService.ListOrgBudgets:input_type -> koinon.budget.v1alpha1.ListOrgBudgetsRequest
+	6,  // 16: koinon.budget.v1alpha1.BudgetService.SetMonthlyCap:input_type -> koinon.budget.v1alpha1.SetMonthlyCapRequest
+	8,  // 17: koinon.budget.v1alpha1.BudgetService.SetPlatformCeiling:input_type -> koinon.budget.v1alpha1.SetPlatformCeilingRequest
+	11, // 18: koinon.budget.v1alpha1.BudgetService.GetAgentBudget:input_type -> koinon.budget.v1alpha1.GetAgentBudgetRequest
+	13, // 19: koinon.budget.v1alpha1.BudgetService.ListAgentBudgets:input_type -> koinon.budget.v1alpha1.ListAgentBudgetsRequest
+	15, // 20: koinon.budget.v1alpha1.BudgetService.SetAgentBudget:input_type -> koinon.budget.v1alpha1.SetAgentBudgetRequest
+	18, // 21: koinon.budget.v1alpha1.BudgetService.ListNotifications:input_type -> koinon.budget.v1alpha1.ListNotificationsRequest
+	20, // 22: koinon.budget.v1alpha1.BudgetService.MarkNotificationRead:input_type -> koinon.budget.v1alpha1.MarkNotificationReadRequest
+	5,  // 23: koinon.budget.v1alpha1.BudgetService.GetOrgBudget:output_type -> koinon.budget.v1alpha1.GetOrgBudgetResponse
+	3,  // 24: koinon.budget.v1alpha1.BudgetService.ListOrgBudgets:output_type -> koinon.budget.v1alpha1.ListOrgBudgetsResponse
+	7,  // 25: koinon.budget.v1alpha1.BudgetService.SetMonthlyCap:output_type -> koinon.budget.v1alpha1.SetMonthlyCapResponse
+	9,  // 26: koinon.budget.v1alpha1.BudgetService.SetPlatformCeiling:output_type -> koinon.budget.v1alpha1.SetPlatformCeilingResponse
+	12, // 27: koinon.budget.v1alpha1.BudgetService.GetAgentBudget:output_type -> koinon.budget.v1alpha1.GetAgentBudgetResponse
+	14, // 28: koinon.budget.v1alpha1.BudgetService.ListAgentBudgets:output_type -> koinon.budget.v1alpha1.ListAgentBudgetsResponse
+	16, // 29: koinon.budget.v1alpha1.BudgetService.SetAgentBudget:output_type -> koinon.budget.v1alpha1.SetAgentBudgetResponse
+	19, // 30: koinon.budget.v1alpha1.BudgetService.ListNotifications:output_type -> koinon.budget.v1alpha1.ListNotificationsResponse
+	21, // 31: koinon.budget.v1alpha1.BudgetService.MarkNotificationRead:output_type -> koinon.budget.v1alpha1.MarkNotificationReadResponse
+	23, // [23:32] is the sub-list for method output_type
+	14, // [14:23] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_koinon_budget_v1alpha1_budget_proto_init() }
@@ -1227,7 +1420,7 @@ func file_koinon_budget_v1alpha1_budget_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_budget_v1alpha1_budget_proto_rawDesc), len(file_koinon_budget_v1alpha1_budget_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

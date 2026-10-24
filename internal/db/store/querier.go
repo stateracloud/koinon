@@ -73,6 +73,8 @@ type Querier interface {
 	// approved -> executed | failed, by the executor that claimed it (fenced on
 	// executions). No row: another executor took it over.
 	CompleteApprovalExecution(ctx context.Context, arg CompleteApprovalExecutionParams) (ApprovalRequest, error)
+	// Fills a migrated price in place, once.
+	CompleteMigratedPrice(ctx context.Context, arg CompleteMigratedPriceParams) (int64, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -261,7 +263,11 @@ type Querier interface {
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
 	ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiToken, error)
+	// The config of each agent's active version, for the template default of its daily limit.
+	ListActiveVersionConfigs(ctx context.Context, orgID pgtype.UUID) ([]ListActiveVersionConfigsRow, error)
 	ListAgentBudgets(ctx context.Context, orgID pgtype.UUID) ([]ListAgentBudgetsRow, error)
+	// Every agent's recorded USD spend since @since, for the budgets list.
+	ListAgentSpendSince(ctx context.Context, arg ListAgentSpendSinceParams) ([]ListAgentSpendSinceRow, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
 	ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
 	// Agents that are not archived and whose active or latest version binds the connection
@@ -301,6 +307,8 @@ type Querier interface {
 	ListOpenRunsOfOrg(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
 	// The users who are told about an org's budget: owners and admins.
 	ListOrgBudgetRecipients(ctx context.Context, orgID pgtype.UUID) ([]pgtype.UUID, error)
+	// Every live org with its cap, platform ceiling and spend since @since. Platform admins only.
+	ListOrgBudgetSummaries(ctx context.Context, since pgtype.Timestamptz) ([]ListOrgBudgetSummariesRow, error)
 	// Every live org, for control-plane sweeps and workers that then work org by
 	// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
@@ -317,6 +325,9 @@ type Querier interface {
 	// Trusted-preset calls are recorded as approved and never listed here.
 	ListPendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	ListPendingApprovalRequestsOfFinishedRuns(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
+	// Org prices that migration 00014 made from model rates and that still wait for the settings of
+	// the matching default entry, in every org (startup: prices.CompleteMigrated).
+	ListPendingMigratedPrices(ctx context.Context) ([]ListPendingMigratedPricesRow, error)
 	ListPlatformAdminIDs(ctx context.Context) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//

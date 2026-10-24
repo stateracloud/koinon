@@ -99,6 +99,10 @@ message PriceVersion {
   int32 max_output = 13;
   int32 tool_overhead_tokens = 14;
   bool hidden_thinking = 15;
+  string note = 16;
+  // needs_review is set for a price migrated from a model's rates whose estimation settings are
+  // generic because no default entry matched; an admin should check them.
+  bool needs_review = 17;
 }
 
 message ListPricesRequest {

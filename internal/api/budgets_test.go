@@ -66,6 +66,30 @@ var _ = Describe("BudgetService and PriceService", func() {
 		Expect(n).To(Equal(2))
 	})
 
+	It("lists every org's cap, ceiling and spend for platform admins only", func(ctx SpecContext) {
+		_, err := budgets(owner).ListOrgBudgets(ctx, &budgetv1alpha1.ListOrgBudgetsRequest{})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
+		_, err = budgets(admin).ListOrgBudgets(ctx, &budgetv1alpha1.ListOrgBudgetsRequest{})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		_, err = e.pool.Exec(ctx, `INSERT INTO org_budgets (org_id, monthly_cap, platform_ceiling, updated_by) VALUES ($1, 10, 50, 'test')`, org)
+		Expect(err).NotTo(HaveOccurred())
+		pa := e.userIn(ctx, org, store.OrgRoleMember)
+		_, err = e.pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, pa.userID)
+		Expect(err).NotTo(HaveOccurred())
+		res, err := budgets(pa).ListOrgBudgets(ctx, &budgetv1alpha1.ListOrgBudgetsRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		var found bool
+		for _, o := range res.GetOrgs() {
+			if o.GetOrgId() == org {
+				found = true
+				Expect(o.GetMonthlyCapUsd()).To(Equal("10.00"))
+				Expect(o.GetPlatformCeilingUsd()).To(Equal("50.00"))
+			}
+		}
+		Expect(found).To(BeTrue())
+	})
+
 	It("shows this month's spend and the estimated part of it", func(ctx SpecContext) {
 		var orgID pgtype.UUID
 		Expect(orgID.Scan(org)).To(Succeed())

@@ -259,10 +259,11 @@ func (i *Importer) applyProvider(ctx context.Context, org pgtype.UUID, sec *core
 	if changed {
 		i.log().Info("applied a declarative provider", "secret", sec.Name, "org", sec.Labels[LabelOrg], "provider", d.Name, "models", len(d.Models))
 		i.event(ctx, sec, corev1.EventTypeNormal, ReasonApplied, "Provider "+d.Name+" imported for org "+sec.Labels[LabelOrg])
-		for _, w := range d.Warnings {
-			i.log().Warn("declarative provider Secret has an ignored field", "secret", sec.Name, "warning", w)
-			i.event(ctx, sec, corev1.EventTypeWarning, ReasonInvalid, w)
-		}
+	}
+	// Every sync, while the Secret still carries the ignored field: the Event's count rises.
+	for _, w := range d.Warnings {
+		i.log().Warn("declarative provider Secret has an ignored field", "secret", sec.Name, "warning", w)
+		i.event(ctx, sec, corev1.EventTypeWarning, ReasonInvalid, w)
 	}
 	return nil
 }
