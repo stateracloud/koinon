@@ -642,6 +642,54 @@ func (q *Queries) ListServedMCPServers(ctx context.Context, orgID pgtype.UUID) (
 	return items, nil
 }
 
+const listUnavailableMCPServersOfAgent = `-- name: ListUnavailableMCPServersOfAgent :many
+SELECT s.name, s.health::text AS health, s.health_reason, s.disabled_reason
+FROM agent_mcp_servers a
+JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
+WHERE a.org_id = $1 AND a.agent_id = $2
+  AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.removed_at IS NOT NULL)
+ORDER BY s.name
+`
+
+type ListUnavailableMCPServersOfAgentParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+type ListUnavailableMCPServersOfAgentRow struct {
+	Name           string
+	Health         string
+	HealthReason   pgtype.Text
+	DisabledReason pgtype.Text
+}
+
+// The servers an agent may use that are down or disabled right now, for the note agentd gives the
+// agent when a session starts.
+func (q *Queries) ListUnavailableMCPServersOfAgent(ctx context.Context, arg ListUnavailableMCPServersOfAgentParams) ([]ListUnavailableMCPServersOfAgentRow, error) {
+	rows, err := q.db.Query(ctx, listUnavailableMCPServersOfAgent, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnavailableMCPServersOfAgentRow
+	for rows.Next() {
+		var i ListUnavailableMCPServersOfAgentRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.Health,
+			&i.HealthReason,
+			&i.DisabledReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markMCPServerRemoved = `-- name: MarkMCPServerRemoved :exec
 UPDATE mcp_servers
 SET removed_at = now(), disabled_reason = $1
