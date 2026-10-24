@@ -127,6 +127,14 @@ n=$(render --show-only templates/gateway-standalone.yaml | grep -c 'kek' || true
 has "gateway mounts the provider keys" 'mountPath: /secrets/providers$' --show-only templates/gateway-standalone.yaml
 n=$(render | grep -c 'secretName: koinon-gateway-providers$' || true)
 [ "$n" = 1 ] || fail "the provider keys Secret is mounted by $n pods, want only the gateway"
+# The gateway's egress is restricted by a standard NetworkPolicy; internal upstreams are added by value.
+has "gateway egress policy" 'policyTypes: \[Ingress, Egress\]' --show-only templates/networkpolicy.yaml
+has "gateway egress carves out the private ranges" '10.0.0.0/8' --show-only templates/networkpolicy.yaml
+lacks "no egress policy with networkPolicy.enabled=false" 'policyTypes: \[Ingress, Egress\]' --set networkPolicy.enabled=false
+has "gatewayEgressTo is rendered" 'cidr: 10.20.0.0/24' --set 'networkPolicy.gatewayEgressTo[0].to[0].ipBlock.cidr=10.20.0.0/24' --show-only templates/networkpolicy.yaml
+env_is KOINON_PROVIDER_ALLOWED_HOSTS '"ollama.example.com:11434"' --set 'providers.allowedInternalHosts[0]=ollama.example.com:11434'
+# The reconciler is not ready until it holds the key-encryption keys.
+has "reconciler readiness probe" 'path: /readyz' --show-only templates/deployments.yaml
 # Provider values are gone: orgs add providers in the UI, the admin API or declarative Secrets.
 if render --set model.baseUrl=https://x/v1 >/dev/null 2>&1; then
 	fail "model.* values must no longer be accepted"

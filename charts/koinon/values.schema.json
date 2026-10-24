@@ -395,7 +395,8 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "apiFrom": {"$ref": "#/definitions/peers"},
-        "metricsFrom": {"$ref": "#/definitions/peers"}
+        "metricsFrom": {"$ref": "#/definitions/peers"},
+        "gatewayEgressTo": {"type": "array", "items": {"type": "object"}}
       }
     },
     "sandboxPolicy": {

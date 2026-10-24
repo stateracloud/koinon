@@ -183,6 +183,75 @@ func (q *Queries) ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiTo
 	return items, nil
 }
 
+const lockAPITokenShare = `-- name: LockAPITokenShare :one
+SELECT org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, revoked_at, last_used_at, created_at FROM api_tokens
+WHERE org_id = $1 AND id = $2
+FOR SHARE
+`
+
+type LockAPITokenShareParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// A token being used to create a child holds a share lock on itself until the child is committed,
+// so a revoke (which locks the tree for update first) waits for the child and then revokes it too.
+func (q *Queries) LockAPITokenShare(ctx context.Context, arg LockAPITokenShareParams) (ApiToken, error) {
+	row := q.db.QueryRow(ctx, lockAPITokenShare, arg.OrgID, arg.ID)
+	var i ApiToken
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Name,
+		&i.Prefix,
+		&i.TokenHash,
+		&i.Role,
+		&i.CreatedBy,
+		&i.ParentTokenID,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.LastUsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const lockAPITokenTree = `-- name: LockAPITokenTree :many
+WITH RECURSIVE tree AS (
+    SELECT r.id FROM api_tokens r WHERE r.org_id = $1 AND r.id = $2
+    UNION
+    SELECT c.id FROM api_tokens c JOIN tree ON c.parent_token_id = tree.id WHERE c.org_id = $1
+)
+SELECT t.id FROM api_tokens t
+WHERE t.org_id = $1 AND t.id IN (SELECT tree.id FROM tree)
+FOR UPDATE OF t
+`
+
+type LockAPITokenTreeParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+func (q *Queries) LockAPITokenTree(ctx context.Context, arg LockAPITokenTreeParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockAPITokenTree, arg.OrgID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeAPITokenTree = `-- name: RevokeAPITokenTree :many
 WITH RECURSIVE tree AS (
     SELECT r.id FROM api_tokens r WHERE r.org_id = $1 AND r.id = $2

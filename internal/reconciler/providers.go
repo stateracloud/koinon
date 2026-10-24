@@ -149,7 +149,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 			}
 			p, ok := byID[id]
 			if !ok {
-				if err := r.cfg.URLPolicy.Check(ctx, row.Url); err != nil {
+				if err := r.cfg.URLPolicy.CheckStrict(ctx, row.Url); err != nil {
 					errs = append(errs, fmt.Errorf("provider %s/%s not served: %w", org.Slug, row.ProviderName, err))
 					skip[id] = true
 					continue

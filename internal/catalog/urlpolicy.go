@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,8 +18,10 @@ import (
 // provider's key, to the URL: without a policy that is a server-side request forgery primitive
 // against the node and the cluster. The policy denies, unless the host is in AllowedHosts:
 //
-//   - loopback, unspecified and link-local addresses (127/8, ::1, 169.254/16, fe80::/10) and the
-//     cloud metadata addresses, whether written as the host or reached by resolving its name;
+//   - loopback, unspecified, link-local, private and shared-address ranges (127/8, ::1, 0/8,
+//     169.254/16, fe80::/10, RFC 1918, fc00::/7, 100.64/10) and the cloud metadata addresses,
+//     whether written as the host or reached by resolving its name. Private addresses include
+//     Kubernetes Services' ClusterIPs;
 //   - single-label names (they resolve to Services in the gateway's own namespace through the search
 //     path) and `localhost`;
 //   - names in Koinon's own namespace: <name>.<namespace>.svc[.cluster.local] and <name>.<namespace>.
@@ -27,8 +30,14 @@ import (
 // renders it, which narrows DNS rebinding but cannot close it: the gateway resolves the name itself
 // at request time. Put a NetworkPolicy on the gateway's egress for a hard limit.
 //
+// Hosts are read the way agentgateway's URL parser (WHATWG) reads them: a host whose last label is a
+// number (decimal, 0x hex or leading-0 octal) is an IPv4 address in any of its short forms, so
+// 0177.0.0.1, 127.1, 0x7f.0.0.1 and 2130706433 are all 127.0.0.1; one that is not a valid address is
+// refused.
+//
 // AllowedHosts is a platform-level setting (chart value providers.allowedInternalHosts): exact
-// hostnames or IPs, each optionally with a port, such as "ollama.lab.example.com:11434".
+// hostnames, IPs or CIDRs, each name optionally with a port, such as "ollama.lab.example.com:11434"
+// or "10.20.0.0/24". The gateway pod's egress NetworkPolicy is a separate allow list (see the chart).
 type URLPolicy struct {
 	// Namespace is Koinon's namespace.
 	Namespace string
@@ -38,17 +47,38 @@ type URLPolicy struct {
 	Resolver func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
-var metadataAddrs = []netip.Addr{
-	netip.MustParseAddr("169.254.169.254"), netip.MustParseAddr("fd00:ec2::254"), netip.MustParseAddr("100.100.100.200"),
-}
+var (
+	metadataAddrs = []netip.Addr{
+		netip.MustParseAddr("169.254.169.254"), netip.MustParseAddr("fd00:ec2::254"), netip.MustParseAddr("100.100.100.200"),
+	}
+	deniedPrefixes = []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("fc00::/7"),
+	}
+)
 
 func deniedAddr(a netip.Addr) bool {
 	a = a.Unmap()
 	return a.IsLoopback() || a.IsUnspecified() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
-		a.IsMulticast() || slices.Contains(metadataAddrs, a)
+		a.IsMulticast() || a.IsPrivate() || slices.Contains(metadataAddrs, a) ||
+		slices.ContainsFunc(deniedPrefixes, func(p netip.Prefix) bool { return p.Contains(a) })
 }
 
-func (p URLPolicy) allowed(host, hostport string) bool {
+// allowedAddr reports whether an AllowedHosts entry (an IP or a CIDR) covers a.
+func (p URLPolicy) allowedAddr(a netip.Addr) bool {
+	a = a.Unmap()
+	for _, e := range p.AllowedHosts {
+		e = strings.TrimSpace(e)
+		if pre, err := netip.ParsePrefix(e); err == nil && pre.Contains(a) {
+			return true
+		}
+		if ip, err := netip.ParseAddr(e); err == nil && ip.Unmap() == a {
+			return true
+		}
+	}
+	return false
+}
+
+func (p URLPolicy) allowedName(host, hostport string) bool {
 	for _, a := range p.AllowedHosts {
 		a = strings.ToLower(strings.TrimSpace(a))
 		if a != "" && (a == host || a == hostport) {
@@ -64,30 +94,113 @@ func (p URLPolicy) lookup(ctx context.Context, host string) ([]netip.Addr, error
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	return ips, err
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+}
+
+// whatwgIPv4 reads host as the WHATWG URL standard's IPv4 parser does. numeric is true when the
+// host's last label is a number, which makes it an IPv4 address or invalid; ok is false for an
+// invalid one.
+func whatwgIPv4(host string) (addr netip.Addr, numeric, ok bool) {
+	parts := strings.Split(host, ".")
+	if parts[len(parts)-1] == "" && len(parts) > 1 {
+		parts = parts[:len(parts)-1]
+	}
+	isNum := func(s string) bool {
+		if s == "" {
+			return false
+		}
+		digits, valid := s, "0123456789"
+		if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+			digits, valid = s[2:], "0123456789abcdefABCDEF"
+		}
+		return strings.Trim(digits, valid) == ""
+	}
+	if !isNum(parts[len(parts)-1]) {
+		return netip.Addr{}, false, false
+	}
+	if len(parts) > 4 {
+		return netip.Addr{}, true, false
+	}
+	nums := make([]uint64, len(parts))
+	for i, s := range parts {
+		var v uint64
+		var err error
+		switch {
+		case s == "":
+			return netip.Addr{}, true, false
+		case strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X"):
+			if len(s) == 2 {
+				v = 0
+			} else if v, err = strconv.ParseUint(s[2:], 16, 64); err != nil {
+				return netip.Addr{}, true, false
+			}
+		case len(s) > 1 && s[0] == '0':
+			if v, err = strconv.ParseUint(s[1:], 8, 64); err != nil {
+				return netip.Addr{}, true, false
+			}
+		default:
+			if v, err = strconv.ParseUint(s, 10, 64); err != nil {
+				return netip.Addr{}, true, false
+			}
+		}
+		nums[i] = v
+	}
+	for _, v := range nums[:len(nums)-1] {
+		if v > 255 {
+			return netip.Addr{}, true, false
+		}
+	}
+	last := nums[len(nums)-1]
+	if last >= 1<<(8*(5-uint(len(nums)))) {
+		return netip.Addr{}, true, false
+	}
+	ip := last
+	for i, v := range nums[:len(nums)-1] {
+		ip += v << (8 * (3 - uint(i)))
+	}
+	return netip.AddrFrom4([4]byte{byte(ip >> 24), byte(ip >> 16), byte(ip >> 8), byte(ip)}), true, true
 }
 
 // Check returns an *InvalidError when rawURL names a host the policy denies. A name that does not
 // resolve passes: nothing is reachable through it now, and the check runs again at render.
 func (p URLPolicy) Check(ctx context.Context, rawURL string) error {
+	return p.check(ctx, rawURL, false)
+}
+
+// CheckStrict is Check for rendering: a name that cannot be resolved is refused too, so a failing
+// resolver cannot be used to get past the policy.
+func (p URLPolicy) CheckStrict(ctx context.Context, rawURL string) error {
+	return p.check(ctx, rawURL, true)
+}
+
+func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" {
 		return invalid("url must be an http(s) URL of an OpenAI-compatible API")
 	}
-	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	if p.allowed(host, strings.ToLower(u.Host)) {
+	host := strings.ToLower(u.Hostname())
+	if p.allowedName(strings.TrimSuffix(host, "."), strings.ToLower(u.Host)) {
 		return nil
 	}
 	deny := func(why string) error {
 		return invalid("the url's host %q is not allowed: %s (a platform admin can allow it with providers.allowedInternalHosts)", host, why)
 	}
-	if ip, err := netip.ParseAddr(host); err == nil {
-		if deniedAddr(ip) {
-			return deny("it is a loopback, link-local or metadata address")
+	check := func(a netip.Addr, how string) error {
+		if deniedAddr(a) && !p.allowedAddr(a) {
+			return deny(how + " a loopback, link-local, private, shared or metadata address")
 		}
 		return nil
 	}
+	if ip, err := netip.ParseAddr(host); err == nil { // an IPv6 literal (brackets already stripped)
+		return check(ip, "it is")
+	}
+	if ip, numeric, ok := whatwgIPv4(host); numeric {
+		if !ok {
+			return deny("it is not a valid IP address, and agentgateway would not read it as a name")
+		}
+		return check(ip, "it is")
+	}
+	host = strings.TrimSuffix(host, ".")
 	switch {
 	case host == "localhost" || strings.HasSuffix(host, ".localhost"):
 		return deny("it is the gateway itself")
@@ -103,11 +216,14 @@ func (p URLPolicy) Check(ctx context.Context, rawURL string) error {
 	}
 	addrs, err := p.lookup(ctx, host)
 	if err != nil {
+		if strict {
+			return deny("it cannot be resolved right now, and the policy fails closed")
+		}
 		return nil
 	}
 	for _, a := range addrs {
-		if deniedAddr(a) {
-			return deny("it resolves to a loopback, link-local or metadata address")
+		if err := check(a, "it resolves to"); err != nil {
+			return err
 		}
 	}
 	return nil

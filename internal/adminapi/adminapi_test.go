@@ -350,7 +350,49 @@ var _ = Describe("the admin API", func() {
 			}
 			Expect(last).To(Equal(429))
 			code, _ := e.call(ctx, e.token, "GET", "/providers", nil)
-			Expect(code).To(Equal(429), "the block holds for a good token too, until it lapses")
+			Expect(code).To(Equal(200), "a valid token is never locked out by bad ones")
+			_, other := mint(ctx, e, e.token, "admin", map[string]any{})
+			code, _ = e.call(ctx, other.Secret, "GET", "/providers", nil)
+			Expect(code).To(Equal(200))
+		})
+
+		It("slows down guesses at a real token's secret, but not that token's valid use", func(ctx SpecContext) {
+			_, victim := mint(ctx, e, e.token, "admin", map[string]any{})
+			guess := "koinon_" + victim.Token.Prefix + "_wrong-secret"
+			var last int
+			for range 8 {
+				last, _ = e.call(ctx, guess, "GET", "/providers", nil)
+			}
+			Expect(last).To(Equal(429))
+			code, _ := e.call(ctx, victim.Secret, "GET", "/providers", nil)
+			Expect(code).To(Equal(200), "the real holder still gets in")
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'token.use_failed' AND target_id = $2`, e.org, victim.Token.ID).Scan(&n)).To(Succeed())
+			Expect(n).To(BeNumerically(">=", 6))
+		})
+
+		It("cannot create a child while the parent is being revoked", func(ctx SpecContext) {
+			_, parent := mint(ctx, e, e.token, "admin", map[string]any{})
+			done := make(chan []made, 1)
+			go func() {
+				defer GinkgoRecover()
+				var kids []made
+				for range 6 {
+					code, k := mint(ctx, e, parent.Secret, "admin", map[string]any{})
+					if code == 201 {
+						kids = append(kids, k)
+					}
+				}
+				done <- kids
+			}()
+			time.Sleep(15 * time.Millisecond)
+			code, _ := e.call(ctx, e.token, "DELETE", "/tokens/"+parent.Token.ID, nil)
+			Expect(code).To(Equal(204))
+			kids := <-done
+			for _, k := range kids {
+				code, _ := e.call(ctx, k.Secret, "GET", "/providers", nil)
+				Expect(code).To(Equal(401), "every child that got created is revoked with its parent")
+			}
 		})
 
 		It("are scoped to their org", func(ctx SpecContext) {

@@ -302,6 +302,12 @@ networkPolicy:
   apiFrom: []
   # Peers allowed to scrape agentgateway's stats port.
   metricsFrom: []
+  # Egress rules added to agentgateway's, for internal model upstreams (it may otherwise reach DNS,
+  # koinon-api and the public internet only). Each item is a NetworkPolicy egress rule, for example
+  #   - to: [{ipBlock: {cidr: 10.20.0.0/24}}]
+  #     ports: [{port: 11434}]
+  # List the same hosts in providers.allowedInternalHosts so providers may name them.
+  gatewayEgressTo: []
 
 # ValidatingAdmissionPolicy for OpenShell sandbox namespaces (ADRs 0045, 0048).
 sandboxPolicy:

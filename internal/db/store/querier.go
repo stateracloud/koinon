@@ -236,6 +236,9 @@ type Querier interface {
 	ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiToken, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
 	ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
+	// Agents that are not archived and whose active or latest version binds the connection
+	// (config.bindings[].connectionId). Deleting a connection needs this to be empty.
+	ListAgentsBoundToConnection(ctx context.Context, arg ListAgentsBoundToConnectionParams) ([]ListAgentsBoundToConnectionRow, error)
 	// Agents that are not archived, plus archived agents whose sandbox is not
 	// cleaned up yet.
 	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
@@ -293,6 +296,10 @@ type Querier interface {
 	ListTicketsByStatus(ctx context.Context, arg ListTicketsByStatusParams) ([]Ticket, error)
 	// A run's requests whose outcome the agent has not been sent yet.
 	ListUndeliveredApprovalRequestsForRun(ctx context.Context, arg ListUndeliveredApprovalRequestsForRunParams) ([]ApprovalRequest, error)
+	// A token being used to create a child holds a share lock on itself until the child is committed,
+	// so a revoke (which locks the tree for update first) waits for the child and then revokes it too.
+	LockAPITokenShare(ctx context.Context, arg LockAPITokenShareParams) (ApiToken, error)
+	LockAPITokenTree(ctx context.Context, arg LockAPITokenTreeParams) ([]pgtype.UUID, error)
 	// Serialises decisions on one request.
 	LockApprovalRequest(ctx context.Context, arg LockApprovalRequestParams) (ApprovalRequest, error)
 	// SPDX-License-Identifier: Apache-2.0

@@ -45,3 +45,20 @@ UPDATE api_tokens
 SET last_used_at = now()
 WHERE org_id = @org_id AND id = @id
   AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute');
+
+-- name: LockAPITokenShare :one
+-- A token being used to create a child holds a share lock on itself until the child is committed,
+-- so a revoke (which locks the tree for update first) waits for the child and then revokes it too.
+SELECT * FROM api_tokens
+WHERE org_id = @org_id AND id = @id
+FOR SHARE;
+
+-- name: LockAPITokenTree :many
+WITH RECURSIVE tree AS (
+    SELECT r.id FROM api_tokens r WHERE r.org_id = @org_id AND r.id = @id
+    UNION
+    SELECT c.id FROM api_tokens c JOIN tree ON c.parent_token_id = tree.id WHERE c.org_id = @org_id
+)
+SELECT t.id FROM api_tokens t
+WHERE t.org_id = @org_id AND t.id IN (SELECT tree.id FROM tree)
+FOR UPDATE OF t;

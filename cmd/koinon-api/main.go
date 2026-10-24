@@ -366,7 +366,8 @@ func run() error {
 		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
 		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret}
 		if cfg.kekCreate {
-			created, err := keyscli.EnsureKubeSecret(ctx, kube, cfg.secretsNamespace, cfg.kekSecret, time.Now())
+			created, err := keyscli.EnsureKubeSecret(ctx, kube, cfg.secretsNamespace, cfg.kekSecret, time.Now(),
+				func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) })
 			if err != nil {
 				return err
 			}

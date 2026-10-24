@@ -42,6 +42,16 @@ spec:
         - name: {{ $component }}
           image: {{ include "koinon.image" (list $ $v.image) }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          {{- if eq $component "reconciler" }}
+          ports:
+            - name: health
+              containerPort: 8082
+          # Not ready until the key-encryption keys are loaded (koinon-api creates them on its first start).
+          readinessProbe:
+            httpGet: {path: /readyz, port: health}
+          livenessProbe:
+            httpGet: {path: /healthz, port: health}
+          {{- end }}
           {{- if eq $component "api" }}
           args: ["-addr", ":{{ $v.port }}", "-otlp-addr", ":{{ $v.otlpPort }}", "-tools-addr", ":{{ $v.toolsPort }}"]
           ports:

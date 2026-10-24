@@ -195,8 +195,9 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	return res, nil
 }
 
-// DeleteConnection implements ConnectionService. Only a removed connection (its declaring Secret
-// was deleted) can be deleted.
+// DeleteConnection implements ConnectionService, by the rules of DeleteProvider: a connection entered
+// here can be deleted, a declared one only after its Secret was deleted (removed), and none while an
+// agent is bound to it.
 func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.DeleteConnectionRequest) (*connectionv1alpha1.DeleteConnectionResponse, error) {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
 	if err != nil {
@@ -212,15 +213,26 @@ func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.D
 		if err != nil {
 			return err
 		}
-		if !row.RemovedAt.Valid {
-			return connect.NewError(connect.CodeFailedPrecondition, "only a connection whose Kubernetes Secret was deleted can be deleted; change or delete its Secret instead")
+		if row.Source == store.ConfigSourceSecret && !row.RemovedAt.Valid {
+			return connect.NewError(connect.CodeFailedPrecondition, "this connection is declared by the Kubernetes Secret "+row.ManagedBySecret.String+"; delete or change that Secret instead")
+		}
+		bound, err := q.ListAgentsBoundToConnection(rctx, store.ListAgentsBoundToConnectionParams{OrgID: c.org, ConnectionID: id.String()})
+		if err != nil {
+			return err
+		}
+		if len(bound) > 0 {
+			names := make([]string, 0, len(bound))
+			for _, b := range bound {
+				names = append(names, fmt.Sprintf("%s (%s)", b.DisplayName, b.ID.String()))
+			}
+			return connect.NewError(connect.CodeFailedPrecondition, "agents are still bound to this connection; unbind them first: "+strings.Join(names, ", "))
 		}
 		if _, err := q.DeleteConnection(rctx, store.DeleteConnectionParams{OrgID: c.org, ID: id}); err != nil {
 			return err
 		}
 		return audit.RecordErr(rctx, q, audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "connection.delete", TargetKind: "connection", TargetID: id.String(),
-			Before: map[string]any{"displayName": row.DisplayName, "source": string(row.Source), "keyFingerprint": row.SecretFingerprint},
+			Before: map[string]any{"displayName": row.DisplayName, "source": string(row.Source), "keyFingerprint": row.SecretFingerprint, "removed": row.RemovedAt.Valid},
 		})
 	})
 	if err != nil {

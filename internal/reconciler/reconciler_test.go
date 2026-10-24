@@ -113,6 +113,7 @@ var _ = Describe("Reconciler", func() {
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: "koinon-gateway-providers"},
 			ProviderKeyDir: "/secrets/providers",
+			URLPolicy:      testPolicy,
 			Flavors: map[store.AgentFlavor]reconciler.Flavor{
 				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
 			},

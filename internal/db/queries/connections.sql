@@ -74,3 +74,14 @@ WHERE org_id = @org_id AND id = @id;
 UPDATE connections
 SET removed_at = now()
 WHERE org_id = @org_id AND id = @id AND source = 'secret' AND removed_at IS NULL;
+
+-- name: ListAgentsBoundToConnection :many
+-- Agents that are not archived and whose active or latest version binds the connection
+-- (config.bindings[].connectionId). Deleting a connection needs this to be empty.
+SELECT DISTINCT a.id, a.display_name
+FROM agents a
+JOIN agent_versions v ON v.org_id = a.org_id AND v.agent_id = a.id
+WHERE a.org_id = @org_id AND a.status <> 'archived'
+  AND (v.id = a.active_version_id OR v.version = a.latest_version)
+  AND v.config -> 'bindings' @> jsonb_build_array(jsonb_build_object('connectionId', @connection_id::text))
+ORDER BY a.display_name, a.id;

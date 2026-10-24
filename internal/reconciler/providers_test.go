@@ -45,8 +45,8 @@ var _ = Describe("Provider delivery", func() {
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
-			ProviderKeyDir: "/secrets/providers",
-			Logger:         slog.New(slog.DiscardHandler),
+			ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy,
+			Logger: slog.New(slog.DiscardHandler),
 		})
 		Expect(err).NotTo(HaveOccurred())
 	})
@@ -194,7 +194,7 @@ var _ = Describe("Provider delivery", func() {
 			r, err = reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
 				Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 				Keys:    ring, ProviderKeys: reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
-				ProviderKeyDir: "/secrets/providers", ProviderKeySettle: time.Minute,
+				ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, ProviderKeySettle: time.Minute,
 				Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return clock },
 			})
 			Expect(err).NotTo(HaveOccurred())

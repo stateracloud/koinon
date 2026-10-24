@@ -67,7 +67,8 @@ answers the open questions on KEK rotation and on role tokens.
    DEK, so a copied envelope does not open. KEKs come from a Kubernetes Secret with several keys and
    one active ID (`koinon-api` creates it on its first start and never overwrites it, because the chart cannot render
    key material that survives `helm template`, Argo CD or Flux; or `secrets.kek.existingSecret` names
-   one). `koinon-api` reads it through the Kubernetes API and `koinon-reconciler` mounts it, and nothing
+   one; it refuses to create a new one when the database already holds encrypted values).
+   `koinon-api` reads it through the Kubernetes API and `koinon-reconciler` mounts it, and nothing
    else sees it. Because every value has
    its own DEK, DEKs need no scheduled rotation. The default KEK active period is **365 days**
    (`koinon-api keys status` warns after). `koinon-api keys status|add|activate|rewrap|retire|reencrypt`
@@ -114,10 +115,13 @@ answers the open questions on KEK rotation and on role tokens.
    is finished at the next start). `koinon-api` can delete Secrets only while the chart value
    `secrets.migrateLegacyConnections` is set. The reconciler's token minting reads the store. The
    connection API is unchanged.
-8. **Upstream URLs** may not name loopback, link-local or metadata addresses, names without a dot or
-   hosts in Koinon's namespace, checked by resolving the name when the provider is saved and when it is
-   rendered; a platform admin lists exceptions in `providers.allowedInternalHosts`. DNS rebinding in
-   between stays open (the gateway resolves the name itself).
+8. **Upstream URLs** may not name loopback, link-local, private, shared or metadata addresses, names
+   without a dot or hosts in Koinon's namespace. Hosts are read as WHATWG does (short, octal and hex
+   IPv4 forms are the addresses they denote). The name is resolved when the provider is saved and again,
+   failing closed, when it is rendered; a platform admin lists exceptions (names, IPs, CIDRs) in
+   `providers.allowedInternalHosts`. A standard egress NetworkPolicy for the gateway (DNS, koinon-api,
+   public internet minus the private ranges, plus `networkPolicy.gatewayEgressTo`) is the hard limit,
+   since DNS rebinding between the checks stays open (the gateway resolves the name itself).
 9. **Other.** Model rates stay on the model for now (PV2 replaces them); a model without rates is
    not served. The routing guard exists for OpenRouter providers and forces
    `{"provider": {"zdr": true, "data_collection": "deny"}}`.

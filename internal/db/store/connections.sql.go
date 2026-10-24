@@ -200,6 +200,48 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (C
 	return i, err
 }
 
+const listAgentsBoundToConnection = `-- name: ListAgentsBoundToConnection :many
+SELECT DISTINCT a.id, a.display_name
+FROM agents a
+JOIN agent_versions v ON v.org_id = a.org_id AND v.agent_id = a.id
+WHERE a.org_id = $1 AND a.status <> 'archived'
+  AND (v.id = a.active_version_id OR v.version = a.latest_version)
+  AND v.config -> 'bindings' @> jsonb_build_array(jsonb_build_object('connectionId', $2::text))
+ORDER BY a.display_name, a.id
+`
+
+type ListAgentsBoundToConnectionParams struct {
+	OrgID        pgtype.UUID
+	ConnectionID string
+}
+
+type ListAgentsBoundToConnectionRow struct {
+	ID          pgtype.UUID
+	DisplayName string
+}
+
+// Agents that are not archived and whose active or latest version binds the connection
+// (config.bindings[].connectionId). Deleting a connection needs this to be empty.
+func (q *Queries) ListAgentsBoundToConnection(ctx context.Context, arg ListAgentsBoundToConnectionParams) ([]ListAgentsBoundToConnectionRow, error) {
+	rows, err := q.db.Query(ctx, listAgentsBoundToConnection, arg.OrgID, arg.ConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentsBoundToConnectionRow
+	for rows.Next() {
+		var i ListAgentsBoundToConnectionRow
+		if err := rows.Scan(&i.ID, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listConnections = `-- name: ListConnections :many
 SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at FROM connections
 WHERE org_id = $1

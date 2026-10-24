@@ -121,8 +121,9 @@ type ConnectionServiceClient interface {
 	// TestConnection runs the setup guide's checks against the provider and
 	// records the result. Nothing is written to the provider. Admins and owners.
 	TestConnection(context.Context, *v1alpha1.TestConnectionRequest) (*v1alpha1.TestConnectionResponse, error)
-	// DeleteConnection deletes a connection for good. Only a connection whose declaring Secret was
-	// deleted (removed) can be deleted; one that is in use changes in its Secret. Admins and owners.
+	// DeleteConnection deletes a connection and its stored secret fields for good. A connection entered
+	// here can be deleted; a declared one only after its Secret was deleted (removed). While agents are
+	// bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners.
 	DeleteConnection(context.Context, *v1alpha1.DeleteConnectionRequest) (*v1alpha1.DeleteConnectionResponse, error)
 	// ListInstallationRepos lists the repositories a GitHub connection's App
 	// installation can access, for choosing what to bind an agent to. Koinon
@@ -155,8 +156,9 @@ type ConnectionServiceHandler interface {
 	// TestConnection runs the setup guide's checks against the provider and
 	// records the result. Nothing is written to the provider. Admins and owners.
 	TestConnection(context.Context, *v1alpha1.TestConnectionRequest) (*v1alpha1.TestConnectionResponse, error)
-	// DeleteConnection deletes a connection for good. Only a connection whose declaring Secret was
-	// deleted (removed) can be deleted; one that is in use changes in its Secret. Admins and owners.
+	// DeleteConnection deletes a connection and its stored secret fields for good. A connection entered
+	// here can be deleted; a declared one only after its Secret was deleted (removed). While agents are
+	// bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners.
 	DeleteConnection(context.Context, *v1alpha1.DeleteConnectionRequest) (*v1alpha1.DeleteConnectionResponse, error)
 	// ListInstallationRepos lists the repositories a GitHub connection's App
 	// installation can access, for choosing what to bind an agent to. Koinon
