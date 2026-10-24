@@ -5,6 +5,7 @@ package catalog
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"net"
 	"net/netip"
 	"net/url"
@@ -14,7 +15,7 @@ import (
 	"time"
 )
 
-// URLPolicy decides which upstream URLs a provider may name. Providers are entered by org admins
+// URLPolicy decides which upstream URLs a provider or a remote MCP server may name. Providers are entered by org admins
 // (and by anyone who can write a labelled Secret), and the gateway then sends requests, carrying the
 // provider's key, to the URL: without a policy that is a server-side request forgery primitive
 // against the node and the cluster. The policy denies, unless the host is in AllowedHosts:
@@ -36,7 +37,7 @@ import (
 // 0177.0.0.1, 127.1, 0x7f.0.0.1 and 2130706433 are all 127.0.0.1; one that is not a valid address is
 // refused.
 //
-// AllowedHosts is a platform-level setting (chart value providers.allowedInternalHosts): exact
+// AllowedHosts is a platform-level setting (chart value egress.allowedInternalHosts; providers.allowedInternalHosts is a deprecated alias): exact
 // hostnames, IPs or CIDRs, each name optionally with a port, such as "ollama.lab.example.com:11434"
 // or "10.20.0.0/24". The gateway pod's egress NetworkPolicy is a separate allow list (see the chart).
 type URLPolicy struct {
@@ -169,6 +170,45 @@ func whatwgIPv4(host string) (addr netip.Addr, numeric, ok bool) {
 	return netip.AddrFrom4(b), true, true
 }
 
+// DialContext is a net.Dialer DialContext that connects only to addresses the policy allows. It is
+// for clients that call a URL Check accepted: it closes the window between the check and the
+// connection (DNS rebinding) by checking the addresses it dials. A host the platform allowed by
+// name is dialled as given.
+func (p URLPolicy) DialContext(d *net.Dialer) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		host = strings.ToLower(strings.TrimSuffix(host, "."))
+		if p.allowedName(host, host+":"+port) {
+			return d.DialContext(ctx, network, addr)
+		}
+		var addrs []netip.Addr
+		if ip, err := netip.ParseAddr(host); err == nil {
+			addrs = []netip.Addr{ip}
+		} else if addrs, err = p.lookup(ctx, host); err != nil {
+			return nil, err
+		}
+		var last error
+		for _, a := range addrs {
+			if deniedAddr(a) && !p.allowedAddr(a) {
+				last = invalid("the host %q resolves to an address the egress policy denies", host)
+				continue
+			}
+			c, err := d.DialContext(ctx, network, net.JoinHostPort(a.String(), port))
+			if err == nil {
+				return c, nil
+			}
+			last = err
+		}
+		if last == nil {
+			last = errors.New("no address")
+		}
+		return nil, last
+	}
+}
+
 // Check returns an *InvalidError when rawURL names a host the policy denies. A name that does not
 // resolve passes: nothing is reachable through it now, and the check runs again at render.
 func (p URLPolicy) Check(ctx context.Context, rawURL string) error {
@@ -184,7 +224,7 @@ func (p URLPolicy) CheckStrict(ctx context.Context, rawURL string) error {
 func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Hostname() == "" {
-		return invalid("url must be an http(s) URL of an OpenAI-compatible API")
+		return invalid("url must be an http(s) URL")
 	}
 	host := strings.ToLower(u.Hostname())
 	for i := 0; i < len(host); i++ {
@@ -196,7 +236,7 @@ func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error 
 		return nil
 	}
 	deny := func(why string) error {
-		return invalid("the url's host %q is not allowed: %s (a platform admin can allow it with providers.allowedInternalHosts)", host, why)
+		return invalid("the url's host %q is not allowed: %s (a platform admin can allow it with egress.allowedInternalHosts)", host, why)
 	}
 	check := func(a netip.Addr, how string) error {
 		if deniedAddr(a) && !p.allowedAddr(a) {

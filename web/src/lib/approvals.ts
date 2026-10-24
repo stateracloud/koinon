@@ -14,3 +14,19 @@ export function targetRepo(target: string): string {
 export function isApprover(role: OrgRole): boolean {
   return role >= OrgRole.ADMIN
 }
+
+/** toolVersion is the short form of a tool's content hash shown on an MCP approval. */
+export function toolVersion(contentHash: string): string {
+  return contentHash.slice(0, 8)
+}
+
+/** toolChanged is true when the tool's description or schema differs from what the request was made against. */
+export function toolChanged(contentHash: string, currentContentHash: string): boolean {
+  return currentContentHash !== '' && currentContentHash !== contentHash
+}
+
+/** approveLabel names the Approve button: the first or second of two approvals, else plain Approve. */
+export function approveLabel(approvalsRequired: number, firstApprover: string): string {
+  if (approvalsRequired !== 2) return 'Approve'
+  return firstApprover ? 'Give second approval' : 'Give first approval'
+}

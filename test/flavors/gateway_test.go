@@ -150,7 +150,8 @@ const mcpTool = "koinon_contract_ping"
 // readyPrompt is the one prompt it offers, as Koinon's MCP server does behind agentgateway
 // (gateway.ReadyPrompt): a harness that turns MCP prompts into commands announces it once the
 // server is connected, which koinon-agentd waits for (ADR 0052).
-const readyPrompt = "koinon-ready"
+// agentgateway names it after its target (prefixMode always): github_koinon-ready.
+const readyPrompt = "github_koinon-ready"
 
 // serveMCP is the smallest Streamable HTTP MCP server a harness accepts: JSON responses to
 // POSTed JSON-RPC requests, 202 for notifications, no server-initiated stream.

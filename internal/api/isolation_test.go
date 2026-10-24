@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	connect "connectrpc.com/connect/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -31,6 +33,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1/budgetv1alpha1connect"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	mcpserverv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
@@ -41,6 +45,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 )
 
@@ -349,6 +354,67 @@ var isolationCases = map[string]isolationCase{
 		},
 	},
 
+	mcpserverv1alpha1connect.McpServerServiceListServersProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.mcps.ListServers(ctx, &mcpserverv1alpha1.ListServersRequest{OrgId: org})
+		},
+	},
+	mcpserverv1alpha1connect.McpServerServiceCreateServerProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.mcps.CreateServer(ctx, &mcpserverv1alpha1.CreateServerRequest{
+				OrgId: org, Name: fmt.Sprintf("intruder-%d", dbSeq.Add(1)), Url: "https://intruder.example.com/mcp",
+			})
+		},
+	},
+	mcpserverv1alpha1connect.McpServerServiceUpdateServerProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.UpdateServer(ctx, &mcpserverv1alpha1.UpdateServerRequest{
+				OrgId: org, ServerId: f.mcpServer, Url: new("https://intruder.example.com/mcp"),
+			})
+		},
+	},
+	mcpserverv1alpha1connect.McpServerServiceDeleteServerProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.DeleteServer(ctx, &mcpserverv1alpha1.DeleteServerRequest{OrgId: org, ServerId: f.mcpServer})
+		},
+	},
+	mcpserverv1alpha1connect.McpServerServiceListToolsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.ListTools(ctx, &mcpserverv1alpha1.ListToolsRequest{OrgId: org, ServerId: f.mcpServer})
+		},
+	},
+	mcpserverv1alpha1connect.McpServerServiceSetToolTierProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.SetToolTier(ctx, &mcpserverv1alpha1.SetToolTierRequest{
+				OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool, Tier: mcpserverv1alpha1.Tier_TIER_AUTO,
+			})
+		},
+	},
+	mcpserverv1alpha1connect.McpServerServiceSetToolTwoApproversProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.SetToolTwoApprovers(ctx, &mcpserverv1alpha1.SetToolTwoApproversRequest{OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool, Required: true})
+		},
+	},
+	mcpserverv1alpha1connect.McpServerServiceAcknowledgeToolReviewProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.AcknowledgeToolReview(ctx, &mcpserverv1alpha1.AcknowledgeToolReviewRequest{OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool})
+		},
+	},
+	mcpserverv1alpha1connect.McpServerServiceGetAgentServersProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.GetAgentServers(ctx, &mcpserverv1alpha1.GetAgentServersRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	mcpserverv1alpha1connect.McpServerServiceSetAgentServersProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.SetAgentServers(ctx, &mcpserverv1alpha1.SetAgentServersRequest{
+				OrgId: org, AgentId: f.agent.GetId(), Servers: []*mcpserverv1alpha1.Allowance{{ServerId: f.mcpServer}},
+			})
+		},
+	},
+
 	runv1alpha1connect.RunServiceWatchRunProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			stream, err := c.runs.WatchRun(ctx, &runv1alpha1.WatchRunRequest{OrgId: org, RunId: f.run.GetId()})
@@ -445,6 +511,17 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	})
 	Expect(err).NotTo(HaveOccurred())
 	f.model = mod.GetModel().GetId()
+	srv, err := f.owner.mcps.CreateServer(ctx, &mcpserverv1alpha1.CreateServerRequest{
+		OrgId: f.org, Name: "isolated", Url: "https://mcp.example.com/mcp", CredentialValue: "not-a-real-token",
+	})
+	Expect(err).NotTo(HaveOccurred())
+	f.mcpServer, f.mcpTool = srv.GetServer().GetId(), "search"
+	var sid pgtype.UUID
+	Expect(sid.Scan(f.mcpServer)).To(Succeed())
+	var orgID pgtype.UUID
+	Expect(orgID.Scan(f.org)).To(Succeed())
+	_, err = mcpservers.New(e.pool, nil, nil).SyncTools(ctx, orgID, sid, []mcpservers.ListedTool{{Name: f.mcpTool, Description: "Search"}})
+	Expect(err).NotTo(HaveOccurred())
 	return f
 }
 
@@ -470,6 +547,11 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM providers WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM models WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM price_overrides WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND url = 'https://mcp.example.com/mcp'`, org),
+		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND tier = 'ask' AND review_reason IS NULL`, org),
+		count(ctx, e, `SELECT count(*) FROM agent_mcp_servers WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND requires_two_approvers`, org),
 	}
 }
 

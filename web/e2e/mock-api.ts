@@ -67,3 +67,67 @@ export async function mockApi(page: Page, h: Handlers) {
 function expectHeader(headers: Record<string, string>, name: string, value: string) {
   if (headers[name] !== value) throw new Error(`missing ${name}: ${value} (the API's CSRF check requires it)`)
 }
+
+const mcp = 'koinon.mcpserver.v1alpha1.McpServerService/'
+
+/**
+ * mcpServerHandlers is an in-memory McpServerService: a healthy server, an unhealthy one and one
+ * declared by a Secret, with tools in different tiers and one carrying a review flag. `seen` records
+ * the writes so a spec can assert on them. Credentials are never returned.
+ */
+export function mcpServerHandlers() {
+  const at = new Date(Date.now() - 120_000).toISOString()
+  const servers: Json[] = [
+    { id: 's-docs', name: 'docs', url: 'https://mcp.example.com/mcp', transport: 'streamable-http', hasCredential: true, credentialHeader: 'Authorization', credentialPrefix: 'Bearer ', source: 'ui', health: 'HEALTH_HEALTHY', healthCheckedAt: at, gatewayTarget: 'default-docs' },
+    { id: 's-issues', name: 'issues', url: 'https://issues.example.com/mcp', transport: 'sse', source: 'ui', health: 'HEALTH_UNHEALTHY', healthReason: 'connection refused', healthCheckedAt: at, gatewayTarget: 'default-issues' },
+    { id: 's-wiki', name: 'wiki', url: 'https://wiki.example.com/mcp', transport: 'streamable-http', hasCredential: true, credentialHeader: 'X-Api-Key', source: 'secret', managedBySecret: 'wiki-secret', health: 'HEALTH_UNKNOWN', gatewayTarget: 'default-wiki' },
+  ]
+  const tools: Json[] = [
+    { serverId: 's-docs', name: 'search', description: 'Search the docs', readOnlyHint: true, tier: 'TIER_ASK', present: true },
+    { serverId: 's-docs', name: 'publish', description: 'Publish a page', tier: 'TIER_NEVER', present: true },
+    { serverId: 's-docs', name: 'edit', description: 'Edit a page', tier: 'TIER_ASK', present: true, reviewReason: 'the description changed; moved to Ask until reviewed' },
+    { serverId: 's-docs', name: 'legacy', tier: 'TIER_AUTO', present: false },
+    { serverId: 's-docs', name: 'a_very_long_tool_name', description: 'Too long', tier: 'TIER_ASK', present: true, unavailable: 'unavailable: name too long for the gateway' },
+    { serverId: 's-issues', name: 'list_issues', description: 'List issues', tier: 'TIER_AUTO', present: true },
+    { serverId: 's-wiki', name: 'read', description: 'Read a page', tier: 'TIER_ASK', present: true },
+  ]
+  let allowed: Json[] = []
+  const seen: { create?: Json; tier?: Json; two?: Json; ack?: Json; allow?: Json } = {}
+  const find = (req: Json) => tools.find((t) => t.serverId === req.serverId && t.name === req.tool)!
+  const unary: Handlers['unary'] = {
+    [mcp + 'ListServers']: () => ({ servers }),
+    [mcp + 'ListTools']: () => ({ tools }),
+    [mcp + 'CreateServer']: (req) => {
+      seen.create = req
+      const s = { id: 's-new', name: req.name, url: req.url, transport: req.transport, hasCredential: !!req.credentialValue, source: 'ui', health: 'HEALTH_UNKNOWN', gatewayTarget: `default-${String(req.name)}` }
+      servers.push(s)
+      return { server: s }
+    },
+    [mcp + 'SetToolTier']: (req) => {
+      seen.tier = req
+      const t = find(req)
+      t.tier = req.tier
+      delete t.reviewReason
+      return { tool: t }
+    },
+    [mcp + 'SetToolTwoApprovers']: (req) => {
+      seen.two = req
+      const t = find(req)
+      t.requiresTwoApprovers = req.required
+      return { tool: t }
+    },
+    [mcp + 'AcknowledgeToolReview']: (req) => {
+      seen.ack = req
+      const t = find(req)
+      delete t.reviewReason
+      return { tool: t }
+    },
+    [mcp + 'GetAgentServers']: () => ({ servers: allowed }),
+    [mcp + 'SetAgentServers']: (req) => {
+      seen.allow = req
+      allowed = (req.servers as Json[]) ?? []
+      return { servers: allowed }
+    },
+  }
+  return { unary, seen }
+}

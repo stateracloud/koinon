@@ -102,12 +102,29 @@ const OrgHeader = "x-koinon-org"
 // targets trust it only because they are reachable from the gateway alone.
 const AgentHeader = "X-Koinon-Agent"
 
+// Names of the agents Koinon itself runs to use MCP servers through the gateway: a prober per
+// server and an executor per org for approved calls. They hold keys like agents do, ask for no
+// model, and are not rows in the agents table.
+const (
+	MCPProbeAgentPrefix = "mcp-probe-"
+	MCPExecAgentName    = "mcp-exec"
+)
+
+// IsInternalAgent reports whether a is one of Koinon's own MCP agents.
+func IsInternalAgent(a AgentRef) bool {
+	return a.Name == MCPExecAgentName || strings.HasPrefix(a.Name, MCPProbeAgentPrefix)
+}
+
 // ReadyPrompt is the MCP prompt Koinon's MCP server publishes to every agent.
 // A harness that turns MCP prompts into commands (OpenCode v2) announces it
 // once the server is connected and its tools are registered; koinon-agentd
 // waits for it before the first prompt (ADR 0052). Drivers must let every
 // authenticated key list and get it.
 const ReadyPrompt = "koinon-ready"
+
+// ReadyPromptExposed is the prompt as agents see it: agentgateway prefixes every prompt and tool with
+// the name of its target (prefixMode always), and Koinon's MCP server is the "github" target.
+const ReadyPromptExposed = "github_" + ReadyPrompt
 
 // Key is the gateway-side record of an API key: its ID, owner and hash. It
 // holds no key material and is safe to persist and to render into config.
@@ -275,17 +292,33 @@ func (s State) Unpriced() []string {
 // ModelRef is the gateway-wide name of an org's model.
 func ModelRef(org, model string) string { return org + "/" + model }
 
-// MCPTarget is an upstream MCP server (Streamable HTTP).
+// MCPTarget is an upstream MCP server.
 type MCPTarget struct {
-	// Name prefixes the target's tools when several targets are multiplexed.
+	// Name prefixes the target's tools when several targets are multiplexed. It is a DNS-label style
+	// name without underscores (agentgateway reserves them as delimiters).
 	Name string
 	URL  string
+	// SSE says the server speaks the legacy SSE transport; the default is Streamable HTTP.
+	SSE bool
+	// Org, when set, makes the target an org's own server (ADR 0057): only keys of this org see it.
+	// Drivers render a per-target condition for it, besides the agents' own allow rules.
+	Org string
+	// CredentialHeader, CredentialPrefix and CredentialFile inject a static credential into every
+	// request the gateway sends to the target: the header's value is CredentialPrefix followed by
+	// the content of the file, a path inside the gateway. Agents never see it. All empty means the
+	// target needs no credential.
+	CredentialHeader string
+	CredentialPrefix string
+	CredentialFile   string
 }
 
 // ToolGrant allows an agent to see and call some tools of one MCP target.
 type ToolGrant struct {
 	Target string
 	Tools  []string
+	// All grants every tool of the target, whatever it lists. Only Koinon's own probe keys have it
+	// (the prober lists a server's tools through the gateway); an agent's grants name tools.
+	All bool
 }
 
 // State is everything a gateway serves. The zero value serves nothing.
@@ -341,6 +374,11 @@ var (
 	// providerType is an agentgateway providerOverride.
 	providerType = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 	keyPath      = regexp.MustCompile(`^/[A-Za-z0-9_./-]{1,256}$`)
+	// targetName is agentgateway's SectionName rule for MCP targets (lowercase letters, digits, '-'
+	// and '.'; '_' and '+' are its delimiters).
+	targetName = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]{0,126}[a-z0-9])?$`)
+	// headerName is an HTTP token.
+	headerName = regexp.MustCompile(`^[A-Za-z0-9!#$%&'*+.^_|~-]{1,128}$`)
 )
 
 // Validate checks s for values that would be unsafe or ambiguous in gateway
@@ -414,8 +452,26 @@ func (s State) Validate() error {
 	}
 	targets := map[string]bool{}
 	for _, t := range s.MCP {
-		if !toolName.MatchString(t.Name) || t.URL == "" {
+		switch {
+		case !targetName.MatchString(t.Name) || t.URL == "":
 			errs = append(errs, fmt.Errorf("mcp target %q: invalid name or empty URL", t.Name))
+		case targets[t.Name]:
+			errs = append(errs, fmt.Errorf("mcp target %q: duplicate", t.Name))
+		}
+		if t.Org != "" && !orgSlug.MatchString(t.Org) {
+			errs = append(errs, fmt.Errorf("mcp target %q: org must be an org slug", t.Name))
+		}
+		if (t.CredentialHeader == "") != (t.CredentialFile == "") {
+			errs = append(errs, fmt.Errorf("mcp target %q: a credential needs both a header and a file", t.Name))
+		}
+		if t.CredentialHeader != "" && !headerName.MatchString(t.CredentialHeader) {
+			errs = append(errs, fmt.Errorf("mcp target %q: invalid credential header name", t.Name))
+		}
+		if t.CredentialFile != "" && !keyPath.MatchString(t.CredentialFile) {
+			errs = append(errs, fmt.Errorf("mcp target %q: invalid credential file path", t.Name))
+		}
+		if strings.ContainsAny(t.CredentialPrefix, "\r\n") {
+			errs = append(errs, fmt.Errorf("mcp target %q: invalid credential prefix", t.Name))
 		}
 		targets[t.Name] = true
 	}

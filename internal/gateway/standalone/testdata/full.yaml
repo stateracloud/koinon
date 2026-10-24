@@ -34,7 +34,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"e5924da00f84297d"'
+      koinon.config: '"790ca40f4d04e4ed"'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -97,7 +97,7 @@ llm:
             org: globex
           allowedModels:
             - deepseek/deepseek-v4.1-flash
-        - keyHash: sha256:3fc96c1675689c044ff5567c005e3b2ac034b2d3d116928dfb69e7227e3672b8
+        - keyHash: sha256:6d5cf06a20aef6b2bcc2860982b7f85f168501add5ad5bd27990e8f959bcb731
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -174,6 +174,8 @@ llm:
       transformation:
         stream_options: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
 mcp:
+  failureMode: failOpen
+  prefixMode: always
   policies:
     apiKey:
       mode: strict
@@ -206,9 +208,9 @@ mcp:
         set:
           x-koinon-agent: apiKey.agent
   targets:
-    - name: github
-      mcp:
-        host: http://koinon-github-tools.koinon.svc:8080/mcp
     - name: docs
       mcp:
         host: http://docs.koinon.svc:8080/mcp
+    - name: github
+      mcp:
+        host: http://koinon-github-tools.koinon.svc:8080/mcp

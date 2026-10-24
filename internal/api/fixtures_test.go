@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	providerv1alpha1connect "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
@@ -50,6 +51,7 @@ type client struct {
 	approvals approvalv1alpha1connect.ApprovalServiceClient
 	tokens    tokenv1alpha1connect.TokenServiceClient
 	providers providerv1alpha1connect.ProviderServiceClient
+	mcps      mcpserverv1alpha1connect.McpServerServiceClient
 }
 
 func newClient(b *browser) *client {
@@ -64,6 +66,7 @@ func newClient(b *browser) *client {
 		approvals: approvalv1alpha1connect.NewApprovalServiceClient(cc),
 		tokens:    tokenv1alpha1connect.NewTokenServiceClient(cc),
 		providers: providerv1alpha1connect.NewProviderServiceClient(cc),
+		mcps:      mcpserverv1alpha1connect.NewMcpServerServiceClient(cc),
 	}
 }
 
@@ -254,6 +257,8 @@ type orgFixture struct {
 	token string
 	// provider and model are a provider and a model of the org, for the isolation suite.
 	provider, model string
+	// mcpServer is a remote MCP server of the org, with the tool "search"; mcpTool is its name.
+	mcpServer, mcpTool string
 }
 
 func (e *env) newOrgFixture(ctx context.Context) orgFixture {

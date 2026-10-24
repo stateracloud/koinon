@@ -41,11 +41,13 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1/budgetv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/tokens"
@@ -82,6 +84,8 @@ type Options struct {
 	// Catalog manages model providers and models (ADR 0056). Nil means ProviderService answers
 	// UNIMPLEMENTED.
 	Catalog *catalog.Service
+	// MCP manages remote MCP servers (ADR 0057). Nil means McpServerService answers UNIMPLEMENTED.
+	MCP *mcpservers.Service
 }
 
 // Server implements the four services.
@@ -99,6 +103,7 @@ type Server struct {
 	github    *github.Client
 	approvals *approvals.Service
 	catalog   *catalog.Service
+	mcp       *mcpservers.Service
 }
 
 // New returns a Server backed by pool.
@@ -117,7 +122,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	}
 	return &Server{
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
-		keys: opts.Keys, tokens: opts.Tokens, github: opts.GitHub, approvals: opts.Approvals, catalog: opts.Catalog,
+		keys: opts.Keys, tokens: opts.Tokens, github: opts.GitHub, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger),
 	}
 }
@@ -134,6 +139,7 @@ func (s *Server) Register(server *connect.Server) {
 	budgetv1alpha1connect.RegisterPriceServiceHandler(server, s)
 	approvalv1alpha1connect.RegisterApprovalServiceHandler(server, s)
 	providerv1alpha1connect.RegisterProviderServiceHandler(server, s)
+	mcpserverv1alpha1connect.RegisterMcpServerServiceHandler(server, s)
 }
 
 var (
@@ -147,6 +153,7 @@ var (
 	_ budgetv1alpha1connect.BudgetServiceHandler         = (*Server)(nil)
 	_ budgetv1alpha1connect.PriceServiceHandler          = (*Server)(nil)
 	_ providerv1alpha1connect.ProviderServiceHandler     = (*Server)(nil)
+	_ mcpserverv1alpha1connect.McpServerServiceHandler   = (*Server)(nil)
 )
 
 // caller is an authorised request in one org.

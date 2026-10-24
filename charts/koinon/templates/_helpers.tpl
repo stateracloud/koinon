@@ -208,6 +208,11 @@ koinon-api's login settings (plan items A1, A2), as KOINON_* environment variabl
 Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environment.
 */}}
 {{- define "koinon.apiEnv" -}}
+{{- if eq .Values.gateway.mode "standalone" }}
+# Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
+- name: KOINON_GATEWAY_MCP_URL
+  value: {{ printf "http://%s:%d/mcp" (include "koinon.gatewayHost" .) (int .Values.gateway.standalone.port) | quote }}
+{{- end }}
 - name: KOINON_KEK_ACTIVE_PERIOD
   value: {{ .Values.secrets.kek.activePeriod | quote }}
 {{- with include "koinon.publicUrl" . }}
@@ -369,10 +374,13 @@ has started.
     optional: true
 {{- end }}
 
-{{/* Platform-level allowlist of internal provider hosts (SSRF policy, internal/catalog/urlpolicy.go). */}}
+{{/* Platform-level allowlist of internal hosts that providers and MCP servers may name (SSRF policy,
+internal/catalog/urlpolicy.go). providers.allowedInternalHosts is the deprecated name of
+egress.allowedInternalHosts; both are joined. */}}
 {{- define "koinon.providerEnv" -}}
-{{- with .Values.providers.allowedInternalHosts }}
-- name: KOINON_PROVIDER_ALLOWED_HOSTS
+{{- $hosts := concat (.Values.egress.allowedInternalHosts | default list) (.Values.providers.allowedInternalHosts | default list) | uniq }}
+{{- with $hosts }}
+- name: KOINON_EGRESS_ALLOWED_HOSTS
   value: {{ join "," . | quote }}
 {{- end }}
 {{- end }}

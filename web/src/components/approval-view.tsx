@@ -5,6 +5,7 @@ import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connec
 import { useQueryClient } from '@tanstack/react-query'
 import { ApprovalCard } from '@/components/approval-card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { TicketService } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
 import { isApprover } from '@/lib/approvals'
@@ -20,6 +21,7 @@ export function ApprovalView({ approvalId, showPermalink }: { approvalId: string
   const { org } = useOrg()
   const orgId = org.orgId
   const queryClient = useQueryClient()
+  const who = useQuery(AuthService.method.whoAmI, {})
   const get = useQuery(ApprovalService.method.getApproval, { orgId, approvalId })
   // The diff against the base branch: Koinon reads the current versions from
   // GitHub server-side; the browser never fetches file contents itself.
@@ -57,6 +59,7 @@ export function ApprovalView({ approvalId, showPermalink }: { approvalId: string
   return (
     <ApprovalCard
       approval={a}
+      currentUserId={who.data?.user?.id}
       canDecide={a.canDecide && isApprover(org.role)}
       pending={approve.isPending || deny.isPending}
       error={err && !changed ? err.rawMessage : undefined}

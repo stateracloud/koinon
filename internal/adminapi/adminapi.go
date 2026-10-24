@@ -37,6 +37,7 @@ import (
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/tokens"
@@ -51,6 +52,7 @@ const maxBody = 64 << 10
 type Server struct {
 	pool    *pgxpool.Pool
 	catalog *catalog.Service
+	mcp     *mcpservers.Service
 	tokens  *tokens.Service
 	prices  *prices.Service
 	budgets *budget.Service

@@ -4,6 +4,7 @@ import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
+import { AgentMcpServers } from '@/components/agent-mcp-servers'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -81,6 +82,7 @@ export function AgentPage() {
         <h2 className="mt-2 font-semibold">{draft || pendingVersion ? 'Proposed grants' : 'Approved grants'}</h2>
         {grants.length === 0 ? <p className="text-muted-foreground">None.</p> : grants.map((g, i) => <GrantSummary key={i} grant={g} connectionName={connName} />)}
       </section>
+      {isApprover(org.role) && <AgentMcpServers agentId={a.id} />}
       {(draft || pendingVersion) && a.status !== AgentStatus.ARCHIVED && (
         <section aria-label="Activation" className="grid gap-2">
           {isApprover(org.role) ? (

@@ -18,7 +18,7 @@ to a later 2.0.x is issue [#85](https://github.com/stateracloud/koinon/issues/85
 | --- | --- |
 | ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs]`, run as UID 10001 in a session working directory under `/sandbox`. agentd adds `--plugin-installs` only for an agent whose template sets `harness.pluginInstalls: true` (see [Plugins](#plugins)) |
 | Instructions | `/sandbox/.koinon/AGENTS.md`, written by koinon-agentd before every harness start from the run's agent version, and checked before every prompt. The entry script refuses to start (exit 64) when it is missing, empty or a symbolic link |
-| Session start | After `session/new` or `session/load`, agentd waits for the command `koinon:koinon-ready`, then selects the model with `session/set_config_option` (`configId` `model`, value `koinon/<model>`) |
+| Session start | After `session/new` or `session/load`, agentd waits for the command `koinon:github_koinon-ready`, then selects the model with `session/set_config_option` (`configId` `model`, value `koinon/<model>`) |
 | Resume mode | `session/load` (replays history). OpenCode also advertises `session/resume`; Koinon does not rely on it |
 | Model endpoint | `--model-base-url` (agentgateway's OpenAI-compatible base, ending in `/v1`) and `--model` (the gateway's model name); key from `$OPENAI_API_KEY` |
 | MCP | `--mcp-url` (agentgateway's MCP route), server `koinon` in OpenCode's own config, `Authorization: Bearer <key>`; tools reach the model one by one as `koinon_<tool>` (`codemode: false`) |
@@ -86,7 +86,7 @@ turn for them (`packages/core/src/mcp/index.ts`: "Initial connections stay async
 has no MCP status notification. It does turn MCP prompts into commands named
 `<server>:<prompt>` (`packages/core/src/plugin/command.ts`) and announces commands with
 `available_commands_update` (`packages/cli/src/acp/sessions.ts`). Koinon's MCP server publishes
-one prompt, `koinon-ready`, which agentgateway admits for every key, so `koinon:koinon-ready`
+one prompt, `koinon-ready`, which agentgateway admits for every key, so `koinon:github_koinon-ready`
 appears once the server is connected. agentd waits for it (bounded; a timeout fails the run),
 then waits one more second: OpenCode registers the server's tools after a 100 ms debounce
 (`packages/core/src/tool/mcp.ts`), separately from the prompt path.

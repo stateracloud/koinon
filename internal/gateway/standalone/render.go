@@ -88,6 +88,9 @@ const (
 	// database the zero budget answers (429); without one, this rule does.
 	probeRule = `apiKey.name != "` + gateway.ReloadProbeKeyName + `"`
 
+	// placeholderTarget is added next to a lone org target (see build).
+	placeholderTarget = "koinon-placeholder"
+
 	header = "# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.\n" +
 		"# Keys appear only as hashes; key material lives in Kubernetes Secrets.\n"
 )
@@ -355,8 +358,14 @@ type fileSource struct {
 }
 
 type mcpSection struct {
-	Policies mcpPolicies `yaml:"policies"`
-	Targets  []mcpTarget `yaml:"targets"`
+	// FailureMode is failOpen: a target that cannot be reached is skipped, so one broken server does
+	// not break every agent's session (ADR 0057).
+	FailureMode string `yaml:"failureMode"`
+	// PrefixMode is always: a tool is named <target>_<tool> whatever number of targets a key can
+	// see, so an agent's tool names never change when an org adds a server (ADR 0057).
+	PrefixMode string      `yaml:"prefixMode"`
+	Policies   mcpPolicies `yaml:"policies"`
+	Targets    []mcpTarget `yaml:"targets"`
 }
 
 type mcpPolicies struct {
@@ -372,6 +381,9 @@ type transformations struct {
 type headerTransform struct {
 	// Set replaces a header, so a client cannot supply its own value.
 	Set map[string]string `yaml:"set"`
+	// Remove drops headers a client sent, before any target policy runs: a client-supplied copy of
+	// a credential header would otherwise win over the injected one.
+	Remove []string `yaml:"remove,omitempty"`
 }
 
 type mcpAuthorization struct {
@@ -379,12 +391,36 @@ type mcpAuthorization struct {
 }
 
 type mcpTarget struct {
-	Name string      `yaml:"name"`
-	MCP  mcpEndpoint `yaml:"mcp"`
+	Name string `yaml:"name"`
+	// Condition hides the target from keys it returns false for: the target is not contacted for
+	// them (agentgateway v1.6.0 mcp/README.md, target conditions).
+	Condition string          `yaml:"condition,omitempty"`
+	MCP       *mcpEndpoint    `yaml:"mcp,omitempty"`
+	SSE       *mcpEndpoint    `yaml:"sse,omitempty"`
+	Policies  *targetPolicies `yaml:"policies,omitempty"`
 }
 
 type mcpEndpoint struct {
 	Host string `yaml:"host"`
+}
+
+type targetPolicies struct {
+	BackendAuth backendAuth `yaml:"backendAuth"`
+}
+
+// backendAuth injects a static credential read from a file when the config loads (agentgateway
+// v1.6.0 http/auth BackendAuthKind key; the key is a file source like llm params.apiKey).
+type backendAuth struct {
+	Credentials []backendCredential `yaml:"credentials"`
+}
+
+type backendCredential struct {
+	Key      backendKey  `yaml:"key"`
+	Location keyLocation `yaml:"location"`
+}
+
+type backendKey struct {
+	File string `yaml:"file"`
 }
 
 func build(s gateway.State, o Options) document {
@@ -517,18 +553,42 @@ func build(s gateway.State, o Options) document {
 
 	if len(s.MCP) > 0 {
 		doc.MCP = &mcpSection{
+			FailureMode: "failOpen",
+			PrefixMode:  "always",
 			Policies: mcpPolicies{
 				APIKey:           keyPolicy(keys, nil, nil),
 				MCPAuthorization: mcpAuthorization{Rules: toolRules(s.Tools)},
 				// Targets learn which agent calls from this header (gateway.AgentHeader);
 				// set overwrites whatever the client sent.
-				Transformations: transformations{Request: headerTransform{Set: map[string]string{
-					strings.ToLower(gateway.AgentHeader): "apiKey.agent",
-				}}},
+				Transformations: transformations{Request: headerTransform{
+					Set:    map[string]string{strings.ToLower(gateway.AgentHeader): "apiKey.agent"},
+					Remove: credentialHeaders(s.MCP),
+				}},
 			},
 		}
-		for _, t := range s.MCP {
-			doc.MCP.Targets = append(doc.MCP.Targets, mcpTarget{Name: t.Name, MCP: mcpEndpoint{Host: t.URL}})
+		for _, t := range sortedTargets(s) {
+			mt := mcpTarget{Name: t.Name}
+			if t.SSE {
+				mt.SSE = &mcpEndpoint{Host: t.URL}
+			} else {
+				mt.MCP = &mcpEndpoint{Host: t.URL}
+			}
+			// agentgateway rejects a condition when only one target is configured, so a lone org
+			// target gets a placeholder partner below and its condition always applies.
+			if t.Org != "" {
+				mt.Condition = `apiKey.org == ` + strconv.Quote(t.Org)
+			}
+			if t.CredentialFile != "" {
+				mt.Policies = &targetPolicies{BackendAuth: backendAuth{Credentials: []backendCredential{{
+					Key:      backendKey{File: t.CredentialFile},
+					Location: keyLocation{Header: headerLocation{Name: t.CredentialHeader, Prefix: t.CredentialPrefix}},
+				}}}}
+			}
+			doc.MCP.Targets = append(doc.MCP.Targets, mt)
+		}
+		if len(doc.MCP.Targets) == 1 && doc.MCP.Targets[0].Condition != "" {
+			// Never contacted: its condition is false for every key.
+			doc.MCP.Targets = append(doc.MCP.Targets, mcpTarget{Name: placeholderTarget, Condition: "false", MCP: &mcpEndpoint{Host: "http://127.0.0.1:9/mcp"}})
 		}
 	}
 	return doc
@@ -560,8 +620,12 @@ func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit, al
 	for _, k := range keys {
 		ak := apiKey{KeyHash: k.Hash, Metadata: keyMetadata{Name: k.ID, Agent: k.Agent.String(), Org: k.Agent.Org}}
 		if allowed != nil {
-			// An org without served models gets the empty list: it can request nothing.
+			// An org without served models gets the empty list: it can request nothing. Koinon's own
+			// MCP keys (the prober's and the executor's) request no model.
 			names := append([]string{}, allowed[k.Agent.Org]...)
+			if gateway.IsInternalAgent(k.Agent) {
+				names = []string{}
+			}
 			ak.AllowedModels = &names
 		}
 		if l, ok := limits[k.Agent]; ok {
@@ -600,6 +664,10 @@ func toolRules(tools map[gateway.AgentRef][]gateway.ToolGrant) []string {
 	for _, a := range agents {
 		var alts []string
 		for _, g := range tools[a] {
+			if g.All {
+				alts = append(alts, fmt.Sprintf("(mcp.tool.target == %s)", strconv.Quote(g.Target)))
+				continue
+			}
 			if len(g.Tools) == 0 {
 				continue
 			}
@@ -630,6 +698,25 @@ func formatWindow(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%ds", (d+time.Second-1)/time.Second)
 	}
+}
+
+// credentialHeaders lists the lower-cased credential headers of the targets, sorted and unique.
+func credentialHeaders(targets []gateway.MCPTarget) []string {
+	var out []string
+	for _, t := range targets {
+		if t.CredentialHeader != "" {
+			out = append(out, strings.ToLower(t.CredentialHeader))
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// sortedTargets orders MCP targets by name, so equal States render byte-identical config.
+func sortedTargets(s gateway.State) []gateway.MCPTarget {
+	out := slices.Clone(s.MCP)
+	slices.SortFunc(out, func(a, b gateway.MCPTarget) int { return strings.Compare(a.Name, b.Name) })
+	return out
 }
 
 // sortedProviders orders providers by org and name and each one's models by name, so equal

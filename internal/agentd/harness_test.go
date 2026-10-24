@@ -33,7 +33,7 @@ const (
 	resumeMarker = "[Koinon]"
 	// readyCommand is what the fake harness announces once a session is up, as OpenCode does
 	// for Koinon's MCP readiness prompt.
-	readyCommand = "koinon:koinon-ready"
+	readyCommand = "koinon:github_koinon-ready"
 )
 
 // harness is a scripted ACP agent standing in for a flavor's harness behind exec. Each exec

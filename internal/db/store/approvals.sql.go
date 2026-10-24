@@ -15,7 +15,7 @@ const cancelPendingApprovalRequestsForRun = `-- name: CancelPendingApprovalReque
 UPDATE approval_requests
 SET status = 'canceled'
 WHERE org_id = $1 AND run_id = $2 AND status = 'pending'
-RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding
 `
 
 type CancelPendingApprovalRequestsForRunParams struct {
@@ -60,6 +60,9 @@ func (q *Queries) CancelPendingApprovalRequestsForRun(ctx context.Context, arg C
 			&i.ExecutedAt,
 			&i.Error,
 			&i.DeliveredAt,
+			&i.ApprovalsRequired,
+			&i.FirstApprover,
+			&i.CallBinding,
 		); err != nil {
 			return nil, err
 		}
@@ -77,7 +80,7 @@ SET executions = executions + 1,
     execution_lease_until = now() + make_interval(secs => $1::integer)
 WHERE org_id = $2 AND id = $3 AND status = 'approved'
   AND (execution_lease_until IS NULL OR execution_lease_until < now())
-RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding
 `
 
 type ClaimApprovalExecutionParams struct {
@@ -117,6 +120,9 @@ func (q *Queries) ClaimApprovalExecution(ctx context.Context, arg ClaimApprovalE
 		&i.ExecutedAt,
 		&i.Error,
 		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
 	)
 	return i, err
 }
@@ -130,7 +136,7 @@ SET status = $1::approval_status,
     execution_lease_until = NULL
 WHERE org_id = $4 AND id = $5 AND status = 'approved' AND executions = $6
   AND $1::approval_status IN ('executed', 'failed')
-RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding
 `
 
 type CompleteApprovalExecutionParams struct {
@@ -180,33 +186,40 @@ func (q *Queries) CompleteApprovalExecution(ctx context.Context, arg CompleteApp
 		&i.ExecutedAt,
 		&i.Error,
 		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
 	)
 	return i, err
 }
 
 const createApprovalRequest = `-- name: CreateApprovalRequest :one
 INSERT INTO approval_requests (org_id, ticket_id, run_id, agent_id, connector, tool, target,
-                               args_json, args_sha256, risk, decision, status, expires_at)
+                               args_json, args_sha256, risk, decision, status, expires_at,
+                               approvals_required, call_binding)
 VALUES ($1, $2, $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13)
+        $8, $9, $10, $11, $12, $13,
+        COALESCE($14::smallint, 1), COALESCE($15::jsonb, '{}'))
 ON CONFLICT (org_id, run_id, tool, target, args_sha256) DO NOTHING
-RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding
 `
 
 type CreateApprovalRequestParams struct {
-	OrgID      pgtype.UUID
-	TicketID   pgtype.UUID
-	RunID      pgtype.UUID
-	AgentID    pgtype.UUID
-	Connector  string
-	Tool       string
-	Target     string
-	ArgsJson   string
-	ArgsSha256 string
-	Risk       []byte
-	Decision   ApprovalDecision
-	Status     ApprovalStatus
-	ExpiresAt  pgtype.Timestamptz
+	OrgID             pgtype.UUID
+	TicketID          pgtype.UUID
+	RunID             pgtype.UUID
+	AgentID           pgtype.UUID
+	Connector         string
+	Tool              string
+	Target            string
+	ArgsJson          string
+	ArgsSha256        string
+	Risk              []byte
+	Decision          ApprovalDecision
+	Status            ApprovalStatus
+	ExpiresAt         pgtype.Timestamptz
+	ApprovalsRequired pgtype.Int2
+	CallBinding       []byte
 }
 
 // No row: the same call was already recorded in this run (see
@@ -226,6 +239,8 @@ func (q *Queries) CreateApprovalRequest(ctx context.Context, arg CreateApprovalR
 		arg.Decision,
 		arg.Status,
 		arg.ExpiresAt,
+		arg.ApprovalsRequired,
+		arg.CallBinding,
 	)
 	var i ApprovalRequest
 	err := row.Scan(
@@ -254,6 +269,9 @@ func (q *Queries) CreateApprovalRequest(ctx context.Context, arg CreateApprovalR
 		&i.ExecutedAt,
 		&i.Error,
 		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
 	)
 	return i, err
 }
@@ -266,7 +284,7 @@ SET status = $1::approval_status,
     decision_note = $3
 WHERE org_id = $4 AND id = $5 AND status = 'pending'
   AND $1::approval_status IN ('approved', 'denied')
-RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding
 `
 
 type DecideApprovalRequestParams struct {
@@ -313,6 +331,9 @@ func (q *Queries) DecideApprovalRequest(ctx context.Context, arg DecideApprovalR
 		&i.ExecutedAt,
 		&i.Error,
 		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
 	)
 	return i, err
 }
@@ -321,7 +342,7 @@ const expirePendingApprovalRequests = `-- name: ExpirePendingApprovalRequests :m
 UPDATE approval_requests
 SET status = 'expired'
 WHERE org_id = $1 AND status = 'pending' AND expires_at < now()
-RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding
 `
 
 // pending -> expired once expires_at has passed (ADR 0049: 7 days).
@@ -360,6 +381,9 @@ func (q *Queries) ExpirePendingApprovalRequests(ctx context.Context, orgID pgtyp
 			&i.ExecutedAt,
 			&i.Error,
 			&i.DeliveredAt,
+			&i.ApprovalsRequired,
+			&i.FirstApprover,
+			&i.CallBinding,
 		); err != nil {
 			return nil, err
 		}
@@ -372,7 +396,7 @@ func (q *Queries) ExpirePendingApprovalRequests(ctx context.Context, orgID pgtyp
 }
 
 const getApprovalRequest = `-- name: GetApprovalRequest :one
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding FROM approval_requests
 WHERE org_id = $1 AND id = $2
 `
 
@@ -410,12 +434,15 @@ func (q *Queries) GetApprovalRequest(ctx context.Context, arg GetApprovalRequest
 		&i.ExecutedAt,
 		&i.Error,
 		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
 	)
 	return i, err
 }
 
 const getApprovalRequestByCall = `-- name: GetApprovalRequestByCall :one
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding FROM approval_requests
 WHERE org_id = $1 AND run_id = $2 AND tool = $3 AND target = $4
   AND args_sha256 = $5
 `
@@ -463,12 +490,15 @@ func (q *Queries) GetApprovalRequestByCall(ctx context.Context, arg GetApprovalR
 		&i.ExecutedAt,
 		&i.Error,
 		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
 	)
 	return i, err
 }
 
 const getApprovalRequestForAgent = `-- name: GetApprovalRequestForAgent :one
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding FROM approval_requests
 WHERE org_id = $1 AND id = $2 AND agent_id = $3
 `
 
@@ -508,6 +538,9 @@ func (q *Queries) GetApprovalRequestForAgent(ctx context.Context, arg GetApprova
 		&i.ExecutedAt,
 		&i.Error,
 		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
 	)
 	return i, err
 }
@@ -567,7 +600,7 @@ func (q *Queries) GetRunningRunForAgent(ctx context.Context, arg GetRunningRunFo
 }
 
 const listApprovalRequestsForTicket = `-- name: ListApprovalRequestsForTicket :many
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding FROM approval_requests
 WHERE org_id = $1 AND ticket_id = $2
 ORDER BY created_at, id
 `
@@ -612,6 +645,9 @@ func (q *Queries) ListApprovalRequestsForTicket(ctx context.Context, arg ListApp
 			&i.ExecutedAt,
 			&i.Error,
 			&i.DeliveredAt,
+			&i.ApprovalsRequired,
+			&i.FirstApprover,
+			&i.CallBinding,
 		); err != nil {
 			return nil, err
 		}
@@ -624,7 +660,7 @@ func (q *Queries) ListApprovalRequestsForTicket(ctx context.Context, arg ListApp
 }
 
 const listExecutableApprovalRequests = `-- name: ListExecutableApprovalRequests :many
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding FROM approval_requests
 WHERE org_id = $1 AND status = 'approved'
   AND (execution_lease_until IS NULL OR execution_lease_until < now())
 ORDER BY updated_at, id
@@ -673,6 +709,9 @@ func (q *Queries) ListExecutableApprovalRequests(ctx context.Context, arg ListEx
 			&i.ExecutedAt,
 			&i.Error,
 			&i.DeliveredAt,
+			&i.ApprovalsRequired,
+			&i.FirstApprover,
+			&i.CallBinding,
 		); err != nil {
 			return nil, err
 		}
@@ -685,7 +724,7 @@ func (q *Queries) ListExecutableApprovalRequests(ctx context.Context, arg ListEx
 }
 
 const listPendingApprovalRequests = `-- name: ListPendingApprovalRequests :many
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding FROM approval_requests
 WHERE org_id = $1 AND status = 'pending'
 ORDER BY created_at, id
 `
@@ -727,6 +766,9 @@ func (q *Queries) ListPendingApprovalRequests(ctx context.Context, orgID pgtype.
 			&i.ExecutedAt,
 			&i.Error,
 			&i.DeliveredAt,
+			&i.ApprovalsRequired,
+			&i.FirstApprover,
+			&i.CallBinding,
 		); err != nil {
 			return nil, err
 		}
@@ -739,7 +781,7 @@ func (q *Queries) ListPendingApprovalRequests(ctx context.Context, orgID pgtype.
 }
 
 const listPendingApprovalRequestsOfFinishedRuns = `-- name: ListPendingApprovalRequestsOfFinishedRuns :many
-SELECT a.org_id, a.id, a.ticket_id, a.run_id, a.agent_id, a.connector, a.tool, a.target, a.args_json, a.args_sha256, a.risk, a.decision, a.status, a.decided_by, a.decided_at, a.decision_note, a.result, a.expires_at, a.created_at, a.updated_at, a.executions, a.execution_lease_until, a.executed_at, a.error, a.delivered_at FROM approval_requests a
+SELECT a.org_id, a.id, a.ticket_id, a.run_id, a.agent_id, a.connector, a.tool, a.target, a.args_json, a.args_sha256, a.risk, a.decision, a.status, a.decided_by, a.decided_at, a.decision_note, a.result, a.expires_at, a.created_at, a.updated_at, a.executions, a.execution_lease_until, a.executed_at, a.error, a.delivered_at, a.approvals_required, a.first_approver, a.call_binding FROM approval_requests a
 JOIN runs r ON r.org_id = a.org_id AND r.id = a.run_id
 WHERE a.org_id = $1 AND a.status = 'pending'
   AND r.state IN ('succeeded', 'failed', 'canceled')
@@ -781,6 +823,9 @@ func (q *Queries) ListPendingApprovalRequestsOfFinishedRuns(ctx context.Context,
 			&i.ExecutedAt,
 			&i.Error,
 			&i.DeliveredAt,
+			&i.ApprovalsRequired,
+			&i.FirstApprover,
+			&i.CallBinding,
 		); err != nil {
 			return nil, err
 		}
@@ -793,7 +838,7 @@ func (q *Queries) ListPendingApprovalRequestsOfFinishedRuns(ctx context.Context,
 }
 
 const listUndeliveredApprovalRequestsForRun = `-- name: ListUndeliveredApprovalRequestsForRun :many
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding FROM approval_requests
 WHERE org_id = $1 AND run_id = $2 AND delivered_at IS NULL
 ORDER BY created_at, id
 `
@@ -839,6 +884,9 @@ func (q *Queries) ListUndeliveredApprovalRequestsForRun(ctx context.Context, arg
 			&i.ExecutedAt,
 			&i.Error,
 			&i.DeliveredAt,
+			&i.ApprovalsRequired,
+			&i.FirstApprover,
+			&i.CallBinding,
 		); err != nil {
 			return nil, err
 		}
@@ -851,7 +899,7 @@ func (q *Queries) ListUndeliveredApprovalRequestsForRun(ctx context.Context, arg
 }
 
 const lockApprovalRequest = `-- name: LockApprovalRequest :one
-SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at FROM approval_requests
+SELECT org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding FROM approval_requests
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -891,6 +939,9 @@ func (q *Queries) LockApprovalRequest(ctx context.Context, arg LockApprovalReque
 		&i.ExecutedAt,
 		&i.Error,
 		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
 	)
 	return i, err
 }
@@ -914,4 +965,103 @@ func (q *Queries) MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApp
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const raiseApprovalsRequired = `-- name: RaiseApprovalsRequired :one
+UPDATE approval_requests
+SET approvals_required = 2
+WHERE org_id = $1 AND id = $2 AND status = 'pending' AND approvals_required < 2
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding
+`
+
+type RaiseApprovalsRequiredParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// A tool turned two-approver on after the request was recorded: the pending request needs two too.
+func (q *Queries) RaiseApprovalsRequired(ctx context.Context, arg RaiseApprovalsRequiredParams) (ApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, raiseApprovalsRequired, arg.OrgID, arg.ID)
+	var i ApprovalRequest
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.TicketID,
+		&i.RunID,
+		&i.AgentID,
+		&i.Connector,
+		&i.Tool,
+		&i.Target,
+		&i.ArgsJson,
+		&i.ArgsSha256,
+		&i.Risk,
+		&i.Decision,
+		&i.Status,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.Result,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
+	)
+	return i, err
+}
+
+const setApprovalFirstApprover = `-- name: SetApprovalFirstApprover :one
+UPDATE approval_requests
+SET first_approver = $1::uuid
+WHERE org_id = $2 AND id = $3 AND status = 'pending' AND first_approver IS NULL AND approvals_required = 2
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding
+`
+
+type SetApprovalFirstApproverParams struct {
+	Approver pgtype.UUID
+	OrgID    pgtype.UUID
+	ID       pgtype.UUID
+}
+
+// The first of two approvals: remembered, the request stays pending.
+func (q *Queries) SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, setApprovalFirstApprover, arg.Approver, arg.OrgID, arg.ID)
+	var i ApprovalRequest
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.TicketID,
+		&i.RunID,
+		&i.AgentID,
+		&i.Connector,
+		&i.Tool,
+		&i.Target,
+		&i.ArgsJson,
+		&i.ArgsSha256,
+		&i.Risk,
+		&i.Decision,
+		&i.Status,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.Result,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
+	)
+	return i, err
 }

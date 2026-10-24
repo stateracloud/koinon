@@ -36,8 +36,8 @@ one image).
 | `session/resume` advertised | yes | yes | no |
 | Asks permission for | paths outside the session directory | every file write or patch | nothing |
 | Unknown session on load | `session not found` | `-32603` `not_found` | `-32602` `Unknown sessionId` |
-| MCP readiness | `koinon:koinon-ready` command, waited for by agentd | none | none |
-| MCP tool names | `koinon_<tool>` | `mcp__koinon__<tool>` | `mcp__koinon__<tool>` (direct exposure) |
+| MCP readiness | `koinon:github_koinon-ready` command, waited for by agentd | none | none |
+| MCP tool names | `koinon_<target>_<tool>`, for example `koinon_github_create_pull_request` | `mcp__koinon__<target>_<tool>` | `mcp__koinon__<target>_<tool>` (direct exposure) |
 | Config | read-only, used in place | read-only, linked into `HERMES_HOME` | read-only templates rendered into the home at start |
 | Tool switches | read-only config | managed scope `/etc/hermes/config.yaml`, over the user config | rendered config |
 | Run instructions (`/sandbox/.koinon/AGENTS.md`, written by agentd) | system prompt, through the global `AGENTS.md` link in the read-only image | system prompt, through `$HERMES_HOME/SOUL.md`, linked at start; a loaded session keeps its old prompt | appended to the system prompt, through `$PI_CODING_AGENT_DIR/APPEND_SYSTEM.md`, linked at start |

@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path"
 	"strconv"
 	"strings"
@@ -52,6 +53,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
 // Retention decides what happens to an archived agent's home volume.
@@ -72,6 +74,8 @@ const (
 const (
 	DefaultIdleTimeout    = 10 * time.Minute
 	DefaultResyncInterval = 30 * time.Second
+	// DefaultMCPProbeInterval is how often each org MCP server is probed (plan item MC1).
+	DefaultMCPProbeInterval = 60 * time.Second
 )
 
 // Endpoint is a host and port.
@@ -105,6 +109,13 @@ type Config struct {
 	// agent is allowed the tools its approved grants expose. Empty serves no
 	// tools.
 	ToolServers map[string]string
+	// MCPAskURL is the base URL, as agentgateway reaches it, of koinon-api's approval-gated MCP tool
+	// proxy (internal/mcpask); an org server "wiki" has its ask-tier tools at <MCPAskURL>/wiki. Empty
+	// offers no ask-tier tools of org MCP servers.
+	MCPAskURL string
+	// MCPProbeInterval is the time between health probes of each org MCP server. Default
+	// DefaultMCPProbeInterval.
+	MCPProbeInterval time.Duration
 	// GitHub mints the installation tokens of repo.read grants (plan item C2). Nil leaves
 	// agents with such a grant unconverged, with an error.
 	GitHub GitHubTokens
@@ -152,6 +163,13 @@ type Reconciler struct {
 	lastLimit map[gateway.AgentRef]gateway.Limit
 	// appliedFile is the key file (data key) each provider ID was last applied with.
 	appliedFile map[string]string
+	// appliedMCPFile is the same for org MCP servers, by server ID.
+	appliedMCPFile map[string]string
+	// probeKeys are the prober's gateway keys, in memory only; probes are the servers the last
+	// applied state lets the prober list.
+	probeKeys map[gateway.AgentRef]gateway.IssuedKey
+	probes    []mcpProbe
+	mcp       *mcpservers.Service
 }
 
 // New returns a Reconciler.
@@ -161,6 +179,9 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.IdleTimeout == 0 {
 		cfg.IdleTimeout = DefaultIdleTimeout
+	}
+	if cfg.MCPProbeInterval == 0 {
+		cfg.MCPProbeInterval = DefaultMCPProbeInterval
 	}
 	if cfg.ResyncInterval == 0 {
 		cfg.ResyncInterval = DefaultResyncInterval
@@ -184,6 +205,7 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{},
+		mcp: mcpservers.New(pool, nil, cfg.Logger),
 	}, nil
 }
 
@@ -266,6 +288,12 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		return errors.Join(append(errs, fmt.Errorf("%w: %w", errAbortPass, err))...)
 	}
 	errs = append(errs, provErrs...)
+	// The orgs' remote MCP servers (MC1), likewise.
+	mcpServed, mcpErrs, err := r.loadMCP(ctx, orgs)
+	if err != nil {
+		return errors.Join(append(errs, fmt.Errorf("%w: %w", errAbortPass, err))...)
+	}
+	errs = append(errs, mcpErrs...)
 
 	// One gateway state for every agent: keys of archived agents are revoked by omission.
 	state := gateway.State{Keys: keys, Providers: served.providers, MCP: r.mcpTargets(), Tools: tools}
@@ -299,19 +327,29 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	// One provider's new key file still travelling to the gateway pod never holds back the others:
 	// that provider keeps serving with its previous file, or is left out until the file has arrived.
 	var written []string
-	if len(served.files) > 0 {
+	files := map[string][]byte{}
+	maps.Copy(files, served.files)
+	maps.Copy(files, mcpServed.files)
+	if len(files) > 0 {
 		var err error
-		if written, err = r.cfg.ProviderKeys.Put(ctx, served.files); err != nil {
+		if written, err = r.cfg.ProviderKeys.Put(ctx, files); err != nil {
 			return errors.Join(append(errs, fmt.Errorf("reconciler: deliver provider keys: %w", err))...)
 		}
 	}
-	keep := r.settleProviders(&state, served, r.keysSettling(written, now))
+	settling := r.keysSettling(written, now)
+	keep := r.settleProviders(&state, served, settling)
+	maps.Copy(keep, r.settleMCP(&mcpServed, settling))
+	probes, err := r.applyMCP(ctx, &state, &mcpServed, items)
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
 	if _, err := r.gw.Apply(ctx, state); err != nil {
 		errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
 		return errors.Join(errs...)
 	}
 	r.recordApplied(served, state)
-	if r.cfg.ProviderKeys != nil && len(provErrs) == 0 {
+	r.recordAppliedMCP(mcpServed, probes)
+	if r.cfg.ProviderKeys != nil && len(provErrs) == 0 && len(mcpErrs) == 0 {
 		if err := r.cfg.ProviderKeys.Prune(ctx, keep); err != nil {
 			errs = append(errs, fmt.Errorf("reconciler: prune provider keys: %w", err))
 		}

@@ -150,7 +150,7 @@ func run() error {
 			Keys:              keyring,
 			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
 			ProviderKeyDir:    cfg.providerKeysDir,
-			URLPolicy:         catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.allowedHosts)},
+			URLPolicy:         catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)},
 			ProviderKeySettle: cfg.keySettle,
 			Flavors:           cfg.flavors(),
 			RuntimeClassName:  cfg.runtimeClass,
@@ -158,6 +158,7 @@ func run() error {
 			ResyncInterval:    cfg.resyncInterval,
 			HomeRetention:     reconciler.Retention(cfg.homeRetention),
 			ToolServers:       cfg.toolServers(),
+			MCPAskURL:         cfg.mcpAskURL,
 			// repo.read grants (plan item C2): tokens minted with the App key opened from the
 			// connection's stored secret fields.
 			GitHub: reconciler.GitHubApps{
