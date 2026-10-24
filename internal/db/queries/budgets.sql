@@ -69,8 +69,8 @@ ORDER BY created_at DESC
 LIMIT @max_rows;
 
 -- name: MarkNotificationRead :execrows
-UPDATE notifications SET read_at = now()
-WHERE org_id = @org_id AND user_id = @user_id AND id = @id AND read_at IS NULL;
+UPDATE notifications SET read_at = coalesce(read_at, now())
+WHERE org_id = @org_id AND user_id = @user_id AND id = @id;
 
 -- name: ListOpenRunsOfOrg :many
 -- Runs that can still be canceled, when an org-wide limit is reached.

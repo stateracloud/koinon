@@ -240,8 +240,12 @@ func (s *Server) MarkNotificationRead(ctx context.Context, req *budgetv1alpha1.M
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.q.MarkNotificationRead(ctx, store.MarkNotificationReadParams{OrgID: c.org, UserID: c.actor(), ID: id}); err != nil {
+	n, err := s.q.MarkNotificationRead(ctx, store.MarkNotificationReadParams{OrgID: c.org, UserID: c.actor(), ID: id})
+	if err != nil {
 		return nil, s.dbError(err, "notification")
+	}
+	if n == 0 {
+		return nil, connect.NewError(connect.CodeNotFound, "notification not found")
 	}
 	return &budgetv1alpha1.MarkNotificationReadResponse{}, nil
 }

@@ -315,8 +315,8 @@ func (q *Queries) ListPlatformAdminIDs(ctx context.Context) ([]pgtype.UUID, erro
 }
 
 const markNotificationRead = `-- name: MarkNotificationRead :execrows
-UPDATE notifications SET read_at = now()
-WHERE org_id = $1 AND user_id = $2 AND id = $3 AND read_at IS NULL
+UPDATE notifications SET read_at = coalesce(read_at, now())
+WHERE org_id = $1 AND user_id = $2 AND id = $3
 `
 
 type MarkNotificationReadParams struct {
