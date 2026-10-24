@@ -291,6 +291,8 @@ type Querier interface {
 	// Price entries whose recomputed cost differs from the gateway's by more than 1% since
 	// @since, with how often and by how much.
 	ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error)
+	// Every model with rates, across orgs, to log rates the stricter validation would refuse.
+	ListModelRatesForAudit(ctx context.Context) ([]ListModelRatesForAuditRow, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
 	// Runs that can still be canceled, when an org-wide limit is reached.

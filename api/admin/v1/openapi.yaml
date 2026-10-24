@@ -666,6 +666,7 @@ components:
         ratio: {type: string, description: "UTF-8 bytes per token, used to estimate usage a provider did not report."}
         toolOverheadTokens: {type: integer}
         hiddenThinking: {type: boolean}
+        maxOutput: {type: integer, description: "Largest output in tokens; an aborted response without usage settles at the request max_tokens, or at this when it was not logged."}
         source:
           type: object
           required: [url, accessed]
@@ -688,6 +689,7 @@ components:
         ratio: {type: string}
         toolOverheadTokens: {type: integer}
         hiddenThinking: {type: boolean}
+        maxOutput: {type: integer, description: "Largest output in tokens; an aborted response without usage settles at the request max_tokens, or at this when it was not logged."}
         validFrom: {type: string, format: date-time, description: "Default now."}
     PriceVersion:
       type: object

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -25,6 +26,15 @@ type Ingester struct {
 	// Notifier delivers budget alerts; nil stores in-app notifications. This is the seam where
 	// email attaches later.
 	Notifier budget.Notifier
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
+}
+
+func (in *Ingester) now() time.Time {
+	if in.Now != nil {
+		return in.Now()
+	}
+	return time.Now()
 }
 
 // Result counts what Ingest did with its entries.
@@ -154,11 +164,24 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 	if err := budget.Alert(ctx, q, in.Notifier, st, delta); err != nil {
 		return err
 	}
-	reached := st.Reached()
-	if len(reached) == 0 {
+	// A limit cancels runs only in its current window: a late entry from last month reaching
+	// last month's cap must not cancel this month's runs.
+	var l budget.Level
+	found := false
+	for _, r := range st.Reached() {
+		current := budget.MonthStart(in.now())
+		if r.Name == budget.AgentDaily {
+			current = budget.DayStart(in.now())
+		}
+		if !r.WindowStart.Equal(current) {
+			continue
+		}
+		l, found = r, true
+		break
+	}
+	if !found {
 		return nil
 	}
-	l := reached[0]
 	msg := fmt.Sprintf("%s reached ($%s of $%s since %s)", limitTitle(l.Name), l.Spent, l.Limit, l.WindowStart.Format("2006-01-02 15:04 MST"))
 	extra := map[string]any{
 		"limit": l.Name, "spend_limit_usd": l.Limit.String(), "spent_usd": l.Spent.String(), "window_start": l.WindowStart.Format("2006-01-02T15:04:05Z"),

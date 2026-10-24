@@ -181,10 +181,15 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 			if row.InputRate.Valid {
 				pm.Rates = &pricing.Wire{Input: row.InputRate.String, Output: row.OutputRate.String, CacheRead: row.CacheReadRate.String}
 			}
+			var badPrice *prices.BadPriceError
 			switch res, err := prices.Resolve(ctx, r.q, org.ID, pm, r.cfg.Now()); {
 			case err == nil:
 				gp := res.Price.Gateway()
 				m.Price = &gp
+			case errors.As(err, &badPrice):
+				// One org's unusable price skips that model, reported, and stops nothing else.
+				errs = append(errs, fmt.Errorf("model %s/%s not served: %w", org.Slug, row.ModelName, err))
+				continue
 			case !errors.Is(err, prices.ErrUnpriced):
 				return out, errs, fmt.Errorf("reconciler: price of model %s/%s: %w", org.Slug, row.ModelName, err)
 			}

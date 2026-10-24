@@ -61,6 +61,7 @@ func (r Resolution) EstimateParams() estimate.Params {
 	}
 	return estimate.Params{
 		Tokenizer: r.Entry.Tokenizer, Ratio: ratio, ToolOverheadTokens: r.Entry.ToolOverheadTokens, HiddenThinking: r.Entry.HiddenThinking,
+		MaxOutput: int64(r.Entry.MaxOutput),
 	}
 }
 
@@ -82,18 +83,49 @@ func Lookup(ctx context.Context, q *store.Queries, org pgtype.UUID, name string)
 	return m, nil
 }
 
-// Resolve finds m's price at time at.
+// BadPriceError means a stored price cannot be used (a rate that does not parse, an override
+// that no longer validates). It concerns one org's prices only: callers record the request as
+// unpriced or skip the model, and never stop work for other orgs.
+type BadPriceError struct{ Err error }
+
+func (e *BadPriceError) Error() string { return "prices: unusable stored price: " + e.Err.Error() }
+func (e *BadPriceError) Unwrap() error { return e.Err }
+
+func bad(err error) error { return &BadPriceError{Err: err} }
+
+// Resolve finds m's price at time at. A stored price that cannot be used is a *BadPriceError.
+//
+// TODO(W4, PV2 UI): fold the per-model rates of PV1 into dated org price entries and remove this
+// layer. Until then the model's rates win for input, output and cache read, and everything else
+// (cache write, reasoning, estimation settings) comes from the entry that would match otherwise.
 func Resolve(ctx context.Context, q *store.Queries, org pgtype.UUID, m Model, at time.Time) (Resolution, error) {
-	if m.Rates != nil {
-		p, err := pricing.Spec{Prices: *m.Rates}.Parse()
-		if err != nil {
-			return Resolution{}, fmt.Errorf("prices: rates of model %s: %w", m.Name, err)
-		}
-		return Resolution{
-			Ref: fmt.Sprintf("model#%s@%d", m.ID, m.UpdatedAt.Unix()), Source: SourceModel, Price: p,
-			Entry: pricing.Entry{ID: "model-" + m.ID, Provider: m.ProviderType, Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", ValidFrom: m.UpdatedAt.UTC().Format(time.DateOnly)},
-		}, nil
+	matched, err := resolveEntries(ctx, q, org, m, at)
+	if err != nil && (m.Rates == nil || !errors.Is(err, ErrUnpriced)) {
+		return Resolution{}, err
 	}
+	if m.Rates == nil {
+		return matched, nil
+	}
+	p, perr := pricing.Spec{Prices: *m.Rates}.Parse()
+	if perr != nil {
+		return Resolution{}, bad(fmt.Errorf("rates of model %s: %w", m.Name, perr))
+	}
+	res := Resolution{
+		Ref: fmt.Sprintf("model#%s@%d", m.ID, m.UpdatedAt.Unix()), Source: SourceModel, Price: p,
+		Entry: pricing.Entry{ID: "model-" + m.ID, Provider: m.ProviderType, Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", ValidFrom: m.UpdatedAt.UTC().Format(time.DateOnly)},
+	}
+	if err == nil {
+		// The model's rates replace the entry's base rates for input, output and cache read; the
+		// entry still says what a cache write and reasoning cost and how to estimate.
+		res.Entry = matched.Entry
+		res.Price.Base.CacheWrite, res.Price.Base.Reasoning = matched.Price.Base.CacheWrite, matched.Price.Base.Reasoning
+		res.ListVersion = matched.ListVersion
+	}
+	return res, nil
+}
+
+// resolveEntries finds the org's or the default list's entry for m.
+func resolveEntries(ctx context.Context, q *store.Queries, org pgtype.UUID, m Model, at time.Time) (Resolution, error) {
 	rows, err := q.ListPriceOverrides(ctx, org)
 	if err != nil {
 		return Resolution{}, err
@@ -105,23 +137,21 @@ func Resolve(ctx context.Context, q *store.Queries, org pgtype.UUID, m Model, at
 			t = now
 		}
 		var rs []pricing.Resolved
-		byID := map[string]store.PriceOverride{}
 		for _, row := range rows {
 			if row.RetiredAt.Valid && !row.RetiredAt.Time.After(t) {
 				continue
 			}
 			var e pricing.Entry
 			if err := json.Unmarshal(row.Entry, &e); err != nil {
-				return Resolution{}, fmt.Errorf("prices: price override %s: %w", row.ID, err)
+				return Resolution{}, bad(fmt.Errorf("price override %s: %w", row.ID, err))
 			}
 			e.ID = row.ID.String()
 			r, err := e.Resolve(true)
 			if err != nil {
-				return Resolution{}, err
+				return Resolution{}, bad(err)
 			}
 			r.ValidFrom = row.ValidFrom.Time
 			rs = append(rs, r)
-			byID[e.ID] = row
 		}
 		if r, ok := pricing.Select(rs, m.ProviderType, m.Name, t); ok {
 			return Resolution{Ref: "org#" + r.Entry.ID, Source: SourceOrg, Entry: r.Entry, Price: r.Price, Fallback: fallback}, nil

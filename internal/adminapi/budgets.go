@@ -90,6 +90,9 @@ func (s *Server) SetPrice(ctx context.Context, req SetPriceRequestObject) (SetPr
 	if b.HiddenThinking != nil {
 		e["hiddenThinking"] = *b.HiddenThinking
 	}
+	if b.MaxOutput != nil {
+		e["maxOutput"] = *b.MaxOutput
+	}
 	if err := via(e, &in.Entry); err != nil {
 		st, er := s.problem(&prices.InvalidError{Msg: "invalid price: " + err.Error()})
 		return SetPricedefaultJSONResponse{Body: er, StatusCode: st}, nil

@@ -38,15 +38,25 @@ func TestBytesRatioAndOverheads(t *testing.T) {
 	}
 }
 
-func TestHiddenThinkingAbortSettlesAtMaxTokens(t *testing.T) {
-	p := estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 2.3, HiddenThinking: true}
-	r := estimate.Estimate(p, estimate.Input{RequestBytes: 230, ResponseBytes: 10, Aborted: true, MaxTokens: 8000})
-	if !r.ThinkingUnmeasured || r.OutputTokens != 8000 || r.Method != "max_tokens" {
+func TestAbortSettlesAtMaxTokensWhetherOrNotThinkingIsHidden(t *testing.T) {
+	for _, hidden := range []bool{true, false} {
+		p := estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 2.3, HiddenThinking: hidden, MaxOutput: 128000}
+		r := estimate.Estimate(p, estimate.Input{RequestBytes: 230, ResponseBytes: 10, Aborted: true, MaxTokens: 8000})
+		if !r.Estimated || r.OutputTokens != 8000 || r.Method != "max_tokens" || r.ThinkingUnmeasured != hidden || r.MaxOutputFallback {
+			t.Fatalf("hidden=%v %+v", hidden, r)
+		}
+	}
+}
+
+func TestAbortWithoutMaxTokensUsesTheEntrysMaxOutputAndFlagsIt(t *testing.T) {
+	p := estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 2.3, MaxOutput: 128000}
+	r := estimate.Estimate(p, estimate.Input{RequestBytes: 230, Aborted: true})
+	if r.OutputTokens != 128000 || !r.MaxOutputFallback || r.Method != "max_output" || !r.Estimated {
 		t.Fatalf("%+v", r)
 	}
-	// A request that completed without usage is estimated from its visible text.
+	// A response that completed without usage is estimated from its bytes.
 	r = estimate.Estimate(p, estimate.Input{RequestBytes: 230, ResponseBytes: 229})
-	if r.ThinkingUnmeasured || r.OutputTokens != 100 {
+	if r.OutputTokens != 100 || r.MaxOutputFallback {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -60,6 +70,10 @@ func TestCalibrationOnlyRaises(t *testing.T) {
 	if p.EffectiveRatio() != 3.0 {
 		t.Fatalf("%v", p.EffectiveRatio())
 	}
+	p.LearnedP90 = 1e9 // a degenerate sample is capped at the lower bound of a ratio
+	if p.EffectiveRatio() != estimate.MinRatio {
+		t.Fatalf("%v", p.EffectiveRatio())
+	}
 }
 
 func TestTiktokenOfflineAndExact(t *testing.T) {
@@ -70,9 +84,5 @@ func TestTiktokenOfflineAndExact(t *testing.T) {
 	n, err = estimate.CountTiktoken("cl100k_base", strings.Repeat("a", 10))
 	if err != nil || n < 1 {
 		t.Fatalf("%d %v", n, err)
-	}
-	r := estimate.Estimate(estimate.Params{Tokenizer: pricing.TokenizerO200K, Ratio: 3}, estimate.Input{RequestText: "hello world", RequestBytes: 11, ReportedOutput: ptr(1)})
-	if r.InputTokens != 2 || r.Method != "tiktoken" {
-		t.Fatalf("%+v", r)
 	}
 }

@@ -32,6 +32,10 @@ import (
 // ADR 0041 grows by that lag. The window is 24 hours even when the monthly cap binds: the
 // amount is recomputed every pass, and a new UTC day starts a new counter.
 //
+// Every key of an org is pushed the same org remaining, so while ingest is stalled N agents can
+// spend N times it before the gateway stops them; the ledger cancels the org's runs once it records
+// the spend. Old counters are not deleted (agentgateway has no API for it); see ADR 0056.
+//
 // It returns nil for an agent without an active version and no limit at all.
 func AgentLimit(ctx context.Context, q *store.Queries, agent store.Agent, now time.Time) (*gateway.Limit, error) {
 	if !agent.ActiveVersionID.Valid {

@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -94,7 +95,6 @@ var (
 	namePattern  = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
 	typePattern  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 	modelPattern = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
-	ratePattern  = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
 )
 
 // Rates are USD per million tokens as decimal strings.
@@ -231,11 +231,17 @@ func ValidateModel(name string, guard bool, r *Rates, providerType string) error
 		return invalid("the routing guard exists for %s providers only", GuardProviderType)
 	}
 	if r != nil {
-		if !ratePattern.MatchString(r.Input) || !ratePattern.MatchString(r.Output) {
-			return invalid("rates are USD per million tokens as decimals such as \"0.30\"; input and output are both required")
+		// Exactly what money.ParseRate accepts, so a stored rate can always be priced.
+		if _, err := money.ParseRate(r.Input); err != nil {
+			return invalid("input: rates are USD per million tokens as decimals with at most 6 fraction digits, such as \"0.30\"")
 		}
-		if r.CacheRead != "" && !ratePattern.MatchString(r.CacheRead) {
-			return invalid("cacheRead must be a decimal such as \"0.03\"")
+		if _, err := money.ParseRate(r.Output); err != nil {
+			return invalid("output: rates are USD per million tokens as decimals with at most 6 fraction digits, such as \"1.20\"")
+		}
+		if r.CacheRead != "" {
+			if _, err := money.ParseRate(r.CacheRead); err != nil {
+				return invalid("cacheRead must be a decimal with at most 6 fraction digits, such as \"0.03\"")
+			}
 		}
 	}
 	return nil
@@ -284,4 +290,28 @@ func (s *Service) seal(org, id pgtype.UUID, key string) ([]byte, error) {
 func newID() (pgtype.UUID, error) {
 	id, err := uuid.NewV7()
 	return pgtype.UUID{Bytes: id, Valid: true}, err
+}
+
+// AuditRates logs every stored model rate that money.ParseRate would refuse (rows from before
+// the stricter validation) and returns how many there were. Such a model is not priced and is
+// reported by the reconciler; nothing else is affected.
+func (s *Service) AuditRates(ctx context.Context) (int, error) {
+	rows, err := store.New(s.pool).ListModelRatesForAudit(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range rows {
+		for field, v := range map[string]string{"input": r.InputRate.String, "output": r.OutputRate.String, "cacheRead": r.CacheReadRate.String} {
+			if v == "" {
+				continue
+			}
+			if _, err := money.ParseRate(v); err != nil {
+				s.log.Warn("model has a rate that cannot be priced; it is not served until fixed",
+					"org", r.OrgID.String(), "model", r.Name, "field", field, "value", v)
+				n++
+			}
+		}
+	}
+	return n, nil
 }

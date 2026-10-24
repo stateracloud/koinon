@@ -52,10 +52,12 @@ func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID
 	if e.CostUSD != "" {
 		g, err := gatewayCost(e.CostUSD)
 		if err != nil {
-			return p, err
+			// A cost that does not fit is not a reason to lose the request.
+			in.log().Warn("spend ledger: unusable gateway cost", "request", e.RequestID, "err", err)
+		} else {
+			gw = g
+			p.gatewayCost = pgtype.Text{String: g.Numeric(), Valid: true}
 		}
-		gw = g
-		p.gatewayCost = pgtype.Text{String: g.Numeric(), Valid: true}
 	}
 
 	model, err := prices.Lookup(ctx, q, org, e.Model)
@@ -63,8 +65,29 @@ func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID
 		var res prices.Resolution
 		res, err = prices.Resolve(ctx, q, org, model, e.Time)
 		if err == nil {
-			return in.priceWith(ctx, q, org, e, p, res, gw)
+			out, perr := in.priceWith(ctx, q, org, e, p, res, gw)
+			var badPrice *prices.BadPriceError
+			if perr != nil && !errors.As(perr, &badPrice) {
+				return out, perr
+			}
+			if perr == nil {
+				return out, nil
+			}
+			err = perr
 		}
+	}
+	var badPrice *prices.BadPriceError
+	if errors.As(err, &badPrice) {
+		// A stored price that cannot be used (or overflows) must not stop the batch or return
+		// 503: record the request unpriced and flagged with the error. The gateway's cost, if
+		// any, stands in.
+		in.log().Error("spend ledger: request not priced", "agent", e.Agent.String(), "model", e.Model, "request", e.RequestID, "err", err)
+		p.flagged, p.priced, p.ref = true, p.gatewayCost.Valid, pgtype.Text{}
+		if p.gatewayCost.Valid {
+			p.cost = gw
+		}
+		p.estimate, _ = json.Marshal(map[string]any{"price_error": err.Error()})
+		return p, nil
 	}
 	if !errors.Is(err, prices.ErrUnpriced) {
 		return p, err
@@ -106,14 +129,14 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		p.inTokens, p.outTokens, p.estimated = r.InputTokens, r.OutputTokens, true
 		meta["estimate"] = map[string]any{
 			"method": r.Method, "input_reported": r.InputReported, "output_reported": r.OutputReported,
-			"thinking_unmeasured": r.ThinkingUnmeasured, "ratio_static": r.RatioStatic, "ratio_effective": r.RatioEffective,
+			"thinking_unmeasured": r.ThinkingUnmeasured, "max_output_fallback": r.MaxOutputFallback, "ratio_static": r.RatioStatic, "ratio_effective": r.RatioEffective,
 			"learned_p90_tokens_per_byte": r.LearnedP90TokensPerByte, "overhead_tokens": r.OverheadTokens,
 		}
 	}
 	u := pricing.Split(p.inTokens, p.cacheRead, p.cacheWrite, p.outTokens, p.reasoning)
 	_, cost, err := res.Price.Cost(u)
 	if err != nil {
-		return p, fmt.Errorf("price request %s: %w", e.RequestID, err)
+		return p, &prices.BadPriceError{Err: fmt.Errorf("price request %s: %w", e.RequestID, err)}
 	}
 	p.cost = cost
 	// Cost truth: our cost counts. A real (not estimated) request whose cost the gateway also

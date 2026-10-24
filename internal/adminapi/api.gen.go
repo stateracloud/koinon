@@ -203,7 +203,10 @@ type PriceEntry struct {
 
 	// Match Exactly one of glob (`*` any characters, `?` one, case-insensitive) and regex (RE2, whole name).
 	Match PriceMatch `json:"match"`
-	Note  *string    `json:"note,omitempty"`
+
+	// MaxOutput Largest output in tokens; an aborted response without usage settles at the request max_tokens, or at this when it was not logged.
+	MaxOutput *int    `json:"maxOutput,omitempty"`
+	Note      *string `json:"note,omitempty"`
 
 	// Prices USD per million tokens as decimal strings with at most 6 fraction digits. A free model needs an explicit "0".
 	Prices PriceRates `json:"prices"`
@@ -234,6 +237,9 @@ type PriceInput struct {
 
 	// Match Exactly one of glob (`*` any characters, `?` one, case-insensitive) and regex (RE2, whole name).
 	Match PriceMatch `json:"match"`
+
+	// MaxOutput Largest output in tokens; an aborted response without usage settles at the request max_tokens, or at this when it was not logged.
+	MaxOutput *int `json:"maxOutput,omitempty"`
 
 	// Name Names the price; a new version of the same name replaces it from validFrom on.
 	Name string `json:"name"`

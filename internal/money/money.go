@@ -47,6 +47,9 @@ func Parse(s string) (USD, error) {
 	if err != nil {
 		return 0, err
 	}
+	if w > math.MaxInt64/PerUSD {
+		return 0, ErrOverflow // the whole part times PerUSD would not fit
+	}
 	f, err := strconv.ParseInt(frac, 10, 64)
 	if err != nil {
 		return 0, err
