@@ -310,15 +310,12 @@ func (r *runner) execute(ctx context.Context) error {
 		if err != nil {
 			return r.dbErr(ctx, "load the org's models", err)
 		}
-		for _, m := range served {
-			if m.InputRate.Valid {
-				model = m.ModelName
-				break
-			}
+		if len(served) > 0 {
+			model = served[0].ModelName
 		}
 	}
 	if model == "" {
-		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
+		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model"}
 	}
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
 	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp"})

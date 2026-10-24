@@ -207,6 +207,8 @@ type Querier interface {
 	GetOrgBudget(ctx context.Context, orgID pgtype.UUID) (GetOrgBudgetRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
+	// The part of an org's spend since @since that came from estimated usage.
+	GetOrgEstimatedSpendSince(ctx context.Context, arg GetOrgEstimatedSpendSinceParams) (string, error)
 	// An org's recorded USD spend since @since (the start of the calendar month in UTC), for its
 	// monthly cap and the platform ceiling.
 	GetOrgSpendSince(ctx context.Context, arg GetOrgSpendSinceParams) (string, error)
@@ -288,11 +290,11 @@ type Querier interface {
 	ListExecutableApprovalRequests(ctx context.Context, arg ListExecutableApprovalRequestsParams) ([]ApprovalRequest, error)
 	// Parked runs whose park has expired (ADR 0049: 7 days for an approval).
 	ListExpiredParkedRuns(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
-	// Price entries whose recomputed cost differs from the gateway's by more than 1% since
-	// @since, with how often and by how much.
+	// Price entries with requests Koinon flagged since @since, with how often, why and by how
+	// much: the recomputed cost differs from the gateway's by more than 1% (gateway_diff), the
+	// provider reported no usage (usage_missing), an estimated output was capped at the entry's
+	// max_output, or the price could not be used (price_error).
 	ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error)
-	// Every model with rates, across orgs, to log rates the stricter validation would refuse.
-	ListModelRatesForAudit(ctx context.Context) ([]ListModelRatesForAuditRow, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
 	// Runs that can still be canceled, when an org-wide limit is reached.

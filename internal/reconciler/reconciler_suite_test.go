@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,7 +28,9 @@ import (
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // postgresImage is the minimum supported Postgres version (ADR 0047).
@@ -228,7 +231,16 @@ func addProvider(ctx context.Context, org, user pgtype.UUID, name, key, model st
 	})
 	Expect(err).NotTo(HaveOccurred())
 	_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{
-		ProviderID: p.ID, Name: model, Rates: &catalog.Rates{Input: "1", Output: "2"},
+		ProviderID: p.ID, Name: model,
+	})
+	Expect(err).NotTo(HaveOccurred())
+	_, err = prices.New(pool, nil).SetOverride(ctx, org, actor, prices.OverrideInput{
+		Entry: pricing.Entry{
+			ID: "price-" + strings.NewReplacer("/", "-", "_", "-").Replace(strings.ToLower(model)), Provider: "openai", Match: pricing.Match{Glob: model},
+			Spec:      pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2"}},
+			Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
+		},
+		ValidFrom: time.Now().Add(-time.Hour),
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return p

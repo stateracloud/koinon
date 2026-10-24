@@ -19,7 +19,6 @@
 //	  models: |
 //	    - name: deepseek/deepseek-v4.1-flash
 //	      guard: true
-//	      rates: {input: "0.30", output: "1.20"}
 //
 // A Secret that parses becomes a provider (with its models) or a connection with source
 // "secret": read-only through the UI and admin API, winning a name collision with a UI entry
@@ -260,6 +259,10 @@ func (i *Importer) applyProvider(ctx context.Context, org pgtype.UUID, sec *core
 	if changed {
 		i.log().Info("applied a declarative provider", "secret", sec.Name, "org", sec.Labels[LabelOrg], "provider", d.Name, "models", len(d.Models))
 		i.event(ctx, sec, corev1.EventTypeNormal, ReasonApplied, "Provider "+d.Name+" imported for org "+sec.Labels[LabelOrg])
+		for _, w := range d.Warnings {
+			i.log().Warn("declarative provider Secret has an ignored field", "secret", sec.Name, "warning", w)
+			i.event(ctx, sec, corev1.EventTypeWarning, ReasonInvalid, w)
+		}
 	}
 	return nil
 }

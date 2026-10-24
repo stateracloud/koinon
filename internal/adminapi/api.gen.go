@@ -132,7 +132,9 @@ type Model struct {
 	Name       string             `json:"name"`
 	ProviderId openapi_types.UUID `json:"providerId"`
 
-	// Rates USD per million tokens, as decimal strings.
+	// Rates Deprecated and never returned. Setting it on a request answers 400: add a price with
+	// `POST /admin/v1/prices` instead.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Rates *Rates `json:"rates,omitempty"`
 
 	// Source `secret` entries are declared by a Kubernetes Secret and read-only here.
@@ -146,7 +148,9 @@ type ModelCreate struct {
 	Name       string             `json:"name"`
 	ProviderId openapi_types.UUID `json:"providerId"`
 
-	// Rates USD per million tokens, as decimal strings.
+	// Rates Deprecated and never returned. Setting it on a request answers 400: add a price with
+	// `POST /admin/v1/prices` instead.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Rates *Rates `json:"rates,omitempty"`
 }
 
@@ -157,11 +161,14 @@ type ModelList struct {
 
 // ModelUpdate defines model for ModelUpdate.
 type ModelUpdate struct {
-	// ClearRates Remove the rates, so the model is no longer served.
+	// ClearRates Deprecated; setting it answers 400.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	ClearRates *bool `json:"clearRates,omitempty"`
 	Guard      *bool `json:"guard,omitempty"`
 
-	// Rates USD per million tokens, as decimal strings.
+	// Rates Deprecated and never returned. Setting it on a request answers 400: add a price with
+	// `POST /admin/v1/prices` instead.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Rates *Rates `json:"rates,omitempty"`
 }
 
@@ -356,7 +363,8 @@ type ProviderUpdate struct {
 	Url    *string `json:"url,omitempty"`
 }
 
-// Rates USD per million tokens, as decimal strings.
+// Rates Deprecated and never returned. Setting it on a request answers 400: add a price with
+// `POST /admin/v1/prices` instead.
 type Rates struct {
 	CacheRead *string `json:"cacheRead,omitempty"`
 	Input     string  `json:"input"`
@@ -492,7 +500,7 @@ type ServerInterface interface {
 	// List the org's models, entered and declared.
 	// (GET /models)
 	ListModels(w http.ResponseWriter, r *http.Request)
-	// Add a model to a provider. A model without rates is not served.
+	// Add a model to a provider. Its price is an org price or a default one.
 	// (POST /models)
 	CreateModel(w http.ResponseWriter, r *http.Request)
 	// Delete a model. Declared models answer 409.
@@ -501,7 +509,7 @@ type ServerInterface interface {
 	// Get a model.
 	// (GET /models/{modelId})
 	GetModel(w http.ResponseWriter, r *http.Request, modelId ModelId)
-	// Change a model's routing guard or rates. Declared models answer 409.
+	// Change a model's routing guard. Declared models answer 409.
 	// (PATCH /models/{modelId})
 	UpdateModel(w http.ResponseWriter, r *http.Request, modelId ModelId)
 	// List the org's own prices, every version, newest first per name.
@@ -2053,7 +2061,7 @@ type StrictServerInterface interface {
 	// List the org's models, entered and declared.
 	// (GET /models)
 	ListModels(ctx context.Context, request ListModelsRequestObject) (ListModelsResponseObject, error)
-	// Add a model to a provider. A model without rates is not served.
+	// Add a model to a provider. Its price is an org price or a default one.
 	// (POST /models)
 	CreateModel(ctx context.Context, request CreateModelRequestObject) (CreateModelResponseObject, error)
 	// Delete a model. Declared models answer 409.
@@ -2062,7 +2070,7 @@ type StrictServerInterface interface {
 	// Get a model.
 	// (GET /models/{modelId})
 	GetModel(ctx context.Context, request GetModelRequestObject) (GetModelResponseObject, error)
-	// Change a model's routing guard or rates. Declared models answer 409.
+	// Change a model's routing guard. Declared models answer 409.
 	// (PATCH /models/{modelId})
 	UpdateModel(ctx context.Context, request UpdateModelRequestObject) (UpdateModelResponseObject, error)
 	// List the org's own prices, every version, newest first per name.

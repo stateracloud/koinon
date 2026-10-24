@@ -97,6 +97,8 @@ message PriceVersion {
   string created_by = 11;
   google.protobuf.Timestamp created_at = 12;
   int32 max_output = 13;
+  int32 tool_overhead_tokens = 14;
+  bool hidden_thinking = 15;
 }
 
 message ListPricesRequest {
@@ -177,6 +179,14 @@ message FlaggedPrice {
   google.protobuf.Timestamp last_seen = 4;
   string cost_usd = 5;
   string gateway_cost_usd = 6;
+  // Requests per reason; one request can have several. gateway_diff: Koinon's cost differs
+  // from the gateway's by more than 1%. usage_missing: the provider reported no usage, so the
+  // request was estimated. max_output_capped: an estimated output was capped at the price's
+  // max_output. price_error: the stored price could not be used.
+  int64 gateway_diff = 7;
+  int64 usage_missing = 8;
+  int64 max_output_capped = 9;
+  int64 price_error = 10;
 }
 
 message ListFlaggedPricesRequest {

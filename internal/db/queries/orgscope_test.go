@@ -54,7 +54,6 @@ var crossOrgQueries = map[string]string{
 	"auth.sql:DeleteStaleGroupMemberships":     "login: revokes the user's IdP-group roles in every org whose group they lost",
 	"api_tokens.sql:GetAPITokenByPrefix":       "admin API: authenticates a bearer token, which names its org only after it is looked up",
 	"connections.sql:ListConnectionsToMigrate": "startup: moves every org's connection secrets from Kubernetes Secrets into the store",
-	"catalog.sql:ListModelRatesForAudit":       "startup: logs stored model rates, in every org, that no longer validate",
 	"auth.sql:ListEffectiveMemberships":        "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
 }
 

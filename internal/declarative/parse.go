@@ -91,18 +91,17 @@ func ParseProvider(sec *corev1.Secret, version string) (catalog.DeclaredProvider
 				errs = append(errs, fmt.Errorf("%s is not a YAML list of {name, guard, rates}: %w", KeyModels, yamlErr(err)))
 			}
 			for _, e := range entries {
-				m := catalog.DeclaredModel{Name: e.Name, Guard: e.Guard}
 				if e.Rates != nil {
-					m.Rates = &catalog.Rates{Input: e.Rates.Input, Output: e.Rates.Output, CacheRead: e.Rates.CacheRead}
+					d.Warnings = append(d.Warnings, fmt.Sprintf("model %q: rates are ignored; per-model rates were replaced by org prices (add one on the Prices page)", e.Name))
 				}
-				d.Models = append(d.Models, m)
+				d.Models = append(d.Models, catalog.DeclaredModel{Name: e.Name, Guard: e.Guard})
 			}
 		}
 	}
 	if len(errs) == 0 {
 		// Validate the models now, so an invalid Secret is reported before anything is applied.
 		for _, m := range d.Models {
-			if err := catalog.ValidateModel(m.Name, m.Guard, m.Rates, d.Type); err != nil {
+			if err := catalog.ValidateModel(m.Name, m.Guard, d.Type); err != nil {
 				errs = append(errs, fmt.Errorf("model %q: %w", m.Name, err))
 			}
 		}

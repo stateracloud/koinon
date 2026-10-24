@@ -27,17 +27,14 @@ func providerProto(p catalog.Provider) *providerv1alpha1.Provider {
 }
 
 func modelProto(m catalog.Model) *providerv1alpha1.Model {
-	out := &providerv1alpha1.Model{
+	return &providerv1alpha1.Model{
 		Id: m.ID, ProviderId: m.ProviderID, Name: m.Name, Guard: m.Guard, Source: m.Source,
 		ManagedBySecret: m.ManagedBySecret, DisabledReason: m.DisabledReason,
 		CreatedAt: timestamppb.New(m.CreatedAt), UpdatedAt: timestamppb.New(m.UpdatedAt),
 	}
-	if m.Rates != nil {
-		out.Rates = &providerv1alpha1.Rates{Input: m.Rates.Input, Output: m.Rates.Output, CacheRead: m.Rates.CacheRead}
-	}
-	return out
 }
 
+// ratesFromProto carries the deprecated rates field to the catalog, which refuses it.
 func ratesFromProto(r *providerv1alpha1.Rates) *catalog.Rates {
 	if r == nil {
 		return nil
@@ -158,7 +155,7 @@ func (s *Server) CreateModel(ctx context.Context, req *providerv1alpha1.CreateMo
 		return nil, err
 	}
 	m, err := s.catalog.CreateModel(requestCtx(ctx), c.org, c.auditActor(), c.actor(), catalog.ModelInput{
-		ProviderID: req.GetProviderId(), Name: req.GetName(), Guard: req.GetGuard(), Rates: ratesFromProto(req.GetRates()),
+		ProviderID: req.GetProviderId(), Name: req.GetName(), Guard: req.GetGuard(), Rates: ratesFromProto(req.GetRates()), //nolint:staticcheck // deprecated field, refused by the catalog
 	})
 	if err != nil {
 		return nil, s.catalogError(err)
@@ -173,7 +170,7 @@ func (s *Server) UpdateModel(ctx context.Context, req *providerv1alpha1.UpdateMo
 		return nil, err
 	}
 	m, err := s.catalog.UpdateModel(requestCtx(ctx), c.org, c.auditActor(), req.GetModelId(), catalog.ModelPatch{
-		Guard: req.Guard, Rates: ratesFromProto(req.GetRates()), ClearRates: req.GetClearRates(),
+		Guard: req.Guard, Rates: ratesFromProto(req.GetRates()), ClearRates: req.GetClearRates(), //nolint:staticcheck // deprecated fields, refused by the catalog
 	})
 	if err != nil {
 		return nil, s.catalogError(err)

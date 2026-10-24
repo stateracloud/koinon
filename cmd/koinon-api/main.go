@@ -420,9 +420,6 @@ func run() error {
 	}
 	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).
 		WithURLPolicy(catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.providerAllowedHosts)})
-	if _, err := catalogSvc.AuditRates(ctx); err != nil {
-		slog.Warn("audit of stored model rates failed", "err", err)
-	}
 	svc := services.New(pool, services.Options{
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc, Catalog: catalogSvc,
 	})

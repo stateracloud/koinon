@@ -226,10 +226,17 @@ var _ = Describe("the quickstart", Ordered, func() {
 			OrgId: org, Name: "e2e", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		admin := func(method, path string) (int, []byte) {
-			req, err := http.NewRequestWithContext(ctx, method, c.base+"/admin/v1"+path, nil)
+		admin := func(method, path string, body ...string) (int, []byte) {
+			var rdr io.Reader
+			if len(body) > 0 {
+				rdr = strings.NewReader(body[0])
+			}
+			req, err := http.NewRequestWithContext(ctx, method, c.base+"/admin/v1"+path, rdr)
 			Expect(err).NotTo(HaveOccurred())
 			req.Header.Set("Authorization", "Bearer "+tok.GetSecret())
+			if rdr != nil {
+				req.Header.Set("Content-Type", "application/json")
+			}
 			res, err := http.DefaultClient.Do(req)
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { _ = res.Body.Close() }()
@@ -252,7 +259,12 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(providers.Providers[0].ManagedBySecret).To(Equal("fake-model"))
 		code, body := admin(http.MethodDelete, "/providers/"+providers.Providers[0].ID)
 		Expect(code).To(Equal(http.StatusConflict), "declared providers are read-only: %s", body)
-		t.end("1b. Declared model provider (admin API)")
+		// A model has no rates of its own; its price is an org price (or a default one). The fake model
+		// is in no default list, so the run is priced by this entry and the ledger's estimates work.
+		code, body = admin(http.MethodPost, "/prices", `{"name":"fake-repo-helper","provider":"openai","match":{"glob":"repo-helper"},`+
+			`"prices":{"input":"0.30","output":"1.20"},"maxOutput":4096}`)
+		Expect(code).To(Equal(http.StatusCreated), string(body))
+		t.end("1b. Declared model provider and its price (admin API)")
 	})
 
 	It("2. creates and tests the GitHub connection", func(ctx SpecContext) {
