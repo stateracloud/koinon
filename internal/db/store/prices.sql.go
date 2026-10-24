@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const completeMigratedPrice = `-- name: CompleteMigratedPrice :execrows
+UPDATE price_overrides SET entry = $1
+WHERE org_id = $2 AND id = $3 AND created_by = 'migration 00014' AND entry->>'note' LIKE 'migrated:pending:%'
+`
+
+type CompleteMigratedPriceParams struct {
+	Entry []byte
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// Fills a migrated price in place, once.
+func (q *Queries) CompleteMigratedPrice(ctx context.Context, arg CompleteMigratedPriceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeMigratedPrice, arg.Entry, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getDefaultPriceList = `-- name: GetDefaultPriceList :one
 SELECT version, seq, entries, loaded_at FROM default_price_lists
 WHERE version = $1
@@ -29,7 +49,7 @@ func (q *Queries) GetDefaultPriceList(ctx context.Context, version string) (Defa
 }
 
 const getModelForPricing = `-- name: GetModelForPricing :one
-SELECT m.id, m.name, m.input_rate, m.output_rate, m.cache_read_rate, m.updated_at, p.type AS provider_type
+SELECT m.id, m.name, p.type AS provider_type
 FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
 WHERE m.org_id = $1 AND m.name = $2 AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL
@@ -42,13 +62,9 @@ type GetModelForPricingParams struct {
 }
 
 type GetModelForPricingRow struct {
-	ID            pgtype.UUID
-	Name          string
-	InputRate     pgtype.Text
-	OutputRate    pgtype.Text
-	CacheReadRate pgtype.Text
-	UpdatedAt     pgtype.Timestamptz
-	ProviderType  string
+	ID           pgtype.UUID
+	Name         string
+	ProviderType string
 }
 
 // The enabled model an agent asks for by its plain name, with its provider's type, for
@@ -56,15 +72,7 @@ type GetModelForPricingRow struct {
 func (q *Queries) GetModelForPricing(ctx context.Context, arg GetModelForPricingParams) (GetModelForPricingRow, error) {
 	row := q.db.QueryRow(ctx, getModelForPricing, arg.OrgID, arg.Name)
 	var i GetModelForPricingRow
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.InputRate,
-		&i.OutputRate,
-		&i.CacheReadRate,
-		&i.UpdatedAt,
-		&i.ProviderType,
-	)
+	err := row.Scan(&i.ID, &i.Name, &i.ProviderType)
 	return i, err
 }
 
@@ -171,6 +179,47 @@ func (q *Queries) ListDefaultPriceLists(ctx context.Context) ([]DefaultPriceList
 			&i.Seq,
 			&i.Entries,
 			&i.LoadedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingMigratedPrices = `-- name: ListPendingMigratedPrices :many
+SELECT org_id, id, name, entry, valid_from FROM price_overrides
+WHERE created_by = 'migration 00014' AND entry->>'note' LIKE 'migrated:pending:%'
+`
+
+type ListPendingMigratedPricesRow struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	Name      string
+	Entry     []byte
+	ValidFrom pgtype.Timestamptz
+}
+
+// Org prices that migration 00014 made from model rates and that still wait for the settings of
+// the matching default entry, in every org (startup: prices.CompleteMigrated).
+func (q *Queries) ListPendingMigratedPrices(ctx context.Context) ([]ListPendingMigratedPricesRow, error) {
+	rows, err := q.db.Query(ctx, listPendingMigratedPrices)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingMigratedPricesRow
+	for rows.Next() {
+		var i ListPendingMigratedPricesRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.Name,
+			&i.Entry,
+			&i.ValidFrom,
 		); err != nil {
 			return nil, err
 		}

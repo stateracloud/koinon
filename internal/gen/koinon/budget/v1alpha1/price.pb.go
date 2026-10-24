@@ -360,19 +360,25 @@ func (x *PriceEntry) GetMaxOutput() int32 {
 type PriceVersion struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// id is cited by ledger entries as org#<id>.
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Provider      string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
-	Match         *PriceMatch            `protobuf:"bytes,4,opt,name=match,proto3" json:"match,omitempty"`
-	Rates         *Rates                 `protobuf:"bytes,5,opt,name=rates,proto3" json:"rates,omitempty"`
-	Tiers         []*PriceTier           `protobuf:"bytes,6,rep,name=tiers,proto3" json:"tiers,omitempty"`
-	Tokenizer     string                 `protobuf:"bytes,7,opt,name=tokenizer,proto3" json:"tokenizer,omitempty"`
-	Ratio         string                 `protobuf:"bytes,8,opt,name=ratio,proto3" json:"ratio,omitempty"`
-	ValidFrom     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=valid_from,json=validFrom,proto3" json:"valid_from,omitempty"`
-	RetiredAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=retired_at,json=retiredAt,proto3" json:"retired_at,omitempty"`
-	CreatedBy     string                 `protobuf:"bytes,11,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	MaxOutput     int32                  `protobuf:"varint,13,opt,name=max_output,json=maxOutput,proto3" json:"max_output,omitempty"`
+	Id                 string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name               string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Provider           string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
+	Match              *PriceMatch            `protobuf:"bytes,4,opt,name=match,proto3" json:"match,omitempty"`
+	Rates              *Rates                 `protobuf:"bytes,5,opt,name=rates,proto3" json:"rates,omitempty"`
+	Tiers              []*PriceTier           `protobuf:"bytes,6,rep,name=tiers,proto3" json:"tiers,omitempty"`
+	Tokenizer          string                 `protobuf:"bytes,7,opt,name=tokenizer,proto3" json:"tokenizer,omitempty"`
+	Ratio              string                 `protobuf:"bytes,8,opt,name=ratio,proto3" json:"ratio,omitempty"`
+	ValidFrom          *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=valid_from,json=validFrom,proto3" json:"valid_from,omitempty"`
+	RetiredAt          *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=retired_at,json=retiredAt,proto3" json:"retired_at,omitempty"`
+	CreatedBy          string                 `protobuf:"bytes,11,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	CreatedAt          *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	MaxOutput          int32                  `protobuf:"varint,13,opt,name=max_output,json=maxOutput,proto3" json:"max_output,omitempty"`
+	ToolOverheadTokens int32                  `protobuf:"varint,14,opt,name=tool_overhead_tokens,json=toolOverheadTokens,proto3" json:"tool_overhead_tokens,omitempty"`
+	HiddenThinking     bool                   `protobuf:"varint,15,opt,name=hidden_thinking,json=hiddenThinking,proto3" json:"hidden_thinking,omitempty"`
+	Note               string                 `protobuf:"bytes,16,opt,name=note,proto3" json:"note,omitempty"`
+	// needs_review is set for a price migrated from a model's rates whose estimation settings are
+	// generic because no default entry matched; an admin should check them.
+	NeedsReview   bool `protobuf:"varint,17,opt,name=needs_review,json=needsReview,proto3" json:"needs_review,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -496,6 +502,34 @@ func (x *PriceVersion) GetMaxOutput() int32 {
 		return x.MaxOutput
 	}
 	return 0
+}
+
+func (x *PriceVersion) GetToolOverheadTokens() int32 {
+	if x != nil {
+		return x.ToolOverheadTokens
+	}
+	return 0
+}
+
+func (x *PriceVersion) GetHiddenThinking() bool {
+	if x != nil {
+		return x.HiddenThinking
+	}
+	return false
+}
+
+func (x *PriceVersion) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
+func (x *PriceVersion) GetNeedsReview() bool {
+	if x != nil {
+		return x.NeedsReview
+	}
+	return false
 }
 
 type ListPricesRequest struct {
@@ -1172,8 +1206,16 @@ type FlaggedPrice struct {
 	LastSeen       *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=last_seen,json=lastSeen,proto3" json:"last_seen,omitempty"`
 	CostUsd        string                 `protobuf:"bytes,5,opt,name=cost_usd,json=costUsd,proto3" json:"cost_usd,omitempty"`
 	GatewayCostUsd string                 `protobuf:"bytes,6,opt,name=gateway_cost_usd,json=gatewayCostUsd,proto3" json:"gateway_cost_usd,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Requests per reason; one request can have several. gateway_diff: Koinon's cost differs
+	// from the gateway's by more than 1%. usage_missing: the provider reported no usage, so the
+	// request was estimated. max_output_capped: an estimated output was capped at the price's
+	// max_output. price_error: the stored price could not be used.
+	GatewayDiff     int64 `protobuf:"varint,7,opt,name=gateway_diff,json=gatewayDiff,proto3" json:"gateway_diff,omitempty"`
+	UsageMissing    int64 `protobuf:"varint,8,opt,name=usage_missing,json=usageMissing,proto3" json:"usage_missing,omitempty"`
+	MaxOutputCapped int64 `protobuf:"varint,9,opt,name=max_output_capped,json=maxOutputCapped,proto3" json:"max_output_capped,omitempty"`
+	PriceError      int64 `protobuf:"varint,10,opt,name=price_error,json=priceError,proto3" json:"price_error,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *FlaggedPrice) Reset() {
@@ -1246,6 +1288,34 @@ func (x *FlaggedPrice) GetGatewayCostUsd() string {
 		return x.GatewayCostUsd
 	}
 	return ""
+}
+
+func (x *FlaggedPrice) GetGatewayDiff() int64 {
+	if x != nil {
+		return x.GatewayDiff
+	}
+	return 0
+}
+
+func (x *FlaggedPrice) GetUsageMissing() int64 {
+	if x != nil {
+		return x.UsageMissing
+	}
+	return 0
+}
+
+func (x *FlaggedPrice) GetMaxOutputCapped() int64 {
+	if x != nil {
+		return x.MaxOutputCapped
+	}
+	return 0
+}
+
+func (x *FlaggedPrice) GetPriceError() int64 {
+	if x != nil {
+		return x.PriceError
+	}
+	return 0
 }
 
 type ListFlaggedPricesRequest struct {
@@ -1384,7 +1454,7 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\x0fsource_accessed\x18\f \x01(\tR\x0esourceAccessed\x12\x12\n" +
 	"\x04note\x18\r \x01(\tR\x04note\x12\x1d\n" +
 	"\n" +
-	"max_output\x18\x0e \x01(\x05R\tmaxOutput\"\x99\x04\n" +
+	"max_output\x18\x0e \x01(\x05R\tmaxOutput\"\xab\x05\n" +
 	"\fPriceVersion\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -1404,7 +1474,11 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x1d\n" +
 	"\n" +
-	"max_output\x18\r \x01(\x05R\tmaxOutput\"*\n" +
+	"max_output\x18\r \x01(\x05R\tmaxOutput\x120\n" +
+	"\x14tool_overhead_tokens\x18\x0e \x01(\x05R\x12toolOverheadTokens\x12'\n" +
+	"\x0fhidden_thinking\x18\x0f \x01(\bR\x0ehiddenThinking\x12\x12\n" +
+	"\x04note\x18\x10 \x01(\tR\x04note\x12!\n" +
+	"\fneeds_review\x18\x11 \x01(\bR\vneedsReview\"*\n" +
 	"\x11ListPricesRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"R\n" +
 	"\x12ListPricesResponse\x12<\n" +
@@ -1454,14 +1528,20 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\ffrom_version\x18\x01 \x01(\tR\vfromVersion\x12\x1d\n" +
 	"\n" +
 	"to_version\x18\x02 \x01(\tR\ttoVersion\x12=\n" +
-	"\achanges\x18\x03 \x03(\v2#.koinon.budget.v1alpha1.PriceChangeR\achanges\"\xdb\x01\n" +
+	"\achanges\x18\x03 \x03(\v2#.koinon.budget.v1alpha1.PriceChangeR\achanges\"\xf0\x02\n" +
 	"\fFlaggedPrice\x12\x1b\n" +
 	"\tprice_ref\x18\x01 \x01(\tR\bpriceRef\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12\x1a\n" +
 	"\brequests\x18\x03 \x01(\x03R\brequests\x127\n" +
 	"\tlast_seen\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\blastSeen\x12\x19\n" +
 	"\bcost_usd\x18\x05 \x01(\tR\acostUsd\x12(\n" +
-	"\x10gateway_cost_usd\x18\x06 \x01(\tR\x0egatewayCostUsd\"c\n" +
+	"\x10gateway_cost_usd\x18\x06 \x01(\tR\x0egatewayCostUsd\x12!\n" +
+	"\fgateway_diff\x18\a \x01(\x03R\vgatewayDiff\x12#\n" +
+	"\rusage_missing\x18\b \x01(\x03R\fusageMissing\x12*\n" +
+	"\x11max_output_capped\x18\t \x01(\x03R\x0fmaxOutputCapped\x12\x1f\n" +
+	"\vprice_error\x18\n" +
+	" \x01(\x03R\n" +
+	"priceError\"c\n" +
 	"\x18ListFlaggedPricesRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x120\n" +
 	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x05since\"[\n" +

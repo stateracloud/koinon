@@ -863,13 +863,16 @@ type LocalCredential struct {
 }
 
 type Model struct {
-	OrgID           pgtype.UUID
-	ID              pgtype.UUID
-	ProviderID      pgtype.UUID
-	Name            string
-	Guard           bool
-	InputRate       pgtype.Text
-	OutputRate      pgtype.Text
+	OrgID      pgtype.UUID
+	ID         pgtype.UUID
+	ProviderID pgtype.UUID
+	Name       string
+	Guard      bool
+	// Deprecated and unread since migration 00014: prices are price_overrides rows. Dropped later.
+	InputRate pgtype.Text
+	// Deprecated and unread since migration 00014. Dropped later.
+	OutputRate pgtype.Text
+	// Deprecated and unread since migration 00014. Dropped later.
 	CacheReadRate   pgtype.Text
 	Source          ConfigSource
 	ManagedBySecret pgtype.Text

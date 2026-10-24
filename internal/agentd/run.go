@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/prices"
 )
 
 // How a driven run ends, besides success (nil).
@@ -311,7 +312,9 @@ func (r *runner) execute(ctx context.Context) error {
 			return r.dbErr(ctx, "load the org's models", err)
 		}
 		for _, m := range served {
-			if m.InputRate.Valid {
+			// Only a priced model is served (the gateway answers 404 for the rest).
+			pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType}
+			if _, err := prices.Resolve(fctx, r.q, r.run.OrgID, pm, time.Now()); err == nil {
 				model = m.ModelName
 				break
 			}

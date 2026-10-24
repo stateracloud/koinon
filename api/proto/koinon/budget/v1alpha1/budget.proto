@@ -18,6 +18,12 @@ service BudgetService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // ListOrgBudgets returns every org's cap, platform ceiling and spend this month. Platform
+  // admins only.
+  rpc ListOrgBudgets(ListOrgBudgetsRequest) returns (ListOrgBudgetsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // SetMonthlyCap sets the cap, or clears it with an empty amount. It cannot exceed the ceiling.
   rpc SetMonthlyCap(SetMonthlyCapRequest) returns (SetMonthlyCapResponse);
 
@@ -27,6 +33,12 @@ service BudgetService {
 
   // GetAgentBudget returns an agent's effective daily limit and today's spend.
   rpc GetAgentBudget(GetAgentBudgetRequest) returns (GetAgentBudgetResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListAgentBudgets returns every agent's effective daily limit, template default and
+  // today's spend.
+  rpc ListAgentBudgets(ListAgentBudgetsRequest) returns (ListAgentBudgetsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
@@ -52,6 +64,25 @@ message OrgBudget {
   string platform_ceiling_usd = 2;
   string spent_this_month_usd = 3;
   google.protobuf.Timestamp month_start = 4;
+  // estimated_this_month_usd is the part of the spend that came from estimated usage.
+  string estimated_this_month_usd = 5;
+}
+
+message ListOrgBudgetsRequest {}
+
+message OrgBudgetSummary {
+  string org_id = 1;
+  string org_slug = 2;
+  string org_name = 3;
+  // monthly_cap_usd and platform_ceiling_usd are empty when unset.
+  string monthly_cap_usd = 4;
+  string platform_ceiling_usd = 5;
+  string spent_this_month_usd = 6;
+}
+
+message ListOrgBudgetsResponse {
+  repeated OrgBudgetSummary orgs = 1;
+  google.protobuf.Timestamp month_start = 2;
 }
 
 message GetOrgBudgetRequest {
@@ -85,6 +116,10 @@ message AgentBudget {
   string daily_limit_usd = 2;
   string spent_today_usd = 3;
   google.protobuf.Timestamp day_start = 4;
+  // agent_name and template_default_usd are set by ListAgentBudgets. The default is the
+  // spendUSD of the agent's active version.
+  string agent_name = 5;
+  string template_default_usd = 6;
 }
 
 message GetAgentBudgetRequest {
@@ -94,6 +129,14 @@ message GetAgentBudgetRequest {
 
 message GetAgentBudgetResponse {
   AgentBudget budget = 1;
+}
+
+message ListAgentBudgetsRequest {
+  string org_id = 1;
+}
+
+message ListAgentBudgetsResponse {
+  repeated AgentBudget budgets = 1;
 }
 
 message SetAgentBudgetRequest {

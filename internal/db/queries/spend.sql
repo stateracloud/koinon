@@ -79,6 +79,12 @@ SELECT coalesce(sum(cost_usd), 0)::text AS cost_usd
 FROM spend_entries
 WHERE org_id = @org_id AND occurred_at >= @since;
 
+-- name: GetOrgEstimatedSpendSince :one
+-- The part of an org's spend since @since that came from estimated usage.
+SELECT coalesce(sum(cost_usd), 0)::text AS cost_usd
+FROM spend_entries
+WHERE org_id = @org_id AND estimated AND occurred_at >= @since;
+
 -- name: GetCalibration :one
 -- The p90 of provider-reported input tokens per request byte over the newest 500 real
 -- (not estimated) requests of a model, and how many there were.
@@ -93,15 +99,22 @@ FROM (
 ) s;
 
 -- name: ListFlaggedPrices :many
--- Price entries whose recomputed cost differs from the gateway's by more than 1% since
--- @since, with how often and by how much.
+-- Price entries with requests Koinon flagged since @since, with how often, why and by how
+-- much: the recomputed cost differs from the gateway's by more than 1% (gateway_diff), the
+-- provider reported no usage (usage_missing), an estimated output was capped at the entry's
+-- max_output, or the price could not be used (price_error).
 SELECT coalesce(price_ref, '')::text AS price_ref, model,
        count(*)::bigint AS flagged,
+       count(*) FILTER (WHERE jsonb_exists(estimate, 'gateway_diff'))::bigint AS gateway_diff,
+       count(*) FILTER (WHERE estimate->>'usage_missing' = 'true')::bigint AS usage_missing,
+       count(*) FILTER (WHERE estimate->'estimate'->>'max_output_capped' = 'true')::bigint AS max_output_capped,
+       count(*) FILTER (WHERE jsonb_exists(estimate, 'price_error'))::bigint AS price_error,
        max(occurred_at)::timestamptz AS last_seen,
        sum(cost_usd)::text AS cost_usd,
        sum(gateway_cost_usd)::text AS gateway_cost_usd
 FROM spend_entries
-WHERE org_id = @org_id AND cost_flagged AND occurred_at >= @since
+WHERE org_id = @org_id AND occurred_at >= @since
+  AND (cost_flagged OR estimate->'estimate'->>'max_output_capped' = 'true')
 GROUP BY price_ref, model
 ORDER BY max(occurred_at) DESC;
 

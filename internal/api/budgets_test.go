@@ -46,6 +46,17 @@ var _ = Describe("BudgetService and PriceService", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(set.GetBudget().GetDailyLimitUsd()).To(Equal("3.50"))
 
+		By("the list shows each agent's limit, its template default and today's spend")
+		list, err := budgets(admin).ListAgentBudgets(ctx, &budgetv1alpha1.ListAgentBudgetsRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list.GetBudgets()).To(HaveLen(1))
+		Expect(list.GetBudgets()[0].GetAgentName()).To(Equal(a.GetDisplayName()))
+		Expect(list.GetBudgets()[0].GetDailyLimitUsd()).To(Equal("3.50"))
+		Expect(list.GetBudgets()[0].GetTemplateDefaultUsd()).NotTo(BeEmpty())
+		Expect(list.GetBudgets()[0].GetTemplateDefaultUsd()).NotTo(Equal("3.50"))
+		_, err = budgets(member).ListAgentBudgets(ctx, &budgetv1alpha1.ListAgentBudgetsRequest{OrgId: org})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+
 		By("only a platform admin sets the ceiling")
 		_, err = budgets(owner).SetPlatformCeiling(ctx, &budgetv1alpha1.SetPlatformCeilingRequest{OrgId: org, PlatformCeilingUsd: "500"})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
@@ -53,6 +64,48 @@ var _ = Describe("BudgetService and PriceService", func() {
 		var n int
 		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action LIKE 'budget.%'`, org).Scan(&n)).To(Succeed())
 		Expect(n).To(Equal(2))
+	})
+
+	It("lists every org's cap, ceiling and spend for platform admins only", func(ctx SpecContext) {
+		_, err := budgets(owner).ListOrgBudgets(ctx, &budgetv1alpha1.ListOrgBudgetsRequest{})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
+		_, err = budgets(admin).ListOrgBudgets(ctx, &budgetv1alpha1.ListOrgBudgetsRequest{})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		_, err = e.pool.Exec(ctx, `INSERT INTO org_budgets (org_id, monthly_cap, platform_ceiling, updated_by) VALUES ($1, 10, 50, 'test')`, org)
+		Expect(err).NotTo(HaveOccurred())
+		pa := e.userIn(ctx, org, store.OrgRoleMember)
+		_, err = e.pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, pa.userID)
+		Expect(err).NotTo(HaveOccurred())
+		res, err := budgets(pa).ListOrgBudgets(ctx, &budgetv1alpha1.ListOrgBudgetsRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		var found bool
+		for _, o := range res.GetOrgs() {
+			if o.GetOrgId() == org {
+				found = true
+				Expect(o.GetMonthlyCapUsd()).To(Equal("10.00"))
+				Expect(o.GetPlatformCeilingUsd()).To(Equal("50.00"))
+			}
+		}
+		Expect(found).To(BeTrue())
+	})
+
+	It("shows this month's spend and the estimated part of it", func(ctx SpecContext) {
+		var orgID pgtype.UUID
+		Expect(orgID.Scan(org)).To(Succeed())
+		a := owner.activeAgent(ctx, org)
+		for i, row := range []struct {
+			cost      string
+			estimated bool
+		}{{"3", false}, {"1", true}} {
+			_, err := e.pool.Exec(ctx, `INSERT INTO spend_entries (org_id, request_id, agent_id, key_id, model, input_tokens, output_tokens, occurred_at, cost_usd, priced, estimated)
+				VALUES ($1, $2, $3, 'k', 'm', 1, 1, now(), $4::numeric, true, $5)`, orgID, "req-"+string(rune('a'+i)), a.GetId(), row.cost, row.estimated)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		got, err := budgets(owner).GetOrgBudget(ctx, &budgetv1alpha1.GetOrgBudgetRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetBudget().GetSpentThisMonthUsd()).To(Equal("4.00"))
+		Expect(got.GetBudget().GetEstimatedThisMonthUsd()).To(Equal("1.00"))
 	})
 
 	It("lists a user's own notifications and marks them read", func(ctx SpecContext) {

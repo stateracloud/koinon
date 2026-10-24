@@ -110,6 +110,25 @@ func (q *Queries) GetCalibration(ctx context.Context, arg GetCalibrationParams) 
 	return i, err
 }
 
+const getOrgEstimatedSpendSince = `-- name: GetOrgEstimatedSpendSince :one
+SELECT coalesce(sum(cost_usd), 0)::text AS cost_usd
+FROM spend_entries
+WHERE org_id = $1 AND estimated AND occurred_at >= $2
+`
+
+type GetOrgEstimatedSpendSinceParams struct {
+	OrgID pgtype.UUID
+	Since pgtype.Timestamptz
+}
+
+// The part of an org's spend since @since that came from estimated usage.
+func (q *Queries) GetOrgEstimatedSpendSince(ctx context.Context, arg GetOrgEstimatedSpendSinceParams) (string, error) {
+	row := q.db.QueryRow(ctx, getOrgEstimatedSpendSince, arg.OrgID, arg.Since)
+	var cost_usd string
+	err := row.Scan(&cost_usd)
+	return cost_usd, err
+}
+
 const getOrgSpendSince = `-- name: GetOrgSpendSince :one
 SELECT coalesce(sum(cost_usd), 0)::text AS cost_usd
 FROM spend_entries
@@ -209,11 +228,16 @@ func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryPara
 const listFlaggedPrices = `-- name: ListFlaggedPrices :many
 SELECT coalesce(price_ref, '')::text AS price_ref, model,
        count(*)::bigint AS flagged,
+       count(*) FILTER (WHERE jsonb_exists(estimate, 'gateway_diff'))::bigint AS gateway_diff,
+       count(*) FILTER (WHERE estimate->>'usage_missing' = 'true')::bigint AS usage_missing,
+       count(*) FILTER (WHERE estimate->'estimate'->>'max_output_capped' = 'true')::bigint AS max_output_capped,
+       count(*) FILTER (WHERE jsonb_exists(estimate, 'price_error'))::bigint AS price_error,
        max(occurred_at)::timestamptz AS last_seen,
        sum(cost_usd)::text AS cost_usd,
        sum(gateway_cost_usd)::text AS gateway_cost_usd
 FROM spend_entries
-WHERE org_id = $1 AND cost_flagged AND occurred_at >= $2
+WHERE org_id = $1 AND occurred_at >= $2
+  AND (cost_flagged OR estimate->'estimate'->>'max_output_capped' = 'true')
 GROUP BY price_ref, model
 ORDER BY max(occurred_at) DESC
 `
@@ -224,16 +248,22 @@ type ListFlaggedPricesParams struct {
 }
 
 type ListFlaggedPricesRow struct {
-	PriceRef       string
-	Model          string
-	Flagged        int64
-	LastSeen       pgtype.Timestamptz
-	CostUsd        string
-	GatewayCostUsd string
+	PriceRef        string
+	Model           string
+	Flagged         int64
+	GatewayDiff     int64
+	UsageMissing    int64
+	MaxOutputCapped int64
+	PriceError      int64
+	LastSeen        pgtype.Timestamptz
+	CostUsd         string
+	GatewayCostUsd  string
 }
 
-// Price entries whose recomputed cost differs from the gateway's by more than 1% since
-// @since, with how often and by how much.
+// Price entries with requests Koinon flagged since @since, with how often, why and by how
+// much: the recomputed cost differs from the gateway's by more than 1% (gateway_diff), the
+// provider reported no usage (usage_missing), an estimated output was capped at the entry's
+// max_output, or the price could not be used (price_error).
 func (q *Queries) ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error) {
 	rows, err := q.db.Query(ctx, listFlaggedPrices, arg.OrgID, arg.Since)
 	if err != nil {
@@ -247,6 +277,10 @@ func (q *Queries) ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesPa
 			&i.PriceRef,
 			&i.Model,
 			&i.Flagged,
+			&i.GatewayDiff,
+			&i.UsageMissing,
+			&i.MaxOutputCapped,
+			&i.PriceError,
 			&i.LastSeen,
 			&i.CostUsd,
 			&i.GatewayCostUsd,

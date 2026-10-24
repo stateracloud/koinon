@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
 	budgetv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1"
@@ -41,7 +42,9 @@ func (s *Server) budgetError(err error) error {
 }
 
 func orgBudgetProto(v budget.OrgView) *budgetv1alpha1.OrgBudget {
-	out := &budgetv1alpha1.OrgBudget{SpentThisMonthUsd: v.SpentThisMonth.String(), MonthStart: timestamppb.New(v.MonthStart)}
+	out := &budgetv1alpha1.OrgBudget{
+		SpentThisMonthUsd: v.SpentThisMonth.String(), EstimatedThisMonthUsd: v.EstimatedThisMonth.String(), MonthStart: timestamppb.New(v.MonthStart),
+	}
 	if v.MonthlyCap != nil {
 		out.MonthlyCapUsd = v.MonthlyCap.String()
 	}
@@ -118,11 +121,8 @@ func (s *Server) SetPlatformCeiling(ctx context.Context, req *budgetv1alpha1.Set
 	return &budgetv1alpha1.SetPlatformCeilingResponse{Budget: orgBudgetProto(v)}, nil
 }
 
-func (s *Server) agentBudgetView(ctx context.Context, org, agent pgtype.UUID) (*budgetv1alpha1.AgentBudget, error) {
-	a, err := s.q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent})
-	if err != nil {
-		return nil, s.dbError(err, "agent")
-	}
+// templateDefault is the spendUSD of the agent's active version: the default its limit started from.
+func (s *Server) templateDefault(ctx context.Context, org pgtype.UUID, a store.Agent) money.USD {
 	var fallback money.USD
 	if a.ActiveVersionID.Valid {
 		if v, err := s.q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: org, ID: a.ActiveVersionID}); err == nil {
@@ -131,16 +131,151 @@ func (s *Server) agentBudgetView(ctx context.Context, org, agent pgtype.UUID) (*
 			}
 		}
 	}
-	v, ok, err := s.budgets.GetAgent(ctx, org, agent, fallback, time.Now())
+	return fallback
+}
+
+func (s *Server) agentBudgetOf(ctx context.Context, org pgtype.UUID, a store.Agent) (*budgetv1alpha1.AgentBudget, bool, error) {
+	fallback := s.templateDefault(ctx, org, a)
+	v, ok, err := s.budgets.GetAgent(ctx, org, a.ID, fallback, time.Now())
+	if err != nil || !ok {
+		return nil, ok, s.budgetErrorOrNil(err)
+	}
+	return &budgetv1alpha1.AgentBudget{
+		AgentId: a.ID.String(), DailyLimitUsd: v.DailyLimit.String(), SpentTodayUsd: v.SpentToday.String(), DayStart: timestamppb.New(v.DayStart),
+		AgentName: a.DisplayName, TemplateDefaultUsd: fallback.String(),
+	}, true, nil
+}
+
+func (s *Server) budgetErrorOrNil(err error) error {
+	if err == nil {
+		return nil
+	}
+	return s.budgetError(err)
+}
+
+func (s *Server) agentBudgetView(ctx context.Context, org, agent pgtype.UUID) (*budgetv1alpha1.AgentBudget, error) {
+	a, err := s.q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent})
 	if err != nil {
-		return nil, s.budgetError(err)
+		return nil, s.dbError(err, "agent")
+	}
+	b, ok, err := s.agentBudgetOf(ctx, org, a)
+	if err != nil {
+		return nil, err
 	}
 	if !ok {
 		return nil, connect.NewError(connect.CodeNotFound, "this agent has no daily limit")
 	}
-	return &budgetv1alpha1.AgentBudget{
-		AgentId: agent.String(), DailyLimitUsd: v.DailyLimit.String(), SpentTodayUsd: v.SpentToday.String(), DayStart: timestamppb.New(v.DayStart),
-	}, nil
+	return b, nil
+}
+
+// ListAgentBudgets implements BudgetService. Admins and owners. It reads the limits, the template
+// defaults and today's spend in four queries, however many agents the org has.
+func (s *Server) ListAgentBudgets(ctx context.Context, req *budgetv1alpha1.ListAgentBudgetsRequest) (*budgetv1alpha1.ListAgentBudgetsResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	day := pgtype.Timestamptz{Time: budget.DayStart(now), Valid: true}
+	agents, err := s.q.ListAgents(ctx, c.org)
+	if err != nil {
+		return nil, s.dbError(err, "agents")
+	}
+	limits, err := s.q.ListAgentBudgets(ctx, c.org)
+	if err != nil {
+		return nil, s.dbError(err, "budgets")
+	}
+	spends, err := s.q.ListAgentSpendSince(ctx, store.ListAgentSpendSinceParams{OrgID: c.org, Since: day})
+	if err != nil {
+		return nil, s.dbError(err, "spend")
+	}
+	cfgs, err := s.q.ListActiveVersionConfigs(ctx, c.org)
+	if err != nil {
+		return nil, s.dbError(err, "agent versions")
+	}
+	own := map[pgtype.UUID]string{}
+	for _, l := range limits {
+		own[l.AgentID] = l.DailyLimit
+	}
+	spent := map[pgtype.UUID]string{}
+	for _, sp := range spends {
+		spent[sp.AgentID] = sp.CostUsd
+	}
+	template := map[pgtype.UUID]money.USD{}
+	for _, cf := range cfgs {
+		if cfg, err := agentconfig.Parse(cf.Config); err == nil {
+			template[cf.AgentID] = money.FromCents(cfg.Limits.SpendUSD.Cents())
+		}
+	}
+	res := &budgetv1alpha1.ListAgentBudgetsResponse{}
+	for _, a := range agents {
+		if a.Status == store.AgentStatusArchived {
+			continue
+		}
+		limit, ok := template[a.ID], template[a.ID] > 0
+		if v, has := own[a.ID]; has {
+			n, err := money.ParseNumeric(v)
+			if err != nil {
+				return nil, s.budgetError(err)
+			}
+			limit, ok = n, true
+		}
+		if !ok {
+			continue
+		}
+		today, err := money.ParseNumeric(spent[a.ID])
+		if spent[a.ID] == "" {
+			today, err = 0, nil
+		}
+		if err != nil {
+			return nil, s.budgetError(err)
+		}
+		res.Budgets = append(res.Budgets, &budgetv1alpha1.AgentBudget{
+			AgentId: a.ID.String(), AgentName: a.DisplayName, DailyLimitUsd: limit.String(), SpentTodayUsd: today.String(),
+			DayStart: timestamppb.New(day.Time), TemplateDefaultUsd: template[a.ID].String(),
+		})
+	}
+	return res, nil
+}
+
+// ListOrgBudgets implements BudgetService. Platform admins only.
+func (s *Server) ListOrgBudgets(ctx context.Context, _ *budgetv1alpha1.ListOrgBudgetsRequest) (*budgetv1alpha1.ListOrgBudgetsResponse, error) {
+	p, ok := auth.PrincipalFrom(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, "login required")
+	}
+	if !p.PlatformAdmin {
+		return nil, connect.NewError(connect.CodePermissionDenied, budget.ErrForbidden.Error())
+	}
+	since := budget.MonthStart(time.Now())
+	rows, err := s.q.ListOrgBudgetSummaries(ctx, pgtype.Timestamptz{Time: since, Valid: true})
+	if err != nil {
+		return nil, s.dbError(err, "orgs")
+	}
+	res := &budgetv1alpha1.ListOrgBudgetsResponse{MonthStart: timestamppb.New(since)}
+	for _, r := range rows {
+		spent, err := money.ParseNumeric(r.Spent)
+		if err != nil {
+			return nil, s.budgetError(err)
+		}
+		res.Orgs = append(res.Orgs, &budgetv1alpha1.OrgBudgetSummary{
+			OrgId: r.OrgID.String(), OrgSlug: r.Slug, OrgName: r.DisplayName, MonthlyCapUsd: formatAmount(r.MonthlyCap),
+			PlatformCeilingUsd: formatAmount(r.PlatformCeiling), SpentThisMonthUsd: spent.String(),
+		})
+	}
+	return res, nil
+}
+
+// formatAmount writes a numeric text from the database the way money.USD prints, or "" for none.
+func formatAmount(s string) string {
+	if s == "" {
+		return ""
+	}
+	v, err := money.ParseNumeric(s)
+	if err != nil {
+		return ""
+	}
+	return v.String()
 }
 
 // GetAgentBudget implements BudgetService. Admins and owners.
@@ -283,7 +418,9 @@ func versionProto(o prices.Override) *budgetv1alpha1.PriceVersion {
 		Id: o.ID, Name: o.Name, Provider: o.Entry.Provider, Match: &budgetv1alpha1.PriceMatch{Glob: o.Entry.Match.Glob, Regex: o.Entry.Match.Regex},
 		Rates: ratesProto(o.Entry.Prices), Tiers: tiersProto(o.Entry.Tiers), Tokenizer: o.Entry.Tokenizer, Ratio: o.Entry.Ratio,
 		ValidFrom: timestamppb.New(o.ValidFrom), CreatedBy: o.CreatedBy, CreatedAt: timestamppb.New(o.CreatedAt),
-		MaxOutput: int32(o.Entry.MaxOutput), //nolint:gosec // validated to at most 10M
+		MaxOutput:          int32(o.Entry.MaxOutput),                                                  //nolint:gosec // validated to at most 10M
+		ToolOverheadTokens: int32(o.Entry.ToolOverheadTokens), HiddenThinking: o.Entry.HiddenThinking, //nolint:gosec // validated to at most 100k
+		Note: o.Entry.Note, NeedsReview: prices.NeedsReview(o.CreatedBy, o.Entry.Note),
 	}
 	if o.RetiredAt != nil {
 		out.RetiredAt = timestamppb.New(*o.RetiredAt)
@@ -409,6 +546,7 @@ func (s *Server) ListFlaggedPrices(ctx context.Context, req *budgetv1alpha1.List
 		res.Flagged = append(res.Flagged, &budgetv1alpha1.FlaggedPrice{
 			PriceRef: f.PriceRef, Model: f.Model, Requests: f.Requests, LastSeen: timestamppb.New(f.LastSeen),
 			CostUsd: ledger.FormatUSD(f.CostUSD), GatewayCostUsd: ledger.FormatUSD(f.GatewayCostUSD),
+			GatewayDiff: f.GatewayDiff, UsageMissing: f.UsageMissing, MaxOutputCapped: f.MaxOutputCapped, PriceError: f.PriceError,
 		})
 	}
 	return res, nil

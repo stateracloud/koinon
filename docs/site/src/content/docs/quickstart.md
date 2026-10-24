@@ -120,10 +120,11 @@ provider in the UI.
    check the **URL** and enter your **API key**. For Ollama, use your server's URL and leave the key
    empty. Press **Add provider**. Koinon encrypts the key and never shows it again.
 3. On the new provider press **Add model**. Enter the **Model name** (for OpenRouter, for example
-   `deepseek/deepseek-v4.1-flash`) and its **Input rate** and **Output rate** in US dollars per million
-   tokens. Press **Add model**. The model appears as `default/<model name>`.
+   `deepseek/deepseek-v4.1-flash`) and press **Add model**. The model appears as `default/<model name>`.
 
-Koinon needs a rate to serve a model, and uses it for budgets. For OpenRouter you can also turn on the
+Koinon prices a model from its default price list and uses the price for budgets. If the list does not
+have your model, open **Prices** under **Settings** and press **Add price**
+([Prices](/guides/prices/)). For OpenRouter you can also turn on the
 routing guard, which sends the model only to hosts that keep no data. The first model of the org is the
 default for every agent. A new API key reaches the gateway through Kubernetes' Secret sync, which
 can take about three minutes; a run that starts sooner can fail, so do this step early. If the URL is refused, the form says why; see
@@ -152,12 +153,11 @@ stringData:
   models: |
     - name: deepseek/deepseek-v4.1-flash
       guard: true
-      rates: {input: "0.30", output: "1.20"}
 ```
 
-`rates` are US dollars per million tokens. Koinon needs a rate to serve a model, and uses it for
-budgets. `guard: true` is the routing guard. The first model of the org is the default for every
-agent.
+Koinon prices this model from its default price list, and uses the price for budgets
+([Prices](/guides/prices/)). `guard: true` is the routing guard. The first model of the org is the
+default for every agent.
 
 
 ```sh e1=model-provider
@@ -185,8 +185,9 @@ Create a GitHub App first. [GitHub App](/guides/github-app/) lists the permissio
 4. Pick the repository in **Repository 1**, then **Next**.
 5. Press **Create draft**, then **Activate**.
 
-The agent's model is the first model of the org's providers. Its spend limit is the template's `spendUSD`.
-See [Changing in v0.1](#changing-in-v01).
+The agent's model is the first model of the org's providers. It starts with the template's spend limit
+as its own daily limit, which an admin can change ([Budgets](/guides/budgets/)). See
+[Changing in v0.1](#changing-in-v01).
 
 ## 7. Create a ticket
 
@@ -214,13 +215,10 @@ spend of the run.
 
 ## Changing in v0.1
 
-Providers and models per org have UI pages, Secrets and an admin API under `/admin/v1` (plan items
-PV1 and W4). ADR 0056 and ADR 0058 decided more for v0.1. It is **not built yet**, so these pages do
-not describe it as available.
+Providers, models, prices and budgets per org have UI pages, Secrets and an admin API under
+`/admin/v1` (plan items PV1, PV2, BG1 and W4). ADR 0056 and ADR 0058 decided more for v0.1. It is
+**not built yet**, so these pages do not describe it as available.
 
-- Prices per org with a default price list (plan item PV2). Until then a model carries its own rates.
-- Org and per-agent budgets that admins set. The template's `spendUSD` becomes only the default.
-  Plan item BG1. Until then, the template's `spendUSD` is the agent's limit per UTC calendar day.
 - The Kubernetes-mode gateway (plan item G2). See [Gateway modes](/guides/gateway-modes/).
 
 [ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md)

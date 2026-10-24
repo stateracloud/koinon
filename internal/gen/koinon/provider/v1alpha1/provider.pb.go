@@ -154,7 +154,8 @@ func (x *Provider) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-// Rates are USD per million tokens as decimal strings such as "0.30".
+// Rates are deprecated: per-model rates were folded into org prices (PriceService, ADR 0056). The
+// message stays for wire compatibility; the server never fills it and refuses requests that set it.
 type Rates struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Input         string                 `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`
@@ -223,7 +224,9 @@ type Model struct {
 	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	// guard is the routing guard, for OpenRouter providers only.
 	Guard bool `protobuf:"varint,4,opt,name=guard,proto3" json:"guard,omitempty"`
-	// rates is unset for a model without rates, which is not served.
+	// rates is deprecated and never set; prices are org price entries (PriceService).
+	//
+	// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
 	Rates           *Rates                 `protobuf:"bytes,5,opt,name=rates,proto3" json:"rates,omitempty"`
 	Source          string                 `protobuf:"bytes,6,opt,name=source,proto3" json:"source,omitempty"`
 	ManagedBySecret string                 `protobuf:"bytes,7,opt,name=managed_by_secret,json=managedBySecret,proto3" json:"managed_by_secret,omitempty"`
@@ -292,6 +295,7 @@ func (x *Model) GetGuard() bool {
 	return false
 }
 
+// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
 func (x *Model) GetRates() *Rates {
 	if x != nil {
 		return x.Rates
@@ -847,7 +851,10 @@ type CreateModelRequest struct {
 	ProviderId string                 `protobuf:"bytes,2,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
 	Name       string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	Guard      bool                   `protobuf:"varint,4,opt,name=guard,proto3" json:"guard,omitempty"`
-	// rates is required for the model to be served.
+	// rates is deprecated: a request that sets it fails with INVALID_ARGUMENT. Add a price with
+	// PriceService.SetPrice instead.
+	//
+	// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
 	Rates         *Rates `protobuf:"bytes,5,opt,name=rates,proto3" json:"rates,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -911,6 +918,7 @@ func (x *CreateModelRequest) GetGuard() bool {
 	return false
 }
 
+// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
 func (x *CreateModelRequest) GetRates() *Rates {
 	if x != nil {
 		return x.Rates
@@ -967,9 +975,12 @@ type UpdateModelRequest struct {
 	OrgId   string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
 	ModelId string                 `protobuf:"bytes,2,opt,name=model_id,json=modelId,proto3" json:"model_id,omitempty"`
 	Guard   *bool                  `protobuf:"varint,3,opt,name=guard,proto3,oneof" json:"guard,omitempty"`
-	// rates replaces the rates when set; clear_rates removes them.
-	Rates         *Rates `protobuf:"bytes,4,opt,name=rates,proto3" json:"rates,omitempty"`
-	ClearRates    bool   `protobuf:"varint,5,opt,name=clear_rates,json=clearRates,proto3" json:"clear_rates,omitempty"`
+	// rates and clear_rates are deprecated: a request that sets either fails with INVALID_ARGUMENT.
+	//
+	// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
+	Rates *Rates `protobuf:"bytes,4,opt,name=rates,proto3" json:"rates,omitempty"`
+	// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
+	ClearRates    bool `protobuf:"varint,5,opt,name=clear_rates,json=clearRates,proto3" json:"clear_rates,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1025,6 +1036,7 @@ func (x *UpdateModelRequest) GetGuard() bool {
 	return false
 }
 
+// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
 func (x *UpdateModelRequest) GetRates() *Rates {
 	if x != nil {
 		return x.Rates
@@ -1032,6 +1044,7 @@ func (x *UpdateModelRequest) GetRates() *Rates {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
 func (x *UpdateModelRequest) GetClearRates() bool {
 	if x != nil {
 		return x.ClearRates
@@ -1195,14 +1208,14 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12\x16\n" +
 	"\x06output\x18\x02 \x01(\tR\x06output\x12\x1d\n" +
 	"\n" +
-	"cache_read\x18\x03 \x01(\tR\tcacheRead\"\xfc\x02\n" +
+	"cache_read\x18\x03 \x01(\tR\tcacheRead\"\x80\x03\n" +
 	"\x05Model\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vprovider_id\x18\x02 \x01(\tR\n" +
 	"providerId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
-	"\x05guard\x18\x04 \x01(\bR\x05guard\x125\n" +
-	"\x05rates\x18\x05 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesR\x05rates\x12\x16\n" +
+	"\x05guard\x18\x04 \x01(\bR\x05guard\x129\n" +
+	"\x05rates\x18\x05 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\x12\x16\n" +
 	"\x06source\x18\x06 \x01(\tR\x06source\x12*\n" +
 	"\x11managed_by_secret\x18\a \x01(\tR\x0fmanagedBySecret\x12'\n" +
 	"\x0fdisabled_reason\x18\b \x01(\tR\x0edisabledReason\x129\n" +
@@ -1244,22 +1257,22 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\x11ListModelsRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"M\n" +
 	"\x12ListModelsResponse\x127\n" +
-	"\x06models\x18\x01 \x03(\v2\x1f.koinon.provider.v1alpha1.ModelR\x06models\"\xad\x01\n" +
+	"\x06models\x18\x01 \x03(\v2\x1f.koinon.provider.v1alpha1.ModelR\x06models\"\xb1\x01\n" +
 	"\x12CreateModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vprovider_id\x18\x02 \x01(\tR\n" +
 	"providerId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
-	"\x05guard\x18\x04 \x01(\bR\x05guard\x125\n" +
-	"\x05rates\x18\x05 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesR\x05rates\"L\n" +
+	"\x05guard\x18\x04 \x01(\bR\x05guard\x129\n" +
+	"\x05rates\x18\x05 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\"L\n" +
 	"\x13CreateModelResponse\x125\n" +
-	"\x05model\x18\x01 \x01(\v2\x1f.koinon.provider.v1alpha1.ModelR\x05model\"\xc3\x01\n" +
+	"\x05model\x18\x01 \x01(\v2\x1f.koinon.provider.v1alpha1.ModelR\x05model\"\xcb\x01\n" +
 	"\x12UpdateModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\x12\x19\n" +
-	"\x05guard\x18\x03 \x01(\bH\x00R\x05guard\x88\x01\x01\x125\n" +
-	"\x05rates\x18\x04 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesR\x05rates\x12\x1f\n" +
-	"\vclear_rates\x18\x05 \x01(\bR\n" +
+	"\x05guard\x18\x03 \x01(\bH\x00R\x05guard\x88\x01\x01\x129\n" +
+	"\x05rates\x18\x04 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\x12#\n" +
+	"\vclear_rates\x18\x05 \x01(\bB\x02\x18\x01R\n" +
 	"clearRatesB\b\n" +
 	"\x06_guard\"L\n" +
 	"\x13UpdateModelResponse\x125\n" +

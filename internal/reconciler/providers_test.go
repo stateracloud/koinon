@@ -95,15 +95,15 @@ var _ = Describe("Provider delivery", func() {
 		Expect(string(sec.Data[name])).To(Equal("sk-upstream-secret"))
 	})
 
-	It("skips a model whose stored rate cannot be priced and still serves every other org", func(ctx SpecContext) {
+	It("skips a model whose stored price cannot be used and still serves every other org", func(ctx SpecContext) {
 		orgA, userA := newOrg(ctx)
 		orgB, userB := newOrg(ctx)
 		a := addProvider(ctx, orgA, userA, "up", "", "bad-rate")
 		b := addProvider(ctx, orgB, userB, "up", "", "fine")
 		cleanup(ctx, orgA, a.ID)
 		cleanup(ctx, orgB, b.ID)
-		// A row from before the stricter validation: seven fraction digits.
-		_, err := pool.Exec(ctx, `UPDATE models SET input_rate = '1.1234567' WHERE org_id = $1`, orgA)
+		// An org price that no longer validates: seven fraction digits, from before the stricter rule.
+		_, err := pool.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, 'old', '{"provider":"openai","match":{"glob":"bad-rate"},"validFrom":"2020-01-01","prices":{"input":"1.1234567","output":"1"},"tokenizer":"bytes","ratio":"3.0","maxOutput":10}', now(), 'test')`, orgA)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = r.ReconcileAll(ctx)

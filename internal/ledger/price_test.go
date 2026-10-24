@@ -89,6 +89,8 @@ var _ = Describe("Cost truth", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(flagged).To(HaveLen(1))
 		Expect(flagged[0].Flagged).To(Equal(int64(1)))
+		Expect(flagged[0].GatewayDiff).To(Equal(int64(1)), "the reason is counted")
+		Expect(flagged[0].UsageMissing + flagged[0].PriceError + flagged[0].MaxOutputCapped).To(BeZero())
 	})
 
 	It("lets an org override win and records its version", func(ctx SpecContext) {
@@ -120,18 +122,25 @@ var _ = Describe("Cost truth", func() {
 		Expect(n).To(Equal(1))
 	})
 
-	It("takes the cache write rate and estimation settings of the matching entry when the model sets its own rates", func(ctx SpecContext) {
+	It("bills a bucket an org price does not name at the rate it would have without the split", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
 		e.model(ctx, "openrouter", "anthropic/claude-sonnet-5.5")
-		_, err := db.Exec(ctx, `UPDATE models SET input_rate = '2', output_rate = '10' WHERE org_id = $1`, e.org)
+		_, err := prices.New(db, nil).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
+			Entry: pricing.Entry{
+				ID: "sonnet-mine", Provider: "openrouter", Match: pricing.Match{Glob: "anthropic/claude-sonnet-5.5"},
+				Spec:      pricing.Spec{Prices: pricing.Wire{Input: "2", Output: "10"}},
+				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
+			},
+			ValidFrom: time.Now().Add(-time.Hour),
+		})
 		Expect(err).NotTo(HaveOccurred())
 		u := e.usage(time.Now(), "anthropic/claude-sonnet-5.5", 1_000_000, 0, 0, "")
 		u.CacheWriteTokens = 1_000_000
 		_, err = ing.Ingest(ctx, []ledger.Entry{u})
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("2.50"), "Anthropic's cache write price, not the input rate")
-		Expect(s.PriceRef).To(HavePrefix("model#"))
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("2.00"), "the cache write is billed at the input rate")
+		Expect(s.PriceRef).To(HavePrefix("org#"))
 	})
 
 	It("estimates missing usage, marks it and counts it toward the limit", func(ctx SpecContext) {
@@ -192,7 +201,7 @@ var _ = Describe("An unusable stored price", func() {
 		bad.model(ctx, "openrouter", deepseek)
 		good.model(ctx, "openrouter", deepseek)
 		// A rate from before the stricter validation, and an override that no longer parses.
-		_, err := db.Exec(ctx, `UPDATE models SET input_rate = '1.1234567', output_rate = '1' WHERE org_id = $1`, bad.org)
+		_, err := db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, 'old', '{"provider":"openrouter","match":{"glob":"deepseek/*"},"validFrom":"2020-01-01","prices":{"input":"1.1234567","output":"1"},"tokenizer":"bytes","ratio":"3.0","maxOutput":10}', now() - interval '1 hour', 'test')`, bad.org)
 		Expect(err).NotTo(HaveOccurred())
 
 		res, err := ing.Ingest(ctx, []ledger.Entry{
@@ -404,3 +413,72 @@ var _ = Describe("Budgets", func() {
 })
 
 func ptr[T any](v T) *T { return &v }
+
+var _ = Describe("Prices migrated from model rates", func() {
+	BeforeEach(needDocker)
+
+	// What migration 00014 writes: the model's rates, generic settings and a pending note.
+	migrated := func(ctx SpecContext, org pgtype.UUID, provider, model, prices string) {
+		GinkgoHelper()
+		_, err := db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, $2,
+			jsonb_build_object('provider', $3::text, 'match', jsonb_build_object('regex', '(?-i:' || replace($4::text, '.', '\.') || ')'),
+			'validFrom', '2026-10-01', 'prices', $5::jsonb, 'tokenizer', 'bytes', 'ratio', '3.0', 'maxOutput', 131072,
+			'source', jsonb_build_object('url', '', 'accessed', ''), 'note', 'migrated:pending:' || $4::text),
+			'2026-10-01T00:00:00Z', 'migration 00014')`, org, "model-"+uniq("m"), provider, model, prices)
+		Expect(err).NotTo(HaveOccurred())
+	}
+	read := func(ctx SpecContext, org pgtype.UUID) pricing.Entry {
+		GinkgoHelper()
+		var raw []byte
+		Expect(db.QueryRow(ctx, `SELECT entry FROM price_overrides WHERE org_id = $1`, org).Scan(&raw)).To(Succeed())
+		var e pricing.Entry
+		Expect(json.Unmarshal(raw, &e)).To(Succeed())
+		return e
+	}
+
+	It("takes what the model's rates never set from the matching default entry, once", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		migrated(ctx, e.org, "openrouter", "anthropic/claude-sonnet-5.5", `{"input":"2","output":"10"}`)
+		svc := prices.New(db, nil)
+		n, err := svc.CompleteMigrated(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeNumerically(">=", 1))
+		got := read(ctx, e.org)
+		_, defs := pricing.Default()
+		d, ok := pricing.Select(defs, "openrouter", "anthropic/claude-sonnet-5.5", time.Now())
+		Expect(ok).To(BeTrue())
+		Expect(got.Prices.Input).To(Equal("2"), "the model's own rates stay")
+		Expect(got.Prices.Output).To(Equal("10"))
+		Expect(got.Prices.CacheWrite).To(Equal(d.Entry.Prices.CacheWrite))
+		Expect(got.Prices.CacheWrite).NotTo(BeEmpty(), "Claude bills cache writes above the input rate")
+		Expect(got.Ratio).To(Equal(d.Entry.Ratio))
+		Expect(got.HiddenThinking).To(Equal(d.Entry.HiddenThinking))
+		Expect(got.MaxOutput).To(Equal(d.Entry.MaxOutput))
+		Expect(got.Note).To(HavePrefix("Migrated from the rates set on the model; the other settings come from the default entry"))
+		Expect(prices.NeedsReview("migration 00014", got.Note)).To(BeFalse())
+		checked := got
+		checked.ID = "x"
+		_, err = checked.Resolve(true)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("a second run changes nothing")
+		again, err := svc.CompleteMigrated(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(read(ctx, e.org)).To(Equal(got))
+		Expect(again).To(BeNumerically(">=", 0))
+	})
+
+	It("keeps generic settings and asks for a review when no default entry matches", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		migrated(ctx, e.org, "openai", "acme/custom-model", `{"input":"1","output":"2"}`)
+		_, err := prices.New(db, nil).CompleteMigrated(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		got := read(ctx, e.org)
+		Expect(got.Tokenizer).To(Equal(pricing.TokenizerBytes))
+		Expect(got.Ratio).To(Equal("3.0"))
+		Expect(got.MaxOutput).To(Equal(131072))
+		Expect(got.Prices.CacheWrite).To(BeEmpty())
+		Expect(got.Note).To(Equal(prices.NoteReview))
+		Expect(prices.NeedsReview("migration 00014", got.Note)).To(BeTrue())
+	})
+})

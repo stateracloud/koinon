@@ -8,7 +8,7 @@ agentgateway holds the real key, forwards the request to your provider and count
 reads the cost from agentgateway's access log and keeps a ledger.
 
 Each org has its own **providers** (an OpenAI-compatible endpoint and, usually, a key) and **models**
-(a name, an optional routing guard and a price). Provider keys are encrypted in Postgres
+(a name and an optional routing guard). Provider keys are encrypted in Postgres
 ([ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md));
 the encryption keys live in a Secret that only `koinon-api` and `koinon-reconciler` mount
 ([Secret keys](https://github.com/stateracloud/koinon/blob/main/docs/ops/secret-keys.md)).
@@ -32,9 +32,9 @@ Org admins and owners open **Providers** under Settings in the sidebar. Members 
   To remove it, tick the box on the edit form.
 - If the URL is refused (a private, loopback or cluster-internal address), the form shows the reason.
   Ask a platform admin to allow the host ([Upstream hosts](#upstream-hosts)).
-- **Add model** on a provider takes the model name, the rates in US dollars per million tokens and,
-  for OpenRouter providers only, the routing guard. The page shows the name the gateway serves,
-  `<org>/<model>`.
+- **Add model** on a provider takes the model name and, for OpenRouter providers only, the routing
+  guard. The page shows the name the gateway serves, `<org>/<model>`. A model has no price of its own:
+  see [Prices](/guides/prices/).
 - A provider declared by a Secret shows "Managed by Secret <name>" and has no edit buttons. If its
   Secret was deleted it shows as removed, with the reason, and you may delete it.
 
@@ -61,16 +61,17 @@ stringData:
   models: |
     - name: deepseek/deepseek-v4.1-flash
       guard: true
-      rates: {input: "0.30", output: "1.20"}
 ```
 
 - `koinon.dev/org` is the org's slug. The bootstrap install has the org `default`.
 - `name` is the provider's name, unique in the org. `provider` is agentgateway's `providerOverride`
   (`openai`, `openrouter`, `ollama` and so on). `url` is the OpenAI-compatible base URL. `apiKey` is
   optional; leave it out for Ollama.
-- `models` is a YAML list. Each model has a `name`, an optional `guard` and `rates`: US dollars per
-  million tokens, `input` and `output`, and optionally `cacheRead`. Koinon does not serve a model
-  without rates; give a free model the rate `"0"`.
+- `models` is a YAML list. Each model has a `name` and an optional `guard`. Prices are not declared
+  here: Koinon prices a model from [its default price list or a price you add](/guides/prices/). **Upgrading:** an
+  older Secret that still has `rates` stays valid, but Koinon ignores the rates and says so in a Warning Event
+  on every sync. A model that only had `rates` is not served unless the default list prices it; add a price
+  for it on the **Prices** page.
 
 `koinon-api` imports the Secret within seconds. What you need to know:
 
@@ -124,12 +125,13 @@ request for the model, and it wins over anything the client sends:
 - `data_collection: deny` allows only endpoints that do not store or train on data.
 
 The guard exists for OpenRouter providers only. Koinon refuses `guard: true` on any other provider
-type. Set `rates` to the highest price among your allowed hosts, so the ledger never counts too
-little.
+type. Add a price for the model that is the highest among your allowed hosts, so the ledger never
+counts too little.
 
 ## Ollama
 
-Ollama needs no key and has no cost per token. Koinon still needs a rate, so set it to zero:
+Ollama needs no key and has no cost per token. Koinon's default price list prices every Ollama model at
+zero, so there is nothing to add:
 
 ```yaml
 apiVersion: v1
@@ -146,7 +148,6 @@ stringData:
   url: http://ollama.example.internal:11434/v1
   models: |
     - name: "qwen3.5:4b"
-      rates: {input: "0", output: "0"}
 ```
 
 Sandboxes cannot reach the Ollama server directly. Only agentgateway can. Small models struggle
@@ -156,13 +157,13 @@ instructions, and sometimes returned empty or cut-off replies. Use a larger mode
 ## The default model
 
 An agent whose template names no model (or `default`) uses the first model its org serves: providers
-by name, then models by name, skipping models without rates.
+by name, then models by name.
 
 ## The admin API
 
 REST under `/admin/v1`, described by an
 [OpenAPI document](https://github.com/stateracloud/koinon/blob/main/api/admin/v1/openapi.yaml) that
-the server also serves at `/admin/v1/openapi.yaml`. It manages providers, models and API tokens.
+the server also serves at `/admin/v1/openapi.yaml`. It manages providers, models, prices, budgets and API tokens.
 
 It takes bearer tokens only. A token belongs to one org and has the role `admin` or `owner`, never
 more than the role of whoever created it. It expires: after 30 days by default, after at most 90.
@@ -185,19 +186,10 @@ curl -sS -H "Authorization: Bearer $KOINON_TOKEN" -H 'Content-Type: application/
   -d '{"name":"ollama","type":"ollama","url":"http://ollama.example.internal:11434/v1"}'
 ```
 
-## Budgets
+## Prices and budgets
 
-The agent template sets `spendUSD`, a limit per agent per UTC calendar day. Koinon pushes it to
-agentgateway as a key limit. When the agent reaches it, Koinon cancels the run with the reason
-`spend_limit` and says so on the ticket. A response in flight can overshoot the limit by a little.
-
-## Changing in v0.1
-
-These are decided and **not built yet**:
-
-- A price schema with a default price list, and raw usage kept beside the cost (plan item PV2). Until
-  then a model carries its own `rates`.
-- An org monthly cap and per-agent daily limits that admins set. At 80% Koinon warns. At 100% it blocks
-  the run (plan item BG1).
+Koinon prices every request from the tokens the provider reports. See [Prices](/guides/prices/) for
+the default list and your own prices, and [Budgets](/guides/budgets/) for the org's monthly cap and the
+agents' daily limits.
 
 See [ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md).

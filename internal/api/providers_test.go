@@ -24,7 +24,7 @@ var _ = Describe("ProviderService", func() {
 		org, owner = e.newTeamOrg(ctx)
 	})
 
-	rates := &providerv1alpha1.Rates{Input: "0.30", Output: "1.20"}
+	rates := &providerv1alpha1.Rates{Input: "0.30", Output: "1.20"} //nolint:staticcheck // deprecated, only to test that it is refused
 	create := func(ctx SpecContext, c *client, name, typ, url, key string) (*providerv1alpha1.CreateProviderResponse, error) {
 		return c.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{OrgId: org, Name: name, Type: typ, Url: url, ApiKey: key})
 	}
@@ -33,7 +33,7 @@ var _ = Describe("ProviderService", func() {
 		prov, err := create(ctx, owner, "existing", "openrouter", "https://openrouter.ai/api/v1", "")
 		Expect(err).NotTo(HaveOccurred())
 		pid := prov.GetProvider().GetId()
-		mod, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "m", Rates: rates})
+		mod, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "m"})
 		Expect(err).NotTo(HaveOccurred())
 		mid := mod.GetModel().GetId()
 		calls := map[string]func(c *client) error{
@@ -58,11 +58,11 @@ var _ = Describe("ProviderService", func() {
 				return err
 			},
 			"CreateModel": func(c *client) error {
-				_, err := c.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "n", Rates: rates})
+				_, err := c.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "n"})
 				return err
 			},
 			"UpdateModel": func(c *client) error {
-				_, err := c.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: mid, ClearRates: true})
+				_, err := c.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: mid, Guard: new(false)})
 				return err
 			},
 			"DeleteModel": func(c *client) error {
@@ -155,38 +155,38 @@ var _ = Describe("ProviderService", func() {
 		Expect(codeOf(err)).To(Equal(connect.CodeAlreadyExists))
 	})
 
-	It("manages models: guard only on OpenRouter, rates validated, org-scoped lists", func(ctx SpecContext) {
+	It("manages models: guard only on OpenRouter, rates refused, org-scoped lists", func(ctx SpecContext) {
 		or, err := create(ctx, owner, "openrouter", "openrouter", "https://openrouter.ai/api/v1", "k")
 		Expect(err).NotTo(HaveOccurred())
 		oa, err := create(ctx, owner, "openai", "openai", "https://api.openai.com/v1", "k")
 		Expect(err).NotTo(HaveOccurred())
 
 		m, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{
-			OrgId: org, ProviderId: or.GetProvider().GetId(), Name: "deepseek/deepseek-v4.1-flash", Guard: true, Rates: rates,
+			OrgId: org, ProviderId: or.GetProvider().GetId(), Name: "deepseek/deepseek-v4.1-flash", Guard: true,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(m.GetModel().GetGuard()).To(BeTrue())
-		Expect(m.GetModel().GetRates().GetOutput()).To(Equal("1.20"))
 
 		_, err = owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{
-			OrgId: org, ProviderId: oa.GetProvider().GetId(), Name: "gpt", Guard: true, Rates: rates,
+			OrgId: org, ProviderId: oa.GetProvider().GetId(), Name: "gpt", Guard: true,
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
 		Expect(err).To(MatchError(ContainSubstring("routing guard")))
 		_, err = owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{
-			OrgId: org, ProviderId: oa.GetProvider().GetId(), Name: "gpt", Rates: &providerv1alpha1.Rates{Input: "cheap", Output: "1"},
+			OrgId: org, ProviderId: oa.GetProvider().GetId(), Name: "gpt", Rates: rates, //nolint:staticcheck // deprecated, refused
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(err).To(MatchError(ContainSubstring("prices")))
 
 		upd, err := owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{
-			OrgId: org, ModelId: m.GetModel().GetId(), Guard: new(false), Rates: &providerv1alpha1.Rates{Input: "0.10", Output: "0.20"},
+			OrgId: org, ModelId: m.GetModel().GetId(), Guard: new(false),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(upd.GetModel().GetGuard()).To(BeFalse())
-		Expect(upd.GetModel().GetRates().GetInput()).To(Equal("0.10"))
-		upd, err = owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), ClearRates: true})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(upd.GetModel().GetRates()).To(BeNil())
+		_, err = owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), Rates: rates}) //nolint:staticcheck // deprecated, refused
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		_, err = owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), ClearRates: true}) //nolint:staticcheck // deprecated, refused
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
 
 		list, err := owner.providers.ListModels(ctx, &providerv1alpha1.ListModelsRequest{OrgId: org})
 		Expect(err).NotTo(HaveOccurred())
@@ -208,8 +208,8 @@ var _ = Describe("ProviderService", func() {
 		var pid, mid string
 		Expect(e.pool.QueryRow(ctx, `INSERT INTO providers (org_id, id, name, type, url, source, managed_by_secret, declared_version)
 			VALUES ($1, gen_random_uuid(), 'declared', 'openrouter', 'https://openrouter.ai/api/v1', 'secret', 'my-secret', 'v1') RETURNING id`, org).Scan(&pid)).To(Succeed())
-		Expect(e.pool.QueryRow(ctx, `INSERT INTO models (org_id, id, provider_id, name, guard, input_rate, output_rate, source, managed_by_secret)
-			VALUES ($1, gen_random_uuid(), $2, 'm', false, '1', '2', 'secret', 'my-secret') RETURNING id`, org, pid).Scan(&mid)).To(Succeed())
+		Expect(e.pool.QueryRow(ctx, `INSERT INTO models (org_id, id, provider_id, name, guard, source, managed_by_secret)
+			VALUES ($1, gen_random_uuid(), $2, 'm', false, 'secret', 'my-secret') RETURNING id`, org, pid).Scan(&mid)).To(Succeed())
 
 		list, err := owner.providers.ListProviders(ctx, &providerv1alpha1.ListProvidersRequest{OrgId: org})
 		Expect(err).NotTo(HaveOccurred())
@@ -225,7 +225,7 @@ var _ = Describe("ProviderService", func() {
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 		_, err = owner.providers.DeleteModel(ctx, &providerv1alpha1.DeleteModelRequest{OrgId: org, ModelId: mid})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
-		_, err = owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "n", Rates: rates})
+		_, err = owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "n"})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 
 		By("once its Secret is gone it is marked removed and may be deleted")

@@ -43,8 +43,8 @@ DELETE FROM providers
 WHERE org_id = @org_id AND id = @id;
 
 -- name: CreateModel :one
-INSERT INTO models (org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by)
-VALUES (@org_id, @id, @provider_id, @name, @guard, sqlc.narg(input_rate), sqlc.narg(output_rate), sqlc.narg(cache_read_rate),
+INSERT INTO models (org_id, id, provider_id, name, guard, source, managed_by_secret, disabled_reason, created_by)
+VALUES (@org_id, @id, @provider_id, @name, @guard,
         @source, sqlc.narg(managed_by_secret), sqlc.narg(disabled_reason), sqlc.narg(created_by))
 RETURNING *;
 
@@ -59,8 +59,7 @@ ORDER BY name, source, id;
 
 -- name: UpdateModel :one
 UPDATE models
-SET guard = @guard, input_rate = sqlc.narg(input_rate), output_rate = sqlc.narg(output_rate),
-    cache_read_rate = sqlc.narg(cache_read_rate)
+SET guard = @guard
 WHERE org_id = @org_id AND id = @id
 RETURNING *;
 
@@ -76,7 +75,7 @@ WHERE org_id = @org_id AND id = @id;
 -- name: ListServedCatalog :many
 -- Every enabled provider of the org with its enabled models, for the gateway.
 SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.url, p.api_key,
-       m.id AS model_id, m.name AS model_name, m.guard, m.input_rate, m.output_rate, m.cache_read_rate, m.updated_at AS model_updated_at
+       m.id AS model_id, m.name AS model_name, m.guard
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
 WHERE p.org_id = @org_id AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND m.disabled_reason IS NULL
@@ -140,7 +139,3 @@ UPDATE models
 SET disabled_reason = NULL
 WHERE org_id = @org_id AND id = @id;
 
--- name: ListModelRatesForAudit :many
--- Every model with rates, across orgs, to log rates the stricter validation would refuse.
-SELECT org_id, name, input_rate, output_rate, cache_read_rate FROM models
-WHERE input_rate IS NOT NULL;

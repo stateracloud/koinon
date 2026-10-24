@@ -17,7 +17,6 @@ import (
 type DeclaredModel struct {
 	Name  string
 	Guard bool
-	Rates *Rates
 }
 
 // DeclaredProvider is a provider declared by a Kubernetes Secret of type model-provider.
@@ -32,6 +31,8 @@ type DeclaredProvider struct {
 	URL     string
 	APIKey  string
 	Models  []DeclaredModel
+	// Warnings are things the Secret declares that Koinon ignores (the removed per-model rates).
+	Warnings []string
 }
 
 // ApplyDeclaredProvider creates or updates the provider and models a Secret declares, and
@@ -47,7 +48,7 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 	}
 	seen := map[string]bool{}
 	for _, m := range d.Models {
-		if err := ValidateModel(m.Name, m.Guard, m.Rates, d.Type); err != nil {
+		if err := ValidateModel(m.Name, m.Guard, d.Type); err != nil {
 			return false, fmt.Errorf("model %q: %w", m.Name, err)
 		}
 		if seen[m.Name] {
@@ -157,12 +158,9 @@ func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org 
 		if err := q.ShadowUIModels(ctx, store.ShadowUIModelsParams{OrgID: org, Name: m.Name, Reason: pgtype.Text{String: ReasonShadowedModel, Valid: true}}); err != nil {
 			return err
 		}
-		inR, outR, cacheR := rateParams(m.Rates)
 		if cur, ok := have[m.Name]; ok {
 			delete(have, m.Name)
-			if _, err := q.UpdateModel(ctx, store.UpdateModelParams{
-				OrgID: org, ID: cur.ID, Guard: m.Guard, InputRate: inR, OutputRate: outR, CacheReadRate: cacheR,
-			}); err != nil {
+			if _, err := q.UpdateModel(ctx, store.UpdateModelParams{OrgID: org, ID: cur.ID, Guard: m.Guard}); err != nil {
 				return err
 			}
 			// A model of a provider that was removed and came back is served again.
@@ -177,7 +175,7 @@ func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org 
 		}
 		if _, err := q.CreateModel(ctx, store.CreateModelParams{
 			OrgID: org, ID: id, ProviderID: prov.ID, Name: m.Name, Guard: m.Guard,
-			InputRate: inR, OutputRate: outR, CacheReadRate: cacheR, Source: store.ConfigSourceSecret,
+			Source:          store.ConfigSourceSecret,
 			ManagedBySecret: pgtype.Text{String: d.SecretName, Valid: true},
 		}); err != nil {
 			if isUnique(err) {
