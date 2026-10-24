@@ -123,8 +123,8 @@ answers the open questions on KEK rotation and on role tokens.
    `providers.allowedInternalHosts`. A standard egress NetworkPolicy for the gateway (DNS, koinon-api,
    public internet minus the private ranges, plus `networkPolicy.gatewayEgressTo`) is the hard limit,
    since DNS rebinding between the checks stays open (the gateway resolves the name itself).
-9. **Other.** Model rates stay on the model for now (PV2 replaces them); a model without rates is
-   not served. The routing guard exists for OpenRouter providers and forces
+9. **Other.** Model rates stayed on the model in PV1; the W4 amendment below folds them into prices.
+   The routing guard exists for OpenRouter providers and forces
    `{"provider": {"zdr": true, "data_collection": "deny"}}`.
 
 ## Amendment (2026-10-24, plan items PV2 and BG1)
@@ -151,10 +151,8 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    tokenizer and a bytes-per-token ratio, and for default entries a source URL and access date. When
    several entries match, the exact provider beats `*`, then the more specific pattern, then the
    later `valid_from`.
-3. **Precedence and versions.** The rates set on a model (the PV1 shorthand, kept) win for input, output and cache read, then the
-   org's own price entries, then the default list; the entry that would otherwise match still supplies
-   the cache write and reasoning rates and the estimation settings. Folding model rates into dated org
-   price entries is decided for the PV2 UI PR (W4); until then the layer stays. Org prices are append-only: a change is a new
+3. **Precedence and versions.** The org's own price entries win over the default list (the PV1 per-model
+   rates were a layer above both until the W4 amendment folded them into org entries). Org prices are append-only: a change is a new
    version with a later `valid_from`; deleting one sets `retired_at`. A request is priced with the
    entry valid at its time (if none was, the current one, noted on the entry). Every ledger entry stores
    `price_ref` (`default@<list version>#<id>`, `org#<id>` or `model#<id>@<time>`).
@@ -239,6 +237,58 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    is the seam (a notifier that also enqueues mail wraps the in-app one).
 10. **Audit.** Every price, cap, ceiling and agent-limit change is audited by the service layer in the
     same transaction, with the actor, and refused changes are not.
+
+## Amendment (2026-10-24, plan item W4)
+
+Andre decided the following for the pricing and budget pages. It completes decisions 5 to 7 in the UI and
+removes the layer that PV1 left on the model.
+
+1. **Per-model rates are folded into org price entries; the layer is gone.** Migration
+   `00014_fold_model_rates_into_prices.sql` creates one org price entry for every model that has rates:
+   the model's provider type, the exact model name as a glob, the rates it had (input, output, cache
+   read), tokenizer `bytes`, ratio 3.0, and a name `model-<name>-<id prefix>`. Precedence is now the org's
+   entries, then the default list.
+   - **Valid from the model's creation.** The rates applied to every request since the model existed, so
+     an entry that reaches the ledger late is priced as it would have been. `now()` would have sent
+     those entries to the fallback ("no price was valid then") instead. A later org entry of the same
+     length of pattern still beats it, which is the point of dated entries.
+   - **`max_output` is 131072** (0 for a free model), a ceiling: a model never stored one and SQL cannot
+     read the default list. It is only used when an aborted response without usage settles; admins
+     tighten it by adding a later version. The cache write rate, reasoning rate, tiers and the tokenizer of
+     the default entry that used to fill the gaps are not copied; a bucket without a rate bills at the
+     input or output rate, as for any entry.
+   - A model whose stored rates `money.ParseRate` would refuse is skipped with a notice (it would make
+     every price of its org unusable); it was not priced before either.
+   - The `models.input_rate`, `output_rate` and `cache_read_rate` columns stay, unread and marked
+     deprecated, for one release (expand, then contract) so a rolling upgrade does not break the old pods;
+     a later migration drops them.
+2. **The rates fields are deprecated and refused, not mapped.** `Model.rates`, `CreateModelRequest.rates`,
+   `UpdateModelRequest.rates` and `clear_rates` (and the admin API's `rates` and `clearRates`) stay in the
+   schemas so old clients still compile and decode, but the server never fills them, and a request that
+   sets one fails with INVALID_ARGUMENT (HTTP 400) saying to add a price. Mapping a model's rates to a new
+   org entry on the fly would silently create org-wide patterns without a `max_output` or a start date,
+   and a second way to do what `PriceService.SetPrice` does; a clear error is cheaper to explain.
+   `rates` in a declarative Secret is ignored with a Warning Event ("rates are ignored") when it is
+   applied; the Secret stays valid. A model is now served whenever its provider is, priced by an org
+   entry or the default list, or by the gateway's own catalog when neither has it.
+3. **Pages.** *Prices* (owners and admins): the default list read-only with each entry's source link and a
+   "changed since your last upgrade" marker (the diff of the current list against the version before it);
+   the org's entries (add, a new version of one, retire) with every usage-type price, tiers, tokenizer,
+   ratio, tool overhead and `max_output`, validated in the browser like the server; and the flagged
+   requests, with a reason and period filter. The flagged endpoint now says why: `gateway_diff`
+   (cost differs from the gateway's by more than 1%), `usage_missing`, `max_output_capped` and
+   `price_error`. *Budgets*: the org's monthly cap with spent, remaining and the estimated share; each
+   agent's daily limit next to its template default and today's spend (`ListAgentBudgets`); the
+   notifications with mark-as-read. A banner on every page tells owners and admins of an unread 80% or
+   100% notice of the window now running (the highest threshold per limit). Members see none of it and
+   their pages make no request.
+4. **The platform ceiling** is read-only on the Budgets page. Platform admins set it in a Platform area of
+   the sidebar (*Budget ceiling*), for the org chosen in the org switcher; there is no org list for platform
+   admins yet, so they reach another org through the switcher.
+5. **Estimated against reported.** A run's and a ticket's cost says how many of its requests were
+   estimated, with a tooltip that explains why (the provider reported no usage) and that estimates count
+   toward limits and tend to run high. The 100% stop shows on the ticket timeline as "stopped at a spend
+   limit", from the `run.canceled` event the ledger already writes.
 
 ## Alternatives considered
 
