@@ -130,17 +130,43 @@ var _ = Describe("Decode", func() {
 		Expect(entries[0].KeyID).To(Equal("k-aaaaaaaaaaaa"))
 	})
 
-	It("skips refused requests and marks a 2xx without usage for estimation", func() {
-		refused := llmRecord(num(gateway.LogFieldStatus, 400), str("agw.ai.usage.cost.total", "0"))
-		refused.Attributes = withoutAttrs(refused.Attributes, "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens")
-		missing := llmRecord(num(gateway.LogFieldStatus, 200), num(gateway.LogFieldMaxTokens, 4000), num(gateway.LogFieldRequestBytes, 900))
-		missing.Attributes = withoutAttrs(missing.Attributes, "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens", "agw.ai.usage.cost.total")
-		entries, rejected, reason := ledger.Decode(export(refused, missing))
+	It("charges usage whatever the status, skips only gateway refusals, and estimates the rest", func() {
+		strip := func(r *logspb.LogRecord, keys ...string) *logspb.LogRecord {
+			r.Attributes = withoutAttrs(r.Attributes, keys...)
+			return r
+		}
+		noUsage := []string{"gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens", "agw.ai.usage.cost.total"}
+		withZeroCost := func(r *logspb.LogRecord) *logspb.LogRecord {
+			r.Attributes = append(withoutAttrs(r.Attributes, "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens", "agw.ai.usage.cost.total"), str("agw.ai.usage.cost.total", "0"))
+			return r
+		}
+		id := func(n string) *commonpb.KeyValue { return str(gateway.LogFieldRequest, n) }
+		entries, rejected, reason := ledger.Decode(export(
+			// charged: usage under a 500 (an upstream that failed after working)
+			llmRecord(num(gateway.LogFieldStatus, 500), id("r-500-usage")),
+			// skipped: the gateway's own 429 and a 401, zero cost, no usage
+			withZeroCost(llmRecord(num(gateway.LogFieldStatus, 429), id("r-429"))),
+			withZeroCost(llmRecord(num(gateway.LogFieldStatus, 401), id("r-401"))),
+			// estimated: an upstream 400 with a zero cost, a 2xx without usage, and a record
+			// without a status (the client left before the headers)
+			withZeroCost(llmRecord(num(gateway.LogFieldStatus, 400), num(gateway.LogFieldRequestBytes, 10), id("r-400"))),
+			strip(llmRecord(num(gateway.LogFieldStatus, 200), num(gateway.LogFieldMaxTokens, 4000), num(gateway.LogFieldRequestBytes, 900), id("r-200")), noUsage...),
+			strip(llmRecord(num(gateway.LogFieldRequestBytes, 71), id("r-gone")), noUsage...),
+			// an older config's record without usage or status stays uncharged
+			strip(llmRecord(id("r-old")), noUsage...),
+		))
 		Expect(rejected).To(BeZero(), reason)
-		Expect(entries).To(HaveLen(1))
-		Expect(entries[0].InputKnown || entries[0].OutputKnown).To(BeFalse())
-		Expect(entries[0].MaxTokens).To(Equal(int64(4000)))
-		Expect(entries[0].RequestBytes).To(Equal(int64(900)))
+		got := map[string]ledger.Entry{}
+		for _, e := range entries {
+			got[e.RequestID] = e
+		}
+		Expect(got).To(HaveLen(4))
+		Expect(got["r-500-usage"].InputKnown).To(BeTrue())
+		for _, id := range []string{"r-400", "r-200", "r-gone"} {
+			Expect(got[id].InputKnown || got[id].OutputKnown).To(BeFalse(), id)
+		}
+		Expect(got["r-200"].MaxTokens).To(Equal(int64(4000)))
+		Expect(got["r-200"].RequestBytes).To(Equal(int64(900)))
 	})
 
 	It("accepts numeric costs and tokens", func() {
