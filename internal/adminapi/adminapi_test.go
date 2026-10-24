@@ -96,7 +96,7 @@ func (e *env) call(ctx context.Context, token, method, path string, body any) (i
 
 	// The response must be one the document describes.
 	vreq, _ := http.NewRequestWithContext(ctx, method, "http://localhost/"+strings.TrimPrefix(path, "/"), nil)
-	vreq.URL.Path = path
+	vreq.URL.Path, _, _ = strings.Cut(path, "?")
 	route, params, rerr := e.router.FindRoute(vreq)
 	Expect(rerr).NotTo(HaveOccurred(), "the document describes %s %s", method, path)
 	Expect(openapi3filter.ValidateResponse(ctx, &openapi3filter.ResponseValidationInput{

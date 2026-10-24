@@ -61,6 +61,7 @@ import (
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/scheduler"
@@ -342,6 +343,9 @@ func run() error {
 	embedded, err := templates.All()
 	if err != nil {
 		return fmt.Errorf("load templates: %w", err)
+	}
+	if err := prices.New(pool, slog.Default()).SyncDefaults(ctx); err != nil {
+		return err
 	}
 	if _, err := services.SyncTemplates(ctx, pool, embedded); err != nil {
 		return err

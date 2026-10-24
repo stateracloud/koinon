@@ -32,9 +32,13 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	adminv1 "github.com/stateracloud/koinon/api/admin/v1"
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/tokens"
 )
 
@@ -48,6 +52,8 @@ type Server struct {
 	pool    *pgxpool.Pool
 	catalog *catalog.Service
 	tokens  *tokens.Service
+	prices  *prices.Service
+	budgets *budget.Service
 	log     *slog.Logger
 	limiter *limiter
 }
@@ -59,7 +65,7 @@ func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Lo
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{pool: pool, catalog: c, tokens: t, log: log, limiter: newLimiter()}
+	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log), budgets: budget.New(pool), log: log, limiter: newLimiter()}
 }
 
 type principalKey struct{}
@@ -185,6 +191,8 @@ func (s *Server) problem(err error) (int, Error) {
 		e   Error
 		inv *catalog.InvalidError
 		tin *tokens.InvalidError
+		pin *prices.InvalidError
+		bin *budget.InvalidError
 	)
 	set := func(status int, code ErrorCode, msg string) (int, Error) {
 		e.Error.Code, e.Error.Message = code, msg
@@ -195,6 +203,14 @@ func (s *Server) problem(err error) (int, Error) {
 		return set(http.StatusBadRequest, InvalidRequest, inv.Msg)
 	case errors.As(err, &tin):
 		return set(http.StatusBadRequest, InvalidRequest, tin.Msg)
+	case errors.As(err, &pin):
+		return set(http.StatusBadRequest, InvalidRequest, pin.Msg)
+	case errors.As(err, &bin):
+		return set(http.StatusBadRequest, InvalidRequest, bin.Msg)
+	case errors.Is(err, budget.ErrForbidden):
+		return set(http.StatusForbidden, PermissionDenied, err.Error())
+	case errors.Is(err, prices.ErrNotFound), errors.Is(err, budget.ErrNotFound):
+		return set(http.StatusNotFound, NotFound, "not found")
 	case errors.Is(err, catalog.ErrNotFound), errors.Is(err, tokens.ErrNotFound):
 		return set(http.StatusNotFound, NotFound, "not found")
 	case errors.Is(err, catalog.ErrReadOnly):
@@ -441,4 +457,17 @@ func (s *Server) RevokeToken(ctx context.Context, req RevokeTokenRequestObject) 
 		return RevokeTokendefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
 	return RevokeToken204Response{}, nil
+}
+
+// templateLimit is the spendUSD of an agent version, the default daily limit of an agent that has none of its own.
+func (s *Server) templateLimit(ctx context.Context, org, version pgtype.UUID) money.USD {
+	v, err := store.New(s.pool).GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: org, ID: version})
+	if err != nil {
+		return 0
+	}
+	cfg, err := agentconfig.Parse(v.Config)
+	if err != nil {
+		return 0
+	}
+	return money.FromCents(cfg.Limits.SpendUSD.Cents())
 }
