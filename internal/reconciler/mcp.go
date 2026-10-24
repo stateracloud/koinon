@@ -252,13 +252,25 @@ func (r *Reconciler) applyMCP(ctx context.Context, state *gateway.State, served 
 	execGrants := map[string][]gateway.ToolGrant{}
 	execOrg := map[string]store.ListOrgsToReconcileRow{}
 	for _, s := range served.servers {
-		execGrants[s.org.Slug] = append(execGrants[s.org.Slug], gateway.ToolGrant{Target: s.target, All: true})
+		// Only the ask-tier tools: the executor makes calls a human approved, and those are ask-tier
+		// calls (a tool moved to auto meanwhile is called by the agent directly, so an approval made
+		// before the move is refused by the gateway). Defence in depth: the key opens nothing else.
+		var asked []string
+		for _, t := range s.tools {
+			if t.Present && t.Tier == store.McpTierAsk && mcpservers.ToolNameProblem(s.org.Slug, s.row.Name, t.Name) == "" {
+				asked = append(asked, t.Name)
+			}
+		}
 		execOrg[s.org.Slug] = s.org
+		if len(asked) > 0 {
+			execGrants[s.org.Slug] = append(execGrants[s.org.Slug], gateway.ToolGrant{Target: s.target, Tools: asked})
+		}
 	}
 	// Each org with servers gets an executor key, for the calls a human approved: they go through the
 	// gateway like any call (its egress policy, its credential injection), so koinon-api never holds
 	// a server credential. The key opens that org's servers only (the target conditions).
-	for slug, grants := range execGrants {
+	for slug := range execOrg {
+		grants := execGrants[slug]
 		ref := gateway.AgentRef{Org: slug, Name: gateway.MCPExecAgentName}
 		key, err := r.execKey(ctx, execOrg[slug], ref)
 		if err != nil {

@@ -366,6 +366,20 @@ var _ = Describe("the ask-tier proxy", func() {
 			Expect(gw.count()).To(Equal(1))
 		})
 
+		It("covers a request recorded before the flag was turned on", func(ctx SpecContext) {
+			_, err := svc.SetTwoApprovers(ctx, org, audit.System(), server.ID, "create_issue", false)
+			Expect(err).NotTo(HaveOccurred())
+			row := request(ctx, map[string]any{"title": "early"})
+			Expect(row.ApprovalsRequired).To(BeEquivalentTo(1))
+			_, err = svc.SetTwoApprovers(ctx, org, audit.System(), server.ID, "create_issue", true)
+			Expect(err).NotTo(HaveOccurred())
+			got, err := exec().Approve(ctx, org, row.ID, second, row.ArgsSha256, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Status).To(Equal(store.ApprovalStatusPending), "one approval is not enough any more")
+			Expect(got.ApprovalsRequired).To(BeEquivalentTo(2))
+			Expect(gw.count()).To(BeZero())
+		})
+
 		It("lets either approver deny, and one approval of a one-approver tool still suffices", func(ctx SpecContext) {
 			row := request(ctx, map[string]any{"title": "deny me"})
 			_, err := exec().Approve(ctx, org, row.ID, second, row.ArgsSha256, "")

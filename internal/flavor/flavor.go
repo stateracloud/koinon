@@ -7,6 +7,7 @@
 package flavor
 
 import (
+	"github.com/stateracloud/koinon/internal/gateway"
 	"slices"
 
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -72,7 +73,7 @@ var table = []Descriptor{
 		Name:         store.AgentFlavorOpencode,
 		Proto:        templatev1alpha1.Flavor_FLAVOR_OPENCODE,
 		EntryScript:  "/usr/local/bin/koinon-opencode",
-		ReadyCommand: "koinon:github_koinon-ready",
+		ReadyCommand: "koinon:" + gateway.ReadyPromptExposed,
 		ModelPrefix:  "koinon/",
 		// The global config directory's AGENTS.md (flavors/opencode/Dockerfile).
 		InstructionLink:   "/etc/koinon/opencode/AGENTS.md",

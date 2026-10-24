@@ -140,3 +140,10 @@ UPDATE approval_requests
 SET first_approver = @approver::uuid
 WHERE org_id = @org_id AND id = @id AND status = 'pending' AND first_approver IS NULL AND approvals_required = 2
 RETURNING *;
+
+-- name: RaiseApprovalsRequired :one
+-- A tool turned two-approver on after the request was recorded: the pending request needs two too.
+UPDATE approval_requests
+SET approvals_required = 2
+WHERE org_id = @org_id AND id = @id AND status = 'pending' AND approvals_required < 2
+RETURNING *;

@@ -288,11 +288,11 @@ var _ = Describe("Org MCP servers", func() {
 	})
 
 	It("gives each org with servers an executor key that opens its servers only, kept in a Secret koinon-api reads", func(ctx SpecContext) {
-		server(ctx, org, "wiki", "", map[string]string{"read": "auto"})
+		server(ctx, org, "wiki", "", map[string]string{"read": "auto", "write": "ask", "drop": "never"})
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 		st := mg.last()
 		exec := gateway.AgentRef{Org: slug, Name: gateway.MCPExecAgentName}
-		Expect(st.Tools[exec]).To(Equal([]gateway.ToolGrant{{Target: slug + "-wiki", All: true}}))
+		Expect(st.Tools[exec]).To(Equal([]gateway.ToolGrant{{Target: slug + "-wiki", Tools: []string{"write"}}}), "only the ask-tier tools")
 		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, mcpservers.ExecSecretName(org), metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sec.Data[mcpservers.ExecKeyDataKey]).NotTo(BeEmpty())
