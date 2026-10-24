@@ -103,6 +103,20 @@ func (q *Queries) CreateSystemApprovalRequest(ctx context.Context, arg CreateSys
 	return i, err
 }
 
+const deleteOldUploadNonces = `-- name: DeleteOldUploadNonces :execrows
+DELETE FROM saved_work_upload_nonces
+WHERE org_id = $1 AND created_at < now() - interval '10 minutes'
+`
+
+// A nonce only matters while its token could still be good (5 minutes); older ones go.
+func (q *Queries) DeleteOldUploadNonces(ctx context.Context, orgID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOldUploadNonces, orgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const expireSavedWork = `-- name: ExpireSavedWork :many
 UPDATE saved_work SET status = 'expired', envelope = NULL
 WHERE org_id = $1 AND status = 'saved' AND expires_at < now()

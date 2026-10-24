@@ -120,6 +120,9 @@ n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /secrets
 [ "$n" = 1 ] || fail "KEK mounted into $n components, want only koinon-reconciler"
 # koinon-agentd holds no KEK; it posts a stuck sandbox's work to koinon-api's tools port (ADR 0054).
 env_is KOINON_SAVED_WORK_URL '"http://koinon-api-saved-work.koinon.svc.cluster.local:8082"'
+# The URL agentd posts to must name a Service that exists, on the port it exposes.
+svc=$(render --show-only templates/deployments.yaml | awk '/^kind: Service$/{s=1} s&&/^  name: koinon-api-saved-work$/{f=1} f&&/port: 8082$/{p=1} /^---$/{s=0;f=0} END{exit !p}' && echo yes || echo no)
+[ "$svc" = yes ] || fail "no Service koinon-api-saved-work on port 8082 for KOINON_SAVED_WORK_URL"
 env_is KOINON_SAVED_WORK_KEY_FILE '/secrets/saved-work/key'
 n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /secrets/saved-work$' || true)
 [ "$n" = 1 ] || fail "the saved-work key is mounted into $n components, want only koinon-agentd"

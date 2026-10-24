@@ -160,6 +160,8 @@ type Querier interface {
 	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) error
 	DeleteMCPServer(ctx context.Context, arg DeleteMCPServerParams) (int64, error)
 	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
+	// A nonce only matters while its token could still be good (5 minutes); older ones go.
+	DeleteOldUploadNonces(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	DeleteProvider(ctx context.Context, arg DeleteProviderParams) (int64, error)
 	// Drops IdP-sourced memberships from this issuer whose group the user no
 	// longer has, or whose org stopped using the IdP.

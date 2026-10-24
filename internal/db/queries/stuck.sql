@@ -125,3 +125,8 @@ ON CONFLICT DO NOTHING;
 -- The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
 SELECT * FROM runs
 WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state IN ('starting', 'running');
+
+-- name: DeleteOldUploadNonces :execrows
+-- A nonce only matters while its token could still be good (5 minutes); older ones go.
+DELETE FROM saved_work_upload_nonces
+WHERE org_id = @org_id AND created_at < now() - interval '10 minutes';

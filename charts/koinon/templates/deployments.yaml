@@ -184,3 +184,19 @@ spec:
     - name: tools
       port: {{ .Values.api.toolsPort }}
       targetPort: tools
+---
+# Saved work from a stuck sandbox, for koinon-agentd only (ADR 0054; see networkpolicy.yaml). Its own
+# Service and port keep it apart from the tools, which trust agentgateway's agent header.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "koinon.componentName" (list . "api-saved-work") }}
+  labels:
+    {{- include "koinon.labels" (list . "api") | nindent 4 }}
+spec:
+  selector:
+    {{- include "koinon.selectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - name: savedwork
+      port: {{ .Values.api.savedWorkPort }}
+      targetPort: savedwork
