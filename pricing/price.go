@@ -116,8 +116,11 @@ func (w Wire) Parse() (Rates, error) {
 		s    string
 		dst  **money.Rate
 	}{
-		{"input", w.Input, &r.Input}, {"output", w.Output, &r.Output}, {"cache_read", w.CacheRead, &r.CacheRead},
-		{"cache_write", w.CacheWrite, &r.CacheWrite}, {"reasoning", w.Reasoning, &r.Reasoning},
+		{"input", w.Input, &r.Input},
+		{"output", w.Output, &r.Output},
+		{"cache_read", w.CacheRead, &r.CacheRead},
+		{"cache_write", w.CacheWrite, &r.CacheWrite},
+		{"reasoning", w.Reasoning, &r.Reasoning},
 	} {
 		v, err := parseRate(f.name, f.s)
 		if err != nil {
@@ -297,8 +300,8 @@ func (m Match) Compile() (re *regexp.Regexp, specificity int, err error) {
 // Tokenizers.
 const (
 	TokenizerBytes      = "bytes"
-	TokenizerO200K      = "tiktoken:o200k_base"
-	TokenizerCL100K     = "tiktoken:cl100k_base"
+	TokenizerO200K      = "tiktoken:o200k_base"  //nolint:gosec // encoding name, not a credential
+	TokenizerCL100K     = "tiktoken:cl100k_base" //nolint:gosec // encoding name, not a credential
 	maxOverheadTokens   = 100000
 	providerWildcard    = "*"
 	idPattern           = `^[a-z0-9][a-z0-9._-]{0,127}$`
@@ -366,7 +369,7 @@ func (e Entry) Resolve(orgEntry bool) (Resolved, error) {
 	if err != nil {
 		bad("valid_from %q must be a date yyyy-mm-dd", e.ValidFrom)
 	}
-	price, err := e.Spec.Parse()
+	price, err := e.Parse()
 	if err != nil {
 		bad("%v", err)
 	}
