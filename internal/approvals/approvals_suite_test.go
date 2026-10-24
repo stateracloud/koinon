@@ -35,6 +35,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 )
 
@@ -85,6 +86,7 @@ type fixture struct {
 	run                  store.Run
 	agentHeader          string
 
+	ring  *secretstore.Keyring
 	gh    *githubtest.Fake
 	svc   *approvals.Service
 	tools *httptest.Server
@@ -142,6 +144,7 @@ func newFixture(ctx context.Context, preset string) *fixture {
 	})).To(Succeed())
 
 	ring := secretstoretest.Keyring()
+	f.ring = ring
 	connID := uuid.New()
 	connPG := pgtype.UUID{Bytes: connID, Valid: true}
 	env, err := connections.SealFields(ring, f.org, connPG, map[string][]byte{connections.GitHubPrivateKeyField: f.gh.PEM})
@@ -173,7 +176,7 @@ func newFixture(ctx context.Context, preset string) *fixture {
 
 	log := slog.New(slog.NewTextHandler(f.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	f.svc = approvals.New(pool, approvals.Options{
-		Keys: ring, GitHub: github.NewClient(github.Options{BaseURL: f.gh.URL()}), Logger: log,
+		Keys: ring, SavedWorkKeys: ring, GitHub: github.NewClient(github.Options{BaseURL: f.gh.URL()}), Logger: log,
 		ExecutionLease: 2 * time.Second,
 	})
 	tools, err := githubtools.New(pool, githubtools.Options{

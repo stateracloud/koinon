@@ -434,6 +434,7 @@ func run() error {
 		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
 		approvalOpts.ExecKeys = mcpservers.KubeExecKeys{Client: kube, Namespace: cfg.secretsNamespace}
 	}
+	approvalOpts.SavedWorkKeys = keyring // opens the work saved from stuck sandboxes (ADR 0054)
 	approvalSvc := approvals.New(pool, approvalOpts)
 	go approvalSvc.Sweeper(bgCtx, cfg.sweepInterval)
 	tokenSvc := tokens.New(pool, nil)

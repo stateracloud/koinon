@@ -16,6 +16,7 @@ import (
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/savedwork"
 )
 
 // maxNoteBytes bounds an approver's note.
@@ -49,6 +50,7 @@ func approvalProto(a store.ApprovalRequest, canDecide, detail bool) *approvalv1a
 		ExpiresAt: tsProto(a.ExpiresAt), CreatedAt: tsProto(a.CreatedAt), ExecutedAt: tsProto(a.ExecutedAt),
 		CanDecide:         canDecide && a.Status == store.ApprovalStatusPending,
 		ApprovalsRequired: int32(a.ApprovalsRequired), FirstApprover: idString(a.FirstApprover),
+		System: a.System,
 	}
 	if len(a.Result) > 0 {
 		out.Result = payloadProto(a.Result)
@@ -118,6 +120,7 @@ func (s *Server) GetApproval(ctx context.Context, req *approvalv1alpha1.GetAppro
 	}
 	out := approvalProto(row, c.p.HasRole(c.org, store.OrgRoleAdmin), true)
 	s.enrichMCP(ctx, out, row)
+	s.enrichSavedWork(ctx, out, row)
 	return &approvalv1alpha1.GetApprovalResponse{Approval: out}, nil
 }
 
@@ -139,6 +142,40 @@ func (s *Server) enrichMCP(ctx context.Context, out *approvalv1alpha1.Approval, 
 		}
 	}
 	out.Call = &approvalv1alpha1.Approval_Mcp{Mcp: call}
+}
+
+// enrichSavedWork fills the diffstat of a "push saved work" request from the saved work's manifest.
+// The sealed files are not opened here.
+func (s *Server) enrichSavedWork(ctx context.Context, out *approvalv1alpha1.Approval, row store.ApprovalRequest) {
+	if !row.System || row.Tool != savedwork.ToolPush {
+		return
+	}
+	args, err := savedwork.DecodePushArgs(row.ArgsJson)
+	if err != nil {
+		return
+	}
+	var id pgtype.UUID
+	if id.Scan(args.SavedWorkID) != nil {
+		return
+	}
+	sw, err := s.q.GetSavedWorkManifest(ctx, store.GetSavedWorkManifestParams{OrgID: row.OrgID, ID: id})
+	if err != nil {
+		return
+	}
+	var m savedwork.Manifest
+	if json.Unmarshal(sw.Manifest, &m) != nil {
+		return
+	}
+	call := &approvalv1alpha1.SavedWorkCall{
+		Repository: sw.Repo, Base: sw.BaseSha, Branch: sw.Branch, SizeBytes: sw.SizeBytes, Skipped: m.Skipped,
+		Status: sw.Status, ExpiresAt: tsProto(sw.ExpiresAt),
+	}
+	for _, f := range m.Files {
+		call.Files = append(call.Files, &approvalv1alpha1.SavedFile{
+			Path: f.Path, Status: f.Status, Added: int32(f.Added), Deleted: int32(f.Deleted), Size: f.Size, Binary: f.Binary, //nolint:gosec // line counts
+		})
+	}
+	out.Call = &approvalv1alpha1.Approval_SavedWork{SavedWork: call}
 }
 
 var fileStatusToProto = map[approvals.FileStatus]approvalv1alpha1.FileStatus{

@@ -55,6 +55,10 @@ const (
 // ErrAgentNotActive means the ticket's agent cannot take runs.
 var ErrAgentNotActive = errors.New("agent is not active")
 
+// ErrAgentUnhealthy means the agent's sandbox keeps getting stuck and an admin has not resumed it
+// (ADR 0054). The error wraps the reason.
+var ErrAgentUnhealthy = errors.New("agent is unhealthy")
+
 // Actor is who caused a scheduler action, for the ticket event.
 type Actor struct {
 	// UserID is set for a user; otherwise the actor is the system.
@@ -88,6 +92,9 @@ func Enqueue(ctx context.Context, q *store.Queries, ticket store.Ticket) (store.
 	}
 	if agent.Status != store.AgentStatusActive || !agent.ActiveVersionID.Valid {
 		return store.Run{}, false, ErrAgentNotActive
+	}
+	if agent.UnhealthyAt.Valid {
+		return store.Run{}, false, fmt.Errorf("%w: %s", ErrAgentUnhealthy, agent.UnhealthyReason.String)
 	}
 	version, err := q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: org, ID: agent.ActiveVersionID})
 	if err != nil {

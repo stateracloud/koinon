@@ -413,6 +413,48 @@ var _ = Describe("Reconciler", func() {
 			Expect(osg.Sandbox(row.Workspace, names.Sandbox).GetSpec().GetTemplate().GetImage()).To(Equal(image + "-2"))
 		})
 
+		It("recreates a sandbox agentd found stuck at once, parked run or not, audits it, and clears the mark with the new home", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			old := osg.Sandbox(row.Workspace, names.Sandbox).GetMetadata().GetId()
+			queueRun(ctx, org, user, agent.ID)
+			run := claimRun(ctx, org)
+			_, err := q.ParkRun(ctx, store.ParkRunParams{OrgID: org, ID: run.ID, Epoch: run.Epoch, ParkReason: store.RunParkReasonApproval})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("a healthy sandbox with a parked run is left alone")
+			pass(ctx, r)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+
+			By("agentd marks the stuck one")
+			_, err = q.MarkSandboxUnhealthy(ctx, store.MarkSandboxUnhealthyParams{
+				OrgID: org, AgentID: agent.ID, Reason: "a process could not be ended for 1m0s: worker (pid 41, state D)", Generation: old,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx, r) // deletes
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1), "the parked run does not hold it off")
+			Expect(sandboxRow(ctx, agent.ID).UnhealthyAt.Valid).To(BeTrue(), "still marked while it is being deleted")
+			pass(ctx, r) // creates
+			recreated := sandboxRow(ctx, agent.ID)
+			Expect(recreated.HomeGeneration.String).NotTo(Equal(old), "a new home")
+			Expect(recreated.UnhealthyAt.Valid).To(BeFalse())
+			Expect(recreated.State).To(Equal(store.SandboxStateReady))
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'sandbox.recreate' AND summary::text LIKE '%state D%'`, org).Scan(&n)).To(Succeed())
+			Expect(n).To(Equal(1))
+
+			By("the parked run is still parked in Postgres")
+			parked, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: run.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(parked.State).To(Equal(store.RunStateParked))
+
+			By("a mark for a sandbox that is already gone does not recreate the new one")
+			_, err = q.MarkSandboxUnhealthy(ctx, store.MarkSandboxUnhealthyParams{OrgID: org, AgentID: agent.ID, Reason: "old", Generation: old})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx, r)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(sandboxRow(ctx, agent.ID).UnhealthyAt.Valid).To(BeFalse(), "recording the new home clears the stale mark")
+		})
+
 		It("stops after the idle timeout and starts again for a queued run", func(ctx SpecContext) {
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			phase := func() openshellv1.SandboxPhase {

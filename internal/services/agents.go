@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
@@ -30,16 +31,18 @@ var agentStatusToProto = map[store.AgentStatus]agentv1alpha1.AgentStatus{
 // agentView renders an agent with its latest and active versions.
 func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent, slugs map[pgtype.UUID]string) (*agentv1alpha1.Agent, error) {
 	out := &agentv1alpha1.Agent{
-		Id:            idString(a.ID),
-		OrgId:         idString(a.OrgID),
-		DisplayName:   a.DisplayName,
-		Status:        agentStatusToProto[a.Status],
-		Flavor:        flavorProto(string(a.Flavor)),
-		TemplateId:    idString(a.TemplateID),
-		LatestVersion: a.LatestVersion,
-		CreatedAt:     tsProto(a.CreatedAt),
-		ActivatedAt:   tsProto(a.ActivatedAt),
-		ArchivedAt:    tsProto(a.ArchivedAt),
+		Id:              idString(a.ID),
+		OrgId:           idString(a.OrgID),
+		DisplayName:     a.DisplayName,
+		Status:          agentStatusToProto[a.Status],
+		Flavor:          flavorProto(string(a.Flavor)),
+		TemplateId:      idString(a.TemplateID),
+		LatestVersion:   a.LatestVersion,
+		CreatedAt:       tsProto(a.CreatedAt),
+		ActivatedAt:     tsProto(a.ActivatedAt),
+		ArchivedAt:      tsProto(a.ArchivedAt),
+		UnhealthyAt:     tsProto(a.UnhealthyAt),
+		UnhealthyReason: a.UnhealthyReason.String,
 	}
 	if a.TemplateID.Valid {
 		slug, ok := slugs[a.TemplateID]
@@ -212,6 +215,7 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 		return nil, err
 	}
 	var out *agentv1alpha1.Agent
+	restarting := 0
 	err = s.inTx(ctx, func(q *store.Queries) error {
 		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: id})
 		if err != nil {
@@ -244,15 +248,83 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 		if err != nil {
 			return err
 		}
+		if req.GetApplyToOpenTickets() {
+			// Open tickets of the agent start a fresh session, with a handoff, at their next run.
+			marked, err := q.RequestSessionRestartForAgent(ctx, store.RequestSessionRestartForAgentParams{OrgID: c.org, AgentID: a.ID})
+			if err != nil {
+				return err
+			}
+			restarting = len(marked)
+		}
 		out, err = s.agentView(ctx, q, a, nil)
-		return err
+		if err != nil {
+			return err
+		}
+		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: "agent.activate", TargetKind: "agent", TargetID: a.ID.String(),
+			After: map[string]any{
+				"version": versions[i].Version, "applyToOpenTickets": req.GetApplyToOpenTickets(), "ticketsRestarting": restarting,
+			},
+		})
 	})
 	if err != nil {
 		return nil, s.dbError(err, "agent")
 	}
 	s.log.Info("agent activated", "org", c.org.String(), "agent", out.GetId(),
-		"version", out.GetActiveVersion(), "by", c.actor().String())
-	return &agentv1alpha1.ActivateAgentResponse{Agent: out}, nil
+		"version", out.GetActiveVersion(), "by", c.actor().String(),
+		"apply_to_open_tickets", req.GetApplyToOpenTickets(), "tickets_restarting", restarting)
+	return &agentv1alpha1.ActivateAgentResponse{Agent: out, TicketsRestarting: int32(restarting)}, nil //nolint:gosec // a count of tickets
+}
+
+// ResumeAgent implements AgentService: an admin or owner clears an agent's unhealthy state (ADR 0054).
+// The agent's stuck sandbox, if it is still there, is recreated, and the count of recreations
+// starts again.
+func (s *Server) ResumeAgent(ctx context.Context, req *agentv1alpha1.ResumeAgentRequest) (*agentv1alpha1.ResumeAgentResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	var out *agentv1alpha1.Agent
+	err = s.inTx(ctx, func(q *store.Queries) error {
+		before, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: id})
+		if err != nil {
+			return err
+		}
+		a, err := q.ResumeAgent(ctx, store.ResumeAgentParams{OrgID: c.org, ID: id})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return connect.NewError(connect.CodeFailedPrecondition, "agent is not unhealthy")
+		}
+		if err != nil {
+			return err
+		}
+		// The sandbox that kept getting stuck is recreated; the reconciler is woken below.
+		if _, err := q.MarkSandboxUnhealthy(ctx, store.MarkSandboxUnhealthyParams{
+			OrgID: c.org, AgentID: id, Reason: "the agent was resumed after its sandbox kept getting stuck",
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		out, err = s.agentView(ctx, q, a, nil)
+		if err != nil {
+			return err
+		}
+		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: "agent.resume", TargetKind: "agent", TargetID: id.String(),
+			Before: map[string]any{"unhealthyReason": before.UnhealthyReason.String},
+			After:  map[string]any{"unhealthy": false},
+		})
+	})
+	if err != nil {
+		return nil, s.dbError(err, "agent")
+	}
+	if err := s.q.NotifyReconciler(ctx, c.org); err != nil {
+		s.log.Warn("notifying the reconciler after resuming an agent failed", "err", err)
+	}
+	s.log.Info("agent resumed", "org", c.org.String(), "agent", id.String(), "by", c.actor().String())
+	return &agentv1alpha1.ResumeAgentResponse{Agent: out}, nil
 }
 
 // ArchiveAgent implements AgentService. Unfinished runs of the agent are

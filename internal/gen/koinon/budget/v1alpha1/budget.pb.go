@@ -933,7 +933,7 @@ func (x *SetAgentBudgetResponse) GetBudget() *AgentBudget {
 type Notification struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// kind is budget.warning (80%) or budget.reached (100%).
+	// kind is budget.warning (80%), budget.reached (100%) or agent.unhealthy.
 	Kind string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
 	// level is agent_daily, org_monthly or platform_ceiling.
 	Level string `protobuf:"bytes,3,opt,name=level,proto3" json:"level,omitempty"`
@@ -946,7 +946,10 @@ type Notification struct {
 	WindowStart *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=window_start,json=windowStart,proto3" json:"window_start,omitempty"`
 	CreatedAt   *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// read_at is unset while the notification is unread.
-	ReadAt        *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
+	ReadAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=read_at,json=readAt,proto3" json:"read_at,omitempty"`
+	// message is the text of notifications that are not about a budget (kind agent.unhealthy: an
+	// agent whose sandbox keeps getting stuck; agent_id names it).
+	Message       string `protobuf:"bytes,11,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1049,6 +1052,13 @@ func (x *Notification) GetReadAt() *timestamppb.Timestamp {
 		return x.ReadAt
 	}
 	return nil
+}
+
+func (x *Notification) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
 }
 
 type ListNotificationsRequest struct {
@@ -1296,7 +1306,7 @@ const file_koinon_budget_v1alpha1_budget_proto_rawDesc = "" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12&\n" +
 	"\x0fdaily_limit_usd\x18\x03 \x01(\tR\rdailyLimitUsd\"U\n" +
 	"\x16SetAgentBudgetResponse\x12;\n" +
-	"\x06budget\x18\x01 \x01(\v2#.koinon.budget.v1alpha1.AgentBudgetR\x06budget\"\xea\x02\n" +
+	"\x06budget\x18\x01 \x01(\v2#.koinon.budget.v1alpha1.AgentBudgetR\x06budget\"\x84\x03\n" +
 	"\fNotification\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x14\n" +
@@ -1309,7 +1319,8 @@ const file_koinon_budget_v1alpha1_budget_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x123\n" +
 	"\aread_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\x06readAt\"R\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\x06readAt\x12\x18\n" +
+	"\amessage\x18\v \x01(\tR\amessage\"R\n" +
 	"\x18ListNotificationsRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vmax_results\x18\x02 \x01(\x05R\n" +

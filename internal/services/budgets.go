@@ -328,8 +328,10 @@ func notificationProto(n store.Notification) *budgetv1alpha1.Notification {
 		SpentUSD    string `json:"spent_usd"`
 		WindowStart string `json:"window_start"`
 		AgentID     string `json:"agent_id"`
+		Message     string `json:"message"`
 	}
 	if json.Unmarshal(n.Payload, &p) == nil {
+		out.Message = p.Message
 		out.Level, out.Threshold, out.LimitUsd, out.SpentUsd = p.Level, p.Threshold, p.LimitUSD, p.SpentUSD
 		if p.AgentID != "" && p.AgentID != "00000000-0000-0000-0000-000000000000" {
 			out.AgentId = p.AgentID
