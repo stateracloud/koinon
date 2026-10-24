@@ -38,13 +38,15 @@ before), or `PriceService.GetDefaultPriceChanges` in the UI.
 An org admin adds prices of their own with `POST /admin/v1/prices` (or `PriceService.SetPrice`).
 They win over the default list. A price has a name; setting the same name again adds a version that
 applies from its `validFrom` (default now), and earlier versions never change, so past requests keep
-the price they were charged at. `DELETE /admin/v1/prices/{name}` ends the price. The rates set on a
-model itself (`rates`) win over both. Every change is audited.
+the price they were charged at. `DELETE /admin/v1/prices/{name}` ends the price. Every change is audited. The UI is the *Prices*
+page (Settings, owners and admins); the per-model `rates` of the first release were folded into org prices
+by migration 00014 and are refused now.
 
 ## Cost checks
 
 Koinon's cost counts for limits and reports. agentgateway's cost from its access log is kept beside it;
-when they differ by more than 1% the price entry is flagged (`GET /admin/v1/prices/flagged`). A flag
+when they differ by more than 1% the price entry is flagged (`GET /admin/v1/prices/flagged`, or the Flagged requests list on the Prices page, which also shows
+usage that was missing, estimated output cut at the price's largest output, and prices that could not be used). A flag
 usually means the gateway's catalog is out of date (a price changed since the last reconcile) or the
 provider bills a bucket the entry does not price (an entry missing `cache_write`, for example).
 
