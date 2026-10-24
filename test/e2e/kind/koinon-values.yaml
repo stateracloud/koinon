@@ -18,14 +18,6 @@ postgres:
 gateway:
   mode: standalone
 
-# The default 256Mi limit can OOM koinon-api when the first password change (two argon2id runs of
-# 64 MiB) lands while it starts; the pod restarted in two of four browser e2e runs and the page showed
-# HTTP 502. Give the test install room; the chart default is untouched.
-api:
-  resources:
-    requests: {cpu: 50m, memory: 128Mi}
-    limits: {memory: 768Mi}
-
 # The fake model server is a Service in another namespace (a ClusterIP, which the default provider
 # URL policy and the gateway's egress policy deny).
 providers:

@@ -29,19 +29,58 @@ var _ = Describe("ProviderService", func() {
 		return c.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{OrgId: org, Name: name, Type: typ, Url: url, ApiKey: key})
 	}
 
-	It("is for admins and owners only", func(ctx SpecContext) {
+	It("is for admins and owners only, on all eight RPCs", func(ctx SpecContext) {
+		prov, err := create(ctx, owner, "existing", "openrouter", "https://openrouter.ai/api/v1", "")
+		Expect(err).NotTo(HaveOccurred())
+		pid := prov.GetProvider().GetId()
+		mod, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "m", Rates: rates})
+		Expect(err).NotTo(HaveOccurred())
+		mid := mod.GetModel().GetId()
+		calls := map[string]func(c *client) error{
+			"ListProviders": func(c *client) error {
+				_, err := c.providers.ListProviders(ctx, &providerv1alpha1.ListProvidersRequest{OrgId: org})
+				return err
+			},
+			"CreateProvider": func(c *client) error {
+				_, err := create(ctx, c, "x", "openai", "https://api.example.com/v1", "")
+				return err
+			},
+			"UpdateProvider": func(c *client) error {
+				_, err := c.providers.UpdateProvider(ctx, &providerv1alpha1.UpdateProviderRequest{OrgId: org, ProviderId: pid, Url: new("https://example.com/v1")})
+				return err
+			},
+			"DeleteProvider": func(c *client) error {
+				_, err := c.providers.DeleteProvider(ctx, &providerv1alpha1.DeleteProviderRequest{OrgId: org, ProviderId: pid})
+				return err
+			},
+			"ListModels": func(c *client) error {
+				_, err := c.providers.ListModels(ctx, &providerv1alpha1.ListModelsRequest{OrgId: org})
+				return err
+			},
+			"CreateModel": func(c *client) error {
+				_, err := c.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "n", Rates: rates})
+				return err
+			},
+			"UpdateModel": func(c *client) error {
+				_, err := c.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: mid, ClearRates: true})
+				return err
+			},
+			"DeleteModel": func(c *client) error {
+				_, err := c.providers.DeleteModel(ctx, &providerv1alpha1.DeleteModelRequest{OrgId: org, ModelId: mid})
+				return err
+			},
+		}
+		Expect(calls).To(HaveLen(8))
 		for _, role := range []store.OrgRole{store.OrgRoleMember, store.OrgRoleViewer} {
 			c := e.userIn(ctx, org, role)
-			_, err := create(ctx, c, "x", "openai", "https://api.example.com/v1", "")
-			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied), string(role))
-			_, err = c.providers.ListProviders(ctx, &providerv1alpha1.ListProvidersRequest{OrgId: org})
-			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied), string(role))
-			_, err = c.providers.ListModels(ctx, &providerv1alpha1.ListModelsRequest{OrgId: org})
-			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied), string(role))
+			for name, call := range calls {
+				Expect(codeOf(call(c))).To(Equal(connect.CodePermissionDenied), string(role)+" "+name)
+			}
 		}
 		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
-		_, err := create(ctx, admin, "ok", "openai", "https://api.example.com/v1", "")
-		Expect(err).NotTo(HaveOccurred())
+		for _, name := range []string{"ListProviders", "ListModels", "CreateProvider", "CreateModel", "UpdateProvider", "UpdateModel", "DeleteModel", "DeleteProvider"} {
+			Expect(calls[name](admin)).To(Succeed(), name)
+		}
 	})
 
 	It("does not reveal an org to someone outside it", func(ctx SpecContext) {

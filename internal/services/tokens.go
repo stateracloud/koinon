@@ -8,6 +8,7 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/audit"
@@ -34,28 +35,41 @@ func tokenProto(t tokens.Token, names map[string]string) *tokenv1alpha1.Token {
 	return out
 }
 
-// userNames maps the IDs of the users who created the tokens to their display name or email.
-func (s *Server) userNames(ctx context.Context, list []tokens.Token) map[string]string {
-	names := map[string]string{}
+// userNames maps the IDs of the users who created the tokens to their display name or email, with
+// one query. A real database error is returned, not shown as a deleted user.
+func (s *Server) userNames(ctx context.Context, list []tokens.Token) (map[string]string, error) {
+	seen := map[string]bool{}
+	var ids []pgtype.UUID
 	for _, t := range list {
-		if t.CreatedBy == "" || names[t.CreatedBy] != "" {
+		if t.CreatedBy == "" || seen[t.CreatedBy] {
 			continue
 		}
+		seen[t.CreatedBy] = true
 		id, err := parseID("user", t.CreatedBy)
 		if err != nil {
-			continue
+			return nil, err
 		}
-		u, err := s.q.GetActiveUser(ctx, id)
+		ids = append(ids, id)
+	}
+	names := map[string]string{}
+	if len(ids) == 0 {
+		return names, nil
+	}
+	rows, err := s.q.ListUsersByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range rows {
 		switch {
-		case err != nil:
-			names[t.CreatedBy] = "a deleted user"
+		case u.DeletedAt.Valid:
+			names[u.ID.String()] = "a deleted user"
 		case u.DisplayName != "":
-			names[t.CreatedBy] = u.DisplayName
+			names[u.ID.String()] = u.DisplayName
 		default:
-			names[t.CreatedBy] = u.Email.String
+			names[u.ID.String()] = u.Email.String
 		}
 	}
-	return names
+	return names, nil
 }
 
 func roleOf(s string) (store.OrgRole, bool) {
@@ -112,7 +126,11 @@ func (s *Server) CreateToken(ctx context.Context, req *tokenv1alpha1.CreateToken
 		return nil, s.tokenError(err)
 	}
 	s.log.Info("admin API token created", "org", c.org.String(), "token", created.ID, "prefix", created.Prefix, "role", created.Role, "by", c.actor().String())
-	return &tokenv1alpha1.CreateTokenResponse{Token: tokenProto(created.Token, s.userNames(ctx, []tokens.Token{created.Token})), Secret: created.Secret}, nil
+	names, err := s.userNames(ctx, []tokens.Token{created.Token})
+	if err != nil {
+		return nil, s.tokenError(err)
+	}
+	return &tokenv1alpha1.CreateTokenResponse{Token: tokenProto(created.Token, names), Secret: created.Secret}, nil
 }
 
 // ListTokens implements TokenService. Admins and owners.
@@ -126,7 +144,10 @@ func (s *Server) ListTokens(ctx context.Context, req *tokenv1alpha1.ListTokensRe
 		return nil, s.tokenError(err)
 	}
 	res := &tokenv1alpha1.ListTokensResponse{}
-	names := s.userNames(ctx, list)
+	names, err := s.userNames(ctx, list)
+	if err != nil {
+		return nil, s.tokenError(err)
+	}
 	for _, t := range list {
 		res.Tokens = append(res.Tokens, tokenProto(t, names))
 	}
@@ -143,5 +164,9 @@ func (s *Server) RevokeToken(ctx context.Context, req *tokenv1alpha1.RevokeToken
 	if err != nil {
 		return nil, s.tokenError(err)
 	}
-	return &tokenv1alpha1.RevokeTokenResponse{Token: tokenProto(t, s.userNames(ctx, []tokens.Token{t}))}, nil
+	names, err := s.userNames(ctx, []tokens.Token{t})
+	if err != nil {
+		return nil, s.tokenError(err)
+	}
+	return &tokenv1alpha1.RevokeTokenResponse{Token: tokenProto(t, names)}, nil
 }
