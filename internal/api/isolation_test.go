@@ -5,11 +5,12 @@ package api_test
 import (
 	"context"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgtype"
 	"io/fs"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	connect "connectrpc.com/connect/v2"
 	. "github.com/onsi/ginkgo/v2"

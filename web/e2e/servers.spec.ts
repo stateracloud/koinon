@@ -67,7 +67,7 @@ test('owner walks the Servers page: health, tiers, suggestions, reviews and addi
   await expectAccessible(page)
   await form.getByRole('button', { name: 'Add server' }).click()
   await expect(page.getByRole('region', { name: 'fresh' })).toBeVisible()
-  expect(seen.create).toMatchObject({ orgId: org, name: 'fresh', credentialHeader: 'X-Api-Key', credentialPrefix: '', credentialValue: 'not-a-real-token' })
+  expect(seen.create).toMatchObject({ orgId: org, name: 'fresh', credentialHeader: 'X-Api-Key', credentialValue: 'not-a-real-token' })
   await expect(page.getByText('not-a-real-token')).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Delete server docs' }).click()

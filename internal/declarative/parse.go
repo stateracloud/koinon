@@ -38,7 +38,7 @@ const (
 // it the credential is the whole header value. credentialHeader defaults to Authorization.
 const (
 	KeyTransport        = "transport"
-	KeyCredentialHeader = "credentialHeader"
+	KeyCredentialHeader = "credentialHeader" //nolint:gosec // a data key name
 	KeyCredentialScheme = "credentialScheme"
 	KeyCredential       = "credential"
 )

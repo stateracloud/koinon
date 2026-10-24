@@ -210,8 +210,10 @@ var _ = Describe("Org MCP servers", func() {
 		fakeGateway := func(target string, tools ...string) (host string, port int, stop func()) {
 			srv := mcp.NewServer(&mcp.Implementation{Name: "fake-gateway", Version: "0"}, nil)
 			for _, t := range tools {
-				srv.AddTool(&mcp.Tool{Name: target + "_" + t, Description: "does " + t, InputSchema: json.RawMessage(`{"type":"object"}`),
-					Annotations: &mcp.ToolAnnotations{ReadOnlyHint: t == "read"}},
+				srv.AddTool(&mcp.Tool{
+					Name: target + "_" + t, Description: "does " + t, InputSchema: json.RawMessage(`{"type":"object"}`),
+					Annotations: &mcp.ToolAnnotations{ReadOnlyHint: t == "read"},
+				},
 					func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 						return &mcp.CallToolResult{}, nil
 					})
