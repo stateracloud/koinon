@@ -358,9 +358,10 @@ var _ = Describe("the quickstart", Ordered, func() {
 			g.Expect(cost.GetRequests()).To(BeNumerically(">", 0), "the ledger recorded the run's requests")
 		}, 60*time.Second, time.Second).Should(Succeed())
 		// The streamed requests carry usage through the gateway; the title request the fake model
-		// refuses (a 400 without usage) is charged its input only.
+		// refuses (a 400 without usage) is charged its input only. OpenCode asks for a title with each
+		// prompt until it has one, so the end-of-turn note's prompt adds one more such request.
 		Expect(cost.GetRequests()-cost.GetEstimatedRequests()).To(BeNumerically(">=", 1), "streamed requests reported their usage")
-		Expect(cost.GetEstimatedRequests()).To(BeNumerically("<=", 1))
+		Expect(cost.GetEstimatedRequests()).To(BeNumerically("<=", 2))
 		Expect(cost.GetInputTokens()).To(BeNumerically(">=", 1200), "the fake model's reported input tokens")
 		Expect(cost.GetOutputTokens()).To(BeNumerically("<", 1000), "no output is charged for the refused request")
 
