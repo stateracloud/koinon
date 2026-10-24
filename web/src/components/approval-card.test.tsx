@@ -24,7 +24,25 @@ import { orgId, renderApp, whoAmI } from '@/test-utils'
 
 const sha = 'f3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 
-function approval(opts: { canDecide?: boolean; status?: Status; executable?: boolean } = {}) {
+function mcpApproval() {
+  return create(ApprovalSchema, {
+    id: 'ap-1',
+    orgId,
+    ticketId: 't-1',
+    runId: 'r-1',
+    connector: 'mcp',
+    tool: 'create_page',
+    target: 'mcp:docs',
+    argsJson: '{"title":"Hello","tags":["a","b"]}',
+    argsSha256: sha,
+    decision: Decision.ASK,
+    status: Status.PENDING,
+    canDecide: true,
+  })
+}
+
+function approval(opts: { canDecide?: boolean; status?: Status; executable?: boolean; mcp?: boolean } = {}) {
+  if (opts.mcp) return mcpApproval()
   return create(ApprovalSchema, {
     id: 'ap-1',
     orgId,
@@ -68,10 +86,10 @@ const changedSha = 'a'.repeat(64)
 
 type DiffInit = MessageInitShape<typeof GetApprovalDiffResponseSchema>
 
-function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean; diff?: DiffInit; executable?: boolean } = {}) {
+function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean; diff?: DiffInit; executable?: boolean; mcp?: boolean } = {}) {
   const approves: ApproveRequest[] = []
   const denies: DenyRequest[] = []
-  let current = approval({ canDecide: opts.canDecide, executable: opts.executable })
+  let current = approval({ canDecide: opts.canDecide, executable: opts.executable, mcp: opts.mcp })
   let gets = 0
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
@@ -277,6 +295,21 @@ describe('ApprovalCard', () => {
     expect(approves[0].argsSha256).toBe(sha)
     expect(approves[1].argsSha256).toBe(changedSha)
     expect(await screen.findByRole('link', { name: 'https://github.com/acme/widgets/pull/7' })).toBeInTheDocument()
+  })
+
+  it('renders an MCP call with its server and pretty-printed arguments, and approves the same hash', async () => {
+    const { approves } = setup({ mcp: true })
+    const card = await screen.findByTestId('approval-card')
+    expect(within(card).getByRole('heading', { name: 'Approve create_page on docs?' })).toBeInTheDocument()
+    expect(within(card).getByText('Server')).toBeInTheDocument()
+    expect(within(card).queryByText('Repository')).not.toBeInTheDocument()
+    expect(within(card).queryByRole('region', { name: 'Push and run risk' })).not.toBeInTheDocument()
+    const details = within(card).getByTestId('mcp-arguments') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(within(card).getByLabelText('Call arguments').textContent).toBe(JSON.stringify({ title: 'Hello', tags: ['a', 'b'] }, null, 2))
+    await userEvent.click(within(card).getByRole('button', { name: 'Approve' }))
+    await waitFor(() => expect(approves).toHaveLength(1))
+    expect(approves[0].argsSha256).toBe(sha)
   })
 
   it('denies with a note', async () => {

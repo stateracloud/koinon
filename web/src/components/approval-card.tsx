@@ -58,6 +58,7 @@ export function ApprovalCard({
   const headingId = useId()
   const pr = a.call.case === 'pullRequest' ? a.call.value : undefined
   const comment = a.call.case === 'comment' ? a.call.value : undefined
+  const mcp = a.connector === 'mcp'
   const items = riskItems(a.risk)
   const isPending = a.status === Status.PENDING
   const resultUrl = typeof a.result?.url === 'string' ? a.result.url : undefined
@@ -78,7 +79,7 @@ export function ApprovalCard({
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">Tool</dt>
         <dd className="font-mono">{a.tool}</dd>
-        <dt className="text-muted-foreground">Repository</dt>
+        <dt className="text-muted-foreground">{mcp ? 'Server' : 'Repository'}</dt>
         <dd>{targetRepo(a.target)}</dd>
         {pr && (
           <>
@@ -111,6 +112,8 @@ export function ApprovalCard({
         </section>
       )}
 
+      {mcp && <McpArguments json={a.argsJson} />}
+
       {pr && <FileList files={pr.files} items={items} diff={diff} diffPending={diffPending} diffError={diffError} />}
 
       <Outcome approval={a} resultUrl={resultUrl} />
@@ -142,6 +145,29 @@ export function ApprovalCard({
         </Link>
       )}
     </article>
+  )
+}
+
+/** prettyJson indents canonical JSON for reading; text that does not parse is shown as it is. */
+function prettyJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    return text
+  }
+}
+
+/** McpArguments shows the arguments an MCP call is approved with; the approval binds to their hash. */
+function McpArguments({ json }: { json: string }) {
+  return (
+    <section aria-label="Arguments">
+      <details className="rounded-md border" data-testid="mcp-arguments">
+        <summary className="cursor-pointer px-2 py-1 text-sm font-medium">Arguments</summary>
+        <pre className="bg-muted/40 max-h-96 overflow-auto border-t p-2 font-mono text-xs" aria-label="Call arguments">
+          {json ? prettyJson(json) : '(none)'}
+        </pre>
+      </details>
+    </section>
   )
 }
 
