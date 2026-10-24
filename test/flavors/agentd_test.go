@@ -182,6 +182,13 @@ func describeAgentd(f flavor) bool {
 			// For a flavor with instructionsInSystem, the fake model answers helloPrompt only with
 			// the instructions agentd wrote in the system prompt.
 			Expect(text).To(ContainSubstring(helloReply))
+			// The end-of-turn summary is one more prompt on the same session (ADR 0051 amendment).
+			// Its reply is the ticket's note, not part of the run's reply: the turn's text is there
+			// once, and the note is stored on the ticket whichever harness wrote it.
+			Expect(strings.Count(text, helloReply)).To(Equal(1), "the note is not recorded as the turn's reply")
+			Expect(t.AgentSummary.String).To(Equal(helloReply))
+			Expect(evs).To(ContainElement(WithTransform(func(e store.RunEvent) string { return e.Kind }, Equal("run.summary"))))
+			Expect(gw.modelBodies()).To(ContainElement(ContainSubstring("Your turn is over")), "the harness sent the summary prompt to the model")
 			Expect(gw.authHeaders()).To(HaveEach("Bearer " + fakeKey))
 			Expect(sb.run(ctx, "cat", instructionsPath)).To(ContainSubstring(instructionsMarker))
 			// The first chat request of the turn already offers the Koinon tools: agentd waited for

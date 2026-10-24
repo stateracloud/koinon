@@ -175,12 +175,13 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 	}
 	if len(args) == 5 && args[0] == "-c" && args[1] == agentd.SaveworkScript {
 		f.mu.Lock()
-		defer f.mu.Unlock()
 		f.saveworkRuns++
-		if f.savework == nil {
+		fn := f.savework
+		f.mu.Unlock() // the fake may be slow; other execs must not wait for it
+		if fn == nil {
 			return 0
 		}
-		out, code := f.savework(args[3])
+		out, code := fn(args[3])
 		_, _ = io.WriteString(stdout, out)
 		return code
 	}

@@ -422,6 +422,33 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("6. Run resumes → PR URL on the ticket")
 	})
 
+	It("6a. the agent's end-of-turn note is on the ticket, not in its timeline as a reply", func(ctx SpecContext) {
+		t.begin()
+		// The note is written after each turn (the run parked once, then finished: two turns), so
+		// it is there by the time the run has succeeded; the last one wins.
+		var got *ticketv1alpha1.GetTicketResponse
+		Eventually(func(g Gomega) {
+			var err error
+			got, err = c.tickets.GetTicket(ctx, &ticketv1alpha1.GetTicketRequest{OrgId: org, TicketId: ticket.GetId()})
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(got.GetTicket().GetAgentSummary()).To(HavePrefix("Notes: the ticket asks for a hello.md"))
+		}, 30*time.Second, time.Second).Should(Succeed())
+		Expect(got.GetTicket().GetAgentSummaryAt()).NotTo(BeNil())
+		for _, ev := range got.GetEvents() {
+			if ev.GetKind() == "message" {
+				text, _ := ev.GetPayload().AsMap()["text"].(string)
+				Expect(text).NotTo(HavePrefix("Notes:"), "the note is not a reply on the ticket")
+			}
+		}
+		By("the note's model call went through the gateway and was counted with the run")
+		Eventually(func(g Gomega) {
+			r, err := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(r.GetRun().GetCost().GetRequests()).To(BeNumerically(">=", 4), "title, two turns and at least one note")
+		}, 60*time.Second, time.Second).Should(Succeed())
+		t.end("6a. Agent's notes on the ticket")
+	})
+
 	It("6b. adds a remote MCP server: the gateway injects its credential, and an agent's call reaches it", func(ctx SpecContext) {
 		t.begin()
 		mcpServerID = mcpServerE2E(ctx, admin, org, agent.GetId())
