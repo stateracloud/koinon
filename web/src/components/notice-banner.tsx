@@ -5,7 +5,7 @@ import { Link } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { BudgetService } from '@/gen/koinon/budget/v1alpha1/budget_pb'
-import { bannerNotices, noticeText } from '@/lib/budgets'
+import { bannerNotices, isAgentUnhealthy, noticeText } from '@/lib/budgets'
 
 /** The banner shows this many notices; the rest are counted and listed on the Budgets page. */
 export const maxBannerNotices = 3
@@ -26,22 +26,32 @@ export function NoticeBanner({ orgId, platformAdmin }: { orgId: string; platform
   const names = useMemo(() => new Map((agents.data?.budgets ?? []).map((a) => [a.agentId, a.agentName])), [agents.data])
   if (shown.length === 0) return null
   return (
-    <div className="grid gap-2 px-4 pt-3 md:px-6" role="region" aria-label="Budget notices">
-      {shown.map((n) => (
-        <Alert key={n.id} variant={n.threshold >= 100 ? 'destructive' : 'default'} role={n.threshold >= 100 ? 'alert' : 'status'}>
-          <AlertDescription>
-            {noticeText(n, names)}{' '}
-            <Link to="/settings/budgets" className="underline">
-              See budgets
-            </Link>
-          </AlertDescription>
-        </Alert>
-      ))}
+    <div className="grid gap-2 px-4 pt-3 md:px-6" role="region" aria-label="Notices">
+      {shown.map((n) => {
+        const unhealthy = isAgentUnhealthy(n)
+        const urgent = unhealthy || n.threshold >= 100
+        return (
+          <Alert key={n.id} variant={urgent ? 'destructive' : 'default'} role={urgent ? 'alert' : 'status'}>
+            <AlertDescription>
+              {noticeText(n, names)}{' '}
+              {unhealthy && n.agentId ? (
+                <Link to="/agents/$agentId" params={{ agentId: n.agentId }} className="underline">
+                  Open the agent
+                </Link>
+              ) : (
+                <Link to="/settings/budgets" className="underline">
+                  See budgets
+                </Link>
+              )}
+            </AlertDescription>
+          </Alert>
+        )
+      })}
       {all.length > shown.length && (
         <p className="text-sm">
           {all.length - shown.length} more.{' '}
           <Link to="/settings/budgets" className="underline">
-            See all budget notices
+            See all notices
           </Link>
         </p>
       )}

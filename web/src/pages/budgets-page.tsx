@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { BudgetService, type AgentBudget, type OrgBudget } from '@/gen/koinon/budget/v1alpha1/budget_pb'
 import { useBudgetActions } from '@/hooks/use-spend-actions'
-import { formatDate, nextMonthStart, noticeText, overridden } from '@/lib/budgets'
+import { formatDate, isAgentUnhealthy, nextMonthStart, noticeText, overridden } from '@/lib/budgets'
 import { formatUSD } from '@/lib/cost'
 import { percent, remaining } from '@/lib/money'
 import { useOrg } from '@/lib/org-context'
@@ -206,6 +206,14 @@ function Notices({ orgId, actions, agents }: { orgId: string; actions: Actions; 
               <span className="min-w-0 flex-1">
                 {!n.readAt && <Badge className="mr-2">New</Badge>}
                 {noticeText(n, names)} <span className="text-muted-foreground">{formatDate(n.createdAt)}</span>
+                {isAgentUnhealthy(n) && n.agentId && (
+                  <>
+                    {' '}
+                    <Link to="/agents/$agentId" params={{ agentId: n.agentId }} className="underline">
+                      Open the agent
+                    </Link>
+                  </>
+                )}
               </span>
               {!n.readAt && (
                 <Button variant="outline" size="sm" aria-label={`Mark as read: ${noticeText(n, names)}`} onClick={() => void actions.markRead(n.id)}>
