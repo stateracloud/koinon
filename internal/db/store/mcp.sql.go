@@ -122,6 +122,21 @@ func (q *Queries) CreateMCPServer(ctx context.Context, arg CreateMCPServerParams
 	return i, err
 }
 
+const deleteAgentMCPServers = `-- name: DeleteAgentMCPServers :exec
+DELETE FROM agent_mcp_servers
+WHERE org_id = $1 AND agent_id = $2
+`
+
+type DeleteAgentMCPServersParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+func (q *Queries) DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error {
+	_, err := q.db.Exec(ctx, deleteAgentMCPServers, arg.OrgID, arg.AgentID)
+	return err
+}
+
 const deleteMCPServer = `-- name: DeleteMCPServer :execrows
 DELETE FROM mcp_servers
 WHERE org_id = $1 AND id = $2
@@ -213,6 +228,28 @@ func (q *Queries) GetMCPTool(ctx context.Context, arg GetMCPToolParams) (McpTool
 	return i, err
 }
 
+const insertAgentMCPServer = `-- name: InsertAgentMCPServer :exec
+INSERT INTO agent_mcp_servers (org_id, agent_id, server_id, tools)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertAgentMCPServerParams struct {
+	OrgID    pgtype.UUID
+	AgentID  pgtype.UUID
+	ServerID pgtype.UUID
+	Tools    []string
+}
+
+func (q *Queries) InsertAgentMCPServer(ctx context.Context, arg InsertAgentMCPServerParams) error {
+	_, err := q.db.Exec(ctx, insertAgentMCPServer,
+		arg.OrgID,
+		arg.AgentID,
+		arg.ServerID,
+		arg.Tools,
+	)
+	return err
+}
+
 const insertMCPTool = `-- name: InsertMCPTool :one
 INSERT INTO mcp_tools (org_id, server_id, name, description, input_schema, content_hash, read_only_hint)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -257,6 +294,103 @@ func (q *Queries) InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (M
 		&i.TierSetAt,
 	)
 	return i, err
+}
+
+const listAgentMCPServers = `-- name: ListAgentMCPServers :many
+SELECT org_id, agent_id, server_id, tools FROM agent_mcp_servers
+WHERE org_id = $1
+ORDER BY agent_id, server_id
+`
+
+func (q *Queries) ListAgentMCPServers(ctx context.Context, orgID pgtype.UUID) ([]AgentMcpServer, error) {
+	rows, err := q.db.Query(ctx, listAgentMCPServers, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AgentMcpServer
+	for rows.Next() {
+		var i AgentMcpServer
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.AgentID,
+			&i.ServerID,
+			&i.Tools,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentMCPServersOfAgent = `-- name: ListAgentMCPServersOfAgent :many
+SELECT org_id, agent_id, server_id, tools FROM agent_mcp_servers
+WHERE org_id = $1 AND agent_id = $2
+ORDER BY server_id
+`
+
+type ListAgentMCPServersOfAgentParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+func (q *Queries) ListAgentMCPServersOfAgent(ctx context.Context, arg ListAgentMCPServersOfAgentParams) ([]AgentMcpServer, error) {
+	rows, err := q.db.Query(ctx, listAgentMCPServersOfAgent, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AgentMcpServer
+	for rows.Next() {
+		var i AgentMcpServer
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.AgentID,
+			&i.ServerID,
+			&i.Tools,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentsAllowingMCPServer = `-- name: ListAgentsAllowingMCPServer :many
+SELECT agent_id FROM agent_mcp_servers
+WHERE org_id = $1 AND server_id = $2
+`
+
+type ListAgentsAllowingMCPServerParams struct {
+	OrgID    pgtype.UUID
+	ServerID pgtype.UUID
+}
+
+func (q *Queries) ListAgentsAllowingMCPServer(ctx context.Context, arg ListAgentsAllowingMCPServerParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentsAllowingMCPServer, arg.OrgID, arg.ServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var agent_id pgtype.UUID
+		if err := rows.Scan(&agent_id); err != nil {
+			return nil, err
+		}
+		items = append(items, agent_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMCPServers = `-- name: ListMCPServers :many

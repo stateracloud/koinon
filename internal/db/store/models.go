@@ -865,6 +865,13 @@ type AgentBudget struct {
 	UpdatedAt  pgtype.Timestamptz
 }
 
+type AgentMcpServer struct {
+	OrgID    pgtype.UUID
+	AgentID  pgtype.UUID
+	ServerID pgtype.UUID
+	Tools    []string
+}
+
 type AgentSandbox struct {
 	OrgID          pgtype.UUID
 	AgentID        pgtype.UUID

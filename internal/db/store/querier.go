@@ -148,6 +148,7 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// pending -> approved | denied by a human. No row: already decided.
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
+	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
 	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
 	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
@@ -256,6 +257,7 @@ type Querier interface {
 	HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run, error)
 	// Gives a new agent its template's limit as its own editable limit.
 	InsertAgentBudgetDefault(ctx context.Context, arg InsertAgentBudgetDefaultParams) error
+	InsertAgentMCPServer(ctx context.Context, arg InsertAgentMCPServerParams) error
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The audit log (plan item PV1, ADR 0023). Append-only: there is no update or
@@ -279,10 +281,13 @@ type Querier interface {
 	// The config of each agent's active version, for the template default of its daily limit.
 	ListActiveVersionConfigs(ctx context.Context, orgID pgtype.UUID) ([]ListActiveVersionConfigsRow, error)
 	ListAgentBudgets(ctx context.Context, orgID pgtype.UUID) ([]ListAgentBudgetsRow, error)
+	ListAgentMCPServers(ctx context.Context, orgID pgtype.UUID) ([]AgentMcpServer, error)
+	ListAgentMCPServersOfAgent(ctx context.Context, arg ListAgentMCPServersOfAgentParams) ([]AgentMcpServer, error)
 	// Every agent's recorded USD spend since @since, for the budgets list.
 	ListAgentSpendSince(ctx context.Context, arg ListAgentSpendSinceParams) ([]ListAgentSpendSinceRow, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
 	ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
+	ListAgentsAllowingMCPServer(ctx context.Context, arg ListAgentsAllowingMCPServerParams) ([]pgtype.UUID, error)
 	// Agents that are not archived and whose active or latest version binds the connection
 	// (config.bindings[].connectionId). Deleting a connection needs this to be empty.
 	ListAgentsBoundToConnection(ctx context.Context, arg ListAgentsBoundToConnectionParams) ([]ListAgentsBoundToConnectionRow, error)

@@ -143,3 +143,25 @@ UPDATE mcp_tools
 SET review_reason = NULL
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name
 RETURNING *;
+
+-- name: ListAgentMCPServers :many
+SELECT * FROM agent_mcp_servers
+WHERE org_id = @org_id
+ORDER BY agent_id, server_id;
+
+-- name: ListAgentMCPServersOfAgent :many
+SELECT * FROM agent_mcp_servers
+WHERE org_id = @org_id AND agent_id = @agent_id
+ORDER BY server_id;
+
+-- name: ListAgentsAllowingMCPServer :many
+SELECT agent_id FROM agent_mcp_servers
+WHERE org_id = @org_id AND server_id = @server_id;
+
+-- name: DeleteAgentMCPServers :exec
+DELETE FROM agent_mcp_servers
+WHERE org_id = @org_id AND agent_id = @agent_id;
+
+-- name: InsertAgentMCPServer :exec
+INSERT INTO agent_mcp_servers (org_id, agent_id, server_id, tools)
+VALUES (@org_id, @agent_id, @server_id, sqlc.narg(tools));

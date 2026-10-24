@@ -91,11 +91,20 @@ func newOrg(ctx context.Context) (org, user pgtype.UUID) {
 
 // newOrgWithID is newOrg with a fixed org UUID; empty lets the database choose one.
 func newOrgWithID(ctx context.Context, id string) (org, user pgtype.UUID) {
+	return newOrgWith(ctx, id, uniq("org"))
+}
+
+// newOrgWithSlug is newOrg with a fixed slug.
+func newOrgWithSlug(ctx context.Context, slug string) (org, user pgtype.UUID) {
+	return newOrgWith(ctx, "", slug)
+}
+
+func newOrgWith(ctx context.Context, id, slug string) (org, user pgtype.UUID) {
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO orgs (id, slug, display_name, kind)
 			 VALUES (coalesce(nullif($2, '')::uuid, uuidv7()), $1, 'Personal', 'personal') RETURNING id`,
-			uniq("org"), id).Scan(&org); err != nil {
+			slug, id).Scan(&org); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx,

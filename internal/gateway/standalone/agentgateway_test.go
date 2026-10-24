@@ -632,7 +632,9 @@ var _ = Describe("golden files", func() {
 		// The full fixture names a provider key file; validation opens it.
 		secrets := GinkgoT().TempDir()
 		Expect(os.Chmod(secrets, 0o755)).To(Succeed())
-		Expect(os.WriteFile(filepath.Join(secrets, "api_key"), []byte("not-a-real-key"), 0o644)).To(Succeed()) //nolint:gosec // dummy
+		for _, name := range []string{"api_key", "mcp_wiki", "mcp_search"} {
+			Expect(os.WriteFile(filepath.Join(secrets, name), []byte("not-a-real-key"), 0o644)).To(Succeed()) //nolint:gosec // dummy
+		}
 		for _, f := range fixtures() {
 			ctr, err := testcontainers.Run(ctx, AgentgatewayImage,
 				testcontainers.WithCmd("--validate-only", "-f", "/cfg/"+f.name+".yaml"),

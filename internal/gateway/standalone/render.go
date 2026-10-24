@@ -650,6 +650,10 @@ func toolRules(tools map[gateway.AgentRef][]gateway.ToolGrant) []string {
 	for _, a := range agents {
 		var alts []string
 		for _, g := range tools[a] {
+			if g.All {
+				alts = append(alts, fmt.Sprintf("(mcp.tool.target == %s)", strconv.Quote(g.Target)))
+				continue
+			}
 			if len(g.Tools) == 0 {
 				continue
 			}
