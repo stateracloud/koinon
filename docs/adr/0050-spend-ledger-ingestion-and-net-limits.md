@@ -97,6 +97,10 @@ per-agent daily limit is set by admins (`limits.spendUSD` is its default), an or
 added, and a model's price comes from the org's dated price schema. Entries without usage are
 estimated and flagged rather than dropped.
 
+Amendment 2026-10-24 (PV2, BG1): the ledger recomputes cost itself and the net limit is the smallest
+remaining amount of the agent's daily limit, the org's monthly cap and the platform ceiling; the
+counter generation digests every spend that amount derives from. See ADR 0056.
+
 ## Open questions
 
 - Whether the receiver should require a token once agentgateway can read one from a file.
