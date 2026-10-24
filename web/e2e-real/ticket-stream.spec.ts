@@ -35,7 +35,7 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   }
 
   // 2. Model provider: added in the UI (the fake model server as an OpenAI-compatible provider), with
-  // one model that has rates. The key is write-only: it is not on the page afterwards.
+  // one model. The key is write-only: it is not on the page afterwards.
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Providers' }).click()
   await expect(page.getByRole('heading', { name: 'Providers', level: 1 })).toBeVisible()
   await page.getByRole('button', { name: 'Add provider' }).click()
@@ -52,10 +52,30 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   await provider.getByRole('button', { name: 'Add model to fake' }).click()
   const modelForm = page.getByRole('form', { name: 'Add model to fake' })
   await modelForm.getByLabel('Model name').fill('repo-helper')
-  await modelForm.getByLabel('Input rate').fill('0.30')
-  await modelForm.getByLabel('Output rate').fill('1.20')
   await modelForm.getByRole('button', { name: 'Add model', exact: true }).click()
   await expect(provider.getByRole('list', { name: 'Models of fake' })).toContainText('default/repo-helper')
+
+  // 2b. The model's price is an org price (the fake model is in no default list); an org cap is set and shown.
+  await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Prices' }).click()
+  await expect(page.getByRole('heading', { name: 'Prices', level: 1 })).toBeVisible()
+  await page.getByRole('button', { name: 'Add price' }).first().click()
+  const priceForm = page.getByRole('form', { name: 'Add a price' })
+  await priceForm.getByLabel('Name', { exact: true }).fill('fake-repo-helper')
+  await priceForm.getByLabel('Provider type').fill('openai')
+  await priceForm.getByLabel('Model pattern').fill('repo-helper')
+  await priceForm.getByLabel('Input', { exact: true }).fill('0.30')
+  await priceForm.getByLabel('Output', { exact: true }).fill('1.20')
+  await priceForm.getByLabel('Largest output (tokens)').fill('4096')
+  await priceForm.getByRole('button', { name: 'Add price' }).click()
+  await expect(page.getByRole('list', { name: 'Your prices' })).toContainText('fake-repo-helper')
+  await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Budgets' }).click()
+  const cap = page.getByRole('region', { name: 'Monthly cap' })
+  await cap.getByRole('button', { name: 'Set a cap' }).click()
+  await cap.getByLabel('Monthly cap in US dollars').fill('50')
+  await cap.getByRole('button', { name: 'Save cap' }).click()
+  await expect(cap).toContainText('$50.00')
+  await expect(cap).toContainText('Spent this month')
+
   // A UI-added provider is not served at once: the reconciler picks the row up on its 30 s resync, then
   // the key reaches agentgateway through the kubelet's Secret sync. That took about 170 s on kind. A run
   // that starts first fails with "provider authentication required". Nothing in the UI shows when the

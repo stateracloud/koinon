@@ -140,3 +140,14 @@ describe('buildTimeline', () => {
     expect(agentTexts(items)).toEqual(['Asked for approval.', 'Resumed, still typing'])
   })
 })
+
+describe('a spend limit', () => {
+  it('shows the ticket note the ledger writes when a run is stopped at a limit', () => {
+    const items = buildTimeline(
+      [ticketEvent(1, 100, 'run.canceled', { reason: 'spend_limit', limit: 'org_monthly', message: 'Org monthly cap reached ($10.00 of $10.00 since 2026-10-01 00:00 UTC)' })],
+      {},
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ type: 'note', text: 'Run r-123456 stopped at a spend limit: Org monthly cap reached ($10.00 of $10.00 since 2026-10-01 00:00 UTC)' })
+  })
+})

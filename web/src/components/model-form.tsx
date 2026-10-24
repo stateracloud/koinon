@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ConnectError } from '@connectrpc/connect'
+import { Link } from '@tanstack/react-router'
 import { useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -8,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { Model, Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import type { ModelChange, ModelCreate } from '@/hooks/use-catalog-actions'
-import { guardProviderType, rateError, scopedModelName } from '@/lib/providers'
+import { guardProviderType, scopedModelName } from '@/lib/providers'
 
 const namePattern = /^[A-Za-z0-9_.:/@-]{1,256}$/
 
@@ -25,25 +26,19 @@ export type ModelFormProps = {
 }
 
 /**
- * ModelForm adds or edits a model of a provider. Rates are USD per million tokens until PV2 brings the
- * price schema; a model without rates is not served. The routing guard exists for OpenRouter providers only.
+ * ModelForm adds or edits a model of a provider. A model has no rates of its own: its price is an org price or a
+ * default one (the Prices page). The routing guard exists for OpenRouter providers only.
  */
 export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone, onSaved }: ModelFormProps) {
   const editing = !!model
   const [name, setName] = useState(model?.name ?? '')
   const [guard, setGuard] = useState(model?.guard ?? false)
-  const [input, setInput] = useState(model?.rates?.input ?? '')
-  const [output, setOutput] = useState(model?.rates?.output ?? '')
-  const [cache, setCache] = useState(model?.rates?.cacheRead ?? '')
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
 
   const errors = {
     name: namePattern.test(name) ? undefined : 'Model name is required: letters, digits and _ . : / @ -',
-    input: rateError('Input rate', input, true),
-    output: rateError('Output rate', output, true),
-    cache: rateError('Cache read rate', cache, false),
   }
   const invalid = Object.values(errors).some(Boolean)
   const err = (k: keyof typeof errors) => (touched ? errors[k] : undefined)
@@ -55,10 +50,9 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
     if (invalid) return
     setPending(true)
     setError(undefined)
-    const rates = { input: input.trim(), output: output.trim(), cacheRead: cache.trim() }
     try {
-      if (model) await onUpdate(model.id, { guard: canGuard ? guard : undefined, rates })
-      else await onCreate({ providerId: provider.id, name, guard: canGuard && guard, rates })
+      if (model) await onUpdate(model.id, { guard: canGuard ? guard : undefined })
+      else await onCreate({ providerId: provider.id, name, guard: canGuard && guard })
       onSaved?.()
       onDone()
     } catch (e2) {
@@ -84,15 +78,9 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
           </p>
         )}
       </div>
-      <fieldset className="grid gap-3">
-        <legend className="text-sm font-medium">Rates, in US dollars per million tokens</legend>
-        <p className="text-muted-foreground text-xs">Koinon needs rates to serve a model and to count its spend against budgets.</p>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <RateField id="model-input" label="Input rate" value={input} onChange={setInput} error={err('input')} />
-          <RateField id="model-output" label="Output rate" value={output} onChange={setOutput} error={err('output')} />
-          <RateField id="model-cache" label="Cache read rate (optional)" value={cache} onChange={setCache} error={err('cache')} />
-        </div>
-      </fieldset>
+      <p className="text-muted-foreground text-xs">
+        The price of a model is set on the <Link to="/settings/prices" className="underline">Prices page</Link>. Koinon ships prices for common models; add one of your own for the rest.
+      </p>
       {canGuard && (
         <div className="grid gap-1">
           <label className="flex items-center gap-2 text-sm font-medium">
@@ -118,19 +106,5 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
         </Button>
       </div>
     </form>
-  )
-}
-
-function RateField({ id, label, value, onChange, error }: { id: string; label: string; value: string; onChange: (v: string) => void; error?: string }) {
-  return (
-    <div className="grid gap-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <Input id={id} inputMode="decimal" value={value} onChange={(e) => onChange(e.target.value)} placeholder="0.30" autoComplete="off" aria-invalid={!!error} aria-describedby={error ? `${id}-error` : undefined} />
-      {error && (
-        <p id={`${id}-error`} className="text-destructive text-xs">
-          {error}
-        </p>
-      )}
-    </div>
   )
 }

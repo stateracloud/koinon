@@ -33,8 +33,8 @@ const removedProvider = create(ProviderSchema, {
 })
 const fresh = create(ProviderSchema, { id: 'p-fresh', name: 'fresh', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'ui', createdAt: t, updatedAt: t })
 const shadowed = create(ProviderSchema, { id: 'p-shadow', name: 'dup', type: 'openai', url: 'https://api.example.com/v1', source: 'ui', disabledReason: 'shadowed by a provider of the same name declared in a Kubernetes Secret' })
-const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', rates: { input: '0.30', output: '1.20' } })
-const secretModel = create(ModelSchema, { id: 'm-2', providerId: 'p-sec', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret', rates: { input: '0', output: '0' } })
+const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui' })
+const secretModel = create(ModelSchema, { id: 'm-2', providerId: 'p-sec', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret' })
 
 function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string } = {}) {
   const calls = { providerCreates: [] as CreateProviderRequest[], providerUpdates: [] as UpdateProviderRequest[], providerDeletes: [] as DeleteProviderRequest[], modelCreates: [] as CreateModelRequest[], listed: 0 }
@@ -80,7 +80,8 @@ describe('Providers page', () => {
     expect(ui.getByRole('button', { name: 'Edit provider openrouter' })).toBeInTheDocument()
     expect(ui.getByText('default/deepseek/deepseek-v4.1-flash')).toBeInTheDocument()
     expect(ui.getByText('Routing guard')).toBeInTheDocument()
-    expect(ui.getByText('$0.30 in / $1.20 out per million tokens')).toBeInTheDocument()
+    expect(ui.queryByText(/per million tokens/)).not.toBeInTheDocument()
+    expect(ui.getByRole('link', { name: 'Prices page' })).toHaveAttribute('href', '/settings/prices')
 
     const sec = within(within(list).getByRole('region', { name: 'homelab' }))
     expect(sec.getByText('Managed by Secret ollama-secret')).toBeInTheDocument()
@@ -166,12 +167,12 @@ describe('Providers page', () => {
     expect(within(form).getByText(/zero data retention/)).toBeInTheDocument()
     await userEvent.type(within(form).getByLabelText('Model name'), 'qwen/qwen3')
     expect(within(form).getByText('default/qwen/qwen3')).toBeInTheDocument()
-    await userEvent.type(within(form).getByLabelText('Input rate'), '0.1')
-    await userEvent.type(within(form).getByLabelText('Output rate'), '0.2')
+    expect(within(form).queryByLabelText('Input rate')).not.toBeInTheDocument()
+    expect(within(form).getByRole('link', { name: 'Prices page' })).toHaveAttribute('href', '/settings/prices')
     await userEvent.click(within(form).getByLabelText('Routing guard'))
     await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
     await waitFor(() => expect(calls.modelCreates).toHaveLength(1))
-    expect(calls.modelCreates[0]).toMatchObject({ providerId: 'p-ui', name: 'qwen/qwen3', guard: true, rates: { input: '0.1', output: '0.2' } })
+    expect(calls.modelCreates[0]).toMatchObject({ providerId: 'p-ui', name: 'qwen/qwen3', guard: true })
   })
 
   it('does not offer the routing guard for other providers', async () => {
