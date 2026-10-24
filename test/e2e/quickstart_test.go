@@ -341,8 +341,11 @@ var _ = Describe("the quickstart", Ordered, func() {
 			cost = got.GetRun().GetCost()
 			g.Expect(cost.GetRequests()).To(BeNumerically(">", 0), "the ledger recorded the run's requests")
 		}, 60*time.Second, time.Second).Should(Succeed())
-		Expect(cost.GetEstimatedRequests()).To(BeZero(), "no request was charged as an estimate: streamed requests carry usage")
-		Expect(cost.GetInputTokens()).To(BeNumerically(">", 0))
+		// The streamed requests carry usage through the gateway; only the title request the fake
+		// model refuses (a 400 without usage) is an estimate.
+		Expect(cost.GetRequests()-cost.GetEstimatedRequests()).To(BeNumerically(">=", 1), "streamed requests reported their usage")
+		Expect(cost.GetEstimatedRequests()).To(BeNumerically("<=", 1))
+		Expect(cost.GetInputTokens()).To(BeNumerically(">=", 1200), "the fake model's reported input tokens")
 
 		By("nothing has reached GitHub before the approval")
 		repo := gh.repo(ctx, repoName)

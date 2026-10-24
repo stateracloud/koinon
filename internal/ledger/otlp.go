@@ -35,6 +35,13 @@ const (
 	attrCostTotal    = "agw.ai.usage.cost.total"
 )
 
+// refusedBeforeUpstream are the statuses agentgateway sets itself, before it calls the provider
+// (bad or missing key, model not allowed or unknown, request too large, its own budget or rate
+// limit). A record with one of them and no usage was never charged.
+var refusedBeforeUpstream = map[int64]bool{401: true, 403: true, 404: true, 405: true, 413: true, 415: true, 429: true}
+
+func isZeroDecimal(s string) bool { return strings.Trim(s, "0.") == "" }
+
 // LogsPath is the OTLP/HTTP logs path.
 const LogsPath = "/v1/logs"
 
@@ -81,17 +88,27 @@ func Decode(req *collogspb.ExportLogsServiceRequest) (entries []Entry, rejected 
 				reasoning, _ := intValue(attrs[gateway.LogFieldReasoning])
 				status, statusOK := intValue(attrs[gateway.LogFieldStatus])
 				cost := decimalValue(attrs[attrCostTotal])
-				usage := inOK || outOK || cost != ""
-				// A request the gateway admitted (2xx) that has a model but no usage is an
-				// aborted stream or a provider that reports none: its usage is estimated.
-				admitted := statusOK && status >= 200 && status < 300
-				// A request the gateway or the upstream refused (4xx, 5xx) was not served and is
-				// not charged, even though agentgateway logs a zero cost for it.
-				if statusOK && !admitted {
-					continue
+				// Usage or a non-zero cost is charged whatever the status. agentgateway logs a zero
+				// cost for requests it did not price, so a zero cost is not usage.
+				usage := inOK || outOK || (cost != "" && !isZeroDecimal(cost))
+				reqBytes, hasReqBytes := intValue(attrs[gateway.LogFieldRequestBytes])
+				if model == "" {
+					continue // not an LLM request (MCP, or refused before the model)
 				}
-				if model == "" || (!usage && !admitted) {
-					continue // not a charged LLM request
+				if !usage {
+					switch {
+					case statusOK && refusedBeforeUpstream[status]:
+						continue // answered by the gateway itself, never reached the provider
+					case statusOK, hasReqBytes:
+						// A 2xx without usage (an aborted stream, a provider that reports none), any
+						// other non-2xx, or no status at all (the client disconnected before the
+						// headers): the provider may have done and billed the work, so the usage
+						// is estimated, marked usage_missing and flagged. The status test alone
+						// cannot see a record without a status, so records of this driver's
+						// config (which always log the request bytes) count as such.
+					default:
+						continue // an older config's record without usage: not a charged request
+					}
 				}
 				agent := stringValue(attrs[gateway.LogFieldAgent])
 				if agent == "" {
@@ -110,8 +127,8 @@ func Decode(req *collogspb.ExportLogsServiceRequest) (entries []Entry, rejected 
 					Time: recordTime(lr.GetTimeUnixNano(), lr.GetObservedTimeUnixNano()),
 				}
 				e.MaxTokens, _ = intValue(attrs[gateway.LogFieldMaxTokens])
-				if n, ok := intValue(attrs[gateway.LogFieldRequestBytes]); ok && n >= 0 {
-					e.RequestBytes = n
+				if hasReqBytes && reqBytes >= 0 {
+					e.RequestBytes = reqBytes
 				}
 				org, name, ok := strings.Cut(agent, "/")
 				e.Agent = gateway.AgentRef{Org: org, Name: name}

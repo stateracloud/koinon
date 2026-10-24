@@ -36,6 +36,8 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +46,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
@@ -282,7 +285,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 		l, err := limitFor(ctx, r.q, w.agent, now)
 		if err != nil {
-			failed := r.failClosedLimit(w.key.Agent)
+			failed := r.failClosedLimit(w.key.Agent, now)
 			r.log.Error("agent budget not computed; its key keeps its last pushed limit, or zero if it had none",
 				"agent", execution.UUIDString(w.agent.ID.Bytes), "org", w.key.Agent.Org, "err", err)
 			errs = append(errs, fmt.Errorf("spend limit of agent %s not computed (key fails closed): %w", execution.UUIDString(w.agent.ID.Bytes), err))
@@ -810,13 +813,17 @@ func (r *Reconciler) rememberLimit(agent gateway.AgentRef, l *gateway.Limit) {
 }
 
 // failClosedLimit is the budget for an agent whose budget could not be computed: the last one
-// pushed, or zero. A last pushed limit only ever shrinks as the gateway charges against it, and
-// zero blocks the key until the next pass computes it.
-func (r *Reconciler) failClosedLimit(agent gateway.AgentRef) *gateway.Limit {
+// pushed while it is still from the current UTC day, else zero. A pushed limit only ever shrinks
+// as the gateway charges against it, but it must not be regranted every day by a computation that
+// keeps failing; zero blocks the key until a pass computes it.
+func (r *Reconciler) failClosedLimit(agent gateway.AgentRef, now time.Time) *gateway.Limit {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if l, ok := r.lastLimit[agent]; ok {
-		return &l
+		day, _, _ := strings.Cut(l.Generation, "-")
+		if day == strconv.FormatInt(budget.DayStart(now).Unix(), 10) {
+			return &l
+		}
 	}
 	return &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: ledger.Window, Generation: "failed"}
 }

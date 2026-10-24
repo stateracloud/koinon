@@ -562,6 +562,31 @@ var _ = Describe("Reconciler", func() {
 		Expect(byAgent[broken.ID.String()].Amount).To(BeZero(), "no earlier limit: the key is blocked")
 	})
 
+	It("keeps a failed agent's last limit only for the UTC day it was pushed", func(ctx SpecContext) {
+		agent := newAgentWithConfig(ctx, org, user, `{"instructions":"help","limits":{"spendUSD":"10.00"}}`)
+		failing := false
+		cfg2 := cfg
+		cfg2.AgentLimit = func(ctx context.Context, q *store.Queries, a store.Agent, at time.Time) (*gateway.Limit, error) {
+			if failing && a.ID == agent.ID {
+				return nil, errors.New("simulated budget failure")
+			}
+			return ledger.AgentLimit(ctx, q, a, at)
+		}
+		r, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg2)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		ref := mg.last().Keys[0].Agent
+		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10))
+
+		failing = true
+		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
+		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10), "the same day: the last pushed limit stands")
+
+		advance(26 * time.Hour)
+		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
+		Expect(mg.last().Limits[ref].Amount).To(BeZero(), "a new UTC day: a failing computation does not regrant yesterday's amount")
+	})
+
 	It("uses one workspace per org", func(ctx SpecContext) {
 		a1 := newAgent(ctx, org, user)
 		a2 := newAgent(ctx, org, user)
