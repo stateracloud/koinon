@@ -369,10 +369,13 @@ has started.
     optional: true
 {{- end }}
 
-{{/* Platform-level allowlist of internal provider hosts (SSRF policy, internal/catalog/urlpolicy.go). */}}
+{{/* Platform-level allowlist of internal hosts that providers and MCP servers may name (SSRF policy,
+internal/catalog/urlpolicy.go). providers.allowedInternalHosts is the deprecated name of
+egress.allowedInternalHosts; both are joined. */}}
 {{- define "koinon.providerEnv" -}}
-{{- with .Values.providers.allowedInternalHosts }}
-- name: KOINON_PROVIDER_ALLOWED_HOSTS
+{{- $hosts := concat (.Values.egress.allowedInternalHosts | default list) (.Values.providers.allowedInternalHosts | default list) | uniq }}
+{{- with $hosts }}
+- name: KOINON_EGRESS_ALLOWED_HOSTS
   value: {{ join "," . | quote }}
 {{- end }}
 {{- end }}

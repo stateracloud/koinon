@@ -55,7 +55,7 @@ var _ = Describe("URLPolicy", func() {
 			err := p.Check(ctx, u)
 			var inv *catalog.InvalidError
 			Expect(errors.As(err, &inv)).To(BeTrue(), u)
-			Expect(err.Error()).To(ContainSubstring("providers.allowedInternalHosts"))
+			Expect(err.Error()).To(ContainSubstring("egress.allowedInternalHosts"))
 		},
 		Entry("localhost", "http://localhost:8080/v1"),
 		Entry("loopback", "http://127.0.0.1/v1"),

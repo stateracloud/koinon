@@ -114,6 +114,9 @@ type config struct {
 	kekSecret string
 	kekCreate bool
 
+	// egressAllowedHosts and its deprecated alias providerAllowedHosts are joined: internal hosts that
+	// providers and MCP servers may name.
+	egressAllowedHosts   string
 	providerAllowedHosts string
 }
 
@@ -171,9 +174,11 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.githubAPIURL, "github-api-url", github.DefaultBaseURL, "GitHub REST API base URL")
 	fs.StringVar(&c.kekSecret, "kek-secret", "",
 		"Secret with the key-encryption keys, read through the Kubernetes API; takes precedence over --kek-dir")
-	fs.StringVar(&c.providerAllowedHosts, "provider-allowed-hosts", "",
-		"comma-separated hosts (optionally host:port) that providers may name although they are internal "+
+	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
+		"comma-separated hosts (optionally host:port) that providers and MCP servers may name although they are internal "+
 			"(loopback, link-local, metadata and Koinon's own namespace are denied otherwise); platform-level")
+	fs.StringVar(&c.providerAllowedHosts, "provider-allowed-hosts", "",
+		"deprecated alias of --egress-allowed-hosts, kept for one release")
 	fs.BoolVar(&c.kekCreate, "kek-create", true, "create the --kek-secret Secret with a new key when it does not exist")
 	fs.StringVar(&c.kekDir, "kek-dir", "",
 		"directory with the mounted key-encryption keys Secret (files named by KEK ID plus \"active\"); "+
@@ -423,7 +428,7 @@ func run() error {
 		catalogKeys = keyring
 	}
 	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).
-		WithURLPolicy(catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.providerAllowedHosts)})
+		WithURLPolicy(catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts)})
 	svc := services.New(pool, services.Options{
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc, Catalog: catalogSvc,
 	})

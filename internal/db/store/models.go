@@ -356,6 +356,134 @@ func (ns NullIdentityMode) Value() (driver.Value, error) {
 	return string(ns.IdentityMode), nil
 }
 
+type McpHealth string
+
+const (
+	McpHealthUnknown   McpHealth = "unknown"
+	McpHealthHealthy   McpHealth = "healthy"
+	McpHealthUnhealthy McpHealth = "unhealthy"
+)
+
+func (e *McpHealth) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = McpHealth(s)
+	case string:
+		*e = McpHealth(s)
+	default:
+		return fmt.Errorf("unsupported scan type for McpHealth: %T", src)
+	}
+	return nil
+}
+
+type NullMcpHealth struct {
+	McpHealth McpHealth
+	Valid     bool // Valid is true if McpHealth is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMcpHealth) Scan(value interface{}) error {
+	if value == nil {
+		ns.McpHealth, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.McpHealth.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMcpHealth) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.McpHealth), nil
+}
+
+type McpTier string
+
+const (
+	McpTierAsk   McpTier = "ask"
+	McpTierAuto  McpTier = "auto"
+	McpTierNever McpTier = "never"
+)
+
+func (e *McpTier) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = McpTier(s)
+	case string:
+		*e = McpTier(s)
+	default:
+		return fmt.Errorf("unsupported scan type for McpTier: %T", src)
+	}
+	return nil
+}
+
+type NullMcpTier struct {
+	McpTier McpTier
+	Valid   bool // Valid is true if McpTier is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMcpTier) Scan(value interface{}) error {
+	if value == nil {
+		ns.McpTier, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.McpTier.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMcpTier) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.McpTier), nil
+}
+
+type McpTransport string
+
+const (
+	McpTransportStreamableHttp McpTransport = "streamable-http"
+	McpTransportSse            McpTransport = "sse"
+)
+
+func (e *McpTransport) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = McpTransport(s)
+	case string:
+		*e = McpTransport(s)
+	default:
+		return fmt.Errorf("unsupported scan type for McpTransport: %T", src)
+	}
+	return nil
+}
+
+type NullMcpTransport struct {
+	McpTransport McpTransport
+	Valid        bool // Valid is true if McpTransport is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMcpTransport) Scan(value interface{}) error {
+	if value == nil {
+		ns.McpTransport, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.McpTransport.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMcpTransport) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.McpTransport), nil
+}
+
 type MembershipSource string
 
 const (
@@ -860,6 +988,48 @@ type LocalCredential struct {
 	PasswordChangedAt  pgtype.Timestamptz
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
+}
+
+type McpServer struct {
+	OrgID               pgtype.UUID
+	ID                  pgtype.UUID
+	Name                string
+	Url                 string
+	Transport           McpTransport
+	CredentialHeader    pgtype.Text
+	CredentialPrefix    string
+	Credential          []byte
+	Source              ConfigSource
+	ManagedBySecret     pgtype.Text
+	DeclaredVersion     pgtype.Text
+	RemovedAt           pgtype.Timestamptz
+	DisabledReason      pgtype.Text
+	Health              McpHealth
+	HealthReason        pgtype.Text
+	HealthCheckedAt     pgtype.Timestamptz
+	HealthSince         pgtype.Timestamptz
+	ConsecutiveFailures int32
+	ToolsSyncedAt       pgtype.Timestamptz
+	CreatedBy           pgtype.UUID
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+}
+
+type McpTool struct {
+	OrgID        pgtype.UUID
+	ServerID     pgtype.UUID
+	Name         string
+	Description  string
+	InputSchema  []byte
+	ContentHash  string
+	ReadOnlyHint bool
+	Tier         McpTier
+	ReviewReason pgtype.Text
+	Present      bool
+	FirstSeenAt  pgtype.Timestamptz
+	LastSeenAt   pgtype.Timestamptz
+	TierSetBy    pgtype.Text
+	TierSetAt    pgtype.Timestamptz
 }
 
 type Model struct {

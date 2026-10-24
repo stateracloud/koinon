@@ -150,7 +150,7 @@ func run() error {
 			Keys:              keyring,
 			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
 			ProviderKeyDir:    cfg.providerKeysDir,
-			URLPolicy:         catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.allowedHosts)},
+			URLPolicy:         catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)},
 			ProviderKeySettle: cfg.keySettle,
 			Flavors:           cfg.flavors(),
 			RuntimeClassName:  cfg.runtimeClass,

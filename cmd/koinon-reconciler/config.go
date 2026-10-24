@@ -80,6 +80,7 @@ type config struct {
 	kekDir             string
 	keySettle          time.Duration
 	allowedHosts       string
+	egressHosts        string
 	healthAddr         string
 	accessLogOTLP      string
 
@@ -117,7 +118,8 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.accessLogOTLP, "gateway-access-log-otlp", "",
 		"host:port of koinon-api's OTLP/HTTP receiver, where agentgateway exports its access log for the spend ledger; empty exports nothing")
 	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready until the key-encryption keys are loaded); empty disables it")
-	fs.StringVar(&c.allowedHosts, "provider-allowed-hosts", "", "comma-separated hosts (optionally host:port) providers may name although they are internal")
+	fs.StringVar(&c.egressHosts, "egress-allowed-hosts", "", "comma-separated hosts (optionally host:port) providers and MCP servers may name although they are internal")
+	fs.StringVar(&c.allowedHosts, "provider-allowed-hosts", "", "deprecated alias of --egress-allowed-hosts, kept for one release")
 	fs.DurationVar(&c.keySettle, "provider-key-settle", 90*time.Second,
 		"how long to wait after writing a new provider key file before applying a gateway config that names it (kubelet updates a mounted Secret within about a minute)")
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
