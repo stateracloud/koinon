@@ -23,6 +23,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -86,6 +87,9 @@ func parseFlags(args []string) (config, error) {
 }
 
 func main() {
+	if limit := memlimit.Apply(); limit > 0 {
+		slog.Info("memory soft limit set", "bytes", limit)
+	}
 	if err := run(); err != nil {
 		slog.Error("koinon-agentd failed", "err", err)
 		os.Exit(1)

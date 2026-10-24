@@ -25,6 +25,11 @@ WHERE oidc_issuer = @oidc_issuer AND oidc_subject = @oidc_subject;
 SELECT * FROM users
 WHERE id = @id AND deleted_at IS NULL;
 
+-- name: ListUsersByIDs :many
+-- Users by ID, deleted ones included, to name who created something.
+SELECT id, display_name, email, deleted_at FROM users
+WHERE id = ANY(@ids::uuid[]);
+
 -- name: CreateUser :one
 INSERT INTO users (oidc_issuer, oidc_subject, email, display_name, personal_org_id)
 VALUES (@oidc_issuer, @oidc_subject, @email, @display_name, @personal_org_id)
