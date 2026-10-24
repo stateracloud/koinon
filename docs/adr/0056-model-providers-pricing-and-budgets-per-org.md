@@ -120,7 +120,7 @@ answers the open questions on KEK rotation and on role tokens.
    without a dot or hosts in Koinon's namespace. Hosts are read as WHATWG does (short, octal and hex
    IPv4 forms are the addresses they denote). The name is resolved when the provider is saved and again,
    failing closed, when it is rendered; a platform admin lists exceptions (names, IPs, CIDRs) in
-   `providers.allowedInternalHosts`. A standard egress NetworkPolicy for the gateway (DNS, koinon-api,
+   `providers.allowedInternalHosts` (renamed `egress.allowedInternalHosts` by [0057](0057-mcp-servers.md), which also applies it to remote MCP servers). A standard egress NetworkPolicy for the gateway (DNS, koinon-api,
    public internet minus the private ranges, plus `networkPolicy.gatewayEgressTo`) is the hard limit,
    since DNS rebinding between the checks stays open (the gateway resolves the name itself).
 9. **Other.** Model rates stayed on the model in PV1; the W4 amendment below folds them into prices.

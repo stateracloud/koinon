@@ -151,7 +151,7 @@ again each time the reconciler renders it (a name that cannot be resolved, or re
 address, is not served; the render check fails closed). DNS rebinding between the checks is not closed,
 because the gateway resolves the name itself; the egress NetworkPolicy below is the hard limit.
 
-A platform admin allows internal upstreams in the chart value `providers.allowedInternalHosts`: names
+A platform admin allows internal upstreams in the chart value `egress.allowedInternalHosts` (the old name `providers.allowedInternalHosts` still works for one more release and is joined with it; the list covers model providers and remote MCP servers): names
 (optionally with a port), IPs or CIDRs, for example `["ollama.lab.example.com:11434", "10.20.0.0/24"]`.
 
 **Gateway egress policy.** With `networkPolicy.enabled` the chart restricts agentgateway's egress with a
@@ -173,7 +173,7 @@ it to `networkPolicy.gatewayEgressTo` too. The IPv6 carve-outs include NAT64 (`6
 
 Limits: the carve-outs are the standard private ranges, so a cluster that numbers pods or Services from
 public addresses needs its own rules; the policy matches addresses, not names, so keep it and
-`providers.allowedInternalHosts` in agreement; and a CNI that does not enforce egress policy ignores
+`egress.allowedInternalHosts` in agreement; and a CNI that does not enforce egress policy ignores
 it (the default provider URL check still applies).
 
 ## Limits and notes
