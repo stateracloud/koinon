@@ -11,11 +11,15 @@
 //     Opus 4.7: 3.0, Opus 4.7 and later: 2.3, others 3.0), plus fixed overheads for tool
 //     definitions, images and PDF pages. Nobody ships an exact offline tokenizer for current
 //     Claude models, and the tokenizers that exist undercount them, so none is used for Claude.
-//  3. An aborted request whose model bills hidden thinking cannot be measured from the visible
-//     text: the entry is flagged ThinkingUnmeasured and its output is settled at max_tokens.
-//  4. For OpenAI-family models the exact tiktoken encoding counts the text when the text is
-//     available. The BPE files are compiled into the binary (github.com/pkoukk/tiktoken-go-loader,
-//     MIT); nothing is downloaded at run time.
+//  3. An aborted response without usage settles its output at the request's max_tokens, marked
+//     estimated, whether or not the model bills hidden thinking (visible text cannot measure
+//     thinking, and partial text would undercount). When max_tokens was not logged (OpenAI's
+//     max_completion_tokens), the price entry's max_output stands in and the entry is flagged
+//     MaxOutputFallback.
+//  4. For OpenAI-family models, [CountTiktoken] counts text exactly with the offline encoding
+//     (BPE files compiled into the binary, github.com/pkoukk/tiktoken-go-loader, MIT; nothing is
+//     downloaded at run time). Koinon never logs or buffers prompt or response text, so the live
+//     path does not use it; it is for callers that already hold the text.
 //  5. Calibration only raises: the effective ratio is the more conservative of the static ratio
 //     and the p90 of tokens per byte learned from real provider-reported usage.
 //
@@ -29,8 +33,6 @@ import (
 
 	"github.com/pkoukk/tiktoken-go"
 	tiktokenloader "github.com/pkoukk/tiktoken-go-loader"
-
-	"github.com/stateracloud/koinon/pricing"
 )
 
 // Params come from the matched price entry and the calibration.
@@ -42,6 +44,8 @@ type Params struct {
 	LearnedP90         float64
 	ToolOverheadTokens int
 	HiddenThinking     bool
+	// MaxOutput is the price entry's largest output, used when the request's max_tokens is unknown.
+	MaxOutput int64
 }
 
 // Image is an input image in pixels.
@@ -52,10 +56,9 @@ type Input struct {
 	// ReportedInput and ReportedOutput are counts the provider did report (nil if not).
 	ReportedInput, ReportedOutput *int64
 	// RequestBytes and ResponseBytes are UTF-8 byte counts of what was sent and what was
-	// received before the stream ended. RequestText and ResponseText, when present, are
-	// counted exactly with tiktoken for OpenAI-family models.
+	// received before the stream ended (-1 or 0 when unknown). No text is passed: Koinon never
+	// logs or buffers prompt or response text.
 	RequestBytes, ResponseBytes int64
-	RequestText, ResponseText   string
 	HasTools                    bool
 	Images                      []Image
 	PDFPages                    int
@@ -75,18 +78,26 @@ type Result struct {
 	Estimated                     bool
 	InputReported, OutputReported bool
 	ThinkingUnmeasured            bool
-	Method                        string // reported, bytes, tiktoken, max_tokens
-	RatioStatic, RatioEffective   float64
-	LearnedP90TokensPerByte       float64
-	OverheadTokens                int64
+	// MaxOutputFallback is set when output was settled at the entry's max_output because the
+	// request's max_tokens was not logged.
+	MaxOutputFallback           bool
+	Method                      string // reported, bytes, max_tokens, max_output
+	RatioStatic, RatioEffective float64
+	LearnedP90TokensPerByte     float64
+	OverheadTokens              int64
 }
+
+// MinRatio is the smallest bytes-per-token ratio (the lower bound of pricing.ParseRatio).
+const MinRatio = 0.5
 
 // EffectiveRatio is bytes per token after calibration: calibration can only lower it (raise
 // the token estimate).
 func (p Params) EffectiveRatio() float64 {
 	r := p.Ratio
-	if p.LearnedP90 > 0 && 1/p.LearnedP90 < r {
-		r = 1 / p.LearnedP90
+	// The learned density is capped at the bound pricing.ParseRatio accepts for a ratio (0.5
+	// bytes per token), so a degenerate sample cannot grow an estimate without limit.
+	if l := min(p.LearnedP90, 1/MinRatio); l > 0 && 1/l < r {
+		r = 1 / l
 	}
 	return r
 }
@@ -138,34 +149,13 @@ func CountTiktoken(encodingName, text string) (int64, error) {
 	return int64(len(e.EncodeOrdinary(text))), nil
 }
 
-func (p Params) encodingName() string {
-	switch p.Tokenizer {
-	case pricing.TokenizerO200K:
-		return "o200k_base"
-	case pricing.TokenizerCL100K:
-		return "cl100k_base"
-	}
-	return ""
-}
-
-func (p Params) count(bytes int64, text string) (n int64, exact bool) {
-	if name := p.encodingName(); name != "" && text != "" {
-		if n, err := CountTiktoken(name, text); err == nil {
-			return n, true
-		}
-	}
-	return p.Tokens(bytes), false
-}
-
 // Estimate fills in whatever in is missing.
 func Estimate(p Params, in Input) Result {
 	res := Result{RatioStatic: p.Ratio, RatioEffective: p.EffectiveRatio(), LearnedP90TokensPerByte: p.LearnedP90, Method: "reported"}
-	exact := true
 
 	if in.ReportedInput != nil {
 		res.InputTokens, res.InputReported = *in.ReportedInput, true
 	} else {
-		n, ex := p.count(in.RequestBytes, in.RequestText)
 		var over int64
 		if in.HasTools {
 			over += int64(p.ToolOverheadTokens)
@@ -174,31 +164,24 @@ func Estimate(p Params, in Input) Result {
 			over += ImageTokens(im)
 		}
 		over += int64(in.PDFPages) * int64(in.PDFPageTokens)
-		res.InputTokens, res.OverheadTokens = n+over, over
-		res.Estimated, exact = true, exact && ex
+		res.InputTokens, res.OverheadTokens, res.Estimated = p.Tokens(in.RequestBytes)+over, over, true
 	}
 
 	switch {
 	case in.ReportedOutput != nil:
 		res.OutputTokens, res.OutputReported = *in.ReportedOutput, true
-	case in.Aborted && p.HiddenThinking && in.MaxTokens > 0:
-		// Visible text says nothing about billed thinking: settle at the most the request
-		// could have produced.
-		res.OutputTokens, res.ThinkingUnmeasured, res.Estimated, exact = in.MaxTokens, true, true, false
-		res.Method = "max_tokens"
-	default:
-		n, ex := p.count(in.ResponseBytes, in.ResponseText)
-		res.OutputTokens = n
-		res.Estimated, exact = true, exact && ex
-		if in.Aborted && p.HiddenThinking {
-			res.ThinkingUnmeasured = true // visible estimate only: max_tokens was not known
+	case in.Aborted && (in.MaxTokens > 0 || p.MaxOutput > 0):
+		res.OutputTokens, res.Estimated, res.Method = in.MaxTokens, true, "max_tokens"
+		if in.MaxTokens <= 0 {
+			res.OutputTokens, res.MaxOutputFallback, res.Method = p.MaxOutput, true, "max_output"
 		}
+		res.ThinkingUnmeasured = p.HiddenThinking
+	default:
+		res.OutputTokens, res.Estimated = p.Tokens(in.ResponseBytes), true
+		res.ThinkingUnmeasured = in.Aborted && p.HiddenThinking
 	}
 	if res.Estimated && res.Method == "reported" {
 		res.Method = "bytes"
-		if exact {
-			res.Method = "tiktoken"
-		}
 	}
 	return res
 }

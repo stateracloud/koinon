@@ -151,8 +151,10 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    tokenizer and a bytes-per-token ratio, and for default entries a source URL and access date. When
    several entries match, the exact provider beats `*`, then the more specific pattern, then the
    later `valid_from`.
-3. **Precedence and versions.** The rates set on a model (the PV1 shorthand, kept) win, then the
-   org's own price entries, then the default list. Org prices are append-only: a change is a new
+3. **Precedence and versions.** The rates set on a model (the PV1 shorthand, kept) win for input, output and cache read, then the
+   org's own price entries, then the default list; the entry that would otherwise match still supplies
+   the cache write and reasoning rates and the estimation settings. Folding model rates into dated org
+   price entries is decided for the PV2 UI PR (W4); until then the layer stays. Org prices are append-only: a change is a new
    version with a later `valid_from`; deleting one sets `retired_at`. A request is priced with the
    entry valid at its time (if none was, the current one, noted on the entry). Every ledger entry stores
    `price_ref` (`default@<list version>#<id>`, `org#<id>` or `model#<id>@<time>`).
@@ -170,25 +172,32 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    it (`gateway_cost_usd`). When both exist and differ by more than 1% of the gateway's cost, the
    entry is flagged and `GET /admin/v1/prices/flagged` lists the price entries with how often. A model
    without a Koinon price is still served only when the gateway can price it; the gateway's cost then
-   stands in and the entry has no price ref.
+   stands in and the entry has no price ref. A stored price that cannot be used (a rate from before the
+   stricter validation, an override that no longer parses, a cost that overflows) never stops a batch or
+   returns 503: the request is recorded unpriced and flagged with the error, the reconciler skips and
+   reports the model, and other orgs are unaffected. Model rates are validated with exactly what
+   `money.ParseRate` accepts, and `koinon-api` logs stored rates that fail it on start.
 6. **Estimates when usage is missing.** (1) Counts the provider reported, even early ones such as
    Anthropic's `message_start` `input_tokens`, are used as reported and are not estimates. (2) Otherwise
    UTF-8 bytes divided by the entry's ratio (Claude before Opus 4.7: 3.0; Opus 4.7 and later: 2.3;
    others: 3.0), plus the entry's fixed tool overhead, images (`ceil(w/28) * ceil(h/28)`) and PDF pages
-   when the request says it has them. (3) An aborted request on a model that bills hidden thinking is
-   flagged `thinking_unmeasured` and its output is settled at `max_tokens`. (4) OpenAI-family models
-   are counted exactly with tiktoken (`github.com/pkoukk/tiktoken-go` v0.1.8 with
+   when the request says it has them. (3) An aborted response without usage settles its output at the request's `max_tokens`, marked
+   estimated, whether or not the model bills hidden thinking (hidden thinking is flagged
+   `thinking_unmeasured`); when `max_tokens` is not logged (OpenAI's `max_completion_tokens`), the price
+   entry's `max_output` stands in and the entry is flagged `max_output_fallback`. (4) OpenAI-family text
+   can be counted exactly with tiktoken (`github.com/pkoukk/tiktoken-go` v0.1.8 with
    `tiktoken-go-loader` v0.0.2, both MIT, which compile the BPE files into the binary, so nothing is
-   downloaded at run time) when the text is available. (5) Calibration only raises: the effective
-   ratio is the more conservative of the static ratio and the p90 of tokens per request byte learned
-   from the last 500 real, provider-reported requests of the model (at least 20). Estimated entries are
+   downloaded at run time), but Koinon never logs or buffers prompt or response text, so the live path
+   does not use it; `estimate.CountTiktoken` is for callers that already hold the text. (5) Calibration
+   only raises: the effective ratio is the more conservative of the static ratio and the p90 of
+   tokens per request byte learned from the last 500 real, provider-reported requests of the model (at
+   least 20), capped at the same bound as a ratio (0.5 bytes per token). Estimated entries are
    marked (`estimated`, `estimate` with method and ratios), count toward every limit, and are shown
-   apart in the spend report. What agentgateway v1.6.0 lets Koinon see limits this: its access log
-   carries the request's `Content-Length` and the token counts, but neither the response bytes nor the
-   text (`llm.prompt` and `llm.completion` would copy prompts into the log and cost CPU), so the live
-   path estimates the input from request bytes and settles an aborted output only through `max_tokens`
-   (when the model bills hidden thinking) or not at all; tiktoken and the response-bytes path run when
-   a caller supplies the text.
+   apart in the spend report. What agentgateway v1.6.0 lets Koinon see limits this: its access log carries the request's
+   `Content-Length` and the token counts, but not the response bytes, and Koinon does not copy text into
+   the log (`llm.prompt` and `llm.completion` would, and cost CPU), so the live path estimates input from
+   request bytes and settles output as in (3). A provider that returns 2xx without usage is
+   indistinguishable from an aborted one and settles the same way, which overestimates.
 7. **Gateway catalog.** The reconciler renders each model's current price, with cache write, reasoning
    and tiers, into agentgateway's `modelCatalog` under the existing `<org>.<type>` provider key, for the
    gateway's own budget backstop. The access log gains `koinon.in`, `koinon.out`, `koinon.cache_read`,
@@ -207,7 +216,15 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    reason and the payload `limit` (`agent_daily`, `org_monthly` or `platform_ceiling`); an org-wide
    limit cancels every open run of the org. The overshoot is bounded by the responses in flight when
    a limit is reached (one per running agent, as in ADR 0041) plus the export lag (ADR 0050); for an
-   org-wide limit that is one response per running agent of the org.
+   org-wide limit that is one response per running agent of the org. The gateway backstop is weaker
+   than the ledger for org-wide limits: every key of the org is pushed the same org remaining R, so
+   while ingest is stalled N agents can spend N times R before the gateway stops them; the ledger
+   cancels all of the org's runs as soon as it records the spend. A counter generation changes only
+   when the recorded spend it derives from changed, but then it changes for every agent of the org,
+   and agentgateway has no API to delete the old counters (they are rows in its database, one per
+   renamed budget). Follow-up: measure the growth, and prune the gateway's budget table or move org
+   levels to a shared counter if it matters. A limit reached by a late entry of an earlier window (last
+   month's cap, yesterday's daily limit) cancels nothing.
 9. **Alerts.** At 80% and 100% of each limit, once per limit and window, owners and admins get a stored
    in-app notification (`notifications`; `BudgetService.ListNotifications`), and platform admins for the
    ceiling. The run's cancel event is the ticket timeline note at 100%. Email is later: `budget.Notifier`

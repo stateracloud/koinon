@@ -139,3 +139,8 @@ WHERE org_id = @org_id AND provider_id = @provider_id;
 UPDATE models
 SET disabled_reason = NULL
 WHERE org_id = @org_id AND id = @id;
+
+-- name: ListModelRatesForAudit :many
+-- Every model with rates, across orgs, to log rates the stricter validation would refuse.
+SELECT org_id, name, input_rate, output_rate, cache_read_rate FROM models
+WHERE input_rate IS NOT NULL;

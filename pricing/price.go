@@ -303,6 +303,7 @@ const (
 	TokenizerO200K      = "tiktoken:o200k_base"  //nolint:gosec // encoding name, not a credential
 	TokenizerCL100K     = "tiktoken:cl100k_base" //nolint:gosec // encoding name, not a credential
 	maxOverheadTokens   = 100000
+	maxOutputTokens     = 10_000_000
 	providerWildcard    = "*"
 	idPattern           = `^[a-z0-9][a-z0-9._-]{0,127}$`
 	providerTypePattern = `^(\*|[a-z][a-z0-9-]{0,62})$`
@@ -336,9 +337,13 @@ type Entry struct {
 	ToolOverheadTokens int `json:"toolOverheadTokens,omitempty" yaml:"tool_overhead_tokens,omitempty"`
 	// HiddenThinking marks models that bill thinking tokens the response may not show, so an
 	// aborted request cannot be measured from its text (estimate rule 3).
-	HiddenThinking bool   `json:"hiddenThinking,omitempty" yaml:"hidden_thinking,omitempty"`
-	Source         Source `json:"source" yaml:"source"`
-	Note           string `json:"note,omitempty" yaml:"note,omitempty"`
+	HiddenThinking bool `json:"hiddenThinking,omitempty" yaml:"hidden_thinking,omitempty"`
+	// MaxOutput is the model's largest output in tokens. An aborted response without usage
+	// settles output at the request's max_tokens, or at this when the request's limit was not
+	// logged (for example OpenAI's max_completion_tokens).
+	MaxOutput int    `json:"maxOutput,omitempty" yaml:"max_output,omitempty"`
+	Source    Source `json:"source" yaml:"source"`
+	Note      string `json:"note,omitempty" yaml:"note,omitempty"`
 }
 
 // Resolved is an Entry parsed.
@@ -382,6 +387,9 @@ func (e Entry) Resolve(orgEntry bool) (Resolved, error) {
 	}
 	if e.ToolOverheadTokens < 0 || e.ToolOverheadTokens > maxOverheadTokens {
 		bad("tool_overhead_tokens out of range")
+	}
+	if e.MaxOutput < 0 || e.MaxOutput > maxOutputTokens {
+		bad("max_output out of range")
 	}
 	if !orgEntry {
 		if !strings.HasPrefix(e.Source.URL, "https://") {

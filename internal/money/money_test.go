@@ -53,6 +53,15 @@ func TestRateCostExact(t *testing.T) {
 	}
 }
 
+func TestParseRefusesWhatWouldOverflow(t *testing.T) {
+	if _, err := money.Parse("9999999"); err == nil {
+		t.Fatal("9,999,999 USD times 10^12 overflows int64 and must be refused")
+	}
+	if _, err := money.Parse("9223372"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCents(t *testing.T) {
 	if money.FromCents(1050).String() != "10.50" {
 		t.Fatal(money.FromCents(1050))

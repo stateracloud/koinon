@@ -39,18 +39,18 @@ func (e *env) usage(t time.Time, model string, in, out, cacheRead int64, gwCost 
 }
 
 type spendRow struct {
-	InputTokens, CacheReadTokens      int64
-	CostUsd, GatewayCostUsd, PriceRef string
-	Estimated, CostFlagged            bool
-	Estimate                          []byte
+	InputTokens, OutputTokens, CacheReadTokens int64
+	CostUsd, GatewayCostUsd, PriceRef          string
+	Estimated, CostFlagged                     bool
+	Estimate                                   []byte
 }
 
 func (e *env) lastEntry(ctx SpecContext) spendRow {
 	var s spendRow
-	Expect(db.QueryRow(ctx, `SELECT input_tokens, cache_read_tokens, cost_usd::text, coalesce(gateway_cost_usd::text, ''),
+	Expect(db.QueryRow(ctx, `SELECT input_tokens, output_tokens, cache_read_tokens, cost_usd::text, coalesce(gateway_cost_usd::text, ''),
 		coalesce(price_ref, ''), estimated, cost_flagged, coalesce(estimate, '{}'::jsonb)
 		FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, e.org).Scan(
-		&s.InputTokens, &s.CacheReadTokens, &s.CostUsd, &s.GatewayCostUsd, &s.PriceRef, &s.Estimated, &s.CostFlagged, &s.Estimate)).To(Succeed())
+		&s.InputTokens, &s.OutputTokens, &s.CacheReadTokens, &s.CostUsd, &s.GatewayCostUsd, &s.PriceRef, &s.Estimated, &s.CostFlagged, &s.Estimate)).To(Succeed())
 	return s
 }
 
@@ -120,6 +120,20 @@ var _ = Describe("Cost truth", func() {
 		Expect(n).To(Equal(1))
 	})
 
+	It("takes the cache write rate and estimation settings of the matching entry when the model sets its own rates", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		e.model(ctx, "openrouter", "anthropic/claude-sonnet-5.5")
+		_, err := db.Exec(ctx, `UPDATE models SET input_rate = '2', output_rate = '10' WHERE org_id = $1`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		u := e.usage(time.Now(), "anthropic/claude-sonnet-5.5", 1_000_000, 0, 0, "")
+		u.CacheWriteTokens = 1_000_000
+		_, err = ing.Ingest(ctx, []ledger.Entry{u})
+		Expect(err).NotTo(HaveOccurred())
+		s := e.lastEntry(ctx)
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("2.50"), "Anthropic's cache write price, not the input rate")
+		Expect(s.PriceRef).To(HavePrefix("model#"))
+	})
+
 	It("estimates missing usage, marks it and counts it toward the limit", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "0.01", 1<<40)
 		e.model(ctx, "openrouter", deepseek)
@@ -127,14 +141,15 @@ var _ = Describe("Cost truth", func() {
 		r := e.startRun(ctx, t, 1<<40, time.Now().Add(-time.Minute))
 		x := ledger.Entry{
 			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: deepseek, Status: 200,
-			RequestBytes: 3_000_000, ResponseBytes: -1, Time: time.Now(), // 1M tokens at 3.0 bytes per token
+			MaxTokens: 1000, RequestBytes: 3_000_000, ResponseBytes: -1, Time: time.Now(), // 1M tokens at 3.0 bytes per token
 		}
 		_, err := ing.Ingest(ctx, []ledger.Entry{x})
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
 		Expect(s.Estimated).To(BeTrue())
 		Expect(s.InputTokens).To(Equal(int64(1_000_000)))
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.02"))
+		Expect(s.OutputTokens).To(Equal(int64(1000)), "an admitted response without usage settles at max_tokens")
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.021"))
 		var est map[string]any
 		Expect(json.Unmarshal(s.Estimate, &est)).To(Succeed())
 		Expect(est).To(HaveKey("estimate"))
@@ -145,7 +160,7 @@ var _ = Describe("Cost truth", func() {
 		Expect(rep).To(HaveLen(1))
 		Expect(rep[0].EstimatedRequests).To(Equal(int64(1)))
 		Expect(ledger.FormatUSD(rep[0].ReportedUsd)).To(Equal("0.00"))
-		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.02"))
+		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.021"))
 	})
 
 	It("raises, never lowers, the estimate with the learned p90", func(ctx SpecContext) {
@@ -165,6 +180,61 @@ var _ = Describe("Cost truth", func() {
 		}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(e.lastEntry(ctx).InputTokens).To(Equal(int64(3000)), "static ratio would say 1000")
+	})
+})
+
+var _ = Describe("An unusable stored price", func() {
+	BeforeEach(needDocker)
+
+	It("records the request unpriced and flagged, and never stops the batch or other orgs", func(ctx SpecContext) {
+		bad := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		good := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		bad.model(ctx, "openrouter", deepseek)
+		good.model(ctx, "openrouter", deepseek)
+		// A rate from before the stricter validation, and an override that no longer parses.
+		_, err := db.Exec(ctx, `UPDATE models SET input_rate = '1.1234567', output_rate = '1' WHERE org_id = $1`, bad.org)
+		Expect(err).NotTo(HaveOccurred())
+
+		res, err := ing.Ingest(ctx, []ledger.Entry{
+			bad.usage(time.Now(), deepseek, 1000, 10, 0, "0.5"),
+			good.usage(time.Now(), deepseek, 1_000_000, 0, 0, ""),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Recorded).To(Equal(2))
+		b := bad.lastEntry(ctx)
+		Expect(b.CostFlagged).To(BeTrue())
+		Expect(b.PriceRef).To(BeEmpty())
+		Expect(string(b.Estimate)).To(ContainSubstring("price_error"))
+		Expect(ledger.FormatUSD(b.CostUsd)).To(Equal("0.50"), "the gateway's cost stands in")
+		Expect(ledger.FormatUSD(good.lastEntry(ctx).CostUsd)).To(Equal("0.02"))
+
+		_, err = db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, 'broken', '{"id":"broken"}', now() - interval '1 hour', 'test')`, good.org)
+		Expect(err).NotTo(HaveOccurred())
+		res, err = ing.Ingest(ctx, []ledger.Entry{good.usage(time.Now(), deepseek, 1000, 10, 0, "")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Recorded).To(Equal(1))
+		Expect(good.lastEntry(ctx).CostFlagged).To(BeTrue())
+	})
+
+	It("settles an aborted response without usage at max_tokens, or at the entry's max_output when it is not logged", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		e.model(ctx, "openrouter", deepseek)
+		x := func(max int64) ledger.Entry {
+			return ledger.Entry{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: deepseek, Status: 200, MaxTokens: max,
+				InputKnown: true, InputTokens: 1000, RequestBytes: 3000, ResponseBytes: -1, Time: time.Now(),
+			}
+		}
+		_, err := ing.Ingest(ctx, []ledger.Entry{x(2000)})
+		Expect(err).NotTo(HaveOccurred())
+		s := e.lastEntry(ctx)
+		Expect(s.Estimated).To(BeTrue())
+		// 1000 reported input at 0.02 + 2000 output at 1.00, per million.
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.00202"))
+		_, err = ing.Ingest(ctx, []ledger.Entry{x(0)})
+		Expect(err).NotTo(HaveOccurred())
+		s = e.lastEntry(ctx)
+		Expect(string(s.Estimate)).To(ContainSubstring(`"max_output_fallback": true`))
 	})
 })
 

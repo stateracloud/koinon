@@ -281,6 +281,46 @@ func (q *Queries) GetProvider(ctx context.Context, arg GetProviderParams) (Provi
 	return i, err
 }
 
+const listModelRatesForAudit = `-- name: ListModelRatesForAudit :many
+SELECT org_id, name, input_rate, output_rate, cache_read_rate FROM models
+WHERE input_rate IS NOT NULL
+`
+
+type ListModelRatesForAuditRow struct {
+	OrgID         pgtype.UUID
+	Name          string
+	InputRate     pgtype.Text
+	OutputRate    pgtype.Text
+	CacheReadRate pgtype.Text
+}
+
+// Every model with rates, across orgs, to log rates the stricter validation would refuse.
+func (q *Queries) ListModelRatesForAudit(ctx context.Context) ([]ListModelRatesForAuditRow, error) {
+	rows, err := q.db.Query(ctx, listModelRatesForAudit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListModelRatesForAuditRow
+	for rows.Next() {
+		var i ListModelRatesForAuditRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.Name,
+			&i.InputRate,
+			&i.OutputRate,
+			&i.CacheReadRate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listModels = `-- name: ListModels :many
 SELECT org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at FROM models
 WHERE org_id = $1

@@ -23,7 +23,7 @@ CREATE TABLE price_overrides (
     UNIQUE (org_id, name, valid_from)
 );
 
-CREATE INDEX price_overrides_org_name ON price_overrides (org_id, name, valid_from DESC);
+-- (org_id, name, valid_from) is already indexed by the UNIQUE constraint above.
 
 -- Every default price list version this installation has run, in order. The newest is the
 -- embedded list; the rest let admins see what an upgrade changed.

@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -317,8 +318,16 @@ type Service struct{ pool *pgxpool.Pool }
 // New returns a Service.
 func New(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
+// tx runs fn in a transaction. A concurrent change of the cap and the ceiling that would leave the
+// cap above the ceiling is caught by the table's CHECK (SQLSTATE 23514) and answered as a
+// validation error, so two admins cannot both succeed.
 func (s *Service) tx(ctx context.Context, fn func(q *store.Queries) error) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return fn(store.New(tx)) })
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error { return fn(store.New(tx)) })
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "23514" {
+		return &InvalidError{Msg: "the monthly cap cannot exceed the platform ceiling (changed at the same time); check the current values and try again"}
+	}
+	return err
 }
 
 func checkAmount(name string, v money.USD) error {
