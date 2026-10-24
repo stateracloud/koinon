@@ -12,7 +12,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"93d5b0e60904a347"'
+      koinon.config: '"80d31c2e9e8fc5b3"'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -39,7 +39,7 @@ llm:
             agent: acme/triage
             org: acme
           allowedModels: []
-        - keyHash: sha256:475d89b8ec66df899029bdd1309084276879e8937ea87675e6e17a5b0792f638
+        - keyHash: sha256:3dbbe6834b95253c508cd04a56fd5b7487a835b0bcb786f9c2b4cab3b95c7f0f
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -52,6 +52,7 @@ llm:
           x-koinon-org: default(apiKey.org, "")
   models: []
 mcp:
+  failureMode: failOpen
   policies:
     apiKey:
       mode: strict

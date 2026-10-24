@@ -299,6 +299,9 @@ type MCPTarget struct {
 type ToolGrant struct {
 	Target string
 	Tools  []string
+	// All grants every tool of the target, whatever it lists. Only Koinon's own probe keys have it
+	// (the prober lists a server's tools through the gateway); an agent's grants name tools.
+	All bool
 }
 
 // State is everything a gateway serves. The zero value serves nothing.

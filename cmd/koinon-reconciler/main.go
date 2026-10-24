@@ -158,6 +158,7 @@ func run() error {
 			ResyncInterval:    cfg.resyncInterval,
 			HomeRetention:     reconciler.Retention(cfg.homeRetention),
 			ToolServers:       cfg.toolServers(),
+			MCPAskURL:         cfg.mcpAskURL,
 			// repo.read grants (plan item C2): tokens minted with the App key opened from the
 			// connection's stored secret fields.
 			GitHub: reconciler.GitHubApps{

@@ -54,6 +54,10 @@ type fileConfig struct {
 	GitHubTools struct {
 		URL string `yaml:"url"`
 	} `yaml:"githubTools"`
+	// MCPAsk is koinon-api's approval-gated proxy for org MCP servers' ask-tier tools (plan item MC1).
+	MCPAsk struct {
+		URL string `yaml:"url"`
+	} `yaml:"mcpAsk"`
 }
 
 // config is the reconciler's effective configuration: the config file, overridden by flags
@@ -90,6 +94,7 @@ type config struct {
 	flavorImages   map[string]string
 
 	githubToolsURL string
+	mcpAskURL      string
 	githubAPIURL   string
 }
 
@@ -126,6 +131,7 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")
+	fs.StringVar(&c.mcpAskURL, "mcp-ask-url", "", "base URL of koinon-api's approval-gated MCP proxy as agentgateway reaches it; empty offers no ask-tier tools of org MCP servers")
 	fs.StringVar(&c.githubToolsURL, "github-tools-url", "", "URL of the GitHub tools MCP server as agentgateway reaches it; empty serves no GitHub tools")
 
 	if err := cli.BindEnv(fs, getenv); err != nil {
@@ -183,6 +189,7 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.accessLogOTLP, fc.Gateway.AccessLogOTLP)
 	orDefault(&c.homeRetention, fc.Reconciler.HomeRetention)
 	orDefault(&c.githubToolsURL, fc.GitHubTools.URL)
+	orDefault(&c.mcpAskURL, fc.MCPAsk.URL)
 	for _, d := range []struct {
 		dst *time.Duration
 		src string

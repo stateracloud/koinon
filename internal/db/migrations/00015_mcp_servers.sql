@@ -81,6 +81,23 @@ CREATE TABLE mcp_tools (
     CHECK (jsonb_typeof(input_schema) = 'object')
 );
 
+-- The servers an agent may use, optionally narrowed to some tools (ADR 0057). An admin edits it
+-- directly, not through an agent version: what an agent may do with a server is bounded by the
+-- tiers an admin set on its tools, and adding a server is not a grant of a new kind of power.
+CREATE TABLE agent_mcp_servers (
+    org_id    uuid NOT NULL,
+    agent_id  uuid NOT NULL,
+    server_id uuid NOT NULL,
+    -- NULL allows every tool the server has, including tools it adds later (in the ask tier);
+    -- a list allows those tools only.
+    tools     text[],
+    PRIMARY KEY (org_id, agent_id, server_id),
+    FOREIGN KEY (org_id, agent_id) REFERENCES agents (org_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (org_id, server_id) REFERENCES mcp_servers (org_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX agent_mcp_servers_server ON agent_mcp_servers (org_id, server_id);
+
 -- MCP tool names are not limited to lower case and underscores, and the ask-tier proxy records
 -- them as "<server>/<tool>" calls.
 ALTER TABLE approval_requests DROP CONSTRAINT approval_requests_tool_check;
