@@ -85,6 +85,12 @@ function api(role: string, platformAdmin = false) {
         seen.limit = req
         return { budget: {} }
       },
+      'koinon.budget.v1alpha1.BudgetService/ListOrgBudgets': () => ({
+        orgs: [
+          { orgId: org, orgSlug: 'default', orgName: 'Default', monthlyCapUsd: '100.00', platformCeilingUsd: '500.00', spentThisMonthUsd: '40.00' },
+          { orgId: 'org-2', orgSlug: 'acme', orgName: 'Acme', spentThisMonthUsd: '1.00' },
+        ],
+      }),
       'koinon.budget.v1alpha1.BudgetService/SetPlatformCeiling': (req: Json) => {
         seen.ceiling = req
         return { budget: {} }
@@ -173,13 +179,15 @@ test('a platform admin sets the ceiling in the platform area; an org admin canno
   const { handlers, seen } = api('ORG_ROLE_ADMIN', true)
   await mockApi(page, handlers)
   await page.goto('/')
-  await page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Budget ceiling' }).click()
-  await expect(page.getByRole('heading', { name: 'Platform budget ceiling' })).toBeVisible()
+  await page.getByRole('navigation', { name: 'Platform' }).getByRole('link', { name: 'Budget ceilings' }).click()
+  await expect(page.getByRole('heading', { name: 'Platform budget ceilings' })).toBeVisible()
   await expectAccessible(page)
-  await page.getByRole('button', { name: 'Change ceiling' }).click()
-  await page.getByLabel('Ceiling in US dollars').fill('1000')
-  await page.getByRole('button', { name: 'Save ceiling' }).click()
-  await expect.poll(() => seen.ceiling).toMatchObject({ orgId: org, platformCeilingUsd: '1000' })
+  await expect(page.getByRole('heading', { name: 'Acme' })).toBeVisible()
+  await page.getByRole('button', { name: 'Set ceiling of Acme' }).click()
+  await page.getByLabel('Ceiling for Acme, in US dollars').fill('1000')
+  await expectAccessible(page)
+  await page.getByRole('button', { name: 'Save ceiling for Acme' }).click()
+  await expect.poll(() => seen.ceiling).toMatchObject({ orgId: 'org-2', platformCeilingUsd: '1000' })
 
   const other = api('ORG_ROLE_ADMIN', false)
   await page.unroute(/\/koinon\.[^/]+\/[^/]+$/)

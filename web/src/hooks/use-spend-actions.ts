@@ -50,3 +50,19 @@ export function useBudgetActions(orgId: string) {
     }
   }, [transport, queryClient, orgId])
 }
+
+/** usePlatformActions returns the write call of the platform area: a ceiling for any org. */
+export function usePlatformActions() {
+  const transport = useTransport()
+  const queryClient = useQueryClient()
+  return useMemo(() => {
+    const client = createClient(BudgetService, transport)
+    return {
+      setCeiling: async (orgId: string, usd: string) => {
+        const res = await client.setPlatformCeiling({ orgId, platformCeilingUsd: usd })
+        await queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: BudgetService, cardinality: undefined }) })
+        return res
+      },
+    }
+  }, [transport, queryClient])
+}

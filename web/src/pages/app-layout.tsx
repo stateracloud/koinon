@@ -121,7 +121,7 @@ function Shell({ who }: { who: WhoAmIResponse }) {
               Platform
             </h2>
             <Link to="/platform/budgets" className={navLink} activeProps={active}>
-              Budget ceiling
+              Budget ceilings
             </Link>
           </nav>
         )}
@@ -150,9 +150,9 @@ function Shell({ who }: { who: WhoAmIResponse }) {
           </Button>
         </header>
         {admin && <NoticeBanner key={org.orgId} orgId={org.orgId} platformAdmin={who.platformAdmin} />}
-        {who.platformAdmin && (
+        {who.platformAdmin && !memberships.some((m) => m.orgId === org.orgId) && (
           <p role="note" className="bg-muted px-4 py-1.5 text-xs md:px-6">
-            You are a platform admin, so you can see and change every org.
+            You are acting as a platform admin in an org you are not a member of.
           </p>
         )}
         <main className="min-w-0 flex-1 px-4 py-6 md:px-6">

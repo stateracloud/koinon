@@ -93,11 +93,12 @@ describe('toSetPrice', () => {
 
   it('round-trips a stored version into the form', () => {
     const v = create(PriceVersionSchema, {
-      name: 'x', provider: '*', match: { regex: 'a.*' }, rates: { input: '1', output: '2' }, tokenizer: 'bytes', ratio: '2.3', maxOutput: 100,
+      name: 'x', provider: '*', match: { regex: 'a.*' }, rates: { input: '1', output: '2' }, tokenizer: 'bytes', ratio: '2.3', maxOutput: 100, toolOverheadTokens: 346, hiddenThinking: true,
       tiers: [{ contextOver: 5n, rates: { input: '3' } }],
     })
     const f = formFromVersion(v)
-    expect(f).toMatchObject({ matchKind: 'regex', pattern: 'a.*', ratio: '2.3', maxOutput: '100' })
+    expect(f).toMatchObject({ matchKind: 'regex', pattern: 'a.*', ratio: '2.3', maxOutput: '100', toolOverhead: '346', hiddenThinking: true })
+    expect(toSetPrice('o', f)).toMatchObject({ toolOverheadTokens: 346, hiddenThinking: true })
     expect(f.tiers[0]).toMatchObject({ contextOver: '5' })
     expect(validatePrice(f, true)).toEqual({})
   })

@@ -55,7 +55,7 @@ export function formFromVersion(v: PriceVersion): PriceFormValues {
   return {
     name: v.name, provider: v.provider, matchKind: v.match?.regex ? 'regex' : 'glob', pattern: v.match?.regex || v.match?.glob || '',
     rates: rates(v.rates), tiers: v.tiers.map((t) => ({ contextOver: String(t.contextOver), rates: rates(t.rates) })),
-    tokenizer: v.tokenizer || 'bytes', ratio: v.ratio || '3.0', toolOverhead: '0', hiddenThinking: false,
+    tokenizer: v.tokenizer || 'bytes', ratio: v.ratio || '3.0', toolOverhead: String(v.toolOverheadTokens), hiddenThinking: v.hiddenThinking,
     maxOutput: v.maxOutput ? String(v.maxOutput) : '', validFrom: '',
   }
 }
