@@ -7,9 +7,9 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
-import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { CostSchema, RunEventSchema, RunSchema, RunService, RunState, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
-import { ActorKind, TicketEventSchema, TicketService, TicketStatus, type TicketEvent } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
+import { ActorKind, TicketEventSchema, TicketSchema, TicketService, TicketStatus, type TicketEvent } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
 import { agent, orgId, renderApp, ticket, whoAmI } from '@/test-utils'
 
 const t0 = Date.now() - 60_000
@@ -117,5 +117,49 @@ describe('TicketPage', () => {
     const list = screen.getByRole('region', { name: 'Run costs' })
     expect(list).toHaveTextContent('Run r-1aaaaa · succeeded · $0.0021')
     expect(list).toHaveTextContent('Run r-2bbbbb · failed · at least $1,234.50')
+  })
+
+  describe('agent notes', () => {
+    const summary = 'Fixed the typo.\n\n<b>not bold</b> **not markdown**\n- next: add a test'
+    function setup(agentSummary: string, role = OrgRole.OWNER) {
+      const transport = createRouterTransport(({ service }) => {
+        service(AuthService, { whoAmI: () => whoAmI({ role }) })
+        service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+        service(TicketService, {
+          getTicket: () => ({
+            ticket: create(TicketSchema, { ...ticket('t-1', 'Say hello', TicketStatus.IN_PROGRESS), agentSummary, agentSummaryAt: agentSummary ? timestampFromMs(t0) : undefined }),
+            events: [],
+            runs: [],
+          }),
+        })
+      })
+      renderApp(transport, '/tickets/t-1')
+    }
+
+    it('is collapsed by default, opens to plain preformatted text with the time, and injects no HTML', async () => {
+      setup(summary)
+      const notes = await screen.findByTestId('agent-notes')
+      expect((notes as HTMLDetailsElement).open).toBe(false)
+      expect(screen.getByText("Agent's notes")).toBeInTheDocument()
+      await userEvent.click(screen.getByText("Agent's notes"))
+      expect((notes as HTMLDetailsElement).open).toBe(true)
+      const text = screen.getByTestId('agent-notes-text')
+      expect(text.textContent).toBe(summary)
+      expect(text).toHaveClass('whitespace-pre-wrap')
+      expect(text.querySelector('b')).toBeNull()
+      expect(notes.querySelector('time')).toBeInTheDocument()
+    })
+
+    it('is shown to a viewer too', async () => {
+      setup(summary, OrgRole.VIEWER)
+      expect(await screen.findByTestId('agent-notes')).toBeInTheDocument()
+    })
+
+    it('renders nothing without a summary', async () => {
+      setup('')
+      await screen.findByRole('heading', { name: 'Say hello' })
+      expect(screen.queryByTestId('agent-notes')).not.toBeInTheDocument()
+      expect(screen.queryByText("Agent's notes")).not.toBeInTheDocument()
+    })
   })
 })

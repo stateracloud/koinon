@@ -40,9 +40,10 @@ export function AgentsPage() {
                 {a.displayName}
               </Link>
               <span className="text-muted-foreground text-sm">{flavorLabel(a.flavor)}</span>
-              <Badge variant={a.status === AgentStatus.DRAFT ? 'outline' : 'secondary'} className="ml-auto">
-                {agentStatusLabel(a.status)}
-              </Badge>
+              <span className="ml-auto flex flex-wrap items-center gap-2">
+                {a.unhealthyAt && <Badge variant="destructive">Unhealthy</Badge>}
+                <Badge variant={a.status === AgentStatus.DRAFT ? 'outline' : 'secondary'}>{agentStatusLabel(a.status)}</Badge>
+              </span>
             </li>
           ))}
         </ul>

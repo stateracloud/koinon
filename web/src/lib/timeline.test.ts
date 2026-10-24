@@ -104,6 +104,35 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it("shows Koinon's sandbox and health events as notes with their message", () => {
+    const items = buildTimeline(
+      [
+        ticketEvent(1, 100, 'sandbox.recreated', { message: 'Sandbox recreated: stuck process' }),
+        ticketEvent(2, 200, 'sandbox.work_lost', { message: 'Unsaved work was lost' }),
+        ticketEvent(3, 300, 'agent.unhealthy', { message: 'Agent marked unhealthy: repeated stuck sandboxes' }),
+        ticketEvent(4, 400, 'run.session_restarted', { message: 'Session restarted: new instructions.' }),
+        ticketEvent(5, 500, 'sandbox.recreated', {}),
+      ],
+      {},
+    )
+    expect(items.map((i) => (i.type === 'note' ? i.text : ''))).toEqual([
+      'Sandbox recreated: stuck process',
+      'Unsaved work was lost',
+      'Agent marked unhealthy: repeated stuck sandboxes',
+      'Session restarted: new instructions.',
+      'Sandbox recreated.',
+    ])
+    expect(items.every((i) => i.type === 'note')).toBe(true)
+  })
+
+  it('gives a system-requested approval (saved work) an approval item that a human decides', () => {
+    const items = buildTimeline(
+      [ticketEvent(1, 100, 'approval.requested', { system: true, approval_id: 'ap-9', tool: 'push_saved_work', target: 'github:acme/widgets', args_sha256: 'abc' })],
+      {},
+    )
+    expect(items[0]).toMatchObject({ type: 'approval', approvalId: 'ap-9', kind: 'approval.requested', ask: true, text: 'Approval requested: push_saved_work on acme/widgets' })
+  })
+
   const chunk = (seq: number, t: string) => runEvent(seq, 'acp.agent_message_chunk', { sessionUpdate: 'agent_message_chunk', content: text(t) })
   const agentTexts = (items: ReturnType<typeof buildTimeline>) =>
     items.flatMap((i) => (i.type === 'agent-text' || (i.type === 'message' && i.actor === ActorKind.AGENT) ? [i.text] : []))

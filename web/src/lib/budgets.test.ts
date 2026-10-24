@@ -4,7 +4,7 @@ import { create } from '@bufbuild/protobuf'
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { NotificationSchema } from '@/gen/koinon/budget/v1alpha1/budget_pb'
-import { bannerNotices, isCurrent, nextMonthStart, noticeText, overridden, windowStart } from '@/lib/budgets'
+import { bannerNotices, isAgentUnhealthy, isCurrent, nextMonthStart, noticeText, overridden, windowStart } from '@/lib/budgets'
 
 const now = new Date('2026-10-24T12:00:00Z')
 const n = (id: string, p: Partial<{ level: string; threshold: number; readAt: number; windowStart: string; agentId: string }>) =>
@@ -72,5 +72,24 @@ describe('overridden', () => {
     expect(overridden('3.50', '10.00')).toBe(true)
     expect(overridden('10.00', '10.00')).toBe(false)
     expect(overridden('3.50', '')).toBe(false)
+  })
+})
+
+describe('agent.unhealthy notifications', () => {
+  const unhealthy = create(NotificationSchema, { id: 'n-u', kind: 'agent.unhealthy', agentId: 'a-1', message: 'Repo helper was marked unhealthy: its sandbox kept getting stuck.' })
+
+  it('says the server message, and falls back to a plain sentence', () => {
+    expect(isAgentUnhealthy(unhealthy)).toBe(true)
+    expect(noticeText(unhealthy)).toBe('Repo helper was marked unhealthy: its sandbox kept getting stuck.')
+    expect(noticeText(create(NotificationSchema, { kind: 'agent.unhealthy', agentId: 'a-1' }), new Map([['a-1', 'Repo helper']]))).toBe('Repo helper was marked unhealthy.')
+  })
+
+  it('does not call an unknown kind a budget notice', () => {
+    expect(noticeText(create(NotificationSchema, { kind: 'something.new', message: 'Hello' }))).toBe('Hello')
+    expect(noticeText(create(NotificationSchema, { kind: 'something.new' }))).toBe('A notification this version does not recognise.')
+  })
+
+  it('keeps an unread one in the banner list', () => {
+    expect(bannerNotices([unhealthy], now, false).map((x) => x.id)).toEqual(['n-u'])
   })
 })
