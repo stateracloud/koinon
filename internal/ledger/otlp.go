@@ -85,6 +85,11 @@ func Decode(req *collogspb.ExportLogsServiceRequest) (entries []Entry, rejected 
 				// A request the gateway admitted (2xx) that has a model but no usage is an
 				// aborted stream or a provider that reports none: its usage is estimated.
 				admitted := statusOK && status >= 200 && status < 300
+				// A request the gateway or the upstream refused (4xx, 5xx) was not served and is
+				// not charged, even though agentgateway logs a zero cost for it.
+				if statusOK && !admitted {
+					continue
+				}
 				if model == "" || (!usage && !admitted) {
 					continue // not a charged LLM request
 				}
