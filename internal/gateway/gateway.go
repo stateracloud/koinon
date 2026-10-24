@@ -102,12 +102,29 @@ const OrgHeader = "x-koinon-org"
 // targets trust it only because they are reachable from the gateway alone.
 const AgentHeader = "X-Koinon-Agent"
 
+// Names of the agents Koinon itself runs to use MCP servers through the gateway: a prober per
+// server and an executor per org for approved calls. They hold keys like agents do, ask for no
+// model, and are not rows in the agents table.
+const (
+	MCPProbeAgentPrefix = "mcp-probe-"
+	MCPExecAgentName    = "mcp-exec"
+)
+
+// IsInternalAgent reports whether a is one of Koinon's own MCP agents.
+func IsInternalAgent(a AgentRef) bool {
+	return a.Name == MCPExecAgentName || strings.HasPrefix(a.Name, MCPProbeAgentPrefix)
+}
+
 // ReadyPrompt is the MCP prompt Koinon's MCP server publishes to every agent.
 // A harness that turns MCP prompts into commands (OpenCode v2) announces it
 // once the server is connected and its tools are registered; koinon-agentd
 // waits for it before the first prompt (ADR 0052). Drivers must let every
 // authenticated key list and get it.
 const ReadyPrompt = "koinon-ready"
+
+// ReadyPromptExposed is the prompt as agents see it: agentgateway prefixes every prompt and tool with
+// the name of its target (prefixMode always), and Koinon's MCP server is the "github" target.
+const ReadyPromptExposed = "github_" + ReadyPrompt
 
 // Key is the gateway-side record of an API key: its ID, owner and hash. It
 // holds no key material and is safe to persist and to render into config.

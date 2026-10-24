@@ -12,6 +12,7 @@ import {
   FileChangeSchema,
   FileStatus,
   GetApprovalDiffResponseSchema,
+  McpCallSchema,
   PullRequestCallSchema,
   RiskSchema,
   Status,
@@ -24,8 +25,24 @@ import { orgId, renderApp, whoAmI } from '@/test-utils'
 
 const sha = 'f3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 
+type McpInit = { contentHash?: string; currentContentHash?: string; reviewReason?: string; toolDescription?: string; approvalsRequired?: number; firstApprover?: string; errorOnApprove?: boolean }
+let mcpInit: McpInit = {}
+
 function mcpApproval() {
   return create(ApprovalSchema, {
+    approvalsRequired: mcpInit.approvalsRequired ?? 1,
+    firstApprover: mcpInit.firstApprover ?? '',
+    call: {
+      case: 'mcp',
+      value: create(McpCallSchema, {
+        serverId: 's-docs',
+        serverName: 'docs',
+        contentHash: mcpInit.contentHash ?? 'abcdef0123456789',
+        currentContentHash: mcpInit.currentContentHash ?? '',
+        reviewReason: mcpInit.reviewReason ?? '',
+        toolDescription: mcpInit.toolDescription ?? '',
+      }),
+    },
     id: 'ap-1',
     orgId,
     ticketId: 't-1',
@@ -86,7 +103,8 @@ const changedSha = 'a'.repeat(64)
 
 type DiffInit = MessageInitShape<typeof GetApprovalDiffResponseSchema>
 
-function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean; diff?: DiffInit; executable?: boolean; mcp?: boolean } = {}) {
+function setup(opts: { mcpInit?: McpInit; role?: OrgRole; canDecide?: boolean; changed?: boolean; diff?: DiffInit; executable?: boolean; mcp?: boolean } = {}) {
+  mcpInit = opts.mcpInit ?? {}
   const approves: ApproveRequest[] = []
   const denies: DenyRequest[] = []
   let current = approval({ canDecide: opts.canDecide, executable: opts.executable, mcp: opts.mcp })
@@ -104,6 +122,7 @@ function setup(opts: { role?: OrgRole; canDecide?: boolean; changed?: boolean; d
       },
       approve: (req) => {
         approves.push(req)
+        if (mcpInit.errorOnApprove) throw new ConnectError('the tool changed since the request', Code.FailedPrecondition)
         if (req.argsSha256 !== current.argsSha256) throw new ConnectError('approval does not match the requested arguments', Code.Aborted)
         if (opts.changed && approves.length === 1) {
           // The request changed after the card loaded: the API refuses the old hash.
@@ -310,6 +329,62 @@ describe('ApprovalCard', () => {
     await userEvent.click(within(card).getByRole('button', { name: 'Approve' }))
     await waitFor(() => expect(approves).toHaveLength(1))
     expect(approves[0].argsSha256).toBe(sha)
+  })
+
+  it('shows the tool version, its description collapsed, and a review notice for an MCP call', async () => {
+    setup({ mcp: true, mcpInit: { reviewReason: 'the description changed', toolDescription: 'Creates a page.' } })
+    const card = await screen.findByTestId('approval-card')
+    expect(within(card).getByText('abcdef01')).toBeInTheDocument()
+    expect(within(card).getByText(/Tool version/)).toBeInTheDocument()
+    expect(within(card).getByText('the description changed')).toBeInTheDocument()
+    expect((within(card).getByTestId('mcp-tool-description') as HTMLDetailsElement).open).toBe(false)
+    expect(within(card).getByText('What the tool says it does')).toBeInTheDocument()
+    expect(within(card).queryByText(/The tool changed after this request/)).not.toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Approve' })).toBeEnabled()
+  })
+
+  it('warns and disables Approve when the tool changed after the request', async () => {
+    setup({ mcp: true, mcpInit: { currentContentHash: '99999999aaaa' } })
+    const card = await screen.findByTestId('approval-card')
+    expect(within(card).getAllByText(/The tool changed after this request; Koinon will not run it/).length).toBeGreaterThan(0)
+    expect(within(card).getByText(/Deny it and let the agent ask again/)).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Approve' })).toBeDisabled()
+    expect(within(card).getByRole('button', { name: 'Deny' })).toBeEnabled()
+  })
+
+  it('does not warn when the current hash equals the requested one', async () => {
+    setup({ mcp: true, mcpInit: { currentContentHash: 'abcdef0123456789' } })
+    const card = await screen.findByTestId('approval-card')
+    expect(within(card).queryByText(/The tool changed after this request/)).not.toBeInTheDocument()
+  })
+
+  it('labels the first of two approvals', async () => {
+    setup({ mcp: true, mcpInit: { approvalsRequired: 2 } })
+    const card = await screen.findByTestId('approval-card')
+    expect(within(card).getByText('Needs two approvers')).toBeInTheDocument()
+    expect(within(card).queryByText(/First approval given/)).not.toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Give first approval' })).toBeEnabled()
+  })
+
+  it('offers the second approval to someone other than the first approver', async () => {
+    setup({ mcp: true, mcpInit: { approvalsRequired: 2, firstApprover: 'u-other' } })
+    const card = await screen.findByTestId('approval-card')
+    expect(within(card).getByText(/First approval given; a second person \(not the first approver, not the ticket's creator\) must approve\./)).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Give second approval' })).toBeEnabled()
+  })
+
+  it('stops the first approver from giving the second approval', async () => {
+    setup({ mcp: true, mcpInit: { approvalsRequired: 2, firstApprover: 'u-1' } })
+    const card = await screen.findByTestId('approval-card')
+    expect(within(card).getByRole('button', { name: 'Give second approval' })).toBeDisabled()
+    expect(within(card).getByText(/You gave the first approval; a different admin or owner must give the second/)).toBeInTheDocument()
+  })
+
+  it('shows a FailedPrecondition from Approve inline', async () => {
+    setup({ mcp: true, mcpInit: { errorOnApprove: true } })
+    const card = await screen.findByTestId('approval-card')
+    await userEvent.click(within(card).getByRole('button', { name: 'Approve' }))
+    expect(await within(card).findByText('the tool changed since the request')).toBeInTheDocument()
   })
 
   it('denies with a note', async () => {

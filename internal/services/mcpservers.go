@@ -61,6 +61,7 @@ func mcpToolProto(t mcpservers.Tool) *mcpserverv1alpha1.Tool {
 		ServerId: t.ServerID, Name: t.Name, Description: t.Description, ReadOnlyHint: t.ReadOnlyHint, Tier: mcpTierToProto[t.Tier],
 		ReviewReason: t.ReviewReason, Present: t.Present, FirstSeenAt: timestamppb.New(t.FirstSeenAt),
 		LastSeenAt: timestamppb.New(t.LastSeenAt), TierSetBy: t.TierSetBy, TierSetAt: optTime(t.TierSetAt),
+		RequiresTwoApprovers: t.RequiresTwoApprovers, ContentHash: t.ContentHash, Unavailable: t.Unavailable,
 	}
 }
 
@@ -193,6 +194,19 @@ func (s *Server) SetToolTier(ctx context.Context, req *mcpserverv1alpha1.SetTool
 		return nil, s.mcpError(err)
 	}
 	return &mcpserverv1alpha1.SetToolTierResponse{Tool: mcpToolProto(t)}, nil
+}
+
+// SetToolTwoApprovers implements McpServerService. Admins and owners.
+func (s *Server) SetToolTwoApprovers(ctx context.Context, req *mcpserverv1alpha1.SetToolTwoApproversRequest) (*mcpserverv1alpha1.SetToolTwoApproversResponse, error) {
+	c, err := s.mcpCaller(ctx, req.GetOrgId())
+	if err != nil {
+		return nil, err
+	}
+	t, err := s.mcp.SetTwoApprovers(requestCtx(ctx), c.org, c.auditActor(), req.GetServerId(), req.GetTool(), req.GetRequired())
+	if err != nil {
+		return nil, s.mcpError(err)
+	}
+	return &mcpserverv1alpha1.SetToolTwoApproversResponse{Tool: mcpToolProto(t)}, nil
 }
 
 // AcknowledgeToolReview implements McpServerService. Admins and owners.

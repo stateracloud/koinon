@@ -33,10 +33,13 @@ type Diagnosis struct {
 	Reason string
 }
 
-// Diagnose sends one request to the server named by p, directly from this process (not through the
-// gateway), and says what came back. It dials only addresses policy allows, follows no redirects and
-// sends the credential to p.URL alone. The request is an MCP initialize for Streamable HTTP and a GET
-// of the event stream for SSE; it never calls a tool.
+// Diagnose sends one request to the server named by p, directly from this process, and says what came
+// back. It is for the add-time OAuth check only, and it carries NO credential: the server is not
+// known to the gateway yet, and a credential never leaves the gateway. A server that wants OAuth
+// answers an anonymous request with a 401 naming its resource metadata; one that wants a static
+// credential answers 401 without it. It dials only addresses policy allows and follows no redirects.
+// The request is an MCP initialize for Streamable HTTP and a GET of the event stream for SSE; it never
+// calls a tool.
 func Diagnose(ctx context.Context, policy catalog.URLPolicy, p PreflightRequest) Diagnosis {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -66,9 +69,6 @@ func Diagnose(ctx context.Context, policy catalog.URLPolicy, p PreflightRequest)
 	if err != nil {
 		return Diagnosis{Reason: "the URL cannot be requested"}
 	}
-	if p.Value != "" && p.Header != "" {
-		req.Header.Set(p.Header, p.Prefix+p.Value)
-	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return Diagnosis{Reason: "could not connect: " + networkReason(err)}
@@ -82,8 +82,6 @@ func Diagnose(ctx context.Context, policy catalog.URLPolicy, p PreflightRequest)
 		if strings.Contains(strings.ToLower(strings.Join(resp.Header.Values("Www-Authenticate"), " ")), "resource_metadata") {
 			d.NeedsOAuth = true
 			d.Reason = OAuthMessage
-		} else if p.Value != "" {
-			d.Reason = fmt.Sprintf("the server rejected the credential (HTTP %d)", resp.StatusCode)
 		} else {
 			d.Reason = fmt.Sprintf("the server asks for a credential (HTTP %d)", resp.StatusCode)
 		}

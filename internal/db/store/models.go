@@ -944,6 +944,9 @@ type ApprovalRequest struct {
 	ExecutedAt          pgtype.Timestamptz
 	Error               pgtype.Text
 	DeliveredAt         pgtype.Timestamptz
+	ApprovalsRequired   int16
+	FirstApprover       pgtype.UUID
+	CallBinding         []byte
 }
 
 type AuditEvent struct {
@@ -1023,20 +1026,21 @@ type McpServer struct {
 }
 
 type McpTool struct {
-	OrgID        pgtype.UUID
-	ServerID     pgtype.UUID
-	Name         string
-	Description  string
-	InputSchema  []byte
-	ContentHash  string
-	ReadOnlyHint bool
-	Tier         McpTier
-	ReviewReason pgtype.Text
-	Present      bool
-	FirstSeenAt  pgtype.Timestamptz
-	LastSeenAt   pgtype.Timestamptz
-	TierSetBy    pgtype.Text
-	TierSetAt    pgtype.Timestamptz
+	OrgID                pgtype.UUID
+	ServerID             pgtype.UUID
+	Name                 string
+	Description          string
+	InputSchema          []byte
+	ContentHash          string
+	ReadOnlyHint         bool
+	Tier                 McpTier
+	ReviewReason         pgtype.Text
+	Present              bool
+	FirstSeenAt          pgtype.Timestamptz
+	LastSeenAt           pgtype.Timestamptz
+	RequiresTwoApprovers bool
+	TierSetBy            pgtype.Text
+	TierSetAt            pgtype.Timestamptz
 }
 
 type Model struct {

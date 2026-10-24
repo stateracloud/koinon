@@ -44,7 +44,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -71,6 +70,22 @@ var (
 	ErrNotPending = errors.New("approval request is no longer pending")
 )
 
+// ExecKeys yields an org's gateway executor key (package mcpservers).
+type ExecKeys interface {
+	Key(ctx context.Context, org pgtype.UUID) (string, error)
+}
+
+// Errors of Approve beyond those above (two-approver requests).
+var (
+	// ErrSameApprover: the second approval must come from a different person than the first.
+	ErrSameApprover = errors.New("this request needs two approvers; the second must be a different person than the first")
+	// ErrRequesterApproves: the person who created the ticket may not approve a two-approver request.
+	ErrRequesterApproves = errors.New("this request needs two approvers, and the person who created the ticket cannot be one of them")
+)
+
+// KindFirstApproved is the ticket event of the first of two approvals.
+const KindFirstApproved = "approval.first_approved"
+
 // Defaults.
 const (
 	DefaultExecutionLease = 2 * time.Minute
@@ -82,8 +97,11 @@ const (
 type Options struct {
 	// Keys opens connections' stored secret fields. Without it execution fails.
 	Keys connections.Opener
-	// URLPolicy is the egress policy for the remote MCP servers whose approved calls Koinon executes.
-	URLPolicy catalog.URLPolicy
+	// GatewayMCPURL is agentgateway's MCP endpoint and ExecKeys the org's executor keys: approved
+	// calls to remote MCP servers go through the gateway, which holds their credentials. Without
+	// them such a call fails permanently.
+	GatewayMCPURL string
+	ExecKeys      ExecKeys
 	// GitHub defaults to a client for api.github.com.
 	GitHub *github.Client
 	// ExecutionLease is how long one executor holds a request. Default
@@ -101,7 +119,8 @@ type Service struct {
 	pool    *pgxpool.Pool
 	q       *store.Queries
 	keys    connections.Opener
-	policy  catalog.URLPolicy
+	gwURL   string
+	execKey ExecKeys
 	gh      *github.Client
 	lease   time.Duration
 	maxExec int
@@ -123,7 +142,7 @@ func New(pool *pgxpool.Pool, opts Options) *Service {
 		opts.Logger = slog.Default()
 	}
 	return &Service{
-		pool: pool, q: store.New(pool), keys: opts.Keys, policy: opts.URLPolicy, gh: opts.GitHub,
+		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, gh: opts.GitHub,
 		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger,
 	}
 }
@@ -184,6 +203,27 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 		}
 		if run.State.Finished() {
 			return ErrNotPending // the sweeper cancels it
+		}
+		if cur.ApprovalsRequired >= 2 {
+			// Two approvers: distinct people, neither the one who created the ticket (they asked for
+			// the work; a second pair of eyes is the point). The role check is the caller's.
+			t, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: org, ID: cur.TicketID})
+			if err != nil {
+				return err
+			}
+			if t.CreatedBy.Valid && t.CreatedBy == approver {
+				return ErrRequesterApproves
+			}
+			if !cur.FirstApprover.Valid {
+				row, err = q.SetApprovalFirstApprover(ctx, store.SetApprovalFirstApproverParams{OrgID: org, ID: id, Approver: approver})
+				if err != nil {
+					return err
+				}
+				return ticketEvent(ctx, q, row, KindFirstApproved, approver, map[string]any{"note": note})
+			}
+			if cur.FirstApprover == approver {
+				return ErrSameApprover
+			}
 		}
 		row, err = q.DecideApprovalRequest(ctx, store.DecideApprovalRequestParams{
 			OrgID: org, ID: id, Status: store.ApprovalStatusApproved, DecidedBy: approver,

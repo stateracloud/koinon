@@ -8,8 +8,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { FileStatus, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse } from '@/gen/koinon/approval/v1alpha1/approval_pb'
-import { approvalStatusLabel, targetRepo } from '@/lib/approvals'
+import { FileStatus, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type McpCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
+import { approvalStatusLabel, approveLabel, targetRepo, toolChanged, toolVersion } from '@/lib/approvals'
 import { formatBytes, riskFlagsFor, riskItems, type RiskItem } from '@/lib/risk'
 import { cn } from '@/lib/utils'
 
@@ -34,6 +34,8 @@ export type ApprovalCardProps = {
   diffError?: string
   /** Link to the standalone view (shown in the ticket timeline). */
   showPermalink?: boolean
+  /** The signed-in user's ID, to stop the first of two approvers from giving the second approval. */
+  currentUserId?: string
 }
 
 /**
@@ -54,11 +56,21 @@ export function ApprovalCard({
   diffPending,
   diffError,
   showPermalink,
+  currentUserId,
 }: ApprovalCardProps) {
   const headingId = useId()
   const pr = a.call.case === 'pullRequest' ? a.call.value : undefined
   const comment = a.call.case === 'comment' ? a.call.value : undefined
   const mcp = a.connector === 'mcp'
+  const mcpCall = a.call.case === 'mcp' ? a.call.value : undefined
+  const stale = !!mcpCall && toolChanged(mcpCall.contentHash, mcpCall.currentContentHash)
+  const two = a.approvalsRequired === 2
+  const isFirstApprover = two && !!a.firstApprover && a.firstApprover === currentUserId
+  const blocked = stale
+    ? 'The tool changed after this request; Koinon will not run it.'
+    : isFirstApprover
+      ? 'You gave the first approval; a different admin or owner must give the second.'
+      : undefined
   const items = riskItems(a.risk)
   const isPending = a.status === Status.PENDING
   const resultUrl = typeof a.result?.url === 'string' ? a.result.url : undefined
@@ -112,6 +124,15 @@ export function ApprovalCard({
         </section>
       )}
 
+      {two && (
+        <section aria-label="Approvers" className="rounded-md border p-3 text-sm">
+          <p className="font-medium">Needs two approvers</p>
+          {isPending && a.firstApprover && <p className="text-muted-foreground">First approval given; a second person (not the first approver, not the ticket&apos;s creator) must approve.</p>}
+        </section>
+      )}
+
+      {mcpCall && <McpToolInfo call={mcpCall} stale={stale} />}
+
       {mcp && <McpArguments json={a.argsJson} />}
 
       {pr && <FileList files={pr.files} items={items} diff={diff} diffPending={diffPending} diffError={diffError} />}
@@ -120,7 +141,7 @@ export function ApprovalCard({
 
       {isPending &&
         (canDecide ? (
-          <DecisionForm onApprove={onApprove} onDeny={onDeny} pending={pending} sha={a.argsSha256} />
+          <DecisionForm onApprove={onApprove} onDeny={onDeny} pending={pending} sha={a.argsSha256} approveText={approveLabel(a.approvalsRequired, a.firstApprover)} blocked={blocked} />
         ) : (
           <p className="text-muted-foreground text-sm">Only org admins and owners can approve or deny this request.</p>
         ))}
@@ -155,6 +176,33 @@ function prettyJson(text: string): string {
   } catch {
     return text
   }
+}
+
+/** McpToolInfo shows which version of the tool the request was made against, and whether it has since changed. */
+function McpToolInfo({ call, stale }: { call: McpCall; stale: boolean }) {
+  return (
+    <section aria-label="Tool version" className="grid gap-2 text-sm">
+      <p>
+        Tool version <code className="font-mono">{toolVersion(call.contentHash)}</code>
+      </p>
+      {stale && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="font-medium">The tool changed after this request; Koinon will not run it. Deny it and let the agent ask again.</AlertDescription>
+        </Alert>
+      )}
+      {call.reviewReason && (
+        <p role="note" className="rounded-md border border-amber-500/60 bg-amber-500/5 p-2">
+          {call.reviewReason}
+        </p>
+      )}
+      {call.toolDescription && (
+        <details className="rounded-md border" data-testid="mcp-tool-description">
+          <summary className="cursor-pointer px-2 py-1 font-medium">What the tool says it does</summary>
+          <p className="bg-muted/40 max-h-48 overflow-auto border-t p-2 whitespace-pre-wrap">{call.toolDescription}</p>
+        </details>
+      )}
+    </section>
+  )
 }
 
 /** McpArguments shows the arguments an MCP call is approved with; the approval binds to their hash. */
@@ -375,8 +423,23 @@ function Outcome({ approval: a, resultUrl }: { approval: Approval; resultUrl?: s
   )
 }
 
-function DecisionForm({ onApprove, onDeny, pending, sha }: { onApprove?: (note: string) => void; onDeny?: (note: string) => void; pending?: boolean; sha: string }) {
+function DecisionForm({
+  onApprove,
+  onDeny,
+  pending,
+  sha,
+  approveText,
+  blocked,
+}: {
+  onApprove?: (note: string) => void
+  onDeny?: (note: string) => void
+  pending?: boolean
+  sha: string
+  approveText: string
+  blocked?: string
+}) {
   const noteId = useId()
+  const blockedId = useId()
   const [note, setNote] = useState('')
   return (
     <div className="grid gap-2 border-t pt-3">
@@ -389,10 +452,15 @@ function DecisionForm({ onApprove, onDeny, pending, sha }: { onApprove?: (note: 
         <Button variant="outline" className="ml-auto" disabled={pending} onClick={() => onDeny?.(note.trim())}>
           Deny
         </Button>
-        <Button disabled={pending} onClick={() => onApprove?.(note.trim())}>
-          Approve
+        <Button disabled={pending || !!blocked} aria-describedby={blocked ? blockedId : undefined} onClick={() => onApprove?.(note.trim())}>
+          {approveText}
         </Button>
       </div>
+      {blocked && (
+        <p id={blockedId} className="text-muted-foreground text-sm">
+          {blocked}
+        </p>
+      )}
     </div>
   )
 }

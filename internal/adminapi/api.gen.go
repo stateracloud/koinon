@@ -245,6 +245,8 @@ type McpServerUpdateTransport string
 
 // McpTool defines model for McpTool.
 type McpTool struct {
+	// ContentHash SHA-256 of the description and input schema as last published.
+	ContentHash string    `json:"contentHash"`
 	Description string    `json:"description"`
 	FirstSeenAt time.Time `json:"firstSeenAt"`
 	LastSeenAt  time.Time `json:"lastSeenAt"`
@@ -256,12 +258,18 @@ type McpTool struct {
 	// ReadOnlyHint The server's own readOnlyHint annotation. A suggestion; an admin decides the tier.
 	ReadOnlyHint bool `json:"readOnlyHint"`
 
+	// RequiresTwoApprovers A call in the ask tier needs two approvers.
+	RequiresTwoApprovers *bool `json:"requiresTwoApprovers,omitempty"`
+
 	// ReviewReason Set while the tool's description or input schema changed since an admin last reviewed it.
 	ReviewReason *string            `json:"reviewReason,omitempty"`
 	ServerId     openapi_types.UUID `json:"serverId"`
 	Tier         McpToolTier        `json:"tier"`
 	TierSetAt    *time.Time         `json:"tierSetAt,omitempty"`
 	TierSetBy    *string            `json:"tierSetBy,omitempty"`
+
+	// Unavailable Why agents are not offered the tool, for example a name too long.
+	Unavailable *string `json:"unavailable,omitempty"`
 }
 
 // McpToolTier defines model for McpTool.Tier.
@@ -279,6 +287,11 @@ type McpToolTierUpdate struct {
 
 // McpToolTierUpdateTier defines model for McpToolTierUpdate.Tier.
 type McpToolTierUpdateTier string
+
+// McpToolTwoApprovers defines model for McpToolTwoApprovers.
+type McpToolTwoApprovers struct {
+	Required bool `json:"required"`
+}
 
 // Model defines model for Model.
 type Model struct {
@@ -645,6 +658,9 @@ type UpdateMcpServerJSONRequestBody = McpServerUpdate
 // SetMcpToolTierJSONRequestBody defines body for SetMcpToolTier for application/json ContentType.
 type SetMcpToolTierJSONRequestBody = McpToolTierUpdate
 
+// SetMcpToolTwoApproversJSONRequestBody defines body for SetMcpToolTwoApprovers for application/json ContentType.
+type SetMcpToolTwoApproversJSONRequestBody = McpToolTwoApprovers
+
 // CreateModelJSONRequestBody defines body for CreateModel for application/json ContentType.
 type CreateModelJSONRequestBody = ModelCreate
 
@@ -711,6 +727,10 @@ type ServerInterface interface {
 	// `never`. Works on declared servers too. Clears the tool's review flag.
 	// (PUT /mcp-servers/{serverId}/tools/{toolName}/tier)
 	SetMcpToolTier(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName)
+	// Require two approvers for calls to a tool in the ask tier: distinct admins or owners, neither the
+	// ticket's creator. Off by default.
+	// (PUT /mcp-servers/{serverId}/tools/{toolName}/two-approvers)
+	SetMcpToolTwoApprovers(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName)
 	// List the org's models, entered and declared.
 	// (GET /models)
 	ListModels(w http.ResponseWriter, r *http.Request)
@@ -1181,6 +1201,46 @@ func (siw *ServerInterfaceWrapper) SetMcpToolTier(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetMcpToolTier(w, r, serverId, toolName)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetMcpToolTwoApprovers operation middleware
+func (siw *ServerInterfaceWrapper) SetMcpToolTwoApprovers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId ServerId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", r.PathValue("serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "toolName" -------------
+	var toolName ToolName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "toolName", r.PathValue("toolName"), &toolName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "toolName", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetMcpToolTwoApprovers(w, r, serverId, toolName)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1859,6 +1919,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("GET "+options.BaseURL+"/mcp-servers/{serverId}/tools", wrapper.ListMcpTools)
 	m.HandleFunc("POST "+options.BaseURL+"/mcp-servers/{serverId}/tools/{toolName}/review", wrapper.AcknowledgeMcpToolReview)
 	m.HandleFunc("PUT "+options.BaseURL+"/mcp-servers/{serverId}/tools/{toolName}/tier", wrapper.SetMcpToolTier)
+	m.HandleFunc("PUT "+options.BaseURL+"/mcp-servers/{serverId}/tools/{toolName}/two-approvers", wrapper.SetMcpToolTwoApprovers)
 	m.HandleFunc("GET "+options.BaseURL+"/models", wrapper.ListModels)
 	m.HandleFunc("POST "+options.BaseURL+"/models", wrapper.CreateModel)
 	m.HandleFunc("DELETE "+options.BaseURL+"/models/{modelId}", wrapper.DeleteModel)
@@ -2288,6 +2349,37 @@ type SetMcpToolTierdefaultJSONResponse struct {
 }
 
 func (response SetMcpToolTierdefaultJSONResponse) VisitSetMcpToolTierResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetMcpToolTwoApproversRequestObject struct {
+	ServerId ServerId `json:"serverId"`
+	ToolName ToolName `json:"toolName"`
+	Body     *SetMcpToolTwoApproversJSONRequestBody
+}
+
+type SetMcpToolTwoApproversResponseObject interface {
+	VisitSetMcpToolTwoApproversResponse(w http.ResponseWriter) error
+}
+
+type SetMcpToolTwoApprovers200JSONResponse McpTool
+
+func (response SetMcpToolTwoApprovers200JSONResponse) VisitSetMcpToolTwoApproversResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetMcpToolTwoApproversdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetMcpToolTwoApproversdefaultJSONResponse) VisitSetMcpToolTwoApproversResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 
@@ -2915,6 +3007,10 @@ type StrictServerInterface interface {
 	// `never`. Works on declared servers too. Clears the tool's review flag.
 	// (PUT /mcp-servers/{serverId}/tools/{toolName}/tier)
 	SetMcpToolTier(ctx context.Context, request SetMcpToolTierRequestObject) (SetMcpToolTierResponseObject, error)
+	// Require two approvers for calls to a tool in the ask tier: distinct admins or owners, neither the
+	// ticket's creator. Off by default.
+	// (PUT /mcp-servers/{serverId}/tools/{toolName}/two-approvers)
+	SetMcpToolTwoApprovers(ctx context.Context, request SetMcpToolTwoApproversRequestObject) (SetMcpToolTwoApproversResponseObject, error)
 	// List the org's models, entered and declared.
 	// (GET /models)
 	ListModels(ctx context.Context, request ListModelsRequestObject) (ListModelsResponseObject, error)
@@ -3399,6 +3495,40 @@ func (sh *strictHandler) SetMcpToolTier(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetMcpToolTierResponseObject); ok {
 		if err := validResponse.VisitSetMcpToolTierResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetMcpToolTwoApprovers operation middleware
+func (sh *strictHandler) SetMcpToolTwoApprovers(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName) {
+	var request SetMcpToolTwoApproversRequestObject
+
+	request.ServerId = serverId
+	request.ToolName = toolName
+
+	var body SetMcpToolTwoApproversJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetMcpToolTwoApprovers(ctx, request.(SetMcpToolTwoApproversRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetMcpToolTwoApprovers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetMcpToolTwoApproversResponseObject); ok {
+		if err := validResponse.VisitSetMcpToolTwoApproversResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

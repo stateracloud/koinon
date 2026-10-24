@@ -68,7 +68,7 @@ A spike on 2026-10-22 rebuilt the flavor on `@opencode/cli` 2.0.24 (tag `v2.0.24
    (exit 64) when the file is missing, empty or a link.
 4. **Readiness:** Koinon's MCP server publishes the prompt `koinon-ready`, which agentgateway
    admits for every key. After `session/new` or `session/load`, agentd waits (bounded) for the
-   command `koinon:koinon-ready` and then, as a fixed settle, one second for OpenCode's tool
+   command `koinon:github_koinon-ready` and then, as a fixed settle, one second for OpenCode's tool
    registration; a timeout fails the run. Andre's decision (2026-10-22) is the `koinon-ready`
    prompt, with a fixed delay as the fallback if the prompt does not get through. That fallback is
    not built: today a prompt that does not arrive fails the run, and the only fixed delay is the

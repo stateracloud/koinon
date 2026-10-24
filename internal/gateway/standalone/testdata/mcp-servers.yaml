@@ -12,7 +12,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"a33a89b320ad11d7"'
+      koinon.config: '"e56a3cbf64b7b880"'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -45,7 +45,7 @@ llm:
             agent: globex/analyst
             org: globex
           allowedModels: []
-        - keyHash: sha256:d7754614ea02a19e516d23a8f783b043f7ee9fa950d4320d409af2ac2448b374
+        - keyHash: sha256:967e658b280e1aa29e6b5480df3448fd8b63d77fac542e4887e92059fba57215
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -59,6 +59,7 @@ llm:
   models: []
 mcp:
   failureMode: failOpen
+  prefixMode: always
   policies:
     apiKey:
       mode: strict

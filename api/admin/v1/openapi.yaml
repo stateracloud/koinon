@@ -231,6 +231,31 @@ paths:
                 $ref: "#/components/schemas/McpTool"
         default:
           $ref: "#/components/responses/Error"
+  /mcp-servers/{serverId}/tools/{toolName}/two-approvers:
+    parameters:
+      - $ref: "#/components/parameters/serverId"
+      - $ref: "#/components/parameters/toolName"
+    put:
+      tags: [mcp]
+      operationId: setMcpToolTwoApprovers
+      summary: |
+        Require two approvers for calls to a tool in the ask tier: distinct admins or owners, neither the
+        ticket's creator. Off by default.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpToolTwoApprovers"
+      responses:
+        "200":
+          description: The tool.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpTool"
+        default:
+          $ref: "#/components/responses/Error"
   /mcp-servers/{serverId}/tools/{toolName}/review:
     parameters:
       - $ref: "#/components/parameters/serverId"
@@ -791,7 +816,7 @@ components:
         removeCredential: {type: boolean}
     McpTool:
       type: object
-      required: [serverId, name, description, readOnlyHint, tier, present, firstSeenAt, lastSeenAt]
+      required: [serverId, name, description, readOnlyHint, tier, contentHash, present, firstSeenAt, lastSeenAt]
       properties:
         serverId: {type: string, format: uuid}
         name: {type: string}
@@ -803,6 +828,15 @@ components:
         reviewReason:
           type: string
           description: Set while the tool's description or input schema changed since an admin last reviewed it.
+        requiresTwoApprovers:
+          type: boolean
+          description: A call in the ask tier needs two approvers.
+        contentHash:
+          type: string
+          description: SHA-256 of the description and input schema as last published.
+        unavailable:
+          type: string
+          description: Why agents are not offered the tool, for example a name too long.
         present:
           type: boolean
           description: False once the server stopped listing the tool.
@@ -817,6 +851,11 @@ components:
         tools:
           type: array
           items: {$ref: "#/components/schemas/McpTool"}
+    McpToolTwoApprovers:
+      type: object
+      required: [required]
+      properties:
+        required: {type: boolean}
     McpToolTierUpdate:
       type: object
       required: [tier]

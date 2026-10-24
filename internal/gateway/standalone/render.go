@@ -88,6 +88,9 @@ const (
 	// database the zero budget answers (429); without one, this rule does.
 	probeRule = `apiKey.name != "` + gateway.ReloadProbeKeyName + `"`
 
+	// placeholderTarget is added next to a lone org target (see build).
+	placeholderTarget = "koinon-placeholder"
+
 	header = "# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.\n" +
 		"# Keys appear only as hashes; key material lives in Kubernetes Secrets.\n"
 )
@@ -357,9 +360,12 @@ type fileSource struct {
 type mcpSection struct {
 	// FailureMode is failOpen: a target that cannot be reached is skipped, so one broken server does
 	// not break every agent's session (ADR 0057).
-	FailureMode string      `yaml:"failureMode"`
-	Policies    mcpPolicies `yaml:"policies"`
-	Targets     []mcpTarget `yaml:"targets"`
+	FailureMode string `yaml:"failureMode"`
+	// PrefixMode is always: a tool is named <target>_<tool> whatever number of targets a key can
+	// see, so an agent's tool names never change when an org adds a server (ADR 0057).
+	PrefixMode string      `yaml:"prefixMode"`
+	Policies   mcpPolicies `yaml:"policies"`
+	Targets    []mcpTarget `yaml:"targets"`
 }
 
 type mcpPolicies struct {
@@ -548,6 +554,7 @@ func build(s gateway.State, o Options) document {
 	if len(s.MCP) > 0 {
 		doc.MCP = &mcpSection{
 			FailureMode: "failOpen",
+			PrefixMode:  "always",
 			Policies: mcpPolicies{
 				APIKey:           keyPolicy(keys, nil, nil),
 				MCPAuthorization: mcpAuthorization{Rules: toolRules(s.Tools)},
@@ -566,10 +573,9 @@ func build(s gateway.State, o Options) document {
 			} else {
 				mt.MCP = &mcpEndpoint{Host: t.URL}
 			}
-			// agentgateway rejects a condition when only one target is configured. The agents' own
-			// allow rules (toolRules) are the primary control; the condition keeps another org's
-			// keys from even reaching the server.
-			if t.Org != "" && len(s.MCP) > 1 {
+			// agentgateway rejects a condition when only one target is configured, so a lone org
+			// target gets a placeholder partner below and its condition always applies.
+			if t.Org != "" {
 				mt.Condition = `apiKey.org == ` + strconv.Quote(t.Org)
 			}
 			if t.CredentialFile != "" {
@@ -579,6 +585,10 @@ func build(s gateway.State, o Options) document {
 				}}}}
 			}
 			doc.MCP.Targets = append(doc.MCP.Targets, mt)
+		}
+		if len(doc.MCP.Targets) == 1 && doc.MCP.Targets[0].Condition != "" {
+			// Never contacted: its condition is false for every key.
+			doc.MCP.Targets = append(doc.MCP.Targets, mcpTarget{Name: placeholderTarget, Condition: "false", MCP: &mcpEndpoint{Host: "http://127.0.0.1:9/mcp"}})
 		}
 	}
 	return doc
@@ -610,8 +620,12 @@ func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit, al
 	for _, k := range keys {
 		ak := apiKey{KeyHash: k.Hash, Metadata: keyMetadata{Name: k.ID, Agent: k.Agent.String(), Org: k.Agent.Org}}
 		if allowed != nil {
-			// An org without served models gets the empty list: it can request nothing.
+			// An org without served models gets the empty list: it can request nothing. Koinon's own
+			// MCP keys (the prober's and the executor's) request no model.
 			names := append([]string{}, allowed[k.Agent.Org]...)
+			if gateway.IsInternalAgent(k.Agent) {
+				names = []string{}
+			}
 			ak.AllowedModels = &names
 		}
 		if l, ok := limits[k.Agent]; ok {

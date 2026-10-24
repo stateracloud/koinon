@@ -4,7 +4,9 @@ package approvals
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -14,14 +16,25 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
-// executeMCP calls the remote MCP server with the exact arguments a human approved (ADR 0042, plan
-// item MC1). The credential is opened here, in koinon-api, and sent to the server's URL only; the
-// agent never holds it. The server and the tool are looked up again: a server deleted or disabled
-// since, or a tool an admin moved to the never tier since, is not called.
+// executeMCP makes the approved call to the remote MCP server through the gateway, with the org's
+// executor key (ADR 0042, 0057): the gateway applies its egress policy and injects the server's
+// credential, which this process never holds. Everything the approval was bound to is checked again:
+// the server (ID and URL), the tool and its published content, the tier and the agent's allowance.
+// The arguments are sent exactly as approved.
+//
+// Only a failure before the call was sent is retried. After that the outcome may be unknown and the
+// request fails; it is never run twice.
 func (s *Service) executeMCP(ctx context.Context, row store.ApprovalRequest) (map[string]any, error) {
 	name, ok := strings.CutPrefix(row.Target, mcpask.ConnectorID+":")
 	if !ok {
 		return nil, permanent("target %q is not an MCP server", row.Target)
+	}
+	if s.gwURL == "" || s.execKey == nil {
+		return nil, permanent("remote MCP calls are not configured: no gateway endpoint or executor keys")
+	}
+	var bound mcpservers.CallBinding
+	if err := json.Unmarshal(row.CallBinding, &bound); err != nil || bound.ServerID == "" || bound.ContentHash == "" {
+		return nil, permanent("the request has no binding to a server and tool version")
 	}
 	srv, err := s.q.GetServedMCPServerByName(ctx, store.GetServedMCPServerByNameParams{OrgID: row.OrgID, Name: name})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -30,6 +43,12 @@ func (s *Service) executeMCP(ctx context.Context, row store.ApprovalRequest) (ma
 	if err != nil {
 		return nil, err
 	}
+	if srv.ID.String() != bound.ServerID {
+		return nil, permanent("the MCP server %s is not the one the request was made for", name)
+	}
+	if mcpservers.URLHash(srv.Url) != bound.URLHash {
+		return nil, permanent("the URL of the MCP server %s changed since the request was made", name)
+	}
 	tool, err := s.q.GetMCPTool(ctx, store.GetMCPToolParams{OrgID: row.OrgID, ServerID: srv.ID, Name: row.Tool})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, permanent("the server %s has no tool %s", name, row.Tool)
@@ -37,27 +56,40 @@ func (s *Service) executeMCP(ctx context.Context, row store.ApprovalRequest) (ma
 	if err != nil {
 		return nil, err
 	}
+	if tool.ContentHash != bound.ContentHash {
+		return nil, permanent("the description or input schema of %s changed since the request was made; ask again", row.Tool)
+	}
 	if tool.Tier == store.McpTierNever {
 		return nil, permanent("an admin has since moved %s of %s to the never tier", row.Tool, name)
 	}
-	if err := s.policy.CheckStrict(ctx, srv.Url); err != nil {
-		return nil, permanentError{err}
+	allowed, err := s.q.GetAgentMCPServer(ctx, store.GetAgentMCPServerParams{OrgID: row.OrgID, AgentID: row.AgentID, ServerID: srv.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, permanent("the agent is no longer allowed to use the server %s", name)
 	}
-	var secret string
-	if len(srv.Credential) > 0 {
-		if s.keys == nil {
-			return nil, permanent("no key-encryption keys are configured, so the server's credential cannot be opened")
-		}
-		if secret, err = mcpservers.OpenCredential(s.keys, row.OrgID, srv.ID, srv.Credential); err != nil {
-			return nil, permanentError{err}
-		}
+	if err != nil {
+		return nil, err
 	}
-	res, err := mcpservers.CallTool(ctx, s.policy, mcpservers.CallRequest{
-		URL: srv.Url, Transport: string(srv.Transport), Header: srv.CredentialHeader.String, Prefix: srv.CredentialPrefix,
-		Value: secret, Tool: row.Tool, Arguments: []byte(row.ArgsJson), Idempotency: row.ID.String(),
+	if allowed.Tools != nil && !slices.Contains(allowed.Tools, row.Tool) {
+		return nil, permanent("the agent is no longer allowed to use %s of %s", row.Tool, name)
+	}
+	slug, err := s.q.GetOrgSlug(ctx, row.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	key, err := s.execKey.Key(ctx, row.OrgID)
+	if err != nil {
+		return nil, err // transient: the reconciler may not have written the key yet
+	}
+	res, err := mcpservers.CallTool(ctx, mcpservers.CallRequest{
+		GatewayMCPURL: s.gwURL, Key: key, Target: mcpservers.TargetName(slug, name), Tool: row.Tool,
+		Arguments: json.RawMessage(row.ArgsJson), Idempotency: row.ID.String(),
 	})
-	if errors.Is(err, mcpservers.ErrPermanent) {
+	switch {
+	case err == nil:
+		return res, nil
+	case errors.Is(err, mcpservers.ErrNotSent):
+		return nil, err // retried by the sweeper
+	default:
 		return nil, permanentError{err}
 	}
-	return res, err
 }

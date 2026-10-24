@@ -27,6 +27,7 @@ export function useMcpActions(orgId: string) {
       updateServer: (serverId: string, i: UpdateServerInput) => done(client.updateServer({ orgId, serverId, ...i })),
       deleteServer: (serverId: string) => done(client.deleteServer({ orgId, serverId })),
       setToolTier: (serverId: string, tool: string, tier: Tier) => done(client.setToolTier({ orgId, serverId, tool, tier })),
+      setToolTwoApprovers: (serverId: string, tool: string, required: boolean) => done(client.setToolTwoApprovers({ orgId, serverId, tool, required })),
       acknowledgeReview: (serverId: string, tool: string) => done(client.acknowledgeToolReview({ orgId, serverId, tool })),
       setAgentServers: (agentId: string, servers: { serverId: string; tools: string[] }[]) => done(client.setAgentServers({ orgId, agentId, servers })),
     }

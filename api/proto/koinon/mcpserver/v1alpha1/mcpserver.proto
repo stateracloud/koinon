@@ -33,6 +33,9 @@ service McpServerService {
   }
   // SetToolTier moves a tool to a tier and clears its review flag.
   rpc SetToolTier(SetToolTierRequest) returns (SetToolTierResponse);
+  // SetToolTwoApprovers turns on or off the requirement that a call to the tool in the ask tier needs
+  // two approvers: distinct admins or owners, neither the ticket's creator. Off by default.
+  rpc SetToolTwoApprovers(SetToolTwoApproversRequest) returns (SetToolTwoApproversResponse);
   // AcknowledgeToolReview clears a tool's review flag without changing its tier.
   rpc AcknowledgeToolReview(AcknowledgeToolReviewRequest) returns (AcknowledgeToolReviewResponse);
 
@@ -108,6 +111,13 @@ message Tool {
   google.protobuf.Timestamp last_seen_at = 9;
   string tier_set_by = 10;
   google.protobuf.Timestamp tier_set_at = 11;
+  // requires_two_approvers: a call in the ask tier needs two approvers.
+  bool requires_two_approvers = 12;
+  // content_hash identifies the description and input schema as last published.
+  string content_hash = 13;
+  // unavailable says why agents are not offered the tool ("unavailable: name too long ..."); empty when
+  // they are.
+  string unavailable = 14;
 }
 
 // Allowance is a server an agent may use, optionally narrowed to some of its tools.
@@ -215,4 +225,15 @@ message SetAgentServersRequest {
 
 message SetAgentServersResponse {
   repeated Allowance servers = 1;
+}
+
+message SetToolTwoApproversRequest {
+  string org_id = 1;
+  string server_id = 2;
+  string tool = 3;
+  bool required = 4;
+}
+
+message SetToolTwoApproversResponse {
+  Tool tool = 1;
 }

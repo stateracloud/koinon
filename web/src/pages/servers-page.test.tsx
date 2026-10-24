@@ -20,6 +20,7 @@ import {
   type DeleteServerRequest,
   type SetAgentServersRequest,
   type SetToolTierRequest,
+  type SetToolTwoApproversRequest,
   type UpdateServerRequest,
 } from '@/gen/koinon/mcpserver/v1alpha1/mcpserver_pb'
 import { renderApp, whoAmI } from '@/test-utils'
@@ -68,12 +69,15 @@ const tools = [
   create(ToolSchema, { serverId: 's-docs', name: 'publish', description: 'Publish a page', tier: Tier.NEVER, present: true }),
   create(ToolSchema, { serverId: 's-docs', name: 'edit', description: 'Edit a page', tier: Tier.ASK, present: true, reviewReason: 'the description changed' }),
   create(ToolSchema, { serverId: 's-docs', name: 'legacy', tier: Tier.AUTO, present: false }),
+  create(ToolSchema, { serverId: 's-docs', name: 'long_tool', description: 'Too long', tier: Tier.ASK, present: true, unavailable: 'unavailable: name too long for the gateway' }),
+  create(ToolSchema, { serverId: 's-docs', name: 'sync', description: 'Sync pages', tier: Tier.AUTO, present: true }),
   create(ToolSchema, { serverId: 's-sec', name: 'read', description: 'Read a page', tier: Tier.ASK, present: true }),
 ]
 
 function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failDelete?: string; allowed?: { serverId: string; tools: string[] }[] } = {}) {
   const calls = {
     tiers: [] as SetToolTierRequest[],
+    twos: [] as SetToolTwoApproversRequest[],
     acks: [] as AcknowledgeToolReviewRequest[],
     creates: [] as CreateServerRequest[],
     updates: [] as UpdateServerRequest[],
@@ -109,6 +113,12 @@ function setup(opts: { role?: OrgRole; path?: string; failCreate?: string; failD
       setToolTier: (req) => {
         calls.tiers.push(req)
         const t = create(ToolSchema, { ...current.get(`${req.serverId}/${req.tool}`)!, tier: req.tier, reviewReason: '' })
+        current.set(`${req.serverId}/${req.tool}`, t)
+        return { tool: t }
+      },
+      setToolTwoApprovers: (req) => {
+        calls.twos.push(req)
+        const t = create(ToolSchema, { ...current.get(`${req.serverId}/${req.tool}`)!, requiresTwoApprovers: req.required })
         current.set(`${req.serverId}/${req.tool}`, t)
         return { tool: t }
       },
@@ -217,6 +227,36 @@ describe('Servers page', () => {
     await waitFor(() => expect(calls.acks).toEqual([expect.objectContaining({ serverId: 's-docs', tool: 'edit' })]))
     expect(calls.tiers).toHaveLength(0)
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Mark edit reviewed' })).not.toBeInTheDocument())
+  })
+
+  it('sets Require two approvers in the Ask tier and disables it elsewhere', async () => {
+    const calls = setup()
+    const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
+    const search = within(tl.getByText('search').closest('li')!)
+    const box = search.getByRole('checkbox', { name: 'Require two approvers' })
+    expect(box).not.toBeChecked()
+    expect(search.getByText(/Two distinct admins or owners must approve, neither the person who created the ticket/)).toBeInTheDocument()
+    await userEvent.click(box)
+    await waitFor(() => expect(calls.twos).toEqual([expect.objectContaining({ orgId: 'org-1', serverId: 's-docs', tool: 'search', required: true })]))
+    await waitFor(() => expect(search.getByRole('checkbox', { name: 'Require two approvers' })).toBeChecked())
+    const sync = within(tl.getByText('sync').closest('li')!)
+    expect(sync.getByRole('checkbox', { name: 'Require two approvers' })).toBeDisabled()
+    expect(sync.getByText(/only applies in the Ask tier/)).toBeInTheDocument()
+  })
+
+  it('says why an unavailable tool is not offered to agents', async () => {
+    setup()
+    const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
+    const row = within(tl.getByText('long_tool').closest('li')!)
+    expect(row.getByText(/unavailable: name too long for the gateway/)).toBeInTheDocument()
+    expect(row.getByText(/Agents are not offered this tool/)).toBeInTheDocument()
+    expect(row.getByRole('radio', { name: 'Ask' })).toBeEnabled()
+  })
+
+  it('hints that reviewing does not restore Auto', async () => {
+    setup()
+    const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
+    expect(tl.getByText('Reviewing keeps the tool in Ask; set it back to Auto yourself if you trust the new version.')).toBeInTheDocument()
   })
 
   it('adds a server with a bearer token and clears the secret from the page', async () => {

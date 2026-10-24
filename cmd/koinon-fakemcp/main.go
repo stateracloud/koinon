@@ -39,8 +39,9 @@ type record struct {
 	// ClientAuthorization says an Authorization header arrived that is not the credential (the
 	// gateway must not forward the agent's own key).
 	ClientAuthorization bool `json:"clientAuthorization,omitempty"`
-	// Tool is the tool a tools/call asked for; set by the tool handlers.
+	// Tool is the tool a tools/call asked for and Args its raw arguments; set by the tool handlers.
 	Tool string `json:"tool,omitempty"`
+	Args string `json:"args,omitempty"`
 }
 
 type log struct {
@@ -77,7 +78,7 @@ func run(addr, header, value string) error {
 			Name: tool, Description: "Fake tool " + tool,
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: tool == "read_item"},
 		}, func(_ context.Context, req *mcp.CallToolRequest, in args) (*mcp.CallToolResult, any, error) {
-			recs.add(record{Time: time.Now(), Method: "TOOL", Tool: tool, Authorized: true, Agent: req.Extra.Header.Get("X-Koinon-Agent")})
+			recs.add(record{Time: time.Now(), Method: "TOOL", Tool: tool, Args: string(req.Params.Arguments), Authorized: true, Agent: req.Extra.Header.Get("X-Koinon-Agent")})
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: tool + " ok: " + in.Title}}}, nil, nil
 		})
 	}

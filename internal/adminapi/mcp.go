@@ -50,10 +50,13 @@ func toMcpServer(m mcpservers.Server) McpServer {
 func toMcpTool(t mcpservers.Tool) McpTool {
 	out := McpTool{
 		ServerId: openapi_types.UUID(pgUUID(t.ServerID).Bytes), Name: t.Name, Description: t.Description, ReadOnlyHint: t.ReadOnlyHint,
-		Tier: McpToolTier(t.Tier), Present: t.Present, FirstSeenAt: t.FirstSeenAt, LastSeenAt: t.LastSeenAt, TierSetAt: t.TierSetAt,
+		Tier: McpToolTier(t.Tier), Present: t.Present, ContentHash: t.ContentHash, RequiresTwoApprovers: &t.RequiresTwoApprovers, FirstSeenAt: t.FirstSeenAt, LastSeenAt: t.LastSeenAt, TierSetAt: t.TierSetAt,
 	}
 	if t.ReviewReason != "" {
 		out.ReviewReason = &t.ReviewReason
+	}
+	if t.Unavailable != "" {
+		out.Unavailable = &t.Unavailable
 	}
 	if t.TierSetBy != "" {
 		out.TierSetBy = &t.TierSetBy
@@ -194,6 +197,21 @@ func (s *Server) SetMcpToolTier(ctx context.Context, req SetMcpToolTierRequestOb
 		return SetMcpToolTierdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
 	return SetMcpToolTier200JSONResponse(toMcpTool(got)), nil
+}
+
+// SetMcpToolTwoApprovers implements StrictServerInterface.
+func (s *Server) SetMcpToolTwoApprovers(ctx context.Context, req SetMcpToolTwoApproversRequestObject) (SetMcpToolTwoApproversResponseObject, error) {
+	if s.mcp == nil {
+		st, e := s.noMCP()
+		return SetMcpToolTwoApproversdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	p, actor := s.actor(ctx)
+	got, err := s.mcp.SetTwoApprovers(ctx, p.Org, actor, uid(req.ServerId), req.ToolName, req.Body.Required)
+	if err != nil {
+		st, e := s.problem(err)
+		return SetMcpToolTwoApproversdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	return SetMcpToolTwoApprovers200JSONResponse(toMcpTool(got)), nil
 }
 
 // AcknowledgeMcpToolReview implements StrictServerInterface.

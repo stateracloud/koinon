@@ -152,7 +152,8 @@ func (s *Server) askTools(ctx context.Context, c caller) ([]store.McpTool, error
 	}
 	var out []store.McpTool
 	for _, t := range tools {
-		if t.Present && t.Tier == store.McpTierAsk && t.Name != StatusTool && (c.allowed.Tools == nil || slices.Contains(c.allowed.Tools, t.Name)) {
+		if t.Present && t.Tier == store.McpTierAsk && t.Name != StatusTool && (c.allowed.Tools == nil || slices.Contains(c.allowed.Tools, t.Name)) &&
+			mcpservers.ToolNameProblem(c.org.Slug, c.server.Name, t.Name) == "" {
 			out = append(out, t)
 		}
 	}
@@ -245,7 +246,8 @@ func (s *Server) callTool(serverName, tool string) mcp.ToolHandler {
 		if err != nil {
 			return toolError("internal error; try again later")
 		}
-		if !slices.ContainsFunc(tools, func(t store.McpTool) bool { return t.Name == tool }) {
+		i := slices.IndexFunc(tools, func(t store.McpTool) bool { return t.Name == tool })
+		if i < 0 {
 			return toolError(fmt.Sprintf("the tool %s is not available to this agent", tool))
 		}
 		if len(req.Params.Arguments) > MaxArgsBytes {
@@ -255,7 +257,7 @@ func (s *Server) callTool(serverName, tool string) mcp.ToolHandler {
 		if err != nil {
 			return toolError(err.Error())
 		}
-		return s.record(ctx, c, tool, canonical)
+		return s.record(ctx, c, tools[i], canonical)
 	}
 }
 
@@ -266,7 +268,8 @@ func hash(canonical []byte) string {
 
 // record stores the call as an approval request, or returns the existing one for the same call in
 // the same run.
-func (s *Server) record(ctx context.Context, c caller, tool string, canonical []byte) (*mcp.CallToolResult, error) {
+func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonical []byte) (*mcp.CallToolResult, error) {
+	tool := t.Name
 	run, err := s.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return toolError("this agent has no running run; tools are only available while working on a ticket")
@@ -275,12 +278,22 @@ func (s *Server) record(ctx context.Context, c caller, tool string, canonical []
 		s.log.Error("mcp ask: read run", "err", err)
 		return toolError("internal error; try again later")
 	}
+	binding, err := json.Marshal(mcpservers.CallBinding{ServerID: c.server.ID.String(), URLHash: mcpservers.URLHash(c.server.Url), ContentHash: t.ContentHash})
+	if err != nil {
+		return toolError("internal error; try again later")
+	}
 	params := store.CreateApprovalRequestParams{
 		OrgID: c.org.ID, TicketID: run.TicketID, RunID: run.ID, AgentID: c.agent.ID,
 		Connector: ConnectorID, Tool: tool, Target: Target(c.server.Name),
 		ArgsJson: string(canonical), ArgsSha256: hash(canonical), Risk: []byte(`{}`),
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
 		ExpiresAt: pgtype.Timestamptz{Time: s.now().Add(s.ttl), Valid: true},
+		// The call is bound to this server, URL and published version of the tool; the executor
+		// refuses it if any of them changed before the approval.
+		CallBinding: binding,
+	}
+	if t.RequiresTwoApprovers {
+		params.ApprovalsRequired = pgtype.Int2{Int16: 2, Valid: true}
 	}
 	var row store.ApprovalRequest
 	created := true
@@ -300,7 +313,7 @@ func (s *Server) record(ctx context.Context, c caller, tool string, canonical []
 		}
 		payload, err := json.Marshal(map[string]any{
 			"approval_id": row.ID.String(), "tool": tool, "target": row.Target, "args_sha256": row.ArgsSha256,
-			"decision": string(row.Decision), "risk": map[string]any{},
+			"decision": string(row.Decision), "risk": map[string]any{}, "approvals_required": row.ApprovalsRequired,
 		})
 		if err != nil {
 			return err

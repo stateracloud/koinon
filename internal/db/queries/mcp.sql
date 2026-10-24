@@ -113,11 +113,14 @@ RETURNING *;
 
 -- name: UpdateMCPToolContent :one
 -- The server published a different description or schema for a known tool: remember it and flag
--- the tool for review. The tier stays (the flag does not block).
+-- the tool for review. An auto tool drops to ask until an admin reviews it; ask and never stay.
 UPDATE mcp_tools
 SET description = @description, input_schema = @input_schema, content_hash = @content_hash,
     read_only_hint = @read_only_hint, present = true, last_seen_at = now(),
-    review_reason = @review_reason
+    review_reason = @review_reason,
+    tier = CASE WHEN tier = 'auto' THEN 'ask'::mcp_tier ELSE tier END,
+    tier_set_by = CASE WHEN tier = 'auto' THEN 'koinon (the tool changed)' ELSE tier_set_by END,
+    tier_set_at = CASE WHEN tier = 'auto' THEN now() ELSE tier_set_at END
 WHERE org_id = @org_id AND server_id = @server_id AND name = @name
 RETURNING *;
 
@@ -183,3 +186,9 @@ JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
 WHERE a.org_id = @org_id AND a.agent_id = @agent_id
   AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.removed_at IS NOT NULL)
 ORDER BY s.name;
+
+-- name: SetMCPToolTwoApprovers :one
+UPDATE mcp_tools
+SET requires_two_approvers = @required
+WHERE org_id = @org_id AND server_id = @server_id AND name = @name
+RETURNING *;

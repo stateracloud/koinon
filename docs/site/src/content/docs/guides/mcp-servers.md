@@ -25,7 +25,8 @@ Org admins and owners open **Servers** in the sidebar. Members do not see it.
   `acme-tracker_search`.
 - If the URL is refused (a private, loopback or cluster-internal address), the form says why. Ask a
   platform admin to allow the host ([Upstream hosts](#upstream-hosts)).
-- If the server asks each user to sign in, Koinon refuses it and says so.
+- If the server asks each user to sign in, Koinon refuses it and says so. (Koinon makes one anonymous request
+  to the new server to see; it carries no credential.)
 - A new credential takes about three minutes to reach the gateway. Until then the server is not served.
 
 The same operations are in the admin API: `GET`, `POST` `/admin/v1/mcp-servers`, `PATCH` and `DELETE`
@@ -67,6 +68,10 @@ stringData:
   something a Secret declares.
 - A Secret that does not parse is ignored with a Warning Event on the Secret, which never quotes a value.
 
+Approved calls to a tier-Ask tool run through the gateway too, with an executor key for your org, so the
+same egress rules apply and Koinon's API never holds the credential. A call is sent once: if the connection
+drops after it was sent, the request fails with "outcome unknown" and is not retried; check the server.
+
 Anyone who can create a labelled Secret in Koinon's namespace can define servers for any org: grant that
 as you would grant cluster administration.
 
@@ -83,9 +88,19 @@ Every tool a server lists enters the **ask** tier. You decide, tool by tool, on 
 - A tool with the MCP `readOnlyHint` annotation shows "Suggested read-only". It is only the server's
   claim. Move it to Auto yourself if you agree.
 - A tool the server adds later enters the ask tier for every agent that allows the whole server.
-- If a tool's **description or input schema changes**, it keeps its tier and shows a **Review** flag. A
-  changed description is how a hostile server could try to steer an agent, so read it, then move the tool
-  to another tier or choose **Mark reviewed**. The flag never blocks the tool.
+- If a tool's **description or input schema changes**, it shows a **Review** flag. A changed description
+  is how a hostile server could try to steer an agent. An **Auto** tool that changes is **moved to Ask**
+  until you review it; **Mark reviewed** clears the flag but keeps it in Ask, and you set Auto again if
+  you trust the new version. Ask and Never tools only get the flag. An approval request is tied to the
+  version of the tool it was made against: if the tool changes before a human approves, Koinon will not
+  run it.
+- **Require two approvers** (per tool, off by default): the call needs two different admins or owners,
+  and neither may be the person who created the ticket. The first approval leaves the card pending.
+- Tool names must be at most what model APIs accept. Agents see `<org>-<server>-ask_<tool>` behind the
+  harness' prefix, so a long server name leaves less room; a tool that does not fit, or has characters such
+  as `.`, shows "unavailable" and is not offered.
+- Tool names an agent sees always start with the gateway target: `acme-tracker_search`,
+  `github_create_pull_request`. They do not change when an org adds a server.
 
 Then allow servers per agent. On the agent's page, **MCP servers** lists the org's servers. Tick the ones
 the agent may use, and, if you want, **limit to some tools**. Nothing is allowed by default. The change
@@ -97,7 +112,7 @@ Koinon checks every server every 60 seconds through the gateway: it connects lik
 lists the tools. The result also keeps the tool list up to date.
 
 - After **three failed checks in a row** the server is **Unhealthy**: the Servers page shows why
-  (connection refused, the server rejected the credential, no tools came back), and its tools leave every
+  (the gateway got no tools back: the server is unreachable, rejected the credential, or lists none), and its tools leave every
   agent's tool list. Other servers are not affected.
 - At the start of a session, Koinon tells an agent which of its allowed servers are down.
 - One successful check makes the server healthy again, and the tools return.

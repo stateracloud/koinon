@@ -392,6 +392,11 @@ var isolationCases = map[string]isolationCase{
 			})
 		},
 	},
+	mcpserverv1alpha1connect.McpServerServiceSetToolTwoApproversProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.mcps.SetToolTwoApprovers(ctx, &mcpserverv1alpha1.SetToolTwoApproversRequest{OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool, Required: true})
+		},
+	},
 	mcpserverv1alpha1connect.McpServerServiceAcknowledgeToolReviewProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.mcps.AcknowledgeToolReview(ctx, &mcpserverv1alpha1.AcknowledgeToolReviewRequest{OrgId: org, ServerId: f.mcpServer, Tool: f.mcpTool})
@@ -546,6 +551,7 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM mcp_servers WHERE org_id = $1 AND url = 'https://mcp.example.com/mcp'`, org),
 		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND tier = 'ask' AND review_reason IS NULL`, org),
 		count(ctx, e, `SELECT count(*) FROM agent_mcp_servers WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM mcp_tools WHERE org_id = $1 AND requires_two_approvers`, org),
 	}
 }
 
