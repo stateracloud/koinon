@@ -126,7 +126,7 @@ provider in the UI.
 Koinon needs a rate to serve a model, and uses it for budgets. For OpenRouter you can also turn on the
 routing guard, which sends the model only to hosts that keep no data. The first model of the org is the
 default for every agent. A new API key reaches the gateway through Kubernetes' Secret sync, which
-can take a few minutes; a run that starts sooner can fail, so do this step early. If the URL is refused, the form says why; see
+can take about three minutes; a run that starts sooner can fail, so do this step early. If the URL is refused, the form says why; see
 [Models](/guides/models/#add-a-provider-in-the-ui).
 
 ### Declare the provider with a Secret instead
