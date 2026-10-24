@@ -24,7 +24,7 @@ var _ = Describe("The end-of-turn summary", func() {
 
 		summaries, _ := e.harness.summarySnapshot()
 		Expect(summaries).To(HaveLen(1))
-		Expect(summaries[0]).To(And(ContainSubstring("Do not call any tool"), ContainSubstring("not shown as a reply")))
+		Expect(summaries[0]).To(And(ContainSubstring("Do not use any tool at all"), ContainSubstring("not shown as a reply")))
 		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.AgentSummary.String).To(Equal("Notes: the build is green; next, open the pull request."))

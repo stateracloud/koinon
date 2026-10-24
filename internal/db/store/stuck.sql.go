@@ -142,6 +142,53 @@ func (q *Queries) ExpireSavedWork(ctx context.Context, orgID pgtype.UUID) ([]Exp
 	return items, nil
 }
 
+const getRunForUpload = `-- name: GetRunForUpload :one
+SELECT org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing FROM runs
+WHERE org_id = $1 AND id = $2 AND epoch = $3 AND state IN ('starting', 'running')
+`
+
+type GetRunForUploadParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+	Epoch int64
+}
+
+// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
+func (q *Queries) GetRunForUpload(ctx context.Context, arg GetRunForUploadParams) (Run, error) {
+	row := q.db.QueryRow(ctx, getRunForUpload, arg.OrgID, arg.ID, arg.Epoch)
+	var i Run
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.AgentVersionID,
+		&i.TicketID,
+		&i.State,
+		&i.Epoch,
+		&i.OwnerID,
+		&i.LeaseExpiresAt,
+		&i.HeartbeatAt,
+		&i.ReadyAt,
+		&i.ParkReason,
+		&i.ParkedAt,
+		&i.ParkExpiresAt,
+		&i.OutcomeReason,
+		&i.MaxWallClockSeconds,
+		&i.MaxTokens,
+		&i.LastEventSeq,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParkedSeconds,
+		&i.TokensUsed,
+		&i.PromptThroughSeq,
+		&i.Takeovers,
+		&i.Summarizing,
+	)
+	return i, err
+}
+
 const getSavedWork = `-- name: GetSavedWork :one
 SELECT org_id, id, ticket_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, status, created_at, expires_at FROM saved_work
 WHERE org_id = $1 AND id = $2
@@ -221,6 +268,18 @@ func (q *Queries) GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkMani
 		&i.ExpiresAt,
 	)
 	return i, err
+}
+
+const getServiceKey = `-- name: GetServiceKey :one
+SELECT key FROM service_keys WHERE name = $1
+`
+
+// Not org-owned: shared by the components of one installation.
+func (q *Queries) GetServiceKey(ctx context.Context, name string) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getServiceKey, name)
+	var key []byte
+	err := row.Scan(&key)
+	return key, err
 }
 
 const insertSandboxIncident = `-- name: InsertSandboxIncident :one

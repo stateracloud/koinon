@@ -241,6 +241,8 @@ type Querier interface {
 	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
+	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
+	GetRunForUpload(ctx context.Context, arg GetRunForUploadParams) (Run, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Ask-tier approval requests (plan item C3, ADR 0042). C3 records them; P1
@@ -256,6 +258,8 @@ type Querier interface {
 	// Everything but the sealed files.
 	GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkManifestParams) (GetSavedWorkManifestRow, error)
 	GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error)
+	// Not org-owned: shared by the components of one installation.
+	GetServiceKey(ctx context.Context, name string) ([]byte, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
 	// The highest ticket timeline seq already sent to the harness by the ticket's

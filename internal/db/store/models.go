@@ -1245,6 +1245,12 @@ type SavedWork struct {
 	ExpiresAt pgtype.Timestamptz
 }
 
+type ServiceKey struct {
+	Name      string
+	Key       []byte
+	CreatedAt pgtype.Timestamptz
+}
+
 type Session struct {
 	ID            pgtype.UUID
 	TokenHash     []byte

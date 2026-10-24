@@ -184,7 +184,7 @@ var _ = Describe("agent health and fresh sessions", func() {
 			VALUES ($1, $2, $3, $4, $5, 'acme/widgets', $6, 'koinon/wip/abc-1', $7, 10, '{"fmt":1}', now() + interval '14 days')`,
 			org, sid, t.GetId(), r.GetId(), agent.GetId(), strings.Repeat("a", 40), manifest)
 		Expect(err).NotTo(HaveOccurred())
-		args := savedwork.PushArgsJSON(sid, "acme/widgets", strings.Repeat("a", 40), "koinon/wip/abc-1")
+		args := savedwork.PushArgsJSON(sid, "acme/widgets", strings.Repeat("a", 40), "koinon/wip/abc-1", strings.Repeat("b", 64), strings.Repeat("c", 64))
 		sum := sha256.Sum256([]byte(args))
 		var aid string
 		Expect(e.pool.QueryRow(ctx, `INSERT INTO approval_requests (org_id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, decision, status, expires_at, system)

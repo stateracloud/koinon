@@ -5,9 +5,10 @@ package agentd
 // Saving a stuck sandbox's uncommitted work (plan item AG1; ADR 0054).
 //
 // Before the sandbox is recreated, agentd reads the workspace's uncommitted changes with
-// savework.sh, within SaveTimeout (30 s), and seals them in Postgres (package savedwork). Each
-// repository becomes one saved_work row and a system-made approval request, "Push saved work to
-// a branch", on the ticket: an approver decides, and only then does the API push
+// savework.sh, within SaveTimeout (30 s), and posts each repository's bundle to koinon-api
+// (package savedwork), which seals it - koinon-agentd holds no key-encryption key - and stores it
+// as one saved_work row and a system-made approval request, "Push saved work to a branch", on the
+// ticket: an approver decides, and only then does the API push
 // koinon/wip/<ticket>-<time> to GitHub (package approvals). Nothing leaves the sandbox for
 // GitHub without that approval.
 //
@@ -18,31 +19,22 @@ package agentd
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/connectors"
-	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/savedwork"
-	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
-// savedRow is one repository's sealed work, ready to insert.
+// savedRow is one repository's work, stored by koinon-api.
 type savedRow struct {
-	id     pgtype.UUID
-	work   savedwork.Work
-	env    secretstore.Envelope
-	branch string
+	id         pgtype.UUID
+	approvalID string
+	branch     string
 }
 
 // saveResult is what became of the workspace's uncommitted work.
@@ -52,7 +44,22 @@ type saveResult struct {
 	rows   []savedRow
 }
 
-func (s saveResult) note() string { return strings.Join(s.notes, "; ") }
+// note is the sandbox-reported detail for the timeline and the incident, capped: the lines come
+// from the sandbox, so they are shown as reported by it and bounded in number and length.
+func (s saveResult) note() string { return strings.Join(capNotes(s.notes), "; ") }
+
+// capNotes keeps at most savedwork.MaxNotes notes of savedwork.MaxNoteBytes bytes each.
+func capNotes(notes []string) []string {
+	var out []string
+	for i, n := range notes {
+		if i == savedwork.MaxNotes {
+			out = append(out, fmt.Sprintf("and %d more", len(notes)-i))
+			break
+		}
+		out = append(out, strings.ToValidUTF8(cutBytes(strings.Join(strings.Fields(n), " "), savedwork.MaxNoteBytes), ""))
+	}
+	return out
+}
 
 var errSaveOver = errors.New("the uncommitted work is larger than 50 MB")
 
@@ -62,8 +69,8 @@ func (r *runner) saveWork(ctx context.Context, workspace, sandbox string) saveRe
 	lost := func(format string, a ...any) saveResult {
 		return saveResult{status: "lost", notes: []string{fmt.Sprintf(format, a...)}}
 	}
-	if r.p.cfg.Keyring == nil {
-		return lost("saving work needs the key-encryption keys, which this koinon-agentd does not have")
+	if r.p.cfg.SavedWorkURL == "" {
+		return lost("saving work is not configured on this koinon-agentd (no koinon-api address)")
 	}
 	sctx, cancel := context.WithTimeout(ctx, r.p.cfg.SaveTimeout)
 	defer cancel()
@@ -90,23 +97,38 @@ func (r *runner) saveWork(ctx context.Context, workspace, sandbox string) saveRe
 	}
 	bound := r.githubTargets()
 	res := saveResult{notes: skipped}
-	now := time.Now()
+	var key []byte
 	for _, w := range works {
 		if !bound[strings.ToLower(w.Manifest.Repo)] {
 			res.notes = append(res.notes, fmt.Sprintf("%s: this agent has no GitHub access to the repository, so its work is not saved", w.Manifest.Repo))
 			continue
 		}
-		id := pgtype.UUID{Bytes: uuid.Must(uuid.NewV7()), Valid: true}
-		env, err := savedwork.Seal(r.p.cfg.Keyring, r.run.OrgID.String(), id.String(), w)
+		w.Manifest.Skipped = capNotes(skipped)
+		packed, err := savedwork.Pack(w)
 		if err != nil {
 			res.notes = append(res.notes, fmt.Sprintf("%s: %v", w.Manifest.Repo, err))
 			continue
 		}
-		branch := savedwork.BranchName(r.run.TicketID.String(), now)
-		if len(res.rows) > 0 {
-			branch += "-" + strconv.Itoa(len(res.rows)+1)
+		if key == nil {
+			if key, err = r.q.GetServiceKey(sctx, savedwork.KeyName); err != nil {
+				return lost("the upload key is unreadable: %v", err)
+			}
 		}
-		res.rows = append(res.rows, savedRow{id: id, work: w, env: env, branch: branch})
+		// One upload at a time per koinon-agentd (and per koinon-api): a bundle is up to 50 MB.
+		select {
+		case r.p.saveSem <- struct{}{}:
+		case <-sctx.Done():
+			return lost("saving waited longer than %s for another save", r.p.cfg.SaveTimeout)
+		}
+		up, err := savedwork.Upload(sctx, r.p.http, r.p.cfg.SavedWorkURL, key, r.run.OrgID.String(), r.run.ID.String(), r.run.Epoch, len(res.rows)+1, packed)
+		<-r.p.saveSem
+		if err != nil {
+			res.notes = append(res.notes, fmt.Sprintf("%s: storing the work failed: %v", w.Manifest.Repo, err))
+			continue
+		}
+		var id pgtype.UUID
+		_ = id.Scan(up.SavedWorkID)
+		res.rows = append(res.rows, savedRow{id: id, approvalID: up.ApprovalID, branch: up.Branch})
 	}
 	switch {
 	case len(res.rows) > 0:
@@ -128,48 +150,6 @@ func (r *runner) githubTargets() map[string]bool {
 		}
 	}
 	return out
-}
-
-// insertSavedWork stores a sealed work and asks for the approval to push it.
-func (r *runner) insertSavedWork(ctx context.Context, q *store.Queries, w savedRow) error {
-	env, err := json.Marshal(w.env)
-	if err != nil {
-		return err
-	}
-	manifest, err := json.Marshal(w.work.Manifest)
-	if err != nil {
-		return err
-	}
-	expires := time.Now().Add(savedwork.Retention)
-	if _, err := q.InsertSavedWork(ctx, store.InsertSavedWorkParams{
-		OrgID: r.run.OrgID, ID: w.id, TicketID: r.run.TicketID, RunID: r.run.ID, AgentID: r.run.AgentID,
-		Repo: w.work.Manifest.Repo, BaseSha: w.work.Manifest.Base, Branch: w.branch, Manifest: manifest,
-		SizeBytes: w.work.Manifest.Bytes(), Envelope: env, ExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true},
-	}); err != nil {
-		return err
-	}
-	args := savedwork.PushArgsJSON(w.id.String(), w.work.Manifest.Repo, w.work.Manifest.Base, w.branch)
-	sum := sha256.Sum256([]byte(args))
-	row, err := q.CreateSystemApprovalRequest(ctx, store.CreateSystemApprovalRequestParams{
-		OrgID: r.run.OrgID, TicketID: r.run.TicketID, RunID: r.run.ID, AgentID: r.run.AgentID,
-		Connector: connectors.GitHubID, Tool: savedwork.ToolPush, Target: connectors.GitHubID + ":" + w.work.Manifest.Repo,
-		ArgsJson: args, ArgsSha256: hex.EncodeToString(sum[:]), ExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true},
-	})
-	if err != nil {
-		return err
-	}
-	payload, err := json.Marshal(map[string]any{
-		"approval_id": row.ID.String(), "tool": row.Tool, "target": row.Target, "args_sha256": row.ArgsSha256,
-		"decision": string(row.Decision), "risk": json.RawMessage(`{}`), "system": true,
-	})
-	if err != nil {
-		return err
-	}
-	_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-		OrgID: r.run.OrgID, TicketID: r.run.TicketID, RunID: r.run.ID,
-		Kind: githubtools.KindApprovalRequested, ActorKind: store.TicketActorKindSystem, Payload: payload,
-	})
-	return err
 }
 
 // parseSaveOutput reads savework.sh's output.
@@ -219,10 +199,10 @@ func parseSaveOutput(out []byte) ([]savedwork.Work, []string, error) {
 			if file.Status == savedwork.Deleted {
 				file.Mode, file.Size = "", 0
 			} else {
-				if int64(len(out)) < size+1 {
-					return nil, nil, errors.New("the output ends inside a file")
+				if int64(len(out)) < size+1 || out[size] != '\n' {
+					return nil, nil, errors.New("the output ends inside a file or a file is not followed by a newline")
 				}
-				cur.Content[file.Path] = append([]byte(nil), out[:size]...)
+				cur.Content[file.Path] = out[:size:size]
 				out = out[size+1:]
 			}
 			cur.Manifest.Files = append(cur.Manifest.Files, file)

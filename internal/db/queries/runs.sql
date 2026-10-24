@@ -50,6 +50,9 @@ WITH next AS (
     WHERE r.org_id = @org_id
       AND r.ready_at IS NOT NULL
       AND a.status = 'active'
+      -- An unhealthy agent (ADR 0054) claims nothing: queued runs wait, and a parked run whose
+      -- approval was decided stays parked, until an admin resumes the agent.
+      AND a.unhealthy_at IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM runs act
           WHERE act.org_id = r.org_id AND act.agent_id = r.agent_id
@@ -72,6 +75,7 @@ WITH next AS (
 )
 UPDATE runs
 SET state = 'starting',
+    summarizing = false, -- a summary left by a lost owner must not silence the tools (ADR 0051)
     epoch = agent.epoch,
     owner_id = @owner_id::text,
     lease_expires_at = now() + make_interval(secs => @lease_seconds::integer),
@@ -113,6 +117,7 @@ WITH stale AS (
 )
 UPDATE runs
 SET epoch = agent.epoch,
+    summarizing = false,
     takeovers = runs.takeovers + 1,
     owner_id = @owner_id::text,
     lease_expires_at = now() + make_interval(secs => @lease_seconds::integer),

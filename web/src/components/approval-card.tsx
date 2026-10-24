@@ -197,6 +197,12 @@ function SavedWork({ call: w }: { call: SavedWorkCall }) {
       <p role="note" className="bg-muted/30 rounded-md border p-3">
         Koinon saved this uncommitted work from a sandbox that had to be recreated. Nothing is pushed until you approve. It goes to a new branch, never the default branch.
       </p>
+      {w.files.some((f) => f.path.startsWith('.github/')) && (
+        <p role="note" className="rounded-md border border-amber-600 p-3" data-testid="workflow-warning">
+          This work changes files under .github/. GitHub may refuse the push of workflow files with this connection. A pushed branch can also start existing
+          workflows that run on push, and those can use the repository&apos;s secrets, so read these files before you approve.
+        </p>
+      )}
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
         <dt className="text-muted-foreground">Branch</dt>
         <dd className="font-mono break-all">{w.branch}</dd>
@@ -272,7 +278,7 @@ function SavedWork({ call: w }: { call: SavedWorkCall }) {
       </div>
       {w.skipped.length > 0 && (
         <div>
-          <h4 className="text-muted-foreground mb-1 text-xs font-medium uppercase">Not saved</h4>
+          <h4 className="text-muted-foreground mb-1 text-xs font-medium uppercase">Left out, as reported by the sandbox (not verified)</h4>
           <ul className="list-disc pl-5">
             {w.skipped.map((n, i) => (
               <li key={i}>{n}</li>

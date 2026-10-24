@@ -67,6 +67,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
+	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/services"
@@ -503,6 +504,11 @@ func run() error {
 		mux.Handle("/mcp", tools.Handler())
 		// The ask-tier tools of org MCP servers (plan item MC1), for agentgateway only like /mcp.
 		mux.Handle(mcpask.Path, mcpask.New(pool, mcpask.Options{}).Handler())
+		// Saved work from a stuck sandbox (ADR 0054), for koinon-agentd only: it holds no KEK, so it
+		// posts the bundle here to be sealed. The network policy admits agentd to this port.
+		if keyring != nil {
+			mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(pool, keyring, slog.Default()))
+		}
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		toolsSrv := &http.Server{Addr: cfg.toolsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, toolsSrv)

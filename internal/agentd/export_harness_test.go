@@ -75,3 +75,6 @@ func ProcinfoOf(out string) []string {
 	}
 	return r
 }
+
+// CapNotes bounds the notes a sandbox reports.
+var CapNotes = capNotes

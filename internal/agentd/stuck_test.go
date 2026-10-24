@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,10 +57,23 @@ func (e *env) stuckAfterTurn(procinfo string) {
 
 const dProc = "41|D|worker|nfs_wait_bit_killable\n"
 
-func fastStuck(c *agentd.Config) {
-	c.StuckAfter, c.StuckPoll = 400*time.Millisecond, 50*time.Millisecond
-	c.SaveTimeout = 2 * time.Second
-	c.Keyring = fakeKeyring()
+// receiverURL starts koinon-api's saved-work receiver (which holds the keyring; koinon-agentd does
+// not) on the suite's database and returns its address.
+func receiverURL() string {
+	mux := http.NewServeMux()
+	mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(db, fakeKeyring(), nil))
+	srv := httptest.NewServer(mux)
+	DeferCleanup(srv.Close)
+	return srv.URL
+}
+
+// fastStuck is a pool config with a 400 ms stuck time that posts saved work to url.
+func fastStuck(url string) func(*agentd.Config) {
+	return func(c *agentd.Config) {
+		c.StuckAfter, c.StuckPoll = 400*time.Millisecond, 50*time.Millisecond
+		c.SaveTimeout = 2 * time.Second
+		c.SavedWorkURL = url
+	}
 }
 
 var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
@@ -73,7 +88,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		}
 		t := e.ticket(ctx, "hello")
 		r := e.enqueue(ctx, t)
-		e.pool("agentd-a", fastStuck)
+		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, r)).WithTimeout(10*time.Second).Should(Equal(store.RunStateSucceeded), "the run itself ended well")
 
 		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
@@ -144,7 +159,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
 		e.stuckAfterTurn("")
 		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
-		e.pool("agentd-a", fastStuck)
+		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Eventually(func() int { e.files.mu.Lock(); defer e.files.mu.Unlock(); return e.files.procinfoRuns }).Should(BeNumerically(">=", 1))
 		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
@@ -160,7 +175,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e.stuckAfterTurn(dProc)
 		start := time.Now()
 		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
-		e.pool("agentd-a", fastStuck)
+		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Eventually(func() bool {
 			sb, _ := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
@@ -179,7 +194,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 			save(e.files)
 			t := e.ticket(ctx, "hello")
 			r := e.enqueue(ctx, t)
-			e.pool("agentd-a", fastStuck, mutate)
+			e.pool("agentd-a", fastStuck(receiverURL()), mutate)
 			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 			Eventually(func() []string { return kindsOf(ticketEvents(ctx, e, t)) }).WithTimeout(5 * time.Second).Should(ContainElement("sandbox.work_lost"))
 			var lost string
@@ -208,9 +223,9 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		Entry("the script fails", func(f *files) {
 			f.savework = func(string) (string, int) { return "", 2 }
 		}, func(*agentd.Config) {}, "reading the workspace failed"),
-		Entry("no key-encryption keys", func(f *files) {
+		Entry("no koinon-api address", func(f *files) {
 			f.savework = func(string) (string, int) { return "R acme/widgets " + baseSHA + "\nF A 100644 1 1 0 0 x\nx\n\nE\n", 0 }
-		}, func(c *agentd.Config) { c.Keyring = nil }, "key-encryption keys"),
+		}, func(c *agentd.Config) { c.SavedWorkURL = "" }, "not configured"),
 		Entry("the agent has no access to the repository", func(f *files) {
 			f.savework = func(string) (string, int) {
 				return "R other/repo " + baseSHA + "\nF A 100644 1 1 0 0 x\nx\n\nE\n", 0
@@ -228,7 +243,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e.stuckAfterTurn(dProc)
 		t := e.ticket(ctx, "hello")
 		r := e.enqueue(ctx, t)
-		e.pool("agentd-a", fastStuck)
+		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Eventually(func() string {
 			var w string
@@ -249,7 +264,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 			Expect(err).NotTo(HaveOccurred())
 		}
 		e.stuckAfterTurn(dProc)
-		e.pool("agentd-a", fastStuck)
+		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, first)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 
 		Eventually(func() bool {
@@ -268,11 +283,13 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		Expect(db.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'agent.mark_unhealthy'`, e.org).Scan(&n)).To(Succeed())
 		Expect(n).To(Equal(1))
 
-		// A run that was queued before fails with the reason; the timeline shows it.
+		// A run queued meanwhile is not claimed: it waits until an admin resumes the agent.
 		e.message(ctx, t, "again")
 		second := e.enqueue(ctx, t)
-		Eventually(runState(ctx, second)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
-		Expect(getRun(ctx, second).OutcomeReason.String).To(ContainSubstring("agent is unhealthy"))
+		Consistently(runState(ctx, second)).WithTimeout(1500 * time.Millisecond).Should(Equal(store.RunStateQueued))
+		_, err = db.Exec(ctx, `UPDATE agents SET unhealthy_at = NULL, unhealthy_reason = NULL WHERE id = $1`, e.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(runState(ctx, second)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 	})
 
 	It("recreates before the next run when the process is found by the sweep that precedes the harness", func(ctx SpecContext) {
@@ -288,7 +305,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e.files.procinfo = func() string { return dProc }
 		t := e.ticket(ctx, "hello")
 		r := e.enqueue(ctx, t)
-		e.pool("agentd-a", fastStuck)
+		e.pool("agentd-a", fastStuck(receiverURL()))
 
 		// The reconciler's part: the sandbox flagged unhealthy is replaced.
 		old := e.gw.Sandbox(e.workspace, e.sandbox).GetMetadata().GetId()
@@ -311,7 +328,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
 		t := e.ticket(ctx, "hello")
 		r1 := e.enqueue(ctx, t)
-		e.pool("agentd-a", fastStuck)
+		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		// The home the session lives in is replaced (as the reconciler does for a stuck sandbox).
 		e.recreateSandbox(ctx)

@@ -117,8 +117,10 @@ env_is KOINON_KEK_CREATE '"false"' --set secrets.kek.existingSecret=mine
 env_is KOINON_KEK_SECRET '"mine"' --set secrets.kek.existingSecret=mine
 has "existing KEK Secret mounted" 'secretName: mine$' --set secrets.kek.existingSecret=mine --show-only templates/deployments.yaml
 n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /secrets/kek$' || true)
-# koinon-reconciler, and koinon-agentd to seal the work saved from a stuck sandbox (ADR 0054).
-[ "$n" = 2 ] || fail "KEK mounted into $n components, want only koinon-reconciler and koinon-agentd"
+[ "$n" = 1 ] || fail "KEK mounted into $n components, want only koinon-reconciler"
+# koinon-agentd holds no KEK; it posts a stuck sandbox's work to koinon-api's tools port (ADR 0054).
+env_is KOINON_SAVED_WORK_URL '"http://koinon-api-tools.koinon.svc.cluster.local:8081"'
+has "agentd may reach the tools port" 'app.kubernetes.io/component: agentd' --show-only templates/networkpolicy.yaml
 # koinon-api cannot delete Secrets unless the legacy connection migration is on.
 lacks "no Secret delete by default" 'verbs: \[delete\]'
 has "Secret delete with the legacy migration" 'verbs: \[delete\]' --set secrets.migrateLegacyConnections=true

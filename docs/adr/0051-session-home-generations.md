@@ -73,7 +73,7 @@ Decided by the product owner; it settles what was open above. Plan item AG1 buil
    run events, which the ticket's reply is built from; only a `run.summary` event records its size.
    Tools are refused in three ways, because ACP has no switch to turn a harness's tools off: the
    prompt says to call none; permission requests during it are rejected; and while it runs the run
-   is marked `summarizing`, which makes Koinon's tool servers (GitHub and remote MCP servers,
+   is marked `summarizing` (the mark is cleared when a run is claimed or taken over, so a lost owner cannot leave the tools off), which makes Koinon's tool servers (GitHub and remote MCP servers,
    `GetRunningRunForAgent`) answer as if no run were active, so no approval request can be
    recorded. A harness that calls a tool anyway has its note discarded (`run.summary_refused`). A
    note that fails or times out (2 minutes) never fails the run (`run.summary_failed`). This is

@@ -14,7 +14,8 @@ ALTER TABLE agent_sandboxes
     ADD COLUMN unhealthy_reason     text,
     ADD COLUMN unhealthy_generation text,
     ADD CONSTRAINT agent_sandboxes_unhealthy
-        CHECK ((unhealthy_at IS NULL) = (unhealthy_reason IS NULL));
+        CHECK ((unhealthy_at IS NULL) = (unhealthy_reason IS NULL)
+               AND (unhealthy_at IS NULL) = (unhealthy_generation IS NULL));
 
 -- Agent health. After three recreations in 24 hours the agent is unhealthy: new runs are refused
 -- until an admin resumes it. resumed_at starts a new count.
@@ -72,6 +73,7 @@ CREATE TABLE sandbox_incidents (
     saved_work_id uuid,
     PRIMARY KEY (org_id, id),
     FOREIGN KEY (org_id, agent_id) REFERENCES agents (org_id, id),
+    FOREIGN KEY (org_id, ticket_id, run_id) REFERENCES runs (org_id, ticket_id, id),
     FOREIGN KEY (org_id, saved_work_id) REFERENCES saved_work (org_id, id)
 );
 
@@ -97,3 +99,15 @@ ALTER TABLE tickets
 -- effects (GetRunningRunForAgent).
 ALTER TABLE runs
     ADD COLUMN summarizing boolean NOT NULL DEFAULT false;
+
+-- The key koinon-agentd and koinon-api share to authenticate the upload of saved work (HMAC over
+-- org, run and epoch, short-lived). It is not a key-encryption key: koinon-agentd holds no KEK,
+-- and the sealing happens in koinon-api. Generated here from the database's own CSPRNG.
+CREATE TABLE service_keys (
+    name       text        PRIMARY KEY CHECK (name ~ '^[a-z][a-z0-9-]{0,62}$'),
+    key        bytea       NOT NULL CHECK (length(key) = 32),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+INSERT INTO service_keys (name, key)
+VALUES ('saved-work-upload', decode(replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''), 'hex'));

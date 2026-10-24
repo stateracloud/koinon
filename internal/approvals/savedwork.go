@@ -62,12 +62,23 @@ func (s *Service) executeSavedWork(ctx context.Context, row store.ApprovalReques
 	if err := json.Unmarshal(sw.Envelope, &env); err != nil {
 		return nil, permanent("the saved work is unreadable")
 	}
-	work, err := savedwork.Open(s.savedKeys, row.OrgID.String(), id.String(), env)
+	work, packed, err := savedwork.OpenPacked(s.savedKeys, row.OrgID.String(), id.String(), env)
 	if err != nil {
 		return nil, permanent("the saved work cannot be opened: %v", err)
 	}
-	if work.Manifest.Repo != args.Repo || work.Manifest.Base != args.Base {
+	// The approval binds to the content the approver's card showed: the packed files and the
+	// manifest (also kept in the clear on the row, which the card reads).
+	var shown savedwork.Manifest
+	if err := json.Unmarshal(sw.Manifest, &shown); err != nil {
+		return nil, permanent("the saved work's manifest is unreadable")
+	}
+	switch {
+	case work.Manifest.Repo != args.Repo || work.Manifest.Base != args.Base:
 		return nil, permanent("the saved work does not match its manifest")
+	case savedwork.BundleHash(packed) != args.BundleSHA256:
+		return nil, permanent("the saved files are not the ones that were approved (bundle hash differs)")
+	case savedwork.ManifestHash(work.Manifest) != args.ManifestSHA256, savedwork.ManifestHash(shown) != args.ManifestSHA256:
+		return nil, permanent("the saved files are not the ones that were approved (manifest hash differs)")
 	}
 	repo, err := github.ParseRepo(args.Repo)
 	if err != nil {

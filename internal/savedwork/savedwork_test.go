@@ -70,6 +70,12 @@ var _ = Describe("saved work", func() {
 			w.Manifest.Files[0].Size = savedwork.MaxBytes + 1
 			w.Content["a/b.go"] = make([]byte, savedwork.MaxBytes+1)
 		}),
+		Entry("more notes than allowed", func(w *savedwork.Work) {
+			for range savedwork.MaxNotes + 1 {
+				w.Manifest.Skipped = append(w.Manifest.Skipped, "x")
+			}
+		}),
+		Entry("a note that is too long", func(w *savedwork.Work) { w.Manifest.Skipped = []string{strings.Repeat("x", savedwork.MaxNoteBytes+1)} }),
 		Entry("no files", func(w *savedwork.Work) { w.Manifest.Files = nil }),
 	)
 
@@ -83,14 +89,20 @@ var _ = Describe("saved work", func() {
 	})
 
 	It("reads push arguments strictly", func() {
-		args := savedwork.PushArgsJSON("id", "acme/widgets", "base", "koinon/wip/x-1")
-		Expect(args).To(Equal(`{"base":"base","branch":"koinon/wip/x-1","repo":"acme/widgets","saved_work_id":"id"}`))
+		args := savedwork.PushArgsJSON("id", "acme/widgets", "base", "koinon/wip/x-1", strings.Repeat("a", 64), strings.Repeat("b", 64))
+		Expect(args).To(Equal(`{"base":"base","branch":"koinon/wip/x-1","bundle_sha256":"` + strings.Repeat("a", 64) +
+			`","manifest_sha256":"` + strings.Repeat("b", 64) + `","repo":"acme/widgets","saved_work_id":"id"}`))
 		a, err := savedwork.DecodePushArgs(args)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.Branch).To(Equal("koinon/wip/x-1"))
-		_, err = savedwork.DecodePushArgs(`{"base":"b","branch":"main","repo":"r","saved_work_id":"i"}`)
+		bad := func(branch, extra string) string {
+			return `{"base":"b","branch":"` + branch + `","bundle_sha256":"` + strings.Repeat("a", 64) + `","manifest_sha256":"` + strings.Repeat("b", 64) + `","repo":"r","saved_work_id":"i"` + extra + `}`
+		}
+		_, err = savedwork.DecodePushArgs(bad("main", ""))
 		Expect(err).To(HaveOccurred())
-		_, err = savedwork.DecodePushArgs(`{"base":"b","branch":"koinon/wip/x","repo":"r","saved_work_id":"i","extra":1}`)
+		_, err = savedwork.DecodePushArgs(bad("koinon/wip/x", `,"extra":1`))
 		Expect(err).To(HaveOccurred())
+		_, err = savedwork.DecodePushArgs(`{"base":"b","branch":"koinon/wip/x","repo":"r","saved_work_id":"i"}`)
+		Expect(err).To(HaveOccurred(), "the hashes are required")
 	})
 })

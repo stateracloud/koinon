@@ -232,9 +232,6 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 		work, note := saved.status, saved.note()
 		var firstSaved pgtype.UUID
 		for _, w := range saved.rows {
-			if err := r.insertSavedWork(ctx, q, w); err != nil {
-				return err
-			}
 			if !firstSaved.Valid {
 				firstSaved = w.id
 			}
@@ -293,7 +290,7 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 		}
 		if work == "lost" {
 			if err := r.ticketNote(ctx, q, r.run.TicketID, kindWorkLost,
-				"The agent's uncommitted work was lost: "+note); err != nil {
+				"The agent's uncommitted work was lost. Details (the sandbox reported some of them; they are not verified): "+note); err != nil {
 				return err
 			}
 		}

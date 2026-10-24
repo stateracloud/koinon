@@ -10,8 +10,8 @@ numbers and the procedure are in [the research](../research/kek-rotation.md).
 
 | What | Where | Who can read it |
 | --- | --- | --- |
-| KEKs | Secret `koinon-kek` (or `secrets.kek.existingSecret`): one file per KEK, named by its ID, plus `active` | `koinon-api` reads it through the Kubernetes API; `koinon-reconciler` and `koinon-agentd` mount it, read-only (agentd only seals the work saved from a stuck sandbox, ADR 0054). Nothing else does. |
-| Wrapped DEKs and ciphertext | `providers.api_key`, `connections.secret_envelope`, `saved_work.envelope` (uncommitted work saved from a stuck sandbox, gone after 14 days) in Postgres | Anyone with the database, but they need the KEK to open them. |
+| KEKs | Secret `koinon-kek` (or `secrets.kek.existingSecret`): one file per KEK, named by its ID, plus `active` | `koinon-api` reads it through the Kubernetes API; `koinon-reconciler` mounts it. Nothing else does. |
+| Wrapped DEKs and ciphertext | `providers.api_key`, `connections.secret_envelope`, `saved_work.envelope` (uncommitted work saved from a stuck sandbox, sealed by koinon-api, gone after 14 days) in Postgres | Anyone with the database, but they need the KEK to open them. |
 | Opened provider keys | Secret `koinon-gateway-providers` | Only the gateway pod mounts it. |
 
 **The chart does not generate the keys.** A Helm render that made key material would make new keys

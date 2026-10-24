@@ -53,7 +53,9 @@ func (f *fixture) saved(ctx context.Context, mutate func(*savedwork.Work)) *save
 	Expect(err).NotTo(HaveOccurred())
 	sf := &savedFixture{fixture: f, work: w, id: mustID(uniqUUID())}
 	sf.branch = savedwork.BranchName(f.ticket.ID.String(), time.Now())
-	env, err := savedwork.Seal(f.ring, f.org.String(), sf.id.String(), w)
+	packed, err := savedwork.Pack(w)
+	Expect(err).NotTo(HaveOccurred())
+	env, err := savedwork.SealPacked(f.ring, f.org.String(), sf.id.String(), packed)
 	Expect(err).NotTo(HaveOccurred())
 	envJSON, _ := json.Marshal(env)
 	mj, _ := json.Marshal(w.Manifest)
@@ -63,7 +65,7 @@ func (f *fixture) saved(ctx context.Context, mutate func(*savedwork.Work)) *save
 		BaseSha: base, Branch: sf.branch, Manifest: mj, SizeBytes: w.Manifest.Bytes(), Envelope: envJSON, ExpiresAt: expires,
 	})
 	Expect(err).NotTo(HaveOccurred())
-	args := savedwork.PushArgsJSON(sf.id.String(), "acme/widgets", base, sf.branch)
+	args := savedwork.PushArgsJSON(sf.id.String(), "acme/widgets", base, sf.branch, savedwork.BundleHash(packed), savedwork.ManifestHash(w.Manifest))
 	sf.approval, err = q.CreateSystemApprovalRequest(ctx, store.CreateSystemApprovalRequestParams{
 		OrgID: f.org, TicketID: f.ticket.ID, RunID: f.run.ID, AgentID: f.agent.ID, Connector: "github", Tool: savedwork.ToolPush,
 		Target: "github:acme/widgets", ArgsJson: args, ArgsSha256: sha(args), ExpiresAt: expires,
@@ -178,7 +180,8 @@ var _ = Describe("Pushing saved work", func() {
 		req := f.call(ctx, "create_pull_request", prArgs())
 		f.park(ctx)
 		base := f.gh.Snapshot("widgets").Refs["main"]
-		args := savedwork.PushArgsJSON(uniqUUID(), "acme/widgets", base, "koinon/wip/x-1")
+		h := sha("x")
+		args := savedwork.PushArgsJSON(uniqUUID(), "acme/widgets", base, "koinon/wip/x-1", h, h)
 		_, err := q.CreateSystemApprovalRequest(ctx, store.CreateSystemApprovalRequestParams{
 			OrgID: f.org, TicketID: f.ticket.ID, RunID: f.run.ID, AgentID: f.agent.ID, Connector: "github", Tool: savedwork.ToolPush,
 			Target: "github:acme/widgets", ArgsJson: args, ArgsSha256: sha(args),
@@ -220,6 +223,34 @@ var _ = Describe("Pushing saved work", func() {
 		Expect(row.Status).To(Equal(store.ApprovalStatusFailed))
 		Expect(row.Error.String).To(ContainSubstring("expired"))
 		Expect(f.gh.Snapshot("widgets").Calls).To(BeEmpty())
+	})
+
+	It("refuses files other than the ones approved: a bundle swapped in the database, with a valid seal", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard").saved(ctx, nil)
+		evil := f.work
+		evil.Content = map[string][]byte{"src/new.go": []byte("package evil \n\n")[:14], "run.sh": f.work.Content["run.sh"]}
+		packed, err := savedwork.Pack(evil)
+		Expect(err).NotTo(HaveOccurred())
+		env, err := savedwork.SealPacked(f.ring, f.org.String(), f.id.String(), packed) // sealed correctly, for this row
+		Expect(err).NotTo(HaveOccurred())
+		envJSON, _ := json.Marshal(env)
+		_, err = pool.Exec(ctx, `UPDATE saved_work SET envelope = $2 WHERE id = $1`, f.id, envJSON)
+		Expect(err).NotTo(HaveOccurred())
+		row, err := f.svc.Approve(ctx, f.org, f.approval.ID, f.admin, f.approval.ArgsSha256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).To(Equal(store.ApprovalStatusFailed))
+		Expect(row.Error.String).To(ContainSubstring("bundle hash differs"))
+		Expect(f.gh.Snapshot("widgets").Calls).To(BeEmpty())
+	})
+
+	It("refuses a manifest changed after the approval card showed it", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard").saved(ctx, nil)
+		_, err := pool.Exec(ctx, `UPDATE saved_work SET manifest = jsonb_set(manifest, '{files,0,added}', '99') WHERE id = $1`, f.id)
+		Expect(err).NotTo(HaveOccurred())
+		row, err := f.svc.Approve(ctx, f.org, f.approval.ID, f.admin, f.approval.ArgsSha256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).To(Equal(store.ApprovalStatusFailed))
+		Expect(row.Error.String).To(ContainSubstring("manifest hash differs"))
 	})
 
 	It("refuses an envelope moved to another row (the binding fails to open)", func(ctx SpecContext) {

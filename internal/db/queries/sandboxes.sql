@@ -77,6 +77,9 @@ SET state = @state::sandbox_state,
     unhealthy_reason = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
                              AND nullif(@home_generation::text, '') IS DISTINCT FROM unhealthy_generation
                             THEN NULL ELSE unhealthy_reason END,
+    unhealthy_generation = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
+                                 AND nullif(@home_generation::text, '') IS DISTINCT FROM unhealthy_generation
+                                THEN NULL ELSE unhealthy_generation END,
     observed_at = now()
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
