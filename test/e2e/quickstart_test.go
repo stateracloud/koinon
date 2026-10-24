@@ -333,10 +333,14 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(pr.GetFiles()).To(ConsistOf(HaveField("Path", prFile)))
 
 		By("the model's streamed requests reported their usage through the gateway")
-		got2, err := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
-		Expect(err).NotTo(HaveOccurred())
-		cost := got2.GetRun().GetCost()
-		Expect(cost.GetRequests()).To(BeNumerically(">", 0), "the ledger recorded the run's requests")
+		// The gateway exports its access log in batches, so the ledger lags the run by a moment.
+		var cost *runv1alpha1.Cost
+		Eventually(func(g Gomega) {
+			got, err := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
+			g.Expect(err).NotTo(HaveOccurred())
+			cost = got.GetRun().GetCost()
+			g.Expect(cost.GetRequests()).To(BeNumerically(">", 0), "the ledger recorded the run's requests")
+		}, 60*time.Second, time.Second).Should(Succeed())
 		Expect(cost.GetEstimatedRequests()).To(BeZero(), "no request was charged as an estimate: streamed requests carry usage")
 		Expect(cost.GetInputTokens()).To(BeNumerically(">", 0))
 
