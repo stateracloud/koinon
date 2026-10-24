@@ -62,6 +62,7 @@ import (
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/memlimit"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/scheduler"
@@ -347,6 +348,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load templates: %w", err)
 	}
+	if err := prices.New(pool, slog.Default()).SyncDefaults(ctx); err != nil {
+		return err
+	}
 	if _, err := services.SyncTemplates(ctx, pool, embedded); err != nil {
 		return err
 	}
@@ -416,6 +420,9 @@ func run() error {
 	}
 	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).
 		WithURLPolicy(catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.providerAllowedHosts)})
+	if _, err := catalogSvc.AuditRates(ctx); err != nil {
+		slog.Warn("audit of stored model rates failed", "err", err)
+	}
 	svc := services.New(pool, services.Options{
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc, Catalog: catalogSvc,
 	})

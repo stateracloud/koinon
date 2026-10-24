@@ -24,6 +24,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/stateracloud/koinon/internal/money"
 )
 
 // ModelGateway is implemented by each gateway driver.
@@ -189,6 +191,12 @@ type Limit struct {
 	Generation string
 }
 
+// USDLimit returns a USD limit of amount per window. It is the edge where Koinon's exact
+// money type (package money) becomes the number agentgateway's budget config takes.
+func USDLimit(amount money.USD, window time.Duration, generation string) Limit {
+	return Limit{Unit: USD, Amount: amount.Float64(), Window: window, Generation: generation}
+}
+
 // Provider is one OpenAI-compatible upstream of an org (ADR 0056, plan item PV1). Drivers
 // serve each of its models as "<org>/<model>" to the org's own keys only.
 type Provider struct {
@@ -230,9 +238,25 @@ func GuardOverrides() map[string]any {
 
 // Price is a per-million-token price in USD, as decimal strings.
 type Price struct {
-	Input     string
-	Output    string
-	CacheRead string
+	Input      string
+	Output     string
+	CacheRead  string
+	CacheWrite string
+	Reasoning  string
+	// Tiers raise or lower rates once the input side of a request (input, cache
+	// reads and cache writes together) exceeds ContextOver tokens. A tier overlays
+	// the base rates: unset fields keep the base rate (agentgateway's model catalog).
+	Tiers []PriceTier
+}
+
+// PriceTier is one context-length tier of a Price.
+type PriceTier struct {
+	ContextOver int64
+	Input       string
+	Output      string
+	CacheRead   string
+	CacheWrite  string
+	Reasoning   string
 }
 
 // Unpriced returns "<org>/<model>" for each model without a price; drivers do not serve them.
@@ -426,6 +450,25 @@ const (
 	// LogFieldRequest is a per-request UUID. agentgateway logs its own request
 	// id only at debug level, so drivers add one; the ledger is idempotent on it.
 	LogFieldRequest = "koinon.request"
+
+	// LogFieldInput and the fields after it carry the usage in agentgateway's consistent
+	// semantics (llm.inputTokens includes cache reads and writes, llm.outputTokens includes
+	// reasoning), so the ledger prices disjoint buckets whatever the provider's convention.
+	LogFieldInput      = "koinon.in"
+	LogFieldOutput     = "koinon.out"
+	LogFieldCacheRead  = "koinon.cache_read"
+	LogFieldCacheWrite = "koinon.cache_write"
+	LogFieldReasoning  = "koinon.reasoning"
+	// LogFieldStatus is the HTTP status the gateway answered; a 2xx LLM record without usage
+	// is a request whose usage must be estimated (an aborted stream, a provider that
+	// reports none).
+	LogFieldStatus = "koinon.status"
+	// LogFieldMaxTokens is the request's max_tokens, to settle an aborted request that bills
+	// hidden thinking.
+	LogFieldMaxTokens = "koinon.max_tokens" //nolint:gosec // attribute name, not a credential
+	// LogFieldRequestBytes is the request's Content-Length: the byte count the estimate and its
+	// calibration use. Response bytes are not exposed by agentgateway's CEL context.
+	LogFieldRequestBytes = "koinon.req_bytes"
 
 	// ReloadProbeKeyName is the LogFieldKey of the key a driver puts in each
 	// config to detect its reload (standalone.ReloadProbeKey). Its requests

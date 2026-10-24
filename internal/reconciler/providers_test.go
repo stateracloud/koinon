@@ -95,6 +95,29 @@ var _ = Describe("Provider delivery", func() {
 		Expect(string(sec.Data[name])).To(Equal("sk-upstream-secret"))
 	})
 
+	It("skips a model whose stored rate cannot be priced and still serves every other org", func(ctx SpecContext) {
+		orgA, userA := newOrg(ctx)
+		orgB, userB := newOrg(ctx)
+		a := addProvider(ctx, orgA, userA, "up", "", "bad-rate")
+		b := addProvider(ctx, orgB, userB, "up", "", "fine")
+		cleanup(ctx, orgA, a.ID)
+		cleanup(ctx, orgB, b.ID)
+		// A row from before the stricter validation: seven fraction digits.
+		_, err := pool.Exec(ctx, `UPDATE models SET input_rate = '1.1234567' WHERE org_id = $1`, orgA)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = r.ReconcileAll(ctx)
+		Expect(err).To(HaveOccurred(), "the bad model is reported")
+		Expect(err.Error()).To(ContainSubstring("bad-rate"))
+
+		got, ok := providerOf(mg.last(), orgSlug(ctx, orgB))
+		Expect(ok).To(BeTrue(), "the other org is served")
+		Expect(got.Models).To(HaveLen(1))
+		if pa, ok := providerOf(mg.last(), orgSlug(ctx, orgA)); ok {
+			Expect(pa.Models).To(BeEmpty())
+		}
+	})
+
 	It("uses a new file name for a new key and prunes the old file", func(ctx SpecContext) {
 		org, user := newOrg(ctx)
 		p := addProvider(ctx, org, user, "openrouter", "sk-old", "m")

@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/templates"
 )
@@ -132,6 +133,13 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 		}
 		if _, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
 			OrgID: c.org, AgentID: a.ID, Config: config, CreatedBy: c.actor(),
+		}); err != nil {
+			return err
+		}
+		// The template's spendUSD is only the default: from here the limit is the agent's own,
+		// which org admins change (plan item BG1).
+		if err := q.InsertAgentBudgetDefault(ctx, store.InsertAgentBudgetDefaultParams{
+			OrgID: c.org, AgentID: a.ID, DailyLimit: money.FromCents(t.Spec.Limits.SpendUSD.Cents()).Numeric(), UpdatedBy: "template",
 		}); err != nil {
 			return err
 		}

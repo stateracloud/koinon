@@ -19,9 +19,17 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"c0ec08a242eaf070"'
+      koinon.cache_read: llm.cachedInputTokens
+      koinon.cache_write: llm.cacheCreationInputTokens
+      koinon.config: '"7028498eff7c508f"'
+      koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
+      koinon.max_tokens: llm.params.max_tokens
+      koinon.out: llm.outputTokens
+      koinon.reasoning: llm.reasoningTokens
+      koinon.req_bytes: int(request.headers["content-length"])
       koinon.request: uuid()
+      koinon.status: response.code
 gateways:
   default:
     port: 8080
@@ -41,7 +49,7 @@ llm:
             org: acme
           allowedModels:
             - qwen3.5:4b
-        - keyHash: sha256:1cd7f511e20744528f20c076ae31efc63886e8a487fe91596eea735de70bdf6e
+        - keyHash: sha256:2217d595684d7ff7abd017de994f2767dc3b993b5663ada7630e1112437537aa
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -67,3 +75,5 @@ llm:
             - type: completions
       params:
         baseUrl: http://ollama.example.internal:11434/v1
+      transformation:
+        stream_options: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'

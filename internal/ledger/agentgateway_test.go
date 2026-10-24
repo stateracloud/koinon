@@ -35,6 +35,7 @@ const agentgatewayImage = "cr.agentgateway.dev/agentgateway:v1.6.0"
 const (
 	pricedModel   = "fake/ledger-model"
 	unpricedModel = "fake/unpriced-model"
+	slowModel     = "fake/slow-model"
 )
 
 func hostPort(s *httptest.Server) int {
@@ -47,13 +48,14 @@ func hostPort(s *httptest.Server) int {
 // export into the in-process receiver, the ledger, and limits pushed back net of recorded spend.
 var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", Ordered, func() {
 	var (
-		e      *env
-		run    store.Run
-		key    gateway.IssuedKey
-		state  gateway.State
-		driver *standalone.Driver
-		llmURL string
-		ctr    *testcontainers.DockerContainer
+		e        *env
+		run      store.Run
+		key      gateway.IssuedKey
+		state    gateway.State
+		driver   *standalone.Driver
+		llmURL   string
+		ctr      *testcontainers.DockerContainer
+		slowPort int
 	)
 
 	chat := func(ctx context.Context, material, model string) int {
@@ -99,6 +101,15 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 		Expect(err).NotTo(HaveOccurred())
 		upstream := httptest.NewServer(model)
 		DeferCleanup(upstream.Close)
+		// An upstream that answers after the client has given up.
+		slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
+		}))
+		DeferCleanup(slow.Close)
+		slowPort = hostPort(slow)
 		receiver := httptest.NewServer(ledger.Handler(ing, slog.New(slog.NewTextHandler(GinkgoWriter, nil))))
 		DeferCleanup(receiver.Close)
 
@@ -131,7 +142,7 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 		ctr, err = testcontainers.Run(ctx, agentgatewayImage,
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
 			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
-			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver)),
+			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver), slowPort),
 			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
 				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro")
 			}),
@@ -204,7 +215,7 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 		Eventually(func() store.RunState { return e.run(ctx, run.ID).State }).
 			WithTimeout(20 * time.Second).WithPolling(200 * time.Millisecond).
 			Should(Equal(store.RunStateCanceled))
-		Expect(e.run(ctx, run.ID).OutcomeReason.String).To(HavePrefix("agent spend limit reached"))
+		Expect(e.run(ctx, run.ID).OutcomeReason.String).To(HavePrefix("agent daily limit reached"))
 	}, SpecTimeout(2*time.Minute))
 
 	It("keeps the agent blocked after its key is rotated", func(ctx SpecContext) {
@@ -223,5 +234,47 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 
 		Expect(chat(ctx, key.Material, pricedModel)).To(Equal(http.StatusUnauthorized))
 		Expect(chat(ctx, rotated.Material, pricedModel)).To(Equal(http.StatusTooManyRequests))
+	}, SpecTimeout(time.Minute))
+
+	// agentgateway logs a request whose client left before the response headers with the model
+	// and the key but no status, no usage and no cost (verified against v1.6.0). The provider may
+	// have done the work, so the ledger charges it as an estimate, marked usage_missing.
+	It("charges a request whose client disconnected before the headers, as an estimate", func(ctx SpecContext) {
+		d := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		d.model(ctx, "fake", slowModel)
+		_, err := db.Exec(ctx, `UPDATE models SET input_rate = '50', output_rate = '50' WHERE org_id = $1`, d.org)
+		Expect(err).NotTo(HaveOccurred())
+		dkey, err := gateway.NewKey(d.ref())
+		Expect(err).NotTo(HaveOccurred())
+		state.Providers = append(state.Providers, gateway.Provider{
+			Org: d.ref().Org, Name: "slow", Type: "fake",
+			BaseURL: fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, slowPort),
+			Models:  []gateway.Model{{Name: slowModel, Price: &gateway.Price{Input: "50", Output: "50"}}},
+		})
+		state.AddKey(dkey.Key)
+		_, err = driver.Apply(ctx, state)
+		Expect(err).NotTo(HaveOccurred())
+
+		short, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
+		defer cancel()
+		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, slowModel)
+		req, err := http.NewRequestWithContext(short, http.MethodPost, llmURL+"/v1/chat/completions", bytes.NewBufferString(body))
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+dkey.Material)
+		_, err = http.DefaultClient.Do(req) //nolint:bodyclose // the request fails before a response
+		Expect(err).To(HaveOccurred(), "the client gave up before the headers")
+
+		var row spendRow
+		Eventually(func() error {
+			return db.QueryRow(ctx, `SELECT input_tokens, output_tokens, cache_read_tokens, cost_usd::text, coalesce(gateway_cost_usd::text, ''),
+				coalesce(price_ref, ''), estimated, cost_flagged, coalesce(estimate, '{}'::jsonb)
+				FROM spend_entries WHERE org_id = $1`, d.org).Scan(
+				&row.InputTokens, &row.OutputTokens, &row.CacheReadTokens, &row.CostUsd, &row.GatewayCostUsd, &row.PriceRef, &row.Estimated, &row.CostFlagged, &row.Estimate)
+		}).WithTimeout(20 * time.Second).WithPolling(200 * time.Millisecond).Should(Succeed())
+		Expect(row.Estimated).To(BeTrue())
+		Expect(row.CostFlagged).To(BeTrue())
+		Expect(string(row.Estimate)).To(ContainSubstring(`"usage_missing": true`))
+		Expect(row.CostUsd).NotTo(HavePrefix("0.00"), "charged, not dropped")
 	}, SpecTimeout(time.Minute))
 })

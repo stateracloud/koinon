@@ -29,7 +29,7 @@ detects reloads with each revision's probe key on the llm listener (standalone.R
 {{- $revision := "bootstrap" }}
 {{- $base := dict "database" (dict "url" "sqlite:///data/agentgateway.db?mode=rwc") "adminAddr" "localhost:15000" "statsAddr" "[::]:15020" "readinessAddr" "[::]:15021" "logging" (dict "format" "json") }}
 {{- $otlp := dict "host" (printf "%s.%s.svc:%v" (include "koinon.componentName" (list . "api")) .Release.Namespace .Values.api.otlpPort) "protocol" "http" }}
-{{- $accessLog := dict "add" (dict "koinon.key" "default(apiKey.name, \"\")" "koinon.agent" "default(apiKey.agent, \"\")" "koinon.request" "uuid()" "koinon.config" (quote $revision)) "otlp" $otlp }}
+{{- $accessLog := dict "add" (dict "koinon.key" "default(apiKey.name, \"\")" "koinon.agent" "default(apiKey.agent, \"\")" "koinon.request" "uuid()" "koinon.in" "llm.inputTokens" "koinon.out" "llm.outputTokens" "koinon.cache_read" "llm.cachedInputTokens" "koinon.cache_write" "llm.cacheCreationInputTokens" "koinon.reasoning" "llm.reasoningTokens" "koinon.status" "response.code" "koinon.max_tokens" "llm.params.max_tokens" "koinon.req_bytes" "int(request.headers[\"content-length\"])" "koinon.config" (quote $revision)) "otlp" $otlp }}
 {{- /* The reload probe key, refused before routing by the authorization rule and its zero budget. */ -}}
 {{- $probeBudget := dict "name" "koinon-reload-probe" "limit" (dict "unit" "Tokens" "amount" 0) "window" (dict "rolling" "24h") "onBudgetExceeded" "Block" }}
 {{- $probe := dict "keyHash" (printf "sha256:%s" (sha256sum (printf "koinon-probe-%s" $revision))) "metadata" (dict "name" "koinon-reload-probe" "agent" "") "budgets" (list $probeBudget) }}

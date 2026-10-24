@@ -12,7 +12,7 @@ info:
   title: Koinon admin API
   version: 1.0.0
   description: |
-    Manage an org's model providers, models and API tokens. The org is the token's org.
+    Manage an org's model providers, models, prices, budgets and API tokens. The org is the token's org.
     Providers and models declared by a labelled Kubernetes Secret (`koinon.dev/secret-type:
     model-provider`) are read-only here: changing or deleting them answers 409 and names the
     Secret. When the Secret is deleted they stay, disabled and `removed`, and may then be deleted.
@@ -29,6 +29,8 @@ tags:
   - name: providers
   - name: models
   - name: tokens
+  - name: prices
+  - name: budgets
 paths:
   /providers:
     get:
@@ -232,6 +234,204 @@ paths:
           description: Revoked.
         default:
           $ref: "#/components/responses/Error"
+  /prices:
+    get:
+      tags: [prices]
+      operationId: listPrices
+      summary: List the org's own prices, every version, newest first per name.
+      description: |
+        An org price wins over the default price list, and the rates set on a model win over
+        both. Each version applies from its `validFrom`; requests before it keep the price
+        they were charged at.
+      responses:
+        "200":
+          description: The org's price versions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [prices]
+      operationId: setPrice
+      summary: Add a version of a named price. Earlier versions never change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PriceInput"
+      responses:
+        "201":
+          description: The new version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceVersion"
+        default:
+          $ref: "#/components/responses/Error"
+  /prices/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: {type: string}
+    delete:
+      tags: [prices]
+      operationId: retirePrice
+      summary: End a named price now. Its versions stay for the ledger entries that cite them.
+      responses:
+        "204":
+          description: Retired.
+        default:
+          $ref: "#/components/responses/Error"
+  /prices/defaults:
+    get:
+      tags: [prices]
+      operationId: getDefaultPrices
+      summary: The default price list this installation runs and the versions before it.
+      responses:
+        "200":
+          description: The default list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DefaultPrices"
+        default:
+          $ref: "#/components/responses/Error"
+  /prices/defaults/changes:
+    get:
+      tags: [prices]
+      operationId: getDefaultPriceChanges
+      summary: What changed in the default price list between two versions (after an upgrade).
+      description: |
+        Without `from`, the version before `to`; without `to`, the current version.
+      parameters:
+        - {name: from, in: query, required: false, schema: {type: string}}
+        - {name: to, in: query, required: false, schema: {type: string}}
+      responses:
+        "200":
+          description: The changes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DefaultPriceChanges"
+        default:
+          $ref: "#/components/responses/Error"
+  /prices/flagged:
+    get:
+      tags: [prices]
+      operationId: listFlaggedPrices
+      summary: Price entries whose recomputed cost differs from the gateway's by more than 1%.
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: RFC 3339 time; default 7 days ago.
+          schema: {type: string, format: date-time}
+      responses:
+        "200":
+          description: The flagged entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlaggedPriceList"
+        default:
+          $ref: "#/components/responses/Error"
+  /spend:
+    get:
+      tags: [budgets]
+      operationId: getSpendReport
+      summary: Spend per model, with estimated usage shown apart from reported usage.
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: RFC 3339 time; default the start of the current month (UTC).
+          schema: {type: string, format: date-time}
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpendReport"
+        default:
+          $ref: "#/components/responses/Error"
+  /budget:
+    get:
+      tags: [budgets]
+      operationId: getBudget
+      summary: The org's monthly cap (calendar month, UTC), its platform ceiling and this month's spend.
+      responses:
+        "200":
+          description: The budget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgBudget"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [budgets]
+      operationId: setBudget
+      summary: Set the org's monthly cap, or clear it by leaving `monthlyCapUsd` out.
+      description: |
+        The cap cannot exceed the platform ceiling, which only a platform admin sets (in the UI).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrgBudgetUpdate"
+      responses:
+        "200":
+          description: The budget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgBudget"
+        default:
+          $ref: "#/components/responses/Error"
+  /agents/{agentId}/budget:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [budgets]
+      operationId: getAgentBudget
+      summary: An agent's daily limit (UTC day) and today's spend.
+      responses:
+        "200":
+          description: The agent's budget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentBudget"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [budgets]
+      operationId: setAgentBudget
+      summary: Set an agent's daily limit. A template's spendUSD is only the default for a new agent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentBudgetUpdate"
+      responses:
+        "200":
+          description: The agent's budget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentBudget"
+        default:
+          $ref: "#/components/responses/Error"
 components:
   securitySchemes:
     bearerAuth:
@@ -426,3 +626,186 @@ components:
         secret:
           type: string
           description: "Send as `Authorization: Bearer <secret>`. Shown only here."
+    PriceRates:
+      type: object
+      description: USD per million tokens as decimal strings with at most 6 fraction digits. A free model needs an explicit "0".
+      properties:
+        input: {type: string}
+        output: {type: string}
+        cacheRead: {type: string}
+        cacheWrite: {type: string}
+        reasoning: {type: string}
+    PriceTier:
+      type: object
+      required: [contextOver, prices]
+      properties:
+        contextOver:
+          type: integer
+          format: int64
+          description: The tier applies when the input side of a request (input, cache reads and writes) exceeds this many tokens; its rates replace the base rates they name.
+        prices: {$ref: "#/components/schemas/PriceRates"}
+    PriceMatch:
+      type: object
+      description: Exactly one of glob (`*` any characters, `?` one, case-insensitive) and regex (RE2, whole name).
+      properties:
+        glob: {type: string}
+        regex: {type: string}
+    PriceEntry:
+      type: object
+      required: [id, provider, match, validFrom, prices, tokenizer, ratio, source]
+      properties:
+        id: {type: string}
+        provider: {type: string, description: "Provider type the price applies to, or *."}
+        match: {$ref: "#/components/schemas/PriceMatch"}
+        validFrom: {type: string, description: "Date yyyy-mm-dd (UTC)."}
+        prices: {$ref: "#/components/schemas/PriceRates"}
+        tiers:
+          type: array
+          items: {$ref: "#/components/schemas/PriceTier"}
+        tokenizer: {type: string, enum: [bytes, "tiktoken:o200k_base", "tiktoken:cl100k_base"]}
+        ratio: {type: string, description: "UTF-8 bytes per token, used to estimate usage a provider did not report."}
+        toolOverheadTokens: {type: integer}
+        hiddenThinking: {type: boolean}
+        maxOutput: {type: integer, description: "Largest output in tokens; an aborted response without usage settles at the request max_tokens, or at this when it was not logged."}
+        source:
+          type: object
+          required: [url, accessed]
+          properties:
+            url: {type: string}
+            accessed: {type: string}
+        note: {type: string}
+    PriceInput:
+      type: object
+      required: [name, provider, match, prices]
+      properties:
+        name: {type: string, description: "Names the price; a new version of the same name replaces it from validFrom on."}
+        provider: {type: string}
+        match: {$ref: "#/components/schemas/PriceMatch"}
+        prices: {$ref: "#/components/schemas/PriceRates"}
+        tiers:
+          type: array
+          items: {$ref: "#/components/schemas/PriceTier"}
+        tokenizer: {type: string, enum: [bytes, "tiktoken:o200k_base", "tiktoken:cl100k_base"]}
+        ratio: {type: string}
+        toolOverheadTokens: {type: integer}
+        hiddenThinking: {type: boolean}
+        maxOutput: {type: integer, description: "Largest output in tokens; an aborted response without usage settles at the request max_tokens, or at this when it was not logged."}
+        validFrom: {type: string, format: date-time, description: "Default now."}
+    PriceVersion:
+      type: object
+      required: [id, name, provider, match, prices, validFrom, createdBy, createdAt]
+      properties:
+        id: {type: string, format: uuid, description: "The ledger cites it as org#<id>."}
+        name: {type: string}
+        provider: {type: string}
+        match: {$ref: "#/components/schemas/PriceMatch"}
+        prices: {$ref: "#/components/schemas/PriceRates"}
+        tiers:
+          type: array
+          items: {$ref: "#/components/schemas/PriceTier"}
+        tokenizer: {type: string}
+        ratio: {type: string}
+        validFrom: {type: string, format: date-time}
+        retiredAt: {type: string, format: date-time}
+        createdBy: {type: string}
+        createdAt: {type: string, format: date-time}
+    PriceList:
+      type: object
+      required: [prices]
+      properties:
+        prices:
+          type: array
+          items: {$ref: "#/components/schemas/PriceVersion"}
+    DefaultPrices:
+      type: object
+      required: [version, previousVersions, entries]
+      properties:
+        version: {type: string}
+        previousVersions:
+          type: array
+          items: {type: string}
+        entries:
+          type: array
+          items: {$ref: "#/components/schemas/PriceEntry"}
+    PriceChange:
+      type: object
+      required: [kind, id, validFrom]
+      properties:
+        kind: {type: string, enum: [added, removed, changed]}
+        id: {type: string}
+        validFrom: {type: string}
+        before: {$ref: "#/components/schemas/PriceEntry"}
+        after: {$ref: "#/components/schemas/PriceEntry"}
+        fields:
+          type: array
+          items: {type: string}
+    DefaultPriceChanges:
+      type: object
+      required: [to, changes]
+      properties:
+        from: {type: string}
+        to: {type: string}
+        changes:
+          type: array
+          items: {$ref: "#/components/schemas/PriceChange"}
+    FlaggedPrice:
+      type: object
+      required: [priceRef, model, requests, lastSeen, costUsd, gatewayCostUsd]
+      properties:
+        priceRef: {type: string}
+        model: {type: string}
+        requests: {type: integer, format: int64}
+        lastSeen: {type: string, format: date-time}
+        costUsd: {type: string, description: "What Koinon computed (counts for limits and reports)."}
+        gatewayCostUsd: {type: string}
+    FlaggedPriceList:
+      type: object
+      required: [flagged]
+      properties:
+        flagged:
+          type: array
+          items: {$ref: "#/components/schemas/FlaggedPrice"}
+    SpendLine:
+      type: object
+      required: [model, requests, inputTokens, outputTokens, reportedUsd, estimatedUsd, estimatedRequests]
+      properties:
+        model: {type: string}
+        requests: {type: integer, format: int64}
+        inputTokens: {type: integer, format: int64}
+        outputTokens: {type: integer, format: int64}
+        reportedUsd: {type: string, description: "Cost of requests whose usage the provider reported."}
+        estimatedUsd: {type: string, description: "Cost of requests whose usage was estimated. Counts toward limits."}
+        estimatedRequests: {type: integer, format: int64}
+    SpendReport:
+      type: object
+      required: [since, models]
+      properties:
+        since: {type: string, format: date-time}
+        models:
+          type: array
+          items: {$ref: "#/components/schemas/SpendLine"}
+    OrgBudget:
+      type: object
+      required: [spentThisMonthUsd, monthStart]
+      properties:
+        monthlyCapUsd: {type: string, description: "Calendar month in UTC. Absent: no cap."}
+        platformCeilingUsd: {type: string, description: "Set by a platform admin; absent: off."}
+        spentThisMonthUsd: {type: string}
+        monthStart: {type: string, format: date-time}
+    OrgBudgetUpdate:
+      type: object
+      properties:
+        monthlyCapUsd: {type: string, description: "Decimal with at most 12 fraction digits, above 0 and at most 1000000. Leave out to clear."}
+    AgentBudget:
+      type: object
+      required: [agentId, dailyLimitUsd, spentTodayUsd, dayStart]
+      properties:
+        agentId: {type: string, format: uuid}
+        dailyLimitUsd: {type: string}
+        spentTodayUsd: {type: string}
+        dayStart: {type: string, format: date-time}
+    AgentBudgetUpdate:
+      type: object
+      required: [dailyLimitUsd]
+      properties:
+        dailyLimitUsd: {type: string}

@@ -332,6 +332,22 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(pr.GetBranch()).To(Equal(prBranch))
 		Expect(pr.GetFiles()).To(ConsistOf(HaveField("Path", prFile)))
 
+		By("the model's streamed requests reported their usage through the gateway")
+		// The gateway exports its access log in batches, so the ledger lags the run by a moment.
+		var cost *runv1alpha1.Cost
+		Eventually(func(g Gomega) {
+			got, err := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
+			g.Expect(err).NotTo(HaveOccurred())
+			cost = got.GetRun().GetCost()
+			g.Expect(cost.GetRequests()).To(BeNumerically(">", 0), "the ledger recorded the run's requests")
+		}, 60*time.Second, time.Second).Should(Succeed())
+		// The streamed requests carry usage through the gateway; the title request the fake model
+		// refuses (a 400 without usage) is charged its input only.
+		Expect(cost.GetRequests()-cost.GetEstimatedRequests()).To(BeNumerically(">=", 1), "streamed requests reported their usage")
+		Expect(cost.GetEstimatedRequests()).To(BeNumerically("<=", 1))
+		Expect(cost.GetInputTokens()).To(BeNumerically(">=", 1200), "the fake model's reported input tokens")
+		Expect(cost.GetOutputTokens()).To(BeNumerically("<", 1000), "no output is charged for the refused request")
+
 		By("nothing has reached GitHub before the approval")
 		repo := gh.repo(ctx, repoName)
 		Expect(repo.Pulls).To(BeEmpty())
