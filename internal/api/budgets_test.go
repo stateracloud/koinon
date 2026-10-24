@@ -24,12 +24,7 @@ var _ = Describe("BudgetService and PriceService", func() {
 		e = newEnv(ctx, envOptions{})
 		org, owner = e.newTeamOrg(ctx)
 	})
-	budgets := func(c *client) budgetv1alpha1connect.BudgetServiceClient {
-		return budgetv1alpha1connect.NewBudgetServiceClient(connect.NewClient(connecthttp.NewTransport(c.b.http, c.b.e.srv.URL)))
-	}
-	priceSvc := func(c *client) budgetv1alpha1connect.PriceServiceClient {
-		return budgetv1alpha1connect.NewPriceServiceClient(connect.NewClient(connecthttp.NewTransport(c.b.http, c.b.e.srv.URL)))
-	}
+	budgets, priceSvc := budgetClient, priceClient
 
 	It("lets admins set the cap and an agent's limit, and keeps members out", func(ctx SpecContext) {
 		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
@@ -115,3 +110,11 @@ var _ = Describe("BudgetService and PriceService", func() {
 		Expect(defs.GetEntries()[0].GetSourceUrl()).To(HavePrefix("https://"))
 	})
 })
+
+func budgetClient(c *client) budgetv1alpha1connect.BudgetServiceClient {
+	return budgetv1alpha1connect.NewBudgetServiceClient(connect.NewClient(connecthttp.NewTransport(c.b.http, c.b.e.srv.URL)))
+}
+
+func priceClient(c *client) budgetv1alpha1connect.PriceServiceClient {
+	return budgetv1alpha1connect.NewPriceServiceClient(connect.NewClient(connecthttp.NewTransport(c.b.http, c.b.e.srv.URL)))
+}
