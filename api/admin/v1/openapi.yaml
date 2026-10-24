@@ -12,11 +12,12 @@ info:
   title: Koinon admin API
   version: 1.0.0
   description: |
-    Manage an org's model providers, models, prices, budgets and API tokens. The org is the token's org.
+    Manage an org's model providers, models, remote MCP servers, prices, budgets and API tokens. The org is the token's org.
     Providers and models declared by a labelled Kubernetes Secret (`koinon.dev/secret-type:
     model-provider`) are read-only here: changing or deleting them answers 409 and names the
     Secret. When the Secret is deleted they stay, disabled and `removed`, and may then be deleted.
-    Secret values are never returned. A token can create tokens only with the same or a lower
+    Remote MCP servers (`koinon.dev/secret-type: mcp-server`) follow the same rules. Secret values are never
+    returned. A token can create tokens only with the same or a lower
     role and an expiry no later than its own; revoking a token revokes the tokens it created.
     Repeated bad tokens from one client are answered 429 with Retry-After.
   license:
@@ -28,6 +29,7 @@ security:
 tags:
   - name: providers
   - name: models
+  - name: mcp
   - name: tokens
   - name: prices
   - name: budgets
@@ -107,6 +109,184 @@ paths:
       responses:
         "204":
           description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+  /mcp-servers:
+    get:
+      tags: [mcp]
+      operationId: listMcpServers
+      summary: List the org's remote MCP servers, entered and declared, with their health.
+      responses:
+        "200":
+          description: The servers, by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServerList"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      tags: [mcp]
+      operationId: createMcpServer
+      summary: |
+        Add a remote MCP server. A server that asks each user to sign in with OAuth is refused (planned
+        for v0.2).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpServerCreate"
+      responses:
+        "201":
+          description: The server.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServer"
+        default:
+          $ref: "#/components/responses/Error"
+  /mcp-servers/{serverId}:
+    parameters:
+      - $ref: "#/components/parameters/serverId"
+    get:
+      tags: [mcp]
+      operationId: getMcpServer
+      summary: Get a server.
+      responses:
+        "200":
+          description: The server.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServer"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [mcp]
+      operationId: updateMcpServer
+      summary: Change a server's URL, transport or credential. Declared servers answer 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpServerUpdate"
+      responses:
+        "200":
+          description: The server.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServer"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [mcp]
+      operationId: deleteMcpServer
+      summary: Delete a server, its tools and the agents' allowances of it. Declared servers answer 409.
+      responses:
+        "204":
+          description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+  /mcp-servers/{serverId}/tools:
+    parameters:
+      - $ref: "#/components/parameters/serverId"
+    get:
+      tags: [mcp]
+      operationId: listMcpTools
+      summary: The server's tools with their tiers and review flags.
+      responses:
+        "200":
+          description: The tools, by name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpToolList"
+        default:
+          $ref: "#/components/responses/Error"
+  /mcp-servers/{serverId}/tools/{toolName}/tier:
+    parameters:
+      - $ref: "#/components/parameters/serverId"
+      - $ref: "#/components/parameters/toolName"
+    put:
+      tags: [mcp]
+      operationId: setMcpToolTier
+      summary: |
+        Move a tool to a tier: `ask` (a human approves each call), `auto` (the agent calls it) or
+        `never`. Works on declared servers too. Clears the tool's review flag.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpToolTierUpdate"
+      responses:
+        "200":
+          description: The tool.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpTool"
+        default:
+          $ref: "#/components/responses/Error"
+  /mcp-servers/{serverId}/tools/{toolName}/review:
+    parameters:
+      - $ref: "#/components/parameters/serverId"
+      - $ref: "#/components/parameters/toolName"
+    post:
+      tags: [mcp]
+      operationId: acknowledgeMcpToolReview
+      summary: Mark a changed tool as reviewed without changing its tier.
+      responses:
+        "200":
+          description: The tool.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpTool"
+        default:
+          $ref: "#/components/responses/Error"
+  /agents/{agentId}/mcp-servers:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [mcp]
+      operationId: getAgentMcpServers
+      summary: The servers an agent may use.
+      responses:
+        "200":
+          description: The allowlist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentMcpServers"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [mcp]
+      operationId: setAgentMcpServers
+      summary: |
+        Replace the servers an agent may use, each optionally narrowed to some tools. Tools are
+        offered by tier; a tool the server adds later enters the ask tier for an agent that allows the
+        whole server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentMcpServers"
+      responses:
+        "200":
+          description: The allowlist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentMcpServers"
         default:
           $ref: "#/components/responses/Error"
   /models:
@@ -454,6 +634,16 @@ components:
       in: path
       required: true
       schema: {type: string, format: uuid}
+    serverId:
+      name: serverId
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    toolName:
+      name: toolName
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[A-Za-z0-9_.-]{1,128}$'}
   responses:
     Error:
       description: |
@@ -534,6 +724,119 @@ components:
         apiKey:
           type: string
           description: Replaces the key; an empty string removes it.
+    McpServer:
+      type: object
+      required: [id, name, url, transport, hasCredential, source, health, createdAt, updatedAt]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string, example: tracker}
+        url: {type: string, example: "https://mcp.example.com/mcp"}
+        transport: {type: string, enum: [streamable-http, sse]}
+        hasCredential:
+          type: boolean
+          description: Whether a credential is stored. The credential itself is never returned.
+        credentialHeader: {type: string, example: Authorization}
+        credentialPrefix: {type: string, example: "Bearer "}
+        source: {$ref: "#/components/schemas/Source"}
+        managedBySecret: {type: string}
+        disabledReason: {type: string}
+        removed:
+          type: boolean
+          description: The declaring Secret was deleted; the server is disabled.
+        health: {type: string, enum: [unknown, healthy, unhealthy]}
+        healthReason:
+          type: string
+          description: Why the server is unhealthy.
+        healthCheckedAt: {type: string, format: date-time}
+        healthSince: {type: string, format: date-time}
+        toolsSyncedAt: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    McpServerList:
+      type: object
+      required: [servers]
+      properties:
+        servers:
+          type: array
+          items: {$ref: "#/components/schemas/McpServer"}
+    McpServerCreate:
+      type: object
+      required: [name, url]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]([a-z0-9-]{0,22}[a-z0-9])?$'
+          description: A DNS label of at most 24 characters. The gateway target is `<org slug>-<name>`.
+        url: {type: string}
+        transport: {type: string, enum: [streamable-http, sse], default: streamable-http}
+        credentialHeader:
+          type: string
+          description: Defaults to Authorization when a credential value is given.
+        credentialPrefix:
+          type: string
+          description: What precedes the secret in the header value, for example `Bearer `.
+        credentialValue:
+          type: string
+          description: The secret. Omit for a server that needs none.
+    McpServerUpdate:
+      type: object
+      properties:
+        url: {type: string}
+        transport: {type: string, enum: [streamable-http, sse]}
+        credentialHeader: {type: string}
+        credentialPrefix: {type: string}
+        credentialValue:
+          type: string
+          description: Replaces the secret. Leave out to keep it while changing the header or prefix.
+        removeCredential: {type: boolean}
+    McpTool:
+      type: object
+      required: [serverId, name, description, readOnlyHint, tier, present, firstSeenAt, lastSeenAt]
+      properties:
+        serverId: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string}
+        readOnlyHint:
+          type: boolean
+          description: The server's own readOnlyHint annotation. A suggestion; an admin decides the tier.
+        tier: {type: string, enum: [ask, auto, never]}
+        reviewReason:
+          type: string
+          description: Set while the tool's description or input schema changed since an admin last reviewed it.
+        present:
+          type: boolean
+          description: False once the server stopped listing the tool.
+        firstSeenAt: {type: string, format: date-time}
+        lastSeenAt: {type: string, format: date-time}
+        tierSetBy: {type: string}
+        tierSetAt: {type: string, format: date-time}
+    McpToolList:
+      type: object
+      required: [tools]
+      properties:
+        tools:
+          type: array
+          items: {$ref: "#/components/schemas/McpTool"}
+    McpToolTierUpdate:
+      type: object
+      required: [tier]
+      properties:
+        tier: {type: string, enum: [ask, auto, never]}
+    AgentMcpServers:
+      type: object
+      required: [servers]
+      properties:
+        servers:
+          type: array
+          items:
+            type: object
+            required: [serverId]
+            properties:
+              serverId: {type: string, format: uuid}
+              tools:
+                type: array
+                items: {type: string}
+                description: Narrows the allowance to these tools. Omit to allow the whole server.
     Rates:
       type: object
       required: [input, output]

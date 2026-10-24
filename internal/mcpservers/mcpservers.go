@@ -137,6 +137,10 @@ var (
 	}
 )
 
+// AskStatusTool is the tool of an ask-tier target that reports the state of an approval request. A
+// server tool of this name is not offered in the ask tier.
+const AskStatusTool = "get_approval_status"
+
 // AskSuffix ends the name of the gateway target that offers a server's ask-tier tools.
 const AskSuffix = "-ask"
 

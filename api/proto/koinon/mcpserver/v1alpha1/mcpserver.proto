@@ -1,0 +1,218 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.mcpserver.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1;mcpserverv1alpha1";
+
+// McpServerService manages an org's remote MCP servers (ADR 0057) for the UI. It is the connect-rpc
+// face of the same service layer the admin API uses, so validation, the upstream URL policy and the
+// audit trail are the same. Admins and owners only: members do not see servers.
+//
+// Servers declared by a labelled Kubernetes Secret (source "secret") are read-only: changing or
+// deleting a live one fails with FAILED_PRECONDITION and names the Secret. Their tools' tiers can still
+// be set here. Credentials are write-only; they are never returned.
+service McpServerService {
+  rpc ListServers(ListServersRequest) returns (ListServersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // CreateServer adds a server. A server that asks each user to sign in with OAuth is refused with
+  // INVALID_ARGUMENT (planned for v0.2).
+  rpc CreateServer(CreateServerRequest) returns (CreateServerResponse);
+  rpc UpdateServer(UpdateServerRequest) returns (UpdateServerResponse);
+  // DeleteServer deletes a server entered here, with its tools and the agents' allowances of it. A
+  // declared server can be deleted only after its Secret was deleted (removed).
+  rpc DeleteServer(DeleteServerRequest) returns (DeleteServerResponse);
+
+  // ListTools returns the tools of one server, or of all the org's servers when server_id is empty.
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetToolTier moves a tool to a tier and clears its review flag.
+  rpc SetToolTier(SetToolTierRequest) returns (SetToolTierResponse);
+  // AcknowledgeToolReview clears a tool's review flag without changing its tier.
+  rpc AcknowledgeToolReview(AcknowledgeToolReviewRequest) returns (AcknowledgeToolReviewResponse);
+
+  // GetAgentServers returns the servers an agent may use.
+  rpc GetAgentServers(GetAgentServersRequest) returns (GetAgentServersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // SetAgentServers replaces the servers an agent may use.
+  rpc SetAgentServers(SetAgentServersRequest) returns (SetAgentServersResponse);
+}
+
+enum Tier {
+  TIER_UNSPECIFIED = 0;
+  // ASK: a human approves each call (ADR 0008, 0042). Every new tool starts here.
+  TIER_ASK = 1;
+  // AUTO: the agent calls the tool directly.
+  TIER_AUTO = 2;
+  // NEVER: no agent may call the tool.
+  TIER_NEVER = 3;
+}
+
+enum Health {
+  HEALTH_UNSPECIFIED = 0;
+  HEALTH_UNKNOWN = 1;
+  HEALTH_HEALTHY = 2;
+  // UNHEALTHY: three probes in a row failed; the server's tools are withdrawn from agents.
+  HEALTH_UNHEALTHY = 3;
+}
+
+// Server is a remote MCP server of the org. It never holds the credential.
+message Server {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  // transport is "streamable-http" or "sse".
+  string transport = 4;
+  bool has_credential = 5;
+  string credential_header = 6;
+  string credential_prefix = 7;
+  // source is "ui" for a server entered here and "secret" for one declared by a Secret.
+  string source = 8;
+  string managed_by_secret = 9;
+  // disabled_reason says why the server is not served, empty when it is.
+  string disabled_reason = 10;
+  // removed is set when the declaring Secret was deleted.
+  bool removed = 11;
+  Health health = 12;
+  string health_reason = 13;
+  google.protobuf.Timestamp health_checked_at = 14;
+  google.protobuf.Timestamp health_since = 15;
+  google.protobuf.Timestamp tools_synced_at = 16;
+  google.protobuf.Timestamp created_at = 17;
+  google.protobuf.Timestamp updated_at = 18;
+  // gateway_target is the name of the server's target in the gateway, "<org slug>-<name>", which is
+  // also the prefix of its tools in an agent's tool list.
+  string gateway_target = 19;
+}
+
+message Tool {
+  string server_id = 1;
+  string name = 2;
+  string description = 3;
+  // read_only_hint is the server's own readOnlyHint annotation: a suggestion for the admin, who decides
+  // the tier.
+  bool read_only_hint = 4;
+  Tier tier = 5;
+  // review_reason is set while the tool's description or input schema changed since an admin last
+  // reviewed it. It does not block the tool.
+  string review_reason = 6;
+  // present is false once the server stopped listing the tool.
+  bool present = 7;
+  google.protobuf.Timestamp first_seen_at = 8;
+  google.protobuf.Timestamp last_seen_at = 9;
+  string tier_set_by = 10;
+  google.protobuf.Timestamp tier_set_at = 11;
+}
+
+// Allowance is a server an agent may use, optionally narrowed to some of its tools.
+message Allowance {
+  string server_id = 1;
+  // tools narrows the allowance; empty allows the whole server, including tools it adds later (which
+  // enter the ask tier).
+  repeated string tools = 2;
+}
+
+message ListServersRequest {
+  string org_id = 1;
+}
+
+message ListServersResponse {
+  repeated Server servers = 1;
+}
+
+message CreateServerRequest {
+  string org_id = 1;
+  string name = 2;
+  string url = 3;
+  // transport defaults to "streamable-http".
+  string transport = 4;
+  // credential_header defaults to Authorization when credential_value is set.
+  string credential_header = 5;
+  // credential_prefix precedes the secret in the header value, for example "Bearer ".
+  string credential_prefix = 6;
+  string credential_value = 7 [debug_redact = true];
+}
+
+message CreateServerResponse {
+  Server server = 1;
+}
+
+message UpdateServerRequest {
+  string org_id = 1;
+  string server_id = 2;
+  // Fields left unset stay.
+  optional string url = 3;
+  optional string transport = 4;
+  // Setting any of the credential fields replaces the credential's header and prefix; credential_value
+  // replaces the secret, and leaving it out keeps the stored one.
+  optional string credential_header = 5;
+  optional string credential_prefix = 6;
+  optional string credential_value = 7 [debug_redact = true];
+  bool remove_credential = 8;
+}
+
+message UpdateServerResponse {
+  Server server = 1;
+}
+
+message DeleteServerRequest {
+  string org_id = 1;
+  string server_id = 2;
+}
+
+message DeleteServerResponse {}
+
+message ListToolsRequest {
+  string org_id = 1;
+  string server_id = 2;
+}
+
+message ListToolsResponse {
+  repeated Tool tools = 1;
+}
+
+message SetToolTierRequest {
+  string org_id = 1;
+  string server_id = 2;
+  string tool = 3;
+  Tier tier = 4;
+}
+
+message SetToolTierResponse {
+  Tool tool = 1;
+}
+
+message AcknowledgeToolReviewRequest {
+  string org_id = 1;
+  string server_id = 2;
+  string tool = 3;
+}
+
+message AcknowledgeToolReviewResponse {
+  Tool tool = 1;
+}
+
+message GetAgentServersRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+message GetAgentServersResponse {
+  repeated Allowance servers = 1;
+}
+
+message SetAgentServersRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  repeated Allowance servers = 3;
+}
+
+message SetAgentServersResponse {
+  repeated Allowance servers = 1;
+}

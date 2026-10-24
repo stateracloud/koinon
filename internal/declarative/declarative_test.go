@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
@@ -31,6 +32,7 @@ var _ = Describe("Importer", func() {
 	var (
 		kube *fake.Clientset
 		svc  *catalog.Service
+		mcp  *mcpservers.Service
 		imp  *declarative.Importer
 		org  pgtype.UUID
 		user pgtype.UUID
@@ -42,9 +44,10 @@ var _ = Describe("Importer", func() {
 		ring := secretstoretest.Keyring()
 		kube = fake.NewClientset()
 		svc = catalog.New(pool, ring, nil)
+		mcp = mcpservers.New(pool, ring, nil)
 		logs.Reset()
 		imp = &declarative.Importer{
-			Client: kube, Namespace: ns, Pool: pool, Catalog: svc, Sealer: ring,
+			Client: kube, Namespace: ns, Pool: pool, Catalog: svc, MCP: mcp, Sealer: ring,
 			Log: slog.New(slog.NewTextHandler(&logs, nil)),
 		}
 		org, user, slug = pgtest.NewOrg(ctx, pool)
@@ -94,6 +97,58 @@ var _ = Describe("Importer", func() {
 		}
 		return out
 	}
+
+	It("imports an mcp-server Secret as a read-only server, disables it when the Secret goes and restores it", func(ctx SpecContext) {
+		put(ctx, "tracker", declarative.TypeMCPServer, slug, map[string]string{
+			"name": "tracker", "url": "https://mcp.example.com/mcp", "credentialScheme": "Bearer", "credential": "not-a-real-token",
+		})
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, err := mcp.List(ctx, org)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list).To(HaveLen(1))
+		Expect(list[0]).To(HaveField("Source", "secret"))
+		Expect(list[0]).To(HaveField("ManagedBySecret", "tracker"))
+		Expect(list[0]).To(HaveField("HasCredential", true))
+		Expect(list[0]).To(HaveField("CredentialHeader", "Authorization"))
+		Expect(list[0]).To(HaveField("CredentialPrefix", "Bearer "))
+		ev := auditOf(ctx, "mcp_server.declare")
+		Expect(ev).To(HaveLen(1))
+		Expect(ev[0].ActorKind).To(Equal("secret"))
+		Expect(string(ev[0].Summary)).NotTo(ContainSubstring("not-a-real-token"))
+		Expect(logs.String()).NotTo(ContainSubstring("not-a-real-token"))
+
+		By("deleting the Secret disables the server and keeps the row")
+		Expect(kube.CoreV1().Secrets(ns).Delete(ctx, "tracker", metav1.DeleteOptions{})).To(Succeed())
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ = mcp.List(ctx, org)
+		Expect(list).To(HaveLen(1))
+		Expect(list[0].Removed).To(BeTrue())
+		Expect(list[0].DisabledReason).To(Equal(mcpservers.ReasonRemoved))
+
+		By("restoring it brings the server back")
+		put(ctx, "tracker", declarative.TypeMCPServer, slug, map[string]string{"name": "tracker", "url": "https://mcp.example.com/mcp"})
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ = mcp.List(ctx, org)
+		Expect(list).To(HaveLen(1))
+		Expect(list[0].Removed).To(BeFalse())
+		Expect(list[0].DisabledReason).To(BeEmpty())
+		Expect(list[0].HasCredential).To(BeFalse())
+	})
+
+	It("ignores an invalid mcp-server Secret with a Warning Event that quotes no value", func(ctx SpecContext) {
+		put(ctx, "bad", declarative.TypeMCPServer, slug, map[string]string{"name": "Bad Name", "url": "https://mcp.example.com/mcp?key=not-a-real-token"})
+		Expect(imp.Sync(ctx)).To(Succeed())
+		list, _ := mcp.List(ctx, org)
+		Expect(list).To(BeEmpty())
+		var msg string
+		for _, e := range events(ctx) {
+			if e.Type == corev1.EventTypeWarning {
+				msg = e.Message
+			}
+		}
+		Expect(msg).To(ContainSubstring("Ignored"))
+		Expect(msg).NotTo(ContainSubstring("not-a-real-token"))
+	})
 
 	It("imports a model-provider Secret as a read-only provider with models, audited as the Secret", func(ctx SpecContext) {
 		put(ctx, "openrouter", declarative.TypeModelProvider, slug, provider("openrouter"))

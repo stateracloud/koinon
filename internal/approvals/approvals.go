@@ -44,6 +44,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -81,6 +82,8 @@ const (
 type Options struct {
 	// Keys opens connections' stored secret fields. Without it execution fails.
 	Keys connections.Opener
+	// URLPolicy is the egress policy for the remote MCP servers whose approved calls Koinon executes.
+	URLPolicy catalog.URLPolicy
 	// GitHub defaults to a client for api.github.com.
 	GitHub *github.Client
 	// ExecutionLease is how long one executor holds a request. Default
@@ -98,6 +101,7 @@ type Service struct {
 	pool    *pgxpool.Pool
 	q       *store.Queries
 	keys    connections.Opener
+	policy  catalog.URLPolicy
 	gh      *github.Client
 	lease   time.Duration
 	maxExec int
@@ -119,7 +123,7 @@ func New(pool *pgxpool.Pool, opts Options) *Service {
 		opts.Logger = slog.Default()
 	}
 	return &Service{
-		pool: pool, q: store.New(pool), keys: opts.Keys, gh: opts.GitHub,
+		pool: pool, q: store.New(pool), keys: opts.Keys, policy: opts.URLPolicy, gh: opts.GitHub,
 		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger,
 	}
 }

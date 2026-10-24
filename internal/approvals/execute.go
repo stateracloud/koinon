@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/mcpask"
 )
 
 // Trailers of the commits Koinon creates. TrailerApproval carries the idempotency key.
@@ -31,6 +32,9 @@ const trustedApprover = "Koinon Trusted preset (no human approval)"
 
 // execute runs the approved call against GitHub and returns its result.
 func (s *Service) execute(ctx context.Context, row store.ApprovalRequest) (map[string]any, error) {
+	if row.Connector == mcpask.ConnectorID {
+		return s.executeMCP(ctx, row)
+	}
 	if row.Connector != connectors.GitHubID {
 		return nil, permanent("no executor for connector %q", row.Connector)
 	}

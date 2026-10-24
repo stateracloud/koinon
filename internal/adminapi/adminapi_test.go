@@ -27,6 +27,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/tokens"
@@ -36,6 +37,7 @@ type env struct {
 	srv     *httptest.Server
 	tokens  *tokens.Service
 	catalog *catalog.Service
+	mcp     *mcpservers.Service
 	now     *atomic.Pointer[time.Time]
 	org     pgtype.UUID
 	user    pgtype.UUID
@@ -53,9 +55,11 @@ func newEnv(ctx context.Context) *env {
 		return time.Now()
 	}
 	e.tokens = tokens.New(pool, clock)
-	e.catalog = catalog.New(pool, secretstoretest.Keyring(), nil)
+	ring := secretstoretest.Keyring()
+	e.catalog = catalog.New(pool, ring, nil)
+	e.mcp = mcpservers.New(pool, ring, nil).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"})
 	mux := http.NewServeMux()
-	adminapi.New(pool, e.catalog, e.tokens, slog.New(slog.NewTextHandler(GinkgoWriter, nil))).Mount(mux)
+	adminapi.New(pool, e.catalog, e.tokens, slog.New(slog.NewTextHandler(GinkgoWriter, nil))).WithMCP(e.mcp).Mount(mux)
 	e.srv = httptest.NewServer(mux)
 	DeferCleanup(e.srv.Close)
 	e.org, e.user, _ = pgtest.NewOrg(ctx, pool)

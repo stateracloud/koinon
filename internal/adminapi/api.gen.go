@@ -31,6 +31,45 @@ const (
 	Unauthenticated  ErrorCode = "unauthenticated"
 )
 
+// Defines values for McpServerHealth.
+const (
+	Healthy   McpServerHealth = "healthy"
+	Unhealthy McpServerHealth = "unhealthy"
+	Unknown   McpServerHealth = "unknown"
+)
+
+// Defines values for McpServerTransport.
+const (
+	McpServerTransportSse            McpServerTransport = "sse"
+	McpServerTransportStreamableHttp McpServerTransport = "streamable-http"
+)
+
+// Defines values for McpServerCreateTransport.
+const (
+	McpServerCreateTransportSse            McpServerCreateTransport = "sse"
+	McpServerCreateTransportStreamableHttp McpServerCreateTransport = "streamable-http"
+)
+
+// Defines values for McpServerUpdateTransport.
+const (
+	Sse            McpServerUpdateTransport = "sse"
+	StreamableHttp McpServerUpdateTransport = "streamable-http"
+)
+
+// Defines values for McpToolTier.
+const (
+	McpToolTierAsk   McpToolTier = "ask"
+	McpToolTierAuto  McpToolTier = "auto"
+	McpToolTierNever McpToolTier = "never"
+)
+
+// Defines values for McpToolTierUpdateTier.
+const (
+	McpToolTierUpdateTierAsk   McpToolTierUpdateTier = "ask"
+	McpToolTierUpdateTierAuto  McpToolTierUpdateTier = "auto"
+	McpToolTierUpdateTierNever McpToolTierUpdateTier = "never"
+)
+
 // Defines values for PriceChangeKind.
 const (
 	Added   PriceChangeKind = "added"
@@ -77,6 +116,16 @@ type AgentBudgetUpdate struct {
 	DailyLimitUsd string `json:"dailyLimitUsd"`
 }
 
+// AgentMcpServers defines model for AgentMcpServers.
+type AgentMcpServers struct {
+	Servers []struct {
+		ServerId openapi_types.UUID `json:"serverId"`
+
+		// Tools Narrows the allowance to these tools. Omit to allow the whole server.
+		Tools *[]string `json:"tools,omitempty"`
+	} `json:"servers"`
+}
+
 // DefaultPriceChanges defines model for DefaultPriceChanges.
 type DefaultPriceChanges struct {
 	Changes []PriceChange `json:"changes"`
@@ -117,6 +166,119 @@ type FlaggedPrice struct {
 type FlaggedPriceList struct {
 	Flagged []FlaggedPrice `json:"flagged"`
 }
+
+// McpServer defines model for McpServer.
+type McpServer struct {
+	CreatedAt        time.Time `json:"createdAt"`
+	CredentialHeader *string   `json:"credentialHeader,omitempty"`
+	CredentialPrefix *string   `json:"credentialPrefix,omitempty"`
+	DisabledReason   *string   `json:"disabledReason,omitempty"`
+
+	// HasCredential Whether a credential is stored. The credential itself is never returned.
+	HasCredential   bool            `json:"hasCredential"`
+	Health          McpServerHealth `json:"health"`
+	HealthCheckedAt *time.Time      `json:"healthCheckedAt,omitempty"`
+
+	// HealthReason Why the server is unhealthy.
+	HealthReason    *string            `json:"healthReason,omitempty"`
+	HealthSince     *time.Time         `json:"healthSince,omitempty"`
+	Id              openapi_types.UUID `json:"id"`
+	ManagedBySecret *string            `json:"managedBySecret,omitempty"`
+	Name            string             `json:"name"`
+
+	// Removed The declaring Secret was deleted; the server is disabled.
+	Removed *bool `json:"removed,omitempty"`
+
+	// Source `secret` entries are declared by a Kubernetes Secret and read-only here.
+	Source        Source             `json:"source"`
+	ToolsSyncedAt *time.Time         `json:"toolsSyncedAt,omitempty"`
+	Transport     McpServerTransport `json:"transport"`
+	UpdatedAt     time.Time          `json:"updatedAt"`
+	Url           string             `json:"url"`
+}
+
+// McpServerHealth defines model for McpServer.Health.
+type McpServerHealth string
+
+// McpServerTransport defines model for McpServer.Transport.
+type McpServerTransport string
+
+// McpServerCreate defines model for McpServerCreate.
+type McpServerCreate struct {
+	// CredentialHeader Defaults to Authorization when a credential value is given.
+	CredentialHeader *string `json:"credentialHeader,omitempty"`
+
+	// CredentialPrefix What precedes the secret in the header value, for example `Bearer `.
+	CredentialPrefix *string `json:"credentialPrefix,omitempty"`
+
+	// CredentialValue The secret. Omit for a server that needs none.
+	CredentialValue *string `json:"credentialValue,omitempty"`
+
+	// Name A DNS label of at most 24 characters. The gateway target is `<org slug>-<name>`.
+	Name      string                    `json:"name"`
+	Transport *McpServerCreateTransport `json:"transport,omitempty"`
+	Url       string                    `json:"url"`
+}
+
+// McpServerCreateTransport defines model for McpServerCreate.Transport.
+type McpServerCreateTransport string
+
+// McpServerList defines model for McpServerList.
+type McpServerList struct {
+	Servers []McpServer `json:"servers"`
+}
+
+// McpServerUpdate defines model for McpServerUpdate.
+type McpServerUpdate struct {
+	CredentialHeader *string `json:"credentialHeader,omitempty"`
+	CredentialPrefix *string `json:"credentialPrefix,omitempty"`
+
+	// CredentialValue Replaces the secret. Leave out to keep it while changing the header or prefix.
+	CredentialValue  *string                   `json:"credentialValue,omitempty"`
+	RemoveCredential *bool                     `json:"removeCredential,omitempty"`
+	Transport        *McpServerUpdateTransport `json:"transport,omitempty"`
+	Url              *string                   `json:"url,omitempty"`
+}
+
+// McpServerUpdateTransport defines model for McpServerUpdate.Transport.
+type McpServerUpdateTransport string
+
+// McpTool defines model for McpTool.
+type McpTool struct {
+	Description string    `json:"description"`
+	FirstSeenAt time.Time `json:"firstSeenAt"`
+	LastSeenAt  time.Time `json:"lastSeenAt"`
+	Name        string    `json:"name"`
+
+	// Present False once the server stopped listing the tool.
+	Present bool `json:"present"`
+
+	// ReadOnlyHint The server's own readOnlyHint annotation. A suggestion; an admin decides the tier.
+	ReadOnlyHint bool `json:"readOnlyHint"`
+
+	// ReviewReason Set while the tool's description or input schema changed since an admin last reviewed it.
+	ReviewReason *string            `json:"reviewReason,omitempty"`
+	ServerId     openapi_types.UUID `json:"serverId"`
+	Tier         McpToolTier        `json:"tier"`
+	TierSetAt    *time.Time         `json:"tierSetAt,omitempty"`
+	TierSetBy    *string            `json:"tierSetBy,omitempty"`
+}
+
+// McpToolTier defines model for McpTool.Tier.
+type McpToolTier string
+
+// McpToolList defines model for McpToolList.
+type McpToolList struct {
+	Tools []McpTool `json:"tools"`
+}
+
+// McpToolTierUpdate defines model for McpToolTierUpdate.
+type McpToolTierUpdate struct {
+	Tier McpToolTierUpdateTier `json:"tier"`
+}
+
+// McpToolTierUpdateTier defines model for McpToolTierUpdate.Tier.
+type McpToolTierUpdateTier string
 
 // Model defines model for Model.
 type Model struct {
@@ -438,8 +600,14 @@ type ModelId = openapi_types.UUID
 // ProviderId defines model for providerId.
 type ProviderId = openapi_types.UUID
 
+// ServerId defines model for serverId.
+type ServerId = openapi_types.UUID
+
 // TokenId defines model for tokenId.
 type TokenId = openapi_types.UUID
+
+// ToolName defines model for toolName.
+type ToolName = string
 
 // GetDefaultPriceChangesParams defines parameters for GetDefaultPriceChanges.
 type GetDefaultPriceChangesParams struct {
@@ -462,8 +630,20 @@ type GetSpendReportParams struct {
 // SetAgentBudgetJSONRequestBody defines body for SetAgentBudget for application/json ContentType.
 type SetAgentBudgetJSONRequestBody = AgentBudgetUpdate
 
+// SetAgentMcpServersJSONRequestBody defines body for SetAgentMcpServers for application/json ContentType.
+type SetAgentMcpServersJSONRequestBody = AgentMcpServers
+
 // SetBudgetJSONRequestBody defines body for SetBudget for application/json ContentType.
 type SetBudgetJSONRequestBody = OrgBudgetUpdate
+
+// CreateMcpServerJSONRequestBody defines body for CreateMcpServer for application/json ContentType.
+type CreateMcpServerJSONRequestBody = McpServerCreate
+
+// UpdateMcpServerJSONRequestBody defines body for UpdateMcpServer for application/json ContentType.
+type UpdateMcpServerJSONRequestBody = McpServerUpdate
+
+// SetMcpToolTierJSONRequestBody defines body for SetMcpToolTier for application/json ContentType.
+type SetMcpToolTierJSONRequestBody = McpToolTierUpdate
 
 // CreateModelJSONRequestBody defines body for CreateModel for application/json ContentType.
 type CreateModelJSONRequestBody = ModelCreate
@@ -491,12 +671,46 @@ type ServerInterface interface {
 	// Set an agent's daily limit. A template's spendUSD is only the default for a new agent.
 	// (PUT /agents/{agentId}/budget)
 	SetAgentBudget(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// The servers an agent may use.
+	// (GET /agents/{agentId}/mcp-servers)
+	GetAgentMcpServers(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// Replace the servers an agent may use, each optionally narrowed to some tools. Tools are
+	// offered by tier; a tool the server adds later enters the ask tier for an agent that allows the
+	// whole server.
+	// (PUT /agents/{agentId}/mcp-servers)
+	SetAgentMcpServers(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
 	// The org's monthly cap (calendar month, UTC), its platform ceiling and this month's spend.
 	// (GET /budget)
 	GetBudget(w http.ResponseWriter, r *http.Request)
 	// Set the org's monthly cap, or clear it by leaving `monthlyCapUsd` out.
 	// (PUT /budget)
 	SetBudget(w http.ResponseWriter, r *http.Request)
+	// List the org's remote MCP servers, entered and declared, with their health.
+	// (GET /mcp-servers)
+	ListMcpServers(w http.ResponseWriter, r *http.Request)
+	// Add a remote MCP server. A server that asks each user to sign in with OAuth is refused (planned
+	// for v0.2).
+	// (POST /mcp-servers)
+	CreateMcpServer(w http.ResponseWriter, r *http.Request)
+	// Delete a server, its tools and the agents' allowances of it. Declared servers answer 409.
+	// (DELETE /mcp-servers/{serverId})
+	DeleteMcpServer(w http.ResponseWriter, r *http.Request, serverId ServerId)
+	// Get a server.
+	// (GET /mcp-servers/{serverId})
+	GetMcpServer(w http.ResponseWriter, r *http.Request, serverId ServerId)
+	// Change a server's URL, transport or credential. Declared servers answer 409.
+	// (PATCH /mcp-servers/{serverId})
+	UpdateMcpServer(w http.ResponseWriter, r *http.Request, serverId ServerId)
+	// The server's tools with their tiers and review flags.
+	// (GET /mcp-servers/{serverId}/tools)
+	ListMcpTools(w http.ResponseWriter, r *http.Request, serverId ServerId)
+	// Mark a changed tool as reviewed without changing its tier.
+	// (POST /mcp-servers/{serverId}/tools/{toolName}/review)
+	AcknowledgeMcpToolReview(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName)
+	// Move a tool to a tier: `ask` (a human approves each call), `auto` (the agent calls it) or
+	// `never`. Works on declared servers too. Clears the tool's review flag.
+	// (PUT /mcp-servers/{serverId}/tools/{toolName}/tier)
+	SetMcpToolTier(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName)
 	// List the org's models, entered and declared.
 	// (GET /models)
 	ListModels(w http.ResponseWriter, r *http.Request)
@@ -630,6 +844,68 @@ func (siw *ServerInterfaceWrapper) SetAgentBudget(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetAgentMcpServers operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentMcpServers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "agentId" -------------
+	var agentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agentId", r.PathValue("agentId"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agentId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentMcpServers(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentMcpServers operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentMcpServers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "agentId" -------------
+	var agentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agentId", r.PathValue("agentId"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agentId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentMcpServers(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetBudget operation middleware
 func (siw *ServerInterfaceWrapper) GetBudget(w http.ResponseWriter, r *http.Request) {
 
@@ -661,6 +937,250 @@ func (siw *ServerInterfaceWrapper) SetBudget(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetBudget(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMcpServers operation middleware
+func (siw *ServerInterfaceWrapper) ListMcpServers(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMcpServers(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMcpServer operation middleware
+func (siw *ServerInterfaceWrapper) CreateMcpServer(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMcpServer(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMcpServer operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMcpServer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId ServerId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", r.PathValue("serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMcpServer(w, r, serverId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMcpServer operation middleware
+func (siw *ServerInterfaceWrapper) GetMcpServer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId ServerId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", r.PathValue("serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMcpServer(w, r, serverId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateMcpServer operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMcpServer(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId ServerId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", r.PathValue("serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateMcpServer(w, r, serverId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMcpTools operation middleware
+func (siw *ServerInterfaceWrapper) ListMcpTools(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId ServerId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", r.PathValue("serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMcpTools(w, r, serverId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcknowledgeMcpToolReview operation middleware
+func (siw *ServerInterfaceWrapper) AcknowledgeMcpToolReview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId ServerId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", r.PathValue("serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "toolName" -------------
+	var toolName ToolName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "toolName", r.PathValue("toolName"), &toolName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "toolName", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcknowledgeMcpToolReview(w, r, serverId, toolName)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetMcpToolTier operation middleware
+func (siw *ServerInterfaceWrapper) SetMcpToolTier(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId ServerId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", r.PathValue("serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "toolName" -------------
+	var toolName ToolName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "toolName", r.PathValue("toolName"), &toolName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "toolName", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetMcpToolTier(w, r, serverId, toolName)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1327,8 +1847,18 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc("GET "+options.BaseURL+"/agents/{agentId}/budget", wrapper.GetAgentBudget)
 	m.HandleFunc("PUT "+options.BaseURL+"/agents/{agentId}/budget", wrapper.SetAgentBudget)
+	m.HandleFunc("GET "+options.BaseURL+"/agents/{agentId}/mcp-servers", wrapper.GetAgentMcpServers)
+	m.HandleFunc("PUT "+options.BaseURL+"/agents/{agentId}/mcp-servers", wrapper.SetAgentMcpServers)
 	m.HandleFunc("GET "+options.BaseURL+"/budget", wrapper.GetBudget)
 	m.HandleFunc("PUT "+options.BaseURL+"/budget", wrapper.SetBudget)
+	m.HandleFunc("GET "+options.BaseURL+"/mcp-servers", wrapper.ListMcpServers)
+	m.HandleFunc("POST "+options.BaseURL+"/mcp-servers", wrapper.CreateMcpServer)
+	m.HandleFunc("DELETE "+options.BaseURL+"/mcp-servers/{serverId}", wrapper.DeleteMcpServer)
+	m.HandleFunc("GET "+options.BaseURL+"/mcp-servers/{serverId}", wrapper.GetMcpServer)
+	m.HandleFunc("PATCH "+options.BaseURL+"/mcp-servers/{serverId}", wrapper.UpdateMcpServer)
+	m.HandleFunc("GET "+options.BaseURL+"/mcp-servers/{serverId}/tools", wrapper.ListMcpTools)
+	m.HandleFunc("POST "+options.BaseURL+"/mcp-servers/{serverId}/tools/{toolName}/review", wrapper.AcknowledgeMcpToolReview)
+	m.HandleFunc("PUT "+options.BaseURL+"/mcp-servers/{serverId}/tools/{toolName}/tier", wrapper.SetMcpToolTier)
 	m.HandleFunc("GET "+options.BaseURL+"/models", wrapper.ListModels)
 	m.HandleFunc("POST "+options.BaseURL+"/models", wrapper.CreateModel)
 	m.HandleFunc("DELETE "+options.BaseURL+"/models/{modelId}", wrapper.DeleteModel)
@@ -1414,6 +1944,65 @@ func (response SetAgentBudgetdefaultJSONResponse) VisitSetAgentBudgetResponse(w 
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type GetAgentMcpServersRequestObject struct {
+	AgentId openapi_types.UUID `json:"agentId"`
+}
+
+type GetAgentMcpServersResponseObject interface {
+	VisitGetAgentMcpServersResponse(w http.ResponseWriter) error
+}
+
+type GetAgentMcpServers200JSONResponse AgentMcpServers
+
+func (response GetAgentMcpServers200JSONResponse) VisitGetAgentMcpServersResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentMcpServersdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetAgentMcpServersdefaultJSONResponse) VisitGetAgentMcpServersResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetAgentMcpServersRequestObject struct {
+	AgentId openapi_types.UUID `json:"agentId"`
+	Body    *SetAgentMcpServersJSONRequestBody
+}
+
+type SetAgentMcpServersResponseObject interface {
+	VisitSetAgentMcpServersResponse(w http.ResponseWriter) error
+}
+
+type SetAgentMcpServers200JSONResponse AgentMcpServers
+
+func (response SetAgentMcpServers200JSONResponse) VisitSetAgentMcpServersResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetAgentMcpServersdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetAgentMcpServersdefaultJSONResponse) VisitSetAgentMcpServersResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type GetBudgetRequestObject struct {
 }
 
@@ -1465,6 +2054,240 @@ type SetBudgetdefaultJSONResponse struct {
 }
 
 func (response SetBudgetdefaultJSONResponse) VisitSetBudgetResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListMcpServersRequestObject struct {
+}
+
+type ListMcpServersResponseObject interface {
+	VisitListMcpServersResponse(w http.ResponseWriter) error
+}
+
+type ListMcpServers200JSONResponse McpServerList
+
+func (response ListMcpServers200JSONResponse) VisitListMcpServersResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListMcpServersdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListMcpServersdefaultJSONResponse) VisitListMcpServersResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type CreateMcpServerRequestObject struct {
+	Body *CreateMcpServerJSONRequestBody
+}
+
+type CreateMcpServerResponseObject interface {
+	VisitCreateMcpServerResponse(w http.ResponseWriter) error
+}
+
+type CreateMcpServer201JSONResponse McpServer
+
+func (response CreateMcpServer201JSONResponse) VisitCreateMcpServerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateMcpServerdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CreateMcpServerdefaultJSONResponse) VisitCreateMcpServerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type DeleteMcpServerRequestObject struct {
+	ServerId ServerId `json:"serverId"`
+}
+
+type DeleteMcpServerResponseObject interface {
+	VisitDeleteMcpServerResponse(w http.ResponseWriter) error
+}
+
+type DeleteMcpServer204Response struct {
+}
+
+func (response DeleteMcpServer204Response) VisitDeleteMcpServerResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteMcpServerdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response DeleteMcpServerdefaultJSONResponse) VisitDeleteMcpServerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetMcpServerRequestObject struct {
+	ServerId ServerId `json:"serverId"`
+}
+
+type GetMcpServerResponseObject interface {
+	VisitGetMcpServerResponse(w http.ResponseWriter) error
+}
+
+type GetMcpServer200JSONResponse McpServer
+
+func (response GetMcpServer200JSONResponse) VisitGetMcpServerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetMcpServerdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetMcpServerdefaultJSONResponse) VisitGetMcpServerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type UpdateMcpServerRequestObject struct {
+	ServerId ServerId `json:"serverId"`
+	Body     *UpdateMcpServerJSONRequestBody
+}
+
+type UpdateMcpServerResponseObject interface {
+	VisitUpdateMcpServerResponse(w http.ResponseWriter) error
+}
+
+type UpdateMcpServer200JSONResponse McpServer
+
+func (response UpdateMcpServer200JSONResponse) VisitUpdateMcpServerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type UpdateMcpServerdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response UpdateMcpServerdefaultJSONResponse) VisitUpdateMcpServerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListMcpToolsRequestObject struct {
+	ServerId ServerId `json:"serverId"`
+}
+
+type ListMcpToolsResponseObject interface {
+	VisitListMcpToolsResponse(w http.ResponseWriter) error
+}
+
+type ListMcpTools200JSONResponse McpToolList
+
+func (response ListMcpTools200JSONResponse) VisitListMcpToolsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListMcpToolsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListMcpToolsdefaultJSONResponse) VisitListMcpToolsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type AcknowledgeMcpToolReviewRequestObject struct {
+	ServerId ServerId `json:"serverId"`
+	ToolName ToolName `json:"toolName"`
+}
+
+type AcknowledgeMcpToolReviewResponseObject interface {
+	VisitAcknowledgeMcpToolReviewResponse(w http.ResponseWriter) error
+}
+
+type AcknowledgeMcpToolReview200JSONResponse McpTool
+
+func (response AcknowledgeMcpToolReview200JSONResponse) VisitAcknowledgeMcpToolReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AcknowledgeMcpToolReviewdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response AcknowledgeMcpToolReviewdefaultJSONResponse) VisitAcknowledgeMcpToolReviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetMcpToolTierRequestObject struct {
+	ServerId ServerId `json:"serverId"`
+	ToolName ToolName `json:"toolName"`
+	Body     *SetMcpToolTierJSONRequestBody
+}
+
+type SetMcpToolTierResponseObject interface {
+	VisitSetMcpToolTierResponse(w http.ResponseWriter) error
+}
+
+type SetMcpToolTier200JSONResponse McpTool
+
+func (response SetMcpToolTier200JSONResponse) VisitSetMcpToolTierResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetMcpToolTierdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetMcpToolTierdefaultJSONResponse) VisitSetMcpToolTierResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 
@@ -2052,12 +2875,46 @@ type StrictServerInterface interface {
 	// Set an agent's daily limit. A template's spendUSD is only the default for a new agent.
 	// (PUT /agents/{agentId}/budget)
 	SetAgentBudget(ctx context.Context, request SetAgentBudgetRequestObject) (SetAgentBudgetResponseObject, error)
+	// The servers an agent may use.
+	// (GET /agents/{agentId}/mcp-servers)
+	GetAgentMcpServers(ctx context.Context, request GetAgentMcpServersRequestObject) (GetAgentMcpServersResponseObject, error)
+	// Replace the servers an agent may use, each optionally narrowed to some tools. Tools are
+	// offered by tier; a tool the server adds later enters the ask tier for an agent that allows the
+	// whole server.
+	// (PUT /agents/{agentId}/mcp-servers)
+	SetAgentMcpServers(ctx context.Context, request SetAgentMcpServersRequestObject) (SetAgentMcpServersResponseObject, error)
 	// The org's monthly cap (calendar month, UTC), its platform ceiling and this month's spend.
 	// (GET /budget)
 	GetBudget(ctx context.Context, request GetBudgetRequestObject) (GetBudgetResponseObject, error)
 	// Set the org's monthly cap, or clear it by leaving `monthlyCapUsd` out.
 	// (PUT /budget)
 	SetBudget(ctx context.Context, request SetBudgetRequestObject) (SetBudgetResponseObject, error)
+	// List the org's remote MCP servers, entered and declared, with their health.
+	// (GET /mcp-servers)
+	ListMcpServers(ctx context.Context, request ListMcpServersRequestObject) (ListMcpServersResponseObject, error)
+	// Add a remote MCP server. A server that asks each user to sign in with OAuth is refused (planned
+	// for v0.2).
+	// (POST /mcp-servers)
+	CreateMcpServer(ctx context.Context, request CreateMcpServerRequestObject) (CreateMcpServerResponseObject, error)
+	// Delete a server, its tools and the agents' allowances of it. Declared servers answer 409.
+	// (DELETE /mcp-servers/{serverId})
+	DeleteMcpServer(ctx context.Context, request DeleteMcpServerRequestObject) (DeleteMcpServerResponseObject, error)
+	// Get a server.
+	// (GET /mcp-servers/{serverId})
+	GetMcpServer(ctx context.Context, request GetMcpServerRequestObject) (GetMcpServerResponseObject, error)
+	// Change a server's URL, transport or credential. Declared servers answer 409.
+	// (PATCH /mcp-servers/{serverId})
+	UpdateMcpServer(ctx context.Context, request UpdateMcpServerRequestObject) (UpdateMcpServerResponseObject, error)
+	// The server's tools with their tiers and review flags.
+	// (GET /mcp-servers/{serverId}/tools)
+	ListMcpTools(ctx context.Context, request ListMcpToolsRequestObject) (ListMcpToolsResponseObject, error)
+	// Mark a changed tool as reviewed without changing its tier.
+	// (POST /mcp-servers/{serverId}/tools/{toolName}/review)
+	AcknowledgeMcpToolReview(ctx context.Context, request AcknowledgeMcpToolReviewRequestObject) (AcknowledgeMcpToolReviewResponseObject, error)
+	// Move a tool to a tier: `ask` (a human approves each call), `auto` (the agent calls it) or
+	// `never`. Works on declared servers too. Clears the tool's review flag.
+	// (PUT /mcp-servers/{serverId}/tools/{toolName}/tier)
+	SetMcpToolTier(ctx context.Context, request SetMcpToolTierRequestObject) (SetMcpToolTierResponseObject, error)
 	// List the org's models, entered and declared.
 	// (GET /models)
 	ListModels(ctx context.Context, request ListModelsRequestObject) (ListModelsResponseObject, error)
@@ -2208,6 +3065,65 @@ func (sh *strictHandler) SetAgentBudget(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
+// GetAgentMcpServers operation middleware
+func (sh *strictHandler) GetAgentMcpServers(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	var request GetAgentMcpServersRequestObject
+
+	request.AgentId = agentId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentMcpServers(ctx, request.(GetAgentMcpServersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentMcpServers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentMcpServersResponseObject); ok {
+		if err := validResponse.VisitGetAgentMcpServersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetAgentMcpServers operation middleware
+func (sh *strictHandler) SetAgentMcpServers(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	var request SetAgentMcpServersRequestObject
+
+	request.AgentId = agentId
+
+	var body SetAgentMcpServersJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetAgentMcpServers(ctx, request.(SetAgentMcpServersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetAgentMcpServers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetAgentMcpServersResponseObject); ok {
+		if err := validResponse.VisitSetAgentMcpServersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetBudget operation middleware
 func (sh *strictHandler) GetBudget(w http.ResponseWriter, r *http.Request) {
 	var request GetBudgetRequestObject
@@ -2256,6 +3172,233 @@ func (sh *strictHandler) SetBudget(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetBudgetResponseObject); ok {
 		if err := validResponse.VisitSetBudgetResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMcpServers operation middleware
+func (sh *strictHandler) ListMcpServers(w http.ResponseWriter, r *http.Request) {
+	var request ListMcpServersRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMcpServers(ctx, request.(ListMcpServersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMcpServers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMcpServersResponseObject); ok {
+		if err := validResponse.VisitListMcpServersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateMcpServer operation middleware
+func (sh *strictHandler) CreateMcpServer(w http.ResponseWriter, r *http.Request) {
+	var request CreateMcpServerRequestObject
+
+	var body CreateMcpServerJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateMcpServer(ctx, request.(CreateMcpServerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateMcpServer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateMcpServerResponseObject); ok {
+		if err := validResponse.VisitCreateMcpServerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteMcpServer operation middleware
+func (sh *strictHandler) DeleteMcpServer(w http.ResponseWriter, r *http.Request, serverId ServerId) {
+	var request DeleteMcpServerRequestObject
+
+	request.ServerId = serverId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteMcpServer(ctx, request.(DeleteMcpServerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteMcpServer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteMcpServerResponseObject); ok {
+		if err := validResponse.VisitDeleteMcpServerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMcpServer operation middleware
+func (sh *strictHandler) GetMcpServer(w http.ResponseWriter, r *http.Request, serverId ServerId) {
+	var request GetMcpServerRequestObject
+
+	request.ServerId = serverId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMcpServer(ctx, request.(GetMcpServerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMcpServer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMcpServerResponseObject); ok {
+		if err := validResponse.VisitGetMcpServerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateMcpServer operation middleware
+func (sh *strictHandler) UpdateMcpServer(w http.ResponseWriter, r *http.Request, serverId ServerId) {
+	var request UpdateMcpServerRequestObject
+
+	request.ServerId = serverId
+
+	var body UpdateMcpServerJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateMcpServer(ctx, request.(UpdateMcpServerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateMcpServer")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateMcpServerResponseObject); ok {
+		if err := validResponse.VisitUpdateMcpServerResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListMcpTools operation middleware
+func (sh *strictHandler) ListMcpTools(w http.ResponseWriter, r *http.Request, serverId ServerId) {
+	var request ListMcpToolsRequestObject
+
+	request.ServerId = serverId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListMcpTools(ctx, request.(ListMcpToolsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListMcpTools")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListMcpToolsResponseObject); ok {
+		if err := validResponse.VisitListMcpToolsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AcknowledgeMcpToolReview operation middleware
+func (sh *strictHandler) AcknowledgeMcpToolReview(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName) {
+	var request AcknowledgeMcpToolReviewRequestObject
+
+	request.ServerId = serverId
+	request.ToolName = toolName
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AcknowledgeMcpToolReview(ctx, request.(AcknowledgeMcpToolReviewRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AcknowledgeMcpToolReview")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AcknowledgeMcpToolReviewResponseObject); ok {
+		if err := validResponse.VisitAcknowledgeMcpToolReviewResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetMcpToolTier operation middleware
+func (sh *strictHandler) SetMcpToolTier(w http.ResponseWriter, r *http.Request, serverId ServerId, toolName ToolName) {
+	var request SetMcpToolTierRequestObject
+
+	request.ServerId = serverId
+	request.ToolName = toolName
+
+	var body SetMcpToolTierJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetMcpToolTier(ctx, request.(SetMcpToolTierRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetMcpToolTier")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetMcpToolTierResponseObject); ok {
+		if err := validResponse.VisitSetMcpToolTierResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

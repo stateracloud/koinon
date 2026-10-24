@@ -141,11 +141,11 @@ var _ = Describe("Org MCP servers", func() {
 		st := mg.last()
 		Expect(st.Tools[ref(slug, a)]).To(ConsistOf(
 			gateway.ToolGrant{Target: slug + "-wiki", Tools: []string{"list", "read"}},
-			gateway.ToolGrant{Target: slug + "-wiki-ask", Tools: []string{"write"}},
+			gateway.ToolGrant{Target: slug + "-wiki-ask", Tools: []string{"write", "get_approval_status"}},
 		))
 		Expect(st.Tools[ref(slug, b)]).To(ConsistOf(
 			gateway.ToolGrant{Target: slug + "-wiki", Tools: []string{"read"}},
-			gateway.ToolGrant{Target: slug + "-wiki-ask", Tools: []string{"write"}},
+			gateway.ToolGrant{Target: slug + "-wiki-ask", Tools: []string{"write", "get_approval_status"}},
 		))
 		ask, ok := targetOf(st, slug+"-wiki-ask")
 		Expect(ok).To(BeTrue())
