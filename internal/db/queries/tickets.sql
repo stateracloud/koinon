@@ -38,7 +38,8 @@ RETURNING *;
 -- of one of the ticket's active runs can set it.
 UPDATE tickets t
 SET harness_session_id = @harness_session_id::text, harness_session_cwd = @harness_session_cwd::text,
-    harness_session_generation = sqlc.narg(harness_session_generation)
+    harness_session_generation = sqlc.narg(harness_session_generation),
+    session_restart_pending = false
 WHERE t.org_id = @org_id AND t.id = @id
   AND EXISTS (
       SELECT 1 FROM runs r

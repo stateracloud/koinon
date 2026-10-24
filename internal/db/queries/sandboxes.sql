@@ -70,6 +70,16 @@ SET state = @state::sandbox_state,
                       THEN now() ELSE agent_sandboxes.started_at END,
     stopped_at = CASE WHEN @state::sandbox_state = 'stopped' AND agent_sandboxes.state <> 'stopped'
                       THEN now() ELSE agent_sandboxes.stopped_at END,
+    -- The unhealthy mark ends with the sandbox it was made for (ADR 0054).
+    unhealthy_at = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
+                         AND nullif(@home_generation::text, '') IS DISTINCT FROM unhealthy_generation
+                        THEN NULL ELSE unhealthy_at END,
+    unhealthy_reason = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
+                             AND nullif(@home_generation::text, '') IS DISTINCT FROM unhealthy_generation
+                            THEN NULL ELSE unhealthy_reason END,
+    unhealthy_generation = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
+                                 AND nullif(@home_generation::text, '') IS DISTINCT FROM unhealthy_generation
+                                THEN NULL ELSE unhealthy_generation END,
     observed_at = now()
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;

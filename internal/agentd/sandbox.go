@@ -41,6 +41,9 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 				return store.AgentSandbox{}, ctx.Err()
 			}
 			last = err.Error()
+		case sb.State == store.SandboxStateReady && sb.UnhealthyAt.Valid:
+			// Found stuck: the reconciler recreates it (ADR 0054).
+			last = "recreating the stuck sandbox"
 		case sb.State == store.SandboxStateReady:
 			return sb, nil
 		case sb.State == store.SandboxStateError, sb.State == store.SandboxStateDeleted,
@@ -89,9 +92,14 @@ func (r *runner) mkdir(ctx context.Context, workspace, name, dir string) error {
 // sandboxExec runs a short command in the sandbox with stdin as its input and returns its
 // output, exit code and the tail of its standard error.
 func (r *runner) sandboxExec(ctx context.Context, workspace, name string, cmd []string, stdin []byte) ([]byte, int, string, error) {
+	return r.sandboxExecLimit(ctx, workspace, name, cmd, stdin, time.Minute, 1<<20)
+}
+
+// sandboxExecLimit is sandboxExec with its own timeout and cap on the output it reads.
+func (r *runner) sandboxExecLimit(ctx context.Context, workspace, name string, cmd []string, stdin []byte, timeout time.Duration, limit int64) ([]byte, int, string, error) {
 	var stderr tail
 	proc, err := r.p.backend.Exec(ctx, workspace, name, execution.ExecRequest{
-		Command: cmd, Stderr: &stderr, Timeout: time.Minute,
+		Command: cmd, Stderr: &stderr, Timeout: timeout,
 	})
 	if err != nil {
 		return nil, 0, "", err
@@ -102,7 +110,7 @@ func (r *runner) sandboxExec(ctx context.Context, workspace, name string, cmd []
 		_, err := proc.Stdin().Write(stdin)
 		werr <- errors.Join(err, proc.Stdin().Close())
 	}()
-	out, _ := io.ReadAll(io.LimitReader(proc.Stdout(), 1<<20))
+	out, _ := io.ReadAll(io.LimitReader(proc.Stdout(), limit))
 	code, err := proc.Wait()
 	if err != nil {
 		return nil, 0, "", err

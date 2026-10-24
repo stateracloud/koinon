@@ -30,6 +30,11 @@ service AgentService {
   // proposes. Admins and owners only.
   rpc ActivateAgent(ActivateAgentRequest) returns (ActivateAgentResponse);
 
+  // ResumeAgent clears the unhealthy state of an agent whose sandbox got stuck again and again
+  // (ADR 0054), so it takes runs again; its stuck sandbox is recreated. Audited. Admins and owners
+  // only.
+  rpc ResumeAgent(ResumeAgentRequest) returns (ResumeAgentResponse);
+
   // ArchiveAgent archives a draft or active agent and cancels its unfinished
   // runs. Admins and owners only.
   rpc ArchiveAgent(ArchiveAgentRequest) returns (ArchiveAgentResponse);
@@ -67,6 +72,10 @@ message Agent {
   google.protobuf.Timestamp created_at = 15;
   google.protobuf.Timestamp activated_at = 16;
   google.protobuf.Timestamp archived_at = 17;
+  // Set while the agent is unhealthy: its sandbox got stuck three times in 24 hours and was not
+  // recreated again (ADR 0054). New runs are refused until ResumeAgent.
+  google.protobuf.Timestamp unhealthy_at = 18;
+  string unhealthy_reason = 19;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -130,10 +139,27 @@ message ActivateAgentRequest {
   // Must equal the agent's latest_version, so the caller approves exactly the
   // grants they saw; otherwise the call fails with FailedPrecondition.
   int32 version = 3;
+  // Start fresh sessions, with a handoff, on the agent's open tickets: their next run begins a new
+  // session from the agent's last notes and replies instead of loading the old one, so the new
+  // version's instructions apply (ADR 0051 amendment). Default off; audited.
+  bool apply_to_open_tickets = 4;
 }
 
 // ActivateAgentResponse holds the active agent.
 message ActivateAgentResponse {
+  Agent agent = 1;
+  // How many open tickets were marked to start a fresh session.
+  int32 tickets_restarting = 2;
+}
+
+// ResumeAgentRequest names the agent.
+message ResumeAgentRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+// ResumeAgentResponse holds the agent, healthy again.
+message ResumeAgentResponse {
   Agent agent = 1;
 }
 

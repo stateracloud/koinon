@@ -30,6 +30,8 @@ api:
   # The GitHub tools MCP server (plan item C3): its own listener and Service, reachable only from
   # agentgateway (NetworkPolicy), never through the API Service or ingress.
   toolsPort: 8081
+  # Saved work from a stuck sandbox, for koinon-agentd only (ADR 0054).
+  savedWorkPort: 8082
   # 512Mi: a password hash or check holds 64 MiB, and at most two run at once (internal/auth).
   resources:
     requests: {cpu: 50m, memory: 128Mi}
@@ -78,7 +80,8 @@ agentd:
   gatewayURL: ""
   resources:
     requests: {cpu: 50m, memory: 64Mi}
-    limits: {memory: 256Mi}
+    # Saving a stuck sandbox's work (up to 50 MB, ADR 0054) holds it in memory a few times over.
+    limits: {memory: 512Mi}
   podAnnotations: {}
   nodeSelector: {}
   tolerations: []

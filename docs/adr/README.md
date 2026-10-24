@@ -65,10 +65,10 @@ are in [0046](0046-adr-conventions.md).
 | [0048](0048-openshell-spike-results.md) | OpenShell spike results | Proposed |
 | [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes, agentd placement | Accepted, amended by 0056, 0058; Helm model values dropped by 0056 |
 | [0050](0050-spend-ledger-ingestion-and-net-limits.md) | Spend ledger ingestion and net limits | Proposed, amended by 0056 |
-| [0051](0051-session-home-generations.md) | Session home generations | Accepted, amended by 0054 and 2026-10-23 |
+| [0051](0051-session-home-generations.md) | Session home generations | Accepted, amended by 0054 and 2026-10-23, 2026-10-24 |
 | [0052](0052-opencode-v2-flavor.md) | OpenCode flavor on OpenCode v2 | Accepted |
 | [0053](0053-hermes-context-file-patch.md) | Hermes context-file build patch: redo on every upgrade, with a guard test | Accepted |
-| [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted |
+| [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted, amended 2026-10-24 |
 | [0055](0055-chat-as-its-own-object.md) | Chat is its own object | Accepted |
 | [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted, amended 2026-10-23 |
 | [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted |

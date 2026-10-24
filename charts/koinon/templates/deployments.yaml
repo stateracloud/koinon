@@ -53,7 +53,7 @@ spec:
             httpGet: {path: /healthz, port: health}
           {{- end }}
           {{- if eq $component "api" }}
-          args: ["-addr", ":{{ $v.port }}", "-otlp-addr", ":{{ $v.otlpPort }}", "-tools-addr", ":{{ $v.toolsPort }}"]
+          args: ["-addr", ":{{ $v.port }}", "-otlp-addr", ":{{ $v.otlpPort }}", "-tools-addr", ":{{ $v.toolsPort }}", "-saved-work-addr", ":{{ $v.savedWorkPort }}", "-saved-work-secret", "{{ include "koinon.savedWorkSecretName" $ }}"]
           ports:
             - name: http
               containerPort: {{ $v.port }}
@@ -61,6 +61,8 @@ spec:
               containerPort: {{ $v.otlpPort }}
             - name: tools
               containerPort: {{ $v.toolsPort }}
+            - name: savedwork
+              containerPort: {{ $v.savedWorkPort }}
           # Until the first migration has run, koinon-api retries its bootstrap without serving;
           # the startup probe keeps the liveness probe from restarting it meanwhile.
           startupProbe:
@@ -103,6 +105,9 @@ spec:
             {{- if eq $component "reconciler" }}
             {{- include "koinon.kekVolumeMount" $ | nindent 12 }}
             {{- end }}
+            {{- if eq $component "agentd" }}
+            {{- include "koinon.savedWorkVolumeMount" $ | nindent 12 }}
+            {{- end }}
             {{- if ne $component "api" }}
             {{- include "koinon.openshellVolumeMount" $ | nindent 12 }}
             {{- else }}
@@ -119,6 +124,9 @@ spec:
         {{- include "koinon.dbVolume" $ | nindent 8 }}
         {{- if eq $component "reconciler" }}
         {{- include "koinon.kekVolume" $ | nindent 8 }}
+        {{- end }}
+        {{- if eq $component "agentd" }}
+        {{- include "koinon.savedWorkVolume" $ | nindent 8 }}
         {{- end }}
         {{- if ne $component "api" }}
         {{- include "koinon.openshellVolume" $ | nindent 8 }}
@@ -176,3 +184,19 @@ spec:
     - name: tools
       port: {{ .Values.api.toolsPort }}
       targetPort: tools
+---
+# Saved work from a stuck sandbox, for koinon-agentd only (ADR 0054; see networkpolicy.yaml). Its own
+# Service and port keep it apart from the tools, which trust agentgateway's agent header.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "koinon.componentName" (list . "api-saved-work") }}
+  labels:
+    {{- include "koinon.labels" (list . "api") | nindent 4 }}
+spec:
+  selector:
+    {{- include "koinon.selectorLabels" (list . "api") | nindent 4 }}
+  ports:
+    - name: savedwork
+      port: {{ .Values.api.savedWorkPort }}
+      targetPort: savedwork

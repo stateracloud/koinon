@@ -5,6 +5,7 @@ import { createConnectQueryKey, useMutation, useQuery, useTransport } from '@con
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { AgentNotes } from '@/components/agent-notes'
 import { ApprovalView } from '@/components/approval-view'
 import { Timeline } from '@/components/timeline'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -70,7 +71,8 @@ export function TicketPage() {
   }
 
   const t = ticket.data.ticket
-  const agentName = agents.data?.agents.find((a) => a.id === t?.agentId)?.displayName
+  const agent = agents.data?.agents.find((a) => a.id === t?.agentId)
+  const agentName = agent?.displayName
   const runs = ticket.data.runs.map((r) => watches[r.id]?.run ?? r)
   // Costs come from GetTicket only: watched runs carry none.
   const runCosts = ticket.data.runs.map((r, i) => ({ id: r.id, state: runs[i].state, cost: r.cost }))
@@ -102,7 +104,25 @@ export function TicketPage() {
         )}
       </div>
 
+      {agent?.unhealthyAt && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="grid gap-1">
+            <span className="font-medium">This agent is unhealthy: runs on this ticket wait until it is resumed.</span>
+            {agent.unhealthyReason && <span>Reason: {agent.unhealthyReason}</span>}
+            {org.role >= OrgRole.ADMIN ? (
+              <Link to="/agents/$agentId" params={{ agentId: agent.id }} className="underline">
+                Open the agent to resume it
+              </Link>
+            ) : (
+              <span>An org admin or owner can resume it.</span>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <RunStatus runs={active.map((r) => ({ id: r.id, state: runStateLabel(r.state), watch: watches[r.id] }))} />
+
+      <AgentNotes summary={t?.agentSummary ?? ''} at={t?.agentSummaryAt} />
 
       <Timeline items={items} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
 

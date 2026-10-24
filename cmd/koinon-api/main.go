@@ -26,6 +26,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"flag"
@@ -43,6 +44,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for goose
 	"github.com/pressly/goose/v3"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -67,6 +71,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
+	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/services"
@@ -106,6 +111,8 @@ type config struct {
 
 	otlpAddr         string
 	toolsAddr        string
+	savedWorkAddr    string
+	savedWorkSecret  string
 	secretsNamespace string
 	kubeconfig       string
 	githubAPIURL     string
@@ -170,6 +177,10 @@ func parseFlags(args []string) (config, error) {
 		"listen address of the spend ledger's OTLP/HTTP logs receiver, for agentgateway's access log; "+
 			"it has no authentication, so restrict it to agentgateway with a NetworkPolicy; empty disables it")
 
+	fs.StringVar(&c.savedWorkAddr, "saved-work-addr", "",
+		"listen address of the saved-work upload endpoint, for koinon-agentd only; empty disables it")
+	fs.StringVar(&c.savedWorkSecret, "saved-work-secret", "koinon-saved-work",
+		"Secret with the key that signs saved-work uploads; created on first use, never overwritten")
 	fs.StringVar(&c.toolsAddr, "tools-addr", ":8081",
 		"listen address of the GitHub tools MCP server, for agentgateway only; empty disables it")
 	fs.StringVar(&c.secretsNamespace, "secrets-namespace", "",
@@ -434,6 +445,7 @@ func run() error {
 		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
 		approvalOpts.ExecKeys = mcpservers.KubeExecKeys{Client: kube, Namespace: cfg.secretsNamespace}
 	}
+	approvalOpts.SavedWorkKeys = keyring // opens the work saved from stuck sandboxes (ADR 0054)
 	approvalSvc := approvals.New(pool, approvalOpts)
 	go approvalSvc.Sweeper(bgCtx, cfg.sweepInterval)
 	tokenSvc := tokens.New(pool, nil)
@@ -513,6 +525,30 @@ func run() error {
 			}
 		}()
 	}
+	// Saved work from a stuck sandbox (ADR 0054) arrives on its own listener, which only koinon-agentd
+	// may reach: koinon-agentd holds no KEK, so it posts the bundle here to be sealed. The tools
+	// listener stays agentgateway's alone.
+	if cfg.savedWorkAddr != "" && keyring != nil && kube != nil {
+		secretName := cfg.savedWorkSecret
+		keyFn := func(ctx context.Context) ([]byte, error) {
+			return savedWorkKey(ctx, kube, cfg.secretsNamespace, secretName)
+		}
+		if _, err := keyFn(ctx); err != nil {
+			return fmt.Errorf("saved-work upload key: %w", err)
+		}
+		mux := http.NewServeMux()
+		mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(pool, keyring, keyFn, slog.Default()))
+		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+		swSrv := &http.Server{Addr: cfg.savedWorkAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		servers = append(servers, swSrv)
+		go func() {
+			slog.Info("serving saved-work uploads", "addr", cfg.savedWorkAddr)
+			if err := swSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				toolsErr <- err
+				stop()
+			}
+		}()
+	}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -571,4 +607,37 @@ func migrate(ctx context.Context, dsn string, wait time.Duration) error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil
+}
+
+// savedWorkKey returns the key that signs saved-work uploads, creating its Secret (32 random bytes
+// under "key") when it does not exist and never overwriting one that does.
+func savedWorkKey(ctx context.Context, kube kubernetes.Interface, namespace, name string) ([]byte, error) {
+	secrets := kube.CoreV1().Secrets(namespace)
+	get := func() ([]byte, error) {
+		sec, err := secrets.Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		if len(sec.Data[savedwork.KeyFile]) < 32 {
+			return nil, fmt.Errorf("the Secret %s/%s has no usable %q", namespace, name, savedwork.KeyFile)
+		}
+		return sec.Data[savedwork.KeyFile], nil
+	}
+	key, err := get()
+	if err == nil || !apierrors.IsNotFound(err) {
+		return key, err
+	}
+	k := make([]byte, 32)
+	if _, err := rand.Read(k); err != nil {
+		return nil, err
+	}
+	_, err = secrets.Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: map[string]string{project.Domain + "/managed-by": "koinon-api"}},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{savedwork.KeyFile: k},
+	}, metav1.CreateOptions{FieldManager: "koinon-api"})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return nil, err
+	}
+	return get()
 }

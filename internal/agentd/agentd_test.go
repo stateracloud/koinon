@@ -118,7 +118,7 @@ var _ = Describe("Pool", func() {
 			"acp.tool_call", "acp.permission",
 			"acp.tool_call", "acp.permission",
 			"acp.agent_message_chunk",
-			"run.succeeded",
+			"run.summary", "run.succeeded",
 		}))
 		Expect(payload(evs[0])).To(HaveKeyWithValue("loaded", false))
 		perms := eventOf(evs, "acp.permission")
@@ -158,7 +158,7 @@ var _ = Describe("Pool", func() {
 		// The replayed history is not recorded again.
 		evs := events(ctx, r2)
 		expectOrdered(evs)
-		Expect(kinds(evs)).To(Equal([]string{"run.session", "run.prompt", "acp.agent_message_chunk", "run.succeeded"}))
+		Expect(kinds(evs)).To(Equal([]string{"run.session", "run.prompt", "acp.agent_message_chunk", "run.summary", "run.succeeded"}))
 		Expect(payload(evs[0])).To(HaveKeyWithValue("loaded", true))
 
 		// The session was stored in the sandbox's home generation, which still matches.
@@ -342,7 +342,7 @@ var _ = Describe("Pool", func() {
 		expectOrdered(evs)
 		Expect(kinds(evs)).To(Equal([]string{
 			"run.session", "run.prompt", "acp.agent_message_chunk", "run.interrupted",
-			"run.session", "run.prompt", "acp.agent_message_chunk", "run.succeeded",
+			"run.session", "run.prompt", "acp.agent_message_chunk", "run.summary", "run.succeeded",
 		}))
 		Expect(evs[4].Epoch).To(Equal(evs[0].Epoch + 1))
 		Expect(payload(evs[3])).To(HaveKeyWithValue("exitCode", BeEquivalentTo(137)))
@@ -375,7 +375,7 @@ var _ = Describe("Pool", func() {
 		expectOrdered(evs)
 		Expect(kinds(evs)).To(Equal([]string{
 			"run.session", "run.prompt", "acp.agent_message_chunk", "acp.agent_message_chunk",
-			"run.session", "run.prompt", "acp.agent_message_chunk", "run.succeeded",
+			"run.session", "run.prompt", "acp.agent_message_chunk", "run.summary", "run.succeeded",
 		}))
 		Expect(chunks(evs)).To(Equal([]string{"one ", "two ", "resumed"}), "the replayed history is not recorded again")
 		for _, ev := range evs[:4] {

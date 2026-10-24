@@ -141,7 +141,7 @@ Upstream research during the ADR work changed some of the decisions above. Detai
 | ADR | Change |
 | --- | --- |
 | [0053](adr/0053-hermes-context-file-patch.md) | Hermes context-file build patch is redone on every upgrade, with a guard test |
-| [0054](adr/0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is marked unhealthy after 60 s and recreated |
+| [0054](adr/0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is saved (uncommitted work, sealed, pushed only on approval), marked unhealthy after 60 s and recreated; three recreations a day make the agent unhealthy |
 | [0055](adr/0055-chat-as-its-own-object.md) | Chat is its own object; supersedes 0017 (v0.2) |
 | [0056](adr/0056-model-providers-pricing-and-budgets-per-org.md) | Providers, models, pricing and budgets per org, with an admin API |
 | [0057](adr/0057-mcp-servers.md) | MCP servers: remote and container, catalog, per-agent allowlists |

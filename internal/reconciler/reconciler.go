@@ -47,6 +47,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -662,6 +663,24 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 
 	if sb.Phase == execution.PhaseDeleting {
 		return r.record(ctx, w, sb, hash, "")
+	}
+	if w.sb.UnhealthyAt.Valid && (w.sb.UnhealthyGeneration.String == "" || w.sb.UnhealthyGeneration.String == sb.ID) {
+		// koinon-agentd found this sandbox stuck: a process in it survives SIGKILL (ADR 0054). It is
+		// recreated at once, parked runs included: they stay parked in Postgres and resume in the new
+		// sandbox through the reset path (ADR 0051). The new sandbox has a new ID, which clears the
+		// mark (RecordAgentSandbox).
+		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
+			return err
+		}
+		r.log.Warn("deleting a stuck sandbox to recreate it", append(w.logAttrs(), "reason", w.sb.UnhealthyReason.String)...)
+		if err := audit.RecordErr(ctx, r.q, audit.Event{
+			Org: w.org.ID, Actor: audit.System(), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
+			After: map[string]any{"sandbox": names.Sandbox, "reason": w.sb.UnhealthyReason.String, "home_generation": sb.ID},
+		}); err != nil {
+			return err
+		}
+		sb.Phase = execution.PhaseDeleting
+		return r.record(ctx, w, sb, hash, "recreating a stuck sandbox: "+w.sb.UnhealthyReason.String)
 	}
 	if sb.Labels[LabelSpecHash] != hash {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by

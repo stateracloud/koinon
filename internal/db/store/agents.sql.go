@@ -16,7 +16,7 @@ UPDATE agents
 SET status = 'active', active_version_id = $1,
     activated_by = $2, activated_at = now()
 WHERE org_id = $3 AND id = $4 AND status = 'draft'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at
 `
 
 type ActivateAgentParams struct {
@@ -51,6 +51,9 @@ func (q *Queries) ActivateAgent(ctx context.Context, arg ActivateAgentParams) (A
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
 	)
 	return i, err
 }
@@ -59,7 +62,7 @@ const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agents
 SET status = 'archived', archived_at = now()
 WHERE org_id = $1 AND id = $2 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at
 `
 
 type ArchiveAgentParams struct {
@@ -86,6 +89,9 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
 	)
 	return i, err
 }
@@ -94,7 +100,7 @@ const createAgent = `-- name: CreateAgent :one
 
 INSERT INTO agents (org_id, display_name, flavor, template_id, created_by)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at
 `
 
 type CreateAgentParams struct {
@@ -135,6 +141,9 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
 	)
 	return i, err
 }
@@ -181,7 +190,7 @@ func (q *Queries) CreateAgentVersion(ctx context.Context, arg CreateAgentVersion
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at FROM agents
+SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at FROM agents
 WHERE org_id = $1 AND id = $2
 `
 
@@ -209,6 +218,9 @@ func (q *Queries) GetAgent(ctx context.Context, arg GetAgentParams) (Agent, erro
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
 	)
 	return i, err
 }
@@ -278,7 +290,7 @@ func (q *Queries) ListAgentVersions(ctx context.Context, arg ListAgentVersionsPa
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at FROM agents
+SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at FROM agents
 WHERE org_id = $1
 ORDER BY created_at, id
 `
@@ -308,6 +320,9 @@ func (q *Queries) ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, e
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UnhealthyAt,
+			&i.UnhealthyReason,
+			&i.ResumedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -323,7 +338,7 @@ const returnAgentToDraft = `-- name: ReturnAgentToDraft :one
 UPDATE agents
 SET status = 'draft'
 WHERE org_id = $1 AND id = $2 AND status = 'active'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at
 `
 
 type ReturnAgentToDraftParams struct {
@@ -352,6 +367,9 @@ func (q *Queries) ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraft
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
 	)
 	return i, err
 }

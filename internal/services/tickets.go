@@ -56,6 +56,10 @@ func enqueue(ctx context.Context, q *store.Queries, t store.Ticket) (*runv1alpha
 	if errors.Is(err, scheduler.ErrAgentNotActive) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, "the ticket's agent is not active")
 	}
+	if errors.Is(err, scheduler.ErrAgentUnhealthy) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			"the ticket's agent is unhealthy and takes no new runs until an admin resumes it ("+strings.TrimPrefix(err.Error(), scheduler.ErrAgentUnhealthy.Error()+": ")+")")
+	}
 	if err != nil || !queued {
 		return nil, err
 	}
@@ -172,6 +176,8 @@ func (s *Server) GetTicket(ctx context.Context, req *ticketv1alpha1.GetTicketReq
 			return err
 		}
 		res.Ticket = ticketProto(t)
+		res.Ticket.AgentSummary = t.AgentSummary.String
+		res.Ticket.AgentSummaryAt = tsProto(t.AgentSummaryAt)
 		events, err := q.ListTicketEvents(ctx, store.ListTicketEventsParams{
 			OrgID: c.org, TicketID: id, AfterSeq: 0, MaxEvents: maxTimelineItems,
 		})

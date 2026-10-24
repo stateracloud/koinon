@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -18,6 +19,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/mcpask"
+	"github.com/stateracloud/koinon/internal/savedwork"
 )
 
 // Trailers of the commits Koinon creates. TrailerApproval carries the idempotency key.
@@ -37,6 +39,9 @@ func (s *Service) execute(ctx context.Context, row store.ApprovalRequest) (map[s
 	}
 	if row.Connector != connectors.GitHubID {
 		return nil, permanent("no executor for connector %q", row.Connector)
+	}
+	if row.System && row.Tool == savedwork.ToolPush {
+		return s.executeSavedWork(ctx, row)
 	}
 	tool, err := githubtools.LookupWriteTool(row.Tool)
 	if err != nil {
@@ -80,38 +85,46 @@ func (s *Service) target(ctx context.Context, row store.ApprovalRequest) (github
 	if err != nil {
 		return github.Repo{}, github.App{}, permanentError{err}
 	}
+	app, err := s.appFor(ctx, row, full, true)
+	return repo, app, err
+}
+
+// appFor returns the GitHub App of the connection the run's agent version binds full to. With
+// single, the binding must name exactly that repository (a pull request or comment); without, it
+// may name more (saved work is pushed to any repository the agent may use).
+func (s *Service) appFor(ctx context.Context, row store.ApprovalRequest, full string, single bool) (github.App, error) {
 	run, err := s.q.GetRun(ctx, store.GetRunParams{OrgID: row.OrgID, ID: row.RunID})
 	if err != nil {
-		return github.Repo{}, github.App{}, err
+		return github.App{}, err
 	}
 	v, err := s.q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: row.OrgID, ID: run.AgentVersionID})
 	if err != nil {
-		return github.Repo{}, github.App{}, err
+		return github.App{}, err
 	}
 	cfg, err := agentconfig.Parse(v.Config)
 	if err != nil {
-		return github.Repo{}, github.App{}, permanentError{err}
+		return github.App{}, permanentError{err}
 	}
 	b, ok := cfg.Binding(connectors.GitHubID)
-	if !ok || len(b.Targets) != 1 || !strings.EqualFold(b.Targets[0], full) {
-		return github.Repo{}, github.App{}, permanent("the run's agent version is not bound to %s", full)
+	if !ok || (single && len(b.Targets) != 1) || !slices.ContainsFunc(b.Targets, func(t string) bool { return strings.EqualFold(t, full) }) {
+		return github.App{}, permanent("the run's agent version is not bound to %s", full)
 	}
 	var connID pgtype.UUID
 	if err := connID.Scan(b.ConnectionID); err != nil || !connID.Valid {
-		return github.Repo{}, github.App{}, permanent("the agent's GitHub binding names no connection")
+		return github.App{}, permanent("the agent's GitHub binding names no connection")
 	}
 	conn, err := s.q.GetConnection(ctx, store.GetConnectionParams{OrgID: row.OrgID, ID: connID})
 	if err != nil {
-		return github.Repo{}, github.App{}, fmt.Errorf("load the GitHub connection: %w", err)
+		return github.App{}, fmt.Errorf("load the GitHub connection: %w", err)
 	}
 	app, err := connections.LoadGitHubApp(ctx, s.keys, conn)
 	if err != nil {
 		if errors.Is(err, connections.ErrNoKeyring) || errors.Is(err, connections.ErrRemoved) {
-			return github.Repo{}, github.App{}, permanentError{err}
+			return github.App{}, permanentError{err}
 		}
-		return github.Repo{}, github.App{}, err
+		return github.App{}, err
 	}
-	return repo, app, nil
+	return app, nil
 }
 
 // people names the ticket's creator and the approver for the commit trailers.
