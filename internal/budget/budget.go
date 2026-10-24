@@ -101,7 +101,7 @@ func (s Status) Net() (amount money.USD, binding string, ok bool) {
 func (s Status) Generation(now time.Time) string {
 	h := sha256.New()
 	for _, l := range s.Levels {
-		fmt.Fprintf(h, "%s|%d|%d;", l.Name, l.Limit, l.Spent)
+		h.Write(fmt.Appendf(nil, "%s|%d|%d;", l.Name, l.Limit, l.Spent))
 	}
 	return fmt.Sprintf("%d-%s", DayStart(now).Unix(), hex.EncodeToString(h.Sum(nil))[:16])
 }

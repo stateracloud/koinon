@@ -88,7 +88,7 @@ func ParseNumeric(s string) (USD, error) {
 // String formats the amount exactly, trimming trailing zeros but keeping two fraction digits.
 func (u USD) String() string {
 	neg := u < 0
-	n := uint64(u)
+	n := int64(u)
 	if neg {
 		n = -n
 	}
@@ -107,7 +107,7 @@ func (u USD) String() string {
 // Numeric formats the amount for a numeric(24,12) column.
 func (u USD) Numeric() string {
 	neg := u < 0
-	n := uint64(u)
+	n := int64(u)
 	if neg {
 		n = -n
 	}

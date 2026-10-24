@@ -465,7 +465,7 @@ const (
 	LogFieldStatus = "koinon.status"
 	// LogFieldMaxTokens is the request's max_tokens, to settle an aborted request that bills
 	// hidden thinking.
-	LogFieldMaxTokens = "koinon.max_tokens"
+	LogFieldMaxTokens = "koinon.max_tokens" //nolint:gosec // attribute name, not a credential
 	// LogFieldRequestBytes is the request's Content-Length: the byte count the estimate and its
 	// calibration use. Response bytes are not exposed by agentgateway's CEL context.
 	LogFieldRequestBytes = "koinon.req_bytes"
