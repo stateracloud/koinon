@@ -53,7 +53,8 @@ SELECT run_id::uuid AS run_id,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
        coalesce(sum(cost_usd), 0)::text AS cost_usd,
-       bool_and(priced) AS priced
+       bool_and(priced) AS priced,
+       count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
 FROM spend_entries
 WHERE org_id = @org_id AND run_id = ANY(@run_ids::uuid[])
 GROUP BY run_id;
@@ -65,7 +66,8 @@ SELECT ticket_id::uuid AS ticket_id,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
        coalesce(sum(cost_usd), 0)::text AS cost_usd,
-       bool_and(priced) AS priced
+       bool_and(priced) AS priced,
+       count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
 FROM spend_entries
 WHERE org_id = @org_id AND ticket_id = ANY(@ticket_ids::uuid[])
 GROUP BY ticket_id;

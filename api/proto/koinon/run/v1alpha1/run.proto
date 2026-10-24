@@ -89,6 +89,9 @@ message Cost {
   string usd = 4;
   // False when some request had no price, so usd undercounts.
   bool priced = 5;
+  // Requests whose usage the provider did not report and Koinon estimated (included in
+  // requests, tokens and usd). Zero when every request reported its usage.
+  int64 estimated_requests = 6;
 }
 
 // RunEvent is one session update or lifecycle note of a run.

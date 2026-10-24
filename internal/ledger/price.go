@@ -126,10 +126,15 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 			x.ReportedOutput = &e.OutputTokens
 		}
 		r := estimate.Estimate(params, x)
+		if !e.OutputKnown {
+			// A 2xx without usage: say why the request was charged at max, and flag it.
+			meta["usage_missing"] = true
+			p.flagged = true
+		}
 		p.inTokens, p.outTokens, p.estimated = r.InputTokens, r.OutputTokens, true
 		meta["estimate"] = map[string]any{
 			"method": r.Method, "input_reported": r.InputReported, "output_reported": r.OutputReported,
-			"thinking_unmeasured": r.ThinkingUnmeasured, "max_output_fallback": r.MaxOutputFallback, "ratio_static": r.RatioStatic, "ratio_effective": r.RatioEffective,
+			"thinking_unmeasured": r.ThinkingUnmeasured, "max_output_fallback": r.MaxOutputFallback, "max_output_capped": r.MaxOutputCapped, "ratio_static": r.RatioStatic, "ratio_effective": r.RatioEffective,
 			"learned_p90_tokens_per_byte": r.LearnedP90TokensPerByte, "overhead_tokens": r.OverheadTokens,
 		}
 	}

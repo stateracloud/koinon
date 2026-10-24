@@ -16,8 +16,8 @@ var _ = Describe("prices and budgets", func() {
 		e := newEnv(ctx)
 		body := map[string]any{
 			"name": "contract", "provider": "openrouter", "match": map[string]any{"glob": "deepseek/*"},
-			"prices": map[string]any{"input": "0.5", "output": "1.5", "cacheRead": "0.05"},
-			"tiers":  []any{map[string]any{"contextOver": 200000, "prices": map[string]any{"input": "1"}}},
+			"prices": map[string]any{"input": "0.5", "output": "1.5", "cacheRead": "0.05"}, "maxOutput": 4096,
+			"tiers": []any{map[string]any{"contextOver": 200000, "prices": map[string]any{"input": "1"}}},
 		}
 		st, raw := e.call(ctx, e.token, http.MethodPost, "/prices", body)
 		Expect(st).To(Equal(http.StatusCreated), string(raw))
@@ -35,6 +35,8 @@ var _ = Describe("prices and budgets", func() {
 		// A new version of the same name keeps the old one.
 		body["prices"] = map[string]any{"input": "0.6", "output": "1.5"}
 		body["validFrom"] = "2999-01-01T00:00:00Z"
+		st, _ = e.call(ctx, e.token, http.MethodPost, "/prices", map[string]any{"name": "nomax", "provider": "x", "match": map[string]any{"glob": "a"}, "prices": map[string]any{"input": "1", "output": "1"}})
+		Expect(st).To(Equal(http.StatusBadRequest), "a priced entry needs maxOutput")
 		st, raw = e.call(ctx, e.token, http.MethodPost, "/prices", body)
 		Expect(st).To(Equal(http.StatusCreated), string(raw))
 		st, raw = e.call(ctx, e.token, http.MethodGet, "/prices", nil)

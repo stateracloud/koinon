@@ -325,7 +325,8 @@ SELECT run_id::uuid AS run_id,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
        coalesce(sum(cost_usd), 0)::text AS cost_usd,
-       bool_and(priced) AS priced
+       bool_and(priced) AS priced,
+       count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
 FROM spend_entries
 WHERE org_id = $1 AND run_id = ANY($2::uuid[])
 GROUP BY run_id
@@ -337,12 +338,13 @@ type SumRunCostsParams struct {
 }
 
 type SumRunCostsRow struct {
-	RunID        pgtype.UUID
-	Requests     int64
-	InputTokens  int64
-	OutputTokens int64
-	CostUsd      string
-	Priced       bool
+	RunID             pgtype.UUID
+	Requests          int64
+	InputTokens       int64
+	OutputTokens      int64
+	CostUsd           string
+	Priced            bool
+	EstimatedRequests int64
 }
 
 // Totals per run, for the runs in @run_ids that have spend.
@@ -362,6 +364,7 @@ func (q *Queries) SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]Sum
 			&i.OutputTokens,
 			&i.CostUsd,
 			&i.Priced,
+			&i.EstimatedRequests,
 		); err != nil {
 			return nil, err
 		}
@@ -379,7 +382,8 @@ SELECT ticket_id::uuid AS ticket_id,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
        coalesce(sum(cost_usd), 0)::text AS cost_usd,
-       bool_and(priced) AS priced
+       bool_and(priced) AS priced,
+       count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
 FROM spend_entries
 WHERE org_id = $1 AND ticket_id = ANY($2::uuid[])
 GROUP BY ticket_id
@@ -391,12 +395,13 @@ type SumTicketCostsParams struct {
 }
 
 type SumTicketCostsRow struct {
-	TicketID     pgtype.UUID
-	Requests     int64
-	InputTokens  int64
-	OutputTokens int64
-	CostUsd      string
-	Priced       bool
+	TicketID          pgtype.UUID
+	Requests          int64
+	InputTokens       int64
+	OutputTokens      int64
+	CostUsd           string
+	Priced            bool
+	EstimatedRequests int64
 }
 
 // Totals per ticket, for the tickets in @ticket_ids that have spend.
@@ -416,6 +421,7 @@ func (q *Queries) SumTicketCosts(ctx context.Context, arg SumTicketCostsParams) 
 			&i.OutputTokens,
 			&i.CostUsd,
 			&i.Priced,
+			&i.EstimatedRequests,
 		); err != nil {
 			return nil, err
 		}

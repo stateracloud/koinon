@@ -306,7 +306,18 @@ type llmModel struct {
 	Provider  llmProvider    `yaml:"provider"`
 	Params    llmParams      `yaml:"params"`
 	Overrides map[string]any `yaml:"overrides,omitempty"`
+	// Transformation sets request body fields from CEL expressions, replacing client values
+	// (schema/config.md llm.models[].transformation).
+	Transformation map[string]string `yaml:"transformation,omitempty"`
 }
+
+// streamUsageExpr makes every streamed chat completion ask the upstream for usage. agentgateway
+// v1.6.0 adds stream_options.include_usage itself only when the client sent no stream_options at
+// all (llm/mod.rs, process_completions_request), so a client sending {"include_usage": false} or
+// an empty object would otherwise get its streamed requests charged without usage. For a request
+// that is not streamed the expression is null, which OpenAI-compatible upstreams accept and
+// which drops the field (stream_options is an error without stream).
+const streamUsageExpr = `has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null`
 
 type modelMatch struct {
 	Headers []headerMatch `yaml:"headers"`
@@ -470,7 +481,8 @@ func build(s gateway.State, o Options) document {
 					ProviderOverride: override,
 					Formats:          []format{{Type: "completions"}},
 				}},
-				Params: llmParams{BaseURL: p.BaseURL},
+				Params:         llmParams{BaseURL: p.BaseURL},
+				Transformation: map[string]string{"stream_options": streamUsageExpr},
 			}
 			if p.APIKeyFile != "" {
 				lm.Params.APIKey = &fileSource{File: p.APIKeyFile}

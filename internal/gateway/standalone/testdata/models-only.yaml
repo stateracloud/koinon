@@ -21,7 +21,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"2ec4159af2701105"'
+      koinon.config: '"7028498eff7c508f"'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -49,7 +49,7 @@ llm:
             org: acme
           allowedModels:
             - qwen3.5:4b
-        - keyHash: sha256:0b96ab25c287332bb53ae440c72e5ec56b45a0fc34c82867fe1776385686c9ea
+        - keyHash: sha256:2217d595684d7ff7abd017de994f2767dc3b993b5663ada7630e1112437537aa
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -75,3 +75,5 @@ llm:
             - type: completions
       params:
         baseUrl: http://ollama.example.internal:11434/v1
+      transformation:
+        stream_options: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'

@@ -468,6 +468,39 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 			Expect(got).NotTo(HaveKey("provider"))
 		})
 
+		It("always asks a streaming upstream for usage, whatever the client sent", func(ctx SpecContext) {
+			send := func(body string) {
+				GinkgoHelper()
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions", bytes.NewBufferString(body))
+				Expect(err).NotTo(HaveOccurred())
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+keyG.Material)
+				resp, err := http.DefaultClient.Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				b, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				Expect(resp.StatusCode).To(Equal(http.StatusOK), string(b))
+			}
+			upstreamOptions := func() any {
+				var got map[string]any
+				Expect(json.Unmarshal([]byte(ups["guarded"].lastBody()), &got)).To(Succeed())
+				return got["stream_options"]
+			}
+			msgs := `"messages":[{"role":"user","content":"hi"}]`
+			include := map[string]any{"include_usage": true}
+
+			send(`{"model":"open-model","stream":true,` + msgs + `}`)
+			Expect(upstreamOptions()).To(Equal(include), "no stream_options from the client")
+			send(`{"model":"open-model","stream":true,"stream_options":{"include_usage":false},` + msgs + `}`)
+			Expect(upstreamOptions()).To(Equal(include), "the client asked for no usage")
+			send(`{"model":"open-model","stream":true,"stream_options":{},` + msgs + `}`)
+			Expect(upstreamOptions()).To(Equal(include), "an empty stream_options")
+			send(`{"model":"open-model","stream":false,"stream_options":{"include_usage":true},` + msgs + `}`)
+			Expect(upstreamOptions()).To(BeNil(), "not streamed: no stream_options goes upstream")
+			send(`{"model":"open-model",` + msgs + `}`)
+			Expect(upstreamOptions()).To(BeNil())
+		})
+
 		It("sends the provider's key file content as the upstream credential", func(ctx SpecContext) {
 			// The fake upstream does not check credentials; the config names the file and
 			// agentgateway accepted it (--validate-only and the reload would fail on a missing file).

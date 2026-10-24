@@ -283,6 +283,7 @@ func versionProto(o prices.Override) *budgetv1alpha1.PriceVersion {
 		Id: o.ID, Name: o.Name, Provider: o.Entry.Provider, Match: &budgetv1alpha1.PriceMatch{Glob: o.Entry.Match.Glob, Regex: o.Entry.Match.Regex},
 		Rates: ratesProto(o.Entry.Prices), Tiers: tiersProto(o.Entry.Tiers), Tokenizer: o.Entry.Tokenizer, Ratio: o.Entry.Ratio,
 		ValidFrom: timestamppb.New(o.ValidFrom), CreatedBy: o.CreatedBy, CreatedAt: timestamppb.New(o.CreatedAt),
+		MaxOutput: int32(o.Entry.MaxOutput), //nolint:gosec // validated to at most 10M
 	}
 	if o.RetiredAt != nil {
 		out.RetiredAt = timestamppb.New(*o.RetiredAt)
@@ -315,7 +316,7 @@ func (s *Server) SetPrice(ctx context.Context, req *budgetv1alpha1.SetPriceReque
 	}
 	e := pricing.Entry{
 		ID: req.GetName(), Provider: req.GetProvider(), Match: pricing.Match{Glob: req.GetMatch().GetGlob(), Regex: req.GetMatch().GetRegex()},
-		Tokenizer: req.GetTokenizer(), Ratio: req.GetRatio(), ToolOverheadTokens: int(req.GetToolOverheadTokens()), HiddenThinking: req.GetHiddenThinking(),
+		Tokenizer: req.GetTokenizer(), Ratio: req.GetRatio(), ToolOverheadTokens: int(req.GetToolOverheadTokens()), HiddenThinking: req.GetHiddenThinking(), MaxOutput: int(req.GetMaxOutput()),
 	}
 	e.Prices = ratesWire(req.GetRates())
 	for _, t := range req.GetTiers() {

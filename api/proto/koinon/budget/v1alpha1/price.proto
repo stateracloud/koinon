@@ -79,6 +79,7 @@ message PriceEntry {
   string source_url = 11;
   string source_accessed = 12;
   string note = 13;
+  int32 max_output = 14;
 }
 
 message PriceVersion {
@@ -95,6 +96,7 @@ message PriceVersion {
   google.protobuf.Timestamp retired_at = 10;
   string created_by = 11;
   google.protobuf.Timestamp created_at = 12;
+  int32 max_output = 13;
 }
 
 message ListPricesRequest {
@@ -120,6 +122,9 @@ message SetPriceRequest {
   bool hidden_thinking = 10;
   // valid_from defaults to now.
   google.protobuf.Timestamp valid_from = 11;
+  // max_output is the largest output in tokens; required unless every rate is "0". An aborted
+  // response without usage settles at no more than this.
+  int32 max_output = 12;
 }
 
 message SetPriceResponse {

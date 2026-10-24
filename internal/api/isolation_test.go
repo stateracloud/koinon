@@ -265,7 +265,7 @@ var isolationCases = map[string]isolationCase{
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
 			return priceClient(c).SetPrice(ctx, &budgetv1alpha1.SetPriceRequest{
-				OrgId: org, Name: "intruder", Provider: "*", Match: &budgetv1alpha1.PriceMatch{Glob: "x"}, Rates: &budgetv1alpha1.Rates{Input: "1", Output: "1"},
+				OrgId: org, Name: "intruder", Provider: "*", Match: &budgetv1alpha1.PriceMatch{Glob: "x"}, Rates: &budgetv1alpha1.Rates{Input: "1", Output: "1"}, MaxOutput: 100,
 			})
 		},
 	},
