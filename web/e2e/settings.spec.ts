@@ -23,8 +23,8 @@ function api(role: string) {
     { id: 'p-3', name: 'old', type: 'openai', url: 'https://api.example.com/v1', source: 'secret', managedBySecret: 'old-secret', removed: true, disabledReason: 'its Kubernetes Secret was deleted; restore the Secret or delete this entry' },
   ]
   const models: Json[] = [
-    { id: 'm-1', providerId: 'p-1', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', rates: { input: '0.30', output: '1.20' } },
-    { id: 'm-2', providerId: 'p-2', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret', rates: { input: '0', output: '0' } },
+    { id: 'm-1', providerId: 'p-1', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui' },
+    { id: 'm-2', providerId: 'p-2', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret' },
   ]
   const tokens: Json[] = [
     { id: 't-1', name: 'root', prefix: 'rootpref', role: 'ORG_ROLE_OWNER', createdAt: iso(-1), expiresAt: iso(29), lastUsedAt: iso(0), createdBy: 'u-1', createdByName: 'Admin' },
@@ -47,7 +47,7 @@ function api(role: string) {
       },
       'koinon.provider.v1alpha1.ProviderService/CreateModel': (req: Json) => {
         seen.modelCreate = req
-        const m = { id: 'm-new', providerId: req.providerId, name: req.name, guard: !!req.guard, source: 'ui', rates: req.rates }
+        const m = { id: 'm-new', providerId: req.providerId, name: req.name, guard: !!req.guard, source: 'ui' }
         models.push(m)
         return { model: m }
       },
@@ -89,12 +89,12 @@ test('owner adds a provider and a model; the pages pass axe in each state', asyn
   await page.getByRole('button', { name: 'Add model to ollama-lab' }).click()
   await expect(page.getByLabel('Routing guard')).toHaveCount(0)
   await page.getByLabel('Model name').fill('llama3.1')
-  await page.getByLabel('Input rate').fill('0')
-  await page.getByLabel('Output rate').fill('0')
+  await expect(page.getByLabel('Input rate')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Prices page' }).first()).toBeVisible()
   await expectAccessible(page)
   await page.getByRole('button', { name: 'Add model', exact: true }).click()
   await expect(page.getByText('default/llama3.1')).toBeVisible()
-  expect(seen.modelCreate).toMatchObject({ providerId: 'p-new', name: 'llama3.1', rates: { input: '0', output: '0' } })
+  expect(seen.modelCreate).toMatchObject({ providerId: 'p-new', name: 'llama3.1' })
 
   await page.getByRole('button', { name: 'Delete provider openrouter' }).click()
   await expectAccessible(page)

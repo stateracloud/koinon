@@ -17,7 +17,7 @@ import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import type { Cost, RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { TicketService, TicketStatus } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
 import { useRunWatches, type RunWatch } from '@/hooks/use-run-watches'
-import { costDetail, costLabel } from '@/lib/cost'
+import { costDetail, costLabel, estimateNote } from '@/lib/cost'
 import { runFinished, runStateLabel, statusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 import { buildTimeline } from '@/lib/timeline'
@@ -89,7 +89,7 @@ export function TicketPage() {
             {t?.cost && (
               <>
                 {' '}
-                · <span title={costDetail(t.cost)}>Cost {costLabel(t.cost)}</span>
+                · <span title={costDetail(t.cost)}>Cost {costLabel(t.cost)}{estimateNote(t.cost) && ` (${estimateNote(t.cost)})`}</span>
               </>
             )}
           </p>
@@ -144,7 +144,7 @@ function RunCosts({ runs }: { runs: { id: string; state: RunState; cost?: Cost }
         {runs.map((r) => (
           <li key={r.id}>
             Run {r.id.slice(0, 8)} · {runStateLabel(r.state)} ·{' '}
-            {r.cost ? <span title={costDetail(r.cost)}>{costLabel(r.cost)}</span> : 'no cost recorded'}
+            {r.cost ? <span title={costDetail(r.cost)}>{costLabel(r.cost)}{estimateNote(r.cost) && ` (${estimateNote(r.cost)})`}</span> : 'no cost recorded'}
           </li>
         ))}
       </ul>

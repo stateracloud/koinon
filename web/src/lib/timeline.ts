@@ -115,6 +115,10 @@ function ticketItem(ev: TicketEvent): TimelineItem {
     case 'run.canceled':
     case 'run.failed': {
       // scheduler.RecordCancel writes {reason, message}; agentd's finish writes {reason}.
+      // A spend limit reached (the ledger, ADR 0056) says which limit and what was spent in its message.
+      if (str(p.reason) === 'spend_limit') {
+        return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} stopped at a spend limit: ${str(p.message) ?? 'a limit was reached'}`, runId }
+      }
       const reason = str(p.message) || str(p.reason)
       const verb = ev.kind === 'run.failed' ? 'failed' : 'canceled'
       return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} ${verb}${reason ? `: ${reason}` : ''}`, runId }

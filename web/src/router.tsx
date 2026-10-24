@@ -9,6 +9,9 @@ import { ApprovalPage } from '@/pages/approval-page'
 import { BoardPage } from '@/pages/board-page'
 import { ConnectionPage } from '@/pages/connection-page'
 import { ConnectionsPage } from '@/pages/connections-page'
+import { BudgetsPage } from '@/pages/budgets-page'
+import { PlatformBudgetsPage } from '@/pages/platform-budgets-page'
+import { PricesPage } from '@/pages/prices-page'
 import { ProvidersPage } from '@/pages/providers-page'
 import { TokensPage } from '@/pages/tokens-page'
 import { NewAgentPage } from '@/pages/new-agent-page'
@@ -57,6 +60,9 @@ export const newGitHubConnectionRoute = createRoute({
 export const connectionRoute = createRoute({ getParentRoute: () => appRoute, path: '/connections/$connectionId', component: ConnectionPage })
 
 export const providersRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/providers', component: ProvidersPage })
+export const pricesRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/prices', component: PricesPage })
+export const budgetsRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/budgets', component: BudgetsPage })
+export const platformBudgetsRoute = createRoute({ getParentRoute: () => appRoute, path: '/platform/budgets', component: PlatformBudgetsPage })
 export const tokensRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/tokens', component: TokensPage })
 
 const routeTree = rootRoute.addChildren([
@@ -72,6 +78,9 @@ const routeTree = rootRoute.addChildren([
     newGitHubConnectionRoute,
     connectionRoute,
     providersRoute,
+    pricesRoute,
+    budgetsRoute,
+    platformBudgetsRoute,
     tokensRoute,
   ]),
 ])

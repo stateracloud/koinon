@@ -2,6 +2,7 @@
 
 import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
+import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { ModelForm } from '@/components/model-form'
@@ -13,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { ProviderService, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { useProviderActions } from '@/hooks/use-catalog-actions'
 import { useOrg } from '@/lib/org-context'
-import { availabilityMinutes, savedNotice, savedRecently, modelsOf, providerDeletable, providerEditable, providerTypeLabel, ratesLabel, scopedModelName } from '@/lib/providers'
+import { availabilityMinutes, savedNotice, savedRecently, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName } from '@/lib/providers'
 
 /** ProvidersPage is where org admins and owners manage the org's model providers and models (ADR 0056). */
 export function ProvidersPage() {
@@ -77,7 +78,7 @@ function ProvidersContent() {
       {providers.isPending || models.isPending ? (
         <p role="status">Loading providers…</p>
       ) : list.length === 0 ? (
-        <p className="text-muted-foreground text-sm">No providers yet. Add OpenRouter or Ollama, then add a model so agents can run.</p>
+        <p className="text-muted-foreground text-sm">No providers yet. Add OpenRouter or Ollama, then add a model so agents can run. Prices are set on the Prices page.</p>
       ) : (
         <ul className="grid gap-4" aria-label="Providers">
           {list.map((p) => (
@@ -277,12 +278,13 @@ function ModelRow({
         <code className="text-sm font-medium">{scopedModelName(orgSlug, m.name)}</code>
         {m.guard && <Badge variant="secondary">Routing guard</Badge>}
         {m.disabledReason && <Badge variant="destructive">Disabled</Badge>}
-        {!m.rates && <Badge variant="destructive">Not served</Badge>}
-        {m.rates && !m.disabledReason && m.source === 'ui' && savedRecently(m.updatedAt, now) && (
+        {!m.disabledReason && m.source === 'ui' && savedRecently(m.updatedAt, now) && (
           <Badge variant="outline">Saved, available to agents within about {availabilityMinutes} minutes</Badge>
         )}
       </div>
-      <p className="text-muted-foreground text-sm">{ratesLabel(m.rates)}</p>
+      <p className="text-muted-foreground text-sm">
+        Priced on the <Link to="/settings/prices" className="underline">Prices page</Link>.
+      </p>
       {m.disabledReason && <p className="text-destructive text-sm">Disabled: {m.disabledReason}.</p>}
       {editable && (
         <div className="flex flex-wrap gap-2">
