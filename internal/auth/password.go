@@ -85,8 +85,8 @@ func HashPasswordContext(ctx context.Context, password string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer release()
 	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
-	release()
 	b64 := base64.RawStdEncoding
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, argonMemory, argonTime, argonThreads,
@@ -133,8 +133,8 @@ func VerifyPasswordContext(ctx context.Context, hash, password string) (bool, er
 	if err != nil {
 		return false, err
 	}
+	defer release()
 	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want))) //nolint:gosec // len(want) <= 64
-	release()
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 
