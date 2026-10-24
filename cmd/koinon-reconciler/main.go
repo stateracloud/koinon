@@ -12,11 +12,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -99,12 +102,32 @@ func run() error {
 
 	// koinon-api creates the KEK Secret on its first start, so on a fresh install it may not be there
 	// (or mounted) yet: wait for it.
+	// The pod is not ready while it waits, and the wait is logged at warn level every minute.
+	var ready atomic.Bool
+	if cfg.healthAddr != "" {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+		mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+			if !ready.Load() {
+				http.Error(w, "waiting for the key-encryption keys", http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+		health := &http.Server{Addr: cfg.healthAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			if err := health.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("health listener failed", "err", err)
+			}
+		}()
+		defer func() { _ = health.Close() }()
+	}
 	var keyring *secretstore.Keyring
-	for waited := false; keyring == nil; {
+	for lastWarn := (time.Time{}); keyring == nil; {
 		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
-			if !waited {
-				log.Info("waiting for the key-encryption keys (koinon-api creates them on its first start)", "err", err)
-				waited = true
+			if time.Since(lastWarn) >= time.Minute {
+				log.Warn("waiting for the key-encryption keys (koinon-api creates them on its first start, or restore the KEK Secret)", "err", err)
+				lastWarn = time.Now()
 			}
 			select {
 			case <-ctx.Done():
@@ -113,6 +136,7 @@ func run() error {
 			}
 		}
 	}
+	ready.Store(true)
 	go keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log)
 
 	r, err := reconciler.New(pool, backend, driver,

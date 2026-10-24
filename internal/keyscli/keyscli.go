@@ -119,6 +119,21 @@ func (t *Tool) Usage(ctx context.Context) (map[string]int, error) {
 	return out, nil
 }
 
+// AnyEnvelope reports whether any stored value is encrypted (so some KEK is needed to read it).
+func AnyEnvelope(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
+	for _, c := range Columns {
+		var found bool
+		if err := pool.QueryRow(ctx, fmt.Sprintf( //nolint:gosec // names come from Columns
+			`SELECT EXISTS (SELECT 1 FROM %s WHERE %s IS NOT NULL)`, c.Table, c.Column)).Scan(&found); err != nil {
+			return false, err
+		}
+		if found {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func ageFromID(id string) (time.Time, bool) {
 	rest, ok := strings.CutPrefix(id, "kek-")
 	if !ok || len(rest) < 8 {

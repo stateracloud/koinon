@@ -18,7 +18,14 @@ numbers and the procedure are in [the research](../research/kek-rotation.md).
 every time it ran (`helm template`, Argo CD and Flux do not have the live Secret to look at), and a new
 KEK loses every stored secret. Instead `koinon-api` creates the Secret `koinon-kek` on its first start,
 with one new KEK, and never overwrites it. If you set `secrets.kek.existingSecret`, `koinon-api` creates
-nothing and fails to start when the Secret is missing. The reconciler waits for the Secret to appear.
+nothing and fails to start when the Secret is missing. The reconciler waits for the Secret to appear
+(not ready, with a warning in its log every minute).
+
+**If the Secret is deleted later, `koinon-api` refuses to make a new one.** A new KEK could not open any
+stored value, so on start it checks whether the database holds encrypted values; if it does, it stops with
+"KEK Secret missing; restore it from your backup" and creates nothing. Restore the Secret from your
+backup (`kubectl apply -f koinon-kek-backup.yaml`) and the pods start. Only a database with no
+encrypted values yet gets a fresh Secret.
 
 A KEK file holds the base64 of 32 random bytes (64 hex characters also work). KEK IDs made by Koinon
 look like `kek-20261023-a1b2`; the date lets `keys status` tell the key's age.
@@ -132,13 +139,37 @@ IP is the connection's peer; behind an ingress that is the ingress.
 
 ## Provider URLs
 
-Providers may not name loopback, link-local or cloud metadata addresses, names without a dot, or hosts
-in Koinon's own namespace, because the gateway would send requests there with the provider's key. The
-names are resolved when a provider is saved and again each time the reconciler renders it. DNS
-rebinding between the two checks is not closed (the gateway resolves the name itself); restrict the
-gateway pod's egress with a NetworkPolicy for a hard limit. To allow an internal upstream such as the
-home lab's Ollama, a platform admin lists it in the chart value `providers.allowedInternalHosts`, for
-example `["ollama.lab.example.com:11434"]`.
+Providers may not name loopback, link-local, private (RFC 1918, fc00::/7) or shared (100.64/10)
+addresses, the cloud metadata addresses, names without a dot, or hosts in Koinon's own namespace,
+because the gateway would send requests there with the provider's key. Private addresses include the
+ClusterIPs of Services, so even `koinon-api` is out of reach.
+
+Hosts are read the way agentgateway's URL parser reads them: `0177.0.0.1`, `127.1`, `0x7f.0.0.1` and
+`2130706433` are all 127.0.0.1 and are refused, and so is a host that ends in a number but is no valid
+address. Names are resolved when a provider is saved (a name that does not resolve yet is accepted) and
+again each time the reconciler renders it (a name that cannot be resolved, or resolves to a denied
+address, is not served; the render check fails closed). DNS rebinding between the checks is not closed,
+because the gateway resolves the name itself; the egress NetworkPolicy below is the hard limit.
+
+A platform admin allows internal upstreams in the chart value `providers.allowedInternalHosts`: names
+(optionally with a port), IPs or CIDRs, for example `["ollama.lab.example.com:11434", "10.20.0.0/24"]`.
+
+**Gateway egress policy.** With `networkPolicy.enabled` the chart restricts agentgateway's egress with a
+standard `networking.k8s.io/v1` NetworkPolicy (no CNI-specific resources): DNS, `koinon-api`'s OTLP and
+tools ports, and the public internet with the private, shared, link-local and loopback ranges carved
+out. Allow an internal upstream there too, by address, with `networkPolicy.gatewayEgressTo`:
+
+```yaml
+networkPolicy:
+  gatewayEgressTo:
+    - to: [{ipBlock: {cidr: 10.20.0.0/24}}]
+      ports: [{port: 11434}]
+```
+
+Limits: the carve-outs are the standard private ranges, so a cluster that numbers pods or Services from
+public addresses needs its own rules; the policy matches addresses, not names, so keep it and
+`providers.allowedInternalHosts` in agreement; and a CNI that does not enforce egress policy ignores
+it (the default provider URL check still applies).
 
 ## Limits and notes
 

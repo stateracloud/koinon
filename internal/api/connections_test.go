@@ -20,6 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
+	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
@@ -303,31 +304,51 @@ var _ = Describe("ConnectionService", func() {
 		})
 	})
 
-	It("deletes a connection only when its declaring Secret was deleted", func(ctx SpecContext) {
-		res, err := create(ctx, owner, gh.PEM, false)
-		Expect(err).NotTo(HaveOccurred())
-		id := res.GetConnection().GetId()
+	It("deletes a connection entered here once no agent is bound to it, and audits it", func(ctx SpecContext) {
+		// The fixture connection is the one draftAgent binds.
+		id := e.githubConnection(ctx, org)
+		agent := owner.draftAgent(ctx, org)
 		del := func(c *client) error {
 			_, err := c.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: id})
 			return err
 		}
-		Expect(codeOf(del(owner))).To(Equal(connect.CodeFailedPrecondition), "a live connection")
 		Expect(codeOf(del(e.userIn(ctx, org, store.OrgRoleMember)))).To(Equal(connect.CodePermissionDenied))
 
-		// The importer marks a declared connection removed when its Secret goes away.
-		_, err = e.pool.Exec(ctx, `UPDATE connections SET source = 'secret', managed_by_secret = 'gh', removed_at = now() WHERE id = $1`, id)
+		err := del(owner)
+		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+		Expect(err.Error()).To(ContainSubstring(agent.GetId()), "the bound agents are listed")
+
+		_, err = owner.agents.ArchiveAgent(ctx, &agentv1alpha1.ArchiveAgentRequest{OrgId: org, AgentId: agent.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(del(owner)).To(Succeed())
+		_, err = owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
+		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+		Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'connection.delete'`, org)).To(Equal(1))
+		Expect(count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1`, org)).To(BeZero(), "the envelope went with the row")
+	})
+
+	It("deletes a declared connection only after its Secret was deleted", func(ctx SpecContext) {
+		res, err := create(ctx, owner, gh.PEM, false)
+		Expect(err).NotTo(HaveOccurred())
+		id := res.GetConnection().GetId()
+		// What the importer does for a declared connection.
+		_, err = e.pool.Exec(ctx, `UPDATE connections SET source = 'secret', managed_by_secret = 'gh' WHERE id = $1`, id)
+		Expect(err).NotTo(HaveOccurred())
+		del := func() error {
+			_, err := owner.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: id})
+			return err
+		}
+		err = del()
+		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+		Expect(err.Error()).To(ContainSubstring("Secret gh"))
+
+		_, err = e.pool.Exec(ctx, `UPDATE connections SET removed_at = now() WHERE id = $1`, id)
 		Expect(err).NotTo(HaveOccurred())
 		got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.GetConnection().GetRemoved()).To(BeTrue())
 		Expect(got.GetConnection().GetManagedBySecret()).To(Equal("gh"))
-		_, err = owner.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: id})
-		Expect(err).NotTo(HaveOccurred())
-
-		Expect(del(owner)).To(Succeed())
-		_, err = owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
-		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
-		Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'connection.delete'`, org)).To(Equal(1))
+		Expect(del()).To(Succeed())
 	})
 
 	It("refuses to create connections without a secret store", func(ctx SpecContext) {

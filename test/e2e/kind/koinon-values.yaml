@@ -18,6 +18,20 @@ postgres:
 gateway:
   mode: standalone
 
+# The fake model server is a Service in another namespace (a ClusterIP, which the default provider
+# URL policy and the gateway's egress policy deny).
+providers:
+  allowedInternalHosts: ["fakemodel.koinon-e2e-fakes.svc:8080"]
+
+networkPolicy:
+  gatewayEgressTo:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon-e2e-fakes
+      ports:
+        - port: 8080
+
 github:
   apiUrl: http://fakegithub.koinon-e2e-fakes.svc:8080
 

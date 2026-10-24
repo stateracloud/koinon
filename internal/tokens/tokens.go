@@ -190,6 +190,18 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	var row store.ApiToken
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
+		if by.Parent != nil {
+			// Share-lock the parent until the child is committed: a concurrent revoke locks the tree
+			// for update first, so it waits and then sees (and revokes) the child. A parent revoked
+			// in the meantime cannot create one.
+			cur, err := q.LockAPITokenShare(ctx, store.LockAPITokenShareParams{OrgID: org, ID: by.Parent.TokenID})
+			if err != nil {
+				return err
+			}
+			if cur.RevokedAt.Valid || !now.Before(cur.ExpiresAt.Time) {
+				return &InvalidError{"the creating token has been revoked or has expired"}
+			}
+		}
 		var err error
 		row, err = q.CreateAPIToken(ctx, store.CreateAPITokenParams{
 			OrgID: org, ID: id, Name: name, Prefix: prefix, TokenHash: hashOf(raw), Role: role, CreatedBy: by.User,
@@ -242,6 +254,11 @@ func (s *Service) Revoke(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		}
 		if !auth.RoleAtLeast(callerRole, target.Role) {
 			return &InvalidError{"a token with a lower role cannot revoke a token with a higher one"}
+		}
+		// Lock the whole subtree first (waiting for creations under it), so the statement below,
+		// which takes a fresh snapshot, sees every child committed by then.
+		if _, err := q.LockAPITokenTree(ctx, store.LockAPITokenTreeParams{OrgID: org, ID: tid}); err != nil {
+			return err
 		}
 		revoked, err := q.RevokeAPITokenTree(ctx, store.RevokeAPITokenTreeParams{OrgID: org, ID: tid})
 		if err != nil {

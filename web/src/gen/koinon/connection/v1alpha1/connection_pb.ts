@@ -780,8 +780,9 @@ export const ConnectionService: GenService<{
     output: typeof TestConnectionResponseSchema;
   },
   /**
-   * DeleteConnection deletes a connection for good. Only a connection whose declaring Secret was
-   * deleted (removed) can be deleted; one that is in use changes in its Secret. Admins and owners.
+   * DeleteConnection deletes a connection and its stored secret fields for good. A connection entered
+   * here can be deleted; a declared one only after its Secret was deleted (removed). While agents are
+   * bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners.
    *
    * @generated from rpc koinon.connection.v1alpha1.ConnectionService.DeleteConnection
    */

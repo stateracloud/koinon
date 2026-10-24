@@ -36,6 +36,10 @@ const (
 
 func newLimiter() *limiter { return &limiter{clients: map[string]*attempts{}} }
 
+// limiterKey is the slot of a client IP and a token prefix; "" is the shared slot of bad tokens that
+// name no token.
+func limiterKey(ip, prefix string) string { return ip + "|" + prefix }
+
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

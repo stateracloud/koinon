@@ -18,6 +18,9 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
+// ErrKEKMissing means the KEK Secret is gone while values encrypted with it exist.
+var ErrKEKMissing = errors.New("keyscli: KEK Secret missing")
+
 // ActivatedAnnotation records when the active KEK was activated, as RFC 3339.
 var ActivatedAnnotation = project.Domain + "/kek-activated-at"
 
@@ -90,12 +93,24 @@ func (DirStore) Save(context.Context, KeySet) error {
 // reports whether it did. It never overwrites an existing Secret, so a restart, a second replica
 // or a re-render of the chart cannot replace the keys (which would make every stored secret
 // unreadable). Two replicas starting together race on Create; the loser reads the winner's Secret.
-func EnsureKubeSecret(ctx context.Context, client kubernetes.Interface, namespace, name string, now time.Time) (bool, error) {
+//
+// It also refuses to create the Secret when the database already holds envelopes (hasValues): a new
+// KEK could not open any of them, so a deleted Secret must be restored from backup, not replaced.
+func EnsureKubeSecret(ctx context.Context, client kubernetes.Interface, namespace, name string, now time.Time, hasValues func(context.Context) (bool, error)) (bool, error) {
 	secrets := client.CoreV1().Secrets(namespace)
 	if _, err := secrets.Get(ctx, name, metav1.GetOptions{}); err == nil {
 		return false, nil
 	} else if !apierrors.IsNotFound(err) {
 		return false, fmt.Errorf("read the KEK Secret %s/%s: %w", namespace, name, err)
+	}
+	if hasValues != nil {
+		used, err := hasValues(ctx)
+		if err != nil {
+			return false, fmt.Errorf("check for stored secrets before creating the KEK Secret: %w", err)
+		}
+		if used {
+			return false, fmt.Errorf("%w: the KEK Secret %s/%s is missing but the database holds encrypted values that only its keys can open; restore the Secret from your backup (docs/ops/secret-keys.md). Nothing was created", ErrKEKMissing, namespace, name)
+		}
 	}
 	id, err := NewID(now)
 	if err != nil {

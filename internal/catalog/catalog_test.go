@@ -35,15 +35,19 @@ var _ = Describe("URLPolicy", func() {
 	}
 	p := catalog.URLPolicy{
 		Namespace:    "koinon",
-		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com"},
+		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com", "10.20.0.0/24", "fakemodel.fakes.svc:8080", "192.168.7.7"},
 		Resolver: resolver(map[string][]string{
-			"api.openai.com":         {"104.18.6.192"},
-			"ollama.lab.example.com": {"127.0.0.1"},
-			"rebind.example.com":     {"203.0.113.9", "127.0.0.1"},
-			"meta.example.com":       {"169.254.169.254"},
-			"fakemodel.fakes.svc":    {"10.96.4.4"},
-			"internal.example.com":   {"10.1.2.3"},
-			"v6.example.com":         {"fe80::1"},
+			"api.openai.com":          {"104.18.6.192"},
+			"ollama.lab.example.com":  {"127.0.0.1"},
+			"rebind.example.com":      {"203.0.113.9", "127.0.0.1"},
+			"meta.example.com":        {"169.254.169.254"},
+			"fakemodel.fakes.svc":     {"10.96.4.4"},
+			"other.fakes.svc":         {"10.96.4.5"},
+			"internal.example.com":    {"10.1.2.3"},
+			"allowed-net.example.com": {"10.20.0.9"},
+			"cgnat.example.com":       {"100.64.3.3"},
+			"ula.example.com":         {"fd12::1"},
+			"v6.example.com":          {"fe80::1"},
 		}),
 	}
 	DescribeTable("denies",
@@ -68,16 +72,47 @@ var _ = Describe("URLPolicy", func() {
 		Entry("a name that resolves to metadata", "http://meta.example.com/v1"),
 		Entry("a name that resolves to link-local v6", "http://v6.example.com/v1"),
 		Entry("localhost on another port than the allowed one", "http://localhost:9999/v1"),
+		// The forms agentgateway's URL parser reads as IPv4 addresses.
+		Entry("octal 0177.0.0.1", "http://0177.0.0.1/"),
+		Entry("short 127.1", "http://127.1/"),
+		Entry("hex 0x7f.0.0.1", "http://0x7f.0.0.1/"),
+		Entry("hex integer 0x7f000001", "http://0x7f000001/"),
+		Entry("decimal integer 2130706433", "http://2130706433/"),
+		Entry("octal integer 017700000001", "http://017700000001/"),
+		Entry("trailing dot 127.0.0.1.", "http://127.0.0.1./"),
+		Entry("metadata as an integer", "http://2852039166/"),
+		Entry("mixed 0251.0376.0251.0376", "http://0251.0376.0251.0376/"),
+		Entry("a numeric last label that is no address, 1.2.3.4.5", "http://1.2.3.4.5/"),
+		Entry("a name ending in a number, foo.0x1", "http://foo.0x1/"),
+		Entry("a part over 255, 1.2.3.999", "http://1.2.3.999/"),
+		// Private, shared and unique-local ranges, including Services' ClusterIPs.
+		Entry("a ClusterIP", "http://10.96.0.10:8080/"),
+		Entry("RFC 1918 172.16", "http://172.16.0.1/"),
+		Entry("RFC 1918 192.168", "http://192.168.1.5/"),
+		Entry("CGNAT", "http://100.64.1.1/"),
+		Entry("unique-local v6", "http://[fd00::1]/"),
+		Entry("a name that resolves to a private address", "http://internal.example.com/v1"),
+		Entry("a name that resolves to CGNAT", "http://cgnat.example.com/v1"),
+		Entry("a name that resolves to a unique-local address", "http://ula.example.com/v1"),
+		Entry("another Service's ClusterIP, not allow-listed", "http://other.fakes.svc:8080/v1"),
 	)
 	DescribeTable("allows",
 		func(ctx SpecContext, u string) { Expect(p.Check(ctx, u)).To(Succeed(), u) },
 		Entry("a public API", "https://api.openai.com/v1"),
-		Entry("a private upstream", "http://internal.example.com:11434/v1"),
-		Entry("another namespace's Service", "http://fakemodel.fakes.svc:8080/v1"),
+		Entry("a public IP", "http://104.18.6.192/v1"),
+		Entry("an allow-listed Service with its port", "http://fakemodel.fakes.svc:8080/v1"),
 		Entry("an allow-listed host even though it resolves to loopback", "http://ollama.lab.example.com:11434/v1"),
 		Entry("an allow-listed host:port", "http://localhost:11434/v1"),
+		Entry("an IP inside an allow-listed CIDR", "http://10.20.0.5:11434/v1"),
+		Entry("a name that resolves into an allow-listed CIDR", "http://allowed-net.example.com/v1"),
+		Entry("an allow-listed IP", "http://192.168.7.7:11434/v1"),
 		Entry("a name that does not resolve (checked again at render)", "https://future.example.com/v1"),
 	)
+	It("fails closed at render when a name cannot be resolved", func(ctx SpecContext) {
+		Expect(p.CheckStrict(ctx, "https://future.example.com/v1")).NotTo(Succeed())
+		Expect(p.CheckStrict(ctx, "https://api.openai.com/v1")).To(Succeed())
+		Expect(p.CheckStrict(ctx, "http://ollama.lab.example.com:11434/v1")).To(Succeed(), "an allow-listed name needs no lookup")
+	})
 })
 
 var _ = Describe("Service", func() {

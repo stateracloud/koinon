@@ -4,6 +4,7 @@ package keyscli_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"time"
@@ -215,6 +216,25 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(string(fields[connections.GitHubPrivateKeyField])).To(Equal("pem"))
 	})
 
+	It("refuses to make a new KEK Secret when the database holds encrypted values", func(ctx SpecContext) {
+		seed(ctx, 1)
+		fresh := fake.NewClientset() // the Secret was deleted
+		used := func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) }
+		created, err := keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now, used)
+		Expect(err).To(MatchError(keyscli.ErrKEKMissing))
+		Expect(err.Error()).To(ContainSubstring("restore the Secret from your backup"))
+		Expect(created).To(BeFalse())
+		list, _ := fresh.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+		Expect(list.Items).To(BeEmpty(), "nothing was created")
+
+		By("with no encrypted value yet, a fresh install creates it")
+		_, err = pool.Exec(ctx, `TRUNCATE orgs CASCADE`)
+		Expect(err).NotTo(HaveOccurred())
+		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now, used)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(created).To(BeTrue())
+	})
+
 	It("cannot change a key set it only reads from a directory", func(ctx SpecContext) {
 		dir := keyscli.DirStore{Dir: GinkgoT().TempDir()}
 		Expect(dir.Save(ctx, keyscli.KeySet{})).To(MatchError(ContainSubstring("cannot be changed here")))
@@ -227,7 +247,7 @@ var _ = Describe("koinon-api keys", func() {
 
 	It("creates the KEK Secret once and never overwrites it", func(ctx SpecContext) {
 		fresh := fake.NewClientset()
-		created, err := keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now)
+		created, err := keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(created).To(BeTrue())
 		store := keyscli.KubeStore{Client: fresh, Namespace: ns, Name: "koinon-kek"}
@@ -236,7 +256,7 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(first.Keys).To(HaveLen(1))
 		Expect(first.Active).To(MatchRegexp(`^kek-20261023-[0-9a-f]{4}$`))
 
-		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now.Add(24*time.Hour))
+		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now.Add(24*time.Hour), nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(created).To(BeFalse())
 		again, _ := store.Load(ctx)
@@ -245,7 +265,7 @@ var _ = Describe("koinon-api keys", func() {
 		By("a Secret someone else made is left alone, whatever it holds")
 		_, err = fresh.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "mine", Namespace: ns}, Data: map[string][]byte{"x": []byte("y")}}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "mine", now)
+		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "mine", now, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(created).To(BeFalse())
 		got, _ := fresh.CoreV1().Secrets(ns).Get(ctx, "mine", metav1.GetOptions{})

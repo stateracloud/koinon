@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -231,4 +232,11 @@ func addProvider(ctx context.Context, org, user pgtype.UUID, name, key, model st
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return p
+}
+
+// publicDNS resolves every name to a public address, so specs do not depend on real DNS.
+var testPolicy = catalog.URLPolicy{
+	Resolver: func(context.Context, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("93.184.216.34")}, nil
+	},
 }

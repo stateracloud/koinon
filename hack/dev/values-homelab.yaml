@@ -13,6 +13,20 @@ imagePullSecrets:
 # The home-lab Ollama (docs/spikes/openshell.md) is declared by hack/dev/model-provider-homelab.yaml,
 # which the Tiltfile applies. Real model, no cost, no key.
 
+# Ollama sits on the lab network: allowed as a provider host, and open on its port in the gateway's
+# egress policy (private ranges are otherwise denied).
+providers:
+  allowedInternalHosts: ["ollama.lab.example.invalid:11434"]
+
+networkPolicy:
+  gatewayEgressTo:
+    - to:
+        - ipBlock: {cidr: 10.0.0.0/8}
+        - ipBlock: {cidr: 172.16.0.0/12}
+        - ipBlock: {cidr: 192.168.0.0/16}
+      ports:
+        - port: 11434
+
 openshell:
   address: openshell.openshell.svc:8080
   runtimeClassName: kata
