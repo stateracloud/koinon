@@ -264,7 +264,8 @@ removes the layer that PV1 left on the model.
      `max_output`. The model's own input, output and cache read stay; tiers are not copied, because the
      model's rates applied at every context length. Without it, Claude costs and estimates would run low
      (cache writes about 20%, input estimates about 23%, aborted thinking output almost entirely) and
-     budgets would stop runs late. An entry no default entry matches keeps the generic values and shows
+     budgets would stop runs late. A free (zero-rate) model whose default entry has a cache write rate gets
+     that rate copied in, which is what the old pricing did too. An entry no default entry matches keeps the generic values and shows
      **Needs review** on the Prices page.
    - A model whose stored rates `money.ParseRate` would refuse is skipped (it would make every price of
      its org unusable; it was not priced before either). The migration raises a warning with the count

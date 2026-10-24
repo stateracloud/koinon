@@ -148,3 +148,26 @@ func TestDiff(t *testing.T) {
 		t.Fatalf("%v", kinds)
 	}
 }
+
+func TestLaterExactGlobBeatsMigratedCaseSensitiveRegex(t *testing.T) {
+	mk := func(id string, m pricing.Match, from string) pricing.Resolved {
+		r, err := pricing.Entry{
+			ID: id, Provider: "openrouter", Match: m, ValidFrom: from,
+			Spec:      pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "1"}},
+			Tokenizer: "bytes", Ratio: "3.0", MaxOutput: 1000,
+		}.Resolve(true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	migrated := mk("migrated", pricing.Match{Regex: `(?-i:deepseek/flash)`}, "2026-01-01")
+	mine := mk("mine", pricing.Match{Glob: "deepseek/flash"}, "2026-06-01")
+	if migrated.Specificity != mine.Specificity {
+		t.Errorf("specificity: regex %d, glob %d; inline flags are not literal characters", migrated.Specificity, mine.Specificity)
+	}
+	got, ok := pricing.Select([]pricing.Resolved{migrated, mine}, "openrouter", "deepseek/flash", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
+	if !ok || got.Entry.ID != "mine" {
+		t.Errorf("got %v %v, want the later exact glob", got.Entry.ID, ok)
+	}
+}
