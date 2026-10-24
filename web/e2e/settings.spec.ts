@@ -2,7 +2,7 @@
 
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
-import { mockApi } from './mock-api.ts'
+import { mockApi, type Handlers } from './mock-api.ts'
 
 const org = 'org-1'
 const now = Date.now()
@@ -31,7 +31,7 @@ function api(role: string) {
     { id: 't-2', name: 'pipeline', prefix: 'childpre', role: 'ORG_ROLE_ADMIN', createdAt: iso(-1), expiresAt: iso(10), createdBy: 'u-1', createdByName: 'Admin', parentTokenId: 't-1' },
   ]
   const seen: { providerCreate?: Json; modelCreate?: Json; tokenCreate?: Json; revoked?: string } = {}
-  const handlers = {
+  const handlers: Handlers = {
     unary: {
       'koinon.auth.v1alpha1.AuthService/WhoAmI': () => ({
         user: { id: 'u-1', email: 'admin@example.test', displayName: 'Admin' },
@@ -130,7 +130,7 @@ test('a member sees no Settings links and the pages refuse them', async ({ page 
   const list = handlers.unary['koinon.provider.v1alpha1.ProviderService/ListProviders']
   handlers.unary['koinon.provider.v1alpha1.ProviderService/ListProviders'] = () => {
     providerCalls++
-    return list()
+    return list({})
   }
   await mockApi(page, handlers)
   await page.goto('/settings/providers')
@@ -140,3 +140,22 @@ test('a member sees no Settings links and the pages refuse them', async ({ page 
   await expectAccessible(page)
   expect(providerCalls).toBe(0)
 })
+
+// WCAG 1.4.10 Reflow (AA): at 320 CSS px wide the pages need no horizontal scrolling and still pass axe.
+for (const path of ['/settings/providers', '/settings/tokens', '/connections']) {
+  test(`${path} reflows at 320px`, async ({ page }) => {
+    const { handlers } = api('ORG_ROLE_OWNER')
+    handlers.unary['koinon.connection.v1alpha1.ConnectionService/ListConnections'] = () => ({
+      connections: [{ id: 'c-1', orgId: org, connector: 'github', displayName: 'Acme GitHub', status: 'CONNECTION_STATUS_OK', source: 'secret', managedBySecret: 'gh-secret' }],
+    })
+    await mockApi(page, handlers)
+    await page.setViewportSize({ width: 320, height: 640 })
+    await page.goto(path)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    if (path === '/settings/providers') await page.getByRole('button', { name: 'Add provider' }).click()
+    const overflow = await page.evaluate<number>('document.documentElement.scrollWidth - document.documentElement.clientWidth')
+    const wide = await page.evaluate<string[]>("[...document.querySelectorAll('body *')].filter((e) => e.getBoundingClientRect().right > 321).slice(0, 5).map((e) => e.tagName + '.' + e.className)")
+    expect(overflow, wide.join(' | ')).toBeLessThanOrEqual(0)
+    await expectAccessible(page)
+  })
+}

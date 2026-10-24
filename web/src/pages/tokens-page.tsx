@@ -22,7 +22,7 @@ import { createdByLabel, daysToSeconds, defaultTokenDays, formatTime, maxTokenDa
 /** TokensPage manages the org's admin API tokens (ADR 0056): create, see once, list, revoke. */
 export function TokensPage() {
   return (
-    <div className="mx-auto grid max-w-4xl gap-4">
+    <div className="mx-auto grid max-w-4xl grid-cols-[minmax(0,1fr)] gap-4">
       <RequireAdmin what="API tokens">
         <TokensContent />
       </RequireAdmin>
@@ -65,6 +65,7 @@ function TokensContent() {
       ) : tokens.length === 0 ? (
         <p className="text-muted-foreground text-sm">No tokens yet.</p>
       ) : (
+        <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="API tokens table">
         <table className="w-full text-left text-sm">
           <caption className="sr-only">API tokens</caption>
           <thead>
@@ -118,6 +119,7 @@ function TokensContent() {
             })}
           </tbody>
         </table>
+        </div>
       )}
     </>
   )
@@ -165,8 +167,12 @@ function CreateTokenForm({
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="grid gap-1.5">
           <Label htmlFor="token-name">Name</Label>
-          <Input id="token-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="CI pipeline" autoComplete="off" aria-invalid={touched && !!nameError} />
-          {touched && nameError && <p className="text-destructive text-xs">{nameError}</p>}
+          <Input id="token-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="CI pipeline" autoComplete="off" aria-invalid={touched && !!nameError} aria-describedby={touched && nameError ? 'token-name-error' : undefined} />
+          {touched && nameError && (
+            <p id="token-name-error" className="text-destructive text-xs">
+              {nameError}
+            </p>
+          )}
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="token-role">Role</Label>
@@ -180,11 +186,15 @@ function CreateTokenForm({
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="token-days">Expires in (days)</Label>
-          <Input id="token-days" type="number" min={1} max={maxTokenDays} value={days} onChange={(e) => setDays(e.target.value)} aria-invalid={touched && !!daysError} aria-describedby="token-days-help" />
+          <Input id="token-days" type="number" min={1} max={maxTokenDays} value={days} onChange={(e) => setDays(e.target.value)} aria-invalid={touched && !!daysError} aria-describedby={touched && daysError ? 'token-days-help token-days-error' : 'token-days-help'} />
           <p id="token-days-help" className="text-muted-foreground text-xs">
             {defaultTokenDays} by default, {maxTokenDays} at most.
           </p>
-          {touched && daysError && <p className="text-destructive text-xs">{daysError}</p>}
+          {touched && daysError && (
+            <p id="token-days-error" className="text-destructive text-xs">
+              {daysError}
+            </p>
+          )}
         </div>
       </div>
       {error && (

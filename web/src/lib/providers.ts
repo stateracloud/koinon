@@ -54,17 +54,13 @@ export function rateError(label: string, value: string, required: boolean): stri
   return rate.test(v) ? undefined : `${label} must be a decimal such as 0.30.`
 }
 
-export type BoundAgent = { id: string; name: string }
+/** How long a new or changed provider takes to reach the gateway, measured on kind (about 170 s). */
+export const availabilityMinutes = 3
+export const savedNotice = `Saved. It will be available to agents within about ${availabilityMinutes} minutes.`
 
-/**
- * boundAgents reads the agent list out of DeleteConnection's refusal: "agents are still bound to this
- * connection; unbind them first: Repo helper (uuid), Docs bot (uuid)".
- */
-export function boundAgents(message: string): BoundAgent[] {
-  const i = message.indexOf('unbind them first: ')
-  if (i < 0) return []
-  const list = message.slice(i + 'unbind them first: '.length)
-  return [...list.matchAll(/(.+?) \(([0-9a-f-]{36})\)(?:, |$)/g)].map((m) => ({ name: m[1], id: m[2] }))
+/** savedRecently is true while a provider or model saved at ts may not be served yet. */
+export function savedRecently(ts: Timestamp | undefined, now = Date.now()): boolean {
+  return !!ts && now - timestampDate(ts).getTime() < availabilityMinutes * 60_000
 }
 
 export const defaultTokenDays = 30

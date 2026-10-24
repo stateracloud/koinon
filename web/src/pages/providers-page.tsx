@@ -2,7 +2,7 @@
 
 import { ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { ModelForm } from '@/components/model-form'
 import { ProviderForm } from '@/components/provider-form'
@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { ProviderService, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { useProviderActions } from '@/hooks/use-catalog-actions'
 import { useOrg } from '@/lib/org-context'
-import { modelsOf, providerDeletable, providerEditable, providerTypeLabel, ratesLabel, scopedModelName } from '@/lib/providers'
+import { availabilityMinutes, savedNotice, savedRecently, modelsOf, providerDeletable, providerEditable, providerTypeLabel, ratesLabel, scopedModelName } from '@/lib/providers'
 
 /** ProvidersPage is where org admins and owners manage the org's model providers and models (ADR 0056). */
 export function ProvidersPage() {
@@ -38,6 +38,10 @@ function ProvidersContent() {
   const [notice, setNotice] = useState<string>()
   const [refused, setRefused] = useState<string>()
   const done = () => setEditing(undefined)
+  const saved = () => {
+    setRefused(undefined)
+    setNotice(savedNotice)
+  }
 
   const failed = providers.error ?? models.error
   const list = providers.data?.providers ?? []
@@ -54,7 +58,7 @@ function ProvidersContent() {
       <p className="text-muted-foreground text-sm">
         A provider is the model API your agents call, such as OpenRouter or Ollama. Koinon keeps its key encrypted and hands it only to the gateway; sandboxes never see it. Providers can also be declared with a Kubernetes Secret, which are read-only here. A new or changed API key reaches the gateway through Kubernetes, which can take a few minutes; an agent run that starts sooner can fail.
       </p>
-      {editing?.kind === 'new-provider' && <ProviderForm onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} />}
+      {editing?.kind === 'new-provider' && <ProviderForm onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} onSaved={saved} />}
       {refused && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{refused}</AlertDescription>
@@ -85,6 +89,7 @@ function ProvidersContent() {
                 editing={editing}
                 setEditing={setEditing}
                 actions={actions}
+                onSaved={saved}
                 onNotice={(m) => {
                   setRefused(undefined)
                   setNotice(m)
@@ -111,6 +116,7 @@ function ProviderCard({
   editing,
   setEditing,
   actions,
+  onSaved,
   onNotice,
   onRefused,
 }: {
@@ -120,10 +126,12 @@ function ProviderCard({
   editing: Editing | undefined
   setEditing: (e: Editing | undefined) => void
   actions: Actions
+  onSaved: () => void
   onNotice: (m: string) => void
   onRefused: (m: string) => void
 }) {
   const done = () => setEditing(undefined)
+  const now = useNow()
   const editable = providerEditable(p)
   const disabled = p.disabledReason !== '' || p.removed
   return (
@@ -133,7 +141,15 @@ function ProviderCard({
           {p.name}
         </h2>
         <Badge variant="outline">{providerTypeLabel(p.type)}</Badge>
-        {p.removed ? <Badge variant="destructive">Removed</Badge> : disabled ? <Badge variant="destructive">Disabled</Badge> : <Badge variant="secondary">Active</Badge>}
+        {p.removed ? (
+          <Badge variant="destructive">Removed</Badge>
+        ) : disabled ? (
+          <Badge variant="destructive">Disabled</Badge>
+        ) : p.source === 'ui' && savedRecently(p.updatedAt, now) ? (
+          <Badge variant="outline">Saved, available to agents within about {availabilityMinutes} minutes</Badge>
+        ) : (
+          <Badge variant="secondary">Active</Badge>
+        )}
         <span className="text-muted-foreground ml-auto text-sm">{p.source === 'secret' ? `Managed by Secret ${p.managedBySecret}` : 'Added in the UI'}</span>
       </div>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
@@ -155,7 +171,7 @@ function ProviderCard({
         </p>
       )}
       {editing?.kind === 'provider' && editing.id === p.id ? (
-        <ProviderForm provider={p} onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} />
+        <ProviderForm provider={p} onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} onSaved={onSaved} />
       ) : (
         (editable || providerDeletable(p)) && (
           <div className="flex flex-wrap gap-2">
@@ -198,7 +214,7 @@ function ProviderCard({
           )}
         </div>
         {editing?.kind === 'new-model' && editing.providerId === p.id && (
-          <ModelForm provider={p} orgSlug={orgSlug} onCreate={actions.createModel} onUpdate={actions.updateModel} onDone={done} />
+          <ModelForm provider={p} orgSlug={orgSlug} onCreate={actions.createModel} onUpdate={actions.updateModel} onDone={done} onSaved={onSaved} />
         )}
         {models.length === 0 ? (
           <p className="text-muted-foreground text-sm">No models yet. Agents can only use models you add.</p>
@@ -213,7 +229,9 @@ function ProviderCard({
                   editing={editing?.kind === 'model' && editing.id === m.id}
                   edit={() => setEditing({ kind: 'model', id: m.id })}
                   done={done}
+                  now={now}
                   actions={actions}
+                  onSaved={onSaved}
                   onNotice={onNotice}
                   onRefused={onRefused}
                 />
@@ -233,7 +251,9 @@ function ModelRow({
   editing,
   edit,
   done,
+  now,
   actions,
+  onSaved,
   onNotice,
   onRefused,
 }: {
@@ -243,12 +263,14 @@ function ModelRow({
   editing: boolean
   edit: () => void
   done: () => void
+  now: number
   actions: Actions
+  onSaved: () => void
   onNotice: (m: string) => void
   onRefused: (m: string) => void
 }) {
   const editable = m.source !== 'secret'
-  if (editing) return <ModelForm provider={provider} orgSlug={orgSlug} model={m} onCreate={actions.createModel} onUpdate={actions.updateModel} onDone={done} />
+  if (editing) return <ModelForm provider={provider} orgSlug={orgSlug} model={m} onCreate={actions.createModel} onUpdate={actions.updateModel} onDone={done} onSaved={onSaved} />
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
@@ -256,6 +278,9 @@ function ModelRow({
         {m.guard && <Badge variant="secondary">Routing guard</Badge>}
         {m.disabledReason && <Badge variant="destructive">Disabled</Badge>}
         {!m.rates && <Badge variant="destructive">Not served</Badge>}
+        {m.rates && !m.disabledReason && m.source === 'ui' && savedRecently(m.updatedAt, now) && (
+          <Badge variant="outline">Saved, available to agents within about {availabilityMinutes} minutes</Badge>
+        )}
       </div>
       <p className="text-muted-foreground text-sm">{ratesLabel(m.rates)}</p>
       {m.disabledReason && <p className="text-destructive text-sm">Disabled: {m.disabledReason}.</p>}
@@ -279,4 +304,14 @@ function ModelRow({
       )}
     </>
   )
+}
+
+/** useNow is the current time, refreshed every 15 s, so "saved a moment ago" notes expire. */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15_000)
+    return () => clearInterval(t)
+  }, [])
+  return now
 }
