@@ -23,6 +23,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +49,7 @@ type Server struct {
 	catalog *catalog.Service
 	tokens  *tokens.Service
 	log     *slog.Logger
+	limiter *limiter
 }
 
 var _ StrictServerInterface = (*Server)(nil)
@@ -57,7 +59,7 @@ func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Lo
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{pool: pool, catalog: c, tokens: t, log: log}
+	return &Server{pool: pool, catalog: c, tokens: t, log: log, limiter: newLimiter()}
 }
 
 type principalKey struct{}
@@ -110,20 +112,34 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if !ok || raw == "" {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="koinon-admin"`)
+			s.limiter.fail(clientIP(r), time.Now())
+			s.log.Warn("admin API request without a bearer token", "client_ip", clientIP(r), "path", r.URL.Path)
 			writeError(w, http.StatusUnauthorized, Unauthenticated, "a bearer token is required")
+			return
+		}
+		ip := clientIP(r)
+		if wait := s.limiter.blocked(ip, time.Now()); wait > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+			writeError(w, http.StatusTooManyRequests, Unauthenticated, "too many failed attempts; retry later")
 			return
 		}
 		p, err := s.tokens.Authenticate(r.Context(), raw)
 		if err != nil {
-			if !errors.Is(err, tokens.ErrInvalid) {
+			var ae *tokens.AuthError
+			if !errors.As(err, &ae) {
 				s.log.Error("admin API token check failed", "err", err)
 				writeError(w, http.StatusInternalServerError, Internal, "internal error")
 				return
 			}
+			// Security log: never an org's audit trail, except for a real token (recorded by
+			// tokens.Authenticate). The secret part is never logged, only the public prefix.
+			s.limiter.fail(ip, time.Now())
+			s.log.Warn("admin API authentication failed", "client_ip", ip, "token_prefix", ae.Prefix, "reason", ae.Reason, "path", r.URL.Path)
 			w.Header().Set("WWW-Authenticate", `Bearer realm="koinon-admin", error="invalid_token"`)
 			writeError(w, http.StatusUnauthorized, Unauthenticated, "the token is invalid, expired or revoked")
 			return
 		}
+		s.limiter.succeed(ip)
 		ctx := audit.WithRequestID(context.WithValue(r.Context(), principalKey{}, p), reqID)
 		r = r.WithContext(ctx)
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
@@ -396,7 +412,7 @@ func (s *Server) CreateToken(ctx context.Context, req CreateTokenRequestObject) 
 	if req.Body.ExpiresIn != nil {
 		ttl = time.Duration(*req.Body.ExpiresIn) * time.Second
 	}
-	created, err := s.tokens.Create(ctx, p.Org, actor, pgtype.UUID{}, p.Role, req.Body.Name, store.OrgRole(req.Body.Role), ttl)
+	created, err := s.tokens.Create(ctx, p.Org, actor, tokens.Creator{User: p.CreatedBy, Role: p.Role, Parent: &p}, req.Body.Name, store.OrgRole(req.Body.Role), ttl)
 	if err != nil {
 		st, e := s.problem(err)
 		return CreateTokendefaultJSONResponse{Body: e, StatusCode: st}, nil
@@ -407,7 +423,7 @@ func (s *Server) CreateToken(ctx context.Context, req CreateTokenRequestObject) 
 // RevokeToken implements StrictServerInterface.
 func (s *Server) RevokeToken(ctx context.Context, req RevokeTokenRequestObject) (RevokeTokenResponseObject, error) {
 	p, actor := s.actor(ctx)
-	if _, err := s.tokens.Revoke(ctx, p.Org, actor, uid(req.TokenId)); err != nil {
+	if _, err := s.tokens.Revoke(ctx, p.Org, actor, p.Role, uid(req.TokenId)); err != nil {
 		st, e := s.problem(err)
 		return RevokeTokendefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}

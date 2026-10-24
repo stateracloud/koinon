@@ -7,8 +7,8 @@
 -- (TestQueriesAreOrgScoped).
 
 -- name: CreateAPIToken :one
-INSERT INTO api_tokens (org_id, id, name, prefix, token_hash, role, created_by, expires_at, created_at)
-VALUES (@org_id, @id, @name, @prefix, @token_hash, @role, sqlc.narg(created_by), @expires_at, @created_at)
+INSERT INTO api_tokens (org_id, id, name, prefix, token_hash, role, created_by, parent_token_id, expires_at, created_at)
+VALUES (@org_id, @id, @name, @prefix, @token_hash, @role, @created_by, sqlc.narg(parent_token_id), @expires_at, @created_at)
 RETURNING *;
 
 -- name: GetAPITokenByPrefix :one
@@ -18,16 +18,26 @@ SELECT t.*, o.slug AS org_slug FROM api_tokens t
 JOIN orgs o ON o.id = t.org_id AND o.deleted_at IS NULL
 WHERE t.prefix = @prefix;
 
+-- name: GetAPIToken :one
+SELECT * FROM api_tokens
+WHERE org_id = @org_id AND id = @id;
+
 -- name: ListAPITokens :many
 SELECT * FROM api_tokens
 WHERE org_id = @org_id
 ORDER BY created_at DESC, id DESC;
 
--- name: RevokeAPIToken :one
-UPDATE api_tokens
-SET revoked_at = coalesce(revoked_at, now())
-WHERE org_id = @org_id AND id = @id
-RETURNING *;
+-- name: RevokeAPITokenTree :many
+-- Revokes the token and every token descended from it.
+WITH RECURSIVE tree AS (
+    SELECT r.id FROM api_tokens r WHERE r.org_id = @org_id AND r.id = @id
+    UNION
+    SELECT c.id FROM api_tokens c JOIN tree ON c.parent_token_id = tree.id WHERE c.org_id = @org_id
+)
+UPDATE api_tokens AS t
+SET revoked_at = coalesce(t.revoked_at, now())
+WHERE t.org_id = @org_id AND t.id IN (SELECT tree.id FROM tree)
+RETURNING t.*;
 
 -- name: TouchAPIToken :exec
 -- Records use, at most once a minute per token.

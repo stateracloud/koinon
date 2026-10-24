@@ -15,7 +15,10 @@ info:
     Manage an org's model providers, models and API tokens. The org is the token's org.
     Providers and models declared by a labelled Kubernetes Secret (`koinon.dev/secret-type:
     model-provider`) are read-only here: changing or deleting them answers 409 and names the
-    Secret. Secret values are never returned.
+    Secret. When the Secret is deleted they stay, disabled and `removed`, and may then be deleted.
+    Secret values are never returned. A token can create tokens only with the same or a lower
+    role and an expiry no later than its own; revoking a token revokes the tokens it created.
+    Repeated bad tokens from one client are answered 429 with Retry-After.
   license:
     name: Apache-2.0
 servers:

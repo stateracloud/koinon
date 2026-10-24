@@ -10,8 +10,8 @@ import (
 )
 
 var _ = Describe("00012_providers_audit_tokens", func() {
-	var org string
-	BeforeEach(func(ctx SpecContext) { _, org = newUser(ctx) })
+	var org, user string
+	BeforeEach(func(ctx SpecContext) { user, org = newUser(ctx) })
 
 	It("makes audit_events append-only, even for the table owner", func(ctx SpecContext) {
 		var id string
@@ -63,8 +63,8 @@ var _ = Describe("00012_providers_audit_tokens", func() {
 
 	It("limits tokens to admin or owner and 90 days", func(ctx SpecContext) {
 		insert := func(prefix, role, interval string) error {
-			_, err := db.ExecContext(ctx, `INSERT INTO api_tokens (org_id, name, prefix, token_hash, role, expires_at, created_at)
-				VALUES ($1, 't', $2, decode(repeat('ab', 32), 'hex'), $3::org_role, now() + $4::interval, now())`, org, prefix, role, interval)
+			_, err := db.ExecContext(ctx, `INSERT INTO api_tokens (org_id, name, prefix, token_hash, role, created_by, expires_at, created_at)
+				VALUES ($1, 't', $2, decode(repeat('ab', 32), 'hex'), $3::org_role, $5, now() + $4::interval, now())`, org, prefix, role, interval, user)
 			return err
 		}
 		Expect(insert("aaaaaaa1", "admin", "30 days")).To(Succeed())

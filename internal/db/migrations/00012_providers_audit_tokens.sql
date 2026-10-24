@@ -31,6 +31,9 @@ CREATE TABLE providers (
     -- The declaring Secret's "<uid>/<resourceVersion>" when last applied, so an unchanged Secret is
     -- not applied (and audited) again. Holds nothing derived from the Secret's data.
     declared_version  text,
+    -- Set when the declaring Secret was deleted: the row stays (for audit and for what refers to it),
+    -- is not served, and comes back when the Secret does. An admin may delete it for good.
+    removed_at        timestamptz,
     -- Set while a declared provider of the same name shadows this UI one: not served.
     disabled_reason   text,
     created_by        uuid          REFERENCES users (id),
@@ -90,6 +93,7 @@ ALTER TABLE connections
     ADD COLUMN source             config_source NOT NULL DEFAULT 'ui',
     ADD COLUMN managed_by_secret  text,
     ADD COLUMN declared_version   text,
+    ADD COLUMN removed_at         timestamptz,
     ADD CONSTRAINT connections_secret_where CHECK (secret_envelope IS NULL OR jsonb_typeof(secret_envelope) = 'object'),
     ADD CONSTRAINT connections_source_secret CHECK ((source = 'secret') = (managed_by_secret IS NOT NULL));
 
@@ -103,13 +107,19 @@ CREATE TABLE api_tokens (
     token_hash   bytea       NOT NULL CHECK (length(token_hash) = 32),
     -- Never more than the creator's role at creation; viewer and member tokens do not exist.
     role         org_role    NOT NULL CHECK (role IN ('admin', 'owner')),
-    created_by   uuid        REFERENCES users (id),
+    -- The user at the root of the chain of tokens: who created the first token from a session. A
+    -- token made with a token carries it down. Authentication checks the user still holds the role.
+    created_by   uuid        NOT NULL REFERENCES users (id),
+    -- The token that created this one, if any. Revoking a token revokes its descendants, and a child
+    -- expires no later than its parent (enforced by the service).
+    parent_token_id uuid,
     -- At most 90 days after creation (default 30, set by the API).
     expires_at   timestamptz NOT NULL,
     revoked_at   timestamptz,
     last_used_at timestamptz,
     created_at   timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (org_id, id),
+    FOREIGN KEY (org_id, parent_token_id) REFERENCES api_tokens (org_id, id),
     CHECK (expires_at > created_at AND expires_at <= created_at + interval '90 days')
 );
 
