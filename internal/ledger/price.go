@@ -112,7 +112,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		if err != nil {
 			return p, err
 		}
-		x := estimate.Input{Aborted: !e.OutputKnown, MaxTokens: e.MaxTokens}
+		x := estimate.Input{Aborted: !e.OutputKnown, MaxTokens: e.MaxTokens, Rejected: !e.InputKnown && !e.OutputKnown && e.Status >= 400 && e.Status < 500}
 		if e.RequestBytes > 0 {
 			x.RequestBytes = e.RequestBytes
 		}
@@ -129,6 +129,7 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		if !e.OutputKnown {
 			// A 2xx without usage: say why the request was charged at max, and flag it.
 			meta["usage_missing"] = true
+			meta["rejected_by_upstream"] = x.Rejected
 			p.flagged = true
 		}
 		p.inTokens, p.outTokens, p.estimated = r.InputTokens, r.OutputTokens, true

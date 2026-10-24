@@ -103,3 +103,11 @@ func TestAbsurdMaxTokensIsCapped(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestRejectedRequestChargesInputOnly(t *testing.T) {
+	p := estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 3, MaxOutput: 128000}
+	r := estimate.Estimate(p, estimate.Input{RequestBytes: 3000, Rejected: true, Aborted: true, MaxTokens: 4000})
+	if r.InputTokens != 1000 || r.OutputTokens != 0 || !r.Estimated {
+		t.Fatalf("%+v", r)
+	}
+}
