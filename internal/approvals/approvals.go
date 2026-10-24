@@ -48,6 +48,8 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/mcpask"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
@@ -203,6 +205,19 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 		}
 		if run.State.Finished() {
 			return ErrNotPending // the sweeper cancels it
+		}
+		if cur.ApprovalsRequired < 2 && cur.Connector == mcpask.ConnectorID {
+			// The tool's flag is read now, not only when the request was recorded: turning it on
+			// covers requests that are already pending.
+			var b mcpservers.CallBinding
+			var sid pgtype.UUID
+			if json.Unmarshal(cur.CallBinding, &b) == nil && sid.Scan(b.ServerID) == nil {
+				if tool, err := q.GetMCPTool(ctx, store.GetMCPToolParams{OrgID: org, ServerID: sid, Name: cur.Tool}); err == nil && tool.RequiresTwoApprovers {
+					if cur, err = q.RaiseApprovalsRequired(ctx, store.RaiseApprovalsRequiredParams{OrgID: org, ID: id}); err != nil {
+						return err
+					}
+				}
+			}
 		}
 		if cur.ApprovalsRequired >= 2 {
 			// Two approvers: distinct people, neither the one who created the ticket (they asked for

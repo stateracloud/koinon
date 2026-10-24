@@ -430,6 +430,8 @@ type Querier interface {
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
+	// A tool turned two-approver on after the request was recorded: the pending request needs two too.
+	RaiseApprovalsRequired(ctx context.Context, arg RaiseApprovalsRequiredParams) (ApprovalRequest, error)
 	// Records the observed sandbox. started_at and stopped_at are stamped on the
 	// transition into ready and stopped. An empty home_generation (no sandbox
 	// observed) keeps the recorded one.

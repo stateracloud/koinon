@@ -967,6 +967,55 @@ func (q *Queries) MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApp
 	return result.RowsAffected(), nil
 }
 
+const raiseApprovalsRequired = `-- name: RaiseApprovalsRequired :one
+UPDATE approval_requests
+SET approvals_required = 2
+WHERE org_id = $1 AND id = $2 AND status = 'pending' AND approvals_required < 2
+RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding
+`
+
+type RaiseApprovalsRequiredParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// A tool turned two-approver on after the request was recorded: the pending request needs two too.
+func (q *Queries) RaiseApprovalsRequired(ctx context.Context, arg RaiseApprovalsRequiredParams) (ApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, raiseApprovalsRequired, arg.OrgID, arg.ID)
+	var i ApprovalRequest
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.TicketID,
+		&i.RunID,
+		&i.AgentID,
+		&i.Connector,
+		&i.Tool,
+		&i.Target,
+		&i.ArgsJson,
+		&i.ArgsSha256,
+		&i.Risk,
+		&i.Decision,
+		&i.Status,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.Result,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Executions,
+		&i.ExecutionLeaseUntil,
+		&i.ExecutedAt,
+		&i.Error,
+		&i.DeliveredAt,
+		&i.ApprovalsRequired,
+		&i.FirstApprover,
+		&i.CallBinding,
+	)
+	return i, err
+}
+
 const setApprovalFirstApprover = `-- name: SetApprovalFirstApprover :one
 UPDATE approval_requests
 SET first_approver = $1::uuid
