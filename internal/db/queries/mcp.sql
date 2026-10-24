@@ -173,3 +173,13 @@ WHERE org_id = @org_id AND name = @name AND disabled_reason IS NULL AND removed_
 -- name: GetAgentMCPServer :one
 SELECT * FROM agent_mcp_servers
 WHERE org_id = @org_id AND agent_id = @agent_id AND server_id = @server_id;
+
+-- name: ListUnavailableMCPServersOfAgent :many
+-- The servers an agent may use that are down or disabled right now, for the note agentd gives the
+-- agent when a session starts.
+SELECT s.name, s.health::text AS health, s.health_reason, s.disabled_reason
+FROM agent_mcp_servers a
+JOIN mcp_servers s ON s.org_id = a.org_id AND s.id = a.server_id
+WHERE a.org_id = @org_id AND a.agent_id = @agent_id
+  AND (s.health = 'unhealthy' OR s.disabled_reason IS NOT NULL OR s.removed_at IS NOT NULL)
+ORDER BY s.name;

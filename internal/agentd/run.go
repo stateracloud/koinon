@@ -683,9 +683,18 @@ func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded, reset 
 	if err != nil {
 		return "", 0, err
 	}
+	var notice string
+	if reset || !loaded {
+		if notice, err = r.mcpNotice(ctx); err != nil {
+			return "", 0, err
+		}
+	}
 	switch {
 	case reset:
 		parts = append(parts, "Ticket: "+ticket.Title)
+		if notice != "" {
+			parts = append(parts, notice)
+		}
 	// A claimed parked run is starting with its prompt already recorded: it resumes after
 	// its approvals were decided. A takeover keeps the state it had.
 	case resumed && r.run.State == store.RunStateStarting:
@@ -694,6 +703,9 @@ func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded, reset 
 		parts = append(parts, resumeNote+outcomes)
 	case !loaded:
 		parts = append(parts, "Ticket: "+ticket.Title)
+		if notice != "" {
+			parts = append(parts, notice)
+		}
 	}
 	through := after
 	for _, m := range msgs {
