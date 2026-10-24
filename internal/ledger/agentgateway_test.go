@@ -204,7 +204,7 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 		Eventually(func() store.RunState { return e.run(ctx, run.ID).State }).
 			WithTimeout(20 * time.Second).WithPolling(200 * time.Millisecond).
 			Should(Equal(store.RunStateCanceled))
-		Expect(e.run(ctx, run.ID).OutcomeReason.String).To(HavePrefix("agent spend limit reached"))
+		Expect(e.run(ctx, run.ID).OutcomeReason.String).To(HavePrefix("agent daily limit reached"))
 	}, SpecTimeout(2*time.Minute))
 
 	It("keeps the agent blocked after its key is rotated", func(ctx SpecContext) {

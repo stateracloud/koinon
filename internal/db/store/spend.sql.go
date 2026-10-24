@@ -79,35 +79,103 @@ func (q *Queries) GetAgentSpendSince(ctx context.Context, arg GetAgentSpendSince
 	return cost_usd, err
 }
 
+const getCalibration = `-- name: GetCalibration :one
+SELECT coalesce(percentile_cont(0.9) WITHIN GROUP (ORDER BY s.ratio), 0)::float8 AS p90,
+       count(*)::bigint AS samples
+FROM (
+    SELECT (input_tokens::float8 / request_bytes) AS ratio
+    FROM spend_entries
+    WHERE org_id = $1 AND model = $2 AND NOT estimated AND request_bytes > 0 AND input_tokens > 0
+    ORDER BY occurred_at DESC
+    LIMIT 500
+) s
+`
+
+type GetCalibrationParams struct {
+	OrgID pgtype.UUID
+	Model string
+}
+
+type GetCalibrationRow struct {
+	P90     float64
+	Samples int64
+}
+
+// The p90 of provider-reported input tokens per request byte over the newest 500 real
+// (not estimated) requests of a model, and how many there were.
+func (q *Queries) GetCalibration(ctx context.Context, arg GetCalibrationParams) (GetCalibrationRow, error) {
+	row := q.db.QueryRow(ctx, getCalibration, arg.OrgID, arg.Model)
+	var i GetCalibrationRow
+	err := row.Scan(&i.P90, &i.Samples)
+	return i, err
+}
+
+const getOrgSpendSince = `-- name: GetOrgSpendSince :one
+SELECT coalesce(sum(cost_usd), 0)::text AS cost_usd
+FROM spend_entries
+WHERE org_id = $1 AND occurred_at >= $2
+`
+
+type GetOrgSpendSinceParams struct {
+	OrgID pgtype.UUID
+	Since pgtype.Timestamptz
+}
+
+// An org's recorded USD spend since @since (the start of the calendar month in UTC), for its
+// monthly cap and the platform ceiling.
+func (q *Queries) GetOrgSpendSince(ctx context.Context, arg GetOrgSpendSinceParams) (string, error) {
+	row := q.db.QueryRow(ctx, getOrgSpendSince, arg.OrgID, arg.Since)
+	var cost_usd string
+	err := row.Scan(&cost_usd)
+	return cost_usd, err
+}
+
 const insertSpendEntry = `-- name: InsertSpendEntry :one
 INSERT INTO spend_entries (
     org_id, agent_id, run_id, ticket_id, request_id, key_id, model,
-    input_tokens, output_tokens, cost_usd, priced, occurred_at
+    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
+    cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
+    request_bytes, response_bytes, occurred_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, ($10::text)::numeric, $11, $12
+    $8, $9, $10, $11, $12,
+    ($13::text)::numeric, ($14::text)::numeric,
+    $15, $16, $17, $18::jsonb, $19,
+    $20, $21, $22
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id
 `
 
 type InsertSpendEntryParams struct {
-	OrgID        pgtype.UUID
-	AgentID      pgtype.UUID
-	RunID        pgtype.UUID
-	TicketID     pgtype.UUID
-	RequestID    string
-	KeyID        string
-	Model        string
-	InputTokens  int64
-	OutputTokens int64
-	CostUsd      string
-	Priced       bool
-	OccurredAt   pgtype.Timestamptz
+	OrgID            pgtype.UUID
+	AgentID          pgtype.UUID
+	RunID            pgtype.UUID
+	TicketID         pgtype.UUID
+	RequestID        string
+	KeyID            string
+	Model            string
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	ReasoningTokens  int64
+	CostUsd          string
+	GatewayCostUsd   pgtype.Text
+	PriceRef         pgtype.Text
+	Priced           bool
+	Estimated        bool
+	Estimate         []byte
+	CostFlagged      bool
+	RequestBytes     pgtype.Int8
+	ResponseBytes    pgtype.Int8
+	OccurredAt       pgtype.Timestamptz
 }
 
 // Records one request. Returns no row when the request id is already
-// recorded, so a replayed export is not charged twice.
+// recorded, so a replayed export is not charged twice. cost_usd is Koinon's
+// own computation from the raw usage and the dated price; gateway_cost_usd is
+// what agentgateway logged (NULL when it could not price the request).
 func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, insertSpendEntry,
 		arg.OrgID,
@@ -119,13 +187,136 @@ func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryPara
 		arg.Model,
 		arg.InputTokens,
 		arg.OutputTokens,
+		arg.CacheReadTokens,
+		arg.CacheWriteTokens,
+		arg.ReasoningTokens,
 		arg.CostUsd,
+		arg.GatewayCostUsd,
+		arg.PriceRef,
 		arg.Priced,
+		arg.Estimated,
+		arg.Estimate,
+		arg.CostFlagged,
+		arg.RequestBytes,
+		arg.ResponseBytes,
 		arg.OccurredAt,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const listFlaggedPrices = `-- name: ListFlaggedPrices :many
+SELECT coalesce(price_ref, '')::text AS price_ref, model,
+       count(*)::bigint AS flagged,
+       max(occurred_at)::timestamptz AS last_seen,
+       sum(cost_usd)::text AS cost_usd,
+       sum(gateway_cost_usd)::text AS gateway_cost_usd
+FROM spend_entries
+WHERE org_id = $1 AND cost_flagged AND occurred_at >= $2
+GROUP BY price_ref, model
+ORDER BY max(occurred_at) DESC
+`
+
+type ListFlaggedPricesParams struct {
+	OrgID pgtype.UUID
+	Since pgtype.Timestamptz
+}
+
+type ListFlaggedPricesRow struct {
+	PriceRef       string
+	Model          string
+	Flagged        int64
+	LastSeen       pgtype.Timestamptz
+	CostUsd        string
+	GatewayCostUsd string
+}
+
+// Price entries whose recomputed cost differs from the gateway's by more than 1% since
+// @since, with how often and by how much.
+func (q *Queries) ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error) {
+	rows, err := q.db.Query(ctx, listFlaggedPrices, arg.OrgID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFlaggedPricesRow
+	for rows.Next() {
+		var i ListFlaggedPricesRow
+		if err := rows.Scan(
+			&i.PriceRef,
+			&i.Model,
+			&i.Flagged,
+			&i.LastSeen,
+			&i.CostUsd,
+			&i.GatewayCostUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const spendReport = `-- name: SpendReport :many
+SELECT model,
+       count(*)::bigint AS requests,
+       coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
+       coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
+       coalesce(sum(cost_usd) FILTER (WHERE NOT estimated), 0)::text AS reported_usd,
+       coalesce(sum(cost_usd) FILTER (WHERE estimated), 0)::text AS estimated_usd,
+       count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
+FROM spend_entries
+WHERE org_id = $1 AND occurred_at >= $2
+GROUP BY model
+ORDER BY model
+`
+
+type SpendReportParams struct {
+	OrgID pgtype.UUID
+	Since pgtype.Timestamptz
+}
+
+type SpendReportRow struct {
+	Model             string
+	Requests          int64
+	InputTokens       int64
+	OutputTokens      int64
+	ReportedUsd       string
+	EstimatedUsd      string
+	EstimatedRequests int64
+}
+
+// Spend per model since @since, with estimated usage kept apart.
+func (q *Queries) SpendReport(ctx context.Context, arg SpendReportParams) ([]SpendReportRow, error) {
+	rows, err := q.db.Query(ctx, spendReport, arg.OrgID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SpendReportRow
+	for rows.Next() {
+		var i SpendReportRow
+		if err := rows.Scan(
+			&i.Model,
+			&i.Requests,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.ReportedUsd,
+			&i.EstimatedUsd,
+			&i.EstimatedRequests,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const sumRunCosts = `-- name: SumRunCosts :many

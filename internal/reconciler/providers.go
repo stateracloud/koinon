@@ -20,6 +20,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Provider keys reach the gateway as files (plan item PV1, ADR 0056). The reconciler opens
@@ -173,8 +175,18 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 				order = append(order, id)
 			}
 			m := gateway.Model{Name: row.ModelName, Guard: row.Guard}
+			// The price valid now: the model's own rates, else the org's price entries, else the
+			// default list (plan item PV2). A model with no price is not served.
+			pm := prices.Model{ID: row.ModelID.String(), Name: row.ModelName, ProviderType: row.ProviderType, UpdatedAt: row.ModelUpdatedAt.Time}
 			if row.InputRate.Valid {
-				m.Price = &gateway.Price{Input: row.InputRate.String, Output: row.OutputRate.String, CacheRead: row.CacheReadRate.String}
+				pm.Rates = &pricing.Wire{Input: row.InputRate.String, Output: row.OutputRate.String, CacheRead: row.CacheReadRate.String}
+			}
+			switch res, err := prices.Resolve(ctx, r.q, org.ID, pm, r.cfg.Now()); {
+			case err == nil:
+				gp := res.Price.Gateway()
+				m.Price = &gp
+			case !errors.Is(err, prices.ErrUnpriced):
+				return out, errs, fmt.Errorf("reconciler: price of model %s/%s: %w", org.Slug, row.ModelName, err)
 			}
 			p.Models = append(p.Models, m)
 		}
