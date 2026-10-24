@@ -9,6 +9,8 @@ import { ApprovalPage } from '@/pages/approval-page'
 import { BoardPage } from '@/pages/board-page'
 import { ConnectionPage } from '@/pages/connection-page'
 import { ConnectionsPage } from '@/pages/connections-page'
+import { ProvidersPage } from '@/pages/providers-page'
+import { TokensPage } from '@/pages/tokens-page'
 import { NewAgentPage } from '@/pages/new-agent-page'
 import { NewGitHubConnectionPage } from '@/pages/new-github-connection-page'
 import { LoginPage } from '@/pages/login-page'
@@ -54,6 +56,9 @@ export const newGitHubConnectionRoute = createRoute({
 })
 export const connectionRoute = createRoute({ getParentRoute: () => appRoute, path: '/connections/$connectionId', component: ConnectionPage })
 
+export const providersRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/providers', component: ProvidersPage })
+export const tokensRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/tokens', component: TokensPage })
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
@@ -66,6 +71,8 @@ const routeTree = rootRoute.addChildren([
     connectionsRoute,
     newGitHubConnectionRoute,
     connectionRoute,
+    providersRoute,
+    tokensRoute,
   ]),
 ])
 

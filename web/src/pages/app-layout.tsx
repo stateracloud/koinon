@@ -9,6 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AuthService, type WhoAmIResponse } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { isApprover } from '@/lib/approvals'
 import { OrgProvider } from '@/lib/org'
 import { useOrg } from '@/lib/org-context'
 import { logout } from '@/lib/session'
@@ -74,24 +75,42 @@ function Shell({ who }: { who: WhoAmIResponse }) {
     }
   }
 
+  const navLink = 'block rounded-md px-3 py-1.5 text-sm hover:bg-accent'
+  const active = { 'aria-current': 'page' as const, className: 'bg-accent font-medium' }
+  const admin = isApprover(org.role)
   return (
-    <div className="mx-auto flex min-h-screen max-w-7xl flex-col">
-      <header className="flex flex-wrap items-center gap-4 border-b px-4 py-3">
-        <Link to="/" className="text-lg font-semibold">
+    <div className="flex min-h-screen">
+      <aside className="bg-card w-56 shrink-0 border-r p-3">
+        <Link to="/" className="mb-4 block px-3 text-lg font-semibold">
           Koinon
         </Link>
-        <nav aria-label="Main" className="flex gap-3 text-sm">
-          <Link to="/" className="hover:underline" activeOptions={{ exact: true }} activeProps={{ 'aria-current': 'page', className: 'font-medium' }}>
+        <nav aria-label="Main" className="grid gap-1">
+          <Link to="/" className={navLink} activeOptions={{ exact: true }} activeProps={active}>
             Board
           </Link>
-          <Link to="/agents" className="hover:underline" activeProps={{ 'aria-current': 'page', className: 'font-medium' }}>
+          <Link to="/agents" className={navLink} activeProps={active}>
             Agents
           </Link>
-          <Link to="/connections" className="hover:underline" activeProps={{ 'aria-current': 'page', className: 'font-medium' }}>
+          <Link to="/connections" className={navLink} activeProps={active}>
             Connections
           </Link>
         </nav>
-        <div className="ml-auto flex items-center gap-3 text-sm">
+        {admin && (
+          <nav aria-labelledby="settings-nav" className="mt-6 grid gap-1">
+            <h2 id="settings-nav" className="text-muted-foreground px-3 pb-1 text-xs font-semibold tracking-wide uppercase">
+              Settings
+            </h2>
+            <Link to="/settings/providers" className={navLink} activeProps={active}>
+              Providers
+            </Link>
+            <Link to="/settings/tokens" className={navLink} activeProps={active}>
+              API tokens
+            </Link>
+          </nav>
+        )}
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex flex-wrap items-center justify-end gap-3 border-b px-4 py-3 text-sm">
           {memberships.length > 1 ? (
             <Select value={org.orgId} onValueChange={setOrgId}>
               <SelectTrigger size="sm" aria-label="Organization">
@@ -112,14 +131,14 @@ function Shell({ who }: { who: WhoAmIResponse }) {
           <Button variant="outline" size="sm" onClick={() => void onLogout()} disabled={loggingOut}>
             Log out
           </Button>
-        </div>
-      </header>
-      <main className="flex-1 px-4 py-6">
-        {/* Remount pages when the org changes so no query mixes two orgs. */}
-        <div key={org.orgId}>
-          <Outlet />
-        </div>
-      </main>
+        </header>
+        <main className="flex-1 px-6 py-6">
+          {/* Remount pages when the org changes so no query mixes two orgs. */}
+          <div key={org.orgId}>
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   )
 }
