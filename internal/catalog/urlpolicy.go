@@ -4,6 +4,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/binary"
 	"net"
 	"net/netip"
 	"net/url"
@@ -158,7 +159,9 @@ func whatwgIPv4(host string) (addr netip.Addr, numeric, ok bool) {
 	for i, v := range nums[:len(nums)-1] {
 		ip += v << (8 * (3 - uint(i)))
 	}
-	return netip.AddrFrom4([4]byte{byte(ip >> 24), byte(ip >> 16), byte(ip >> 8), byte(ip)}), true, true
+	var b [4]byte
+	binary.BigEndian.PutUint32(b[:], uint32(ip)) //nolint:gosec // ip < 2^32 was checked above
+	return netip.AddrFrom4(b), true, true
 }
 
 // Check returns an *InvalidError when rawURL names a host the policy denies. A name that does not
