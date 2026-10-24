@@ -65,6 +65,10 @@ type Token struct {
 	ExpiresAt  time.Time  `json:"expiresAt"`
 	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	// CreatedBy is the root user of the token's chain; ParentID names the token that created this
+	// one, empty for a token made from a session.
+	CreatedBy string `json:"createdBy,omitempty"`
+	ParentID  string `json:"parentId,omitempty"`
 }
 
 // Created is a new token with its secret, shown once.
@@ -100,6 +104,12 @@ func New(pool *pgxpool.Pool, now func() time.Time) *Service {
 
 func toToken(t store.ApiToken) Token {
 	out := Token{ID: t.ID.String(), Name: t.Name, Prefix: t.Prefix, Role: string(t.Role), CreatedAt: t.CreatedAt.Time, ExpiresAt: t.ExpiresAt.Time}
+	if t.CreatedBy.Valid {
+		out.CreatedBy = t.CreatedBy.String()
+	}
+	if t.ParentTokenID.Valid {
+		out.ParentID = t.ParentTokenID.String()
+	}
 	if t.RevokedAt.Valid {
 		out.RevokedAt = &t.RevokedAt.Time
 	}

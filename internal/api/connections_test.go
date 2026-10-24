@@ -4,11 +4,13 @@ package api_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 
 	connect "connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connectproto"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -317,6 +319,16 @@ var _ = Describe("ConnectionService", func() {
 		err := del(owner)
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 		Expect(err.Error()).To(ContainSubstring(agent.GetId()), "the bound agents are listed")
+		var ce *connect.Error
+		Expect(errors.As(err, &ce)).To(BeTrue())
+		Expect(ce.Details()).To(HaveLen(1))
+		msg, uerr := connectproto.UnmarshalErrorDetail(ce.Details()[0])
+		Expect(uerr).NotTo(HaveOccurred())
+		bound, ok := msg.(*connectionv1alpha1.BoundAgents)
+		Expect(ok).To(BeTrue())
+		Expect(bound.GetAgents()).To(HaveLen(1))
+		Expect(bound.GetAgents()[0].GetId()).To(Equal(agent.GetId()))
+		Expect(bound.GetAgents()[0].GetDisplayName()).NotTo(BeEmpty())
 
 		_, err = owner.agents.ArchiveAgent(ctx, &agentv1alpha1.ArchiveAgentRequest{OrgId: org, AgentId: agent.GetId()})
 		Expect(err).NotTo(HaveOccurred())

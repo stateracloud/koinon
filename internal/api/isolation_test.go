@@ -4,6 +4,7 @@ package api_test
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"path/filepath"
 	"sort"
@@ -29,6 +30,8 @@ import (
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
+	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
@@ -212,6 +215,56 @@ var isolationCases = map[string]isolationCase{
 		},
 	},
 
+	providerv1alpha1connect.ProviderServiceListProvidersProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.providers.ListProviders(ctx, &providerv1alpha1.ListProvidersRequest{OrgId: org})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceCreateProviderProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{
+				OrgId: org, Name: fmt.Sprintf("intruder-%d", dbSeq.Add(1)), Type: "openai", Url: "https://api.example.com/v1",
+			})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceUpdateProviderProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.UpdateProvider(ctx, &providerv1alpha1.UpdateProviderRequest{
+				OrgId: org, ProviderId: f.provider, Url: new("https://intruder.example.com/v1"),
+			})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceDeleteProviderProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.DeleteProvider(ctx, &providerv1alpha1.DeleteProviderRequest{OrgId: org, ProviderId: f.provider})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceListModelsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.providers.ListModels(ctx, &providerv1alpha1.ListModelsRequest{OrgId: org})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceCreateModelProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{
+				OrgId: org, ProviderId: f.provider, Name: "intruder", Rates: &providerv1alpha1.Rates{Input: "1", Output: "1"},
+			})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceUpdateModelProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: f.model, ClearRates: true})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceDeleteModelProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.DeleteModel(ctx, &providerv1alpha1.DeleteModelRequest{OrgId: org, ModelId: f.model})
+		},
+	},
+
 	runv1alpha1connect.RunServiceWatchRunProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			stream, err := c.runs.WatchRun(ctx, &runv1alpha1.WatchRunRequest{OrgId: org, RunId: f.run.GetId()})
@@ -245,7 +298,7 @@ var _ = Describe("org isolation", func() {
 		})
 		a := e.newIsolationFixture(ctx, gh.PEM)
 		b := e.newIsolationFixture(ctx, gh.PEM)
-		foreign := []string{a.org, a.agent.GetId(), a.draft.GetId(), a.ticket.GetId(), a.run.GetId(), a.connection, a.approval.ID.String()}
+		foreign := []string{a.org, a.agent.GetId(), a.draft.GetId(), a.ticket.GetId(), a.run.GetId(), a.connection, a.approval.ID.String(), a.provider, a.model}
 		before := snapshot(ctx, e, a)
 
 		// The strongest caller in B: its owner, and a B admin.
@@ -296,6 +349,16 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	})
 	Expect(err).NotTo(HaveOccurred())
 	f.token = tok.GetToken().GetId()
+	prov, err := f.owner.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{
+		OrgId: f.org, Name: "isolated", Type: "openrouter", Url: "https://openrouter.ai/api/v1", ApiKey: "sk-isolated",
+	})
+	Expect(err).NotTo(HaveOccurred())
+	f.provider = prov.GetProvider().GetId()
+	mod, err := f.owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{
+		OrgId: f.org, ProviderId: f.provider, Name: "isolated-model", Rates: &providerv1alpha1.Rates{Input: "1", Output: "2"},
+	})
+	Expect(err).NotTo(HaveOccurred())
+	f.model = mod.GetModel().GetId()
 	return f
 }
 
@@ -317,6 +380,10 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM approval_requests WHERE org_id = $1 AND status = 'pending'`, org),
 		count(ctx, e, `SELECT count(*) FROM api_tokens WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM api_tokens WHERE org_id = $1 AND revoked_at IS NULL`, org),
+		count(ctx, e, `SELECT count(*) FROM providers WHERE org_id = $1 AND url = 'https://openrouter.ai/api/v1'`, org),
+		count(ctx, e, `SELECT count(*) FROM providers WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM models WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM models WHERE org_id = $1 AND input_rate IS NOT NULL`, org),
 	}
 }
 

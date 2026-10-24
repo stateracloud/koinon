@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	connect "connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connectproto"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -222,10 +223,17 @@ func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.D
 		}
 		if len(bound) > 0 {
 			names := make([]string, 0, len(bound))
+			detail := &connectionv1alpha1.BoundAgents{}
 			for _, b := range bound {
 				names = append(names, fmt.Sprintf("%s (%s)", b.DisplayName, b.ID.String()))
+				detail.Agents = append(detail.Agents, &connectionv1alpha1.BoundAgent{Id: b.ID.String(), DisplayName: b.DisplayName})
 			}
-			return connect.NewError(connect.CodeFailedPrecondition, "agents are still bound to this connection; unbind them first: "+strings.Join(names, ", "))
+			// The message is for people and logs; the detail is what clients read.
+			e := connect.NewError(connect.CodeFailedPrecondition, "agents are still bound to this connection; unbind them first: "+strings.Join(names, ", "))
+			if d, err := connectproto.NewErrorDetail(detail); err == nil {
+				e = e.WithDetail(d)
+			}
+			return e
 		}
 		if _, err := q.DeleteConnection(rctx, store.DeleteConnectionParams{OrgID: c.org, ID: id}); err != nil {
 			return err

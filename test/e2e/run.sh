@@ -9,8 +9,9 @@
 #   3. the quickstart's shell commands (plan item DOC1): the blocks marked `sh e1=<name>` in
 #      docs/site/src/content/docs/quickstart.md, run by name through hack/docs-e1.sh, so the docs
 #      cannot drift from this test. They create the namespace, copy the OpenShell client
-#      certificate, declare the model provider with a labelled Secret and `helm install`
-#      charts/koinon (runc, CNPG, the fakes as model and GitHub). Only three things differ from a
+#      certificate, (SUITE=go) declare the model provider with a labelled Secret and `helm install`
+#      charts/koinon (runc, CNPG, the fakes as model and GitHub). SUITE=web adds the provider through
+#      the Providers page instead, as quickstart step 4 does. Only three things differ from a
 #      reader's run: values.yaml is test/e2e/kind/koinon-values.yaml, model-provider.yaml is
 #      test/e2e/kind/model-provider.yaml (the fake model), and kubectl/helm are wrappers that add
 #      the kind context;
@@ -144,12 +145,15 @@ step "fakes ($FAKES)"
 "${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub --timeout=120s
 done_step "Fakes deployed"
 
-# The quickstart blocks, as the docs show them (quickstart.md). The model provider is a labelled
-# Secret; here model-provider.yaml declares the fake model server instead of OpenRouter.
+# The quickstart blocks, as the docs show them (quickstart.md). The Go suite declares the model
+# provider with a labelled Secret (the docs' GitOps alternative): model-provider.yaml declares the
+# fake model server instead of OpenRouter. The browser suite adds the same provider in the UI.
 step "quickstart: namespace, OpenShell client certificate, model provider"
 e1 namespace
 e1 client-cert
-e1 model-provider
+if [[ $SUITE == go ]]; then
+  e1 model-provider
+fi
 done_step "Namespace, client certificate and model provider (quickstart blocks)"
 
 # The quickstart clock starts here (ADR 0049).
@@ -185,6 +189,7 @@ web)
   (cd web && KOINON_API_URL="http://127.0.0.1:$API_PORT" \
     KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
     KOINON_E2E_PASSWORD="$password" \
+    KOINON_E2E_FAKEMODEL_URL="http://fakemodel.$FAKES.svc:8080/v1" \
     PLAYWRIGHT_OUTPUT_DIR="$OUT/playwright" \
     pnpm exec playwright test -c playwright.real.config.ts) 2>&1 | tee "$OUT/web.log"
   done_step "Browser e2e"

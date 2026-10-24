@@ -40,6 +40,13 @@ message Token {
   google.protobuf.Timestamp expires_at = 6;
   google.protobuf.Timestamp revoked_at = 7;
   google.protobuf.Timestamp last_used_at = 8;
+  // created_by is the user at the root of the token's chain: who created the first token from a
+  // session. created_by_name is their display name or email.
+  string created_by = 9;
+  string created_by_name = 10;
+  // parent_token_id names the token that created this one, empty for a token made in the UI. A
+  // token dies with its parent.
+  string parent_token_id = 11;
 }
 
 message CreateTokenRequest {

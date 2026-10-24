@@ -32,12 +32,16 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 func main() {
+	if limit := memlimit.Apply(); limit > 0 {
+		slog.Info("memory soft limit set", "bytes", limit)
+	}
 	if err := run(); err != nil {
 		slog.Error("koinon-reconciler failed", "err", err)
 		os.Exit(1)

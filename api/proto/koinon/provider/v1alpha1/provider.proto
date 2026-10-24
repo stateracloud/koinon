@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.provider.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1;providerv1alpha1";
+
+// ProviderService manages an org's model providers and models (ADR 0056) for the UI. It is the
+// connect-rpc face of the same service layer the admin API uses, so validation, the upstream URL
+// policy and the audit trail are the same. Admins and owners only: members do not see providers.
+//
+// Entries declared by a labelled Kubernetes Secret (source "secret") are read-only: changing or
+// deleting a live one fails with FAILED_PRECONDITION and names the Secret. Provider keys are write-only;
+// they are never returned.
+service ProviderService {
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc CreateProvider(CreateProviderRequest) returns (CreateProviderResponse);
+  rpc UpdateProvider(UpdateProviderRequest) returns (UpdateProviderResponse);
+  // DeleteProvider deletes a provider entered here, with its models. A declared provider can be
+  // deleted only after its Secret was deleted (removed).
+  rpc DeleteProvider(DeleteProviderRequest) returns (DeleteProviderResponse);
+
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc CreateModel(CreateModelRequest) returns (CreateModelResponse);
+  rpc UpdateModel(UpdateModelRequest) returns (UpdateModelResponse);
+  rpc DeleteModel(DeleteModelRequest) returns (DeleteModelResponse);
+}
+
+// Provider is an upstream model API of the org. It never holds the key.
+message Provider {
+  string id = 1;
+  string name = 2;
+  // type is the agentgateway provider name, such as openai, openrouter or ollama.
+  string type = 3;
+  string url = 4;
+  // has_key is whether an API key is stored.
+  bool has_key = 5;
+  // source is "ui" for a provider entered here and "secret" for one declared by a Secret.
+  string source = 6;
+  string managed_by_secret = 7;
+  // disabled_reason says why the provider is not served, empty when it is.
+  string disabled_reason = 8;
+  // removed is set when the declaring Secret was deleted.
+  bool removed = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+// Rates are USD per million tokens as decimal strings such as "0.30".
+message Rates {
+  string input = 1;
+  string output = 2;
+  string cache_read = 3;
+}
+
+message Model {
+  string id = 1;
+  string provider_id = 2;
+  // name is the plain name agents ask for; the gateway serves it as "<org slug>/<name>".
+  string name = 3;
+  // guard is the routing guard, for OpenRouter providers only.
+  bool guard = 4;
+  // rates is unset for a model without rates, which is not served.
+  Rates rates = 5;
+  string source = 6;
+  string managed_by_secret = 7;
+  string disabled_reason = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message ListProvidersRequest {
+  string org_id = 1;
+}
+
+message ListProvidersResponse {
+  repeated Provider providers = 1;
+}
+
+message CreateProviderRequest {
+  string org_id = 1;
+  string name = 2;
+  string type = 3;
+  string url = 4;
+  // api_key is empty for keyless upstreams such as Ollama.
+  string api_key = 5 [debug_redact = true];
+}
+
+message CreateProviderResponse {
+  Provider provider = 1;
+}
+
+message UpdateProviderRequest {
+  string org_id = 1;
+  string provider_id = 2;
+  // Fields left unset stay.
+  optional string type = 3;
+  optional string url = 4;
+  // api_key replaces the key; set to "" it removes the key.
+  optional string api_key = 5 [debug_redact = true];
+}
+
+message UpdateProviderResponse {
+  Provider provider = 1;
+}
+
+message DeleteProviderRequest {
+  string org_id = 1;
+  string provider_id = 2;
+}
+
+message DeleteProviderResponse {}
+
+message ListModelsRequest {
+  string org_id = 1;
+}
+
+message ListModelsResponse {
+  repeated Model models = 1;
+}
+
+message CreateModelRequest {
+  string org_id = 1;
+  string provider_id = 2;
+  string name = 3;
+  bool guard = 4;
+  // rates is required for the model to be served.
+  Rates rates = 5;
+}
+
+message CreateModelResponse {
+  Model model = 1;
+}
+
+message UpdateModelRequest {
+  string org_id = 1;
+  string model_id = 2;
+  optional bool guard = 3;
+  // rates replaces the rates when set; clear_rates removes them.
+  Rates rates = 4;
+  bool clear_rates = 5;
+}
+
+message UpdateModelResponse {
+  Model model = 1;
+}
+
+message DeleteModelRequest {
+  string org_id = 1;
+  string model_id = 2;
+}
+
+message DeleteModelResponse {}

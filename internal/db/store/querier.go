@@ -296,6 +296,8 @@ type Querier interface {
 	ListTicketsByStatus(ctx context.Context, arg ListTicketsByStatusParams) ([]Ticket, error)
 	// A run's requests whose outcome the agent has not been sent yet.
 	ListUndeliveredApprovalRequestsForRun(ctx context.Context, arg ListUndeliveredApprovalRequestsForRunParams) ([]ApprovalRequest, error)
+	// Users by ID, deleted ones included, to name who created something.
+	ListUsersByIDs(ctx context.Context, ids []pgtype.UUID) ([]ListUsersByIDsRow, error)
 	// A token being used to create a child holds a share lock on itself until the child is committed,
 	// so a revoke (which locks the tree for update first) waits for the child and then revokes it too.
 	LockAPITokenShare(ctx context.Context, arg LockAPITokenShareParams) (ApiToken, error)

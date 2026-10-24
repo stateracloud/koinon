@@ -1006,6 +1006,104 @@ func (*DeleteConnectionResponse) Descriptor() ([]byte, []int) {
 	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{12}
 }
 
+// BoundAgents is the error detail of a DeleteConnection refused with FAILED_PRECONDITION because
+// agents are still bound to the connection.
+type BoundAgents struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Agents        []*BoundAgent          `protobuf:"bytes,1,rep,name=agents,proto3" json:"agents,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BoundAgents) Reset() {
+	*x = BoundAgents{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BoundAgents) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BoundAgents) ProtoMessage() {}
+
+func (x *BoundAgents) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BoundAgents.ProtoReflect.Descriptor instead.
+func (*BoundAgents) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *BoundAgents) GetAgents() []*BoundAgent {
+	if x != nil {
+		return x.Agents
+	}
+	return nil
+}
+
+type BoundAgent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BoundAgent) Reset() {
+	*x = BoundAgent{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BoundAgent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BoundAgent) ProtoMessage() {}
+
+func (x *BoundAgent) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BoundAgent.ProtoReflect.Descriptor instead.
+func (*BoundAgent) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *BoundAgent) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *BoundAgent) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
 // ListConnectionsRequest names the org.
 type ListConnectionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1016,7 +1114,7 @@ type ListConnectionsRequest struct {
 
 func (x *ListConnectionsRequest) Reset() {
 	*x = ListConnectionsRequest{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[13]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1028,7 +1126,7 @@ func (x *ListConnectionsRequest) String() string {
 func (*ListConnectionsRequest) ProtoMessage() {}
 
 func (x *ListConnectionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[13]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1041,7 +1139,7 @@ func (x *ListConnectionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListConnectionsRequest.ProtoReflect.Descriptor instead.
 func (*ListConnectionsRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{13}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListConnectionsRequest) GetOrgId() string {
@@ -1061,7 +1159,7 @@ type ListConnectionsResponse struct {
 
 func (x *ListConnectionsResponse) Reset() {
 	*x = ListConnectionsResponse{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[14]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1073,7 +1171,7 @@ func (x *ListConnectionsResponse) String() string {
 func (*ListConnectionsResponse) ProtoMessage() {}
 
 func (x *ListConnectionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[14]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1086,7 +1184,7 @@ func (x *ListConnectionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListConnectionsResponse.ProtoReflect.Descriptor instead.
 func (*ListConnectionsResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{14}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListConnectionsResponse) GetConnections() []*Connection {
@@ -1107,7 +1205,7 @@ type TestConnectionRequest struct {
 
 func (x *TestConnectionRequest) Reset() {
 	*x = TestConnectionRequest{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[15]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1119,7 +1217,7 @@ func (x *TestConnectionRequest) String() string {
 func (*TestConnectionRequest) ProtoMessage() {}
 
 func (x *TestConnectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[15]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1132,7 +1230,7 @@ func (x *TestConnectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestConnectionRequest.ProtoReflect.Descriptor instead.
 func (*TestConnectionRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{15}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *TestConnectionRequest) GetOrgId() string {
@@ -1160,7 +1258,7 @@ type TestConnectionResponse struct {
 
 func (x *TestConnectionResponse) Reset() {
 	*x = TestConnectionResponse{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[16]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1172,7 +1270,7 @@ func (x *TestConnectionResponse) String() string {
 func (*TestConnectionResponse) ProtoMessage() {}
 
 func (x *TestConnectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[16]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1185,7 +1283,7 @@ func (x *TestConnectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestConnectionResponse.ProtoReflect.Descriptor instead.
 func (*TestConnectionResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{16}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TestConnectionResponse) GetConnection() *Connection {
@@ -1219,7 +1317,7 @@ type ListInstallationReposRequest struct {
 
 func (x *ListInstallationReposRequest) Reset() {
 	*x = ListInstallationReposRequest{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[17]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1231,7 +1329,7 @@ func (x *ListInstallationReposRequest) String() string {
 func (*ListInstallationReposRequest) ProtoMessage() {}
 
 func (x *ListInstallationReposRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[17]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1244,7 +1342,7 @@ func (x *ListInstallationReposRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListInstallationReposRequest.ProtoReflect.Descriptor instead.
 func (*ListInstallationReposRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{17}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListInstallationReposRequest) GetOrgId() string {
@@ -1288,7 +1386,7 @@ type InstallationRepo struct {
 
 func (x *InstallationRepo) Reset() {
 	*x = InstallationRepo{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[18]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1300,7 +1398,7 @@ func (x *InstallationRepo) String() string {
 func (*InstallationRepo) ProtoMessage() {}
 
 func (x *InstallationRepo) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[18]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1313,7 +1411,7 @@ func (x *InstallationRepo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallationRepo.ProtoReflect.Descriptor instead.
 func (*InstallationRepo) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{18}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *InstallationRepo) GetFullName() string {
@@ -1352,7 +1450,7 @@ type ListInstallationReposResponse struct {
 
 func (x *ListInstallationReposResponse) Reset() {
 	*x = ListInstallationReposResponse{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[19]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1364,7 +1462,7 @@ func (x *ListInstallationReposResponse) String() string {
 func (*ListInstallationReposResponse) ProtoMessage() {}
 
 func (x *ListInstallationReposResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[19]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1377,7 +1475,7 @@ func (x *ListInstallationReposResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListInstallationReposResponse.ProtoReflect.Descriptor instead.
 func (*ListInstallationReposResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{19}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ListInstallationReposResponse) GetRepos() []*InstallationRepo {
@@ -1472,7 +1570,13 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x17DeleteConnectionRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12#\n" +
 	"\rconnection_id\x18\x02 \x01(\tR\fconnectionId\"\x1a\n" +
-	"\x18DeleteConnectionResponse\"/\n" +
+	"\x18DeleteConnectionResponse\"M\n" +
+	"\vBoundAgents\x12>\n" +
+	"\x06agents\x18\x01 \x03(\v2&.koinon.connection.v1alpha1.BoundAgentR\x06agents\"?\n" +
+	"\n" +
+	"BoundAgent\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\"/\n" +
 	"\x16ListConnectionsRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"c\n" +
 	"\x17ListConnectionsResponse\x12H\n" +
@@ -1533,7 +1637,7 @@ func file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_connection_v1alpha1_connection_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_koinon_connection_v1alpha1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_koinon_connection_v1alpha1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_koinon_connection_v1alpha1_connection_proto_goTypes = []any{
 	(Tier)(0),                              // 0: koinon.connection.v1alpha1.Tier
 	(ConnectionStatus)(0),                  // 1: koinon.connection.v1alpha1.ConnectionStatus
@@ -1550,52 +1654,55 @@ var file_koinon_connection_v1alpha1_connection_proto_goTypes = []any{
 	(*GetConnectionResponse)(nil),          // 12: koinon.connection.v1alpha1.GetConnectionResponse
 	(*DeleteConnectionRequest)(nil),        // 13: koinon.connection.v1alpha1.DeleteConnectionRequest
 	(*DeleteConnectionResponse)(nil),       // 14: koinon.connection.v1alpha1.DeleteConnectionResponse
-	(*ListConnectionsRequest)(nil),         // 15: koinon.connection.v1alpha1.ListConnectionsRequest
-	(*ListConnectionsResponse)(nil),        // 16: koinon.connection.v1alpha1.ListConnectionsResponse
-	(*TestConnectionRequest)(nil),          // 17: koinon.connection.v1alpha1.TestConnectionRequest
-	(*TestConnectionResponse)(nil),         // 18: koinon.connection.v1alpha1.TestConnectionResponse
-	(*ListInstallationReposRequest)(nil),   // 19: koinon.connection.v1alpha1.ListInstallationReposRequest
-	(*InstallationRepo)(nil),               // 20: koinon.connection.v1alpha1.InstallationRepo
-	(*ListInstallationReposResponse)(nil),  // 21: koinon.connection.v1alpha1.ListInstallationReposResponse
-	(*structpb.Struct)(nil),                // 22: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil),          // 23: google.protobuf.Timestamp
+	(*BoundAgents)(nil),                    // 15: koinon.connection.v1alpha1.BoundAgents
+	(*BoundAgent)(nil),                     // 16: koinon.connection.v1alpha1.BoundAgent
+	(*ListConnectionsRequest)(nil),         // 17: koinon.connection.v1alpha1.ListConnectionsRequest
+	(*ListConnectionsResponse)(nil),        // 18: koinon.connection.v1alpha1.ListConnectionsResponse
+	(*TestConnectionRequest)(nil),          // 19: koinon.connection.v1alpha1.TestConnectionRequest
+	(*TestConnectionResponse)(nil),         // 20: koinon.connection.v1alpha1.TestConnectionResponse
+	(*ListInstallationReposRequest)(nil),   // 21: koinon.connection.v1alpha1.ListInstallationReposRequest
+	(*InstallationRepo)(nil),               // 22: koinon.connection.v1alpha1.InstallationRepo
+	(*ListInstallationReposResponse)(nil),  // 23: koinon.connection.v1alpha1.ListInstallationReposResponse
+	(*structpb.Struct)(nil),                // 24: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),          // 25: google.protobuf.Timestamp
 }
 var file_koinon_connection_v1alpha1_connection_proto_depIdxs = []int32{
 	0,  // 0: koinon.connection.v1alpha1.Scope.tier:type_name -> koinon.connection.v1alpha1.Tier
 	2,  // 1: koinon.connection.v1alpha1.ConnectorType.scopes:type_name -> koinon.connection.v1alpha1.Scope
-	22, // 2: koinon.connection.v1alpha1.ConnectorType.document:type_name -> google.protobuf.Struct
+	24, // 2: koinon.connection.v1alpha1.ConnectorType.document:type_name -> google.protobuf.Struct
 	3,  // 3: koinon.connection.v1alpha1.ListConnectorTypesResponse.connector_types:type_name -> koinon.connection.v1alpha1.ConnectorType
 	1,  // 4: koinon.connection.v1alpha1.Connection.status:type_name -> koinon.connection.v1alpha1.ConnectionStatus
-	23, // 5: koinon.connection.v1alpha1.Connection.last_tested_at:type_name -> google.protobuf.Timestamp
+	25, // 5: koinon.connection.v1alpha1.Connection.last_tested_at:type_name -> google.protobuf.Timestamp
 	6,  // 6: koinon.connection.v1alpha1.Connection.last_test:type_name -> koinon.connection.v1alpha1.CheckResult
-	23, // 7: koinon.connection.v1alpha1.Connection.created_at:type_name -> google.protobuf.Timestamp
+	25, // 7: koinon.connection.v1alpha1.Connection.created_at:type_name -> google.protobuf.Timestamp
 	7,  // 8: koinon.connection.v1alpha1.Connection.github:type_name -> koinon.connection.v1alpha1.GitHubConnection
 	8,  // 9: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
 	6,  // 10: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
 	8,  // 11: koinon.connection.v1alpha1.GetConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
-	8,  // 12: koinon.connection.v1alpha1.ListConnectionsResponse.connections:type_name -> koinon.connection.v1alpha1.Connection
-	8,  // 13: koinon.connection.v1alpha1.TestConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
-	6,  // 14: koinon.connection.v1alpha1.TestConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
-	20, // 15: koinon.connection.v1alpha1.ListInstallationReposResponse.repos:type_name -> koinon.connection.v1alpha1.InstallationRepo
-	4,  // 16: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:input_type -> koinon.connection.v1alpha1.ListConnectorTypesRequest
-	9,  // 17: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:input_type -> koinon.connection.v1alpha1.CreateGitHubConnectionRequest
-	11, // 18: koinon.connection.v1alpha1.ConnectionService.GetConnection:input_type -> koinon.connection.v1alpha1.GetConnectionRequest
-	15, // 19: koinon.connection.v1alpha1.ConnectionService.ListConnections:input_type -> koinon.connection.v1alpha1.ListConnectionsRequest
-	17, // 20: koinon.connection.v1alpha1.ConnectionService.TestConnection:input_type -> koinon.connection.v1alpha1.TestConnectionRequest
-	13, // 21: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:input_type -> koinon.connection.v1alpha1.DeleteConnectionRequest
-	19, // 22: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:input_type -> koinon.connection.v1alpha1.ListInstallationReposRequest
-	5,  // 23: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:output_type -> koinon.connection.v1alpha1.ListConnectorTypesResponse
-	10, // 24: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:output_type -> koinon.connection.v1alpha1.CreateGitHubConnectionResponse
-	12, // 25: koinon.connection.v1alpha1.ConnectionService.GetConnection:output_type -> koinon.connection.v1alpha1.GetConnectionResponse
-	16, // 26: koinon.connection.v1alpha1.ConnectionService.ListConnections:output_type -> koinon.connection.v1alpha1.ListConnectionsResponse
-	18, // 27: koinon.connection.v1alpha1.ConnectionService.TestConnection:output_type -> koinon.connection.v1alpha1.TestConnectionResponse
-	14, // 28: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:output_type -> koinon.connection.v1alpha1.DeleteConnectionResponse
-	21, // 29: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:output_type -> koinon.connection.v1alpha1.ListInstallationReposResponse
-	23, // [23:30] is the sub-list for method output_type
-	16, // [16:23] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	16, // 12: koinon.connection.v1alpha1.BoundAgents.agents:type_name -> koinon.connection.v1alpha1.BoundAgent
+	8,  // 13: koinon.connection.v1alpha1.ListConnectionsResponse.connections:type_name -> koinon.connection.v1alpha1.Connection
+	8,  // 14: koinon.connection.v1alpha1.TestConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	6,  // 15: koinon.connection.v1alpha1.TestConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
+	22, // 16: koinon.connection.v1alpha1.ListInstallationReposResponse.repos:type_name -> koinon.connection.v1alpha1.InstallationRepo
+	4,  // 17: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:input_type -> koinon.connection.v1alpha1.ListConnectorTypesRequest
+	9,  // 18: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:input_type -> koinon.connection.v1alpha1.CreateGitHubConnectionRequest
+	11, // 19: koinon.connection.v1alpha1.ConnectionService.GetConnection:input_type -> koinon.connection.v1alpha1.GetConnectionRequest
+	17, // 20: koinon.connection.v1alpha1.ConnectionService.ListConnections:input_type -> koinon.connection.v1alpha1.ListConnectionsRequest
+	19, // 21: koinon.connection.v1alpha1.ConnectionService.TestConnection:input_type -> koinon.connection.v1alpha1.TestConnectionRequest
+	13, // 22: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:input_type -> koinon.connection.v1alpha1.DeleteConnectionRequest
+	21, // 23: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:input_type -> koinon.connection.v1alpha1.ListInstallationReposRequest
+	5,  // 24: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:output_type -> koinon.connection.v1alpha1.ListConnectorTypesResponse
+	10, // 25: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:output_type -> koinon.connection.v1alpha1.CreateGitHubConnectionResponse
+	12, // 26: koinon.connection.v1alpha1.ConnectionService.GetConnection:output_type -> koinon.connection.v1alpha1.GetConnectionResponse
+	18, // 27: koinon.connection.v1alpha1.ConnectionService.ListConnections:output_type -> koinon.connection.v1alpha1.ListConnectionsResponse
+	20, // 28: koinon.connection.v1alpha1.ConnectionService.TestConnection:output_type -> koinon.connection.v1alpha1.TestConnectionResponse
+	14, // 29: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:output_type -> koinon.connection.v1alpha1.DeleteConnectionResponse
+	23, // 30: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:output_type -> koinon.connection.v1alpha1.ListInstallationReposResponse
+	24, // [24:31] is the sub-list for method output_type
+	17, // [17:24] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_koinon_connection_v1alpha1_connection_proto_init() }
@@ -1612,7 +1719,7 @@ func file_koinon_connection_v1alpha1_connection_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_connection_v1alpha1_connection_proto_rawDesc), len(file_koinon_connection_v1alpha1_connection_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   20,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

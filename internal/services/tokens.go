@@ -8,6 +8,7 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/audit"
@@ -17,11 +18,13 @@ import (
 	"github.com/stateracloud/koinon/internal/tokens"
 )
 
-func tokenProto(t tokens.Token) *tokenv1alpha1.Token {
+// tokenProto converts a token; names maps user IDs to what the UI shows for them.
+func tokenProto(t tokens.Token, names map[string]string) *tokenv1alpha1.Token {
 	role, _ := roleOf(t.Role)
 	out := &tokenv1alpha1.Token{
 		Id: t.ID, Name: t.Name, Prefix: t.Prefix, Role: auth.RoleToProto(role),
 		CreatedAt: timestamppb.New(t.CreatedAt), ExpiresAt: timestamppb.New(t.ExpiresAt),
+		CreatedBy: t.CreatedBy, CreatedByName: names[t.CreatedBy], ParentTokenId: t.ParentID,
 	}
 	if t.RevokedAt != nil {
 		out.RevokedAt = timestamppb.New(*t.RevokedAt)
@@ -30,6 +33,43 @@ func tokenProto(t tokens.Token) *tokenv1alpha1.Token {
 		out.LastUsedAt = timestamppb.New(*t.LastUsedAt)
 	}
 	return out
+}
+
+// userNames maps the IDs of the users who created the tokens to their display name or email, with
+// one query. A real database error is returned, not shown as a deleted user.
+func (s *Server) userNames(ctx context.Context, list []tokens.Token) (map[string]string, error) {
+	seen := map[string]bool{}
+	var ids []pgtype.UUID
+	for _, t := range list {
+		if t.CreatedBy == "" || seen[t.CreatedBy] {
+			continue
+		}
+		seen[t.CreatedBy] = true
+		id, err := parseID("user", t.CreatedBy)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	names := map[string]string{}
+	if len(ids) == 0 {
+		return names, nil
+	}
+	rows, err := s.q.ListUsersByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range rows {
+		switch {
+		case u.DeletedAt.Valid:
+			names[u.ID.String()] = "a deleted user"
+		case u.DisplayName != "":
+			names[u.ID.String()] = u.DisplayName
+		default:
+			names[u.ID.String()] = u.Email.String
+		}
+	}
+	return names, nil
 }
 
 func roleOf(s string) (store.OrgRole, bool) {
@@ -86,7 +126,13 @@ func (s *Server) CreateToken(ctx context.Context, req *tokenv1alpha1.CreateToken
 		return nil, s.tokenError(err)
 	}
 	s.log.Info("admin API token created", "org", c.org.String(), "token", created.ID, "prefix", created.Prefix, "role", created.Role, "by", c.actor().String())
-	return &tokenv1alpha1.CreateTokenResponse{Token: tokenProto(created.Token), Secret: created.Secret}, nil
+	// The token exists and its secret is shown only here: a failed name lookup must not lose it.
+	names, err := s.userNames(ctx, []tokens.Token{created.Token})
+	if err != nil {
+		s.log.Error("could not look up the token creator's name", "token", created.ID, "err", err)
+		names = map[string]string{}
+	}
+	return &tokenv1alpha1.CreateTokenResponse{Token: tokenProto(created.Token, names), Secret: created.Secret}, nil
 }
 
 // ListTokens implements TokenService. Admins and owners.
@@ -100,8 +146,12 @@ func (s *Server) ListTokens(ctx context.Context, req *tokenv1alpha1.ListTokensRe
 		return nil, s.tokenError(err)
 	}
 	res := &tokenv1alpha1.ListTokensResponse{}
+	names, err := s.userNames(ctx, list)
+	if err != nil {
+		return nil, s.tokenError(err)
+	}
 	for _, t := range list {
-		res.Tokens = append(res.Tokens, tokenProto(t))
+		res.Tokens = append(res.Tokens, tokenProto(t, names))
 	}
 	return res, nil
 }
@@ -116,5 +166,9 @@ func (s *Server) RevokeToken(ctx context.Context, req *tokenv1alpha1.RevokeToken
 	if err != nil {
 		return nil, s.tokenError(err)
 	}
-	return &tokenv1alpha1.RevokeTokenResponse{Token: tokenProto(t)}, nil
+	names, err := s.userNames(ctx, []tokens.Token{t})
+	if err != nil {
+		return nil, s.tokenError(err)
+	}
+	return &tokenv1alpha1.RevokeTokenResponse{Token: tokenProto(t, names)}, nil
 }

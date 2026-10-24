@@ -442,6 +442,44 @@ func (q *Queries) ListEffectiveMemberships(ctx context.Context, userID pgtype.UU
 	return items, nil
 }
 
+const listUsersByIDs = `-- name: ListUsersByIDs :many
+SELECT id, display_name, email, deleted_at FROM users
+WHERE id = ANY($1::uuid[])
+`
+
+type ListUsersByIDsRow struct {
+	ID          pgtype.UUID
+	DisplayName string
+	Email       pgtype.Text
+	DeletedAt   pgtype.Timestamptz
+}
+
+// Users by ID, deleted ones included, to name who created something.
+func (q *Queries) ListUsersByIDs(ctx context.Context, ids []pgtype.UUID) ([]ListUsersByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listUsersByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersByIDsRow
+	for rows.Next() {
+		var i ListUsersByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DisplayName,
+			&i.Email,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockBootstrap = `-- name: LockBootstrap :exec
 
 SELECT pg_advisory_xact_lock(hashtext('koinon.bootstrap'))
