@@ -2,3 +2,5 @@
 # gitleaks findings that are known false positives, by fingerprint (commit:file:rule:line).
 # A fake token in the mocked CreateToken response; later commits replace it with an obviously fake value.
 86035255835499a48a18d27cb8ffa3e0bda61817:web/e2e/settings.spec.ts:generic-api-key:59
+# A rendered CEL rule (apiKey.agent == "acme/repo-helper" && ...) in a golden file; not a secret.
+19412ff555611f318221c8bee776b3d61b1db549:internal/gateway/standalone/testdata/mcp-servers.yaml:generic-api-key:83
