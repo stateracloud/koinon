@@ -94,6 +94,13 @@ var _ = Describe("URLPolicy", func() {
 		Entry("a name that resolves to a private address", "http://internal.example.com/v1"),
 		Entry("a name that resolves to CGNAT", "http://cgnat.example.com/v1"),
 		Entry("a name that resolves to a unique-local address", "http://ula.example.com/v1"),
+		Entry("IPv4-compatible ::127.0.0.1", "http://[::127.0.0.1]/"),
+		Entry("IPv4-compatible ::7f00:1", "http://[::7f00:1]/"),
+		Entry("NAT64 of loopback", "http://[64:ff9b::7f00:1]/"),
+		Entry("NAT64 of metadata", "http://[64:ff9b::a9fe:a9fe]/"),
+		Entry("local-use NAT64", "http://[64:ff9b:1::7f00:1]/"),
+		Entry("6to4 of loopback", "http://[2002:7f00:1::]/"),
+		Entry("6to4 of 10.0.0.1", "http://[2002:a00:1::1]/"),
 		Entry("another Service's ClusterIP, not allow-listed", "http://other.fakes.svc:8080/v1"),
 	)
 	DescribeTable("allows",
@@ -107,6 +114,14 @@ var _ = Describe("URLPolicy", func() {
 		Entry("a name that resolves into an allow-listed CIDR", "http://allowed-net.example.com/v1"),
 		Entry("an allow-listed IP", "http://192.168.7.7:11434/v1"),
 		Entry("a name that does not resolve (checked again at render)", "https://future.example.com/v1"),
+	)
+	DescribeTable("rejects non-ASCII hosts", func(ctx SpecContext, u string) {
+		var inv *catalog.InvalidError
+		Expect(errors.As(p.Check(ctx, u), &inv)).To(BeTrue(), u)
+		Expect(errors.As(p.CheckStrict(ctx, u), &inv)).To(BeTrue(), u)
+	},
+		Entry("a non-ASCII name", "http://exämple.com/v1"),
+		Entry("fullwidth digits", "http://１２７.0.0.1/"),
 	)
 	It("fails closed at render when a name cannot be resolved", func(ctx SpecContext) {
 		Expect(p.CheckStrict(ctx, "https://future.example.com/v1")).NotTo(Succeed())

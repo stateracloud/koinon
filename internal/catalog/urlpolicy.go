@@ -54,6 +54,11 @@ var (
 	}
 	deniedPrefixes = []netip.Prefix{
 		netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("fc00::/7"),
+		// IPv6 ranges that carry an IPv4 address inside: refused outright rather than unpacked.
+		netip.MustParsePrefix("::/96"),          // IPv4-compatible (::127.0.0.1, ::7f00:1)
+		netip.MustParsePrefix("64:ff9b::/96"),   // NAT64
+		netip.MustParsePrefix("64:ff9b:1::/48"), // local-use NAT64
+		netip.MustParsePrefix("2002::/16"),      // 6to4
 	}
 )
 
@@ -182,6 +187,11 @@ func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error 
 		return invalid("url must be an http(s) URL of an OpenAI-compatible API")
 	}
 	host := strings.ToLower(u.Hostname())
+	for i := 0; i < len(host); i++ {
+		if host[i] >= 0x80 {
+			return invalid("the url's host must be ASCII; write an internationalised name in its xn-- form")
+		}
+	}
 	if p.allowedName(strings.TrimSuffix(host, "."), strings.ToLower(u.Host)) {
 		return nil
 	}

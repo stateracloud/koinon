@@ -158,17 +158,20 @@ func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 
 var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 	var (
-		cfgDir  string
-		driver  *standalone.Driver
-		state   gateway.State
-		llmURL  string
-		keyA    gateway.IssuedKey // limited agent
-		keyB    gateway.IssuedKey // unlimited agent, no tool grants
-		keyG    gateway.IssuedKey // an agent of the second org, globex
-		ups     map[string]*taggedUpstream
-		ctr     *testcontainers.DockerContainer
-		hits    atomic.Int64 // requests that reached the upstream
-		options = standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mode=rwc"}
+		cfgDir string
+		driver *standalone.Driver
+		state  gateway.State
+		llmURL string
+		keyA   gateway.IssuedKey // limited agent
+		keyB   gateway.IssuedKey // unlimited agent, no tool grants
+		keyG   gateway.IssuedKey // an agent of the second org, globex
+		ups    map[string]*taggedUpstream
+		// redirector answers 307 to the "private" upstream; redirects counts what it was asked.
+		redirector *httptest.Server
+		redirects  atomic.Int64
+		ctr        *testcontainers.DockerContainer
+		hits       atomic.Int64 // requests that reached the upstream
+		options    = standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mode=rwc"}
 	)
 
 	chatModel := func(ctx context.Context, key, model string) (int, string) {
@@ -220,7 +223,13 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		upstream := fakeUpstream(&hits)
 		DeferCleanup(upstream.Close)
 		// Two orgs, each with its own upstream; both call their model testModel.
-		ups = map[string]*taggedUpstream{"globex": newTaggedUpstream("globex"), "guarded": newTaggedUpstream("guarded")}
+		ups = map[string]*taggedUpstream{"globex": newTaggedUpstream("globex"), "guarded": newTaggedUpstream("guarded"), "private": newTaggedUpstream("private")}
+		// A provider that answers every request with a 307 to a private address (here the "private" fake).
+		redirector = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			redirects.Add(1)
+			http.Redirect(w, &http.Request{}, fmt.Sprintf("http://%s:%d/v1/chat/completions", testcontainers.HostInternal, port(ups["private"].Server)), http.StatusTemporaryRedirect)
+		}))
+		DeferCleanup(redirector.Close)
 		for _, u := range ups {
 			DeferCleanup(u.Close)
 		}
@@ -248,6 +257,10 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 						{Name: "globex/" + testModel, Price: &gateway.Price{Input: "1", Output: "1"}},
 						{Name: "unpriced"},
 					},
+				},
+				{
+					Org: "acme", Name: "redirecting", Type: "fake", BaseURL: hostURL(port(redirector)),
+					Models: []gateway.Model{{Name: "redirect-model", Price: &gateway.Price{Input: "1", Output: "1"}}},
 				},
 				{
 					Org: "globex", Name: "upstream", Type: "fake", BaseURL: hostURL(port(ups["globex"].Server)),
@@ -286,7 +299,7 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		ctr, err = testcontainers.Run(ctx, AgentgatewayImage,
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
 			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
-			testcontainers.WithHostPortAccess(port(upstream), port(tools), port(ups["globex"].Server), port(ups["guarded"].Server)),
+			testcontainers.WithHostPortAccess(port(upstream), port(tools), port(ups["globex"].Server), port(ups["guarded"].Server), port(ups["private"].Server), port(redirector)),
 			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
 				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro", secretsDir+":/secrets/upstream:ro")
 			}),
@@ -399,6 +412,27 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
 			Expect(ups["globex"].hits.Load() + ups["guarded"].hits.Load()).To(Equal(g))
 			Expect(hits.Load()).To(Equal(before + 1))
+		})
+
+		It("does not follow a redirect from a provider to another address", func(ctx SpecContext) {
+			// A provider the egress policy allows could still answer 307 to a private address; the
+			// gateway must hand that answer back, not connect there with the provider's credentials.
+			before := ups["private"].hits.Load()
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions",
+				bytes.NewBufferString(`{"model":"redirect-model","messages":[{"role":"user","content":"hi"}]}`))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+keyB.Material)
+			// Do not follow redirects ourselves: we want to see what the gateway answers.
+			client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+			resp, err := client.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = resp.Body.Close() }()
+			raw, _ := io.ReadAll(resp.Body)
+			code, body := resp.StatusCode, string(raw)
+			Expect(redirects.Load()).To(BeNumerically(">=", 1), "the request reached the redirecting provider")
+			Expect(ups["private"].hits.Load()).To(Equal(before), "agentgateway followed the redirect: "+body)
+			Expect(code).NotTo(Equal(http.StatusOK), body)
 		})
 
 		It("does not let the client pick another org by header", func(ctx SpecContext) {

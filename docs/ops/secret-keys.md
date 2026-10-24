@@ -166,6 +166,11 @@ networkPolicy:
       ports: [{port: 11434}]
 ```
 
+An MCP target other than `koinon-api`'s tools listener (a future remote MCP server, or any other
+upstream the gateway is configured with) is blocked the same way when it is on a private address: add
+it to `networkPolicy.gatewayEgressTo` too. The IPv6 carve-outs include NAT64 (`64:ff9b::/96`) and 6to4
+(`2002::/16`), so an IPv6-only cluster that reaches the internet through NAT64 must add its own rule.
+
 Limits: the carve-outs are the standard private ranges, so a cluster that numbers pods or Services from
 public addresses needs its own rules; the policy matches addresses, not names, so keep it and
 `providers.allowedInternalHosts` in agreement; and a CNI that does not enforce egress policy ignores
