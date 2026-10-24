@@ -3,8 +3,8 @@ title: Quickstart
 description: From helm install to an approved pull request in about 15 minutes.
 ---
 
-You will install Koinon, sign in, connect a GitHub App, create the repo-helper agent, give it a
-ticket and approve the pull request it proposes.
+You will install Koinon, sign in, add a model provider, connect a GitHub App, create the
+repo-helper agent, give it a ticket and approve the pull request it proposes.
 
 The clock starts at `helm install`. The prerequisites are not on it. Install them first
 ([Prerequisites](/prerequisites/)).
@@ -43,7 +43,7 @@ openshell:
 
 ```
 
-The model provider is not a chart value. You declare it with a Secret in the next section, and
+The model provider is not a chart value. You add it in the UI after you sign in (step 4), and
 [Models](/guides/models/) explains the options. The chart also creates the key-encryption keys that
 protect stored provider keys; see [Back up the encryption keys](#back-up-the-encryption-keys).
 
@@ -73,41 +73,6 @@ kubectl create namespace koinon --dry-run=client -o yaml | kubectl apply -f -
 ```sh e1=client-cert
 kubectl -n openshell get secret openshell-client-tls -o json | jq --arg ns koinon '{apiVersion, kind, type, data, metadata: {name: .metadata.name, namespace: $ns}}' | kubectl apply -f -
 ```
-
-Add the model provider. Save this as `model-provider.yaml`, with your OpenRouter key (or an Ollama
-URL, see [Models](/guides/models/)). Koinon encrypts the key in its database and hands it only to
-agentgateway. Sandboxes never see it.
-
-```yaml model-provider
-apiVersion: v1
-kind: Secret
-metadata:
-  name: openrouter
-  namespace: koinon
-  labels:
-    koinon.dev/secret-type: model-provider
-    koinon.dev/org: default
-stringData:
-  name: openrouter
-  provider: openrouter
-  url: https://openrouter.ai/api/v1
-  apiKey: sk-or-replace-me
-  models: |
-    - name: deepseek/deepseek-v4.1-flash
-      guard: true
-      rates: {input: "0.30", output: "1.20"}
-```
-
-`rates` are US dollars per million tokens. Koinon needs a rate to serve a model, and uses it for
-budgets. `guard: true` is the routing guard. The first model of the org is the default for every
-agent.
-
-```sh e1=model-provider
-kubectl apply -f model-provider.yaml
-```
-
-*UI: next pull request.* The Providers page will do this step in the browser. Until it lands, the
-Secret above or the admin API ([Models](/guides/models/#the-admin-api)) is how you add a provider.
 
 Install the chart. This is the start of the 15 minutes.
 
@@ -145,7 +110,60 @@ the spec's own. A check in CI fails when a bold label here is not in the spec.
    You land on the board, with the columns **To do**, **In progress**, **Waiting on you** and
    **Done**. You are the owner of the default org.
 
-## 4. Connect GitHub
+## 4. Add a model provider
+
+Agents call a model through agentgateway, with a key that never reaches their sandbox. You add the
+provider in the UI.
+
+1. In the sidebar, under **Settings**, open **Providers** and press **Add provider**.
+2. Enter a **Name** (for example `openrouter`), choose the **Provider type** (OpenRouter or Ollama),
+   check the **URL** and enter your **API key**. For Ollama, use your server's URL and leave the key
+   empty. Press **Add provider**. Koinon encrypts the key and never shows it again.
+3. On the new provider press **Add model**. Enter the **Model name** (for OpenRouter, for example
+   `deepseek/deepseek-v4.1-flash`) and its **Input rate** and **Output rate** in US dollars per million
+   tokens. Press **Add model**. The model appears as `default/<model name>`.
+
+Koinon needs a rate to serve a model, and uses it for budgets. For OpenRouter you can also turn on the
+routing guard, which sends the model only to hosts that keep no data. The first model of the org is the
+default for every agent. If the URL is refused, the form says why; see
+[Models](/guides/models/#add-a-provider-in-the-ui).
+
+### Declare the provider with a Secret instead
+
+A GitOps install can skip the UI and declare the provider with a Secret in Koinon's namespace. Save
+this as `model-provider.yaml`, with your OpenRouter key (or an Ollama URL), and apply it. It can be
+applied before or after the install. A provider declared this way is read-only in the UI.
+
+```yaml model-provider
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openrouter
+  namespace: koinon
+  labels:
+    koinon.dev/secret-type: model-provider
+    koinon.dev/org: default
+stringData:
+  name: openrouter
+  provider: openrouter
+  url: https://openrouter.ai/api/v1
+  apiKey: sk-or-replace-me
+  models: |
+    - name: deepseek/deepseek-v4.1-flash
+      guard: true
+      rates: {input: "0.30", output: "1.20"}
+```
+
+`rates` are US dollars per million tokens. Koinon needs a rate to serve a model, and uses it for
+budgets. `guard: true` is the routing guard. The first model of the org is the default for every
+agent.
+
+
+```sh e1=model-provider
+kubectl apply -f model-provider.yaml
+```
+
+## 5. Connect GitHub
 
 Create a GitHub App first. [GitHub App](/guides/github-app/) lists the permissions.
 
@@ -155,7 +173,7 @@ Create a GitHub App first. [GitHub App](/guides/github-app/) lists the permissio
 3. Press **Create and test connection**. Koinon signs in as the App, lists the repositories of the
    installation and shows them under **Installation repositories**. A failed check shows its message.
 
-## 5. Create the repo-helper agent
+## 6. Create the repo-helper agent
 
 1. Open **Agents** and press **New agent**.
 2. Choose **Repo helper**, then **Next**. The template gives the agent read access to one
@@ -169,7 +187,7 @@ Create a GitHub App first. [GitHub App](/guides/github-app/) lists the permissio
 The agent's model is the first model of the org's providers. Its spend limit is the template's `spendUSD`.
 See [Changing in v0.1](#changing-in-v01).
 
-## 6. Create a ticket
+## 7. Create a ticket
 
 1. On the agent's page, follow **Create a ticket for it on the board**.
 2. Enter a **Title** and a **First message (optional)**. For example: "Add hello.md" and "Please add
@@ -180,7 +198,7 @@ Koinon starts a sandbox for the agent. The agent clones the repository (read-onl
 change and calls `create_pull_request`. Its reply streams into the ticket's timeline. The first run
 takes longer, because the sandbox starts from nothing.
 
-## 7. Approve
+## 8. Approve
 
 The call parks the run. The ticket moves to **Waiting on you** and shows an approval card with the
 branch, the title and every changed file. Nothing has reached GitHub yet.
@@ -195,12 +213,11 @@ spend of the run.
 
 ## Changing in v0.1
 
-Providers and models per org exist as Secrets and an admin API under `/admin/v1` (plan item PV1).
-ADR 0056 and ADR 0058 decided more for v0.1. It is **not built yet**, so these pages do not describe
-it as available.
+Providers and models per org have UI pages, Secrets and an admin API under `/admin/v1` (plan items
+PV1 and W4). ADR 0056 and ADR 0058 decided more for v0.1. It is **not built yet**, so these pages do
+not describe it as available.
 
-- The Providers, models and API tokens pages in the UI, and prices per org with a default price
-  list (plan items W4 and PV2).
+- Prices per org with a default price list (plan item PV2). Until then a model carries its own rates.
 - Org and per-agent budgets that admins set. The template's `spendUSD` becomes only the default.
   Plan item BG1. Until then, the template's `spendUSD` is the agent's limit per UTC calendar day.
 - The Kubernetes-mode gateway (plan item G2). See [Gateway modes](/guides/gateway-modes/).
@@ -263,8 +280,9 @@ builds a kind cluster and then runs the `e1` blocks above, by name, through
 [`hack/docs-e1.sh`](https://github.com/stateracloud/koinon/blob/main/hack/docs-e1.sh). It does not
 keep its own copy of the commands. Its `kubectl` and `helm` are wrappers that add the kind context.
 Three things differ: `values.yaml` holds the kind values with the fake GitHub instead of github.com,
-`model-provider.yaml` declares the fake model server instead of OpenRouter, and the wrappers add the
-kind context.
+the provider is the fake model server instead of OpenRouter (the Go suite declares it with
+`model-provider.yaml`; the browser suite adds it on the Providers page, as step 4 does), and the
+wrappers add the kind context.
 
 `make docs-check` runs on every pull request. It fails when:
 

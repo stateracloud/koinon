@@ -1,6 +1,6 @@
 ---
 title: Models
-description: Add model providers and models per org, with Kubernetes Secrets or the admin API.
+description: Add model providers and models per org, in the UI, with Kubernetes Secrets or the admin API.
 ---
 
 Agents never hold a model key. A sandbox gets a placeholder key and the address of agentgateway.
@@ -15,12 +15,28 @@ the encryption keys live in a Secret that only `koinon-api` and `koinon-reconcil
 agentgateway serves each model as `<org>/<model>` to that org's agents only. An agent still asks for
 the plain name.
 
-There are two ways to add them. A provider or model has one source:
+There are two ways to add them, and the admin API is a third door to the UI's source. A provider or model has one source:
 
 | Source | How | Changeable in the UI and admin API |
 | --- | --- | --- |
-| `ui` | The admin API now; the UI pages come in the next pull request. | Yes. |
+| `ui` | The **Providers** page (Settings in the sidebar, for org admins and owners), or the admin API. | Yes. |
 | `secret` | A labelled Kubernetes Secret, below. | No. They are read-only and say which Secret manages them. |
+
+## Add a provider in the UI
+
+Org admins and owners open **Providers** under Settings in the sidebar. Members do not see it.
+
+- **Add provider** takes a name, a provider type (OpenRouter, Ollama, an OpenAI-compatible API, or
+  another agentgateway provider name), the URL and the API key. The key is write-only: Koinon stores
+  it encrypted and never shows it again, not even its last characters. To change it, type a new one.
+  To remove it, tick the box on the edit form.
+- If the URL is refused (a private, loopback or cluster-internal address), the form shows the reason.
+  Ask a platform admin to allow the host ([Upstream hosts](#upstream-hosts)).
+- **Add model** on a provider takes the model name, the rates in US dollars per million tokens and,
+  for OpenRouter providers only, the routing guard. The page shows the name the gateway serves,
+  `<org>/<model>`.
+- A provider declared by a Secret shows "Managed by Secret <name>" and has no edit buttons. If its
+  Secret was deleted it shows as removed, with the reason, and you may delete it.
 
 ## Declare a provider with a Secret
 
@@ -157,9 +173,11 @@ A token can create tokens, but only with the same or a lower role and an expiry 
 Revoking a token revokes every token it created. A token works only while the user whose session began
 its chain still holds at least its role in the org. Bad tokens slow a client down (HTTP 429).
 
-Until the UI page exists, an org admin creates the first token through the UI's connect-rpc API
-(`koinon.token.v1alpha1.TokenService/CreateToken`, signed in as an admin or owner). A token can then
-create further tokens with `POST /admin/v1/tokens`.
+An org admin or owner creates the first token on the **API tokens** page (Settings in the sidebar):
+name, role (never above your own) and expiry (30 days by default, 90 at most). The page shows the
+token once, with a copy button, and lists each token's prefix, role, dates, last use and who created
+it. Revoking says that it revokes the tokens it created. A token can create further tokens with
+`POST /admin/v1/tokens`.
 
 ```sh
 curl -sS -H "Authorization: Bearer $KOINON_TOKEN" -H 'Content-Type: application/json' \
@@ -177,8 +195,6 @@ agentgateway as a key limit. When the agent reaches it, Koinon cancels the run w
 
 These are decided and **not built yet**:
 
-- The providers and models pages in the UI (the next pull request, plan item W4), and a page for
-  API tokens.
 - A price schema with a default price list, and raw usage kept beside the cost (plan item PV2). Until
   then a model carries its own `rates`.
 - An org monthly cap and per-agent daily limits that admins set. At 80% Koinon warns. At 100% it blocks
