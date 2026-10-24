@@ -182,10 +182,16 @@ gateway:
 # Model providers and models are not chart values: orgs add them in the UI or the admin API, or
 # declare them with labelled Secrets (ADR 0056, docs/site guides/models). Their keys are encrypted
 # in Postgres with the key-encryption keys below.
-# Providers may not name loopback, link-local or metadata addresses, names without a dot, or hosts in
-# Koinon's own namespace (they would make the gateway a request-forgery proxy). List the internal
-# upstreams you do want, exactly as written in the provider URL, optionally with a port, for example
-# "ollama.lab.example.com:11434". Only a platform admin can change this.
+# Providers and remote MCP servers may not name loopback, link-local or metadata addresses, names
+# without a dot, or hosts in Koinon's own namespace (they would make the gateway a request-forgery
+# proxy). List the internal upstreams you do want, exactly as written in the provider or server URL,
+# optionally with a port, for example "ollama.lab.example.com:11434". Only a platform admin can
+# change this. Add the same addresses to networkPolicy.gatewayEgressTo so the gateway may reach them.
+egress:
+  allowedInternalHosts: []
+
+# DEPRECATED, removed after the next release: the old name of egress.allowedInternalHosts. Both are
+# joined.
 providers:
   allowedInternalHosts: []
 
@@ -307,7 +313,8 @@ networkPolicy:
   # koinon-api and the public internet only). Each item is a NetworkPolicy egress rule, for example
   #   - to: [{ipBlock: {cidr: 10.20.0.0/24}}]
   #     ports: [{port: 11434}]
-  # List the same hosts in providers.allowedInternalHosts so providers may name them.
+  # List the same hosts in egress.allowedInternalHosts so providers and MCP servers may name them. The
+  # rule covers every upstream the gateway calls: model providers and remote MCP servers.
   gatewayEgressTo: []
 
 # ValidatingAdmissionPolicy for OpenShell sandbox namespaces (ADRs 0045, 0048).

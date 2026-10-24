@@ -15,7 +15,7 @@ imagePullSecrets:
 
 # Ollama sits on the lab network: allowed as a provider host, and open on its port in the gateway's
 # egress policy (private ranges are otherwise denied).
-providers:
+egress:
   allowedInternalHosts: ["ollama.lab.example.invalid:11434"]
 
 networkPolicy:

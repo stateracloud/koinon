@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// URLPolicy decides which upstream URLs a provider may name. Providers are entered by org admins
+// URLPolicy decides which upstream URLs a provider or a remote MCP server may name. Providers are entered by org admins
 // (and by anyone who can write a labelled Secret), and the gateway then sends requests, carrying the
 // provider's key, to the URL: without a policy that is a server-side request forgery primitive
 // against the node and the cluster. The policy denies, unless the host is in AllowedHosts:
@@ -36,7 +36,7 @@ import (
 // 0177.0.0.1, 127.1, 0x7f.0.0.1 and 2130706433 are all 127.0.0.1; one that is not a valid address is
 // refused.
 //
-// AllowedHosts is a platform-level setting (chart value providers.allowedInternalHosts): exact
+// AllowedHosts is a platform-level setting (chart value egress.allowedInternalHosts; providers.allowedInternalHosts is a deprecated alias): exact
 // hostnames, IPs or CIDRs, each name optionally with a port, such as "ollama.lab.example.com:11434"
 // or "10.20.0.0/24". The gateway pod's egress NetworkPolicy is a separate allow list (see the chart).
 type URLPolicy struct {
@@ -196,7 +196,7 @@ func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error 
 		return nil
 	}
 	deny := func(why string) error {
-		return invalid("the url's host %q is not allowed: %s (a platform admin can allow it with providers.allowedInternalHosts)", host, why)
+		return invalid("the url's host %q is not allowed: %s (a platform admin can allow it with egress.allowedInternalHosts)", host, why)
 	}
 	check := func(a netip.Addr, how string) error {
 		if deniedAddr(a) && !p.allowedAddr(a) {

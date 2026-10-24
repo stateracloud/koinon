@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	AcknowledgeMCPToolReview(ctx context.Context, arg AcknowledgeMCPToolReviewParams) (McpTool, error)
 	// draft -> active with the given version (ADR 0020). No row: not a draft.
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
@@ -107,6 +108,14 @@ type Querier interface {
 	// A connection whose secret fields are an envelope (internal/secretstore).
 	CreateConnectionWithEnvelope(ctx context.Context, arg CreateConnectionWithEnvelopeParams) (Connection, error)
 	CreateLocalCredential(ctx context.Context, arg CreateLocalCredentialParams) error
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Remote MCP servers and their tools (plan item MC1). credential is an envelope
+	// (internal/secretstore); no query decrypts anything.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	CreateMCPServer(ctx context.Context, arg CreateMCPServerParams) (McpServer, error)
 	CreateModel(ctx context.Context, arg CreateModelParams) (Model, error)
 	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
 	CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, error)
@@ -144,6 +153,7 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	// Removing a mapping cascades to the memberships it granted.
 	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) error
+	DeleteMCPServer(ctx context.Context, arg DeleteMCPServerParams) (int64, error)
 	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
 	DeleteProvider(ctx context.Context, arg DeleteProviderParams) (int64, error)
 	// Drops IdP-sourced memberships from this issuer whose group the user no
@@ -198,6 +208,8 @@ type Querier interface {
 	GetDefaultPriceList(ctx context.Context, version string) (DefaultPriceList, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
+	GetMCPServer(ctx context.Context, arg GetMCPServerParams) (McpServer, error)
+	GetMCPTool(ctx context.Context, arg GetMCPToolParams) (McpTool, error)
 	GetModel(ctx context.Context, arg GetModelParams) (Model, error)
 	// The enabled model an agent asks for by its plain name, with its provider's type, for
 	// finding its price.
@@ -253,6 +265,7 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) (AuditEvent, error)
 	InsertDefaultPriceList(ctx context.Context, arg InsertDefaultPriceListParams) (int64, error)
+	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
 	InsertPriceOverride(ctx context.Context, arg InsertPriceOverrideParams) (PriceOverride, error)
@@ -301,6 +314,9 @@ type Querier interface {
 	// provider reported no usage (usage_missing), an estimated output was capped at the entry's
 	// max_output, or the price could not be used (price_error).
 	ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesParams) ([]ListFlaggedPricesRow, error)
+	ListMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
+	ListMCPTools(ctx context.Context, orgID pgtype.UUID) ([]McpTool, error)
+	ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfServerParams) ([]McpTool, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
 	// Runs that can still be canceled, when an org-wide limit is reached.
@@ -342,6 +358,8 @@ type Querier interface {
 	ListRunsForTicket(ctx context.Context, arg ListRunsForTicketParams) ([]Run, error)
 	// Every enabled provider of the org with its enabled models, for the gateway.
 	ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]ListServedCatalogRow, error)
+	// Enabled servers, for the gateway and the prober.
+	ListServedMCPServers(ctx context.Context, orgID pgtype.UUID) ([]McpServer, error)
 	// Enabled providers (with or without models), for key delivery.
 	ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
 	// The timeline after a sequence number (0 for the start), in order.
@@ -376,6 +394,10 @@ type Querier interface {
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
 	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
+	// The declaring Secret was deleted: keep the row, stop serving it.
+	MarkMCPServerRemoved(ctx context.Context, arg MarkMCPServerRemovedParams) error
+	// Tools the server did not list this time.
+	MarkMCPToolsAbsent(ctx context.Context, arg MarkMCPToolsAbsentParams) error
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error)
 	// The declaring Secret was deleted: keep the row, stop serving it.
 	MarkProviderRemoved(ctx context.Context, arg MarkProviderRemovedParams) error
@@ -401,7 +423,11 @@ type Querier interface {
 	// observed) keeps the recorded one.
 	RecordAgentSandbox(ctx context.Context, arg RecordAgentSandboxParams) (AgentSandbox, error)
 	RecordConnectionTest(ctx context.Context, arg RecordConnectionTestParams) (Connection, error)
+	// One probe's result. Three failures in a row make a server unhealthy; one success makes it
+	// healthy again. health_since moves only when the health changes.
+	RecordMCPServerProbe(ctx context.Context, arg RecordMCPServerProbeParams) (McpServer, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
+	ReenableUIMCPServers(ctx context.Context, orgID pgtype.UUID) error
 	// Re-enable UI models whose provider is enabled and that no declared model shadows.
 	ReenableUIModels(ctx context.Context, orgID pgtype.UUID) error
 	// Re-enable UI providers no declared provider shadows any more.
@@ -432,6 +458,7 @@ type Querier interface {
 	SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
+	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// Sets or clears (NULL) the org's monthly cap, keeping its platform ceiling.
@@ -446,6 +473,8 @@ type Querier interface {
 	// sandbox it was created in. Fenced by the run epoch: only the current owner
 	// of one of the ticket's active runs can set it.
 	SetTicketHarnessSession(ctx context.Context, arg SetTicketHarnessSessionParams) (Ticket, error)
+	// A declared server of this name now exists: disable the UI ones.
+	ShadowUIMCPServers(ctx context.Context, arg ShadowUIMCPServersParams) error
 	ShadowUIModels(ctx context.Context, arg ShadowUIModelsParams) error
 	// A declared provider of this name now exists: disable the UI ones.
 	ShadowUIProviders(ctx context.Context, arg ShadowUIProvidersParams) error
@@ -461,11 +490,18 @@ type Querier interface {
 	TakeOverExpiredRun(ctx context.Context, arg TakeOverExpiredRunParams) (Run, error)
 	// Records use, at most once a minute per token.
 	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
+	TouchMCPTool(ctx context.Context, arg TouchMCPToolParams) error
 	// Returns the session if it is still valid at @now and extends its idle
 	// deadline, never past the absolute one.
 	TouchSession(ctx context.Context, arg TouchSessionParams) (Session, error)
 	UpdateDeclaredConnection(ctx context.Context, arg UpdateDeclaredConnectionParams) (Connection, error)
+	UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclaredMCPServerParams) (McpServer, error)
 	UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclaredProviderParams) (Provider, error)
+	// A change of the URL, transport or credential starts health over: the new settings are unproven.
+	UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error)
+	// The server published a different description or schema for a known tool: remember it and flag
+	// the tool for review. The tier stays (the flag does not block).
+	UpdateMCPToolContent(ctx context.Context, arg UpdateMCPToolContentParams) (McpTool, error)
 	UpdateModel(ctx context.Context, arg UpdateModelParams) (Model, error)
 	UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error)
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
