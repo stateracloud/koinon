@@ -1,0 +1,168 @@
+# Koinon default price list (plan item PV2, ADR 0056 amendment 2026-10-24).
+#
+# Prices are USD per 1,000,000 tokens, taken only from the provider's own pricing page (or, for
+# OpenRouter routes, OpenRouter's models API, which is its price list). Each entry cites the page
+# and the date it was read. A model whose price could not be verified from a primary source is
+# left out: add it to the list in a pull request that cites the page. Org admins override any
+# entry; they never edit this file. See docs/ops/prices.md for the update process.
+#
+# valid_from is the earliest date Koinon applies the entry (the day the price was verified).
+# Change a price by adding an entry with the same id, the new price and a later valid_from, so
+# ledger entries keep citing the price they used. Bump `version` with every change.
+# tokenizer/ratio estimate usage a provider did not report: ratio is UTF-8 bytes per token
+# (Claude before Opus 4.7: 3.0; Opus 4.7 and later: 2.3; others 3.0; see
+# docs/research/claude-token-estimation.md).
+version: "2026-10-24.1"
+entries:
+  - id: ollama-local
+    provider: ollama
+    match: {glob: "*"}
+    valid_from: 2026-10-24
+    prices: {input: "0", output: "0"}
+    tokenizer: bytes
+    ratio: "3.0"
+    source: {url: "https://ollama.com/", accessed: 2026-10-24}
+    note: "Runs on the org's own hardware; no provider bills tokens, so the price is zero."
+  - id: openrouter-deepseek-v4-1-flash
+    provider: openrouter
+    match: {glob: "deepseek/deepseek-v4.1-flash"}
+    valid_from: 2026-10-24
+    prices: {input: "0.02", output: "1", cache_read: "0.015"}
+    tokenizer: bytes
+    ratio: "3.0"
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
+    note: "OpenRouter models API 2026-10-24: prompt 0.00000002, completion 0.000001, input_cache_read 0.000000015 USD per token; same on openrouter.ai/deepseek/deepseek-v4.1-flash."
+  - id: openai-gpt-6-astra
+    provider: openai
+    match: {glob: "gpt-6-astra"}
+    valid_from: 2026-10-24
+    prices: {input: "10", output: "50", cache_read: "1", cache_write: "12.5"}
+    tiers:
+      - context_over: 272000
+        prices: {input: "20", output: "75", cache_read: "2", cache_write: "25"}
+    tokenizer: tiktoken:o200k_base
+    ratio: "3.0"
+    source: {url: "https://developers.openai.com/api/docs/pricing", accessed: 2026-10-24}
+    note: "OpenAI pricing page 2026-10-24; cache_write is the 30-minute write price; above 272K input tokens the whole request is billed at the tier. The page does not name the tokenizer for gpt-6; o200k_base (the encoding of gpt-4o and gpt-5) is assumed and calibration can only raise estimates."
+  - id: openrouter-openai-gpt-6-astra
+    provider: openrouter
+    match: {glob: "openai/gpt-6-astra"}
+    valid_from: 2026-10-24
+    prices: {input: "10", output: "50", cache_read: "1", cache_write: "12.5"}
+    tiers:
+      - context_over: 272000
+        prices: {input: "20", output: "75", cache_read: "2", cache_write: "25"}
+    tokenizer: tiktoken:o200k_base
+    ratio: "3.0"
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
+    note: "OpenRouter models API 2026-10-24 (same prices and the min_prompt_tokens 272000 override as OpenAI). Tokenizer assumed as for the OpenAI entry."
+  - id: openai-gpt-6-luna
+    provider: openai
+    match: {glob: "gpt-6-luna"}
+    valid_from: 2026-10-24
+    prices: {input: "0.1", output: "0.5", cache_read: "0.01", cache_write: "0.125"}
+    tiers:
+      - context_over: 272000
+        prices: {input: "0.2", output: "0.75", cache_read: "0.02", cache_write: "0.25"}
+    tokenizer: tiktoken:o200k_base
+    ratio: "3.0"
+    source: {url: "https://developers.openai.com/api/docs/pricing", accessed: 2026-10-24}
+    note: "OpenAI pricing page 2026-10-24; cache_write is the 30-minute write price; above 272K input tokens the whole request is billed at the tier. The page does not name the tokenizer for gpt-6; o200k_base (the encoding of gpt-4o and gpt-5) is assumed and calibration can only raise estimates."
+  - id: openrouter-openai-gpt-6-luna
+    provider: openrouter
+    match: {glob: "openai/gpt-6-luna"}
+    valid_from: 2026-10-24
+    prices: {input: "0.1", output: "0.5", cache_read: "0.01", cache_write: "0.125"}
+    tiers:
+      - context_over: 272000
+        prices: {input: "0.2", output: "0.75", cache_read: "0.02", cache_write: "0.25"}
+    tokenizer: tiktoken:o200k_base
+    ratio: "3.0"
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
+    note: "OpenRouter models API 2026-10-24 (same prices and the min_prompt_tokens 272000 override as OpenAI). Tokenizer assumed as for the OpenAI entry."
+  - id: anthropic-claude-fable-5-1
+    provider: anthropic
+    match: {glob: "claude-fable-5-1"}
+    valid_from: 2026-10-24
+    prices: {input: "10", output: "50", cache_read: "0.25", cache_write: "12.5"}
+    tokenizer: bytes
+    ratio: "2.3"
+    hidden_thinking: true
+    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-10-24}
+    note: "Anthropic pricing page 2026-10-24, Claude Fable 5.1: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3."
+  - id: openrouter-anthropic-claude-fable-5-1
+    provider: openrouter
+    match: {glob: "anthropic/claude-fable-5.1"}
+    valid_from: 2026-10-24
+    prices: {input: "10", output: "50", cache_read: "0.25", cache_write: "12.5"}
+    tokenizer: bytes
+    ratio: "2.3"
+    hidden_thinking: true
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
+    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page."
+  - id: anthropic-claude-opus-5-5
+    provider: anthropic
+    match: {glob: "claude-opus-5-5"}
+    valid_from: 2026-10-24
+    prices: {input: "4", output: "20", cache_read: "0.2", cache_write: "5"}
+    tokenizer: bytes
+    ratio: "2.3"
+    tool_overhead_tokens: 286
+    hidden_thinking: true
+    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-10-24}
+    note: "Anthropic pricing page 2026-10-24, Claude Opus 5.5: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. Tool-use system prompt of 286 tokens: docs/research/claude-token-estimation.md [S30]."
+  - id: openrouter-anthropic-claude-opus-5-5
+    provider: openrouter
+    match: {glob: "anthropic/claude-opus-5.5"}
+    valid_from: 2026-10-24
+    prices: {input: "4", output: "20", cache_read: "0.2", cache_write: "5"}
+    tokenizer: bytes
+    ratio: "2.3"
+    tool_overhead_tokens: 286
+    hidden_thinking: true
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
+    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page."
+  - id: anthropic-claude-sonnet-5-5
+    provider: anthropic
+    match: {glob: "claude-sonnet-5-5"}
+    valid_from: 2026-10-24
+    prices: {input: "2", output: "10", cache_read: "0.1", cache_write: "2.5"}
+    tokenizer: bytes
+    ratio: "2.3"
+    hidden_thinking: true
+    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-10-24}
+    note: "Anthropic pricing page 2026-10-24, Claude Sonnet 5.5: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3."
+  - id: openrouter-anthropic-claude-sonnet-5-5
+    provider: openrouter
+    match: {glob: "anthropic/claude-sonnet-5.5"}
+    valid_from: 2026-10-24
+    prices: {input: "2", output: "10", cache_read: "0.1", cache_write: "2.5"}
+    tokenizer: bytes
+    ratio: "2.3"
+    hidden_thinking: true
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
+    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page."
+  - id: anthropic-claude-haiku-5-5
+    provider: anthropic
+    match: {glob: "claude-haiku-5-5"}
+    valid_from: 2026-10-24
+    prices: {input: "0.1", output: "0.5", cache_read: "0.01", cache_write: "0.125"}
+    tiers:
+      - context_over: 100000
+        prices: {input: "0.5", output: "2.5", cache_read: "0.05", cache_write: "0.625"}
+    tokenizer: bytes
+    ratio: "2.3"
+    source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-10-24}
+    note: "Anthropic pricing page 2026-10-24, Claude Haiku 5.5: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. Prompts over 100,000 tokens (cache tokens included) bill at the tier."
+  - id: openrouter-anthropic-claude-haiku-5-5
+    provider: openrouter
+    match: {glob: "anthropic/claude-haiku-5.5"}
+    valid_from: 2026-10-24
+    prices: {input: "0.1", output: "0.5", cache_read: "0.01", cache_write: "0.125"}
+    tiers:
+      - context_over: 100000
+        prices: {input: "0.5", output: "2.5", cache_read: "0.05", cache_write: "0.625"}
+    tokenizer: bytes
+    ratio: "2.3"
+    source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
+    note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page including the min_prompt_tokens 100000 override."
