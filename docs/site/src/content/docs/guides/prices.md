@@ -29,6 +29,9 @@ that number, so set it to the model's real limit. The form checks the fields as 
 keep the price they were charged at. **Retire** ends a price; past requests keep it too. Every change
 is audited. The admin API does the same under `/admin/v1/prices`.
 
+A price that came from the rates of a model in an earlier release, and that matched no default price, shows
+**Needs review**: its estimate settings are generic. Save a new version with the right ones.
+
 ## Estimates and flags
 
 When a provider reports no usage, Koinon estimates it from the size of the request, marks the request

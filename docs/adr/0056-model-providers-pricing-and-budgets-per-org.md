@@ -245,20 +245,32 @@ removes the layer that PV1 left on the model.
 
 1. **Per-model rates are folded into org price entries; the layer is gone.** Migration
    `00014_fold_model_rates_into_prices.sql` creates one org price entry for every model that has rates:
-   the model's provider type, the exact model name as a glob, the rates it had (input, output, cache
-   read), tokenizer `bytes`, ratio 3.0, and a name `model-<name>-<id prefix>`. Precedence is now the org's
-   entries, then the default list.
+   the model's provider type, its exact name, the rates it had (input, output, cache read), a start date
+   and a name `model-<name>-<random tail of the id>`. Precedence is now the org's entries, then the
+   default list.
    - **Valid from the model's creation.** The rates applied to every request since the model existed, so
      an entry that reaches the ledger late is priced as it would have been. `now()` would have sent
      those entries to the fallback ("no price was valid then") instead. A later org entry of the same
      length of pattern still beats it, which is the point of dated entries.
-   - **`max_output` is 131072** (0 for a free model), a ceiling: a model never stored one and SQL cannot
-     read the default list. It is only used when an aborted response without usage settles; admins
-     tighten it by adding a later version. The cache write rate, reasoning rate, tiers and the tokenizer of
-     the default entry that used to fill the gaps are not copied; a bucket without a rate bills at the
-     input or output rate, as for any entry.
-   - A model whose stored rates `money.ParseRate` would refuse is skipped with a notice (it would make
-     every price of its org unusable); it was not priced before either.
+   - **The name matches case-sensitively and exactly**, as the old lookup (`m.name = $1`) did: the
+     pattern is the regex `(?-i:<name>)`, because a glob would let "Foo" and "foo" price each other. One
+     model is converted per (org, name, provider type), preferring an enabled model on a live provider.
+   - **The settings the old pricing took from the matching default entry are filled in at startup.**
+     SQL cannot read the default list, so the migration writes generic settings (tokenizer `bytes`, ratio
+     3.0, `max_output` 131072, or 0 for a free model) and a pending note. `koinon-api` then runs
+     `prices.CompleteMigrated` once per start (idempotent, in place): it finds the default entry that
+     matches the provider type and name now (as the old `Resolve` did) and copies what the model's rates
+     never set: cache write, reasoning, tokenizer, ratio, tool overhead, hidden thinking and
+     `max_output`. The model's own input, output and cache read stay; tiers are not copied, because the
+     model's rates applied at every context length. Without it, Claude costs and estimates would run low
+     (cache writes about 20%, input estimates about 23%, aborted thinking output almost entirely) and
+     budgets would stop runs late. An entry no default entry matches keeps the generic values and shows
+     **Needs review** on the Prices page.
+   - A model whose stored rates `money.ParseRate` would refuse is skipped (it would make every price of
+     its org unusable; it was not priced before either). The migration raises a warning with the count
+     and writes an audit event `price.migration_skipped` per model, which admins see in the audit log.
+   - Rates that an old pod writes while a rolling upgrade is under way are not converted; add a price for
+     such a model.
    - The `models.input_rate`, `output_rate` and `cache_read_rate` columns stay, unread and marked
      deprecated, for one release (expand, then contract) so a rolling upgrade does not break the old pods;
      a later migration drops them.
@@ -269,8 +281,9 @@ removes the layer that PV1 left on the model.
    org entry on the fly would silently create org-wide patterns without a `max_output` or a start date,
    and a second way to do what `PriceService.SetPrice` does; a clear error is cheaper to explain.
    `rates` in a declarative Secret is ignored with a Warning Event ("rates are ignored") when it is
-   applied; the Secret stays valid. A model is now served whenever its provider is, priced by an org
-   entry or the default list, or by the gateway's own catalog when neither has it.
+   applied and on every sync while it is present; the Secret stays valid. A model is served only when an org
+   entry or the default list prices it (the gateway answers 404 for an unpriced one), so a model added
+   through a Secret that only had `rates` is not served until a price covers it.
 3. **Pages.** *Prices* (owners and admins): the default list read-only with each entry's source link and a
    "changed since your last upgrade" marker (the diff of the current list against the version before it);
    the org's entries (add, a new version of one, retire) with every usage-type price, tiers, tokenizer,
@@ -283,8 +296,9 @@ removes the layer that PV1 left on the model.
    100% notice of the window now running (the highest threshold per limit). Members see none of it and
    their pages make no request.
 4. **The platform ceiling** is read-only on the Budgets page. Platform admins set it in a Platform area of
-   the sidebar (*Budget ceiling*), for the org chosen in the org switcher; there is no org list for platform
-   admins yet, so they reach another org through the switcher.
+   the sidebar (*Budget ceilings*): a list of every org with its ceiling, cap and spend this month, each
+   editable in place. `BudgetService.ListOrgBudgets` serves it and refuses everyone but platform admins.
+   The "acting as a platform admin" note shows only inside an org the admin is not a member of.
 5. **Estimated against reported.** A run's and a ticket's cost says how many of its requests were
    estimated, with a tooltip that explains why (the provider reported no usage) and that estimates count
    toward limits and tend to run high. The 100% stop shows on the ticket timeline as "stopped at a spend

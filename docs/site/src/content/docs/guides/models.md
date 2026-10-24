@@ -68,8 +68,10 @@ stringData:
   (`openai`, `openrouter`, `ollama` and so on). `url` is the OpenAI-compatible base URL. `apiKey` is
   optional; leave it out for Ollama.
 - `models` is a YAML list. Each model has a `name` and an optional `guard`. Prices are not declared
-  here: Koinon prices a model from [its default price list or a price you add](/guides/prices/). An
-  older Secret that still has `rates` keeps working; Koinon ignores them and says so in a Warning Event.
+  here: Koinon prices a model from [its default price list or a price you add](/guides/prices/). **Upgrading:** an
+  older Secret that still has `rates` stays valid, but Koinon ignores the rates and says so in a Warning Event
+  on every sync. A model that only had `rates` is not served unless the default list prices it; add a price
+  for it on the **Prices** page.
 
 `koinon-api` imports the Secret within seconds. What you need to know:
 
