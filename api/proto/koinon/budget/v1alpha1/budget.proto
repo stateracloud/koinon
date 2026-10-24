@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.budget.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1;budgetv1alpha1";
+
+// BudgetService sets an org's monthly cap and its agents' daily limits and lists the in-app
+// notifications about them (plan item BG1, ADR 0056). Amounts are USD decimal strings.
+// The cap is per calendar month in UTC, an agent's limit per UTC day. Admins and owners write;
+// the platform ceiling is for platform admins. Every change is audited.
+service BudgetService {
+  // GetOrgBudget returns the cap, the platform ceiling and this month's spend.
+  rpc GetOrgBudget(GetOrgBudgetRequest) returns (GetOrgBudgetResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // SetMonthlyCap sets the cap, or clears it with an empty amount. It cannot exceed the ceiling.
+  rpc SetMonthlyCap(SetMonthlyCapRequest) returns (SetMonthlyCapResponse);
+
+  // SetPlatformCeiling sets the org's ceiling, or clears it with an empty amount. Platform
+  // admins only. The org's cap must already fit under it.
+  rpc SetPlatformCeiling(SetPlatformCeilingRequest) returns (SetPlatformCeilingResponse);
+
+  // GetAgentBudget returns an agent's effective daily limit and today's spend.
+  rpc GetAgentBudget(GetAgentBudgetRequest) returns (GetAgentBudgetResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // SetAgentBudget sets an agent's daily limit. A template's spendUSD is only the default for
+  // a new agent.
+  rpc SetAgentBudget(SetAgentBudgetRequest) returns (SetAgentBudgetResponse);
+
+  // ListNotifications returns the caller's notifications in this org, newest first: budget
+  // warnings at 80% and stops at 100%. Owners and admins receive them; platform admins also
+  // those about the platform ceiling.
+  rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // MarkNotificationRead marks one of the caller's notifications read.
+  rpc MarkNotificationRead(MarkNotificationReadRequest) returns (MarkNotificationReadResponse);
+}
+
+message OrgBudget {
+  // monthly_cap_usd is empty when there is no cap.
+  string monthly_cap_usd = 1;
+  // platform_ceiling_usd is empty when the ceiling is off.
+  string platform_ceiling_usd = 2;
+  string spent_this_month_usd = 3;
+  google.protobuf.Timestamp month_start = 4;
+}
+
+message GetOrgBudgetRequest {
+  string org_id = 1;
+}
+
+message GetOrgBudgetResponse {
+  OrgBudget budget = 1;
+}
+
+message SetMonthlyCapRequest {
+  string org_id = 1;
+  string monthly_cap_usd = 2;
+}
+
+message SetMonthlyCapResponse {
+  OrgBudget budget = 1;
+}
+
+message SetPlatformCeilingRequest {
+  string org_id = 1;
+  string platform_ceiling_usd = 2;
+}
+
+message SetPlatformCeilingResponse {
+  OrgBudget budget = 1;
+}
+
+message AgentBudget {
+  string agent_id = 1;
+  string daily_limit_usd = 2;
+  string spent_today_usd = 3;
+  google.protobuf.Timestamp day_start = 4;
+}
+
+message GetAgentBudgetRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+message GetAgentBudgetResponse {
+  AgentBudget budget = 1;
+}
+
+message SetAgentBudgetRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  string daily_limit_usd = 3;
+}
+
+message SetAgentBudgetResponse {
+  AgentBudget budget = 1;
+}
+
+message Notification {
+  string id = 1;
+  // kind is budget.warning (80%) or budget.reached (100%).
+  string kind = 2;
+  // level is agent_daily, org_monthly or platform_ceiling.
+  string level = 3;
+  // threshold is 80 or 100.
+  int32 threshold = 4;
+  string limit_usd = 5;
+  string spent_usd = 6;
+  // agent_id is set for agent_daily.
+  string agent_id = 7;
+  google.protobuf.Timestamp window_start = 8;
+  google.protobuf.Timestamp created_at = 9;
+  // read_at is unset while the notification is unread.
+  google.protobuf.Timestamp read_at = 10;
+}
+
+message ListNotificationsRequest {
+  string org_id = 1;
+  // max_results defaults to 50 and is at most 200.
+  int32 max_results = 2;
+}
+
+message ListNotificationsResponse {
+  repeated Notification notifications = 1;
+}
+
+message MarkNotificationReadRequest {
+  string org_id = 1;
+  string notification_id = 2;
+}
+
+message MarkNotificationReadResponse {}
