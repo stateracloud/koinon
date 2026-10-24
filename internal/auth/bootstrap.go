@@ -211,7 +211,7 @@ func Bootstrap(ctx context.Context, pool *pgxpool.Pool, cfg BootstrapConfig, now
 		if err != nil {
 			return err
 		}
-		hash, err := HashPassword(password)
+		hash, err := HashPasswordContext(ctx, password)
 		if err != nil {
 			return err
 		}

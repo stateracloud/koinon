@@ -134,13 +134,13 @@ func (s *Service) checkPassword(ctx context.Context, username, password string) 
 	}
 	cred, err := s.q.GetLocalCredentialByUsername(ctx, username)
 	if errors.Is(err, pgx.ErrNoRows) {
-		_, _ = VerifyPassword(dummyHash(), password)
+		_, _ = VerifyPasswordContext(ctx, dummyHash(), password)
 		return store.LocalCredential{}, false, nil
 	}
 	if err != nil {
 		return store.LocalCredential{}, false, err
 	}
-	ok, err := VerifyPassword(cred.PasswordHash, password)
+	ok, err := VerifyPasswordContext(ctx, cred.PasswordHash, password)
 	if err != nil || !ok {
 		return store.LocalCredential{}, false, err
 	}

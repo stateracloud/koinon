@@ -178,6 +178,12 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
   valueFrom:
     fieldRef:
       fieldPath: metadata.namespace
+{{- /* The container's memory limit in bytes; the binaries set the Go runtime's soft limit to 80% of it (internal/memlimit). */}}
+- name: KOINON_MEMORY_LIMIT_BYTES
+  valueFrom:
+    resourceFieldRef:
+      resource: limits.memory
+      divisor: "1"
 {{- end }}
 
 {{/*

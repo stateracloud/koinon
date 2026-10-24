@@ -184,6 +184,17 @@ message DeleteConnectionRequest {
 
 message DeleteConnectionResponse {}
 
+// BoundAgents is the error detail of a DeleteConnection refused with FAILED_PRECONDITION because
+// agents are still bound to the connection.
+message BoundAgents {
+  repeated BoundAgent agents = 1;
+}
+
+message BoundAgent {
+  string id = 1;
+  string display_name = 2;
+}
+
 // ListConnectionsRequest names the org.
 message ListConnectionsRequest {
   string org_id = 1;
