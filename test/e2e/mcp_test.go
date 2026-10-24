@@ -120,10 +120,18 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	By("the gateway injected the credential on everything it sent, and did not forward the prober's key")
 	recs := fakeMCPRequests(ctx, fake)
 	Expect(recs).NotTo(BeEmpty())
+	anonymous := 0
 	for _, r := range recs {
+		if r.Agent == "" {
+			// koinon-api's add-time OAuth check: direct, and it carries no credential.
+			Expect(r.Authorized).To(BeFalse(), "the add-time check must not carry the credential: %+v", r)
+			anonymous++
+			continue
+		}
 		Expect(r.Authorized).To(BeTrue(), "every request the gateway sent carried the credential: %+v", r)
 		Expect(r.ClientAuthorization).To(BeFalse(), "the gateway's own key must not reach the server: %+v", r)
 	}
+	Expect(anonymous).To(BeNumerically(">=", 1), "the OAuth check reached the server anonymously")
 	Expect(recs).To(ContainElement(HaveField("Agent", "default/mcp-probe-tracker")))
 
 	By("an admin confirms read_item as auto and allows the agent")
