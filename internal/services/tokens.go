@@ -126,9 +126,11 @@ func (s *Server) CreateToken(ctx context.Context, req *tokenv1alpha1.CreateToken
 		return nil, s.tokenError(err)
 	}
 	s.log.Info("admin API token created", "org", c.org.String(), "token", created.ID, "prefix", created.Prefix, "role", created.Role, "by", c.actor().String())
+	// The token exists and its secret is shown only here: a failed name lookup must not lose it.
 	names, err := s.userNames(ctx, []tokens.Token{created.Token})
 	if err != nil {
-		return nil, s.tokenError(err)
+		s.log.Error("could not look up the token creator's name", "token", created.ID, "err", err)
+		names = map[string]string{}
 	}
 	return &tokenv1alpha1.CreateTokenResponse{Token: tokenProto(created.Token, names), Secret: created.Secret}, nil
 }
