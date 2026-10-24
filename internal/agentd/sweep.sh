@@ -10,7 +10,9 @@
 # once before the scan, sleep only between rounds, and no command substitution or pipeline
 # runs while it scans, so it never finds its own helpers. Prints the main process it kept
 # ("main: PID") and what it ended ("ended: PID..." or "ended: none") on stdout; exits 1 when
-# processes are still running after the last round, 2 when it cannot tell which process is
+# processes are still running after the last round, after printing them as
+# "survivors: PID:STARTTIME..." (the start time tells a process from a later one that reuses
+# its PID; koinon-agentd then watches them, stuck.go), 2 when it cannot tell which process is
 # the sandbox's main one, ending nothing.
 set -u
 
@@ -111,6 +113,15 @@ while :; do
   fi
   round=$((round + 1))
   if [ "$round" -gt 5 ]; then
+    sv=
+    for pid in $found; do
+      { read -r line <"/proc/$pid/stat"; } 2>/dev/null || continue
+      set -- ${line##*") "}
+      [ $# -ge 20 ] || continue
+      shift 19
+      sv="$sv $pid:$1"
+    done
+    echo "survivors:$sv"
     echo "still running:$found" >&2
     exit 1
   fi

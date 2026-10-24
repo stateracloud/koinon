@@ -52,6 +52,8 @@ type Column struct {
 var Columns = []Column{
 	{Table: "providers", Column: "api_key"},
 	{Table: "connections", Column: "secret_envelope"},
+	// Uncommitted work saved from a stuck sandbox (ADR 0054); NULL once pushed or expired.
+	{Table: "saved_work", Column: "envelope"},
 }
 
 // KeySet is the KEK Secret's content.

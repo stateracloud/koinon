@@ -855,6 +855,9 @@ type Agent struct {
 	ArchivedAt      pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
+	UnhealthyAt     pgtype.Timestamptz
+	UnhealthyReason pgtype.Text
+	ResumedAt       pgtype.Timestamptz
 }
 
 type AgentBudget struct {
@@ -873,24 +876,27 @@ type AgentMcpServer struct {
 }
 
 type AgentSandbox struct {
-	OrgID          pgtype.UUID
-	AgentID        pgtype.UUID
-	Workspace      string
-	SandboxName    string
-	ProviderName   string
-	KeySecretName  string
-	GatewayKeyID   pgtype.Text
-	GatewayKeyHash pgtype.Text
-	State          SandboxState
-	Phase          string
-	Message        string
-	SpecHash       string
-	StartedAt      pgtype.Timestamptz
-	StoppedAt      pgtype.Timestamptz
-	ObservedAt     pgtype.Timestamptz
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
-	HomeGeneration pgtype.Text
+	OrgID               pgtype.UUID
+	AgentID             pgtype.UUID
+	Workspace           string
+	SandboxName         string
+	ProviderName        string
+	KeySecretName       string
+	GatewayKeyID        pgtype.Text
+	GatewayKeyHash      pgtype.Text
+	State               SandboxState
+	Phase               string
+	Message             string
+	SpecHash            string
+	StartedAt           pgtype.Timestamptz
+	StoppedAt           pgtype.Timestamptz
+	ObservedAt          pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+	HomeGeneration      pgtype.Text
+	UnhealthyAt         pgtype.Timestamptz
+	UnhealthyReason     pgtype.Text
+	UnhealthyGeneration pgtype.Text
 }
 
 type AgentVersion struct {
@@ -947,6 +953,7 @@ type ApprovalRequest struct {
 	ApprovalsRequired   int16
 	FirstApprover       pgtype.UUID
 	CallBinding         []byte
+	System              bool
 }
 
 type AuditEvent struct {
@@ -1192,6 +1199,7 @@ type Run struct {
 	TokensUsed          int64
 	PromptThroughSeq    pgtype.Int8
 	Takeovers           int32
+	Summarizing         bool
 }
 
 type RunEvent struct {
@@ -1204,6 +1212,44 @@ type RunEvent struct {
 	Payload   []byte
 	CreatedAt pgtype.Timestamptz
 	SourceSeq pgtype.Int8
+}
+
+type SandboxIncident struct {
+	OrgID       pgtype.UUID
+	ID          pgtype.UUID
+	AgentID     pgtype.UUID
+	RunID       pgtype.UUID
+	TicketID    pgtype.UUID
+	DetectedAt  pgtype.Timestamptz
+	Processes   []byte
+	Outcome     string
+	Work        string
+	WorkNote    string
+	SavedWorkID pgtype.UUID
+}
+
+type SavedWork struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	TicketID  pgtype.UUID
+	RunID     pgtype.UUID
+	AgentID   pgtype.UUID
+	Repo      string
+	BaseSha   string
+	Branch    string
+	Manifest  []byte
+	SizeBytes int64
+	Envelope  []byte
+	Status    string
+	CreatedAt pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
+}
+
+type SavedWorkUploadNonce struct {
+	OrgID     pgtype.UUID
+	RunID     pgtype.UUID
+	Nonce     string
+	CreatedAt pgtype.Timestamptz
 }
 
 type Session struct {
@@ -1270,6 +1316,9 @@ type Ticket struct {
 	CreatedAt                pgtype.Timestamptz
 	UpdatedAt                pgtype.Timestamptz
 	HarnessSessionGeneration pgtype.Text
+	AgentSummary             pgtype.Text
+	AgentSummaryAt           pgtype.Timestamptz
+	SessionRestartPending    bool
 }
 
 type TicketEvent struct {

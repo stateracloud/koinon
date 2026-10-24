@@ -419,7 +419,31 @@ egress.allowedInternalHosts; both are joined. */}}
 koinon-agentd's settings (plan item AG1). The gateway URL tells sandboxes where agentgateway is;
 it carries no credentials.
 */}}
+{{/* The Secret koinon-api creates on first use for the key that signs saved-work uploads (ADR 0054). koinon-agentd mounts it read-only (optional: it exists once koinon-api has started); it is not a KEK. */}}
+{{- define "koinon.savedWorkSecretName" -}}
+{{- include "koinon.componentName" (list . "saved-work") -}}
+{{- end }}
+
+{{- define "koinon.savedWorkVolumeMount" -}}
+- name: saved-work
+  mountPath: /secrets/saved-work
+  readOnly: true
+{{- end }}
+
+{{- define "koinon.savedWorkVolume" -}}
+- name: saved-work
+  secret:
+    secretName: {{ include "koinon.savedWorkSecretName" . }}
+    defaultMode: 0440
+    optional: true
+{{- end }}
+
 {{- define "koinon.agentdEnv" -}}
+{{- /* The uncommitted work of a stuck sandbox is posted here to be sealed; agentd holds no KEK (ADR 0054). */}}
+- name: KOINON_SAVED_WORK_KEY_FILE
+  value: /secrets/saved-work/key
+- name: KOINON_SAVED_WORK_URL
+  value: {{ printf "http://%s.%s.svc.%s:%v" (include "koinon.componentName" (list . "api-saved-work")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") .Values.api.savedWorkPort | quote }}
 - name: POD_NAME
   valueFrom:
     fieldRef:

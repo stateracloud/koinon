@@ -134,14 +134,14 @@ describe('Budgets page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Only org admins and owners can manage budgets.')
     expect(calls.listed).toBe(0)
     expect(calls.noticeCalls).toBe(0)
-    expect(screen.queryByRole('region', { name: 'Budget notices' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Notices' })).not.toBeInTheDocument()
   })
 })
 
 describe('Budget notices banner', () => {
   it('shows an unread 100% notice to admins on any page, and the 80% one replaced by it', async () => {
     setup({ path: '/', notices: [notice('n-1', 80), notice('n-2', 100)] })
-    const banner = await screen.findByRole('region', { name: 'Budget notices' })
+    const banner = await screen.findByRole('region', { name: 'Notices' })
     expect(within(banner).getAllByRole('alert')).toHaveLength(1)
     expect(within(banner).getByText(/The org’s monthly cap has been reached/)).toBeInTheDocument()
     expect(within(banner).getByRole('link', { name: 'See budgets' })).toHaveAttribute('href', '/settings/budgets')
@@ -149,7 +149,7 @@ describe('Budget notices banner', () => {
 
   it('shows an 80% notice as a status, and nothing for read notices', async () => {
     setup({ path: '/', notices: [notice('n-1', 80)] })
-    const banner = await screen.findByRole('region', { name: 'Budget notices' })
+    const banner = await screen.findByRole('region', { name: 'Notices' })
     expect(within(banner).getByRole('status')).toHaveTextContent('is at 80%')
   })
 
@@ -158,7 +158,7 @@ describe('Budget notices banner', () => {
       path: '/',
       notices: [notice('n-1', 100, 'agent_daily'), notice('n-2', 100, 'org_monthly'), notice('n-4', 80, 'agent_daily'), notice('n-5', 80, 'agent_daily')].map((n, i) => (i >= 2 ? create(NotificationSchema, { ...n, agentId: `a-${i + 1}` }) : n)),
     })
-    const banner = await screen.findByRole('region', { name: 'Budget notices' })
+    const banner = await screen.findByRole('region', { name: 'Notices' })
     expect(await within(banner).findByText(/Repo helper’s daily limit has been reached/)).toBeInTheDocument()
     expect(within(banner).getByText(/1 more/)).toBeInTheDocument()
   })
@@ -166,7 +166,28 @@ describe('Budget notices banner', () => {
   it('shows nothing when everything is read', async () => {
     const calls = setup({ path: '/', notices: [notice('n-1', 100, 'org_monthly', true)] })
     await waitFor(() => expect(calls.noticeCalls).toBeGreaterThan(0))
-    expect(screen.queryByRole('region', { name: 'Budget notices' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Notices' })).not.toBeInTheDocument()
+  })
+})
+
+describe('Agent unhealthy notifications', () => {
+  const unhealthy = (id: string, kind = 'agent.unhealthy') =>
+    create(NotificationSchema, { id, kind, agentId: 'a-1', message: 'Repo helper was marked unhealthy: its sandbox kept getting stuck.', createdAt: timestampFromMs(Date.now()) })
+
+  it('shows the message in the banner with a link to the agent, as an alert', async () => {
+    setup({ path: '/', notices: [unhealthy('n-u')] })
+    const banner = await screen.findByRole('region', { name: 'Notices' })
+    expect(within(banner).getByRole('alert')).toHaveTextContent('Repo helper was marked unhealthy: its sandbox kept getting stuck.')
+    expect(within(banner).getByRole('link', { name: 'Open the agent' })).toHaveAttribute('href', '/agents/a-1')
+    expect(within(banner).queryByRole('link', { name: 'See budgets' })).not.toBeInTheDocument()
+  })
+
+  it('lists it on the Budgets page with the agent link and does not crash on an unknown kind', async () => {
+    setup({ notices: [unhealthy('n-u'), unhealthy('n-x', 'something.new')] })
+    const list = await screen.findByRole('list', { name: 'Notifications' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(list).getAllByText(/was marked unhealthy/)).toHaveLength(2)
+    expect(within(list).getAllByRole('link', { name: 'Open the agent' })[0]).toHaveAttribute('href', '/agents/a-1')
   })
 })
 

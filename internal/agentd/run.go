@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/acp"
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -90,6 +91,15 @@ type runner struct {
 	// cwd is the session directory, set before the harness starts; permission requests for
 	// paths outside it are rejected.
 	cwd string
+
+	// vcfg and home are the run's version config and the sandbox's home generation, for
+	// handling a stuck sandbox (stuck.go).
+	vcfg agentconfig.Config
+	home pgtype.Text
+
+	// sum is the summary prompt in progress (summary.go), nil otherwise.
+	sumMu sync.Mutex
+	sum   *summaryState
 
 	cmdMu      sync.Mutex
 	commands   []string      // the harness's last available_commands_update
@@ -287,6 +297,11 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.dbErr(ctx, "load agent", err)
 	}
+	// ClaimNextRun skips unhealthy agents, so only a run claimed just before the mark gets here; a
+	// resumed (parked) run is not failed for it: its sandbox work and approvals are intact.
+	if agent.UnhealthyAt.Valid && !r.run.PromptThroughSeq.Valid {
+		return &failure{reason: "the agent is unhealthy and will not run until an admin resumes it: " + agent.UnhealthyReason.String}
+	}
 	version, err := r.q.GetAgentVersion(fctx, store.GetAgentVersionParams{OrgID: r.run.OrgID, ID: r.run.AgentVersionID})
 	if err != nil {
 		return r.dbErr(ctx, "load agent version", err)
@@ -329,18 +344,46 @@ func (r *runner) execute(ctx context.Context) error {
 		return &failure{reason: err.Error()}
 	}
 	cmd = append(cmd, harnessArgs(agent.Flavor, vc)...)
+	r.vcfg = vc
 	sb, err := r.waitSandbox(fctx)
 	if err != nil {
 		return r.execErr(ctx, "sandbox", err)
 	}
-	workspace, sandbox := sb.Workspace, sb.SandboxName
-	log := r.log.With("sandbox", sandbox)
 	// Nothing of an earlier run may still be running when this one starts (sweep.go); a
-	// sweep that cannot end everything fails the run.
-	main, ended, err := r.sweep(fctx, workspace, sandbox)
+	// sweep that cannot end everything fails the run, unless processes that will not die make
+	// the sandbox stuck: it is then recreated (stuck.go) and the run waits for the new one.
+	var main string
+	var ended []string
+	for attempt := 0; ; attempt++ {
+		r.home = sb.HomeGeneration
+		main, ended, err = r.sweep(fctx, sb.Workspace, sb.SandboxName)
+		var sv *survivorsError
+		if !errors.As(err, &sv) {
+			break
+		}
+		out, herr := r.handleSurvivors(ctx, sb.Workspace, sb.SandboxName, sv)
+		if herr != nil {
+			return r.execErr(ctx, "handle the stuck sandbox", herr)
+		}
+		switch {
+		case out == stuckFenced:
+			return errFenced
+		case out == stuckUnhealthy:
+			return &failure{reason: "the agent is unhealthy: its sandbox got stuck again and was not recreated; an admin must resume the agent"}
+		case attempt >= 2, out == stuckUnknown:
+			return &failure{reason: sv.Error()}
+		}
+		if out == stuckRecreate {
+			if sb, err = r.waitSandbox(fctx); err != nil {
+				return r.execErr(ctx, "sandbox", err)
+			}
+		}
+	}
 	if err != nil {
 		return r.execErr(ctx, "end the processes left in the sandbox", err)
 	}
+	workspace, sandbox := sb.Workspace, sb.SandboxName
+	log := r.log.With("sandbox", sandbox)
 	if len(ended) > 0 {
 		log.Warn("ended processes left in the sandbox", "pids", ended, "main", main)
 		if err := r.record(fctx, "run.sandbox_swept", map[string]any{"pids": ended, "main": main}); err != nil {
@@ -351,8 +394,13 @@ func (r *runner) execute(ctx context.Context) error {
 	// the sandbox. The ticket's session is loaded only in the home it was created in; after a
 	// recreated sandbox (or for a session recorded before generations existed) the run starts a
 	// new session instead of failing on session/load.
-	loaded := ticket.HarnessSessionID.Valid && sameHome(ticket.HarnessSessionGeneration, sb.HomeGeneration)
-	reset := ticket.HarnessSessionID.Valid && !loaded
+	//
+	// A ticket whose agent version was activated with "apply to open tickets" starts a new session
+	// too, with a handoff (handoff.go); that takes precedence over a reset, whose prompt carries no
+	// summary.
+	restart := ticket.HarnessSessionID.Valid && ticket.SessionRestartPending
+	loaded := ticket.HarnessSessionID.Valid && !restart && sameHome(ticket.HarnessSessionGeneration, sb.HomeGeneration)
+	reset := ticket.HarnessSessionID.Valid && !loaded && !restart
 	cwd := cfg.SessionCwd
 	if loaded {
 		cwd = ticket.HarnessSessionCwd.String
@@ -417,7 +465,7 @@ func (r *runner) execute(ctx context.Context) error {
 		if session, err = conn.NewSession(fctx, cwd); err != nil {
 			return harnessErr("session/new", err)
 		}
-		if err := r.storeSession(fctx, ticket, session, cwd, sb.HomeGeneration, reset); err != nil {
+		if err := r.storeSession(fctx, ticket, session, cwd, sb.HomeGeneration, reset, restart); err != nil {
 			return r.dbErr(ctx, "store the session", err)
 		}
 	}
@@ -446,14 +494,14 @@ func (r *runner) execute(ctx context.Context) error {
 		}
 	}
 	if err := r.record(fctx, "run.session", map[string]any{
-		"sessionId": session, "loaded": loaded, "reset": reset, "takeovers": r.run.Takeovers,
+		"sessionId": session, "loaded": loaded, "reset": reset, "restart": restart, "takeovers": r.run.Takeovers,
 		"agent": init.AgentInfo, "model": model,
 		"instructions": map[string]any{"path": instructionsPath, "sha256": sha256Hex(instructions)},
 	}); err != nil {
 		return r.dbErr(ctx, "record the session", err)
 	}
 
-	text, through, err := r.prompt(fctx, ticket, loaded, reset)
+	text, through, err := r.prompt(fctx, ticket, loaded, reset, restart)
 	if err != nil {
 		return r.dbErr(ctx, "build the prompt", err)
 	}
@@ -476,6 +524,8 @@ func (r *runner) execute(ctx context.Context) error {
 	if !errors.Is(err, errEndTurn) {
 		return err
 	}
+	// The agent's note for the ticket, before the harness is let go.
+	r.summarize(ctx, conn, session)
 	closeHarness()
 	sweepOnce()
 	// Finishes the run, or parks it on its approvals.
@@ -497,7 +547,7 @@ func sameHome(generation, home pgtype.Text) bool {
 
 // storeSession records a new session on the ticket with the home generation it lives in and,
 // when it replaces a session the home lost, a ticket event that says so.
-func (r *runner) storeSession(ctx context.Context, ticket store.Ticket, session acp.SessionID, cwd string, home pgtype.Text, reset bool) error {
+func (r *runner) storeSession(ctx context.Context, ticket store.Ticket, session acp.SessionID, cwd string, home pgtype.Text, reset, restart bool) error {
 	return pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
 		if _, err := q.SetTicketHarnessSession(ctx, store.SetTicketHarnessSessionParams{
@@ -506,18 +556,22 @@ func (r *runner) storeSession(ctx context.Context, ticket store.Ticket, session 
 		}); err != nil {
 			return err
 		}
-		if !reset {
+		kind, message := kindSessionReset, sessionResetMessage
+		switch {
+		case restart:
+			kind, message = kindSessionRestarted, sessionRestartedMessage
+		case !reset:
 			return nil
 		}
 		payload, err := json.Marshal(map[string]string{
-			"message": sessionResetMessage, "previousSessionId": ticket.HarnessSessionID.String, "sessionId": string(session),
+			"message": message, "previousSessionId": ticket.HarnessSessionID.String, "sessionId": string(session),
 		})
 		if err != nil {
 			return err
 		}
 		_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
 			OrgID: r.run.OrgID, TicketID: ticket.ID, RunID: r.run.ID,
-			Kind: kindSessionReset, ActorKind: store.TicketActorKindSystem, Payload: payload,
+			Kind: kind, ActorKind: store.TicketActorKindSystem, Payload: payload,
 		})
 		return err
 	})
@@ -657,7 +711,7 @@ func (r *runner) interrupted(ctx context.Context, reason string, exit *int, stde
 // prompted: it gets the resume note plus anything that arrived since. A new session that
 // replaces one the sandbox home lost (reset) knows nothing of the ticket, so it gets the
 // ticket's title and every message, plus the run's approval outcomes not sent yet.
-func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded, reset bool) (string, int64, error) {
+func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded, reset, restart bool) (string, int64, error) {
 	resumed := r.run.PromptThroughSeq.Valid
 	after := r.run.PromptThroughSeq.Int64
 	switch {
@@ -688,6 +742,9 @@ func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded, reset 
 		if notice, err = r.mcpNotice(ctx); err != nil {
 			return "", 0, err
 		}
+	}
+	if restart {
+		return r.handoffPrompt(ctx, ticket, outcomes, notice)
 	}
 	switch {
 	case reset:
@@ -921,6 +978,9 @@ func (r *runner) release(ctx context.Context) {
 type handler struct{ r *runner }
 
 func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
+	if h.r.summaryUpdate(n) {
+		return nil // the summary prompt's reply is the ticket's note, not a run event
+	}
 	if n.Update.AvailableCommandsUpdate != nil {
 		// Harness state, not part of the run's timeline: kept for waitCommand only.
 		h.r.setCommands(acp.Flatten(n).Commands)
@@ -955,6 +1015,11 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 const toolCallWait = 250 * time.Millisecond
 
 func (h handler) RequestPermission(ctx context.Context, req acp.PermissionRequest) (acp.Decision, error) {
+	if h.r.summarizingNow() {
+		// The summary prompt does nothing: every permission request is refused.
+		h.r.log.Warn("permission refused during the end-of-turn summary")
+		return acp.Choose(req, acp.RejectOnce, acp.RejectAlways), nil
+	}
 	d := h.r.p.cfg.Permissions.decide(req, h.r.cwd)
 	if h.r.replaying.Load() {
 		return acp.Decision{}, nil

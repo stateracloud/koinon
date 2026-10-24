@@ -146,7 +146,7 @@ test('owner sets the cap and a limit, reads notices, and the banner follows them
   const { handlers, seen } = api('ORG_ROLE_OWNER')
   await mockApi(page, handlers)
   await page.goto('/')
-  const banner = page.getByRole('region', { name: 'Budget notices' })
+  const banner = page.getByRole('region', { name: 'Notices' })
   await expect(banner).toContainText('has been reached')
   await expectAccessible(page)
 
@@ -209,7 +209,7 @@ test('a member sees no price or budget links, no banner, and the pages refuse th
   await page.goto('/settings/prices')
   await expect(page.getByRole('alert')).toContainText('Only org admins and owners can manage prices.')
   await expect(page.getByRole('link', { name: 'Budgets' })).toHaveCount(0)
-  await expect(page.getByRole('region', { name: 'Budget notices' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Notices' })).toHaveCount(0)
   await expectAccessible(page)
   await page.goto('/settings/budgets')
   await expect(page.getByRole('alert')).toContainText('Only org admins and owners can manage budgets.')

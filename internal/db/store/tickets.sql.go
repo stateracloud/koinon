@@ -69,7 +69,7 @@ const createTicket = `-- name: CreateTicket :one
 
 INSERT INTO tickets (org_id, title, agent_id, created_by)
 VALUES ($1, $2, $3, $4)
-RETURNING org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation
+RETURNING org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending
 `
 
 type CreateTicketParams struct {
@@ -105,12 +105,15 @@ func (q *Queries) CreateTicket(ctx context.Context, arg CreateTicketParams) (Tic
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HarnessSessionGeneration,
+		&i.AgentSummary,
+		&i.AgentSummaryAt,
+		&i.SessionRestartPending,
 	)
 	return i, err
 }
 
 const getTicket = `-- name: GetTicket :one
-SELECT org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation FROM tickets
+SELECT org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending FROM tickets
 WHERE org_id = $1 AND id = $2
 `
 
@@ -136,6 +139,9 @@ func (q *Queries) GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HarnessSessionGeneration,
+		&i.AgentSummary,
+		&i.AgentSummaryAt,
+		&i.SessionRestartPending,
 	)
 	return i, err
 }
@@ -240,7 +246,7 @@ func (q *Queries) ListTicketMessagesAfter(ctx context.Context, arg ListTicketMes
 }
 
 const listTickets = `-- name: ListTickets :many
-SELECT org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation FROM tickets
+SELECT org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending FROM tickets
 WHERE org_id = $1
 ORDER BY created_at, id
 `
@@ -268,6 +274,9 @@ func (q *Queries) ListTickets(ctx context.Context, orgID pgtype.UUID) ([]Ticket,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.HarnessSessionGeneration,
+			&i.AgentSummary,
+			&i.AgentSummaryAt,
+			&i.SessionRestartPending,
 		); err != nil {
 			return nil, err
 		}
@@ -280,7 +289,7 @@ func (q *Queries) ListTickets(ctx context.Context, orgID pgtype.UUID) ([]Ticket,
 }
 
 const listTicketsByStatus = `-- name: ListTicketsByStatus :many
-SELECT org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation FROM tickets
+SELECT org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending FROM tickets
 WHERE org_id = $1 AND status = $2
 ORDER BY created_at, id
 `
@@ -314,6 +323,9 @@ func (q *Queries) ListTicketsByStatus(ctx context.Context, arg ListTicketsByStat
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.HarnessSessionGeneration,
+			&i.AgentSummary,
+			&i.AgentSummaryAt,
+			&i.SessionRestartPending,
 		); err != nil {
 			return nil, err
 		}
@@ -330,7 +342,7 @@ UPDATE tickets
 SET status = $1,
     done_at = CASE WHEN $1::ticket_status = 'done' THEN coalesce(done_at, now()) END
 WHERE org_id = $2 AND id = $3
-RETURNING org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation
+RETURNING org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending
 `
 
 type MoveTicketParams struct {
@@ -358,6 +370,9 @@ func (q *Queries) MoveTicket(ctx context.Context, arg MoveTicketParams) (Ticket,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HarnessSessionGeneration,
+		&i.AgentSummary,
+		&i.AgentSummaryAt,
+		&i.SessionRestartPending,
 	)
 	return i, err
 }
@@ -367,7 +382,7 @@ UPDATE tickets
 SET status = $1::ticket_status
 WHERE org_id = $2 AND id = $3 AND status::text = ANY($4::text[])
   AND $1::ticket_status <> 'done'
-RETURNING org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation
+RETURNING org_id, id, title, status, agent_id, created_by, harness_session_id, harness_session_cwd, last_event_seq, done_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending
 `
 
 type MoveTicketFromParams struct {
@@ -403,6 +418,9 @@ func (q *Queries) MoveTicketFrom(ctx context.Context, arg MoveTicketFromParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HarnessSessionGeneration,
+		&i.AgentSummary,
+		&i.AgentSummaryAt,
+		&i.SessionRestartPending,
 	)
 	return i, err
 }
@@ -410,13 +428,14 @@ func (q *Queries) MoveTicketFrom(ctx context.Context, arg MoveTicketFromParams) 
 const setTicketHarnessSession = `-- name: SetTicketHarnessSession :one
 UPDATE tickets t
 SET harness_session_id = $1::text, harness_session_cwd = $2::text,
-    harness_session_generation = $3
+    harness_session_generation = $3,
+    session_restart_pending = false
 WHERE t.org_id = $4 AND t.id = $5
   AND EXISTS (
       SELECT 1 FROM runs r
       WHERE r.org_id = $4 AND r.ticket_id = t.id AND r.id = $6
         AND r.epoch = $7 AND r.state IN ('starting', 'running'))
-RETURNING t.org_id, t.id, t.title, t.status, t.agent_id, t.created_by, t.harness_session_id, t.harness_session_cwd, t.last_event_seq, t.done_at, t.created_at, t.updated_at, t.harness_session_generation
+RETURNING t.org_id, t.id, t.title, t.status, t.agent_id, t.created_by, t.harness_session_id, t.harness_session_cwd, t.last_event_seq, t.done_at, t.created_at, t.updated_at, t.harness_session_generation, t.agent_summary, t.agent_summary_at, t.session_restart_pending
 `
 
 type SetTicketHarnessSessionParams struct {
@@ -457,6 +476,9 @@ func (q *Queries) SetTicketHarnessSession(ctx context.Context, arg SetTicketHarn
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HarnessSessionGeneration,
+		&i.AgentSummary,
+		&i.AgentSummaryAt,
+		&i.SessionRestartPending,
 	)
 	return i, err
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { timestampDate } from '@bufbuild/protobuf/wkt'
 import { Link } from '@tanstack/react-router'
 import { TriangleAlert, CircleCheck, FileText } from 'lucide-react'
 import { useId, useState } from 'react'
@@ -8,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { FileStatus, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type McpCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
+import { FileStatus, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type McpCall, type SavedWorkCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { approvalStatusLabel, approveLabel, targetRepo, toolChanged, toolVersion } from '@/lib/approvals'
 import { formatBytes, riskFlagsFor, riskItems, type RiskItem } from '@/lib/risk'
 import { cn } from '@/lib/utils'
@@ -61,6 +62,8 @@ export function ApprovalCard({
   const headingId = useId()
   const pr = a.call.case === 'pullRequest' ? a.call.value : undefined
   const comment = a.call.case === 'comment' ? a.call.value : undefined
+  const saved = a.call.case === 'savedWork' ? a.call.value : undefined
+  const savedClosed = !!saved && saved.status !== 'saved'
   const mcp = a.connector === 'mcp'
   const mcpCall = a.call.case === 'mcp' ? a.call.value : undefined
   const stale = !!mcpCall && toolChanged(mcpCall.contentHash, mcpCall.currentContentHash)
@@ -79,7 +82,13 @@ export function ApprovalCard({
     <article aria-labelledby={headingId} data-testid="approval-card" className="bg-card grid gap-4 rounded-lg border p-4 shadow-xs">
       <header className="flex flex-wrap items-center gap-2">
         <h3 id={headingId} className="font-semibold">
-          Approve <code className="font-mono text-sm">{a.tool}</code> on {targetRepo(a.target)}?
+          {saved ? (
+            'Push saved work to a branch'
+          ) : (
+            <>
+              Approve <code className="font-mono text-sm">{a.tool}</code> on {targetRepo(a.target)}?
+            </>
+          )}
         </h3>
         <Badge variant={isPending ? 'default' : 'secondary'} className="ml-auto">
           {approvalStatusLabel(a.status)}
@@ -88,11 +97,13 @@ export function ApprovalCard({
 
       {pr && <RiskSummary items={items} />}
 
+      {saved && <SavedWork call={saved} />}
+
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">Tool</dt>
         <dd className="font-mono">{a.tool}</dd>
         <dt className="text-muted-foreground">{mcp ? 'Server' : 'Repository'}</dt>
-        <dd>{targetRepo(a.target)}</dd>
+        <dd>{saved?.repository || targetRepo(a.target)}</dd>
         {pr && (
           <>
             <dt className="text-muted-foreground">Branch</dt>
@@ -140,6 +151,7 @@ export function ApprovalCard({
       <Outcome approval={a} resultUrl={resultUrl} />
 
       {isPending &&
+        !savedClosed &&
         (canDecide ? (
           <DecisionForm onApprove={onApprove} onDeny={onDeny} pending={pending} sha={a.argsSha256} approveText={approveLabel(a.approvalsRequired, a.firstApprover)} blocked={blocked} />
         ) : (
@@ -166,6 +178,115 @@ export function ApprovalCard({
         </Link>
       )}
     </article>
+  )
+}
+
+const savedStatusText: Record<string, string> = { A: 'Added', M: 'Modified', D: 'Deleted' }
+
+/**
+ * SavedWork shows what Koinon saved from a sandbox it had to recreate: a diffstat of the files, where they would
+ * go, and until when they are kept. The files are not shown (there is no diff): approving pushes them to a new
+ * branch, never the default branch.
+ */
+function SavedWork({ call: w }: { call: SavedWorkCall }) {
+  const added = w.files.reduce((n, f) => n + f.added, 0)
+  const deleted = w.files.reduce((n, f) => n + f.deleted, 0)
+  const expires = w.expiresAt ? timestampDate(w.expiresAt) : undefined
+  return (
+    <section aria-label="Saved work" className="grid gap-3 text-sm">
+      <p role="note" className="bg-muted/30 rounded-md border p-3">
+        Koinon saved this uncommitted work from a sandbox that had to be recreated. Nothing is pushed until you approve. It goes to a new branch, never the default branch.
+      </p>
+      {w.files.some((f) => f.path.startsWith('.github/')) && (
+        <p role="note" className="rounded-md border border-amber-600 p-3" data-testid="workflow-warning">
+          This work changes files under .github/. GitHub may refuse the push of workflow files with this connection. A pushed branch can also start existing
+          workflows that run on push, and those can use the repository&apos;s secrets, so read these files before you approve.
+        </p>
+      )}
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
+        <dt className="text-muted-foreground">Branch</dt>
+        <dd className="font-mono break-all">{w.branch}</dd>
+        {w.base && (
+          <>
+            <dt className="text-muted-foreground">Base commit</dt>
+            <dd className="font-mono" title={w.base}>
+              {w.base.slice(0, 7)}
+            </dd>
+          </>
+        )}
+        <dt className="text-muted-foreground">Size</dt>
+        <dd>{formatBytes(Number(w.sizeBytes))}</dd>
+        <dt className="text-muted-foreground">Saved work</dt>
+        <dd>{w.status === 'expired' ? 'Expired' : w.status === 'pushed' ? 'Pushed' : 'Saved'}</dd>
+        {expires && (
+          <>
+            <dt className="text-muted-foreground">{w.status === 'expired' ? 'Expired' : 'Kept until'}</dt>
+            <dd>
+              <time dateTime={expires.toISOString()}>{expires.toLocaleString()}</time>
+            </dd>
+          </>
+        )}
+      </dl>
+      {w.status === 'expired' && <p role="note">This saved work has expired and was deleted. It can no longer be pushed.</p>}
+      {w.status === 'pushed' && <p role="note">This saved work has been pushed to the branch.</p>}
+      <div>
+        <h4 className="text-muted-foreground mb-1 text-xs font-medium uppercase">Files ({w.files.length})</h4>
+        <table className="w-full text-left" aria-label="Saved files">
+          <thead>
+            <tr className="text-muted-foreground border-b text-xs">
+              <th scope="col" className="py-1 pr-2 font-medium">
+                File
+              </th>
+              <th scope="col" className="px-2 py-1 font-medium">
+                Change
+              </th>
+              <th scope="col" className="py-1 pl-2 text-right font-medium">
+                Lines
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {w.files.map((f) => (
+              <tr key={f.path} className="border-b last:border-b-0">
+                <td className="py-1 pr-2 font-mono break-all">{f.path}</td>
+                <td className="px-2 py-1 whitespace-nowrap">
+                  {f.status} <span className="text-muted-foreground">({savedStatusText[f.status] ?? 'Changed'})</span>
+                </td>
+                <td className="py-1 pl-2 text-right font-mono whitespace-nowrap">
+                  {f.binary ? (
+                    <span className="text-muted-foreground">binary, {formatBytes(Number(f.size))}</span>
+                  ) : (
+                    <>
+                      +{f.added} -{f.deleted}
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t font-medium">
+              <th scope="row" colSpan={2} className="py-1 pr-2 text-left font-medium">
+                Total, {w.files.length} {w.files.length === 1 ? 'file' : 'files'}
+              </th>
+              <td className="py-1 pl-2 text-right font-mono whitespace-nowrap">
+                +{added} -{deleted}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {w.skipped.length > 0 && (
+        <div>
+          <h4 className="text-muted-foreground mb-1 text-xs font-medium uppercase">Left out, as reported by the sandbox (not verified)</h4>
+          <ul className="list-disc pl-5">
+            {w.skipped.map((n, i) => (
+              <li key={i}>{n}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   )
 }
 

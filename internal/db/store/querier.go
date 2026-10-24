@@ -77,6 +77,8 @@ type Querier interface {
 	// Fills a migrated price in place, once.
 	CompleteMigratedPrice(ctx context.Context, arg CompleteMigratedPriceParams) (int64, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
+	// Recreations for stuck sandboxes in the last 24 hours, since the agent was last resumed.
+	CountRecentSandboxRecreations(ctx context.Context, arg CountRecentSandboxRecreationsParams) (int64, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Admin API tokens (plan item PV1). token_hash is the SHA-256 of the token;
@@ -140,6 +142,8 @@ type Querier interface {
 	// active.
 	CreateRun(ctx context.Context, arg CreateRunParams) (Run, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	// A request Koinon makes itself (saved work to push). No row: it exists.
+	CreateSystemApprovalRequest(ctx context.Context, arg CreateSystemApprovalRequestParams) (ApprovalRequest, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Every query on an org-owned table takes @org_id and filters on it
@@ -156,6 +160,8 @@ type Querier interface {
 	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) error
 	DeleteMCPServer(ctx context.Context, arg DeleteMCPServerParams) (int64, error)
 	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
+	// A nonce only matters while its token could still be good (5 minutes); older ones go.
+	DeleteOldUploadNonces(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	DeleteProvider(ctx context.Context, arg DeleteProviderParams) (int64, error)
 	// Drops IdP-sourced memberships from this issuer whose group the user no
 	// longer has, or whose org stopped using the IdP.
@@ -165,6 +171,8 @@ type Querier interface {
 	EnableModel(ctx context.Context, arg EnableModelParams) error
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
+	// Saved work is kept for 14 days; the sealed files go with it.
+	ExpireSavedWork(ctx context.Context, orgID pgtype.UUID) ([]ExpireSavedWorkRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The spend ledger (plan item L1). USD amounts cross the Go boundary as
@@ -235,6 +243,8 @@ type Querier interface {
 	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
+	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
+	GetRunForUpload(ctx context.Context, arg GetRunForUploadParams) (Run, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Ask-tier approval requests (plan item C3, ADR 0042). C3 records them; P1
@@ -243,8 +253,12 @@ type Querier interface {
 	// Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
 	// The run an agent's tool call belongs to: one active run per agent
-	// (runs_one_active_per_agent), and tools are only called while it runs.
+	// (runs_one_active_per_agent), and tools are only called while it runs, not while agentd
+	// asks the agent for its end-of-turn summary (ADR 0051 amendment: no tool calls then).
 	GetRunningRunForAgent(ctx context.Context, arg GetRunningRunForAgentParams) (Run, error)
+	GetSavedWork(ctx context.Context, arg GetSavedWorkParams) (SavedWork, error)
+	// Everything but the sealed files.
+	GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkManifestParams) (GetSavedWorkManifestRow, error)
 	GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
@@ -275,11 +289,15 @@ type Querier interface {
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
 	InsertPriceOverride(ctx context.Context, arg InsertPriceOverrideParams) (PriceOverride, error)
+	InsertSandboxIncident(ctx context.Context, arg InsertSandboxIncidentParams) (SandboxIncident, error)
+	InsertSavedWork(ctx context.Context, arg InsertSavedWorkParams) (SavedWork, error)
 	// Records one request. Returns no row when the request id is already
 	// recorded, so a replayed export is not charged twice. cost_usd is Koinon's
 	// own computation from the raw usage and the dated price; gateway_cost_usd is
 	// what agentgateway logged (NULL when it could not price the request).
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
+	// Zero rows: the nonce was used before (a replay).
+	InsertUploadNonce(ctx context.Context, arg InsertUploadNonceParams) (int64, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
 	ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiToken, error)
 	// The config of each agent's active version, for the template default of its daily limit.
@@ -361,6 +379,8 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	ListPriceOverrides(ctx context.Context, orgID pgtype.UUID) ([]PriceOverride, error)
 	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
+	// The agent's latest replies on the ticket, newest first.
+	ListRecentAgentReplies(ctx context.Context, arg ListRecentAgentRepliesParams) ([]TicketEvent, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
@@ -379,6 +399,10 @@ type Querier interface {
 	ListTickets(ctx context.Context, orgID pgtype.UUID) ([]Ticket, error)
 	// One board column, oldest first.
 	ListTicketsByStatus(ctx context.Context, arg ListTicketsByStatusParams) ([]Ticket, error)
+	// Tickets whose run is parked in the agent's sandbox: they resume in the new sandbox.
+	ListTicketsWithParkedRunOfAgent(ctx context.Context, arg ListTicketsWithParkedRunOfAgentParams) ([]pgtype.UUID, error)
+	// Tickets with a queued or parked run of the agent: they wait while the agent is unhealthy.
+	ListTicketsWithWaitingRunOfAgent(ctx context.Context, arg ListTicketsWithWaitingRunOfAgentParams) ([]pgtype.UUID, error)
 	// The servers an agent may use that are down or disabled right now, for the note agentd gives the
 	// agent when a session starts.
 	ListUnavailableMCPServersOfAgent(ctx context.Context, arg ListUnavailableMCPServersOfAgentParams) ([]ListUnavailableMCPServersOfAgentRow, error)
@@ -402,6 +426,7 @@ type Querier interface {
 	// Serialises a park decision (agentd) with the resolution of the run's
 	// approvals (the executor), so neither misses the other.
 	LockRun(ctx context.Context, arg LockRunParams) (Run, error)
+	MarkAgentUnhealthy(ctx context.Context, arg MarkAgentUnhealthyParams) (Agent, error)
 	// Records that the outcomes were sent to the agent.
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
 	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
@@ -415,6 +440,17 @@ type Querier interface {
 	MarkProviderRemoved(ctx context.Context, arg MarkProviderRemovedParams) error
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// A stuck sandbox, the work saved from it, and the end-of-turn summary and fresh-session
+	// handoff (plan item AG1; ADRs 0051, 0054).
+	//
+	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
+	// agentd found the sandbox stuck: the reconciler recreates it. The mark clears when the
+	// reconciler records another home generation.
+	MarkSandboxUnhealthy(ctx context.Context, arg MarkSandboxUnhealthyParams) (AgentSandbox, error)
+	// The files are dropped once they are on GitHub.
+	MarkSavedWorkPushed(ctx context.Context, arg MarkSavedWorkPushedParams) (int64, error)
 	// Moves a ticket to a board column. Callers moving to Done also cancel its
 	// queued runs (CancelQueuedRunsForTicket) in the same transaction.
 	MoveTicket(ctx context.Context, arg MoveTicketParams) (Ticket, error)
@@ -450,9 +486,14 @@ type Querier interface {
 	// exec stream to the harness dropped: the lease ends now, so any agentd can
 	// take the run over at once (TakeOverExpiredRun) and resume the session.
 	ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams) (Run, error)
+	// Activating a version with "apply to open tickets": every open ticket of the agent that has a
+	// session starts a new one at its next run.
+	RequestSessionRestartForAgent(ctx context.Context, arg RequestSessionRestartForAgentParams) ([]pgtype.UUID, error)
 	// Makes a parked run claimable again (approval decided, input given). It
 	// stays parked until an owner claims it: parked -> starting.
 	ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) (Run, error)
+	// Clears the unhealthy mark and starts a new count of recreations. No row: not unhealthy.
+	ResumeAgent(ctx context.Context, arg ResumeAgentParams) (Agent, error)
 	// Ends every live version of a named price at @at. The rows stay: ledger entries cite them.
 	RetirePriceOverrides(ctx context.Context, arg RetirePriceOverridesParams) (int64, error)
 	// active -> draft when a grant change is proposed (ADR 0020). The approved
@@ -486,10 +527,14 @@ type Querier interface {
 	// Records, before the prompt is sent, the ticket timeline seq through which
 	// the ticket's messages are in it.
 	SetRunPromptThrough(ctx context.Context, arg SetRunPromptThroughParams) (Run, error)
+	// Fenced by the run's epoch.
+	SetRunSummarizing(ctx context.Context, arg SetRunSummarizingParams) (int64, error)
 	// Stores the harness session for the ticket with the home generation of the
 	// sandbox it was created in. Fenced by the run epoch: only the current owner
 	// of one of the ticket's active runs can set it.
 	SetTicketHarnessSession(ctx context.Context, arg SetTicketHarnessSessionParams) (Ticket, error)
+	// Stores the agent's end-of-turn summary. Fenced by the run epoch like SetTicketHarnessSession.
+	SetTicketSummary(ctx context.Context, arg SetTicketSummaryParams) (int64, error)
 	// A declared server of this name now exists: disable the UI ones.
 	ShadowUIMCPServers(ctx context.Context, arg ShadowUIMCPServersParams) error
 	ShadowUIModels(ctx context.Context, arg ShadowUIModelsParams) error

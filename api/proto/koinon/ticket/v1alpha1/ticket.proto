@@ -71,6 +71,10 @@ message Ticket {
   // Model spend of all the ticket's runs (plan item L1). Set by GetTicket and
   // ListTickets.
   koinon.run.v1alpha1.Cost cost = 11;
+  // The agent's own note on where the ticket stands and what comes next, written at the end of
+  // its last turn (ADR 0051 amendment). Set by GetTicket only; seen by whoever sees the ticket.
+  string agent_summary = 12;
+  google.protobuf.Timestamp agent_summary_at = 13;
 }
 
 // TicketEvent is one entry of the ticket timeline: a message, a column move

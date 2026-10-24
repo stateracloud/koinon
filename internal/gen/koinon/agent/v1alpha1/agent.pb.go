@@ -103,8 +103,12 @@ type Agent struct {
 	CreatedAt      *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	ActivatedAt    *timestamppb.Timestamp `protobuf:"bytes,16,opt,name=activated_at,json=activatedAt,proto3" json:"activated_at,omitempty"`
 	ArchivedAt     *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=archived_at,json=archivedAt,proto3" json:"archived_at,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Set while the agent is unhealthy: its sandbox got stuck three times in 24 hours and was not
+	// recreated again (ADR 0054). New runs are refused until ResumeAgent.
+	UnhealthyAt     *timestamppb.Timestamp `protobuf:"bytes,18,opt,name=unhealthy_at,json=unhealthyAt,proto3" json:"unhealthy_at,omitempty"`
+	UnhealthyReason string                 `protobuf:"bytes,19,opt,name=unhealthy_reason,json=unhealthyReason,proto3" json:"unhealthy_reason,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Agent) Reset() {
@@ -254,6 +258,20 @@ func (x *Agent) GetArchivedAt() *timestamppb.Timestamp {
 		return x.ArchivedAt
 	}
 	return nil
+}
+
+func (x *Agent) GetUnhealthyAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UnhealthyAt
+	}
+	return nil
+}
+
+func (x *Agent) GetUnhealthyReason() string {
+	if x != nil {
+		return x.UnhealthyReason
+	}
+	return ""
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -646,9 +664,13 @@ type ActivateAgentRequest struct {
 	AgentId string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	// Must equal the agent's latest_version, so the caller approves exactly the
 	// grants they saw; otherwise the call fails with FailedPrecondition.
-	Version       int32 `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Version int32 `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	// Start fresh sessions, with a handoff, on the agent's open tickets: their next run begins a new
+	// session from the agent's last notes and replies instead of loading the old one, so the new
+	// version's instructions apply (ADR 0051 amendment). Default off; audited.
+	ApplyToOpenTickets bool `protobuf:"varint,4,opt,name=apply_to_open_tickets,json=applyToOpenTickets,proto3" json:"apply_to_open_tickets,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ActivateAgentRequest) Reset() {
@@ -702,12 +724,21 @@ func (x *ActivateAgentRequest) GetVersion() int32 {
 	return 0
 }
 
+func (x *ActivateAgentRequest) GetApplyToOpenTickets() bool {
+	if x != nil {
+		return x.ApplyToOpenTickets
+	}
+	return false
+}
+
 // ActivateAgentResponse holds the active agent.
 type ActivateAgentResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Agent         *Agent                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Agent *Agent                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
+	// How many open tickets were marked to start a fresh session.
+	TicketsRestarting int32 `protobuf:"varint,2,opt,name=tickets_restarting,json=ticketsRestarting,proto3" json:"tickets_restarting,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ActivateAgentResponse) Reset() {
@@ -747,6 +778,111 @@ func (x *ActivateAgentResponse) GetAgent() *Agent {
 	return nil
 }
 
+func (x *ActivateAgentResponse) GetTicketsRestarting() int32 {
+	if x != nil {
+		return x.TicketsRestarting
+	}
+	return 0
+}
+
+// ResumeAgentRequest names the agent.
+type ResumeAgentRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResumeAgentRequest) Reset() {
+	*x = ResumeAgentRequest{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResumeAgentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResumeAgentRequest) ProtoMessage() {}
+
+func (x *ResumeAgentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResumeAgentRequest.ProtoReflect.Descriptor instead.
+func (*ResumeAgentRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ResumeAgentRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *ResumeAgentRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+// ResumeAgentResponse holds the agent, healthy again.
+type ResumeAgentResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Agent         *Agent                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResumeAgentResponse) Reset() {
+	*x = ResumeAgentResponse{}
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResumeAgentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResumeAgentResponse) ProtoMessage() {}
+
+func (x *ResumeAgentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResumeAgentResponse.ProtoReflect.Descriptor instead.
+func (*ResumeAgentResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ResumeAgentResponse) GetAgent() *Agent {
+	if x != nil {
+		return x.Agent
+	}
+	return nil
+}
+
 // ArchiveAgentRequest names the agent.
 type ArchiveAgentRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -758,7 +894,7 @@ type ArchiveAgentRequest struct {
 
 func (x *ArchiveAgentRequest) Reset() {
 	*x = ArchiveAgentRequest{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[10]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -770,7 +906,7 @@ func (x *ArchiveAgentRequest) String() string {
 func (*ArchiveAgentRequest) ProtoMessage() {}
 
 func (x *ArchiveAgentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[10]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -783,7 +919,7 @@ func (x *ArchiveAgentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArchiveAgentRequest.ProtoReflect.Descriptor instead.
 func (*ArchiveAgentRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{10}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ArchiveAgentRequest) GetOrgId() string {
@@ -810,7 +946,7 @@ type ArchiveAgentResponse struct {
 
 func (x *ArchiveAgentResponse) Reset() {
 	*x = ArchiveAgentResponse{}
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[11]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -822,7 +958,7 @@ func (x *ArchiveAgentResponse) String() string {
 func (*ArchiveAgentResponse) ProtoMessage() {}
 
 func (x *ArchiveAgentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[11]
+	mi := &file_koinon_agent_v1alpha1_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -835,7 +971,7 @@ func (x *ArchiveAgentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArchiveAgentResponse.ProtoReflect.Descriptor instead.
 func (*ArchiveAgentResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{11}
+	return file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ArchiveAgentResponse) GetAgent() *Agent {
@@ -849,7 +985,7 @@ var File_koinon_agent_v1alpha1_agent_proto protoreflect.FileDescriptor
 
 const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\n" +
-	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\xa4\x06\n" +
+	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\x8e\a\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12!\n" +
@@ -872,7 +1008,9 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"created_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12=\n" +
 	"\factivated_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\vactivatedAt\x12;\n" +
 	"\varchived_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"archivedAt\"\xf2\x01\n" +
+	"archivedAt\x12=\n" +
+	"\funhealthy_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\vunhealthyAt\x12)\n" +
+	"\x10unhealthy_reason\x18\x13 \x01(\tR\x0funhealthyReason\"\xf2\x01\n" +
 	"\x1eCreateAgentFromTemplateRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vtemplate_id\x18\x02 \x01(\tR\n" +
@@ -894,12 +1032,19 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\x11ListAgentsRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"J\n" +
 	"\x12ListAgentsResponse\x124\n" +
-	"\x06agents\x18\x01 \x03(\v2\x1c.koinon.agent.v1alpha1.AgentR\x06agents\"b\n" +
+	"\x06agents\x18\x01 \x03(\v2\x1c.koinon.agent.v1alpha1.AgentR\x06agents\"\x95\x01\n" +
 	"\x14ActivateAgentRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\x05R\aversion\"K\n" +
+	"\aversion\x18\x03 \x01(\x05R\aversion\x121\n" +
+	"\x15apply_to_open_tickets\x18\x04 \x01(\bR\x12applyToOpenTickets\"z\n" +
 	"\x15ActivateAgentResponse\x122\n" +
+	"\x05agent\x18\x01 \x01(\v2\x1c.koinon.agent.v1alpha1.AgentR\x05agent\x12-\n" +
+	"\x12tickets_restarting\x18\x02 \x01(\x05R\x11ticketsRestarting\"F\n" +
+	"\x12ResumeAgentRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\"I\n" +
+	"\x13ResumeAgentResponse\x122\n" +
 	"\x05agent\x18\x01 \x01(\v2\x1c.koinon.agent.v1alpha1.AgentR\x05agent\"G\n" +
 	"\x13ArchiveAgentRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
@@ -910,13 +1055,14 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\x18AGENT_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12AGENT_STATUS_DRAFT\x10\x01\x12\x17\n" +
 	"\x13AGENT_STATUS_ACTIVE\x10\x02\x12\x19\n" +
-	"\x15AGENT_STATUS_ARCHIVED\x10\x032\xb8\x04\n" +
+	"\x15AGENT_STATUS_ARCHIVED\x10\x032\x9e\x05\n" +
 	"\fAgentService\x12\x88\x01\n" +
 	"\x17CreateAgentFromTemplate\x125.koinon.agent.v1alpha1.CreateAgentFromTemplateRequest\x1a6.koinon.agent.v1alpha1.CreateAgentFromTemplateResponse\x12`\n" +
 	"\bGetAgent\x12&.koinon.agent.v1alpha1.GetAgentRequest\x1a'.koinon.agent.v1alpha1.GetAgentResponse\"\x03\x90\x02\x01\x12f\n" +
 	"\n" +
 	"ListAgents\x12(.koinon.agent.v1alpha1.ListAgentsRequest\x1a).koinon.agent.v1alpha1.ListAgentsResponse\"\x03\x90\x02\x01\x12j\n" +
-	"\rActivateAgent\x12+.koinon.agent.v1alpha1.ActivateAgentRequest\x1a,.koinon.agent.v1alpha1.ActivateAgentResponse\x12g\n" +
+	"\rActivateAgent\x12+.koinon.agent.v1alpha1.ActivateAgentRequest\x1a,.koinon.agent.v1alpha1.ActivateAgentResponse\x12d\n" +
+	"\vResumeAgent\x12).koinon.agent.v1alpha1.ResumeAgentRequest\x1a*.koinon.agent.v1alpha1.ResumeAgentResponse\x12g\n" +
 	"\fArchiveAgent\x12*.koinon.agent.v1alpha1.ArchiveAgentRequest\x1a+.koinon.agent.v1alpha1.ArchiveAgentResponseBQZOgithub.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1;agentv1alpha1b\x06proto3"
 
 var (
@@ -932,7 +1078,7 @@ func file_koinon_agent_v1alpha1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_agent_v1alpha1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_koinon_agent_v1alpha1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_koinon_agent_v1alpha1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_koinon_agent_v1alpha1_agent_proto_goTypes = []any{
 	(AgentStatus)(0),                        // 0: koinon.agent.v1alpha1.AgentStatus
 	(*Agent)(nil),                           // 1: koinon.agent.v1alpha1.Agent
@@ -945,44 +1091,50 @@ var file_koinon_agent_v1alpha1_agent_proto_goTypes = []any{
 	(*ListAgentsResponse)(nil),              // 8: koinon.agent.v1alpha1.ListAgentsResponse
 	(*ActivateAgentRequest)(nil),            // 9: koinon.agent.v1alpha1.ActivateAgentRequest
 	(*ActivateAgentResponse)(nil),           // 10: koinon.agent.v1alpha1.ActivateAgentResponse
-	(*ArchiveAgentRequest)(nil),             // 11: koinon.agent.v1alpha1.ArchiveAgentRequest
-	(*ArchiveAgentResponse)(nil),            // 12: koinon.agent.v1alpha1.ArchiveAgentResponse
-	(v1alpha1.Flavor)(0),                    // 13: koinon.template.v1alpha1.Flavor
-	(*v1alpha1.Grant)(nil),                  // 14: koinon.template.v1alpha1.Grant
-	(*v1alpha1.RunLimits)(nil),              // 15: koinon.template.v1alpha1.RunLimits
-	(*timestamppb.Timestamp)(nil),           // 16: google.protobuf.Timestamp
+	(*ResumeAgentRequest)(nil),              // 11: koinon.agent.v1alpha1.ResumeAgentRequest
+	(*ResumeAgentResponse)(nil),             // 12: koinon.agent.v1alpha1.ResumeAgentResponse
+	(*ArchiveAgentRequest)(nil),             // 13: koinon.agent.v1alpha1.ArchiveAgentRequest
+	(*ArchiveAgentResponse)(nil),            // 14: koinon.agent.v1alpha1.ArchiveAgentResponse
+	(v1alpha1.Flavor)(0),                    // 15: koinon.template.v1alpha1.Flavor
+	(*v1alpha1.Grant)(nil),                  // 16: koinon.template.v1alpha1.Grant
+	(*v1alpha1.RunLimits)(nil),              // 17: koinon.template.v1alpha1.RunLimits
+	(*timestamppb.Timestamp)(nil),           // 18: google.protobuf.Timestamp
 }
 var file_koinon_agent_v1alpha1_agent_proto_depIdxs = []int32{
 	0,  // 0: koinon.agent.v1alpha1.Agent.status:type_name -> koinon.agent.v1alpha1.AgentStatus
-	13, // 1: koinon.agent.v1alpha1.Agent.flavor:type_name -> koinon.template.v1alpha1.Flavor
-	14, // 2: koinon.agent.v1alpha1.Agent.proposed_grants:type_name -> koinon.template.v1alpha1.Grant
-	14, // 3: koinon.agent.v1alpha1.Agent.approved_grants:type_name -> koinon.template.v1alpha1.Grant
-	15, // 4: koinon.agent.v1alpha1.Agent.run_limits:type_name -> koinon.template.v1alpha1.RunLimits
-	16, // 5: koinon.agent.v1alpha1.Agent.created_at:type_name -> google.protobuf.Timestamp
-	16, // 6: koinon.agent.v1alpha1.Agent.activated_at:type_name -> google.protobuf.Timestamp
-	16, // 7: koinon.agent.v1alpha1.Agent.archived_at:type_name -> google.protobuf.Timestamp
-	13, // 8: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.flavor:type_name -> koinon.template.v1alpha1.Flavor
-	3,  // 9: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.grants:type_name -> koinon.agent.v1alpha1.GrantBinding
-	1,  // 10: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 11: koinon.agent.v1alpha1.GetAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 12: koinon.agent.v1alpha1.ListAgentsResponse.agents:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 13: koinon.agent.v1alpha1.ActivateAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 14: koinon.agent.v1alpha1.ArchiveAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	2,  // 15: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:input_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
-	5,  // 16: koinon.agent.v1alpha1.AgentService.GetAgent:input_type -> koinon.agent.v1alpha1.GetAgentRequest
-	7,  // 17: koinon.agent.v1alpha1.AgentService.ListAgents:input_type -> koinon.agent.v1alpha1.ListAgentsRequest
-	9,  // 18: koinon.agent.v1alpha1.AgentService.ActivateAgent:input_type -> koinon.agent.v1alpha1.ActivateAgentRequest
-	11, // 19: koinon.agent.v1alpha1.AgentService.ArchiveAgent:input_type -> koinon.agent.v1alpha1.ArchiveAgentRequest
-	4,  // 20: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:output_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
-	6,  // 21: koinon.agent.v1alpha1.AgentService.GetAgent:output_type -> koinon.agent.v1alpha1.GetAgentResponse
-	8,  // 22: koinon.agent.v1alpha1.AgentService.ListAgents:output_type -> koinon.agent.v1alpha1.ListAgentsResponse
-	10, // 23: koinon.agent.v1alpha1.AgentService.ActivateAgent:output_type -> koinon.agent.v1alpha1.ActivateAgentResponse
-	12, // 24: koinon.agent.v1alpha1.AgentService.ArchiveAgent:output_type -> koinon.agent.v1alpha1.ArchiveAgentResponse
-	20, // [20:25] is the sub-list for method output_type
-	15, // [15:20] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	15, // 1: koinon.agent.v1alpha1.Agent.flavor:type_name -> koinon.template.v1alpha1.Flavor
+	16, // 2: koinon.agent.v1alpha1.Agent.proposed_grants:type_name -> koinon.template.v1alpha1.Grant
+	16, // 3: koinon.agent.v1alpha1.Agent.approved_grants:type_name -> koinon.template.v1alpha1.Grant
+	17, // 4: koinon.agent.v1alpha1.Agent.run_limits:type_name -> koinon.template.v1alpha1.RunLimits
+	18, // 5: koinon.agent.v1alpha1.Agent.created_at:type_name -> google.protobuf.Timestamp
+	18, // 6: koinon.agent.v1alpha1.Agent.activated_at:type_name -> google.protobuf.Timestamp
+	18, // 7: koinon.agent.v1alpha1.Agent.archived_at:type_name -> google.protobuf.Timestamp
+	18, // 8: koinon.agent.v1alpha1.Agent.unhealthy_at:type_name -> google.protobuf.Timestamp
+	15, // 9: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.flavor:type_name -> koinon.template.v1alpha1.Flavor
+	3,  // 10: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.grants:type_name -> koinon.agent.v1alpha1.GrantBinding
+	1,  // 11: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 12: koinon.agent.v1alpha1.GetAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 13: koinon.agent.v1alpha1.ListAgentsResponse.agents:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 14: koinon.agent.v1alpha1.ActivateAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 15: koinon.agent.v1alpha1.ResumeAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 16: koinon.agent.v1alpha1.ArchiveAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 17: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:input_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
+	5,  // 18: koinon.agent.v1alpha1.AgentService.GetAgent:input_type -> koinon.agent.v1alpha1.GetAgentRequest
+	7,  // 19: koinon.agent.v1alpha1.AgentService.ListAgents:input_type -> koinon.agent.v1alpha1.ListAgentsRequest
+	9,  // 20: koinon.agent.v1alpha1.AgentService.ActivateAgent:input_type -> koinon.agent.v1alpha1.ActivateAgentRequest
+	11, // 21: koinon.agent.v1alpha1.AgentService.ResumeAgent:input_type -> koinon.agent.v1alpha1.ResumeAgentRequest
+	13, // 22: koinon.agent.v1alpha1.AgentService.ArchiveAgent:input_type -> koinon.agent.v1alpha1.ArchiveAgentRequest
+	4,  // 23: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:output_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
+	6,  // 24: koinon.agent.v1alpha1.AgentService.GetAgent:output_type -> koinon.agent.v1alpha1.GetAgentResponse
+	8,  // 25: koinon.agent.v1alpha1.AgentService.ListAgents:output_type -> koinon.agent.v1alpha1.ListAgentsResponse
+	10, // 26: koinon.agent.v1alpha1.AgentService.ActivateAgent:output_type -> koinon.agent.v1alpha1.ActivateAgentResponse
+	12, // 27: koinon.agent.v1alpha1.AgentService.ResumeAgent:output_type -> koinon.agent.v1alpha1.ResumeAgentResponse
+	14, // 28: koinon.agent.v1alpha1.AgentService.ArchiveAgent:output_type -> koinon.agent.v1alpha1.ArchiveAgentResponse
+	23, // [23:29] is the sub-list for method output_type
+	17, // [17:23] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_koinon_agent_v1alpha1_agent_proto_init() }
@@ -996,7 +1148,7 @@ func file_koinon_agent_v1alpha1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_agent_v1alpha1_agent_proto_rawDesc), len(file_koinon_agent_v1alpha1_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

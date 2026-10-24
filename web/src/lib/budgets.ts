@@ -19,8 +19,21 @@ export function levelLabel(level: string): string {
   }
 }
 
+/** isAgentUnhealthy: Koinon marked an agent unhealthy (a sandbox it could not recover). */
+export function isAgentUnhealthy(n: Notification): boolean {
+  return n.kind === 'agent.unhealthy'
+}
+
+/** isBudgetKind: the notification is a spend-limit notice (or an older one with no kind recorded). */
+function isBudgetKind(n: Notification): boolean {
+  return n.kind === '' || n.kind.startsWith('budget.')
+}
+
 /** noticeText says what a notification means, in plain words. */
 export function noticeText(n: Notification, agentNames: ReadonlyMap<string, string> = new Map()): string {
+  if (isAgentUnhealthy(n)) return n.message || `${agentNames.get(n.agentId) ?? 'An agent'} was marked unhealthy.`
+  // A kind this version does not know shows the server's message rather than a wrong budget sentence.
+  if (!isBudgetKind(n)) return n.message || 'A notification this version does not recognise.'
   const who = n.level === 'agent_daily' && n.agentId ? `${agentNames.get(n.agentId) ?? 'An agent'}’s daily limit` : levelLabel(n.level)
   const spent = `$${n.spentUsd} of $${n.limitUsd}`
   return n.threshold >= 100

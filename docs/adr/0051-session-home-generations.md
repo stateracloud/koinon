@@ -1,6 +1,6 @@
 # 0051. Session home generations
 
-- Status: Accepted; amended by [0054](0054-unkillable-sandbox-process.md) and below
+- Status: Accepted; amended by [0054](0054-unkillable-sandbox-process.md) and below (2026-10-23, 2026-10-24)
 - Date: 2026-10-22
 - Amends: ADR 0029 (when a ticket's session is loaded) and ADR 0049 (what holds off a sandbox
   recreation)
@@ -49,4 +49,41 @@ A new agent version can be marked **apply to open tickets** (opt-in). Open ticke
 then start a **new session plus a handoff** instead of resuming: the agent's earlier replies on the
 ticket and an end-of-turn summary.
 
-Open: the size limit of the handoff, and who writes the end-of-turn summary.
+## Amendment (2026-10-24): fresh session with a handoff
+
+Decided by the product owner; it settles what was open above. Plan item AG1 builds it.
+
+1. **The option.** Activating an agent version takes **"Apply to open tickets now (starts fresh
+   sessions with a handoff)"**: `ActivateAgentRequest.apply_to_open_tickets` and a checkbox on the
+   activation. Default off. The activation is audited (`agent.activate`) with the flag and the
+   number of tickets marked. Only open tickets (not Done) with a stored session are marked
+   (`tickets.session_restart_pending`).
+2. **The fresh session.** The next run on a marked ticket starts `session/new` instead of loading
+   (a new session in the same home), stores it with the home generation and clears the mark, and
+   the timeline says "Session restarted: new instructions." (`run.session_restarted`). Tickets
+   not marked resume as before. A restart takes precedence over a reset
+   ([decision 1](#decision) above) when both apply, because its prompt carries more.
+3. **The end-of-turn summary.** At the end of every turn agentd sends one more prompt on the same
+   session asking for a short note of state and next steps. It is a normal model call through the
+   gateway, so the ledger counts it in the run's and the agent's budget. The note is limited to
+   2,000 tokens (instructed, then truncated at 6,000 bytes, bytes / 3 as the estimate), stored on
+   the ticket (`tickets.agent_summary`, replaced each turn) and shown, collapsed, as **"Agent's
+   notes"** to anyone who can see the ticket.
+4. **No visible reply, no side effects.** The summary prompt's message chunks are not recorded as
+   run events, which the ticket's reply is built from; only a `run.summary` event records its size.
+   Tools are refused in three ways, because ACP has no switch to turn a harness's tools off: the
+   prompt says to call none; permission requests during it are rejected; and while it runs the run
+   is marked `summarizing` (the mark is cleared when a run is claimed or taken over, so a lost owner cannot leave the tools off), which makes Koinon's tool servers (GitHub and remote MCP servers,
+   `GetRunningRunForAgent`) answer as if no run were active, so no approval request can be
+   recorded. A harness that calls a tool anyway has its note discarded (`run.summary_refused`). A
+   note that fails or times out (2 minutes) never fails the run (`run.summary_failed`). This is
+   harness-independent (it uses `session/prompt` only) and is exercised against OpenCode, Hermes
+   and pi by the flavor contract suite.
+5. **The handoff.** The first prompt of a fresh session is the ticket's title, the latest note, the
+   agent's last three replies, every message of the people on the ticket and the approval
+   outcomes not yet sent, capped at about 8,000 tokens (bytes / 3): the oldest replies are dropped
+   first, then the oldest messages (never the newest), and last the note is cut.
+
+Consequences: every turn costs one more short model call; a ticket whose agent was never asked
+(a session from before this) hands off from its messages alone; a handoff is a summary, not the
+session, so the agent can miss detail the old session had.

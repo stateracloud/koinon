@@ -31,6 +31,8 @@ const (
 	markOutside = "OUTSIDE"
 	// resumeMarker is how the fake harness recognises agentd's resume note.
 	resumeMarker = "[Koinon]"
+	// summaryMarker opens agentd's end-of-turn summary prompt.
+	summaryMarker = "[Koinon] Your turn is over."
 	// readyCommand is what the fake harness announces once a session is up, as OpenCode does
 	// for Koinon's MCP readiness prompt.
 	readyCommand = "koinon:github_koinon-ready"
@@ -45,11 +47,21 @@ type harness struct {
 	nextID   int
 	args     [][]string
 	prompts  []string
-	loads    []string
-	cancels  int
-	crashed  bool
-	hung     bool
-	hangs    chan struct{} // receives when a hang starts
+	// summaries are the end-of-turn summary prompts, kept apart from prompts. summaryReply is
+	// what the fake writes (default a short note); summaryTool makes it call a tool and ask for
+	// permission instead; summaryHang makes it wait until the prompt is cancelled.
+	summaries     []string
+	summaryReply  string
+	summaryTool   bool
+	summaryHang   bool
+	summaryAnswer string
+	// onSummary runs when the summary prompt arrives.
+	onSummary func()
+	loads     []string
+	cancels   int
+	crashed   bool
+	hung      bool
+	hangs     chan struct{} // receives when a hang starts
 	// onPrompt, if set, may answer a prompt itself (for example by calling Koinon's tools as
 	// the agent would): it returns the reply and true, or false to fall through.
 	onPrompt func(ctx context.Context, text string) (string, bool)
@@ -122,6 +134,62 @@ func (p *process) announce(id sdk.SessionId) {
 	}()
 }
 
+// summary answers agentd's end-of-turn summary prompt.
+func (p *process) summary(ctx context.Context, id sdk.SessionId, text string) (sdk.PromptResponse, error) {
+	p.h.mu.Lock()
+	p.h.summaries = append(p.h.summaries, text)
+	reply, tool, hang, hook := p.h.summaryReply, p.h.summaryTool, p.h.summaryHang, p.h.onSummary
+	p.h.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	if reply == "" {
+		reply = "Notes: the task is done; nothing is left."
+	}
+	end := sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}
+	if hang {
+		select {
+		case <-p.cancelled:
+		case <-ctx.Done():
+		}
+		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
+	}
+	if tool {
+		tid := sdk.ToolCallId("summary-tool")
+		name, k := "edit a file", sdk.ToolKindEdit
+		if err := p.agent().SessionUpdate(ctx, sdk.SessionNotification{SessionId: id, Update: sdk.StartToolCall(tid, name, sdk.WithStartKind(k))}); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		res, err := p.agent().RequestPermission(ctx, sdk.RequestPermissionRequest{
+			SessionId: id,
+			ToolCall:  sdk.ToolCallUpdate{ToolCallId: tid, Title: &name, Kind: &k},
+			Options: []sdk.PermissionOption{
+				{OptionId: "allow", Name: "Allow", Kind: sdk.PermissionOptionKindAllowOnce},
+				{OptionId: "reject", Name: "Reject", Kind: sdk.PermissionOptionKindRejectOnce},
+			},
+		})
+		if err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		p.h.mu.Lock()
+		if res.Outcome.Selected != nil {
+			p.h.summaryAnswer = string(res.Outcome.Selected.OptionId)
+		}
+		p.h.mu.Unlock()
+	}
+	if err := p.agent().SessionUpdate(ctx, sdk.SessionNotification{SessionId: id, Update: sdk.UpdateAgentMessageText(reply)}); err != nil {
+		return sdk.PromptResponse{}, err
+	}
+	return end, nil
+}
+
+// summarySnapshot returns the summary prompts and the answer to the summary's permission request.
+func (h *harness) summarySnapshot() ([]string, string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.summaries), h.summaryAnswer
+}
+
 func (h *harness) snapshot() (prompts, loads []string, cancels int, args [][]string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -192,6 +260,9 @@ func (p *process) LoadSession(ctx context.Context, r sdk.LoadSessionRequest) (sd
 
 func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptResponse, error) {
 	text := r.Prompt[0].Text.Text
+	if strings.HasPrefix(text, summaryMarker) {
+		return p.summary(ctx, r.SessionId, text)
+	}
 	p.h.mu.Lock()
 	p.h.prompts = append(p.h.prompts, text)
 	p.h.sessions[string(r.SessionId)] = append(p.h.sessions[string(r.SessionId)], sdk.UpdateUserMessageText(text))

@@ -35,6 +35,8 @@ const (
 	AgentServiceListAgentsProcedure = "/koinon.agent.v1alpha1.AgentService/ListAgents"
 	// AgentServiceActivateAgentProcedure is the procedure name of the AgentService's ActivateAgent RPC.
 	AgentServiceActivateAgentProcedure = "/koinon.agent.v1alpha1.AgentService/ActivateAgent"
+	// AgentServiceResumeAgentProcedure is the procedure name of the AgentService's ResumeAgent RPC.
+	AgentServiceResumeAgentProcedure = "/koinon.agent.v1alpha1.AgentService/ResumeAgent"
 	// AgentServiceArchiveAgentProcedure is the procedure name of the AgentService's ArchiveAgent RPC.
 	AgentServiceArchiveAgentProcedure = "/koinon.agent.v1alpha1.AgentService/ArchiveAgent"
 )
@@ -70,6 +72,13 @@ var (
 			Procedure:  AgentServiceActivateAgentProcedure,
 		}
 	})
+	agentServiceResumeAgentSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_agent_v1alpha1_agent_proto.Services().ByName("AgentService").Methods().ByName("ResumeAgent"),
+			Procedure:  AgentServiceResumeAgentProcedure,
+		}
+	})
 	agentServiceArchiveAgentSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType: connect.StreamTypeUnary,
@@ -91,6 +100,10 @@ type AgentServiceClient interface {
 	// ActivateAgent activates a draft and so approves the grants its version
 	// proposes. Admins and owners only.
 	ActivateAgent(context.Context, *v1alpha1.ActivateAgentRequest) (*v1alpha1.ActivateAgentResponse, error)
+	// ResumeAgent clears the unhealthy state of an agent whose sandbox got stuck again and again
+	// (ADR 0054), so it takes runs again; its stuck sandbox is recreated. Audited. Admins and owners
+	// only.
+	ResumeAgent(context.Context, *v1alpha1.ResumeAgentRequest) (*v1alpha1.ResumeAgentResponse, error)
 	// ArchiveAgent archives a draft or active agent and cancels its unfinished
 	// runs. Admins and owners only.
 	ArchiveAgent(context.Context, *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error)
@@ -114,6 +127,10 @@ type AgentServiceHandler interface {
 	// ActivateAgent activates a draft and so approves the grants its version
 	// proposes. Admins and owners only.
 	ActivateAgent(context.Context, *v1alpha1.ActivateAgentRequest) (*v1alpha1.ActivateAgentResponse, error)
+	// ResumeAgent clears the unhealthy state of an agent whose sandbox got stuck again and again
+	// (ADR 0054), so it takes runs again; its stuck sandbox is recreated. Audited. Admins and owners
+	// only.
+	ResumeAgent(context.Context, *v1alpha1.ResumeAgentRequest) (*v1alpha1.ResumeAgentResponse, error)
 	// ArchiveAgent archives a draft or active agent and cancels its unfinished
 	// runs. Admins and owners only.
 	ArchiveAgent(context.Context, *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error)
@@ -128,6 +145,7 @@ func RegisterAgentServiceHandler(server *connect.Server, svc AgentServiceHandler
 		connect.Method{Spec: agentServiceGetAgentSpec(), Handler: adapter.getAgent},
 		connect.Method{Spec: agentServiceListAgentsSpec(), Handler: adapter.listAgents},
 		connect.Method{Spec: agentServiceActivateAgentSpec(), Handler: adapter.activateAgent},
+		connect.Method{Spec: agentServiceResumeAgentSpec(), Handler: adapter.resumeAgent},
 		connect.Method{Spec: agentServiceArchiveAgentSpec(), Handler: adapter.archiveAgent},
 	)
 }
@@ -149,6 +167,10 @@ func (UnimplementedAgentServiceHandler) ListAgents(context.Context, *v1alpha1.Li
 
 func (UnimplementedAgentServiceHandler) ActivateAgent(context.Context, *v1alpha1.ActivateAgentRequest) (*v1alpha1.ActivateAgentResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.ActivateAgent is not implemented")
+}
+
+func (UnimplementedAgentServiceHandler) ResumeAgent(context.Context, *v1alpha1.ResumeAgentRequest) (*v1alpha1.ResumeAgentResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.agent.v1alpha1.AgentService.ResumeAgent is not implemented")
 }
 
 func (UnimplementedAgentServiceHandler) ArchiveAgent(context.Context, *v1alpha1.ArchiveAgentRequest) (*v1alpha1.ArchiveAgentResponse, error) {
@@ -186,6 +208,14 @@ func (c *agentServiceClient) ListAgents(ctx context.Context, req *v1alpha1.ListA
 func (c *agentServiceClient) ActivateAgent(ctx context.Context, req *v1alpha1.ActivateAgentRequest) (*v1alpha1.ActivateAgentResponse, error) {
 	var res v1alpha1.ActivateAgentResponse
 	if err := c.client.CallUnary(ctx, agentServiceActivateAgentSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *agentServiceClient) ResumeAgent(ctx context.Context, req *v1alpha1.ResumeAgentRequest) (*v1alpha1.ResumeAgentResponse, error) {
+	var res v1alpha1.ResumeAgentResponse
+	if err := c.client.CallUnary(ctx, agentServiceResumeAgentSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -243,6 +273,18 @@ func (h agentServiceHandler) activateAgent(ctx context.Context, _ connect.Spec, 
 		return err
 	}
 	res, err := h.svc.ActivateAgent(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h agentServiceHandler) resumeAgent(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ResumeAgentRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ResumeAgent(ctx, &req)
 	if err != nil {
 		return err
 	}

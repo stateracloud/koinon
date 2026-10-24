@@ -75,6 +75,32 @@ var _ = Describe("koinon-agentd's sandbox sweep", func() {
 		Expect(running(ctx, name, job)).To(BeFalse(), "the job is ended")
 	})
 
+	It("reports a process that survives its signals, and procinfo.sh then reads its state and wait channel", func(ctx SpecContext) {
+		// An unkillable process cannot be made without a stuck kernel: `kill` is replaced by a
+		// no-op, so the job survives every round, as one in uninterruptible sleep would.
+		name, job := container(ctx, "exec sleep infinity", "KOINON_SANDBOX_STANDIN=1")
+		stdout, stderr, code := tryExec(ctx, name, "/bin/sh", "-c", "kill() { :; }\n"+script, "sweep")
+		Expect(code).To(Equal(1), stderr)
+		Expect(stderr).To(ContainSubstring("still running: " + job))
+		Expect(stdout).To(MatchRegexp(`(?m)^survivors: .*\b` + job + `:[0-9]+\b`))
+		var survivors []string
+		for _, l := range strings.Split(stdout, "\n") {
+			if v, ok := strings.CutPrefix(l, "survivors:"); ok {
+				survivors = strings.Fields(v)
+			}
+		}
+
+		procinfo, err := os.ReadFile("../../internal/agentd/procinfo.sh")
+		Expect(err).NotTo(HaveOccurred())
+		out, stderr, code := tryExec(ctx, name, append([]string{"/bin/sh", "-c", string(procinfo), "procinfo"}, survivors...)...)
+		Expect(code).To(BeZero(), stderr)
+		Expect(out).To(MatchRegexp(`(?m)^` + job + `\|[SR]\|sh\|`)) // state, comm, wchan of the real /proc entry
+
+		By("a reused PID (another start time) is not reported")
+		out, _, _ = tryExec(ctx, name, "/bin/sh", "-c", string(procinfo), "procinfo", job+":1")
+		Expect(out).To(BeEmpty())
+	})
+
 	It("refuses, ending nothing, under a PID 1 it does not know", func(ctx SpecContext) {
 		name, job := container(ctx, "exec sleep infinity")
 		stdout, stderr, code := tryExec(ctx, name, "/bin/sh", "-c", script, "sweep")

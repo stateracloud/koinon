@@ -8,9 +8,10 @@
 
 -- name: GetRunningRunForAgent :one
 -- The run an agent's tool call belongs to: one active run per agent
--- (runs_one_active_per_agent), and tools are only called while it runs.
+-- (runs_one_active_per_agent), and tools are only called while it runs, not while agentd
+-- asks the agent for its end-of-turn summary (ADR 0051 amendment: no tool calls then).
 SELECT * FROM runs
-WHERE org_id = @org_id AND agent_id = @agent_id AND state = 'running';
+WHERE org_id = @org_id AND agent_id = @agent_id AND state = 'running' AND NOT summarizing;
 
 -- name: CreateApprovalRequest :one
 -- No row: the same call was already recorded in this run (see
@@ -119,12 +120,13 @@ SELECT a.* FROM approval_requests a
 JOIN runs r ON r.org_id = a.org_id AND r.id = a.run_id
 WHERE a.org_id = @org_id AND a.status = 'pending'
   AND r.state IN ('succeeded', 'failed', 'canceled')
+  AND NOT a.system
 ORDER BY a.created_at, a.id;
 
 -- name: ListUndeliveredApprovalRequestsForRun :many
 -- A run's requests whose outcome the agent has not been sent yet.
 SELECT * FROM approval_requests
-WHERE org_id = @org_id AND run_id = @run_id AND delivered_at IS NULL
+WHERE org_id = @org_id AND run_id = @run_id AND delivered_at IS NULL AND NOT system
 ORDER BY created_at, id;
 
 -- name: MarkApprovalRequestsDelivered :execrows

@@ -112,6 +112,19 @@ function ticketItem(ev: TicketEvent): TimelineItem {
       // replaced since the ticket's session was stored: {message,
       // previousSessionId, sessionId}.
       return { key, at, type: 'note', text: str(p.message) || "The agent's workspace was reset, so this run starts a new session.", runId }
+    case 'sandbox.recreated':
+    case 'sandbox.work_lost':
+    case 'agent.unhealthy':
+    case 'run.session_restarted': {
+      // Koinon's own notes (system actor), each {message}.
+      const fallback: Record<string, string> = {
+        'sandbox.recreated': 'Sandbox recreated.',
+        'sandbox.work_lost': "Unsaved work in the agent's sandbox was lost.",
+        'agent.unhealthy': 'The agent was marked unhealthy.',
+        'run.session_restarted': 'Session restarted: new instructions.',
+      }
+      return { key, at, type: 'note', text: str(p.message) || fallback[ev.kind], runId }
+    }
     case 'run.canceled':
     case 'run.failed': {
       // scheduler.RecordCancel writes {reason, message}; agentd's finish writes {reason}.

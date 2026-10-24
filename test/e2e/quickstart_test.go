@@ -358,9 +358,12 @@ var _ = Describe("the quickstart", Ordered, func() {
 			g.Expect(cost.GetRequests()).To(BeNumerically(">", 0), "the ledger recorded the run's requests")
 		}, 60*time.Second, time.Second).Should(Succeed())
 		// The streamed requests carry usage through the gateway; the title request the fake model
-		// refuses (a 400 without usage) is charged its input only.
+		// refuses (a 400 without usage) is charged its input only. OpenCode asks for a title with each
+		// prompt until it has one, so the turn's prompt and the end-of-turn note's prompt make exactly
+		// two such requests; a third would be a request nobody accounts for.
 		Expect(cost.GetRequests()-cost.GetEstimatedRequests()).To(BeNumerically(">=", 1), "streamed requests reported their usage")
-		Expect(cost.GetEstimatedRequests()).To(BeNumerically("<=", 1))
+		Expect(cost.GetEstimatedRequests()).To(BeNumerically("<=", 2))
+		Expect(cost.GetEstimatedRequests()).To(BeNumerically(">=", 1))
 		Expect(cost.GetInputTokens()).To(BeNumerically(">=", 1200), "the fake model's reported input tokens")
 		Expect(cost.GetOutputTokens()).To(BeNumerically("<", 1000), "no output is charged for the refused request")
 
@@ -420,6 +423,54 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(repo.Calls).To(HaveKeyWithValue("POST pulls", 1))
 		Expect(repo.Pulls).To(HaveLen(1))
 		t.end("6. Run resumes → PR URL on the ticket")
+	})
+
+	It("6a. the agent's end-of-turn note is on the ticket, not in its timeline as a reply", func(ctx SpecContext) {
+		t.begin()
+		// The note is written after each turn (the run parked once, then finished: two turns), so
+		// it is there by the time the run has succeeded; the last one wins.
+		var got *ticketv1alpha1.GetTicketResponse
+		Eventually(func(g Gomega) {
+			var err error
+			got, err = c.tickets.GetTicket(ctx, &ticketv1alpha1.GetTicketRequest{OrgId: org, TicketId: ticket.GetId()})
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(got.GetTicket().GetAgentSummary()).To(HavePrefix("Notes: the ticket asks for a hello.md"))
+		}, 30*time.Second, time.Second).Should(Succeed())
+		Expect(got.GetTicket().GetAgentSummaryAt()).NotTo(BeNil())
+		for _, ev := range got.GetEvents() {
+			if ev.GetKind() == "message" {
+				text, _ := ev.GetPayload().AsMap()["text"].(string)
+				Expect(text).NotTo(HavePrefix("Notes:"), "the note is not a reply on the ticket")
+			}
+		}
+		By("the note's model call went through the gateway and was counted with the run")
+		Eventually(func(g Gomega) {
+			r, err := c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: run.GetId()})
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(r.GetRun().GetCost().GetRequests()).To(BeNumerically(">=", 4), "title, two turns and at least one note")
+		}, 60*time.Second, time.Second).Should(Succeed())
+		t.end("6a. Agent's notes on the ticket")
+	})
+
+	It("6a2. the saved-work upload Service exists and answers; the tools port does not serve it", func(ctx SpecContext) {
+		t.begin()
+		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
+		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+		post := func(addr, path string) int {
+			q := "?org=00000000-0000-7000-8000-000000000001&run=00000000-0000-7000-8000-000000000002&epoch=1&n=1&exp=" +
+				strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+path+q, strings.NewReader("x"))
+			Expect(err).NotTo(HaveOccurred())
+			res, err := http.DefaultClient.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			_ = res.Body.Close()
+			return res.StatusCode
+		}
+		// The Service agentd's KOINON_SAVED_WORK_URL names: an unsigned post is refused, by the receiver.
+		Expect(post(portForward(ctx, kubectl, "svc/koinon-api-saved-work", "8082"), "/internal/saved-work")).To(Equal(http.StatusUnauthorized))
+		// The tools port, which agentd cannot reach, does not serve the path at all.
+		Expect(post(portForward(ctx, kubectl, "svc/koinon-api-tools", "8081"), "/internal/saved-work")).To(Equal(http.StatusNotFound))
+		t.end("6a2. Saved-work upload Service")
 	})
 
 	It("6b. adds a remote MCP server: the gateway injects its credential, and an agent's call reaches it", func(ctx SpecContext) {
