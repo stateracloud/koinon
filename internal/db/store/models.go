@@ -761,17 +761,18 @@ type AgentVersion struct {
 }
 
 type ApiToken struct {
-	OrgID      pgtype.UUID
-	ID         pgtype.UUID
-	Name       string
-	Prefix     string
-	TokenHash  []byte
-	Role       OrgRole
-	CreatedBy  pgtype.UUID
-	ExpiresAt  pgtype.Timestamptz
-	RevokedAt  pgtype.Timestamptz
-	LastUsedAt pgtype.Timestamptz
-	CreatedAt  pgtype.Timestamptz
+	OrgID         pgtype.UUID
+	ID            pgtype.UUID
+	Name          string
+	Prefix        string
+	TokenHash     []byte
+	Role          OrgRole
+	CreatedBy     pgtype.UUID
+	ParentTokenID pgtype.UUID
+	ExpiresAt     pgtype.Timestamptz
+	RevokedAt     pgtype.Timestamptz
+	LastUsedAt    pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
 }
 
 type ApprovalRequest struct {
@@ -833,6 +834,7 @@ type Connection struct {
 	Source            ConfigSource
 	ManagedBySecret   pgtype.Text
 	DeclaredVersion   pgtype.Text
+	RemovedAt         pgtype.Timestamptz
 }
 
 type LocalCredential struct {
@@ -927,6 +929,7 @@ type Provider struct {
 	Source          ConfigSource
 	ManagedBySecret pgtype.Text
 	DeclaredVersion pgtype.Text
+	RemovedAt       pgtype.Timestamptz
 	DisabledReason  pgtype.Text
 	CreatedBy       pgtype.UUID
 	CreatedAt       pgtype.Timestamptz

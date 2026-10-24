@@ -81,7 +81,7 @@ func (s *Server) CreateToken(ctx context.Context, req *tokenv1alpha1.CreateToken
 	if !ok {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "role must be admin or owner")
 	}
-	created, err := s.tokens.Create(requestCtx(ctx), c.org, c.auditActor(), c.p.UserID, c.role(), req.GetName(), role, req.GetExpiresIn().AsDuration())
+	created, err := s.tokens.Create(requestCtx(ctx), c.org, c.auditActor(), tokens.Creator{User: c.p.UserID, Role: c.role()}, req.GetName(), role, req.GetExpiresIn().AsDuration())
 	if err != nil {
 		return nil, s.tokenError(err)
 	}
@@ -112,7 +112,7 @@ func (s *Server) RevokeToken(ctx context.Context, req *tokenv1alpha1.RevokeToken
 	if err != nil {
 		return nil, err
 	}
-	t, err := s.tokens.Revoke(requestCtx(ctx), c.org, c.auditActor(), req.GetTokenId())
+	t, err := s.tokens.Revoke(requestCtx(ctx), c.org, c.auditActor(), c.role(), req.GetTokenId())
 	if err != nil {
 		return nil, s.tokenError(err)
 	}

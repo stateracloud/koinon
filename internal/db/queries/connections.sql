@@ -38,16 +38,18 @@ VALUES (@org_id, @id, @connector, @display_name, @config, @secret_envelope, @sec
 RETURNING *;
 
 -- name: SetConnectionEnvelope :one
--- Moves a connection's secret fields from its Kubernetes Secret into Postgres.
+-- Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays
+-- until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
+-- at the next start.
 UPDATE connections
-SET secret_envelope = @secret_envelope, secret_name = NULL
+SET secret_envelope = @secret_envelope
 WHERE org_id = @org_id AND id = @id
 RETURNING *;
 
 -- name: UpdateDeclaredConnection :one
 UPDATE connections
 SET display_name = @display_name, config = @config, secret_envelope = @secret_envelope,
-    secret_fingerprint = @secret_fingerprint, declared_version = @declared_version
+    secret_fingerprint = @secret_fingerprint, declared_version = @declared_version, removed_at = NULL
 WHERE org_id = @org_id AND id = @id AND source = 'secret'
 RETURNING *;
 
@@ -56,8 +58,19 @@ DELETE FROM connections
 WHERE org_id = @org_id AND id = @id;
 
 -- name: ListConnectionsToMigrate :many
--- Connections whose secret fields still live in a Kubernetes Secret. Startup migration,
--- across orgs.
+-- Connections that still name a Kubernetes Secret: not yet moved, or moved but the old Secret not
+-- yet deleted. Startup migration, across orgs.
 SELECT * FROM connections
-WHERE secret_envelope IS NULL AND secret_name IS NOT NULL
+WHERE secret_name IS NOT NULL
 ORDER BY org_id, id;
+
+-- name: ClearConnectionSecretName :exec
+UPDATE connections
+SET secret_name = NULL
+WHERE org_id = @org_id AND id = @id;
+
+-- name: MarkConnectionRemoved :exec
+-- The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
+UPDATE connections
+SET removed_at = now()
+WHERE org_id = @org_id AND id = @id AND source = 'secret' AND removed_at IS NULL;

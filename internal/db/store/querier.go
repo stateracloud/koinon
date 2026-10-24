@@ -69,6 +69,7 @@ type Querier interface {
 	// update no run: the next owner would get a skipped epoch.
 	ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error)
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
+	ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error
 	// approved -> executed | failed, by the executor that claimed it (fenced on
 	// executions). No row: another executor took it over.
 	CompleteApprovalExecution(ctx context.Context, arg CompleteApprovalExecutionParams) (ApprovalRequest, error)
@@ -147,6 +148,8 @@ type Querier interface {
 	// longer has, or whose org stopped using the IdP.
 	DeleteStaleGroupMemberships(ctx context.Context, arg DeleteStaleGroupMembershipsParams) error
 	DisableModelsOfDisabledProviders(ctx context.Context, arg DisableModelsOfDisabledProvidersParams) error
+	DisableModelsOfProvider(ctx context.Context, arg DisableModelsOfProviderParams) error
+	EnableModel(ctx context.Context, arg EnableModelParams) error
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -165,6 +168,7 @@ type Querier interface {
 	// The owner ends the run: running -> succeeded | failed | canceled, or
 	// starting -> failed | canceled. No row: stale epoch or illegal transition.
 	FinishRun(ctx context.Context, arg FinishRunParams) (Run, error)
+	GetAPIToken(ctx context.Context, arg GetAPITokenParams) (ApiToken, error)
 	// Authentication: the org is not known before the token is. Looked up by the unique prefix
 	// and then compared by hash in constant time.
 	GetAPITokenByPrefix(ctx context.Context, prefix string) (GetAPITokenByPrefixRow, error)
@@ -239,8 +243,8 @@ type Querier interface {
 	ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error)
 	ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Connection, error)
 	ListConnectionsByConnector(ctx context.Context, arg ListConnectionsByConnectorParams) ([]Connection, error)
-	// Connections whose secret fields still live in a Kubernetes Secret. Startup migration,
-	// across orgs.
+	// Connections that still name a Kubernetes Secret: not yet moved, or moved but the old Secret not
+	// yet deleted. Startup migration, across orgs.
 	ListConnectionsToMigrate(ctx context.Context) ([]Connection, error)
 	// The most recently synced content of each template.
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
@@ -303,6 +307,10 @@ type Querier interface {
 	LockRun(ctx context.Context, arg LockRunParams) (Run, error)
 	// Records that the outcomes were sent to the agent.
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
+	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
+	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
+	// The declaring Secret was deleted: keep the row, stop serving it.
+	MarkProviderRemoved(ctx context.Context, arg MarkProviderRemovedParams) error
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
 	// Moves a ticket to a board column. Callers moving to Done also cancel its
@@ -340,13 +348,16 @@ type Querier interface {
 	// active -> draft when a grant change is proposed (ADR 0020). The approved
 	// version stays recorded until the next activation.
 	ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraftParams) (Agent, error)
-	RevokeAPIToken(ctx context.Context, arg RevokeAPITokenParams) (ApiToken, error)
+	// Revokes the token and every token descended from it.
+	RevokeAPITokenTree(ctx context.Context, arg RevokeAPITokenTreeParams) ([]ApiToken, error)
 	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
-	// Moves a connection's secret fields from its Kubernetes Secret into Postgres.
+	// Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays
+	// until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
+	// at the next start.
 	SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error

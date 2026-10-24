@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -78,6 +79,9 @@ type Principal struct {
 	Org     pgtype.UUID
 	OrgSlug string
 	Role    store.OrgRole
+	// CreatedBy is the root user of the token's chain.
+	CreatedBy pgtype.UUID
+	ExpiresAt time.Time
 }
 
 // Service issues and verifies tokens.
@@ -123,24 +127,51 @@ func hashOf(token string) []byte {
 	return h[:]
 }
 
-// Create issues a token for org with role, expiring after ttl (zero means DefaultTTL). creatorRole
-// is the creator's role in org (a token creator's own role, or a user's); the token cannot
-// carry more. creator is the user who creates it, or invalid when a token does.
-func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor, creator pgtype.UUID, creatorRole store.OrgRole, name string, role store.OrgRole, ttl time.Duration) (Created, error) {
+// Creator is who makes a token. A user in a session starts a fresh chain; a token continues its
+// own: the new token has the same root user, names the creating token as its parent, and cannot
+// outlive it or outrank it.
+type Creator struct {
+	// User is the root user: the signed-in user, or for a token the user its chain began with.
+	User pgtype.UUID
+	// Role is the creator's role (a token's own role, or the user's role in the org).
+	Role store.OrgRole
+	// Parent is the creating token, nil for a session.
+	Parent *Principal
+}
+
+// Create issues a token for org with role, expiring after ttl (zero means DefaultTTL, or the
+// parent's remaining life if shorter). The token cannot carry more than the creator's role, and
+// a child cannot outlive its parent.
+func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor, by Creator, name string, role store.OrgRole, ttl time.Duration) (Created, error) {
 	name = strings.TrimSpace(name)
 	switch {
 	case name == "" || len(name) > 200:
 		return Created{}, &InvalidError{"name must be 1 to 200 characters"}
 	case role != store.OrgRoleAdmin && role != store.OrgRoleOwner:
 		return Created{}, &InvalidError{"role must be admin or owner"}
-	case !auth.RoleAtLeast(creatorRole, role):
-		return Created{}, &InvalidError{"a token cannot carry a higher role than its creator's (" + string(creatorRole) + ")"}
+	case !auth.RoleAtLeast(by.Role, role):
+		return Created{}, &InvalidError{"a token cannot carry a higher role than its creator's (" + string(by.Role) + ")"}
+	case !by.User.Valid:
+		return Created{}, errors.New("tokens: a token needs a root user")
 	}
+	now := s.now()
+	var parentID pgtype.UUID
 	if ttl == 0 {
 		ttl = DefaultTTL
-	}
-	if ttl < MinTTL || ttl > MaxTTL {
+		if by.Parent != nil {
+			ttl = min(ttl, by.Parent.ExpiresAt.Sub(now))
+		}
+	} else if ttl < MinTTL || ttl > MaxTTL {
 		return Created{}, &InvalidError{fmt.Sprintf("expiry must be between %s and %s", MinTTL, MaxTTL)}
+	}
+	if by.Parent != nil {
+		parentID = by.Parent.TokenID
+		if left := by.Parent.ExpiresAt.Sub(now); ttl > left {
+			return Created{}, &InvalidError{fmt.Sprintf("a token cannot outlive the token that creates it, which expires in %s", left.Round(time.Second))}
+		}
+	}
+	if ttl <= 0 {
+		return Created{}, &InvalidError{"the creating token has expired"}
 	}
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
@@ -156,21 +187,24 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		return Created{}, err
 	}
 	id := pgtype.UUID{Bytes: uid, Valid: true}
-	now := s.now()
 	var row store.ApiToken
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		var err error
 		row, err = q.CreateAPIToken(ctx, store.CreateAPITokenParams{
-			OrgID: org, ID: id, Name: name, Prefix: prefix, TokenHash: hashOf(raw), Role: role, CreatedBy: creator,
-			ExpiresAt: pgtype.Timestamptz{Time: now.Add(ttl), Valid: true}, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+			OrgID: org, ID: id, Name: name, Prefix: prefix, TokenHash: hashOf(raw), Role: role, CreatedBy: by.User,
+			ParentTokenID: parentID,
+			ExpiresAt:     pgtype.Timestamptz{Time: now.Add(ttl), Valid: true}, CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
 		})
 		if err != nil {
 			return err
 		}
+		after := map[string]any{"name": name, "role": string(role), "tokenPrefix": prefix, "expiresAt": row.ExpiresAt.Time}
+		if parentID.Valid {
+			after["parentTokenId"] = parentID.String()
+		}
 		return audit.RecordErr(ctx, q, audit.Event{
-			Org: org, Actor: actor, Action: "token.create", TargetKind: "token", TargetID: id.String(),
-			After: map[string]any{"name": name, "role": string(role), "tokenPrefix": prefix, "expiresAt": row.ExpiresAt.Time},
+			Org: org, Actor: actor, Action: "token.create", TargetKind: "token", TargetID: id.String(), After: after,
 		})
 	})
 	if err != nil {
@@ -192,22 +226,35 @@ func (s *Service) List(ctx context.Context, org pgtype.UUID) ([]Token, error) {
 	return out, nil
 }
 
-// Revoke revokes a token. Revoking twice is fine.
-func (s *Service) Revoke(ctx context.Context, org pgtype.UUID, actor audit.Actor, id string) (Token, error) {
+// Revoke revokes a token and every token descended from it. The caller's role must be at least the
+// target's. Revoking twice is fine.
+func (s *Service) Revoke(ctx context.Context, org pgtype.UUID, actor audit.Actor, callerRole store.OrgRole, id string) (Token, error) {
 	var tid pgtype.UUID
 	if err := tid.Scan(id); err != nil || !tid.Valid {
 		return Token{}, ErrNotFound
 	}
-	var row store.ApiToken
+	var target store.ApiToken
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		var err error
-		if row, err = q.RevokeAPIToken(ctx, store.RevokeAPITokenParams{OrgID: org, ID: tid}); err != nil {
+		if target, err = q.GetAPIToken(ctx, store.GetAPITokenParams{OrgID: org, ID: tid}); err != nil {
 			return err
 		}
+		if !auth.RoleAtLeast(callerRole, target.Role) {
+			return &InvalidError{"a token with a lower role cannot revoke a token with a higher one"}
+		}
+		revoked, err := q.RevokeAPITokenTree(ctx, store.RevokeAPITokenTreeParams{OrgID: org, ID: tid})
+		if err != nil {
+			return err
+		}
+		ids := make([]string, 0, len(revoked))
+		for _, r := range revoked {
+			ids = append(ids, r.ID.String())
+		}
+		slices.Sort(ids)
 		return audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: actor, Action: "token.revoke", TargetKind: "token", TargetID: id,
-			After: map[string]any{"name": row.Name, "tokenPrefix": row.Prefix},
+			After: map[string]any{"name": target.Name, "tokenPrefix": target.Prefix, "revokedTokenIds": ids},
 		})
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -216,30 +263,94 @@ func (s *Service) Revoke(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err != nil {
 		return Token{}, err
 	}
+	row, err := store.New(s.pool).GetAPIToken(ctx, store.GetAPITokenParams{OrgID: org, ID: tid})
+	if err != nil {
+		return Token{}, err
+	}
 	return toToken(row), nil
 }
 
-// Authenticate verifies a bearer token and records its use.
+// AuthError is a failed authentication. When the token's prefix names a real token, TokenID and
+// Org say which, so the failure can be written to that org's audit trail.
+type AuthError struct {
+	Reason string
+	// Prefix is the token's public prefix as presented, if it had one; never the secret part.
+	Prefix  string
+	TokenID pgtype.UUID
+	Org     pgtype.UUID
+}
+
+func (e *AuthError) Error() string { return ErrInvalid.Error() }
+func (e *AuthError) Unwrap() error { return ErrInvalid }
+
+// Authenticate verifies a bearer token and records its use. A token also needs its root user to
+// still hold at least the token's role in the org (a demoted or removed creator voids the chain).
+// A failure that names a real token is recorded in that token's org audit trail.
 func (s *Service) Authenticate(ctx context.Context, raw string) (Principal, error) {
 	rest, ok := strings.CutPrefix(raw, Prefix)
 	if !ok || len(rest) < 10 || rest[8] != '_' {
-		return Principal{}, ErrInvalid
+		return Principal{}, &AuthError{Reason: "not a Koinon token"}
 	}
+	prefix := rest[:8]
 	q := store.New(s.pool)
-	row, err := q.GetAPITokenByPrefix(ctx, rest[:8])
+	row, err := q.GetAPITokenByPrefix(ctx, prefix)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Hash anyway, so unknown prefixes cost the same.
 		subtle.ConstantTimeCompare(hashOf(raw), hashOf(raw))
-		return Principal{}, ErrInvalid
+		return Principal{}, &AuthError{Reason: "unknown token", Prefix: prefix}
 	}
 	if err != nil {
 		return Principal{}, err
 	}
-	if subtle.ConstantTimeCompare(hashOf(raw), row.TokenHash) != 1 ||
-		row.RevokedAt.Valid || !s.now().Before(row.ExpiresAt.Time) {
-		return Principal{}, ErrInvalid
+	reason := ""
+	switch {
+	case subtle.ConstantTimeCompare(hashOf(raw), row.TokenHash) != 1:
+		reason = "wrong secret"
+	case row.RevokedAt.Valid:
+		reason = "revoked"
+	case !s.now().Before(row.ExpiresAt.Time):
+		reason = "expired"
+	default:
+		if holds, err := s.holdsRole(ctx, q, row.CreatedBy, row.OrgID, row.Role); err != nil {
+			return Principal{}, err
+		} else if !holds {
+			reason = "its creator no longer holds the role"
+		}
+	}
+	if reason != "" {
+		s.auditFailure(ctx, q, row, reason)
+		return Principal{}, &AuthError{Reason: reason, Prefix: prefix, TokenID: row.ID, Org: row.OrgID}
 	}
 	// Failing to record use must not fail the request.
 	_ = q.TouchAPIToken(ctx, store.TouchAPITokenParams{OrgID: row.OrgID, ID: row.ID})
-	return Principal{TokenID: row.ID, Org: row.OrgID, OrgSlug: row.OrgSlug, Role: row.Role}, nil
+	return Principal{
+		TokenID: row.ID, Org: row.OrgID, OrgSlug: row.OrgSlug, Role: row.Role, CreatedBy: row.CreatedBy, ExpiresAt: row.ExpiresAt.Time,
+	}, nil
+}
+
+// holdsRole reports whether the user is a platform admin or has at least role in the org.
+func (s *Service) holdsRole(ctx context.Context, q *store.Queries, user, org pgtype.UUID, role store.OrgRole) (bool, error) {
+	if admin, err := q.IsPlatformAdmin(ctx, user); err != nil || admin {
+		return admin, err
+	}
+	ms, err := q.ListEffectiveMemberships(ctx, user)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range ms {
+		if m.OrgID == org {
+			return auth.RoleAtLeast(m.Role, role), nil
+		}
+	}
+	return false, nil
+}
+
+// auditFailure writes "failed use of token <id>" to the token's org. It is best effort.
+func (s *Service) auditFailure(ctx context.Context, q *store.Queries, row store.GetAPITokenByPrefixRow, reason string) {
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_, _ = audit.Record(actx, q, audit.Event{
+		Org: row.OrgID, Actor: audit.System(), Action: "token.use_failed", TargetKind: "token", TargetID: row.ID.String(),
+		After: map[string]any{"reason": reason, "tokenPrefix": row.Prefix},
+	})
 }

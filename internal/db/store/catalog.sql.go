@@ -72,7 +72,7 @@ const createProvider = `-- name: CreateProvider :one
 
 INSERT INTO providers (org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, disabled_reason, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, disabled_reason, created_by, created_at, updated_at
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at
 `
 
 type CreateProviderParams struct {
@@ -121,6 +121,7 @@ func (q *Queries) CreateProvider(ctx context.Context, arg CreateProviderParams) 
 		&i.Source,
 		&i.ManagedBySecret,
 		&i.DeclaredVersion,
+		&i.RemovedAt,
 		&i.DisabledReason,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -183,6 +184,39 @@ func (q *Queries) DisableModelsOfDisabledProviders(ctx context.Context, arg Disa
 	return err
 }
 
+const disableModelsOfProvider = `-- name: DisableModelsOfProvider :exec
+UPDATE models
+SET disabled_reason = $1
+WHERE org_id = $2 AND provider_id = $3
+`
+
+type DisableModelsOfProviderParams struct {
+	Reason     pgtype.Text
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+}
+
+func (q *Queries) DisableModelsOfProvider(ctx context.Context, arg DisableModelsOfProviderParams) error {
+	_, err := q.db.Exec(ctx, disableModelsOfProvider, arg.Reason, arg.OrgID, arg.ProviderID)
+	return err
+}
+
+const enableModel = `-- name: EnableModel :exec
+UPDATE models
+SET disabled_reason = NULL
+WHERE org_id = $1 AND id = $2
+`
+
+type EnableModelParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+func (q *Queries) EnableModel(ctx context.Context, arg EnableModelParams) error {
+	_, err := q.db.Exec(ctx, enableModel, arg.OrgID, arg.ID)
+	return err
+}
+
 const getModel = `-- name: GetModel :one
 SELECT org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at FROM models
 WHERE org_id = $1 AND id = $2
@@ -216,7 +250,7 @@ func (q *Queries) GetModel(ctx context.Context, arg GetModelParams) (Model, erro
 }
 
 const getProvider = `-- name: GetProvider :one
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, disabled_reason, created_by, created_at, updated_at FROM providers
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at FROM providers
 WHERE org_id = $1 AND id = $2
 `
 
@@ -238,6 +272,7 @@ func (q *Queries) GetProvider(ctx context.Context, arg GetProviderParams) (Provi
 		&i.Source,
 		&i.ManagedBySecret,
 		&i.DeclaredVersion,
+		&i.RemovedAt,
 		&i.DisabledReason,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -288,7 +323,7 @@ func (q *Queries) ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, e
 }
 
 const listProviders = `-- name: ListProviders :many
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, disabled_reason, created_by, created_at, updated_at FROM providers
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at FROM providers
 WHERE org_id = $1
 ORDER BY name, source, id
 `
@@ -312,6 +347,7 @@ func (q *Queries) ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provi
 			&i.Source,
 			&i.ManagedBySecret,
 			&i.DeclaredVersion,
+			&i.RemovedAt,
 			&i.DisabledReason,
 			&i.CreatedBy,
 			&i.CreatedAt,
@@ -332,7 +368,7 @@ SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.
        m.name AS model_name, m.guard, m.input_rate, m.output_rate, m.cache_read_rate
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
-WHERE p.org_id = $1 AND p.disabled_reason IS NULL AND m.disabled_reason IS NULL
+WHERE p.org_id = $1 AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND m.disabled_reason IS NULL
 ORDER BY p.name, m.name
 `
 
@@ -382,8 +418,8 @@ func (q *Queries) ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]L
 }
 
 const listServedProviders = `-- name: ListServedProviders :many
-SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, disabled_reason, created_by, created_at, updated_at FROM providers
-WHERE org_id = $1 AND disabled_reason IS NULL
+SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at FROM providers
+WHERE org_id = $1 AND disabled_reason IS NULL AND removed_at IS NULL
 ORDER BY name
 `
 
@@ -407,6 +443,7 @@ func (q *Queries) ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([
 			&i.Source,
 			&i.ManagedBySecret,
 			&i.DeclaredVersion,
+			&i.RemovedAt,
 			&i.DisabledReason,
 			&i.CreatedBy,
 			&i.CreatedAt,
@@ -422,6 +459,24 @@ func (q *Queries) ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([
 	return items, nil
 }
 
+const markProviderRemoved = `-- name: MarkProviderRemoved :exec
+UPDATE providers
+SET removed_at = now(), disabled_reason = $1
+WHERE org_id = $2 AND id = $3 AND source = 'secret'
+`
+
+type MarkProviderRemovedParams struct {
+	Reason pgtype.Text
+	OrgID  pgtype.UUID
+	ID     pgtype.UUID
+}
+
+// The declaring Secret was deleted: keep the row, stop serving it.
+func (q *Queries) MarkProviderRemoved(ctx context.Context, arg MarkProviderRemovedParams) error {
+	_, err := q.db.Exec(ctx, markProviderRemoved, arg.Reason, arg.OrgID, arg.ID)
+	return err
+}
+
 const reenableUIModels = `-- name: ReenableUIModels :exec
 UPDATE models m
 SET disabled_reason = NULL
@@ -429,7 +484,7 @@ FROM providers p
 WHERE m.org_id = $1 AND p.org_id = m.org_id AND p.id = m.provider_id
   AND m.source = 'ui' AND m.disabled_reason IS NOT NULL AND p.disabled_reason IS NULL
   AND NOT EXISTS (SELECT 1 FROM models d
-                  WHERE d.org_id = m.org_id AND d.name = m.name AND d.source = 'secret')
+                  WHERE d.org_id = m.org_id AND d.name = m.name AND d.source = 'secret' AND d.disabled_reason IS NULL)
 `
 
 // Re-enable UI models whose provider is enabled and that no declared model shadows.
@@ -443,7 +498,7 @@ UPDATE providers p
 SET disabled_reason = NULL
 WHERE p.org_id = $1 AND p.source = 'ui' AND p.disabled_reason IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM providers d
-                  WHERE d.org_id = p.org_id AND d.name = p.name AND d.source = 'secret')
+                  WHERE d.org_id = p.org_id AND d.name = p.name AND d.source = 'secret' AND d.removed_at IS NULL)
 `
 
 // Re-enable UI providers no declared provider shadows any more.
@@ -523,9 +578,10 @@ func (q *Queries) ShadowUIProviders(ctx context.Context, arg ShadowUIProvidersPa
 
 const updateDeclaredProvider = `-- name: UpdateDeclaredProvider :one
 UPDATE providers
-SET type = $1, url = $2, api_key = $3, declared_version = $4
+SET type = $1, url = $2, api_key = $3, declared_version = $4,
+    removed_at = NULL, disabled_reason = NULL
 WHERE org_id = $5 AND id = $6 AND source = 'secret'
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, disabled_reason, created_by, created_at, updated_at
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at
 `
 
 type UpdateDeclaredProviderParams struct {
@@ -557,6 +613,7 @@ func (q *Queries) UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclared
 		&i.Source,
 		&i.ManagedBySecret,
 		&i.DeclaredVersion,
+		&i.RemovedAt,
 		&i.DisabledReason,
 		&i.CreatedBy,
 		&i.CreatedAt,
@@ -615,7 +672,7 @@ const updateProvider = `-- name: UpdateProvider :one
 UPDATE providers
 SET type = $1, url = $2, api_key = $3
 WHERE org_id = $4 AND id = $5
-RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, disabled_reason, created_by, created_at, updated_at
+RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at
 `
 
 type UpdateProviderParams struct {
@@ -645,6 +702,7 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 		&i.Source,
 		&i.ManagedBySecret,
 		&i.DeclaredVersion,
+		&i.RemovedAt,
 		&i.DisabledReason,
 		&i.CreatedBy,
 		&i.CreatedAt,

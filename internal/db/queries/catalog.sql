@@ -28,7 +28,8 @@ RETURNING *;
 
 -- name: UpdateDeclaredProvider :one
 UPDATE providers
-SET type = @type, url = @url, api_key = sqlc.narg(api_key), declared_version = @declared_version
+SET type = @type, url = @url, api_key = sqlc.narg(api_key), declared_version = @declared_version,
+    removed_at = NULL, disabled_reason = NULL
 WHERE org_id = @org_id AND id = @id AND source = 'secret'
 RETURNING *;
 
@@ -78,13 +79,13 @@ SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.
        m.name AS model_name, m.guard, m.input_rate, m.output_rate, m.cache_read_rate
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
-WHERE p.org_id = @org_id AND p.disabled_reason IS NULL AND m.disabled_reason IS NULL
+WHERE p.org_id = @org_id AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND m.disabled_reason IS NULL
 ORDER BY p.name, m.name;
 
 -- name: ListServedProviders :many
 -- Enabled providers (with or without models), for key delivery.
 SELECT * FROM providers
-WHERE org_id = @org_id AND disabled_reason IS NULL
+WHERE org_id = @org_id AND disabled_reason IS NULL AND removed_at IS NULL
 ORDER BY name;
 
 -- name: ShadowUIProviders :exec
@@ -104,7 +105,7 @@ UPDATE providers p
 SET disabled_reason = NULL
 WHERE p.org_id = @org_id AND p.source = 'ui' AND p.disabled_reason IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM providers d
-                  WHERE d.org_id = p.org_id AND d.name = p.name AND d.source = 'secret');
+                  WHERE d.org_id = p.org_id AND d.name = p.name AND d.source = 'secret' AND d.removed_at IS NULL);
 
 -- name: DisableModelsOfDisabledProviders :exec
 UPDATE models m
@@ -121,4 +122,20 @@ FROM providers p
 WHERE m.org_id = @org_id AND p.org_id = m.org_id AND p.id = m.provider_id
   AND m.source = 'ui' AND m.disabled_reason IS NOT NULL AND p.disabled_reason IS NULL
   AND NOT EXISTS (SELECT 1 FROM models d
-                  WHERE d.org_id = m.org_id AND d.name = m.name AND d.source = 'secret');
+                  WHERE d.org_id = m.org_id AND d.name = m.name AND d.source = 'secret' AND d.disabled_reason IS NULL);
+
+-- name: MarkProviderRemoved :exec
+-- The declaring Secret was deleted: keep the row, stop serving it.
+UPDATE providers
+SET removed_at = now(), disabled_reason = @reason
+WHERE org_id = @org_id AND id = @id AND source = 'secret';
+
+-- name: DisableModelsOfProvider :exec
+UPDATE models
+SET disabled_reason = @reason
+WHERE org_id = @org_id AND provider_id = @provider_id;
+
+-- name: EnableModel :exec
+UPDATE models
+SET disabled_reason = NULL
+WHERE org_id = @org_id AND id = @id;
