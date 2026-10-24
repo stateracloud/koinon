@@ -19,9 +19,17 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"c0ec08a242eaf070"'
+      koinon.cache_read: llm.cachedInputTokens
+      koinon.cache_write: llm.cacheCreationInputTokens
+      koinon.config: '"2ec4159af2701105"'
+      koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
+      koinon.max_tokens: llm.params.max_tokens
+      koinon.out: llm.outputTokens
+      koinon.reasoning: llm.reasoningTokens
+      koinon.req_bytes: int(request.headers["content-length"])
       koinon.request: uuid()
+      koinon.status: response.code
 gateways:
   default:
     port: 8080
@@ -41,7 +49,7 @@ llm:
             org: acme
           allowedModels:
             - qwen3.5:4b
-        - keyHash: sha256:1cd7f511e20744528f20c076ae31efc63886e8a487fe91596eea735de70bdf6e
+        - keyHash: sha256:0b96ab25c287332bb53ae440c72e5ec56b45a0fc34c82867fe1776385686c9ea
           metadata:
             name: koinon-reload-probe
             agent: ""

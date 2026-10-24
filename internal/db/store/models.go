@@ -729,6 +729,14 @@ type Agent struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+type AgentBudget struct {
+	OrgID      pgtype.UUID
+	AgentID    pgtype.UUID
+	DailyLimit pgtype.Numeric
+	UpdatedBy  string
+	UpdatedAt  pgtype.Timestamptz
+}
+
 type AgentSandbox struct {
 	OrgID          pgtype.UUID
 	AgentID        pgtype.UUID
@@ -837,6 +845,13 @@ type Connection struct {
 	RemovedAt         pgtype.Timestamptz
 }
 
+type DefaultPriceList struct {
+	Version  string
+	Seq      pgtype.Int8
+	Entries  []byte
+	LoadedAt pgtype.Timestamptz
+}
+
 type LocalCredential struct {
 	UserID             pgtype.UUID
 	Username           string
@@ -864,6 +879,17 @@ type Model struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+type Notification struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	UserID    pgtype.UUID
+	Kind      string
+	DedupeKey string
+	Payload   []byte
+	CreatedAt pgtype.Timestamptz
+	ReadAt    pgtype.Timestamptz
+}
+
 type OidcLoginFlow struct {
 	StateHash    []byte
 	CodeVerifier string
@@ -882,6 +908,14 @@ type Org struct {
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
 	DeletedAt    pgtype.Timestamptz
+}
+
+type OrgBudget struct {
+	OrgID           pgtype.UUID
+	MonthlyCap      pgtype.Numeric
+	PlatformCeiling pgtype.Numeric
+	UpdatedBy       string
+	UpdatedAt       pgtype.Timestamptz
 }
 
 type OrgGroupMapping struct {
@@ -917,6 +951,17 @@ type PlatformAdmin struct {
 	UserID    pgtype.UUID
 	GrantedBy pgtype.UUID
 	GrantedAt pgtype.Timestamptz
+}
+
+type PriceOverride struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	Name      string
+	Entry     []byte
+	ValidFrom pgtype.Timestamptz
+	RetiredAt pgtype.Timestamptz
+	CreatedBy string
+	CreatedAt pgtype.Timestamptz
 }
 
 type Provider struct {
@@ -990,20 +1035,30 @@ type Session struct {
 }
 
 type SpendEntry struct {
-	OrgID        pgtype.UUID
-	ID           pgtype.UUID
-	AgentID      pgtype.UUID
-	RunID        pgtype.UUID
-	TicketID     pgtype.UUID
-	RequestID    string
-	KeyID        string
-	Model        string
-	InputTokens  int64
-	OutputTokens int64
-	CostUsd      pgtype.Numeric
-	Priced       bool
-	OccurredAt   pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
+	OrgID            pgtype.UUID
+	ID               pgtype.UUID
+	AgentID          pgtype.UUID
+	RunID            pgtype.UUID
+	TicketID         pgtype.UUID
+	RequestID        string
+	KeyID            string
+	Model            string
+	InputTokens      int64
+	OutputTokens     int64
+	CostUsd          pgtype.Numeric
+	Priced           bool
+	OccurredAt       pgtype.Timestamptz
+	CreatedAt        pgtype.Timestamptz
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	ReasoningTokens  int64
+	GatewayCostUsd   pgtype.Numeric
+	PriceRef         pgtype.Text
+	Estimated        bool
+	Estimate         []byte
+	CostFlagged      bool
+	RequestBytes     pgtype.Int8
+	ResponseBytes    pgtype.Int8
 }
 
 type Template struct {

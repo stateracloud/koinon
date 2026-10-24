@@ -395,7 +395,17 @@ func build(s gateway.State, o Options) document {
 			gateway.LogFieldKey:     `default(apiKey.name, "")`,
 			gateway.LogFieldAgent:   `default(apiKey.agent, "")`,
 			gateway.LogFieldRequest: `uuid()`,
-			MarkerField:             `""`,
+			// Usage in agentgateway's consistent semantics, for the ledger's own pricing
+			// (plan item PV2). A field whose expression fails is left out of the record.
+			gateway.LogFieldInput:        `llm.inputTokens`,
+			gateway.LogFieldOutput:       `llm.outputTokens`,
+			gateway.LogFieldCacheRead:    `llm.cachedInputTokens`,
+			gateway.LogFieldCacheWrite:   `llm.cacheCreationInputTokens`,
+			gateway.LogFieldReasoning:    `llm.reasoningTokens`,
+			gateway.LogFieldStatus:       `response.code`,
+			gateway.LogFieldMaxTokens:    `llm.params.max_tokens`,
+			gateway.LogFieldRequestBytes: `int(request.headers["content-length"])`,
+			MarkerField:                  `""`,
 		}}},
 		Gateways: map[string]listener{"default": {Port: o.Port}},
 	}

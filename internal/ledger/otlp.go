@@ -66,10 +66,26 @@ func Decode(req *collogspb.ExportLogsServiceRequest) (entries []Entry, rejected 
 					continue // the gateway driver's reload probe, never charged or run-attributed
 				}
 				model := stringValue(attrs[attrRequestModel])
-				in, inOK := intValue(attrs[attrInputTokens])
-				out, outOK := intValue(attrs[attrOutputTokens])
+				// Usage in agentgateway's consistent semantics when the driver logged it
+				// (koinon.*), else the gen_ai attributes (older configs and fixtures).
+				in, inOK := intValue(attrs[gateway.LogFieldInput])
+				if !inOK {
+					in, inOK = intValue(attrs[attrInputTokens])
+				}
+				out, outOK := intValue(attrs[gateway.LogFieldOutput])
+				if !outOK {
+					out, outOK = intValue(attrs[attrOutputTokens])
+				}
+				cacheRead, _ := intValue(attrs[gateway.LogFieldCacheRead])
+				cacheWrite, _ := intValue(attrs[gateway.LogFieldCacheWrite])
+				reasoning, _ := intValue(attrs[gateway.LogFieldReasoning])
+				status, statusOK := intValue(attrs[gateway.LogFieldStatus])
 				cost := decimalValue(attrs[attrCostTotal])
-				if model == "" || (!inOK && !outOK && cost == "") {
+				usage := inOK || outOK || cost != ""
+				// A request the gateway admitted (2xx) that has a model but no usage is an
+				// aborted stream or a provider that reports none: its usage is estimated.
+				admitted := statusOK && status >= 200 && status < 300
+				if model == "" || (!usage && !admitted) {
 					continue // not a charged LLM request
 				}
 				agent := stringValue(attrs[gateway.LogFieldAgent])
@@ -82,8 +98,15 @@ func Decode(req *collogspb.ExportLogsServiceRequest) (entries []Entry, rejected 
 					Model:        model,
 					InputTokens:  in,
 					OutputTokens: out,
-					CostUSD:      cost,
-					Time:         recordTime(lr.GetTimeUnixNano(), lr.GetObservedTimeUnixNano()),
+					InputKnown:   inOK, OutputKnown: outOK,
+					CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite, ReasoningTokens: reasoning,
+					CostUSD: cost, Status: status,
+					RequestBytes: -1, ResponseBytes: -1,
+					Time: recordTime(lr.GetTimeUnixNano(), lr.GetObservedTimeUnixNano()),
+				}
+				e.MaxTokens, _ = intValue(attrs[gateway.LogFieldMaxTokens])
+				if n, ok := intValue(attrs[gateway.LogFieldRequestBytes]); ok && n >= 0 {
+					e.RequestBytes = n
 				}
 				org, name, ok := strings.Cut(agent, "/")
 				e.Agent = gateway.AgentRef{Org: org, Name: name}
@@ -97,7 +120,7 @@ func Decode(req *collogspb.ExportLogsServiceRequest) (entries []Entry, rejected 
 				case e.KeyID == "":
 					reject("missing " + gateway.LogFieldKey)
 					continue
-				case in < 0 || out < 0:
+				case in < 0 || out < 0 || cacheRead < 0 || cacheWrite < 0 || reasoning < 0:
 					reject("negative token counts")
 					continue
 				case attrs[attrCostTotal] != nil && cost == "":

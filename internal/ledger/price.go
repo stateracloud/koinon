@@ -1,0 +1,162 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package ledger
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math/big"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/estimate"
+	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
+)
+
+// FlagThreshold is the relative difference between Koinon's cost and the gateway's above which
+// the price entry is flagged (1%).
+var FlagThreshold = big.NewRat(1, 100)
+
+// priced is what the ledger records for one request.
+type priced struct {
+	inTokens, outTokens        int64
+	cacheRead, cacheWrite      int64
+	reasoning                  int64
+	cost                       money.USD
+	gatewayCost                pgtype.Text
+	ref                        pgtype.Text
+	priced, estimated, flagged bool
+	estimate                   []byte
+	reqBytes, respBytes        pgtype.Int8
+}
+
+// price computes the request's cost from its usage (estimated when missing) and the price valid
+// at its time, and compares it with the gateway's.
+func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID, e Entry) (priced, error) {
+	p := priced{
+		inTokens: e.InputTokens, outTokens: e.OutputTokens,
+		cacheRead: e.CacheReadTokens, cacheWrite: e.CacheWriteTokens, reasoning: e.ReasoningTokens,
+	}
+	if e.RequestBytes >= 0 {
+		p.reqBytes = pgtype.Int8{Int64: e.RequestBytes, Valid: true}
+	}
+	if e.ResponseBytes >= 0 {
+		p.respBytes = pgtype.Int8{Int64: e.ResponseBytes, Valid: true}
+	}
+	var gw money.USD
+	if e.CostUSD != "" {
+		g, err := gatewayCost(e.CostUSD)
+		if err != nil {
+			return p, err
+		}
+		gw = g
+		p.gatewayCost = pgtype.Text{String: g.Numeric(), Valid: true}
+	}
+
+	model, err := prices.Lookup(ctx, q, org, e.Model)
+	if err == nil {
+		var res prices.Resolution
+		res, err = prices.Resolve(ctx, q, org, model, e.Time)
+		if err == nil {
+			return in.priceWith(ctx, q, org, e, p, res, gw)
+		}
+	}
+	if !errors.Is(err, prices.ErrUnpriced) {
+		return p, err
+	}
+	// No Koinon price: the gateway's cost stands in, flagged by having no price version.
+	in.log().Warn("spend ledger: request for a model without a price", "agent", e.Agent.String(), "model", e.Model, "request", e.RequestID)
+	if e.CostUSD != "" {
+		p.cost, p.priced = gw, true
+	}
+	return p, nil
+}
+
+func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.UUID, e Entry, p priced, res prices.Resolution, gw money.USD) (priced, error) {
+	p.ref = pgtype.Text{String: res.Ref, Valid: true}
+	p.priced = true
+	meta := map[string]any{"price_ref": res.Ref}
+	if res.Fallback {
+		meta["price_fallback"] = "no price was valid at the request time; the current one was used"
+	}
+	if !e.InputKnown || !e.OutputKnown {
+		params, err := prices.Calibrated(ctx, q, org, e.Model, res)
+		if err != nil {
+			return p, err
+		}
+		x := estimate.Input{Aborted: !e.OutputKnown, MaxTokens: e.MaxTokens}
+		if e.RequestBytes > 0 {
+			x.RequestBytes = e.RequestBytes
+		}
+		if e.ResponseBytes > 0 {
+			x.ResponseBytes = e.ResponseBytes
+		}
+		if e.InputKnown {
+			x.ReportedInput = &e.InputTokens
+		}
+		if e.OutputKnown {
+			x.ReportedOutput = &e.OutputTokens
+		}
+		r := estimate.Estimate(params, x)
+		p.inTokens, p.outTokens, p.estimated = r.InputTokens, r.OutputTokens, true
+		meta["estimate"] = map[string]any{
+			"method": r.Method, "input_reported": r.InputReported, "output_reported": r.OutputReported,
+			"thinking_unmeasured": r.ThinkingUnmeasured, "ratio_static": r.RatioStatic, "ratio_effective": r.RatioEffective,
+			"learned_p90_tokens_per_byte": r.LearnedP90TokensPerByte, "overhead_tokens": r.OverheadTokens,
+		}
+	}
+	u := pricing.Split(p.inTokens, p.cacheRead, p.cacheWrite, p.outTokens, p.reasoning)
+	_, cost, err := res.Price.Cost(u)
+	if err != nil {
+		return p, fmt.Errorf("price request %s: %w", e.RequestID, err)
+	}
+	p.cost = cost
+	// Cost truth: our cost counts. A real (not estimated) request whose cost the gateway also
+	// logged is compared with it.
+	if !p.estimated && p.gatewayCost.Valid && differs(cost, gw) {
+		p.flagged = true
+		meta["gateway_diff"] = map[string]any{"cost_usd": cost.String(), "gateway_cost_usd": gw.String()}
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return p, err
+	}
+	if p.estimated || p.flagged || res.Fallback {
+		p.estimate = raw
+	}
+	return p, nil
+}
+
+// differs reports |cost - gateway| > 1% of the gateway's cost (any difference when it is 0).
+func differs(cost, gateway money.USD) bool {
+	d := int64(cost - gateway)
+	if d < 0 {
+		d = -d
+	}
+	if gateway == 0 {
+		return d != 0
+	}
+	diff := new(big.Rat).SetInt64(d)
+	limit := new(big.Rat).Mul(FlagThreshold, new(big.Rat).SetInt64(int64(gateway)))
+	return diff.Cmp(limit) > 0
+}
+
+// gatewayCost converts the gateway's decimal total (up to 18 fraction digits) to money, rounding
+// half up at the twelfth digit.
+func gatewayCost(s string) (money.USD, error) {
+	r, ok := new(big.Rat).SetString(s)
+	if !ok || !decimalRE.MatchString(s) {
+		return 0, fmt.Errorf("ledger: invalid gateway cost %q", s)
+	}
+	r.Mul(r, big.NewRat(money.PerUSD, 1))
+	n := new(big.Int).Quo(new(big.Int).Add(new(big.Int).Mul(r.Num(), big.NewInt(2)), r.Denom()), new(big.Int).Mul(r.Denom(), big.NewInt(2)))
+	if !n.IsInt64() {
+		return 0, money.ErrOverflow
+	}
+	return money.USD(n.Int64()), nil
+}

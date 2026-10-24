@@ -451,6 +451,25 @@ const (
 	// id only at debug level, so drivers add one; the ledger is idempotent on it.
 	LogFieldRequest = "koinon.request"
 
+	// LogFieldInput and the fields after it carry the usage in agentgateway's consistent
+	// semantics (llm.inputTokens includes cache reads and writes, llm.outputTokens includes
+	// reasoning), so the ledger prices disjoint buckets whatever the provider's convention.
+	LogFieldInput      = "koinon.in"
+	LogFieldOutput     = "koinon.out"
+	LogFieldCacheRead  = "koinon.cache_read"
+	LogFieldCacheWrite = "koinon.cache_write"
+	LogFieldReasoning  = "koinon.reasoning"
+	// LogFieldStatus is the HTTP status the gateway answered; a 2xx LLM record without usage
+	// is a request whose usage must be estimated (an aborted stream, a provider that
+	// reports none).
+	LogFieldStatus = "koinon.status"
+	// LogFieldMaxTokens is the request's max_tokens, to settle an aborted request that bills
+	// hidden thinking.
+	LogFieldMaxTokens = "koinon.max_tokens"
+	// LogFieldRequestBytes is the request's Content-Length: the byte count the estimate and its
+	// calibration use. Response bytes are not exposed by agentgateway's CEL context.
+	LogFieldRequestBytes = "koinon.req_bytes"
+
 	// ReloadProbeKeyName is the LogFieldKey of the key a driver puts in each
 	// config to detect its reload (standalone.ReloadProbeKey). Its requests
 	// never reach a model; the spend ledger drops them.
