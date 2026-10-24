@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const completeMigratedPrice = `-- name: CompleteMigratedPrice :execrows
+UPDATE price_overrides SET entry = $1
+WHERE org_id = $2 AND id = $3 AND created_by = 'migration 00014' AND entry->>'note' LIKE 'migrated:pending:%'
+`
+
+type CompleteMigratedPriceParams struct {
+	Entry []byte
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// Fills a migrated price in place, once.
+func (q *Queries) CompleteMigratedPrice(ctx context.Context, arg CompleteMigratedPriceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeMigratedPrice, arg.Entry, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getDefaultPriceList = `-- name: GetDefaultPriceList :one
 SELECT version, seq, entries, loaded_at FROM default_price_lists
 WHERE version = $1
@@ -159,6 +179,47 @@ func (q *Queries) ListDefaultPriceLists(ctx context.Context) ([]DefaultPriceList
 			&i.Seq,
 			&i.Entries,
 			&i.LoadedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingMigratedPrices = `-- name: ListPendingMigratedPrices :many
+SELECT org_id, id, name, entry, valid_from FROM price_overrides
+WHERE created_by = 'migration 00014' AND entry->>'note' LIKE 'migrated:pending:%'
+`
+
+type ListPendingMigratedPricesRow struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	Name      string
+	Entry     []byte
+	ValidFrom pgtype.Timestamptz
+}
+
+// Org prices that migration 00014 made from model rates and that still wait for the settings of
+// the matching default entry, in every org (startup: prices.CompleteMigrated).
+func (q *Queries) ListPendingMigratedPrices(ctx context.Context) ([]ListPendingMigratedPricesRow, error) {
+	rows, err := q.db.Query(ctx, listPendingMigratedPrices)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingMigratedPricesRow
+	for rows.Next() {
+		var i ListPendingMigratedPricesRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.Name,
+			&i.Entry,
+			&i.ValidFrom,
 		); err != nil {
 			return nil, err
 		}

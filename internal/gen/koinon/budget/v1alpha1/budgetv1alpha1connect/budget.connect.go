@@ -28,6 +28,9 @@ const (
 const (
 	// BudgetServiceGetOrgBudgetProcedure is the procedure name of the BudgetService's GetOrgBudget RPC.
 	BudgetServiceGetOrgBudgetProcedure = "/koinon.budget.v1alpha1.BudgetService/GetOrgBudget"
+	// BudgetServiceListOrgBudgetsProcedure is the procedure name of the BudgetService's ListOrgBudgets
+	// RPC.
+	BudgetServiceListOrgBudgetsProcedure = "/koinon.budget.v1alpha1.BudgetService/ListOrgBudgets"
 	// BudgetServiceSetMonthlyCapProcedure is the procedure name of the BudgetService's SetMonthlyCap
 	// RPC.
 	BudgetServiceSetMonthlyCapProcedure = "/koinon.budget.v1alpha1.BudgetService/SetMonthlyCap"
@@ -57,6 +60,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1alpha1.File_koinon_budget_v1alpha1_budget_proto.Services().ByName("BudgetService").Methods().ByName("GetOrgBudget"),
 			Procedure:        BudgetServiceGetOrgBudgetProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	budgetServiceListOrgBudgetsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_budget_proto.Services().ByName("BudgetService").Methods().ByName("ListOrgBudgets"),
+			Procedure:        BudgetServiceListOrgBudgetsProcedure,
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
@@ -118,6 +129,9 @@ var (
 type BudgetServiceClient interface {
 	// GetOrgBudget returns the cap, the platform ceiling and this month's spend.
 	GetOrgBudget(context.Context, *v1alpha1.GetOrgBudgetRequest) (*v1alpha1.GetOrgBudgetResponse, error)
+	// ListOrgBudgets returns every org's cap, platform ceiling and spend this month. Platform
+	// admins only.
+	ListOrgBudgets(context.Context, *v1alpha1.ListOrgBudgetsRequest) (*v1alpha1.ListOrgBudgetsResponse, error)
 	// SetMonthlyCap sets the cap, or clears it with an empty amount. It cannot exceed the ceiling.
 	SetMonthlyCap(context.Context, *v1alpha1.SetMonthlyCapRequest) (*v1alpha1.SetMonthlyCapResponse, error)
 	// SetPlatformCeiling sets the org's ceiling, or clears it with an empty amount. Platform
@@ -149,6 +163,9 @@ func NewBudgetServiceClient(client *connect.Client) BudgetServiceClient {
 type BudgetServiceHandler interface {
 	// GetOrgBudget returns the cap, the platform ceiling and this month's spend.
 	GetOrgBudget(context.Context, *v1alpha1.GetOrgBudgetRequest) (*v1alpha1.GetOrgBudgetResponse, error)
+	// ListOrgBudgets returns every org's cap, platform ceiling and spend this month. Platform
+	// admins only.
+	ListOrgBudgets(context.Context, *v1alpha1.ListOrgBudgetsRequest) (*v1alpha1.ListOrgBudgetsResponse, error)
 	// SetMonthlyCap sets the cap, or clears it with an empty amount. It cannot exceed the ceiling.
 	SetMonthlyCap(context.Context, *v1alpha1.SetMonthlyCapRequest) (*v1alpha1.SetMonthlyCapResponse, error)
 	// SetPlatformCeiling sets the org's ceiling, or clears it with an empty amount. Platform
@@ -176,6 +193,7 @@ func RegisterBudgetServiceHandler(server *connect.Server, svc BudgetServiceHandl
 	adapter := budgetServiceHandler{svc: svc}
 	server.Register(
 		connect.Method{Spec: budgetServiceGetOrgBudgetSpec(), Handler: adapter.getOrgBudget},
+		connect.Method{Spec: budgetServiceListOrgBudgetsSpec(), Handler: adapter.listOrgBudgets},
 		connect.Method{Spec: budgetServiceSetMonthlyCapSpec(), Handler: adapter.setMonthlyCap},
 		connect.Method{Spec: budgetServiceSetPlatformCeilingSpec(), Handler: adapter.setPlatformCeiling},
 		connect.Method{Spec: budgetServiceGetAgentBudgetSpec(), Handler: adapter.getAgentBudget},
@@ -191,6 +209,10 @@ type UnimplementedBudgetServiceHandler struct{}
 
 func (UnimplementedBudgetServiceHandler) GetOrgBudget(context.Context, *v1alpha1.GetOrgBudgetRequest) (*v1alpha1.GetOrgBudgetResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.GetOrgBudget is not implemented")
+}
+
+func (UnimplementedBudgetServiceHandler) ListOrgBudgets(context.Context, *v1alpha1.ListOrgBudgetsRequest) (*v1alpha1.ListOrgBudgetsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.ListOrgBudgets is not implemented")
 }
 
 func (UnimplementedBudgetServiceHandler) SetMonthlyCap(context.Context, *v1alpha1.SetMonthlyCapRequest) (*v1alpha1.SetMonthlyCapResponse, error) {
@@ -228,6 +250,14 @@ type budgetServiceClient struct {
 func (c *budgetServiceClient) GetOrgBudget(ctx context.Context, req *v1alpha1.GetOrgBudgetRequest) (*v1alpha1.GetOrgBudgetResponse, error) {
 	var res v1alpha1.GetOrgBudgetResponse
 	if err := c.client.CallUnary(ctx, budgetServiceGetOrgBudgetSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *budgetServiceClient) ListOrgBudgets(ctx context.Context, req *v1alpha1.ListOrgBudgetsRequest) (*v1alpha1.ListOrgBudgetsResponse, error) {
+	var res v1alpha1.ListOrgBudgetsResponse
+	if err := c.client.CallUnary(ctx, budgetServiceListOrgBudgetsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -297,6 +327,18 @@ func (h budgetServiceHandler) getOrgBudget(ctx context.Context, _ connect.Spec, 
 		return err
 	}
 	res, err := h.svc.GetOrgBudget(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h budgetServiceHandler) listOrgBudgets(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListOrgBudgetsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListOrgBudgets(ctx, &req)
 	if err != nil {
 		return err
 	}

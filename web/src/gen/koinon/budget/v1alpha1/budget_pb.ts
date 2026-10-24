@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/budget/v1alpha1/budget.proto.
  */
 export const file_koinon_budget_v1alpha1_budget: GenFile = /*@__PURE__*/
-  fileDesc("CiNrb2lub24vYnVkZ2V0L3YxYWxwaGExL2J1ZGdldC5wcm90bxIWa29pbm9uLmJ1ZGdldC52MWFscGhhMSKzAQoJT3JnQnVkZ2V0EhcKD21vbnRobHlfY2FwX3VzZBgBIAEoCRIcChRwbGF0Zm9ybV9jZWlsaW5nX3VzZBgCIAEoCRIcChRzcGVudF90aGlzX21vbnRoX3VzZBgDIAEoCRIvCgttb250aF9zdGFydBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASIAoYZXN0aW1hdGVkX3RoaXNfbW9udGhfdXNkGAUgASgJIiUKE0dldE9yZ0J1ZGdldFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJIkkKFEdldE9yZ0J1ZGdldFJlc3BvbnNlEjEKBmJ1ZGdldBgBIAEoCzIhLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuT3JnQnVkZ2V0Ij8KFFNldE1vbnRobHlDYXBSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIXCg9tb250aGx5X2NhcF91c2QYAiABKAkiSgoVU2V0TW9udGhseUNhcFJlc3BvbnNlEjEKBmJ1ZGdldBgBIAEoCzIhLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuT3JnQnVkZ2V0IkkKGVNldFBsYXRmb3JtQ2VpbGluZ1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhwKFHBsYXRmb3JtX2NlaWxpbmdfdXNkGAIgASgJIk8KGlNldFBsYXRmb3JtQ2VpbGluZ1Jlc3BvbnNlEjEKBmJ1ZGdldBgBIAEoCzIhLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuT3JnQnVkZ2V0IrIBCgtBZ2VudEJ1ZGdldBIQCghhZ2VudF9pZBgBIAEoCRIXCg9kYWlseV9saW1pdF91c2QYAiABKAkSFwoPc3BlbnRfdG9kYXlfdXNkGAMgASgJEi0KCWRheV9zdGFydBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKYWdlbnRfbmFtZRgFIAEoCRIcChR0ZW1wbGF0ZV9kZWZhdWx0X3VzZBgGIAEoCSI5ChVHZXRBZ2VudEJ1ZGdldFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIk0KFkdldEFnZW50QnVkZ2V0UmVzcG9uc2USMwoGYnVkZ2V0GAEgASgLMiMua29pbm9uLmJ1ZGdldC52MWFscGhhMS5BZ2VudEJ1ZGdldCIpChdMaXN0QWdlbnRCdWRnZXRzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkiUAoYTGlzdEFnZW50QnVkZ2V0c1Jlc3BvbnNlEjQKB2J1ZGdldHMYASADKAsyIy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkFnZW50QnVkZ2V0IlIKFVNldEFnZW50QnVkZ2V0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSFwoPZGFpbHlfbGltaXRfdXNkGAMgASgJIk0KFlNldEFnZW50QnVkZ2V0UmVzcG9uc2USMwoGYnVkZ2V0GAEgASgLMiMua29pbm9uLmJ1ZGdldC52MWFscGhhMS5BZ2VudEJ1ZGdldCKRAgoMTm90aWZpY2F0aW9uEgoKAmlkGAEgASgJEgwKBGtpbmQYAiABKAkSDQoFbGV2ZWwYAyABKAkSEQoJdGhyZXNob2xkGAQgASgFEhEKCWxpbWl0X3VzZBgFIAEoCRIRCglzcGVudF91c2QYBiABKAkSEAoIYWdlbnRfaWQYByABKAkSMAoMd2luZG93X3N0YXJ0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpjcmVhdGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIrCgdyZWFkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCI/ChhMaXN0Tm90aWZpY2F0aW9uc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC21heF9yZXN1bHRzGAIgASgFIlgKGUxpc3ROb3RpZmljYXRpb25zUmVzcG9uc2USOwoNbm90aWZpY2F0aW9ucxgBIAMoCzIkLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTm90aWZpY2F0aW9uIkYKG01hcmtOb3RpZmljYXRpb25SZWFkUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFwoPbm90aWZpY2F0aW9uX2lkGAIgASgJIh4KHE1hcmtOb3RpZmljYXRpb25SZWFkUmVzcG9uc2Uy0AcKDUJ1ZGdldFNlcnZpY2USbgoMR2V0T3JnQnVkZ2V0Eisua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRPcmdCdWRnZXRSZXF1ZXN0Giwua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRPcmdCdWRnZXRSZXNwb25zZSIDkAIBEmwKDVNldE1vbnRobHlDYXASLC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlNldE1vbnRobHlDYXBSZXF1ZXN0Gi0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRNb250aGx5Q2FwUmVzcG9uc2USewoSU2V0UGxhdGZvcm1DZWlsaW5nEjEua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRQbGF0Zm9ybUNlaWxpbmdSZXF1ZXN0GjIua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRQbGF0Zm9ybUNlaWxpbmdSZXNwb25zZRJ0Cg5HZXRBZ2VudEJ1ZGdldBItLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuR2V0QWdlbnRCdWRnZXRSZXF1ZXN0Gi4ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRBZ2VudEJ1ZGdldFJlc3BvbnNlIgOQAgESegoQTGlzdEFnZW50QnVkZ2V0cxIvLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTGlzdEFnZW50QnVkZ2V0c1JlcXVlc3QaMC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RBZ2VudEJ1ZGdldHNSZXNwb25zZSIDkAIBEm8KDlNldEFnZW50QnVkZ2V0Ei0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRBZ2VudEJ1ZGdldFJlcXVlc3QaLi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLlNldEFnZW50QnVkZ2V0UmVzcG9uc2USfQoRTGlzdE5vdGlmaWNhdGlvbnMSMC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3ROb3RpZmljYXRpb25zUmVxdWVzdBoxLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTGlzdE5vdGlmaWNhdGlvbnNSZXNwb25zZSIDkAIBEoEBChRNYXJrTm90aWZpY2F0aW9uUmVhZBIzLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTWFya05vdGlmaWNhdGlvblJlYWRSZXF1ZXN0GjQua29pbm9uLmJ1ZGdldC52MWFscGhhMS5NYXJrTm90aWZpY2F0aW9uUmVhZFJlc3BvbnNlQlNaUWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL2J1ZGdldC92MWFscGhhMTtidWRnZXR2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("CiNrb2lub24vYnVkZ2V0L3YxYWxwaGExL2J1ZGdldC5wcm90bxIWa29pbm9uLmJ1ZGdldC52MWFscGhhMSKzAQoJT3JnQnVkZ2V0EhcKD21vbnRobHlfY2FwX3VzZBgBIAEoCRIcChRwbGF0Zm9ybV9jZWlsaW5nX3VzZBgCIAEoCRIcChRzcGVudF90aGlzX21vbnRoX3VzZBgDIAEoCRIvCgttb250aF9zdGFydBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASIAoYZXN0aW1hdGVkX3RoaXNfbW9udGhfdXNkGAUgASgJIhcKFUxpc3RPcmdCdWRnZXRzUmVxdWVzdCKbAQoQT3JnQnVkZ2V0U3VtbWFyeRIOCgZvcmdfaWQYASABKAkSEAoIb3JnX3NsdWcYAiABKAkSEAoIb3JnX25hbWUYAyABKAkSFwoPbW9udGhseV9jYXBfdXNkGAQgASgJEhwKFHBsYXRmb3JtX2NlaWxpbmdfdXNkGAUgASgJEhwKFHNwZW50X3RoaXNfbW9udGhfdXNkGAYgASgJIoEBChZMaXN0T3JnQnVkZ2V0c1Jlc3BvbnNlEjYKBG9yZ3MYASADKAsyKC5rb2lub24uYnVkZ2V0LnYxYWxwaGExLk9yZ0J1ZGdldFN1bW1hcnkSLwoLbW9udGhfc3RhcnQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIiUKE0dldE9yZ0J1ZGdldFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJIkkKFEdldE9yZ0J1ZGdldFJlc3BvbnNlEjEKBmJ1ZGdldBgBIAEoCzIhLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuT3JnQnVkZ2V0Ij8KFFNldE1vbnRobHlDYXBSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIXCg9tb250aGx5X2NhcF91c2QYAiABKAkiSgoVU2V0TW9udGhseUNhcFJlc3BvbnNlEjEKBmJ1ZGdldBgBIAEoCzIhLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuT3JnQnVkZ2V0IkkKGVNldFBsYXRmb3JtQ2VpbGluZ1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhwKFHBsYXRmb3JtX2NlaWxpbmdfdXNkGAIgASgJIk8KGlNldFBsYXRmb3JtQ2VpbGluZ1Jlc3BvbnNlEjEKBmJ1ZGdldBgBIAEoCzIhLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuT3JnQnVkZ2V0IrIBCgtBZ2VudEJ1ZGdldBIQCghhZ2VudF9pZBgBIAEoCRIXCg9kYWlseV9saW1pdF91c2QYAiABKAkSFwoPc3BlbnRfdG9kYXlfdXNkGAMgASgJEi0KCWRheV9zdGFydBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKYWdlbnRfbmFtZRgFIAEoCRIcChR0ZW1wbGF0ZV9kZWZhdWx0X3VzZBgGIAEoCSI5ChVHZXRBZ2VudEJ1ZGdldFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIk0KFkdldEFnZW50QnVkZ2V0UmVzcG9uc2USMwoGYnVkZ2V0GAEgASgLMiMua29pbm9uLmJ1ZGdldC52MWFscGhhMS5BZ2VudEJ1ZGdldCIpChdMaXN0QWdlbnRCdWRnZXRzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkiUAoYTGlzdEFnZW50QnVkZ2V0c1Jlc3BvbnNlEjQKB2J1ZGdldHMYASADKAsyIy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkFnZW50QnVkZ2V0IlIKFVNldEFnZW50QnVkZ2V0UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSFwoPZGFpbHlfbGltaXRfdXNkGAMgASgJIk0KFlNldEFnZW50QnVkZ2V0UmVzcG9uc2USMwoGYnVkZ2V0GAEgASgLMiMua29pbm9uLmJ1ZGdldC52MWFscGhhMS5BZ2VudEJ1ZGdldCKRAgoMTm90aWZpY2F0aW9uEgoKAmlkGAEgASgJEgwKBGtpbmQYAiABKAkSDQoFbGV2ZWwYAyABKAkSEQoJdGhyZXNob2xkGAQgASgFEhEKCWxpbWl0X3VzZBgFIAEoCRIRCglzcGVudF91c2QYBiABKAkSEAoIYWdlbnRfaWQYByABKAkSMAoMd2luZG93X3N0YXJ0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpjcmVhdGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIrCgdyZWFkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCI/ChhMaXN0Tm90aWZpY2F0aW9uc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC21heF9yZXN1bHRzGAIgASgFIlgKGUxpc3ROb3RpZmljYXRpb25zUmVzcG9uc2USOwoNbm90aWZpY2F0aW9ucxgBIAMoCzIkLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTm90aWZpY2F0aW9uIkYKG01hcmtOb3RpZmljYXRpb25SZWFkUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFwoPbm90aWZpY2F0aW9uX2lkGAIgASgJIh4KHE1hcmtOb3RpZmljYXRpb25SZWFkUmVzcG9uc2UyxggKDUJ1ZGdldFNlcnZpY2USbgoMR2V0T3JnQnVkZ2V0Eisua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRPcmdCdWRnZXRSZXF1ZXN0Giwua29pbm9uLmJ1ZGdldC52MWFscGhhMS5HZXRPcmdCdWRnZXRSZXNwb25zZSIDkAIBEnQKDkxpc3RPcmdCdWRnZXRzEi0ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0T3JnQnVkZ2V0c1JlcXVlc3QaLi5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RPcmdCdWRnZXRzUmVzcG9uc2UiA5ACARJsCg1TZXRNb250aGx5Q2FwEiwua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRNb250aGx5Q2FwUmVxdWVzdBotLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0TW9udGhseUNhcFJlc3BvbnNlEnsKElNldFBsYXRmb3JtQ2VpbGluZxIxLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0UGxhdGZvcm1DZWlsaW5nUmVxdWVzdBoyLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0UGxhdGZvcm1DZWlsaW5nUmVzcG9uc2USdAoOR2V0QWdlbnRCdWRnZXQSLS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkdldEFnZW50QnVkZ2V0UmVxdWVzdBouLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuR2V0QWdlbnRCdWRnZXRSZXNwb25zZSIDkAIBEnoKEExpc3RBZ2VudEJ1ZGdldHMSLy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3RBZ2VudEJ1ZGdldHNSZXF1ZXN0GjAua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0QWdlbnRCdWRnZXRzUmVzcG9uc2UiA5ACARJvCg5TZXRBZ2VudEJ1ZGdldBItLmtvaW5vbi5idWRnZXQudjFhbHBoYTEuU2V0QWdlbnRCdWRnZXRSZXF1ZXN0Gi4ua29pbm9uLmJ1ZGdldC52MWFscGhhMS5TZXRBZ2VudEJ1ZGdldFJlc3BvbnNlEn0KEUxpc3ROb3RpZmljYXRpb25zEjAua29pbm9uLmJ1ZGdldC52MWFscGhhMS5MaXN0Tm90aWZpY2F0aW9uc1JlcXVlc3QaMS5rb2lub24uYnVkZ2V0LnYxYWxwaGExLkxpc3ROb3RpZmljYXRpb25zUmVzcG9uc2UiA5ACARKBAQoUTWFya05vdGlmaWNhdGlvblJlYWQSMy5rb2lub24uYnVkZ2V0LnYxYWxwaGExLk1hcmtOb3RpZmljYXRpb25SZWFkUmVxdWVzdBo0LmtvaW5vbi5idWRnZXQudjFhbHBoYTEuTWFya05vdGlmaWNhdGlvblJlYWRSZXNwb25zZUJTWlFnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9idWRnZXQvdjFhbHBoYTE7YnVkZ2V0djFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message koinon.budget.v1alpha1.OrgBudget
@@ -61,6 +61,85 @@ export const OrgBudgetSchema: GenMessage<OrgBudget> = /*@__PURE__*/
   messageDesc(file_koinon_budget_v1alpha1_budget, 0);
 
 /**
+ * @generated from message koinon.budget.v1alpha1.ListOrgBudgetsRequest
+ */
+export type ListOrgBudgetsRequest = Message<"koinon.budget.v1alpha1.ListOrgBudgetsRequest"> & {
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ListOrgBudgetsRequest.
+ * Use `create(ListOrgBudgetsRequestSchema)` to create a new message.
+ */
+export const ListOrgBudgetsRequestSchema: GenMessage<ListOrgBudgetsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 1);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.OrgBudgetSummary
+ */
+export type OrgBudgetSummary = Message<"koinon.budget.v1alpha1.OrgBudgetSummary"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string org_slug = 2;
+   */
+  orgSlug: string;
+
+  /**
+   * @generated from field: string org_name = 3;
+   */
+  orgName: string;
+
+  /**
+   * monthly_cap_usd and platform_ceiling_usd are empty when unset.
+   *
+   * @generated from field: string monthly_cap_usd = 4;
+   */
+  monthlyCapUsd: string;
+
+  /**
+   * @generated from field: string platform_ceiling_usd = 5;
+   */
+  platformCeilingUsd: string;
+
+  /**
+   * @generated from field: string spent_this_month_usd = 6;
+   */
+  spentThisMonthUsd: string;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.OrgBudgetSummary.
+ * Use `create(OrgBudgetSummarySchema)` to create a new message.
+ */
+export const OrgBudgetSummarySchema: GenMessage<OrgBudgetSummary> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 2);
+
+/**
+ * @generated from message koinon.budget.v1alpha1.ListOrgBudgetsResponse
+ */
+export type ListOrgBudgetsResponse = Message<"koinon.budget.v1alpha1.ListOrgBudgetsResponse"> & {
+  /**
+   * @generated from field: repeated koinon.budget.v1alpha1.OrgBudgetSummary orgs = 1;
+   */
+  orgs: OrgBudgetSummary[];
+
+  /**
+   * @generated from field: google.protobuf.Timestamp month_start = 2;
+   */
+  monthStart?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message koinon.budget.v1alpha1.ListOrgBudgetsResponse.
+ * Use `create(ListOrgBudgetsResponseSchema)` to create a new message.
+ */
+export const ListOrgBudgetsResponseSchema: GenMessage<ListOrgBudgetsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_budget_v1alpha1_budget, 3);
+
+/**
  * @generated from message koinon.budget.v1alpha1.GetOrgBudgetRequest
  */
 export type GetOrgBudgetRequest = Message<"koinon.budget.v1alpha1.GetOrgBudgetRequest"> & {
@@ -75,7 +154,7 @@ export type GetOrgBudgetRequest = Message<"koinon.budget.v1alpha1.GetOrgBudgetRe
  * Use `create(GetOrgBudgetRequestSchema)` to create a new message.
  */
 export const GetOrgBudgetRequestSchema: GenMessage<GetOrgBudgetRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 1);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 4);
 
 /**
  * @generated from message koinon.budget.v1alpha1.GetOrgBudgetResponse
@@ -92,7 +171,7 @@ export type GetOrgBudgetResponse = Message<"koinon.budget.v1alpha1.GetOrgBudgetR
  * Use `create(GetOrgBudgetResponseSchema)` to create a new message.
  */
 export const GetOrgBudgetResponseSchema: GenMessage<GetOrgBudgetResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 2);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 5);
 
 /**
  * @generated from message koinon.budget.v1alpha1.SetMonthlyCapRequest
@@ -114,7 +193,7 @@ export type SetMonthlyCapRequest = Message<"koinon.budget.v1alpha1.SetMonthlyCap
  * Use `create(SetMonthlyCapRequestSchema)` to create a new message.
  */
 export const SetMonthlyCapRequestSchema: GenMessage<SetMonthlyCapRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 3);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 6);
 
 /**
  * @generated from message koinon.budget.v1alpha1.SetMonthlyCapResponse
@@ -131,7 +210,7 @@ export type SetMonthlyCapResponse = Message<"koinon.budget.v1alpha1.SetMonthlyCa
  * Use `create(SetMonthlyCapResponseSchema)` to create a new message.
  */
 export const SetMonthlyCapResponseSchema: GenMessage<SetMonthlyCapResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 4);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 7);
 
 /**
  * @generated from message koinon.budget.v1alpha1.SetPlatformCeilingRequest
@@ -153,7 +232,7 @@ export type SetPlatformCeilingRequest = Message<"koinon.budget.v1alpha1.SetPlatf
  * Use `create(SetPlatformCeilingRequestSchema)` to create a new message.
  */
 export const SetPlatformCeilingRequestSchema: GenMessage<SetPlatformCeilingRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 5);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 8);
 
 /**
  * @generated from message koinon.budget.v1alpha1.SetPlatformCeilingResponse
@@ -170,7 +249,7 @@ export type SetPlatformCeilingResponse = Message<"koinon.budget.v1alpha1.SetPlat
  * Use `create(SetPlatformCeilingResponseSchema)` to create a new message.
  */
 export const SetPlatformCeilingResponseSchema: GenMessage<SetPlatformCeilingResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 6);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 9);
 
 /**
  * @generated from message koinon.budget.v1alpha1.AgentBudget
@@ -215,7 +294,7 @@ export type AgentBudget = Message<"koinon.budget.v1alpha1.AgentBudget"> & {
  * Use `create(AgentBudgetSchema)` to create a new message.
  */
 export const AgentBudgetSchema: GenMessage<AgentBudget> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 7);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 10);
 
 /**
  * @generated from message koinon.budget.v1alpha1.GetAgentBudgetRequest
@@ -237,7 +316,7 @@ export type GetAgentBudgetRequest = Message<"koinon.budget.v1alpha1.GetAgentBudg
  * Use `create(GetAgentBudgetRequestSchema)` to create a new message.
  */
 export const GetAgentBudgetRequestSchema: GenMessage<GetAgentBudgetRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 8);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 11);
 
 /**
  * @generated from message koinon.budget.v1alpha1.GetAgentBudgetResponse
@@ -254,7 +333,7 @@ export type GetAgentBudgetResponse = Message<"koinon.budget.v1alpha1.GetAgentBud
  * Use `create(GetAgentBudgetResponseSchema)` to create a new message.
  */
 export const GetAgentBudgetResponseSchema: GenMessage<GetAgentBudgetResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 9);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 12);
 
 /**
  * @generated from message koinon.budget.v1alpha1.ListAgentBudgetsRequest
@@ -271,7 +350,7 @@ export type ListAgentBudgetsRequest = Message<"koinon.budget.v1alpha1.ListAgentB
  * Use `create(ListAgentBudgetsRequestSchema)` to create a new message.
  */
 export const ListAgentBudgetsRequestSchema: GenMessage<ListAgentBudgetsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 10);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 13);
 
 /**
  * @generated from message koinon.budget.v1alpha1.ListAgentBudgetsResponse
@@ -288,7 +367,7 @@ export type ListAgentBudgetsResponse = Message<"koinon.budget.v1alpha1.ListAgent
  * Use `create(ListAgentBudgetsResponseSchema)` to create a new message.
  */
 export const ListAgentBudgetsResponseSchema: GenMessage<ListAgentBudgetsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 11);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 14);
 
 /**
  * @generated from message koinon.budget.v1alpha1.SetAgentBudgetRequest
@@ -315,7 +394,7 @@ export type SetAgentBudgetRequest = Message<"koinon.budget.v1alpha1.SetAgentBudg
  * Use `create(SetAgentBudgetRequestSchema)` to create a new message.
  */
 export const SetAgentBudgetRequestSchema: GenMessage<SetAgentBudgetRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 12);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 15);
 
 /**
  * @generated from message koinon.budget.v1alpha1.SetAgentBudgetResponse
@@ -332,7 +411,7 @@ export type SetAgentBudgetResponse = Message<"koinon.budget.v1alpha1.SetAgentBud
  * Use `create(SetAgentBudgetResponseSchema)` to create a new message.
  */
 export const SetAgentBudgetResponseSchema: GenMessage<SetAgentBudgetResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 13);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 16);
 
 /**
  * @generated from message koinon.budget.v1alpha1.Notification
@@ -404,7 +483,7 @@ export type Notification = Message<"koinon.budget.v1alpha1.Notification"> & {
  * Use `create(NotificationSchema)` to create a new message.
  */
 export const NotificationSchema: GenMessage<Notification> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 14);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 17);
 
 /**
  * @generated from message koinon.budget.v1alpha1.ListNotificationsRequest
@@ -428,7 +507,7 @@ export type ListNotificationsRequest = Message<"koinon.budget.v1alpha1.ListNotif
  * Use `create(ListNotificationsRequestSchema)` to create a new message.
  */
 export const ListNotificationsRequestSchema: GenMessage<ListNotificationsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 15);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 18);
 
 /**
  * @generated from message koinon.budget.v1alpha1.ListNotificationsResponse
@@ -445,7 +524,7 @@ export type ListNotificationsResponse = Message<"koinon.budget.v1alpha1.ListNoti
  * Use `create(ListNotificationsResponseSchema)` to create a new message.
  */
 export const ListNotificationsResponseSchema: GenMessage<ListNotificationsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 16);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 19);
 
 /**
  * @generated from message koinon.budget.v1alpha1.MarkNotificationReadRequest
@@ -467,7 +546,7 @@ export type MarkNotificationReadRequest = Message<"koinon.budget.v1alpha1.MarkNo
  * Use `create(MarkNotificationReadRequestSchema)` to create a new message.
  */
 export const MarkNotificationReadRequestSchema: GenMessage<MarkNotificationReadRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 17);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 20);
 
 /**
  * @generated from message koinon.budget.v1alpha1.MarkNotificationReadResponse
@@ -480,7 +559,7 @@ export type MarkNotificationReadResponse = Message<"koinon.budget.v1alpha1.MarkN
  * Use `create(MarkNotificationReadResponseSchema)` to create a new message.
  */
 export const MarkNotificationReadResponseSchema: GenMessage<MarkNotificationReadResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_budget_v1alpha1_budget, 18);
+  messageDesc(file_koinon_budget_v1alpha1_budget, 21);
 
 /**
  * BudgetService sets an org's monthly cap and its agents' daily limits and lists the in-app
@@ -500,6 +579,17 @@ export const BudgetService: GenService<{
     methodKind: "unary";
     input: typeof GetOrgBudgetRequestSchema;
     output: typeof GetOrgBudgetResponseSchema;
+  },
+  /**
+   * ListOrgBudgets returns every org's cap, platform ceiling and spend this month. Platform
+   * admins only.
+   *
+   * @generated from rpc koinon.budget.v1alpha1.BudgetService.ListOrgBudgets
+   */
+  listOrgBudgets: {
+    methodKind: "unary";
+    input: typeof ListOrgBudgetsRequestSchema;
+    output: typeof ListOrgBudgetsResponseSchema;
   },
   /**
    * SetMonthlyCap sets the cap, or clears it with an empty amount. It cannot exceed the ceiling.

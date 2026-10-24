@@ -18,6 +18,12 @@ service BudgetService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // ListOrgBudgets returns every org's cap, platform ceiling and spend this month. Platform
+  // admins only.
+  rpc ListOrgBudgets(ListOrgBudgetsRequest) returns (ListOrgBudgetsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // SetMonthlyCap sets the cap, or clears it with an empty amount. It cannot exceed the ceiling.
   rpc SetMonthlyCap(SetMonthlyCapRequest) returns (SetMonthlyCapResponse);
 
@@ -60,6 +66,23 @@ message OrgBudget {
   google.protobuf.Timestamp month_start = 4;
   // estimated_this_month_usd is the part of the spend that came from estimated usage.
   string estimated_this_month_usd = 5;
+}
+
+message ListOrgBudgetsRequest {}
+
+message OrgBudgetSummary {
+  string org_id = 1;
+  string org_slug = 2;
+  string org_name = 3;
+  // monthly_cap_usd and platform_ceiling_usd are empty when unset.
+  string monthly_cap_usd = 4;
+  string platform_ceiling_usd = 5;
+  string spent_this_month_usd = 6;
+}
+
+message ListOrgBudgetsResponse {
+  repeated OrgBudgetSummary orgs = 1;
+  google.protobuf.Timestamp month_start = 2;
 }
 
 message GetOrgBudgetRequest {

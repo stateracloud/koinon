@@ -175,7 +175,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 			}
 			m := gateway.Model{Name: row.ModelName, Guard: row.Guard}
 			// The price valid now: the org's price entries, else the default list (plan item PV2).
-			// A model with no price is served unpriced when the gateway can price it.
+			// A model with no price is not served.
 			pm := prices.Model{ID: row.ModelID.String(), Name: row.ModelName, ProviderType: row.ProviderType}
 			var badPrice *prices.BadPriceError
 			switch res, err := prices.Resolve(ctx, r.q, org.ID, pm, r.cfg.Now()); {

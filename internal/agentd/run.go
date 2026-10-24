@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/prices"
 )
 
 // How a driven run ends, besides success (nil).
@@ -310,12 +311,17 @@ func (r *runner) execute(ctx context.Context) error {
 		if err != nil {
 			return r.dbErr(ctx, "load the org's models", err)
 		}
-		if len(served) > 0 {
-			model = served[0].ModelName
+		for _, m := range served {
+			// Only a priced model is served (the gateway answers 404 for the rest).
+			pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType}
+			if _, err := prices.Resolve(fctx, r.q, r.run.OrgID, pm, time.Now()); err == nil {
+				model = m.ModelName
+				break
+			}
 		}
 	}
 	if model == "" {
-		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model"}
+		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
 	}
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
 	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp"})
