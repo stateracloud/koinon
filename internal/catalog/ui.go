@@ -219,20 +219,23 @@ type ModelInput struct {
 	ProviderID string
 	Name       string
 	Guard      bool
-	// Rates are USD per million tokens. A model without them is not served (ADR 0041).
+	// Rates are refused: a model's price is an org price entry now (ADR 0056).
 	Rates *Rates
 }
 
 // ModelPatch changes a model; nil fields stay.
 type ModelPatch struct {
 	Guard *bool
-	// Rates replaces the rates; ClearRates removes them.
+	// Rates and ClearRates are refused, as in ModelInput.
 	Rates      *Rates
 	ClearRates bool
 }
 
 // CreateModel adds a model to a provider entered by a person.
 func (s *Service) CreateModel(ctx context.Context, org pgtype.UUID, actor audit.Actor, creator pgtype.UUID, in ModelInput) (Model, error) {
+	if in.Rates != nil {
+		return Model{}, invalid(ratesRemoved)
+	}
 	pid, err := parseID(in.ProviderID)
 	if err != nil {
 		return Model{}, err
@@ -250,17 +253,16 @@ func (s *Service) CreateModel(ctx context.Context, org pgtype.UUID, actor audit.
 		if prov.Source != store.ConfigSourceUi {
 			return readOnly(prov.ManagedBySecret.String)
 		}
-		if err := ValidateModel(in.Name, in.Guard, in.Rates, prov.Type); err != nil {
+		if err := ValidateModel(in.Name, in.Guard, prov.Type); err != nil {
 			return err
 		}
-		inR, outR, cacheR := rateParams(in.Rates)
 		reason := pgtype.Text{}
 		if prov.DisabledReason.Valid {
 			reason = pgtype.Text{String: ReasonProviderDisabled, Valid: true}
 		}
 		row, err = q.CreateModel(ctx, store.CreateModelParams{
 			OrgID: org, ID: id, ProviderID: pid, Name: in.Name, Guard: in.Guard,
-			InputRate: inR, OutputRate: outR, CacheReadRate: cacheR, Source: store.ConfigSourceUi,
+			Source:         store.ConfigSourceUi,
 			DisabledReason: reason, CreatedBy: creator,
 		})
 		if err != nil {
@@ -278,6 +280,9 @@ func (s *Service) CreateModel(ctx context.Context, org pgtype.UUID, actor audit.
 
 // UpdateModel changes a model entered by a person.
 func (s *Service) UpdateModel(ctx context.Context, org pgtype.UUID, actor audit.Actor, id string, patch ModelPatch) (Model, error) {
+	if patch.Rates != nil || patch.ClearRates {
+		return Model{}, invalid(ratesRemoved)
+	}
 	mid, err := parseID(id)
 	if err != nil {
 		return Model{}, err
@@ -299,20 +304,10 @@ func (s *Service) UpdateModel(ctx context.Context, org pgtype.UUID, actor audit.
 		if patch.Guard != nil {
 			guard = *patch.Guard
 		}
-		rates := toModel(cur).Rates
-		switch {
-		case patch.ClearRates:
-			rates = nil
-		case patch.Rates != nil:
-			rates = patch.Rates
-		}
-		if err := ValidateModel(cur.Name, guard, rates, prov.Type); err != nil {
+		if err := ValidateModel(cur.Name, guard, prov.Type); err != nil {
 			return err
 		}
-		inR, outR, cacheR := rateParams(rates)
-		out, err = q.UpdateModel(ctx, store.UpdateModelParams{
-			OrgID: org, ID: mid, Guard: guard, InputRate: inR, OutputRate: outR, CacheReadRate: cacheR,
-		})
+		out, err = q.UpdateModel(ctx, store.UpdateModelParams{OrgID: org, ID: mid, Guard: guard})
 		if err != nil {
 			return err
 		}

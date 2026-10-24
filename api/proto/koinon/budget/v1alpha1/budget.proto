@@ -30,6 +30,12 @@ service BudgetService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // ListAgentBudgets returns every agent's effective daily limit, template default and
+  // today's spend.
+  rpc ListAgentBudgets(ListAgentBudgetsRequest) returns (ListAgentBudgetsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // SetAgentBudget sets an agent's daily limit. A template's spendUSD is only the default for
   // a new agent.
   rpc SetAgentBudget(SetAgentBudgetRequest) returns (SetAgentBudgetResponse);
@@ -52,6 +58,8 @@ message OrgBudget {
   string platform_ceiling_usd = 2;
   string spent_this_month_usd = 3;
   google.protobuf.Timestamp month_start = 4;
+  // estimated_this_month_usd is the part of the spend that came from estimated usage.
+  string estimated_this_month_usd = 5;
 }
 
 message GetOrgBudgetRequest {
@@ -85,6 +93,10 @@ message AgentBudget {
   string daily_limit_usd = 2;
   string spent_today_usd = 3;
   google.protobuf.Timestamp day_start = 4;
+  // agent_name and template_default_usd are set by ListAgentBudgets. The default is the
+  // spendUSD of the agent's active version.
+  string agent_name = 5;
+  string template_default_usd = 6;
 }
 
 message GetAgentBudgetRequest {
@@ -94,6 +106,14 @@ message GetAgentBudgetRequest {
 
 message GetAgentBudgetResponse {
   AgentBudget budget = 1;
+}
+
+message ListAgentBudgetsRequest {
+  string org_id = 1;
+}
+
+message ListAgentBudgetsResponse {
+  repeated AgentBudget budgets = 1;
 }
 
 message SetAgentBudgetRequest {

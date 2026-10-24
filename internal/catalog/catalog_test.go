@@ -248,24 +248,24 @@ var _ = Describe("Service", func() {
 	})
 
 	Describe("models", func() {
-		It("serves a model only with rates, and allows the guard on OpenRouter only", func(ctx SpecContext) {
+		It("serves a model, refuses rates on it, and allows the guard on OpenRouter only", func(ctx SpecContext) {
 			p := create(ctx, "openrouter", "")
 			m, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "deepseek/flash", Guard: true})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(m.Rates).To(BeNil())
 			rows, err := store.New(pool).ListServedCatalog(ctx, org)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(rows).To(HaveLen(1))
-			Expect(rows[0].InputRate.Valid).To(BeFalse(), "the reconciler does not serve a model without a price")
 
-			m, err = svc.UpdateModel(ctx, org, actor, m.ID, catalog.ModelPatch{Rates: &catalog.Rates{Input: "0.30", Output: "1.20"}})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(m.Rates).To(Equal(&catalog.Rates{Input: "0.30", Output: "1.20"}))
+			var inv *catalog.InvalidError
+			_, err = svc.UpdateModel(ctx, org, actor, m.ID, catalog.ModelPatch{Rates: &catalog.Rates{Input: "0.30", Output: "1.20"}})
+			Expect(errors.As(err, &inv)).To(BeTrue(), "rates were replaced by prices")
+			Expect(inv.Msg).To(ContainSubstring("price"))
+			_, err = svc.UpdateModel(ctx, org, actor, m.ID, catalog.ModelPatch{ClearRates: true})
+			Expect(errors.As(err, &inv)).To(BeTrue())
 
 			ollama, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "ollama", Type: "ollama", URL: "http://x.example.com/v1"})
 			Expect(err).NotTo(HaveOccurred())
 			_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: ollama.ID, Name: "q", Guard: true})
-			var inv *catalog.InvalidError
 			Expect(errors.As(err, &inv)).To(BeTrue())
 		})
 
@@ -277,9 +277,9 @@ var _ = Describe("Service", func() {
 			Expect(err).To(MatchError(catalog.ErrConflict))
 		})
 
-		It("rejects a rate that is not a decimal", func(ctx SpecContext) {
+		It("refuses rates when a model is created", func(ctx SpecContext) {
 			p := create(ctx, "a", "")
-			_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "m", Rates: &catalog.Rates{Input: "1e3", Output: "1"}})
+			_, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: p.ID, Name: "m", Rates: &catalog.Rates{Input: "1", Output: "1"}})
 			var inv *catalog.InvalidError
 			Expect(errors.As(err, &inv)).To(BeTrue())
 		})
@@ -302,7 +302,7 @@ var _ = Describe("Service", func() {
 				URL: "https://openrouter.ai/api/v1", APIKey: "sk-declared", Models: models,
 			}
 		}
-		flash := catalog.DeclaredModel{Name: "deepseek/flash", Guard: true, Rates: &catalog.Rates{Input: "0.30", Output: "1.20"}}
+		flash := catalog.DeclaredModel{Name: "deepseek/flash", Guard: true}
 
 		It("is read-only here, audited as the Secret, and applied once per version", func(ctx SpecContext) {
 			changed, err := svc.ApplyDeclaredProvider(ctx, org, declared("v1", flash))
@@ -326,7 +326,7 @@ var _ = Describe("Service", func() {
 			models, err := svc.ListModels(ctx, org)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(models).To(HaveLen(1))
-			_, err = svc.UpdateModel(ctx, org, actor, models[0].ID, catalog.ModelPatch{ClearRates: true})
+			_, err = svc.UpdateModel(ctx, org, actor, models[0].ID, catalog.ModelPatch{Guard: new(false)})
 			Expect(err).To(MatchError(catalog.ErrReadOnly))
 			_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: list[0].ID, Name: "extra"})
 			Expect(err).To(MatchError(catalog.ErrReadOnly))
@@ -340,7 +340,7 @@ var _ = Describe("Service", func() {
 
 		It("wins a name collision: the UI entry is disabled with a reason, and back when the Secret goes", func(ctx SpecContext) {
 			ui := create(ctx, "openrouter", "sk-ui")
-			uiModel, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: ui.ID, Name: "deepseek/flash", Rates: &catalog.Rates{Input: "9", Output: "9"}})
+			uiModel, err := svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: ui.ID, Name: "deepseek/flash"})
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = svc.ApplyDeclaredProvider(ctx, org, declared("v1", flash))
@@ -355,7 +355,7 @@ var _ = Describe("Service", func() {
 			served, err := store.New(pool).ListServedCatalog(ctx, org)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(served).To(HaveLen(1))
-			Expect(served[0].InputRate.String).To(Equal("0.30"), "only the declared model is served")
+			Expect(served[0].ModelID.String()).NotTo(Equal(uiModel.ID), "only the declared model is served")
 
 			Expect(svc.RemoveDeclared(ctx, org, "openrouter-secret")).To(Succeed())
 			got, err = svc.GetProvider(ctx, org, ui.ID)
@@ -414,12 +414,12 @@ var _ = Describe("Service", func() {
 			_, err := svc.ApplyDeclaredProvider(ctx, org, declared("v1", flash, catalog.DeclaredModel{Name: "old"}))
 			Expect(err).NotTo(HaveOccurred())
 			cheaper := flash
-			cheaper.Rates = &catalog.Rates{Input: "0.10", Output: "0.20"}
+			cheaper.Guard = false
 			_, err = svc.ApplyDeclaredProvider(ctx, org, declared("v2", cheaper))
 			Expect(err).NotTo(HaveOccurred())
 			models, _ := svc.ListModels(ctx, org)
 			Expect(models).To(HaveLen(1))
-			Expect(models[0].Rates.Input).To(Equal("0.10"))
+			Expect(models[0].Guard).To(BeFalse())
 		})
 
 		It("refuses a provider name another Secret declares, and an invalid model, changing nothing", func(ctx SpecContext) {

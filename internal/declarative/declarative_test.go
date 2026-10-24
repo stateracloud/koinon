@@ -111,11 +111,16 @@ var _ = Describe("Importer", func() {
 			switch m.Name {
 			case "deepseek/flash":
 				Expect(m.Guard).To(BeTrue())
-				Expect(m.Rates).To(Equal(&catalog.Rates{Input: "0.30", Output: "1.20"}))
-			case "free":
-				Expect(m.Rates).To(Equal(&catalog.Rates{Input: "0", Output: "0"}))
 			}
 		}
+		By("rates in the Secret are ignored with a Warning Event")
+		var warned bool
+		for _, e := range events(ctx) {
+			if e.Type == corev1.EventTypeWarning && strings.Contains(e.Message, "rates are ignored") {
+				warned = true
+			}
+		}
+		Expect(warned).To(BeTrue())
 		ev := auditOf(ctx, "provider.declare")
 		Expect(ev).To(HaveLen(1))
 		Expect(ev[0].ActorKind).To(Equal("secret"))
@@ -226,7 +231,6 @@ var _ = Describe("Importer", func() {
 		Entry("a missing provider", func(d map[string]string) { delete(d, "provider") }, "provider is required"),
 		Entry("models that are not a list", func(d map[string]string) { d["models"] = "name: x" }, "models"),
 		Entry("a model with an unknown field", func(d map[string]string) { d["models"] = "- {name: x, price: 3}" }, "models"),
-		Entry("a model with bad rates", func(d map[string]string) { d["models"] = "- {name: x, rates: {input: abc, output: 1}}" }, "rates"),
 		Entry("the guard on a provider that has none", func(d map[string]string) {
 			d["provider"] = "ollama"
 		}, "routing guard"),

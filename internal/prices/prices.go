@@ -3,10 +3,11 @@
 // Package prices finds the price of a model request and manages org price overrides and the
 // default list's versions (plan item PV2, ADR 0056 amendment 2026-10-24).
 //
-// Precedence, highest first: the rates set on the model itself (the PV1 shorthand), the org's
-// own price entries, the default list. Within a layer see pricing.Select. Every answer carries
-// a ref ("default@<list version>#<id>", "org#<id>", "model#<id>@<unix time>") that the ledger
-// stores, so each ledger entry names the price version it used.
+// Precedence, highest first: the org's own price entries, the default list. Within a layer see
+// pricing.Select. The per-model rates of PV1 were folded into dated org entries (migration
+// 00014, ADR 0056). Every answer carries a ref ("default@<list version>#<id>" or "org#<id>")
+// that the ledger stores, so each ledger entry names the price version it used. Ledger entries
+// written before the migration may still cite "model#<id>@<unix time>".
 package prices
 
 import (
@@ -29,7 +30,6 @@ import (
 
 // Layers a price can come from.
 const (
-	SourceModel   = "model"
 	SourceOrg     = "org"
 	SourceDefault = "default"
 )
@@ -37,9 +37,6 @@ const (
 // Model is the model a request asked for.
 type Model struct {
 	ID, Name, ProviderType string
-	// Rates are the rates set on the model itself, if any.
-	Rates     *pricing.Wire
-	UpdatedAt time.Time
 }
 
 // Resolution is the price found for a model at a time.
@@ -76,11 +73,7 @@ func Lookup(ctx context.Context, q *store.Queries, org pgtype.UUID, name string)
 	} else if err != nil {
 		return Model{}, err
 	}
-	m := Model{ID: row.ID.String(), Name: row.Name, ProviderType: row.ProviderType, UpdatedAt: row.UpdatedAt.Time}
-	if row.InputRate.Valid {
-		m.Rates = &pricing.Wire{Input: row.InputRate.String, Output: row.OutputRate.String, CacheRead: row.CacheReadRate.String}
-	}
-	return m, nil
+	return Model{ID: row.ID.String(), Name: row.Name, ProviderType: row.ProviderType}, nil
 }
 
 // BadPriceError means a stored price cannot be used (a rate that does not parse, an override
@@ -94,34 +87,8 @@ func (e *BadPriceError) Unwrap() error { return e.Err }
 func bad(err error) error { return &BadPriceError{Err: err} }
 
 // Resolve finds m's price at time at. A stored price that cannot be used is a *BadPriceError.
-//
-// TODO(W4, PV2 UI): fold the per-model rates of PV1 into dated org price entries and remove this
-// layer. Until then the model's rates win for input, output and cache read, and everything else
-// (cache write, reasoning, estimation settings) comes from the entry that would match otherwise.
 func Resolve(ctx context.Context, q *store.Queries, org pgtype.UUID, m Model, at time.Time) (Resolution, error) {
-	matched, err := resolveEntries(ctx, q, org, m, at)
-	if err != nil && (m.Rates == nil || !errors.Is(err, ErrUnpriced)) {
-		return Resolution{}, err
-	}
-	if m.Rates == nil {
-		return matched, nil
-	}
-	p, perr := pricing.Spec{Prices: *m.Rates}.Parse()
-	if perr != nil {
-		return Resolution{}, bad(fmt.Errorf("rates of model %s: %w", m.Name, perr))
-	}
-	res := Resolution{
-		Ref: fmt.Sprintf("model#%s@%d", m.ID, m.UpdatedAt.Unix()), Source: SourceModel, Price: p,
-		Entry: pricing.Entry{ID: "model-" + m.ID, Provider: m.ProviderType, Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", ValidFrom: m.UpdatedAt.UTC().Format(time.DateOnly)},
-	}
-	if err == nil {
-		// The model's rates replace the entry's base rates for input, output and cache read; the
-		// entry still says what a cache write and reasoning cost and how to estimate.
-		res.Entry = matched.Entry
-		res.Price.Base.CacheWrite, res.Price.Base.Reasoning = matched.Price.Base.CacheWrite, matched.Price.Base.Reasoning
-		res.ListVersion = matched.ListVersion
-	}
-	return res, nil
+	return resolveEntries(ctx, q, org, m, at)
 }
 
 // resolveEntries finds the org's or the default list's entry for m.
@@ -397,12 +364,14 @@ func (s *Service) DefaultsDiff(ctx context.Context, from, to string) (fromV, toV
 
 // Flagged is a price entry whose recomputed cost disagrees with the gateway's by more than 1%.
 type Flagged struct {
-	PriceRef       string    `json:"priceRef"`
-	Model          string    `json:"model"`
-	Requests       int64     `json:"requests"`
-	LastSeen       time.Time `json:"lastSeen"`
-	CostUSD        string    `json:"costUsd"`
-	GatewayCostUSD string    `json:"gatewayCostUsd"`
+	PriceRef string `json:"priceRef"`
+	Model    string `json:"model"`
+	Requests int64  `json:"requests"`
+	// Why counts the requests per reason; a request can have several.
+	GatewayDiff, UsageMissing, MaxOutputCapped, PriceError int64
+	LastSeen                                               time.Time `json:"lastSeen"`
+	CostUSD                                                string    `json:"costUsd"`
+	GatewayCostUSD                                         string    `json:"gatewayCostUsd"`
 }
 
 // ListFlagged lists the entries flagged since a time.
@@ -413,7 +382,7 @@ func (s *Service) ListFlagged(ctx context.Context, org pgtype.UUID, since time.T
 	}
 	out := make([]Flagged, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, Flagged{PriceRef: r.PriceRef, Model: r.Model, Requests: r.Flagged, LastSeen: r.LastSeen.Time, CostUSD: r.CostUsd, GatewayCostUSD: r.GatewayCostUsd})
+		out = append(out, Flagged{PriceRef: r.PriceRef, Model: r.Model, Requests: r.Flagged, GatewayDiff: r.GatewayDiff, UsageMissing: r.UsageMissing, MaxOutputCapped: r.MaxOutputCapped, PriceError: r.PriceError, LastSeen: r.LastSeen.Time, CostUSD: r.CostUsd, GatewayCostUSD: r.GatewayCostUsd})
 	}
 	return out, nil
 }

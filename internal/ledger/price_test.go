@@ -89,6 +89,8 @@ var _ = Describe("Cost truth", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(flagged).To(HaveLen(1))
 		Expect(flagged[0].Flagged).To(Equal(int64(1)))
+		Expect(flagged[0].GatewayDiff).To(Equal(int64(1)), "the reason is counted")
+		Expect(flagged[0].UsageMissing + flagged[0].PriceError + flagged[0].MaxOutputCapped).To(BeZero())
 	})
 
 	It("lets an org override win and records its version", func(ctx SpecContext) {
@@ -120,18 +122,25 @@ var _ = Describe("Cost truth", func() {
 		Expect(n).To(Equal(1))
 	})
 
-	It("takes the cache write rate and estimation settings of the matching entry when the model sets its own rates", func(ctx SpecContext) {
+	It("bills a bucket an org price does not name at the rate it would have without the split", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
 		e.model(ctx, "openrouter", "anthropic/claude-sonnet-5.5")
-		_, err := db.Exec(ctx, `UPDATE models SET input_rate = '2', output_rate = '10' WHERE org_id = $1`, e.org)
+		_, err := prices.New(db, nil).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
+			Entry: pricing.Entry{
+				ID: "sonnet-mine", Provider: "openrouter", Match: pricing.Match{Glob: "anthropic/claude-sonnet-5.5"},
+				Spec:      pricing.Spec{Prices: pricing.Wire{Input: "2", Output: "10"}},
+				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
+			},
+			ValidFrom: time.Now().Add(-time.Hour),
+		})
 		Expect(err).NotTo(HaveOccurred())
 		u := e.usage(time.Now(), "anthropic/claude-sonnet-5.5", 1_000_000, 0, 0, "")
 		u.CacheWriteTokens = 1_000_000
 		_, err = ing.Ingest(ctx, []ledger.Entry{u})
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("2.50"), "Anthropic's cache write price, not the input rate")
-		Expect(s.PriceRef).To(HavePrefix("model#"))
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("2.00"), "the cache write is billed at the input rate")
+		Expect(s.PriceRef).To(HavePrefix("org#"))
 	})
 
 	It("estimates missing usage, marks it and counts it toward the limit", func(ctx SpecContext) {
@@ -192,7 +201,7 @@ var _ = Describe("An unusable stored price", func() {
 		bad.model(ctx, "openrouter", deepseek)
 		good.model(ctx, "openrouter", deepseek)
 		// A rate from before the stricter validation, and an override that no longer parses.
-		_, err := db.Exec(ctx, `UPDATE models SET input_rate = '1.1234567', output_rate = '1' WHERE org_id = $1`, bad.org)
+		_, err := db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, 'old', '{"provider":"openrouter","match":{"glob":"deepseek/*"},"validFrom":"2020-01-01","prices":{"input":"1.1234567","output":"1"},"tokenizer":"bytes","ratio":"3.0","maxOutput":10}', now() - interval '1 hour', 'test')`, bad.org)
 		Expect(err).NotTo(HaveOccurred())
 
 		res, err := ing.Ingest(ctx, []ledger.Entry{

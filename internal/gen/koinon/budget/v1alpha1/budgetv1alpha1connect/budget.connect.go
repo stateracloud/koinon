@@ -37,6 +37,9 @@ const (
 	// BudgetServiceGetAgentBudgetProcedure is the procedure name of the BudgetService's GetAgentBudget
 	// RPC.
 	BudgetServiceGetAgentBudgetProcedure = "/koinon.budget.v1alpha1.BudgetService/GetAgentBudget"
+	// BudgetServiceListAgentBudgetsProcedure is the procedure name of the BudgetService's
+	// ListAgentBudgets RPC.
+	BudgetServiceListAgentBudgetsProcedure = "/koinon.budget.v1alpha1.BudgetService/ListAgentBudgets"
 	// BudgetServiceSetAgentBudgetProcedure is the procedure name of the BudgetService's SetAgentBudget
 	// RPC.
 	BudgetServiceSetAgentBudgetProcedure = "/koinon.budget.v1alpha1.BudgetService/SetAgentBudget"
@@ -79,6 +82,14 @@ var (
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
+	budgetServiceListAgentBudgetsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_budget_proto.Services().ByName("BudgetService").Methods().ByName("ListAgentBudgets"),
+			Procedure:        BudgetServiceListAgentBudgetsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
 	budgetServiceSetAgentBudgetSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType: connect.StreamTypeUnary,
@@ -114,6 +125,9 @@ type BudgetServiceClient interface {
 	SetPlatformCeiling(context.Context, *v1alpha1.SetPlatformCeilingRequest) (*v1alpha1.SetPlatformCeilingResponse, error)
 	// GetAgentBudget returns an agent's effective daily limit and today's spend.
 	GetAgentBudget(context.Context, *v1alpha1.GetAgentBudgetRequest) (*v1alpha1.GetAgentBudgetResponse, error)
+	// ListAgentBudgets returns every agent's effective daily limit, template default and
+	// today's spend.
+	ListAgentBudgets(context.Context, *v1alpha1.ListAgentBudgetsRequest) (*v1alpha1.ListAgentBudgetsResponse, error)
 	// SetAgentBudget sets an agent's daily limit. A template's spendUSD is only the default for
 	// a new agent.
 	SetAgentBudget(context.Context, *v1alpha1.SetAgentBudgetRequest) (*v1alpha1.SetAgentBudgetResponse, error)
@@ -142,6 +156,9 @@ type BudgetServiceHandler interface {
 	SetPlatformCeiling(context.Context, *v1alpha1.SetPlatformCeilingRequest) (*v1alpha1.SetPlatformCeilingResponse, error)
 	// GetAgentBudget returns an agent's effective daily limit and today's spend.
 	GetAgentBudget(context.Context, *v1alpha1.GetAgentBudgetRequest) (*v1alpha1.GetAgentBudgetResponse, error)
+	// ListAgentBudgets returns every agent's effective daily limit, template default and
+	// today's spend.
+	ListAgentBudgets(context.Context, *v1alpha1.ListAgentBudgetsRequest) (*v1alpha1.ListAgentBudgetsResponse, error)
 	// SetAgentBudget sets an agent's daily limit. A template's spendUSD is only the default for
 	// a new agent.
 	SetAgentBudget(context.Context, *v1alpha1.SetAgentBudgetRequest) (*v1alpha1.SetAgentBudgetResponse, error)
@@ -162,6 +179,7 @@ func RegisterBudgetServiceHandler(server *connect.Server, svc BudgetServiceHandl
 		connect.Method{Spec: budgetServiceSetMonthlyCapSpec(), Handler: adapter.setMonthlyCap},
 		connect.Method{Spec: budgetServiceSetPlatformCeilingSpec(), Handler: adapter.setPlatformCeiling},
 		connect.Method{Spec: budgetServiceGetAgentBudgetSpec(), Handler: adapter.getAgentBudget},
+		connect.Method{Spec: budgetServiceListAgentBudgetsSpec(), Handler: adapter.listAgentBudgets},
 		connect.Method{Spec: budgetServiceSetAgentBudgetSpec(), Handler: adapter.setAgentBudget},
 		connect.Method{Spec: budgetServiceListNotificationsSpec(), Handler: adapter.listNotifications},
 		connect.Method{Spec: budgetServiceMarkNotificationReadSpec(), Handler: adapter.markNotificationRead},
@@ -185,6 +203,10 @@ func (UnimplementedBudgetServiceHandler) SetPlatformCeiling(context.Context, *v1
 
 func (UnimplementedBudgetServiceHandler) GetAgentBudget(context.Context, *v1alpha1.GetAgentBudgetRequest) (*v1alpha1.GetAgentBudgetResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.GetAgentBudget is not implemented")
+}
+
+func (UnimplementedBudgetServiceHandler) ListAgentBudgets(context.Context, *v1alpha1.ListAgentBudgetsRequest) (*v1alpha1.ListAgentBudgetsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.ListAgentBudgets is not implemented")
 }
 
 func (UnimplementedBudgetServiceHandler) SetAgentBudget(context.Context, *v1alpha1.SetAgentBudgetRequest) (*v1alpha1.SetAgentBudgetResponse, error) {
@@ -230,6 +252,14 @@ func (c *budgetServiceClient) SetPlatformCeiling(ctx context.Context, req *v1alp
 func (c *budgetServiceClient) GetAgentBudget(ctx context.Context, req *v1alpha1.GetAgentBudgetRequest) (*v1alpha1.GetAgentBudgetResponse, error) {
 	var res v1alpha1.GetAgentBudgetResponse
 	if err := c.client.CallUnary(ctx, budgetServiceGetAgentBudgetSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *budgetServiceClient) ListAgentBudgets(ctx context.Context, req *v1alpha1.ListAgentBudgetsRequest) (*v1alpha1.ListAgentBudgetsResponse, error) {
+	var res v1alpha1.ListAgentBudgetsResponse
+	if err := c.client.CallUnary(ctx, budgetServiceListAgentBudgetsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -303,6 +333,18 @@ func (h budgetServiceHandler) getAgentBudget(ctx context.Context, _ connect.Spec
 		return err
 	}
 	res, err := h.svc.GetAgentBudget(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h budgetServiceHandler) listAgentBudgets(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListAgentBudgetsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListAgentBudgets(ctx, &req)
 	if err != nil {
 		return err
 	}

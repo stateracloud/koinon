@@ -19,4 +19,3 @@ stringData:
   models: |
     # Local Ollama costs nothing per token, but a model without a price is not served.
     - name: "qwen3.5:4b"
-      rates: {input: "0", output: "0"}

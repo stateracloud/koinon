@@ -53,7 +53,8 @@ message Provider {
   google.protobuf.Timestamp updated_at = 11;
 }
 
-// Rates are USD per million tokens as decimal strings such as "0.30".
+// Rates are deprecated: per-model rates were folded into org prices (PriceService, ADR 0056). The
+// message stays for wire compatibility; the server never fills it and refuses requests that set it.
 message Rates {
   string input = 1;
   string output = 2;
@@ -67,8 +68,8 @@ message Model {
   string name = 3;
   // guard is the routing guard, for OpenRouter providers only.
   bool guard = 4;
-  // rates is unset for a model without rates, which is not served.
-  Rates rates = 5;
+  // rates is deprecated and never set; prices are org price entries (PriceService).
+  Rates rates = 5 [deprecated = true];
   string source = 6;
   string managed_by_secret = 7;
   string disabled_reason = 8;
@@ -131,8 +132,9 @@ message CreateModelRequest {
   string provider_id = 2;
   string name = 3;
   bool guard = 4;
-  // rates is required for the model to be served.
-  Rates rates = 5;
+  // rates is deprecated: a request that sets it fails with INVALID_ARGUMENT. Add a price with
+  // PriceService.SetPrice instead.
+  Rates rates = 5 [deprecated = true];
 }
 
 message CreateModelResponse {
@@ -143,9 +145,9 @@ message UpdateModelRequest {
   string org_id = 1;
   string model_id = 2;
   optional bool guard = 3;
-  // rates replaces the rates when set; clear_rates removes them.
-  Rates rates = 4;
-  bool clear_rates = 5;
+  // rates and clear_rates are deprecated: a request that sets either fails with INVALID_ARGUMENT.
+  Rates rates = 4 [deprecated = true];
+  bool clear_rates = 5 [deprecated = true];
 }
 
 message UpdateModelResponse {

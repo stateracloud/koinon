@@ -354,7 +354,9 @@ type OrgView struct {
 	PlatformCeiling *money.USD
 	// SpentThisMonth is the org's recorded spend in the current calendar month (UTC).
 	SpentThisMonth money.USD
-	MonthStart     time.Time
+	// EstimatedThisMonth is the part of it that came from estimated usage.
+	EstimatedThisMonth money.USD
+	MonthStart         time.Time
 }
 
 // GetOrg returns the org's budget and its spend this month.
@@ -370,7 +372,15 @@ func (s *Service) GetOrg(ctx context.Context, org pgtype.UUID, now time.Time) (O
 		return OrgView{}, err
 	}
 	spent, err := money.ParseNumeric(sp)
-	return OrgView{MonthlyCap: o.MonthlyCap, PlatformCeiling: o.PlatformCeiling, SpentThisMonth: spent, MonthStart: since}, err
+	if err != nil {
+		return OrgView{}, err
+	}
+	es, err := q.GetOrgEstimatedSpendSince(ctx, store.GetOrgEstimatedSpendSinceParams{OrgID: org, Since: pgtype.Timestamptz{Time: since, Valid: true}})
+	if err != nil {
+		return OrgView{}, err
+	}
+	estimated, err := money.ParseNumeric(es)
+	return OrgView{MonthlyCap: o.MonthlyCap, PlatformCeiling: o.PlatformCeiling, SpentThisMonth: spent, EstimatedThisMonth: estimated, MonthStart: since}, err
 }
 
 // SetOrgCap sets the org's monthly cap, or clears it with nil. It cannot exceed the platform ceiling.
