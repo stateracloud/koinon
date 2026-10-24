@@ -36,6 +36,7 @@ import (
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/auth/oidctest"
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
@@ -259,8 +260,13 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	go func() { defer close(hubDone); e.hub.Run(hubCtx) }()
 	DeferCleanup(func() { stopHub(); <-hubDone })
 	Eventually(e.hub.Listening()).Should(BeClosed())
+	var catalogKeys catalog.Keys
+	if opts.keys != nil {
+		catalogKeys = opts.keys
+	}
 	rpc := services.New(e.pool, services.Options{
-		Hub: e.hub, WatchPollInterval: opts.watchPoll,
+		Catalog: catalog.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
+		Hub:     e.hub, WatchPollInterval: opts.watchPoll,
 		Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 		Keys:   servicesKeys(opts.keys), GitHub: opts.github,
 		Approvals: approvals.New(e.pool, approvals.Options{
