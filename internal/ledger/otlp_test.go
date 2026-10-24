@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -127,6 +128,19 @@ var _ = Describe("Decode", func() {
 		Expect(rejected).To(BeZero(), reason)
 		Expect(entries).To(HaveLen(1))
 		Expect(entries[0].KeyID).To(Equal("k-aaaaaaaaaaaa"))
+	})
+
+	It("skips refused requests and marks a 2xx without usage for estimation", func() {
+		refused := llmRecord(num(gateway.LogFieldStatus, 400), str("agw.ai.usage.cost.total", "0"))
+		refused.Attributes = withoutAttrs(refused.Attributes, "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens")
+		missing := llmRecord(num(gateway.LogFieldStatus, 200), num(gateway.LogFieldMaxTokens, 4000), num(gateway.LogFieldRequestBytes, 900))
+		missing.Attributes = withoutAttrs(missing.Attributes, "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens", "agw.ai.usage.cost.total")
+		entries, rejected, reason := ledger.Decode(export(refused, missing))
+		Expect(rejected).To(BeZero(), reason)
+		Expect(entries).To(HaveLen(1))
+		Expect(entries[0].InputKnown || entries[0].OutputKnown).To(BeFalse())
+		Expect(entries[0].MaxTokens).To(Equal(int64(4000)))
+		Expect(entries[0].RequestBytes).To(Equal(int64(900)))
 	})
 
 	It("accepts numeric costs and tokens", func() {
@@ -249,3 +263,13 @@ var _ = Describe("Handler", func() {
 		Expect(out.GetPartialSuccess().GetRejectedLogRecords()).To(Equal(int64(1)))
 	})
 })
+
+func withoutAttrs(in []*commonpb.KeyValue, keys ...string) []*commonpb.KeyValue {
+	var out []*commonpb.KeyValue
+	for _, kv := range in {
+		if !slices.Contains(keys, kv.GetKey()) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
