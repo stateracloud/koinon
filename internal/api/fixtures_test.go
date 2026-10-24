@@ -252,6 +252,8 @@ type orgFixture struct {
 	approval store.ApprovalRequest
 	// token is an admin API token of the org; set by newIsolationFixture.
 	token string
+	// provider and model are a provider and a model of the org, for the isolation suite.
+	provider, model string
 }
 
 func (e *env) newOrgFixture(ctx context.Context) orgFixture {
