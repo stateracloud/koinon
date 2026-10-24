@@ -12,6 +12,7 @@ import {
   BudgetService,
   NotificationSchema,
   OrgBudgetSchema,
+  OrgBudgetSummarySchema,
   type SetAgentBudgetRequest,
   type SetMonthlyCapRequest,
   type SetPlatformCeilingRequest,
@@ -59,6 +60,12 @@ function setup(opts: { role?: OrgRole; platformAdmin?: boolean; ceiling?: string
         calls.ceilings.push(req)
         return { budget: create(OrgBudgetSchema, { platformCeilingUsd: req.platformCeilingUsd }) }
       },
+      listOrgBudgets: () => ({
+        orgs: [
+          create(OrgBudgetSummarySchema, { orgId: 'org-1', orgSlug: 'default', orgName: 'Default', monthlyCapUsd: '100.00', spentThisMonthUsd: '40.00' }),
+          create(OrgBudgetSummarySchema, { orgId: 'org-2', orgSlug: 'acme', orgName: 'Acme', platformCeilingUsd: '500.00', spentThisMonthUsd: '1.00' }),
+        ],
+      }),
       markNotificationRead: (req) => {
         calls.read.push(req.notificationId)
         return {}
@@ -146,6 +153,16 @@ describe('Budget notices banner', () => {
     expect(within(banner).getByRole('status')).toHaveTextContent('is at 80%')
   })
 
+  it('shows three notices and counts the rest, naming agents', async () => {
+    setup({
+      path: '/',
+      notices: [notice('n-1', 100, 'agent_daily'), notice('n-2', 100, 'org_monthly'), notice('n-4', 80, 'agent_daily'), notice('n-5', 80, 'agent_daily')].map((n, i) => (i >= 2 ? create(NotificationSchema, { ...n, agentId: `a-${i + 1}` }) : n)),
+    })
+    const banner = await screen.findByRole('region', { name: 'Budget notices' })
+    expect(await within(banner).findByText(/Repo helper’s daily limit has been reached/)).toBeInTheDocument()
+    expect(within(banner).getByText(/1 more/)).toBeInTheDocument()
+  })
+
   it('shows nothing when everything is read', async () => {
     const calls = setup({ path: '/', notices: [notice('n-1', 100, 'org_monthly', true)] })
     await waitFor(() => expect(calls.noticeCalls).toBeGreaterThan(0))
@@ -153,18 +170,24 @@ describe('Budget notices banner', () => {
   })
 })
 
-describe('Platform ceiling', () => {
-  it('is set by a platform admin in the platform area', async () => {
+describe('Platform ceilings', () => {
+  it('lists every org with its ceiling, cap and spend and sets a ceiling in place', async () => {
     const calls = setup({ platformAdmin: true, path: '/platform/budgets' })
-    expect(await screen.findByRole('heading', { name: 'Platform budget ceiling' })).toBeInTheDocument()
-    await userEvent.click(await screen.findByRole('button', { name: 'Set a ceiling' }))
-    await userEvent.type(screen.getByLabelText('Ceiling in US dollars'), '1000')
-    await userEvent.click(screen.getByRole('button', { name: 'Save ceiling' }))
+    expect(await screen.findByRole('heading', { name: 'Platform budget ceilings' })).toBeInTheDocument()
+    const list = await screen.findByRole('list', { name: 'Orgs' })
+    const acme = within(list).getByRole('heading', { name: 'Acme' }).closest('li')!
+    expect(within(acme).getByText('$500.00')).toBeInTheDocument()
+    const def = within(list).getByRole('heading', { name: 'Default' }).closest('li')!
+    expect(within(def).getByText('$100.00')).toBeInTheDocument()
+    await userEvent.click(within(def).getByRole('button', { name: 'Set ceiling of Default' }))
+    await userEvent.type(within(def).getByLabelText('Ceiling for Default, in US dollars'), '1000')
+    await userEvent.click(within(def).getByRole('button', { name: 'Save ceiling for Default' }))
     await waitFor(() => expect(calls.ceilings).toEqual([expect.objectContaining({ orgId: 'org-1', platformCeilingUsd: '1000' })]))
   })
 
-  it('is refused to org admins who are not platform admins', async () => {
+  it('is refused to org admins who are not platform admins, without a flash while loading', async () => {
     const calls = setup({ path: '/platform/budgets' })
+    expect(screen.queryByText('Only platform admins can set the platform ceiling.')).not.toBeInTheDocument()
     expect(await screen.findByRole('alert')).toHaveTextContent('Only platform admins can set the platform ceiling.')
     expect(calls.listed).toBe(0)
     expect(screen.queryByRole('navigation', { name: 'Platform' })).not.toBeInTheDocument()

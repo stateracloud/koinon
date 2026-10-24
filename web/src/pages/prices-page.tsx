@@ -101,10 +101,18 @@ function PricesContent() {
               <li key={g.name} className="bg-card grid gap-2 rounded-md border p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-base font-semibold">{g.name}</h3>
+                  {g.current?.needsReview && <Badge variant="destructive">Needs review</Badge>}
                   {g.current ? <Badge variant="secondary">Active</Badge> : <Badge variant="outline">{g.versions[0]?.retiredAt ? 'Retired' : 'Starts later'}</Badge>}
                 </div>
                 {g.current ? (
                   <>
+                    {g.current.needsReview && (
+                      <Alert role="note">
+                        <AlertDescription>
+                          This price came from the rates set on a model. No default price matched it, so its estimate settings (tokenizer, bytes per token, largest output) are generic. Check them and save a new version.
+                        </AlertDescription>
+                      </Alert>
+                    )}
                     <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
                       <dt className="text-muted-foreground">Models</dt>
                       <dd className="break-all">

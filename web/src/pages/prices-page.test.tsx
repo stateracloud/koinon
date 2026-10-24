@@ -23,6 +23,10 @@ const mine = create(PriceVersionSchema, {
   id: 'pv-1', name: 'sonnet-mine', provider: 'openrouter', match: { glob: 'anthropic/claude-sonnet-*' }, rates: { input: '3', output: '15' },
   tokenizer: 'bytes', ratio: '3.0', maxOutput: 64000, validFrom: timestampFromMs(Date.now() - day),
 })
+const migrated = create(PriceVersionSchema, {
+  id: 'pv-2', name: 'model-custom-abc', provider: 'openai', match: { regex: '(?-i:acme/custom)' }, rates: { input: '1', output: '2' },
+  tokenizer: 'bytes', ratio: '3.0', maxOutput: 131072, validFrom: timestampFromMs(Date.now() - day), needsReview: true,
+})
 const gpt = create(PriceEntrySchema, {
   id: 'openai-gpt', provider: 'openai', match: { glob: 'gpt-*' }, validFrom: '2026-10-01', rates: { input: '2', output: '8' }, tokenizer: 'bytes', ratio: '3.0',
   sourceUrl: 'https://openai.com/api/pricing/', sourceAccessed: '2026-10-20', maxOutput: 32000,
@@ -36,7 +40,7 @@ function setup(role = OrgRole.OWNER) {
     service(PriceService, {
       listPrices: () => {
         calls.listed++
-        return { prices: [mine] }
+        return { prices: [mine, migrated] }
       },
       getDefaultPrices: () => ({ version: '2026-10-24.1', entries: [gpt, bad] }),
       getDefaultPriceChanges: () => ({
@@ -87,6 +91,15 @@ describe('Prices page', () => {
     const flagged = await screen.findByRole('list', { name: 'Flagged requests' })
     expect(within(flagged).getByText('openai/gpt-6')).toBeInTheDocument()
     expect(within(flagged).getByText('Koinon $0.42, gateway $0.50.')).toBeInTheDocument()
+  })
+
+  it('flags a price migrated from model rates whose estimate settings are generic', async () => {
+    setup()
+    const own = await screen.findByRole('list', { name: 'Your prices' })
+    const row = within(own).getByRole('heading', { name: 'model-custom-abc' }).closest('li')!
+    expect(within(row).getByText('Needs review')).toBeInTheDocument()
+    expect(within(row).getByText(/No default price matched it/)).toBeInTheDocument()
+    expect(within(own).getByRole('heading', { name: 'sonnet-mine' }).closest('li')).not.toHaveTextContent('Needs review')
   })
 
   it('filters flagged requests by reason and by text', async () => {
