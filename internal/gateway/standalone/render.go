@@ -194,13 +194,21 @@ type catalogProvider struct {
 }
 
 type catalogModel struct {
-	Rates rates `yaml:"rates"`
+	Rates rates         `yaml:"rates"`
+	Tiers []catalogTier `yaml:"tiers,omitempty"`
+}
+
+type catalogTier struct {
+	ContextOver int64 `yaml:"contextOver"`
+	Rates       rates `yaml:"rates"`
 }
 
 type rates struct {
-	Input     string `yaml:"input,omitempty"`
-	Output    string `yaml:"output,omitempty"`
-	CacheRead string `yaml:"cacheRead,omitempty"`
+	Input      string `yaml:"input,omitempty"`
+	Output     string `yaml:"output,omitempty"`
+	CacheRead  string `yaml:"cacheRead,omitempty"`
+	CacheWrite string `yaml:"cacheWrite,omitempty"`
+	Reasoning  string `yaml:"reasoning,omitempty"`
 }
 
 type frontendPolicies struct {
@@ -468,7 +476,16 @@ func build(s gateway.State, o Options) document {
 			if cp.Models == nil {
 				cp.Models = map[string]catalogModel{}
 			}
-			cp.Models[m.Name] = catalogModel{Rates: rates{Input: m.Price.Input, Output: m.Price.Output, CacheRead: m.Price.CacheRead}}
+			cm := catalogModel{Rates: rates{
+				Input: m.Price.Input, Output: m.Price.Output, CacheRead: m.Price.CacheRead,
+				CacheWrite: m.Price.CacheWrite, Reasoning: m.Price.Reasoning,
+			}}
+			for _, t := range m.Price.Tiers {
+				cm.Tiers = append(cm.Tiers, catalogTier{ContextOver: t.ContextOver, Rates: rates{
+					Input: t.Input, Output: t.Output, CacheRead: t.CacheRead, CacheWrite: t.CacheWrite, Reasoning: t.Reasoning,
+				}})
+			}
+			cp.Models[m.Name] = cm
 			catalogs[override] = cp
 		}
 	}

@@ -1,0 +1,193 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package money is Koinon's one money type (issue #48, ADR 0056 amendment 2026-10-24).
+//
+// A [USD] is an exact integer number of pico-USD (10^-12 USD). A price is written in USD per
+// million tokens with at most six fraction digits, so the cost of one token is a whole number
+// of pico-USD (a [Rate]) and a request's cost is tokens times rate with no rounding at all.
+// The type holds up to about 9.2 million USD, far above any limit Koinon accepts ([MaxLimit]);
+// arithmetic is checked and reports overflow instead of wrapping.
+//
+// Floats are used only at the edge, where agentgateway's config takes a JSON number
+// ([USD.Float64]); the database stores numeric(24,12) and crosses the Go boundary as text.
+package money
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"math/big"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// USD is an amount in pico-USD.
+type USD int64
+
+// PerUSD is the number of pico-USD in one USD.
+const PerUSD = 1_000_000_000_000
+
+// MaxLimit is the largest budget Koinon accepts (1,000,000 USD).
+const MaxLimit USD = 1_000_000 * PerUSD
+
+// ErrOverflow means an amount does not fit.
+var ErrOverflow = errors.New("money: amount overflows")
+
+var decimalRE = regexp.MustCompile(`^[0-9]{1,7}(\.[0-9]{1,12})?$`)
+
+// Parse reads a non-negative decimal such as "10.50" or "0.000123456789" (at most 12 fraction digits).
+func Parse(s string) (USD, error) {
+	if !decimalRE.MatchString(s) {
+		return 0, fmt.Errorf("money: invalid USD amount %q (want a non-negative decimal with at most 12 fraction digits)", s)
+	}
+	whole, frac, _ := strings.Cut(s, ".")
+	frac += strings.Repeat("0", 12-len(frac))
+	w, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	f, err := strconv.ParseInt(frac, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return USD(w*PerUSD + f), nil
+}
+
+// MustParse is Parse for constants.
+func MustParse(s string) USD {
+	u, err := Parse(s)
+	if err != nil {
+		panic(err)
+	}
+	return u
+}
+
+// FromCents converts cents (the unit of template limits) to USD.
+func FromCents(c int64) USD { return USD(c) * (PerUSD / 100) }
+
+// ParseNumeric reads a Postgres numeric rendered as text, such as "3.0000000000". Digits
+// beyond the twelfth must be zero.
+func ParseNumeric(s string) (USD, error) {
+	whole, frac, ok := strings.Cut(s, ".")
+	if ok {
+		if len(frac) > 12 {
+			if strings.Trim(frac[12:], "0") != "" {
+				return 0, fmt.Errorf("money: %q has more than 12 fraction digits", s)
+			}
+			frac = frac[:12]
+		}
+		s = whole + "." + frac
+		if frac == "" {
+			s = whole
+		}
+	}
+	return Parse(s)
+}
+
+// String formats the amount exactly, trimming trailing zeros but keeping two fraction digits.
+func (u USD) String() string {
+	neg := u < 0
+	n := uint64(u)
+	if neg {
+		n = -n
+	}
+	whole, frac := n/PerUSD, n%PerUSD
+	f := strings.TrimRight(fmt.Sprintf("%012d", frac), "0")
+	for len(f) < 2 {
+		f += "0"
+	}
+	s := fmt.Sprintf("%d.%s", whole, f)
+	if neg {
+		s = "-" + s
+	}
+	return s
+}
+
+// Numeric formats the amount for a numeric(24,12) column.
+func (u USD) Numeric() string {
+	neg := u < 0
+	n := uint64(u)
+	if neg {
+		n = -n
+	}
+	s := fmt.Sprintf("%d.%012d", n/PerUSD, n%PerUSD)
+	if neg {
+		s = "-" + s
+	}
+	return s
+}
+
+// Float64 converts at the edge to agentgateway's config. It is the only float conversion.
+func (u USD) Float64() float64 { return float64(u) / PerUSD }
+
+// Add returns u+v or ErrOverflow.
+func (u USD) Add(v USD) (USD, error) {
+	if (v > 0 && u > math.MaxInt64-v) || (v < 0 && u < math.MinInt64-v) {
+		return 0, ErrOverflow
+	}
+	return u + v, nil
+}
+
+// SubFloor returns u-v, or 0 when v exceeds u.
+func (u USD) SubFloor(v USD) USD {
+	if v >= u {
+		return 0
+	}
+	return u - v
+}
+
+// Min returns the smaller amount.
+func Min(a, b USD) USD {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// Rate is a price per token in pico-USD, from a price per million tokens.
+type Rate int64
+
+var rateRE = regexp.MustCompile(`^[0-9]{1,6}(\.[0-9]{1,6})?$`)
+
+// ParseRate reads a price in USD per million tokens with at most six fraction digits.
+func ParseRate(s string) (Rate, error) {
+	if !rateRE.MatchString(s) {
+		return 0, fmt.Errorf("money: invalid price %q (want USD per million tokens, a decimal with at most 6 fraction digits)", s)
+	}
+	u, err := Parse(s)
+	if err != nil {
+		return 0, err
+	}
+	return Rate(u / 1_000_000), nil // u is pico-USD per million tokens
+}
+
+// PerMillion formats the rate as USD per million tokens.
+func (r Rate) PerMillion() string {
+	whole, frac := int64(r)/1_000_000, int64(r)%1_000_000
+	f := strings.TrimRight(fmt.Sprintf("%06d", frac), "0")
+	if f == "" {
+		return fmt.Sprintf("%d", whole)
+	}
+	return fmt.Sprintf("%d.%s", whole, f)
+}
+
+// Cost is tokens times rate, exactly.
+func (r Rate) Cost(tokens int64) (USD, error) {
+	if tokens < 0 || r < 0 {
+		return 0, errors.New("money: negative tokens or rate")
+	}
+	p := new(big.Int).Mul(big.NewInt(tokens), big.NewInt(int64(r)))
+	if !p.IsInt64() {
+		return 0, ErrOverflow
+	}
+	return USD(p.Int64()), nil
+}
+
+// Ratio returns 100*a/b as a float for display and thresholds (never for charging).
+func Ratio(a, b USD) float64 {
+	if b == 0 {
+		return 0
+	}
+	return float64(a) / float64(b)
+}
