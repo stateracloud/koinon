@@ -79,6 +79,12 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* A grid item's minimum width is its content's, so one long word or a form row stretches the whole grid past
+     a narrow screen (WCAG 1.4.10 Reflow). Items may shrink; text wraps and tables scroll in their own region. */
+  .grid > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: system-ui, sans-serif;

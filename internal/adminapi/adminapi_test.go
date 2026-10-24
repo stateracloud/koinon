@@ -130,9 +130,6 @@ type modelJSON struct {
 	Name   string `json:"name"`
 	Guard  bool   `json:"guard"`
 	Source string `json:"source"`
-	Rates  *struct {
-		Input, Output string
-	} `json:"rates"`
 }
 
 type tokenJSON struct {
@@ -417,11 +414,19 @@ var _ = Describe("the admin API", func() {
 			Expect(p.Source).To(Equal("ui"))
 
 			code, body = e.call(ctx, e.token, "POST", "/models", map[string]any{
-				"providerId": p.ID, "name": "deepseek/flash", "guard": true, "rates": map[string]any{"input": "0.30", "output": "1.20"},
+				"providerId": p.ID, "name": "deepseek/flash", "guard": true,
 			})
 			Expect(code).To(Equal(201), string(body))
 			m := decode[modelJSON](body)
 			Expect(m.Guard).To(BeTrue())
+
+			code, body = e.call(ctx, e.token, "POST", "/models", map[string]any{
+				"providerId": p.ID, "name": "with-rates", "rates": map[string]any{"input": "0.30", "output": "1.20"},
+			})
+			Expect(code).To(Equal(400), "rates on a model were replaced by prices")
+			Expect(string(body)).To(ContainSubstring("prices"))
+			code, _ = e.call(ctx, e.token, "PATCH", "/models/"+m.ID, map[string]any{"clearRates": true})
+			Expect(code).To(Equal(400))
 
 			code, body = e.call(ctx, e.token, "PATCH", "/models/"+m.ID, map[string]any{"guard": false})
 			Expect(code).To(Equal(200), string(body))
@@ -464,7 +469,7 @@ var _ = Describe("the admin API", func() {
 		It("show declared entries as read-only, answering 409 with the Secret's name", func(ctx SpecContext) {
 			_, err := e.catalog.ApplyDeclaredProvider(ctx, e.org, catalog.DeclaredProvider{
 				SecretName: "declared-1", Version: "v1", Name: "declared", Type: "ollama", URL: "http://ollama.example.com:11434/v1",
-				Models: []catalog.DeclaredModel{{Name: "qwen", Rates: &catalog.Rates{Input: "0", Output: "0"}}},
+				Models: []catalog.DeclaredModel{{Name: "qwen"}},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			list := decode[struct{ Providers []providerJSON }](mustBody(e.call(ctx, e.token, "GET", "/providers", nil)))

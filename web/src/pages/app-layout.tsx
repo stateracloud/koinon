@@ -5,6 +5,7 @@ import { useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, Navigate, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
+import { NoticeBanner } from '@/components/notice-banner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -103,8 +104,24 @@ function Shell({ who }: { who: WhoAmIResponse }) {
             <Link to="/settings/providers" className={navLink} activeProps={active}>
               Providers
             </Link>
+            <Link to="/settings/prices" className={navLink} activeProps={active}>
+              Prices
+            </Link>
+            <Link to="/settings/budgets" className={navLink} activeProps={active}>
+              Budgets
+            </Link>
             <Link to="/settings/tokens" className={navLink} activeProps={active}>
               API tokens
+            </Link>
+          </nav>
+        )}
+        {who.platformAdmin && (
+          <nav aria-labelledby="platform-nav" className="mt-2 flex flex-wrap items-center gap-1 md:mt-6 md:grid">
+            <h2 id="platform-nav" className="text-muted-foreground px-3 text-xs font-semibold tracking-wide uppercase md:pb-1">
+              Platform
+            </h2>
+            <Link to="/platform/budgets" className={navLink} activeProps={active}>
+              Budget ceilings
             </Link>
           </nav>
         )}
@@ -132,6 +149,12 @@ function Shell({ who }: { who: WhoAmIResponse }) {
             Log out
           </Button>
         </header>
+        {admin && <NoticeBanner key={org.orgId} orgId={org.orgId} platformAdmin={who.platformAdmin} />}
+        {who.platformAdmin && !memberships.some((m) => m.orgId === org.orgId) && (
+          <p role="note" className="bg-muted px-4 py-1.5 text-xs md:px-6">
+            You are acting as a platform admin in an org you are not a member of.
+          </p>
+        )}
         <main className="min-w-0 flex-1 px-4 py-6 md:px-6">
           {/* Remount pages when the org changes so no query mixes two orgs. */}
           <div key={org.orgId}>

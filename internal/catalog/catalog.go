@@ -30,7 +30,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -97,12 +96,17 @@ var (
 	modelPattern = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
 )
 
-// Rates are USD per million tokens as decimal strings.
+// Rates are the per-model rates of PV1. They were folded into org price entries (ADR 0056,
+// amendment 2026-10-24, W4); the type remains only so a request or Secret that still sets them
+// can be refused (API) or ignored with a warning (declarative Secrets).
 type Rates struct {
 	Input     string `json:"input"`
 	Output    string `json:"output"`
 	CacheRead string `json:"cacheRead,omitempty"`
 }
+
+// ErrRatesRemoved is the answer to a request that sets rates on a model.
+const ratesRemoved = "rates on a model were replaced by prices: add one on the Prices page, with PriceService.SetPrice or POST /admin/v1/prices"
 
 // Provider is a provider as callers see it: never its key.
 type Provider struct {
@@ -126,7 +130,6 @@ type Model struct {
 	ProviderID      string    `json:"providerId"`
 	Name            string    `json:"name"`
 	Guard           bool      `json:"guard"`
-	Rates           *Rates    `json:"rates,omitempty"`
 	Source          string    `json:"source"`
 	ManagedBySecret string    `json:"managedBySecret,omitempty"`
 	DisabledReason  string    `json:"disabledReason,omitempty"`
@@ -190,9 +193,6 @@ func toModel(m store.Model) Model {
 		Source: string(m.Source), ManagedBySecret: m.ManagedBySecret.String, DisabledReason: m.DisabledReason.String,
 		CreatedAt: m.CreatedAt.Time, UpdatedAt: m.UpdatedAt.Time,
 	}
-	if m.InputRate.Valid {
-		out.Rates = &Rates{Input: m.InputRate.String, Output: m.OutputRate.String, CacheRead: m.CacheReadRate.String}
-	}
 	return out
 }
 
@@ -222,41 +222,15 @@ func validateTypeURL(typ, rawURL string) error {
 	return nil
 }
 
-// ValidateModel checks a model's name, guard and rates against its provider type.
-func ValidateModel(name string, guard bool, r *Rates, providerType string) error {
+// ValidateModel checks a model's name and guard against its provider type.
+func ValidateModel(name string, guard bool, providerType string) error {
 	if !modelPattern.MatchString(name) {
 		return invalid("model name must be 1 to 256 characters of letters, digits and _ . : / @ -")
 	}
 	if guard && providerType != GuardProviderType {
 		return invalid("the routing guard exists for %s providers only", GuardProviderType)
 	}
-	if r != nil {
-		// Exactly what money.ParseRate accepts, so a stored rate can always be priced.
-		if _, err := money.ParseRate(r.Input); err != nil {
-			return invalid("input: rates are USD per million tokens as decimals with at most 6 fraction digits, such as \"0.30\"")
-		}
-		if _, err := money.ParseRate(r.Output); err != nil {
-			return invalid("output: rates are USD per million tokens as decimals with at most 6 fraction digits, such as \"1.20\"")
-		}
-		if r.CacheRead != "" {
-			if _, err := money.ParseRate(r.CacheRead); err != nil {
-				return invalid("cacheRead must be a decimal with at most 6 fraction digits, such as \"0.03\"")
-			}
-		}
-	}
 	return nil
-}
-
-func rateParams(r *Rates) (in, out, cache pgtype.Text) {
-	if r == nil {
-		return
-	}
-	in = pgtype.Text{String: r.Input, Valid: true}
-	out = pgtype.Text{String: r.Output, Valid: true}
-	if r.CacheRead != "" {
-		cache = pgtype.Text{String: r.CacheRead, Valid: true}
-	}
-	return
 }
 
 func providerSummary(p store.Provider) map[string]any {
@@ -267,9 +241,6 @@ func providerSummary(p store.Provider) map[string]any {
 
 func modelSummary(m store.Model) map[string]any {
 	out := map[string]any{"name": m.Name, "guard": m.Guard, "providerId": m.ProviderID.String(), "source": string(m.Source)}
-	if m.InputRate.Valid {
-		out["rates"] = Rates{Input: m.InputRate.String, Output: m.OutputRate.String, CacheRead: m.CacheReadRate.String}
-	}
 	return out
 }
 
@@ -290,28 +261,4 @@ func (s *Service) seal(org, id pgtype.UUID, key string) ([]byte, error) {
 func newID() (pgtype.UUID, error) {
 	id, err := uuid.NewV7()
 	return pgtype.UUID{Bytes: id, Valid: true}, err
-}
-
-// AuditRates logs every stored model rate that money.ParseRate would refuse (rows from before
-// the stricter validation) and returns how many there were. Such a model is not priced and is
-// reported by the reconciler; nothing else is affected.
-func (s *Service) AuditRates(ctx context.Context) (int, error) {
-	rows, err := store.New(s.pool).ListModelRatesForAudit(ctx)
-	if err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, r := range rows {
-		for field, v := range map[string]string{"input": r.InputRate.String, "output": r.OutputRate.String, "cacheRead": r.CacheReadRate.String} {
-			if v == "" {
-				continue
-			}
-			if _, err := money.ParseRate(v); err != nil {
-				s.log.Warn("model has a rate that cannot be priced; it is not served until fixed",
-					"org", r.OrgID.String(), "model", r.Name, "field", field, "value", v)
-				n++
-			}
-		}
-	}
-	return n, nil
 }

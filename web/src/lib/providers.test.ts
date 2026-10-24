@@ -5,17 +5,11 @@ import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { TokenSchema } from '@/gen/koinon/token/v1alpha1/token_pb'
-import { createdByLabel, savedRecently, daysToSeconds, rateError, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
+import { createdByLabel, savedRecently, daysToSeconds, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
 
 describe('forms', () => {
   it('names a model the way the gateway serves it', () => {
     expect(scopedModelName('acme', 'deepseek/v4')).toBe('acme/deepseek/v4')
-  })
-  it('checks rates like the server', () => {
-    expect(rateError('Input rate', '0.30', true)).toBeUndefined()
-    expect(rateError('Input rate', '', true)).toMatch(/required/)
-    expect(rateError('Cache', '', false)).toBeUndefined()
-    expect(rateError('Input rate', 'cheap', true)).toMatch(/decimal/)
   })
   it('limits the token expiry to 1 to 90 whole days', () => {
     expect(tokenDaysError('30')).toBeUndefined()

@@ -25,9 +25,17 @@ export function costLabel(c: Cost | undefined): string | undefined {
   return c.priced ? usd : `at least ${usd}`
 }
 
+/** estimateNote says how many of a cost's requests were estimated, or undefined when none were. */
+export function estimateNote(c: Cost | undefined): string | undefined {
+  if (!c || c.estimatedRequests <= 0n) return undefined
+  return `${c.estimatedRequests} of ${c.requests} ${c.requests === 1n ? 'request' : 'requests'} estimated`
+}
+
 /** costDetail describes what a cost counts, for a tooltip. */
 export function costDetail(c: Cost): string {
   const requests = `${c.requests} model ${c.requests === 1n ? 'request' : 'requests'}`
   const tokens = `${c.inputTokens} input and ${c.outputTokens} output tokens`
-  return c.priced ? `${requests}, ${tokens}` : `${requests}, ${tokens}; some requests had no price`
+  const base = c.priced ? `${requests}, ${tokens}` : `${requests}, ${tokens}; some requests had no price`
+  if (c.estimatedRequests <= 0n) return base
+  return `${base}. ${estimateNote(c)}: the provider did not report their usage, so Koinon estimated it from the size of the request. Estimates count toward budgets and tend to run high.`
 }

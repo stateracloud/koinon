@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -80,8 +79,8 @@ func TestDocumentedSecretsParse(t *testing.T) {
 		if err != nil {
 			t.Errorf("%s: %v", f, err)
 		}
-		if len(d.Models) == 0 || !strings.Contains(string(raw), "rates") {
-			t.Errorf("%s: declare at least one model with rates", f)
+		if len(d.Models) == 0 || len(d.Warnings) > 0 {
+			t.Errorf("%s: declare at least one model, without the removed rates (%v)", f, d.Warnings)
 		}
 	}
 }

@@ -302,9 +302,13 @@ func (m Match) Compile() (re *regexp.Regexp, specificity int, err error) {
 			return nil, 0, errors.New("match: regex longer than 1024 characters")
 		}
 		re, err = regexp.Compile("(?i)^(?:" + m.Regex + ")$")
-		return re, len(regexp.MustCompile(`[^a-zA-Z0-9_./:@-]`).ReplaceAllString(m.Regex, "")), err
+		// Inline flag groups, (?flags:...) and (?flags), are syntax, not literal characters.
+		lit := inlineFlagsRE.ReplaceAllString(m.Regex, "")
+		return re, len(regexp.MustCompile(`[^a-zA-Z0-9_./:@-]`).ReplaceAllString(lit, "")), err
 	}
 }
+
+var inlineFlagsRE = regexp.MustCompile(`\(\?[a-zA-Z]*(-[a-zA-Z]+)?[:)]`)
 
 // Tokenizers.
 const (

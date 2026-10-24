@@ -22,11 +22,14 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // agentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
@@ -242,7 +245,13 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 	It("charges a request whose client disconnected before the headers, as an estimate", func(ctx SpecContext) {
 		d := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
 		d.model(ctx, "fake", slowModel)
-		_, err := db.Exec(ctx, `UPDATE models SET input_rate = '50', output_rate = '50' WHERE org_id = $1`, d.org)
+		_, err := prices.New(db, nil).SetOverride(ctx, d.org, audit.User(d.user), prices.OverrideInput{
+			Entry: pricing.Entry{
+				ID: "slow", Provider: "fake", Match: pricing.Match{Glob: slowModel}, Spec: pricing.Spec{Prices: pricing.Wire{Input: "50", Output: "50"}},
+				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
+			},
+			ValidFrom: time.Now().Add(-time.Hour),
+		})
 		Expect(err).NotTo(HaveOccurred())
 		dkey, err := gateway.NewKey(d.ref())
 		Expect(err).NotTo(HaveOccurred())

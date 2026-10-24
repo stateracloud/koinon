@@ -2,7 +2,7 @@
 
 import { timestampDate } from '@bufbuild/protobuf/wkt'
 import type { Timestamp } from '@bufbuild/protobuf/wkt'
-import type { Model, Provider, Rates } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import type { Model, Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import type { Token } from '@/gen/koinon/token/v1alpha1/token_pb'
 
 /** The provider type that has a routing guard (ADR 0048, 0056). */
@@ -24,13 +24,6 @@ export function scopedModelName(orgSlug: string, name: string): string {
   return `${orgSlug}/${name}`
 }
 
-/** ratesLabel reads "$0.30 in / $1.20 out per million tokens", or says the model is not served. */
-export function ratesLabel(r: Rates | undefined): string {
-  if (!r) return 'No rates, so this model is not served'
-  const cache = r.cacheRead ? ` / $${r.cacheRead} cached` : ''
-  return `$${r.input} in / $${r.output} out${cache} per million tokens`
-}
-
 /** True when a provider's models and key can be changed here. */
 export function providerEditable(p: Provider): boolean {
   return p.source !== 'secret'
@@ -43,15 +36,6 @@ export function providerDeletable(p: Provider): boolean {
 
 export function modelsOf(models: readonly Model[], providerId: string): Model[] {
   return models.filter((m) => m.providerId === providerId)
-}
-
-const rate = /^[0-9]+(\.[0-9]+)?$/
-
-/** rateError checks a rate field the way the server does. */
-export function rateError(label: string, value: string, required: boolean): string | undefined {
-  const v = value.trim()
-  if (!v) return required ? `${label} is required.` : undefined
-  return rate.test(v) ? undefined : `${label} must be a decimal such as 0.30.`
 }
 
 /** How long a new or changed provider takes to reach the gateway, measured on kind (about 170 s). */

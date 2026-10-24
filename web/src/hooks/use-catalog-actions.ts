@@ -4,8 +4,7 @@ import { createClient } from '@connectrpc/connect'
 import { createConnectQueryKey, useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import type { MessageInitShape } from '@bufbuild/protobuf'
-import { ProviderService, type RatesSchema } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import { ProviderService } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { TokenService } from '@/gen/koinon/token/v1alpha1/token_pb'
 import type { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 
@@ -13,12 +12,10 @@ import type { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 // and result in its cache, and these carry provider keys and the token secret, which must not outlive
 // the form that handled them.
 
-type RatesInit = MessageInitShape<typeof RatesSchema>
-
 export type ProviderCreate = { name: string; type: string; url: string; apiKey: string }
 export type ProviderChange = { type?: string; url?: string; apiKey?: string }
-export type ModelCreate = { providerId: string; name: string; guard: boolean; rates: RatesInit }
-export type ModelChange = { guard?: boolean; rates?: RatesInit; clearRates?: boolean }
+export type ModelCreate = { providerId: string; name: string; guard: boolean }
+export type ModelChange = { guard?: boolean }
 
 /** useProviderActions returns the write calls of ProviderService for one org; each refreshes the lists. */
 export function useProviderActions(orgId: string) {

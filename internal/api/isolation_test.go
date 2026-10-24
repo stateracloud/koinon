@@ -239,6 +239,12 @@ var isolationCases = map[string]isolationCase{
 			return budgetClient(c).GetAgentBudget(ctx, &budgetv1alpha1.GetAgentBudgetRequest{OrgId: org, AgentId: f.agent.GetId()})
 		},
 	},
+	budgetv1alpha1connect.BudgetServiceListAgentBudgetsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return budgetClient(c).ListAgentBudgets(ctx, &budgetv1alpha1.ListAgentBudgetsRequest{OrgId: org})
+		},
+	},
 	budgetv1alpha1connect.BudgetServiceSetAgentBudgetProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return budgetClient(c).SetAgentBudget(ctx, &budgetv1alpha1.SetAgentBudgetRequest{OrgId: org, AgentId: f.agent.GetId(), DailyLimitUsd: "1"})
@@ -328,13 +334,13 @@ var isolationCases = map[string]isolationCase{
 	providerv1alpha1connect.ProviderServiceCreateModelProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{
-				OrgId: org, ProviderId: f.provider, Name: "intruder", Rates: &providerv1alpha1.Rates{Input: "1", Output: "1"},
+				OrgId: org, ProviderId: f.provider, Name: "intruder",
 			})
 		},
 	},
 	providerv1alpha1connect.ProviderServiceUpdateModelProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
-			return c.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: f.model, ClearRates: true})
+			return c.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: f.model, Guard: new(false)})
 		},
 	},
 	providerv1alpha1connect.ProviderServiceDeleteModelProcedure: {
@@ -359,6 +365,8 @@ var isolationCases = map[string]isolationCase{
 var isolationExempt = map[string]string{
 	authv1alpha1connect.AuthServiceWhoAmIProcedure:         "describes the caller's own session; takes no IDs",
 	authv1alpha1connect.AuthServiceChangePasswordProcedure: "changes the caller's own password; takes no IDs",
+	budgetv1alpha1connect.BudgetServiceListOrgBudgetsProcedure: "lists every org, for platform admins only; the server " +
+		"refuses everyone else (TestListOrgBudgets in budgets_test.go)",
 	templatev1alpha1connect.TemplateServiceListTemplatesProcedure: "templates are platform data shared by every org; " +
 		"takes no IDs",
 	connectionv1alpha1connect.ConnectionServiceListConnectorTypesProcedure: "connector types are platform data shared by " +
@@ -433,7 +441,7 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	Expect(err).NotTo(HaveOccurred())
 	f.provider = prov.GetProvider().GetId()
 	mod, err := f.owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{
-		OrgId: f.org, ProviderId: f.provider, Name: "isolated-model", Rates: &providerv1alpha1.Rates{Input: "1", Output: "2"},
+		OrgId: f.org, ProviderId: f.provider, Name: "isolated-model",
 	})
 	Expect(err).NotTo(HaveOccurred())
 	f.model = mod.GetModel().GetId()
@@ -461,7 +469,7 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM providers WHERE org_id = $1 AND url = 'https://openrouter.ai/api/v1'`, org),
 		count(ctx, e, `SELECT count(*) FROM providers WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM models WHERE org_id = $1`, org),
-		count(ctx, e, `SELECT count(*) FROM models WHERE org_id = $1 AND input_rate IS NOT NULL`, org),
+		count(ctx, e, `SELECT count(*) FROM price_overrides WHERE org_id = $1`, org),
 	}
 }
 
