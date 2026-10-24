@@ -100,14 +100,13 @@ ALTER TABLE tickets
 ALTER TABLE runs
     ADD COLUMN summarizing boolean NOT NULL DEFAULT false;
 
--- The key koinon-agentd and koinon-api share to authenticate the upload of saved work (HMAC over
--- org, run and epoch, short-lived). It is not a key-encryption key: koinon-agentd holds no KEK,
--- and the sealing happens in koinon-api. Generated here from the database's own CSPRNG.
-CREATE TABLE service_keys (
-    name       text        PRIMARY KEY CHECK (name ~ '^[a-z][a-z0-9-]{0,62}$'),
-    key        bytea       NOT NULL CHECK (length(key) = 32),
-    created_at timestamptz NOT NULL DEFAULT now()
+-- Nonces of saved-work uploads already accepted (ADR 0054): a captured request cannot be replayed.
+-- The upload key itself is a Kubernetes Secret that koinon-api creates, not a database value.
+CREATE TABLE saved_work_upload_nonces (
+    org_id     uuid        NOT NULL,
+    run_id     uuid        NOT NULL,
+    nonce      text        NOT NULL CHECK (nonce ~ '^[0-9a-f]{32}$'),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (org_id, run_id, nonce),
+    FOREIGN KEY (org_id, run_id) REFERENCES runs (org_id, id)
 );
-
-INSERT INTO service_keys (name, key)
-VALUES ('saved-work-upload', decode(replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''), 'hex'));

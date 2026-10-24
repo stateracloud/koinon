@@ -33,17 +33,18 @@ type Receiver struct {
 	pool *pgxpool.Pool
 	q    *store.Queries
 	ring *secretstore.Keyring
+	key  func(context.Context) ([]byte, error)
 	log  *slog.Logger
 	sem  chan struct{}
 	now  func() time.Time
 }
 
 // NewReceiver returns a Receiver.
-func NewReceiver(pool *pgxpool.Pool, ring *secretstore.Keyring, log *slog.Logger) *Receiver {
+func NewReceiver(pool *pgxpool.Pool, ring *secretstore.Keyring, key func(context.Context) ([]byte, error), log *slog.Logger) *Receiver {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Receiver{pool: pool, q: store.New(pool), ring: ring, log: log, sem: make(chan struct{}, 1), now: time.Now}
+	return &Receiver{pool: pool, q: store.New(pool), ring: ring, key: key, log: log, sem: make(chan struct{}, 1), now: time.Now}
 }
 
 func fail(w http.ResponseWriter, code int, msg string) { http.Error(w, msg, code) }
@@ -63,15 +64,30 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad parameters")
 		return
 	}
-	key, err := rc.q.GetServiceKey(r.Context(), KeyName)
+	key, err := rc.key(r.Context())
 	if err != nil {
 		rc.log.Error("saved work: reading the upload key failed", "err", err)
 		fail(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ValidToken(key, token, org.String(), runID.String(), epoch, exp, rc.now()) {
+	nonce, bodySHA := r.Header.Get(NonceHeader), r.Header.Get(BodyHashHeader)
+	if !hashPattern32.MatchString(nonce) || !hashPattern.MatchString(bodySHA) ||
+		!ValidToken(key, token, org.String(), runID.String(), epoch, exp, n, bodySHA, nonce, rc.now()) {
 		fail(w, http.StatusUnauthorized, "bad credential")
+		return
+	}
+	if _, err := rc.q.GetRunForUpload(r.Context(), store.GetRunForUploadParams{OrgID: org, ID: runID, Epoch: epoch}); err != nil {
+		fail(w, http.StatusUnprocessableEntity, "the run does not own its sandbox any more")
+		return
+	}
+	// A credential is good once: a replay is refused before anything is read.
+	if used, err := rc.q.InsertUploadNonce(r.Context(), store.InsertUploadNonceParams{OrgID: org, RunID: runID, Nonce: nonce}); err != nil {
+		rc.log.Error("saved work: recording the nonce failed", "err", err)
+		fail(w, http.StatusInternalServerError, "internal error")
+		return
+	} else if used == 0 {
+		fail(w, http.StatusConflict, "this credential was used already")
 		return
 	}
 	select {
@@ -83,6 +99,10 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	packed, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxUploadBytes))
 	if err != nil {
 		fail(w, http.StatusRequestEntityTooLarge, "the bundle is too large or unreadable")
+		return
+	}
+	if BundleHash(packed) != bodySHA {
+		fail(w, http.StatusUnauthorized, "the body is not the one the credential was made for")
 		return
 	}
 	res, err := rc.store(r.Context(), org, runID, epoch, n, packed)

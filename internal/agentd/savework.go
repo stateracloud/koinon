@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -69,7 +70,7 @@ func (r *runner) saveWork(ctx context.Context, workspace, sandbox string) saveRe
 	lost := func(format string, a ...any) saveResult {
 		return saveResult{status: "lost", notes: []string{fmt.Sprintf(format, a...)}}
 	}
-	if r.p.cfg.SavedWorkURL == "" {
+	if r.p.cfg.SavedWorkURL == "" || r.p.cfg.SavedWorkKey == nil {
 		return lost("saving work is not configured on this koinon-agentd (no koinon-api address)")
 	}
 	sctx, cancel := context.WithTimeout(ctx, r.p.cfg.SaveTimeout)
@@ -78,11 +79,12 @@ func (r *runner) saveWork(ctx context.Context, workspace, sandbox string) saveRe
 	if cwd == "" {
 		cwd = r.p.cfg.SessionCwd
 	}
+	started := time.Now()
 	out, code, stderr, err := r.sandboxExecLimit(sctx, workspace, sandbox,
 		[]string{"/bin/sh", "-c", saveworkScript, "savework", cwd, strconv.Itoa(savedwork.MaxBytes)},
 		nil, r.p.cfg.SaveTimeout, savedwork.MaxBytes+(8<<20))
 	switch {
-	case sctx.Err() != nil:
+	case sctx.Err() != nil || (err != nil && time.Since(started) >= r.p.cfg.SaveTimeout):
 		return lost("reading the workspace took longer than %s (its storage may be what the stuck process waits on)", r.p.cfg.SaveTimeout)
 	case err != nil:
 		return lost("reading the workspace failed: %v", err)
@@ -110,8 +112,8 @@ func (r *runner) saveWork(ctx context.Context, workspace, sandbox string) saveRe
 			continue
 		}
 		if key == nil {
-			if key, err = r.q.GetServiceKey(sctx, savedwork.KeyName); err != nil {
-				return lost("the upload key is unreadable: %v", err)
+			if key, err = r.p.cfg.SavedWorkKey(); err != nil || len(key) == 0 {
+				return lost("the upload key is not available: %v", err)
 			}
 		}
 		// One upload at a time per koinon-agentd (and per koinon-api): a bundle is up to 50 MB.

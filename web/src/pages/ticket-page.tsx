@@ -71,7 +71,8 @@ export function TicketPage() {
   }
 
   const t = ticket.data.ticket
-  const agentName = agents.data?.agents.find((a) => a.id === t?.agentId)?.displayName
+  const agent = agents.data?.agents.find((a) => a.id === t?.agentId)
+  const agentName = agent?.displayName
   const runs = ticket.data.runs.map((r) => watches[r.id]?.run ?? r)
   // Costs come from GetTicket only: watched runs carry none.
   const runCosts = ticket.data.runs.map((r, i) => ({ id: r.id, state: runs[i].state, cost: r.cost }))
@@ -102,6 +103,22 @@ export function TicketPage() {
           </Button>
         )}
       </div>
+
+      {agent?.unhealthyAt && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription className="grid gap-1">
+            <span className="font-medium">This agent is unhealthy: runs on this ticket wait until it is resumed.</span>
+            {agent.unhealthyReason && <span>Reason: {agent.unhealthyReason}</span>}
+            {org.role >= OrgRole.ADMIN ? (
+              <Link to="/agents/$agentId" params={{ agentId: agent.id }} className="underline">
+                Open the agent to resume it
+              </Link>
+            ) : (
+              <span>An org admin or owner can resume it.</span>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
       <RunStatus runs={active.map((r) => ({ id: r.id, state: runStateLabel(r.state), watch: watches[r.id] }))} />
 

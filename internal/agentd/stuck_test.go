@@ -4,6 +4,7 @@ package agentd_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -57,11 +58,15 @@ func (e *env) stuckAfterTurn(procinfo string) {
 
 const dProc = "41|D|worker|nfs_wait_bit_killable\n"
 
+// uploadKey stands in for the Secret that signs uploads; obviously fake.
+var uploadKey = bytes.Repeat([]byte("u"), 32)
+
 // receiverURL starts koinon-api's saved-work receiver (which holds the keyring; koinon-agentd does
 // not) on the suite's database and returns its address.
 func receiverURL() string {
 	mux := http.NewServeMux()
-	mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(db, fakeKeyring(), nil))
+	mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(db, fakeKeyring(),
+		func(context.Context) ([]byte, error) { return uploadKey, nil }, nil))
 	srv := httptest.NewServer(mux)
 	DeferCleanup(srv.Close)
 	return srv.URL
@@ -73,6 +78,7 @@ func fastStuck(url string) func(*agentd.Config) {
 		c.StuckAfter, c.StuckPoll = 400*time.Millisecond, 50*time.Millisecond
 		c.SaveTimeout = 2 * time.Second
 		c.SavedWorkURL = url
+		c.SavedWorkKey = func() ([]byte, error) { return uploadKey, nil }
 	}
 }
 
@@ -257,6 +263,8 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
 		t := e.ticket(ctx, "hello")
 		first := e.enqueue(ctx, t)
+		other := e.ticket(ctx, "waiting")
+		waiting := e.enqueue(ctx, other) // queued behind the first run
 		// Three earlier recreations.
 		for range 3 {
 			_, err := db.Exec(ctx, `INSERT INTO sandbox_incidents (org_id, agent_id, run_id, ticket_id, processes, outcome, work)
@@ -279,6 +287,8 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		Expect(kind).To(Equal("agent.unhealthy"))
 		Expect(payload).To(ContainSubstring(e.agent.ID.String()))
 		Expect(kindsOf(ticketEvents(ctx, e, t))).To(ContainElement("agent.unhealthy"))
+		Expect(kindsOf(ticketEvents(ctx, e, other))).To(ContainElement("agent.unhealthy"), "a ticket whose run waits is told why")
+		Expect(getRun(ctx, waiting).State).To(Equal(store.RunStateQueued))
 		var n int
 		Expect(db.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'agent.mark_unhealthy'`, e.org).Scan(&n)).To(Succeed())
 		Expect(n).To(Equal(1))
@@ -287,9 +297,13 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e.message(ctx, t, "again")
 		second := e.enqueue(ctx, t)
 		Consistently(runState(ctx, second)).WithTimeout(1500 * time.Millisecond).Should(Equal(store.RunStateQueued))
+		e.files.mu.Lock()
+		e.files.sweep, e.files.procinfo = nil, nil // the cause is fixed
+		e.files.mu.Unlock()
 		_, err = db.Exec(ctx, `UPDATE agents SET unhealthy_at = NULL, unhealthy_reason = NULL WHERE id = $1`, e.agent.ID)
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(runState(ctx, second)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Eventually(runState(ctx, waiting)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 	})
 
 	It("recreates before the next run when the process is found by the sweep that precedes the harness", func(ctx SpecContext) {

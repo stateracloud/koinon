@@ -44,6 +44,11 @@ RETURNING *;
 SELECT DISTINCT ticket_id FROM runs
 WHERE org_id = @org_id AND agent_id = @agent_id AND state = 'parked';
 
+-- name: ListTicketsWithWaitingRunOfAgent :many
+-- Tickets with a queued or parked run of the agent: they wait while the agent is unhealthy.
+SELECT DISTINCT ticket_id FROM runs
+WHERE org_id = @org_id AND agent_id = @agent_id AND state IN ('queued', 'parked');
+
 -- name: InsertSavedWork :one
 INSERT INTO saved_work (org_id, id, ticket_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, expires_at)
 VALUES (@org_id, @id, @ticket_id, @run_id, @agent_id, @repo, @base_sha, @branch, @manifest, @size_bytes, @envelope, @expires_at)
@@ -110,9 +115,11 @@ WHERE org_id = @org_id AND ticket_id = @ticket_id AND kind = 'message' AND actor
 ORDER BY seq DESC
 LIMIT @max_rows;
 
--- name: GetServiceKey :one
--- Not org-owned: shared by the components of one installation.
-SELECT key FROM service_keys WHERE name = @name;
+-- name: InsertUploadNonce :execrows
+-- Zero rows: the nonce was used before (a replay).
+INSERT INTO saved_work_upload_nonces (org_id, run_id, nonce)
+VALUES (@org_id, @run_id, @nonce)
+ON CONFLICT DO NOTHING;
 
 -- name: GetRunForUpload :one
 -- The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
