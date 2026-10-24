@@ -57,3 +57,16 @@ method is in the ADR and in [the research](../research/claude-token-estimation.m
 counted with tiktoken through `github.com/pkoukk/tiktoken-go` (MIT) and
 `github.com/pkoukk/tiktoken-go-loader` (MIT), which compile OpenAI's BPE files (also MIT) into the
 binary; nothing is downloaded at run time. Update both modules together and re-run `go test ./internal/estimate`.
+
+## Upgrading from the first release (per-model rates)
+
+Migration 00014 turns the rates set on each model into an org price entry (see ADR 0056, W4 amendment),
+and `koinon-api` completes those entries at start from the matching default entry. Check three things:
+
+- Entries with **Needs review** on the Prices page matched no default entry and have generic estimate
+  settings. Save a new version with the right ones.
+- `price.migration_skipped` events in the audit log name models whose rates could not be converted.
+- GitOps users: `rates` in a model-provider Secret is now ignored (a Warning Event on every sync says so). A
+  model added through a Secret with only `rates` is not served unless the default list covers it. Declare
+  a price instead, on the Prices page or with `POST /admin/v1/prices`.
+- During a rolling upgrade, rates written by an old pod are not converted.

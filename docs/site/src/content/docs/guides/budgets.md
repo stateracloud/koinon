@@ -34,7 +34,8 @@ says so, with the limit and the amount.
 
 ## Platform ceiling
 
-Platform admins set the ceiling under **Platform** in the sidebar, for the org chosen in the org switcher.
+Platform admins set the ceiling under **Platform** in the sidebar. The page lists every org with its ceiling,
+cap and spend this month, and each ceiling is edited in place.
 
 Overshoot is bounded by the responses in flight when a limit is reached. The details are in
 [ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md).
