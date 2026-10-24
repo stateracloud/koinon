@@ -119,8 +119,17 @@ has "existing KEK Secret mounted" 'secretName: mine$' --set secrets.kek.existing
 n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /secrets/kek$' || true)
 [ "$n" = 1 ] || fail "KEK mounted into $n components, want only koinon-reconciler"
 # koinon-agentd holds no KEK; it posts a stuck sandbox's work to koinon-api's tools port (ADR 0054).
-env_is KOINON_SAVED_WORK_URL '"http://koinon-api-tools.koinon.svc.cluster.local:8081"'
-has "agentd may reach the tools port" 'app.kubernetes.io/component: agentd' --show-only templates/networkpolicy.yaml
+env_is KOINON_SAVED_WORK_URL '"http://koinon-api-saved-work.koinon.svc.cluster.local:8082"'
+env_is KOINON_SAVED_WORK_KEY_FILE '/secrets/saved-work/key'
+n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /secrets/saved-work$' || true)
+[ "$n" = 1 ] || fail "the saved-work key is mounted into $n components, want only koinon-agentd"
+# The saved-work port admits agentd only; the tools port stays agentgateway's alone.
+np=$(render --show-only templates/networkpolicy.yaml)
+sw=$(printf '%s\n' "$np" | grep -A8 -- '- port: savedwork' || true)
+printf '%s\n' "$sw" | grep -q 'component: agentd' || fail "the saved-work port does not admit koinon-agentd"
+printf '%s\n' "$sw" | grep -q 'component: gateway' && fail "the saved-work port admits the gateway"
+tl=$(printf '%s\n' "$np" | grep -A8 -- '- port: tools' || true)
+printf '%s\n' "$tl" | grep -q 'component: agentd' && fail "the tools port admits koinon-agentd"
 # koinon-api cannot delete Secrets unless the legacy connection migration is on.
 lacks "no Secret delete by default" 'verbs: \[delete\]'
 has "Secret delete with the legacy migration" 'verbs: \[delete\]' --set secrets.migrateLegacyConnections=true

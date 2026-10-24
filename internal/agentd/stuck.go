@@ -262,10 +262,20 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 			if err := r.notifyUnhealthy(ctx, q, inc.ID, reason); err != nil {
 				return err
 			}
-			if err := r.ticketNote(ctx, q, r.run.TicketID, kindAgentUnhealthy,
-				"The agent is unhealthy: its sandbox got stuck again ("+strconv.FormatInt(n, 10)+
-					" recreations in 24 hours), so it is not recreated and new runs are refused until an admin resumes the agent. "+reason); err != nil {
+			waiting, err := q.ListTicketsWithWaitingRunOfAgent(ctx, store.ListTicketsWithWaitingRunOfAgentParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
+			if err != nil {
 				return err
+			}
+			notify := map[pgtype.UUID]bool{r.run.TicketID: true}
+			for _, t := range waiting {
+				notify[t] = true
+			}
+			for t := range notify {
+				if err := r.ticketNote(ctx, q, t, kindAgentUnhealthy,
+					"The agent is unhealthy: its sandbox got stuck again ("+strconv.FormatInt(n, 10)+
+						" recreations in 24 hours), so it is not recreated. New runs are refused, and this ticket's waiting run does not start until an admin resumes the agent. "+reason); err != nil {
+					return err
+				}
 			}
 		} else {
 			ev.Action = "sandbox.mark_unhealthy"

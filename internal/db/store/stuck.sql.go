@@ -270,18 +270,6 @@ func (q *Queries) GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkMani
 	return i, err
 }
 
-const getServiceKey = `-- name: GetServiceKey :one
-SELECT key FROM service_keys WHERE name = $1
-`
-
-// Not org-owned: shared by the components of one installation.
-func (q *Queries) GetServiceKey(ctx context.Context, name string) ([]byte, error) {
-	row := q.db.QueryRow(ctx, getServiceKey, name)
-	var key []byte
-	err := row.Scan(&key)
-	return key, err
-}
-
 const insertSandboxIncident = `-- name: InsertSandboxIncident :one
 INSERT INTO sandbox_incidents (org_id, agent_id, run_id, ticket_id, processes, outcome, work, work_note, saved_work_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -385,6 +373,27 @@ func (q *Queries) InsertSavedWork(ctx context.Context, arg InsertSavedWorkParams
 	return i, err
 }
 
+const insertUploadNonce = `-- name: InsertUploadNonce :execrows
+INSERT INTO saved_work_upload_nonces (org_id, run_id, nonce)
+VALUES ($1, $2, $3)
+ON CONFLICT DO NOTHING
+`
+
+type InsertUploadNonceParams struct {
+	OrgID pgtype.UUID
+	RunID pgtype.UUID
+	Nonce string
+}
+
+// Zero rows: the nonce was used before (a replay).
+func (q *Queries) InsertUploadNonce(ctx context.Context, arg InsertUploadNonceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertUploadNonce, arg.OrgID, arg.RunID, arg.Nonce)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listRecentAgentReplies = `-- name: ListRecentAgentReplies :many
 SELECT org_id, id, ticket_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM ticket_events
 WHERE org_id = $1 AND ticket_id = $2 AND kind = 'message' AND actor_kind = 'agent'
@@ -444,6 +453,37 @@ type ListTicketsWithParkedRunOfAgentParams struct {
 // Tickets whose run is parked in the agent's sandbox: they resume in the new sandbox.
 func (q *Queries) ListTicketsWithParkedRunOfAgent(ctx context.Context, arg ListTicketsWithParkedRunOfAgentParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listTicketsWithParkedRunOfAgent, arg.OrgID, arg.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var ticket_id pgtype.UUID
+		if err := rows.Scan(&ticket_id); err != nil {
+			return nil, err
+		}
+		items = append(items, ticket_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTicketsWithWaitingRunOfAgent = `-- name: ListTicketsWithWaitingRunOfAgent :many
+SELECT DISTINCT ticket_id FROM runs
+WHERE org_id = $1 AND agent_id = $2 AND state IN ('queued', 'parked')
+`
+
+type ListTicketsWithWaitingRunOfAgentParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// Tickets with a queued or parked run of the agent: they wait while the agent is unhealthy.
+func (q *Queries) ListTicketsWithWaitingRunOfAgent(ctx context.Context, arg ListTicketsWithWaitingRunOfAgentParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listTicketsWithWaitingRunOfAgent, arg.OrgID, arg.AgentID)
 	if err != nil {
 		return nil, err
 	}

@@ -258,8 +258,6 @@ type Querier interface {
 	// Everything but the sealed files.
 	GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkManifestParams) (GetSavedWorkManifestRow, error)
 	GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error)
-	// Not org-owned: shared by the components of one installation.
-	GetServiceKey(ctx context.Context, name string) ([]byte, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
 	// The highest ticket timeline seq already sent to the harness by the ticket's
@@ -296,6 +294,8 @@ type Querier interface {
 	// own computation from the raw usage and the dated price; gateway_cost_usd is
 	// what agentgateway logged (NULL when it could not price the request).
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
+	// Zero rows: the nonce was used before (a replay).
+	InsertUploadNonce(ctx context.Context, arg InsertUploadNonceParams) (int64, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
 	ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiToken, error)
 	// The config of each agent's active version, for the template default of its daily limit.
@@ -399,6 +399,8 @@ type Querier interface {
 	ListTicketsByStatus(ctx context.Context, arg ListTicketsByStatusParams) ([]Ticket, error)
 	// Tickets whose run is parked in the agent's sandbox: they resume in the new sandbox.
 	ListTicketsWithParkedRunOfAgent(ctx context.Context, arg ListTicketsWithParkedRunOfAgentParams) ([]pgtype.UUID, error)
+	// Tickets with a queued or parked run of the agent: they wait while the agent is unhealthy.
+	ListTicketsWithWaitingRunOfAgent(ctx context.Context, arg ListTicketsWithWaitingRunOfAgentParams) ([]pgtype.UUID, error)
 	// The servers an agent may use that are down or disabled right now, for the note agentd gives the
 	// agent when a session starts.
 	ListUnavailableMCPServersOfAgent(ctx context.Context, arg ListUnavailableMCPServersOfAgentParams) ([]ListUnavailableMCPServersOfAgentRow, error)

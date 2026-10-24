@@ -28,11 +28,12 @@ import (
 )
 
 type config struct {
-	databaseURL     string
-	openshellAddr   string
-	openshellTLSDir string
-	openshellName   string
-	pool            agentd.Config
+	databaseURL      string
+	openshellAddr    string
+	openshellTLSDir  string
+	openshellName    string
+	savedWorkKeyFile string
+	pool             agentd.Config
 }
 
 func parseFlags(args []string) (config, error) {
@@ -43,6 +44,7 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "",
 		"directory with the OpenShell client bundle (tls.crt, tls.key, ca.crt); empty connects without TLS")
 	fs.StringVar(&c.openshellName, "openshell-server-name", "", "name checked against the gateway's certificate")
+	fs.StringVar(&c.savedWorkKeyFile, "saved-work-key-file", "", "file with the key that signs saved-work posts (the Secret koinon-api creates, mounted read-only)")
 	fs.StringVar(&c.pool.SavedWorkURL, "saved-work-url", "",
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")
 	fs.StringVar(&c.pool.GatewayURL, "gateway-url", "",
@@ -118,6 +120,9 @@ func run() error {
 	}
 	defer func() { _ = backend.Close() }()
 
+	if cfg.savedWorkKeyFile != "" {
+		cfg.pool.SavedWorkKey = func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) } //nolint:gosec // an operator-set path
+	}
 	pool, err := agentd.New(db, backend, cfg.pool)
 	if err != nil {
 		return err

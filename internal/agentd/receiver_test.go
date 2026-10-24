@@ -4,6 +4,7 @@ package agentd_test
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,10 +31,7 @@ var _ = Describe("the saved-work receiver", func() {
 	BeforeEach(func(ctx SpecContext) {
 		e = newEnvWith(ctx, store.AgentFlavorOpencode, bound)
 		url = receiverURL()
-		var err error
-		key, err = q.GetServiceKey(ctx, savedwork.KeyName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(key).To(HaveLen(32))
+		key = uploadKey
 		t := e.ticket(ctx, "hello")
 		e.enqueue(ctx, t)
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "x", LeaseSeconds: 600})
@@ -92,9 +90,20 @@ var _ = Describe("the saved-work receiver", func() {
 	It("refuses a wrong key, an expired token and a repository the agent is not bound to", func(ctx SpecContext) {
 		_, err := savedwork.Upload(ctx, http.DefaultClient, url, bytes.Repeat([]byte("z"), 32), e.org.String(), run.ID.String(), epoch, 1, packed)
 		Expect(err).To(MatchError(ContainSubstring("401")))
-		Expect(savedwork.ValidToken(key, savedwork.Token(key, "o", "r", 1, time.Now().Add(-time.Minute).Unix()), "o", "r", 1, time.Now().Add(-time.Minute).Unix(), time.Now())).To(BeFalse())
-		Expect(savedwork.ValidToken(key, savedwork.Token(key, "o", "r", 1, time.Now().Add(time.Hour).Unix()), "o", "r", 1, time.Now().Add(time.Hour).Unix(), time.Now())).To(BeFalse(), "too far ahead")
-		Expect(savedwork.ValidToken(key, savedwork.Token(key, "o", "r", 1, time.Now().Add(time.Minute).Unix()), "o", "r2", 1, time.Now().Add(time.Minute).Unix(), time.Now())).To(BeFalse(), "another run")
+		now := time.Now()
+		tok := func(exp int64, n int, sha, nonce string) string {
+			return savedwork.Token(key, "o", "r", 1, exp, n, sha, nonce)
+		}
+		sha, nonce := strings.Repeat("a", 64), strings.Repeat("b", 32)
+		ok := now.Add(time.Minute).Unix()
+		Expect(savedwork.ValidToken(key, tok(ok, 1, sha, nonce), "o", "r", 1, ok, 1, sha, nonce, now)).To(BeTrue())
+		past := now.Add(-time.Minute).Unix()
+		Expect(savedwork.ValidToken(key, tok(past, 1, sha, nonce), "o", "r", 1, past, 1, sha, nonce, now)).To(BeFalse(), "expired")
+		far := now.Add(savedwork.TokenLifetime + time.Minute).Unix()
+		Expect(savedwork.ValidToken(key, tok(far, 1, sha, nonce), "o", "r", 1, far, 1, sha, nonce, now)).To(BeFalse(), "beyond one lifetime")
+		Expect(savedwork.ValidToken(key, tok(ok, 1, sha, nonce), "o", "r2", 1, ok, 1, sha, nonce, now)).To(BeFalse(), "another run")
+		Expect(savedwork.ValidToken(key, tok(ok, 1, sha, nonce), "o", "r", 1, ok, 2, sha, nonce, now)).To(BeFalse(), "another repository number")
+		Expect(savedwork.ValidToken(key, tok(ok, 1, sha, nonce), "o", "r", 1, ok, 1, strings.Repeat("c", 64), nonce, now)).To(BeFalse(), "another body")
 		other, err := savedwork.Pack(savedwork.Work{
 			Manifest: savedwork.Manifest{Repo: "evil/repo", Base: baseSHA, Files: []savedwork.File{{Path: "a", Status: "A", Mode: "100644", Size: 1}}},
 			Content:  map[string][]byte{"a": []byte("x")},
@@ -102,6 +111,37 @@ var _ = Describe("the saved-work receiver", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = savedwork.Upload(ctx, http.DefaultClient, url, key, e.org.String(), run.ID.String(), epoch, 1, other)
 		Expect(err).To(MatchError(ContainSubstring("not bound")))
+	})
+
+	It("refuses a replayed request and a swapped body", func(ctx SpecContext) {
+		do := func(body []byte, bodySHA, nonce string, exp int64, token string) int {
+			q := fmt.Sprintf("?org=%s&run=%s&epoch=%d&exp=%d&n=1", e.org, run.ID, epoch, exp)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+savedwork.UploadPath+q, bytes.NewReader(body))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set(savedwork.NonceHeader, nonce)
+			req.Header.Set(savedwork.BodyHashHeader, bodySHA)
+			res, err := http.DefaultClient.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			_ = res.Body.Close()
+			return res.StatusCode
+		}
+		exp := time.Now().Add(time.Minute).Unix()
+		sha := savedwork.BundleHash(packed)
+		nonce := strings.Repeat("1", 32)
+		token := savedwork.Token(key, e.org.String(), run.ID.String(), epoch, exp, 1, sha, nonce)
+		Expect(do(packed, sha, nonce, exp, token)).To(Equal(http.StatusOK))
+		Expect(do(packed, sha, nonce, exp, token)).To(Equal(http.StatusConflict), "the same request twice")
+
+		By("a body other than the one the credential was made for")
+		other := append(append([]byte(nil), packed...), 0)
+		nonce2 := strings.Repeat("2", 32)
+		token2 := savedwork.Token(key, e.org.String(), run.ID.String(), epoch, exp, 1, sha, nonce2)
+		Expect(do(other, sha, nonce2, exp, token2)).To(Equal(http.StatusUnauthorized))
+		Expect(do(other, savedwork.BundleHash(other), nonce2, exp, token2)).To(Equal(http.StatusUnauthorized), "the header is covered too")
+		var n int
+		Expect(db.QueryRow(ctx, `SELECT count(*) FROM saved_work WHERE org_id = $1`, e.org).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1))
 	})
 
 	It("is not open to a plain GET and reads no more than the cap", func() {

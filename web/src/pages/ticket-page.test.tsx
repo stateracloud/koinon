@@ -162,4 +162,32 @@ describe('TicketPage', () => {
       expect(screen.queryByText("Agent's notes")).not.toBeInTheDocument()
     })
   })
+
+  describe('an unhealthy agent', () => {
+    function setup(role: OrgRole) {
+      const transport = createRouterTransport(({ service }) => {
+        service(AuthService, { whoAmI: () => whoAmI({ role }) })
+        service(AgentService, {
+          listAgents: () => ({ agents: [{ ...agent('a-1', 'Repo helper'), unhealthyAt: timestampFromMs(t0), unhealthyReason: 'sandbox stuck three times' }] }),
+        })
+        service(TicketService, { getTicket: () => ({ ticket: ticket('t-1', 'Say hello', TicketStatus.TODO), events: [], runs: [] }) })
+      })
+      renderApp(transport, '/tickets/t-1')
+    }
+
+    it('says why the run waits and links admins to Resume', async () => {
+      setup(OrgRole.ADMIN)
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('runs on this ticket wait until it is resumed')
+      expect(alert).toHaveTextContent('sandbox stuck three times')
+      expect(screen.getByRole('link', { name: 'Open the agent to resume it' })).toHaveAttribute('href', '/agents/a-1')
+    })
+
+    it('tells a member that an admin can resume it, without a link', async () => {
+      setup(OrgRole.MEMBER)
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('An org admin or owner can resume it.')
+      expect(screen.queryByRole('link', { name: 'Open the agent to resume it' })).not.toBeInTheDocument()
+    })
+  })
 })

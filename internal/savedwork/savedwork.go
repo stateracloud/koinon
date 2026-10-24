@@ -103,7 +103,10 @@ func (m Manifest) Totals() (added, deleted int) {
 	return added, deleted
 }
 
-var hashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var (
+	hashPattern   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	hashPattern32 = regexp.MustCompile(`^[0-9a-f]{32}$`)
+)
 
 var pathPattern = regexp.MustCompile(`^[^\x00-\x1f\x7f]+$`)
 

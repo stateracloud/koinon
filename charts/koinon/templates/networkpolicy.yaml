@@ -39,15 +39,19 @@ spec:
             matchLabels:
               {{- include "koinon.selectorLabels" (list . "gateway") | nindent 14 }}
     {{- end }}
+    # Saved work from a stuck sandbox: koinon-agentd, which holds no key-encryption key, posts it here
+    # to be sealed (an HMAC credential per upload). Its own port, so agentd cannot reach the tools
+    # below, which trust agentgateway's agent header. Sandboxes cannot reach it.
+    - ports:
+        - port: savedwork
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "agentd") | nindent 14 }}
     # The GitHub tools trust agentgateway's agent header, so only the gateway may reach them.
     - ports:
         - port: tools
       from:
-        # koinon-agentd posts the work saved from a stuck sandbox here (/internal/saved-work, with
-        # an HMAC credential); it has no key-encryption key. Sandboxes cannot reach this port.
-        - podSelector:
-            matchLabels:
-              {{- include "koinon.selectorLabels" (list . "agentd") | nindent 14 }}
         {{- if eq .Values.gateway.mode "standalone" }}
         - podSelector:
             matchLabels:

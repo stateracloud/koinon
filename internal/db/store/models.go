@@ -1245,9 +1245,10 @@ type SavedWork struct {
 	ExpiresAt pgtype.Timestamptz
 }
 
-type ServiceKey struct {
-	Name      string
-	Key       []byte
+type SavedWorkUploadNonce struct {
+	OrgID     pgtype.UUID
+	RunID     pgtype.UUID
+	Nonce     string
 	CreatedAt pgtype.Timestamptz
 }
 

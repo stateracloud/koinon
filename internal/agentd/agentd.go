@@ -100,6 +100,9 @@ type Config struct {
 	// sealed (package savedwork); koinon-agentd holds no key-encryption key. Without it that work
 	// is not saved, and the timeline says so.
 	SavedWorkURL string
+	// SavedWorkKey returns the key that signs those posts: a Kubernetes Secret koinon-api creates
+	// and koinon-agentd mounts. It is read on each save, so a rotated Secret applies.
+	SavedWorkKey func() ([]byte, error)
 	// MaxTakeovers fails a run that has been taken over more often than this, instead of
 	// resuming it again. Default 5.
 	MaxTakeovers int
