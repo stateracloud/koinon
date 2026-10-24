@@ -56,7 +56,7 @@ function api(role: string) {
         seen.tokenCreate = req
         const t = { id: 't-new', name: req.name, prefix: 'newpref', role: req.role, createdAt: iso(0), expiresAt: iso(30), createdBy: 'u-1', createdByName: 'Admin' }
         tokens.unshift(t)
-        return { token: t, secret: 'koinon_newpref_0123456789abcdef' }
+        return { token: t, secret: 'koinon_newpref_not-a-real-token' } // gitleaks:allow (fake test value)
       },
       'koinon.token.v1alpha1.TokenService/RevokeToken': (req: Json) => {
         seen.revoked = String(req.tokenId)
