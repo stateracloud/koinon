@@ -61,6 +61,8 @@ import (
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/mcpask"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
@@ -420,29 +422,33 @@ func run() error {
 	if keyring != nil {
 		opener, keys = keyring, keyring
 	}
-	approvalSvc := approvals.New(pool, approvals.Options{Keys: opener, GitHub: gh, Logger: slog.Default()})
+	// One egress policy for everything an org points the gateway or Koinon at: model providers and
+	// remote MCP servers.
+	urlPolicy := catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts)}
+	approvalSvc := approvals.New(pool, approvals.Options{Keys: opener, GitHub: gh, URLPolicy: urlPolicy, Logger: slog.Default()})
 	go approvalSvc.Sweeper(bgCtx, cfg.sweepInterval)
 	tokenSvc := tokens.New(pool, nil)
 	var catalogKeys catalog.Keys
 	if keyring != nil {
 		catalogKeys = keyring
 	}
-	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).
-		WithURLPolicy(catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts)})
+	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy)
+	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
+	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc, Catalog: catalogSvc,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc,
 	})
 	if kube != nil {
 		var sealer connections.Sealer
 		if keyring != nil {
 			sealer = keyring
 		}
-		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, Sealer: sealer, Log: slog.Default()}
+		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Sealer: sealer, Log: slog.Default()}
 		go imp.Run(bgCtx)
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
 	}
-	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default())
+	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default()).WithMCP(mcpSvc)
 
 	if cfg.otlpAddr != "" {
 		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
@@ -485,6 +491,8 @@ func run() error {
 		}
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", tools.Handler())
+		// The ask-tier tools of org MCP servers (plan item MC1), for agentgateway only like /mcp.
+		mux.Handle(mcpask.Path, mcpask.New(pool, mcpask.Options{}).Handler())
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		toolsSrv := &http.Server{Addr: cfg.toolsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, toolsSrv)

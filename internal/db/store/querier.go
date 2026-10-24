@@ -188,6 +188,7 @@ type Querier interface {
 	GetActiveUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetAgent(ctx context.Context, arg GetAgentParams) (Agent, error)
 	GetAgentBudget(ctx context.Context, arg GetAgentBudgetParams) (GetAgentBudgetRow, error)
+	GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerParams) (AgentMcpServer, error)
 	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
 	// holds the agent, whether one is waiting to be claimed (queued, or parked
 	// with its park resolved), and when a run last finished or parked. Parked runs
@@ -224,6 +225,8 @@ type Querier interface {
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
 	// The part of an org's spend since @since that came from estimated usage.
 	GetOrgEstimatedSpendSince(ctx context.Context, arg GetOrgEstimatedSpendSinceParams) (string, error)
+	// The slug of the org the caller is acting in, for names derived from it (gateway targets).
+	GetOrgSlug(ctx context.Context, orgID pgtype.UUID) (string, error)
 	// An org's recorded USD spend since @since (the start of the calendar month in UTC), for its
 	// monthly cap and the platform ceiling.
 	GetOrgSpendSince(ctx context.Context, arg GetOrgSpendSinceParams) (string, error)
@@ -242,6 +245,7 @@ type Querier interface {
 	// The run an agent's tool call belongs to: one active run per agent
 	// (runs_one_active_per_agent), and tools are only called while it runs.
 	GetRunningRunForAgent(ctx context.Context, arg GetRunningRunForAgentParams) (Run, error)
+	GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
 	// The highest ticket timeline seq already sent to the harness by the ticket's

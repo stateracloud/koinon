@@ -34,6 +34,19 @@ func (q *Queries) GetOrgBySlug(ctx context.Context, slug string) (Org, error) {
 	return i, err
 }
 
+const getOrgSlug = `-- name: GetOrgSlug :one
+SELECT slug FROM orgs
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+// The slug of the org the caller is acting in, for names derived from it (gateway targets).
+func (q *Queries) GetOrgSlug(ctx context.Context, orgID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getOrgSlug, orgID)
+	var slug string
+	err := row.Scan(&slug)
+	return slug, err
+}
+
 const listOrgIDs = `-- name: ListOrgIDs :many
 SELECT id FROM orgs
 WHERE deleted_at IS NULL

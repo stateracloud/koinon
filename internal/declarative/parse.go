@@ -14,6 +14,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -30,6 +31,16 @@ var (
 const (
 	TypeModelProvider = "model-provider"
 	TypeConnection    = "connection"
+	TypeMCPServer     = "mcp-server"
+)
+
+// Data keys of an mcp-server Secret. credentialScheme "Bearer" sends "Bearer <credential>"; without
+// it the credential is the whole header value. credentialHeader defaults to Authorization.
+const (
+	KeyTransport        = "transport"
+	KeyCredentialHeader = "credentialHeader"
+	KeyCredentialScheme = "credentialScheme"
+	KeyCredential       = "credential"
 )
 
 // Data keys of a model-provider Secret.
@@ -116,6 +127,42 @@ func yamlErr(err error) error {
 		return errors.New("a field has the wrong type or an unknown name")
 	}
 	return errors.New("invalid YAML")
+}
+
+// ParseMCPServer reads an mcp-server Secret. The error is safe to show: it never quotes a value.
+func ParseMCPServer(sec *corev1.Secret, version string) (mcpservers.Declared, error) {
+	get := func(k string) string { return strings.TrimSpace(string(sec.Data[k])) }
+	d := mcpservers.Declared{
+		SecretName: sec.Name, Version: version, Name: get(KeyName), URL: get(KeyURL), Transport: get(KeyTransport),
+		CredentialHeader: get(KeyCredentialHeader), CredentialValue: get(KeyCredential),
+	}
+	if d.Transport == "" {
+		d.Transport = mcpservers.TransportStreamableHTTP
+	}
+	if scheme := get(KeyCredentialScheme); scheme != "" {
+		d.CredentialPrefix = scheme + " "
+	}
+	var errs []error
+	for _, k := range []string{KeyName, KeyURL} {
+		if get(k) == "" {
+			errs = append(errs, fmt.Errorf("%s is required", k))
+		}
+	}
+	if d.CredentialValue == "" && (d.CredentialHeader != "" || d.CredentialPrefix != "") {
+		errs = append(errs, fmt.Errorf("%s is required when a credential header or scheme is set", KeyCredential))
+	}
+	if len(errs) == 0 {
+		header := d.CredentialHeader
+		if header == "" && d.CredentialValue != "" {
+			header = "Authorization"
+		}
+		if err := mcpservers.ValidateName(d.Name); err != nil {
+			errs = append(errs, err)
+		} else if err := mcpservers.ValidateRemote(d.URL, d.Transport, header, d.CredentialPrefix); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return d, errors.Join(errs...)
 }
 
 // DeclaredConnection is a connection declared by a Secret of type connection.

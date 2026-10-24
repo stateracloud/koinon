@@ -155,6 +155,29 @@ func (q *Queries) DeleteMCPServer(ctx context.Context, arg DeleteMCPServerParams
 	return result.RowsAffected(), nil
 }
 
+const getAgentMCPServer = `-- name: GetAgentMCPServer :one
+SELECT org_id, agent_id, server_id, tools FROM agent_mcp_servers
+WHERE org_id = $1 AND agent_id = $2 AND server_id = $3
+`
+
+type GetAgentMCPServerParams struct {
+	OrgID    pgtype.UUID
+	AgentID  pgtype.UUID
+	ServerID pgtype.UUID
+}
+
+func (q *Queries) GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerParams) (AgentMcpServer, error) {
+	row := q.db.QueryRow(ctx, getAgentMCPServer, arg.OrgID, arg.AgentID, arg.ServerID)
+	var i AgentMcpServer
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.ServerID,
+		&i.Tools,
+	)
+	return i, err
+}
+
 const getMCPServer = `-- name: GetMCPServer :one
 SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at FROM mcp_servers
 WHERE org_id = $1 AND id = $2
@@ -224,6 +247,46 @@ func (q *Queries) GetMCPTool(ctx context.Context, arg GetMCPToolParams) (McpTool
 		&i.LastSeenAt,
 		&i.TierSetBy,
 		&i.TierSetAt,
+	)
+	return i, err
+}
+
+const getServedMCPServerByName = `-- name: GetServedMCPServerByName :one
+SELECT org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at FROM mcp_servers
+WHERE org_id = $1 AND name = $2 AND disabled_reason IS NULL AND removed_at IS NULL
+`
+
+type GetServedMCPServerByNameParams struct {
+	OrgID pgtype.UUID
+	Name  string
+}
+
+func (q *Queries) GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error) {
+	row := q.db.QueryRow(ctx, getServedMCPServerByName, arg.OrgID, arg.Name)
+	var i McpServer
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Name,
+		&i.Url,
+		&i.Transport,
+		&i.CredentialHeader,
+		&i.CredentialPrefix,
+		&i.Credential,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
+		&i.DisabledReason,
+		&i.Health,
+		&i.HealthReason,
+		&i.HealthCheckedAt,
+		&i.HealthSince,
+		&i.ConsecutiveFailures,
+		&i.ToolsSyncedAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

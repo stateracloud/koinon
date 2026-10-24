@@ -9,7 +9,7 @@
 //	metadata:
 //	  name: openrouter
 //	  labels:
-//	    koinon.dev/secret-type: model-provider   # or: connection
+//	    koinon.dev/secret-type: model-provider   # or: connection, mcp-server
 //	    koinon.dev/org: acme                     # the org's slug
 //	stringData:
 //	  name: openrouter
@@ -65,6 +65,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -80,6 +81,8 @@ type Importer struct {
 	Namespace string
 	Pool      *pgxpool.Pool
 	Catalog   *catalog.Service
+	// MCP imports mcp-server Secrets (plan item MC1); nil ignores them with a Warning Event.
+	MCP *mcpservers.Service
 	// Sealer seals declared connections' secret fields.
 	Sealer connections.Sealer
 	Log    *slog.Logger
@@ -92,7 +95,7 @@ type Importer struct {
 
 // Selector selects the Secrets the importer reads.
 func Selector() string {
-	return LabelSecretType + " in (" + TypeModelProvider + "," + TypeConnection + ")"
+	return LabelSecretType + " in (" + TypeModelProvider + "," + TypeConnection + "," + TypeMCPServer + ")"
 }
 
 // Run imports on every change to a labelled Secret and on a timer, until ctx ends.
@@ -219,6 +222,8 @@ func (i *Importer) Sync(ctx context.Context) error {
 			applyErr = i.applyProvider(ctx, org, sec, version)
 		case TypeConnection:
 			applyErr = i.applyConnection(ctx, org, sec, version)
+		case TypeMCPServer:
+			applyErr = i.applyMCPServer(ctx, org, sec, version)
 		}
 		if applyErr != nil {
 			var ie *invalidError
@@ -264,6 +269,25 @@ func (i *Importer) applyProvider(ctx context.Context, org pgtype.UUID, sec *core
 	for _, w := range d.Warnings {
 		i.log().Warn("declarative provider Secret has an ignored field", "secret", sec.Name, "warning", w)
 		i.event(ctx, sec, corev1.EventTypeWarning, ReasonInvalid, w)
+	}
+	return nil
+}
+
+func (i *Importer) applyMCPServer(ctx context.Context, org pgtype.UUID, sec *corev1.Secret, version string) error {
+	d, err := ParseMCPServer(sec, version)
+	if err != nil {
+		return &invalidError{err}
+	}
+	if i.MCP == nil {
+		return &invalidError{errors.New("remote MCP servers are not configured on this install")}
+	}
+	changed, err := i.MCP.ApplyDeclared(ctx, org, d)
+	if err != nil {
+		return err
+	}
+	if changed {
+		i.log().Info("applied a declarative MCP server", "secret", sec.Name, "org", sec.Labels[LabelOrg], "server", d.Name)
+		i.event(ctx, sec, corev1.EventTypeNormal, ReasonApplied, "MCP server "+d.Name+" imported for org "+sec.Labels[LabelOrg])
 	}
 	return nil
 }
@@ -364,6 +388,20 @@ func (i *Importer) removeAbsent(ctx context.Context, q *store.Queries, seen map[
 					return err
 				}
 				i.log().Info("removed the providers of a deleted Secret", "secret", name, "org", slug)
+			}
+		}
+		if i.MCP != nil {
+			names, err := i.MCP.DeclaredSecrets(ctx, id)
+			if err != nil {
+				return err
+			}
+			for _, name := range names {
+				if !seen[present{slug, TypeMCPServer, name}] {
+					if err := i.MCP.RemoveDeclared(ctx, id, name); err != nil {
+						return err
+					}
+					i.log().Info("disabled the MCP servers of a deleted Secret", "secret", name, "org", slug)
+				}
 			}
 		}
 		conns, err := q.ListConnections(ctx, id)

@@ -165,3 +165,11 @@ WHERE org_id = @org_id AND agent_id = @agent_id;
 -- name: InsertAgentMCPServer :exec
 INSERT INTO agent_mcp_servers (org_id, agent_id, server_id, tools)
 VALUES (@org_id, @agent_id, @server_id, sqlc.narg(tools));
+
+-- name: GetServedMCPServerByName :one
+SELECT * FROM mcp_servers
+WHERE org_id = @org_id AND name = @name AND disabled_reason IS NULL AND removed_at IS NULL;
+
+-- name: GetAgentMCPServer :one
+SELECT * FROM agent_mcp_servers
+WHERE org_id = @org_id AND agent_id = @agent_id AND server_id = @server_id;

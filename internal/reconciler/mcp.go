@@ -186,6 +186,7 @@ func mcpGrants(allowed []allowedMCP, served *servedMCP) (direct, ask []gateway.T
 			direct = append(direct, gateway.ToolGrant{Target: s.target, Tools: auto})
 		}
 		if len(asked) > 0 {
+			asked = append(asked, mcpservers.AskStatusTool)
 			ask = append(ask, gateway.ToolGrant{Target: mcpservers.AskTargetName(s.org.Slug, s.row.Name), Tools: asked})
 		}
 	}
