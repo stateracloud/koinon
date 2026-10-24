@@ -175,6 +175,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		kinds    []string
 		approval *approvalv1alpha1.Approval
 		prURL    string
+		// admin calls /admin/v1 with a token made at step 1b.
+		admin func(ctx context.Context, method, path string, body ...string) (int, []byte)
 	)
 
 	BeforeAll(func() {
@@ -226,7 +228,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			OrgId: org, Name: "e2e", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		admin := func(method, path string, body ...string) (int, []byte) {
+		admin = func(ctx context.Context, method, path string, body ...string) (int, []byte) {
 			var rdr io.Reader
 			if len(body) > 0 {
 				rdr = strings.NewReader(body[0])
@@ -249,7 +251,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			}
 		}
 		Eventually(func(g Gomega) {
-			code, body := admin(http.MethodGet, "/providers")
+			code, body := admin(ctx, http.MethodGet, "/providers")
 			g.Expect(code).To(Equal(http.StatusOK), string(body))
 			g.Expect(json.Unmarshal(body, &providers)).To(Succeed())
 			g.Expect(providers.Providers).To(HaveLen(1))
@@ -257,11 +259,11 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(providers.Providers[0].Name).To(Equal("fake"))
 		Expect(providers.Providers[0].Source).To(Equal("secret"))
 		Expect(providers.Providers[0].ManagedBySecret).To(Equal("fake-model"))
-		code, body := admin(http.MethodDelete, "/providers/"+providers.Providers[0].ID)
+		code, body := admin(ctx, http.MethodDelete, "/providers/"+providers.Providers[0].ID)
 		Expect(code).To(Equal(http.StatusConflict), "declared providers are read-only: %s", body)
 		// A model has no rates of its own; its price is an org price (or a default one). The fake model
 		// is in no default list, so the run is priced by this entry and the ledger's estimates work.
-		code, body = admin(http.MethodPost, "/prices", `{"name":"fake-repo-helper","provider":"openai","match":{"glob":"repo-helper"},`+
+		code, body = admin(ctx, http.MethodPost, "/prices", `{"name":"fake-repo-helper","provider":"openai","match":{"glob":"repo-helper"},`+
 			`"prices":{"input":"0.30","output":"1.20"},"maxOutput":4096}`)
 		Expect(code).To(Equal(http.StatusCreated), string(body))
 		t.end("1b. Declared model provider and its price (admin API)")
@@ -416,6 +418,12 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(repo.Calls).To(HaveKeyWithValue("POST pulls", 1))
 		Expect(repo.Pulls).To(HaveLen(1))
 		t.end("6. Run resumes → PR URL on the ticket")
+	})
+
+	It("6b. adds a remote MCP server: the gateway injects its credential, and an agent's call reaches it", func(ctx SpecContext) {
+		t.begin()
+		mcpServerE2E(ctx, admin, org, agent.GetId())
+		t.end("6b. Remote MCP server (add, health, tiers, allowlist, call through the gateway)")
 	})
 
 	It("7. took at most 15 minutes from helm install", func() {

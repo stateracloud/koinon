@@ -83,7 +83,7 @@ var _ = Describe("remote MCP servers", func() {
 	It("sets a tool's tier, reports review flags and answers 404 for another org's server", func(ctx SpecContext) {
 		_, raw := e.call(ctx, e.token, http.MethodPost, "/mcp-servers", map[string]any{"name": "tracker", "url": "https://mcp.example.com/mcp"})
 		s := decode[mcpServerJSON](raw)
-		var sid = func() [16]byte { id := pgOf(s.ID); return id.Bytes }()
+		sid := func() [16]byte { id := pgOf(s.ID); return id.Bytes }()
 		_ = sid
 		tool := mcpservers.ListedTool{Name: "search", Description: "Search", InputSchema: json.RawMessage(`{"type":"object"}`), ReadOnlyHint: true}
 		_, err := e.mcp.SyncTools(ctx, e.org, pgOf(s.ID), []mcpservers.ListedTool{tool})

@@ -50,7 +50,7 @@ func newRemote() *remote {
 			r.mu.Lock()
 			defer r.mu.Unlock()
 			r.calls = append(r.calls, req.Extra.Header.Get("X-Api-Key"))
-			r.meta = append(r.meta, string(req.Params.Meta["dev.koinon/approval"].(string)))
+			r.meta = append(r.meta, req.Params.Meta["dev.koinon/approval"].(string))
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "created #7 from " + string(req.Params.Arguments)}}}, nil
 		})
 	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, &mcp.StreamableHTTPOptions{DisableLocalhostProtection: true})
@@ -99,7 +99,8 @@ var _ = Describe("the ask-tier proxy", func() {
 		sid := uuidOf(server.ID)
 		_, err = svc.SyncTools(ctx, org, sid, []mcpservers.ListedTool{
 			{Name: "create_issue", Description: "Create an issue", InputSchema: json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"}}}`)},
-			{Name: "search", Description: "Search"}, {Name: "drop_table", Description: "Drop"},
+			{Name: "search", Description: "Search"},
+			{Name: "drop_table", Description: "Drop"},
 		})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = svc.SetTier(ctx, org, audit.System(), server.ID, "search", "auto")

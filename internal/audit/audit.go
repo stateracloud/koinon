@@ -92,9 +92,11 @@ var ErrSecretInSummary = errors.New("audit: summary has a field that looks like 
 var secretNames = []string{"apikey", "privatekey", "password", "secret", "token", "credential", "authorization"}
 
 // allowed are field names that contain a secret word but are not values.
-var allowed = map[string]bool{"haskey": true, "keyfingerprint": true, "tokenid": true, "parenttokenid": true, "revokedtokenids": true, "tokenprefix": true, "secretname": true, "managedbysecret": true,
+var allowed = map[string]bool{
+	"haskey": true, "keyfingerprint": true, "tokenid": true, "parenttokenid": true, "revokedtokenids": true, "tokenprefix": true, "secretname": true, "managedbysecret": true,
 	// MCP servers (plan item MC1): whether a credential is set, the name of its header, that it changed.
-	"hascredential": true, "credentialheader": true, "credentialchanged": true}
+	"hascredential": true, "credentialheader": true, "credentialchanged": true,
+}
 
 func looksSecret(name string) bool {
 	n := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(name))

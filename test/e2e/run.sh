@@ -45,7 +45,8 @@ SKIP_BUILD=${SKIP_BUILD:-0}
 # The quickstart's port-forward block (docs) uses 8080; run.sh checks that this port is free.
 API_PORT=${API_PORT:-8080}
 GH_PORT=${GH_PORT:-18090}
-for port in "$API_PORT" "$GH_PORT"; do
+MCP_PORT=${MCP_PORT:-18091}
+for port in "$API_PORT" "$GH_PORT" "$MCP_PORT"; do
   if nc -z 127.0.0.1 "$port" 2>/dev/null; then echo "port $port is in use; run.sh port-forwards to it" >&2; exit 1; fi
 done
 
@@ -100,7 +101,7 @@ diagnostics() {
   for c in api reconciler agentd gateway; do
     "${K[@]}" -n "$NS" logs "deploy/koinon-$c" --all-containers --tail=-1 >"$d/koinon-$c.log" 2>&1 || true
   done
-  for c in fakemodel fakegithub; do
+  for c in fakemodel fakegithub fakemcp; do
     "${K[@]}" -n "$FAKES" logs "deploy/$c" --tail=-1 >"$d/$c.log" 2>&1 || true
   done
   "${K[@]}" -n openshell logs statefulset/openshell --tail=-1 >"$d/openshell.log" 2>&1 || true
@@ -129,8 +130,8 @@ if [[ "$SKIP_BUILD" != 1 ]]; then
   step "Koinon images (ko, linux/$arch) into kind"
   KO_DOCKER_REPO=kind.local KIND_CLUSTER_NAME="$CLUSTER" "${KO:-ko}" build --base-import-paths --tags e2e \
     --platform "linux/$arch" ./cmd/koinon-api ./cmd/koinon-reconciler ./cmd/koinon-agentd \
-    ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub
-  done_step "Images: ko build and load (5 binaries)"
+    ./cmd/koinon-fakemodel ./cmd/koinon-fakegithub ./cmd/koinon-fakemcp
+  done_step "Images: ko build and load (6 binaries)"
 
   step "OpenCode flavor (buildx) into kind"
   docker buildx build --load --build-context common=flavors/common \
@@ -141,8 +142,8 @@ fi
 
 step "fakes ($FAKES)"
 "${K[@]}" apply -f "$here/kind/fakes.yaml"
-"${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub >/dev/null
-"${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub --timeout=120s
+"${K[@]}" -n "$FAKES" rollout restart deploy/fakemodel deploy/fakegithub deploy/fakemcp >/dev/null
+"${K[@]}" -n "$FAKES" rollout status deploy/fakemodel deploy/fakegithub deploy/fakemcp --timeout=120s
 done_step "Fakes deployed"
 
 # The quickstart blocks, as the docs show them (quickstart.md). The Go suite declares the model
@@ -166,7 +167,9 @@ done_step "helm install --wait"
 pids+=($!)
 "${K[@]}" -n "$FAKES" port-forward svc/fakegithub "$GH_PORT:8080" >"$OUT/pf-fakegithub.log" 2>&1 &
 pids+=($!)
-for port in "$API_PORT" "$GH_PORT"; do
+"${K[@]}" -n "$FAKES" port-forward svc/fakemcp "$MCP_PORT:8080" >"$OUT/pf-fakemcp.log" 2>&1 &
+pids+=($!)
+for port in "$API_PORT" "$GH_PORT" "$MCP_PORT"; do
   for _ in $(seq 60); do nc -z 127.0.0.1 "$port" 2>/dev/null && break; sleep 0.5; done
   nc -z 127.0.0.1 "$port" || { echo "port-forward to $port did not come up" >&2; exit 1; }
 done
@@ -177,6 +180,8 @@ go)
   step "quickstart driver (go test ./test/e2e)"
   KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
   KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
+  KOINON_E2E_FAKEMCP_URL="http://127.0.0.1:$MCP_PORT" \
+  KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
   KOINON_E2E_PASSWORD="$password" \
   KOINON_E2E_T0="$T0" \
   KOINON_E2E_REPORT="$OUT/quickstart-timings.md" \
