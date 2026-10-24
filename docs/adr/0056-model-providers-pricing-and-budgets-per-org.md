@@ -198,7 +198,7 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    the log (`llm.prompt` and `llm.completion` would, and cost CPU), so the live path estimates input from
    request bytes and settles output as in (3). A provider that returns 2xx without usage is
    indistinguishable from an aborted one and settles the same way, which overestimates; such an entry
-   is recorded with `usage_missing` and flagged so admins can see why it was charged at max. To keep
+   is recorded with `usage_missing` and flagged so admins can see why it was charged at max. An upstream 4xx without usage (the provider refused the request) is charged the input estimate only, never output; the gateway's own refusals (401, 403, 404, 405, 413, 415, 429) are not charged, and 5xx or a missing status (client disconnect) settle like a 2xx. To keep
    that rare, every model's request transformation sets `stream_options.include_usage: true` on
    streaming chat completions (agentgateway v1.6.0 adds it only when the client sent no
    `stream_options` at all, so a client sending `include_usage: false` would otherwise get its streams

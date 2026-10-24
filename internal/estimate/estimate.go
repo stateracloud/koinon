@@ -66,6 +66,9 @@ type Input struct {
 	PDFPageTokens int
 	// Aborted is true when the response did not complete.
 	Aborted bool
+	// Rejected is true when the provider refused the request (a 4xx without usage): only the
+	// input is charged, estimated from the request bytes, and no output.
+	Rejected bool
 	// MaxTokens is the request's max_tokens (0 if unknown).
 	MaxTokens int64
 }
@@ -180,6 +183,8 @@ func Estimate(p Params, in Input) Result {
 	switch {
 	case in.ReportedOutput != nil:
 		res.OutputTokens, res.OutputReported = *in.ReportedOutput, true
+	case in.Rejected:
+		res.Estimated, res.Method = true, "bytes"
 	case in.Aborted:
 		// Settle at the request's max_tokens, but never above the entry's max_output (or the hard
 		// ceiling when the entry has none): a lenient upstream answers a huge max_tokens with 2xx.

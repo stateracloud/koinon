@@ -258,6 +258,28 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(l.Amount).To(BeZero())
 	})
 
+	It("charges an upstream 4xx without usage the input estimate only, flagged usage_missing", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		e.model(ctx, "openrouter", deepseek)
+		x := ledger.Entry{
+			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: deepseek, Status: 400,
+			MaxTokens: 4000, RequestBytes: 3_000_000, ResponseBytes: -1, Time: time.Now(),
+		}
+		_, err := ing.Ingest(ctx, []ledger.Entry{x})
+		Expect(err).NotTo(HaveOccurred())
+		s := e.lastEntry(ctx)
+		Expect(s.InputTokens).To(Equal(int64(1_000_000)))
+		Expect(s.OutputTokens).To(BeZero())
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.02"))
+		Expect(s.CostFlagged).To(BeTrue())
+		Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
+
+		x.RequestID, x.Status = uniq("req"), 502
+		_, err = ing.Ingest(ctx, []ledger.Entry{x})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(e.lastEntry(ctx).OutputTokens).To(Equal(int64(4000)), "a 5xx settles output at max_tokens")
+	})
+
 	It("settles an aborted response without usage at max_tokens, or at the entry's max_output when it is not logged", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
 		e.model(ctx, "openrouter", deepseek)
