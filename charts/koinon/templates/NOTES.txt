@@ -13,6 +13,16 @@ Bootstrap admin: user {{ .Values.bootstrapAdmin.username | quote }}, one-time pa
 The first login asks for a new password.
 {{- end }}
 
+Secret store: provider API keys and connection secrets are encrypted in Postgres with the key-encryption
+keys in Secret {{ include "koinon.kekSecretName" . }}{{ if not .Values.secrets.kek.existingSecret }}, which koinon-api creates on its first start{{ end }}. Back it up once it exists; without it they cannot be read:
+
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "koinon.kekSecretName" . }} -o yaml > koinon-kek-backup.yaml
+
+Rotation and the compromise procedure: docs/ops/secret-keys.md.
+
+Models: add a provider and its models in the UI, with the admin API, or declare them with a labelled
+Secret (koinon.dev/secret-type: model-provider); see the docs site, guide "Models".
+
 Open the UI:
 {{- if .Values.ingress.enabled }}
   http{{ if .Values.ingress.tlsSecretName }}s{{ end }}://{{ .Values.ingress.host }}/

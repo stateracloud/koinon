@@ -12,6 +12,7 @@ import (
 var (
 	agentA = gateway.AgentRef{Org: "acme", Name: "repo-helper"}
 	agentB = gateway.AgentRef{Org: "acme", Name: "triage"}
+	agentG = gateway.AgentRef{Org: "globex", Name: "analyst"}
 )
 
 // Fixed hashes keep golden files stable; they are hashes of no real key.
@@ -27,20 +28,20 @@ type fixture struct {
 
 func fixtures() []fixture {
 	full := gateway.State{
-		Models: gateway.ModelUpstream{
-			Provider:   "openrouter",
-			BaseURL:    "https://openrouter.ai/api/v1",
-			APIKeyFile: "/secrets/upstream/api_key",
-			Models: []gateway.Model{
-				{Name: "deepseek/deepseek-v4.1-flash", Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006"}},
-				{Name: "unpriced/model"},
+		Providers: []gateway.Provider{
+			{
+				Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
+				APIKeyFile: "/secrets/upstream/api_key",
+				Models: []gateway.Model{
+					{Name: "deepseek/deepseek-v4.1-flash", Guard: true, Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006"}},
+					{Name: "open/model", Price: &gateway.Price{Input: "1", Output: "2"}},
+					{Name: "unpriced/model"},
+				},
 			},
-			Overrides: map[string]any{"provider": map[string]any{
-				"zdr":             true,
-				"data_collection": "deny",
-				"only":            []string{"fireworks", "deepinfra"},
-				"allow_fallbacks": false,
-			}},
+			{
+				Org: "globex", Name: "local", Type: "ollama", BaseURL: "http://ollama.globex.internal:11434/v1",
+				Models: []gateway.Model{{Name: "deepseek/deepseek-v4.1-flash", Price: &gateway.Price{Input: "0", Output: "0"}}},
+			},
 		},
 		MCP: []gateway.MCPTarget{
 			{Name: "github", URL: "http://koinon-github-tools.koinon.svc:8080/mcp"},
@@ -48,6 +49,7 @@ func fixtures() []fixture {
 		},
 	}
 	full.AddKey(fixedKey("k-bbbbbbbbbbbb", agentB, "test-b"))
+	full.AddKey(fixedKey("k-gggggggggggg", agentG, "test-g"))
 	full.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
 	full.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 4.25, Window: 24 * time.Hour, Generation: "1792627200-750000000"})
 	full.SetLimit(agentB, &gateway.Limit{Unit: gateway.Tokens, Amount: 200000, Window: 30 * 24 * time.Hour})
@@ -56,11 +58,11 @@ func fixtures() []fixture {
 		gateway.ToolGrant{Target: "docs", Tools: []string{"search"}},
 	)
 
-	modelsOnly := gateway.State{Models: gateway.ModelUpstream{
-		Provider: "ollama",
-		BaseURL:  "http://ollama.example.internal:11434/v1",
-		Models:   []gateway.Model{{Name: "qwen3.5:4b", Price: &gateway.Price{Input: "0", Output: "0"}}},
-	}}
+	modelsOnly := gateway.State{Providers: []gateway.Provider{{
+		Org: "acme", Name: "ollama", Type: "ollama",
+		BaseURL: "http://ollama.example.internal:11434/v1",
+		Models:  []gateway.Model{{Name: "qwen3.5:4b", Price: &gateway.Price{Input: "0", Output: "0"}}},
+	}}}
 	modelsOnly.AddKey(fixedKey("k-cccccccccccc", agentA, "test-c"))
 
 	mcpNoGrants := gateway.State{MCP: []gateway.MCPTarget{{Name: "github", URL: "http://tools:8080/mcp"}}}

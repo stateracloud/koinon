@@ -194,6 +194,15 @@ if os_tls:
 
 # ---- resources ------------------------------------------------------------------------------
 
+# The default org's model provider, declared with a labelled Secret that koinon-api imports (ADR 0056,
+# plan item PV1): the fake model on kind, the lab's keyless Ollama on the home lab.
+provider_file = 'test/e2e/kind/model-provider.yaml' if KIND else 'hack/dev/model-provider-homelab.yaml'
+watch_file(provider_file)
+provider_objs = decode_yaml_stream(read_file(provider_file))
+k8s_yaml(encode_yaml_stream(provider_objs))
+k8s_resource(new_name='model-provider', objects=['%s:secret' % o['metadata']['name'] for o in provider_objs],
+             resource_deps=['namespace'], labels=['koinon'])
+
 k8s_resource(new_name='koinon-config', objects=config_objs, resource_deps=['namespace'], labels=['koinon'])
 k8s_resource(new_name='postgres', objects=['koinon-pg:cluster'], resource_deps=['koinon-config'], labels=['data'])
 # The migration Job (on install, an ordinary release resource) waits for the database itself.

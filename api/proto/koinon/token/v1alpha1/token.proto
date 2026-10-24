@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.token.v1alpha1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "koinon/auth/v1alpha1/auth.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1;tokenv1alpha1";
+
+// TokenService manages an org's admin API tokens (ADR 0056): bearer tokens for
+// /admin/v1, scoped to one org, with the role admin or owner, never more than
+// the creator's. Admins and owners only. The token itself is returned once, by
+// CreateToken; Koinon keeps only its hash.
+service TokenService {
+  // CreateToken creates a token. expires_in defaults to 30 days and is at most
+  // 90 days.
+  rpc CreateToken(CreateTokenRequest) returns (CreateTokenResponse);
+
+  // ListTokens returns the org's tokens, newest first, without their secrets.
+  rpc ListTokens(ListTokensRequest) returns (ListTokensResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // RevokeToken revokes a token. Revoking twice is fine.
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+}
+
+// Token describes an admin API token. It never holds the secret.
+message Token {
+  string id = 1;
+  string name = 2;
+  // prefix is the public part that appears in the token, to tell tokens apart.
+  string prefix = 3;
+  // role is ORG_ROLE_ADMIN or ORG_ROLE_OWNER.
+  koinon.auth.v1alpha1.OrgRole role = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp expires_at = 6;
+  google.protobuf.Timestamp revoked_at = 7;
+  google.protobuf.Timestamp last_used_at = 8;
+}
+
+message CreateTokenRequest {
+  string org_id = 1;
+  string name = 2;
+  // role must be ORG_ROLE_ADMIN or ORG_ROLE_OWNER and at most the caller's.
+  koinon.auth.v1alpha1.OrgRole role = 3;
+  // expires_in is optional: 30 days by default, between 1 hour and 90 days.
+  google.protobuf.Duration expires_in = 4;
+}
+
+message CreateTokenResponse {
+  Token token = 1;
+  // secret is the token to send as "Authorization: Bearer <secret>". It is
+  // shown only here.
+  string secret = 2;
+}
+
+message ListTokensRequest {
+  string org_id = 1;
+}
+
+message ListTokensResponse {
+  repeated Token tokens = 1;
+}
+
+message RevokeTokenRequest {
+  string org_id = 1;
+  string token_id = 2;
+}
+
+message RevokeTokenResponse {
+  Token token = 1;
+}

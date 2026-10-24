@@ -10,7 +10,7 @@ frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"b6858c95813d2ebf"'
+      koinon.config: '"4424646354a26595"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
 gateways:
@@ -29,13 +29,19 @@ llm:
           metadata:
             name: k-dddddddddddd
             agent: acme/triage
-        - keyHash: sha256:920e79d4cda03923cfeedaf37771f1f1eb12e5aff7ed6398664b35088730fa6e
+            org: acme
+          allowedModels: []
+        - keyHash: sha256:7c66a75eb5a3c1f2938ceff2f9f491d2712cd4e2bd9b8ec8218ade3b9d97cbd8
           metadata:
             name: koinon-reload-probe
             agent: ""
     authorization:
       rules:
         - apiKey.name != "koinon-reload-probe"
+    transformations:
+      request:
+        set:
+          x-koinon-org: default(apiKey.org, "")
   models: []
 mcp:
   policies:
@@ -50,6 +56,7 @@ mcp:
           metadata:
             name: k-dddddddddddd
             agent: acme/triage
+            org: acme
     mcpAuthorization:
       rules:
         - mcp.prompt.name == "koinon-ready"

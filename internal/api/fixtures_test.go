@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
+	tokenv1alpha1connect "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
@@ -46,6 +47,7 @@ type client struct {
 	templates templatev1alpha1connect.TemplateServiceClient
 	conns     connectionv1alpha1connect.ConnectionServiceClient
 	approvals approvalv1alpha1connect.ApprovalServiceClient
+	tokens    tokenv1alpha1connect.TokenServiceClient
 }
 
 func newClient(b *browser) *client {
@@ -58,6 +60,7 @@ func newClient(b *browser) *client {
 		templates: templatev1alpha1connect.NewTemplateServiceClient(cc),
 		conns:     connectionv1alpha1connect.NewConnectionServiceClient(cc),
 		approvals: approvalv1alpha1connect.NewApprovalServiceClient(cc),
+		tokens:    tokenv1alpha1connect.NewTokenServiceClient(cc),
 	}
 }
 
@@ -182,19 +185,18 @@ func (e *env) githubConnection(ctx context.Context, org string) string {
 	if id, ok := e.conns[org]; ok {
 		return id
 	}
-	Expect(e.opts.secrets).NotTo(BeNil(), "this env has no secret store")
+	Expect(e.opts.keys).NotTo(BeNil(), "this env has no secret store")
 	var orgID pgtype.UUID
 	Expect(orgID.Scan(org)).To(Succeed())
 	id := pgtype.UUID{Bytes: guuid.New(), Valid: true}
-	name := connections.SecretName(orgID.Bytes, id.Bytes)
 	gh := e.opts.ghFake
 	Expect(gh).NotTo(BeNil(), "envOptions.github is set without ghFake")
-	Expect(e.opts.secrets.Create(ctx, connections.Secret{
-		Name: name, Data: map[string][]byte{connections.GitHubPrivateKeyField: gh.PEM},
-	})).To(Succeed())
+	envelope, err := connections.SealFields(e.opts.keys, orgID, id, map[string][]byte{connections.GitHubPrivateKeyField: gh.PEM})
+	Expect(err).NotTo(HaveOccurred())
 	cfg := fmt.Sprintf(`{"appId": %d, "installationId": %d}`, gh.AppID, gh.InstallationID)
-	conn, err := store.New(e.pool).CreateConnection(ctx, store.CreateConnectionParams{
-		OrgID: orgID, ID: id, Connector: "github", DisplayName: "acme", Config: []byte(cfg), SecretName: name,
+	conn, err := store.New(e.pool).CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+		OrgID: orgID, ID: id, Connector: "github", DisplayName: "acme", Config: []byte(cfg),
+		SecretEnvelope: envelope, Source: store.ConfigSourceUi,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	e.conns[org] = conn.ID.String()
@@ -245,6 +247,8 @@ type orgFixture struct {
 	appKey     []byte
 	// approval is a pending request of run; set by newIsolationFixture.
 	approval store.ApprovalRequest
+	// token is an admin API token of the org; set by newIsolationFixture.
+	token string
 }
 
 func (e *env) newOrgFixture(ctx context.Context) orgFixture {
@@ -318,4 +322,10 @@ func sweep(ctx context.Context, e *env) (int, error) { return scheduler.SweepWal
 
 func recordTokens(ctx context.Context, e *env, r store.Run, tokens int64) (store.Run, error) {
 	return scheduler.RecordTokenUsage(ctx, e.pool, r.OrgID, r.ID, tokens)
+}
+
+func mustUUID(s string) pgtype.UUID {
+	var id pgtype.UUID
+	Expect(id.Scan(s)).To(Succeed())
+	return id
 }

@@ -1,7 +1,7 @@
 # 0007. Connector model: type, connection, grant
 
 - Status: Accepted
-- Amended by: [0049](0049-v01-scope-decisions.md)
+- Amended by: [0049](0049-v01-scope-decisions.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md)
 - Date: 2026-10-21
 - Decision: [design.md#7](../design.md)
 

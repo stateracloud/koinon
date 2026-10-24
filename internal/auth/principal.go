@@ -112,3 +112,16 @@ func PrincipalFrom(ctx context.Context) (*Principal, bool) {
 	p, ok := ctx.Value(principalKey{}).(*Principal)
 	return p, ok && p != nil
 }
+
+// RoleToProto is the wire form of an org role.
+func RoleToProto(r store.OrgRole) authv1alpha1.OrgRole { return roleToProto(r) }
+
+// RoleFromProto is the org role of a wire value; ok is false for unspecified or unknown values.
+func RoleFromProto(r authv1alpha1.OrgRole) (store.OrgRole, bool) {
+	for _, o := range orgRoles {
+		if o.proto == r {
+			return o.role, true
+		}
+	}
+	return "", false
+}

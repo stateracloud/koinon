@@ -69,10 +69,19 @@ type Querier interface {
 	// update no run: the next owner would get a skipped epoch.
 	ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run, error)
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
+	ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error
 	// approved -> executed | failed, by the executor that claimed it (fenced on
 	// executions). No row: another executor took it over.
 	CompleteApprovalExecution(ctx context.Context, arg CompleteApprovalExecutionParams) (ApprovalRequest, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Admin API tokens (plan item PV1). token_hash is the SHA-256 of the token;
+	// the token itself is shown once and never stored.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Every query on an org-owned table takes @org_id and filters on it
@@ -93,9 +102,20 @@ type Querier interface {
 	// Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
 	CreateConnection(ctx context.Context, arg CreateConnectionParams) (Connection, error)
+	// A connection whose secret fields are an envelope (internal/secretstore).
+	CreateConnectionWithEnvelope(ctx context.Context, arg CreateConnectionWithEnvelopeParams) (Connection, error)
 	CreateLocalCredential(ctx context.Context, arg CreateLocalCredentialParams) error
+	CreateModel(ctx context.Context, arg CreateModelParams) (Model, error)
 	CreateOIDCLoginFlow(ctx context.Context, arg CreateOIDCLoginFlowParams) error
 	CreateOrg(ctx context.Context, arg CreateOrgParams) (Org, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Per-org model providers and models (plan item PV1). api_key is an envelope
+	// (internal/secretstore); no query decrypts anything.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	CreateProvider(ctx context.Context, arg CreateProviderParams) (Provider, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Run state machine (ADR 0030). Every transition is a compare-and-set on the
@@ -117,13 +137,19 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// pending -> approved | denied by a human. No row: already decided.
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
+	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
 	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	// Removing a mapping cascades to the memberships it granted.
 	DeleteGroupMappingsExcept(ctx context.Context, arg DeleteGroupMappingsExceptParams) error
+	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
+	DeleteProvider(ctx context.Context, arg DeleteProviderParams) (int64, error)
 	// Drops IdP-sourced memberships from this issuer whose group the user no
 	// longer has, or whose org stopped using the IdP.
 	DeleteStaleGroupMemberships(ctx context.Context, arg DeleteStaleGroupMembershipsParams) error
+	DisableModelsOfDisabledProviders(ctx context.Context, arg DisableModelsOfDisabledProvidersParams) error
+	DisableModelsOfProvider(ctx context.Context, arg DisableModelsOfProviderParams) error
+	EnableModel(ctx context.Context, arg EnableModelParams) error
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -142,6 +168,10 @@ type Querier interface {
 	// The owner ends the run: running -> succeeded | failed | canceled, or
 	// starting -> failed | canceled. No row: stale epoch or illegal transition.
 	FinishRun(ctx context.Context, arg FinishRunParams) (Run, error)
+	GetAPIToken(ctx context.Context, arg GetAPITokenParams) (ApiToken, error)
+	// Authentication: the org is not known before the token is. Looked up by the unique prefix
+	// and then compared by hash in constant time.
+	GetAPITokenByPrefix(ctx context.Context, prefix string) (GetAPITokenByPrefixRow, error)
 	GetActiveUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetAgent(ctx context.Context, arg GetAgentParams) (Agent, error)
 	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
@@ -161,9 +191,11 @@ type Querier interface {
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
+	GetModel(ctx context.Context, arg GetModelParams) (Model, error)
 	// SPDX-License-Identifier: Apache-2.0
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
 	GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWorkspace, error)
+	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -189,18 +221,34 @@ type Querier interface {
 	// Extends the owner's lease. No row: the caller is no longer the owner and
 	// must stop (ADR 0030).
 	HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// The audit log (plan item PV1, ADR 0023). Append-only: there is no update or
+	// delete query, and the table refuses them.
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) (AuditEvent, error)
 	// Records one request. Returns no row when the request id is already
 	// recorded, so a replayed export is not charged twice.
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
+	ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiToken, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
 	ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
+	// Agents that are not archived and whose active or latest version binds the connection
+	// (config.bindings[].connectionId). Deleting a connection needs this to be empty.
+	ListAgentsBoundToConnection(ctx context.Context, arg ListAgentsBoundToConnectionParams) ([]ListAgentsBoundToConnectionRow, error)
 	// Agents that are not archived, plus archived agents whose sandbox is not
 	// cleaned up yet.
 	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
 	ListApprovalRequestsForTicket(ctx context.Context, arg ListApprovalRequestsForTicketParams) ([]ApprovalRequest, error)
+	ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error)
 	ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Connection, error)
 	ListConnectionsByConnector(ctx context.Context, arg ListConnectionsByConnectorParams) ([]Connection, error)
+	// Connections that still name a Kubernetes Secret: not yet moved, or moved but the old Secret not
+	// yet deleted. Startup migration, across orgs.
+	ListConnectionsToMigrate(ctx context.Context) ([]Connection, error)
 	// The most recently synced content of each template.
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// The effective role per org honours the org's identity mode (ADR 0004):
@@ -212,6 +260,7 @@ type Querier interface {
 	ListExecutableApprovalRequests(ctx context.Context, arg ListExecutableApprovalRequestsParams) ([]ApprovalRequest, error)
 	// Parked runs whose park has expired (ADR 0049: 7 days for an approval).
 	ListExpiredParkedRuns(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
+	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
 	// Every live org, for control-plane sweeps and workers that then work org by
 	// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
@@ -228,10 +277,15 @@ type Querier interface {
 	// Trusted-preset calls are recorded as approved and never listed here.
 	ListPendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	ListPendingApprovalRequestsOfFinishedRuns(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
+	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
 	ListRunsForTicket(ctx context.Context, arg ListRunsForTicketParams) ([]Run, error)
+	// Every enabled provider of the org with its enabled models, for the gateway.
+	ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]ListServedCatalogRow, error)
+	// Enabled providers (with or without models), for key delivery.
+	ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
 	// The timeline after a sequence number (0 for the start), in order.
 	ListTicketEvents(ctx context.Context, arg ListTicketEventsParams) ([]TicketEvent, error)
 	// The users' messages on the ticket after a timeline seq, in order: what
@@ -242,6 +296,10 @@ type Querier interface {
 	ListTicketsByStatus(ctx context.Context, arg ListTicketsByStatusParams) ([]Ticket, error)
 	// A run's requests whose outcome the agent has not been sent yet.
 	ListUndeliveredApprovalRequestsForRun(ctx context.Context, arg ListUndeliveredApprovalRequestsForRunParams) ([]ApprovalRequest, error)
+	// A token being used to create a child holds a share lock on itself until the child is committed,
+	// so a revoke (which locks the tree for update first) waits for the child and then revokes it too.
+	LockAPITokenShare(ctx context.Context, arg LockAPITokenShareParams) (ApiToken, error)
+	LockAPITokenTree(ctx context.Context, arg LockAPITokenTreeParams) ([]pgtype.UUID, error)
 	// Serialises decisions on one request.
 	LockApprovalRequest(ctx context.Context, arg LockApprovalRequestParams) (ApprovalRequest, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -256,6 +314,10 @@ type Querier interface {
 	LockRun(ctx context.Context, arg LockRunParams) (Run, error)
 	// Records that the outcomes were sent to the agent.
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
+	// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
+	MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error
+	// The declaring Secret was deleted: keep the row, stop serving it.
+	MarkProviderRemoved(ctx context.Context, arg MarkProviderRemovedParams) error
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
 	// Moves a ticket to a board column. Callers moving to Done also cancel its
@@ -279,6 +341,10 @@ type Querier interface {
 	RecordAgentSandbox(ctx context.Context, arg RecordAgentSandboxParams) (AgentSandbox, error)
 	RecordConnectionTest(ctx context.Context, arg RecordConnectionTestParams) (Connection, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
+	// Re-enable UI models whose provider is enabled and that no declared model shadows.
+	ReenableUIModels(ctx context.Context, orgID pgtype.UUID) error
+	// Re-enable UI providers no declared provider shadows any more.
+	ReenableUIProviders(ctx context.Context, orgID pgtype.UUID) error
 	// The owner gives the run up without finishing it, for example because the
 	// exec stream to the harness dropped: the lease ends now, so any agentd can
 	// take the run over at once (TakeOverExpiredRun) and resume the session.
@@ -289,14 +355,22 @@ type Querier interface {
 	// active -> draft when a grant change is proposed (ADR 0020). The approved
 	// version stays recorded until the next activation.
 	ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraftParams) (Agent, error)
+	// Revokes the token and every token descended from it.
+	RevokeAPITokenTree(ctx context.Context, arg RevokeAPITokenTreeParams) ([]ApiToken, error)
 	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
+	// Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays
+	// until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
+	// at the next start.
+	SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
+	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
+	SetProviderDisabled(ctx context.Context, arg SetProviderDisabledParams) error
 	// Records, before the prompt is sent, the ticket timeline seq through which
 	// the ticket's messages are in it.
 	SetRunPromptThrough(ctx context.Context, arg SetRunPromptThroughParams) (Run, error)
@@ -304,6 +378,9 @@ type Querier interface {
 	// sandbox it was created in. Fenced by the run epoch: only the current owner
 	// of one of the ticket's active runs can set it.
 	SetTicketHarnessSession(ctx context.Context, arg SetTicketHarnessSessionParams) (Ticket, error)
+	ShadowUIModels(ctx context.Context, arg ShadowUIModelsParams) error
+	// A declared provider of this name now exists: disable the UI ones.
+	ShadowUIProviders(ctx context.Context, arg ShadowUIProvidersParams) error
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// Totals per ticket, for the tickets in @ticket_ids that have spend.
@@ -312,9 +389,15 @@ type Querier interface {
 	// (for example a killed agentd). The state is unchanged; the new epoch makes
 	// every later write of the old owner match no rows.
 	TakeOverExpiredRun(ctx context.Context, arg TakeOverExpiredRunParams) (Run, error)
+	// Records use, at most once a minute per token.
+	TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error
 	// Returns the session if it is still valid at @now and extends its idle
 	// deadline, never past the absolute one.
 	TouchSession(ctx context.Context, arg TouchSessionParams) (Session, error)
+	UpdateDeclaredConnection(ctx context.Context, arg UpdateDeclaredConnectionParams) (Connection, error)
+	UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclaredProviderParams) (Provider, error)
+	UpdateModel(ctx context.Context, arg UpdateModelParams) (Model, error)
+	UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error)
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.

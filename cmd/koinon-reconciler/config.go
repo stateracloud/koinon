@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +17,6 @@ import (
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 )
@@ -27,29 +25,19 @@ import (
 // reconciler reads.
 type fileConfig struct {
 	Gateway struct {
-		Mode         project.GatewayMode `yaml:"mode"`
-		ConfigMap    string              `yaml:"configMap"`
-		URL          string              `yaml:"url"`
-		StatsURL     string              `yaml:"statsUrl"`
-		Port         int                 `yaml:"port"`
-		DatabaseURL  string              `yaml:"databaseUrl"`
-		ModelKeyFile string              `yaml:"modelKeyFile"`
+		Mode        project.GatewayMode `yaml:"mode"`
+		ConfigMap   string              `yaml:"configMap"`
+		URL         string              `yaml:"url"`
+		StatsURL    string              `yaml:"statsUrl"`
+		Port        int                 `yaml:"port"`
+		DatabaseURL string              `yaml:"databaseUrl"`
+		// ProviderKeysSecret is the Secret the reconciler writes provider keys into; the gateway
+		// mounts it at ProviderKeysDir.
+		ProviderKeysSecret string `yaml:"providerKeysSecret"`
+		ProviderKeysDir    string `yaml:"providerKeysDir"`
 		// AccessLogOTLP is koinon-api's OTLP/HTTP receiver as host:port (plan item L1).
 		AccessLogOTLP string `yaml:"accessLogOtlp"`
 	} `yaml:"gateway"`
-	Model struct {
-		BaseURL  string `yaml:"baseUrl"`
-		Provider string `yaml:"provider"`
-		Models   []struct {
-			Name  string `yaml:"name"`
-			Rates struct {
-				Input     string `yaml:"input"`
-				Output    string `yaml:"output"`
-				CacheRead string `yaml:"cacheRead"`
-			} `yaml:"rates"`
-			Overrides map[string]any `yaml:"overrides"`
-		} `yaml:"models"`
-	} `yaml:"model"`
 	OpenShell struct {
 		Address          string `yaml:"address"`
 		TLS              string `yaml:"tls"`
@@ -81,14 +69,19 @@ type config struct {
 	openshellTLSDir  string
 	runtimeClass     string
 
-	gatewayMode      project.GatewayMode
-	gatewayURL       string
-	gatewayConfigMap string
-	gatewayStatsURL  string
-	gatewayPort      int
-	gatewayDBURL     string
-	modelKeyFile     string
-	accessLogOTLP    string
+	gatewayMode        project.GatewayMode
+	gatewayURL         string
+	gatewayConfigMap   string
+	gatewayStatsURL    string
+	gatewayPort        int
+	gatewayDBURL       string
+	providerKeysSecret string
+	providerKeysDir    string
+	kekDir             string
+	keySettle          time.Duration
+	allowedHosts       string
+	healthAddr         string
+	accessLogOTLP      string
 
 	idleTimeout    time.Duration
 	resyncInterval time.Duration
@@ -97,8 +90,6 @@ type config struct {
 
 	githubToolsURL string
 	githubAPIURL   string
-
-	models gateway.ModelUpstream
 }
 
 // parseConfig reads flags (and their KOINON_* environment variables) and fills what they leave
@@ -120,9 +111,15 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.gatewayStatsURL, "gateway-stats-url", "", "agentgateway stats URL, to detect rejected configs")
 	fs.IntVar(&c.gatewayPort, "gateway-port", 0, "agentgateway LLM listener port in the rendered config")
 	fs.StringVar(&c.gatewayDBURL, "gateway-database-url", "", "agentgateway budget store URL in the rendered config")
-	fs.StringVar(&c.modelKeyFile, "model-key-file", "", "path of the upstream model key inside agentgateway")
+	fs.StringVar(&c.providerKeysSecret, "provider-keys-secret", "", "Secret that receives the opened provider keys for agentgateway")
+	fs.StringVar(&c.providerKeysDir, "provider-keys-dir", "", "directory where agentgateway mounts the provider keys Secret")
+	fs.StringVar(&c.kekDir, "kek-dir", "", "directory with the mounted key-encryption keys Secret (files named by KEK ID plus \"active\")")
 	fs.StringVar(&c.accessLogOTLP, "gateway-access-log-otlp", "",
 		"host:port of koinon-api's OTLP/HTTP receiver, where agentgateway exports its access log for the spend ledger; empty exports nothing")
+	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready until the key-encryption keys are loaded); empty disables it")
+	fs.StringVar(&c.allowedHosts, "provider-allowed-hosts", "", "comma-separated hosts (optionally host:port) providers may name although they are internal")
+	fs.DurationVar(&c.keySettle, "provider-key-settle", 90*time.Second,
+		"how long to wait after writing a new provider key file before applying a gateway config that names it (kubelet updates a mounted Secret within about a minute)")
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
@@ -179,7 +176,8 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.gatewayStatsURL, fc.Gateway.StatsURL)
 	orDefault(&c.gatewayPort, fc.Gateway.Port)
 	orDefault(&c.gatewayDBURL, fc.Gateway.DatabaseURL)
-	orDefault(&c.modelKeyFile, fc.Gateway.ModelKeyFile)
+	orDefault(&c.providerKeysSecret, fc.Gateway.ProviderKeysSecret)
+	orDefault(&c.providerKeysDir, fc.Gateway.ProviderKeysDir)
 	orDefault(&c.accessLogOTLP, fc.Gateway.AccessLogOTLP)
 	orDefault(&c.homeRetention, fc.Reconciler.HomeRetention)
 	orDefault(&c.githubToolsURL, fc.GitHubTools.URL)
@@ -200,26 +198,6 @@ func (c *config) fill(fc fileConfig) error {
 		c.flavorImages[name] = f.Image
 	}
 
-	c.models = gateway.ModelUpstream{
-		Provider:   fc.Model.Provider,
-		BaseURL:    fc.Model.BaseURL,
-		APIKeyFile: c.modelKeyFile,
-	}
-	for _, m := range fc.Model.Models {
-		gm := gateway.Model{Name: m.Name}
-		if m.Rates.Input != "" || m.Rates.Output != "" || m.Rates.CacheRead != "" {
-			gm.Price = &gateway.Price{Input: m.Rates.Input, Output: m.Rates.Output, CacheRead: m.Rates.CacheRead}
-		}
-		c.models.Models = append(c.models.Models, gm)
-		// ModelUpstream has one set of overrides for the upstream; the chart lists them per
-		// model, so they must agree.
-		if len(m.Overrides) > 0 {
-			if c.models.Overrides != nil && !reflect.DeepEqual(c.models.Overrides, m.Overrides) {
-				return errors.New("config: models with different overrides are not supported yet; use the same overrides for every model")
-			}
-			c.models.Overrides = m.Overrides
-		}
-	}
 	return nil
 }
 
@@ -227,7 +205,8 @@ func (c *config) validate() error {
 	var missing []string
 	for name, v := range map[string]string{
 		"--database-url": c.databaseURL, "--namespace": c.namespace,
-		"--openshell-address": c.openshellAddress, "--gateway-url": c.gatewayURL,
+		"--openshell-address": c.openshellAddress, "--gateway-url": c.gatewayURL, "--kek-dir": c.kekDir,
+		"--provider-keys-secret": c.providerKeysSecret, "--provider-keys-dir": c.providerKeysDir,
 	} {
 		if v == "" {
 			missing = append(missing, name)

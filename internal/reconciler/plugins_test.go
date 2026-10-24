@@ -17,7 +17,6 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/execution/openshell/policycheck"
-	"github.com/stateracloud/koinon/internal/gateway"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/templates"
@@ -37,7 +36,6 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 		r, err = reconciler.New(pool, openshell.New(cc), &fakeModelGateway{},
 			reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
 				Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-				Models:  gateway.ModelUpstream{Provider: "openai", BaseURL: "http://fakemodel:8080/v1", Models: []gateway.Model{{Name: "fake"}}},
 				Flavors: map[store.AgentFlavor]reconciler.Flavor{
 					store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
 				},

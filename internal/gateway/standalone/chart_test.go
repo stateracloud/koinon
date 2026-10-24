@@ -18,8 +18,9 @@ import (
 
 // The chart writes agentgateway's first config file itself
 // (charts/koinon/templates/gateway-standalone.yaml) because the reconciler
-// may not have run yet. That file must be the document Render produces for the
-// same models with no keys, so agentgateway's static `config` section (read
+// may not have run yet. That file must be the document Render produces for an
+// empty State (no providers, no keys: the org's providers come from Postgres and
+// the reconciler renders them), so agentgateway's static `config` section (read
 // only at startup) does not depend on who wrote the file last.
 var _ = Describe("the chart's bootstrap config", func() {
 	chart := filepath.Join("..", "..", "..", "charts", "koinon")
@@ -83,31 +84,5 @@ var _ = Describe("the chart's bootstrap config", func() {
 
 	It("matches Render of an empty State", func() {
 		Expect(renderChart()).To(Equal(renderGo(gateway.State{})))
-	})
-
-	It("matches Render of the same priced models", func() {
-		chartDoc := renderChart(
-			"--set", "model.baseUrl=https://openrouter.ai/api/v1",
-			"--set", "model.provider=openrouter",
-			"--set", "model.apiKeySecret.name=koinon-openrouter",
-			"--set", "model.apiKeySecret.key=api_key",
-			"--set", "model.models[0].name=deepseek/deepseek-v4.1-flash",
-			"--set-string", "model.models[0].rates.input=0.30",
-			"--set-string", "model.models[0].rates.output=1.20",
-			"--set-string", "model.models[0].rates.cacheRead=0.006",
-			"--set", "model.models[0].overrides.provider.zdr=true",
-			"--set", "model.models[1].name=unpriced/model",
-		)
-		goDoc := renderGo(gateway.State{Models: gateway.ModelUpstream{
-			Provider:   "openrouter",
-			BaseURL:    "https://openrouter.ai/api/v1",
-			APIKeyFile: "/secrets/model/api_key",
-			Models: []gateway.Model{
-				{Name: "deepseek/deepseek-v4.1-flash", Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006"}},
-				{Name: "unpriced/model"},
-			},
-			Overrides: map[string]any{"provider": map[string]any{"zdr": true}},
-		}})
-		Expect(chartDoc).To(Equal(goDoc))
 	})
 })

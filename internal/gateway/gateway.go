@@ -88,6 +88,12 @@ func ParseAgentRef(s string) (AgentRef, error) {
 	return a, nil
 }
 
+// OrgHeader is the request header agentgateway sets on every LLM request from the
+// authenticated key's org. Drivers render model entries that match on it, so an org's
+// plain model name resolves to that org's model only. Clients cannot choose it: the
+// gateway overwrites whatever they send.
+const OrgHeader = "x-koinon-org"
+
 // AgentHeader is the request header agentgateway sets on every MCP request
 // it forwards to a target: the authenticated key's agent (AgentRef.String).
 // Drivers render it so that a client-supplied value is overwritten; MCP
@@ -183,30 +189,43 @@ type Limit struct {
 	Generation string
 }
 
-// ModelUpstream is the one OpenAI-compatible upstream of v0.1 (ADR 0049).
-type ModelUpstream struct {
-	// Provider names the upstream for the cost catalog and telemetry, for
-	// example "openrouter" or "ollama".
-	Provider string
+// Provider is one OpenAI-compatible upstream of an org (ADR 0056, plan item PV1). Drivers
+// serve each of its models as "<org>/<model>" to the org's own keys only.
+type Provider struct {
+	// Org is the owning org's slug.
+	Org string
+	// Name is unique within the org; it names the provider in logs and key files.
+	Name string
+	// Type names the upstream for the cost catalog and telemetry (agentgateway's
+	// providerOverride), for example "openrouter" or "ollama".
+	Type string
 	// BaseURL is the OpenAI-compatible base, for example https://openrouter.ai/api/v1.
 	BaseURL string
 	// APIKeyFile is the path, inside the gateway, of the mounted provider key.
 	// Empty means the upstream needs no key.
 	APIKeyFile string
 	Models     []Model
-	// Overrides are set on every request body and win over client values, for
-	// example OpenRouter's provider routing guard (ADR 0048).
-	Overrides map[string]any
 }
 
 // Model is one model clients may request.
 type Model struct {
+	// Name is the plain name agents use; it is unique within the org.
 	Name string
+	// Guard turns on the routing guard (ADR 0048): the gateway forces GuardOverrides
+	// into every request body.
+	Guard bool
 	// Price is per million tokens in USD. agentgateway charges zero for models
 	// it cannot price (ADR 0041), so drivers do not serve models without a
 	// price: requests for them are rejected as unknown models (plan item L1).
 	// A free model needs an explicit zero price.
 	Price *Price
+}
+
+// GuardOverrides are the request fields the routing guard forces: OpenRouter's provider
+// preferences for zero data retention and no training on prompts (ADR 0048). They win over
+// client values.
+func GuardOverrides() map[string]any {
+	return map[string]any{"provider": map[string]any{"zdr": true, "data_collection": "deny"}}
 }
 
 // Price is a per-million-token price in USD, as decimal strings.
@@ -216,17 +235,21 @@ type Price struct {
 	CacheRead string
 }
 
-// Unpriced returns the names of the models without a price, which drivers do
-// not serve.
-func (u ModelUpstream) Unpriced() []string {
+// Unpriced returns "<org>/<model>" for each model without a price; drivers do not serve them.
+func (s State) Unpriced() []string {
 	var out []string
-	for _, m := range u.Models {
-		if m.Price == nil {
-			out = append(out, m.Name)
+	for _, p := range s.Providers {
+		for _, m := range p.Models {
+			if m.Price == nil {
+				out = append(out, p.Org+"/"+m.Name)
+			}
 		}
 	}
 	return out
 }
+
+// ModelRef is the gateway-wide name of an org's model.
+func ModelRef(org, model string) string { return org + "/" + model }
 
 // MCPTarget is an upstream MCP server (Streamable HTTP).
 type MCPTarget struct {
@@ -243,10 +266,10 @@ type ToolGrant struct {
 
 // State is everything a gateway serves. The zero value serves nothing.
 type State struct {
-	Keys   []Key
-	Limits map[AgentRef]Limit
-	Models ModelUpstream
-	MCP    []MCPTarget
+	Keys      []Key
+	Limits    map[AgentRef]Limit
+	Providers []Provider
+	MCP       []MCPTarget
 	// Tools are per-agent MCP allowlists. An agent without grants sees no tools.
 	Tools map[AgentRef][]ToolGrant
 }
@@ -291,6 +314,9 @@ var (
 	keyID      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	keyHash    = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	modelName  = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
+	// providerType is an agentgateway providerOverride.
+	providerType = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+	keyPath      = regexp.MustCompile(`^/[A-Za-z0-9_./-]{1,256}$`)
 )
 
 // Validate checks s for values that would be unsafe or ambiguous in gateway
@@ -330,13 +356,37 @@ func (s State) Validate() error {
 			errs = append(errs, fmt.Errorf("limit for %s: generation must be at most 64 of [a-z0-9-]", a))
 		}
 	}
-	for _, m := range s.Models.Models {
-		if !modelName.MatchString(m.Name) {
-			errs = append(errs, fmt.Errorf("model %q: invalid name", m.Name))
+	seenModel := map[string]bool{}
+	seenProvider := map[string]bool{}
+	for _, p := range s.Providers {
+		ref := p.Org + "/" + p.Name
+		switch {
+		case !orgSlug.MatchString(p.Org):
+			errs = append(errs, fmt.Errorf("provider %q: org must be an org slug", ref))
+		case !dnsLabel.MatchString(p.Name):
+			errs = append(errs, fmt.Errorf("provider %q: name must be a DNS label", ref))
+		case seenProvider[ref]:
+			errs = append(errs, fmt.Errorf("provider %q: duplicate", ref))
 		}
-	}
-	if len(s.Models.Models) > 0 && (s.Models.BaseURL == "" || s.Models.Provider == "") {
-		errs = append(errs, errors.New("models: provider and base URL are required"))
+		seenProvider[ref] = true
+		if !providerType.MatchString(p.Type) {
+			errs = append(errs, fmt.Errorf("provider %q: invalid type %q", ref, p.Type))
+		}
+		if p.BaseURL == "" {
+			errs = append(errs, fmt.Errorf("provider %q: base URL is required", ref))
+		}
+		if p.APIKeyFile != "" && !keyPath.MatchString(p.APIKeyFile) {
+			errs = append(errs, fmt.Errorf("provider %q: invalid key file path", ref))
+		}
+		for _, m := range p.Models {
+			if !modelName.MatchString(m.Name) {
+				errs = append(errs, fmt.Errorf("model %q of provider %q: invalid name", m.Name, ref))
+			}
+			if seenModel[p.Org+"/"+m.Name] {
+				errs = append(errs, fmt.Errorf("model %q: served twice in org %q", m.Name, p.Org))
+			}
+			seenModel[p.Org+"/"+m.Name] = true
+		}
 	}
 	targets := map[string]bool{}
 	for _, t := range s.MCP {

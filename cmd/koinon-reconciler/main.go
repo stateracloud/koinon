@@ -12,23 +12,29 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
-	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 func main() {
@@ -94,22 +100,65 @@ func run() error {
 	// admin listener stays on localhost.
 	driver.Waiter = standalone.ProbeWaiter{GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log}
 
+	// koinon-api creates the KEK Secret on its first start, so on a fresh install it may not be there
+	// (or mounted) yet: wait for it.
+	// The pod is not ready while it waits, and the wait is logged at warn level every minute.
+	var ready atomic.Bool
+	if cfg.healthAddr != "" {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+		mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+			if !ready.Load() {
+				http.Error(w, "waiting for the key-encryption keys", http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+		health := &http.Server{Addr: cfg.healthAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			if err := health.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("health listener failed", "err", err)
+			}
+		}()
+		defer func() { _ = health.Close() }()
+	}
+	var keyring *secretstore.Keyring
+	for lastWarn := (time.Time{}); keyring == nil; {
+		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
+			if time.Since(lastWarn) >= time.Minute {
+				log.Warn("waiting for the key-encryption keys (koinon-api creates them on its first start, or restore the KEK Secret)", "err", err)
+				lastWarn = time.Now()
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
+	ready.Store(true)
+	go keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log)
+
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
-			Gateway:          endpoint,
-			Models:           cfg.models,
-			Flavors:          cfg.flavors(),
-			RuntimeClassName: cfg.runtimeClass,
-			IdleTimeout:      cfg.idleTimeout,
-			ResyncInterval:   cfg.resyncInterval,
-			HomeRetention:    reconciler.Retention(cfg.homeRetention),
-			ToolServers:      cfg.toolServers(),
-			// repo.read grants (plan item C2): tokens minted with the App key from the
-			// connection's Secret, which lives in Koinon's namespace like the key Secrets.
+			Gateway:           endpoint,
+			Keys:              keyring,
+			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
+			ProviderKeyDir:    cfg.providerKeysDir,
+			URLPolicy:         catalog.URLPolicy{Namespace: cfg.namespace, AllowedHosts: splitHosts(cfg.allowedHosts)},
+			ProviderKeySettle: cfg.keySettle,
+			Flavors:           cfg.flavors(),
+			RuntimeClassName:  cfg.runtimeClass,
+			IdleTimeout:       cfg.idleTimeout,
+			ResyncInterval:    cfg.resyncInterval,
+			HomeRetention:     reconciler.Retention(cfg.homeRetention),
+			ToolServers:       cfg.toolServers(),
+			// repo.read grants (plan item C2): tokens minted with the App key opened from the
+			// connection's stored secret fields.
 			GitHub: reconciler.GitHubApps{
-				Secrets: connections.KubeSecrets{Client: kube, Namespace: cfg.namespace},
-				Client:  github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
+				Keys:   keyring,
+				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
 			},
 			Logger: log,
 		})
@@ -135,4 +184,14 @@ func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
 		return nil, fmt.Errorf("kubernetes client config: %w", err)
 	}
 	return kubernetes.NewForConfig(rc)
+}
+
+func splitHosts(s string) []string {
+	var out []string
+	for h := range strings.SplitSeq(s, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
 }

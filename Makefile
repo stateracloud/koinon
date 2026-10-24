@@ -75,10 +75,11 @@ chart-check: ## Lint and render the Helm chart in every mode and validate it wit
 
 .PHONY: generate
 # The OpenShell client is generated after buf.gen.yaml, whose clean step empties internal/gen.
-generate: ## Regenerate protobuf and sqlc code
+generate: ## Regenerate protobuf, sqlc and admin API code
 	buf generate
 	buf generate --template buf.gen.openshell.yaml
 	$(GO) tool sqlc generate
+	$(GO) tool oapi-codegen -config api/admin/v1/oapi-codegen.yaml api/admin/v1/openapi.yaml
 
 # Flavor images build with docker buildx and load into the local Docker image store; nothing is
 # pushed. FLAVOR_PLATFORMS=linux/amd64,linux/arm64 builds both (needs the containerd image store).

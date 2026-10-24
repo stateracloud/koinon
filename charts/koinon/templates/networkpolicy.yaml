@@ -1,8 +1,10 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
 {{- /*
 Standard networking.k8s.io/v1 NetworkPolicies only (no CNI-specific resources). Ingress is
-restricted per component; egress stays open in v0.1 because the Kubernetes API, the OpenShell
-gateway and the model upstream have no portable selector.
+restricted per component. Egress stays open for the components that call the Kubernetes API and
+the OpenShell gateway (no portable selector), except agentgateway's, which is restricted below: it
+holds the provider keys and sends requests to whatever URL a provider names, so it must not reach
+the cluster's private ranges unless you allow them (networkPolicy.gatewayEgressTo).
 */ -}}
 {{- if .Values.networkPolicy.enabled }}
 {{- $release := dict "app.kubernetes.io/name" (include "koinon.name" .) "app.kubernetes.io/instance" .Release.Name }}
@@ -80,7 +82,36 @@ spec:
   podSelector:
     matchLabels:
       {{- include "koinon.selectorLabels" (list . "gateway") | nindent 6 }}
-  policyTypes: [Ingress]
+  policyTypes: [Ingress, Egress]
+  # Egress, standard networking.k8s.io/v1 only. Allowed: DNS; koinon-api's OTLP receiver and tools
+  # listener; the public internet (the private, shared, link-local and loopback ranges are carved out,
+  # which keeps the cloud metadata address, the node and the cluster's Services and pods out of
+  # reach); and whatever networkPolicy.gatewayEgressTo adds for internal upstreams. Limits: the
+  # carve-outs are the standard private ranges, so a cluster whose pods or Services use public
+  # addresses needs its own; an allowed range is open to every port you list for it; names are not
+  # matched, only addresses, so providers.allowedInternalHosts (which names hosts) and this list
+  # (which names addresses) must agree; and a CNI that does not enforce egress policy ignores all of it.
+  egress:
+    - ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "api") | nindent 14 }}
+      ports:
+        - port: {{ .Values.api.otlpPort }}
+        - port: {{ .Values.api.toolsPort }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16]
+        - ipBlock:
+            cidr: ::/0
+            except: ["fc00::/7", "fe80::/10", "::/96", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16"]
+    {{- range .Values.networkPolicy.gatewayEgressTo }}
+    - {{- toYaml . | nindent 6 }}
+    {{- end }}
   ingress:
     - ports:
         - port: llm

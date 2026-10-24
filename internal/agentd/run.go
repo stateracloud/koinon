@@ -305,7 +305,20 @@ func (r *runner) execute(ctx context.Context) error {
 		model = cfg.DefaultModel
 	}
 	if model == "" {
-		return &failure{reason: "the agent names no model and no default model is configured"}
+		// The org's first served model: providers by name, then models by name (PV1).
+		served, err := r.q.ListServedCatalog(fctx, r.run.OrgID)
+		if err != nil {
+			return r.dbErr(ctx, "load the org's models", err)
+		}
+		for _, m := range served {
+			if m.InputRate.Valid {
+				model = m.ModelName
+				break
+			}
+		}
+	}
+	if model == "" {
+		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
 	}
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
 	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp"})

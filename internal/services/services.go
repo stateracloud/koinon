@@ -2,7 +2,7 @@
 
 // Package services implements Koinon's org-facing connect-rpc services
 // (plan item A3): AgentService, TicketService, RunService,
-// TemplateService, ConnectionService and ApprovalService, on the sqlc store and with the caller's Principal from the
+// TemplateService, ConnectionService, ApprovalService and TokenService, on the sqlc store and with the caller's Principal from the
 // auth interceptor.
 //
 // Every org-owned call names its org in the request. The caller must hold a
@@ -12,7 +12,7 @@
 //	viewer  Get*, List*, WatchRun
 //	member  CreateAgentFromTemplate, CreateTicket, AppendMessage, MoveTicket, CancelRun
 //	admin   ActivateAgent (approves the version's grants), ArchiveAgent,
-//	        CreateGitHubConnection, TestConnection, Approve, Deny (ADR 0049:
+//	        CreateGitHubConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
 //	        approvers are admins and owners)
 //
 // A caller without any role in the org gets NotFound, so org IDs cannot be
@@ -41,8 +41,16 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/runwatch"
+	"github.com/stateracloud/koinon/internal/tokens"
 )
+
+// Keys is the secret store as the services use it.
+type Keys interface {
+	connections.Opener
+	connections.Sealer
+}
 
 // DefaultWatchPollInterval is how often a WatchRun stream re-reads the run
 // without a wake-up, as a backstop for missed notifications.
@@ -56,9 +64,11 @@ type Options struct {
 	WatchPollInterval time.Duration
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
-	// Secrets stores connections' secure inputs. Nil means Koinon runs
-	// without Kubernetes access, and creating connections fails.
-	Secrets connections.SecretStore
+	// Keys seals and opens connections' secret fields (the secret store). Nil means Koinon
+	// runs without key-encryption keys, and creating connections fails.
+	Keys Keys
+	// Tokens issues admin API tokens; defaults to a service on the pool.
+	Tokens *tokens.Service
 	// GitHub runs connection checks; defaults to a client for api.github.com.
 	GitHub *github.Client
 	// Approvals decides and executes approval requests. Nil means Approve and
@@ -74,7 +84,8 @@ type Server struct {
 	poll time.Duration
 	log  *slog.Logger
 
-	secrets   connections.SecretStore
+	keys      Keys
+	tokens    *tokens.Service
 	github    *github.Client
 	approvals *approvals.Service
 }
@@ -90,9 +101,12 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.GitHub == nil {
 		opts.GitHub = github.NewClient(github.Options{})
 	}
+	if opts.Tokens == nil {
+		opts.Tokens = tokens.New(pool, nil)
+	}
 	return &Server{
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
-		secrets: opts.Secrets, github: opts.GitHub, approvals: opts.Approvals,
+		keys: opts.Keys, tokens: opts.Tokens, github: opts.GitHub, approvals: opts.Approvals,
 	}
 }
 
@@ -103,6 +117,7 @@ func (s *Server) Register(server *connect.Server) {
 	runv1alpha1connect.RegisterRunServiceHandler(server, s)
 	templatev1alpha1connect.RegisterTemplateServiceHandler(server, s)
 	connectionv1alpha1connect.RegisterConnectionServiceHandler(server, s)
+	tokenv1alpha1connect.RegisterTokenServiceHandler(server, s)
 	approvalv1alpha1connect.RegisterApprovalServiceHandler(server, s)
 }
 
@@ -113,6 +128,7 @@ var (
 	_ templatev1alpha1connect.TemplateServiceHandler     = (*Server)(nil)
 	_ connectionv1alpha1connect.ConnectionServiceHandler = (*Server)(nil)
 	_ approvalv1alpha1connect.ApprovalServiceHandler     = (*Server)(nil)
+	_ tokenv1alpha1connect.TokenServiceHandler           = (*Server)(nil)
 )
 
 // caller is an authorised request in one org.

@@ -104,14 +104,14 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 
 		key, err = gateway.NewKey(e.ref())
 		Expect(err).NotTo(HaveOccurred())
-		state = gateway.State{Models: gateway.ModelUpstream{
-			Provider: "fake",
-			BaseURL:  fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, hostPort(upstream)),
+		state = gateway.State{Providers: []gateway.Provider{{
+			Org: e.ref().Org, Name: "upstream", Type: "fake",
+			BaseURL: fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, hostPort(upstream)),
 			Models: []gateway.Model{
 				{Name: pricedModel, Price: &gateway.Price{Input: "50", Output: "50"}},
 				{Name: unpricedModel},
 			},
-		}}
+		}}}
 		state.AddKey(key.Key)
 		l, err := ledger.AgentLimit(ctx, q, e.agent, time.Now())
 		Expect(err).NotTo(HaveOccurred())
@@ -176,7 +176,9 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 	}, SpecTimeout(time.Minute))
 
 	It("does not serve a model without a price", func(ctx SpecContext) {
-		Expect(chat(ctx, key.Material, unpricedModel)).To(Equal(http.StatusNotFound))
+		// The key's allowedModels leaves an unpriced model out, so the key may not ask for it (403);
+		// without the list agentgateway answers 404 model_not_found. Either way it is never charged.
+		Expect(chat(ctx, key.Material, unpricedModel)).To(BeElementOf(http.StatusForbidden, http.StatusNotFound))
 	})
 
 	It("re-pushes the limit net of recorded spend without counting that spend twice", func(ctx SpecContext) {

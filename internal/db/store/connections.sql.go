@@ -11,11 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearConnectionSecretName = `-- name: ClearConnectionSecretName :exec
+UPDATE connections
+SET secret_name = NULL
+WHERE org_id = $1 AND id = $2
+`
+
+type ClearConnectionSecretNameParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+func (q *Queries) ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error {
+	_, err := q.db.Exec(ctx, clearConnectionSecretName, arg.OrgID, arg.ID)
+	return err
+}
+
 const createConnection = `-- name: CreateConnection :one
 
 INSERT INTO connections (org_id, id, connector, display_name, config, secret_name, secret_fingerprint, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at
 `
 
 type CreateConnectionParams struct {
@@ -24,7 +40,7 @@ type CreateConnectionParams struct {
 	Connector         string
 	DisplayName       string
 	Config            []byte
-	SecretName        string
+	SecretName        pgtype.Text
 	SecretFingerprint string
 	CreatedBy         pgtype.UUID
 }
@@ -62,12 +78,94 @@ func (q *Queries) CreateConnection(ctx context.Context, arg CreateConnectionPara
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
 	)
 	return i, err
 }
 
+const createConnectionWithEnvelope = `-- name: CreateConnectionWithEnvelope :one
+INSERT INTO connections (org_id, id, connector, display_name, config, secret_envelope, secret_fingerprint, source, managed_by_secret, declared_version, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at
+`
+
+type CreateConnectionWithEnvelopeParams struct {
+	OrgID             pgtype.UUID
+	ID                pgtype.UUID
+	Connector         string
+	DisplayName       string
+	Config            []byte
+	SecretEnvelope    []byte
+	SecretFingerprint string
+	Source            ConfigSource
+	ManagedBySecret   pgtype.Text
+	DeclaredVersion   pgtype.Text
+	CreatedBy         pgtype.UUID
+}
+
+// A connection whose secret fields are an envelope (internal/secretstore).
+func (q *Queries) CreateConnectionWithEnvelope(ctx context.Context, arg CreateConnectionWithEnvelopeParams) (Connection, error) {
+	row := q.db.QueryRow(ctx, createConnectionWithEnvelope,
+		arg.OrgID,
+		arg.ID,
+		arg.Connector,
+		arg.DisplayName,
+		arg.Config,
+		arg.SecretEnvelope,
+		arg.SecretFingerprint,
+		arg.Source,
+		arg.ManagedBySecret,
+		arg.DeclaredVersion,
+		arg.CreatedBy,
+	)
+	var i Connection
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Connector,
+		&i.DisplayName,
+		&i.Config,
+		&i.SecretName,
+		&i.SecretFingerprint,
+		&i.Status,
+		&i.LastTestedAt,
+		&i.LastTest,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
+	)
+	return i, err
+}
+
+const deleteConnection = `-- name: DeleteConnection :execrows
+DELETE FROM connections
+WHERE org_id = $1 AND id = $2
+`
+
+type DeleteConnectionParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+func (q *Queries) DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteConnection, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getConnection = `-- name: GetConnection :one
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at FROM connections
 WHERE org_id = $1 AND id = $2
 `
 
@@ -93,12 +191,59 @@ func (q *Queries) GetConnection(ctx context.Context, arg GetConnectionParams) (C
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
 	)
 	return i, err
 }
 
+const listAgentsBoundToConnection = `-- name: ListAgentsBoundToConnection :many
+SELECT DISTINCT a.id, a.display_name
+FROM agents a
+JOIN agent_versions v ON v.org_id = a.org_id AND v.agent_id = a.id
+WHERE a.org_id = $1 AND a.status <> 'archived'
+  AND (v.id = a.active_version_id OR v.version = a.latest_version)
+  AND v.config -> 'bindings' @> jsonb_build_array(jsonb_build_object('connectionId', $2::text))
+ORDER BY a.display_name, a.id
+`
+
+type ListAgentsBoundToConnectionParams struct {
+	OrgID        pgtype.UUID
+	ConnectionID string
+}
+
+type ListAgentsBoundToConnectionRow struct {
+	ID          pgtype.UUID
+	DisplayName string
+}
+
+// Agents that are not archived and whose active or latest version binds the connection
+// (config.bindings[].connectionId). Deleting a connection needs this to be empty.
+func (q *Queries) ListAgentsBoundToConnection(ctx context.Context, arg ListAgentsBoundToConnectionParams) ([]ListAgentsBoundToConnectionRow, error) {
+	rows, err := q.db.Query(ctx, listAgentsBoundToConnection, arg.OrgID, arg.ConnectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentsBoundToConnectionRow
+	for rows.Next() {
+		var i ListAgentsBoundToConnectionRow
+		if err := rows.Scan(&i.ID, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listConnections = `-- name: ListConnections :many
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at FROM connections
 WHERE org_id = $1
 ORDER BY created_at, id
 `
@@ -126,6 +271,11 @@ func (q *Queries) ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Con
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SecretEnvelope,
+			&i.Source,
+			&i.ManagedBySecret,
+			&i.DeclaredVersion,
+			&i.RemovedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -138,7 +288,7 @@ func (q *Queries) ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Con
 }
 
 const listConnectionsByConnector = `-- name: ListConnectionsByConnector :many
-SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at FROM connections
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at FROM connections
 WHERE org_id = $1 AND connector = $2
 ORDER BY created_at, id
 `
@@ -171,6 +321,11 @@ func (q *Queries) ListConnectionsByConnector(ctx context.Context, arg ListConnec
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SecretEnvelope,
+			&i.Source,
+			&i.ManagedBySecret,
+			&i.DeclaredVersion,
+			&i.RemovedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -182,11 +337,75 @@ func (q *Queries) ListConnectionsByConnector(ctx context.Context, arg ListConnec
 	return items, nil
 }
 
+const listConnectionsToMigrate = `-- name: ListConnectionsToMigrate :many
+SELECT org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at FROM connections
+WHERE secret_name IS NOT NULL
+ORDER BY org_id, id
+`
+
+// Connections that still name a Kubernetes Secret: not yet moved, or moved but the old Secret not
+// yet deleted. Startup migration, across orgs.
+func (q *Queries) ListConnectionsToMigrate(ctx context.Context) ([]Connection, error) {
+	rows, err := q.db.Query(ctx, listConnectionsToMigrate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Connection
+	for rows.Next() {
+		var i Connection
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.Connector,
+			&i.DisplayName,
+			&i.Config,
+			&i.SecretName,
+			&i.SecretFingerprint,
+			&i.Status,
+			&i.LastTestedAt,
+			&i.LastTest,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SecretEnvelope,
+			&i.Source,
+			&i.ManagedBySecret,
+			&i.DeclaredVersion,
+			&i.RemovedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markConnectionRemoved = `-- name: MarkConnectionRemoved :exec
+UPDATE connections
+SET removed_at = now()
+WHERE org_id = $1 AND id = $2 AND source = 'secret' AND removed_at IS NULL
+`
+
+type MarkConnectionRemovedParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// The declaring Secret was deleted: keep the row (agents are bound to it, the audit log names it).
+func (q *Queries) MarkConnectionRemoved(ctx context.Context, arg MarkConnectionRemovedParams) error {
+	_, err := q.db.Exec(ctx, markConnectionRemoved, arg.OrgID, arg.ID)
+	return err
+}
+
 const recordConnectionTest = `-- name: RecordConnectionTest :one
 UPDATE connections
 SET status = $1, last_tested_at = now(), last_test = $2
 WHERE org_id = $3 AND id = $4
-RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at
 `
 
 type RecordConnectionTestParams struct {
@@ -218,6 +437,105 @@ func (q *Queries) RecordConnectionTest(ctx context.Context, arg RecordConnection
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
+	)
+	return i, err
+}
+
+const setConnectionEnvelope = `-- name: SetConnectionEnvelope :one
+UPDATE connections
+SET secret_envelope = $1
+WHERE org_id = $2 AND id = $3
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at
+`
+
+type SetConnectionEnvelopeParams struct {
+	SecretEnvelope []byte
+	OrgID          pgtype.UUID
+	ID             pgtype.UUID
+}
+
+// Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays
+// until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
+// at the next start.
+func (q *Queries) SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error) {
+	row := q.db.QueryRow(ctx, setConnectionEnvelope, arg.SecretEnvelope, arg.OrgID, arg.ID)
+	var i Connection
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Connector,
+		&i.DisplayName,
+		&i.Config,
+		&i.SecretName,
+		&i.SecretFingerprint,
+		&i.Status,
+		&i.LastTestedAt,
+		&i.LastTest,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
+	)
+	return i, err
+}
+
+const updateDeclaredConnection = `-- name: UpdateDeclaredConnection :one
+UPDATE connections
+SET display_name = $1, config = $2, secret_envelope = $3,
+    secret_fingerprint = $4, declared_version = $5, removed_at = NULL
+WHERE org_id = $6 AND id = $7 AND source = 'secret'
+RETURNING org_id, id, connector, display_name, config, secret_name, secret_fingerprint, status, last_tested_at, last_test, created_by, created_at, updated_at, secret_envelope, source, managed_by_secret, declared_version, removed_at
+`
+
+type UpdateDeclaredConnectionParams struct {
+	DisplayName       string
+	Config            []byte
+	SecretEnvelope    []byte
+	SecretFingerprint string
+	DeclaredVersion   pgtype.Text
+	OrgID             pgtype.UUID
+	ID                pgtype.UUID
+}
+
+func (q *Queries) UpdateDeclaredConnection(ctx context.Context, arg UpdateDeclaredConnectionParams) (Connection, error) {
+	row := q.db.QueryRow(ctx, updateDeclaredConnection,
+		arg.DisplayName,
+		arg.Config,
+		arg.SecretEnvelope,
+		arg.SecretFingerprint,
+		arg.DeclaredVersion,
+		arg.OrgID,
+		arg.ID,
+	)
+	var i Connection
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Connector,
+		&i.DisplayName,
+		&i.Config,
+		&i.SecretName,
+		&i.SecretFingerprint,
+		&i.Status,
+		&i.LastTestedAt,
+		&i.LastTest,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SecretEnvelope,
+		&i.Source,
+		&i.ManagedBySecret,
+		&i.DeclaredVersion,
+		&i.RemovedAt,
 	)
 	return i, err
 }

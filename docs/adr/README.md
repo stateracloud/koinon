@@ -21,7 +21,7 @@ are in [0046](0046-adr-conventions.md).
 | [0004](0004-human-identity.md) | Human identity | Accepted, amended 2026-10-23 |
 | [0005](0005-agent-identity.md) | Agent identity | Accepted |
 | [0006](0006-identity-layers.md) | Identity layers | Accepted, amended by 0043, 0044 |
-| [0007](0007-connector-model.md) | Connector model | Accepted, amended by 0049 |
+| [0007](0007-connector-model.md) | Connector model | Accepted, amended by 0049, 0056 |
 | [0008](0008-approvals-and-risk-tiers.md) | Approvals | Accepted, amended by 0042 |
 | [0009](0009-agent-runtime.md) | Agent runtime | Accepted |
 | [0010](0010-eventing.md) | Eventing | Accepted |
@@ -35,7 +35,7 @@ are in [0046](0046-adr-conventions.md).
 | [0018](0018-v1-screens.md) | v1 screens | Accepted |
 | [0019](0019-personal-agents-and-teams.md) | Personal agents and teams | Accepted |
 | [0020](0020-agent-builder-and-templates.md) | Creating agents | Accepted |
-| [0021](0021-connector-setup-guides.md) | Connector setup | Accepted |
+| [0021](0021-connector-setup-guides.md) | Connector setup | Accepted, amended by 0056 |
 | [0022](0022-frontend-architecture.md) | Frontend | Accepted |
 | [0023](0023-observability-and-audit.md) | Observability and audit | Accepted |
 | [0024](0024-roadmap.md) | Roadmap | Accepted |
@@ -63,13 +63,13 @@ are in [0046](0046-adr-conventions.md).
 | [0046](0046-adr-conventions.md) | ADR conventions | Accepted |
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted |
 | [0048](0048-openshell-spike-results.md) | OpenShell spike results | Proposed |
-| [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes, agentd placement | Accepted, amended by 0056, 0058 |
+| [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes, agentd placement | Accepted, amended by 0056, 0058; Helm model values dropped by 0056 |
 | [0050](0050-spend-ledger-ingestion-and-net-limits.md) | Spend ledger ingestion and net limits | Proposed, amended by 0056 |
 | [0051](0051-session-home-generations.md) | Session home generations | Accepted, amended by 0054 and 2026-10-23 |
 | [0052](0052-opencode-v2-flavor.md) | OpenCode flavor on OpenCode v2 | Accepted |
 | [0053](0053-hermes-context-file-patch.md) | Hermes context-file build patch: redo on every upgrade, with a guard test | Accepted |
 | [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted |
 | [0055](0055-chat-as-its-own-object.md) | Chat is its own object | Accepted |
-| [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted |
+| [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted, amended 2026-10-23 |
 | [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted |
 | [0058](0058-gateway-modes.md) | Gateway modes: standalone, kubernetes and shared | Accepted |

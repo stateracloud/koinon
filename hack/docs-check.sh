@@ -9,6 +9,8 @@
 #      `hack/docs-check.sh --update` after you change a command on purpose.
 #   2. test/e2e/run.sh runs every e1 block, and only blocks that exist.
 #   3. Every `yaml chart-values` block in the docs is valid chart values (helm lint --strict).
+#   3b. Every `yaml model-provider` block, and the model-provider manifests of the e2e test and the dev
+#      profiles, parse as declarative Secrets (internal/declarative, TestDocumentedSecretsParse).
 #   4. Every bold label in the quickstart's browser steps appears in the Playwright spec as a whole
 #      quoted string or regexp.
 #   5. The versions on the Prerequisites page equal the ones test/e2e/kind/up.sh, the preflight,
@@ -89,6 +91,14 @@ done < <(
 )
 [[ $i -gt 0 ]] || fail "no chart-values blocks found"
 ok "$i chart-values blocks checked with helm lint and template"
+
+# 3b. Declarative Secrets shown in the docs.
+if go test -count=1 -run TestDocumentedSecretsParse ./internal/declarative >"$tmp/secrets.out" 2>&1; then
+  ok "the model-provider manifests in the docs, e2e test and dev profiles parse"
+else
+  cat "$tmp/secrets.out" >&2
+  fail "a model-provider manifest does not parse; see internal/declarative/docs_test.go"
+fi
 
 # 4. UI labels.
 spec=$(cat web/e2e-real/*.spec.ts)

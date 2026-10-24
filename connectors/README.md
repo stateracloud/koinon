@@ -24,8 +24,8 @@ v0.1 ships `github/` (ADR 0036, 0049).
 - `spec.presets`: for `read-only`, `standard` and `trusted`, the decision per tier. `forbidden` is
   always `deny`.
 - `spec.setupGuide`: the one source for the connection page and the agent builder (ADR 0021).
-  `fields` are the inputs; a field with `secret: true` is a secure input, written straight to a
-  Kubernetes Secret and never stored in Postgres, returned or logged. `steps` are ordered, each
+  `fields` are the inputs; a field with `secret: true` is a secure input, sealed straight into
+  the encrypted secret store (ADR 0056) and never stored in the clear, returned or logged. `steps` are ordered, each
   with Markdown, console links, values to copy, the fields it collects and a `check`: the name of
   a built-in Go check (`internal/connections`) that validates the step. `TestConnection` runs the
   checks in step order and reports each against its step.
