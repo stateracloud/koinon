@@ -61,6 +61,7 @@ import (
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/scheduler"
@@ -234,6 +235,9 @@ func splitList(s string) []string {
 }
 
 func main() {
+	if limit := memlimit.Apply(); limit > 0 {
+		slog.Info("memory soft limit set", "bytes", limit)
+	}
 	if err := run(); err != nil {
 		slog.Error("koinon-api failed", "err", err)
 		os.Exit(1)

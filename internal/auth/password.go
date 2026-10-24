@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
@@ -39,22 +41,66 @@ var (
 	dummyHash = sync.OnceValue(func() string { return mustHash("koinon-dummy-password") })
 )
 
-// HashPassword returns an argon2id hash in PHC string format:
-// $argon2id$v=19$m=65536,t=3,p=4$<salt>$<key>.
+// maxArgonConcurrency bounds argon2 computations in this process, hashing and verifying alike. Each
+// holds argonMemory (64 MiB) plus working space, so two fit in the chart's default 512Mi limit with
+// room for the rest of koinon-api. Callers wait for a slot and give up when their context ends.
+const maxArgonConcurrency = 2
+
+var (
+	argonSlots = make(chan struct{}, maxArgonConcurrency)
+	// argonInFlight and argonPeak let tests check the bound.
+	argonInFlight, argonPeak atomic.Int32
+)
+
+// acquireArgon takes a computation slot; call the returned func to release it.
+func acquireArgon(ctx context.Context) (func(), error) {
+	select {
+	case argonSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	n := argonInFlight.Add(1)
+	for {
+		p := argonPeak.Load()
+		if n <= p || argonPeak.CompareAndSwap(p, n) {
+			break
+		}
+	}
+	return func() { argonInFlight.Add(-1); <-argonSlots }, nil
+}
+
+// HashPassword is HashPasswordContext without a deadline.
 func HashPassword(password string) (string, error) {
+	return HashPasswordContext(context.Background(), password)
+}
+
+// HashPasswordContext returns an argon2id hash in PHC string format:
+// $argon2id$v=19$m=65536,t=3,p=4$<salt>$<key>. It waits for a computation slot until ctx ends.
+func HashPasswordContext(ctx context.Context, password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
+	release, err := acquireArgon(ctx)
+	if err != nil {
+		return "", err
+	}
 	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	release()
 	b64 := base64.RawStdEncoding
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, argonMemory, argonTime, argonThreads,
 		b64.EncodeToString(salt), b64.EncodeToString(key)), nil
 }
 
-// VerifyPassword reports whether password matches the PHC-encoded hash.
+// VerifyPassword is VerifyPasswordContext without a deadline.
 func VerifyPassword(hash, password string) (bool, error) {
+	return VerifyPasswordContext(context.Background(), hash, password)
+}
+
+// VerifyPasswordContext reports whether password matches the PHC-encoded hash. It waits for a
+// computation slot until ctx ends.
+func VerifyPasswordContext(ctx context.Context, hash, password string) (bool, error) {
 	parts := strings.Split(hash, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" {
 		return false, errMalformedHash
@@ -83,7 +129,12 @@ func VerifyPassword(hash, password string) (bool, error) {
 	if len(password) > maxPasswordBytes {
 		return false, nil
 	}
+	release, err := acquireArgon(ctx)
+	if err != nil {
+		return false, err
+	}
 	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want))) //nolint:gosec // len(want) <= 64
+	release()
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 
