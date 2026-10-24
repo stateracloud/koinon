@@ -127,7 +127,7 @@ spec:
         label: Private key
         help: >-
           The contents of the .pem file GitHub downloads when you generate a private key. It is
-          written to a Kubernetes Secret and never shown again.
+          stored encrypted and never shown again.
         type: pem
         secret: true
     steps:
@@ -167,7 +167,7 @@ spec:
           On the App's General settings page, under **Private keys**, choose
           **Generate a private key**. Paste the contents of the downloaded `.pem` file below, then
           delete the file. Koinon signs short-lived App tokens with it; the key itself never
-          leaves Koinon's Kubernetes Secret.
+          leaves Koinon's encrypted store.
         links:
           - label: GitHub docs, managing private keys
             url: https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps

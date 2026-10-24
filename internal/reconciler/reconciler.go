@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path"
 	"sync"
 	"time"
 
@@ -43,6 +44,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
@@ -79,8 +81,19 @@ type Endpoint struct {
 type Config struct {
 	// Gateway is agentgateway's LLM listener as sandboxes reach it.
 	Gateway Endpoint
-	// Models is the model upstream rendered into every gateway state.
-	Models gateway.ModelUpstream
+	// Keys opens the provider keys stored in Postgres (the secret store).
+	Keys catalog.Opener
+	// ProviderKeys receives the opened keys for the gateway. Required when any served
+	// provider has a key.
+	ProviderKeys ProviderKeyStore
+	// ProviderKeyDir is where the gateway mounts ProviderKeys, for the rendered config.
+	ProviderKeyDir string
+	// URLPolicy is checked again, with a fresh lookup, for every provider URL before it is served.
+	URLPolicy catalog.URLPolicy
+	// ProviderKeySettle is how long a pass waits, after writing a new provider key file, before it
+	// applies a config that names the file: kubelet needs about a minute to update a mounted Secret
+	// and agentgateway rejects a config whose key file is missing. Zero applies at once.
+	ProviderKeySettle time.Duration
 	// ToolServers maps a connector type ID to the URL of its MCP tool server
 	// (for github: koinon-api's tools listener, plan item C3). Each becomes an
 	// agentgateway MCP target named after the connector, and every active
@@ -124,6 +137,13 @@ type Reconciler struct {
 	mu sync.Mutex
 	// githubRevs is the token revision last pushed per GitHub provider record, to log refreshes.
 	githubRevs map[string]string
+	// unpricedLogged is the unpriced model set last logged.
+	unpricedLogged string
+	// keyWrittenAt is when each provider key file written by this process was written, until it
+	// has had ProviderKeySettle to reach the gateway.
+	keyWrittenAt map[string]time.Time
+	// appliedFile is the key file (data key) each provider ID was last applied with.
+	appliedFile map[string]string
 }
 
 // New returns a Reconciler.
@@ -149,9 +169,6 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
-	}
-	if unpriced := cfg.Models.Unpriced(); len(unpriced) > 0 {
-		cfg.Logger.Warn("models without a price are not served; give free models a zero price", "models", unpriced)
 	}
 	if cfg.GitBinaries == nil {
 		cfg.GitBinaries = DefaultGitBinaries
@@ -234,8 +251,17 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 	}
 
+	// The org's providers and models (PV1). Without the list an Apply would stop serving every
+	// model, so a database error aborts the pass.
+	served, provErrs, err := r.loadProviders(ctx, orgs)
+	if err != nil {
+		return errors.Join(append(errs, fmt.Errorf("%w: %w", errAbortPass, err))...)
+	}
+	errs = append(errs, provErrs...)
+
 	// One gateway state for every agent: keys of archived agents are revoked by omission.
-	state := gateway.State{Keys: keys, Models: r.cfg.Models, MCP: r.mcpTargets(), Tools: tools}
+	state := gateway.State{Keys: keys, Providers: served.providers, MCP: r.mcpTargets(), Tools: tools}
+	r.warnUnpriced(state)
 	// Spend limits net of recorded spend (plan item L1), recomputed every pass, so a key
 	// rotation or a gateway that lost its budget counters gets the remainder, not the full
 	// limit. Without its limit an agent would be unlimited, so a failure aborts the pass and
@@ -251,9 +277,26 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 		state.SetLimit(w.key.Agent, l)
 	}
+	// Provider key files first, then the config that names them; files no provider uses go last.
+	// One provider's new key file still travelling to the gateway pod never holds back the others:
+	// that provider keeps serving with its previous file, or is left out until the file has arrived.
+	var written []string
+	if len(served.files) > 0 {
+		var err error
+		if written, err = r.cfg.ProviderKeys.Put(ctx, served.files); err != nil {
+			return errors.Join(append(errs, fmt.Errorf("reconciler: deliver provider keys: %w", err))...)
+		}
+	}
+	keep := r.settleProviders(&state, served, r.keysSettling(written, now))
 	if _, err := r.gw.Apply(ctx, state); err != nil {
 		errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
 		return errors.Join(errs...)
+	}
+	r.recordApplied(served, state)
+	if r.cfg.ProviderKeys != nil && len(provErrs) == 0 {
+		if err := r.cfg.ProviderKeys.Prune(ctx, keep); err != nil {
+			errs = append(errs, fmt.Errorf("reconciler: prune provider keys: %w", err))
+		}
 	}
 
 	for _, w := range items {
@@ -264,6 +307,88 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// settleProviders handles providers whose key file is still settling: with a previously applied
+// file the provider keeps using it, without one it is left out of state. It returns the data keys to
+// keep in the provider keys Secret.
+func (r *Reconciler) settleProviders(state *gateway.State, served servedProviders, settling map[string]bool) map[string]bool {
+	keep := map[string]bool{}
+	for name := range served.files {
+		keep[name] = true
+	}
+	if len(settling) == 0 {
+		return keep
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []gateway.Provider
+	for i, p := range served.providers {
+		name := served.fileNames[i]
+		if name == "" || !settling[name] {
+			out = append(out, p)
+			continue
+		}
+		if prev := r.appliedFile[served.ids[i]]; prev != "" {
+			p.APIKeyFile = path.Join(r.cfg.ProviderKeyDir, prev)
+			keep[prev] = true
+			out = append(out, p)
+			r.log.Info("a new provider key is still reaching the gateway; serving with the previous one", "org", p.Org, "provider", p.Name)
+			continue
+		}
+		r.log.Info("a new provider key is still reaching the gateway; the provider is not served until it has", "org", p.Org, "provider", p.Name)
+	}
+	state.Providers = out
+	return keep
+}
+
+// recordApplied remembers which key file each served provider was applied with.
+func (r *Reconciler) recordApplied(served servedProviders, state gateway.State) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	next := map[string]string{}
+	for i, id := range served.ids {
+		for _, p := range state.Providers {
+			if p.Org == served.providers[i].Org && p.Name == served.providers[i].Name && p.APIKeyFile != "" {
+				next[id] = path.Base(p.APIKeyFile)
+			}
+		}
+	}
+	r.appliedFile = next
+}
+
+// keysSettling records the files written in this pass and returns the data keys that have not yet
+// had ProviderKeySettle to reach the gateway pod.
+func (r *Reconciler) keysSettling(written []string, now time.Time) map[string]bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.keyWrittenAt == nil {
+		r.keyWrittenAt = map[string]time.Time{}
+	}
+	for _, name := range written {
+		r.keyWrittenAt[name] = now
+	}
+	settling := map[string]bool{}
+	for name, at := range r.keyWrittenAt {
+		if r.cfg.ProviderKeySettle-now.Sub(at) > 0 {
+			settling[name] = true
+		} else {
+			delete(r.keyWrittenAt, name)
+		}
+	}
+	return settling
+}
+
+// warnUnpriced logs the models the gateway does not serve for lack of a price, once per set.
+func (r *Reconciler) warnUnpriced(s gateway.State) {
+	unpriced := s.Unpriced()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := fmt.Sprint(unpriced)
+	if len(unpriced) > 0 && key != r.unpricedLogged {
+		r.log.Warn("models without a price are not served; give free models a zero price", "models", unpriced)
+	}
+	r.unpricedLogged = key
 }
 
 // prepare loads or creates the agent's row and, for an active agent, its key. It returns nil

@@ -47,19 +47,26 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/stateracloud/koinon/internal/adminapi"
 	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/declarative"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/services"
+	"github.com/stateracloud/koinon/internal/tokens"
 	"github.com/stateracloud/koinon/templates"
 	"github.com/stateracloud/koinon/web"
 )
@@ -98,6 +105,14 @@ type config struct {
 	secretsNamespace string
 	kubeconfig       string
 	githubAPIURL     string
+
+	kekDir string
+	// kekSecret names the Secret with the key-encryption keys. koinon-api creates it on its first
+	// start when kekCreate is set and it is missing, and never overwrites it.
+	kekSecret string
+	kekCreate bool
+
+	providerAllowedHosts string
 }
 
 func parseFlags(args []string) (config, error) {
@@ -152,6 +167,15 @@ func parseFlags(args []string) (config, error) {
 		"namespace of connection Secrets (default $POD_NAMESPACE); without one, connections cannot be created")
 	fs.StringVar(&c.kubeconfig, "kubeconfig", "", "kubeconfig file; empty uses the in-cluster config when in a cluster")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", github.DefaultBaseURL, "GitHub REST API base URL")
+	fs.StringVar(&c.kekSecret, "kek-secret", "",
+		"Secret with the key-encryption keys, read through the Kubernetes API; takes precedence over --kek-dir")
+	fs.StringVar(&c.providerAllowedHosts, "provider-allowed-hosts", "",
+		"comma-separated hosts (optionally host:port) that providers may name although they are internal "+
+			"(loopback, link-local, metadata and Koinon's own namespace are denied otherwise); platform-level")
+	fs.BoolVar(&c.kekCreate, "kek-create", true, "create the --kek-secret Secret with a new key when it does not exist")
+	fs.StringVar(&c.kekDir, "kek-dir", "",
+		"directory with the mounted key-encryption keys Secret (files named by KEK ID plus \"active\"); "+
+			"without it, provider keys and connection secrets cannot be stored")
 
 	if err := cli.BindEnv(fs, nil); err != nil {
 		return c, err
@@ -175,9 +199,9 @@ func parseFlags(args []string) (config, error) {
 	return c, nil
 }
 
-// secretStore returns the Kubernetes Secret store for connections, or nil
-// when koinon-api runs outside a cluster without a kubeconfig.
-func secretStore(cfg config) (connections.SecretStore, error) {
+// kubeClient returns the Kubernetes client, or nil when koinon-api runs outside a cluster
+// without a kubeconfig.
+func kubeClient(cfg config) (kubernetes.Interface, error) {
 	var (
 		rc  *rest.Config
 		err error
@@ -196,11 +220,7 @@ func secretStore(cfg config) (connections.SecretStore, error) {
 	if cfg.secretsNamespace == "" {
 		return nil, errors.New("--secrets-namespace (or $POD_NAMESPACE) is required with Kubernetes access")
 	}
-	client, err := kubernetes.NewForConfig(rc)
-	if err != nil {
-		return nil, err
-	}
-	return connections.KubeSecrets{Client: client, Namespace: cfg.secretsNamespace}, nil
+	return kubernetes.NewForConfig(rc)
 }
 
 func splitList(s string) []string {
@@ -225,6 +245,11 @@ func run() error {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		return runPreflight(ctx, os.Args[2:], os.Stdout)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "keys" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runKeys(ctx, os.Args[2:], os.Stdout)
 	}
 	cfg, err := parseFlags(os.Args[1:])
 	if err != nil {
@@ -328,20 +353,79 @@ func run() error {
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
 	go hub.Run(bgCtx)
 	go scheduler.Sweeper(bgCtx, pool, cfg.sweepInterval, slog.Default())
-	secrets, err := secretStore(cfg)
+	kube, err := kubeClient(cfg)
 	if err != nil {
 		return err
 	}
-	if secrets == nil {
-		slog.Warn("no Kubernetes access: connections cannot be created (their secrets go to Kubernetes Secrets)")
+	// The secret store (ADR 0056): provider keys and connection secrets are envelopes in
+	// Postgres, wrapped by the KEKs of a mounted Secret.
+	var keyring *secretstore.Keyring
+	switch {
+	case cfg.kekSecret != "" && kube != nil:
+		// The chart renders no key material (a render would make new keys every time, and a new
+		// KEK loses every stored secret): koinon-api creates the Secret once, and only reads it after.
+		kekStore := keyscli.KubeStore{Client: kube, Namespace: cfg.secretsNamespace, Name: cfg.kekSecret}
+		if cfg.kekCreate {
+			created, err := keyscli.EnsureKubeSecret(ctx, kube, cfg.secretsNamespace, cfg.kekSecret, time.Now(),
+				func(ctx context.Context) (bool, error) { return keyscli.AnyEnvelope(ctx, pool) })
+			if err != nil {
+				return err
+			}
+			if created {
+				slog.Warn("created the key-encryption key Secret; back it up now (docs/ops/secret-keys.md)", "secret", cfg.kekSecret)
+			}
+		}
+		if keyring, err = loadKeyring(ctx, kekStore); err != nil {
+			return err
+		}
+		go watchKeyring(bgCtx, keyring, kekStore, time.Minute)
+	case cfg.kekDir != "":
+		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
+			return err
+		}
+		go keyring.WatchDir(bgCtx, cfg.kekDir, time.Minute, slog.Default())
+	default:
+		slog.Warn("no --kek-secret or --kek-dir: provider keys and connections cannot be stored")
+	}
+	// Connections created before the secret store kept their fields in Kubernetes Secrets: move them.
+	if kube != nil && keyring != nil {
+		legacy := connections.KubeSecrets{Client: kube, Namespace: cfg.secretsNamespace}
+		if n, err := connections.MigrateLegacy(ctx, store.New(pool), legacy, keyring, slog.Default()); err != nil {
+			return fmt.Errorf("move connection secrets into the store: %w", err)
+		} else if n > 0 {
+			slog.Info("moved connection secrets into the store", "count", n)
+		}
 	}
 	// One GitHub client, so connection checks and approved calls share its token cache.
 	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL})
-	approvalSvc := approvals.New(pool, approvals.Options{Secrets: secrets, GitHub: gh, Logger: slog.Default()})
+	var opener connections.Opener
+	var keys services.Keys
+	if keyring != nil {
+		opener, keys = keyring, keyring
+	}
+	approvalSvc := approvals.New(pool, approvals.Options{Keys: opener, GitHub: gh, Logger: slog.Default()})
 	go approvalSvc.Sweeper(bgCtx, cfg.sweepInterval)
+	tokenSvc := tokens.New(pool, nil)
+	var catalogKeys catalog.Keys
+	if keyring != nil {
+		catalogKeys = keyring
+	}
+	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).
+		WithURLPolicy(catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.providerAllowedHosts)})
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Secrets: secrets, GitHub: gh, Approvals: approvalSvc,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc,
 	})
+	if kube != nil {
+		var sealer connections.Sealer
+		if keyring != nil {
+			sealer = keyring
+		}
+		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, Sealer: sealer, Log: slog.Default()}
+		go imp.Run(bgCtx)
+	} else {
+		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
+	}
+	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default())
 
 	if cfg.otlpAddr != "" {
 		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
@@ -360,6 +444,7 @@ func run() error {
 		TrustedOrigins: splitList(cfg.trustedOrigins),
 		Services:       []func(*connect.Server){svc.Register},
 		UI:             web.Dist(),
+		Mounts:         []func(*http.ServeMux){adminSvc.Mount},
 	})
 	if err != nil {
 		return err

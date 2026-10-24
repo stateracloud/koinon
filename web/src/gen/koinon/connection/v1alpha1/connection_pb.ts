@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/connection/v1alpha1/connection.proto.
  */
 export const file_koinon_connection_v1alpha1_connection: GenFile = /*@__PURE__*/
-  fileDesc("Citrb2lub24vY29ubmVjdGlvbi92MWFscGhhMS9jb25uZWN0aW9uLnByb3RvEhprb2lub24uY29ubmVjdGlvbi52MWFscGhhMSJnCgVTY29wZRIKCgJpZBgBIAEoCRIuCgR0aWVyGAIgASgOMiAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGllchITCgtkZXNjcmlwdGlvbhgDIAEoCRINCgV0b29scxgEIAMoCSLIAQoNQ29ubmVjdG9yVHlwZRIKCgJpZBgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIRCglhdXRoX3R5cGUYBSABKAkSMQoGc2NvcGVzGAYgAygLMiEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU2NvcGUSKQoIZG9jdW1lbnQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IhsKGUxpc3RDb25uZWN0b3JUeXBlc1JlcXVlc3QiYAoaTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2USQgoPY29ubmVjdG9yX3R5cGVzGAEgAygLMikua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdG9yVHlwZSJHCgtDaGVja1Jlc3VsdBINCgVjaGVjaxgBIAEoCRIMCgRzdGVwGAIgASgJEgoKAm9rGAMgASgIEg8KB21lc3NhZ2UYBCABKAkiVAoQR2l0SHViQ29ubmVjdGlvbhIOCgZhcHBfaWQYASABKAMSFwoPaW5zdGFsbGF0aW9uX2lkGAIgASgDEhcKD2tleV9maW5nZXJwcmludBgDIAEoCSL7AgoKQ29ubmVjdGlvbhIKCgJpZBgBIAEoCRIOCgZvcmdfaWQYAiABKAkSEQoJY29ubmVjdG9yGAMgASgJEhQKDGRpc3BsYXlfbmFtZRgEIAEoCRI8CgZzdGF0dXMYBSABKA4yLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uU3RhdHVzEjIKDmxhc3RfdGVzdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI6CglsYXN0X3Rlc3QYByADKAsyJy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DaGVja1Jlc3VsdBIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI+CgZnaXRodWIYCiABKAsyLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HaXRIdWJDb25uZWN0aW9uSABCCgoIc2V0dGluZ3MilgEKHUNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSDgoGYXBwX2lkGAMgASgDEhcKD2luc3RhbGxhdGlvbl9pZBgEIAEoAxIYCgtwcml2YXRlX2tleRgFIAEoCUIDgAEBEgwKBHRlc3QYBiABKAgilgEKHkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbhI4CgdyZXN1bHRzGAIgAygLMicua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ2hlY2tSZXN1bHQiPQoUR2V0Q29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkiUwoVR2V0Q29ubmVjdGlvblJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uIigKFkxpc3RDb25uZWN0aW9uc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIlYKF0xpc3RDb25uZWN0aW9uc1Jlc3BvbnNlEjsKC2Nvbm5lY3Rpb25zGAEgAygLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbiI+ChVUZXN0Q29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkijgEKFlRlc3RDb25uZWN0aW9uUmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24SOAoHcmVzdWx0cxgCIAMoCzInLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNoZWNrUmVzdWx0ImgKHExpc3RJbnN0YWxsYXRpb25SZXBvc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkSEgoKcGFnZV90b2tlbhgDIAEoCRINCgVxdWVyeRgEIAEoCSJOChBJbnN0YWxsYXRpb25SZXBvEhEKCWZ1bGxfbmFtZRgBIAEoCRIPCgdwcml2YXRlGAIgASgIEhYKDmRlZmF1bHRfYnJhbmNoGAMgASgJIooBCh1MaXN0SW5zdGFsbGF0aW9uUmVwb3NSZXNwb25zZRI7CgVyZXBvcxgBIAMoCzIsLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkluc3RhbGxhdGlvblJlcG8SFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEhMKC3RvdGFsX2NvdW50GAMgASgDKn0KBFRpZXISFAoQVElFUl9VTlNQRUNJRklFRBAAEg0KCVRJRVJfUkVBRBABEhkKFVRJRVJfUkVWRVJTSUJMRV9XUklURRACEiEKHVRJRVJfRVhURVJOQUxfT1JfSVJSRVZFUlNJQkxFEAMSEgoOVElFUl9GT1JCSURERU4QBCqOAQoQQ29ubmVjdGlvblN0YXR1cxIhCh1DT05ORUNUSU9OX1NUQVRVU19VTlNQRUNJRklFRBAAEh4KGkNPTk5FQ1RJT05fU1RBVFVTX1VOVEVTVEVEEAESGAoUQ09OTkVDVElPTl9TVEFUVVNfT0sQAhIdChlDT05ORUNUSU9OX1NUQVRVU19GQUlMSU5HEAMyuQYKEUNvbm5lY3Rpb25TZXJ2aWNlEogBChJMaXN0Q29ubmVjdG9yVHlwZXMSNS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdG9yVHlwZXNSZXF1ZXN0GjYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2UiA5ACARKPAQoWQ3JlYXRlR2l0SHViQ29ubmVjdGlvbhI5LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXF1ZXN0Gjoua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ3JlYXRlR2l0SHViQ29ubmVjdGlvblJlc3BvbnNlEnkKDUdldENvbm5lY3Rpb24SMC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HZXRDb25uZWN0aW9uUmVxdWVzdBoxLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkdldENvbm5lY3Rpb25SZXNwb25zZSIDkAIBEn8KD0xpc3RDb25uZWN0aW9ucxIyLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RDb25uZWN0aW9uc1JlcXVlc3QaMy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdGlvbnNSZXNwb25zZSIDkAIBEncKDlRlc3RDb25uZWN0aW9uEjEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGVzdENvbm5lY3Rpb25SZXF1ZXN0GjIua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGVzdENvbm5lY3Rpb25SZXNwb25zZRKRAQoVTGlzdEluc3RhbGxhdGlvblJlcG9zEjgua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdEluc3RhbGxhdGlvblJlcG9zUmVxdWVzdBo5LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RJbnN0YWxsYXRpb25SZXBvc1Jlc3BvbnNlIgOQAgFCW1pZZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vY29ubmVjdGlvbi92MWFscGhhMTtjb25uZWN0aW9udjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("Citrb2lub24vY29ubmVjdGlvbi92MWFscGhhMS9jb25uZWN0aW9uLnByb3RvEhprb2lub24uY29ubmVjdGlvbi52MWFscGhhMSJnCgVTY29wZRIKCgJpZBgBIAEoCRIuCgR0aWVyGAIgASgOMiAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGllchITCgtkZXNjcmlwdGlvbhgDIAEoCRINCgV0b29scxgEIAMoCSLIAQoNQ29ubmVjdG9yVHlwZRIKCgJpZBgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIRCglhdXRoX3R5cGUYBSABKAkSMQoGc2NvcGVzGAYgAygLMiEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU2NvcGUSKQoIZG9jdW1lbnQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IhsKGUxpc3RDb25uZWN0b3JUeXBlc1JlcXVlc3QiYAoaTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2USQgoPY29ubmVjdG9yX3R5cGVzGAEgAygLMikua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdG9yVHlwZSJHCgtDaGVja1Jlc3VsdBINCgVjaGVjaxgBIAEoCRIMCgRzdGVwGAIgASgJEgoKAm9rGAMgASgIEg8KB21lc3NhZ2UYBCABKAkiVAoQR2l0SHViQ29ubmVjdGlvbhIOCgZhcHBfaWQYASABKAMSFwoPaW5zdGFsbGF0aW9uX2lkGAIgASgDEhcKD2tleV9maW5nZXJwcmludBgDIAEoCSK3AwoKQ29ubmVjdGlvbhIKCgJpZBgBIAEoCRIOCgZvcmdfaWQYAiABKAkSEQoJY29ubmVjdG9yGAMgASgJEhQKDGRpc3BsYXlfbmFtZRgEIAEoCRI8CgZzdGF0dXMYBSABKA4yLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uU3RhdHVzEjIKDmxhc3RfdGVzdGVkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI6CglsYXN0X3Rlc3QYByADKAsyJy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DaGVja1Jlc3VsdBIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIOCgZzb3VyY2UYCyABKAkSGQoRbWFuYWdlZF9ieV9zZWNyZXQYDCABKAkSDwoHcmVtb3ZlZBgNIAEoCBI+CgZnaXRodWIYCiABKAsyLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HaXRIdWJDb25uZWN0aW9uSABCCgoIc2V0dGluZ3MilgEKHUNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSDgoGYXBwX2lkGAMgASgDEhcKD2luc3RhbGxhdGlvbl9pZBgEIAEoAxIYCgtwcml2YXRlX2tleRgFIAEoCUIDgAEBEgwKBHRlc3QYBiABKAgilgEKHkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbhI4CgdyZXN1bHRzGAIgAygLMicua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ2hlY2tSZXN1bHQiPQoUR2V0Q29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkiUwoVR2V0Q29ubmVjdGlvblJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uIkAKF0RlbGV0ZUNvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJIhoKGERlbGV0ZUNvbm5lY3Rpb25SZXNwb25zZSIoChZMaXN0Q29ubmVjdGlvbnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJWChdMaXN0Q29ubmVjdGlvbnNSZXNwb25zZRI7Cgtjb25uZWN0aW9ucxgBIAMoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24iPgoVVGVzdENvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJIo4BChZUZXN0Q29ubmVjdGlvblJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uEjgKB3Jlc3VsdHMYAiADKAsyJy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DaGVja1Jlc3VsdCJoChxMaXN0SW5zdGFsbGF0aW9uUmVwb3NSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJEhIKCnBhZ2VfdG9rZW4YAyABKAkSDQoFcXVlcnkYBCABKAkiTgoQSW5zdGFsbGF0aW9uUmVwbxIRCglmdWxsX25hbWUYASABKAkSDwoHcHJpdmF0ZRgCIAEoCBIWCg5kZWZhdWx0X2JyYW5jaBgDIAEoCSKKAQodTGlzdEluc3RhbGxhdGlvblJlcG9zUmVzcG9uc2USOwoFcmVwb3MYASADKAsyLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5JbnN0YWxsYXRpb25SZXBvEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRITCgt0b3RhbF9jb3VudBgDIAEoAyp9CgRUaWVyEhQKEFRJRVJfVU5TUEVDSUZJRUQQABINCglUSUVSX1JFQUQQARIZChVUSUVSX1JFVkVSU0lCTEVfV1JJVEUQAhIhCh1USUVSX0VYVEVSTkFMX09SX0lSUkVWRVJTSUJMRRADEhIKDlRJRVJfRk9SQklEREVOEAQqjgEKEENvbm5lY3Rpb25TdGF0dXMSIQodQ09OTkVDVElPTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIeChpDT05ORUNUSU9OX1NUQVRVU19VTlRFU1RFRBABEhgKFENPTk5FQ1RJT05fU1RBVFVTX09LEAISHQoZQ09OTkVDVElPTl9TVEFUVVNfRkFJTElORxADMrgHChFDb25uZWN0aW9uU2VydmljZRKIAQoSTGlzdENvbm5lY3RvclR5cGVzEjUua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3RvclR5cGVzUmVxdWVzdBo2LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RDb25uZWN0b3JUeXBlc1Jlc3BvbnNlIgOQAgESjwEKFkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb24SOS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DcmVhdGVHaXRIdWJDb25uZWN0aW9uUmVxdWVzdBo6LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXNwb25zZRJ5Cg1HZXRDb25uZWN0aW9uEjAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuR2V0Q29ubmVjdGlvblJlcXVlc3QaMS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HZXRDb25uZWN0aW9uUmVzcG9uc2UiA5ACARJ/Cg9MaXN0Q29ubmVjdGlvbnMSMi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdGlvbnNSZXF1ZXN0GjMua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3Rpb25zUmVzcG9uc2UiA5ACARJ3Cg5UZXN0Q29ubmVjdGlvbhIxLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLlRlc3RDb25uZWN0aW9uUmVxdWVzdBoyLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLlRlc3RDb25uZWN0aW9uUmVzcG9uc2USfQoQRGVsZXRlQ29ubmVjdGlvbhIzLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkRlbGV0ZUNvbm5lY3Rpb25SZXF1ZXN0GjQua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuRGVsZXRlQ29ubmVjdGlvblJlc3BvbnNlEpEBChVMaXN0SW5zdGFsbGF0aW9uUmVwb3MSOC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0SW5zdGFsbGF0aW9uUmVwb3NSZXF1ZXN0Gjkua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdEluc3RhbGxhdGlvblJlcG9zUmVzcG9uc2UiA5ACAUJbWllnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9jb25uZWN0aW9uL3YxYWxwaGExO2Nvbm5lY3Rpb252MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * Scope is a grantable capability of a connector type.
@@ -262,6 +262,28 @@ export type Connection = Message<"koinon.connection.v1alpha1.Connection"> & {
   createdAt?: Timestamp | undefined;
 
   /**
+   * source is "ui" for a connection entered here and "secret" for one declared by a
+   * labelled Kubernetes Secret (ADR 0056), which is managed_by_secret.
+   *
+   * @generated from field: string source = 11;
+   */
+  source: string;
+
+  /**
+   * @generated from field: string managed_by_secret = 12;
+   */
+  managedBySecret: string;
+
+  /**
+   * removed is set when the declaring Secret was deleted. The connection stays, for the audit log and
+   * the agents bound to it, but is not usable: bound agents report why and runs that need it fail
+   * with that reason. Restoring the Secret restores the connection.
+   *
+   * @generated from field: bool removed = 13;
+   */
+  removed: boolean;
+
+  /**
    * @generated from oneof koinon.connection.v1alpha1.Connection.settings
    */
   settings: {
@@ -307,8 +329,8 @@ export type CreateGitHubConnectionRequest = Message<"koinon.connection.v1alpha1.
   installationId: bigint;
 
   /**
-   * Secure input (ADR 0021): the App's PEM private key. Written to a
-   * Kubernetes Secret, never stored in Postgres, returned or logged.
+   * Secure input (ADR 0021): the App's PEM private key. Stored only as an
+   * envelope in Postgres (ADR 0056), never returned or logged.
    *
    * @generated from field: string private_key = 5;
    */
@@ -398,6 +420,41 @@ export const GetConnectionResponseSchema: GenMessage<GetConnectionResponse> = /*
   messageDesc(file_koinon_connection_v1alpha1_connection, 10);
 
 /**
+ * @generated from message koinon.connection.v1alpha1.DeleteConnectionRequest
+ */
+export type DeleteConnectionRequest = Message<"koinon.connection.v1alpha1.DeleteConnectionRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string connection_id = 2;
+   */
+  connectionId: string;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.DeleteConnectionRequest.
+ * Use `create(DeleteConnectionRequestSchema)` to create a new message.
+ */
+export const DeleteConnectionRequestSchema: GenMessage<DeleteConnectionRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 11);
+
+/**
+ * @generated from message koinon.connection.v1alpha1.DeleteConnectionResponse
+ */
+export type DeleteConnectionResponse = Message<"koinon.connection.v1alpha1.DeleteConnectionResponse"> & {
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.DeleteConnectionResponse.
+ * Use `create(DeleteConnectionResponseSchema)` to create a new message.
+ */
+export const DeleteConnectionResponseSchema: GenMessage<DeleteConnectionResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 12);
+
+/**
  * ListConnectionsRequest names the org.
  *
  * @generated from message koinon.connection.v1alpha1.ListConnectionsRequest
@@ -414,7 +471,7 @@ export type ListConnectionsRequest = Message<"koinon.connection.v1alpha1.ListCon
  * Use `create(ListConnectionsRequestSchema)` to create a new message.
  */
 export const ListConnectionsRequestSchema: GenMessage<ListConnectionsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 11);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 13);
 
 /**
  * ListConnectionsResponse lists the org's connections.
@@ -433,7 +490,7 @@ export type ListConnectionsResponse = Message<"koinon.connection.v1alpha1.ListCo
  * Use `create(ListConnectionsResponseSchema)` to create a new message.
  */
 export const ListConnectionsResponseSchema: GenMessage<ListConnectionsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 12);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 14);
 
 /**
  * TestConnectionRequest names a connection.
@@ -457,7 +514,7 @@ export type TestConnectionRequest = Message<"koinon.connection.v1alpha1.TestConn
  * Use `create(TestConnectionRequestSchema)` to create a new message.
  */
 export const TestConnectionRequestSchema: GenMessage<TestConnectionRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 13);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 15);
 
 /**
  * TestConnectionResponse holds the checks in setup-guide order.
@@ -481,7 +538,7 @@ export type TestConnectionResponse = Message<"koinon.connection.v1alpha1.TestCon
  * Use `create(TestConnectionResponseSchema)` to create a new message.
  */
 export const TestConnectionResponseSchema: GenMessage<TestConnectionResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 14);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 16);
 
 /**
  * ListInstallationReposRequest names a GitHub connection and a page.
@@ -521,7 +578,7 @@ export type ListInstallationReposRequest = Message<"koinon.connection.v1alpha1.L
  * Use `create(ListInstallationReposRequestSchema)` to create a new message.
  */
 export const ListInstallationReposRequestSchema: GenMessage<ListInstallationReposRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 15);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 17);
 
 /**
  * InstallationRepo is one repository the installation can access.
@@ -552,7 +609,7 @@ export type InstallationRepo = Message<"koinon.connection.v1alpha1.InstallationR
  * Use `create(InstallationRepoSchema)` to create a new message.
  */
 export const InstallationRepoSchema: GenMessage<InstallationRepo> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 16);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 18);
 
 /**
  * ListInstallationReposResponse is one page, in GitHub's order.
@@ -586,7 +643,7 @@ export type ListInstallationReposResponse = Message<"koinon.connection.v1alpha1.
  * Use `create(ListInstallationReposResponseSchema)` to create a new message.
  */
 export const ListInstallationReposResponseSchema: GenMessage<ListInstallationReposResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 17);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 19);
 
 /**
  * Tier is a scope's risk tier (ADR 0008).
@@ -662,8 +719,8 @@ export const ConnectionStatusSchema: GenEnum<ConnectionStatus> = /*@__PURE__*/
 /**
  * ConnectionService manages an org's connections to external systems
  * (ADR 0007): one configured instance of a connector type, such as one GitHub
- * App installation. Secrets entered here are written straight to a Kubernetes
- * Secret (ADR 0021, 0049); no response ever contains them.
+ * App installation. Secrets entered here are sealed straight into the encrypted
+ * secret store (ADR 0021, 0056); no response ever contains them.
  *
  * @generated from service koinon.connection.v1alpha1.ConnectionService
  */
@@ -681,7 +738,7 @@ export const ConnectionService: GenService<{
   },
   /**
    * CreateGitHubConnection creates a GitHub App connection. The private key
-   * is written to a Kubernetes Secret and never returned. Admins and owners.
+   * is stored encrypted and never returned. Admins and owners.
    *
    * @generated from rpc koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection
    */
@@ -721,6 +778,18 @@ export const ConnectionService: GenService<{
     methodKind: "unary";
     input: typeof TestConnectionRequestSchema;
     output: typeof TestConnectionResponseSchema;
+  },
+  /**
+   * DeleteConnection deletes a connection and its stored secret fields for good. A connection entered
+   * here can be deleted; a declared one only after its Secret was deleted (removed). While agents are
+   * bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners.
+   *
+   * @generated from rpc koinon.connection.v1alpha1.ConnectionService.DeleteConnection
+   */
+  deleteConnection: {
+    methodKind: "unary";
+    input: typeof DeleteConnectionRequestSchema;
+    output: typeof DeleteConnectionResponseSchema;
   },
   /**
    * ListInstallationRepos lists the repositories a GitHub connection's App

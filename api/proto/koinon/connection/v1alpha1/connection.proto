@@ -11,8 +11,8 @@ option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/connecti
 
 // ConnectionService manages an org's connections to external systems
 // (ADR 0007): one configured instance of a connector type, such as one GitHub
-// App installation. Secrets entered here are written straight to a Kubernetes
-// Secret (ADR 0021, 0049); no response ever contains them.
+// App installation. Secrets entered here are sealed straight into the encrypted
+// secret store (ADR 0021, 0056); no response ever contains them.
 service ConnectionService {
   // ListConnectorTypes returns the connector types this install ships, with
   // their scopes and setup guides. Any signed-in user.
@@ -21,7 +21,7 @@ service ConnectionService {
   }
 
   // CreateGitHubConnection creates a GitHub App connection. The private key
-  // is written to a Kubernetes Secret and never returned. Admins and owners.
+  // is stored encrypted and never returned. Admins and owners.
   rpc CreateGitHubConnection(CreateGitHubConnectionRequest) returns (CreateGitHubConnectionResponse);
 
   // GetConnection returns one connection. Viewers and above.
@@ -38,6 +38,11 @@ service ConnectionService {
   // TestConnection runs the setup guide's checks against the provider and
   // records the result. Nothing is written to the provider. Admins and owners.
   rpc TestConnection(TestConnectionRequest) returns (TestConnectionResponse);
+
+  // DeleteConnection deletes a connection and its stored secret fields for good. A connection entered
+  // here can be deleted; a declared one only after its Secret was deleted (removed). While agents are
+  // bound to it the call fails with FAILED_PRECONDITION and lists them. Audited. Admins and owners.
+  rpc DeleteConnection(DeleteConnectionRequest) returns (DeleteConnectionResponse);
 
   // ListInstallationRepos lists the repositories a GitHub connection's App
   // installation can access, for choosing what to bind an agent to. Koinon
@@ -127,6 +132,14 @@ message Connection {
   google.protobuf.Timestamp last_tested_at = 6;
   repeated CheckResult last_test = 7;
   google.protobuf.Timestamp created_at = 8;
+  // source is "ui" for a connection entered here and "secret" for one declared by a
+  // labelled Kubernetes Secret (ADR 0056), which is managed_by_secret.
+  string source = 11;
+  string managed_by_secret = 12;
+  // removed is set when the declaring Secret was deleted. The connection stays, for the audit log and
+  // the agents bound to it, but is not usable: bound agents report why and runs that need it fail
+  // with that reason. Restoring the Secret restores the connection.
+  bool removed = 13;
 
   oneof settings {
     GitHubConnection github = 10;
@@ -139,8 +152,8 @@ message CreateGitHubConnectionRequest {
   string display_name = 2;
   int64 app_id = 3;
   int64 installation_id = 4;
-  // Secure input (ADR 0021): the App's PEM private key. Written to a
-  // Kubernetes Secret, never stored in Postgres, returned or logged.
+  // Secure input (ADR 0021): the App's PEM private key. Stored only as an
+  // envelope in Postgres (ADR 0056), never returned or logged.
   string private_key = 5 [debug_redact = true];
   // Run TestConnection right after creating it.
   bool test = 6;
@@ -163,6 +176,13 @@ message GetConnectionRequest {
 message GetConnectionResponse {
   Connection connection = 1;
 }
+
+message DeleteConnectionRequest {
+  string org_id = 1;
+  string connection_id = 2;
+}
+
+message DeleteConnectionResponse {}
 
 // ListConnectionsRequest names the org.
 message ListConnectionsRequest {

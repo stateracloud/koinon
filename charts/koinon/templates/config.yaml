@@ -22,14 +22,12 @@ data:
       databaseUrl: sqlite:///data/agentgateway.db?mode=rwc
       # agentgateway exports its access log here, for the spend ledger (plan item L1).
       accessLogOtlp: {{ include "koinon.componentName" (list . "api") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.otlpPort }}
-      {{- if .Values.model.apiKeySecret.name }}
-      modelKeyFile: /secrets/model/{{ .Values.model.apiKeySecret.key }}
-      {{- end }}
+      # The reconciler writes the opened provider keys into this Secret; the gateway mounts it.
+      providerKeysSecret: {{ include "koinon.gatewayProvidersName" . }}
+      providerKeysDir: /secrets/providers
       {{- else }}
       gatewayClassName: {{ .Values.gateway.kubernetes.gatewayClassName }}
       {{- end }}
-    model:
-      {{- toYaml .Values.model | nindent 6 }}
     openshell:
       address: {{ .Values.openshell.address | quote }}
       tls: {{ if .Values.openshell.clientTLSSecret }}/etc/koinon/openshell-tls{{ else }}""{{ end }}

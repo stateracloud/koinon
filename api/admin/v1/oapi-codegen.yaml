@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Generates the admin API's types and strict server interface (make generate).
+package: adminapi
+output: internal/adminapi/api.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
+output-options:
+  skip-prune: true

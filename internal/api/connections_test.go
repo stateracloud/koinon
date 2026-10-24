@@ -20,7 +20,10 @@ import (
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
+	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
+	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 )
 
 // lockedBuffer collects logs from several goroutines.
@@ -58,6 +61,7 @@ var _ = Describe("ConnectionService", func() {
 		e     *env
 		gh    *githubtest.Fake
 		kube  *fake.Clientset
+		ring  *secretstore.Keyring
 		logs  *lockedBuffer
 		org   string
 		owner *client
@@ -67,12 +71,13 @@ var _ = Describe("ConnectionService", func() {
 		gh = githubtest.New()
 		DeferCleanup(gh.Server.Close)
 		kube = fake.NewClientset()
+		ring = secretstoretest.Keyring()
 		logs = &lockedBuffer{}
 		e = newEnv(ctx, envOptions{
-			secrets: connections.KubeSecrets{Client: kube, Namespace: "koinon"},
-			github:  github.NewClient(github.Options{BaseURL: gh.URL()}),
-			ghFake:  gh,
-			logs:    logs,
+			keys:   ring,
+			github: github.NewClient(github.Options{BaseURL: gh.URL()}),
+			ghFake: gh,
+			logs:   logs,
 		})
 		org, owner = e.newTeamOrg(ctx)
 	})
@@ -99,7 +104,7 @@ var _ = Describe("ConnectionService", func() {
 		Expect(guide.GetFields()["steps"].GetListValue().GetValues()).NotTo(BeEmpty())
 	})
 
-	It("stores the key only in a Kubernetes Secret and never returns or logs it", func(ctx SpecContext) {
+	It("stores the key only as an envelope in Postgres and never returns or logs it", func(ctx SpecContext) {
 		res, err := create(ctx, owner, gh.PEM, true)
 		Expect(err).NotTo(HaveOccurred())
 		conn := res.GetConnection()
@@ -111,14 +116,24 @@ var _ = Describe("ConnectionService", func() {
 			Expect(r.GetOk()).To(BeTrue(), "%s: %s", r.GetCheck(), r.GetMessage())
 		}
 
-		By("the Secret holds the key, labelled with IDs")
+		By("the row holds the key as an envelope that opens only with the keyring, and no Kubernetes Secret is made")
 		secrets, err := kube.CoreV1().Secrets("koinon").List(ctx, metav1.ListOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(secrets.Items).To(HaveLen(1))
-		sec := secrets.Items[0]
-		Expect(sec.Data[connections.GitHubPrivateKeyField]).To(Equal(gh.PEM))
-		Expect(sec.Labels).To(HaveKeyWithValue(connections.LabelConnection, conn.GetId()))
-		Expect(*sec.Immutable).To(BeTrue())
+		Expect(secrets.Items).To(BeEmpty())
+		var stored store.Connection
+		stored, err = store.New(e.pool).GetConnection(ctx, store.GetConnectionParams{OrgID: mustUUID(org), ID: mustUUID(conn.GetId())})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(stored.SecretName.Valid).To(BeFalse())
+		fields, err := connections.OpenFields(ring, stored)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fields[connections.GitHubPrivateKeyField]).To(Equal(gh.PEM))
+		Expect(string(stored.SecretEnvelope)).NotTo(ContainSubstring("PRIVATE KEY"))
+
+		By("the creation is audited without the key")
+		var summary string
+		Expect(e.pool.QueryRow(ctx, `SELECT summary::text FROM audit_events WHERE org_id = $1 AND action = 'connection.create'`, org).Scan(&summary)).To(Succeed())
+		Expect(summary).To(ContainSubstring("keyFingerprint"))
+		Expect(summary).NotTo(ContainSubstring("PRIVATE KEY"))
 
 		By("no response, row or log line carries it")
 		got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: conn.GetId()})
@@ -289,8 +304,55 @@ var _ = Describe("ConnectionService", func() {
 		})
 	})
 
+	It("deletes a connection entered here once no agent is bound to it, and audits it", func(ctx SpecContext) {
+		// The fixture connection is the one draftAgent binds.
+		id := e.githubConnection(ctx, org)
+		agent := owner.draftAgent(ctx, org)
+		del := func(c *client) error {
+			_, err := c.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: id})
+			return err
+		}
+		Expect(codeOf(del(e.userIn(ctx, org, store.OrgRoleMember)))).To(Equal(connect.CodePermissionDenied))
+
+		err := del(owner)
+		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+		Expect(err.Error()).To(ContainSubstring(agent.GetId()), "the bound agents are listed")
+
+		_, err = owner.agents.ArchiveAgent(ctx, &agentv1alpha1.ArchiveAgentRequest{OrgId: org, AgentId: agent.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(del(owner)).To(Succeed())
+		_, err = owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
+		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+		Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'connection.delete'`, org)).To(Equal(1))
+		Expect(count(ctx, e, `SELECT count(*) FROM connections WHERE org_id = $1`, org)).To(BeZero(), "the envelope went with the row")
+	})
+
+	It("deletes a declared connection only after its Secret was deleted", func(ctx SpecContext) {
+		res, err := create(ctx, owner, gh.PEM, false)
+		Expect(err).NotTo(HaveOccurred())
+		id := res.GetConnection().GetId()
+		// What the importer does for a declared connection.
+		_, err = e.pool.Exec(ctx, `UPDATE connections SET source = 'secret', managed_by_secret = 'gh' WHERE id = $1`, id)
+		Expect(err).NotTo(HaveOccurred())
+		del := func() error {
+			_, err := owner.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: id})
+			return err
+		}
+		err = del()
+		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+		Expect(err.Error()).To(ContainSubstring("Secret gh"))
+
+		_, err = e.pool.Exec(ctx, `UPDATE connections SET removed_at = now() WHERE id = $1`, id)
+		Expect(err).NotTo(HaveOccurred())
+		got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetConnection().GetRemoved()).To(BeTrue())
+		Expect(got.GetConnection().GetManagedBySecret()).To(Equal("gh"))
+		Expect(del()).To(Succeed())
+	})
+
 	It("refuses to create connections without a secret store", func(ctx SpecContext) {
-		e2 := newEnvOn(ctx, e, envOptions{noSecrets: true})
+		e2 := newEnvOn(ctx, e, envOptions{noKeys: true})
 		_, err := create(ctx, owner.on(e2), gh.PEM, false)
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 	})

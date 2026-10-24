@@ -6,7 +6,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -22,6 +25,7 @@ import (
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
+	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 )
 
 // What the fake model script test/fakemodel/scripts/repo-helper.yaml does, and the fake
@@ -212,6 +216,43 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 		Expect(org).NotTo(BeEmpty(), "the default org")
 		t.end("1. Bootstrap login and password change")
+	})
+
+	It("1b. sees the model provider the quickstart declared, through the admin API", func(ctx SpecContext) {
+		t.begin()
+		// The quickstart's model-provider.yaml is a labelled Secret that koinon-api imported at start.
+		// A token made with the session reads it back through /admin/v1, read-only.
+		tok, err := c.tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{
+			OrgId: org, Name: "e2e", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		admin := func(method, path string) (int, []byte) {
+			req, err := http.NewRequestWithContext(ctx, method, c.base+"/admin/v1"+path, nil)
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Authorization", "Bearer "+tok.GetSecret())
+			res, err := http.DefaultClient.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = res.Body.Close() }()
+			b, _ := io.ReadAll(res.Body)
+			return res.StatusCode, b
+		}
+		var providers struct {
+			Providers []struct {
+				ID, Name, Source, ManagedBySecret string
+			}
+		}
+		Eventually(func(g Gomega) {
+			code, body := admin(http.MethodGet, "/providers")
+			g.Expect(code).To(Equal(http.StatusOK), string(body))
+			g.Expect(json.Unmarshal(body, &providers)).To(Succeed())
+			g.Expect(providers.Providers).To(HaveLen(1))
+		}).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+		Expect(providers.Providers[0].Name).To(Equal("fake"))
+		Expect(providers.Providers[0].Source).To(Equal("secret"))
+		Expect(providers.Providers[0].ManagedBySecret).To(Equal("fake-model"))
+		code, body := admin(http.MethodDelete, "/providers/"+providers.Providers[0].ID)
+		Expect(code).To(Equal(http.StatusConflict), "declared providers are read-only: %s", body)
+		t.end("1b. Declared model provider (admin API)")
 	})
 
 	It("2. creates and tests the GitHub connection", func(ctx SpecContext) {

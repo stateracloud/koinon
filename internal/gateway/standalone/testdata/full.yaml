@@ -11,18 +11,28 @@ config:
   modelCatalog:
     - inline:
         providers:
-          openrouter:
+          acme.openrouter:
             models:
               deepseek/deepseek-v4.1-flash:
                 rates:
                   input: "0.30"
                   output: "1.20"
                   cacheRead: "0.006"
+              open/model:
+                rates:
+                  input: "1"
+                  output: "2"
+          globex.ollama:
+            models:
+              deepseek/deepseek-v4.1-flash:
+                rates:
+                  input: "0"
+                  output: "0"
 frontendPolicies:
   accessLog:
     add:
       koinon.agent: default(apiKey.agent, "")
-      koinon.config: '"9c1500320f8e5299"'
+      koinon.config: '"bcde3bf0abfdceca"'
       koinon.key: default(apiKey.name, "")
       koinon.request: uuid()
     otlp:
@@ -44,6 +54,10 @@ llm:
           metadata:
             name: k-aaaaaaaaaaaa
             agent: acme/repo-helper
+            org: acme
+          allowedModels:
+            - deepseek/deepseek-v4.1-flash
+            - open/model
           budgets:
             - name: koinon-agent-limit-1792627200-750000000
               limit:
@@ -56,6 +70,10 @@ llm:
           metadata:
             name: k-bbbbbbbbbbbb
             agent: acme/triage
+            org: acme
+          allowedModels:
+            - deepseek/deepseek-v4.1-flash
+            - open/model
           budgets:
             - name: koinon-agent-limit
               limit:
@@ -64,7 +82,14 @@ llm:
               window:
                 rolling: 30d
               onBudgetExceeded: Block
-        - keyHash: sha256:213afb2aa5a9aae0fc71ff868b6109997f6b0936cd894394a1e224da0950209c
+        - keyHash: sha256:b0b03f2ad19f1dc9e87777f6432dd6ca96548f078a07c9bc473a278c2e1b85c6
+          metadata:
+            name: k-gggggggggggg
+            agent: globex/analyst
+            org: globex
+          allowedModels:
+            - deepseek/deepseek-v4.1-flash
+        - keyHash: sha256:4dc56ab244a782633585546d8d0552f24bf583a153e369ce00fa667dab38fe8a
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -79,11 +104,21 @@ llm:
     authorization:
       rules:
         - apiKey.name != "koinon-reload-probe"
+    transformations:
+      request:
+        set:
+          x-koinon-org: default(apiKey.org, "")
   models:
-    - name: deepseek/deepseek-v4.1-flash
+    - id: acme/deepseek/deepseek-v4.1-flash
+      name: deepseek/deepseek-v4.1-flash
+      matches:
+        - headers:
+            - name: x-koinon-org
+              value:
+                exact: acme
       provider:
         custom:
-          providerOverride: openrouter
+          providerOverride: acme.openrouter
           formats:
             - type: completions
       params:
@@ -92,12 +127,38 @@ llm:
           file: /secrets/upstream/api_key
       overrides:
         provider:
-          allow_fallbacks: false
           data_collection: deny
-          only:
-            - fireworks
-            - deepinfra
           zdr: true
+    - id: acme/open/model
+      name: open/model
+      matches:
+        - headers:
+            - name: x-koinon-org
+              value:
+                exact: acme
+      provider:
+        custom:
+          providerOverride: acme.openrouter
+          formats:
+            - type: completions
+      params:
+        baseUrl: https://openrouter.ai/api/v1
+        apiKey:
+          file: /secrets/upstream/api_key
+    - id: globex/deepseek/deepseek-v4.1-flash
+      name: deepseek/deepseek-v4.1-flash
+      matches:
+        - headers:
+            - name: x-koinon-org
+              value:
+                exact: globex
+      provider:
+        custom:
+          providerOverride: globex.ollama
+          formats:
+            - type: completions
+      params:
+        baseUrl: http://ollama.globex.internal:11434/v1
 mcp:
   policies:
     apiKey:
@@ -111,10 +172,17 @@ mcp:
           metadata:
             name: k-aaaaaaaaaaaa
             agent: acme/repo-helper
+            org: acme
         - keyHash: sha256:afba2a391fafa9cdf6ca56f8efe1d251dcc3829546026c10f2694c0b2c759a32
           metadata:
             name: k-bbbbbbbbbbbb
             agent: acme/triage
+            org: acme
+        - keyHash: sha256:b0b03f2ad19f1dc9e87777f6432dd6ca96548f078a07c9bc473a278c2e1b85c6
+          metadata:
+            name: k-gggggggggggg
+            agent: globex/analyst
+            org: globex
     mcpAuthorization:
       rules:
         - apiKey.agent == "acme/repo-helper" && ((mcp.tool.target == "github" && mcp.tool.name in ["create_pull_request", "get_approval_status"]) || (mcp.tool.target == "docs" && mcp.tool.name in ["search"]))

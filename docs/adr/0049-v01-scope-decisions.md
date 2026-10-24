@@ -2,7 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-10-22
-- Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md) (models and budgets),
+- Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md) (models, budgets,
+  connection secrets; the Helm model values are dropped),
   [0058](0058-gateway-modes.md) (gateway modes)
 - Amends: [0007](0007-connector-model.md), [0016](0016-harness-and-deployment.md),
   [0036](0036-v01-demo.md); extends [0048](0048-openshell-spike-results.md) (Proposed, #15)
@@ -171,6 +172,20 @@ Andre answered these in a grilling session on 2026-10-21/22. This ADR records th
   per-agent daily limits ([0056](0056-model-providers-pricing-and-budgets-per-org.md)).
 - **Gateway modes:** a third, *shared* mode joins standalone and kubernetes in v0.2
   ([0058](0058-gateway-modes.md)).
+
+## Amendment (2026-10-23, plan item PV1)
+
+- **Helm model values dropped.** The chart's `model.*` values (`baseUrl`, `provider`,
+  `apiKeySecret`, `models`) and everything that read them (the schema, the config file, the
+  gateway's bootstrap config, the key mount, `KOINON_DEFAULT_MODEL`) are gone. Nobody had installed
+  Koinon, so there is no migration path from them. Providers and models are rows in Postgres per org,
+  entered in the UI or admin API or declared by labelled Secrets
+  ([0056](0056-model-providers-pricing-and-budgets-per-org.md)). The chart gains `secrets.kek.*` for
+  the key-encryption keys.
+- **Connection secrets** are no longer one Kubernetes Secret per connection: they are envelopes in
+  `connections.secret_envelope` ([0056](0056-model-providers-pricing-and-budgets-per-org.md)). The
+  rule that Koinon writes only Kubernetes Secrets (Secrets bullet above) still holds for the KEKs, the
+  gateway's provider keys and agent gateway keys, but no longer for connections.
 
 ## Open questions
 

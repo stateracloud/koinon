@@ -178,21 +178,30 @@ gateway:
     # Used by G2: the GatewayClass of the existing controller.
     gatewayClassName: agentgateway
 
-# One OpenAI-compatible model upstream (ADR 0049).
-model:
-  # For example https://openrouter.ai/api/v1 or http://ollama.example:11434/v1.
-  baseUrl: ""
-  # agentgateway providerOverride for the upstream (openai, openrouter, ollama, ...).
-  provider: openai
-  # Secret holding the upstream API key, mounted only into agentgateway. Empty for keyless upstreams.
-  apiKeySecret:
-    name: ""
-    key: api_key
-  # Models agents may use:
-  #   - name: deepseek/deepseek-v4.1-flash
-  #     rates: {input: "0.30", output: "1.20"}   # USD per 1M tokens, for budgets and the ledger
-  #     overrides: {}                            # request fields forced by the gateway
-  models: []
+# Model providers and models are not chart values: orgs add them in the UI or the admin API, or
+# declare them with labelled Secrets (ADR 0056, docs/site guides/models). Their keys are encrypted
+# in Postgres with the key-encryption keys below.
+# Providers may not name loopback, link-local or metadata addresses, names without a dot, or hosts in
+# Koinon's own namespace (they would make the gateway a request-forgery proxy). List the internal
+# upstreams you do want, exactly as written in the provider URL, optionally with a port, for example
+# "ollama.lab.example.com:11434". Only a platform admin can change this.
+providers:
+  allowedInternalHosts: []
+
+secrets:
+  kek:
+    # A Secret you manage, with one file per key-encryption key named by its ID (base64 of 32 random
+    # bytes) plus a file "active" holding the active ID. Empty: koinon-api creates the Secret
+    # "koinon-kek" on its first start and never overwrites it (the chart renders no key material, so
+    # helm template, Argo CD and Flux cannot replace it). Back it up: without it, stored provider keys
+    # and connection secrets cannot be read.
+    existingSecret: ""
+    # "koinon-api keys status" warns when the active key is older than this.
+    activePeriod: 8760h
+  # Only for installs that predate the secret store and still have a Kubernetes Secret per GitHub
+  # connection: lets koinon-api delete those Secrets after it moved their fields into Postgres. Turn
+  # it off again afterwards.
+  migrateLegacyConnections: false
 
 # GitHub connector (plan item C1). The REST API base URL used to verify connections, mint
 # installation tokens and open approved pull requests; GitHub Enterprise Server uses
@@ -293,6 +302,12 @@ networkPolicy:
   apiFrom: []
   # Peers allowed to scrape agentgateway's stats port.
   metricsFrom: []
+  # Egress rules added to agentgateway's, for internal model upstreams (it may otherwise reach DNS,
+  # koinon-api and the public internet only). Each item is a NetworkPolicy egress rule, for example
+  #   - to: [{ipBlock: {cidr: 10.20.0.0/24}}]
+  #     ports: [{port: 11434}]
+  # List the same hosts in providers.allowedInternalHosts so providers may name them.
+  gatewayEgressTo: []
 
 # ValidatingAdmissionPolicy for OpenShell sandbox namespaces (ADRs 0045, 0048).
 sandboxPolicy:

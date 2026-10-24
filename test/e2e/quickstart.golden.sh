@@ -6,8 +6,8 @@
 kubectl create namespace koinon --dry-run=client -o yaml | kubectl apply -f -
 # e1=client-cert
 kubectl -n openshell get secret openshell-client-tls -o json | jq --arg ns koinon '{apiVersion, kind, type, data, metadata: {name: .metadata.name, namespace: $ns}}' | kubectl apply -f -
-# e1=model-key
-kubectl -n koinon create secret generic koinon-openrouter --from-literal=api_key="$OPENROUTER_API_KEY" --dry-run=client -o yaml | kubectl apply -f -
+# e1=model-provider
+kubectl apply -f model-provider.yaml
 # e1=install
 helm install koinon charts/koinon --namespace koinon -f values.yaml --wait --timeout 10m
 # e1=password

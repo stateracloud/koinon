@@ -17,7 +17,6 @@ import (
 	. "github.com/onsi/gomega"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/execution/openshell/policycheck"
-	"github.com/stateracloud/koinon/internal/gateway"
 	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -112,29 +110,24 @@ var _ = Describe("The repo.read grant in the sandbox", func() {
 
 		org, user = newOrg(ctx)
 		id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
-		secretName := connections.SecretName(org.Bytes, id.Bytes)
-		_, err = kube.CoreV1().Secrets(namespace).Create(ctx, &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: namespace},
-			Data:       map[string][]byte{connections.GitHubPrivateKeyField: gh.PEM},
-		}, metav1.CreateOptions{})
+		envelope, err := connections.SealFields(ring, org, id, map[string][]byte{connections.GitHubPrivateKeyField: gh.PEM})
 		Expect(err).NotTo(HaveOccurred())
 		cfgJSON, err := json.Marshal(connections.GitHubConfig{AppID: gh.AppID, InstallationID: gh.InstallationID})
 		Expect(err).NotTo(HaveOccurred())
-		conn, err = q.CreateConnection(ctx, store.CreateConnectionParams{
+		conn, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 			OrgID: org, ID: id, Connector: "github", DisplayName: "acme", Config: cfgJSON,
-			SecretName: secretName, CreatedBy: user,
+			SecretEnvelope: envelope, Source: store.ConfigSourceUi, CreatedBy: user,
 		})
 		Expect(err).NotTo(HaveOccurred())
 
 		cfg = reconciler.Config{
 			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-			Models:  gateway.ModelUpstream{Provider: "openai", BaseURL: "http://fakemodel:8080/v1", Models: []gateway.Model{{Name: "fake"}}},
 			Flavors: map[store.AgentFlavor]reconciler.Flavor{
 				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
 			},
 			GitHub: reconciler.GitHubApps{
-				Secrets: connections.KubeSecrets{Client: kube, Namespace: namespace},
-				Client:  github.NewClient(github.Options{BaseURL: gh.URL(), Now: clock}),
+				Keys:   ring,
+				Client: github.NewClient(github.Options{BaseURL: gh.URL(), Now: clock}),
 			},
 			Logger: slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 			Now:    clock,

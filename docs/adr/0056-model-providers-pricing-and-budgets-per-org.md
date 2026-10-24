@@ -2,12 +2,14 @@
 
 - Status: Accepted
 - Date: 2026-10-23
-- Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream and
-  template-only budgets), [0041](0041-koinon-spend-ledger-and-budget-stops.md) (price versions, raw
+- Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream, now dropped, and
+  template-only budgets), [0007](0007-connector-model.md) and [0021](0021-connector-setup-guides.md)
+  (connection secrets move into the encrypted store), [0041](0041-koinon-spend-ledger-and-budget-stops.md) (price versions, raw
   usage, estimates and the budget levels), [0050](0050-spend-ledger-ingestion-and-net-limits.md)
   (the per-agent limit and unpriced models)
 - Delivery: per-org providers, models and budgets in the UI and admin API, the price schema and the
-  budgets land in v0.1; see [docs/plans/v0.1.md](../plans/v0.1.md).
+  budgets land in v0.1; see [docs/plans/v0.1.md](../plans/v0.1.md). Plan item PV1 (2026-10-23)
+  built the backend of decisions 1 to 4 and 8; the amendment below records how.
 
 ## Context
 
@@ -38,12 +40,102 @@ usage type, tiers and match patterns.
 8. **Routing guard** (ADR 0048) is optional per model, set by the org admin.
 9. The gateway behind this is configured as in [0058](0058-gateway-modes.md).
 
+## Amendment (2026-10-23, plan item PV1)
+
+Andre decided the following while the backend was designed. It refines decisions 1 to 4 and 8 and
+answers the open questions on KEK rotation and on role tokens.
+
+1. **Declarative Secrets are a second source, in the style of Argo CD.** A Secret in Koinon's
+   namespace labelled `koinon.dev/secret-type: model-provider` and `koinon.dev/org: <slug>` declares a
+   provider (`stringData`: `name`, `provider`, `url`, optional `apiKey`, optional `models` as a YAML list
+   of `name`, `guard` and optional `rates`). `koinon.dev/secret-type: connection` declares a GitHub
+   connection the same way. `koinon-api` imports them (it holds the Kubernetes client, the service layer
+   with audit and the KEKs; the single-active reconciler picks the rows up like any other). Declared
+   entries have `source = secret`, are **read-only** through the UI and admin API ("managed by Secret
+   X"), and **win a name collision**: a UI entry of the same name is disabled with a visible reason.
+   Deleting the Secret does not delete the entry: it is marked removed (disabled, kept for the audit log
+   and for what refers to it), bound agents and runs report why, restoring the Secret restores it, and
+   an admin may delete it for good; what it shadowed is re-enabled. An invalid Secret is
+   ignored (previous state stays) with a Warning Event on the Secret and a log line. Every apply and
+   removal is audited with the actor `secret <name>`. The trust boundary: write access to Koinon's
+   namespace is platform-admin level.
+2. **Envelope encryption and KEK rotation** (research:
+   [kek-rotation](../research/kek-rotation.md)). Every value gets a fresh 256-bit data key (DEK) and
+   is sealed with AES-256-GCM under a random 96-bit nonce; the DEK is wrapped by the active KEK
+   (AES-256-GCM). The stored envelope has `fmt`, `alg`, `kek_id`, `wrapped_dek`, `dek_nonce`, `nonce`
+   and `ciphertext`. The AAD binds org ID, table, row ID and column, for the payload and the wrapped
+   DEK, so a copied envelope does not open. KEKs come from a Kubernetes Secret with several keys and
+   one active ID (`koinon-api` creates it on its first start and never overwrites it, because the chart cannot render
+   key material that survives `helm template`, Argo CD or Flux; or `secrets.kek.existingSecret` names
+   one; it refuses to create a new one when the database already holds encrypted values).
+   `koinon-api` reads it through the Kubernetes API and `koinon-reconciler` mounts it, and nothing
+   else sees it. Because every value has
+   its own DEK, DEKs need no scheduled rotation. The default KEK active period is **365 days**
+   (`koinon-api keys status` warns after). `koinon-api keys status|add|activate|rewrap|retire|reencrypt`
+   run the rotation: add and activate a new KEK, `rewrap` re-wraps the stored DEKs without
+   decrypting a payload, `retire` refuses while any value uses the KEK. After a suspected compromise:
+   stop wrapping with the key, `reencrypt` (new DEKs), then rotate the real credentials at their
+   providers. Retired KEKs stay in the backup escrow for as long as database backups that used them
+   exist ([runbook](../ops/secret-keys.md)). AES-GCM with random nonces is safe for 2^32 invocations
+   per key; a KEK is invoked once per write or rewrap, and Koinon keeps tens to thousands of values,
+   so no per-KEK counter is kept.
+3. **Delivery to the gateway: one Secret.** The reconciler opens the provider keys and writes them
+   into the single Secret `koinon-gateway-providers`, one data key per provider, mounted as a directory
+   into the gateway only. The rendered config references each file (`apiKey.file`). agentgateway
+   reads a key file only when it loads its config (verified on v1.6.0), so the data key name carries a
+   hash of the key's envelope: a new key is a new file name, which changes the config and reloads it
+   without a pod restart. The reconciler writes the file, waits for kubelet to propagate it, applies the
+   config, then prunes unused files; a config rejected for a missing file is redelivered with a changed
+   comment.
+4. **Org-scoped model names.** The gateway serves each model as `<org slug>/<model>` (the entry's
+   `id`). Agents still ask for the plain name: agentgateway sets a header from the key's org before it
+   picks a model (`llm.policies.transformations`), each entry matches that header
+   (`llm.models[].matches`), and each key's `allowedModels` lists its org's plain names. A client
+   cannot choose the header. The simplified `llm` config has no `modelAliases` (that policy exists only
+   under `binds[].…policies.ai`), so this is the form agentgateway v1.6.0 supports there.
+5. **The admin API** is REST plus an OpenAPI 3.1 document (`api/admin/v1/openapi.yaml`), with server
+   types and the strict handler interface generated by oapi-codegen (pinned in `go.mod`; it reads
+   OpenAPI 3.0 constructs, so the document uses only those). Bearer tokens only. A token belongs to
+   one org, has the role admin or owner and never more than its creator's, expires after 30 days by
+   default and at most 90, is shown once, is stored as a SHA-256 hash with a lookup prefix, can be
+   revoked, and records its last use. Every call is audited with the token's ID. Tokens are created
+   through the UI's connect-rpc API (session, admin or owner), which starts a chain, or with an existing
+   token. A child has the same or a lower role and expires no later than its parent, carries the
+   chain's root user, and dies with its parent (revoking cascades). Authentication checks the root user
+   still holds at least the token's role. Bad tokens go to a structured security log, never an org's
+   audit trail, slow the client IP down (backoff), and, when the prefix names a real token, are also
+   recorded in that token's org audit.
+6. **Audit.** `audit_events` is org-scoped and append-only (the app role has no UPDATE, DELETE or
+   TRUNCATE, and a trigger refuses UPDATE and DELETE for every role). The shared service layer writes
+   it in the same transaction as the change, so UI and admin API changes are audited alike.
+7. **Connections move into the store.** A connection's secret fields (the GitHub App private key) are
+   an envelope in `connections.secret_envelope`, not a Kubernetes Secret per connection.
+   `koinon-api` moves existing rows at startup: read the old Secret, seal, record, delete the old
+   Secret, and clear `secret_name` only when the delete succeeded (a row with an envelope and a name
+   is finished at the next start). `koinon-api` can delete Secrets only while the chart value
+   `secrets.migrateLegacyConnections` is set. The reconciler's token minting reads the store. The
+   connection API is unchanged.
+8. **Upstream URLs** may not name loopback, link-local, private, shared or metadata addresses, names
+   without a dot or hosts in Koinon's namespace. Hosts are read as WHATWG does (short, octal and hex
+   IPv4 forms are the addresses they denote). The name is resolved when the provider is saved and again,
+   failing closed, when it is rendered; a platform admin lists exceptions (names, IPs, CIDRs) in
+   `providers.allowedInternalHosts`. A standard egress NetworkPolicy for the gateway (DNS, koinon-api,
+   public internet minus the private ranges, plus `networkPolicy.gatewayEgressTo`) is the hard limit,
+   since DNS rebinding between the checks stays open (the gateway resolves the name itself).
+9. **Other.** Model rates stay on the model for now (PV2 replaces them); a model without rates is
+   not served. The routing guard exists for OpenRouter providers and forces
+   `{"provider": {"zdr": true, "data_collection": "deny"}}`.
+
 ## Alternatives considered
 
 - **One upstream in Helm values** (ADR 0049) _(reconstructed)_. No per-org control.
 - **Fixed input/output price columns** _(reconstructed)_. New billable dimensions (cache, reasoning)
   would need schema changes.
 - **KMS required** _(reconstructed)_. Too heavy for the quickstart.
+- **Provider keys as files in a Secret per provider, mounted individually** (PV1). One Secret keeps
+  the gateway's volumes and the reconciler's RBAC simple.
+- **Importing declarative Secrets in the reconciler** (PV1). It is single-active, lacks the service
+  layer and the KEKs' write path; `koinon-api` has them.
 
 ## Consequences
 
@@ -52,14 +144,16 @@ usage type, tiers and match patterns.
 - Positive: raw usage allows re-pricing later _(inferred)_.
 - Negative: Koinon owns an encryption layer, a price schema, a default price list and an admin API.
 - Negative: estimates can differ from provider bills.
-- Follow-ups: plan items PV1, PV2, BG1 and W4; ADR 0049's Helm-configured upstream becomes the
-  initial provider of the default org _(inferred)_.
+- Follow-ups: plan items PV2, BG1 and W4 (PV1 is built). ADR 0049's Helm-configured upstream is
+  dropped instead of seeding the default org: nobody had installed Koinon, so there is nothing to
+  migrate (see the amendment).
+- Negative (PV1): `koinon-api` can read every Secret in its namespace and create Secrets (the importer needs list and
+  watch, which RBAC cannot limit by label); losing the KEK Secret loses every stored secret, so it
+  must be backed up.
 
 ## Open questions
 
 - Window of the org monthly cap (calendar month in UTC is likely).
-- The role-token lifetime and the roles it can carry.
-- KEK rotation.
 - How often the default price list is refreshed, and how admins see changes to it.
 - Which tokenizer is used for which model.
 - Whether platform-level budgets still exist above the org.
@@ -70,6 +164,10 @@ Langfuse model and price schema, tokenizer fallback and alerts were read from it
 2026-10-23; see the research report.
 
 ## Links
+
+- [KEK and DEK rotation research](../research/kek-rotation.md)
+- [Secret keys runbook](../ops/secret-keys.md)
+- Argo CD [declarative setup](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/)
 
 - [Langfuse cost tracking research](../research/langfuse-cost-tracking.md)
 - Published design: kept privately by the maintainers

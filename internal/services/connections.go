@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
@@ -83,6 +84,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 	out := &connectionv1alpha1.Connection{
 		Id: idString(c.ID), OrgId: idString(c.OrgID), Connector: c.Connector, DisplayName: c.DisplayName,
 		Status: connectionStatusToProto[c.Status], LastTestedAt: tsProto(c.LastTestedAt), CreatedAt: tsProto(c.CreatedAt),
+		Source: string(c.Source), ManagedBySecret: c.ManagedBySecret.String, Removed: c.RemovedAt.Valid,
 	}
 	var results []connections.CheckResult
 	if err := json.Unmarshal(c.LastTest, &results); err == nil {
@@ -107,9 +109,9 @@ func checksProto(rs []connections.CheckResult) []*connectionv1alpha1.CheckResult
 }
 
 // CreateGitHubConnection implements ConnectionService. The private key goes
-// from the request straight into a Kubernetes Secret: it is parsed (so a bad
-// paste fails here, at the step that caused it), never stored in Postgres,
-// never returned and never logged; errors about it never quote it.
+// from the request straight into the secret store (ADR 0056): it is parsed (so a bad
+// paste fails here, at the step that caused it), stored only as an envelope in
+// Postgres, never returned and never logged; errors about it never quote it.
 func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1alpha1.CreateGitHubConnectionRequest) (*connectionv1alpha1.CreateGitHubConnectionResponse, error) {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
 	if err != nil {
@@ -135,8 +137,8 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "private_key: "+strings.TrimPrefix(err.Error(), "github: "))
 	}
-	if s.secrets == nil {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, connections.ErrNoSecretStore.Error())
+	if s.keys == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, connections.ErrNoKeyring.Error())
 	}
 	t, ok := connectors.Get(connectors.GitHubID)
 	if !ok {
@@ -148,38 +150,34 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 		return nil, s.dbError(err, "connection")
 	}
 	connID := pgtype.UUID{Bytes: id, Valid: true}
-	secretName := connections.SecretName(c.org.Bytes, connID.Bytes)
 	config, err := json.Marshal(connections.GitHubConfig{AppID: req.GetAppId(), InstallationID: req.GetInstallationId()})
 	if err != nil {
 		return nil, s.dbError(err, "connection")
 	}
-
-	// Secret first: a row without its Secret would be a connection that can
-	// never work. If the row fails, the Secret is removed again.
-	if err := s.secrets.Create(ctx, connections.Secret{
-		Name: secretName,
-		Labels: map[string]string{
-			connections.LabelManagedBy:  connections.ManagedByValue,
-			connections.LabelOrg:        c.org.String(),
-			connections.LabelConnection: connID.String(),
-		},
-		Annotations: map[string]string{
-			connections.AnnotationConnector:   t.Metadata.ID,
-			connections.AnnotationFingerprint: key.Fingerprint(),
-		},
-		Data: map[string][]byte{connections.GitHubPrivateKeyField: pemKey},
-	}); err != nil {
-		s.log.Error("could not write connection secret", "org", c.org.String(), "connection", connID.String(), "err", err)
+	envelope, err := connections.SealFields(s.keys, c.org, connID, map[string][]byte{connections.GitHubPrivateKeyField: pemKey})
+	if err != nil {
+		s.log.Error("could not seal connection secret", "org", c.org.String(), "connection", connID.String(), "err", err)
 		return nil, connect.NewError(connect.CodeUnavailable, "could not store the private key; try again")
 	}
-	row, err := s.q.CreateConnection(ctx, store.CreateConnectionParams{
-		OrgID: c.org, ID: connID, Connector: t.Metadata.ID, DisplayName: name, Config: config,
-		SecretName: secretName, SecretFingerprint: key.Fingerprint(), CreatedBy: c.actor(),
+	var row store.Connection
+	err = s.inTx(requestCtx(ctx), func(q *store.Queries) error {
+		var err error
+		row, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+			OrgID: c.org, ID: connID, Connector: t.Metadata.ID, DisplayName: name, Config: config,
+			SecretEnvelope: envelope, SecretFingerprint: key.Fingerprint(), Source: store.ConfigSourceUi, CreatedBy: c.actor(),
+		})
+		if err != nil {
+			return err
+		}
+		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: "connection.create", TargetKind: "connection", TargetID: connID.String(),
+			After: map[string]any{
+				"connector": t.Metadata.ID, "displayName": name, "appId": req.GetAppId(),
+				"installationId": req.GetInstallationId(), "keyFingerprint": key.Fingerprint(), "source": "ui",
+			},
+		})
 	})
 	if err != nil {
-		if derr := s.secrets.Delete(context.WithoutCancel(ctx), secretName); derr != nil {
-			s.log.Error("could not remove the Secret of a connection that was not created", "secret", secretName, "err", derr)
-		}
 		return nil, s.dbError(err, "connection")
 	}
 	s.log.Info("connection created", "org", c.org.String(), "connection", connID.String(), "connector", t.Metadata.ID,
@@ -195,6 +193,52 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	}
 	res.Connection = s.connectionProto(row)
 	return res, nil
+}
+
+// DeleteConnection implements ConnectionService, by the rules of DeleteProvider: a connection entered
+// here can be deleted, a declared one only after its Secret was deleted (removed), and none while an
+// agent is bound to it.
+func (s *Server) DeleteConnection(ctx context.Context, req *connectionv1alpha1.DeleteConnectionRequest) (*connectionv1alpha1.DeleteConnectionResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("connection_id", req.GetConnectionId())
+	if err != nil {
+		return nil, err
+	}
+	rctx := requestCtx(ctx)
+	err = s.inTx(rctx, func(q *store.Queries) error {
+		row, err := q.GetConnection(rctx, store.GetConnectionParams{OrgID: c.org, ID: id})
+		if err != nil {
+			return err
+		}
+		if row.Source == store.ConfigSourceSecret && !row.RemovedAt.Valid {
+			return connect.NewError(connect.CodeFailedPrecondition, "this connection is declared by the Kubernetes Secret "+row.ManagedBySecret.String+"; delete or change that Secret instead")
+		}
+		bound, err := q.ListAgentsBoundToConnection(rctx, store.ListAgentsBoundToConnectionParams{OrgID: c.org, ConnectionID: id.String()})
+		if err != nil {
+			return err
+		}
+		if len(bound) > 0 {
+			names := make([]string, 0, len(bound))
+			for _, b := range bound {
+				names = append(names, fmt.Sprintf("%s (%s)", b.DisplayName, b.ID.String()))
+			}
+			return connect.NewError(connect.CodeFailedPrecondition, "agents are still bound to this connection; unbind them first: "+strings.Join(names, ", "))
+		}
+		if _, err := q.DeleteConnection(rctx, store.DeleteConnectionParams{OrgID: c.org, ID: id}); err != nil {
+			return err
+		}
+		return audit.RecordErr(rctx, q, audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: "connection.delete", TargetKind: "connection", TargetID: id.String(),
+			Before: map[string]any{"displayName": row.DisplayName, "source": string(row.Source), "keyFingerprint": row.SecretFingerprint, "removed": row.RemovedAt.Valid},
+		})
+	})
+	if err != nil {
+		return nil, s.dbError(err, "connection")
+	}
+	return &connectionv1alpha1.DeleteConnectionResponse{}, nil
 }
 
 // GetConnection implements ConnectionService.
@@ -258,7 +302,7 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection) (stor
 		return row, nil, connect.NewError(connect.CodeUnimplemented, "no checks for connector "+row.Connector)
 	}
 	var results []connections.CheckResult
-	app, err := connections.LoadGitHubApp(ctx, s.secrets, row)
+	app, err := connections.LoadGitHubApp(ctx, s.keys, row)
 	if err != nil {
 		s.log.Warn("connection credentials unreadable", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
 		results = []connections.CheckResult{{Check: "secret", Step: "generate-key", Message: "Koinon could not read this connection's private key; create the connection again"}}
@@ -324,9 +368,9 @@ func (s *Server) ListInstallationRepos(ctx context.Context, req *connectionv1alp
 	if row.Connector != connectors.GitHubID {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, "the connection is not a GitHub connection")
 	}
-	app, err := connections.LoadGitHubApp(ctx, s.secrets, row)
+	app, err := connections.LoadGitHubApp(ctx, s.keys, row)
 	if err != nil {
-		if errors.Is(err, connections.ErrNoSecretStore) {
+		if errors.Is(err, connections.ErrNoKeyring) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err.Error())
 		}
 		// The messages name the Secret or say the key is malformed; never its content.

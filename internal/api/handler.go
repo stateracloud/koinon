@@ -25,6 +25,9 @@ type Options struct {
 	// Services registers further connect services behind the auth
 	// interceptor.
 	Services []func(*connect.Server)
+	// Mounts register further handlers on the mux, outside the session-authenticated
+	// connect-rpc API (the admin API under /admin/v1 authenticates bearer tokens itself).
+	Mounts []func(*http.ServeMux)
 	// UI is the built web UI (web.Dist()), served for every path no other
 	// handler claims; nil serves none.
 	UI fs.FS
@@ -56,6 +59,9 @@ func NewHandler(opts Options) (http.Handler, error) {
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server, connecthttp.WithRequireConnectProtocolHeader())
 	opts.Auth.Mount(mux)
+	for _, mount := range opts.Mounts {
+		mount(mux)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})

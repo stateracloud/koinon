@@ -5,6 +5,8 @@ package standalone_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -38,11 +40,113 @@ var _ = Describe("Render", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		s := f.state
-		s.Keys = []gateway.Key{s.Keys[1], s.Keys[0]}
+		s.Keys = slices.Clone(s.Keys)
+		slices.Reverse(s.Keys)
+		s.Providers = slices.Clone(s.Providers)
+		slices.Reverse(s.Providers)
+		for i := range s.Providers {
+			s.Providers[i].Models = slices.Clone(s.Providers[i].Models)
+			slices.Reverse(s.Providers[i].Models)
+		}
 		b, revB, err := standalone.Render(s, f.options)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(b).To(Equal(a))
 		Expect(revB).To(Equal(revA))
+	})
+
+	Describe("org-scoped models (plan item PV1)", func() {
+		type apiKey struct {
+			Metadata      struct{ Name, Org string } `yaml:"metadata"`
+			AllowedModels *[]string                  `yaml:"allowedModels"`
+		}
+		type model struct {
+			ID, Name string
+			Matches  []struct {
+				Headers []struct {
+					Name  string
+					Value struct{ Exact string }
+				}
+			}
+			Overrides map[string]any
+		}
+		type doc struct {
+			LLM struct {
+				Policies struct {
+					APIKey struct {
+						Keys []apiKey `yaml:"keys"`
+					} `yaml:"apiKey"`
+					Transformations struct {
+						Request struct{ Set map[string]string }
+					}
+				}
+				Models []model
+			}
+		}
+		render := func() doc {
+			GinkgoHelper()
+			out, _, err := standalone.Render(fixtures()[2].state, fixtures()[2].options)
+			Expect(err).NotTo(HaveOccurred())
+			var d doc
+			Expect(yaml.Unmarshal(out, &d)).To(Succeed())
+			return d
+		}
+
+		It("serves each model as <org>/<name>, matched on the org header", func() {
+			d := render()
+			var ids []string
+			for _, m := range d.LLM.Models {
+				ids = append(ids, m.ID)
+				Expect(m.Matches).To(HaveLen(1))
+				Expect(m.Matches[0].Headers).To(HaveLen(1))
+				Expect(m.Matches[0].Headers[0].Name).To(Equal(gateway.OrgHeader))
+				org, _, _ := strings.Cut(m.ID, "/")
+				Expect(m.Matches[0].Headers[0].Value.Exact).To(Equal(org))
+			}
+			Expect(ids).To(ConsistOf("acme/deepseek/deepseek-v4.1-flash", "acme/open/model", "globex/deepseek/deepseek-v4.1-flash"))
+		})
+
+		It("stamps the key's org into the header before a model is chosen", func() {
+			Expect(render().LLM.Policies.Transformations.Request.Set).To(HaveKeyWithValue(gateway.OrgHeader, `default(apiKey.org, "")`))
+		})
+
+		It("limits every key to its own org's plain model names", func() {
+			byName := map[string]apiKey{}
+			for _, k := range render().LLM.Policies.APIKey.Keys {
+				byName[k.Metadata.Name] = k
+			}
+			Expect(*byName["k-aaaaaaaaaaaa"].AllowedModels).To(Equal([]string{"deepseek/deepseek-v4.1-flash", "open/model"}))
+			Expect(*byName["k-gggggggggggg"].AllowedModels).To(Equal([]string{"deepseek/deepseek-v4.1-flash"}))
+			Expect(byName["k-gggggggggggg"].Metadata.Org).To(Equal("globex"))
+			// The probe key is refused before routing; it has no list to be checked against.
+			Expect(byName[gateway.ReloadProbeKeyName].AllowedModels).To(BeNil())
+		})
+
+		It("denies every model to a key of an org that serves none", func() {
+			s := gateway.State{Providers: fixtures()[2].state.Providers}
+			s.AddKey(fixedKey("k-hhhhhhhhhhhh", gateway.AgentRef{Org: "initech", Name: "x"}, "test-h"))
+			out, _, err := standalone.Render(s, standalone.Options{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(out)).To(ContainSubstring("allowedModels: []"))
+		})
+
+		It("forces the routing guard only into guarded models", func() {
+			for _, m := range render().LLM.Models {
+				if m.ID == "acme/deepseek/deepseek-v4.1-flash" {
+					Expect(m.Overrides).To(HaveKey("provider"))
+				} else {
+					Expect(m.Overrides).To(BeEmpty(), m.ID)
+				}
+			}
+		})
+
+		It("rejects the same model served twice in one org", func() {
+			s := gateway.State{Providers: []gateway.Provider{
+				{Org: "acme", Name: "a", Type: "x", BaseURL: "http://a/v1", Models: []gateway.Model{{Name: "m", Price: &gateway.Price{}}}},
+				{Org: "acme", Name: "b", Type: "x", BaseURL: "http://b/v1", Models: []gateway.Model{{Name: "m", Price: &gateway.Price{}}}},
+			}}
+			_, _, err := standalone.Render(s, standalone.Options{})
+			Expect(err).To(MatchError(ContainSubstring("served twice")))
+		})
 	})
 
 	It("changes the revision when a key is revoked", func() {
@@ -72,12 +176,12 @@ var _ = Describe("Render", func() {
 	It("serves only priced models, so none is charged zero (L1)", func() {
 		out, _, err := standalone.Render(fixtures()[2].state, fixtures()[2].options)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(fixtures()[2].state.Models.Unpriced()).To(Equal([]string{"unpriced/model"}))
+		Expect(fixtures()[2].state.Unpriced()).To(Equal([]string{"acme/unpriced/model"}))
 		Expect(string(out)).NotTo(ContainSubstring("unpriced/model"))
 
-		onlyUnpriced := gateway.State{Models: gateway.ModelUpstream{
-			Provider: "x", BaseURL: "http://x/v1", Models: []gateway.Model{{Name: "free"}},
-		}}
+		onlyUnpriced := gateway.State{Providers: []gateway.Provider{{
+			Org: "acme", Name: "x", Type: "x", BaseURL: "http://x/v1", Models: []gateway.Model{{Name: "free"}},
+		}}}
 		out, _, err = standalone.Render(onlyUnpriced, standalone.Options{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(out)).NotTo(ContainSubstring("free"))
@@ -171,7 +275,7 @@ var _ = Describe("Render", func() {
 	})
 
 	It("names the budget after the limit's generation", func() {
-		s := gateway.State{Models: fixtures()[2].state.Models}
+		s := gateway.State{Providers: fixtures()[2].state.Providers}
 		s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
 		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour, Generation: "g1"})
 		o := standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}

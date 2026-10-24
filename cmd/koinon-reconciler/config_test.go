@@ -15,7 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/reconciler"
 )
 
-// chartConfig is config.yaml as charts/koinon renders it (standalone gateway, one model).
+// chartConfig is config.yaml as charts/koinon renders it (standalone gateway).
 const chartConfig = `
 gateway:
   mode: standalone
@@ -24,16 +24,9 @@ gateway:
   statsUrl: http://koinon-gateway.koinon.svc:15020
   port: 8080
   databaseUrl: sqlite:///data/agentgateway.db?mode=rwc
-  modelKeyFile: /secrets/model/api_key
+  providerKeysSecret: koinon-gateway-providers
+  providerKeysDir: /secrets/providers
   accessLogOtlp: koinon-api.koinon.svc:4318
-model:
-  apiKeySecret: {key: api_key, name: upstream}
-  baseUrl: https://openrouter.ai/api/v1
-  models:
-    - name: deepseek/deepseek-v4.1-flash
-      rates: {input: "0.30", output: "1.20"}
-      overrides: {provider: {zdr: true}}
-  provider: openrouter
 openshell:
   address: openshell.openshell.svc:8080
   tls: /etc/koinon/openshell-tls
@@ -63,6 +56,7 @@ var _ = Describe("parseConfig", func() {
 			"DATABASE_URL":        "postgres://koinon_reconciler@db/koinon",
 			"POD_NAMESPACE":       "koinon",
 			"KOINON_IDLE_TIMEOUT": "15m", // flags and env override the file
+			"KOINON_KEK_DIR":      "/secrets/kek",
 		}
 		c, err := parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 		Expect(err).NotTo(HaveOccurred())
@@ -79,11 +73,9 @@ var _ = Describe("parseConfig", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ep).To(Equal(reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080}))
 
-		Expect(c.models.Provider).To(Equal("openrouter"))
-		Expect(c.models.APIKeyFile).To(Equal("/secrets/model/api_key"))
-		Expect(c.models.Models).To(HaveLen(1))
-		Expect(c.models.Models[0].Price.Output).To(Equal("1.20"))
-		Expect(c.models.Overrides).NotTo(BeNil())
+		Expect(c.providerKeysSecret).To(Equal("koinon-gateway-providers"))
+		Expect(c.providerKeysDir).To(Equal("/secrets/providers"))
+		Expect(c.kekDir).To(Equal("/secrets/kek"))
 
 		f := c.flavors()[store.AgentFlavorOpencode]
 		Expect(f.Image).To(Equal("ghcr.io/stateracloud/flavor-opencode:0.1.0"))

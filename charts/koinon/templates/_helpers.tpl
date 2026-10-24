@@ -202,6 +202,8 @@ koinon-api's login settings (plan items A1, A2), as KOINON_* environment variabl
 Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environment.
 */}}
 {{- define "koinon.apiEnv" -}}
+- name: KOINON_KEK_ACTIVE_PERIOD
+  value: {{ .Values.secrets.kek.activePeriod | quote }}
 {{- with include "koinon.publicUrl" . }}
 - name: KOINON_PUBLIC_URL
   value: {{ . | quote }}
@@ -331,6 +333,56 @@ helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 {{- include "koinon.componentName" (list . "gateway-config") }}
 {{- end }}
 
+{{/* The Secret with the key-encryption keys (KEKs) for provider keys and connection secrets (ADR 0056). */}}
+{{- define "koinon.kekSecretName" -}}
+{{- .Values.secrets.kek.existingSecret | default (include "koinon.componentName" (list . "kek")) }}
+{{- end }}
+
+{{/* The one Secret holding the opened provider keys, mounted into the gateway only (plan item PV1). */}}
+{{- define "koinon.gatewayProvidersName" -}}
+{{- include "koinon.componentName" (list . "gateway-providers") }}
+{{- end }}
+
+{{/*
+The KEKs. koinon-api reads them through the Kubernetes API and creates the Secret on its first start
+(the chart renders no key material: every render would make new keys, and a new KEK loses every stored
+secret). koinon-reconciler mounts them, optionally, because the Secret may not exist before koinon-api
+has started.
+*/}}
+{{- define "koinon.kekVolumeMount" -}}
+- name: kek
+  mountPath: /secrets/kek
+  readOnly: true
+{{- end }}
+
+{{- define "koinon.kekVolume" -}}
+- name: kek
+  secret:
+    secretName: {{ include "koinon.kekSecretName" . }}
+    defaultMode: 0440
+    optional: true
+{{- end }}
+
+{{/* Platform-level allowlist of internal provider hosts (SSRF policy, internal/catalog/urlpolicy.go). */}}
+{{- define "koinon.providerEnv" -}}
+{{- with .Values.providers.allowedInternalHosts }}
+- name: KOINON_PROVIDER_ALLOWED_HOSTS
+  value: {{ join "," . | quote }}
+{{- end }}
+{{- end }}
+
+{{- define "koinon.kekEnv" -}}
+{{- if eq .component "reconciler" }}
+- name: KOINON_KEK_DIR
+  value: /secrets/kek
+{{- else }}
+- name: KOINON_KEK_SECRET
+  value: {{ include "koinon.kekSecretName" .root | quote }}
+- name: KOINON_KEK_CREATE
+  value: {{ if .root.Values.secrets.kek.existingSecret }}"false"{{ else }}"true"{{ end }}
+{{- end }}
+{{- end }}
+
 {{- define "koinon.validate" -}}
 {{- if not (has .Values.postgres.mode (list "cnpg" "external")) }}
 {{- fail "postgres.mode must be cnpg or external" }}
@@ -371,10 +423,6 @@ it carries no credentials.
 {{- with $gatewayURL }}
 - name: KOINON_GATEWAY_URL
   value: {{ . | quote }}
-{{- end }}
-{{- with .Values.model.models }}
-- name: KOINON_DEFAULT_MODEL
-  value: {{ (first .).name | quote }}
 {{- end }}
 - name: KOINON_WORKERS
   value: {{ .Values.agentd.workers | default 8 | quote }}

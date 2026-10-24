@@ -285,33 +285,28 @@
         "apiUrl": {"type": "string", "pattern": "^https?://[^/]+(/.*)?$"}
       }
     },
-    "model": {
+    "providers": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "baseUrl": {"type": "string", "pattern": "^(https?://.+)?$"},
-        "provider": {"$ref": "#/definitions/nonEmpty"},
-        "apiKeySecret": {"$ref": "#/definitions/secretKeyRef"},
-        "models": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["name"],
-            "properties": {
-              "name": {"$ref": "#/definitions/nonEmpty"},
-              "rates": {
-                "description": "USD per 1M tokens.",
-                "type": "object",
-                "additionalProperties": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$"}
-              },
-              "overrides": {"type": "object"}
-            }
+        "allowedInternalHosts": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "migrateLegacyConnections": {"type": "boolean"},
+        "kek": {
+          "description": "Key-encryption keys for stored provider keys and connection secrets (ADR 0056).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"},
+            "activePeriod": {"type": "string", "pattern": "^[0-9]+(h|m|s)$"}
           }
         }
-      },
-      "if": {"properties": {"models": {"minItems": 1}}, "required": ["models"]},
-      "then": {"properties": {"baseUrl": {"minLength": 1}}}
+      }
     },
     "flavors": {
       "description": "Flavor images (ADR 0035). Agents of a flavor without an image are reported as reconcile errors.",
@@ -400,7 +395,8 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "apiFrom": {"$ref": "#/definitions/peers"},
-        "metricsFrom": {"$ref": "#/definitions/peers"}
+        "metricsFrom": {"$ref": "#/definitions/peers"},
+        "gatewayEgressTo": {"type": "array", "items": {"type": "object"}}
       }
     },
     "sandboxPolicy": {

@@ -22,7 +22,7 @@ the end-to-end test runs.
 
 ## 1. Write your values
 
-Save this as `values.yaml`. It uses OpenRouter and Kata. Change `image.registry` and `image.tag` to
+Save this as `values.yaml`. It uses Kata. Change `image.registry` and `image.tag` to
 where you pushed the images ([Build the images](#build-the-images)), and `openshell.address` if your
 gateway lives elsewhere. The chart runs only the flavors it has an entry for, so this file turns off
 Hermes and pi, whose images the build below does not make.
@@ -41,26 +41,11 @@ openshell:
   clientTLSSecret: openshell-client-tls
   runtimeClassName: kata
 
-model:
-  baseUrl: https://openrouter.ai/api/v1
-  provider: openrouter
-  apiKeySecret:
-    name: koinon-openrouter
-    key: api_key
-  models:
-    - name: deepseek/deepseek-v4.1-flash
-      rates: {input: "0.30", output: "1.20"}
-      overrides:
-        provider:
-          zdr: true
-          data_collection: deny
-          only: [fireworks, together, deepinfra, amazon-bedrock, google-vertex]
-          allow_fallbacks: false
 ```
 
-The first model in `model.models` is the default for every agent. `rates` are US dollars per million
-tokens. Koinon needs a rate to serve a model, and uses it for budgets. The `overrides` block is the
-routing guard. [Models](/guides/models/) explains it.
+The model provider is not a chart value. You declare it with a Secret in the next section, and
+[Models](/guides/models/) explains the options. The chart also creates the key-encryption keys that
+protect stored provider keys; see [Back up the encryption keys](#back-up-the-encryption-keys).
 
 On kind, use `runc`. Add these lines and leave the rest:
 
@@ -89,11 +74,40 @@ kubectl create namespace koinon --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n openshell get secret openshell-client-tls -o json | jq --arg ns koinon '{apiVersion, kind, type, data, metadata: {name: .metadata.name, namespace: $ns}}' | kubectl apply -f -
 ```
 
-Store the model key. Only agentgateway mounts this Secret. Sandboxes never see it.
+Add the model provider. Save this as `model-provider.yaml`, with your OpenRouter key (or an Ollama
+URL, see [Models](/guides/models/)). Koinon encrypts the key in its database and hands it only to
+agentgateway. Sandboxes never see it.
 
-```sh e1=model-key
-kubectl -n koinon create secret generic koinon-openrouter --from-literal=api_key="$OPENROUTER_API_KEY" --dry-run=client -o yaml | kubectl apply -f -
+```yaml model-provider
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openrouter
+  namespace: koinon
+  labels:
+    koinon.dev/secret-type: model-provider
+    koinon.dev/org: default
+stringData:
+  name: openrouter
+  provider: openrouter
+  url: https://openrouter.ai/api/v1
+  apiKey: sk-or-replace-me
+  models: |
+    - name: deepseek/deepseek-v4.1-flash
+      guard: true
+      rates: {input: "0.30", output: "1.20"}
 ```
+
+`rates` are US dollars per million tokens. Koinon needs a rate to serve a model, and uses it for
+budgets. `guard: true` is the routing guard. The first model of the org is the default for every
+agent.
+
+```sh e1=model-provider
+kubectl apply -f model-provider.yaml
+```
+
+*UI: next pull request.* The Providers page will do this step in the browser. Until it lands, the
+Secret above or the admin API ([Models](/guides/models/#the-admin-api)) is how you add a provider.
 
 Install the chart. This is the start of the 15 minutes.
 
@@ -152,7 +166,7 @@ Create a GitHub App first. [GitHub App](/guides/github-app/) lists the permissio
 4. Pick the repository in **Repository 1**, then **Next**.
 5. Press **Create draft**, then **Activate**.
 
-The agent's model is the first one in `model.models`. Its spend limit is the template's `spendUSD`.
+The agent's model is the first model of the org's providers. Its spend limit is the template's `spendUSD`.
 See [Changing in v0.1](#changing-in-v01).
 
 ## 6. Create a ticket
@@ -181,20 +195,33 @@ spend of the run.
 
 ## Changing in v0.1
 
-Today a single model upstream and the template's budget are set in Helm values. ADR 0056 and ADR 0058
-decided larger changes for v0.1. They are **not built yet**, so these pages do not describe them as
-available.
+Providers and models per org exist as Secrets and an admin API under `/admin/v1` (plan item PV1).
+ADR 0056 and ADR 0058 decided more for v0.1. It is **not built yet**, so these pages do not describe
+it as available.
 
-- Providers, models and prices per org, in the UI and in an admin API under `/admin/v1`. Plan items
-  PV1 and PV2. Until then, use `model.*` in Helm values as above.
+- The Providers, models and API tokens pages in the UI, and prices per org with a default price
+  list (plan items W4 and PV2).
 - Org and per-agent budgets that admins set. The template's `spendUSD` becomes only the default.
   Plan item BG1. Until then, the template's `spendUSD` is the agent's limit per UTC calendar day.
-- The Providers, models and budgets pages in the UI (plan item W4).
 - The Kubernetes-mode gateway (plan item G2). See [Gateway modes](/guides/gateway-modes/).
 
 [ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md)
 and [ADR 0058](https://github.com/stateracloud/koinon/blob/main/docs/adr/0058-gateway-modes.md) have
 the decisions.
+
+## Back up the encryption keys
+
+`koinon-api` created a Secret, `koinon-kek`, on its first start, with the key that encrypts the provider
+keys and connection secrets in the database. (The chart renders no key material, so a re-render can
+never replace it.) Back it up now. Without it those values cannot be read, and the backup of
+the database does not help.
+
+```sh
+kubectl -n koinon get secret koinon-kek -o yaml > koinon-kek-backup.yaml
+```
+
+Keep the file where you keep your other secrets. Rotation and the compromise procedure are in the
+[runbook](https://github.com/stateracloud/koinon/blob/main/docs/ops/secret-keys.md).
 
 ## Build the images
 
@@ -235,8 +262,9 @@ The end-to-end test, [`test/e2e/run.sh`](https://github.com/stateracloud/koinon/
 builds a kind cluster and then runs the `e1` blocks above, by name, through
 [`hack/docs-e1.sh`](https://github.com/stateracloud/koinon/blob/main/hack/docs-e1.sh). It does not
 keep its own copy of the commands. Its `kubectl` and `helm` are wrappers that add the kind context.
-Two things differ: `values.yaml` holds the kind values with the fake model server and the fake GitHub
-instead of OpenRouter and github.com, and `OPENROUTER_API_KEY` is a dummy.
+Three things differ: `values.yaml` holds the kind values with the fake GitHub instead of github.com,
+`model-provider.yaml` declares the fake model server instead of OpenRouter, and the wrappers add the
+kind context.
 
 `make docs-check` runs on every pull request. It fails when:
 
