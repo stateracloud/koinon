@@ -20,7 +20,7 @@ import { Link } from '@tanstack/react-router'
 /** BudgetsPage shows the org’s monthly cap, the agents’ daily limits and the notices about them (ADR 0056, plan item BG1). */
 export function BudgetsPage() {
   return (
-    <div className="mx-auto grid max-w-3xl gap-6">
+    <div className="mx-auto grid max-w-3xl grid-cols-[minmax(0,1fr)] gap-6">
       <RequireAdmin what="budgets">
         <BudgetsContent />
       </RequireAdmin>
