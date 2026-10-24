@@ -4,8 +4,9 @@ import { timestampDate } from '@bufbuild/protobuf/wkt'
 import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
-import { getRouteApi, Link } from '@tanstack/react-router'
-import { useMemo } from 'react'
+import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
+import { useMemo, useState } from 'react'
+import { ConfirmAction } from '@/components/confirm-action'
 import { InstallationRepos } from '@/components/installation-repos'
 import { SetupGuideSteps } from '@/components/setup-guide'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -16,6 +17,7 @@ import { isApprover } from '@/lib/approvals'
 import { setupGuide } from '@/lib/connector'
 import { connectionStatusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
+import { boundAgents } from '@/lib/providers'
 
 const route = getRouteApi('/app/connections/$connectionId')
 
@@ -30,6 +32,9 @@ export function ConnectionPage() {
   const c = get.data?.connection
   const guide = useMemo(() => setupGuide(types.data?.connectorTypes.find((t) => t.id === c?.connector)), [types.data, c?.connector])
 
+  const navigate = useNavigate()
+  const remove = useMutation(ConnectionService.method.deleteConnection)
+  const [refusal, setRefusal] = useState<string>()
   const test = useMutation(ConnectionService.method.testConnection, {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) }),
   })
@@ -46,6 +51,8 @@ export function ConnectionPage() {
   const stepIds = new Set(guide.steps.map((s) => s.id))
   const loose = results.filter((r) => !stepIds.has(r.step))
   const gh = c.settings.case === 'github' ? c.settings.value : undefined
+  const declared = c.source === 'secret' && !c.removed
+  const refusedAgents = refusal ? boundAgents(refusal) : []
 
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
@@ -61,6 +68,13 @@ export function ConnectionPage() {
           </Button>
         )}
       </div>
+      {c.source === 'secret' && (
+        <p className="text-muted-foreground text-sm">
+          {c.removed
+            ? `Removed: the Secret ${c.managedBySecret} that declared this connection was deleted. Restore the Secret to bring it back, or delete the connection.`
+            : `Managed by Secret ${c.managedBySecret}. Change or delete that Secret to change this connection.`}
+        </p>
+      )}
       {gh && (
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
           <dt className="text-muted-foreground">App ID</dt>
@@ -97,6 +111,45 @@ export function ConnectionPage() {
             </li>
           ))}
         </ul>
+      )}
+      {isApprover(org.role) && !declared && (
+        <div className="grid gap-2 border-t pt-3">
+          <ConfirmAction
+            label="Delete"
+            subject={`connection ${c.displayName}`}
+            consequence={`Delete ${c.displayName} and its stored private key? Agents can no longer use it.`}
+            confirmLabel="Delete connection"
+            onConfirm={async () => {
+              setRefusal(undefined)
+              await remove.mutateAsync({ orgId, connectionId })
+              await queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) })
+              await navigate({ to: '/connections' })
+            }}
+            onError={setRefusal}
+          />
+        </div>
+      )}
+      {refusal && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription>
+            {refusedAgents.length > 0 ? (
+              <>
+                <p>Agents are still bound to this connection, so it was not deleted. Archive these agents first:</p>
+                <ul className="mt-1 list-disc pl-5">
+                  {refusedAgents.map((a) => (
+                    <li key={a.id}>
+                      <Link to="/agents/$agentId" params={{ agentId: a.id }} className="underline">
+                        {a.name}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              refusal
+            )}
+          </AlertDescription>
+        </Alert>
       )}
       {gh && isApprover(org.role) && <InstallationRepos orgId={orgId} connectionId={connectionId} />}
       <SetupGuideSteps steps={guide.steps} results={results} />
