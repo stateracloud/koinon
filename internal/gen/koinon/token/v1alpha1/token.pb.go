@@ -34,11 +34,18 @@ type Token struct {
 	// prefix is the public part that appears in the token, to tell tokens apart.
 	Prefix string `protobuf:"bytes,3,opt,name=prefix,proto3" json:"prefix,omitempty"`
 	// role is ORG_ROLE_ADMIN or ORG_ROLE_OWNER.
-	Role          v1alpha1.OrgRole       `protobuf:"varint,4,opt,name=role,proto3,enum=koinon.auth.v1alpha1.OrgRole" json:"role,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	RevokedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=revoked_at,json=revokedAt,proto3" json:"revoked_at,omitempty"`
-	LastUsedAt    *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_used_at,json=lastUsedAt,proto3" json:"last_used_at,omitempty"`
+	Role       v1alpha1.OrgRole       `protobuf:"varint,4,opt,name=role,proto3,enum=koinon.auth.v1alpha1.OrgRole" json:"role,omitempty"`
+	CreatedAt  *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ExpiresAt  *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	RevokedAt  *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=revoked_at,json=revokedAt,proto3" json:"revoked_at,omitempty"`
+	LastUsedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_used_at,json=lastUsedAt,proto3" json:"last_used_at,omitempty"`
+	// created_by is the user at the root of the token's chain: who created the first token from a
+	// session. created_by_name is their display name or email.
+	CreatedBy     string `protobuf:"bytes,9,opt,name=created_by,json=createdBy,proto3" json:"created_by,omitempty"`
+	CreatedByName string `protobuf:"bytes,10,opt,name=created_by_name,json=createdByName,proto3" json:"created_by_name,omitempty"`
+	// parent_token_id names the token that created this one, empty for a token made in the UI. A
+	// token dies with its parent.
+	ParentTokenId string `protobuf:"bytes,11,opt,name=parent_token_id,json=parentTokenId,proto3" json:"parent_token_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -127,6 +134,27 @@ func (x *Token) GetLastUsedAt() *timestamppb.Timestamp {
 		return x.LastUsedAt
 	}
 	return nil
+}
+
+func (x *Token) GetCreatedBy() string {
+	if x != nil {
+		return x.CreatedBy
+	}
+	return ""
+}
+
+func (x *Token) GetCreatedByName() string {
+	if x != nil {
+		return x.CreatedByName
+	}
+	return ""
+}
+
+func (x *Token) GetParentTokenId() string {
+	if x != nil {
+		return x.ParentTokenId
+	}
+	return ""
 }
 
 type CreateTokenRequest struct {
@@ -441,7 +469,7 @@ var File_koinon_token_v1alpha1_token_proto protoreflect.FileDescriptor
 
 const file_koinon_token_v1alpha1_token_proto_rawDesc = "" +
 	"\n" +
-	"!koinon/token/v1alpha1/token.proto\x12\x15koinon.token.v1alpha1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fkoinon/auth/v1alpha1/auth.proto\"\xe5\x02\n" +
+	"!koinon/token/v1alpha1/token.proto\x12\x15koinon.token.v1alpha1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fkoinon/auth/v1alpha1/auth.proto\"\xd4\x03\n" +
 	"\x05Token\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -454,7 +482,12 @@ const file_koinon_token_v1alpha1_token_proto_rawDesc = "" +
 	"\n" +
 	"revoked_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\trevokedAt\x12<\n" +
 	"\flast_used_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"lastUsedAt\"\xac\x01\n" +
+	"lastUsedAt\x12\x1d\n" +
+	"\n" +
+	"created_by\x18\t \x01(\tR\tcreatedBy\x12&\n" +
+	"\x0fcreated_by_name\x18\n" +
+	" \x01(\tR\rcreatedByName\x12&\n" +
+	"\x0fparent_token_id\x18\v \x01(\tR\rparentTokenId\"\xac\x01\n" +
 	"\x12CreateTokenRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x121\n" +

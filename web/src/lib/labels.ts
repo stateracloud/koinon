@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { Status as ApprovalStatus } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { ConnectionStatus } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
@@ -114,4 +115,16 @@ const connectionStatusLabels: Record<ConnectionStatus, string> = {
 
 export function connectionStatusLabel(s: ConnectionStatus): string {
   return connectionStatusLabels[s] ?? 'Unknown'
+}
+
+/** The roles an API token can have; viewers and members cannot hold one. */
+export function tokenRoleLabel(r: OrgRole): string {
+  switch (r) {
+    case OrgRole.OWNER:
+      return 'Owner'
+    case OrgRole.ADMIN:
+      return 'Admin'
+    default:
+      return 'Unknown'
+  }
 }

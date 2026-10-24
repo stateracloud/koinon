@@ -10,12 +10,15 @@ import { expect, test } from '@playwright/test'
 const fakeGitHub = process.env.KOINON_E2E_FAKEGITHUB_URL
 const bootstrapPassword = process.env.KOINON_E2E_PASSWORD
 const newPassword = 'e2e-browser-' + Math.random().toString(36).slice(2, 12)
+// The fake model server in the cluster (test/e2e/run.sh passes the address the gateway reaches it by).
+const fakeModelURL = process.env.KOINON_E2E_FAKEMODEL_URL
 const repository = 'koinon-demo/hello'
 const title = 'Add hello.md'
 
 test('sign in, create an agent and a ticket, watch the reply stream, approve, run succeeds', async ({ page, request }) => {
   expect(fakeGitHub, 'KOINON_E2E_FAKEGITHUB_URL').toBeTruthy()
   expect(bootstrapPassword, 'KOINON_E2E_PASSWORD').toBeTruthy()
+  expect(fakeModelURL, 'KOINON_E2E_FAKEMODEL_URL').toBeTruthy()
 
   // 1. Bootstrap admin: sign in, replace the one-time password.
   await page.goto('/')
@@ -31,7 +34,35 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
     await expect(page.getByRole('heading', { level: 2, name: new RegExp(`^${col}`) })).toBeVisible()
   }
 
-  // 2. GitHub connection to the fake GitHub App.
+  // 2. Model provider: added in the UI (the fake model server as an OpenAI-compatible provider), with
+  // one model that has rates. The key is write-only: it is not on the page afterwards.
+  await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Providers' }).click()
+  await expect(page.getByRole('heading', { name: 'Providers', level: 1 })).toBeVisible()
+  await page.getByRole('button', { name: 'Add provider' }).click()
+  const providerForm = page.getByRole('form', { name: 'Add provider' })
+  await providerForm.getByLabel('Name', { exact: true }).fill('fake')
+  await providerForm.getByLabel('Provider type').selectOption('openai')
+  await providerForm.getByLabel('URL').fill(fakeModelURL!)
+  await providerForm.getByLabel('API key').fill('e2e-dummy-key')
+  await providerForm.getByRole('button', { name: 'Add provider' }).click()
+  const provider = page.getByRole('region', { name: 'fake' })
+  await expect(provider).toBeVisible()
+  await expect(provider).toContainText('Stored encrypted; it cannot be shown')
+  await expect(page.locator('body')).not.toContainText('e2e-dummy-key')
+  await provider.getByRole('button', { name: 'Add model to fake' }).click()
+  const modelForm = page.getByRole('form', { name: 'Add model to fake' })
+  await modelForm.getByLabel('Model name').fill('repo-helper')
+  await modelForm.getByLabel('Input rate').fill('0.30')
+  await modelForm.getByLabel('Output rate').fill('1.20')
+  await modelForm.getByRole('button', { name: 'Add model', exact: true }).click()
+  await expect(provider.getByRole('list', { name: 'Models of fake' })).toContainText('default/repo-helper')
+  // A UI-added provider is not served at once: the reconciler picks the row up on its 30 s resync, then
+  // the key reaches agentgateway through the kubelet's Secret sync. That took about 170 s on kind. A run
+  // that starts first fails with "provider authentication required". Nothing in the UI shows when the
+  // gateway has it yet, so wait it out before the agent's first run.
+  await page.waitForTimeout(240_000)
+
+  // 3. GitHub connection to the fake GitHub App.
   const app = (await (await request.get(`${fakeGitHub}/_fake/app`)).json()) as {
     appId: number
     installationId: number
@@ -47,7 +78,7 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   await expect(page.getByRole('heading', { name: 'Fake GitHub' })).toBeVisible()
   await expect(page.getByRole('list', { name: 'Installation repositories' })).toContainText(repository)
 
-  // 3. Agent from the repo-helper template, bound to the repository, activated.
+  // 4. Agent from the repo-helper template, bound to the repository, activated.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Agents' }).click()
   await page.getByRole('link', { name: 'New agent' }).click()
   await page.getByRole('radio', { name: /Repo helper/ }).check()
@@ -62,7 +93,7 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   await page.getByRole('button', { name: 'Activate' }).click()
   await expect(page.getByText('Activated.')).toBeVisible()
 
-  // 4. Ticket: the run starts in a sandbox and streams the agent's reply.
+  // 5. Ticket: the run starts in a sandbox and streams the agent's reply.
   await page.getByRole('link', { name: 'Create a ticket for it on the board' }).click()
   await page.getByLabel('Title').fill(title)
   await page.getByLabel('First message (optional)').fill(`Please add a hello.md to ${repository} that says hello from koinon.`)
@@ -74,13 +105,13 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   // The reply shows exactly once: streamed live, then replaced by the persisted message.
   await expect(timeline.getByText(/I asked for approval to open the pull request/)).toHaveCount(1, { timeout: 8 * 60_000 })
 
-  // 5. The tool call parked the run on an approval; approve it in the browser.
+  // 6. The tool call parked the run on an approval; approve it in the browser.
   const card = page.getByTestId('approval-card')
   await expect(card).toBeVisible()
   await expect(card.getByRole('region', { name: 'Files' })).toContainText('hello.md')
   await card.getByRole('button', { name: 'Approve' }).click()
 
-  // 6. The run resumes and posts the pull request URL; it ends in a terminal state.
+  // 7. The run resumes and posts the pull request URL; it ends in a terminal state.
   await expect(timeline.getByText(/The pull request is open: https:\/\/github\.test\/koinon-demo\/hello\/pull\/1/)).toHaveCount(1, {
     timeout: 5 * 60_000,
   })

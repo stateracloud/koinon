@@ -125,7 +125,7 @@ func (h rpcHandler) ChangePassword(ctx context.Context, req *authv1alpha1.Change
 	} else if !ok {
 		return nil, connect.NewError(connect.CodePermissionDenied, "current password is incorrect")
 	}
-	hash, err := HashPassword(req.GetNewPassword())
+	hash, err := HashPasswordContext(ctx, req.GetNewPassword())
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, "internal error").WithCause(err)
 	}
