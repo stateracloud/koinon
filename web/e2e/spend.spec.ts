@@ -223,6 +223,8 @@ for (const path of ['/settings/prices', '/settings/budgets', '/platform/budgets'
     await mockApi(page, handlers)
     await page.setViewportSize({ width: 320, height: 640 })
     await page.goto(path)
+    // Stress the layout with a wide font, so a runner with other font metrics cannot be the first to overflow it.
+    await page.addStyleTag({ content: '* { font-family: "Courier New", monospace !important; }' })
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
     if (path === '/settings/prices') {
       await page.getByRole('button', { name: 'Add price' }).first().click()
@@ -230,7 +232,10 @@ for (const path of ['/settings/prices', '/settings/budgets', '/platform/budgets'
     }
     if (path === '/settings/budgets') await page.getByRole('button', { name: 'Change cap' }).click()
     const overflow = await page.evaluate<number>('document.documentElement.scrollWidth - document.documentElement.clientWidth')
-    const wide = await page.evaluate<string[]>("[...document.querySelectorAll('body *')].filter((e) => e.getBoundingClientRect().right > 321).slice(0, 5).map((e) => e.tagName + '.' + e.className)")
+    // Elements past the right edge, and elements whose own content scrolls sideways (a long string in a box).
+    const wide = await page.evaluate<string[]>(
+      "[...document.querySelectorAll('body *')].filter((e) => e.getBoundingClientRect().right > 321 || e.scrollWidth > e.clientWidth + 1).slice(0, 30).map((e) => e.tagName + '.' + e.className + ' sw=' + e.scrollWidth + ' cw=' + e.clientWidth + ' ' + (e.textContent || '').slice(0, 30))",
+    )
     expect(overflow, wide.join(' | ')).toBeLessThanOrEqual(0)
     await expectAccessible(page)
   })

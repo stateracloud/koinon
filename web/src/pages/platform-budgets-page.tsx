@@ -19,7 +19,7 @@ import { formatUSD } from '@/lib/cost'
 export function PlatformBudgetsPage() {
   const who = useQuery(AuthService.method.whoAmI, {})
   return (
-    <div className="mx-auto grid max-w-3xl gap-4">
+    <div className="mx-auto grid max-w-3xl grid-cols-[minmax(0,1fr)] gap-4">
       {who.isPending ? (
         <p role="status">Loading…</p>
       ) : who.data?.platformAdmin ? (
