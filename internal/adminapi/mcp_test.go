@@ -99,6 +99,9 @@ var _ = Describe("remote MCP servers", func() {
 		code, raw = e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+s.ID+"/tools/search/tier", map[string]any{"tier": "auto"})
 		Expect(code).To(Equal(http.StatusOK), string(raw))
 		Expect(decode[mcpToolJSON](raw).Tier).To(Equal("auto"))
+		code, raw = e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+s.ID+"/tools/search/two-approvers", map[string]any{"required": true})
+		Expect(code).To(Equal(http.StatusOK), string(raw))
+		Expect(string(raw)).To(ContainSubstring(`"requiresTwoApprovers":true`))
 		code, _ = e.call(ctx, e.token, http.MethodPut, "/mcp-servers/"+s.ID+"/tools/search/tier", map[string]any{"tier": "sometimes"})
 		Expect(code).To(Equal(http.StatusBadRequest))
 

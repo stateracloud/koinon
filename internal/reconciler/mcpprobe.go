@@ -16,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
@@ -31,27 +30,24 @@ import (
 //
 // The gateway runs with failureMode failOpen, so a target it cannot reach is skipped without an error
 // and its tools are simply missing from the list; "no tools" is therefore the failure the prober
-// sees. Before the failure that makes a server unhealthy is recorded, the prober asks the server
-// directly (mcpservers.Diagnose) why, so the Servers page can say "connection refused" or "the server
-// rejected the credential" instead of guessing.
+// sees. The reason is only what the gateway returned: the credential never leaves the gateway, so the
+// prober does not ask the server itself.
 
 // mcpProbe is one server the prober lists.
 type mcpProbe struct {
-	org        pgtype.UUID
-	orgSlug    string
-	server     pgtype.UUID
-	name       string
-	target     string
-	material   string
-	row        store.McpServer
-	credential string
+	org      pgtype.UUID
+	orgSlug  string
+	server   pgtype.UUID
+	name     string
+	target   string
+	material string
 }
 
 const (
 	mcpProbeTimeout    = 20 * time.Second
 	mcpProbeParallel   = 8
 	mcpMaxToolPages    = 20
-	reasonNoTools      = "the gateway got no tools from the server: it is unreachable, rejected the credential or lists none"
+	reasonNoTools      = "the gateway got no tools from the server: it is unreachable, rejected the credential or lists none (the gateway does not say which)"
 	reasonGatewayError = "the gateway refused or failed the probe"
 )
 
@@ -158,20 +154,11 @@ func (r *Reconciler) probeOne(ctx context.Context, p mcpProbe) {
 		reason = reasonNoTools
 	}
 	if reason != "" {
-		cur, err := r.serverByID(ctx, p.org, p.server)
-		if errors.Is(err, errNoServer) {
+		// Only what the gateway returned: the server's credential never leaves the gateway, so the
+		// prober cannot ask the server itself why.
+		if _, changed, err := r.mcp.RecordProbe(ctx, p.org, p.server, false, reason, false); errors.Is(err, mcpservers.ErrNotFound) {
 			return
-		}
-		if err == nil && int(cur.ConsecutiveFailures)+1 >= mcpservers.FailureThreshold {
-			d := r.cfg.DiagnoseMCP(ctx, r.cfg.URLPolicy, mcpservers.PreflightRequest{
-				URL: p.row.Url, Transport: string(p.row.Transport), Header: p.row.CredentialHeader.String,
-				Prefix: p.row.CredentialPrefix, Value: p.credential,
-			})
-			if d.Reason != "" {
-				reason = d.Reason
-			}
-		}
-		if _, changed, err := r.mcp.RecordProbe(ctx, p.org, p.server, false, reason, false); err != nil {
+		} else if err != nil {
 			log.Warn("recording an MCP probe failed", "err", err)
 		} else if changed {
 			log.Warn("MCP server is unhealthy; its tools are withdrawn from agents", "reason", reason)

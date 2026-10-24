@@ -149,6 +149,8 @@ message Approval {
   oneof call {
     PullRequestCall pull_request = 14;
     CommentCall comment = 15;
+    // mcp is set for a call to a remote MCP server (connector "mcp").
+    McpCall mcp = 28;
   }
   string decided_by = 16;
   google.protobuf.Timestamp decided_at = 17;
@@ -164,6 +166,26 @@ message Approval {
   // Whether the caller may approve or deny it (admins and owners, while it
   // is pending).
   bool can_decide = 25;
+  // approvals_required is 2 when the tool needs two approvers (a distinct second person, neither of
+  // them the ticket's creator), else 1.
+  int32 approvals_required = 26;
+  // first_approver is the user ID of the first of two approvals, once given; the request stays pending.
+  string first_approver = 27;
+}
+
+// McpCall describes a call to a remote MCP server (ADR 0057). The call is bound to the server, its URL
+// and the version of the tool's description and schema at the time of the request.
+message McpCall {
+  string server_id = 1;
+  string server_name = 2;
+  // content_hash is the SHA-256 of the tool's description and schema the request was made against.
+  string content_hash = 3;
+  // current_content_hash is the tool's version now; when it differs the call will not run.
+  string current_content_hash = 4;
+  // review_reason is set while the tool is flagged for review (its description or schema changed).
+  string review_reason = 5;
+  // tool_description is the tool's current description, so the approver reads what the agent read.
+  string tool_description = 6;
 }
 
 // ListApprovalsRequest names the org and, optionally, a ticket.

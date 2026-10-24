@@ -21,7 +21,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stateracloud/koinon/internal/audit"
-	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
@@ -233,9 +232,6 @@ var _ = Describe("Org MCP servers", func() {
 				Gateway: reconciler.Endpoint{Host: host, Port: uint32(port)}, Keys: ring,
 				ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 				ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, Logger: slog.New(slog.DiscardHandler),
-				DiagnoseMCP: func(context.Context, catalog.URLPolicy, mcpservers.PreflightRequest) mcpservers.Diagnosis {
-					return mcpservers.Diagnosis{Reason: "connection refused"}
-				},
 			})
 			Expect(err).NotTo(HaveOccurred())
 			return rr
@@ -285,10 +281,45 @@ var _ = Describe("Org MCP servers", func() {
 					Expect(got.Health).NotTo(Equal("unhealthy"))
 				} else {
 					Expect(got.Health).To(Equal("unhealthy"))
-					Expect(got.HealthReason).To(Equal("connection refused"))
+					Expect(got.HealthReason).To(ContainSubstring("the gateway got no tools"))
 				}
 			}
 		})
+	})
+
+	It("gives each org with servers an executor key that opens its servers only, kept in a Secret koinon-api reads", func(ctx SpecContext) {
+		server(ctx, org, "wiki", "", map[string]string{"read": "auto"})
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		st := mg.last()
+		exec := gateway.AgentRef{Org: slug, Name: gateway.MCPExecAgentName}
+		Expect(st.Tools[exec]).To(Equal([]gateway.ToolGrant{{Target: slug + "-wiki", All: true}}))
+		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, mcpservers.ExecSecretName(org), metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sec.Data[mcpservers.ExecKeyDataKey]).NotTo(BeEmpty())
+		By("the same key is kept on the next pass")
+		var before string
+		for _, k := range st.Keys {
+			if k.Agent == exec {
+				before = k.ID
+			}
+		}
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		var after string
+		for _, k := range mg.last().Keys {
+			if k.Agent == exec {
+				after = k.ID
+			}
+		}
+		Expect(after).To(Equal(before))
+		Expect(before).NotTo(BeEmpty())
+	})
+
+	It("offers no tool whose name agents could not use", func(ctx SpecContext) {
+		s := server(ctx, org, "wiki", "", map[string]string{"fine": "auto", "has.dot": "auto", "a_very_long_tool_name_that_is_far_too_long_for_a_model_api_to_accept": "auto"})
+		a := newAgent(ctx, org, user)
+		allow(ctx, a, s, nil)
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		Expect(mg.last().Tools[ref(slug, a)]).To(Equal([]gateway.ToolGrant{{Target: slug + "-wiki", Tools: []string{"fine"}}}))
 	})
 
 	It("does not serve a server whose URL the policy denies, and still serves the others", func(ctx SpecContext) {
@@ -303,6 +334,34 @@ var _ = Describe("Org MCP servers", func() {
 		Expect(ok).To(BeTrue())
 		_, ok = targetOf(mg.last(), slug+"-bad")
 		Expect(ok).To(BeFalse())
+	})
+
+	It("reserves the approval target names too: one org's server cannot take another's -ask name", func(ctx SpecContext) {
+		// Org "x8a-b" with the server "ask" would be the target x8a-b-ask, the approval target of org
+		// "x8a" with the server "b". The name "ask" is refused by the service, so force the row.
+		prefix := uniq("x8a")
+		mk := func(slug string) pgtype.UUID {
+			o, _ := newOrgWithSlug(ctx, slug)
+			return o
+		}
+		o1, o2 := mk(prefix+"-b"), mk(prefix)
+		DeferCleanup(func(ctx SpecContext) {
+			_, _ = pool.Exec(ctx, `DELETE FROM mcp_servers WHERE org_id IN ($1, $2)`, o1, o2)
+		})
+		_, err := svc.Create(ctx, o2, audit.System(), pgtype.UUID{}, mcpservers.Input{Name: "b", URL: "https://mcp.example.com/x"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = svc.Create(ctx, o1, audit.System(), pgtype.UUID{}, mcpservers.Input{Name: "ask2", URL: "https://mcp.example.com/y"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `UPDATE mcp_servers SET name = 'ask' WHERE org_id = $1`, o1)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring(prefix + "-b-ask")))
+		n := 0
+		for _, t := range mg.last().MCP {
+			if t.Name == prefix+"-b-ask" || t.Name == prefix+"-b" {
+				n++
+			}
+		}
+		Expect(n).To(Equal(1), "only the first org's server is served")
 	})
 
 	It("reports a gateway target name that two orgs would share, and serves the first only", func(ctx SpecContext) {

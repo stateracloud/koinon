@@ -118,8 +118,33 @@ const (
 	ReasonRemoved = "its Kubernetes Secret was deleted; restore the Secret or delete this entry"
 )
 
-// Review reasons.
-const ReviewChanged = "the tool's description or input schema changed since an admin last reviewed it"
+// Review reasons. A changed auto tool drops to the ask tier until an admin reviews it.
+const (
+	ReviewChanged        = "the tool's description or input schema changed since an admin last reviewed it"
+	ReviewChangedDemoted = "the tool's description or input schema changed since an admin last reviewed it; it was moved from auto to ask until you review it"
+)
+
+// MaxToolNameLen is what model APIs accept of a tool name. Agents see
+// "mcp__koinon__<org>-<server>-ask_<tool>" at most (the longest harness prefix, the gateway's target
+// prefix and, for ask-tier tools, the -ask suffix), made of [A-Za-z0-9_-].
+const (
+	MaxToolNameLen   = 64
+	harnessPrefixLen = len("mcp__koinon__")
+)
+
+// ToolNameProblem says why the tool cannot be offered to agents under its name, or "" if it can. A
+// tool is judged by its longest form (the ask target), so a tier change never changes the verdict.
+func ToolNameProblem(orgSlug, server, tool string) string {
+	for _, r := range tool {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' && r != '-' {
+			return "unavailable: the tool's name has characters (such as '.') that model APIs do not accept"
+		}
+	}
+	if n := harnessPrefixLen + len(AskTargetName(orgSlug, server)) + 1 + len(tool); n > MaxToolNameLen {
+		return fmt.Sprintf("unavailable: name too long (%d characters with the prefixes agents see; models accept %d)", n, MaxToolNameLen)
+	}
+	return ""
+}
 
 // NameMaxLen is the longest server name: the gateway target is "<org slug>-<name>" and a target
 // name is at most 63 characters, an org slug at most 40.
@@ -179,14 +204,20 @@ type Tool struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	// ReadOnlyHint is the server's own claim; an admin decides the tier.
-	ReadOnlyHint bool       `json:"readOnlyHint"`
-	Tier         string     `json:"tier"`
-	ReviewReason string     `json:"reviewReason,omitempty"`
-	Present      bool       `json:"present"`
-	FirstSeenAt  time.Time  `json:"firstSeenAt"`
-	LastSeenAt   time.Time  `json:"lastSeenAt"`
-	TierSetBy    string     `json:"tierSetBy,omitempty"`
-	TierSetAt    *time.Time `json:"tierSetAt,omitempty"`
+	ReadOnlyHint bool   `json:"readOnlyHint"`
+	Tier         string `json:"tier"`
+	ReviewReason string `json:"reviewReason,omitempty"`
+	// RequiresTwoApprovers makes a call in the ask tier need two approvers.
+	RequiresTwoApprovers bool `json:"requiresTwoApprovers,omitempty"`
+	// ContentHash identifies the description and schema as they were last published.
+	ContentHash string `json:"contentHash"`
+	// Unavailable says why agents cannot be offered the tool, for example a name too long.
+	Unavailable string     `json:"unavailable,omitempty"`
+	Present     bool       `json:"present"`
+	FirstSeenAt time.Time  `json:"firstSeenAt"`
+	LastSeenAt  time.Time  `json:"lastSeenAt"`
+	TierSetBy   string     `json:"tierSetBy,omitempty"`
+	TierSetAt   *time.Time `json:"tierSetAt,omitempty"`
 }
 
 // Service is the MCP server service layer.
@@ -202,13 +233,11 @@ type Service struct {
 // example because the server needs per-user OAuth.
 type Preflight func(ctx context.Context, p PreflightRequest) error
 
-// PreflightRequest is what Preflight may use. Value is the secret; implementations send it only to URL.
+// PreflightRequest is what Preflight may use. The secret is not part of it: the add-time check is
+// anonymous (see Diagnose).
 type PreflightRequest struct {
 	URL       string
 	Transport string
-	Header    string
-	Prefix    string
-	Value     string
 }
 
 // New returns a Service. keys may be nil; servers with a credential then cannot be written.
@@ -274,6 +303,7 @@ func toTool(t store.McpTool) Tool {
 	return Tool{
 		ServerID: t.ServerID.String(), Name: t.Name, Description: t.Description, ReadOnlyHint: t.ReadOnlyHint,
 		Tier: string(t.Tier), ReviewReason: t.ReviewReason.String, Present: t.Present,
+		RequiresTwoApprovers: t.RequiresTwoApprovers, ContentHash: t.ContentHash,
 		FirstSeenAt: t.FirstSeenAt.Time, LastSeenAt: t.LastSeenAt.Time, TierSetBy: t.TierSetBy.String, TierSetAt: timePtr(t.TierSetAt),
 	}
 }
@@ -289,6 +319,9 @@ func serverSummary(r store.McpServer) map[string]any {
 func ValidateName(name string) error {
 	if !namePattern.MatchString(name) {
 		return invalid("name must be 1 to %d characters of a-z, 0-9 and '-', starting and ending with a letter or digit", NameMaxLen)
+	}
+	if name == "ask" {
+		return invalid("name must not be %q, which the gateway uses for the approval-gated targets", name)
 	}
 	if strings.HasSuffix(name, AskSuffix) {
 		return invalid("name must not end in %q, which the gateway uses for the approval-gated tools of a server", AskSuffix)
@@ -449,7 +482,7 @@ func (s *Service) Create(ctx context.Context, org pgtype.UUID, actor audit.Actor
 	if err := s.policy.Check(ctx, in.URL); err != nil {
 		return Server{}, err
 	}
-	if err := s.runPreflight(ctx, in.URL, in.Transport, in.CredentialHeader, in.CredentialPrefix, in.CredentialValue); err != nil {
+	if err := s.runPreflight(ctx, in.URL, in.Transport); err != nil {
 		return Server{}, err
 	}
 	id, err := newID()
@@ -488,11 +521,11 @@ func prefixIf(prefix string, has bool) string {
 	return prefix
 }
 
-func (s *Service) runPreflight(ctx context.Context, rawURL, transport, header, prefix, value string) error {
+func (s *Service) runPreflight(ctx context.Context, rawURL, transport string) error {
 	if s.preflight == nil {
 		return nil
 	}
-	return s.preflight(ctx, PreflightRequest{URL: rawURL, Transport: transport, Header: header, Prefix: prefix, Value: value})
+	return s.preflight(ctx, PreflightRequest{URL: rawURL, Transport: transport})
 }
 
 // Update changes a server entered by a person.
@@ -546,10 +579,8 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		if err := s.policy.Check(ctx, u); err != nil {
 			return err
 		}
-		if u != cur.Url || transport != string(cur.Transport) || value != "" {
-			// Only a new secret is available to preflight; with the stored one the check would need
-			// the keyring and would only repeat the first.
-			if err := s.runPreflight(ctx, u, transport, header, prefix, value); err != nil {
+		if u != cur.Url || transport != string(cur.Transport) {
+			if err := s.runPreflight(ctx, u, transport); err != nil {
 				return err
 			}
 		}
@@ -620,11 +651,58 @@ func (s *Service) Tools(ctx context.Context, org pgtype.UUID, serverID string) (
 			return nil, err
 		}
 	}
+	slug, err := q.GetOrgSlug(ctx, org)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	names := map[pgtype.UUID]string{}
+	servers, err := q.ListMCPServers(ctx, org)
+	if err != nil {
+		return nil, err
+	}
+	for _, sv := range servers {
+		names[sv.ID] = sv.Name
+	}
 	out := make([]Tool, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, toTool(r))
+		t := toTool(r)
+		t.Unavailable = ToolNameProblem(slug, names[r.ServerID], r.Name)
+		out = append(out, t)
 	}
 	return out, nil
+}
+
+// SetTwoApprovers turns the two-approver requirement of a tool on or off. It is off by default and
+// applies to calls in the ask tier. Works on declared servers too.
+func (s *Service) SetTwoApprovers(ctx context.Context, org pgtype.UUID, actor audit.Actor, serverID, tool string, required bool) (Tool, error) {
+	sid, err := parseID(serverID)
+	if err != nil {
+		return Tool{}, err
+	}
+	var out store.McpTool
+	err = s.tx(ctx, func(q *store.Queries) error {
+		srv, err := q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: sid})
+		if err != nil {
+			return err
+		}
+		cur, err := q.GetMCPTool(ctx, store.GetMCPToolParams{OrgID: org, ServerID: sid, Name: tool})
+		if err != nil {
+			return err
+		}
+		out, err = q.SetMCPToolTwoApprovers(ctx, store.SetMCPToolTwoApproversParams{OrgID: org, ServerID: sid, Name: tool, Required: required})
+		if err != nil {
+			return err
+		}
+		return audit.RecordErr(ctx, q, audit.Event{
+			Org: org, Actor: actor, Action: "mcp_tool.two_approvers", TargetKind: "mcp_tool", TargetID: serverID + "/" + tool,
+			Before: map[string]any{"server": srv.Name, "tool": tool, "required": cur.RequiresTwoApprovers},
+			After:  map[string]any{"server": srv.Name, "tool": tool, "required": required},
+		})
+	})
+	if err != nil {
+		return Tool{}, mapErr(err)
+	}
+	return toTool(out), nil
 }
 
 // SetTier moves a tool to a tier. It works on declared servers too: tiers are decisions about
@@ -729,6 +807,8 @@ func canonicalJSON(raw json.RawMessage) []byte {
 type SyncResult struct {
 	New     []string
 	Changed []string
+	// Demoted are the changed tools that were in the auto tier and moved to ask.
+	Demoted []string
 	Absent  []string
 }
 
@@ -776,9 +856,14 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 				}
 				res.New = append(res.New, lt.Name)
 			case cur.ContentHash != hash:
+				reason := ReviewChanged
+				if cur.Tier == store.McpTierAuto {
+					reason = ReviewChangedDemoted
+					res.Demoted = append(res.Demoted, lt.Name)
+				}
 				if _, err := q.UpdateMCPToolContent(ctx, store.UpdateMCPToolContentParams{
 					OrgID: org, ServerID: serverID, Name: lt.Name, Description: desc, InputSchema: schema, ContentHash: hash,
-					ReadOnlyHint: lt.ReadOnlyHint, ReviewReason: pgtype.Text{String: ReviewChanged, Valid: true},
+					ReadOnlyHint: lt.ReadOnlyHint, ReviewReason: pgtype.Text{String: reason, Valid: true},
 				}); err != nil {
 					return err
 				}
@@ -804,10 +889,11 @@ func (s *Service) SyncTools(ctx context.Context, org pgtype.UUID, serverID pgtyp
 		}
 		slices.Sort(res.New)
 		slices.Sort(res.Changed)
+		slices.Sort(res.Demoted)
 		slices.Sort(res.Absent)
 		return audit.RecordErr(ctx, q, audit.Event{
 			Org: org, Actor: audit.System(), Action: "mcp_tool.sync", TargetKind: "mcp_server", TargetID: serverID.String(),
-			After: map[string]any{"server": srv.Name, "new": res.New, "changed": res.Changed, "absent": res.Absent},
+			After: map[string]any{"server": srv.Name, "new": res.New, "changed": res.Changed, "demoted": res.Demoted, "absent": res.Absent},
 		})
 	})
 	return res, mapErr(err)

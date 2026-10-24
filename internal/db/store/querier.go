@@ -464,6 +464,8 @@ type Querier interface {
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
+	// The first of two approvals: remembered, the request stays pending.
+	SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error)
 	// Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays
 	// until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
 	// at the next start.
@@ -471,6 +473,7 @@ type Querier interface {
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)
+	SetMCPToolTwoApprovers(ctx context.Context, arg SetMCPToolTwoApproversParams) (McpTool, error)
 	SetModelDisabled(ctx context.Context, arg SetModelDisabledParams) error
 	SetOrgIdentityMode(ctx context.Context, arg SetOrgIdentityModeParams) error
 	// Sets or clears (NULL) the org's monthly cap, keeping its platform ceiling.
@@ -512,7 +515,7 @@ type Querier interface {
 	// A change of the URL, transport or credential starts health over: the new settings are unproven.
 	UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error)
 	// The server published a different description or schema for a known tool: remember it and flag
-	// the tool for review. The tier stays (the flag does not block).
+	// the tool for review. An auto tool drops to ask until an admin reviews it; ask and never stay.
 	UpdateMCPToolContent(ctx context.Context, arg UpdateMCPToolContentParams) (McpTool, error)
 	UpdateModel(ctx context.Context, arg UpdateModelParams) (Model, error)
 	UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error)

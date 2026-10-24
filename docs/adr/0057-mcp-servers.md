@@ -84,13 +84,21 @@ procoduck decided these points on 2026-10-24. They answer the open questions abo
    now `egress.allowedInternalHosts` (chart value; `--egress-allowed-hosts`). `providers.allowedInternalHosts`
    (`--provider-allowed-hosts`) stays as a deprecated alias for one release; both are read and joined. The
    gateway's egress NetworkPolicy already allows the public internet and `networkPolicy.gatewayEgressTo`,
-   so it covers MCP targets too. koinon-api's own calls to a server (below) use a dialer that refuses the
-   addresses the policy denies.
-4. **Gateway targets.** The target is named `<org slug>-<server>` (at most 63 characters, which the 24 and
-   40 character limits guarantee), so an agent sees its tools as `<org slug>-<server>_<tool>` whenever
-   it has more than one visible target. Two orgs can reach the same name (`a-b` with `c`, and `a` with `b-c`):
+   so it covers MCP targets too. Every call to a server goes through the gateway, so its egress policy
+   applies to all of them. The one direct request is the anonymous OAuth check when a server is added (item
+   2), which dials only addresses the policy allows and carries no credential.
+4. **Gateway targets and tool names.** The target is named `<org slug>-<server>` (at most 63 characters,
+   which the 24 and 40 character limits guarantee). The gateway runs with `prefixMode: always`, so a tool is
+   always `<target>_<tool>` and never changes when an org adds a server: `github_create_pull_request`,
+   `acme-tracker_search`, and the readiness prompt `github_koinon-ready`. The `mcpAuthorization` rules match
+   the unprefixed target and tool names (verified with the real binary), so grants and the GitHub ask-tier
+   tools are unchanged; the harness' own prefix still goes in front (`koinon_github_create_pull_request`).
+   Agents see at most `mcp__koinon__<org>-<server>-ask_<tool>`, and model APIs accept 64 characters of
+   `[A-Za-z0-9_-]`, so a tool whose name would exceed that, or has other characters, is not offered and the
+   Servers page says "unavailable". Two orgs can reach the same name (`a-b` with `c`, and `a` with `b-c`):
    the reconciler serves the first and reports the other, instead of letting one config error stop the
-   gateway. The names `...-ask` are reserved for the approval-gated targets below. Each org target has a CEL
+   gateway. The approval-gated targets (`<target>-ask`, below) take part in that check, and the server
+   names `ask` and `*-ask` are refused. Each org target has a CEL
    `condition` (`apiKey.org == "<slug>"`), so another org's key never reaches the server, besides the agents'
    own `mcpAuthorization` allow rules. `failureMode` is `failOpen`: a server that cannot be reached is
    skipped.
@@ -102,24 +110,34 @@ procoduck decided these points on 2026-10-24. They answer the open questions abo
 6. **Tool tiers.** Every tool of a new server starts in the **ask** tier, until an admin marks it **auto**
    or **never**. An MCP `readOnlyHint` is only a suggestion, shown in the UI. A tool a server adds later
    enters the ask tier for an agent that allows the whole server. A known tool whose description or input
-   schema changes (a SHA-256 over both, canonical JSON) keeps its tier and is flagged for review on the
-   Servers page; the flag does not block, and a tier decision or "mark reviewed" clears it.
+   schema changes (a SHA-256 over both, canonical JSON) is flagged for review on the Servers page. An
+   **auto** tool that changes drops to **ask** until an admin reviews it and sets auto again ("mark
+   reviewed" clears the flag but does not restore auto); **ask** and **never** tools are only flagged.
+   A tool can require **two approvers** (off by default, `requires_two_approvers`): two distinct admins or
+   owners must approve the exact call, and neither may be the person who created the ticket (they asked for
+   the work; the second pair of eyes is the point). The first approval leaves the request pending. Either
+   approver can deny. An org with one admin simply leaves the flag off.
 7. **How the ask tier works for a server Koinon does not run.** agentgateway cannot park a call, so an
    agent's allowed ask-tier tools are offered by a second target, `<org slug>-<server>-ask`, that points at
    koinon-api's tools listener (`/mcp-ask/<server>`, reachable from the gateway only). It lists the same
    tools with the server's own schema and answers a call at once with "approval requested", recording the
-   exact canonical arguments as an approval request (ADR 0042). After approval, koinon-api opens the
-   credential and calls the server itself with the exact arguments, and the run resumes with the result. A
-   tool moved to never since the request is not called. The auto tier is offered on the server's own target,
+   exact canonical arguments as an approval request (ADR 0042), bound to the server's ID, a hash of its
+   URL and the tool's content hash. After approval, koinon-api makes the call **through the gateway** with a
+   per-org executor key (the reconciler issues it and keeps it in a Secret koinon-api reads; it opens only
+   that org's targets), so the gateway's egress policy and credential injection apply and koinon-api never
+   holds or sends a server credential. The arguments are passed as the approved bytes, not decoded and
+   re-encoded (big integers and `1.0` survive). The executor refuses the call (permanently) if the server,
+   its URL or the tool's content changed, the tool is in the never tier, or the agent's allowance is gone.
+   Only a failure before the request is sent is retried; once it is sent, a lost answer fails the request
+   with "outcome unknown" and it is never run again. The auto tier is offered on the server's own target,
    directly through the gateway.
 8. **Health.** The reconciler probes each served server every 60 s through the gateway with a probe key
    (initialize and `tools/list`, as an agent would), which also syncs the tool list. With `failOpen` an
-   unreachable target is skipped without an error, so "no tools came back" is the failure the prober sees;
-   before it records the failure that makes a server unhealthy it asks the server directly why (connection
-   refused, rejected credential, OAuth) so the Servers page can say. Three failures in a row make a server
-   **unhealthy**: its tools leave every agent's grants on the next pass (its target stays, so recovery is
-   seen), and agentd tells the agent at the start of a session which allowed servers are down. One
-   successful probe makes it healthy again.
+   unreachable target is skipped without an error, so "no tools came back" is the failure the prober sees,
+   and the Servers page shows that: the credential never leaves the gateway, so the prober cannot ask the
+   server why. Three failures in a row make a server **unhealthy**: its tools leave every agent's grants on
+   the next pass (its target stays, so recovery is seen), and agentd tells the agent at the start of a
+   session which allowed servers are down. One successful probe makes it healthy again.
 9. **Allowlists** are stored per agent and server, optionally narrowed to tools, and edited live by admins
    (not through agent versions, whose approval covers connector grants). The reconciler renders them as
    `mcpAuthorization` rules by tier. Nothing is allowed by default.
@@ -139,9 +157,12 @@ Verified in the gateway spec suite with the real binary:
 - Another org's target is invisible in `tools/list` and `tools/call` (`unknown service`) even to an agent
   whose rules name it; the server is not contacted.
 - With `failOpen` an unreachable target is skipped in `initialize`, `tools/list` and notifications.
-- Tool names are prefixed `<target>_` whenever more than one target is visible to the key. The platform's
-  `github` tool target is visible to every key, so an org that adds a server sees `github_` in front of the
-  GitHub tools too; the harness' own prefix is in front of that.
+- With `prefixMode: always`, tools and prompts are named `<target>_<name>` for every key, and the
+  `mcpAuthorization` rules still match the unprefixed `mcp.tool.target` and `mcp.tool.name`.
+- A lone org target with a condition is rejected; Koinon renders a placeholder second target whose condition
+  is false, so the per-org condition always applies to `initialize` and lists too.
+- A static `credentials[]` entry is the only way to write a credential header; with no target using
+  `Authorization`, the agent's gateway key is still not forwarded.
 
 ### Consequences of the amendment
 
@@ -149,8 +170,10 @@ Verified in the gateway spec suite with the real binary:
   trusts it.
 - Negative: a new credential takes about three minutes to reach the gateway (the kubelet's Secret sync);
   the server is not served until it has.
-- Negative: koinon-api calls remote servers for approved ask-tier calls and for the add-time OAuth check,
-  so it needs egress to them (the chart does not restrict koinon-api's egress).
+- Negative: koinon-api makes one anonymous request to a new server to detect OAuth, so it needs egress to
+  it at that moment (the chart does not restrict koinon-api's egress); nothing else it does reaches a server.
+- Negative: a rotated executor key and a restarted reconciler cost nothing, but a Secret deleted by hand
+  stops approved calls (they retry) until the next reconcile pass writes a new key.
 - Negative: one target-name clash between orgs leaves one server unserved until a name changes.
 
 ## Upstream verification

@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -35,7 +34,7 @@ import (
 // every agent's grants, while its target stays so the prober can see it recover.
 
 // mcpProbeAgentPrefix starts the name of the per-server probe agent, a key that only the prober holds.
-const mcpProbeAgentPrefix = "mcp-probe-"
+const mcpProbeAgentPrefix = gateway.MCPProbeAgentPrefix
 
 // servedServer is an MCP server a pass renders.
 type servedServer struct {
@@ -43,10 +42,8 @@ type servedServer struct {
 	row    store.McpServer
 	target string
 	// file is the credential's data key in the provider keys Secret, "" for a server without one.
-	file string
-	// credential is the opened secret, kept for the prober's diagnosis; never logged.
-	credential string
-	tools      []store.McpTool
+	file  string
+	tools []store.McpTool
 }
 
 func (s *servedServer) probeAgent() gateway.AgentRef {
@@ -74,8 +71,13 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 		}
 		for _, row := range rows {
 			name := mcpservers.TargetName(org.Slug, row.Name)
+			ask := mcpservers.AskTargetName(org.Slug, row.Name)
 			if other, ok := owner[name]; ok {
 				errs = append(errs, fmt.Errorf("MCP server %s/%s not served: its gateway target %q is also the target of %s", org.Slug, row.Name, name, other))
+				continue
+			}
+			if other, ok := owner[ask]; ok {
+				errs = append(errs, fmt.Errorf("MCP server %s/%s not served: its approval target %q is also the target of %s", org.Slug, row.Name, ask, other))
 				continue
 			}
 			if err := r.cfg.URLPolicy.CheckStrict(ctx, row.Url); err != nil {
@@ -91,7 +93,6 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 				}
 				sum := sha256.Sum256(row.Credential)
 				s.file = "mcp-" + execution.UUIDString(row.ID.Bytes) + "-" + hex.EncodeToString(sum[:4])
-				s.credential = cred
 				out.files[s.file] = []byte(cred)
 			}
 			tools, err := r.q.ListMCPToolsOfServer(ctx, store.ListMCPToolsOfServerParams{OrgID: org.ID, ServerID: row.ID})
@@ -99,7 +100,7 @@ func (r *Reconciler) loadMCP(ctx context.Context, orgs []store.ListOrgsToReconci
 				return out, errs, fmt.Errorf("reconciler: list tools of MCP server %s/%s: %w", org.Slug, row.Name, err)
 			}
 			s.tools = tools
-			owner[name] = org.Slug + "/" + row.Name
+			owner[name], owner[ask] = org.Slug+"/"+row.Name, org.Slug+"/"+row.Name
 			out.servers = append(out.servers, s)
 		}
 	}
@@ -175,6 +176,9 @@ func mcpGrants(allowed []allowedMCP, served *servedMCP) (direct, ask []gateway.T
 			if !t.Present || (a.tools != nil && !slices.Contains(a.tools, t.Name)) {
 				continue
 			}
+			if mcpservers.ToolNameProblem(s.org.Slug, s.row.Name, t.Name) != "" {
+				continue // agents cannot use a name this long or with these characters
+			}
 			switch t.Tier {
 			case store.McpTierAuto:
 				auto = append(auto, t.Name)
@@ -245,6 +249,24 @@ func (r *Reconciler) applyMCP(ctx context.Context, state *gateway.State, served 
 		}
 	}
 	var probes []mcpProbe
+	execGrants := map[string][]gateway.ToolGrant{}
+	execOrg := map[string]store.ListOrgsToReconcileRow{}
+	for _, s := range served.servers {
+		execGrants[s.org.Slug] = append(execGrants[s.org.Slug], gateway.ToolGrant{Target: s.target, All: true})
+		execOrg[s.org.Slug] = s.org
+	}
+	// Each org with servers gets an executor key, for the calls a human approved: they go through the
+	// gateway like any call (its egress policy, its credential injection), so koinon-api never holds
+	// a server credential. The key opens that org's servers only (the target conditions).
+	for slug, grants := range execGrants {
+		ref := gateway.AgentRef{Org: slug, Name: gateway.MCPExecAgentName}
+		key, err := r.execKey(ctx, execOrg[slug], ref)
+		if err != nil {
+			return nil, err
+		}
+		state.AddKey(key)
+		state.GrantTools(ref, grants...)
+	}
 	for _, s := range served.servers {
 		state.MCP = append(state.MCP, r.mcpTarget(s))
 		if at := mcpservers.AskTargetName(s.org.Slug, s.row.Name); askTarget[at] {
@@ -260,10 +282,33 @@ func (r *Reconciler) applyMCP(ctx context.Context, state *gateway.State, served 
 		state.GrantTools(ref, gateway.ToolGrant{Target: s.target, All: true})
 		probes = append(probes, mcpProbe{
 			org: s.org.ID, orgSlug: s.org.Slug, server: s.row.ID, name: s.row.Name, target: s.target,
-			material: material, row: s.row, credential: s.credential,
+			material: material,
 		})
 	}
 	return probes, nil
+}
+
+// execKey returns the org's executor key, issuing it on first use and keeping it in a Secret that
+// koinon-api reads (mcpservers.ExecSecretName).
+func (r *Reconciler) execKey(ctx context.Context, org store.ListOrgsToReconcileRow, ref gateway.AgentRef) (gateway.Key, error) {
+	name := mcpservers.ExecSecretName(org.ID)
+	sec, found, err := r.secrets.Get(ctx, name)
+	if err != nil {
+		return gateway.Key{}, err
+	}
+	if found && sec.KeyID != "" && gateway.HashKey(sec.Material) == sec.KeyHash {
+		return gateway.Key{ID: sec.KeyID, Agent: ref, Hash: sec.KeyHash}, nil
+	}
+	k, err := r.gw.IssueKey(ctx, ref)
+	if err != nil {
+		return gateway.Key{}, fmt.Errorf("issue the MCP executor key of %s: %w", ref, err)
+	}
+	if err := r.secrets.Put(ctx, KeySecret{
+		Name: name, KeyID: k.ID, KeyHash: k.Hash, Material: k.Material, Labels: ownerLabels(org.ID, pgtype.UUID{}),
+	}); err != nil {
+		return gateway.Key{}, err
+	}
+	return k.Key, nil
 }
 
 // probeKey returns the prober's key for ref, issuing it on first use. The material lives in this
@@ -307,15 +352,4 @@ func (r *Reconciler) recordAppliedMCP(served servedMCP, probes []mcpProbe) {
 			delete(r.probeKeys, ref)
 		}
 	}
-}
-
-var errNoServer = errors.New("MCP server gone")
-
-// serverByID loads a server for the prober, tolerating one deleted since the pass.
-func (r *Reconciler) serverByID(ctx context.Context, org, id pgtype.UUID) (store.McpServer, error) {
-	row, err := r.q.GetMCPServer(ctx, store.GetMCPServerParams{OrgID: org, ID: id})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return store.McpServer{}, errNoServer
-	}
-	return row, err
 }

@@ -543,13 +543,13 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 	})
 
 	It("shows each agent only its granted tools", func(ctx SpecContext) {
-		Expect(toolNames(ctx, keyA.Material)).To(Equal([]string{"create_pull_request", "get_approval_status"}))
+		Expect(toolNames(ctx, keyA.Material)).To(Equal([]string{"github_create_pull_request", "github_get_approval_status"}))
 		Expect(toolNames(ctx, keyB.Material)).To(BeEmpty())
 
 		s, err := mcpSession(ctx, keyA.Material)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() { _ = s.Close() }()
-		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "direct_create_pull_request"})
+		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "github_direct_create_pull_request"})
 		if err == nil {
 			Expect(res.IsError).To(BeTrue(), "bypass tool must not be callable")
 			for _, c := range res.Content {
@@ -558,7 +558,7 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 				}
 			}
 		}
-		res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "get_approval_status"})
+		res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "github_get_approval_status"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.IsError).To(BeFalse())
 	})
@@ -569,10 +569,10 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 			res, err := s.ListPrompts(ctx, nil)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Prompts).To(ConsistOf(HaveField("Name", gateway.ReadyPrompt)))
-			_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: gateway.ReadyPrompt})
+			Expect(res.Prompts).To(ConsistOf(HaveField("Name", gateway.ReadyPromptExposed)))
+			_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: gateway.ReadyPromptExposed})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: "hidden_prompt"})
+			_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: "github_hidden_prompt"})
 			Expect(err).To(HaveOccurred())
 			_ = s.Close()
 		}
@@ -582,7 +582,7 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		for _, spoof := range []string{"", agentB.String()} {
 			s, err := mcpSessionAs(ctx, keyA.Material, spoof)
 			Expect(err).NotTo(HaveOccurred())
-			res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "get_approval_status"})
+			res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "github_get_approval_status"})
 			_ = s.Close()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.IsError).To(BeFalse())

@@ -27,7 +27,9 @@ type Descriptor struct {
 	// registered, or "" when it announces none.
 	//
 	// OpenCode turns the MCP prompt koinon-ready (gateway.ReadyPrompt, published by Koinon's MCP
-	// server) into the command <server>:<prompt>, and its server is "koinon"
+	// server) into the command <server>:<prompt>, and its server is "koinon". agentgateway prefixes every
+	// prompt and tool with its target (prefixMode always, ADR 0057 amendment), and the prompt comes from the
+	// "github" tools target, so the prompt is github_koinon-ready
 	// (flavors/opencode/README.md, ADR 0052).
 	//
 	// Hermes and pi announce no MCP prompt, and need no wait: their first prompt already carries
@@ -70,7 +72,7 @@ var table = []Descriptor{
 		Name:         store.AgentFlavorOpencode,
 		Proto:        templatev1alpha1.Flavor_FLAVOR_OPENCODE,
 		EntryScript:  "/usr/local/bin/koinon-opencode",
-		ReadyCommand: "koinon:koinon-ready",
+		ReadyCommand: "koinon:github_koinon-ready",
 		ModelPrefix:  "koinon/",
 		// The global config directory's AGENTS.md (flavors/opencode/Dockerfile).
 		InstructionLink:   "/etc/koinon/opencode/AGENTS.md",

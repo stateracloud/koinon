@@ -178,7 +178,9 @@ type conversation struct {
 
 // mcpPrefixes are what harnesses put before the tools of Koinon's MCP server, which every
 // flavor names project.Name: OpenCode <server>_<tool>, Hermes and pi mcp__<server>__<tool>.
-var mcpPrefixes = []string{project.Name + "_", "mcp__" + project.Name + "__"}
+// agentgateway puts the target in front of every tool (prefixMode always), and Koinon's own tools are
+// the "github" target.
+var mcpPrefixes = []string{project.Name + "_", "mcp__" + project.Name + "__", project.Name + "_github_", "mcp__" + project.Name + "__github_"}
 
 // toolMatches reports whether a tool name is the scripted name, possibly behind a harness's
 // MCP prefix (koinon_create_pull_request, mcp__koinon__create_pull_request). Another tool that

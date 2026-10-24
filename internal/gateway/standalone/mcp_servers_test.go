@@ -288,3 +288,78 @@ func (h headerSetter) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// With no target using the Authorization header, the agent's gateway key must still not reach a
+// server, and a lone org target is hidden from other orgs by its condition (a placeholder partner
+// makes agentgateway accept the condition).
+var _ = Describe("agentgateway v1.6.0 with one org MCP server and no credential", Ordered, func() {
+	var (
+		llmURL         string
+		ctr            *testcontainers.DockerContainer
+		log            = &headerLog{}
+		keyAcme, keyGl gateway.IssuedKey
+	)
+	BeforeAll(func(ctx SpecContext) {
+		skipWithoutDocker(ctx)
+		srv := fakeRemote("acme-only", log, "Authorization")
+		DeferCleanup(func() { srv.CloseClientConnections(); go srv.Close() })
+		var err error
+		keyAcme, err = gateway.NewKey(gateway.AgentRef{Org: "acme", Name: "reader"})
+		Expect(err).NotTo(HaveOccurred())
+		keyGl, err = gateway.NewKey(gateway.AgentRef{Org: "globex", Name: "reader"})
+		Expect(err).NotTo(HaveOccurred())
+		state := gateway.State{MCP: []gateway.MCPTarget{{Name: "acme-only", Org: "acme", URL: "http://" + testcontainers.HostInternal + ":" + itoa(port(srv)) + "/mcp"}}}
+		state.AddKey(keyAcme.Key)
+		state.AddKey(keyGl.Key)
+		state.GrantTools(keyAcme.Agent, gateway.ToolGrant{Target: "acme-only", Tools: []string{"read_item"}})
+		state.GrantTools(keyGl.Agent, gateway.ToolGrant{Target: "acme-only", Tools: []string{"read_item"}})
+		cfgDir := GinkgoT().TempDir()
+		Expect(os.Chmod(cfgDir, 0o755)).To(Succeed())
+		body, _, err := standalone.Render(state, standalone.Options{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(os.WriteFile(filepath.Join(cfgDir, "config.yaml"), body, 0o644)).To(Succeed()) //nolint:gosec // test config
+		ctr, err = testcontainers.Run(ctx, AgentgatewayImage,
+			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
+			testcontainers.WithExposedPorts("4000/tcp", "15021/tcp"),
+			testcontainers.WithHostPortAccess(port(srv)),
+			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) { hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro") }),
+			testcontainers.WithWaitStrategyAndDeadline(time.Minute, wait.ForHTTP("/healthz/ready").WithPort("15021/tcp")),
+		)
+		DeferCleanup(func(ctx context.Context) error { return testcontainers.TerminateContainer(ctr) })
+		Expect(err).NotTo(HaveOccurred())
+		llmURL, err = ctr.PortEndpoint(ctx, "4000/tcp", "http")
+		Expect(err).NotTo(HaveOccurred())
+	}, NodeTimeout(3*time.Minute))
+
+	connect := func(ctx context.Context, key string) *mcp.ClientSession {
+		client := mcp.NewClient(&mcp.Implementation{Name: "t", Version: "0"}, nil)
+		s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+			Endpoint: llmURL + "/mcp", HTTPClient: &http.Client{Transport: bearer{key: key, base: http.DefaultTransport}},
+			DisableStandaloneSSE: true, MaxRetries: -1,
+		}, nil)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = s.Close() })
+		return s
+	}
+
+	It("prefixes the tool whatever number of targets a key sees, and does not forward the gateway key", func(ctx SpecContext) {
+		s := connect(ctx, keyAcme.Material)
+		res, err := s.ListTools(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Tools).To(HaveLen(1))
+		Expect(res.Tools[0].Name).To(Equal("acme-only_read_item"))
+		call, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-only_read_item"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(call.Content[0].(*mcp.TextContent).Text).To(Equal("acme-only saw "))
+		Expect(strings.Join(log.values("Authorization"), ",")).NotTo(ContainSubstring(gateway.KeyPrefix))
+	})
+
+	It("hides the lone org target from another org", func(ctx SpecContext) {
+		before := len(log.values("Mcp-Method"))
+		s := connect(ctx, keyGl.Material)
+		res, err := s.ListTools(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Tools).To(BeEmpty())
+		Expect(log.values("Mcp-Method")).To(HaveLen(before), "the server was not contacted for the other org's key")
+	})
+})

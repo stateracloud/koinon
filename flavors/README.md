@@ -36,7 +36,7 @@ one image).
 | `session/resume` advertised | yes | yes | no |
 | Asks permission for | paths outside the session directory | every file write or patch | nothing |
 | Unknown session on load | `session not found` | `-32603` `not_found` | `-32602` `Unknown sessionId` |
-| MCP readiness | `koinon:koinon-ready` command, waited for by agentd | none | none |
+| MCP readiness | `koinon:github_koinon-ready` command, waited for by agentd | none | none |
 | MCP tool names | `koinon_<tool>` | `mcp__koinon__<tool>` | `mcp__koinon__<tool>` (direct exposure) |
 | Config | read-only, used in place | read-only, linked into `HERMES_HOME` | read-only templates rendered into the home at start |
 | Tool switches | read-only config | managed scope `/etc/hermes/config.yaml`, over the user config | rendered config |

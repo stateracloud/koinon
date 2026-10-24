@@ -74,6 +74,9 @@ CREATE TABLE mcp_tools (
     present          boolean     NOT NULL DEFAULT true,
     first_seen_at    timestamptz NOT NULL DEFAULT now(),
     last_seen_at     timestamptz NOT NULL DEFAULT now(),
+    -- A call needs two approvers (distinct, neither the ticket's creator) before Koinon makes it.
+    -- Only meaningful in the ask tier.
+    requires_two_approvers boolean NOT NULL DEFAULT false,
     tier_set_by      text,
     tier_set_at      timestamptz,
     PRIMARY KEY (org_id, server_id, name),
@@ -103,3 +106,11 @@ CREATE INDEX agent_mcp_servers_server ON agent_mcp_servers (org_id, server_id);
 ALTER TABLE approval_requests DROP CONSTRAINT approval_requests_tool_check;
 ALTER TABLE approval_requests ADD CONSTRAINT approval_requests_tool_check
     CHECK (tool ~ '^[A-Za-z0-9_./-]{1,200}$');
+
+-- Two approvers (plan item MC1): how many approvals a request needs, who gave the first, and what an
+-- MCP call was bound to when it was recorded (server, URL hash, the tool's content hash), which the
+-- executor checks again.
+ALTER TABLE approval_requests
+    ADD COLUMN approvals_required smallint NOT NULL DEFAULT 1 CHECK (approvals_required IN (1, 2)),
+    ADD COLUMN first_approver     uuid REFERENCES users (id),
+    ADD COLUMN call_binding       jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(call_binding) = 'object');

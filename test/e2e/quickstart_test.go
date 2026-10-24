@@ -177,6 +177,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		prURL    string
 		// admin calls /admin/v1 with a token made at step 1b.
 		admin func(ctx context.Context, method, path string, body ...string) (int, []byte)
+		// mcpServerID is the remote MCP server step 6b added and 6c uses.
+		mcpServerID string
 	)
 
 	BeforeAll(func() {
@@ -422,8 +424,70 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 	It("6b. adds a remote MCP server: the gateway injects its credential, and an agent's call reaches it", func(ctx SpecContext) {
 		t.begin()
-		mcpServerE2E(ctx, admin, org, agent.GetId())
+		mcpServerID = mcpServerE2E(ctx, admin, org, agent.GetId())
 		t.end("6b. Remote MCP server (add, health, tiers, allowlist, call through the gateway)")
+	})
+
+	It("6c. an agent's call to an ask-tier MCP tool parks, is approved, and runs once through the gateway with the exact arguments", func(ctx SpecContext) {
+		t.begin()
+		Expect(mcpServerID).NotTo(BeEmpty(), "step 6b adds the server")
+		fake := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMCP_URL"), "/")
+		res, err := c.tickets.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{
+			OrgId: org, AgentId: agent.GetId(), Title: "Tracker write",
+			Message: "tracker write: please call the tracker's write tool.",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var seq int64
+		var evKinds []string
+		mw := watchRun(context.WithoutCancel(ctx), c, org, res.GetRun().GetId(), 0)
+		parked := mw.until(ctx, c, org, res.GetRun().GetId(), 8*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+			return r.GetState() == runv1alpha1.RunState_RUN_STATE_PARKED
+		})
+		Expect(parked.GetParkReason()).To(Equal(runv1alpha1.ParkReason_PARK_REASON_APPROVAL))
+
+		list, err := c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: res.GetTicket().GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list.GetApprovals()).To(HaveLen(1))
+		got, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: list.GetApprovals()[0].GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		ap := got.GetApproval()
+		Expect(ap.GetConnector()).To(Equal("mcp"))
+		Expect(ap.GetTool()).To(Equal("write_item"))
+		Expect(ap.GetTarget()).To(Equal("mcp:tracker"))
+		Expect(ap.GetArgsJson()).To(Equal(`{"title":"from the e2e ask"}`))
+		Expect(ap.GetMcp().GetContentHash()).NotTo(BeEmpty())
+		Expect(ap.GetMcp().GetContentHash()).To(Equal(ap.GetMcp().GetCurrentContentHash()))
+		for _, r := range fakeMCPRequests(ctx, fake) {
+			Expect(r.Tool).NotTo(Equal("write_item"), "nothing reached the server before the approval")
+		}
+
+		_, err = c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: org, ApprovalId: ap.GetId(), ArgsSha256: ap.GetArgsSha256()})
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(func(g Gomega) {
+			a, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: ap.GetId()})
+			g.Expect(err).NotTo(HaveOccurred())
+			ap = a.GetApproval()
+			g.Expect(ap.GetStatus()).To(Equal(approvalv1alpha1.Status_STATUS_EXECUTED), ap.GetError())
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		Expect(ap.GetExecutions()).To(BeEquivalentTo(1))
+
+		var calls []fakeMCPRecord
+		for _, r := range fakeMCPRequests(ctx, fake) {
+			if r.Tool == "write_item" {
+				calls = append(calls, r)
+			}
+		}
+		Expect(calls).To(HaveLen(1), "the server saw the approved call exactly once")
+		Expect(calls[0].Args).To(Equal(`{"title":"from the e2e ask"}`))
+		Expect(calls[0].Agent).To(Equal("default/mcp-exec"), "through the gateway, with the org's executor key")
+		Expect(calls[0].Authorized).To(BeTrue())
+
+		mw.until(ctx, c, org, res.GetRun().GetId(), 5*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+			return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
+		})
+		code, body := admin(ctx, http.MethodDelete, "/mcp-servers/"+mcpServerID)
+		Expect(code).To(Equal(http.StatusNoContent), string(body))
+		t.end("6c. Ask-tier MCP call: parks, approved, runs once through the gateway")
 	})
 
 	It("7. took at most 15 minutes from helm install", func() {

@@ -34,7 +34,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"c2cf4dcb0aa71716"'
+      koinon.config: '"790ca40f4d04e4ed"'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -97,7 +97,7 @@ llm:
             org: globex
           allowedModels:
             - deepseek/deepseek-v4.1-flash
-        - keyHash: sha256:2c710be9e30caf97a43ca51d7963fdaf78178a51c9b852fb120ca5c55777d0fc
+        - keyHash: sha256:6d5cf06a20aef6b2bcc2860982b7f85f168501add5ad5bd27990e8f959bcb731
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -175,6 +175,7 @@ llm:
         stream_options: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
 mcp:
   failureMode: failOpen
+  prefixMode: always
   policies:
     apiKey:
       mode: strict

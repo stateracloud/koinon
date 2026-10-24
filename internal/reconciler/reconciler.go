@@ -116,9 +116,6 @@ type Config struct {
 	// MCPProbeInterval is the time between health probes of each org MCP server. Default
 	// DefaultMCPProbeInterval.
 	MCPProbeInterval time.Duration
-	// DiagnoseMCP asks an MCP server directly why the gateway could not use it; default
-	// mcpservers.Diagnose. A seam for tests.
-	DiagnoseMCP func(ctx context.Context, policy catalog.URLPolicy, p mcpservers.PreflightRequest) mcpservers.Diagnosis
 	// GitHub mints the installation tokens of repo.read grants (plan item C2). Nil leaves
 	// agents with such a grant unconverged, with an error.
 	GitHub GitHubTokens
@@ -182,9 +179,6 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.IdleTimeout == 0 {
 		cfg.IdleTimeout = DefaultIdleTimeout
-	}
-	if cfg.DiagnoseMCP == nil {
-		cfg.DiagnoseMCP = mcpservers.Diagnose
 	}
 	if cfg.MCPProbeInterval == 0 {
 		cfg.MCPProbeInterval = DefaultMCPProbeInterval

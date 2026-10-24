@@ -118,6 +118,8 @@ type config struct {
 
 	// egressAllowedHosts and its deprecated alias providerAllowedHosts are joined: internal hosts that
 	// providers and MCP servers may name.
+	// gatewayMCPURL is agentgateway's MCP endpoint as koinon-api reaches it, for approved MCP calls.
+	gatewayMCPURL        string
 	egressAllowedHosts   string
 	providerAllowedHosts string
 }
@@ -176,6 +178,7 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.githubAPIURL, "github-api-url", github.DefaultBaseURL, "GitHub REST API base URL")
 	fs.StringVar(&c.kekSecret, "kek-secret", "",
 		"Secret with the key-encryption keys, read through the Kubernetes API; takes precedence over --kek-dir")
+	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "agentgateway's MCP endpoint, for the calls humans approved on remote MCP servers; empty disables them")
 	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
 		"comma-separated hosts (optionally host:port) that providers and MCP servers may name although they are internal "+
 			"(loopback, link-local, metadata and Koinon's own namespace are denied otherwise); platform-level")
@@ -425,7 +428,13 @@ func run() error {
 	// One egress policy for everything an org points the gateway or Koinon at: model providers and
 	// remote MCP servers.
 	urlPolicy := catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts)}
-	approvalSvc := approvals.New(pool, approvals.Options{Keys: opener, GitHub: gh, URLPolicy: urlPolicy, Logger: slog.Default()})
+	approvalOpts := approvals.Options{Keys: opener, GitHub: gh, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default()}
+	if kube != nil {
+		// Approved calls to remote MCP servers go through the gateway with the org's executor key,
+		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
+		approvalOpts.ExecKeys = mcpservers.KubeExecKeys{Client: kube, Namespace: cfg.secretsNamespace}
+	}
+	approvalSvc := approvals.New(pool, approvalOpts)
 	go approvalSvc.Sweeper(bgCtx, cfg.sweepInterval)
 	tokenSvc := tokens.New(pool, nil)
 	var catalogKeys catalog.Keys

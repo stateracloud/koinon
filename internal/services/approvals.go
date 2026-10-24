@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 )
 
 // maxNoteBytes bounds an approver's note.
@@ -46,7 +47,8 @@ func approvalProto(a store.ApprovalRequest, canDecide, detail bool) *approvalv1a
 		DecidedBy: idString(a.DecidedBy), DecidedAt: tsProto(a.DecidedAt), DecisionNote: a.DecisionNote.String,
 		Error: a.Error.String, Executions: int64(a.Executions),
 		ExpiresAt: tsProto(a.ExpiresAt), CreatedAt: tsProto(a.CreatedAt), ExecutedAt: tsProto(a.ExecutedAt),
-		CanDecide: canDecide && a.Status == store.ApprovalStatusPending,
+		CanDecide:         canDecide && a.Status == store.ApprovalStatusPending,
+		ApprovalsRequired: int32(a.ApprovalsRequired), FirstApprover: idString(a.FirstApprover),
 	}
 	if len(a.Result) > 0 {
 		out.Result = payloadProto(a.Result)
@@ -114,7 +116,29 @@ func (s *Server) GetApproval(ctx context.Context, req *approvalv1alpha1.GetAppro
 	if err != nil {
 		return nil, s.dbError(err, "approval")
 	}
-	return &approvalv1alpha1.GetApprovalResponse{Approval: approvalProto(row, c.p.HasRole(c.org, store.OrgRoleAdmin), true)}, nil
+	out := approvalProto(row, c.p.HasRole(c.org, store.OrgRoleAdmin), true)
+	s.enrichMCP(ctx, out, row)
+	return &approvalv1alpha1.GetApprovalResponse{Approval: out}, nil
+}
+
+// enrichMCP fills the MCP call of an approval: what the request was bound to and what the tool is
+// now, so the card can show a changed or flagged tool.
+func (s *Server) enrichMCP(ctx context.Context, out *approvalv1alpha1.Approval, row store.ApprovalRequest) {
+	if row.Connector != "mcp" {
+		return
+	}
+	var b mcpservers.CallBinding
+	if json.Unmarshal(row.CallBinding, &b) != nil {
+		return
+	}
+	call := &approvalv1alpha1.McpCall{ServerId: b.ServerID, ContentHash: b.ContentHash, ServerName: strings.TrimPrefix(row.Target, "mcp:")}
+	var sid pgtype.UUID
+	if sid.Scan(b.ServerID) == nil {
+		if t, err := s.q.GetMCPTool(ctx, store.GetMCPToolParams{OrgID: row.OrgID, ServerID: sid, Name: row.Tool}); err == nil {
+			call.CurrentContentHash, call.ReviewReason, call.ToolDescription = t.ContentHash, t.ReviewReason.String, t.Description
+		}
+	}
+	out.Call = &approvalv1alpha1.Approval_Mcp{Mcp: call}
 }
 
 var fileStatusToProto = map[approvals.FileStatus]approvalv1alpha1.FileStatus{
@@ -188,6 +212,8 @@ func (s *Server) approvalError(err error) error {
 	switch {
 	case errors.Is(err, approvals.ErrHashMismatch):
 		return connect.NewError(connect.CodeAborted, err.Error())
+	case errors.Is(err, approvals.ErrSameApprover), errors.Is(err, approvals.ErrRequesterApproves):
+		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	case errors.Is(err, approvals.ErrNotPending):
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	}

@@ -35,6 +35,7 @@ type fakeMCPRecord struct {
 	Agent               string `json:"agent"`
 	ClientAuthorization bool   `json:"clientAuthorization"`
 	Tool                string `json:"tool"`
+	Args                string `json:"args"`
 }
 
 func fakeMCPRequests(ctx context.Context, base string) []fakeMCPRecord {
@@ -61,7 +62,7 @@ func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 // whole path: refused OAuth server, probe through the real gateway (which injects the credential),
 // tool sync into the ask tier, tiers, the agent's allowlist, and a tool call by the agent's own
 // gateway key.
-func mcpServerE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), org, agentID string) {
+func mcpServerE2E(ctx context.Context, admin func(context.Context, string, string, ...string) (int, []byte), org, agentID string) string {
 	GinkgoHelper()
 	fake := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMCP_URL"), "/")
 	kubectl := os.Getenv("KOINON_E2E_KUBECTL")
@@ -84,7 +85,6 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(json.Unmarshal(body, &srv)).To(Succeed())
 	Expect(srv.HasCredential).To(BeTrue())
 	Expect(string(body)).NotTo(ContainSubstring(fakeMCPKey))
-	DeferCleanup(func(ctx SpecContext) { admin(ctx, http.MethodDelete, "/mcp-servers/"+srv.ID) })
 
 	By("the reconciler serves it, the prober lists its tools through the gateway and marks it healthy")
 	// A new credential reaches the gateway through the kubelet's Secret sync, then the config reloads.
@@ -177,6 +177,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	Expect(called).NotTo(BeNil(), "the server saw the tool call")
 	Expect(called.Agent).To(Equal("default/" + agentID))
 	Expect(called.Authorized).To(BeTrue())
+	return srv.ID
 }
 
 // agentGatewayKey reads the agent's gateway key from its Secret, with a kubectl bound to the e2e

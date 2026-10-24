@@ -237,13 +237,20 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
     }
   }
   const idBase = `tool-${server.id}-${t.name}`
+  const askTier = t.tier === Tier.ASK || t.tier === Tier.UNSPECIFIED
   return (
     <div className="grid gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <code className="text-sm font-medium break-all">{t.name}</code>
         {t.reviewReason && <Badge variant="outline">Review</Badge>}
         {!t.present && <span className="text-muted-foreground text-xs">no longer listed</span>}
+        {t.unavailable && <Badge variant="outline">Not offered</Badge>}
       </div>
+      {t.unavailable && (
+        <p role="note" className="text-sm text-amber-700 dark:text-amber-400">
+          {t.unavailable}. Agents are not offered this tool, whatever its tier.
+        </p>
+      )}
       {t.description && <p className="text-muted-foreground text-sm">{t.description}</p>}
       <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1" disabled={pending}>
         <legend className="sr-only">Tier of {t.name}</legend>
@@ -260,6 +267,22 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
           </label>
         ))}
       </fieldset>
+      <div className="grid gap-0.5">
+        <label className="flex items-center gap-1.5 text-sm">
+          <input
+            type="checkbox"
+            checked={t.requiresTwoApprovers}
+            disabled={pending || !askTier}
+            aria-describedby={`${idBase}-two-help`}
+            onChange={(e) => void run(actions.setToolTwoApprovers(server.id, t.name, e.target.checked))}
+          />
+          Require two approvers
+        </label>
+        <p id={`${idBase}-two-help`} className="text-muted-foreground text-xs">
+          Two distinct admins or owners must approve, neither the person who created the ticket.
+          {!askTier && ' This only applies in the Ask tier.'}
+        </p>
+      </div>
       {suggestsAuto(t) && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span>Suggested read-only: the server marks this tool as read-only. That is its own claim, so the tier stays as it is until you choose.</span>
@@ -270,10 +293,11 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
       )}
       {t.reviewReason && (
         <div className="flex flex-wrap items-center gap-2 text-sm" role="note">
-          <span>Review: {t.reviewReason}. The tool still works at its tier.</span>
+          <span>Review: {t.reviewReason}.</span>
           <Button variant="outline" size="sm" disabled={pending} aria-label={`Mark ${t.name} reviewed`} onClick={() => void run(actions.acknowledgeReview(server.id, t.name))}>
             Mark reviewed
           </Button>
+          <p className="text-muted-foreground w-full text-xs">Reviewing keeps the tool in Ask; set it back to Auto yourself if you trust the new version.</p>
         </div>
       )}
     </div>
