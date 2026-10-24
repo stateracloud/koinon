@@ -56,7 +56,7 @@ function ProvidersContent() {
         </Button>
       </div>
       <p className="text-muted-foreground text-sm">
-        A provider is the model API your agents call, such as OpenRouter or Ollama. Koinon keeps its key encrypted and hands it only to the gateway; sandboxes never see it. Providers can also be declared with a Kubernetes Secret, which are read-only here. A new or changed API key reaches the gateway through Kubernetes, which can take a few minutes; an agent run that starts sooner can fail.
+        A provider is the model API your agents call, such as OpenRouter or Ollama. Koinon keeps its key encrypted and hands it only to the gateway; sandboxes never see it. Providers can also be declared with a Kubernetes Secret, which are read-only here. A new or changed API key reaches the gateway through Kubernetes, which takes about three minutes; an agent run that starts sooner can fail.
       </p>
       {editing?.kind === 'new-provider' && <ProviderForm onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} onSaved={saved} />}
       {refused && (
