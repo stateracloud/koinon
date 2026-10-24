@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -212,6 +213,25 @@ var _ = Describe("Pushing saved work", func() {
 		Expect(sw.Status).To(Equal("expired"))
 		Expect(sw.Envelope).To(BeNil(), "the sealed files are gone")
 		Expect(f.get(ctx, f.approval.ID.String()).Status).To(Equal(store.ApprovalStatusExpired))
+	})
+
+	It("sweeps upload nonces older than a token's lifetime and keeps the newer ones", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard")
+		_, err := pool.Exec(ctx, `INSERT INTO saved_work_upload_nonces (org_id, run_id, nonce, created_at) VALUES
+			($1, $2, $3, now() - interval '1 hour'), ($1, $2, $4, now())`, f.org, f.run.ID, strings.Repeat("a", 32), strings.Repeat("b", 32))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = f.svc.Sweep(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		var left []string
+		rows, err := pool.Query(ctx, `SELECT nonce FROM saved_work_upload_nonces WHERE org_id = $1`, f.org)
+		Expect(err).NotTo(HaveOccurred())
+		defer rows.Close()
+		for rows.Next() {
+			var n string
+			Expect(rows.Scan(&n)).To(Succeed())
+			left = append(left, n)
+		}
+		Expect(left).To(ConsistOf(strings.Repeat("b", 32)))
 	})
 
 	It("will not execute expired work even if it was approved before", func(ctx SpecContext) {

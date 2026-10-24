@@ -488,6 +488,10 @@ func (s *Service) sweepOrg(ctx context.Context, org pgtype.UUID, res *SweepResul
 			return err
 		}
 		res.SavedWorkExpired += len(gone)
+		// Upload nonces only matter while their token could be good.
+		if _, err := q.DeleteOldUploadNonces(ctx, org); err != nil {
+			return err
+		}
 		parked, err := q.ListExpiredParkedRuns(ctx, org)
 		if err != nil {
 			return err
