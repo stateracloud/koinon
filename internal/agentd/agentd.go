@@ -47,6 +47,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 // Backend is the part of [execution.Backend] agentd uses. agentd only execs: sandbox state
@@ -87,6 +88,17 @@ type Config struct {
 	// registers the tools after a 100 ms debounce, separately from the command (ADR 0052).
 	// Default 1s.
 	ReadySettle time.Duration
+	// SummaryTimeout bounds the end-of-turn summary prompt (summary.go). Default 2m.
+	SummaryTimeout time.Duration
+	// StuckAfter is how long a process may outlive the sweep's last SIGKILL before the sandbox
+	// counts as stuck, and StuckPoll how often it is checked meanwhile (stuck.go). Defaults 60s
+	// and 5s.
+	StuckAfter, StuckPoll time.Duration
+	// SaveTimeout is the time budget for reading a stuck sandbox's uncommitted work. Default 30s.
+	SaveTimeout time.Duration
+	// Keyring seals saved work. Without it a stuck sandbox's work is not saved (and the
+	// timeline says so).
+	Keyring *secretstore.Keyring
 	// MaxTakeovers fails a run that has been taken over more often than this, instead of
 	// resuming it again. Default 5.
 	MaxTakeovers int
@@ -135,6 +147,10 @@ func (c *Config) defaults() error {
 	setDefault(&c.ReadyTimeout, time.Minute)
 	setDefault(&c.ReadySettle, time.Second)
 	setDefault(&c.MaxTakeovers, 5)
+	setDefault(&c.SummaryTimeout, defaultSummaryWait)
+	setDefault(&c.StuckAfter, defaultStuckAfter)
+	setDefault(&c.StuckPoll, defaultStuckPoll)
+	setDefault(&c.SaveTimeout, defaultSaveTimeout)
 	setDefault(&c.SessionCwd, "/sandbox/work")
 	if c.Heartbeat >= c.Lease {
 		return errors.New("agentd: Heartbeat must be shorter than Lease")

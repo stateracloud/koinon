@@ -90,6 +90,11 @@ var isolationCases = map[string]isolationCase{
 			})
 		},
 	},
+	agentv1alpha1connect.AgentServiceResumeAgentProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.ResumeAgent(ctx, &agentv1alpha1.ResumeAgentRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
 	agentv1alpha1connect.AgentServiceArchiveAgentProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.ArchiveAgent(ctx, &agentv1alpha1.ArchiveAgentRequest{OrgId: org, AgentId: f.agent.GetId()})

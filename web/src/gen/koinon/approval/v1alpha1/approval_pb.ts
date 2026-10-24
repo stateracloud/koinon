@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/approval/v1alpha1/approval.proto.
  */
 export const file_koinon_approval_v1alpha1_approval: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vYXBwcm92YWwvdjFhbHBoYTEvYXBwcm92YWwucHJvdG8SGGtvaW5vbi5hcHByb3ZhbC52MWFscGhhMSKOAQoEUmlzaxINCgVmaWxlcxgBIAEoAxINCgVieXRlcxgCIAEoAxIRCglkZWxldGlvbnMYAyADKAkSCgoCY2kYBCADKAkSDwoHc2NyaXB0cxgFIAMoCRIUCgxkZXBlbmRlbmNpZXMYBiADKAkSDgoGYmluYXJ5GAcgAygJEhIKCmV4ZWN1dGFibGUYCCADKAkiTwoKRmlsZUNoYW5nZRIMCgRwYXRoGAEgASgJEg8KB2NvbnRlbnQYAiABKAkSDgoGZGVsZXRlGAMgASgIEhIKCmV4ZWN1dGFibGUYBCABKAgigQEKD1B1bGxSZXF1ZXN0Q2FsbBIOCgZicmFuY2gYASABKAkSDAoEYmFzZRgCIAEoCRINCgV0aXRsZRgDIAEoCRIMCgRib2R5GAQgASgJEjMKBWZpbGVzGAUgAygLMiQua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkZpbGVDaGFuZ2UiMQoLQ29tbWVudENhbGwSFAoMaXNzdWVfbnVtYmVyGAEgASgDEgwKBGJvZHkYAiABKAkigQcKCEFwcHJvdmFsEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSDgoGcnVuX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhEKCWNvbm5lY3RvchgGIAEoCRIMCgR0b29sGAcgASgJEg4KBnRhcmdldBgIIAEoCRIRCglhcmdzX2pzb24YCSABKAkSEwoLYXJnc19zaGEyNTYYCiABKAkSNAoIZGVjaXNpb24YCyABKA4yIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVjaXNpb24SMAoGc3RhdHVzGAwgASgOMiAua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlN0YXR1cxIsCgRyaXNrGA0gASgLMh4ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlJpc2sSQQoMcHVsbF9yZXF1ZXN0GA4gASgLMikua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlB1bGxSZXF1ZXN0Q2FsbEgAEjgKB2NvbW1lbnQYDyABKAsyJS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQ29tbWVudENhbGxIABIwCgNtY3AYHCABKAsyIS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuTWNwQ2FsbEgAEhIKCmRlY2lkZWRfYnkYECABKAkSLgoKZGVjaWRlZF9hdBgRIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFQoNZGVjaXNpb25fbm90ZRgSIAEoCRInCgZyZXN1bHQYEyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Eg0KBWVycm9yGBQgASgJEhIKCmV4ZWN1dGlvbnMYFSABKAMSLgoKZXhwaXJlc19hdBgWIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKY3JlYXRlZF9hdBgXIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLZXhlY3V0ZWRfYXQYGCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNhbl9kZWNpZGUYGSABKAgSGgoSYXBwcm92YWxzX3JlcXVpcmVkGBogASgFEhYKDmZpcnN0X2FwcHJvdmVyGBsgASgJQgYKBGNhbGwilgEKB01jcENhbGwSEQoJc2VydmVyX2lkGAEgASgJEhMKC3NlcnZlcl9uYW1lGAIgASgJEhQKDGNvbnRlbnRfaGFzaBgDIAEoCRIcChRjdXJyZW50X2NvbnRlbnRfaGFzaBgEIAEoCRIVCg1yZXZpZXdfcmVhc29uGAUgASgJEhgKEHRvb2xfZGVzY3JpcHRpb24YBiABKAkiOQoUTGlzdEFwcHJvdmFsc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXRpY2tldF9pZBgCIAEoCSJOChVMaXN0QXBwcm92YWxzUmVzcG9uc2USNQoJYXBwcm92YWxzGAEgAygLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmFsIjkKEkdldEFwcHJvdmFsUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkiSwoTR2V0QXBwcm92YWxSZXNwb25zZRI0CghhcHByb3ZhbBgBIAEoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZhbCI9ChZHZXRBcHByb3ZhbERpZmZSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgthcHByb3ZhbF9pZBgCIAEoCSKxAQoIRmlsZURpZmYSDAoEcGF0aBgBIAEoCRI0CgZzdGF0dXMYAiABKA4yJC5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRmlsZVN0YXR1cxIUCgx1bmlmaWVkX2RpZmYYAyABKAkSDgoGYmluYXJ5GAQgASgIEhcKD2ZhbGxiYWNrX3JlYXNvbhgFIAEoCRIQCghvbGRfbW9kZRgGIAEoCRIQCghuZXdfbW9kZRgHIAEoCSJaChdHZXRBcHByb3ZhbERpZmZSZXNwb25zZRIMCgRiYXNlGAEgASgJEjEKBWZpbGVzGAIgAygLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkZpbGVEaWZmIlgKDkFwcHJvdmVSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgthcHByb3ZhbF9pZBgCIAEoCRITCgthcmdzX3NoYTI1NhgDIAEoCRIMCgRub3RlGAQgASgJIkcKD0FwcHJvdmVSZXNwb25zZRI0CghhcHByb3ZhbBgBIAEoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZhbCJACgtEZW55UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkSDAoEbm90ZRgDIAEoCSJECgxEZW55UmVzcG9uc2USNAoIYXBwcm92YWwYASABKAsyIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQXBwcm92YWwqrQEKBlN0YXR1cxIWChJTVEFUVVNfVU5TUEVDSUZJRUQQABISCg5TVEFUVVNfUEVORElORxABEhMKD1NUQVRVU19BUFBST1ZFRBACEhEKDVNUQVRVU19ERU5JRUQQAxITCg9TVEFUVVNfRVhFQ1VURUQQBBIRCg1TVEFUVVNfRkFJTEVEEAUSEgoOU1RBVFVTX0VYUElSRUQQBhITCg9TVEFUVVNfQ0FOQ0VMRUQQBypKCghEZWNpc2lvbhIYChRERUNJU0lPTl9VTlNQRUNJRklFRBAAEhAKDERFQ0lTSU9OX0FTSxABEhIKDkRFQ0lTSU9OX0FMTE9XEAIqcwoKRmlsZVN0YXR1cxIbChdGSUxFX1NUQVRVU19VTlNQRUNJRklFRBAAEhUKEUZJTEVfU1RBVFVTX0FEREVEEAESGAoURklMRV9TVEFUVVNfTU9ESUZJRUQQAhIXChNGSUxFX1NUQVRVU19ERUxFVEVEEAMysgQKD0FwcHJvdmFsU2VydmljZRJ1Cg1MaXN0QXBwcm92YWxzEi4ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkxpc3RBcHByb3ZhbHNSZXF1ZXN0Gi8ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkxpc3RBcHByb3ZhbHNSZXNwb25zZSIDkAIBEm8KC0dldEFwcHJvdmFsEiwua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkdldEFwcHJvdmFsUmVxdWVzdBotLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5HZXRBcHByb3ZhbFJlc3BvbnNlIgOQAgESewoPR2V0QXBwcm92YWxEaWZmEjAua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkdldEFwcHJvdmFsRGlmZlJlcXVlc3QaMS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuR2V0QXBwcm92YWxEaWZmUmVzcG9uc2UiA5ACARJjCgdBcHByb3ZlEigua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmVSZXF1ZXN0Gikua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmVSZXNwb25zZSIDkAICElUKBERlbnkSJS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVueVJlcXVlc3QaJi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVueVJlc3BvbnNlQldaVWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL2FwcHJvdmFsL3YxYWxwaGExO2FwcHJvdmFsdjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("Cidrb2lub24vYXBwcm92YWwvdjFhbHBoYTEvYXBwcm92YWwucHJvdG8SGGtvaW5vbi5hcHByb3ZhbC52MWFscGhhMSKOAQoEUmlzaxINCgVmaWxlcxgBIAEoAxINCgVieXRlcxgCIAEoAxIRCglkZWxldGlvbnMYAyADKAkSCgoCY2kYBCADKAkSDwoHc2NyaXB0cxgFIAMoCRIUCgxkZXBlbmRlbmNpZXMYBiADKAkSDgoGYmluYXJ5GAcgAygJEhIKCmV4ZWN1dGFibGUYCCADKAkiTwoKRmlsZUNoYW5nZRIMCgRwYXRoGAEgASgJEg8KB2NvbnRlbnQYAiABKAkSDgoGZGVsZXRlGAMgASgIEhIKCmV4ZWN1dGFibGUYBCABKAgigQEKD1B1bGxSZXF1ZXN0Q2FsbBIOCgZicmFuY2gYASABKAkSDAoEYmFzZRgCIAEoCRINCgV0aXRsZRgDIAEoCRIMCgRib2R5GAQgASgJEjMKBWZpbGVzGAUgAygLMiQua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkZpbGVDaGFuZ2UiMQoLQ29tbWVudENhbGwSFAoMaXNzdWVfbnVtYmVyGAEgASgDEgwKBGJvZHkYAiABKAki0AcKCEFwcHJvdmFsEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSDgoGcnVuX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhEKCWNvbm5lY3RvchgGIAEoCRIMCgR0b29sGAcgASgJEg4KBnRhcmdldBgIIAEoCRIRCglhcmdzX2pzb24YCSABKAkSEwoLYXJnc19zaGEyNTYYCiABKAkSNAoIZGVjaXNpb24YCyABKA4yIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVjaXNpb24SMAoGc3RhdHVzGAwgASgOMiAua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlN0YXR1cxIsCgRyaXNrGA0gASgLMh4ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlJpc2sSQQoMcHVsbF9yZXF1ZXN0GA4gASgLMikua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlB1bGxSZXF1ZXN0Q2FsbEgAEjgKB2NvbW1lbnQYDyABKAsyJS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQ29tbWVudENhbGxIABIwCgNtY3AYHCABKAsyIS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuTWNwQ2FsbEgAEj0KCnNhdmVkX3dvcmsYHSABKAsyJy5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuU2F2ZWRXb3JrQ2FsbEgAEhIKCmRlY2lkZWRfYnkYECABKAkSLgoKZGVjaWRlZF9hdBgRIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFQoNZGVjaXNpb25fbm90ZRgSIAEoCRInCgZyZXN1bHQYEyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Eg0KBWVycm9yGBQgASgJEhIKCmV4ZWN1dGlvbnMYFSABKAMSLgoKZXhwaXJlc19hdBgWIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKY3JlYXRlZF9hdBgXIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLZXhlY3V0ZWRfYXQYGCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNhbl9kZWNpZGUYGSABKAgSGgoSYXBwcm92YWxzX3JlcXVpcmVkGBogASgFEhYKDmZpcnN0X2FwcHJvdmVyGBsgASgJEg4KBnN5c3RlbRgeIAEoCEIGCgRjYWxsIpYBCgdNY3BDYWxsEhEKCXNlcnZlcl9pZBgBIAEoCRITCgtzZXJ2ZXJfbmFtZRgCIAEoCRIUCgxjb250ZW50X2hhc2gYAyABKAkSHAoUY3VycmVudF9jb250ZW50X2hhc2gYBCABKAkSFQoNcmV2aWV3X3JlYXNvbhgFIAEoCRIYChB0b29sX2Rlc2NyaXB0aW9uGAYgASgJItoBCg1TYXZlZFdvcmtDYWxsEhIKCnJlcG9zaXRvcnkYASABKAkSDAoEYmFzZRgCIAEoCRIOCgZicmFuY2gYAyABKAkSMgoFZmlsZXMYBCADKAsyIy5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuU2F2ZWRGaWxlEhIKCnNpemVfYnl0ZXMYBSABKAMSDwoHc2tpcHBlZBgGIAMoCRIOCgZzdGF0dXMYByABKAkSLgoKZXhwaXJlc19hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiZwoJU2F2ZWRGaWxlEgwKBHBhdGgYASABKAkSDgoGc3RhdHVzGAIgASgJEg0KBWFkZGVkGAMgASgFEg8KB2RlbGV0ZWQYBCABKAUSDAoEc2l6ZRgFIAEoAxIOCgZiaW5hcnkYBiABKAgiOQoUTGlzdEFwcHJvdmFsc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXRpY2tldF9pZBgCIAEoCSJOChVMaXN0QXBwcm92YWxzUmVzcG9uc2USNQoJYXBwcm92YWxzGAEgAygLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmFsIjkKEkdldEFwcHJvdmFsUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkiSwoTR2V0QXBwcm92YWxSZXNwb25zZRI0CghhcHByb3ZhbBgBIAEoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZhbCI9ChZHZXRBcHByb3ZhbERpZmZSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgthcHByb3ZhbF9pZBgCIAEoCSKxAQoIRmlsZURpZmYSDAoEcGF0aBgBIAEoCRI0CgZzdGF0dXMYAiABKA4yJC5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRmlsZVN0YXR1cxIUCgx1bmlmaWVkX2RpZmYYAyABKAkSDgoGYmluYXJ5GAQgASgIEhcKD2ZhbGxiYWNrX3JlYXNvbhgFIAEoCRIQCghvbGRfbW9kZRgGIAEoCRIQCghuZXdfbW9kZRgHIAEoCSJaChdHZXRBcHByb3ZhbERpZmZSZXNwb25zZRIMCgRiYXNlGAEgASgJEjEKBWZpbGVzGAIgAygLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkZpbGVEaWZmIlgKDkFwcHJvdmVSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgthcHByb3ZhbF9pZBgCIAEoCRITCgthcmdzX3NoYTI1NhgDIAEoCRIMCgRub3RlGAQgASgJIkcKD0FwcHJvdmVSZXNwb25zZRI0CghhcHByb3ZhbBgBIAEoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZhbCJACgtEZW55UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkSDAoEbm90ZRgDIAEoCSJECgxEZW55UmVzcG9uc2USNAoIYXBwcm92YWwYASABKAsyIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQXBwcm92YWwqrQEKBlN0YXR1cxIWChJTVEFUVVNfVU5TUEVDSUZJRUQQABISCg5TVEFUVVNfUEVORElORxABEhMKD1NUQVRVU19BUFBST1ZFRBACEhEKDVNUQVRVU19ERU5JRUQQAxITCg9TVEFUVVNfRVhFQ1VURUQQBBIRCg1TVEFUVVNfRkFJTEVEEAUSEgoOU1RBVFVTX0VYUElSRUQQBhITCg9TVEFUVVNfQ0FOQ0VMRUQQBypKCghEZWNpc2lvbhIYChRERUNJU0lPTl9VTlNQRUNJRklFRBAAEhAKDERFQ0lTSU9OX0FTSxABEhIKDkRFQ0lTSU9OX0FMTE9XEAIqcwoKRmlsZVN0YXR1cxIbChdGSUxFX1NUQVRVU19VTlNQRUNJRklFRBAAEhUKEUZJTEVfU1RBVFVTX0FEREVEEAESGAoURklMRV9TVEFUVVNfTU9ESUZJRUQQAhIXChNGSUxFX1NUQVRVU19ERUxFVEVEEAMysgQKD0FwcHJvdmFsU2VydmljZRJ1Cg1MaXN0QXBwcm92YWxzEi4ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkxpc3RBcHByb3ZhbHNSZXF1ZXN0Gi8ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkxpc3RBcHByb3ZhbHNSZXNwb25zZSIDkAIBEm8KC0dldEFwcHJvdmFsEiwua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkdldEFwcHJvdmFsUmVxdWVzdBotLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5HZXRBcHByb3ZhbFJlc3BvbnNlIgOQAgESewoPR2V0QXBwcm92YWxEaWZmEjAua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkdldEFwcHJvdmFsRGlmZlJlcXVlc3QaMS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuR2V0QXBwcm92YWxEaWZmUmVzcG9uc2UiA5ACARJjCgdBcHByb3ZlEigua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmVSZXF1ZXN0Gikua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmVSZXNwb25zZSIDkAICElUKBERlbnkSJS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVueVJlcXVlc3QaJi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVueVJlc3BvbnNlQldaVWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL2FwcHJvdmFsL3YxYWxwaGExO2FwcHJvdmFsdjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * Risk is the push-and-run summary the approval card leads with (plan item
@@ -290,6 +290,15 @@ export type Approval = Message<"koinon.approval.v1alpha1.Approval"> & {
      */
     value: McpCall;
     case: "mcp";
+  } | {
+    /**
+     * saved_work is set for "Push saved work to a branch", a request Koinon makes itself after a
+     * stuck sandbox (ADR 0054).
+     *
+     * @generated from field: koinon.approval.v1alpha1.SavedWorkCall saved_work = 29;
+     */
+    value: SavedWorkCall;
+    case: "savedWork";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -363,6 +372,14 @@ export type Approval = Message<"koinon.approval.v1alpha1.Approval"> & {
    * @generated from field: string first_approver = 27;
    */
   firstApprover: string;
+
+  /**
+   * system is true for a request Koinon made itself rather than an agent's tool call: the run
+   * neither waits for it nor is told its outcome (saved work from a stuck sandbox).
+   *
+   * @generated from field: bool system = 30;
+   */
+  system: boolean;
 };
 
 /**
@@ -426,6 +443,114 @@ export const McpCallSchema: GenMessage<McpCall> = /*@__PURE__*/
   messageDesc(file_koinon_approval_v1alpha1_approval, 5);
 
 /**
+ * SavedWorkCall describes uncommitted work saved from a stuck sandbox, as a diffstat. The files
+ * stay sealed in Koinon until the request is approved and pushed.
+ *
+ * @generated from message koinon.approval.v1alpha1.SavedWorkCall
+ */
+export type SavedWorkCall = Message<"koinon.approval.v1alpha1.SavedWorkCall"> & {
+  /**
+   * repository is owner/name; base the commit the changes apply to; branch where they are pushed
+   * (never the default branch).
+   *
+   * @generated from field: string repository = 1;
+   */
+  repository: string;
+
+  /**
+   * @generated from field: string base = 2;
+   */
+  base: string;
+
+  /**
+   * @generated from field: string branch = 3;
+   */
+  branch: string;
+
+  /**
+   * @generated from field: repeated koinon.approval.v1alpha1.SavedFile files = 4;
+   */
+  files: SavedFile[];
+
+  /**
+   * @generated from field: int64 size_bytes = 5;
+   */
+  sizeBytes: bigint;
+
+  /**
+   * Notes on changes that were not saved (symbolic links, submodules).
+   *
+   * @generated from field: repeated string skipped = 6;
+   */
+  skipped: string[];
+
+  /**
+   * status is saved, pushed or expired; the work is kept 14 days.
+   *
+   * @generated from field: string status = 7;
+   */
+  status: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp expires_at = 8;
+   */
+  expiresAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message koinon.approval.v1alpha1.SavedWorkCall.
+ * Use `create(SavedWorkCallSchema)` to create a new message.
+ */
+export const SavedWorkCallSchema: GenMessage<SavedWorkCall> = /*@__PURE__*/
+  messageDesc(file_koinon_approval_v1alpha1_approval, 6);
+
+/**
+ * SavedFile is one file of saved work.
+ *
+ * @generated from message koinon.approval.v1alpha1.SavedFile
+ */
+export type SavedFile = Message<"koinon.approval.v1alpha1.SavedFile"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * status is A (added), M (modified) or D (deleted).
+   *
+   * @generated from field: string status = 2;
+   */
+  status: string;
+
+  /**
+   * @generated from field: int32 added = 3;
+   */
+  added: number;
+
+  /**
+   * @generated from field: int32 deleted = 4;
+   */
+  deleted: number;
+
+  /**
+   * @generated from field: int64 size = 5;
+   */
+  size: bigint;
+
+  /**
+   * @generated from field: bool binary = 6;
+   */
+  binary: boolean;
+};
+
+/**
+ * Describes the message koinon.approval.v1alpha1.SavedFile.
+ * Use `create(SavedFileSchema)` to create a new message.
+ */
+export const SavedFileSchema: GenMessage<SavedFile> = /*@__PURE__*/
+  messageDesc(file_koinon_approval_v1alpha1_approval, 7);
+
+/**
  * ListApprovalsRequest names the org and, optionally, a ticket.
  *
  * @generated from message koinon.approval.v1alpha1.ListApprovalsRequest
@@ -450,7 +575,7 @@ export type ListApprovalsRequest = Message<"koinon.approval.v1alpha1.ListApprova
  * Use `create(ListApprovalsRequestSchema)` to create a new message.
  */
 export const ListApprovalsRequestSchema: GenMessage<ListApprovalsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 6);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 8);
 
 /**
  * ListApprovalsResponse holds the requests, without their decoded calls.
@@ -469,7 +594,7 @@ export type ListApprovalsResponse = Message<"koinon.approval.v1alpha1.ListApprov
  * Use `create(ListApprovalsResponseSchema)` to create a new message.
  */
 export const ListApprovalsResponseSchema: GenMessage<ListApprovalsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 7);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 9);
 
 /**
  * GetApprovalRequest names a request.
@@ -493,7 +618,7 @@ export type GetApprovalRequest = Message<"koinon.approval.v1alpha1.GetApprovalRe
  * Use `create(GetApprovalRequestSchema)` to create a new message.
  */
 export const GetApprovalRequestSchema: GenMessage<GetApprovalRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 8);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 10);
 
 /**
  * GetApprovalResponse holds the request with its decoded call.
@@ -512,7 +637,7 @@ export type GetApprovalResponse = Message<"koinon.approval.v1alpha1.GetApprovalR
  * Use `create(GetApprovalResponseSchema)` to create a new message.
  */
 export const GetApprovalResponseSchema: GenMessage<GetApprovalResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 9);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 11);
 
 /**
  * GetApprovalDiffRequest names a request.
@@ -536,7 +661,7 @@ export type GetApprovalDiffRequest = Message<"koinon.approval.v1alpha1.GetApprov
  * Use `create(GetApprovalDiffRequestSchema)` to create a new message.
  */
 export const GetApprovalDiffRequestSchema: GenMessage<GetApprovalDiffRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 10);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 12);
 
 /**
  * FileDiff compares one file with its current version on the base branch.
@@ -601,7 +726,7 @@ export type FileDiff = Message<"koinon.approval.v1alpha1.FileDiff"> & {
  * Use `create(FileDiffSchema)` to create a new message.
  */
 export const FileDiffSchema: GenMessage<FileDiff> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 11);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 13);
 
 /**
  * GetApprovalDiffResponse holds one FileDiff per file of the call, in the
@@ -629,7 +754,7 @@ export type GetApprovalDiffResponse = Message<"koinon.approval.v1alpha1.GetAppro
  * Use `create(GetApprovalDiffResponseSchema)` to create a new message.
  */
 export const GetApprovalDiffResponseSchema: GenMessage<GetApprovalDiffResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 12);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 14);
 
 /**
  * ApproveRequest names a request and the hash the approver saw.
@@ -665,7 +790,7 @@ export type ApproveRequest = Message<"koinon.approval.v1alpha1.ApproveRequest"> 
  * Use `create(ApproveRequestSchema)` to create a new message.
  */
 export const ApproveRequestSchema: GenMessage<ApproveRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 13);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 15);
 
 /**
  * ApproveResponse holds the request after execution: executed with its
@@ -685,7 +810,7 @@ export type ApproveResponse = Message<"koinon.approval.v1alpha1.ApproveResponse"
  * Use `create(ApproveResponseSchema)` to create a new message.
  */
 export const ApproveResponseSchema: GenMessage<ApproveResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 14);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 16);
 
 /**
  * DenyRequest names a request.
@@ -716,7 +841,7 @@ export type DenyRequest = Message<"koinon.approval.v1alpha1.DenyRequest"> & {
  * Use `create(DenyRequestSchema)` to create a new message.
  */
 export const DenyRequestSchema: GenMessage<DenyRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 15);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 17);
 
 /**
  * DenyResponse holds the denied request.
@@ -735,7 +860,7 @@ export type DenyResponse = Message<"koinon.approval.v1alpha1.DenyResponse"> & {
  * Use `create(DenyResponseSchema)` to create a new message.
  */
 export const DenyResponseSchema: GenMessage<DenyResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 16);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 18);
 
 /**
  * Status is the ADR 0042 lifecycle: pending -> approved -> executed | failed,

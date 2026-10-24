@@ -151,7 +151,7 @@ message SetAgentBudgetResponse {
 
 message Notification {
   string id = 1;
-  // kind is budget.warning (80%) or budget.reached (100%).
+  // kind is budget.warning (80%), budget.reached (100%) or agent.unhealthy.
   string kind = 2;
   // level is agent_daily, org_monthly or platform_ceiling.
   string level = 3;
@@ -165,6 +165,9 @@ message Notification {
   google.protobuf.Timestamp created_at = 9;
   // read_at is unset while the notification is unread.
   google.protobuf.Timestamp read_at = 10;
+  // message is the text of notifications that are not about a budget (kind agent.unhealthy: an
+  // agent whose sandbox keeps getting stuck; agent_id names it).
+  string message = 11;
 }
 
 message ListNotificationsRequest {

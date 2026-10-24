@@ -117,7 +117,8 @@ env_is KOINON_KEK_CREATE '"false"' --set secrets.kek.existingSecret=mine
 env_is KOINON_KEK_SECRET '"mine"' --set secrets.kek.existingSecret=mine
 has "existing KEK Secret mounted" 'secretName: mine$' --set secrets.kek.existingSecret=mine --show-only templates/deployments.yaml
 n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /secrets/kek$' || true)
-[ "$n" = 1 ] || fail "KEK mounted into $n components, want only koinon-reconciler"
+# koinon-reconciler, and koinon-agentd to seal the work saved from a stuck sandbox (ADR 0054).
+[ "$n" = 2 ] || fail "KEK mounted into $n components, want only koinon-reconciler and koinon-agentd"
 # koinon-api cannot delete Secrets unless the legacy connection migration is on.
 lacks "no Secret delete by default" 'verbs: \[delete\]'
 has "Secret delete with the legacy migration" 'verbs: \[delete\]' --set secrets.migrateLegacyConnections=true

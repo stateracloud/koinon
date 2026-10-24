@@ -5,6 +5,7 @@ package agentd
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,16 @@ import (
 //
 //go:embed sweep.sh
 var sweepScript string
+
+// procinfoScript reads the processes the sweep could not end (procinfo.sh).
+//
+//go:embed procinfo.sh
+var procinfoScript string
+
+// saveworkScript reads the workspace's uncommitted work (savework.sh).
+//
+//go:embed savework.sh
+var saveworkScript string
 
 // sweepTimeout bounds a sweep: a TERM round, up to four KILL rounds, 3 s of waiting each.
 const sweepTimeout = 30 * time.Second
@@ -34,6 +45,12 @@ func (r *runner) sweep(ctx context.Context, workspace, sandbox string) (string, 
 	out, code, stderr, err := r.sandboxExec(ctx, workspace, sandbox, []string{"/bin/sh", "-c", sweepScript, "sweep"}, nil)
 	if err != nil {
 		return "", nil, err
+	}
+	if code == 1 {
+		// Processes survived the last SIGKILL round. They may be stuck for good (stuck.go).
+		if sv := parseSurvivors(string(out)); len(sv) > 0 {
+			return "", nil, &survivorsError{survivors: sv, detail: strings.TrimSpace(stderr)}
+		}
 	}
 	if code != 0 {
 		return "", nil, &failure{reason: fmt.Sprintf("end the processes left in the sandbox: exit %d: %s", code, strings.TrimSpace(stderr))}
@@ -66,7 +83,11 @@ func (r *runner) sweepAfter(ctx context.Context, workspace, sandbox string) {
 		return
 	}
 	_, ended, err := r.sweep(context.WithoutCancel(ctx), workspace, sandbox)
+	var sv *survivorsError
 	switch {
+	case errors.As(err, &sv):
+		r.log.Warn("processes survived the end-of-turn sweep", "survivors", sv.survivors)
+		r.stuckAfterTurn(ctx, workspace, sandbox, sv)
 	case err != nil:
 		r.log.Warn("ending the processes left in the sandbox failed", "err", err)
 	case len(ended) > 0:

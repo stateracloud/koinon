@@ -78,7 +78,8 @@ agentd:
   gatewayURL: ""
   resources:
     requests: {cpu: 50m, memory: 64Mi}
-    limits: {memory: 256Mi}
+    # Saving a stuck sandbox's work (up to 50 MB, ADR 0054) holds it in memory a few times over.
+    limits: {memory: 512Mi}
   podAnnotations: {}
   nodeSelector: {}
   tolerations: []

@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 type config struct {
@@ -32,6 +33,7 @@ type config struct {
 	openshellAddr   string
 	openshellTLSDir string
 	openshellName   string
+	kekDir          string
 	pool            agentd.Config
 }
 
@@ -43,6 +45,8 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "",
 		"directory with the OpenShell client bundle (tls.crt, tls.key, ca.crt); empty connects without TLS")
 	fs.StringVar(&c.openshellName, "openshell-server-name", "", "name checked against the gateway's certificate")
+	fs.StringVar(&c.kekDir, "kek-dir", "",
+		"directory with the mounted key-encryption keys Secret, read-only; it seals the uncommitted work saved from a stuck sandbox (ADR 0054). Without it that work is not saved")
 	fs.StringVar(&c.pool.GatewayURL, "gateway-url", "",
 		"agentgateway's base URL as sandboxes reach it; flavors get <url>/v1 and <url>/mcp")
 	fs.StringVar(&c.pool.DefaultModel, "default-model", "", "model of agents that name none")
@@ -116,6 +120,19 @@ func run() error {
 	}
 	defer func() { _ = backend.Close() }()
 
+	if cfg.kekDir != "" {
+		// Keys may appear after this pod starts (koinon-api creates them on its first start); the
+		// keyring is filled as soon as they do.
+		ring, err := secretstore.NewKeyring(nil, "")
+		if err != nil {
+			return err
+		}
+		if err := ring.Reload(cfg.kekDir); err != nil {
+			slog.Warn("the key-encryption keys are not readable yet; stuck-sandbox work cannot be saved until they are", "err", err)
+		}
+		go ring.WatchDir(ctx, cfg.kekDir, time.Minute, slog.Default())
+		cfg.pool.Keyring = ring
+	}
 	pool, err := agentd.New(db, backend, cfg.pool)
 	if err != nil {
 		return err

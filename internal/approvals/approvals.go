@@ -50,7 +50,9 @@ import (
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 // Ticket event kinds written here. The tool server writes KindRequested.
@@ -104,6 +106,9 @@ type Options struct {
 	// them such a call fails permanently.
 	GatewayMCPURL string
 	ExecKeys      ExecKeys
+	// SavedWorkKeys opens saved work sealed by koinon-agentd (package savedwork). Without it a
+	// push of saved work fails permanently.
+	SavedWorkKeys *secretstore.Keyring
 	// GitHub defaults to a client for api.github.com.
 	GitHub *github.Client
 	// ExecutionLease is how long one executor holds a request. Default
@@ -118,15 +123,16 @@ type Options struct {
 
 // Service decides and executes approval requests.
 type Service struct {
-	pool    *pgxpool.Pool
-	q       *store.Queries
-	keys    connections.Opener
-	gwURL   string
-	execKey ExecKeys
-	gh      *github.Client
-	lease   time.Duration
-	maxExec int
-	log     *slog.Logger
+	pool      *pgxpool.Pool
+	q         *store.Queries
+	keys      connections.Opener
+	gwURL     string
+	execKey   ExecKeys
+	savedKeys *secretstore.Keyring
+	gh        *github.Client
+	lease     time.Duration
+	maxExec   int
+	log       *slog.Logger
 }
 
 // New returns a Service.
@@ -144,7 +150,7 @@ func New(pool *pgxpool.Pool, opts Options) *Service {
 		opts.Logger = slog.Default()
 	}
 	return &Service{
-		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, gh: opts.GitHub,
+		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, savedKeys: opts.SavedWorkKeys, gh: opts.GitHub,
 		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger,
 	}
 }
@@ -203,7 +209,7 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 		if err != nil {
 			return err
 		}
-		if run.State.Finished() {
+		if run.State.Finished() && !cur.System {
 			return ErrNotPending // the sweeper cancels it
 		}
 		if cur.ApprovalsRequired < 2 && cur.Connector == mcpask.ConnectorID {
@@ -287,6 +293,9 @@ func (s *Service) Deny(ctx context.Context, org, id, approver pgtype.UUID, note 
 		}
 		if err := ticketEvent(ctx, q, row, KindDenied, approver, map[string]any{"note": note}); err != nil {
 			return err
+		}
+		if row.System {
+			return nil
 		}
 		return ResolveRun(ctx, q, org, row.RunID)
 	})
@@ -394,6 +403,19 @@ func (s *Service) Execute(ctx context.Context, org, id pgtype.UUID) (store.Appro
 		if err := ticketEvent(ctx, q, out, kind, pgtype.UUID{}, extra); err != nil {
 			return err
 		}
+		if out.System {
+			// Koinon's own request: the run is not waiting for it. The sealed files go once pushed.
+			if execErr == nil {
+				if a, err := savedwork.DecodePushArgs(out.ArgsJson); err == nil {
+					var id pgtype.UUID
+					if id.Scan(a.SavedWorkID) == nil {
+						_, err = q.MarkSavedWorkPushed(ctx, store.MarkSavedWorkPushedParams{OrgID: org, ID: id})
+						return err
+					}
+				}
+			}
+			return nil
+		}
 		return ResolveRun(ctx, q, org, out.RunID)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -420,7 +442,7 @@ func truncate(s string, n int) string {
 
 // SweepResult counts what one sweep did.
 type SweepResult struct {
-	Executed, Expired, Canceled, RunsCanceled int
+	Executed, Expired, Canceled, RunsCanceled, SavedWorkExpired int
 }
 
 // Sweep does the periodic work in every org: execute approved requests nobody holds,
@@ -455,9 +477,17 @@ func (s *Service) sweepOrg(ctx context.Context, org pgtype.UUID, res *SweepResul
 			if err := ticketEvent(ctx, q, r, KindExpired, pgtype.UUID{}, map[string]any{"expires_at": r.ExpiresAt.Time}); err != nil {
 				return err
 			}
-			runs[r.RunID] = true
+			if !r.System { // Koinon's own request: no run waits for it
+				runs[r.RunID] = true
+			}
 		}
 		res.Expired += len(expired)
+		// Saved work is kept for 14 days; the sealed files go with it.
+		gone, err := q.ExpireSavedWork(ctx, org)
+		if err != nil {
+			return err
+		}
+		res.SavedWorkExpired += len(gone)
 		parked, err := q.ListExpiredParkedRuns(ctx, org)
 		if err != nil {
 			return err

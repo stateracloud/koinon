@@ -110,6 +110,12 @@ type files struct {
 	// sweep answers the sweep script: its output and exit code. Nil ends nothing.
 	sweep  func() (string, int)
 	sweeps int
+	// procinfo answers the script that reads the processes the sweep could not end (its lines),
+	// savework the script that reads the workspace's uncommitted work (its output and exit code).
+	procinfo     func() string
+	procinfoRuns int
+	savework     func(dir string) (string, int)
+	saveworkRuns int
 }
 
 func (f *files) link(path string) (string, bool) {
@@ -145,10 +151,37 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		}
 		out, code := f.sweep()
 		if code != 0 {
-			_, _ = io.WriteString(stderr, out)
+			// Like sweep.sh: survivors are printed on stdout, the rest on stderr.
+			for line := range strings.Lines(out) {
+				if strings.HasPrefix(line, "survivors:") {
+					_, _ = io.WriteString(stdout, line)
+				} else {
+					_, _ = io.WriteString(stderr, line)
+				}
+			}
 		} else {
 			_, _ = io.WriteString(stdout, out)
 		}
+		return code
+	}
+	if len(args) >= 3 && args[0] == "-c" && args[1] == agentd.ProcinfoScript {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.procinfoRuns++
+		if f.procinfo != nil {
+			_, _ = io.WriteString(stdout, f.procinfo())
+		}
+		return 0
+	}
+	if len(args) == 5 && args[0] == "-c" && args[1] == agentd.SaveworkScript {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.saveworkRuns++
+		if f.savework == nil {
+			return 0
+		}
+		out, code := f.savework(args[3])
+		_, _ = io.WriteString(stdout, out)
 		return code
 	}
 	if len(args) < 4 || args[0] != "-c" {

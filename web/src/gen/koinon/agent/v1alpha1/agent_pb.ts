@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/agent/v1alpha1/agent.proto.
  */
 export const file_koinon_agent_v1alpha1_agent: GenFile = /*@__PURE__*/
-  fileDesc("CiFrb2lub24vYWdlbnQvdjFhbHBoYTEvYWdlbnQucHJvdG8SFWtvaW5vbi5hZ2VudC52MWFscGhhMSLgBAoFQWdlbnQSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIyCgZzdGF0dXMYBCABKA4yIi5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnRTdGF0dXMSMAoGZmxhdm9yGAUgASgOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvchITCgt0ZW1wbGF0ZV9pZBgGIAEoCRIVCg10ZW1wbGF0ZV9zbHVnGAcgASgJEhYKDmxhdGVzdF92ZXJzaW9uGAggASgFEhYKDmFjdGl2ZV92ZXJzaW9uGAkgASgFEjgKD3Byb3Bvc2VkX2dyYW50cxgKIAMoCzIfLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5HcmFudBI4Cg9hcHByb3ZlZF9ncmFudHMYCyADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSFAoMaW5zdHJ1Y3Rpb25zGAwgASgJEg0KBW1vZGVsGA0gASgJEjcKCnJ1bl9saW1pdHMYDiABKAsyIy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUnVuTGltaXRzEi4KCmNyZWF0ZWRfYXQYDyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDGFjdGl2YXRlZF9hdBgQIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLYXJjaGl2ZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIsIBCh5DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC3RlbXBsYXRlX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIwCgZmbGF2b3IYBCABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuRmxhdm9yEjMKBmdyYW50cxgFIAMoCzIjLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HcmFudEJpbmRpbmciTgoMR3JhbnRCaW5kaW5nEhEKCWNvbm5lY3RvchgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJEhQKDHJlcG9zaXRvcmllcxgDIAMoCSJOCh9DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IjMKD0dldEFnZW50UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiPwoQR2V0QWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCIjChFMaXN0QWdlbnRzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkiQgoSTGlzdEFnZW50c1Jlc3BvbnNlEiwKBmFnZW50cxgBIAMoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCJJChRBY3RpdmF0ZUFnZW50UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkSDwoHdmVyc2lvbhgDIAEoBSJEChVBY3RpdmF0ZUFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiNwoTQXJjaGl2ZUFnZW50UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIYWdlbnRfaWQYAiABKAkiQwoUQXJjaGl2ZUFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQqdwoLQWdlbnRTdGF0dXMSHAoYQUdFTlRfU1RBVFVTX1VOU1BFQ0lGSUVEEAASFgoSQUdFTlRfU1RBVFVTX0RSQUZUEAESFwoTQUdFTlRfU1RBVFVTX0FDVElWRRACEhkKFUFHRU5UX1NUQVRVU19BUkNISVZFRBADMrgECgxBZ2VudFNlcnZpY2USiAEKF0NyZWF0ZUFnZW50RnJvbVRlbXBsYXRlEjUua29pbm9uLmFnZW50LnYxYWxwaGExLkNyZWF0ZUFnZW50RnJvbVRlbXBsYXRlUmVxdWVzdBo2LmtvaW5vbi5hZ2VudC52MWFscGhhMS5DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlc3BvbnNlEmAKCEdldEFnZW50EiYua29pbm9uLmFnZW50LnYxYWxwaGExLkdldEFnZW50UmVxdWVzdBonLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudFJlc3BvbnNlIgOQAgESZgoKTGlzdEFnZW50cxIoLmtvaW5vbi5hZ2VudC52MWFscGhhMS5MaXN0QWdlbnRzUmVxdWVzdBopLmtvaW5vbi5hZ2VudC52MWFscGhhMS5MaXN0QWdlbnRzUmVzcG9uc2UiA5ACARJqCg1BY3RpdmF0ZUFnZW50Eisua29pbm9uLmFnZW50LnYxYWxwaGExLkFjdGl2YXRlQWdlbnRSZXF1ZXN0Giwua29pbm9uLmFnZW50LnYxYWxwaGExLkFjdGl2YXRlQWdlbnRSZXNwb25zZRJnCgxBcmNoaXZlQWdlbnQSKi5rb2lub24uYWdlbnQudjFhbHBoYTEuQXJjaGl2ZUFnZW50UmVxdWVzdBorLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BcmNoaXZlQWdlbnRSZXNwb25zZUJRWk9naXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9hZ2VudC92MWFscGhhMTthZ2VudHYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_timestamp, file_koinon_template_v1alpha1_template]);
+  fileDesc("CiFrb2lub24vYWdlbnQvdjFhbHBoYTEvYWdlbnQucHJvdG8SFWtvaW5vbi5hZ2VudC52MWFscGhhMSKsBQoFQWdlbnQSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIyCgZzdGF0dXMYBCABKA4yIi5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnRTdGF0dXMSMAoGZmxhdm9yGAUgASgOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvchITCgt0ZW1wbGF0ZV9pZBgGIAEoCRIVCg10ZW1wbGF0ZV9zbHVnGAcgASgJEhYKDmxhdGVzdF92ZXJzaW9uGAggASgFEhYKDmFjdGl2ZV92ZXJzaW9uGAkgASgFEjgKD3Byb3Bvc2VkX2dyYW50cxgKIAMoCzIfLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5HcmFudBI4Cg9hcHByb3ZlZF9ncmFudHMYCyADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSFAoMaW5zdHJ1Y3Rpb25zGAwgASgJEg0KBW1vZGVsGA0gASgJEjcKCnJ1bl9saW1pdHMYDiABKAsyIy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUnVuTGltaXRzEi4KCmNyZWF0ZWRfYXQYDyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDGFjdGl2YXRlZF9hdBgQIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLYXJjaGl2ZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDHVuaGVhbHRoeV9hdBgSIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGAoQdW5oZWFsdGh5X3JlYXNvbhgTIAEoCSLCAQoeQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGVSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgt0ZW1wbGF0ZV9pZBgCIAEoCRIUCgxkaXNwbGF5X25hbWUYAyABKAkSMAoGZmxhdm9yGAQgASgOMiAua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLkZsYXZvchIzCgZncmFudHMYBSADKAsyIy5rb2lub24uYWdlbnQudjFhbHBoYTEuR3JhbnRCaW5kaW5nIk4KDEdyYW50QmluZGluZxIRCgljb25uZWN0b3IYASABKAkSFQoNY29ubmVjdGlvbl9pZBgCIAEoCRIUCgxyZXBvc2l0b3JpZXMYAyADKAkiTgofQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGVSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudCIzCg9HZXRBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIj8KEEdldEFnZW50UmVzcG9uc2USKwoFYWdlbnQYASABKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiIwoRTGlzdEFnZW50c1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIkIKEkxpc3RBZ2VudHNSZXNwb25zZRIsCgZhZ2VudHMYASADKAsyHC5rb2lub24uYWdlbnQudjFhbHBoYTEuQWdlbnQiaAoUQWN0aXZhdGVBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3ZlcnNpb24YAyABKAUSHQoVYXBwbHlfdG9fb3Blbl90aWNrZXRzGAQgASgIImAKFUFjdGl2YXRlQWdlbnRSZXNwb25zZRIrCgVhZ2VudBgBIAEoCzIcLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BZ2VudBIaChJ0aWNrZXRzX3Jlc3RhcnRpbmcYAiABKAUiNgoSUmVzdW1lQWdlbnRSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSJCChNSZXN1bWVBZ2VudFJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50IjcKE0FyY2hpdmVBZ2VudFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJIkMKFEFyY2hpdmVBZ2VudFJlc3BvbnNlEisKBWFnZW50GAEgASgLMhwua29pbm9uLmFnZW50LnYxYWxwaGExLkFnZW50KncKC0FnZW50U3RhdHVzEhwKGEFHRU5UX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKEkFHRU5UX1NUQVRVU19EUkFGVBABEhcKE0FHRU5UX1NUQVRVU19BQ1RJVkUQAhIZChVBR0VOVF9TVEFUVVNfQVJDSElWRUQQAzKeBQoMQWdlbnRTZXJ2aWNlEogBChdDcmVhdGVBZ2VudEZyb21UZW1wbGF0ZRI1LmtvaW5vbi5hZ2VudC52MWFscGhhMS5DcmVhdGVBZ2VudEZyb21UZW1wbGF0ZVJlcXVlc3QaNi5rb2lub24uYWdlbnQudjFhbHBoYTEuQ3JlYXRlQWdlbnRGcm9tVGVtcGxhdGVSZXNwb25zZRJgCghHZXRBZ2VudBImLmtvaW5vbi5hZ2VudC52MWFscGhhMS5HZXRBZ2VudFJlcXVlc3QaJy5rb2lub24uYWdlbnQudjFhbHBoYTEuR2V0QWdlbnRSZXNwb25zZSIDkAIBEmYKCkxpc3RBZ2VudHMSKC5rb2lub24uYWdlbnQudjFhbHBoYTEuTGlzdEFnZW50c1JlcXVlc3QaKS5rb2lub24uYWdlbnQudjFhbHBoYTEuTGlzdEFnZW50c1Jlc3BvbnNlIgOQAgESagoNQWN0aXZhdGVBZ2VudBIrLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BY3RpdmF0ZUFnZW50UmVxdWVzdBosLmtvaW5vbi5hZ2VudC52MWFscGhhMS5BY3RpdmF0ZUFnZW50UmVzcG9uc2USZAoLUmVzdW1lQWdlbnQSKS5rb2lub24uYWdlbnQudjFhbHBoYTEuUmVzdW1lQWdlbnRSZXF1ZXN0Gioua29pbm9uLmFnZW50LnYxYWxwaGExLlJlc3VtZUFnZW50UmVzcG9uc2USZwoMQXJjaGl2ZUFnZW50Eioua29pbm9uLmFnZW50LnYxYWxwaGExLkFyY2hpdmVBZ2VudFJlcXVlc3QaKy5rb2lub24uYWdlbnQudjFhbHBoYTEuQXJjaGl2ZUFnZW50UmVzcG9uc2VCUVpPZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vYWdlbnQvdjFhbHBoYTE7YWdlbnR2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_timestamp, file_koinon_template_v1alpha1_template]);
 
 /**
  * Agent is an agent and the definition it runs.
@@ -119,6 +119,19 @@ export type Agent = Message<"koinon.agent.v1alpha1.Agent"> & {
    * @generated from field: google.protobuf.Timestamp archived_at = 17;
    */
   archivedAt?: Timestamp | undefined;
+
+  /**
+   * Set while the agent is unhealthy: its sandbox got stuck three times in 24 hours and was not
+   * recreated again (ADR 0054). New runs are refused until ResumeAgent.
+   *
+   * @generated from field: google.protobuf.Timestamp unhealthy_at = 18;
+   */
+  unhealthyAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string unhealthy_reason = 19;
+   */
+  unhealthyReason: string;
 };
 
 /**
@@ -337,6 +350,15 @@ export type ActivateAgentRequest = Message<"koinon.agent.v1alpha1.ActivateAgentR
    * @generated from field: int32 version = 3;
    */
   version: number;
+
+  /**
+   * Start fresh sessions, with a handoff, on the agent's open tickets: their next run begins a new
+   * session from the agent's last notes and replies instead of loading the old one, so the new
+   * version's instructions apply (ADR 0051 amendment). Default off; audited.
+   *
+   * @generated from field: bool apply_to_open_tickets = 4;
+   */
+  applyToOpenTickets: boolean;
 };
 
 /**
@@ -356,6 +378,13 @@ export type ActivateAgentResponse = Message<"koinon.agent.v1alpha1.ActivateAgent
    * @generated from field: koinon.agent.v1alpha1.Agent agent = 1;
    */
   agent?: Agent | undefined;
+
+  /**
+   * How many open tickets were marked to start a fresh session.
+   *
+   * @generated from field: int32 tickets_restarting = 2;
+   */
+  ticketsRestarting: number;
 };
 
 /**
@@ -364,6 +393,49 @@ export type ActivateAgentResponse = Message<"koinon.agent.v1alpha1.ActivateAgent
  */
 export const ActivateAgentResponseSchema: GenMessage<ActivateAgentResponse> = /*@__PURE__*/
   messageDesc(file_koinon_agent_v1alpha1_agent, 9);
+
+/**
+ * ResumeAgentRequest names the agent.
+ *
+ * @generated from message koinon.agent.v1alpha1.ResumeAgentRequest
+ */
+export type ResumeAgentRequest = Message<"koinon.agent.v1alpha1.ResumeAgentRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string agent_id = 2;
+   */
+  agentId: string;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.ResumeAgentRequest.
+ * Use `create(ResumeAgentRequestSchema)` to create a new message.
+ */
+export const ResumeAgentRequestSchema: GenMessage<ResumeAgentRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 10);
+
+/**
+ * ResumeAgentResponse holds the agent, healthy again.
+ *
+ * @generated from message koinon.agent.v1alpha1.ResumeAgentResponse
+ */
+export type ResumeAgentResponse = Message<"koinon.agent.v1alpha1.ResumeAgentResponse"> & {
+  /**
+   * @generated from field: koinon.agent.v1alpha1.Agent agent = 1;
+   */
+  agent?: Agent | undefined;
+};
+
+/**
+ * Describes the message koinon.agent.v1alpha1.ResumeAgentResponse.
+ * Use `create(ResumeAgentResponseSchema)` to create a new message.
+ */
+export const ResumeAgentResponseSchema: GenMessage<ResumeAgentResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_agent_v1alpha1_agent, 11);
 
 /**
  * ArchiveAgentRequest names the agent.
@@ -387,7 +459,7 @@ export type ArchiveAgentRequest = Message<"koinon.agent.v1alpha1.ArchiveAgentReq
  * Use `create(ArchiveAgentRequestSchema)` to create a new message.
  */
 export const ArchiveAgentRequestSchema: GenMessage<ArchiveAgentRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 10);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 12);
 
 /**
  * ArchiveAgentResponse holds the archived agent.
@@ -406,7 +478,7 @@ export type ArchiveAgentResponse = Message<"koinon.agent.v1alpha1.ArchiveAgentRe
  * Use `create(ArchiveAgentResponseSchema)` to create a new message.
  */
 export const ArchiveAgentResponseSchema: GenMessage<ArchiveAgentResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_agent_v1alpha1_agent, 11);
+  messageDesc(file_koinon_agent_v1alpha1_agent, 13);
 
 /**
  * AgentStatus is the agent lifecycle (ADR 0020).
@@ -489,6 +561,18 @@ export const AgentService: GenService<{
     methodKind: "unary";
     input: typeof ActivateAgentRequestSchema;
     output: typeof ActivateAgentResponseSchema;
+  },
+  /**
+   * ResumeAgent clears the unhealthy state of an agent whose sandbox got stuck again and again
+   * (ADR 0054), so it takes runs again; its stuck sandbox is recreated. Audited. Admins and owners
+   * only.
+   *
+   * @generated from rpc koinon.agent.v1alpha1.AgentService.ResumeAgent
+   */
+  resumeAgent: {
+    methodKind: "unary";
+    input: typeof ResumeAgentRequestSchema;
+    output: typeof ResumeAgentResponseSchema;
   },
   /**
    * ArchiveAgent archives a draft or active agent and cancels its unfinished

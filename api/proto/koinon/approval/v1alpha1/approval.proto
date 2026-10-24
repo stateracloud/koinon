@@ -151,6 +151,9 @@ message Approval {
     CommentCall comment = 15;
     // mcp is set for a call to a remote MCP server (connector "mcp").
     McpCall mcp = 28;
+    // saved_work is set for "Push saved work to a branch", a request Koinon makes itself after a
+    // stuck sandbox (ADR 0054).
+    SavedWorkCall saved_work = 29;
   }
   string decided_by = 16;
   google.protobuf.Timestamp decided_at = 17;
@@ -171,6 +174,9 @@ message Approval {
   int32 approvals_required = 26;
   // first_approver is the user ID of the first of two approvals, once given; the request stays pending.
   string first_approver = 27;
+  // system is true for a request Koinon made itself rather than an agent's tool call: the run
+  // neither waits for it nor is told its outcome (saved work from a stuck sandbox).
+  bool system = 30;
 }
 
 // McpCall describes a call to a remote MCP server (ADR 0057). The call is bound to the server, its URL
@@ -186,6 +192,34 @@ message McpCall {
   string review_reason = 5;
   // tool_description is the tool's current description, so the approver reads what the agent read.
   string tool_description = 6;
+}
+
+// SavedWorkCall describes uncommitted work saved from a stuck sandbox, as a diffstat. The files
+// stay sealed in Koinon until the request is approved and pushed.
+message SavedWorkCall {
+  // repository is owner/name; base the commit the changes apply to; branch where they are pushed
+  // (never the default branch).
+  string repository = 1;
+  string base = 2;
+  string branch = 3;
+  repeated SavedFile files = 4;
+  int64 size_bytes = 5;
+  // Notes on changes that were not saved (symbolic links, submodules).
+  repeated string skipped = 6;
+  // status is saved, pushed or expired; the work is kept 14 days.
+  string status = 7;
+  google.protobuf.Timestamp expires_at = 8;
+}
+
+// SavedFile is one file of saved work.
+message SavedFile {
+  string path = 1;
+  // status is A (added), M (modified) or D (deleted).
+  string status = 2;
+  int32 added = 3;
+  int32 deleted = 4;
+  int64 size = 5;
+  bool binary = 6;
 }
 
 // ListApprovalsRequest names the org and, optionally, a ticket.

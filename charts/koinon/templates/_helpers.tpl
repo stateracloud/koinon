@@ -420,6 +420,9 @@ koinon-agentd's settings (plan item AG1). The gateway URL tells sandboxes where 
 it carries no credentials.
 */}}
 {{- define "koinon.agentdEnv" -}}
+{{- /* The KEKs seal the uncommitted work saved from a stuck sandbox (ADR 0054); read-only. */}}
+- name: KOINON_KEK_DIR
+  value: /secrets/kek
 - name: POD_NAME
   valueFrom:
     fieldRef:

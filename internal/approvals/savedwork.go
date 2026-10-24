@@ -1,0 +1,164 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package approvals
+
+// Pushing saved work (plan item AG1; ADR 0054).
+//
+// When a stuck sandbox is recreated, koinon-agentd seals the workspace's uncommitted work in
+// Postgres and asks, as the system, for the approval "Push saved work to a branch" (a request
+// with system set, tool push_saved_work). It is an ordinary ask-tier request: an approver sees
+// the diffstat, approves the hash of the arguments, and only then does Koinon open the sealed
+// files and write them to GitHub through the same connection and the same Git Data calls as a
+// pull request - blobs, a tree on top of the recorded base commit, one commit, and a new branch
+// koinon/wip/<ticket>-<time>. The default branch is never written, an existing branch is never
+// overwritten, and a repository the run's agent version is not bound to, or the installation
+// cannot reach, is refused. The request ID is the idempotency key, as for pull requests.
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/savedwork"
+	"github.com/stateracloud/koinon/internal/secretstore"
+)
+
+// savedWorkPermissions are the installation token's permissions for the push: contents only.
+var savedWorkPermissions = map[string]string{"metadata": "read", "contents": "write"}
+
+// executeSavedWork pushes the approved saved work to its branch.
+func (s *Service) executeSavedWork(ctx context.Context, row store.ApprovalRequest) (map[string]any, error) {
+	args, err := savedwork.DecodePushArgs(row.ArgsJson)
+	if err != nil {
+		return nil, permanentError{err}
+	}
+	var id pgtype.UUID
+	if err := id.Scan(args.SavedWorkID); err != nil || !id.Valid {
+		return nil, permanent("the request names no saved work")
+	}
+	if s.savedKeys == nil {
+		return nil, permanent("saved work cannot be opened: this server has no key-encryption keys")
+	}
+	sw, err := s.q.GetSavedWork(ctx, store.GetSavedWorkParams{OrgID: row.OrgID, ID: id})
+	if err != nil {
+		return nil, permanent("the saved work is gone")
+	}
+	switch {
+	case sw.RunID != row.RunID || sw.TicketID != row.TicketID, sw.Repo != args.Repo, sw.BaseSha != args.Base, sw.Branch != args.Branch:
+		return nil, permanent("the request does not match the saved work")
+	case sw.Status == "expired" || !sw.ExpiresAt.Time.After(time.Now()):
+		return nil, permanent("the saved work expired (it is kept for 14 days)")
+	case sw.Status != "saved" || len(sw.Envelope) == 0:
+		return nil, permanent("the saved work was already pushed")
+	}
+	var env secretstore.Envelope
+	if err := json.Unmarshal(sw.Envelope, &env); err != nil {
+		return nil, permanent("the saved work is unreadable")
+	}
+	work, err := savedwork.Open(s.savedKeys, row.OrgID.String(), id.String(), env)
+	if err != nil {
+		return nil, permanent("the saved work cannot be opened: %v", err)
+	}
+	if work.Manifest.Repo != args.Repo || work.Manifest.Base != args.Base {
+		return nil, permanent("the saved work does not match its manifest")
+	}
+	repo, err := github.ParseRepo(args.Repo)
+	if err != nil {
+		return nil, permanentError{err}
+	}
+	app, err := s.appFor(ctx, row, args.Repo, false)
+	if err != nil {
+		return nil, err
+	}
+	tok, err := s.gh.InstallationToken(ctx, app, github.TokenRequest{Repositories: []string{repo.String()}, Permissions: savedWorkPermissions})
+	if err != nil {
+		return nil, err
+	}
+	info, err := s.gh.GetRepository(ctx, tok, repo)
+	if err != nil {
+		return nil, err
+	}
+	if args.Branch == info.DefaultBranch {
+		return nil, permanent("saved work is never written to the default branch")
+	}
+	head, err := s.existingHead(ctx, tok, repo, args.Branch, row.ID.String())
+	if err != nil {
+		return nil, err
+	}
+	if head == "" {
+		requested, approved, err := s.people(ctx, row)
+		if err != nil {
+			return nil, err
+		}
+		ticket, err := s.q.GetTicket(ctx, store.GetTicketParams{OrgID: row.OrgID, ID: row.TicketID})
+		if err != nil {
+			return nil, err
+		}
+		msg := savedWorkMessage(ticket.Title, row.ID.String(), requested, approved)
+		if head, err = s.commitSaved(ctx, tok, repo, work, msg); err != nil {
+			return nil, err
+		}
+		err = s.gh.CreateBranch(ctx, tok, repo, args.Branch, head)
+		if errors.Is(err, github.ErrRefExists) {
+			if head, err = s.existingHead(ctx, tok, repo, args.Branch, row.ID.String()); err == nil && head == "" {
+				err = permanent("branch %s appeared while it was being created", args.Branch)
+			}
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{
+		"url": "https://github.com/" + repo.String() + "/tree/" + args.Branch, "branch": args.Branch, "base": args.Base,
+		"commit": head, "repo": args.Repo, "files": len(work.Manifest.Files),
+	}, nil
+}
+
+// savedWorkMessage is the commit message of pushed saved work, with the trailers.
+func savedWorkMessage(ticketTitle, approvalID, requestedBy, approvedBy string) string {
+	var b strings.Builder
+	b.WriteString("WIP: work saved from a stuck sandbox\n\n")
+	fmt.Fprintf(&b, "Koinon saved this uncommitted work when the agent's sandbox had to be recreated.\nTicket: %s\n\n", oneLine(ticketTitle))
+	fmt.Fprintf(&b, "%s: %s\n%s: %s\n%s: %s\n", TrailerRequestedBy, requestedBy, TrailerApprovedBy, approvedBy, TrailerApproval, approvalID)
+	return b.String()
+}
+
+// commitSaved creates the blobs, the tree on top of the base commit and the commit with the saved
+// files, and returns its SHA. The base commit must be on GitHub.
+func (s *Service) commitSaved(ctx context.Context, tok github.Token, repo github.Repo, w savedwork.Work, message string) (string, error) {
+	base, err := s.gh.GetCommit(ctx, tok, repo, w.Manifest.Base)
+	if github.IsStatus(err, 404) || github.IsStatus(err, 422) {
+		return "", permanent("the commit the work is based on (%s) is not on GitHub in %s; push the branch it came from first", w.Manifest.Base, repo)
+	}
+	if err != nil {
+		return "", err
+	}
+	entries := make([]github.TreeEntry, 0, len(w.Manifest.Files))
+	for _, f := range w.Manifest.Files {
+		mode := f.Mode
+		if f.Status == savedwork.Deleted {
+			mode = "100644"
+		}
+		e := github.TreeEntry{Path: f.Path, Mode: mode, Type: "blob"}
+		if f.Status != savedwork.Deleted {
+			sha, err := s.gh.CreateBlob(ctx, tok, repo, w.Content[f.Path])
+			if err != nil {
+				return "", err
+			}
+			e.SHA = &sha
+		}
+		entries = append(entries, e)
+	}
+	tree, err := s.gh.CreateTree(ctx, tok, repo, base.Tree.SHA, entries)
+	if err != nil {
+		return "", err
+	}
+	return s.gh.CreateCommit(ctx, tok, repo, message, tree, []string{w.Manifest.Base})
+}
