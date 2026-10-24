@@ -15,7 +15,8 @@ package agentd
 //   - the reply is not a timeline message: the agent's message chunks of the summary prompt are
 //     collected here and never recorded as run events, which is what the ticket's reply is built
 //     from;
-//   - tools are refused three ways: the prompt says not to call any; permission requests during
+//   - tools are refused three ways: the prompt says not to use any (harness-local tools such as a shell
+//     or file edits do take effect, so it says so); permission requests during
 //     it are rejected; and while it runs the run is marked summarizing, which makes Koinon's own
 //     tool servers (GitHub, remote MCP servers) answer as if no run were active, so no approval
 //     request can be recorded. A harness that calls a tool anyway has its summary discarded and
@@ -44,8 +45,9 @@ const (
 // summaryPrompt is the extra prompt. It starts with a marker tests and logs can recognise.
 const summaryPrompt = "[Koinon] Your turn is over. Write a short note to your future self about this ticket, " +
 	"for use if your session is restarted: where things stand, what you decided and why, and the next steps. " +
-	"Answer with the note only, in plain text, at most 1500 words. Do not call any tool, run any command or " +
-	"change any file; nothing you do now is carried out. This note is not shown as a reply to the user."
+	"Answer with the note only, in plain text, at most 1500 words. Do not use any tool at all: no shell " +
+	"commands, no file edits, no searches, no calls to Koinon or other servers. Tools that run inside your " +
+	"sandbox do take effect, so do not use them now. This note is not shown as a reply to the user."
 
 // summaryState collects the summary prompt's reply.
 type summaryState struct {

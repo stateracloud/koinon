@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net/http"
 	"net/url"
 	"strconv"
 	"sync"
@@ -47,7 +48,6 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
-	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 // Backend is the part of [execution.Backend] agentd uses. agentd only execs: sandbox state
@@ -96,9 +96,10 @@ type Config struct {
 	StuckAfter, StuckPoll time.Duration
 	// SaveTimeout is the time budget for reading a stuck sandbox's uncommitted work. Default 30s.
 	SaveTimeout time.Duration
-	// Keyring seals saved work. Without it a stuck sandbox's work is not saved (and the
-	// timeline says so).
-	Keyring *secretstore.Keyring
+	// SavedWorkURL is koinon-api's tools listener, where a stuck sandbox's work is posted to be
+	// sealed (package savedwork); koinon-agentd holds no key-encryption key. Without it that work
+	// is not saved, and the timeline says so.
+	SavedWorkURL string
 	// MaxTakeovers fails a run that has been taken over more often than this, instead of
 	// resuming it again. Default 5.
 	MaxTakeovers int
@@ -181,6 +182,9 @@ type Pool struct {
 	backend Backend
 	cfg     Config
 	log     *slog.Logger
+	// saveSem lets one save run at a time: a bundle is up to 50 MB.
+	saveSem chan struct{}
+	http    *http.Client
 }
 
 // New returns a pool. Run starts it.
@@ -188,7 +192,10 @@ func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 	if err := cfg.defaults(); err != nil {
 		return nil, err
 	}
-	return &Pool{db: db, q: store.New(db), backend: backend, cfg: cfg, log: cfg.Logger}, nil
+	return &Pool{
+		db: db, q: store.New(db), backend: backend, cfg: cfg, log: cfg.Logger,
+		saveSem: make(chan struct{}, 1), http: &http.Client{Timeout: cfg.SaveTimeout},
+	}, nil
 }
 
 // Run drives runs until ctx ends, then waits for the workers to stop.

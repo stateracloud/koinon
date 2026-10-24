@@ -17,6 +17,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +40,10 @@ const (
 	BranchPrefix = "koinon/wip/"
 	// MaxFiles bounds the files of one saved repository.
 	MaxFiles = 5000
+	// MaxNotes and MaxNoteBytes bound the lines the sandbox reports about what it left out: they
+	// are shown to people, so a sandbox cannot flood a timeline or a card.
+	MaxNotes     = 20
+	MaxNoteBytes = 200
 )
 
 // Table and Column name the sealed value for the secret store's binding and the key tool.
@@ -97,6 +103,8 @@ func (m Manifest) Totals() (added, deleted int) {
 	return added, deleted
 }
 
+var hashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 var pathPattern = regexp.MustCompile(`^[^\x00-\x1f\x7f]+$`)
 
 // ValidPath reports whether p is a repository-relative path Koinon pushes: no leading slash, no
@@ -120,6 +128,14 @@ func (m Manifest) Validate() error {
 	}
 	if len(m.Files) > MaxFiles {
 		return fmt.Errorf("savedwork: more than %d files", MaxFiles)
+	}
+	if len(m.Skipped) > MaxNotes {
+		return fmt.Errorf("savedwork: more than %d notes", MaxNotes)
+	}
+	for _, n := range m.Skipped {
+		if len(n) > MaxNoteBytes {
+			return errors.New("savedwork: a note is too long")
+		}
 	}
 	seen := map[string]bool{}
 	for _, f := range m.Files {
@@ -241,16 +257,41 @@ func Seal(ring *secretstore.Keyring, org, id string, w Work) (secretstore.Envelo
 	if err != nil {
 		return secretstore.Envelope{}, err
 	}
+	return SealPacked(ring, org, id, packed)
+}
+
+// SealPacked seals bytes Pack wrote.
+func SealPacked(ring *secretstore.Keyring, org, id string, packed []byte) (secretstore.Envelope, error) {
 	return ring.Seal(Binding(org, id), packed)
 }
 
 // Open opens the envelope of the saved_work row (org, id) and unpacks it.
 func Open(ring *secretstore.Keyring, org, id string, env secretstore.Envelope) (Work, error) {
+	w, _, err := OpenPacked(ring, org, id, env)
+	return w, err
+}
+
+// OpenPacked is Open that also returns the packed bytes, whose SHA-256 the approval binds to.
+func OpenPacked(ring *secretstore.Keyring, org, id string, env secretstore.Envelope) (Work, []byte, error) {
 	packed, err := ring.Open(Binding(org, id), env)
 	if err != nil {
-		return Work{}, err
+		return Work{}, nil, err
 	}
-	return Unpack(packed)
+	w, err := Unpack(packed)
+	return w, packed, err
+}
+
+// BundleHash is the SHA-256 (hex) of packed bytes; ManifestHash that of the manifest's JSON.
+func BundleHash(packed []byte) string {
+	sum := sha256.Sum256(packed)
+	return hex.EncodeToString(sum[:])
+}
+
+// ManifestHash is the SHA-256 (hex) of the manifest as JSON.
+func ManifestHash(m Manifest) string {
+	b, _ := json.Marshal(m) //nolint:errchkjson // plain values
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // BranchName is the branch saved work for a ticket is pushed to: koinon/wip/<ticket>-<time>, the
@@ -277,9 +318,10 @@ const ToolPush = "push_saved_work"
 
 // PushArgsJSON is the canonical arguments of a push request: sorted keys, no insignificant space.
 // The approval binds to its SHA-256.
-func PushArgsJSON(savedWorkID, repo, base, branch string) string {
+func PushArgsJSON(savedWorkID, repo, base, branch, bundleSHA, manifestSHA string) string {
 	b, _ := json.Marshal(map[string]string{ //nolint:errchkjson // strings only; encoding/json sorts the keys
-		"base": base, "branch": branch, "repo": repo, "saved_work_id": savedWorkID,
+		"base": base, "branch": branch, "bundle_sha256": bundleSHA, "manifest_sha256": manifestSHA,
+		"repo": repo, "saved_work_id": savedWorkID,
 	})
 	return string(b)
 }
@@ -290,6 +332,10 @@ type PushArgs struct {
 	Repo        string `json:"repo"`
 	Base        string `json:"base"`
 	Branch      string `json:"branch"`
+	// BundleSHA256 and ManifestSHA256 bind the approval to the content: the packed files and the
+	// manifest the approver saw. The push refuses anything else.
+	BundleSHA256   string `json:"bundle_sha256"`
+	ManifestSHA256 string `json:"manifest_sha256"`
 }
 
 // DecodePushArgs reads and checks a push request's recorded arguments.
@@ -300,7 +346,8 @@ func DecodePushArgs(argsJSON string) (PushArgs, error) {
 	if err := dec.Decode(&a); err != nil {
 		return PushArgs{}, fmt.Errorf("savedwork: arguments: %w", err)
 	}
-	if a.SavedWorkID == "" || a.Repo == "" || a.Base == "" || !ValidBranch(a.Branch) {
+	if a.SavedWorkID == "" || a.Repo == "" || a.Base == "" || !ValidBranch(a.Branch) ||
+		!hashPattern.MatchString(a.BundleSHA256) || !hashPattern.MatchString(a.ManifestSHA256) {
 		return PushArgs{}, errors.New("savedwork: incomplete arguments")
 	}
 	return a, nil

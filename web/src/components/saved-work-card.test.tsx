@@ -12,7 +12,7 @@ import { orgId, renderApp, whoAmI } from '@/test-utils'
 
 const sha = 'c'.repeat(64)
 
-function savedApproval(opts: { canDecide?: boolean; savedStatus?: string; status?: Status } = {}) {
+function savedApproval(opts: { workflow?: boolean; canDecide?: boolean; savedStatus?: string; status?: Status } = {}) {
   return create(ApprovalSchema, {
     id: 'ap-1',
     orgId,
@@ -37,6 +37,7 @@ function savedApproval(opts: { canDecide?: boolean; savedStatus?: string; status
           create(SavedFileSchema, { path: 'docs/new.md', status: 'A', added: 5, deleted: 0, size: 90n }),
           create(SavedFileSchema, { path: 'old.txt', status: 'D', added: 0, deleted: 7, size: 0n }),
           create(SavedFileSchema, { path: 'logo.png', status: 'A', size: 2048n, binary: true }),
+          ...(opts.workflow ? [create(SavedFileSchema, { path: '.github/workflows/ci.yml', status: 'M', added: 1, size: 10n })] : []),
         ],
         sizeBytes: 2538n,
         skipped: ['node_modules/ (ignored directory)', 'big.bin (larger than 1 MiB)'],
@@ -104,9 +105,17 @@ describe('ApprovalCard for saved work', () => {
 
     expect(within(card).getByText('node_modules/ (ignored directory)')).toBeInTheDocument()
     expect(within(card).getByText('big.bin (larger than 1 MiB)')).toBeInTheDocument()
+    expect(within(card).getByText('Left out, as reported by the sandbox (not verified)')).toBeInTheDocument()
+    expect(within(card).queryByTestId('workflow-warning')).not.toBeInTheDocument()
     expect(within(card).queryByRole('region', { name: 'Push and run risk' })).not.toBeInTheDocument()
     expect(within(card).queryByRole('region', { name: 'Files' })).not.toBeInTheDocument()
     expect(diffCalls()).toBe(0)
+  })
+
+  it('warns about changes under .github/', async () => {
+    setup({ workflow: true })
+    const card = await screen.findByTestId('approval-card')
+    expect(within(card).getByTestId('workflow-warning')).toHaveTextContent(/start existing workflows that run on push.*secrets/)
   })
 
   it('approves with the args_sha256 from GetApproval, and denies with a note', async () => {

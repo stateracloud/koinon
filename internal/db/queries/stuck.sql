@@ -109,3 +109,12 @@ SELECT * FROM ticket_events
 WHERE org_id = @org_id AND ticket_id = @ticket_id AND kind = 'message' AND actor_kind = 'agent'
 ORDER BY seq DESC
 LIMIT @max_rows;
+
+-- name: GetServiceKey :one
+-- Not org-owned: shared by the components of one installation.
+SELECT key FROM service_keys WHERE name = @name;
+
+-- name: GetRunForUpload :one
+-- The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
+SELECT * FROM runs
+WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state IN ('starting', 'running');

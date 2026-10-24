@@ -43,6 +43,11 @@ spec:
     - ports:
         - port: tools
       from:
+        # koinon-agentd posts the work saved from a stuck sandbox here (/internal/saved-work, with
+        # an HMAC credential); it has no key-encryption key. Sandboxes cannot reach this port.
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "agentd") | nindent 14 }}
         {{- if eq .Values.gateway.mode "standalone" }}
         - podSelector:
             matchLabels:

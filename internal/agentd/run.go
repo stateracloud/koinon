@@ -297,7 +297,9 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.dbErr(ctx, "load agent", err)
 	}
-	if agent.UnhealthyAt.Valid {
+	// ClaimNextRun skips unhealthy agents, so only a run claimed just before the mark gets here; a
+	// resumed (parked) run is not failed for it: its sandbox work and approvals are intact.
+	if agent.UnhealthyAt.Valid && !r.run.PromptThroughSeq.Valid {
 		return &failure{reason: "the agent is unhealthy and will not run until an admin resumes it: " + agent.UnhealthyReason.String}
 	}
 	version, err := r.q.GetAgentVersion(fctx, store.GetAgentVersionParams{OrgID: r.run.OrgID, ID: r.run.AgentVersionID})

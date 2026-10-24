@@ -322,6 +322,9 @@ SET state = $1::sandbox_state,
     unhealthy_reason = CASE WHEN nullif($5::text, '') IS NOT NULL
                              AND nullif($5::text, '') IS DISTINCT FROM unhealthy_generation
                             THEN NULL ELSE unhealthy_reason END,
+    unhealthy_generation = CASE WHEN nullif($5::text, '') IS NOT NULL
+                                 AND nullif($5::text, '') IS DISTINCT FROM unhealthy_generation
+                                THEN NULL ELSE unhealthy_generation END,
     observed_at = now()
 WHERE org_id = $6 AND agent_id = $7
 RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation
