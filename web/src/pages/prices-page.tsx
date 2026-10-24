@@ -35,7 +35,7 @@ import { formatUSD } from '@/lib/cost'
 /** PricesPage is where org admins and owners see the default prices and manage their own (ADR 0056, plan item PV2). */
 export function PricesPage() {
   return (
-    <div className="mx-auto grid max-w-3xl gap-6">
+    <div className="mx-auto grid max-w-3xl grid-cols-[minmax(0,1fr)] gap-6">
       <RequireAdmin what="prices">
         <PricesContent />
       </RequireAdmin>
@@ -234,7 +234,11 @@ function DefaultRow({ entry: e, mark }: { entry: PriceEntry; mark?: Parameters<t
     <li className="bg-card grid gap-2 rounded-md border p-3">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-base font-semibold break-all">{e.id}</h3>
-        {mark && <Badge variant="outline">{changeLabel(mark)}</Badge>}
+        {mark && (
+          <Badge variant="outline" className="h-auto max-w-full rounded-md py-1 text-left whitespace-normal">
+            {changeLabel(mark)}
+          </Badge>
+        )}
       </div>
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">Models</dt>
