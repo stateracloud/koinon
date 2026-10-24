@@ -7,8 +7,9 @@
 package flavor
 
 import (
-	"github.com/stateracloud/koinon/internal/gateway"
 	"slices"
+
+	"github.com/stateracloud/koinon/internal/gateway"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
