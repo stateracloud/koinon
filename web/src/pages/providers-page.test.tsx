@@ -19,7 +19,7 @@ import {
 import { renderApp, whoAmI } from '@/test-utils'
 
 const t = timestampFromMs(Date.now())
-const uiProvider = create(ProviderSchema, { id: 'p-ui', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', createdAt: t })
+const uiProvider = create(ProviderSchema, { id: 'p-ui', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', createdAt: t, updatedAt: timestampFromMs(Date.now() - 3_600_000) })
 const secretProvider = create(ProviderSchema, { id: 'p-sec', name: 'homelab', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'secret', managedBySecret: 'ollama-secret', createdAt: t })
 const removedProvider = create(ProviderSchema, {
   id: 'p-gone',
@@ -31,6 +31,7 @@ const removedProvider = create(ProviderSchema, {
   removed: true,
   disabledReason: 'its Kubernetes Secret was deleted; restore the Secret or delete this entry',
 })
+const fresh = create(ProviderSchema, { id: 'p-fresh', name: 'fresh', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'ui', createdAt: t, updatedAt: t })
 const shadowed = create(ProviderSchema, { id: 'p-shadow', name: 'dup', type: 'openai', url: 'https://api.example.com/v1', source: 'ui', disabledReason: 'shadowed by a provider of the same name declared in a Kubernetes Secret' })
 const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', rates: { input: '0.30', output: '1.20' } })
 const secretModel = create(ModelSchema, { id: 'm-2', providerId: 'p-sec', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret', rates: { input: '0', output: '0' } })
@@ -42,7 +43,7 @@ function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string 
     service(ProviderService, {
       listProviders: () => {
         calls.listed++
-        return { providers: [uiProvider, secretProvider, removedProvider, shadowed] }
+        return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh] }
       },
       listModels: () => ({ models: [model, secretModel] }),
       createProvider: (req) => {
@@ -209,5 +210,51 @@ describe('Providers page', () => {
     const nav = await screen.findByRole('navigation', { name: 'Settings' })
     expect(within(nav).getByRole('link', { name: 'Providers' })).toHaveAttribute('aria-current', 'page')
     expect(within(nav).getByRole('link', { name: 'API tokens' })).toBeInTheDocument()
+  })
+
+  it('says a just-saved provider is not available yet, and an older one is active', async () => {
+    setup()
+    const list = await screen.findByRole('list', { name: 'Providers' })
+    expect(within(within(list).getByRole('region', { name: 'fresh' })).getByText(/Saved, available to agents within about 3 minutes/)).toBeInTheDocument()
+    const old = within(within(list).getByRole('region', { name: 'openrouter' }))
+    expect(old.getByText('Active')).toBeInTheDocument()
+    expect(old.queryByText(/Saved, available/)).not.toBeInTheDocument()
+  })
+
+  it('says the same in the notice after a save', async () => {
+    setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+    const form = screen.getByRole('form', { name: 'Add provider' })
+    await userEvent.type(within(form).getByLabelText('Name'), 'second')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('available to agents within about 3 minutes')
+  })
+
+  it('asks for the key again when a save fails after the key was cleared', async () => {
+    setup({ failCreate: 'upstream refused' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+    const form = screen.getByRole('form', { name: 'Add provider' })
+    await userEvent.type(within(form).getByLabelText('Name'), 'second')
+    await userEvent.type(within(form).getByLabelText('API key'), 'sk-secret')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+    expect(await within(form).findByRole('alert')).toHaveTextContent('Type the API key again.')
+  })
+
+  it('links a field error to its field', async () => {
+    setup()
+    await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+    const form = screen.getByRole('form', { name: 'Add provider' })
+    await userEvent.type(within(form).getByLabelText('Name'), 'Bad Name')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+    expect(within(form).getByLabelText('Name')).toHaveAccessibleDescription(/lowercase letters, digits and dashes/)
+  })
+
+  it('moves focus into the delete question and back to the button when it is dismissed', async () => {
+    setup()
+    const trigger = await screen.findByRole('button', { name: 'Delete provider openrouter' })
+    await userEvent.click(trigger)
+    expect(screen.getByRole('button', { name: 'Delete provider' })).toHaveFocus()
+    await userEvent.click(screen.getByRole('button', { name: 'Keep it' }))
+    expect(screen.getByRole('button', { name: 'Delete provider openrouter' })).toHaveFocus()
   })
 })

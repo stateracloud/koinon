@@ -12,12 +12,11 @@ import { SetupGuideSteps } from '@/components/setup-guide'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ConnectionService, ConnectionStatus } from '@/gen/koinon/connection/v1alpha1/connection_pb'
+import { BoundAgentsSchema, ConnectionService, ConnectionStatus } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { isApprover } from '@/lib/approvals'
 import { setupGuide } from '@/lib/connector'
 import { connectionStatusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
-import { boundAgents } from '@/lib/providers'
 
 const route = getRouteApi('/app/connections/$connectionId')
 
@@ -34,7 +33,7 @@ export function ConnectionPage() {
 
   const navigate = useNavigate()
   const remove = useMutation(ConnectionService.method.deleteConnection)
-  const [refusal, setRefusal] = useState<string>()
+  const [refusal, setRefusal] = useState<{ message: string; agents: { id: string; displayName: string }[] }>()
   const test = useMutation(ConnectionService.method.testConnection, {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) }),
   })
@@ -52,7 +51,6 @@ export function ConnectionPage() {
   const loose = results.filter((r) => !stepIds.has(r.step))
   const gh = c.settings.case === 'github' ? c.settings.value : undefined
   const declared = c.source === 'secret' && !c.removed
-  const refusedAgents = refusal ? boundAgents(refusal) : []
 
   return (
     <div className="mx-auto grid max-w-3xl gap-4">
@@ -125,28 +123,28 @@ export function ConnectionPage() {
               await queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) })
               await navigate({ to: '/connections' })
             }}
-            onError={setRefusal}
+            onError={(message, err) => setRefusal({ message, agents: err.findDetails(BoundAgentsSchema).flatMap((d) => d.agents) })}
           />
         </div>
       )}
       {refusal && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>
-            {refusedAgents.length > 0 ? (
+            {refusal.agents.length > 0 ? (
               <>
-                <p>Agents are still bound to this connection, so it was not deleted. Archive these agents first:</p>
+                <p>Agents are still bound to this connection, so it was not deleted. Unbind them from it first:</p>
                 <ul className="mt-1 list-disc pl-5">
-                  {refusedAgents.map((a) => (
+                  {refusal.agents.map((a) => (
                     <li key={a.id}>
                       <Link to="/agents/$agentId" params={{ agentId: a.id }} className="underline">
-                        {a.name}
+                        {a.displayName}
                       </Link>
                     </li>
                   ))}
                 </ul>
               </>
             ) : (
-              refusal
+              refusal.message
             )}
           </AlertDescription>
         </Alert>

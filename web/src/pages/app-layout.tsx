@@ -79,12 +79,12 @@ function Shell({ who }: { who: WhoAmIResponse }) {
   const active = { 'aria-current': 'page' as const, className: 'bg-accent font-medium' }
   const admin = isApprover(org.role)
   return (
-    <div className="flex min-h-screen">
-      <aside className="bg-card w-56 shrink-0 border-r p-3">
-        <Link to="/" className="mb-4 block px-3 text-lg font-semibold">
+    <div className="flex min-h-screen flex-col md:flex-row">
+      <aside className="bg-card w-full shrink-0 border-b p-3 md:w-56 md:border-r md:border-b-0">
+        <Link to="/" className="mb-2 block px-3 text-lg font-semibold md:mb-4">
           Koinon
         </Link>
-        <nav aria-label="Main" className="grid gap-1">
+        <nav aria-label="Main" className="flex flex-wrap gap-1 md:grid">
           <Link to="/" className={navLink} activeOptions={{ exact: true }} activeProps={active}>
             Board
           </Link>
@@ -96,8 +96,8 @@ function Shell({ who }: { who: WhoAmIResponse }) {
           </Link>
         </nav>
         {admin && (
-          <nav aria-labelledby="settings-nav" className="mt-6 grid gap-1">
-            <h2 id="settings-nav" className="text-muted-foreground px-3 pb-1 text-xs font-semibold tracking-wide uppercase">
+          <nav aria-labelledby="settings-nav" className="mt-2 flex flex-wrap items-center gap-1 md:mt-6 md:grid">
+            <h2 id="settings-nav" className="text-muted-foreground px-3 text-xs font-semibold tracking-wide uppercase md:pb-1">
               Settings
             </h2>
             <Link to="/settings/providers" className={navLink} activeProps={active}>
@@ -132,7 +132,7 @@ function Shell({ who }: { who: WhoAmIResponse }) {
             Log out
           </Button>
         </header>
-        <main className="flex-1 px-6 py-6">
+        <main className="min-w-0 flex-1 px-4 py-6 md:px-6">
           {/* Remount pages when the org changes so no query mixes two orgs. */}
           <div key={org.orgId}>
             <Outlet />

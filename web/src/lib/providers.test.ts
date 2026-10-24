@@ -5,23 +5,7 @@ import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { TokenSchema } from '@/gen/koinon/token/v1alpha1/token_pb'
-import { boundAgents, createdByLabel, daysToSeconds, rateError, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
-
-const id1 = '0198a1b2-0000-7000-8000-000000000001'
-const id2 = '0198a1b2-0000-7000-8000-000000000002'
-
-describe('boundAgents', () => {
-  it('reads the agent list out of the refusal', () => {
-    const msg = `agents are still bound to this connection; unbind them first: Repo helper (${id1}), Docs, the bot (${id2})`
-    expect(boundAgents(msg)).toEqual([
-      { name: 'Repo helper', id: id1 },
-      { name: 'Docs, the bot', id: id2 },
-    ])
-  })
-  it('returns nothing for another message', () => {
-    expect(boundAgents('connection not found')).toEqual([])
-  })
-})
+import { createdByLabel, savedRecently, daysToSeconds, rateError, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
 
 describe('forms', () => {
   it('names a model the way the gateway serves it', () => {
@@ -56,5 +40,14 @@ describe('tokens', () => {
     expect(createdByLabel(parent, [parent, child])).toBe('Maria, in the UI')
     expect(createdByLabel(child, [parent, child])).toBe('Maria, through token root (rrr)')
     expect(createdByLabel(child, [child])).toContain('no longer exists')
+  })
+})
+
+describe('savedRecently', () => {
+  const now = Date.parse('2026-10-24T12:00:00Z')
+  it('holds for three minutes after a save', () => {
+    expect(savedRecently(timestampFromMs(now - 60_000), now)).toBe(true)
+    expect(savedRecently(timestampFromMs(now - 181_000), now)).toBe(false)
+    expect(savedRecently(undefined, now)).toBe(false)
   })
 })

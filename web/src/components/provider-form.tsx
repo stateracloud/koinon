@@ -20,6 +20,8 @@ export type ProviderFormProps = {
   onCreate: (input: ProviderCreate) => Promise<unknown>
   onUpdate: (id: string, input: ProviderChange) => Promise<unknown>
   onDone: () => void
+  /** Called after a save, to say when the provider will be available. */
+  onSaved?: (name: string) => void
 }
 
 /**
@@ -27,7 +29,7 @@ export type ProviderFormProps = {
  * always empty, an edit keeps the stored key unless a new one is typed or removal is asked for, and the
  * typed key is cleared from the page as soon as it is sent.
  */
-export function ProviderForm({ provider, onCreate, onUpdate, onDone }: ProviderFormProps) {
+export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: ProviderFormProps) {
   const editing = !!provider
   const known = providerTypes.some((t) => t.value === provider?.type)
   const [name, setName] = useState(provider?.name ?? '')
@@ -74,9 +76,12 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone }: ProviderF
       } else {
         await onCreate({ name, type, url: url.trim(), apiKey: key })
       }
+      onSaved?.(provider?.name ?? name)
       onDone()
     } catch (err) {
-      setError(ConnectError.from(err).rawMessage)
+      const msg = ConnectError.from(err).rawMessage
+      // The key left the page with the request, so the person has to supply it again.
+      setError(key ? `${msg} The API key was cleared from this page. Type the API key again.` : msg)
     } finally {
       setPending(false)
     }
@@ -95,12 +100,16 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone }: ProviderF
           disabled={editing}
           autoComplete="off"
           aria-invalid={!!err('name')}
-          aria-describedby="provider-name-help"
+          aria-describedby={err('name') ? 'provider-name-help provider-name-error' : 'provider-name-help'}
         />
         <p id="provider-name-help" className="text-muted-foreground text-xs">
           {editing ? 'A provider keeps its name.' : 'Models are served under this org and their own name. Lowercase letters, digits and dashes.'}
         </p>
-        {err('name') && <p className="text-destructive text-xs">{err('name')}</p>}
+        {err('name') && (
+          <p id="provider-name-error" className="text-destructive text-xs">
+            {err('name')}
+          </p>
+        )}
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="provider-type">Provider type</Label>
@@ -115,21 +124,29 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone }: ProviderF
         {typeChoice === other && (
           <div className="grid gap-1.5">
             <Label htmlFor="provider-type-name">Provider type name</Label>
-            <Input id="provider-type-name" value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="for example anthropic" autoComplete="off" aria-invalid={!!err('type')} />
+            <Input id="provider-type-name" value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="for example anthropic" autoComplete="off" aria-invalid={!!err('type')} aria-describedby={err('type') ? 'provider-type-error' : undefined} />
           </div>
         )}
-        {err('type') && <p className="text-destructive text-xs">{err('type')}</p>}
+        {err('type') && (
+          <p id="provider-type-error" className="text-destructive text-xs">
+            {err('type')}
+          </p>
+        )}
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="provider-url">URL</Label>
         <Input id="provider-url" type="url" inputMode="url" value={url} onChange={(e) => {
             setUrl(e.target.value)
             setUrlEdited(true)
-          }} autoComplete="off" aria-invalid={!!err('url')} aria-describedby="provider-url-help" />
+          }} autoComplete="off" aria-invalid={!!err('url')} aria-describedby={err('url') ? 'provider-url-help provider-url-error' : 'provider-url-help'} />
         <p id="provider-url-help" className="text-muted-foreground text-xs">
           The base URL of the OpenAI-compatible API. Koinon refuses private, loopback and cluster-internal addresses unless a platform admin allows them.
         </p>
-        {err('url') && <p className="text-destructive text-xs">{err('url')}</p>}
+        {err('url') && (
+          <p id="provider-url-error" className="text-destructive text-xs">
+            {err('url')}
+          </p>
+        )}
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="provider-key">{editing ? 'New API key' : 'API key'}</Label>
