@@ -45,7 +45,7 @@ metadata:
     app.kubernetes.io/managed-by: koinon-reconciler
     koinon.dev/gateway: koinon-gateway
     koinon.dev/gateway-keys: koinon-gateway
-  name: koinon-gateway-keys-probe
+  name: koinon-gateway-probe
   namespace: koinon
 ---
 apiVersion: agentgateway.dev/v1alpha1

@@ -139,13 +139,45 @@ var _ = Describe("Render", func() {
 		Expect(again.Revision).NotTo(Equal(r.Revision))
 	})
 
-	It("drops an org's key ConfigMap with its last key", func() {
+	It("renders an empty key ConfigMap when an org's last key is revoked, so that the revocation is an update", func() {
 		s := fullState()
 		s.SetLimit(agentG, &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: time.Hour})
 		r, err := gwk8s.Render(s, opts())
 		Expect(err).NotTo(HaveOccurred())
+		cm := find(r, "ConfigMap", "koinon-gateway-keys-globex")
+		Expect(cm.U.Object["data"]).To(BeEmpty())
+
+		// An org with neither keys nor limits has no ConfigMap (the driver prunes it).
+		s = fullState()
+		s.RevokeKey("k-gggggggggggg")
+		r, err = gwk8s.Render(s, opts())
+		Expect(err).NotTo(HaveOccurred())
 		for _, o := range r.Objects {
 			Expect(o.U.GetName()).NotTo(Equal("koinon-gateway-keys-globex"))
+		}
+	})
+
+	It("never names two objects alike, whatever an org is called", func() {
+		for _, slug := range []string{"probe", "catalog", "edge", "frontend", "mcp", "keys-probe", "koinon-gateway"} {
+			s := fullState()
+			a := gateway.AgentRef{Org: slug, Name: "x"}
+			s.AddKey(fixedKey("k-xxxxxxxxxxxx", a, "test-x"))
+			s.Providers = append(s.Providers, gateway.Provider{
+				Org: slug, Name: "p", Type: "fake", BaseURL: "http://p.example.com/v1",
+				Models: []gateway.Model{{Name: "m", Price: &gateway.Price{Input: "1", Output: "1"}}},
+			})
+			r, err := gwk8s.Render(s, opts())
+			Expect(err).NotTo(HaveOccurred(), slug)
+			seen := map[string]string{}
+			for _, o := range r.Objects {
+				Expect(seen).NotTo(HaveKey(o.Ref()), "org %q: %s", slug, o.Ref())
+				seen[o.Ref()] = o.Org
+			}
+			// The probe key's ConfigMap belongs to the platform, not to any org.
+			Expect(seen).To(HaveKeyWithValue("ConfigMap/koinon-gateway-probe", ""))
+			if slug == "probe" {
+				Expect(seen).To(HaveKeyWithValue("ConfigMap/koinon-gateway-keys-probe", "probe"))
+			}
 		}
 	})
 

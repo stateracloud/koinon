@@ -93,6 +93,14 @@ func (e *RejectedError) Orgs() []string {
 	return slices.Compact(out)
 }
 
+// LedgerBudgets is implemented by a driver whose gateway cannot enforce a spend limit itself: the
+// only limit it honours is an amount of zero, which it enforces by revoking the agent's keys (the
+// Kubernetes driver). A caller that cannot compute a budget must then fail closed to zero, because a
+// positive amount is not enforced by anything between two ledger passes.
+type LedgerBudgets interface {
+	LedgerEnforcesBudgets() bool
+}
+
 // Revision identifies an applied configuration. Drivers derive it from the
 // rendered content, so equal States give equal revisions.
 type Revision string
