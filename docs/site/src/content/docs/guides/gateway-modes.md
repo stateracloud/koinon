@@ -11,7 +11,7 @@ changes how the gateway runs, not what Koinon does
 | Mode | State | `gateway.mode` |
 | --- | --- | --- |
 | Standalone | Built. This is the default. | `standalone` |
-| Kubernetes | **Not built yet** (plan item G2). | `kubernetes` |
+| Kubernetes | Built (plan item G2). | `kubernetes` |
 | Shared | **Not built yet.** Planned for v0.2. | none yet |
 
 ## Standalone
@@ -32,13 +32,69 @@ Run one replica only. The budget database is not shared.
 
 ## Kubernetes
 
-Planned for clusters that already run the agentgateway controller (a `GatewayClass` named
-`agentgateway`). Koinon will create its own `Gateway` and policies in its namespace and never touch
-the gateways of others.
+For clusters that already run the agentgateway controller. Koinon creates its own `Gateway` and the
+objects around it in its namespace and never touches the gateways of others.
 
-This mode is not built yet. The chart accepts `gateway.mode: kubernetes` and the preflight checks for
-the `GatewayClass`, but the chart renders nothing for the gateway, and `agentd.gatewayURL` is
-required. Do not use it until plan item G2 lands.
+You install, before Koinon, agentgateway **v1.6.x** with its CRDs and Gateway API v1.4 or newer. The
+tested install is:
+
+```sh
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.0/standard-install.yaml
+helm upgrade -i agentgateway-crds oci://cr.agentgateway.dev/charts/agentgateway-crds --version v1.6.0 -n agentgateway-system --create-namespace
+helm upgrade -i agentgateway oci://cr.agentgateway.dev/charts/agentgateway --version v1.6.0 -n agentgateway-system
+```
+
+```yaml chart-values
+gateway:
+  mode: kubernetes
+  kubernetes:
+    gatewayClassName: agentgateway
+```
+
+The mode is explicit and there is no fallback. The install preflight fails, with the fix, when the
+`GatewayClass`, the four `agentgateway.dev/v1alpha1` CRDs or a v1.6.x controller are missing. If the
+controller does not run in `agentgateway-system` as `agentgateway`, set `preflight.agentgateway.namespace`
+and `.controller`.
+
+What the reconciler creates, in the release namespace, all labelled `app.kubernetes.io/managed-by=koinon-reconciler`:
+
+- a `Gateway` (named like the standalone gateway, `koinon-gateway`) on port 4000 for model and MCP requests,
+  and the proxy the controller runs for it. Agents reach it at the same address as in standalone mode;
+- one `AgentgatewayModel` per model your orgs serve, and a `ConfigMap` of key hashes per org (agent keys
+  are never stored in the gateway, only their hashes);
+- `AgentgatewayPolicy` objects for key authentication and the access log that feeds the spend ledger, a
+  `ConfigMap` with the model prices, and, when orgs have MCP servers, an `AgentgatewayBackend` and an `HTTPRoute`.
+
+Provider keys and MCP credentials are written to one Secret (`koinon-gateway-providers`); the controller
+reads it and passes the value to the proxy. The reconciler may manage these kinds, and ConfigMaps, in the
+release namespace only. The chart adds a NetworkPolicy for the proxy that admits sandboxes and Koinon, lets
+it reach the controller and the public internet, and keeps the private ranges out
+(`networkPolicy.gatewayEgressTo` adds internal upstreams, as in standalone mode).
+
+Every org keeps its plain model names; the gateway picks the org's own model from the key.
+
+### What differs from standalone mode
+
+- **Budgets are enforced by Koinon, not the gateway.** agentgateway's native keys cannot carry a budget.
+  When an agent reaches its daily limit, or its org its monthly cap, or the platform its ceiling, Koinon
+  cancels the runs and removes the keys from the gateway; the proxy refuses them within about a tenth of a
+  second, with a `401`, and Koinon puts them back when the window resets or you raise the limit. The
+  gateway does not stop a key by itself, so a key can spend for roughly one second after the request that
+  reaches the limit (the proxy batches its log for about a second before the ledger sees it, then Koinon
+  runs a pass). At ten requests a second of $0.001 that was four requests past the limit on kind, without
+  the database time. Standalone mode stops a key after at most one response. A proxy restart cannot reset
+  spend: the ledger holds it, and a revoked key stays out of the key list.
+- **MCP servers are less isolated between orgs.** Standalone mode does not contact an org's MCP server
+  for another org's agents at all. Here a call to a tool the agent has no grant for is denied, and an
+  agent lists only its granted tools, but another org's session setup (`initialize`, `ping`) can reach the
+  server, which then sees it with its owner's credential. If an MCP server must never see another org's
+  traffic, use standalone mode.
+- **A rejected object does not stop the others.** If the controller or the API server refuses one org's
+  model or keys, that org's agents show the reason in their status and in the reconciler's log, and every
+  other org is served. A refused object that is not an org's (the Gateway itself, the MCP backend) fails
+  the whole change.
+- A change is live when the controller has accepted every object and a probe key, built for each change,
+  is accepted by the running proxy. Changes take about a tenth of a second, not the kubelet's minute.
 
 ## Shared
 
