@@ -182,6 +182,15 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 	if !found {
 		return nil
 	}
+	// The entry that reaches a limit wakes the reconciler, which recomputes every key's limit net of
+	// the spend and pushes it. Standalone agentgateway then blocks the key itself; in Kubernetes mode
+	// there is no gateway budget, and the reconciler's Apply is what revokes the key (plan item G2).
+	// Later entries of a spent window do not wake it again.
+	if l.Spent-delta < l.Limit {
+		if err := q.NotifyReconciler(ctx, org); err != nil {
+			return fmt.Errorf("wake the reconciler: %w", err)
+		}
+	}
 	msg := fmt.Sprintf("%s reached ($%s of $%s since %s)", limitTitle(l.Name), l.Spent, l.Limit, l.WindowStart.Format("2006-01-02 15:04 MST"))
 	extra := map[string]any{
 		"limit": l.Name, "spend_limit_usd": l.Limit.String(), "spent_usd": l.Spent.String(), "window_start": l.WindowStart.Format("2006-01-02T15:04:05Z"),

@@ -651,6 +651,18 @@ var _ = Describe("Reconciler", func() {
 		Expect(osg.Calls("CreateProvider")).To(Equal(0))
 	})
 
+	It("goes on when the gateway rejects only some orgs' objects, and reports them on the org's agents", func(ctx SpecContext) {
+		agent := newAgent(ctx, org, user)
+		var slug string
+		Expect(pool.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, org).Scan(&slug)).To(Succeed())
+		mg.fail = &gateway.RejectedError{Rejected: []gateway.Rejection{{Org: slug, Kind: "AgentgatewayModel", Name: "m-1", Reason: "not CEL"}}}
+		err := newReconciler().ReconcileAll(ctx)
+		Expect(err).To(MatchError(ContainSubstring("AgentgatewayModel m-1 rejected")))
+		// The agent was still converged: the rest of the gateway state is live.
+		Expect(osg.Calls("CreateSandbox")).To(Equal(1))
+		Expect(sandboxRow(ctx, agent.ID).Message).To(ContainSubstring("the gateway rejected AgentgatewayModel m-1: not CEL"))
+	})
+
 	It("wakes up on NOTIFY when a run is queued", func(ctx SpecContext) {
 		agent := newAgent(ctx, org, user)
 		cfg.ResyncInterval = time.Hour

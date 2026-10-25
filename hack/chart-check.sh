@@ -157,6 +157,30 @@ has "reconciler readiness probe" 'path: /readyz' --show-only templates/deploymen
 if render --set model.baseUrl=https://x/v1 >/dev/null 2>&1; then
 	fail "model.* values must no longer be accepted"
 fi
+# Kubernetes gateway mode (plan item G2): the chart renders no gateway of its own, only the Secret the
+# reconciler writes provider keys into; a standard NetworkPolicy selects the controller's proxy pods
+# by their gateway-name label; the reconciler may manage the agentgateway objects in the release
+# namespace and nothing cluster-wide.
+k8s=(--set gateway.mode=kubernetes)
+lacks "no gateway Deployment in kubernetes mode" 'ghcr.io/agentgateway/agentgateway' "${k8s[@]}"
+has "provider keys Secret in kubernetes mode" 'name: koinon-gateway-providers$' "${k8s[@]}" --show-only templates/gateway-kubernetes.yaml
+n=$(render "${k8s[@]}" | grep -c 'secretName: koinon-gateway-providers$' || true)
+[ "$n" = 0 ] || fail "the provider keys Secret is mounted by $n pods in kubernetes mode, want none (the controller reads it)"
+has "proxy NetworkPolicy selects the controller's pod label" 'gateway.networking.k8s.io/gateway-name: koinon-gateway$' "${k8s[@]}" --show-only templates/networkpolicy.yaml
+has "proxy egress to the controller's xDS port" 'port: 9978$' "${k8s[@]}" --show-only templates/networkpolicy.yaml
+has "proxy egress carves out the private ranges" '10.0.0.0/8' "${k8s[@]}" --show-only templates/networkpolicy.yaml
+has "reconciler manages the agentgateway objects" 'agentgatewaymodels' "${k8s[@]}" --show-only templates/rbac.yaml
+lacks "no agentgateway rules in standalone mode" 'agentgatewaymodels' --show-only templates/rbac.yaml
+cr=$(render "${k8s[@]}" --show-only templates/rbac.yaml | awk '/^kind: ClusterRole$/{p=1} /^---$/{p=0} p')
+grep -Eq 'agentgateway|configmaps|gateways' <<<"$cr" && fail "a ClusterRole grants access to gateway objects or ConfigMaps in kubernetes mode"
+has "reconciler config names the Gateway" 'name: koinon-gateway$' "${k8s[@]}" --show-only templates/config.yaml
+has "reconciler config names the GatewayClass" 'gatewayClassName: agentgateway$' "${k8s[@]}" --show-only templates/config.yaml
+has "sandboxes reach the Gateway's Service" 'http://koinon-gateway.koinon.svc.cluster.local:4000' "${k8s[@]}" --show-only templates/deployments.yaml
+env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:4000/mcp"' "${k8s[@]}"
+has "preflight checks the agentgateway controller" '--agentgateway-controller=agentgateway$' "${k8s[@]}" --show-only templates/preflight.yaml
+has "preflight may read the agentgateway CRDs" 'agentgatewaymodels.agentgateway.dev$' "${k8s[@]}" --show-only templates/preflight.yaml
+env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"'
+has "gateway.kubernetes.port is used" 'url: http://koinon-gateway.koinon.svc.cluster.local:4001$' "${k8s[@]}" --set gateway.kubernetes.port=4001 --show-only templates/config.yaml
 if [ "$failures" -gt 0 ]; then
 	echo "$failures assertion(s) failed" >&2
 	exit 1

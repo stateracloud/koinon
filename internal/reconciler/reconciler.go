@@ -344,9 +344,20 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
+	var rejections []gateway.Rejection
 	if _, err := r.gw.Apply(ctx, state); err != nil {
-		errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
-		return errors.Join(errs...)
+		// A Kubernetes-mode gateway judges objects one by one: the revision is live for everything
+		// but the objects named, which are reported on their org and do not hold back the others.
+		var rej *gateway.RejectedError
+		if !errors.As(err, &rej) {
+			errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
+			return errors.Join(errs...)
+		}
+		rejections = rej.Rejected
+		for _, x := range rej.Rejected {
+			r.log.Error("the gateway rejected an object; the rest is live", "org", x.Org, "kind", x.Kind, "object", x.Name, "reason", x.Reason)
+		}
+		errs = append(errs, fmt.Errorf("reconciler: %w", rej))
 	}
 	r.recordApplied(served, state)
 	r.recordAppliedMCP(mcpServed, probes)
@@ -361,6 +372,14 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 			r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
 			r.recordMessage(ctx, w, err)
 			errs = append(errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
+		}
+	}
+	// Each rejected object is reported on its org's agents, after their own pass has recorded its state.
+	for _, x := range rejections {
+		for _, w := range items {
+			if w.org.Slug == x.Org {
+				r.recordMessage(ctx, w, fmt.Errorf("the gateway rejected %s %s: %s", x.Kind, x.Name, x.Reason))
+			}
 		}
 	}
 	return errors.Join(errs...)

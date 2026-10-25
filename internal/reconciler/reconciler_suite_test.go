@@ -5,6 +5,7 @@ package reconciler_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -189,11 +190,13 @@ func (f *fakeModelGateway) Apply(_ context.Context, s gateway.State) (gateway.Re
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.fail != nil {
+	var rej *gateway.RejectedError
+	if f.fail != nil && !errors.As(f.fail, &rej) {
 		return "", f.fail
 	}
 	f.applied = append(f.applied, s)
-	return gateway.Revision(fmt.Sprint(len(f.applied))), nil
+	// A RejectedError comes with the revision: the rest of the state is live.
+	return gateway.Revision(fmt.Sprint(len(f.applied))), f.fail
 }
 
 func (f *fakeModelGateway) Usage() gateway.UsageReader { return gateway.NoUsage{} }

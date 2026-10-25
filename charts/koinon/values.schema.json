@@ -164,6 +164,15 @@
             "controller": {"$ref": "#/definitions/nonEmpty"}
           }
         },
+        "agentgateway": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "namespace": {"$ref": "#/definitions/nonEmpty"},
+            "controller": {"$ref": "#/definitions/nonEmpty"},
+            "xdsPort": {"type": "integer", "minimum": 1, "maximum": 65535}
+          }
+        },
         "seccompProbe": {
           "type": "object",
           "additionalProperties": false,
@@ -274,7 +283,8 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "gatewayClassName": {"$ref": "#/definitions/nonEmpty"}
+            "gatewayClassName": {"$ref": "#/definitions/nonEmpty"},
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535}
           }
         }
       }

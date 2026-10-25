@@ -116,6 +116,15 @@ func webhookEndpoints(ready bool) *discoveryv1.EndpointSlice {
 	}
 }
 
+func agentgatewayController(image string) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "agentgateway", Namespace: "agentgateway-system"},
+		Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "agentgateway", Image: image}},
+		}}},
+	}
+}
+
 func runtimeClass(name string, labels map[string]string) *nodev1.RuntimeClass {
 	return &nodev1.RuntimeClass{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}, Handler: "kata"}
 }
@@ -159,6 +168,7 @@ func healthyCluster() *cluster {
 	return &cluster{
 		kube: []runtime.Object{
 			controller("registry.k8s.io/agent-sandbox/agent-sandbox-controller:v1.0.7"),
+			agentgatewayController("cr.agentgateway.dev/controller:v1.6.0"),
 			runtimeClass("kata", map[string]string{preflight.AttachableLabel: "true"}),
 			cnpgWebhook(),
 			webhookEndpoints(true),
@@ -174,6 +184,10 @@ func healthyCluster() *cluster {
 		dynamic: []runtime.Object{
 			crd("sandboxes.agents.x-k8s.io", "v1beta1"),
 			crd("clusters.postgresql.cnpg.io", "v1"),
+			crd("agentgatewaybackends.agentgateway.dev", "v1alpha1"),
+			crd("agentgatewaymodels.agentgateway.dev", "v1alpha1"),
+			crd("agentgatewayparameters.agentgateway.dev", "v1alpha1"),
+			crd("agentgatewaypolicies.agentgateway.dev", "v1alpha1"),
 			gatewayClass("agentgateway", "True", "Accepted"),
 		},
 		gateway: fakeGateway{resp: &openshellv1.HealthResponse{
@@ -185,8 +199,24 @@ func healthyCluster() *cluster {
 			PostgresMode: "cnpg", GatewayMode: "kubernetes", GatewayClassName: "agentgateway",
 			RuntimeClassName: "kata", OpenShellAddress: "openshell.openshell.svc:8080",
 			AgentSandboxNamespace: "agent-sandbox-system", AgentSandboxController: "agent-sandbox-controller",
+			AgentgatewayNamespace: "agentgateway-system", AgentgatewayController: "agentgateway",
 		},
 	}
+}
+
+// setAgentgatewayController replaces the controller Deployment, which shares its name with the
+// GatewayClass; nil removes it.
+func (c *cluster) setAgentgatewayController(d *appsv1.Deployment) {
+	var out []runtime.Object
+	for _, o := range c.kube {
+		if dep, ok := o.(*appsv1.Deployment); !ok || dep.Namespace != "agentgateway-system" {
+			out = append(out, o)
+		}
+	}
+	if d != nil {
+		out = append(out, d)
+	}
+	c.kube = out
 }
 
 func (c *cluster) without(name string) *cluster {
@@ -350,6 +380,16 @@ var _ = Describe("Checker", func() {
 			"GatewayClass", "not accepted: InvalidParameters: details", "controller's logs"),
 		Entry("GatewayClass without status", func(c *cluster) { c.with(gatewayClass("agentgateway", "", "")) },
 			"GatewayClass", "no Accepted condition", "controller is running"),
+		Entry("agentgateway CRDs", func(c *cluster) { c.without("agentgatewaymodels.agentgateway.dev") },
+			"GatewayClass", "CRD agentgatewaymodels.agentgateway.dev not found", "agentgateway-crds"),
+		Entry("agentgateway CRD version", func(c *cluster) { c.with(crd("agentgatewaypolicies.agentgateway.dev", "v1beta1")) },
+			"GatewayClass", "serves [v1beta1], not v1alpha1", "v1.6.x"),
+		Entry("agentgateway controller", func(c *cluster) { c.setAgentgatewayController(nil) },
+			"GatewayClass", "controller Deployment agentgateway-system/agentgateway not found", "preflight.agentgateway.namespace"),
+		Entry("agentgateway release", func(c *cluster) {
+			c.setAgentgatewayController(agentgatewayController("cr.agentgateway.dev/controller:v1.7.0"))
+		},
+			"GatewayClass", "is not a tested release", "v1.6.x"),
 		Entry("RBAC", func(c *cluster) { c.forbid = "runtimeclasses" },
 			"RuntimeClass", "the preflight ServiceAccount may not read RuntimeClass kata", "ClusterRole"),
 	)
