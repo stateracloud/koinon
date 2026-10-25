@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Copies one release (plan item REL2) from ghcr.io/stateracloud to another registry: the images
+# koinon-api, koinon-reconciler and koinon-agentd with every platform, their cosign signatures,
+# attestations and SBOM tags when present, and the Helm chart. It needs crane and jq and reads credentials
+# from the docker config (crane uses the same keychain as docker); it never prints them.
+#
+#   hack/mirror-release.sh 0.1.0-rc.1 zot.apps.lab.example.invalid/koinon
+#
+# The images land at <registry>/<name>:<version> and the chart at <registry>/charts/koinon:<version>,
+# so install with --set image.registry=<registry>. SOURCE overrides the source registry (tests).
+set -euo pipefail
+
+if (($# != 2)); then
+	echo "usage: $0 <version> <registry>   (for example 0.1.0-rc.1 zot.apps.lab.example.invalid/koinon)" >&2
+	exit 2
+fi
+version=${1#v}
+dest=${2%/}
+src=${SOURCE:-ghcr.io/stateracloud}
+
+[[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]] ||
+	{ echo "version '$1' is not X.Y.Z or X.Y.Z-rc.N" >&2; exit 2; }
+command -v jq >/dev/null || { echo "jq is not installed" >&2; exit 1; }
+command -v crane >/dev/null || { echo "crane is not installed (https://github.com/google/go-containerregistry)" >&2; exit 1; }
+
+# copy_one <source repo> <destination repo>: the version tag, then cosign's tags for every digest
+# the tag references (the index and its platform manifests): sha256-<hex>.sig, .att and .sbom.
+copy_one() {
+	local from=$1 to=$2 digests d hex suffix
+	echo "copy $from:$version -> $to:$version"
+	crane copy "$from:$version" "$to:$version"
+	digests=$(crane digest "$from:$version")
+	digests+=$'\n'$(crane manifest "$from:$version" | jq -r '.manifests[]?.digest')
+	for d in $digests; do
+		hex=${d#sha256:}
+		for suffix in sig att sbom; do
+			if crane manifest "$from:sha256-$hex.$suffix" >/dev/null 2>&1; then
+				crane copy "$from:sha256-$hex.$suffix" "$to:sha256-$hex.$suffix"
+			fi
+		done
+	done
+}
+
+for name in koinon-api koinon-reconciler koinon-agentd; do
+	copy_one "$src/$name" "$dest/$name"
+done
+copy_one "$src/charts/koinon" "$dest/charts/koinon"
+echo "mirrored $version to $dest"
