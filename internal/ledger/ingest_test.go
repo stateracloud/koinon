@@ -115,6 +115,30 @@ var _ = Describe("Ingester", func() {
 		Expect(drain()).NotTo(ContainElement(fmt.Sprint(e.org)), "requests past the limit do not wake it again")
 	})
 
+	It("wakes the reconciler and cancels the org's runs when a late entry crosses the org cap of an agent whose daily limit is long spent", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
+		_, err := db.Exec(ctx, `INSERT INTO org_budgets (org_id, monthly_cap, updated_by) VALUES ($1, 1.00, 'test')`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		r := e.startRun(ctx, e.ticket(ctx), 100_000, time.Now().Add(-time.Minute))
+		// The agent's daily limit ($0.05) is spent first, then the org cap ($1.00) is crossed.
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.06", 1, 1)})
+		Expect(err).NotTo(HaveOccurred())
+		conn, err := db.Acquire(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		defer conn.Release()
+		_, err = conn.Exec(ctx, `LISTEN koinon_reconcile`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.95", 1, 1)})
+		Expect(err).NotTo(HaveOccurred())
+		wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		n, err := conn.Conn().WaitForNotification(wctx)
+		Expect(err).NotTo(HaveOccurred(), "the org cap was crossed")
+		Expect(n.Payload).To(Equal(fmt.Sprint(e.org)))
+		Expect(e.run(ctx, r.ID).State).To(Equal(store.RunStateCanceled))
+		Expect(e.run(ctx, r.ID).OutcomeReason.String).To(Or(HavePrefix("agent daily limit"), HavePrefix("org monthly cap")))
+	})
+
 	It("cancels the run with a ticket event when the agent's spend reaches its limit", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
 		t := e.ticket(ctx)
