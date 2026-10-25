@@ -23,7 +23,7 @@ import (
 // fakeUpstream is an OpenAI-compatible chat completions server that reports
 // 10 input and 10 output tokens per request and counts requests in hits.
 func fakeUpstream(hits *atomic.Int64) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return newServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		var req struct {
 			Model string `json:"model"`
@@ -52,7 +52,7 @@ type taggedUpstream struct {
 
 func newTaggedUpstream(tag string) *taggedUpstream {
 	u := &taggedUpstream{}
-	u.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	u.Server = newServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u.hits.Add(1)
 		raw, _ := io.ReadAll(r.Body)
 		u.last.Store(string(raw))
@@ -102,7 +102,7 @@ func fakeTools() *httptest.Server {
 	}
 	// agentgateway reaches it through the testcontainers SSH tunnel, which
 	// arrives on localhost with Host: host.testcontainers.internal.
-	return httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
+	return newServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
 		&mcp.StreamableHTTPOptions{DisableLocalhostProtection: true}))
 }
 
@@ -165,7 +165,7 @@ func fakeRemote(name string, log *headerLog, credHeader string) *httptest.Server
 	}
 	inner := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
 		&mcp.StreamableHTTPOptions{DisableLocalhostProtection: true})
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return newServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.add(r.Header)
 		inner.ServeHTTP(w, r)
 	}))
@@ -184,3 +184,18 @@ func (h headerSetter) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// newServer starts h on all interfaces, not only loopback: a gateway in a kind cluster reaches the
+// test process at the address of the Docker network's gateway, where a loopback listener is not
+// reachable. The servers are fakes with dummy credentials that live for one spec run.
+func newServer(h http.Handler) *httptest.Server {
+	s := httptest.NewUnstartedServer(h)
+	l, err := net.Listen("tcp", "0.0.0.0:0") //nolint:gosec,noctx // see above: the kind cluster reaches the test host over the network
+	if err != nil {
+		panic(err)
+	}
+	_ = s.Listener.Close()
+	s.Listener = l
+	s.Start()
+	return s
+}
