@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	. "github.com/onsi/ginkgo/v2" //nolint:staticcheck // the Ginkgo DSL is dot-imported, as in every spec file
+	. "github.com/onsi/gomega"    //nolint:staticcheck // see above
 
 	"github.com/stateracloud/koinon/internal/gateway"
 )
@@ -138,7 +138,7 @@ func llmSpec(env Env) {
 			// Two orgs, each with its own upstream; both call their model testModel.
 			ups = map[string]*taggedUpstream{"globex": newTaggedUpstream("globex"), "guarded": newTaggedUpstream("guarded"), "private": newTaggedUpstream("private")}
 			// A provider that answers every request with a 307 to a private address (here the "private" fake).
-			redirector = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			redirector = newServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				redirects.Add(1)
 				http.Redirect(w, &http.Request{}, fmt.Sprintf("http://%s:%d/v1/chat/completions", env.Host, port(ups["private"].Server)), http.StatusTemporaryRedirect)
 			}))
@@ -517,7 +517,7 @@ func mcpServersSpec(env Env) {
 			DeferCleanup(func() { globex.CloseClientConnections(); globex.Close() })
 			DeferCleanup(func() { tools.CloseClientConnections(); tools.Close() })
 			// A server that is down: a port nothing listens on.
-			dead := httptest.NewServer(http.NotFoundHandler())
+			dead := newServer(http.NotFoundHandler())
 			deadPort := port(dead)
 			dead.Close()
 
@@ -529,9 +529,9 @@ func mcpServersSpec(env Env) {
 			}
 			state := gateway.State{MCP: []gateway.MCPTarget{
 				{Name: "github", URL: host(port(tools))},
-				{Name: "acme-wiki", Org: "acme", URL: host(port(acme)), CredentialHeader: "X-Api-Key", CredentialFile: env.KeyFile("acme-wiki-key")},
+				{Name: "acme-wiki", Org: "acme", URL: host(port(acme)), CredentialHeader: "X-Api-Key", CredentialFile: env.KeyFile("acme-wiki-key")}, //nolint:gosec // dummy
 				{Name: "acme-bearer", Org: "acme", URL: host(port(bearerSrv)), CredentialHeader: "Authorization", CredentialPrefix: "Bearer ", CredentialFile: env.KeyFile("acme-bearer-key")},
-				{Name: "globex-wiki", Org: "globex", URL: host(port(globex)), CredentialHeader: "X-Api-Key", CredentialFile: env.KeyFile("globex-wiki-key")},
+				{Name: "globex-wiki", Org: "globex", URL: host(port(globex)), CredentialHeader: "X-Api-Key", CredentialFile: env.KeyFile("globex-wiki-key")}, //nolint:gosec // dummy
 				{Name: "acme-dead", Org: "acme", URL: host(deadPort)},
 				{Name: "acme-open", Org: "acme", URL: host(port(open))},
 			}}

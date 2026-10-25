@@ -120,7 +120,7 @@ func startKube(ctx context.Context, hostPorts []int, files map[string]string, op
 	}
 	g := &kubeGateway{c: c, ns: ns}
 	var err error
-	if g.ln, err = net.Listen("tcp", "127.0.0.1:0"); err != nil {
+	if g.ln, err = (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0"); err != nil {
 		return nil, err
 	}
 	g.URL = "http://" + g.ln.Addr().String()
@@ -155,7 +155,7 @@ func (g *kubeGateway) serve() {
 			for range 3 {
 				addr, perr := g.forward()
 				if perr == nil {
-					if out, err = net.DialTimeout("tcp", addr, 3*time.Second); err == nil {
+					if out, err = (&net.Dialer{Timeout: 3 * time.Second}).DialContext(context.Background(), "tcp", addr); err == nil {
 						break
 					}
 				}
@@ -183,7 +183,7 @@ func (g *kubeGateway) forward() (string, error) {
 	if g.pf != nil && g.pf.ProcessState == nil && g.pfa != "" {
 		return g.pfa, nil
 	}
-	cmd := exec.Command("kubectl", "--kubeconfig", g.c.cfgPath, "-n", g.ns, "port-forward", "--address", "127.0.0.1", "svc/"+gatewayName, ":4000") //nolint:gosec // test helper
+	cmd := exec.CommandContext(context.Background(), "kubectl", "--kubeconfig", g.c.cfgPath, "-n", g.ns, "port-forward", "--address", "127.0.0.1", "svc/"+gatewayName, ":4000") //nolint:gosec // test helper
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
