@@ -41,6 +41,12 @@ rules:
     resources: [customresourcedefinitions]
     resourceNames:
       - sandboxes.agents.x-k8s.io
+      {{- if eq .Values.gateway.mode "kubernetes" }}
+      - agentgatewaybackends.agentgateway.dev
+      - agentgatewaymodels.agentgateway.dev
+      - agentgatewayparameters.agentgateway.dev
+      - agentgatewaypolicies.agentgateway.dev
+      {{- end }}
       {{- if eq .Values.postgres.mode "cnpg" }}
       - clusters.postgresql.cnpg.io
       {{- end }}
@@ -48,7 +54,7 @@ rules:
   # The Agent Sandbox controller, for its release version (its namespace is checked by name).
   - apiGroups: [apps]
     resources: [deployments]
-    resourceNames: [{{ .Values.preflight.agentSandbox.controller }}]
+    resourceNames: [{{ .Values.preflight.agentSandbox.controller }}{{ if eq .Values.gateway.mode "kubernetes" }}, {{ .Values.preflight.agentgateway.controller }}{{ end }}]
     verbs: [get]
   {{- if eq .Values.postgres.mode "cnpg" }}
   # The CNPG operator: the webhook that validates its Clusters names the operator's Service,
@@ -165,6 +171,8 @@ spec:
             - --postgres-mode={{ .Values.postgres.mode }}
             - --gateway-mode={{ .Values.gateway.mode }}
             - --gateway-class={{ .Values.gateway.kubernetes.gatewayClassName }}
+            - --agentgateway-namespace={{ .Values.preflight.agentgateway.namespace }}
+            - --agentgateway-controller={{ .Values.preflight.agentgateway.controller }}
             - --runtime-class={{ .Values.openshell.runtimeClassName }}
             - --openshell-address={{ .Values.openshell.address }}
             {{- if .Values.openshell.clientTLSSecret }}

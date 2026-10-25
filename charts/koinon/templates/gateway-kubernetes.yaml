@@ -1,0 +1,23 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+gateway.mode=kubernetes: the chart renders no gateway. The reconciler creates Koinon's own Gateway
+and the objects around it in this namespace (plan item G2, internal/gateway/kubernetes), next to an
+agentgateway controller that is a prerequisite (the install preflight checks it).
+
+The one object the chart owns is the Secret the reconciler writes the opened provider keys and MCP
+credentials into. The proxy never mounts it: the controller reads it through the Kubernetes API and
+sends the values to the proxy (AgentgatewayModel policies.auth.secretRef), so nothing outside the
+controller and the proxy holds it.
+*/ -}}
+{{- if eq .Values.gateway.mode "kubernetes" }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "koinon.gatewayProvidersName" . }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+    koinon.dev/owner: reconciler
+# The reconciler fills this Secret, one data key per provider or MCP credential. The chart renders no
+# data, so an upgrade leaves what the reconciler wrote.
+type: Opaque
+{{- end }}

@@ -75,8 +75,8 @@ agentd:
   workers: 8
   # Run lease; when a replica dies, another takes its runs over after this long.
   lease: 30s
-  # agentgateway's base URL as sandboxes reach it. Empty in standalone mode uses the chart's
-  # gateway Service; required in kubernetes mode until plan item G2.
+  # agentgateway's base URL as sandboxes reach it. Empty uses the gateway Service: the chart's own in
+  # standalone mode, the one the controller creates for Koinon's Gateway in kubernetes mode.
   gatewayURL: ""
   resources:
     requests: {cpu: 50m, memory: 64Mi}
@@ -99,8 +99,8 @@ migrations:
 
 # Install preflight ("koinon-api preflight", plan item H2): a pre-install and pre-upgrade hook Job
 # that fails the release when Agent Sandbox, the OpenShell gateway, openshell.runtimeClassName,
-# the CNPG operator (postgres.mode=cnpg) or the agentgateway GatewayClass (gateway.mode=kubernetes)
-# is missing or unsupported, and warns when Kata guest seccomp is off (ADR 0048 decision 2).
+# the CNPG operator (postgres.mode=cnpg) or the agentgateway GatewayClass, CRDs and controller
+# (gateway.mode=kubernetes) is missing or unsupported, and warns when Kata guest seccomp is off (ADR 0048 decision 2).
 preflight:
   enabled: true
   # Kills the Job after this long; keep it below helm's --timeout (default 5m).
@@ -109,6 +109,14 @@ preflight:
   agentSandbox:
     namespace: agent-sandbox-system
     controller: agent-sandbox-controller
+  # Where agentgateway's controller runs (gateway.mode=kubernetes); its image tag must be v1.6.x. The
+  # proxy's NetworkPolicy also admits egress to this namespace, where the proxy fetches its xDS
+  # configuration.
+  agentgateway:
+    namespace: agentgateway-system
+    controller: agentgateway
+    # The controller's xDS port (its chart's agwGrpc).
+    xdsPort: 9978
   # Guest seccomp check: one short-lived unprivileged pod in the release namespace with
   # openshell.runtimeClassName and seccompProfile RuntimeDefault (the koinon-api image) reports
   # its /proc/self/status Seccomp and whether keyctl is denied. Off only warns.
@@ -154,11 +162,14 @@ postgres:
       agentd: agentd-uri
 
 gateway:
-  # The two gateway modes are decided in ADR 0049 (standalone first chosen in ADR 0048 decision 6).
+  # The gateway modes are decided in ADR 0049 and ADR 0058.
   # standalone: the chart installs agentgateway, configured by the reconciler.
-  # kubernetes: use an existing agentgateway controller. The chart renders nothing for
-  # the gateway in v0.1; plan item G2 adds the Gateway, AgentgatewayBackend, AgentgatewayPolicy
-  # and AgentgatewayParameters in this namespace.
+  # kubernetes: use an existing agentgateway controller (v1.6.x, with its CRDs, and a GatewayClass).
+  # The chart renders no gateway; the reconciler creates Koinon's own Gateway, AgentgatewayModels,
+  # AgentgatewayPolicies, AgentgatewayBackend, HTTPRoute and key ConfigMaps in this namespace and never
+  # touches other gateways (plan item G2). There is no fallback to standalone: the install preflight
+  # fails when the controller, its CRDs or the GatewayClass are missing. Budgets are enforced by the
+  # spend ledger, which revokes a key that is out of budget (the S2 fallback, ADR 0058).
   mode: standalone
   standalone:
     image:
@@ -179,8 +190,11 @@ gateway:
     tolerations: []
     affinity: {}
   kubernetes:
-    # Used by G2: the GatewayClass of the existing controller.
+    # The GatewayClass of the existing controller.
     gatewayClassName: agentgateway
+    # The listener of Koinon's Gateway, for LLM and MCP requests. The controller names the proxy's
+    # Service after the Gateway (koinon-gateway by default).
+    port: 4000
 
 # Model providers and models are not chart values: orgs add them in the UI or the admin API, or
 # declare them with labelled Secrets (ADR 0056, docs/site guides/models). Their keys are encrypted

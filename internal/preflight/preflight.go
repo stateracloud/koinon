@@ -48,6 +48,25 @@ const (
 		"https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.7/sandbox-with-extensions.yaml"
 )
 
+// AgentgatewayAPIVersion is the agentgateway.dev version Koinon's objects use, and
+// agentgatewayVersion matches the tested controller line, v1.6.x (plan item G2).
+const AgentgatewayAPIVersion = "v1alpha1"
+
+// agentgatewayControllerName is the controllerName of agentgateway's GatewayClass (verified on a
+// kind cluster with controller v1.6.0; research/agentgateway-k8s-crds.md).
+const agentgatewayControllerName = "agentgateway.dev/agentgateway"
+
+var (
+	agentgatewayVersion = regexp.MustCompile(`^v1\.6\.[0-9]+$`)
+	agentgatewayCRDs    = []string{
+		"agentgatewaybackends.agentgateway.dev", "agentgatewaymodels.agentgateway.dev",
+		"agentgatewayparameters.agentgateway.dev", "agentgatewaypolicies.agentgateway.dev",
+	}
+)
+
+const agentgatewayInstall = "helm upgrade -i agentgateway-crds oci://cr.agentgateway.dev/charts/agentgateway-crds --version v1.6.0 -n agentgateway-system --create-namespace " +
+	"&& helm upgrade -i agentgateway oci://cr.agentgateway.dev/charts/agentgateway --version v1.6.0 -n agentgateway-system"
+
 // agentSandboxVersion matches the supported Agent Sandbox releases, v1.0.x.
 var agentSandboxVersion = regexp.MustCompile(`^v1\.0\.[0-9]+$`)
 
@@ -106,6 +125,10 @@ type Config struct {
 	// Deployment, whose image tag carries the release version.
 	AgentSandboxNamespace  string
 	AgentSandboxController string
+	// AgentgatewayNamespace and AgentgatewayController locate agentgateway's controller Deployment
+	// (kubernetes mode), whose image tag carries its release.
+	AgentgatewayNamespace  string
+	AgentgatewayController string
 }
 
 // OpenShell is the part of the OpenShell gateway API the preflight calls.
@@ -454,6 +477,14 @@ func (c *Checker) checkGatewayClass(ctx context.Context) Result {
 	case err != nil:
 		return apiFailure(check, "GatewayClass "+name, err)
 	}
+	// A class of that name that another controller serves is not agentgateway's.
+	if controller, _, _ := unstructured.NestedString(gc.Object, "spec", "controllerName"); controller != agentgatewayControllerName {
+		return Result{
+			Check: check, Status: Fail,
+			Message: fmt.Sprintf("served by controller %q, not %s: this GatewayClass is not agentgateway's", controller, agentgatewayControllerName),
+			Fix:     "set gateway.kubernetes.gatewayClassName to the GatewayClass of agentgateway's controller, or use gateway.mode=standalone",
+		}
+	}
 	conditions, _, _ := unstructured.NestedSlice(gc.Object, "status", "conditions")
 	for _, cond := range conditions {
 		m, ok := cond.(map[string]any)
@@ -462,7 +493,7 @@ func (c *Checker) checkGatewayClass(ctx context.Context) Result {
 		}
 		if m["status"] == "True" {
 			controller, _, _ := unstructured.NestedString(gc.Object, "spec", "controllerName")
-			return Result{Check: check, Status: Pass, Message: "accepted by " + controller}
+			return c.checkAgentgateway(ctx, check, controller)
 		}
 		return Result{
 			Check: check, Status: Fail,
@@ -475,6 +506,61 @@ func (c *Checker) checkGatewayClass(ctx context.Context) Result {
 		Message: "no Accepted condition: no controller has picked it up",
 		Fix:     "check that the agentgateway controller is running",
 	}
+}
+
+// checkAgentgateway checks what Koinon's native objects need beyond an accepted GatewayClass: the four
+// agentgateway.dev CRDs at v1alpha1 and a controller of the tested v1.6 line. There is no fallback
+// to standalone mode: a missing piece fails the install.
+func (c *Checker) checkAgentgateway(ctx context.Context, check, controllerName string) Result {
+	for _, name := range agentgatewayCRDs {
+		crd, err := c.getCRD(ctx, name)
+		switch {
+		case apierrors.IsNotFound(err):
+			return Result{
+				Check: check, Status: Fail,
+				Message: fmt.Sprintf("CRD %s not found: the agentgateway CRDs are not installed", name),
+				Fix:     "install the agentgateway CRDs and controller v1.6.x: " + agentgatewayInstall,
+			}
+		case err != nil:
+			return apiFailure(check, "CRD "+name, err)
+		}
+		if served := servedVersions(crd); !slices.Contains(served, AgentgatewayAPIVersion) {
+			return Result{
+				Check: check, Status: Fail,
+				Message: fmt.Sprintf("CRD %s serves %v, not %s: unsupported agentgateway version", name, served, AgentgatewayAPIVersion),
+				Fix:     "install agentgateway v1.6.x: " + agentgatewayInstall,
+			}
+		}
+	}
+	ns, name := c.Config.AgentgatewayNamespace, c.Config.AgentgatewayController
+	dctx, cancel := c.callCtx(ctx)
+	defer cancel()
+	deploy, err := c.Kube.AppsV1().Deployments(ns).Get(dctx, name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return Result{
+			Check: check, Status: Fail,
+			Message: fmt.Sprintf("controller Deployment %s/%s not found, so its version is unknown", ns, name),
+			Fix:     "install agentgateway v1.6.x, or set preflight.agentgateway.namespace and .controller to where its controller runs",
+		}
+	case err != nil:
+		return apiFailure(check, fmt.Sprintf("Deployment %s/%s", ns, name), err)
+	}
+	var image string
+	for _, ctr := range deploy.Spec.Template.Spec.Containers {
+		if image == "" || strings.Contains(ctr.Image, "controller") {
+			image = ctr.Image
+		}
+	}
+	tag := imageTag(image)
+	if !agentgatewayVersion.MatchString(tag) {
+		return Result{
+			Check: check, Status: Fail,
+			Message: fmt.Sprintf("controller image %q is not a tested release (kubernetes mode is tested with v1.6.x)", image),
+			Fix:     "install agentgateway v1.6.x: " + agentgatewayInstall,
+		}
+	}
+	return Result{Check: check, Status: Pass, Message: fmt.Sprintf("accepted by %s; CRDs agentgateway.dev/%s; controller %s", controllerName, AgentgatewayAPIVersion, tag)}
 }
 
 // verifySeccomp tells the operator how to check guest seccomp by hand.

@@ -5,6 +5,7 @@ package reconciler_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -170,6 +171,8 @@ type fakeModelGateway struct {
 	issued  []gateway.IssuedKey
 	applied []gateway.State
 	fail    error
+	// ledgerBudgets makes the fake report that only a limit of zero binds (Kubernetes mode).
+	ledgerBudgets bool
 }
 
 func (f *fakeModelGateway) IssueKey(_ context.Context, agent gateway.AgentRef) (gateway.IssuedKey, error) {
@@ -189,12 +192,17 @@ func (f *fakeModelGateway) Apply(_ context.Context, s gateway.State) (gateway.Re
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.fail != nil {
+	var rej *gateway.RejectedError
+	if f.fail != nil && !errors.As(f.fail, &rej) {
 		return "", f.fail
 	}
 	f.applied = append(f.applied, s)
-	return gateway.Revision(fmt.Sprint(len(f.applied))), nil
+	// A RejectedError comes with the revision: the rest of the state is live.
+	return gateway.Revision(fmt.Sprint(len(f.applied))), f.fail
 }
+
+// LedgerEnforcesBudgets makes the fake a Kubernetes-mode gateway when ledgerBudgets is set.
+func (f *fakeModelGateway) LedgerEnforcesBudgets() bool { return f.ledgerBudgets }
 
 func (f *fakeModelGateway) Usage() gateway.UsageReader { return gateway.NoUsage{} }
 

@@ -123,7 +123,7 @@ any of these:
 - The OpenShell gateway is not reachable at `openshell.address`, or its version is not 0.1.5.
 - The RuntimeClass in `openshell.runtimeClassName` does not exist.
 - The CloudNativePG operator is missing (when `postgres.mode` is `cnpg`).
-- The agentgateway `GatewayClass` is missing (when `gateway.mode` is `kubernetes`).
+- The agentgateway `GatewayClass`, its `agentgateway.dev` CRDs or a v1.6.x controller are missing (when `gateway.mode` is `kubernetes`; see [Gateway modes](/guides/gateway-modes/)).
 
 It warns, and does not fail, when Kata guest seccomp is off (ADR 0048), or when your cluster does
 not enforce NetworkPolicy. Turn the seccomp probe off with `preflight.seccompProbe.enabled: false`

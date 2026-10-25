@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# G2 gateway suite on kind (plan item G2): the shared G1 suite and the Kubernetes-mode specs of
+# internal/gateway/kubernetes against agentgateway's real controller v1.6.0, via hack/g2-kind.sh. Manual
+# trigger only while the repository is private, where Actions minutes cost money. Calls no external
+# service besides image, chart and manifest downloads: the model and the MCP servers are fakes in the
+# test process.
+name: g2-kind
+
+on:
+  workflow_dispatch:
+    inputs:
+      focus:
+        description: 'Optional Ginkgo focus (a regular expression on the spec names), for a single spec'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: g2-kind-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kubernetes-gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+
+      - name: Install kind
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSL -o "$RUNNER_TEMP/bin/kind" \
+            "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  $RUNNER_TEMP/bin/kind" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/bin/kind"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Gateway suite (kind, Gateway API, agentgateway v1.6.0, go test)
+        env:
+          OUT: ${{ runner.temp }}/g2
+          FOCUS: ${{ inputs.focus }}
+        run: hack/g2-kind.sh
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: g2-kind-logs
+          path: ${{ runner.temp }}/g2/go-test.log
+          retention-days: 7

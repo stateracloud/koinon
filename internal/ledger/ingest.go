@@ -166,8 +166,11 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 	}
 	// A limit cancels runs only in its current window: a late entry from last month reaching
 	// last month's cap must not cancel this month's runs.
+	// A level this entry has just crossed (spent before it was below the limit) wins over one that
+	// was already spent, so a late entry that crosses the org cap of an agent whose daily limit is
+	// long spent still cancels the org's runs and wakes the reconciler.
 	var l budget.Level
-	found := false
+	found, crossed := false, false
 	for _, r := range st.Reached() {
 		current := budget.MonthStart(in.now())
 		if r.Name == budget.AgentDaily {
@@ -176,11 +179,22 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 		if !r.WindowStart.Equal(current) {
 			continue
 		}
-		l, found = r, true
-		break
+		crossing := r.Spent-delta < r.Limit
+		if !found || (crossing && !crossed) {
+			l, found, crossed = r, true, crossing
+		}
 	}
 	if !found {
 		return nil
+	}
+	// The entry that reaches a limit wakes the reconciler, which recomputes every key's limit net of
+	// the spend and pushes it. Standalone agentgateway then blocks the key itself; in Kubernetes mode
+	// there is no gateway budget, and the reconciler's Apply is what revokes the key (plan item G2).
+	// Later entries of a spent window do not wake it again.
+	if crossed {
+		if err := q.NotifyReconciler(ctx, org); err != nil {
+			return fmt.Errorf("wake the reconciler: %w", err)
+		}
 	}
 	msg := fmt.Sprintf("%s reached ($%s of $%s since %s)", limitTitle(l.Name), l.Spent, l.Limit, l.WindowStart.Format("2006-01-02 15:04 MST"))
 	extra := map[string]any{
