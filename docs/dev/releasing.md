@@ -15,7 +15,9 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
 
 ## Cut a release candidate
 
-1. Merge everything to `main` and wait for the `ci`, `dco` and `secrets` checks on the merge commit.
+1. Merge everything to `main` and wait for the `ci` and `secrets` checks on the merge commit. `ci`
+   cancels a run when a newer commit lands on `main`, so a superseded merge commit can be left with
+   cancelled checks: tag the newest commit whose checks are green.
 2. Tag the merge commit and push the tag (signed tags are fine; the workflow only needs the commit):
 
    ```sh
@@ -27,8 +29,9 @@ the images, the chart's `version` and `appVersion` all come from the tag, withou
 3. Watch the `release` workflow. The `gate` job runs first and fails the release if the tag is not
    `vX.Y.Z` or `vX.Y.Z-rc.N`, the commit is not an ancestor of `origin/main`, or any required check
    of the `main` ruleset (dco, go, web, proto, migrations, generated code, gitleaks, chart, escape
-   (admission)) has not concluded `success` on it. It reruns no tests. `dco` runs on pull requests
-   only, so it is read from the head commit of the pull request that merged the tag's commit.
+   (admission)) has not concluded `success` on it. It reruns no tests. The `dco` workflow runs on
+   pull requests only, so the gate reads that check from the head commit of the pull request that
+   merged the tag's commit.
 4. Open the draft release and read the notes. `-rc.N` releases are already marked as a prerelease.
    Publishing the draft is the only manual step.
 
@@ -42,17 +45,27 @@ Same steps with `vX.Y.Z` after the last rc was exercised (REL2). The final relea
 
 ## Signing and SBOM attestations
 
-The workflow can sign with cosign keyless and attest the SBOMs, but it does so only when the
-repository variable `RELEASE_SIGNING` is `true` (default: unset, off). Keyless signing writes image
-names and digests to the public Rekor log (ADR 0049), so leave it off while the repository is private.
+The workflow can sign with cosign keyless and attest the SBOMs, but its `sign` job runs only when
+the repository variable `RELEASE_SIGNING` is `true` (default: unset, off). Keyless signing writes
+image names and digests to the public Rekor log (ADR 0049), so leave it off while the repository is
+private.
 
-When it is on, the `release` job (the only one with `id-token: write`) signs every image manifest
-through GoReleaser's `docker_signs`, signs the pushed chart artifact, and attaches each image's SPDX
-SBOM as a cosign attestation (`cosign attest --type spdxjson`). Verify with
+The `sign` job runs after `release` and is the only job with `id-token: write`. It gets
+`dist/digests.txt` and the SPDX SBOMs from the release job as an uploaded artifact (`hack/release-refs.sh`
+turns the digests into image references), signs every image by digest and the pushed chart artifact,
+and attaches each image's SBOM as a cosign attestation (`cosign attest --type spdxjson`). Verify with
 `cosign verify` against the workflow's identity once it is on.
 
 Set it with `gh variable set RELEASE_SIGNING --body true`, and remove it again with
 `gh variable delete RELEASE_SIGNING`.
+
+## What protects release tags
+
+The workflow's gate checks that the tagged commit is on `main`, but anyone who can push a tag can
+start a release from a commit on a branch that was merged later, or move a tag afterwards. A tag
+ruleset on `refs/tags/v*` closes that: only repository admins may create matching tags, and tags can
+be neither updated nor deleted. This ruleset is not created by the repository's code; it is a
+repository setting that an admin has to add, and until it exists the gate is the only protection.
 
 ## Mirror a release to the home lab
 
@@ -65,8 +78,28 @@ hack/mirror-release.sh 0.1.0-rc.1 zot.apps.lab.example.invalid/koinon
 
 It copies the three images (every platform, plus any cosign signature, attestation and SBOM tags)
 and the chart to `<registry>/<name>:<version>` and `<registry>/charts/koinon:<version>`. The script
-uses the credentials in the docker config and never prints them. Install the mirrored chart with
+uses the credentials in the docker config and never prints them. Cosign 3 stores its bundles as
+OCI referrers; the script copies them only where they also exist under the `sha256-<hex>` tag, so
+referrers-API-only output is not copied. Install the mirrored chart with
 `helm install koinon oci://<registry>/charts/koinon --version <version> --set image.registry=<registry>`.
+
+### Flavor images when installing a release
+
+The packaged chart defaults `flavors.<x>.image` to `ghcr.io/stateracloud/flavor-<x>:<appVersion>`
+(`opencode`, `hermes`, `pi`), and no release publishes those images. Until the flavor design is
+settled, point the flavors at images you built (`make flavors`, then tag and push), or turn the ones
+you do not use off. `image.registry` is shared by all images, so for REL2 run A on the home-lab Zot:
+
+```sh
+helm install koinon oci://zot.apps.lab.example.invalid/koinon/charts/koinon --version 0.1.0-rc.1 \
+  --set image.registry=zot.apps.lab.example.invalid/koinon \
+  --set flavors.opencode.image.repository=flavor-opencode \
+  --set flavors.opencode.image.tag=dev-<hash from hack/flavor-tag.sh opencode> \
+  --set flavors.hermes=null --set flavors.pi=null
+```
+
+`flavors.<x>.image.registry` does not exist; a flavor in another registry needs
+`flavors.<x>.image.repository` to be a path below `image.registry`.
 
 ## Dry runs
 
@@ -83,7 +116,7 @@ config whose `release` is disabled so that nothing reaches GitHub.
 
 - **Flavor images** (`opencode`, `hermes`, `pi`). The flavor design is being reopened as "bring your
   own harness", so v0.1 releases none. `make flavors` still builds them for development and CI.
-- Signatures and attestations, until `RELEASE_SIGNING` is switched on (when the repository goes
+- Signatures and attestations (the `sign` job), until `RELEASE_SIGNING` is switched on (when the repository goes
   public).
 - Binary archives and checksums; the release ships images and the chart.
 - A "local checks recorded" gate in place of the CI status gate (`hack/release-gate.sh`).
