@@ -26,7 +26,15 @@ data:
       providerKeysSecret: {{ include "koinon.gatewayProvidersName" . }}
       providerKeysDir: /secrets/providers
       {{- else }}
+      # Koinon's own Gateway; the controller names the proxy's Service after it.
+      name: {{ include "koinon.componentName" (list . "gateway") }}
       gatewayClassName: {{ .Values.gateway.kubernetes.gatewayClassName }}
+      url: http://{{ include "koinon.gatewayHost" . }}:{{ .Values.gateway.kubernetes.port }}
+      port: {{ .Values.gateway.kubernetes.port }}
+      accessLogOtlp: {{ include "koinon.componentName" (list . "api") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.otlpPort }}
+      # The Secret the proxy reads provider keys and MCP credentials from, through the controller.
+      providerKeysSecret: {{ include "koinon.gatewayProvidersName" . }}
+      providerKeysDir: /secrets/providers
       {{- end }}
     openshell:
       address: {{ .Values.openshell.address | quote }}

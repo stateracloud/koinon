@@ -3,7 +3,9 @@
 package ledger_test
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -81,6 +83,36 @@ var _ = Describe("Ingester", func() {
 		run := e.run(ctx, r.ID)
 		Expect(run.State).To(Equal(store.RunStateCanceled))
 		Expect(run.OutcomeReason.String).To(ContainSubstring("token cap"))
+	})
+
+	It("wakes the reconciler once, when a request reaches the limit (Kubernetes mode revokes the key then)", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
+		conn, err := db.Acquire(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		defer conn.Release()
+		_, err = conn.Exec(ctx, `LISTEN koinon_reconcile`)
+		Expect(err).NotTo(HaveOccurred())
+		drain := func() []string {
+			var got []string
+			for {
+				wctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+				n, err := conn.Conn().WaitForNotification(wctx)
+				cancel()
+				if err != nil {
+					return got
+				}
+				got = append(got, n.Payload)
+			}
+		}
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.03", 1, 1)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(drain()).NotTo(ContainElement(e.org.String()), "below the limit")
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.025", 1, 1)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(drain()).To(ContainElement(fmt.Sprint(e.org)), "the request that reaches the limit")
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.01", 1, 1)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(drain()).NotTo(ContainElement(fmt.Sprint(e.org)), "requests past the limit do not wake it again")
 	})
 
 	It("cancels the run with a ticket event when the agent's spend reaches its limit", func(ctx SpecContext) {

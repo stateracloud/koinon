@@ -30,15 +30,17 @@ spec:
               {{- toYaml $release | nindent 14 }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
-    {{- if eq .Values.gateway.mode "standalone" }}
     # The spend ledger's OTLP receiver has no authentication: only agentgateway may send to it.
     - ports:
         - port: otlp
       from:
         - podSelector:
             matchLabels:
+              {{- if eq .Values.gateway.mode "standalone" }}
               {{- include "koinon.selectorLabels" (list . "gateway") | nindent 14 }}
-    {{- end }}
+              {{- else }}
+              {{- include "koinon.proxySelectorLabels" . | nindent 14 }}
+              {{- end }}
     # Saved work from a stuck sandbox: koinon-agentd, which holds no key-encryption key, posts it here
     # to be sealed (an HMAC credential per upload). Its own port, so agentd cannot reach the tools
     # below, which trust agentgateway's agent header. Sandboxes cannot reach it.
@@ -57,11 +59,11 @@ spec:
             matchLabels:
               {{- include "koinon.selectorLabels" (list . "gateway") | nindent 14 }}
         {{- else }}
-        # Kubernetes mode: the controller-managed proxy runs in this namespace for Koinon's own
-        # Gateway (ADR 0049); plan item G2 narrows this to its pod labels.
+        # Kubernetes mode: the controller-managed proxy of Koinon's own Gateway, by the label the
+        # controller puts on its pods (ADR 0058).
         - podSelector:
             matchLabels:
-              gateway.networking.k8s.io/gateway-name: {{ include "koinon.componentName" (list . "gateway") }}
+              {{- include "koinon.proxySelectorLabels" . | nindent 14 }}
         {{- end }}
 {{- range $component := list "reconciler" "agentd" "migrate" }}
 ---
@@ -142,6 +144,71 @@ spec:
     {{- with .Values.networkPolicy.metricsFrom }}
     - ports:
         - port: stats
+      from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- end }}
+{{- if eq .Values.gateway.mode "kubernetes" }}
+---
+# The proxy the agentgateway controller runs for Koinon's Gateway (plan item G2). The controller
+# labels its pods gateway.networking.k8s.io/gateway-name; the policy is standard networking.k8s.io/v1
+# and selects only that Gateway's pods, so other gateways in the namespace are not affected.
+# Sandboxes reach it through their OpenShell supervisor pods, as in standalone mode.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "koinon.componentName" (list . "gateway") }}
+  labels:
+    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "koinon.proxySelectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  # Egress as for the standalone gateway (see its policy), plus the controller's xDS port: the proxy
+  # takes its whole configuration from the controller.
+  egress:
+    - ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.preflight.agentgateway.namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentgateway
+      ports:
+        - port: {{ .Values.preflight.agentgateway.xdsPort }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "koinon.selectorLabels" (list . "api") | nindent 14 }}
+      ports:
+        - port: {{ .Values.api.otlpPort }}
+        - port: {{ .Values.api.toolsPort }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16]
+        - ipBlock:
+            cidr: ::/0
+            except: ["fc00::/7", "fe80::/10", "::/96", "64:ff9b::/96", "64:ff9b:1::/48", "2002::/16"]
+    {{- range .Values.networkPolicy.gatewayEgressTo }}
+    - {{- toYaml . | nindent 6 }}
+    {{- end }}
+  ingress:
+    - ports:
+        - port: {{ .Values.gateway.kubernetes.port }}
+      from:
+        - namespaceSelector:
+            {{- toYaml .Values.sandboxPolicy.namespaceSelector | nindent 12 }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml $release | nindent 14 }}
+    {{- with .Values.networkPolicy.metricsFrom }}
+    - ports:
+        - port: 15020
       from:
         {{- toYaml . | nindent 8 }}
     {{- end }}

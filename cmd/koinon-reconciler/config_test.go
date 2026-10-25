@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 )
 
@@ -80,6 +81,40 @@ var _ = Describe("parseConfig", func() {
 		f := c.flavors()[store.AgentFlavorOpencode]
 		Expect(f.Image).To(Equal("ghcr.io/stateracloud/flavor-opencode:0.1.0"))
 		Expect(f.Binaries).To(HaveLen(1))
+	})
+
+	It("reads the Kubernetes-mode config and defaults the key settle time to seconds, not the kubelet's minute", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		cfg := `
+gateway:
+  mode: kubernetes
+  name: koinon-gateway
+  gatewayClassName: agentgateway
+  url: http://koinon-gateway.koinon.svc.cluster.local:4000
+  port: 4000
+  accessLogOtlp: koinon-api.koinon.svc:4318
+  providerKeysSecret: koinon-gateway-providers
+  providerKeysDir: /secrets/providers
+openshell:
+  address: openshell.openshell.svc:8080
+`
+		Expect(os.WriteFile(path, []byte(cfg), 0o600)).To(Succeed())
+		env := map[string]string{
+			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
+		}
+		c, err := parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.gatewayMode).To(Equal(project.GatewayKubernetes))
+		Expect(c.gatewayName).To(Equal("koinon-gateway"))
+		Expect(c.gatewayClass).To(Equal("agentgateway"))
+		Expect(c.gatewayPort).To(Equal(4000))
+		Expect(c.keySettle).To(Equal(2 * time.Second))
+
+		delete(env, "KOINON_CONFIG")
+		env["KOINON_GATEWAY_MODE"], env["KOINON_GATEWAY_URL"] = "kubernetes", "http://g:4000"
+		env["KOINON_OPENSHELL_ADDRESS"], env["KOINON_PROVIDER_KEYS_SECRET"], env["KOINON_PROVIDER_KEYS_DIR"] = "o:1", "s", "/d"
+		_, err = parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		Expect(err).To(MatchError(ContainSubstring("--gateway-name is required in kubernetes mode")))
 	})
 
 	It("requires the database, namespace, OpenShell and gateway settings", func() {

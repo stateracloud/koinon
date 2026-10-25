@@ -55,6 +55,8 @@ func parsePreflightFlags(args []string) (preflightConfig, error) {
 	fs.StringVar(&c.tlsDir, "openshell-tls-dir", "", "directory with the OpenShell client tls.crt, tls.key and ca.crt; empty is plaintext")
 	fs.StringVar(&c.check.AgentSandboxNamespace, "agent-sandbox-namespace", "agent-sandbox-system", "namespace of the Agent Sandbox controller")
 	fs.StringVar(&c.check.AgentSandboxController, "agent-sandbox-controller", "agent-sandbox-controller", "Deployment of the Agent Sandbox controller")
+	fs.StringVar(&c.check.AgentgatewayNamespace, "agentgateway-namespace", "agentgateway-system", "namespace of agentgateway's controller (kubernetes mode)")
+	fs.StringVar(&c.check.AgentgatewayController, "agentgateway-controller", "agentgateway", "Deployment of agentgateway's controller (kubernetes mode)")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")
 	fs.StringVar(&c.probeImage, "probe-image", "", "image of the seccomp probe pod (this binary's image)")
 	fs.StringVar(&c.probePullSecrets, "probe-image-pull-secrets", "", "comma-separated image pull Secrets of the probe pod")

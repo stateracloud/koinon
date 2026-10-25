@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -31,6 +32,8 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/gateway"
+	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/project"
@@ -86,23 +89,10 @@ func run() error {
 	}
 	defer func() { _ = backend.Close() }()
 
-	if cfg.gatewayMode != project.GatewayStandalone {
-		return fmt.Errorf("gateway mode %q is not implemented yet (plan item G2); use standalone", cfg.gatewayMode)
+	driver, err := newGatewayDriver(cfg, kube, log)
+	if err != nil {
+		return err
 	}
-	driver := &standalone.Driver{
-		Options: standalone.Options{Port: cfg.gatewayPort, DatabaseURL: cfg.gatewayDBURL},
-		Deliverer: standalone.ConfigMapDeliverer{
-			Client: kube, Namespace: cfg.namespace, Name: cfg.gatewayConfigMap, FieldManager: reconciler.ManagedByValue,
-		},
-	}
-	if cfg.accessLogOTLP != "" {
-		driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP}
-	} else {
-		log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing and spend limits are not netted")
-	}
-	// Reloads are detected on the data plane, with the revision's probe key; agentgateway's
-	// admin listener stays on localhost.
-	driver.Waiter = standalone.ProbeWaiter{GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log}
 
 	// koinon-api creates the KEK Secret on its first start, so on a fresh install it may not be there
 	// (or mounted) yet: wait for it.
@@ -175,7 +165,7 @@ func run() error {
 	return err
 }
 
-func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
+func restConfig(kubeconfig string) (*rest.Config, error) {
 	var (
 		rc  *rest.Config
 		err error
@@ -188,6 +178,14 @@ func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
 	if err != nil {
 		return nil, fmt.Errorf("kubernetes client config: %w", err)
 	}
+	return rc, nil
+}
+
+func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
+	rc, err := restConfig(kubeconfig)
+	if err != nil {
+		return nil, err
+	}
 	return kubernetes.NewForConfig(rc)
 }
 
@@ -199,4 +197,58 @@ func splitHosts(s string) []string {
 		}
 	}
 	return out
+}
+
+// newGatewayDriver builds the ModelGateway for cfg.gatewayMode: standalone writes agentgateway's
+// config file into a ConfigMap and detects the reload with a probe key; kubernetes applies native
+// agentgateway CRDs next to the existing controller (plan item G2, ADR 0058) and confirms each
+// revision with the same probe key.
+func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (gateway.ModelGateway, error) {
+	switch cfg.gatewayMode {
+	case project.GatewayStandalone:
+		driver := &standalone.Driver{
+			Options: standalone.Options{Port: cfg.gatewayPort, DatabaseURL: cfg.gatewayDBURL},
+			Deliverer: standalone.ConfigMapDeliverer{
+				Client: kube, Namespace: cfg.namespace, Name: cfg.gatewayConfigMap, FieldManager: reconciler.ManagedByValue,
+			},
+		}
+		if cfg.accessLogOTLP != "" {
+			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP}
+		} else {
+			log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing and spend limits are not netted")
+		}
+		// Reloads are detected on the data plane, with the revision's probe key; agentgateway's
+		// admin listener stays on localhost.
+		driver.Waiter = standalone.ProbeWaiter{GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log}
+		return driver, nil
+	case project.GatewayKubernetes:
+		rc, err := restConfig(cfg.kubeconfig)
+		if err != nil {
+			return nil, err
+		}
+		// A pass applies about a dozen objects and lists seven kinds; client-go's default of 5 requests
+		// per second would make every Apply take seconds, and a key revocation with it.
+		rc.QPS, rc.Burst = 50, 100
+		dyn, err := dynamic.NewForConfig(rc)
+		if err != nil {
+			return nil, err
+		}
+		driver := &gwk8s.Driver{
+			Options: gwk8s.Options{
+				Namespace: cfg.namespace, GatewayName: cfg.gatewayName, GatewayClassName: cfg.gatewayClass,
+				Port: cfg.gatewayPort, ProviderKeysSecret: cfg.providerKeysSecret, ManagedBy: reconciler.ManagedByValue,
+			},
+			Store:  gwk8s.DynamicStore{Client: dyn, FieldManager: reconciler.ManagedByValue},
+			Events: kube,
+			Waiter: standalone.ProbeWaiter{GatewayURL: cfg.gatewayURL, Log: log},
+			Log:    log,
+		}
+		if cfg.accessLogOTLP != "" {
+			driver.Options.AccessLogOTLP = &standalone.OTLPExport{HostPort: cfg.accessLogOTLP}
+		} else {
+			log.Warn("no --gateway-access-log-otlp: the spend ledger records nothing, so budgets cannot revoke keys")
+		}
+		return driver, nil
+	}
+	return nil, fmt.Errorf("gateway mode %q is not supported", cfg.gatewayMode)
 }
