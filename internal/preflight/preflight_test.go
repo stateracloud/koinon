@@ -378,6 +378,11 @@ var _ = Describe("Checker", func() {
 			"GatewayClass", "agentgateway's Kubernetes controller is not installed", "gateway.mode=standalone"),
 		Entry("GatewayClass not accepted", func(c *cluster) { c.with(gatewayClass("agentgateway", "False", "InvalidParameters")) },
 			"GatewayClass", "not accepted: InvalidParameters: details", "controller's logs"),
+		Entry("GatewayClass of another controller", func(c *cluster) {
+			gc := gatewayClass("agentgateway", "True", "Accepted")
+			_ = unstructured.SetNestedField(gc.Object, "example.com/other-gateway", "spec", "controllerName")
+			c.with(gc)
+		}, "GatewayClass", `served by controller "example.com/other-gateway"`, "gateway.kubernetes.gatewayClassName"),
 		Entry("GatewayClass without status", func(c *cluster) { c.with(gatewayClass("agentgateway", "", "")) },
 			"GatewayClass", "no Accepted condition", "controller is running"),
 		Entry("agentgateway CRDs", func(c *cluster) { c.without("agentgatewaymodels.agentgateway.dev") },
