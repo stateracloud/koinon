@@ -1,0 +1,348 @@
+# Revision cf97083787d4c27e
+apiVersion: v1
+data:
+  catalog.json: '{"providers":{"acme.openrouter":{"models":{"deepseek/deepseek-v4.1-flash":{"rates":{"cacheRead":"0.006","input":"0.30","output":"1.20"},"tiers":[{"contextOver":200000,"rates":{"input":"0.60"}}]}}},"globex.ollama":{"models":{"deepseek/deepseek-v4.1-flash":{"rates":{"input":"0","output":"0"}}}}}}'
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-catalog
+  namespace: koinon
+---
+apiVersion: v1
+data:
+  k-aaaaaaaaaaaa: '{"keyHash":"sha256:d7ef9a39720870db13b85251d2f81938233b8417e9ef596c773638c5d38fd60c","metadata":{"agent":"acme/repo-helper","internal":false,"name":"k-aaaaaaaaaaaa","org":"acme"}}'
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+    koinon.dev/gateway-keys: koinon-gateway
+    koinon.dev/org: acme
+  name: koinon-gateway-keys-acme
+  namespace: koinon
+---
+apiVersion: v1
+data:
+  k-gggggggggggg: '{"keyHash":"sha256:b0b03f2ad19f1dc9e87777f6432dd6ca96548f078a07c9bc473a278c2e1b85c6","metadata":{"agent":"globex/analyst","internal":false,"name":"k-gggggggggggg","org":"globex"}}'
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+    koinon.dev/gateway-keys: koinon-gateway
+    koinon.dev/org: globex
+  name: koinon-gateway-keys-globex
+  namespace: koinon
+---
+apiVersion: v1
+data:
+  koinon-reload-probe: '{"keyHash":"sha256:3a18e1c2088cda9f80a5bc878d9cee278c1879898468bee9cedb0837d3f5d883","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+    koinon.dev/gateway-keys: koinon-gateway
+  name: koinon-gateway-keys-probe
+  namespace: koinon
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway
+  namespace: koinon
+spec:
+  modelCatalog:
+    sources:
+      - configMap:
+          key: catalog.json
+          name: koinon-gateway-catalog
+  service:
+    spec:
+      type: ClusterIP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway
+  namespace: koinon
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: koinon-gateway
+  listeners:
+    - allowedRoutes:
+        kinds:
+          - group: agentgateway.dev
+            kind: AgentgatewayModel
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+        namespaces:
+          from: Same
+      name: http
+      port: 4000
+      protocol: HTTP
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-mcp
+  namespace: koinon
+spec:
+  mcp:
+    failureMode: FailOpen
+    prefixMode: Always
+    targets:
+      - name: acme-wiki
+        static:
+          host: mcp.wiki.example.com
+          path: /mcp
+          policies:
+            auth:
+              credentials:
+                - location:
+                    header:
+                      name: Authorization
+                      prefix: 'Bearer '
+                  secretRef:
+                    key: acme-wiki
+                    name: koinon-gateway-providers
+            tls:
+              sni: mcp.wiki.example.com
+          port: 443
+          protocol: StreamableHTTP
+      - name: github
+        static:
+          host: koinon-github-tools.koinon.svc
+          path: /mcp
+          port: 8080
+          protocol: StreamableHTTP
+      - name: globex-search
+        static:
+          host: search.example.org
+          path: /sse
+          policies:
+            auth:
+              credentials:
+                - location:
+                    header:
+                      name: X-Api-Key
+                  secretRef:
+                    key: globex-search
+                    name: koinon-gateway-providers
+            tls:
+              sni: search.example.org
+          port: 8443
+          protocol: SSE
+  policies:
+    mcp:
+      authorization:
+        action: Allow
+        policy:
+          matchExpressions:
+            - apiKey.agent == "acme/repo-helper" && ((mcp.tool.target == "github" && mcp.tool.name in ["create_pull_request"]) || (mcp.tool.target == "acme-wiki" && mcp.tool.name in ["read_page"]))
+            - mcp.prompt.name == "koinon-ready"
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+    koinon.dev/org: globex
+  name: m-75884d3f653fa4f24f41
+  namespace: koinon
+spec:
+  baseURL: http://ollama.globex.internal:11434/v1
+  custom:
+    formats:
+      - type: Completions
+    providerOverride: globex.ollama
+  match:
+    model: deepseek/deepseek-v4.1-flash
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: koinon-gateway
+  policies:
+    authorization:
+      action: Require
+      policy:
+        matchExpressions:
+          - apiKey.org == "globex" && !apiKey.internal
+    transformations:
+      - expression: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
+        field: stream_options
+  provider: Custom
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+    koinon.dev/org: acme
+  name: m-7830b8533a392c1a6cf7
+  namespace: koinon
+spec:
+  baseURL: https://openrouter.ai/api/v1
+  custom:
+    formats:
+      - type: Completions
+    providerOverride: acme.openrouter
+  match:
+    model: deepseek/deepseek-v4.1-flash
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: koinon-gateway
+  policies:
+    auth:
+      credentials:
+        - location:
+            header:
+              name: Authorization
+              prefix: 'Bearer '
+          secretRef:
+            key: acme-openrouter
+            name: koinon-gateway-providers
+    authorization:
+      action: Require
+      policy:
+        matchExpressions:
+          - apiKey.org == "acme" && !apiKey.internal
+    transformations:
+      - expression: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
+        field: stream_options
+      - expression: '{"data_collection": "deny", "zdr": true}'
+        field: provider
+  provider: Custom
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-edge
+  namespace: koinon
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: koinon-gateway
+  traffic:
+    apiKeyAuthentication:
+      configMapSelector:
+        matchLabels:
+          koinon.dev/gateway-keys: koinon-gateway
+      mode: Strict
+    phase: PreRouting
+    transformation:
+      request:
+        set:
+          - name: x-koinon-org
+            value: default(apiKey.org, "")
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-frontend
+  namespace: koinon
+spec:
+  frontend:
+    accessLog:
+      attributes:
+        add:
+          - expression: default(apiKey.name, "")
+            name: koinon.key
+          - expression: default(apiKey.agent, "")
+            name: koinon.agent
+          - expression: uuid()
+            name: koinon.request
+          - expression: llm.inputTokens
+            name: koinon.in
+          - expression: llm.outputTokens
+            name: koinon.out
+          - expression: llm.cachedInputTokens
+            name: koinon.cache_read
+          - expression: llm.cacheCreationInputTokens
+            name: koinon.cache_write
+          - expression: llm.reasoningTokens
+            name: koinon.reasoning
+          - expression: response.code
+            name: koinon.status
+          - expression: llm.params.max_tokens
+            name: koinon.max_tokens
+          - expression: int(request.headers["content-length"])
+            name: koinon.req_bytes
+      otlp:
+        protocol: HTTP
+        url: http://koinon-api.koinon.svc:4318
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: koinon-gateway
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-mcp
+  namespace: koinon
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: koinon-gateway-mcp
+  traffic:
+    transformation:
+      request:
+        remove:
+          - authorization
+          - x-api-key
+        set:
+          - name: x-koinon-agent
+            value: apiKey.agent
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-mcp
+  namespace: koinon
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: koinon-gateway
+  rules:
+    - backendRefs:
+        - group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: koinon-gateway-mcp
+      matches:
+        - path:
+            type: PathPrefix
+            value: /mcp
