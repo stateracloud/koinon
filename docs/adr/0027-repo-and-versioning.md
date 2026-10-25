@@ -45,12 +45,24 @@ SBOMs.
 - Negative: flavor images need a separate build path (Dockerfiles), not ko _(inferred)_.
 - Negative: Helm 4 is current and Helm 3 gets no new minor releases; the chart must be tested with
   Helm 4 and should stay compatible with Helm 3 for users who have not moved _(inferred)_.
-- Follow-ups: `.goreleaser.yaml`, release workflow with `id-token: write`, chart push job.
+- Follow-ups: `.goreleaser.yaml`, release workflow with `id-token: write`, chart push job (done in
+  REL1, see [releasing.md](../dev/releasing.md)).
 
 ## Open questions
 
 - Whether flavor images get their own release cadence because they track upstream harness releases.
-- Minimum supported Helm version (3.x still in use vs 4.x only).
+  Not decided; v0.1 releases no flavor images at all (see Amendment).
+- Minimum supported Helm version (3.x still in use vs 4.x only). The chart is packaged and tested
+  with Helm 4 (v4.3.1); a Helm 3 minimum is not promised.
+
+## Amendment (REL1, 2026-10-25)
+
+- Flavor images are not released in v0.1. The flavor design is being reopened as "bring your own
+  harness", so a release builds only the three Go images (`koinon-api`, `koinon-reconciler`,
+  `koinon-agentd`) and the chart. The Dockerfile build path stays for development (`make flavors`).
+- Signing and SBOM attestations are not done by GoReleaser's `docker_signs`. A separate `sign` job
+  (the only one with `id-token: write`) runs cosign over the pushed digests and the chart, and only
+  when the repository variable `RELEASE_SIGNING` is `true` (ADR [0049](0049-v01-scope-decisions.md)).
 
 ## Upstream verification
 
