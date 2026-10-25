@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Release configuration (plan item REL1, ADR 0027). GoReleaser OSS builds the three Koinon images
+# with its kos pipe, pushes them to ghcr.io/stateracloud, signs the manifests when the workflow
+# asks for it and drafts the GitHub release with notes from the Conventional Commits.
+# .github/workflows/release.yml runs it on a tag; docs/dev/releasing.md describes the process.
+#
+# Local dry run, nothing is pushed or signed:
+#   goreleaser release --snapshot --clean --skip=publish,sign
+version: 2
+
+project_name: koinon
+
+# koinon-api embeds the web UI (web/webui.go, build tag webui), so the UI is built first.
+before:
+  hooks:
+    - pnpm -C web install --frozen-lockfile
+    - pnpm -C web build
+
+# No binary archives or checksums: the release ships images and the chart.
+archives:
+  - formats: [none]
+checksum:
+  disable: true
+
+# The kos pipe builds the images from these (it compiles with ko; no binaries are released).
+builds:
+  - &build
+    id: koinon-api
+    binary: koinon-api
+    main: ./cmd/koinon-api
+    goos: [linux]
+    goarch: [amd64, arm64]
+    env: [CGO_ENABLED=0]
+    flags: [-tags=webui, -trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/stateracloud/koinon/internal/project.Version={{ .Version }}
+  - <<: *build
+    id: koinon-reconciler
+    binary: koinon-reconciler
+    main: ./cmd/koinon-reconciler
+    flags: [-trimpath]
+  - <<: *build
+    id: koinon-agentd
+    binary: koinon-agentd
+    main: ./cmd/koinon-agentd
+    flags: [-trimpath]
+
+# Image names have no leading v: the tag v0.1.0 gives ghcr.io/stateracloud/koinon-api:0.1.0, the
+# chart's appVersion. `latest` only moves for final releases (.Prerelease is empty for them).
+# KOINON_IMAGE_REGISTRY redirects the push to another registry, for dry runs against a throwaway
+# one (hack/mirror-release.sh is tested that way); the release workflow never sets it.
+# Flavor images are not part of the release (docs/dev/releasing.md).
+kos:
+  - &ko
+    id: koinon-api
+    build: koinon-api
+    repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud\" }}/koinon-api"]
+    bare: true
+    base_image: gcr.io/distroless/static:nonroot
+    platforms: [linux/amd64, linux/arm64]
+    tags:
+      - "{{ .Version }}"
+      - '{{ if not .Prerelease }}latest{{ end }}'
+    sbom: spdx
+    sbom_directory: dist/sbom
+    creation_time: "{{ .CommitTimestamp }}"
+    ko_data_creation_time: "{{ .CommitTimestamp }}"
+    labels:
+      org.opencontainers.image.source: https://github.com/stateracloud/koinon
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: Apache-2.0
+  - <<: *ko
+    id: koinon-reconciler
+    build: koinon-reconciler
+    repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud\" }}/koinon-reconciler"]
+  - <<: *ko
+    id: koinon-agentd
+    build: koinon-agentd
+    repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud\" }}/koinon-agentd"]
+
+# Keyless cosign signature of every image manifest. The workflow passes --skip=sign unless the
+# repository variable RELEASE_SIGNING is 'true' (ADR 0049: signing writes to the public Rekor log).
+docker_signs:
+  - cmd: cosign
+    artifacts: manifests
+    output: true
+    args:
+      - sign
+      - --yes
+      - "${artifact}@${digest}"
+
+release:
+  draft: true
+  replace_existing_draft: true
+  prerelease: auto
+  name_template: "{{ .Tag }}"
+
+changelog:
+  use: git
+  sort: asc
+  abbrev: 7
+  filters:
+    exclude:
+      - '^Merge '
+      - '^(docs|ci|test|chore|style)(\([^)]*\))?!?:'
+  groups:
+    - title: Features
+      regexp: '^feat(\([^)]*\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\([^)]*\))?!?:'
+      order: 1
+    - title: Others
+      order: 999
