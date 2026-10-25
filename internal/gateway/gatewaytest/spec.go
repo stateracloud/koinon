@@ -632,6 +632,21 @@ func mcpServersSpec(env Env) {
 			Expect(strings.Join(openLog.values("Authorization"), ",")).NotTo(ContainSubstring(gateway.KeyPrefix))
 		})
 
+		It("drops a credential header the agent sent to a server that has none", func(ctx SpecContext) {
+			client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
+			s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+				Endpoint:             llmURL + "/mcp",
+				HTTPClient:           &http.Client{Transport: headerSetter{key: keyAcme.Material, name: "X-Api-Key", value: "agent-chose-this", base: http.DefaultTransport}},
+				DisableStandaloneSSE: true, MaxRetries: -1,
+			}, nil)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() { _ = s.Close() })
+			res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-open_read_item"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Content[0].(*mcp.TextContent).Text).To(Equal("acme-open saw "))
+			Expect(openLog.values("X-Api-Key")).NotTo(ContainElement("agent-chose-this"))
+		})
+
 		It("does not expose the credential to the agent in what it receives", func(ctx SpecContext) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/mcp", strings.NewReader(
 				`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`))
