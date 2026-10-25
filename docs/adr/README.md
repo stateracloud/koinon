@@ -63,7 +63,7 @@ are in [0046](0046-adr-conventions.md).
 | [0046](0046-adr-conventions.md) | ADR conventions | Accepted |
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted |
 | [0048](0048-openshell-spike-results.md) | OpenShell spike results | Proposed |
-| [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes, agentd placement | Accepted, amended by 0056, 0058; Helm model values dropped by 0056 |
+| [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes, agentd placement | Accepted, amended by 0056, 0058 and (Kubernetes mode on native CRDs, ledger budgets) by its own G2 amendment; Helm model values dropped by 0056 |
 | [0050](0050-spend-ledger-ingestion-and-net-limits.md) | Spend ledger ingestion and net limits | Proposed, amended by 0056 |
 | [0051](0051-session-home-generations.md) | Session home generations | Accepted, amended by 0054 and 2026-10-23, 2026-10-24 |
 | [0052](0052-opencode-v2-flavor.md) | OpenCode flavor on OpenCode v2 | Accepted |

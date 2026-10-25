@@ -62,7 +62,8 @@ Andre answered these in a grilling session on 2026-10-21/22. This ADR records th
     `Gateway` (class `agentgateway`), `AgentgatewayBackend`, `AgentgatewayPolicy` and
     `AgentgatewayParameters` in its own namespace. The controller runs a dedicated proxy for it;
     Koinon never edits the user's other gateways or their ConfigMaps.
-  - The v0.1 CRDs (`agentgateway-crds` v1.6.0) cover API keys, AI backends with request overrides,
+  - *Superseded by the amendment of 2026-10-25 (plan item G2): Kubernetes mode renders native CRDs,
+    not `rawConfig`, and the ledger enforces budgets.* The v0.1 CRDs (`agentgateway-crds` v1.6.0) cover API keys, AI backends with request overrides,
     MCP authorization and guardrails, access-log attributes and a model cost catalog, but have no
     USD budget. Spike S2 showed that the standalone LLM configuration (keys with budgets, models,
     budget database, model catalog) works when carried in the Gateway-level
@@ -156,8 +157,8 @@ Andre answered these in a grilling session on 2026-10-21/22. This ADR records th
 
 - Positive: the demo exercises credential isolation, park-and-execute and resume end to end.
 - Positive: Koinon works next to an existing agentgateway without touching its configuration.
-- Negative: two gateway drivers to test; in Kubernetes mode budget usage resets when the proxy
-  pod is replaced, unless G2 adds persistent storage.
+- Negative: two gateway drivers to test; in Kubernetes mode the ledger, not the gateway, stops a key
+  that is out of budget (see the amendment of 2026-10-25).
 - Negative: every run depends on a long-lived exec stream through the OpenShell gateway; a gateway
   restart costs a `session/load` per active run _(inferred)_.
 - Negative: approvers see agent PRs twice (Koinon card, GitHub review), for different questions.
@@ -187,9 +188,51 @@ Andre answered these in a grilling session on 2026-10-21/22. This ADR records th
   rule that Koinon writes only Kubernetes Secrets (Secrets bullet above) still holds for the KEKs, the
   gateway's provider keys and agent gateway keys, but no longer for connections.
 
+## Amendment (2026-10-25, plan item G2): Kubernetes mode on native CRDs, budgets by the ledger
+
+Andre decided this after the research in [agentgateway-k8s-crds](../research/agentgateway-k8s-crds.md)
+and a run against controller v1.6.0 on kind. It replaces the `rawConfig` design of the decision
+above (spike S2 stays a valid result: `rawConfig` budgets work, but they pull keys, models and the
+access log into one file whose every change rolls the proxy pods).
+
+- **Mode and preflight.** `gateway.mode: kubernetes` is explicit, with `gateway.kubernetes.gatewayClassName`
+  (default `agentgateway`). The install preflight fails with a clear message when the GatewayClass, the
+  four `agentgateway.dev/v1alpha1` CRDs or a v1.6.x controller are missing. There is no silent
+  fallback to standalone mode.
+- **Native CRDs only, no `rawConfig`,** all in Koinon's namespace, all carrying the labels
+  `app.kubernetes.io/managed-by=koinon-reconciler` and `koinon.dev/gateway=<name>`; the driver applies
+  and prunes only objects with both, so other gateways are never touched. The mapping is in
+  [0058](0058-gateway-modes.md).
+- **Budgets use the S2 fallback.** There are no gateway budgets. Koinon's ledger enforces them: when an
+  agent, its org or the platform ceiling is spent, the existing path cancels the runs and the reconciler
+  removes the agent's keys from the key ConfigMap; the proxy stops accepting them in about 0.1 s,
+  without a restart. The key comes back when the window resets or the limit is raised. An org cap or
+  the platform ceiling revokes every key of the org the same way. The ledger already pushes limits net
+  of recorded spend (`ledger.AgentLimit`); in this mode a net amount of zero is a revoked key and any
+  other amount is a key without a gateway budget.
+- **Overshoot is bounded by the ingest delay,** not by one response: the gateway no longer stops the key
+  by itself. Measured on kind (Apply and proxy side only, no Postgres): the proxy batches its access log
+  for about 0.75 to 0.9 s before exporting it, the revoking Apply returns in 50 to 150 ms, and the proxy
+  refuses the key about 0.1 s after the ConfigMap changes, so a key is spent for about one second after
+  the request that reaches the limit. At 10 requests a second of $0.001 each that was 4 requests ($0.004)
+  past a $0.010 limit. Add the ledger's transaction, the reconciler's wake-up (200 ms debounce) and a
+  full pass; the pass recomputes every agent, so it takes longer with many agents. The unit is time, not
+  one response: a fast, expensive key overshoots by rate times delay. Standalone mode keeps the
+  one-response bound.
+- **State survives proxy pod replacement** because it never lived in the pod: the key list is in a
+  ConfigMap and the spend is in the ledger. A test deletes the proxy pod while a key is revoked and
+  checks that it is never served, during or after the replacement.
+- **Org-prefixed model names are not needed.** Per-model authorization on the key's org routes one
+  plain model name per org natively (verified on kind).
+- **MCP isolation is weaker than in standalone mode.** The CRDs have no per-target condition, so an
+  org's server is a target for every key. Tool rules deny every call to a target the agent holds no
+  grant for (and the driver drops grants that name another org's server), and `tools/list` shows only
+  granted tools, but another org's `initialize`, `ping` and list requests may reach a server with its
+  owner's credential. Standalone mode does not contact the server at all for other orgs. Accepted by
+  Andre; documented in [0058](0058-gateway-modes.md) and the gateway-modes guide.
+
 ## Open questions
 
-- Budget persistence across proxy pod replacement in Kubernetes mode (G2).
 - Whether OpenShell's Kubernetes driver runs on kind in GitHub's free runners (plan item S1).
 
 ## Upstream verification
