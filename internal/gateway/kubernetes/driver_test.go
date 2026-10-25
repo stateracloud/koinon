@@ -143,7 +143,7 @@ var _ = Describe("Driver without a cluster", func() {
 		rev, err := d.Apply(ctx, fullState())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(waiter.revs).To(Equal([]gateway.Revision{rev}))
-		Expect(mem.names("ConfigMap")).To(ContainElements("koinon-gateway-keys-acme", "koinon-gateway-keys-globex", "koinon-gateway-keys-probe", "koinon-gateway-catalog"))
+		Expect(mem.names("ConfigMap")).To(ContainElements("koinon-gateway-keys-acme", "koinon-gateway-keys-globex", "koinon-gateway-probe", "koinon-gateway-catalog"))
 		Expect(mem.names("AgentgatewayModel")).To(HaveLen(2))
 
 		// globex's last key goes (and its model with it): its ConfigMap and model are pruned.
@@ -237,6 +237,45 @@ var _ = Describe("Driver without a cluster", func() {
 		Expect(errors.As(err, &rej)).To(BeFalse())
 	})
 
+	It("revokes the last key of an org during the apply, and still prunes when another object fails to apply", func(ctx SpecContext) {
+		_, err := d.Apply(ctx, fullState())
+		Expect(err).NotTo(HaveOccurred())
+		s := fullState()
+		s.SetLimit(agentG, &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: time.Hour})
+		_, err = d.Apply(ctx, s)
+		Expect(err).NotTo(HaveOccurred())
+		cm, err := mem.Get(ctx, "ConfigMap", "koinon", "koinon-gateway-keys-globex")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cm.Object["data"]).To(BeEmpty(), "revoked by the apply, not left to prune")
+
+		// An unrelated object fails to apply: the removed org's ConfigMap is still pruned, and the
+		// error is returned.
+		s.RevokeKey("k-gggggggggggg")
+		delete(s.Limits, agentG)
+		mem.applyFn = func(o gwk8s.Object) error {
+			if o.U.GetKind() == gwk8s.KindBackend {
+				return errors.New("API server unavailable")
+			}
+			return nil
+		}
+		_, err = d.Apply(ctx, s)
+		Expect(err).To(MatchError(ContainSubstring("API server unavailable")))
+		Expect(mem.names("ConfigMap")).NotTo(ContainElement("koinon-gateway-keys-globex"))
+	})
+
+	It("fails when the API server refuses a key ConfigMap, whose old keys would stay live", func(ctx SpecContext) {
+		mem.applyFn = func(o gwk8s.Object) error {
+			if o.U.GetKind() == gwk8s.KindConfigMap && o.Org == "acme" {
+				return apierrors.NewInvalid(schema.GroupKind{Kind: "ConfigMap"}, o.U.GetName(), nil)
+			}
+			return nil
+		}
+		_, err := d.Apply(ctx, fullState())
+		Expect(err).To(HaveOccurred())
+		var rej *gateway.RejectedError
+		Expect(errors.As(err, &rej)).To(BeFalse())
+	})
+
 	It("does not wait for a proxy that never serves the revision", func(ctx SpecContext) {
 		d.Waiter = failingWaiter{}
 		_, err := d.Apply(ctx, fullState())
@@ -272,6 +311,41 @@ var _ = Describe("Driver without a cluster", func() {
 type failingWaiter struct{}
 
 func (failingWaiter) Wait(context.Context, gateway.Revision) error { return errors.New("401") }
+
+var _ = Describe("NACK attribution", func() {
+	nack := func(msg string) *gwk8s.Driver {
+		mem := newMem()
+		mem.status = acceptAll
+		d := &gwk8s.Driver{Options: opts(), Store: mem, StatusInterval: time.Millisecond, StatusTimeout: time.Second}
+		d.Events = fake.NewSimpleClientset(&corev1.Event{
+			ObjectMeta: metav1.ObjectMeta{Name: "n", Namespace: "koinon"}, Reason: gwk8s.NackReason, Type: "Warning",
+			Message: msg, LastTimestamp: metav1.NewTime(time.Now().Add(time.Second)),
+		})
+		return d
+	}
+	It("picks the object a message names, not every object that shares its prefix, and finds ConfigMaps", func(ctx SpecContext) {
+		_, err := nack("rejected configmap/koinon/koinon-gateway-keys-globex: bad key").Apply(ctx, fullState())
+		var rej *gateway.RejectedError
+		Expect(errors.As(err, &rej)).To(BeTrue(), "got %v", err)
+		Expect(rej.Rejected).To(ConsistOf(SatisfyAll(
+			HaveField("Org", "globex"), HaveField("Kind", "ConfigMap"), HaveField("Name", "koinon-gateway-keys-globex"))))
+	})
+
+	It("does not take a longer name for a shorter one", func(ctx SpecContext) {
+		// koinon-gateway-keys-globex-extra names no rendered object, and koinon-gateway is only its prefix.
+		_, err := nack("rejected koinon-gateway-keys-globex-extra: bad").Apply(ctx, fullState())
+		var rej *gateway.RejectedError
+		Expect(errors.As(err, &rej)).To(BeTrue())
+		Expect(rej.Rejected).To(ConsistOf(SatisfyAll(HaveField("Org", ""), HaveField("Kind", "Gateway"))))
+	})
+
+	It("attributes a message that names only the Gateway to the platform", func(ctx SpecContext) {
+		_, err := nack("gateway koinon-gateway: rejected something").Apply(ctx, fullState())
+		var rej *gateway.RejectedError
+		Expect(errors.As(err, &rej)).To(BeTrue())
+		Expect(rej.Rejected).To(ConsistOf(SatisfyAll(HaveField("Org", ""), HaveField("Kind", "Gateway"))))
+	})
+})
 
 var _ = Describe("Evaluate", func() {
 	obj := func(kind string, gen int64, status map[string]any) *unstructured.Unstructured {

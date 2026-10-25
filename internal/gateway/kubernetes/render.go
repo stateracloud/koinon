@@ -145,7 +145,8 @@ func (o Options) withDefaults() Options {
 //
 // Budgets. The native API has no per-key budget (research/agentgateway-k8s-crds.md), so State.Limits
 // are not sent to the gateway. A limit with no amount left (a net limit of zero: the agent, its
-// org or the platform ceiling is spent, or the agent's budget could not be computed) leaves the
+// org or the platform ceiling is spent; the reconciler also fails an agent whose budget cannot be
+// computed to zero in this mode, see gateway.LedgerBudgets) leaves the
 // agent's keys out of the key ConfigMap, which revokes them without a restart; the next Apply with
 // an amount above zero puts them back. This is the S2 fallback of plan item G2.
 func Render(s gateway.State, o Options) (Rendered, error) {
@@ -183,6 +184,15 @@ func Render(s gateway.State, o Options) (Rendered, error) {
 	// known and is not part of it (as standalone.Render does).
 	b.probeKey(rev)
 	b.sortObjects()
+	// Names are built from fixed words and org slugs; a collision would let forced server-side apply
+	// make one object take over another (an org slug must never name a platform object).
+	seen := map[string]bool{}
+	for _, o := range b.objs {
+		if seen[o.Ref()] {
+			return Rendered{}, fmt.Errorf("kubernetes: two rendered objects are named %s", o.Ref())
+		}
+		seen[o.Ref()] = true
+	}
 	return Rendered{Revision: rev, Objects: b.objs, Revoked: revoked}, nil
 }
 
@@ -343,14 +353,19 @@ func (b *builder) policyTargets(kind, name string) []any {
 // keys adds one key ConfigMap per org. It returns the keys left out for want of budget.
 func (b *builder) keys(s gateway.State) []string {
 	byOrg := map[string]map[string]any{}
+	// An org with keys or limits always gets its ConfigMap, empty when every key is revoked, so that
+	// revoking the last key is an update applied with the rest and not a deletion left to prune.
+	for _, k := range s.Keys {
+		byOrg[k.Agent.Org] = map[string]any{}
+	}
+	for a := range s.Limits {
+		byOrg[a.Org] = map[string]any{}
+	}
 	var revoked []string
 	for _, k := range s.Keys {
 		if l, ok := s.Limits[k.Agent]; ok && l.Amount <= 0 {
 			revoked = append(revoked, k.ID)
 			continue
-		}
-		if byOrg[k.Agent.Org] == nil {
-			byOrg[k.Agent.Org] = map[string]any{}
 		}
 		byOrg[k.Agent.Org][k.ID] = keyEntry(k)
 	}
@@ -381,7 +396,7 @@ func (b *builder) probeKey(rev gateway.Revision) {
 		// for a model no config serves, so it never reaches an upstream.
 		"metadata": map[string]any{"name": gateway.ReloadProbeKeyName, "agent": "", "org": "", "internal": true},
 	})
-	b.add("", "v1", KindConfigMap, b.name("keys-probe"), nil, map[string]any{gateway.ReloadProbeKeyName: string(raw)}, map[string]any{LabelKeys: b.o.GatewayName})
+	b.add("", "v1", KindConfigMap, b.name("probe"), nil, map[string]any{gateway.ReloadProbeKeyName: string(raw)}, map[string]any{LabelKeys: b.o.GatewayName})
 }
 
 // streamUsageExpr: see standalone's streamUsageExpr.

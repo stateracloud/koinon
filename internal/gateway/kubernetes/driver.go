@@ -4,6 +4,7 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -50,6 +51,9 @@ func (d *Driver) IssueKey(_ context.Context, agent gateway.AgentRef) (gateway.Is
 	return gateway.NewKey(agent)
 }
 
+// LedgerEnforcesBudgets implements gateway.LedgerBudgets: only a limit of zero binds here.
+func (d *Driver) LedgerEnforcesBudgets() bool { return true }
+
 // Usage implements gateway.ModelGateway. Usage arrives through the access log, exported over OTLP
 // to the spend ledger.
 func (d *Driver) Usage() gateway.UsageReader { return gateway.NoUsage{} }
@@ -78,21 +82,30 @@ func (d *Driver) Apply(ctx context.Context, s gateway.State) (gateway.Revision, 
 	started := time.Now()
 	var tApplied, tStatus time.Time
 
-	var rejected []gateway.Rejection
+	var (
+		rejected  []gateway.Rejection
+		applyErrs []error
+	)
 	for _, obj := range r.Objects {
 		if _, err := d.Store.Apply(ctx, obj); err != nil {
 			// The API server refuses one org's object (a base URL the CRD's rules reject): report it
 			// on the org and go on, so it does not hold back the other orgs. Its previous version,
-			// if any, stays. A platform object that is refused is an error.
-			if apierrors.IsInvalid(err) && obj.Org != "" {
+			// if any, stays. A key ConfigMap is the exception: a refused update would leave the old
+			// keys live, so it is an error. A platform object that is refused is an error too.
+			if apierrors.IsInvalid(err) && obj.Org != "" && obj.U.GetKind() != KindConfigMap {
 				rejected = append(rejected, gateway.Rejection{Org: obj.Org, Kind: obj.U.GetKind(), Name: obj.U.GetName(), Reason: err.Error()})
 				continue
 			}
-			return "", err
+			// Go on with the other objects and prune: a revoked key must not wait for an unrelated
+			// failure, and the error is returned at the end.
+			applyErrs = append(applyErrs, err)
 		}
 	}
 	if err := d.prune(ctx, o, r); err != nil {
-		return "", err
+		applyErrs = append(applyErrs, err)
+	}
+	if len(applyErrs) > 0 {
+		return "", errors.Join(applyErrs...)
 	}
 	tApplied = time.Now()
 	if len(r.Revoked) > 0 {
@@ -252,11 +265,9 @@ func (d *Driver) nacks(ctx context.Context, o Options, r Rendered, since time.Ti
 			continue
 		}
 		matched := false
-		for _, obj := range r.Objects {
-			if obj.U.GetKind() != KindConfigMap && strings.Contains(ev.Message, obj.U.GetName()) {
-				out = append(out, gateway.Rejection{Org: obj.Org, Kind: obj.U.GetKind(), Name: obj.U.GetName(), Reason: "proxy NACK: " + ev.Message})
-				matched = true
-			}
+		if obj, ok := nackTarget(ev.Message, r.Objects); ok {
+			out = append(out, gateway.Rejection{Org: obj.Org, Kind: obj.U.GetKind(), Name: obj.U.GetName(), Reason: "proxy NACK: " + ev.Message})
+			matched = true
 		}
 		if !matched {
 			out = append(out, gateway.Rejection{Kind: KindGateway, Name: o.GatewayName, Reason: "proxy NACK: " + ev.Message})
@@ -273,4 +284,44 @@ func dedupe(in []gateway.Rejection) []gateway.Rejection {
 		}
 	}
 	return out
+}
+
+// nackTarget finds the rendered object a NACK message names: the object whose name occurs in the
+// message as a whole name (not as part of a longer one), the longest such name winning, because
+// koinon-gateway is a prefix of the name of every object. ConfigMaps count.
+func nackTarget(msg string, objs []Object) (Object, bool) {
+	var best Object
+	found := false
+	for _, o := range objs {
+		name := o.U.GetName()
+		if !hasName(msg, name) {
+			continue
+		}
+		// The Gateway and its Parameters share a name; the NACK events are about the Gateway.
+		if !found || len(name) > len(best.U.GetName()) || (len(name) == len(best.U.GetName()) && o.U.GetKind() == KindGateway) {
+			best, found = o, true
+		}
+	}
+	return best, found
+}
+
+// hasName reports whether name occurs in msg delimited by characters a Kubernetes name cannot hold.
+func hasName(msg, name string) bool {
+	for i := 0; ; {
+		j := strings.Index(msg[i:], name)
+		if j < 0 {
+			return false
+		}
+		start, end := i+j, i+j+len(name)
+		before := start == 0 || !isNameChar(msg[start-1])
+		after := end == len(msg) || !isNameChar(msg[end])
+		if before && after {
+			return true
+		}
+		i = start + 1
+	}
+}
+
+func isNameChar(c byte) bool {
+	return c == '-' || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
 }
