@@ -23,12 +23,13 @@ archives:
 checksum:
   disable: true
 
-# The kos pipe builds the images from these (it compiles with ko; no binaries are released).
+# The kos pipe builds the images from these (ko compiles; no binaries are released).
 builds:
   - &build
     id: koinon-api
     binary: koinon-api
     main: ./cmd/koinon-api
+    skip: true # ko compiles the images itself; the builds only carry main, flags and ldflags
     goos: [linux]
     goarch: [amd64, arm64]
     env: [CGO_ENABLED=0]
@@ -81,16 +82,8 @@ kos:
     build: koinon-agentd
     repositories: ["{{ envOrDefault \"KOINON_IMAGE_REGISTRY\" \"ghcr.io/stateracloud\" }}/koinon-agentd"]
 
-# Keyless cosign signature of every image manifest. The workflow passes --skip=sign unless the
-# repository variable RELEASE_SIGNING is 'true' (ADR 0049: signing writes to the public Rekor log).
-docker_signs:
-  - cmd: cosign
-    artifacts: manifests
-    output: true
-    args:
-      - sign
-      - --yes
-      - "${artifact}@${digest}"
+# Signing and attestations are not done here: the release workflow's `sign` job does them with
+# cosign, from dist/digests.txt and dist/sbom, only when RELEASE_SIGNING is 'true' (ADR 0049).
 
 release:
   draft: true
