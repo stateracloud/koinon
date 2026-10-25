@@ -168,6 +168,19 @@ resolves names without search domains (koinon-gateway.koinon.svc is NXDOMAIN the
 {{- printf "%s.%s.svc.%s" (include "koinon.componentName" (list . "gateway")) .Release.Namespace (.Values.clusterDomain | default "cluster.local") -}}
 {{- end }}
 
+{{/* The port of the gateway's LLM and MCP listener. */}}
+{{- define "koinon.gatewayPort" -}}
+{{- if eq .Values.gateway.mode "standalone" }}{{ int .Values.gateway.standalone.port }}{{ else }}{{ int .Values.gateway.kubernetes.port }}{{ end -}}
+{{- end }}
+
+{{/*
+The labels the agentgateway controller puts on the proxy pods of Koinon's Gateway (kubernetes mode):
+the Gateway's name is the label value. NetworkPolicies select the proxy by them.
+*/}}
+{{- define "koinon.proxySelectorLabels" -}}
+gateway.networking.k8s.io/gateway-name: {{ include "koinon.componentName" (list . "gateway") }}
+{{- end }}
+
 {{- define "koinon.configEnv" -}}
 - name: KOINON_CONFIG
   value: /etc/koinon/config/config.yaml
@@ -208,11 +221,9 @@ koinon-api's login settings (plan items A1, A2), as KOINON_* environment variabl
 Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environment.
 */}}
 {{- define "koinon.apiEnv" -}}
-{{- if eq .Values.gateway.mode "standalone" }}
 # Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
 - name: KOINON_GATEWAY_MCP_URL
-  value: {{ printf "http://%s:%d/mcp" (include "koinon.gatewayHost" .) (int .Values.gateway.standalone.port) | quote }}
-{{- end }}
+  value: {{ printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) | quote }}
 - name: KOINON_KEK_ACTIVE_PERIOD
   value: {{ .Values.secrets.kek.activePeriod | quote }}
 {{- with include "koinon.publicUrl" . }}
@@ -455,8 +466,8 @@ it carries no credentials.
   value: /etc/koinon/openshell-tls
 {{- end }}
 {{- $gatewayURL := .Values.agentd.gatewayURL }}
-{{- if and (not $gatewayURL) (eq .Values.gateway.mode "standalone") }}
-{{- $gatewayURL = printf "http://%s:%v" (include "koinon.gatewayHost" .) .Values.gateway.standalone.port }}
+{{- if not $gatewayURL }}
+{{- $gatewayURL = printf "http://%s:%s" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) }}
 {{- end }}
 {{- with $gatewayURL }}
 - name: KOINON_GATEWAY_URL

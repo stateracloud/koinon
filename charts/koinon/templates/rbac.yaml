@@ -15,6 +15,12 @@ The reconciler gets what it renders:
   namespace; Secrets have no list or watch, so it can only reach names it already knows (they are
   recorded in Postgres);
 - the same Secret verbs write the provider keys Secret (koinon-gateway-providers, plan item PV1);
+- in kubernetes mode (plan item G2), in this namespace only: create, patch, get, list and delete on the
+  Gateway API and agentgateway objects it renders (Gateway, HTTPRoute, AgentgatewayModel, -Policy,
+  -Backend, -Parameters) and on ConfigMaps (the per-org key lists and the model catalog; create and list
+  cannot be limited by name, so it can reach every ConfigMap here), and list on Events, to read the
+  controller's NACK warnings. It never reads or writes objects of other namespaces, and its apply and
+  prune only touch objects that carry its labels;
 - read and delete on Agent Sandbox objects cluster-wide, to garbage-collect sandboxes the OpenShell
   gateway no longer lists (ADR 0048 finding 1.8).
 Sandboxes, workspaces, providers and policies go through the OpenShell gateway, not this API.
@@ -71,6 +77,20 @@ rules:
     resources: [configmaps]
     resourceNames: [{{ include "koinon.gatewayConfigName" . }}]
     verbs: [patch]
+  {{- end }}
+  {{- if eq .Values.gateway.mode "kubernetes" }}
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, create, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [list]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways, httproutes]
+    verbs: [get, list, create, patch, delete]
+  - apiGroups: [agentgateway.dev]
+    resources: [agentgatewaybackends, agentgatewaymodels, agentgatewayparameters, agentgatewaypolicies]
+    verbs: [get, list, create, patch, delete]
   {{- end }}
   - apiGroups: [""]
     resources: [secrets]

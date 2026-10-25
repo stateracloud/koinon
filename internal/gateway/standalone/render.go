@@ -647,43 +647,9 @@ func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit, al
 	return p
 }
 
-// toolRules renders one CEL allow rule per agent. agentgateway allows a tool
-// when any rule matches, and filters tools/list the same way, so an agent sees
-// only its granted tools. The last rule admits gateway.ReadyPrompt for every
-// key: agentgateway filters prompts/list by the same rules, and the tool rules
-// never match a prompt. With no grants at all the prompt rule alone keeps the
-// policy deny-all for tools instead of absent.
+// toolRules renders the MCP allow rules (gateway.ToolRules).
 func toolRules(tools map[gateway.AgentRef][]gateway.ToolGrant) []string {
-	agents := make([]gateway.AgentRef, 0, len(tools))
-	for a := range tools {
-		agents = append(agents, a)
-	}
-	slices.SortFunc(agents, func(a, b gateway.AgentRef) int { return strings.Compare(a.String(), b.String()) })
-
-	var rules []string
-	for _, a := range agents {
-		var alts []string
-		for _, g := range tools[a] {
-			if g.All {
-				alts = append(alts, fmt.Sprintf("(mcp.tool.target == %s)", strconv.Quote(g.Target)))
-				continue
-			}
-			if len(g.Tools) == 0 {
-				continue
-			}
-			names := make([]string, len(g.Tools))
-			for i, t := range g.Tools {
-				names[i] = strconv.Quote(t)
-			}
-			alts = append(alts, fmt.Sprintf("(mcp.tool.target == %s && mcp.tool.name in [%s])",
-				strconv.Quote(g.Target), strings.Join(names, ", ")))
-		}
-		if len(alts) == 0 {
-			continue
-		}
-		rules = append(rules, fmt.Sprintf("apiKey.agent == %s && (%s)", strconv.Quote(a.String()), strings.Join(alts, " || ")))
-	}
-	return append(rules, "mcp.prompt.name == "+strconv.Quote(gateway.ReadyPrompt))
+	return gateway.ToolRules(tools)
 }
 
 // formatWindow renders d in the largest whole unit agentgateway accepts.

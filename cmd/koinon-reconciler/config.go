@@ -37,6 +37,9 @@ type fileConfig struct {
 		ProviderKeysDir    string `yaml:"providerKeysDir"`
 		// AccessLogOTLP is koinon-api's OTLP/HTTP receiver as host:port (plan item L1).
 		AccessLogOTLP string `yaml:"accessLogOtlp"`
+		// Name and GatewayClassName are Koinon's Gateway and its class in kubernetes mode (plan item G2).
+		Name             string `yaml:"name"`
+		GatewayClassName string `yaml:"gatewayClassName"`
 	} `yaml:"gateway"`
 	OpenShell struct {
 		Address          string `yaml:"address"`
@@ -77,6 +80,8 @@ type config struct {
 	gatewayURL         string
 	gatewayConfigMap   string
 	gatewayStatsURL    string
+	gatewayName        string
+	gatewayClass       string
 	gatewayPort        int
 	gatewayDBURL       string
 	providerKeysSecret string
@@ -115,6 +120,8 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
 	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config")
 	fs.StringVar(&c.gatewayStatsURL, "gateway-stats-url", "", "agentgateway stats URL, to detect rejected configs")
+	fs.StringVar(&c.gatewayName, "gateway-name", "", "name of Koinon's Gateway in kubernetes mode")
+	fs.StringVar(&c.gatewayClass, "gateway-class", "", "GatewayClass of agentgateway's controller in kubernetes mode (default agentgateway)")
 	fs.IntVar(&c.gatewayPort, "gateway-port", 0, "agentgateway LLM listener port in the rendered config")
 	fs.StringVar(&c.gatewayDBURL, "gateway-database-url", "", "agentgateway budget store URL in the rendered config")
 	fs.StringVar(&c.providerKeysSecret, "provider-keys-secret", "", "Secret that receives the opened provider keys for agentgateway")
@@ -125,8 +132,8 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.healthAddr, "health-addr", ":8082", "listen address of /healthz and /readyz (not ready until the key-encryption keys are loaded); empty disables it")
 	fs.StringVar(&c.egressHosts, "egress-allowed-hosts", "", "comma-separated hosts (optionally host:port) providers and MCP servers may name although they are internal")
 	fs.StringVar(&c.allowedHosts, "provider-allowed-hosts", "", "deprecated alias of --egress-allowed-hosts, kept for one release")
-	fs.DurationVar(&c.keySettle, "provider-key-settle", 90*time.Second,
-		"how long to wait after writing a new provider key file before applying a gateway config that names it (kubelet updates a mounted Secret within about a minute)")
+	fs.DurationVar(&c.keySettle, "provider-key-settle", 0,
+		"how long to wait after writing a new provider key file before applying a gateway config that names it (default 90s in standalone mode: kubelet updates a mounted Secret within about a minute; 2s in kubernetes mode: the controller reads the Secret through the API)")
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
@@ -180,6 +187,13 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.gatewayMode, fc.Gateway.Mode)
 	orDefault(&c.gatewayMode, project.GatewayStandalone)
 	orDefault(&c.gatewayURL, fc.Gateway.URL)
+	orDefault(&c.gatewayName, fc.Gateway.Name)
+	orDefault(&c.gatewayClass, fc.Gateway.GatewayClassName)
+	orDefault(&c.gatewayClass, "agentgateway")
+	if c.gatewayMode == project.GatewayKubernetes {
+		orDefault(&c.keySettle, 2*time.Second)
+	}
+	orDefault(&c.keySettle, 90*time.Second)
 	orDefault(&c.gatewayConfigMap, fc.Gateway.ConfigMap)
 	orDefault(&c.gatewayStatsURL, fc.Gateway.StatsURL)
 	orDefault(&c.gatewayPort, fc.Gateway.Port)
@@ -226,6 +240,9 @@ func (c *config) validate() error {
 	}
 	if c.gatewayMode == project.GatewayStandalone && c.gatewayConfigMap == "" {
 		return errors.New("--gateway-config-map is required in standalone mode")
+	}
+	if c.gatewayMode == project.GatewayKubernetes && c.gatewayName == "" {
+		return errors.New("--gateway-name is required in kubernetes mode")
 	}
 	return nil
 }
