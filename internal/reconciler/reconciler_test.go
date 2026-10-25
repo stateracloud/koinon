@@ -629,6 +629,42 @@ var _ = Describe("Reconciler", func() {
 		Expect(mg.last().Limits[ref].Amount).To(BeZero(), "a new UTC day: a failing computation does not regrant yesterday's amount")
 	})
 
+	It("fails a key closed to zero at once when the gateway only honours a limit of zero (Kubernetes mode)", func(ctx SpecContext) {
+		agent := newAgentWithConfig(ctx, org, user, `{"instructions":"help","limits":{"spendUSD":"10.00"}}`)
+		mg.ledgerBudgets = true
+		failing := false
+		cfg2 := cfg
+		cfg2.AgentLimit = func(ctx context.Context, q *store.Queries, a store.Agent, at time.Time) (*gateway.Limit, error) {
+			if failing && a.ID == agent.ID {
+				return nil, errors.New("simulated budget failure")
+			}
+			return ledger.AgentLimit(ctx, q, a, at)
+		}
+		r, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg2)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		ref := mg.last().Keys[0].Agent
+		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10))
+
+		failing = true
+		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
+		Expect(mg.last().Limits[ref].Amount).To(BeZero(), "a positive last limit would not bind: the key is revoked")
+	})
+
+	It("joins several rejections of one org into one message", func(ctx SpecContext) {
+		agent := newAgent(ctx, org, user)
+		var slug string
+		Expect(pool.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, org).Scan(&slug)).To(Succeed())
+		mg.fail = &gateway.RejectedError{Rejected: []gateway.Rejection{
+			{Org: slug, Kind: "AgentgatewayModel", Name: "m-1", Reason: "first"},
+			{Org: slug, Kind: "ConfigMap", Name: "keys", Reason: "second"},
+		}}
+		Expect(newReconciler().ReconcileAll(ctx)).To(HaveOccurred())
+		msg := sandboxRow(ctx, agent.ID).Message
+		Expect(msg).To(ContainSubstring("AgentgatewayModel m-1: first"))
+		Expect(msg).To(ContainSubstring("ConfigMap keys: second"))
+	})
+
 	It("uses one workspace per org", func(ctx SpecContext) {
 		a1 := newAgent(ctx, org, user)
 		a2 := newAgent(ctx, org, user)

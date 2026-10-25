@@ -359,7 +359,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 		errs = append(errs, fmt.Errorf("reconciler: %w", rej))
 	}
-	r.recordApplied(served, state)
+	r.recordApplied(served, state, rejections)
 	r.recordAppliedMCP(mcpServed, probes)
 	if r.cfg.ProviderKeys != nil && len(provErrs) == 0 && len(mcpErrs) == 0 {
 		if err := r.cfg.ProviderKeys.Prune(ctx, keep); err != nil {
@@ -375,11 +375,14 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 	}
 	// Each rejected object is reported on its org's agents, after their own pass has recorded its state.
+	// Several rejections of one org are joined into one message, not overwritten.
+	byOrg := map[string][]string{}
 	for _, x := range rejections {
-		for _, w := range items {
-			if w.org.Slug == x.Org {
-				r.recordMessage(ctx, w, fmt.Errorf("the gateway rejected %s %s: %s", x.Kind, x.Name, x.Reason))
-			}
+		byOrg[x.Org] = append(byOrg[x.Org], fmt.Sprintf("the gateway rejected %s %s: %s", x.Kind, x.Name, x.Reason))
+	}
+	for _, w := range items {
+		if msgs := byOrg[w.org.Slug]; len(msgs) > 0 {
+			r.recordMessage(ctx, w, errors.New(strings.Join(msgs, "; ")))
 		}
 	}
 	return errors.Join(errs...)
@@ -418,12 +421,22 @@ func (r *Reconciler) settleProviders(state *gateway.State, served servedProvider
 	return keep
 }
 
-// recordApplied remembers which key file each served provider was applied with.
-func (r *Reconciler) recordApplied(served servedProviders, state gateway.State) {
+// recordApplied remembers which key file each served provider was applied with. A provider of an org
+// whose model object the gateway rejected was not applied, so its file is not recorded.
+func (r *Reconciler) recordApplied(served servedProviders, state gateway.State, rejections []gateway.Rejection) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	rejected := map[string]bool{}
+	for _, x := range rejections {
+		if x.Kind == "AgentgatewayModel" {
+			rejected[x.Org] = true
+		}
+	}
 	next := map[string]string{}
 	for i, id := range served.ids {
+		if rejected[served.providers[i].Org] {
+			continue
+		}
 		for _, p := range state.Providers {
 			if p.Org == served.providers[i].Org && p.Name == served.providers[i].Name && p.APIKeyFile != "" {
 				next[id] = path.Base(p.APIKeyFile)
@@ -892,9 +905,15 @@ func (r *Reconciler) rememberLimit(agent gateway.AgentRef, l *gateway.Limit) {
 // pushed while it is still from the current UTC day, else zero. A pushed limit only ever shrinks
 // as the gateway charges against it, but it must not be regranted every day by a computation that
 // keeps failing; zero blocks the key until a pass computes it.
+//
+// A gateway that does not enforce limits itself (Kubernetes mode: the ledger revokes the key when
+// the amount is zero) cannot make a positive last limit bind, so there the key fails closed to zero.
 func (r *Reconciler) failClosedLimit(agent gateway.AgentRef, now time.Time) *gateway.Limit {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if g, ok := r.gw.(gateway.LedgerBudgets); ok && g.LedgerEnforcesBudgets() {
+		return &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: ledger.Window, Generation: "failed"}
+	}
 	if l, ok := r.lastLimit[agent]; ok {
 		day, _, _ := strings.Cut(l.Generation, "-")
 		if day == strconv.FormatInt(budget.DayStart(now).Unix(), 10) {
