@@ -4,8 +4,9 @@
 //
 // Callers describe what the gateway should serve as a [State] and hand it to a
 // [ModelGateway] driver with Apply. The standalone driver (package
-// gateway/standalone) renders agentgateway's local config file; a Kubernetes-mode
-// driver (plan item G2) renders agentgateway CRDs from the same State.
+// gateway/standalone) renders agentgateway's local config file; the Kubernetes-mode
+// driver (package gateway/kubernetes, plan item G2) renders agentgateway CRDs from the
+// same State.
 //
 // Key material never enters a State. IssueKey returns it exactly once; the caller
 // stores it in a Kubernetes Secret (and the OpenShell provider record) and keeps
@@ -22,6 +23,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,10 +42,55 @@ type ModelGateway interface {
 	// idempotent; revoking a key or changing a limit is an Apply of a State
 	// without that key or with the new limit (see State.RevokeKey and
 	// State.SetLimit).
+	//
+	// A driver whose gateway judges objects one by one (Kubernetes mode) may return the
+	// revision together with a *RejectedError: everything but the named objects is live.
 	Apply(ctx context.Context, s State) (Revision, error)
 
 	// Usage returns the per-request usage source for the spend ledger (L1).
 	Usage() UsageReader
+}
+
+// Rejection is one object the gateway refused, with the org it belongs to ("" for a platform
+// object).
+type Rejection struct {
+	Org    string
+	Kind   string
+	Name   string
+	Reason string
+}
+
+func (r Rejection) String() string {
+	who := r.Org
+	if who == "" {
+		who = "platform"
+	}
+	return fmt.Sprintf("%s: %s %s rejected: %s", who, r.Kind, r.Name, r.Reason)
+}
+
+// RejectedError reports objects the gateway refused while it serves the rest. The Revision
+// returned with it is live for everything else, so a caller records it as applied and reports
+// each rejection on the owning org.
+type RejectedError struct {
+	Rejected []Rejection
+}
+
+func (e *RejectedError) Error() string {
+	parts := make([]string, len(e.Rejected))
+	for i, r := range e.Rejected {
+		parts[i] = r.String()
+	}
+	return "gateway: " + strings.Join(parts, "; ")
+}
+
+// Orgs returns the orgs with a rejected object, sorted; "" stands for the platform.
+func (e *RejectedError) Orgs() []string {
+	var out []string
+	for _, r := range e.Rejected {
+		out = append(out, r.Org)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // Revision identifies an applied configuration. Drivers derive it from the
@@ -380,6 +427,44 @@ var (
 	// headerName is an HTTP token.
 	headerName = regexp.MustCompile(`^[A-Za-z0-9!#$%&'*+.^_|~-]{1,128}$`)
 )
+
+// ToolRules renders one CEL allow rule per agent for agentgateway's MCP authorization. The gateway
+// allows a tool when any rule matches, and filters tools/list the same way, so an agent sees only
+// its granted tools. The last rule admits ReadyPrompt for every key: the gateway filters
+// prompts/list by the same rules, and the tool rules never match a prompt. With no grants at all
+// the prompt rule alone keeps the policy deny-all for tools instead of absent.
+func ToolRules(tools map[AgentRef][]ToolGrant) []string {
+	agents := make([]AgentRef, 0, len(tools))
+	for a := range tools {
+		agents = append(agents, a)
+	}
+	slices.SortFunc(agents, func(a, b AgentRef) int { return strings.Compare(a.String(), b.String()) })
+
+	var rules []string
+	for _, a := range agents {
+		var alts []string
+		for _, g := range tools[a] {
+			if g.All {
+				alts = append(alts, fmt.Sprintf("(mcp.tool.target == %s)", strconv.Quote(g.Target)))
+				continue
+			}
+			if len(g.Tools) == 0 {
+				continue
+			}
+			names := make([]string, len(g.Tools))
+			for i, t := range g.Tools {
+				names[i] = strconv.Quote(t)
+			}
+			alts = append(alts, fmt.Sprintf("(mcp.tool.target == %s && mcp.tool.name in [%s])",
+				strconv.Quote(g.Target), strings.Join(names, ", ")))
+		}
+		if len(alts) == 0 {
+			continue
+		}
+		rules = append(rules, fmt.Sprintf("apiKey.agent == %s && (%s)", strconv.Quote(a.String()), strings.Join(alts, " || ")))
+	}
+	return append(rules, "mcp.prompt.name == "+strconv.Quote(ReadyPrompt))
+}
 
 // Validate checks s for values that would be unsafe or ambiguous in gateway
 // config. Drivers call it before rendering.

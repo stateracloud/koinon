@@ -5,7 +5,6 @@ package standalone_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -13,27 +12,23 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/gateway/gatewaytest"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 )
 
 // AgentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
 const AgentgatewayImage = "cr.agentgateway.dev/agentgateway:v1.6.0"
-
-const testModel = "fake/test-model"
 
 // skipWithoutDocker skips the spec when no container runtime is reachable.
 func skipWithoutDocker(ctx context.Context) {
@@ -47,289 +42,154 @@ func skipWithoutDocker(ctx context.Context) {
 	}
 }
 
-// fakeUpstream is an OpenAI-compatible chat completions server that reports
-// 10 input and 10 output tokens per request and counts requests in hits.
-func fakeUpstream(hits *atomic.Int64) *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
-		var req struct {
-			Model string `json:"model"`
+var options = standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mode=rwc"}
+
+// running is a started standalone agentgateway container.
+type running struct {
+	gatewaytest.Gateway
+	driver   *standalone.Driver
+	file     standalone.FileDeliverer
+	cfgDir   string
+	statsURL string
+}
+
+// startStandalone starts agentgateway in a container on an empty config; files land in the directory
+// mounted at /secrets/upstream.
+func startStandalone(ctx context.Context, hostPorts []int, files map[string]string) (*running, error) {
+	skipWithoutDocker(ctx)
+	cfgDir, err := os.MkdirTemp("", "koinon-agw-cfg-")
+	if err != nil {
+		return nil, err
+	}
+	secretsDir, err := os.MkdirTemp("", "koinon-agw-secrets-")
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range []string{cfgDir, secretsDir} {
+		if err := os.Chmod(d, 0o755); err != nil { //nolint:gosec // test directories
+			return nil, err
 		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "chatcmpl-test", "object": "chat.completion", "created": time.Now().Unix(), "model": req.Model,
-			"choices": []any{map[string]any{
-				"index": 0, "finish_reason": "stop",
-				"message": map[string]any{"role": "assistant", "content": "ok"},
-			}},
-			"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
-		})
-	}))
-}
-
-// taggedUpstream is fakeUpstream that names itself in every answer, counts its requests
-// and keeps the last request body, so a spec can tell which org's provider answered and
-// what the gateway forced into the request.
-type taggedUpstream struct {
-	*httptest.Server
-	hits atomic.Int64
-	last atomic.Value // string: the last request body
-}
-
-func newTaggedUpstream(tag string) *taggedUpstream {
-	u := &taggedUpstream{}
-	u.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u.hits.Add(1)
-		raw, _ := io.ReadAll(r.Body)
-		u.last.Store(string(raw))
-		var req struct {
-			Model string `json:"model"`
+	}
+	for name, v := range files {
+		if err := os.WriteFile(filepath.Join(secretsDir, name), []byte(v), 0o644); err != nil { //nolint:gosec // dummy
+			return nil, err
 		}
-		_ = json.Unmarshal(raw, &req)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "chatcmpl-test", "object": "chat.completion", "created": time.Now().Unix(), "model": req.Model,
-			"choices": []any{map[string]any{
-				"index": 0, "finish_reason": "stop",
-				"message": map[string]any{"role": "assistant", "content": "answered by " + tag},
-			}},
-			"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
-		})
-	}))
-	return u
-}
-
-func (u *taggedUpstream) lastBody() string {
-	b, _ := u.last.Load().(string)
-	return b
-}
-
-// fakeTools is an MCP server with the two parking tools and a bypass tool
-// that no agent is granted (spike step 6). Each tool answers with the agent
-// header it received.
-func fakeTools() *httptest.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "fake-tools", Version: "0.0.1"}, nil)
-	type args struct {
-		Title string `json:"title,omitempty"`
 	}
-	for _, name := range []string{"create_pull_request", "get_approval_status", "direct_create_pull_request"} {
-		mcp.AddTool(srv, &mcp.Tool{Name: name, Description: name},
-			func(_ context.Context, req *mcp.CallToolRequest, _ args) (*mcp.CallToolResult, any, error) {
-				agent := strings.Join(req.Extra.Header.Values(gateway.AgentHeader), ",")
-				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: name + " reached by " + agent}}}, nil, nil
-			})
+	file := standalone.FileDeliverer{Path: filepath.Join(cfgDir, "config.yaml")}
+	first, _, err := standalone.Render(gateway.State{}, options)
+	if err != nil {
+		return nil, err
 	}
-	// The readiness prompt every agent must see, and one no rule admits.
-	for _, name := range []string{gateway.ReadyPrompt, "hidden_prompt"} {
-		srv.AddPrompt(&mcp.Prompt{Name: name, Description: name},
-			func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-				return &mcp.GetPromptResult{Messages: []*mcp.PromptMessage{{Role: "user", Content: &mcp.TextContent{Text: name}}}}, nil
-			})
+	if err := file.Deliver(ctx, first, ""); err != nil {
+		return nil, err
 	}
-	// agentgateway reaches it through the testcontainers SSH tunnel, which
-	// arrives on localhost with Host: host.testcontainers.internal.
-	return httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv },
-		&mcp.StreamableHTTPOptions{DisableLocalhostProtection: true}))
-}
-
-func port(s *httptest.Server) int {
-	_, p, _ := net.SplitHostPort(s.Listener.Addr().String())
-	n, _ := strconv.Atoi(p)
-	return n
-}
-
-type bearer struct {
-	key  string
-	base http.RoundTripper
-	// spoof, when set, is sent as the agent header, which agentgateway must
-	// overwrite.
-	spoof string
-}
-
-func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
-	r = r.Clone(r.Context())
-	r.Header.Set("Authorization", "Bearer "+b.key)
-	if b.spoof != "" {
-		r.Header.Set(gateway.AgentHeader, b.spoof)
-	}
-	return b.base.RoundTrip(r)
-}
-
-var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
-	var (
-		cfgDir string
-		driver *standalone.Driver
-		state  gateway.State
-		llmURL string
-		keyA   gateway.IssuedKey // limited agent
-		keyB   gateway.IssuedKey // unlimited agent, no tool grants
-		keyG   gateway.IssuedKey // an agent of the second org, globex
-		ups    map[string]*taggedUpstream
-		// redirector answers 307 to the "private" upstream; redirects counts what it was asked.
-		redirector *httptest.Server
-		redirects  atomic.Int64
-		ctr        *testcontainers.DockerContainer
-		hits       atomic.Int64 // requests that reached the upstream
-		options    = standalone.Options{DatabaseURL: "sqlite:///tmp/agentgateway.db?mode=rwc"}
+	ctr, err := testcontainers.Run(ctx, AgentgatewayImage,
+		testcontainers.WithCmd("-f", "/cfg/config.yaml"),
+		testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
+		testcontainers.WithHostPortAccess(hostPorts...),
+		testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
+			hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro", secretsDir+":/secrets/upstream:ro")
+		}),
+		testcontainers.WithWaitStrategyAndDeadline(time.Minute, wait.ForHTTP("/healthz/ready").WithPort("15021/tcp")),
 	)
+	r := &running{file: file, cfgDir: cfgDir}
+	r.Stop = func(ctx context.Context) error {
+		_ = os.RemoveAll(cfgDir)
+		_ = os.RemoveAll(secretsDir)
+		return testcontainers.TerminateContainer(ctr)
+	}
+	if err != nil {
+		_ = r.Stop(ctx)
+		return nil, err
+	}
+	r.Logs = func(ctx context.Context) string {
+		l, err := ctr.Logs(ctx)
+		if err != nil {
+			return err.Error()
+		}
+		b, _ := io.ReadAll(l)
+		return string(b)
+	}
+	if r.URL, err = ctr.PortEndpoint(ctx, "4000/tcp", "http"); err != nil {
+		return nil, err
+	}
+	if r.statsURL, err = ctr.PortEndpoint(ctx, "15020/tcp", "http"); err != nil {
+		return nil, err
+	}
+	r.driver = &standalone.Driver{
+		Options:   options,
+		Deliverer: file,
+		Waiter:    standalone.ProbeWaiter{GatewayURL: r.URL, StatsURL: r.statsURL, Interval: 200 * time.Millisecond},
+	}
+	r.Driver = r.driver
+	return r, nil
+}
 
-	chatModel := func(ctx context.Context, key, model string) (int, string) {
-		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, model)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions", bytes.NewBufferString(body))
+// The G1 suite (internal/gateway/gatewaytest), shared with the Kubernetes driver.
+var _ = func() bool {
+	gatewaytest.Register(gatewaytest.Env{
+		Name:    "standalone",
+		Host:    testcontainers.HostInternal,
+		KeyFile: func(name string) string { return "/secrets/upstream/" + name },
+		Start: func(ctx context.Context, ports []int, files map[string]string) (*gatewaytest.Gateway, error) {
+			r, err := startStandalone(ctx, ports, files)
+			if err != nil {
+				return nil, err
+			}
+			return &r.Gateway, nil
+		},
+		GatewayBudgets:         true,
+		OrgTargetsNotContacted: true,
+	})
+	return true
+}()
+
+var _ = Describe("agentgateway v1.6.0 reload detection (standalone only)", Ordered, func() {
+	var (
+		r     *running
+		state gateway.State
+		hits  atomic.Int64
+		key   gateway.IssuedKey
+		agent = gateway.AgentRef{Org: "acme", Name: "triage"}
+	)
+	const model = "fake/test-model"
+	chat := func(ctx context.Context, material, name string) (int, string) {
+		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, name)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.URL+"/v1/chat/completions", bytes.NewBufferString(body))
 		Expect(err).NotTo(HaveOccurred())
 		req.Header.Set("Content-Type", "application/json")
-		if key != "" {
-			req.Header.Set("Authorization", "Bearer "+key)
-		}
+		req.Header.Set("Authorization", "Bearer "+material)
 		resp, err := http.DefaultClient.Do(req)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() { _ = resp.Body.Close() }()
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
-	chat := func(ctx context.Context, key string) (int, string) { return chatModel(ctx, key, testModel) }
-
-	mcpSessionAs := func(ctx context.Context, key, spoof string) (*mcp.ClientSession, error) {
-		client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
-		return client.Connect(ctx, &mcp.StreamableClientTransport{
-			Endpoint:             llmURL + "/mcp",
-			HTTPClient:           &http.Client{Transport: bearer{key: key, base: http.DefaultTransport, spoof: spoof}},
-			DisableStandaloneSSE: true,
-			MaxRetries:           -1,
-		}, nil)
-	}
-	mcpSession := func(ctx context.Context, key string) (*mcp.ClientSession, error) {
-		return mcpSessionAs(ctx, key, "")
-	}
-
-	toolNames := func(ctx context.Context, key string) []string {
-		s, err := mcpSession(ctx, key)
-		Expect(err).NotTo(HaveOccurred())
-		defer func() { _ = s.Close() }()
-		res, err := s.ListTools(ctx, nil)
-		Expect(err).NotTo(HaveOccurred())
-		var names []string
-		for _, t := range res.Tools {
-			names = append(names, t.Name)
-		}
-		slices.Sort(names)
-		return names
-	}
 
 	BeforeAll(func(ctx SpecContext) {
-		skipWithoutDocker(ctx)
-
-		upstream := fakeUpstream(&hits)
-		DeferCleanup(upstream.Close)
-		// Two orgs, each with its own upstream; both call their model testModel.
-		ups = map[string]*taggedUpstream{"globex": newTaggedUpstream("globex"), "guarded": newTaggedUpstream("guarded"), "private": newTaggedUpstream("private")}
-		// A provider that answers every request with a 307 to a private address (here the "private" fake).
-		redirector = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			redirects.Add(1)
-			http.Redirect(w, &http.Request{}, fmt.Sprintf("http://%s:%d/v1/chat/completions", testcontainers.HostInternal, port(ups["private"].Server)), http.StatusTemporaryRedirect)
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			hits.Add(1)
+			_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}}`))
 		}))
-		DeferCleanup(redirector.Close)
-		for _, u := range ups {
-			DeferCleanup(u.Close)
-		}
-		tools := fakeTools()
-		DeferCleanup(tools.Close)
-
+		DeferCleanup(upstream.Close)
 		var err error
-		keyA, err = gateway.NewKey(agentA)
+		r, err = startStandalone(ctx, []int{portOf(upstream)}, nil)
 		Expect(err).NotTo(HaveOccurred())
-		keyB, err = gateway.NewKey(agentB)
+		DeferCleanup(r.Stop)
+		key, err = gateway.NewKey(agent)
 		Expect(err).NotTo(HaveOccurred())
-		keyG, err = gateway.NewKey(agentG)
-		Expect(err).NotTo(HaveOccurred())
-
-		hostURL := func(p int) string { return fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, p) }
-		state = gateway.State{
-			Providers: []gateway.Provider{
-				{
-					Org: "acme", Name: "upstream", Type: "fake", BaseURL: hostURL(port(upstream)),
-					// $50 per 1M tokens: 20 tokens cost $0.001 per request.
-					Models: []gateway.Model{
-						{Name: testModel, Price: &gateway.Price{Input: "50", Output: "50"}},
-						{Name: "acme-only", Price: &gateway.Price{Input: "1", Output: "1"}},
-						// A plain name that is spelled like globex's gateway-wide id.
-						{Name: "globex/" + testModel, Price: &gateway.Price{Input: "1", Output: "1"}},
-						{Name: "unpriced"},
-					},
-				},
-				{
-					Org: "acme", Name: "redirecting", Type: "fake", BaseURL: hostURL(port(redirector)),
-					Models: []gateway.Model{{Name: "redirect-model", Price: &gateway.Price{Input: "1", Output: "1"}}},
-				},
-				{
-					Org: "globex", Name: "upstream", Type: "fake", BaseURL: hostURL(port(ups["globex"].Server)),
-					APIKeyFile: "/secrets/upstream/globex_key",
-					Models:     []gateway.Model{{Name: testModel, Price: &gateway.Price{Input: "1", Output: "1"}}},
-				},
-				{
-					Org: "globex", Name: "guarded", Type: "openrouter", BaseURL: hostURL(port(ups["guarded"].Server)),
-					Models: []gateway.Model{
-						{Name: "guarded-model", Guard: true, Price: &gateway.Price{Input: "1", Output: "1"}},
-						{Name: "open-model", Price: &gateway.Price{Input: "1", Output: "1"}},
-					},
-				},
-			},
-			MCP: []gateway.MCPTarget{{
-				Name: "github",
-				URL:  fmt.Sprintf("http://%s:%d/mcp", testcontainers.HostInternal, port(tools)),
-			}},
-		}
-		state.AddKey(keyA.Key)
-		state.AddKey(keyB.Key)
-		state.AddKey(keyG.Key)
-		state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 0.0015, Window: 24 * time.Hour})
-		state.GrantTools(agentA, gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}})
-
-		cfgDir = GinkgoT().TempDir()
-		Expect(os.Chmod(cfgDir, 0o755)).To(Succeed())
-		secretsDir := GinkgoT().TempDir()
-		Expect(os.Chmod(secretsDir, 0o755)).To(Succeed())
-		Expect(os.WriteFile(filepath.Join(secretsDir, "globex_key"), []byte("globex-upstream-key"), 0o644)).To(Succeed()) //nolint:gosec // dummy
-		file := standalone.FileDeliverer{Path: filepath.Join(cfgDir, "config.yaml")}
-		first, _, err := standalone.Render(state, options)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(file.Deliver(ctx, first, "")).To(Succeed())
-
-		ctr, err = testcontainers.Run(ctx, AgentgatewayImage,
-			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
-			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
-			testcontainers.WithHostPortAccess(port(upstream), port(tools), port(ups["globex"].Server), port(ups["guarded"].Server), port(ups["private"].Server), port(redirector)),
-			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
-				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro", secretsDir+":/secrets/upstream:ro")
-			}),
-			testcontainers.WithWaitStrategyAndDeadline(time.Minute,
-				wait.ForHTTP("/healthz/ready").WithPort("15021/tcp")),
-		)
-		DeferCleanup(func(ctx context.Context) error { return testcontainers.TerminateContainer(ctr) })
-		Expect(err).NotTo(HaveOccurred())
-
-		llmURL, err = ctr.PortEndpoint(ctx, "4000/tcp", "http")
-		Expect(err).NotTo(HaveOccurred())
-		statsURL, err := ctr.PortEndpoint(ctx, "15020/tcp", "http")
-		Expect(err).NotTo(HaveOccurred())
-
-		driver = &standalone.Driver{
-			Options:   options,
-			Deliverer: file,
-			Waiter:    standalone.ProbeWaiter{GatewayURL: llmURL, StatsURL: statsURL, Interval: 200 * time.Millisecond},
-		}
-		// Same state again: confirms the waiter sees the initial revision.
-		_, err = driver.Apply(ctx, state)
+		state = gateway.State{Providers: []gateway.Provider{{
+			Org: "acme", Name: "upstream", Type: "fake", BaseURL: fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, portOf(upstream)),
+			Models: []gateway.Model{{Name: model, Price: &gateway.Price{Input: "50", Output: "50"}}},
+		}}}
+		state.AddKey(key.Key)
+		_, err = r.driver.Apply(ctx, state)
 		Expect(err).NotTo(HaveOccurred())
 	}, NodeTimeout(3*time.Minute))
 
 	AfterEach(func(ctx SpecContext) {
-		if CurrentSpecReport().Failed() && ctr != nil {
-			if logs, err := ctr.Logs(ctx); err == nil {
-				b, _ := io.ReadAll(logs)
-				AddReportEntry("agentgateway logs", string(b))
-			}
+		if CurrentSpecReport().Failed() && r != nil {
+			AddReportEntry("agentgateway logs", r.Logs(ctx))
 		}
 	})
 
@@ -340,289 +200,48 @@ var _ = Describe("agentgateway v1.6.0 with a rendered config", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		// Not even with a served model name: the zero budget (429, with a
 		// database) or the authorization rule (403) refuses the key first.
-		code, body := chatModel(ctx, standalone.ReloadProbeKey(rev), testModel)
+		code, body := chat(ctx, standalone.ReloadProbeKey(rev), model)
 		Expect(code).To(BeElementOf(http.StatusTooManyRequests, http.StatusForbidden), body)
 
 		// A new revision: its probe key is accepted only once it is live.
-		extra, err := gateway.NewKey(agentB)
+		extra, err := gateway.NewKey(agent)
 		Expect(err).NotTo(HaveOccurred())
 		state.AddKey(extra.Key)
-		next, err := driver.Apply(ctx, state)
+		next, err := r.driver.Apply(ctx, state)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(next).NotTo(Equal(rev))
-		code, _ = chatModel(ctx, standalone.ReloadProbeKey(rev), testModel)
+		code, _ = chat(ctx, standalone.ReloadProbeKey(rev), model)
 		Expect(code).To(Equal(http.StatusUnauthorized), "the previous revision's probe key is gone")
-		code, body = chatModel(ctx, extra.Material, testModel)
+		code, body = chat(ctx, extra.Material, model)
 		Expect(code).To(Equal(http.StatusOK), body)
 		Expect(hits.Load()).To(Equal(int64(1)), "only the real key's request reached the upstream")
 
 		// A revision that was never delivered is never live.
 		short, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		Expect(driver.Waiter.Wait(short, "0000000000000000")).To(MatchError(context.DeadlineExceeded))
+		Expect(r.driver.Waiter.Wait(short, "0000000000000000")).To(MatchError(context.DeadlineExceeded))
 
 		Expect(state.RevokeKey(extra.ID)).To(BeTrue())
-		_, err = driver.Apply(ctx, state)
+		_, err = r.driver.Apply(ctx, state)
 		Expect(err).NotTo(HaveOccurred())
 	}, SpecTimeout(2*time.Minute))
 
-	Describe("org-scoped models (plan item PV1)", func() {
-		It("routes each org's plain model name to its own provider", func(ctx SpecContext) {
-			code, body := chat(ctx, keyG.Material)
-			Expect(code).To(Equal(http.StatusOK), body)
-			Expect(body).To(ContainSubstring("answered by globex"))
-			code, body = chat(ctx, keyB.Material)
-			Expect(code).To(Equal(http.StatusOK), body)
-			Expect(body).NotTo(ContainSubstring("globex"))
-		})
-
-		It("keeps an org's key off another org's models", func(ctx SpecContext) {
-			before := ups["globex"].hits.Load()
-			// acme-only exists only in acme: the globex key may not ask for it.
-			code, body := chatModel(ctx, keyG.Material, "acme-only")
-			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
-			// and an acme key cannot reach globex's models.
-			code, body = chatModel(ctx, keyB.Material, "open-model")
-			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
-			Expect(ups["globex"].hits.Load()).To(Equal(before))
-		})
-
-		It("does not serve another org's gateway-wide id to a key, however the name is spelled", func(ctx SpecContext) {
-			g := ups["globex"].hits.Load() + ups["guarded"].hits.Load()
-			// acme asks for globex's models by their <org>/<model> ids.
-			for _, id := range []string{"globex/" + testModel, "globex/guarded-model", "globex/open-model"} {
-				if id == "globex/"+testModel {
-					continue // acme declared a plain model with this name; see below
-				}
-				code, body := chatModel(ctx, keyB.Material, id)
-				Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), id+": "+body)
-			}
-			Expect(ups["globex"].hits.Load() + ups["guarded"].hits.Load()).To(Equal(g))
-
-			// acme declared a plain model named like globex's id. It is acme's model: acme's upstream
-			// answers, and globex's upstream sees nothing.
-			before := hits.Load()
-			code, body := chatModel(ctx, keyB.Material, "globex/"+testModel)
-			Expect(code).To(Equal(http.StatusOK), body)
-			Expect(hits.Load()).To(Equal(before + 1))
-			Expect(ups["globex"].hits.Load() + ups["guarded"].hits.Load()).To(Equal(g))
-
-			// and globex's key cannot reach acme's model of that name.
-			code, body = chatModel(ctx, keyG.Material, "globex/"+testModel)
-			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
-			Expect(ups["globex"].hits.Load() + ups["guarded"].hits.Load()).To(Equal(g))
-			Expect(hits.Load()).To(Equal(before + 1))
-		})
-
-		It("does not follow a redirect from a provider to another address", func(ctx SpecContext) {
-			// A provider the egress policy allows could still answer 307 to a private address; the
-			// gateway must hand that answer back, not connect there with the provider's credentials.
-			before := ups["private"].hits.Load()
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions",
-				bytes.NewBufferString(`{"model":"redirect-model","messages":[{"role":"user","content":"hi"}]}`))
-			Expect(err).NotTo(HaveOccurred())
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", "Bearer "+keyB.Material)
-			// Do not follow redirects ourselves: we want to see what the gateway answers.
-			client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-			resp, err := client.Do(req)
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = resp.Body.Close() }()
-			raw, _ := io.ReadAll(resp.Body)
-			code, body := resp.StatusCode, string(raw)
-			Expect(redirects.Load()).To(BeNumerically(">=", 1), "the request reached the redirecting provider")
-			Expect(ups["private"].hits.Load()).To(Equal(before), "agentgateway followed the redirect: "+body)
-			Expect(code).NotTo(Equal(http.StatusOK), body)
-		})
-
-		It("does not let the client pick another org by header", func(ctx SpecContext) {
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions",
-				bytes.NewBufferString(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}]}`, testModel)))
-			Expect(err).NotTo(HaveOccurred())
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", "Bearer "+keyB.Material)
-			req.Header.Set(gateway.OrgHeader, "globex")
-			resp, err := http.DefaultClient.Do(req)
-			Expect(err).NotTo(HaveOccurred())
-			defer func() { _ = resp.Body.Close() }()
-			b, _ := io.ReadAll(resp.Body)
-			Expect(string(b)).NotTo(ContainSubstring("globex"))
-		})
-
-		It("serves no unpriced model", func(ctx SpecContext) {
-			code, body := chatModel(ctx, keyB.Material, "unpriced")
-			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
-		})
-
-		It("forces the routing guard into the request only for guarded models", func(ctx SpecContext) {
-			code, body := chatModel(ctx, keyG.Material, "guarded-model")
-			Expect(code).To(Equal(http.StatusOK), body)
-			var got map[string]any
-			Expect(json.Unmarshal([]byte(ups["guarded"].lastBody()), &got)).To(Succeed())
-			Expect(got).To(HaveKeyWithValue("provider", map[string]any{"zdr": true, "data_collection": "deny"}))
-
-			code, body = chatModel(ctx, keyG.Material, "open-model")
-			Expect(code).To(Equal(http.StatusOK), body)
-			got = nil
-			Expect(json.Unmarshal([]byte(ups["guarded"].lastBody()), &got)).To(Succeed())
-			Expect(got).NotTo(HaveKey("provider"))
-		})
-
-		It("always asks a streaming upstream for usage, whatever the client sent", func(ctx SpecContext) {
-			send := func(body string) {
-				GinkgoHelper()
-				req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions", bytes.NewBufferString(body))
-				Expect(err).NotTo(HaveOccurred())
-				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("Authorization", "Bearer "+keyG.Material)
-				resp, err := http.DefaultClient.Do(req)
-				Expect(err).NotTo(HaveOccurred())
-				b, _ := io.ReadAll(resp.Body)
-				_ = resp.Body.Close()
-				Expect(resp.StatusCode).To(Equal(http.StatusOK), string(b))
-			}
-			upstreamOptions := func() any {
-				var got map[string]any
-				Expect(json.Unmarshal([]byte(ups["guarded"].lastBody()), &got)).To(Succeed())
-				return got["stream_options"]
-			}
-			msgs := `"messages":[{"role":"user","content":"hi"}]`
-			include := map[string]any{"include_usage": true}
-
-			send(`{"model":"open-model","stream":true,` + msgs + `}`)
-			Expect(upstreamOptions()).To(Equal(include), "no stream_options from the client")
-			send(`{"model":"open-model","stream":true,"stream_options":{"include_usage":false},` + msgs + `}`)
-			Expect(upstreamOptions()).To(Equal(include), "the client asked for no usage")
-			send(`{"model":"open-model","stream":true,"stream_options":{},` + msgs + `}`)
-			Expect(upstreamOptions()).To(Equal(include), "an empty stream_options")
-			send(`{"model":"open-model","stream":false,"stream_options":{"include_usage":true},` + msgs + `}`)
-			Expect(upstreamOptions()).To(BeNil(), "not streamed: no stream_options goes upstream")
-			send(`{"model":"open-model",` + msgs + `}`)
-			Expect(upstreamOptions()).To(BeNil())
-		})
-
-		It("sends the provider's key file content as the upstream credential", func(ctx SpecContext) {
-			// The fake upstream does not check credentials; the config names the file and
-			// agentgateway accepted it (--validate-only and the reload would fail on a missing file).
-			code, body := chat(ctx, keyG.Material)
-			Expect(code).To(Equal(http.StatusOK), body)
-		})
-	})
-
-	It("rejects requests without a key", func(ctx SpecContext) {
-		code, _ := chat(ctx, "")
-		Expect(code).To(Equal(http.StatusUnauthorized))
-		code, _ = chat(ctx, "kgw_not-a-real-key")
-		Expect(code).To(Equal(http.StatusUnauthorized))
-	})
-
-	It("serves a valid key and reports usage", func(ctx SpecContext) {
-		code, body := chat(ctx, keyB.Material)
-		Expect(code).To(Equal(http.StatusOK), body)
-		Expect(body).To(ContainSubstring(`"prompt_tokens":10`))
-	})
-
-	It("blocks a key over its limit with 429 budget_exceeded", func(ctx SpecContext) {
-		var codes []int
-		var last string
-		for range 5 {
-			code, body := chat(ctx, keyA.Material)
-			codes = append(codes, code)
-			last = body
-			if code == http.StatusTooManyRequests {
-				break
-			}
-		}
-		// $0.001 per request against $0.0015: two pass (the second overshoots
-		// by less than one response, ADR 0041), the third is blocked.
-		Expect(codes).To(Equal([]int{200, 200, 429}))
-		Expect(last).To(ContainSubstring("budget_exceeded"))
-
-		code, _ := chat(ctx, keyB.Material)
-		Expect(code).To(Equal(http.StatusOK), "other agents are not affected")
-	})
-
-	It("shows each agent only its granted tools", func(ctx SpecContext) {
-		Expect(toolNames(ctx, keyA.Material)).To(Equal([]string{"github_create_pull_request", "github_get_approval_status"}))
-		Expect(toolNames(ctx, keyB.Material)).To(BeEmpty())
-
-		s, err := mcpSession(ctx, keyA.Material)
-		Expect(err).NotTo(HaveOccurred())
-		defer func() { _ = s.Close() }()
-		res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "github_direct_create_pull_request"})
-		if err == nil {
-			Expect(res.IsError).To(BeTrue(), "bypass tool must not be callable")
-			for _, c := range res.Content {
-				if t, ok := c.(*mcp.TextContent); ok {
-					Expect(t.Text).NotTo(ContainSubstring("reached"))
-				}
-			}
-		}
-		res, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "github_get_approval_status"})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.IsError).To(BeFalse())
-	})
-
-	It("lists the readiness prompt to every agent, and no other prompt", func(ctx SpecContext) {
-		for _, key := range []string{keyA.Material, keyB.Material} {
-			s, err := mcpSession(ctx, key)
-			Expect(err).NotTo(HaveOccurred())
-			res, err := s.ListPrompts(ctx, nil)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Prompts).To(ConsistOf(HaveField("Name", gateway.ReadyPromptExposed)))
-			_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: gateway.ReadyPromptExposed})
-			Expect(err).NotTo(HaveOccurred())
-			_, err = s.GetPrompt(ctx, &mcp.GetPromptParams{Name: "github_hidden_prompt"})
-			Expect(err).To(HaveOccurred())
-			_ = s.Close()
-		}
-	})
-
-	It("tells the target which agent calls, overwriting a client-supplied header", func(ctx SpecContext) {
-		for _, spoof := range []string{"", agentB.String()} {
-			s, err := mcpSessionAs(ctx, keyA.Material, spoof)
-			Expect(err).NotTo(HaveOccurred())
-			res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: "github_get_approval_status"})
-			_ = s.Close()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(res.IsError).To(BeFalse())
-			Expect(res.Content[0].(*mcp.TextContent).Text).To(Equal("get_approval_status reached by " + agentA.String()))
-		}
-	})
-
-	It("rejects MCP requests without a key", func(ctx SpecContext) {
-		_, err := mcpSession(ctx, "kgw_not-a-real-key")
-		Expect(err).To(HaveOccurred())
-	})
-
-	It("rejects a revoked key after re-render and reload", func(ctx SpecContext) {
-		Expect(state.RevokeKey(keyB.ID)).To(BeTrue())
-		rotated, err := driver.IssueKey(ctx, agentB)
-		Expect(err).NotTo(HaveOccurred())
-		state.AddKey(rotated.Key)
-
-		start := time.Now()
-		_, err = driver.Apply(ctx, state)
-		Expect(err).NotTo(HaveOccurred())
-		AddReportEntry("reload latency", time.Since(start).String())
-
-		code, _ := chat(ctx, keyB.Material)
-		Expect(code).To(Equal(http.StatusUnauthorized))
-		code, body := chat(ctx, rotated.Material)
-		Expect(code).To(Equal(http.StatusOK), body)
-	})
-
 	It("reports a config agentgateway rejects", func(ctx SpecContext) {
-		bad := standalone.FileDeliverer{Path: filepath.Join(cfgDir, "config.yaml")}
-		Expect(bad.Deliver(ctx, []byte("llm: {models: [{name: 1, provider: nope}]}\n"), "")).To(Succeed())
-		err := driver.Waiter.Wait(ctx, "never-rendered")
+		Expect(r.file.Deliver(ctx, []byte("llm: {models: [{name: 1, provider: nope}]}\n"), "")).To(Succeed())
+		err := r.driver.Waiter.Wait(ctx, "never-rendered")
 		Expect(err).To(MatchError(standalone.ErrConfigRejected))
 
 		// The last good config keeps serving, and the next Apply recovers.
-		_, err = driver.Apply(ctx, state)
+		_, err = r.driver.Apply(ctx, state)
 		Expect(err).NotTo(HaveOccurred())
 	}, SpecTimeout(time.Minute))
 })
+
+func portOf(s *httptest.Server) int {
+	_, p, _ := net.SplitHostPort(s.Listener.Addr().String())
+	n, _ := strconv.Atoi(p)
+	return n
+}
 
 var _ = Describe("golden files", func() {
 	It("are accepted by agentgateway --validate-only", func(ctx SpecContext) {
