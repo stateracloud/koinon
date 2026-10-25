@@ -52,6 +52,10 @@ const (
 // agentgatewayVersion matches the tested controller line, v1.6.x (plan item G2).
 const AgentgatewayAPIVersion = "v1alpha1"
 
+// agentgatewayControllerName is the controllerName of agentgateway's GatewayClass (verified on a
+// kind cluster with controller v1.6.0; research/agentgateway-k8s-crds.md).
+const agentgatewayControllerName = "agentgateway.dev/agentgateway"
+
 var (
 	agentgatewayVersion = regexp.MustCompile(`^v1\.6\.[0-9]+$`)
 	agentgatewayCRDs    = []string{
@@ -472,6 +476,14 @@ func (c *Checker) checkGatewayClass(ctx context.Context) Result {
 		}
 	case err != nil:
 		return apiFailure(check, "GatewayClass "+name, err)
+	}
+	// A class of that name that another controller serves is not agentgateway's.
+	if controller, _, _ := unstructured.NestedString(gc.Object, "spec", "controllerName"); controller != agentgatewayControllerName {
+		return Result{
+			Check: check, Status: Fail,
+			Message: fmt.Sprintf("served by controller %q, not %s: this GatewayClass is not agentgateway's", controller, agentgatewayControllerName),
+			Fix:     "set gateway.kubernetes.gatewayClassName to the GatewayClass of agentgateway's controller, or use gateway.mode=standalone",
+		}
 	}
 	conditions, _, _ := unstructured.NestedSlice(gc.Object, "status", "conditions")
 	for _, cond := range conditions {
