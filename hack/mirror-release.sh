@@ -3,7 +3,7 @@
 #
 # Copies one release (plan item REL2) from ghcr.io/stateracloud to another registry: the images
 # koinon-api, koinon-reconciler and koinon-agentd with every platform, their cosign signatures,
-# attestations and SBOM tags when present, and the Helm chart. It needs crane and jq and reads credentials
+# attestations and SBOM tags when present (not referrers-API-only bundles), and the Helm chart. It needs crane and jq and reads credentials
 # from the docker config (crane uses the same keychain as docker); it never prints them.
 #
 #   hack/mirror-release.sh 0.1.0-rc.1 zot.apps.lab.example.invalid/koinon
@@ -26,7 +26,9 @@ command -v jq >/dev/null || { echo "jq is not installed" >&2; exit 1; }
 command -v crane >/dev/null || { echo "crane is not installed (https://github.com/google/go-containerregistry)" >&2; exit 1; }
 
 # copy_one <source repo> <destination repo>: the version tag, then cosign's tags for every digest
-# the tag references (the index and its platform manifests): sha256-<hex>.sig, .att and .sbom.
+# the tag references (the index and its platform manifests): sha256-<hex>.sig, .att and .sbom (cosign
+# 2 and ko) and the bare sha256-<hex> fallback tag that cosign 3 uses for its bundles. Bundles that
+# exist only through the registry's referrers API, without that tag, are not copied.
 copy_one() {
 	local from=$1 to=$2 digests d hex suffix
 	echo "copy $from:$version -> $to:$version"
@@ -35,9 +37,9 @@ copy_one() {
 	digests+=$'\n'$(crane manifest "$from:$version" | jq -r '.manifests[]?.digest')
 	for d in $digests; do
 		hex=${d#sha256:}
-		for suffix in sig att sbom; do
-			if crane manifest "$from:sha256-$hex.$suffix" >/dev/null 2>&1; then
-				crane copy "$from:sha256-$hex.$suffix" "$to:sha256-$hex.$suffix"
+		for suffix in "" .sig .att .sbom; do
+			if crane manifest "$from:sha256-$hex$suffix" >/dev/null 2>&1; then
+				crane copy "$from:sha256-$hex$suffix" "$to:sha256-$hex$suffix"
 			fi
 		done
 	done
