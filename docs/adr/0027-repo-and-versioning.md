@@ -60,8 +60,9 @@ SBOMs.
 - Flavor images are not released in v0.1. The flavor design is being reopened as "bring your own
   harness", so a release builds only the three Go images (`koinon-api`, `koinon-reconciler`,
   `koinon-agentd`) and the chart. The Dockerfile build path stays for development (`make flavors`).
-- Signing, attestations and `id-token: write` sit in the release job but run only when the
-  repository variable `RELEASE_SIGNING` is `true` (ADR [0049](0049-v01-scope-decisions.md)).
+- Signing and SBOM attestations are not done by GoReleaser's `docker_signs`. A separate `sign` job
+  (the only one with `id-token: write`) runs cosign over the pushed digests and the chart, and only
+  when the repository variable `RELEASE_SIGNING` is `true` (ADR [0049](0049-v01-scope-decisions.md)).
 
 ## Upstream verification
 
