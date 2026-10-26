@@ -23,7 +23,7 @@ which OpenShell swaps for the installation token on the wire, and stores nothing
 
 The entry scripts source `common/koinon-entry-lib.sh` (installed as
 `/usr/local/lib/koinon/koinon-entry-lib.sh`): `koinon_die` (exit 64), argument parsing, URL
-checks, the instruction-file check, the instruction link and the `KOINON_*` exports. Each script
+checks, the instruction-file check and the `KOINON_*` exports. Each script
 keeps what differs: its value check, PATH, the harness's variables, home clean-up and the exec.
 
 `internal/flavor` holds one descriptor per flavor (entry script, ready command, instruction

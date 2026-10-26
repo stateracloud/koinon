@@ -2,8 +2,7 @@
 #
 # koinon-entry-lib.sh is sourced by every flavor's entry script (koinon-opencode in v0.1,
 # ADR 0059) from /usr/local/lib/koinon/. It holds what the flavors share: argument parsing, URL
-# checks, the instruction-file check, the instruction link, the environment clean-up and the
-# KOINON_* exports. What differs per flavor stays in the entry script: the value check (each
+# checks, the instruction-file check and the KOINON_* exports. What differs per flavor stays in the entry script: the value check (each
 # harness substitutes values differently), PATH, the harness's own variables, home clean-up and
 # the final exec.
 #
@@ -87,9 +86,3 @@ koinon_require_instructions() {
   fi
 }
 
-# koinon_link_instructions LINK: puts LINK back as a symbolic link to the instruction file, replacing
-# whatever is there. koinon-agentd also restores it before every prompt.
-koinon_link_instructions() {
-  rm -rf "$1"
-  ln -s "$instructions" "$1"
-}

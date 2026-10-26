@@ -42,8 +42,9 @@ What is removed:
   The template fixtures that needed a second flavor (`default-flavor-not-allowed`,
   `plugin-installs-without-opencode`) are deleted, because a template cannot be written with one
   flavor and fail those checks.
-- The `koinon_unset_prefixed` helper of the shared entry library, which only the Hermes and pi
-  entry scripts used.
+- The `koinon_unset_prefixed` and `koinon_link_instructions` helpers of the shared entry
+  library, which only the Hermes and pi entry scripts used (OpenCode's instruction link is made
+  in its Dockerfile).
 - The proto enum values `FLAVOR_HERMES` (2) and `FLAVOR_PI` (3). The numbers and names are
   `reserved`, so they cannot be reused with another meaning.
 
@@ -52,8 +53,9 @@ deliberate, one-time exception to the rule that a merged migration is never edit
 (AGENTS.md). It is allowed only because v0.1 is unreleased: no install exists that has run the
 old migration and has to be carried forward, and a new migration that narrows an enum would leave
 two dead values in every fresh install's history. Development databases made before this change
-must be recreated. No new migration is added. After v0.1 ships, the rule applies again without
-exception.
+must be recreated. No new migration is added. `hack/migrate-lint.sh` allows exactly this content
+of 00002 (`allowed_edits`, pinned to the file's git blob, covered by `hack/migrate-lint-test.sh`);
+any further edit fails again. After v0.1 ships, no other exception is added.
 
 Issues #36 (F2, Hermes flavor) and #37 (F3, pi flavor) are closed as not planned.
 

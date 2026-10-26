@@ -24,7 +24,7 @@ set -eu
 
 KOINON_FLAVOR=opencode
 # The shared helpers (flavors/common/koinon-entry-lib.sh, copied to /usr/local/lib/koinon/ by
-# the Dockerfile): koinon_die, argument parsing, the instruction-file check, the instruction link.
+# the Dockerfile): koinon_die, argument parsing, the instruction-file check.
 # shellcheck source=../common/koinon-entry-lib.sh
 . /usr/local/lib/koinon/koinon-entry-lib.sh
 
