@@ -45,6 +45,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
@@ -132,6 +133,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 func (s *Server) Register(server *connect.Server) {
 	agentv1alpha1connect.RegisterAgentServiceHandler(server, s)
 	ticketv1alpha1connect.RegisterTicketServiceHandler(server, s)
+	taskv1alpha1connect.RegisterTaskServiceHandler(server, taskAPI{s})
 	runv1alpha1connect.RegisterRunServiceHandler(server, s)
 	templatev1alpha1connect.RegisterTemplateServiceHandler(server, s)
 	connectionv1alpha1connect.RegisterConnectionServiceHandler(server, s)

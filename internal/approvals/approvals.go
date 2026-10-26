@@ -22,7 +22,7 @@
 //     cancels requests whose run finished without them.
 //
 // Whenever the last open request of a parked run is resolved, the park is resolved in the
-// same transaction and the ticket moves back from Waiting on you to In progress; agentd then
+// same transaction and the task moves back from Waiting on you to In progress; agentd then
 // claims the run, loads the session and sends the outcomes as the next prompt. The run row
 // lock (store.LockRun) orders this against agentd's park decision, so neither side misses the
 // other.
@@ -56,7 +56,7 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
-// Ticket event kinds written here. The tool server writes KindRequested.
+// Task event kinds written here. The tool server writes KindRequested.
 const (
 	KindRequested = githubtools.KindApprovalRequested
 	KindApproved  = "approval.approved"
@@ -84,11 +84,11 @@ type ExecKeys interface {
 var (
 	// ErrSameApprover: the second approval must come from a different person than the first.
 	ErrSameApprover = errors.New("this request needs two approvers; the second must be a different person than the first")
-	// ErrRequesterApproves: the person who created the ticket may not approve a two-approver request.
-	ErrRequesterApproves = errors.New("this request needs two approvers, and the person who created the ticket cannot be one of them")
+	// ErrRequesterApproves: the person who created the task may not approve a two-approver request.
+	ErrRequesterApproves = errors.New("this request needs two approvers, and the person who created the task cannot be one of them")
 )
 
-// KindFirstApproved is the ticket event of the first of two approvals.
+// KindFirstApproved is the task event of the first of two approvals.
 const KindFirstApproved = "approval.first_approved"
 
 // Defaults.
@@ -168,19 +168,19 @@ func mustJSON(v any) []byte {
 	return b
 }
 
-func ticketEvent(ctx context.Context, q *store.Queries, r store.ApprovalRequest, kind string, user pgtype.UUID, extra map[string]any) error {
+func taskEvent(ctx context.Context, q *store.Queries, r store.ApprovalRequest, kind string, user pgtype.UUID, extra map[string]any) error {
 	p := map[string]any{"approval_id": r.ID.String(), "tool": r.Tool, "target": r.Target, "args_sha256": r.ArgsSha256}
 	for k, v := range extra {
 		p[k] = v
 	}
-	ev := store.AppendTicketEventParams{
-		OrgID: r.OrgID, TicketID: r.TicketID, Kind: kind, ActorKind: store.TicketActorKindSystem,
+	ev := store.AppendTaskEventParams{
+		OrgID: r.OrgID, TaskID: r.TaskID, Kind: kind, ActorKind: store.TaskActorKindSystem,
 		RunID: r.RunID, Payload: mustJSON(p),
 	}
 	if user.Valid {
-		ev.ActorKind, ev.ActorUserID = store.TicketActorKindUser, user
+		ev.ActorKind, ev.ActorUserID = store.TaskActorKindUser, user
 	}
-	_, err := q.AppendTicketEvent(ctx, ev)
+	_, err := q.AppendTaskEvent(ctx, ev)
 	return err
 }
 
@@ -190,7 +190,7 @@ func ticketEvent(ctx context.Context, q *store.Queries, r store.ApprovalRequest,
 func auditDecision(ctx context.Context, q *store.Queries, r store.ApprovalRequest, action string, actor audit.Actor, note string) error {
 	after := map[string]any{
 		"status": string(r.Status), "tool": r.Tool, "target": r.Target, "argsSha256": r.ArgsSha256,
-		"runId": r.RunID.String(), "ticketId": r.TicketID.String(),
+		"runId": r.RunID.String(), "taskId": r.TaskID.String(),
 	}
 	if note != "" {
 		after["note"] = note
@@ -243,13 +243,13 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 			}
 		}
 		if cur.ApprovalsRequired >= 2 {
-			// Two approvers: distinct people, neither the one who created the ticket (they asked for
+			// Two approvers: distinct people, neither the one who created the task (they asked for
 			// the work; a second pair of eyes is the point). The role check is the caller's.
-			t, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: org, ID: cur.TicketID})
+			t, err := q.GetTask(ctx, store.GetTaskParams{OrgID: org, ID: cur.TaskID})
 			if err != nil {
 				return err
 			}
-			if t.CreatedBy.Valid && t.CreatedBy == approver {
+			if t.CreatedByUserID.Valid && t.CreatedByUserID == approver {
 				return ErrRequesterApproves
 			}
 			if !cur.FirstApprover.Valid {
@@ -257,7 +257,7 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 				if err != nil {
 					return err
 				}
-				if err := ticketEvent(ctx, q, row, KindFirstApproved, approver, map[string]any{"note": note}); err != nil {
+				if err := taskEvent(ctx, q, row, KindFirstApproved, approver, map[string]any{"note": note}); err != nil {
 					return err
 				}
 				return auditDecision(ctx, q, row, "approval.first_approve", audit.User(approver), note)
@@ -273,7 +273,7 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 		if err != nil {
 			return err
 		}
-		if err := ticketEvent(ctx, q, row, KindApproved, approver, map[string]any{"note": note}); err != nil {
+		if err := taskEvent(ctx, q, row, KindApproved, approver, map[string]any{"note": note}); err != nil {
 			return err
 		}
 		return auditDecision(ctx, q, row, "approval.approve", audit.User(approver), note)
@@ -314,7 +314,7 @@ func (s *Service) Deny(ctx context.Context, org, id, approver pgtype.UUID, note 
 		if err != nil {
 			return err
 		}
-		if err := ticketEvent(ctx, q, row, KindDenied, approver, map[string]any{"note": note}); err != nil {
+		if err := taskEvent(ctx, q, row, KindDenied, approver, map[string]any{"note": note}); err != nil {
 			return err
 		}
 		if err := auditDecision(ctx, q, row, "approval.deny", audit.User(approver), note); err != nil {
@@ -332,7 +332,7 @@ func (s *Service) Deny(ctx context.Context, org, id, approver pgtype.UUID, note 
 }
 
 // ResolveRun makes a run parked on approvals claimable once none of its requests is open,
-// and moves its ticket back from Waiting on you. It locks the run row first; call it in the
+// and moves its task back from Waiting on you. It locks the run row first; call it in the
 // transaction that resolved a request.
 func ResolveRun(ctx context.Context, q *store.Queries, org, runID pgtype.UUID) error {
 	run, err := q.LockRun(ctx, store.LockRunParams{OrgID: org, ID: runID})
@@ -355,9 +355,9 @@ func ResolveRun(ctx context.Context, q *store.Queries, org, runID pgtype.UUID) e
 	if _, err := q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: org, ID: runID}); err != nil {
 		return err
 	}
-	_, err = q.MoveTicketFrom(ctx, store.MoveTicketFromParams{
-		OrgID: org, ID: run.TicketID, ToStatus: store.TicketStatusInProgress,
-		FromStatuses: []string{string(store.TicketStatusWaitingOnYou)},
+	_, err = q.SetTaskStateFrom(ctx, store.SetTaskStateFromParams{
+		OrgID: org, ID: run.TaskID, ToState: store.TaskStateWorking,
+		FromStates: []string{string(store.TaskStateInputRequired)},
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -426,7 +426,7 @@ func (s *Service) Execute(ctx context.Context, org, id pgtype.UUID) (store.Appro
 		if err != nil {
 			return err
 		}
-		if err := ticketEvent(ctx, q, out, kind, pgtype.UUID{}, extra); err != nil {
+		if err := taskEvent(ctx, q, out, kind, pgtype.UUID{}, extra); err != nil {
 			return err
 		}
 		if out.System {
@@ -500,7 +500,7 @@ func (s *Service) sweepOrg(ctx context.Context, org pgtype.UUID, res *SweepResul
 		}
 		runs := map[pgtype.UUID]bool{}
 		for _, r := range expired {
-			if err := ticketEvent(ctx, q, r, KindExpired, pgtype.UUID{}, map[string]any{"expires_at": r.ExpiresAt.Time}); err != nil {
+			if err := taskEvent(ctx, q, r, KindExpired, pgtype.UUID{}, map[string]any{"expires_at": r.ExpiresAt.Time}); err != nil {
 				return err
 			}
 			if err := auditDecision(ctx, q, r, "approval.expire", audit.System(), ""); err != nil {
@@ -582,15 +582,15 @@ func (s *Service) cancelPending(ctx context.Context, q *store.Queries, org, runI
 		return 0, err
 	}
 	for _, r := range rows {
-		if err := ticketEvent(ctx, q, r, KindCanceled, pgtype.UUID{}, map[string]any{"reason": why}); err != nil {
+		if err := taskEvent(ctx, q, r, KindCanceled, pgtype.UUID{}, map[string]any{"reason": why}); err != nil {
 			return 0, err
 		}
 	}
 	return len(rows), nil
 }
 
-// cancelExpiredRun cancels a run parked on an expired approval, with run and ticket events,
-// cancels its other pending requests, and moves its ticket from Waiting on you to To do.
+// cancelExpiredRun cancels a run parked on an expired approval, with run and task events,
+// cancels its other pending requests, and moves its task from Waiting on you to To do.
 func (s *Service) cancelExpiredRun(ctx context.Context, q *store.Queries, org, runID pgtype.UUID) (bool, error) {
 	run, err := q.LockRun(ctx, store.LockRunParams{OrgID: org, ID: runID})
 	if err != nil {
@@ -606,9 +606,9 @@ func (s *Service) cancelExpiredRun(ctx context.Context, q *store.Queries, org, r
 	if _, err := s.cancelPending(ctx, q, org, runID, expiredMessage); err != nil {
 		return false, err
 	}
-	_, err = q.MoveTicketFrom(ctx, store.MoveTicketFromParams{
-		OrgID: org, ID: run.TicketID, ToStatus: store.TicketStatusTodo,
-		FromStatuses: []string{string(store.TicketStatusWaitingOnYou)},
+	_, err = q.SetTaskStateFrom(ctx, store.SetTaskStateFromParams{
+		OrgID: org, ID: run.TaskID, ToState: store.TaskStateSubmitted,
+		FromStates: []string{string(store.TaskStateInputRequired)},
 	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return false, err

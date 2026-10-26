@@ -14,10 +14,10 @@ import (
 )
 
 var _ = Describe("The end-of-turn summary", func() {
-	It("asks for a note after the turn, stores it on the ticket and keeps it out of the timeline", func(ctx SpecContext) {
+	It("asks for a note after the turn, stores it on the task and keeps it out of the timeline", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.harness.set(func(h *harness) { h.summaryReply = "Notes: the build is green; next, open the pull request." })
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -25,15 +25,15 @@ var _ = Describe("The end-of-turn summary", func() {
 		summaries, _ := e.harness.summarySnapshot()
 		Expect(summaries).To(HaveLen(1))
 		Expect(summaries[0]).To(And(ContainSubstring("Do not use any tool at all"), ContainSubstring("not shown as a reply")))
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.AgentSummary.String).To(Equal("Notes: the build is green; next, open the pull request."))
 		Expect(got.AgentSummaryAt.Valid).To(BeTrue())
 
 		// The one agent reply is the turn's, not the note; no run event carries the note.
 		var replies []string
-		for _, ev := range ticketEvents(ctx, e, t) {
-			if ev.Kind == "message" && ev.ActorKind == store.TicketActorKindAgent {
+		for _, ev := range taskEvents(ctx, e, t) {
+			if ev.Kind == "message" && ev.ActorKind == store.TaskActorKindAgent {
 				replies = append(replies, string(ev.Payload))
 			}
 		}
@@ -49,11 +49,11 @@ var _ = Describe("The end-of-turn summary", func() {
 	It("cuts a long note to 2,000 tokens (6,000 bytes)", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.harness.set(func(h *harness) { h.summaryReply = strings.Repeat("é", 20000) })
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(len(got.AgentSummary.String)).To(BeNumerically("<=", agentd.SummaryMaxBytes))
 		Expect(got.AgentSummary.String).To(HaveSuffix("[truncated]"))
@@ -67,7 +67,7 @@ var _ = Describe("The end-of-turn summary", func() {
 				_, during = q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: e.org, AgentID: e.agent.ID})
 			}
 		})
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Expect(during).To(HaveOccurred(), "tools find no running run while the summary is written")
@@ -77,13 +77,13 @@ var _ = Describe("The end-of-turn summary", func() {
 	It("rejects permission requests during the summary and discards a note from an agent that used a tool", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.harness.set(func(h *harness) { h.summaryTool = true })
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		_, answer := e.harness.summarySnapshot()
 		Expect(answer).To(Equal("reject"))
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.AgentSummary.Valid).To(BeFalse())
 		Expect(kinds(events(ctx, r))).To(ContainElement("run.summary_refused"))
@@ -95,19 +95,19 @@ var _ = Describe("The end-of-turn summary", func() {
 	It("does not fail the run when the agent does not answer in time", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.harness.set(func(h *harness) { h.summaryHang = true })
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a", func(c *agentd.Config) { c.SummaryTimeout = 300 * time.Millisecond })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Expect(kinds(events(ctx, r))).To(ContainElement("run.summary_failed"))
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.AgentSummary.Valid).To(BeFalse())
 	})
 
 	It("asks again at the end of every turn and keeps the latest note", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, "first")
+		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -117,7 +117,7 @@ var _ = Describe("The end-of-turn summary", func() {
 		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		summaries, _ := e.harness.summarySnapshot()
 		Expect(summaries).To(HaveLen(2))
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.AgentSummary.String).To(Equal("Second note."))
 	})
@@ -127,11 +127,11 @@ var _ = Describe("A fresh session with a handoff", func() {
 	It("starts a new session instead of loading, with the notes, the last replies and the messages", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.harness.set(func(h *harness) { h.summaryReply = "Notes: waiting on the review." })
-		t := e.ticket(ctx, "first message")
+		t := e.task(ctx, "first message")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		before, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 
 		marked, err := q.RequestSessionRestartForAgent(ctx, store.RequestSessionRestartForAgentParams{OrgID: e.org, AgentID: e.agent.ID})
@@ -145,30 +145,30 @@ var _ = Describe("A fresh session with a handoff", func() {
 		Expect(loads).To(BeEmpty(), "the old session is not loaded")
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(And(
-			HavePrefix("Ticket: "+t.Title),
+			HavePrefix("Task: "+t.Title),
 			ContainSubstring("Notes: waiting on the review."),
 			ContainSubstring("first message"),
 			ContainSubstring("second message"),
 			ContainSubstring("instructions changed"),
 		))
 		// The agent's last reply is part of it ("asking" is not scripted here; the fake answers "ok"-like text).
-		after, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		after, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(after.HarnessSessionID.String).NotTo(Equal(before.HarnessSessionID.String))
 		Expect(after.SessionRestartPending).To(BeFalse())
 		var note string
-		for _, ev := range ticketEvents(ctx, e, t) {
+		for _, ev := range taskEvents(ctx, e, t) {
 			if ev.Kind == "run.session_restarted" {
 				note = string(ev.Payload)
 			}
 		}
 		Expect(note).To(ContainSubstring("Session restarted: new instructions."))
-		Expect(kindsOf(ticketEvents(ctx, e, t))).NotTo(ContainElement("run.session_reset"))
+		Expect(kindsOf(taskEvents(ctx, e, t))).NotTo(ContainElement("run.session_reset"))
 	})
 
 	It("loads the session as usual when nothing was applied", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, "one")
+		t := e.task(ctx, "one")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -192,7 +192,7 @@ var _ = Describe("The handoff", func() {
 
 	It("has the parts in order", func() {
 		out := h(2, 5).Build()
-		Expect(out).To(MatchRegexp(`(?s)Ticket: Fix the build.*Notes\..*aaaaa.*bbbbb.*AAAAA.*BBBBB`))
+		Expect(out).To(MatchRegexp(`(?s)Task: Fix the build.*Notes\..*aaaaa.*bbbbb.*AAAAA.*BBBBB`))
 	})
 
 	It("stays within about 8,000 tokens (bytes / 3), dropping the oldest replies first", func() {

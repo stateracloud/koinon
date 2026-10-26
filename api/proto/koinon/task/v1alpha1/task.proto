@@ -1,0 +1,183 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.task.v1alpha1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "koinon/run/v1alpha1/run.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1;taskv1alpha1";
+
+// TaskService is the work record and the conversation on each task (ADR 0065). A task is
+// A2A-shaped and owned by one agent; people, triggers and agents create tasks, and nobody moves
+// them along by hand. Every request names the org it acts in; IDs from another org are not found.
+service TaskService {
+  // CreateTask creates a task for an active agent and queues a run for it (plan item A4).
+  // Members and above.
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
+
+  // ListTasks returns the org's tasks, oldest first, optionally those in one state. Viewers and
+  // above.
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetTask returns a task with its timeline and runs. Viewers and above.
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // AppendMessage adds a user message to the task and queues a run for the task's agent unless
+  // one is already queued, which will see the message. Members and above.
+  rpc AppendMessage(AppendMessageRequest) returns (AppendMessageResponse);
+
+  // CancelTask ends a task that has not ended: its queued runs are canceled and it moves to
+  // canceled. Members and above.
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+}
+
+// TaskState is where a task stands (ADR 0065, after A2A).
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  // Created; not yet picked up as working.
+  TASK_STATE_SUBMITTED = 1;
+  // The agent is working on it.
+  TASK_STATE_WORKING = 2;
+  // A person has to act: approve, answer or validate.
+  TASK_STATE_INPUT_REQUIRED = 3;
+  TASK_STATE_COMPLETED = 4;
+  TASK_STATE_CANCELED = 5;
+  TASK_STATE_FAILED = 6;
+}
+
+// ActorKind says who wrote a task event.
+enum ActorKind {
+  ACTOR_KIND_UNSPECIFIED = 0;
+  ACTOR_KIND_USER = 1;
+  ACTOR_KIND_AGENT = 2;
+  ACTOR_KIND_SYSTEM = 3;
+}
+
+// CreatorKind says what created a task.
+enum CreatorKind {
+  CREATOR_KIND_UNSPECIFIED = 0;
+  CREATOR_KIND_USER = 1;
+  CREATOR_KIND_TRIGGER = 2;
+  CREATOR_KIND_AGENT = 3;
+}
+
+// Creator is who or what created a task. Exactly the field of its kind is set.
+message Creator {
+  CreatorKind kind = 1;
+  string user_id = 2;
+  string agent_id = 3;
+  string trigger_id = 4;
+}
+
+// Task is one unit of work and its conversation.
+message Task {
+  string id = 1;
+  string org_id = 2;
+  string title = 3;
+  TaskState state = 4;
+  // The agent that owns the task.
+  string agent_id = 5;
+  Creator created_by = 6;
+  // The seq of the newest timeline event.
+  int64 last_event_seq = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+  // Set once the task is completed, canceled or failed.
+  google.protobuf.Timestamp finished_at = 10;
+  // Model spend of all the task's runs (plan item L1). Set by GetTask and ListTasks.
+  koinon.run.v1alpha1.Cost cost = 11;
+  // The agent's own note on where the task stands and what comes next, written at the end of its
+  // last turn (ADR 0051 amendment). Set by GetTask only.
+  string agent_summary = 12;
+  google.protobuf.Timestamp agent_summary_at = 13;
+}
+
+// TaskEvent is one entry of the task timeline: a message, a state change or a run note such as
+// "canceled: wall-clock cap".
+message TaskEvent {
+  // Gap-free and strictly increasing per task, from 1.
+  int64 seq = 1;
+  // For example "message", "task.created", "status.changed", "run.queued", "run.canceled".
+  string kind = 2;
+  ActorKind actor_kind = 3;
+  string actor_user_id = 4;
+  string actor_agent_id = 5;
+  // The run the event is about, if any.
+  string run_id = 6;
+  google.protobuf.Struct payload = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+// CreateTaskRequest describes the task and its first message. A person creating it through this
+// API is the creator; triggers and agents create tasks inside the control plane.
+message CreateTaskRequest {
+  string org_id = 1;
+  // An active agent of the org; it owns the task.
+  string agent_id = 2;
+  string title = 3;
+  // The first message; optional.
+  string message = 4;
+}
+
+// CreateTaskResponse holds the task and the run queued for it.
+message CreateTaskResponse {
+  Task task = 1;
+  koinon.run.v1alpha1.Run run = 2;
+}
+
+// ListTasksRequest names the org and an optional state.
+message ListTasksRequest {
+  string org_id = 1;
+  // Unspecified lists every state.
+  TaskState state = 2;
+}
+
+// ListTasksResponse lists tasks.
+message ListTasksResponse {
+  repeated Task tasks = 1;
+}
+
+// GetTaskRequest names a task.
+message GetTaskRequest {
+  string org_id = 1;
+  string task_id = 2;
+}
+
+// GetTaskResponse holds the task, its whole timeline and its runs.
+message GetTaskResponse {
+  Task task = 1;
+  repeated TaskEvent events = 2;
+  repeated koinon.run.v1alpha1.Run runs = 3;
+}
+
+// AppendMessageRequest is a user message on a task.
+message AppendMessageRequest {
+  string org_id = 1;
+  string task_id = 2;
+  string text = 3;
+}
+
+// AppendMessageResponse holds the new event and the queued run, if one was queued by this call.
+message AppendMessageResponse {
+  TaskEvent event = 1;
+  koinon.run.v1alpha1.Run run = 2;
+}
+
+// CancelTaskRequest names the task.
+message CancelTaskRequest {
+  string org_id = 1;
+  string task_id = 2;
+}
+
+// CancelTaskResponse holds the canceled task and the queued runs the cancel canceled.
+message CancelTaskResponse {
+  Task task = 1;
+  repeated koinon.run.v1alpha1.Run canceled_runs = 2;
+}
