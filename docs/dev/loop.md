@@ -25,7 +25,7 @@ The Tiltfile refuses every other context, so a stray `tilt up` cannot touch anot
   where Tilt cannot inject (the preflight Job's probe pods).
 - `flavor-<name>`: `make flavor-<name>` (tag from `hack/flavor-tag.sh`), then `kind load` or
   `docker push`. The chart gets that tag, so a flavor change rolls the reconciler. Only `opencode`
-  is built by default: `tilt up -- --flavors=opencode,hermes,pi`.
+  exists in v0.1 (ADR 0059): `tilt up -- --flavors=opencode`.
 - `postgres` (CloudNativePG `Cluster` from the chart), `koinon-migrate-install` (`koinon-api
   migrate`), `koinon-preflight`, `koinon-gateway` (standalone agentgateway), `koinon-config` (the
   rest of the chart's objects).

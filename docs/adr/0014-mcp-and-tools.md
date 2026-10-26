@@ -47,6 +47,7 @@ Agents use tools through MCP. Two problems shape the design:
 - Negative: pi-acp does not forward client-provided MCP servers to pi. For the pi flavor, MCP
   configuration must go through pi's own config, not through ACP
   ([0035](0035-v01-flavors.md)).
+  > Note (2026-10-26): v0.1 ships OpenCode only ([0059](0059-v01-opencode-only.md)).
 - Follow-ups: shared MCP servers ship in v0.5 ([0024](0024-roadmap.md)). v0.1 only needs the GitHub
   MCP tool for the demo approval ([0042](0042-ask-tier-park-and-execute.md)).
 

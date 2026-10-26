@@ -197,8 +197,8 @@ jobs:
       - run: hack/migrate-lint-test.sh
       - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 
-  # Flavor contract suite (plan item E3, issue #76): the three flavor images are built from this
-  # tree (tags are per source tree, hack/flavor-tag.sh) and each is driven over ACP in Docker as
+  # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this
+  # tree (tags are per source tree, hack/flavor-tag.sh) and driven over ACP in Docker as
   # OpenShell would. The suite talks to an in-process fake model server and a fake MCP server with
   # a fake key; it never reaches a real or paid model. Not a required check.
   flavors:
@@ -208,7 +208,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
-      # Three images, the builder's own store and the layer cache outgrow the runner's disk
+      # The flavor image, the builder's own store and the layer cache outgrow the runner's disk
       # (the first run died with "no space left on device"); drop what the job does not use.
       - name: Free disk space
         run: |

@@ -36,7 +36,7 @@ type flavor struct {
 	absentTools []string
 
 	// anonymousProbes is whether the harness also sends metadata GETs to the model endpoint
-	// without the key (Hermes probing for a local llama.cpp or vLLM server). They carry no
+	// without the key (a harness probing for a local model server). They carry no
 	// credential; agentgateway answers them 401.
 	anonymousProbes bool
 	// resume is whether the harness advertises session/resume. Koinon relies on session/load
@@ -127,7 +127,7 @@ func (f flavor) command(modelBaseURL, model, mcpURL string) []string {
 }
 
 // flavors is every flavor the suite checks.
-var flavors = []flavor{opencode, hermes, pi}
+var flavors = []flavor{opencode}
 
 // Values the contract checks for. The key is fake: plain Docker has no OpenShell placeholder
 // substitution, so the harness sends exactly this value.

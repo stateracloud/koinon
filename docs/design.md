@@ -110,7 +110,7 @@ there first, and this page stays the one-page overview.
 | # | Area | Decision | Why |
 | --- | --- | --- | --- |
 | [34](adr/0034-project-identity.md) | Identity | Repo `github.com/procoduck/koinon`, Go module `github.com/procoduck/koinon`; a `koinon` GitHub org is wanted later, so a move (and module path change) must happen before v0.1 if at all; domain `koinon.dev`, CRD API groups under it (e.g. `agents.koinon.dev`) | Start fast under a personal account; avoid a path change after users exist |
-| [35](adr/0035-v01-flavors.md) | v0.1 flavors | OpenCode, Hermes and pi, all over ACP (pi via the `pi-acp` adapter); Claude Code and Codex later | Open source harnesses, any model, matching the open source project |
+| [35](adr/0035-v01-flavors.md) | v0.1 flavors | OpenCode over ACP only in v0.1 ([0059](adr/0059-v01-opencode-only.md)); Hermes, pi, Claude Code and Codex later | Open source harnesses, any model, matching the open source project |
 | [36](adr/0036-v01-demo.md) | v0.1 demo | 15-minute quickstart: Helm install → create an agent from a template → message it → watch the run live → approve one GitHub action; the GitHub connector moves into v0.1 (the full connector framework stays v0.2) | Shows the core promise: useful agent, safe by default |
 | [37](adr/0037-tooling.md) | Tooling | goose for migrations (plain SQL, embedded, sqlc-compatible); Starlight docs site; ACP via the Go SDK; Tilt for the inner loop against the home lab | Simple, open, fits the stack |
 | [38](adr/0038-governance.md) | Governance | BDFL now (Andre) with `MAINTAINERS.md` and a written path to maintainership; GitHub private vulnerability reporting for security issues | Light process while the project is small |
@@ -140,7 +140,7 @@ Upstream research during the ADR work changed some of the decisions above. Detai
 
 | ADR | Change |
 | --- | --- |
-| [0053](adr/0053-hermes-context-file-patch.md) | Hermes context-file build patch is redone on every upgrade, with a guard test |
+| [0053](adr/0053-hermes-context-file-patch.md) | Superseded by [0059](adr/0059-v01-opencode-only.md): Hermes context-file build patch is redone on every upgrade, with a guard test |
 | [0054](adr/0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is saved (uncommitted work, sealed, pushed only on approval), marked unhealthy after 60 s and recreated; three recreations a day make the agent unhealthy |
 | [0055](adr/0055-chat-as-its-own-object.md) | Chat is its own object; supersedes 0017 (v0.2) |
 | [0056](adr/0056-model-providers-pricing-and-budgets-per-org.md) | Providers, models, pricing and budgets per org, with an admin API |
@@ -214,7 +214,6 @@ Verify before relying on it (OpenShell spike):
 - Kubernetes Agent Sandbox: https://agent-sandbox.sigs.k8s.io/docs/getting_started/overview/
 - OpenSandbox review: https://wavect.io/blog/opensandbox-ai-agent-sandbox-review/
 - Multica: https://github.com/multica-ai/multica
-- pi ACP adapter: https://zed.dev/acp/agent/pi
 - Atlas Community Edition limits: https://www.atlasgo.io/community-edition
 - Anthropic Managed Agents memory: https://sdtimes.com/anthropic/anthropic-adds-memory-to-claude-managed-agents/
 - Letta MemFS: https://docs.letta.com/concepts/memfs

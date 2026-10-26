@@ -1,6 +1,6 @@
 # 0053. Hermes context-file build patch: redo on every upgrade, with a guard test
 
-- Status: Accepted
+- Status: Superseded by [0059](0059-v01-opencode-only.md)
 - Date: 2026-10-23
 
 ## Context

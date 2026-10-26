@@ -66,7 +66,7 @@ function setup(opts: { targets?: { min: number; max: number }; role?: OrgRole } 
 
 async function toAccessStep() {
   await userEvent.click(await screen.findByRole('button', { name: 'Next' })) // template (preselected)
-  await userEvent.click(screen.getByRole('radio', { name: /Hermes/ }))
+  await userEvent.click(screen.getByRole('radio', { name: /OpenCode/ }))
   await userEvent.click(screen.getByRole('button', { name: 'Next' })) // flavor
 }
 
@@ -89,7 +89,7 @@ describe('AgentWizard', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
 
     const summary = await screen.findByRole('region', { name: 'Draft summary' })
-    expect(summary).toHaveTextContent('Hermes')
+    expect(summary).toHaveTextContent('OpenCode')
     expect(summary).toHaveTextContent('Repositories: acme/widgets')
     expect(summary).toHaveTextContent('Connection: Acme GitHub')
     await userEvent.clear(screen.getByLabelText('Name'))
@@ -101,7 +101,7 @@ describe('AgentWizard', () => {
       orgId,
       templateId: 'tpl-1',
       displayName: 'Widgets helper',
-      flavor: Flavor.HERMES,
+      flavor: Flavor.OPENCODE,
       grants: [{ connector: 'github', connectionId: 'c-1', repositories: ['acme/widgets'] }],
     })
 

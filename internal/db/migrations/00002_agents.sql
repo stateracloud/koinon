@@ -30,7 +30,7 @@ CREATE INDEX templates_slug_last_synced_at ON templates (slug, last_synced_at DE
 CREATE TYPE agent_status AS ENUM ('draft', 'active', 'archived');
 
 -- ADR 0035: the flavor selects the harness image.
-CREATE TYPE agent_flavor AS ENUM ('opencode', 'hermes', 'pi');
+CREATE TYPE agent_flavor AS ENUM ('opencode');
 
 CREATE TABLE agents (
     org_id              uuid         NOT NULL REFERENCES orgs (id),

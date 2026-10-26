@@ -13,12 +13,12 @@
 // The suite skips when Docker is unavailable and fails when a flavor image is missing. Images are
 // tagged per source tree (koinon/flavor-<name>:dev-<hash>, hack/flavor-tag.sh), so build them from
 // this tree with `make flavors` (or set KOINON_FLAVOR_BUILD=1 to build them here). Override an
-// image with KOINON_FLAVOR_IMAGE_<NAME>, for example KOINON_FLAVOR_IMAGE_HERMES, and print every
+// image with KOINON_FLAVOR_IMAGE_<NAME>, for example KOINON_FLAVOR_IMAGE_OPENCODE, and print every
 // harness's stderr with KOINON_FLAVOR_STDERR=1.
 //
 // The specs are the same for every flavor (contract_test.go, agentd_test.go); where harnesses
 // legitimately differ (session/resume, which tool calls ask for permission, the unknown-session
-// error) the flavor's entry (opencode_test.go, hermes_test.go, pi_test.go) says what to expect.
+// error) the flavor's entry (opencode_test.go) says what to expect.
 package flavors_test
 
 import (

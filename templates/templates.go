@@ -57,8 +57,6 @@ type Flavor string
 // Flavors shipped in v0.1.
 const (
 	FlavorOpenCode Flavor = "opencode"
-	FlavorHermes   Flavor = "hermes"
-	FlavorPi       Flavor = "pi"
 )
 
 // AllFlavors lists every flavor. The schema's $defs.flavor enum and the

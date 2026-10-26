@@ -32,8 +32,8 @@ const sweepTimeout = 30 * time.Second
 
 // sweep ends what is left running in the sandbox under the agent's user. agentd sweeps before
 // it starts a harness and after the harness has ended, so a run starts with no process of an
-// earlier one: not a harness's daemon (Hermes's gateway idles up to 600 s and serves the next
-// `hermes acp`), not a background job the agent started. Such a process could change the
+// earlier one: not a harness's daemon (one that idles after a run and serves the next
+// session), not a background job the agent started. Such a process could change the
 // agent's home between the entry script's checks and the harness reading it, which would let
 // the agent change its own tools or instructions for a later run (#84).
 //

@@ -192,8 +192,7 @@ func describeAgentd(f flavor) bool {
 			Expect(gw.authHeaders()).To(HaveEach("Bearer " + fakeKey))
 			Expect(sb.run(ctx, "cat", instructionsPath)).To(ContainSubstring(instructionsMarker))
 			// The first chat request of the turn already offers the Koinon tools: agentd waited for
-			// OpenCode's ready command, and Hermes and pi connect their MCP server before the first
-			// prompt (internal/agentd, readyCommand).
+			// OpenCode's ready command (internal/agentd, readyCommand).
 			// Side requests without tools (OpenCode's title generator) do not count.
 			first := ""
 			for _, b := range gw.modelBodies() {
