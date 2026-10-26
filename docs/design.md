@@ -109,7 +109,7 @@ there first, and this page stays the one-page overview.
 
 | # | Area | Decision | Why |
 | --- | --- | --- | --- |
-| [34](adr/0034-project-identity.md) | Identity | Repo `github.com/procoduck/koinon`, Go module `github.com/procoduck/koinon`; a `koinon` GitHub org is wanted later, so a move (and module path change) must happen before v0.1 if at all; domain `koinon.dev`, CRD API groups under it (e.g. `agents.koinon.dev`) | Start fast under a personal account; avoid a path change after users exist |
+| [34](adr/0034-project-identity.md) | Identity | Repo and Go module `github.com/stateracloud/koinon` (moved from `procoduck` on 2026-10-23, see the amendment in ADR 0034); domain `koinon.dev`, CRD API groups under it (e.g. `agents.koinon.dev`) | Start fast under a personal account; avoid a path change after users exist |
 | [35](adr/0035-v01-flavors.md) | v0.1 flavors | OpenCode over ACP only in v0.1 ([0059](adr/0059-v01-opencode-only.md)); Hermes, pi, Claude Code and Codex later | Open source harnesses, any model, matching the open source project |
 | [36](adr/0036-v01-demo.md) | v0.1 demo | 15-minute quickstart: Helm install → create an agent from a template → message it → watch the run live → approve one GitHub action; the GitHub connector moves into v0.1 (the full connector framework stays v0.2) | Shows the core promise: useful agent, safe by default |
 | [37](adr/0037-tooling.md) | Tooling | goose for migrations (plain SQL, embedded, sqlc-compatible); Starlight docs site; ACP via the Go SDK; Tilt for the inner loop against the home lab | Simple, open, fits the stack |

@@ -34,7 +34,7 @@ regardless of a later repository move.
 ## Alternatives considered
 
 - **Create the `koinon` org first** _(reconstructed)_: avoids a move, but the availability and
-  trademark checks are not done yet ([#10](https://github.com/procoduck/koinon/issues/10)), and it
+  trademark checks are not done yet ([#10](https://github.com/stateracloud/koinon/issues/10)), and it
   would slow the start.
 - **A vanity import path** (`koinon.dev/koinon` with a `go-import` meta tag) _(reconstructed)_:
   makes the module path independent of the GitHub owner for good. It needs the domain to serve
@@ -56,7 +56,7 @@ regardless of a later repository move.
   - A constant `GroupSuffix = "koinon.dev"` in `api/` and a lint check (grep in CI) against
     hardcoded copies _(inferred)_.
   - Decide on the GitHub org and vanity import path before v0.1 (tracked in
-    [#10](https://github.com/procoduck/koinon/issues/10) and the v0.1 plan).
+    [#10](https://github.com/stateracloud/koinon/issues/10) and the v0.1 plan).
 
 ## Open questions
 
@@ -70,7 +70,26 @@ regardless of a later repository move.
 None needed. Repository state checked 2026-10-21: `procoduck/koinon` exists, is private, and has
 one commit.
 
+## Amendment (2026-10-26): the repository moved to stateracloud
+
+The repository, module and image owner is `stateracloud`, not `procoduck`. The repository moved
+on 2026-10-23 and was recreated with new issue numbers. What the code has today:
+
+- Repository: `github.com/stateracloud/koinon` (private).
+- Go module path: `github.com/stateracloud/koinon` (`go.mod:1`), set once as `project.ModulePath`
+  (`internal/project/project.go:13`) next to `project.Domain = "koinon.dev"` and the API groups under it
+  (`internal/project/project.go:16-27`). A test keeps `go.mod` and the constant equal
+  (`internal/project/project_test.go:13`).
+- Images and chart: `ghcr.io/stateracloud` (`.goreleaser.yaml:60`, `.github/workflows/release.yml`,
+  `charts/koinon/values.yaml`).
+- The org move that this ADR required before v0.1 happened, to an owner called `stateracloud`, not
+  `koinon`. The vanity import path was not adopted. The path is frozen from v0.1.
+
+Issue links in this ADR now point at `stateracloud/koinon`. Where this ADR names `procoduck/koinon`
+above, read the repository as it was on 2026-10-21. [#10](https://github.com/stateracloud/koinon/issues/10)
+still tracks the name checks.
+
 ## Links
 
 - [0027 Repo and versioning](0027-repo-and-versioning.md), [0028 Name](0028-name-koinon.md)
-- [#10 Check availability](https://github.com/procoduck/koinon/issues/10)
+- [#10 Check availability](https://github.com/stateracloud/koinon/issues/10)

@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-21
 - Amends: ADR 0008 (approvals)
-- Verification: Pending: agentgateway spike (routing ask-tier tools) and OpenShell spike ([#3](https://github.com/procoduck/koinon/issues/3))
+- Verification: Pending: agentgateway spike (routing ask-tier tools) and OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
 
 ## Context
 
