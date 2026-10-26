@@ -77,7 +77,11 @@ type Querier interface {
 	// Fills a migrated price in place, once.
 	CompleteMigratedPrice(ctx context.Context, arg CompleteMigratedPriceParams) (int64, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
-	// Recreations for stuck sandboxes in the last 24 hours, since the agent was last resumed.
+	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
+	// shared by agentd (stuck sandboxes) and the reconciler (sandboxes in Error or Completed). A
+	// stuck sandbox counts from its incident, which agentd records before the reconciler recreates
+	// it; one in Error or Completed counts from the audited sandbox.recreate event that carries a
+	// phase. The audit event of a stuck recreation has none, so nothing is counted twice.
 	CountRecentSandboxRecreations(ctx context.Context, arg CountRecentSandboxRecreationsParams) (int64, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -198,8 +202,9 @@ type Querier interface {
 	GetAgentBudget(ctx context.Context, arg GetAgentBudgetParams) (GetAgentBudgetRow, error)
 	GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerParams) (AgentMcpServer, error)
 	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
-	// holds the agent, whether one is waiting to be claimed (queued, or parked
-	// with its park resolved), and when a run last finished or parked. Parked runs
+	// holds the agent, whether one can be claimed now (queued, or parked with its
+	// park resolved, and run_claimable: not behind an unhealthy agent or a
+	// parked sibling), and when a run last finished or parked. Parked runs
 	// do not keep the sandbox up, but they hold off its recreation (has_held):
 	// a parked run resumes its session in the same home volume.
 	GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error)
