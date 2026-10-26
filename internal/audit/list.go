@@ -31,9 +31,10 @@ var (
 
 // Filter narrows List. The zero value lists every event of the org.
 type Filter struct {
-	// Org scopes the listing. When it is not valid, List reads every org: callers allow that for
-	// platform admins only.
+	// Org scopes the listing. A filter without a valid Org is refused unless AllOrgs is set.
 	Org pgtype.UUID
+	// AllOrgs reads every org. Callers set it for platform admins only; it replaces Org.
+	AllOrgs bool
 	// Since and Until bound created_at: Since <= created_at < Until.
 	Since, Until time.Time
 	// ActionPrefix matches the start of the action, for example "approval." or "agent.create".
@@ -53,6 +54,12 @@ func timeArg(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t
 // List returns one page of events, newest first, and the token of the next page ("" at the end).
 // Events are read by id; ids are UUIDv7, so that is creation order.
 func List(ctx context.Context, q *store.Queries, f Filter) ([]store.AuditEvent, string, error) {
+	if !f.AllOrgs && !f.Org.Valid {
+		return nil, "", fmt.Errorf("%w: an org is required", ErrBadFilter)
+	}
+	if f.AllOrgs && f.Org.Valid {
+		return nil, "", fmt.Errorf("%w: AllOrgs and an org together", ErrBadFilter)
+	}
 	if f.ActionPrefix != "" && !actionPrefixRE.MatchString(f.ActionPrefix) {
 		return nil, "", fmt.Errorf("%w: action prefix %q", ErrBadFilter, f.ActionPrefix)
 	}
@@ -87,7 +94,7 @@ func List(ctx context.Context, q *store.Queries, f Filter) ([]store.AuditEvent, 
 	)
 	// One more than the page, to know whether another page follows.
 	limit := int32(size + 1) //nolint:gosec // at most MaxPageSize+1
-	if f.Org.Valid {
+	if !f.AllOrgs {
 		rows, err = q.ListAuditEventsFiltered(ctx, store.ListAuditEventsFilteredParams{
 			OrgID: f.Org, BeforeID: before, Since: timeArg(f.Since), Until: timeArg(f.Until),
 			ActionPrefix: textArg(f.ActionPrefix), ActorKind: textArg(f.ActorKind), ActorID: textArg(f.ActorID), PageSize: limit,

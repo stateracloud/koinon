@@ -47,7 +47,7 @@ var _ = Describe("List", func() {
 		Expect(actions(rows)).To(Equal([]string{"test.b", "test.a"}))
 		Expect(next).To(BeEmpty())
 
-		all, _, err := audit.List(ctx, q, audit.Filter{ActionPrefix: "test.secret"})
+		all, _, err := audit.List(ctx, q, audit.Filter{AllOrgs: true, ActionPrefix: "test.secret"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(actions(all)).To(Equal([]string{"test.secret"}), "no org: every org")
 	})
@@ -118,6 +118,8 @@ var _ = Describe("List", func() {
 			"range":      {Org: org, Since: time.Now(), Until: time.Now().Add(-time.Hour)},
 			"token":      {Org: org, PageToken: "!!"},
 			"page size":  {Org: org, PageSize: -1},
+			"no org":     {},
+			"both":       {Org: org, AllOrgs: true},
 		} {
 			_, _, err := audit.List(ctx, q, f)
 			Expect(err).To(MatchError(audit.ErrBadFilter), name)

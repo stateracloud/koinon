@@ -24,8 +24,8 @@ CREATE TABLE audit_chain_heads (
 -- One length-prefixed field of the canonical encoding: an 8-byte big-endian byte length, then the
 -- UTF-8 bytes. The prefix makes the concatenation unambiguous.
 -- +goose StatementBegin
-CREATE FUNCTION audit_field(t text) RETURNS bytea
-    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+CREATE FUNCTION public.audit_field(t text) RETURNS bytea
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE SET search_path = pg_catalog, public, pg_temp AS $$
     SELECT int8send(octet_length(convert_to(t, 'UTF8'))::bigint) || convert_to(t, 'UTF8')
 $$;
 -- +goose StatementEnd
@@ -35,21 +35,21 @@ $$;
 -- actor_kind, actor_id, action, target_kind, target_id, summary (jsonb text), request_id and
 -- created_at as decimal microseconds since the Unix epoch. prev_hash is appended as its 32 raw bytes.
 -- +goose StatementBegin
-CREATE FUNCTION audit_event_hash(e audit_events) RETURNS bytea
-    LANGUAGE sql STABLE PARALLEL SAFE AS $$
-    SELECT sha256(
-        audit_field('koinon.audit.v1')
-        || audit_field(e.org_id::text)
-        || audit_field(e.id::text)
-        || audit_field(e.chain_seq::text)
-        || audit_field(e.actor_kind)
-        || audit_field(e.actor_id)
-        || audit_field(e.action)
-        || audit_field(e.target_kind)
-        || audit_field(e.target_id)
-        || audit_field(e.summary::text)
-        || audit_field(e.request_id)
-        || audit_field((extract(epoch FROM e.created_at) * 1000000)::bigint::text)
+CREATE FUNCTION public.audit_event_hash(e public.audit_events) RETURNS bytea
+    LANGUAGE sql STABLE PARALLEL SAFE SET search_path = pg_catalog, public, pg_temp AS $$
+    SELECT pg_catalog.sha256(
+        public.audit_field('koinon.audit.v1')
+        || public.audit_field(e.org_id::text)
+        || public.audit_field(e.id::text)
+        || public.audit_field(e.chain_seq::text)
+        || public.audit_field(e.actor_kind)
+        || public.audit_field(e.actor_id)
+        || public.audit_field(e.action)
+        || public.audit_field(e.target_kind)
+        || public.audit_field(e.target_id)
+        || public.audit_field(e.summary::text)
+        || public.audit_field(e.request_id)
+        || public.audit_field((extract(epoch FROM e.created_at) * 1000000)::bigint::text)
         || e.prev_hash)
 $$;
 -- +goose StatementEnd
@@ -102,22 +102,24 @@ ALTER TABLE audit_events
     ADD CONSTRAINT audit_events_hash_len CHECK (length(prev_hash) = 32 AND length(hash) = 32);
 
 -- The chain trigger runs as the table owner, so the app role needs no write access to the heads.
+-- pg_temp is listed last on purpose: when it is not listed it is searched first, and a temp table
+-- named audit_chain_heads would shadow the real one. Every object is schema-qualified as well.
 -- +goose StatementBegin
-CREATE FUNCTION audit_events_chain() RETURNS trigger
-    LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+CREATE FUNCTION public.audit_events_chain() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
-    h audit_chain_heads;
+    h public.audit_chain_heads;
 BEGIN
-    INSERT INTO audit_chain_heads (org_id, seq, hash)
-    VALUES (NEW.org_id, 0, decode(repeat('00', 32), 'hex'))
+    INSERT INTO public.audit_chain_heads (org_id, seq, hash)
+    VALUES (NEW.org_id, 0, pg_catalog.decode(pg_catalog.repeat('00', 32), 'hex'))
     ON CONFLICT (org_id) DO NOTHING;
     -- The lock is held to the end of the transaction: the next insert of this org waits for it,
     -- then reads the head this one wrote.
-    SELECT * INTO h FROM audit_chain_heads WHERE org_id = NEW.org_id FOR UPDATE;
+    SELECT * INTO h FROM public.audit_chain_heads WHERE org_id = NEW.org_id FOR UPDATE;
     NEW.chain_seq := h.seq + 1;
     NEW.prev_hash := h.hash;
-    NEW.hash := audit_event_hash(NEW);
-    UPDATE audit_chain_heads SET seq = NEW.chain_seq, hash = NEW.hash WHERE org_id = NEW.org_id;
+    NEW.hash := public.audit_event_hash(NEW);
+    UPDATE public.audit_chain_heads SET seq = NEW.chain_seq, hash = NEW.hash WHERE org_id = NEW.org_id;
     RETURN NEW;
 END;
 $$;

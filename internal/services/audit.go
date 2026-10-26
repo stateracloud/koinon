@@ -54,6 +54,7 @@ func (s *Server) List(ctx context.Context, req *auditv1alpha1.ListRequest) (*aud
 		if !p.PlatformAdmin {
 			return nil, connect.NewError(connect.CodePermissionDenied, "org_id is required; only a platform admin reads every org")
 		}
+		f.AllOrgs = true
 	} else {
 		c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
 		if err != nil {

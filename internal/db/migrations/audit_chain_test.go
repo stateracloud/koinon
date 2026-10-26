@@ -52,6 +52,69 @@ var _ = Describe("the audit hash chain migration", func() {
 		Expect(ok).To(BeTrue())
 	})
 
+	It("cannot be steered by a temp table, for a role that only inserts events", func(ctx SpecContext) {
+		_, org := newUser(ctx)
+		_, err := db.ExecContext(ctx, `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='chain_probe') THEN CREATE ROLE chain_probe NOLOGIN; END IF; END $$`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.ExecContext(ctx, `GRANT SELECT, INSERT ON audit_events TO chain_probe`)
+		Expect(err).NotTo(HaveOccurred())
+		tx, err := db.BeginTx(ctx, nil)
+		Expect(err).NotTo(HaveOccurred())
+		defer func() { _ = tx.Rollback() }()
+		_, err = tx.ExecContext(ctx, `SET LOCAL ROLE chain_probe`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = tx.ExecContext(ctx, `CREATE TEMP TABLE audit_chain_heads (org_id uuid, seq bigint, hash bytea)`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = tx.ExecContext(ctx, `INSERT INTO pg_temp.audit_chain_heads VALUES ($1, 41, decode(repeat('ee', 32), 'hex'))`, org)
+		Expect(err).NotTo(HaveOccurred())
+		var seq int64
+		var prev []byte
+		Expect(tx.QueryRowContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind) VALUES ($1, 'system', 'test.shadow', 'test') RETURNING chain_seq, prev_hash`, org).
+			Scan(&seq, &prev)).To(Succeed())
+		Expect(seq).To(BeEquivalentTo(1), "the real head, not the temp table's")
+		Expect(prev).To(Equal(make([]byte, 32)))
+		_, err = tx.ExecContext(ctx, `RESET ROLE`)
+		Expect(err).NotTo(HaveOccurred())
+		var headSeq int64
+		Expect(tx.QueryRowContext(ctx, `SELECT seq FROM public.audit_chain_heads WHERE org_id = $1`, org).Scan(&headSeq)).To(Succeed())
+		Expect(headSeq).To(BeEquivalentTo(1))
+		var ok bool
+		Expect(tx.QueryRowContext(ctx, `SELECT hash = public.audit_event_hash(e) FROM audit_events e WHERE org_id = $1`, org).Scan(&ok)).To(Succeed())
+		Expect(ok).To(BeTrue())
+		var tempSeq int64
+		Expect(tx.QueryRowContext(ctx, `SELECT seq FROM pg_temp.audit_chain_heads`).Scan(&tempSeq)).To(Succeed())
+		Expect(tempSeq).To(BeEquivalentTo(41), "the temp table was not touched")
+	})
+
+	It("gives the app role no write access to the chain heads", func(ctx SpecContext) {
+		_, org := newUser(ctx)
+		_, err := db.ExecContext(ctx, `INSERT INTO audit_events (org_id, actor_kind, action, target_kind) VALUES ($1, 'system', 'test.head', 'test')`, org)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.ExecContext(ctx, `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='koinon_app_probe') THEN CREATE ROLE koinon_app_probe NOLOGIN; END IF; END $$`)
+		Expect(err).NotTo(HaveOccurred())
+		// The chart's CNPG bootstrap grants DML by default privileges; the migration revokes the
+		// writes from koinon_app, and this runs the same statement for the probe role.
+		_, err = db.ExecContext(ctx, `GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON audit_chain_heads TO koinon_app_probe`)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.ExecContext(ctx, `REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON audit_chain_heads FROM koinon_app_probe`)
+		Expect(err).NotTo(HaveOccurred())
+		for _, stmt := range []string{
+			`INSERT INTO audit_chain_heads (org_id, seq, hash) VALUES (gen_random_uuid(), 0, decode(repeat('00', 32), 'hex'))`,
+			`UPDATE audit_chain_heads SET seq = 0`,
+			`DELETE FROM audit_chain_heads`,
+			`TRUNCATE audit_chain_heads`,
+		} {
+			conn, err := db.Conn(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = conn.ExecContext(ctx, `SET ROLE koinon_app_probe`)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = conn.ExecContext(ctx, stmt)
+			Expect(err).To(MatchError(ContainSubstring("permission denied")), stmt)
+			_, _ = conn.ExecContext(ctx, `RESET ROLE`)
+			Expect(conn.Close()).To(Succeed())
+		}
+	})
+
 	It("chains the rows that exist when it runs, per org in id order", func(ctx SpecContext) {
 		version := chainMigrationVersion()
 		admin, err := sql.Open("pgx", dsn)
