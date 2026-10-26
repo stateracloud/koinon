@@ -1004,9 +1004,10 @@ func (q *Queries) UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclare
 const updateMCPServer = `-- name: UpdateMCPServer :one
 UPDATE mcp_servers
 SET url = $1, transport = $2, credential_header = $3,
-    credential_prefix = $4, credential = $5,
+    credential_prefix = $4,
+    credential = CASE WHEN $5::boolean THEN $6 ELSE credential END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
-WHERE org_id = $6 AND id = $7
+WHERE org_id = $7 AND id = $8
 RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at
 `
 
@@ -1015,18 +1016,23 @@ type UpdateMCPServerParams struct {
 	Transport        McpTransport
 	CredentialHeader pgtype.Text
 	CredentialPrefix string
+	SetCredential    bool
 	Credential       []byte
 	OrgID            pgtype.UUID
 	ID               pgtype.UUID
 }
 
 // A change of the URL, transport or credential starts health over: the new settings are unproven.
+// credential is written only when @set_credential is true (the patch sets or removes it). The caller
+// read the row without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the
+// envelope since, so writing back the envelope that was read would undo it.
 func (q *Queries) UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error) {
 	row := q.db.QueryRow(ctx, updateMCPServer,
 		arg.Url,
 		arg.Transport,
 		arg.CredentialHeader,
 		arg.CredentialPrefix,
+		arg.SetCredential,
 		arg.Credential,
 		arg.OrgID,
 		arg.ID,

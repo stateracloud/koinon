@@ -586,7 +586,11 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 		}
 		out, err = q.UpdateMCPServer(ctx, store.UpdateMCPServerParams{
 			OrgID: org, ID: sid, Url: u, Transport: store.McpTransport(transport),
-			CredentialHeader: pgtype.Text{String: header, Valid: len(cred) > 0}, CredentialPrefix: prefixIf(prefix, len(cred) > 0), Credential: cred,
+			CredentialHeader: pgtype.Text{String: header, Valid: len(cred) > 0}, CredentialPrefix: prefixIf(prefix, len(cred) > 0),
+			// The envelope is rewritten only when this patch replaces or removes it. cur was read
+			// without a lock, and a concurrent `keys rewrap` or `reencrypt` may have replaced the
+			// envelope since (the preflight above widens that window); writing cur's back would undo it.
+			SetCredential: patch.RemoveCredential || (patch.Credential != nil && patch.Credential.Value != nil), Credential: cred,
 		})
 		if err != nil {
 			return err
