@@ -613,7 +613,7 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 		case acp.StopCancelled:
 			return &failure{reason: "the harness cancelled the turn"}
 		default:
-			return &failure{reason: "the turn stopped: " + string(res.stop)}
+			return stopFailure(res.stop)
 		}
 	case <-r.fenced:
 		if fence(r.fenceKind.Load()) == fenceCanceled {
