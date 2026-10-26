@@ -1,6 +1,6 @@
 # 0034. Repository, module path, domain and API groups
 
-- Status: Accepted
+- Status: Accepted; amended 2026-10-26 (below)
 - Date: 2026-10-21
 - Decision: [design.md#34](../design.md)
 

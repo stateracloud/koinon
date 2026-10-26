@@ -1,6 +1,7 @@
 # 0032. Agent home on a PVC, checkpointed incrementally to object storage
 
 - Status: Accepted
+- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier)
 - Date: 2026-10-21
 - Decision: [design.md#32](../design.md)
 
@@ -96,6 +97,29 @@ Checked 2026-10-21:
   https://github.com/NVIDIA/OpenShell
 - **restic:** v0.19.1, BSD-2-Clause, AES-256-CTR with Poly1305. https://restic.readthedocs.io/en/stable/100_references.html
 - **kopia:** v0.23.1, Apache-2.0, snapshots "always incremental". https://kopia.io/docs/features/
+
+## Amendment (2026-10-26): checkpoints in v0.1
+
+[0065](0065-work-model-tasks-inbox.md) builds checkpoints now. The home (session, notes, scratch
+work) is saved when a sandbox stops or before it is recreated, and restored afterwards, so long
+waits and long tasks survive drains and image bumps. This answers "Is checkpointing needed in
+v0.1?": yes.
+
+Still open: restic or kopia; sidecar or Job; whether the park, run-end and periodic points above
+also ship in v0.1; and which paths "scratch work" covers, given the exclusion of repository
+checkouts above.
+
+## Amendment (2026-10-26, #146 A7): archive tier in v0.1
+
+After N days stopped (default 7), once a home checkpoint is complete, Koinon deletes the sandbox
+and its volume and restores the home into a fresh one on the next run. The generation follows the
+checkpoint lineage, so the next run reloads the same session
+([0051](0051-session-home-generations.md) amendment). Ephemeral agents have no home and are not
+archived ([0065](0065-work-model-tasks-inbox.md)).
+
+Prior art (ideas only, no code; its servers are AGPL-3.0): Daytona v0.190.0 archives a sandbox
+after 7 days stopped and only once its latest backup is complete, and restores newest backup first
+(`sandbox.manager.ts:173-230`; research notes `daytona.md` §3).
 
 ## Links
 

@@ -1,6 +1,6 @@
 # 0017. Board and chat are two views of one ticket
 
-- Status: Superseded by [0055](0055-chat-as-its-own-object.md)
+- Status: Superseded by [0055](0055-chat-as-its-own-object.md) and [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-21
 - Decision: [design.md#17](../design.md)
 
@@ -66,6 +66,15 @@ flowchart LR
 ## Upstream verification
 
 None needed: this decision does not depend on upstream behaviour. Checked 2026-10-21.
+
+## Amendment (2026-10-26)
+
+Beyond [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md) replaces
+tickets with A2A-shaped tasks and makes the inbox ("Waiting on you") the home screen; the board is
+a secondary view. Slack and Teams carry notifications, approval buttons and answers
+([0065](0065-work-model-tasks-inbox.md)), and their messages are a trigger type
+([0066](0066-triggers-and-scheduling.md)). Two-way thread mirroring as described above was not
+decided again.
 
 ## Links
 

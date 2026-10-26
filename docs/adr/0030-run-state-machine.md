@@ -1,6 +1,7 @@
 # 0030. Postgres run state machine with an ownership epoch
 
 - Status: Accepted
+- Amended by: [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md)
 - Date: 2026-10-21
 - Decision: [design.md#30](../design.md)
 
@@ -135,8 +136,42 @@ need their own columns or table. There is also no `AgentStateStore` interface: c
 generated sqlc store (`internal/db/store`) directly. A different backend would need that interface
 introduced first.
 
+## Amendment (2026-10-26): park reasons in use, timers on DBOS
+
+- **Park reasons.** `ask_user` writes `input_required` and `ask_agent` writes `a2a`
+  ([0065](0065-work-model-tasks-inbox.md)). `budget` stays unused.
+- **Expiry of a question** gives the agent one short "no answer" run instead of cancelling the run
+  ([0065](0065-work-model-tasks-inbox.md)).
+- **Tasks have their own states** (submitted, working, input-required, completed, canceled,
+  failed). The run state machine stays as built.
+- **Schedules, durable timers, webhook processing and per-org limits run on DBOS Go**, a library on
+  the same Postgres ([0066](0066-triggers-and-scheduling.md)). "No workflow engine in v0.x" now
+  holds for the run state machine: runs, claims, leases, the epoch and park and resume stay
+  Koinon's.
+- **Sandbox wait.** A run whose sandbox is not ready after 5 minutes waits in the queue instead of
+  failing, and interactive work is claimed before scheduled work ([0066](0066-triggers-and-scheduling.md)).
+
+## Amendment (2026-10-26, #146 A1): failure classes
+
+Each failed run gets a `failure_class`, set where the error is first understood (the gateway or
+ledger response, the ACP stop reason, the harness exit code). Retries and inbox messages follow
+from the class:
+
+| Class | What happens |
+| --- | --- |
+| `transient` | retry with backoff |
+| `throttled` | wait for Retry-After, then retry |
+| `context_overflow` | shrink the largest input once, then `ask_user` ([0065](0065-work-model-tasks-inbox.md)) |
+| `budget` | stop and tell the owner |
+| `policy` | no retry |
+| `fatal` | anything unknown; no retry |
+
+Today a failure is free text (`internal/agentd/run.go:42`, `:603-611`, `:663-692`); exit codes
+64, 126 and 127 are already treated as permanent (`run.go:67`).
+
 ## Links
 
 - [0003 Source of truth](0003-postgres-source-of-truth.md), [0009 Agent runtime](0009-agent-runtime.md)
 - [0029 Run-level resume](0029-run-level-resume.md), [0032 Agent home](0032-agent-home-checkpoints.md)
 - Restate Virtual Objects: https://docs.restate.dev/concepts/services
+- Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the failure classes (`infinity-provider-protocol/src/completion.rs:57-76`; unknown errors default to fatal, `remote.rs:44-60`). Research notes: `infinity-code-ideas.md`.

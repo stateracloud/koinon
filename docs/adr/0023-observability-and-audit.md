@@ -1,6 +1,6 @@
 # 0023. Optional observability, hash-chained audit on by default
 
-- Status: Accepted; amended below
+- Status: Accepted; amended 2026-10-26 (below)
 - Date: 2026-10-21
 - Decision: [design.md#23](../design.md)
 

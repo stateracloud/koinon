@@ -1,6 +1,9 @@
 # 0010. Eventing: the ticket board is the queue
 
-- Status: Accepted
+- Status: Superseded by [0065](0065-work-model-tasks-inbox.md) and [0066](0066-triggers-and-scheduling.md)
+- Note: what still describes the code is the 2026-10-26 wake-up amendment below: row state is the
+  truth, `LISTEN/NOTIFY` is only a hint, and the `runs` table is the queue for runs. Work arrives
+  as tasks ([0065](0065-work-model-tasks-inbox.md)) through triggers ([0066](0066-triggers-and-scheduling.md)).
 - Date: 2026-10-21
 - Decision: [design.md#10](../design.md)
 
@@ -72,9 +75,24 @@ table exists. What was built instead:
   (`internal/db/migrations/00006_agent_sandboxes.sql:79-90`; the reconciler `LISTEN`s in
   `internal/reconciler/loop.go:16`, `:67`) and the reconciler also re-reads everything on a timer.
 
-The board is still the queue for work. Webhooks, crons and subscriptions are not built (v0.2,
-[0024](0024-roadmap.md)). [0003](0003-postgres-source-of-truth.md) and
+When this amendment was written the board was still the queue for work and webhooks, crons and
+subscriptions were not built. Tasks and triggers replace both (amendment below). [0003](0003-postgres-source-of-truth.md) and
 [0022](0022-frontend-architecture.md) also mention the outbox; read them with this amendment.
+
+## Amendment (2026-10-26): tasks and triggers
+
+- **Tasks are the queue for work**, not the board ([0065](0065-work-model-tasks-inbox.md)). The
+  board is a secondary view over tasks.
+- **Triggers replace org subscriptions.** They live on the agent's versioned config: schedules,
+  code-host events, chat events and direct messages; tracker events come later
+  ([0066](0066-triggers-and-scheduling.md), [0064](0064-work-tracker-connectors.md)).
+- **Ingress** is webhooks with signature checks, Slack Socket Mode and polling. Everything lands in
+  DBOS Go, a library on Koinon's Postgres, for dedupe and retries ([0066](0066-triggers-and-scheduling.md)).
+- **"Append to an open ticket" becomes correlation by key:** an event whose key matches an open
+  task wakes that task; otherwise it creates one. Bursts are batched into one wake-up.
+- Still true: there is no event bus, and Postgres is the source of truth. Not decided again: the
+  CloudEvents envelope, the filter language, and budgets per trigger (open in
+  [0066](0066-triggers-and-scheduling.md)).
 
 ## Links
 

@@ -1,6 +1,6 @@
 # 0056. Model providers, models, pricing and budgets per org
 
-- Status: Accepted
+- Status: Accepted; amended 2026-10-23 and 2026-10-24 (below)
 - Date: 2026-10-23
 - Amends: [0049](0049-v01-scope-decisions.md) (the single Helm-configured upstream, now dropped, and
   template-only budgets), [0007](0007-connector-model.md) and [0021](0021-connector-setup-guides.md)

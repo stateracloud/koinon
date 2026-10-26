@@ -1,6 +1,6 @@
 # 0042. Ask tier: park the run, Koinon executes the approved call
 
-- Status: Accepted
+- Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-21
 - Amends: ADR 0008 (approvals)
 - Verification: Pending: agentgateway spike (routing ask-tier tools) and OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
@@ -96,6 +96,16 @@ Checked 2026-10-21: OpenShell policy docs (`docs/how-it-works/policies/schema.md
 `enforcement: audit`), RFC 0002 (accepted; agent proposals behind
 `agent_policy_proposals_enabled`, default false); agentgateway MCP authorization and ExtMCP docs.
 
+## Amendment (2026-10-26, #146 A4): safe defaults and scoped approvals
+
+[0065](0065-work-model-tasks-inbox.md) changes two things:
+
+- **Every question names a safe default** (`ask_user`, and approvals), used when it is dismissed
+  or expires; the agent is told which default applied.
+- **Approvals can be scoped:** once (this ADR's exact-request approval), this task, or this agent
+  and this kind of action until a date. A scope wider than once needs an admin, shows in the
+  agent's grants, and is audited.
+
 ## Links
 
 - https://github.com/NVIDIA/OpenShell/blob/main/docs/how-it-works/policies/schema.mdx
@@ -103,3 +113,4 @@ Checked 2026-10-21: OpenShell policy docs (`docs/how-it-works/policies/schema.md
 - https://agentgateway.dev/docs/standalone/main/mcp/guardrails/about/
 - https://agentclientprotocol.com/protocol/session-setup
 - ADR 0008, ADR 0029, ADR 0030, ADR 0036, ADR 0040, ADR 0045
+- Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the safe default choice and approval scopes (`rap-protocol/src/lib.rs:152-163`; `sandbox-core/src/server.rs:864-945`). Research notes: `infinity-code-ideas.md`.

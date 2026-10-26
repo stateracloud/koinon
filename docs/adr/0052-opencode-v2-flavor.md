@@ -2,14 +2,14 @@
 
 - Status: Accepted
 - Date: 2026-10-22
-- Amends: [0048](0048-openshell-spike-results.md) (on PR #15) (the OpenCode version and the
+- Amends: [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository) (the OpenCode version and the
   OpenCode details of decision 4; decision 4's flavor contract stands)
 - Verification: spike on 2026-10-22 (below); re-pin tracked in
   [#54](https://github.com/stateracloud/koinon/issues/54)
 
 ## Context
 
-ADR 0048 (on PR #15) verified the flavors with OpenCode 1.19.3. OpenCode's current release line is v2
+ADR 0048 (PR 15 in the previous repository) verified the flavors with OpenCode 1.19.3. OpenCode's current release line is v2
 (`@opencode/cli`), which reworks configuration, providers, plugins and the ACP agent. procoduck
 decided on 2026-10-22 to build the v0.1 flavor on v2 rather than ship on 1.x and replace it
 shortly after.
@@ -105,7 +105,7 @@ These go away or change when the flavor is re-pinned ([#54](https://github.com/s
   fallback if the prompt does not get through (decision 4); the short settle after the ready
   signal covers only a documented debounce.
 - **Pass the MCP server in `session/new`'s `mcpServers`:** OpenCode builds that config without
-  `codemode: false`, and Hermes and pi take no client MCP servers (ADR 0048, on PR #15).
+  `codemode: false`, and Hermes and pi take no client MCP servers (ADR 0048, PR 15 in the previous repository).
 - **Instructions in the image or in config:** they are per agent version; only a file agentd
   writes per run follows a version bump without recreating the sandbox.
 
@@ -142,7 +142,7 @@ home-lab run described in Context. Source references are in `flavors/opencode/RE
 
 ## Links
 
-- [0035](0035-v01-flavors.md), [0048](0048-openshell-spike-results.md) (on PR #15),
+- [0035](0035-v01-flavors.md), [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository),
   [0049](0049-v01-scope-decisions.md) (on PR #16)
 - [flavors/opencode/README.md](../../flavors/opencode/README.md)
 - https://github.com/anomalyco/opencode/tree/v2.0.24
