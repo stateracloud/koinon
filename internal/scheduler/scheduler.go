@@ -148,9 +148,8 @@ func Cancel(ctx context.Context, q *store.Queries, org, runID pgtype.UUID, reaso
 }
 
 // CancelQueuedForTask cancels the task's queued runs, when it reaches an end
-// state.
-func CancelQueuedForTask(ctx context.Context, q *store.Queries, task store.Task, actor Actor) ([]store.Run, error) {
-	const msg = "task ended"
+// state. msg is the outcome the runs record.
+func CancelQueuedForTask(ctx context.Context, q *store.Queries, task store.Task, msg string, actor Actor) ([]store.Run, error) {
 	runs, err := q.CancelQueuedRunsForTask(ctx, store.CancelQueuedRunsForTaskParams{
 		OrgID: task.OrgID, TaskID: task.ID, OutcomeReason: msg,
 	})
