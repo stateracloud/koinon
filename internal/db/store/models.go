@@ -652,6 +652,52 @@ func (ns NullPlatformAdminSource) Value() (driver.Value, error) {
 	return string(ns.PlatformAdminSource), nil
 }
 
+type RunFailureClass string
+
+const (
+	RunFailureClassTransient       RunFailureClass = "transient"
+	RunFailureClassThrottled       RunFailureClass = "throttled"
+	RunFailureClassContextOverflow RunFailureClass = "context_overflow"
+	RunFailureClassBudget          RunFailureClass = "budget"
+	RunFailureClassPolicy          RunFailureClass = "policy"
+	RunFailureClassFatal           RunFailureClass = "fatal"
+)
+
+func (e *RunFailureClass) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RunFailureClass(s)
+	case string:
+		*e = RunFailureClass(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RunFailureClass: %T", src)
+	}
+	return nil
+}
+
+type NullRunFailureClass struct {
+	RunFailureClass RunFailureClass
+	Valid           bool // Valid is true if RunFailureClass is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRunFailureClass) Scan(value interface{}) error {
+	if value == nil {
+		ns.RunFailureClass, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RunFailureClass.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRunFailureClass) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RunFailureClass), nil
+}
+
 type RunParkReason string
 
 const (
@@ -1295,6 +1341,7 @@ type Run struct {
 	PromptThroughSeq    pgtype.Int8
 	Takeovers           int32
 	Summarizing         bool
+	FailureClass        NullRunFailureClass
 }
 
 type RunEvent struct {

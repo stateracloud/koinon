@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/run/v1alpha1/run.proto.
  */
 export const file_koinon_run_v1alpha1_run: GenFile = /*@__PURE__*/
-  fileDesc("Ch1rb2lub24vcnVuL3YxYWxwaGExL3J1bi5wcm90bxITa29pbm9uLnJ1bi52MWFscGhhMSL3AwoDUnVuEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSGAoQYWdlbnRfdmVyc2lvbl9pZBgFIAEoCRIsCgVzdGF0ZRgGIAEoDjIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuU3RhdGUSNAoLcGFya19yZWFzb24YByABKA4yHy5rb2lub24ucnVuLnYxYWxwaGExLlBhcmtSZWFzb24SFgoOb3V0Y29tZV9yZWFzb24YCCABKAkSHgoWbWF4X3dhbGxfY2xvY2tfc2Vjb25kcxgJIAEoAxISCgptYXhfdG9rZW5zGAogASgDEhMKC3Rva2Vuc191c2VkGAsgASgDEhYKDmxhc3RfZXZlbnRfc2VxGAwgASgDEi4KCmNyZWF0ZWRfYXQYDSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnN0YXJ0ZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBInCgRjb3N0GBAgASgLMhkua29pbm9uLnJ1bi52MWFscGhhMS5Db3N0In4KBENvc3QSEAoIcmVxdWVzdHMYASABKAMSFAoMaW5wdXRfdG9rZW5zGAIgASgDEhUKDW91dHB1dF90b2tlbnMYAyABKAMSCwoDdXNkGAQgASgJEg4KBnByaWNlZBgFIAEoCBIaChJlc3RpbWF0ZWRfcmVxdWVzdHMYBiABKAMijwEKCFJ1bkV2ZW50Eg4KBnJ1bl9pZBgBIAEoCRILCgNzZXEYAiABKAMSDAoEa2luZBgDIAEoCRIoCgdwYXlsb2FkGAQgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBIuCgpjcmVhdGVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIvCg1HZXRSdW5SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIOCgZydW5faWQYAiABKAkiNwoOR2V0UnVuUmVzcG9uc2USJQoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW4iQgoQQ2FuY2VsUnVuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJEg4KBnJlYXNvbhgDIAEoCSI6ChFDYW5jZWxSdW5SZXNwb25zZRIlCgNydW4YASABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1biJECg9XYXRjaFJ1blJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIRCglhZnRlcl9zZXEYAyABKAMicwoQV2F0Y2hSdW5SZXNwb25zZRInCgNydW4YASABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1bkgAEi4KBWV2ZW50GAIgASgLMh0ua29pbm9uLnJ1bi52MWFscGhhMS5SdW5FdmVudEgAQgYKBGl0ZW0qxwEKCFJ1blN0YXRlEhkKFVJVTl9TVEFURV9VTlNQRUNJRklFRBAAEhQKEFJVTl9TVEFURV9RVUVVRUQQARIWChJSVU5fU1RBVEVfU1RBUlRJTkcQAhIVChFSVU5fU1RBVEVfUlVOTklORxADEhQKEFJVTl9TVEFURV9QQVJLRUQQBBIXChNSVU5fU1RBVEVfU1VDQ0VFREVEEAUSFAoQUlVOX1NUQVRFX0ZBSUxFRBAGEhYKElJVTl9TVEFURV9DQU5DRUxFRBAHKpABCgpQYXJrUmVhc29uEhsKF1BBUktfUkVBU09OX1VOU1BFQ0lGSUVEEAASGAoUUEFSS19SRUFTT05fQVBQUk9WQUwQARIWChJQQVJLX1JFQVNPTl9CVURHRVQQAhITCg9QQVJLX1JFQVNPTl9BMkEQAxIeChpQQVJLX1JFQVNPTl9JTlBVVF9SRVFVSVJFRBAEMqACCgpSdW5TZXJ2aWNlElYKBkdldFJ1bhIiLmtvaW5vbi5ydW4udjFhbHBoYTEuR2V0UnVuUmVxdWVzdBojLmtvaW5vbi5ydW4udjFhbHBoYTEuR2V0UnVuUmVzcG9uc2UiA5ACARJaCglDYW5jZWxSdW4SJS5rb2lub24ucnVuLnYxYWxwaGExLkNhbmNlbFJ1blJlcXVlc3QaJi5rb2lub24ucnVuLnYxYWxwaGExLkNhbmNlbFJ1blJlc3BvbnNlEl4KCFdhdGNoUnVuEiQua29pbm9uLnJ1bi52MWFscGhhMS5XYXRjaFJ1blJlcXVlc3QaJS5rb2lub24ucnVuLnYxYWxwaGExLldhdGNoUnVuUmVzcG9uc2UiA5ACATABQk1aS2dpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL3J1bi92MWFscGhhMTtydW52MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("Ch1rb2lub24vcnVuL3YxYWxwaGExL3J1bi5wcm90bxITa29pbm9uLnJ1bi52MWFscGhhMSKxBAoDUnVuEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSEAoIYWdlbnRfaWQYBCABKAkSGAoQYWdlbnRfdmVyc2lvbl9pZBgFIAEoCRIsCgVzdGF0ZRgGIAEoDjIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuU3RhdGUSNAoLcGFya19yZWFzb24YByABKA4yHy5rb2lub24ucnVuLnYxYWxwaGExLlBhcmtSZWFzb24SFgoOb3V0Y29tZV9yZWFzb24YCCABKAkSHgoWbWF4X3dhbGxfY2xvY2tfc2Vjb25kcxgJIAEoAxISCgptYXhfdG9rZW5zGAogASgDEhMKC3Rva2Vuc191c2VkGAsgASgDEhYKDmxhc3RfZXZlbnRfc2VxGAwgASgDEi4KCmNyZWF0ZWRfYXQYDSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnN0YXJ0ZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBInCgRjb3N0GBAgASgLMhkua29pbm9uLnJ1bi52MWFscGhhMS5Db3N0EjgKDWZhaWx1cmVfY2xhc3MYESABKA4yIS5rb2lub24ucnVuLnYxYWxwaGExLkZhaWx1cmVDbGFzcyJ+CgRDb3N0EhAKCHJlcXVlc3RzGAEgASgDEhQKDGlucHV0X3Rva2VucxgCIAEoAxIVCg1vdXRwdXRfdG9rZW5zGAMgASgDEgsKA3VzZBgEIAEoCRIOCgZwcmljZWQYBSABKAgSGgoSZXN0aW1hdGVkX3JlcXVlc3RzGAYgASgDIo8BCghSdW5FdmVudBIOCgZydW5faWQYASABKAkSCwoDc2VxGAIgASgDEgwKBGtpbmQYAyABKAkSKAoHcGF5bG9hZBgEIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSLgoKY3JlYXRlZF9hdBgFIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiLwoNR2V0UnVuUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDgoGcnVuX2lkGAIgASgJIjcKDkdldFJ1blJlc3BvbnNlEiUKA3J1bhgBIAEoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIkIKEENhbmNlbFJ1blJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg4KBnJ1bl9pZBgCIAEoCRIOCgZyZWFzb24YAyABKAkiOgoRQ2FuY2VsUnVuUmVzcG9uc2USJQoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW4iRAoPV2F0Y2hSdW5SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIOCgZydW5faWQYAiABKAkSEQoJYWZ0ZXJfc2VxGAMgASgDInMKEFdhdGNoUnVuUmVzcG9uc2USJwoDcnVuGAEgASgLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW5IABIuCgVldmVudBgCIAEoCzIdLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuRXZlbnRIAEIGCgRpdGVtKscBCghSdW5TdGF0ZRIZChVSVU5fU1RBVEVfVU5TUEVDSUZJRUQQABIUChBSVU5fU1RBVEVfUVVFVUVEEAESFgoSUlVOX1NUQVRFX1NUQVJUSU5HEAISFQoRUlVOX1NUQVRFX1JVTk5JTkcQAxIUChBSVU5fU1RBVEVfUEFSS0VEEAQSFwoTUlVOX1NUQVRFX1NVQ0NFRURFRBAFEhQKEFJVTl9TVEFURV9GQUlMRUQQBhIWChJSVU5fU1RBVEVfQ0FOQ0VMRUQQByqQAQoKUGFya1JlYXNvbhIbChdQQVJLX1JFQVNPTl9VTlNQRUNJRklFRBAAEhgKFFBBUktfUkVBU09OX0FQUFJPVkFMEAESFgoSUEFSS19SRUFTT05fQlVER0VUEAISEwoPUEFSS19SRUFTT05fQTJBEAMSHgoaUEFSS19SRUFTT05fSU5QVVRfUkVRVUlSRUQQBCrYAQoMRmFpbHVyZUNsYXNzEh0KGUZBSUxVUkVfQ0xBU1NfVU5TUEVDSUZJRUQQABIbChdGQUlMVVJFX0NMQVNTX1RSQU5TSUVOVBABEhsKF0ZBSUxVUkVfQ0xBU1NfVEhST1RUTEVEEAISIgoeRkFJTFVSRV9DTEFTU19DT05URVhUX09WRVJGTE9XEAMSGAoURkFJTFVSRV9DTEFTU19CVURHRVQQBBIYChRGQUlMVVJFX0NMQVNTX1BPTElDWRAFEhcKE0ZBSUxVUkVfQ0xBU1NfRkFUQUwQBjKgAgoKUnVuU2VydmljZRJWCgZHZXRSdW4SIi5rb2lub24ucnVuLnYxYWxwaGExLkdldFJ1blJlcXVlc3QaIy5rb2lub24ucnVuLnYxYWxwaGExLkdldFJ1blJlc3BvbnNlIgOQAgESWgoJQ2FuY2VsUnVuEiUua29pbm9uLnJ1bi52MWFscGhhMS5DYW5jZWxSdW5SZXF1ZXN0GiYua29pbm9uLnJ1bi52MWFscGhhMS5DYW5jZWxSdW5SZXNwb25zZRJeCghXYXRjaFJ1bhIkLmtvaW5vbi5ydW4udjFhbHBoYTEuV2F0Y2hSdW5SZXF1ZXN0GiUua29pbm9uLnJ1bi52MWFscGhhMS5XYXRjaFJ1blJlc3BvbnNlIgOQAgEwAUJNWktnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9ydW4vdjFhbHBoYTE7cnVudjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * Run is one execution of an agent for a ticket.
@@ -111,6 +111,14 @@ export type Run = Message<"koinon.run.v1alpha1.Run"> & {
    * @generated from field: koinon.run.v1alpha1.Cost cost = 16;
    */
   cost?: Cost | undefined;
+
+  /**
+   * The class of the error that failed or stopped the run. Unspecified when the run did not
+   * fail, or failed before classes existed.
+   *
+   * @generated from field: koinon.run.v1alpha1.FailureClass failure_class = 17;
+   */
+  failureClass: FailureClass;
 };
 
 /**
@@ -463,6 +471,67 @@ export enum ParkReason {
  */
 export const ParkReasonSchema: GenEnum<ParkReason> = /*@__PURE__*/
   enumDesc(file_koinon_run_v1alpha1_run, 1);
+
+/**
+ * FailureClass says what kind of error ended a run (ADR 0030, amendment of 2026-10-26). Retries
+ * and the message to the person follow from it. Unset on a run that did not fail.
+ *
+ * @generated from enum koinon.run.v1alpha1.FailureClass
+ */
+export enum FailureClass {
+  /**
+   * @generated from enum value: FAILURE_CLASS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * A passing fault (a 5xx, an overloaded provider, a dropped stream); retried with backoff.
+   *
+   * @generated from enum value: FAILURE_CLASS_TRANSIENT = 1;
+   */
+  TRANSIENT = 1,
+
+  /**
+   * The provider rate-limited the request; retried after its Retry-After.
+   *
+   * @generated from enum value: FAILURE_CLASS_THROTTLED = 2;
+   */
+  THROTTLED = 2,
+
+  /**
+   * The input does not fit the model's context window.
+   *
+   * @generated from enum value: FAILURE_CLASS_CONTEXT_OVERFLOW = 3;
+   */
+  CONTEXT_OVERFLOW = 3,
+
+  /**
+   * A token or spend limit stopped the run.
+   *
+   * @generated from enum value: FAILURE_CLASS_BUDGET = 4;
+   */
+  BUDGET = 4,
+
+  /**
+   * A policy denied the request; never retried.
+   *
+   * @generated from enum value: FAILURE_CLASS_POLICY = 5;
+   */
+  POLICY = 5,
+
+  /**
+   * Anything unknown; never retried.
+   *
+   * @generated from enum value: FAILURE_CLASS_FATAL = 6;
+   */
+  FATAL = 6,
+}
+
+/**
+ * Describes the enum koinon.run.v1alpha1.FailureClass.
+ */
+export const FailureClassSchema: GenEnum<FailureClass> = /*@__PURE__*/
+  enumDesc(file_koinon_run_v1alpha1_run, 2);
 
 /**
  * RunService reads, cancels and streams runs (ADR 0030). Every request names
