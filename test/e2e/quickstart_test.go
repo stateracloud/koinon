@@ -434,7 +434,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			var err error
 			got, err = c.tickets.GetTicket(ctx, &ticketv1alpha1.GetTicketRequest{OrgId: org, TicketId: ticket.GetId()})
 			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(got.GetTicket().GetAgentSummary()).To(HavePrefix("Notes: the ticket asks for a hello.md"))
+			g.Expect(got.GetTicket().GetAgentSummary()).To(HavePrefix("Notes: the task asks for a hello.md"))
 		}, 30*time.Second, time.Second).Should(Succeed())
 		Expect(got.GetTicket().GetAgentSummaryAt()).NotTo(BeNil())
 		for _, ev := range got.GetEvents() {

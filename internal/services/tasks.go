@@ -59,7 +59,7 @@ var endStates = []store.TaskState{store.TaskStateCompleted, store.TaskStateCance
 func isEnded(s store.TaskState) bool { return slices.Contains(endStates, s) }
 
 // errTaskEnded means the task has ended and takes no messages.
-var errTaskEnded = connect.NewError(connect.CodeFailedPrecondition, "task has ended")
+var errTaskEnded = errors.New("task has ended")
 
 // enqueue maps scheduler errors for the API.
 func enqueue(ctx context.Context, q *store.Queries, t store.Task) (*runv1alpha1.Run, error) {
@@ -193,15 +193,15 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 		run *runv1alpha1.Run
 	)
 	err := s.inTx(ctx, func(q *store.Queries) error {
-		t, err := q.GetTask(ctx, store.GetTaskParams{OrgID: c.org, ID: id})
+		// The row lock serialises this with concurrent messages (and so the queued-run check in
+		// Enqueue) and with setState, so a task that ends concurrently takes no message.
+		t, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return err
 		}
 		if isEnded(t.State) {
 			return errTaskEnded
 		}
-		// Appending locks the task row until commit, which serialises
-		// concurrent messages and so the queued-run check in Enqueue.
 		ev, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 			OrgID: c.org, TaskID: t.ID, Kind: KindMessage,
 			ActorKind: store.TaskActorKindUser, ActorUserID: c.actor(),
@@ -220,9 +220,11 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 // Moving to an end state cancels the task's queued runs. A task already in the state is returned
 // unchanged and the canceled runs are still swept, as the ticket API always did.
 //
+// cancelMsg is the outcome of the queued runs it cancels.
+//
 // pick chooses the state from the task's current one. It runs in the transaction, after the task
 // row is locked, so concurrent changes of one task are serialised and pick never sees a stale state.
-func (s *Server) setState(ctx context.Context, c caller, id pgtype.UUID, pick func(cur store.TaskState) (store.TaskState, error)) (store.Task, []store.Run, error) {
+func (s *Server) setState(ctx context.Context, c caller, id pgtype.UUID, cancelMsg string, pick func(cur store.TaskState) (store.TaskState, error)) (store.Task, []store.Run, error) {
 	var (
 		task store.Task
 		runs []store.Run
@@ -249,7 +251,7 @@ func (s *Server) setState(ctx context.Context, c caller, id pgtype.UUID, pick fu
 			}
 		}
 		if isEnded(to) {
-			if runs, err = scheduler.CancelQueuedForTask(ctx, q, t, scheduler.Actor{UserID: c.actor()}); err != nil {
+			if runs, err = scheduler.CancelQueuedForTask(ctx, q, t, cancelMsg, scheduler.Actor{UserID: c.actor()}); err != nil {
 				return err
 			}
 		}
@@ -359,6 +361,9 @@ func (a taskAPI) AppendMessage(ctx context.Context, req *taskv1alpha1.AppendMess
 		return nil, err
 	}
 	ev, run, err := a.appendMessage(ctx, c, id, msg)
+	if errors.Is(err, errTaskEnded) {
+		err = connect.NewError(connect.CodeFailedPrecondition, "task has ended")
+	}
 	if err != nil {
 		return nil, a.dbError(err, "task")
 	}
@@ -377,7 +382,7 @@ func (a taskAPI) CancelTask(ctx context.Context, req *taskv1alpha1.CancelTaskReq
 	}
 	// Ended tasks stay as they ended; only an open task can be canceled. The check runs in
 	// setState's transaction, on the locked row.
-	t, runs, err := a.setState(ctx, c, id, func(cur store.TaskState) (store.TaskState, error) {
+	t, runs, err := a.setState(ctx, c, id, "task ended", func(cur store.TaskState) (store.TaskState, error) {
 		if isEnded(cur) {
 			return cur, connect.NewError(connect.CodeFailedPrecondition, "task has already ended")
 		}
