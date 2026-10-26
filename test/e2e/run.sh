@@ -108,6 +108,21 @@ diagnostics() {
     "${K[@]}" -n "$FAKES" logs "deploy/$c" --tail=-1 >"$d/$c.log" 2>&1 || true
   done
   "${K[@]}" -n openshell logs statefulset/openshell --tail=-1 >"$d/openshell.log" 2>&1 || true
+  # Sandbox namespaces (issue #159): pod status with exit codes and termination messages. Koinon's
+  # admission policy denies pods/log there, so the containers' output is read on the kind node
+  # with crictl, below the API.
+  local ns
+  for ns in $("${K[@]}" get ns -o name 2>/dev/null | sed -n 's|^namespace/\(openshell-openshell-.*\)|\1|p'); do
+    "${K[@]}" -n "$ns" get pods,sandboxes.agents.x-k8s.io -o yaml >"$d/sandbox-$ns.yaml" 2>&1 || true
+  done
+  local node="${CLUSTER}-control-plane" id
+  docker exec "$node" crictl ps -a >"$d/crictl-ps.txt" 2>&1 || true
+  for id in $(docker exec "$node" crictl ps -a -q 2>/dev/null); do
+    case "$(docker exec "$node" crictl inspect -o go-template --template '{{index .status.labels "io.kubernetes.pod.namespace"}}' "$id" 2>/dev/null)" in
+      openshell-openshell-*) docker exec "$node" crictl logs "$id" >"$d/container-$id.log" 2>&1 || true ;;
+    esac
+  done
+  docker exec "$node" dmesg >"$d/node-dmesg.txt" 2>&1 || true
   echo "diagnostics in $d"
 }
 
