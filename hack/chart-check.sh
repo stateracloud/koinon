@@ -31,6 +31,8 @@ done
 
 # Assertions on rendered output: render with --set flags, then grep.
 render() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
+# Assertions capture the rendering before grepping it: piping into grep -q under pipefail fails
+# the pipeline when grep exits on the first match and helm then dies of SIGPIPE.
 failures=0
 fail() {
 	echo "FAIL: $*" >&2
@@ -40,21 +42,25 @@ fail() {
 has() {
 	local what=$1 re=$2
 	shift 2
-	render "$@" | grep -Eq -- "$re" || fail "$what"
+	local out
+	out=$(render "$@")
+	grep -Eq -- "$re" <<<"$out" || fail "$what"
 }
 # lacks <description> <extended regexp> <helm args...>: the rendering does not match the pattern.
 lacks() {
 	local what=$1 re=$2
 	shift 2
-	if render "$@" | grep -Eq -- "$re"; then fail "$what"; fi
+	local out
+	out=$(render "$@")
+	if grep -Eq -- "$re" <<<"$out"; then fail "$what"; fi
 }
 # env <name> <value> <helm args...>: koinon-api's env has name=value (the line after the name).
 env_is() {
 	local name=$1 value=$2
 	shift 2
-	render --show-only templates/deployments.yaml "$@" |
-		grep -A1 -E -- "- name: $name\$" | grep -Fq -- "value: $value" ||
-		fail "env $name=$value with $*"
+	local out
+	out=$(render --show-only templates/deployments.yaml "$@" | grep -A1 -E -- "- name: $name\$") || true
+	grep -Fq -- "value: $value" <<<"$out" || fail "env $name=$value with $*"
 }
 
 echo "== assertions"
