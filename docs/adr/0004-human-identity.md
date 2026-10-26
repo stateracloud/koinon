@@ -51,6 +51,17 @@ An org has three roles: **owner**, **admin** and **member**. Members use agents 
 and see approvals **read-only**; admins and owners decide them, as in
 [0049](0049-v01-scope-decisions.md). A viewer role is not part of this decision.
 
+## Amendment (2026-10-26): platform admins from IdP groups
+
+`oidc.platformAdminGroups` lists IdP groups whose members are platform admins. It is reconciled at
+every login like the default-org group mappings: a user who gains a listed group is granted, one who
+loses all of them is revoked. `platform_admins.source` records where a grant came from (`bootstrap` or
+`oidc_group`), and the login revokes only `oidc_group` rows, so the bootstrap admin and any grant from
+another source stay. Grants and revocations are audited as `platform_admin.grant` and
+`platform_admin.revoke` (actor `system oidc`), in the user's personal org because audit rows need an
+org. An empty setting changes nothing, so removing the setting does not revoke earlier grants.
+Operators set it and log in once before they disable the bootstrap admin.
+
 ## Open questions
 
 - Session lifetime and re-validation interval, so that group removal takes effect in bounded time.

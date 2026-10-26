@@ -11,6 +11,17 @@ the schema exists. So on install in cnpg mode the Job is an ordinary release res
 <fullname>-migrate-install so that it never collides with the pre-upgrade hook of later upgrades,
 which drops it from the release. It waits for the database; until it finishes, components retry
 their connection.
+
+Argo CD renders with `helm template`, where .Release.IsInstall is always true, so under Argo the
+cnpg Job is always this ordinary resource, and an ordinary Job cannot take a new image: its spec is
+immutable, and nothing orders it before the new pods. So the Job also carries Argo CD hook
+annotations (ADR 0060): `argocd.argoproj.io/hook: Sync` runs it in the Sync phase, and with
+`BeforeHookCreation` Argo deletes the previous run and creates a fresh Job on every sync, so each
+new image migrates. Sync wave "1" puts it after wave 0 (the CNPG Cluster, which Argo waits to be
+healthy before the next wave, the ServiceAccount, NetworkPolicies) and before the koinon
+Deployments in wave "2" (deployments.yaml). The migration is idempotent (goose Up), so rerunning it
+on every sync is harmless. Plain Helm and Flux's helm-controller ignore the argocd.argoproj.io/*
+annotations and keep using the Helm hooks and the ordinary install Job.
 */ -}}
 {{- $name := include "koinon.componentName" (list . "migrate") }}
 {{- $hook := "pre-install,pre-upgrade" }}
@@ -48,6 +59,11 @@ metadata:
     helm.sh/hook: {{ $hook }}
     helm.sh/hook-weight: "0"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+  {{- else }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "1"
   {{- end }}
 spec:
   backoffLimit: {{ .Values.migrations.backoffLimit }}

@@ -21,16 +21,24 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
 value_files=("$CHART/values.yaml" "$CHART"/ci/*-values.yaml)
+# The chart requires openshell.clientTLSSecret or openshell.insecure=true (#103); the default
+# values set neither, so they are rendered with insecure, as are the assertions below (render).
+# Value files choose for themselves. insecure_for <values file>: the extra helm arguments.
+insecure_for() { [[ $1 == "$CHART/values.yaml" ]] && echo "--set openshell.insecure=true" || true; }
 
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
 	echo "== $name"
-	"$HELM" lint --strict "$CHART" -f "$f"
-	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" >"$out/$name.yaml"
+	# shellcheck disable=SC2046
+	"$HELM" lint --strict "$CHART" -f "$f" $(insecure_for "$f")
+	# shellcheck disable=SC2046
+	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" $(insecure_for "$f") >"$out/$name.yaml"
 done
 
 # Assertions on rendered output: render with --set flags, then grep.
-render() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
+render() { "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true "$@"; }
+# render_raw renders without that default, for the assertions about the TLS choice itself.
+render_raw() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
 # Assertions capture the rendering before grepping it: piping into grep -q under pipefail fails
 # the pipeline when grep exits on the first match and helm then dies of SIGPIPE.
 failures=0
@@ -109,6 +117,29 @@ for f in "${value_files[@]}"; do
 		fail "port 15000 exposed with $(basename "$f")"
 	fi
 done
+# The CONNECT policy (pods/exec, attach, portforward, pods/proxy, services/proxy) and its binding
+# render in every mode that has the sandbox policies, with no exemption (no variables, no identity list), ADR 0048 decision 3.
+for f in "${value_files[@]}"; do
+	r="$out/$(basename "$f" .yaml).yaml"
+	# A value set that turns the policies off (the cluster-scoped objects need admin rights) has none.
+	grep -Eq -- '^kind: ValidatingAdmissionPolicy$' "$r" || { grep -A1 -E '^sandboxPolicy:' "$f" | grep -q 'enabled: false' && continue; }
+	grep -Eq -- '^  name: koinon-koinon-sandbox-connect$' "$r" || fail "no CONNECT policy with $(basename "$f")"
+	[ "$(grep -c -- '^  name: koinon-koinon-sandbox-connect$' "$r")" = 2 ] || fail "CONNECT policy and binding must both render with $(basename "$f")"
+	grep -Eq -- 'operations: \[CONNECT\]' "$r" || fail "no CONNECT rule with $(basename "$f")"
+	grep -Eq -- 'resources: \[pods/exec, pods/attach, pods/portforward, pods/proxy, services/proxy\]' "$r" || fail "CONNECT rule lacks a subresource with $(basename "$f")"
+done
+lacks "no CONNECT policy with sandboxPolicy.enabled=false" 'sandbox-connect' --set sandboxPolicy.enabled=false
+
+# The OpenShell channel needs mTLS (#103): without a client TLS Secret the chart renders only with
+# an explicit openshell.insecure=true, never with both, and each choice reaches the components.
+if render_raw >/dev/null 2>"$out/tls.err"; then fail "no client TLS Secret and no insecure must not render"; fi
+grep -q 'openshell.clientTLSSecret is required' "$out/tls.err" && grep -q 'openshell.insecure=true' "$out/tls.err" || fail "the TLS error must name both openshell.clientTLSSecret and openshell.insecure"
+render_raw --set openshell.clientTLSSecret=tls >/dev/null 2>&1 || fail "a client TLS Secret alone must render"
+render_raw --set openshell.insecure=true >/dev/null 2>&1 || fail "openshell.insecure=true alone must render"
+if render_raw --set openshell.clientTLSSecret=tls --set openshell.insecure=true >"$out/both.out" 2>"$out/both.err"; then fail "a client TLS Secret together with insecure must not render"; fi
+grep -q 'contradict' "$out/both.err" || fail "the TLS-plus-insecure error must say the options contradict"
+has "TLS Secret reaches the reconciler config" 'tls: /etc/koinon/openshell-tls' --set openshell.insecure=false --set openshell.clientTLSSecret=tls --show-only templates/config.yaml
+has "insecure renders an empty tls dir (plaintext, warned by the components)" 'tls: ""' --show-only templates/config.yaml
 # The key-encryption keys (plan item PV1): a generated Secret kept on uninstall, or an existing one;
 # mounted into koinon-api and koinon-reconciler only, never into agentd or the gateway.
 # The chart renders no key material (a render makes new keys every time): koinon-api creates the Secret.
@@ -188,7 +219,7 @@ has "gateway.kubernetes.port is used" 'url: http://koinon-gateway.koinon.svc.clu
 # GitOps-safe renders (issue #98). (a) Two renders of every value set are byte-identical.
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
-	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" >"$out/$name.again"
+	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" $(insecure_for "$f") >"$out/$name.again"
 	cmp -s "$out/$name.yaml" "$out/$name.again" || fail "two renders of $name differ"
 	rm -f "$out/$name.again"
 done
@@ -229,6 +260,18 @@ for name in mine-migrate mine-api mine-reconciler mine-agentd; do
 done
 lacks "the generated role Secret names are unused with existing Secrets" 'koinon-db-' "${own[@]}"
 has "the Cluster's initdb takes the given migrate Secret" 'name: mine-migrate$' "${own[@]}" --show-only templates/postgres-cnpg.yaml
+# Argo CD (#118, ADR 0060): the cnpg install Job is a Sync hook in wave 1 recreated each sync, and what
+# must follow it (the Deployments, the standalone gateway, which needs the reconciler's ConfigMap) is in wave 2.
+mig=$(render --show-only templates/migrate-job.yaml)
+for want in 'argocd.argoproj.io/hook: Sync' 'argocd.argoproj.io/hook-delete-policy: BeforeHookCreation' 'argocd.argoproj.io/sync-wave: "1"'; do
+	grep -qF -- "$want" <<<"$mig" || fail "the cnpg migration Job lacks '$want'"
+done
+lacks "the external-mode migration hook has no Argo annotations" 'argocd.argoproj.io' --set postgres.mode=external --set postgres.external.secretName=db --show-only templates/migrate-job.yaml
+n=$(render --show-only templates/deployments.yaml | grep -c 'argocd.argoproj.io/sync-wave: "2"' || true)
+[ "$n" = 3 ] || fail "$n of the 3 koinon Deployments are in sync wave 2"
+n=$(render --show-only templates/gateway-standalone.yaml | grep -c 'argocd.argoproj.io/sync-wave: "2"' || true)
+[ "$n" = 2 ] || fail "$n of the gateway's PVC and Deployment are in sync wave 2, want 2"
+has "the migration stays a plain Job on install" 'name: koinon-migrate-install$' --show-only templates/migrate-job.yaml
 has "the migration Job reads the given migrate Secret" 'name: mine-migrate$' "${own[@]}" --show-only templates/migrate-job.yaml
 # One role supplied: the hook ensures the rest only.
 lacks "the hook leaves out a supplied role" 'koinon-db-api' --set postgres.cnpg.existingSecrets.api=mine-api --show-only templates/ensure-secrets.yaml
@@ -256,10 +299,10 @@ fi
 # The preflight hook (plan item H2) renders unless preflight.enabled=false, as a pre-install and
 # pre-upgrade hook whose output Helm prints; the probe RBAC only with the seccomp probe on.
 echo "== preflight hook"
-preflight_job() { "$HELM" template koinon "$CHART" --namespace koinon -f "$1" --show-only templates/preflight.yaml 2>/dev/null; }
+preflight_job() { "$HELM" template koinon "$CHART" --namespace koinon -f "$1" $(insecure_for "$1") --show-only templates/preflight.yaml 2>/dev/null; }
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
-	enabled=$("$HELM" template koinon "$CHART" -f "$f" --show-only templates/preflight.yaml >/dev/null 2>&1 && echo true || echo false)
+	enabled=$("$HELM" template koinon "$CHART" -f "$f" $(insecure_for "$f") --show-only templates/preflight.yaml >/dev/null 2>&1 && echo true || echo false)
 	if [[ $name == external-standalone-values ]]; then
 		[[ $enabled == false ]] || { echo "$name: preflight.enabled=false still renders the hook" >&2; exit 1; }
 		continue

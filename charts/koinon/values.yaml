@@ -256,8 +256,13 @@ flavors:
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:
   address: ""
-  # Secret with the client certificate (tls.crt, tls.key, ca.crt) for mTLS. Empty disables mTLS.
+  # Secret with the client certificate (tls.crt, tls.key, ca.crt) for mTLS. Required: the chart
+  # refuses to render without it unless insecure is true.
   clientTLSSecret: ""
+  # Dial the gateway in plaintext. Only for a service mesh that provides mTLS between Koinon and the
+  # gateway; otherwise the exec channel that controls every sandbox crosses the cluster in clear
+  # text. The components log a warning. Not allowed together with clientTLSSecret.
+  insecure: false
   # Default sandbox runtime class (ADR 0045).
   runtimeClassName: kata
 
@@ -270,8 +275,10 @@ openshell:
 publicUrl: ""
 
 # Bootstrap platform admin (plan item A1). The one-time password is generated once into the Secret
-# <fullname>-bootstrap-admin by the ensure-secrets hook Job and never changed by it. Disable once OIDC works: enabled=false
-# turns the API's password login off and revokes the bootstrap sessions.
+# <fullname>-bootstrap-admin by the ensure-secrets hook Job and never changed by it. Disable once OIDC works:
+# enabled=false turns the API's password login off and revokes the bootstrap sessions. The bootstrap admin
+# is the only platform admin until you set oidc.platformAdminGroups and a user in one of those groups has
+# logged in, so do that first.
 bootstrapAdmin:
   enabled: true
   # Login name, applied on every start (changing it renames the login).
@@ -299,6 +306,14 @@ oidc:
   # IdP group -> role in the default org (viewer, member, admin or owner), for example
   # {koinon-admins: admin, staff: member}. Reconciled on every start.
   groupMappings: {}
+  # IdP groups (in groupsClaim) whose members are platform admins, for example [koinon-platform].
+  # Reconciled at every login like groupMappings: a user who gains a listed group becomes a platform
+  # admin, one who loses all of them stops being one. Only grants made by this setting are revoked;
+  # the bootstrap admin keeps its own. Empty changes nothing. Names may contain spaces but not commas,
+  # because the list reaches koinon-api as a comma-separated environment variable. Set it, and log in once as a user in
+  # one of the groups, before you set bootstrapAdmin.enabled=false: without it nobody can set the
+  # platform budget ceilings (/platform/budgets).
+  platformAdminGroups: []
   # Identity mode of the default org: platform (roles from Koinon only), idp (from groupMappings)
   # or hybrid (both).
   defaultOrgIdentityMode: hybrid
@@ -348,7 +363,9 @@ sandboxPolicy:
     - ghcr.io/nvidia/openshell/supervisor:0.1.5
   validationActions: [Deny]
   # Requesting identities (request.userInfo.username) allowed to write each kind of object in
-  # sandbox namespaces. Everyone else is denied, cluster admins included; there is no break-glass.
+  # sandbox namespaces. Everyone else is denied, cluster admins included. CONNECT (pods/exec, attach,
+  # portforward, proxy; services/proxy) is denied to everyone with no exemption; the break-glass
+  # is the runbook docs/ops/sandbox-break-glass.md, not an identity list.
   identities:
     # Pods: the Agent Sandbox controller.
     pods:
