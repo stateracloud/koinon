@@ -115,6 +115,16 @@ if KIND:
         outputs_image_ref_to='.tilt-ko-koinon-fakegithub',
         skips_local_docker=True,
     )
+    custom_build(
+        'kind.local/koinon-fakemcp',
+        'TAG=tilt-$(date +%s) && KO_DOCKER_REPO="kind.local/koinon-fakemcp" KIND_CLUSTER_NAME="' + kind_cluster + '" ' +
+        'ko build --bare --platform=' + platform + ' --tags "$TAG" ./cmd/koinon-fakemcp >/dev/null && ' +
+        'echo "kind.local/koinon-fakemcp:$TAG" > "$TILT_KO_REF"',
+        deps=['cmd/koinon-fakemcp', 'internal', 'go.mod', 'go.sum'],
+        env={'TILT_KO_REF': '.tilt-ko-koinon-fakemcp'},
+        outputs_image_ref_to='.tilt-ko-koinon-fakemcp',
+        skips_local_docker=True,
+    )
 
 # ---- manifests ------------------------------------------------------------------------------
 
@@ -126,6 +136,7 @@ if KIND:
     k8s_resource(new_name='fakes-namespace', objects=['koinon-e2e-fakes:namespace'], labels=['fakes'])
     k8s_resource('fakemodel', resource_deps=['fakes-namespace'], labels=['fakes'])
     k8s_resource('fakegithub', resource_deps=['fakes-namespace'], labels=['fakes'])
+    k8s_resource('fakemcp', resource_deps=['fakes-namespace'], labels=['fakes'])
 
 # The chart is rendered with `helm template`, which is deterministic (the chart has no lookup and
 # renders no password). Hooks are not run by `helm template | kubectl apply`, so the ensure-secrets
