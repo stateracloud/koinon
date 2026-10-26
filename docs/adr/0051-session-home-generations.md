@@ -90,9 +90,17 @@ Consequences: every turn costs one more short model call; a ticket whose agent w
 (a session from before this) hands off from its messages alone; a handoff is a summary, not the
 session, so the agent can miss detail the old session had.
 
-## Amendment (2026-10-26): restored homes resume the session
+## Amendment (2026-10-26, #146 A6): the generation follows the checkpoint lineage
 
 [0065](0065-work-model-tasks-inbox.md) builds home checkpoints in v0.1
-([0032](0032-agent-home-checkpoints.md)). When a recreated sandbox gets its home restored from a
-checkpoint, the harness resumes with `session/load` instead of decision 1's `session/new` and
-reset. The new-generation path above remains for a recreate without a restorable checkpoint.
+([0032](0032-agent-home-checkpoints.md)). The home generation now follows the home's checkpoint
+lineage, not the OpenShell sandbox ID of decision 1:
+
+- A sandbox restored from a checkpoint keeps its generation, and the harness reloads the same
+  session (`session/load`).
+- Only a sandbox created without a checkpoint gets a new generation, and with it decision 1's
+  `session/new`, reset event and handoff.
+
+Prior art (ideas only, no code; its servers are AGPL-3.0): Daytona v0.190.0 keeps a sandbox's
+identity when it restores it from a backup on another runner (`sandbox-start.action.ts:475-540`;
+research notes `daytona.md`).

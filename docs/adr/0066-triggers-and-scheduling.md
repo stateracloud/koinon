@@ -96,11 +96,27 @@ than a Postgres row does (`messaging-and-workflows.md` §3.4).
     - **wait in the queue** instead of failing after 5 minutes;
     - give **interactive work priority** over scheduled work.
 
+### Interruption, watches and warm pools
+
+12. **Interruption** (#146 A2): only a person's chat message on the task can interrupt a running
+    turn. Events, replies from other agents and answers that match a task mid-turn wait until the
+    turn ends, then arrive together. A parked run is resumed by any matching input.
+13. **Task-scoped watch** (#146 A5): an MCP tool `watch(kind, key, until)` waits for one event tied
+    to the agent's own task. It is allowed only for event kinds that the agent's triggers or
+    connections already cover. It expires, is removed when the task ends, and the run parks
+    meanwhile. **This is not agent-created triggers:** triggers stay on the versioned agent
+    (decision 4); a watch adds no new ingress and no new permission.
+14. **Warm pools** (#146 A9, v0.3): only for sandboxes without a home volume (ephemeral agents,
+    [0065](0065-work-model-tasks-inbox.md)), and only once Agent Sandbox and OpenShell support them
+    upstream. Agent Sandbox v1.0.7 ships a `SandboxWarmPool` extension, but OpenShell 0.1.5 drives
+    `Sandbox` directly and has no warm or claim path (`triggers-lifecycle.md` Part 2).
+
 ### Releases (#146)
 
 - v0.1: DBOS; schedule and direct-message triggers.
-- v0.2: code-host and Slack/Teams events (webhooks, Socket Mode, polling, correlation).
-- v0.3: tracker triggers with the tracker connectors.
+- v0.2: code-host and Slack/Teams events (webhooks, Socket Mode, polling, correlation); the
+  interruption rule and `watch`.
+- v0.3: tracker triggers with the tracker connectors; warm pools for home-less sandboxes.
 
 ```mermaid
 flowchart LR
@@ -192,3 +208,5 @@ Checked 2026-10-26 (`messaging-and-workflows.md` §2):
   [0060](0060-migrations-as-a-job.md), [0062](0062-code-host-connectors.md),
   [0064](0064-work-tracker-connectors.md), [0065](0065-work-model-tasks-inbox.md)
 - Research (session notes, 2026-10-26): `triggers-lifecycle.md`, `messaging-and-workflows.md`
+- Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the interruption rule (`system/thread.rs:240-291`, `system/defer.rs:1-17`) and the task-scoped watch (`event_processor.rs:1127-1305`). Research notes: `infinity-code-ideas.md`.
+- Prior art (ideas only, no code; its servers are AGPL-3.0): [daytonaio/daytona](https://github.com/daytonaio/daytona) v0.190.0, for warm pools of home-less sandboxes (`warm-pool.entity.ts:8-48`). Research notes: `daytona.md`.

@@ -10,7 +10,8 @@
   [0049](0049-v01-scope-decisions.md) (board columns, sandbox idle), [0055](0055-chat-as-its-own-object.md)
   (chat next to tasks), [0051](0051-session-home-generations.md) (restored homes resume the session),
   [0006](0006-identity-layers.md), [0018](0018-v1-screens.md), [0019](0019-personal-agents-and-teams.md),
-  [0036](0036-v01-demo.md); supersedes the rest of [0017](0017-board-and-chat-interaction-model.md)
+  [0036](0036-v01-demo.md), [0042](0042-ask-tier-park-and-execute.md) (safe defaults, scoped
+  approvals); supersedes the rest of [0017](0017-board-and-chat-interaction-model.md)
 - Triggers and latency: [0066](0066-triggers-and-scheduling.md)
 
 ## Context
@@ -87,6 +88,10 @@ with the same `taskId` answers an `input-required` task (§6.3).
 10. **No answer.** A reminder after 24 hours (inbox and chat), expiry after 7 days. On expiry the
     agent gets one short "no answer" run, so it can close the task as canceled or ask someone else.
     Both times are set per agent or template.
+10a. **Safe defaults and scoped approvals** (#146 A4; amends [0042](0042-ask-tier-park-and-execute.md)):
+    - every question names a safe default, used when it is dismissed or expires; the agent is told;
+    - approvals can be scoped: once, this task, or this agent and this kind of action until a date;
+    - a scope wider than once needs an admin, shows in the agent's grants, and is audited.
 
 ### Asking an agent: `ask_agent` and `reply`
 
@@ -98,12 +103,33 @@ with the same `taskId` answers an `input-required` task (§6.3).
     - sandboxes never talk to each other over the network.
 12. **An external A2A gateway comes later** (v1.0, `/.well-known/agent-card.json`) and maps onto the
     same tasks. Andre: build `ask_agent` first, then judge whether it works in practice.
+12a. **`ask_agent` guards** (#146 A3), all tunable per org:
+    - refused when the asked agent is already in the chain;
+    - the chain is at most 3 deep;
+    - an agent has at most 5 open questions to other agents;
+    - the same question to the same agent in the same task returns the existing child.
+12b. **Interruption** (#146 A2): only a person's chat message on the task can interrupt a running
+    turn. Events, replies from other agents and answers wait until the turn ends, then arrive
+    together ([0066](0066-triggers-and-scheduling.md)).
 
 ### Long waits survive restarts
 
 13. **Home checkpoints ([0032](0032-agent-home-checkpoints.md)) are built now.** The home (session,
     notes, scratch work) is saved when a sandbox stops or before it is recreated, and restored
     afterwards, so long waits and long tasks survive drains and image bumps.
+13a. **Checkpoint lineage** (#146 A6): a sandbox restored from a checkpoint keeps its home
+    generation and reloads the same session; only a sandbox created without a checkpoint gets a
+    new generation ([0051](0051-session-home-generations.md) amendment).
+13b. **Archive tier** (#146 A7, v0.1): after N days stopped (default 7), once a checkpoint is
+    complete, Koinon deletes the sandbox and its volume and restores into a fresh one on the next
+    run ([0032](0032-agent-home-checkpoints.md) amendment).
+13c. **Ephemeral agents** (#146 A8): an agent or template can be marked ephemeral. Each task gets a
+    fresh sandbox without a home volume, deleted when the task ends; memory lives in task notes and
+    the [0033](0033-file-based-memory.md) stores. The default stays persistent.
+13d. **Failure classes** (#146 A1): a failed run carries a `failure_class` (`transient`,
+    `throttled`, `context_overflow`, `budget`, `policy`, `fatal`) that drives retries and inbox
+    messages; `context_overflow` shrinks the largest input once, then asks the user
+    ([0030](0030-run-state-machine.md) amendment).
 
 ```mermaid
 stateDiagram-v2
@@ -124,8 +150,10 @@ The diagram is a reading aid. Which run park maps to which task state is an open
 
 ### Releases (#146)
 
-- v0.1: tasks, the inbox, `ask_user`, home checkpoints.
-- v0.2: `ask_agent`; Slack and Teams with approval buttons and account linking.
+- v0.1: tasks, the inbox, `ask_user` (with safe defaults), home checkpoints with lineage and the
+  archive tier, failure classes.
+- v0.2: `ask_agent` with its guards; Slack and Teams with approval buttons and account linking;
+  the interruption rule lands with events.
 
 ## Alternatives considered
 
@@ -176,9 +204,8 @@ The diagram is a reading aid. Which run park maps to which task state is an open
 - Which home paths a checkpoint includes. #146 says "session, notes, scratch work"; ADR 0032
   excludes repository checkouts and caches. restic or kopia, and sidecar or Job, stay open there.
 - Whether the park, run-end and periodic checkpoint points of ADR 0032 also ship in v0.1.
-- The default depth limit and cycle key for `ask_agent` ([0011](0011-agent-to-agent.md) open
-  question).
-- Task retention, deletion and archive.
+- Task retention and deletion.
+- The default N for archive is 7 days; whether it is tunable per org or per agent.
 
 ## Upstream verification
 
@@ -201,3 +228,5 @@ The diagram is a reading aid. Which run park maps to which task state is an open
   [0066](0066-triggers-and-scheduling.md)
 - Research (session notes, 2026-10-26): `ticketing-review.md`, `triggers-lifecycle.md`,
   `messaging-and-workflows.md`
+- Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the interruption rule (`system/thread.rs:240-291`, `system/defer.rs`), the `ask_agent` guards (`tools/thread.rs:72-89`) and the failure classes. Research notes: `infinity-code-ideas.md`.
+- Prior art (ideas only, no code; its servers are AGPL-3.0): [daytonaio/daytona](https://github.com/daytonaio/daytona) v0.190.0, for the archive tier and checkpoint lineage. Research notes: `daytona.md`.

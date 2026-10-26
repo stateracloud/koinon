@@ -83,10 +83,15 @@ Delegations that write, and delegations from tickets, are persisted as tickets a
 - `ask_agent` ships in v0.2 (#146), not v0.3.
 - Not decided: whether a read-only delegation from a chat (amendment of 2026-10-23) stays
   ephemeral now that a request is a child task.
+- **Guards** (#146 A3) are decided in [0065](0065-work-model-tasks-inbox.md): refused when the asked
+  agent is already in the chain, at most 3 deep, at most 5 open questions per agent, and the same
+  question to the same agent in the same task returns the existing child. This answers the open
+  question on depth and cycle key below.
 
 ## Open questions
 
-- Maximum default depth and the cycle-detection key (agent ID chain? ticket lineage?).
+- ~~Maximum default depth and the cycle-detection key~~ Answered 2026-10-26 in
+  [0065](0065-work-model-tasks-inbox.md): the agent chain, at most 3 deep.
 - Should agentgateway (which also speaks A2A, [0040](0040-agentgateway-model-and-mcp-gateway.md))
   carry the A2A transport, with Koinon owning the ticket mapping? To be evaluated in v0.3.
 - Agent card discovery path and how private, shared and public visibility filters it
