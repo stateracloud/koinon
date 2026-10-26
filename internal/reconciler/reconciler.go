@@ -162,6 +162,14 @@ type Reconciler struct {
 	// lastLimit is the budget last pushed per agent key, so one agent whose budget cannot be
 	// computed keeps it (and never gets more) instead of stopping the pass for everyone.
 	lastLimit map[gateway.AgentRef]gateway.Limit
+	// notLive holds the IDs of keys issued by this process that no applied gateway state has
+	// carried yet. While the gateway refuses state, an agent with such a key gets no sandbox
+	// work: its provider record would name a key the gateway does not know.
+	notLive map[string]bool
+	// appliedSinceStart is set once a gateway state has been applied by this process. Before
+	// that, notLive is empty after a restart whatever the gateway serves, so a failing Apply holds
+	// back every active agent.
+	appliedSinceStart bool
 	// appliedFile is the key file (data key) each provider ID was last applied with.
 	appliedFile map[string]string
 	// appliedMCPFile is the same for org MCP servers, by server ID.
@@ -345,29 +353,42 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		return errors.Join(append(errs, err)...)
 	}
 	var rejections []gateway.Rejection
+	applyFailed := false
 	if _, err := r.gw.Apply(ctx, state); err != nil {
 		// A Kubernetes-mode gateway judges objects one by one: the revision is live for everything
 		// but the objects named, which are reported on their org and do not hold back the others.
 		var rej *gateway.RejectedError
 		if !errors.As(err, &rej) {
+			// The gateway is unreachable or the reload did not complete. Sandbox work does not
+			// depend on it (start on demand, idle stop), so it goes on, except for agents whose
+			// new key is not live yet. Nothing is recorded as applied and nothing is pruned.
+			applyFailed = true
 			errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
-			return errors.Join(errs...)
+		} else {
+			rejections = rej.Rejected
+			for _, x := range rej.Rejected {
+				r.log.Error("the gateway rejected an object; the rest is live", "org", x.Org, "kind", x.Kind, "object", x.Name, "reason", x.Reason)
+			}
+			errs = append(errs, fmt.Errorf("reconciler: %w", rej))
 		}
-		rejections = rej.Rejected
-		for _, x := range rej.Rejected {
-			r.log.Error("the gateway rejected an object; the rest is live", "org", x.Org, "kind", x.Kind, "object", x.Name, "reason", x.Reason)
-		}
-		errs = append(errs, fmt.Errorf("reconciler: %w", rej))
 	}
-	r.recordApplied(served, state, rejections)
-	r.recordAppliedMCP(mcpServed, probes)
-	if r.cfg.ProviderKeys != nil && len(provErrs) == 0 && len(mcpErrs) == 0 {
-		if err := r.cfg.ProviderKeys.Prune(ctx, keep); err != nil {
-			errs = append(errs, fmt.Errorf("reconciler: prune provider keys: %w", err))
+	if !applyFailed {
+		r.keysLive(state)
+		r.recordApplied(served, state, rejections)
+		r.recordAppliedMCP(mcpServed, probes)
+		if r.cfg.ProviderKeys != nil && len(provErrs) == 0 && len(mcpErrs) == 0 {
+			if err := r.cfg.ProviderKeys.Prune(ctx, keep); err != nil {
+				errs = append(errs, fmt.Errorf("reconciler: prune provider keys: %w", err))
+			}
 		}
 	}
 
 	for _, w := range items {
+		if applyFailed && w.key.ID != "" && w.agent.Status == store.AgentStatusActive && r.keyNotLive(w.key.ID) {
+			r.log.Warn("the gateway does not serve the agent's new key yet; its sandbox work waits", w.logAttrs()...)
+			r.recordMessage(ctx, w, errors.New("waiting for the gateway to serve the agent's new key"))
+			continue
+		}
 		if err := r.reconcileAgent(ctx, w, workspaces); err != nil {
 			r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
 			r.recordMessage(ctx, w, err)
@@ -386,6 +407,24 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// keysLive records that the applied state carries its keys.
+func (r *Reconciler) keysLive(s gateway.State) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.appliedSinceStart = true
+	for _, k := range s.Keys {
+		delete(r.notLive, k.ID)
+	}
+}
+
+// keyNotLive reports whether the gateway may not serve key id yet. Until this process has applied
+// a state, it cannot tell, so every key counts as not live.
+func (r *Reconciler) keyNotLive(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.appliedSinceStart || r.notLive[id]
 }
 
 // settleProviders handles providers whose key file is still settling: with a previously applied
@@ -585,6 +624,12 @@ func (r *Reconciler) ensureKey(ctx context.Context, w *work) (gateway.Key, strin
 		return gateway.Key{}, "", fmt.Errorf("record gateway key: %w", err)
 	}
 	w.sb = sb
+	r.mu.Lock()
+	if r.notLive == nil {
+		r.notLive = map[string]bool{}
+	}
+	r.notLive[issued.ID] = true
+	r.mu.Unlock()
 	r.log.Info("issued agentgateway key", append(w.logAttrs(), "key_id", issued.ID, "reason", reason)...)
 	return issued.Key, issued.Material, nil
 }

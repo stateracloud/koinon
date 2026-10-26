@@ -679,6 +679,86 @@ var _ = Describe("Reconciler", func() {
 		Expect(osg.Calls("CreateProvider")).To(Equal(0))
 	})
 
+	Describe("when the gateway cannot apply the state", func() {
+		phase := func(row store.AgentSandbox, agent pgtype.UUID) openshellv1.SandboxPhase {
+			names := execution.AgentObjectNames(org.Bytes, agent.Bytes)
+			return osg.Sandbox(row.Workspace, names.Sandbox).GetStatus().GetPhase()
+		}
+
+		It("still starts a stopped sandbox with demand and stops an idle one, and reports the error", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			b := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+
+			mg.fail = errors.New("gateway unreachable")
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("gateway unreachable")))
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED), "idle stop")
+			Expect(sandboxRow(ctx, b.ID).State).To(Equal(store.SandboxStateStopped))
+
+			now.Store(nil)
+			queueRun(ctx, org, user, a.ID)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("gateway unreachable")))
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY), "start on demand")
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateReady))
+			Expect(sandboxRow(ctx, b.ID).State).To(Equal(store.SandboxStateStopped), "no demand for b")
+		})
+
+		It("records sandbox state of agents whose keys did not change, and holds back an agent whose new key is not live", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			keyBefore := sandboxRow(ctx, a.ID).GatewayKeyID
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
+
+			// A reload that does not complete in time, as a slow Waiter reports it.
+			mg.fail = fmt.Errorf("wait for revision: %w", context.DeadlineExceeded)
+			fresh := newAgent(ctx, org, user)
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(context.DeadlineExceeded))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "a's state is recorded")
+			Expect(sandboxRow(ctx, a.ID).GatewayKeyID).To(Equal(keyBefore))
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1), "the fresh agent's key is not live: no sandbox yet")
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for the gateway"))
+
+			By("the gateway is back")
+			mg.fail = nil
+			now.Store(nil)
+			pass(ctx, r)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(2))
+			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("holds back every agent after a restart until one Apply has succeeded", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			pass(ctx, newReconciler())
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+
+			restarted := newReconciler()
+			mg.fail = errors.New("gateway unreachable")
+			advance(11 * time.Minute)
+			Expect(restarted.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY),
+				"the recorded key may not be live: no sandbox work")
+
+			mg.fail = nil
+			pass(ctx, restarted)
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
+		})
+
+		It("keeps holding back a new key over later failed passes", func(ctx SpecContext) {
+			r := newReconciler()
+			newAgent(ctx, org, user)
+			mg.fail = errors.New("gateway unreachable")
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(osg.Calls("CreateSandbox")).To(Equal(0))
+			Expect(osg.Calls("CreateProvider")).To(Equal(0))
+		})
+	})
+
 	It("goes on when the gateway rejects only some orgs' objects, and reports them on the org's agents", func(ctx SpecContext) {
 		agent := newAgent(ctx, org, user)
 		var slug string
