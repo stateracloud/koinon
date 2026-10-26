@@ -7,7 +7,8 @@
 # swapped for a "local checks recorded" gate without touching the release job.
 #
 # Environment: TAG (v1.2.3 or v1.2.3-rc.1), SHA (the tagged commit), GITHUB_REPOSITORY and GH_TOKEN
-# (needs checks:read and contents:read). Needs gh, git and awk, and a clone with origin/main.
+# (needs checks:read, contents:read and pull-requests:read: the dco check runs on pull requests only,
+# so it is read from the head commit of the pull request that merged the tagged commit). Needs gh, git and awk, and a clone with origin/main.
 set -euo pipefail
 
 : "${TAG:?}" "${SHA:?}" "${GITHUB_REPOSITORY:?}" "${GH_TOKEN:?}"
