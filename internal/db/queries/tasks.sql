@@ -15,6 +15,13 @@ RETURNING *;
 SELECT * FROM tasks
 WHERE org_id = @org_id AND id = @id;
 
+-- name: GetTaskForUpdate :one
+-- Like GetTask, and locks the row until the transaction ends, so a read-then-change of the state
+-- cannot interleave with another one.
+SELECT * FROM tasks
+WHERE org_id = @org_id AND id = @id
+FOR UPDATE;
+
 -- name: ListTasks :many
 SELECT * FROM tasks
 WHERE org_id = @org_id
@@ -24,7 +31,7 @@ ORDER BY created_at, id;
 -- The tasks in any of the states, oldest first (a board column of the ticket API is a set of
 -- states).
 SELECT * FROM tasks
-WHERE org_id = @org_id AND state::text = ANY(@states::text[])
+WHERE org_id = @org_id AND state = ANY((@states::text[])::task_state[])
 ORDER BY created_at, id;
 
 -- name: SetTaskState :one
@@ -87,6 +94,6 @@ ORDER BY seq;
 -- task is elsewhere (for example in an end state, or a person moved it).
 UPDATE tasks
 SET state = @to_state::task_state
-WHERE org_id = @org_id AND id = @id AND state::text = ANY(@from_states::text[])
+WHERE org_id = @org_id AND id = @id AND state = ANY((@from_states::text[])::task_state[])
   AND @to_state::task_state NOT IN ('completed', 'canceled', 'failed')
 RETURNING *;

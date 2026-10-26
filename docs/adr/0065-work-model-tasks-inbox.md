@@ -204,6 +204,9 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   and `to` of `status.changed` become states. `TicketService` stays as a deprecated layer over
   tasks until TK2: the column is derived from the state (completed, canceled and failed show as
   Done) and a move to Done completes the task.
+  TK1 keeps today's behaviour otherwise: a run starting does not move a task to working and runs
+  do not end tasks, so a task stays submitted while its agent works, as a ticket stayed in To do;
+  that comes with TK2/TK3/LT1, and the diagram above is the target.
 - How a direct message in the inbox chat (a trigger, [0066](0066-triggers-and-scheduling.md)) relates
   to [0055](0055-chat-as-its-own-object.md)'s private chat that "becomes a ticket when the person
   confirms".

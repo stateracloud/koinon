@@ -270,6 +270,9 @@ type Querier interface {
 	GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkManifestParams) (GetSavedWorkManifestRow, error)
 	GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error)
 	GetTask(ctx context.Context, arg GetTaskParams) (Task, error)
+	// Like GetTask, and locks the row until the transaction ends, so a read-then-change of the state
+	// cannot interleave with another one.
+	GetTaskForUpdate(ctx context.Context, arg GetTaskForUpdateParams) (Task, error)
 	// The highest task timeline seq already sent to the harness by the task's
 	// other runs; messages after it are new for the next run.
 	GetTaskPromptedThrough(ctx context.Context, arg GetTaskPromptedThroughParams) (int64, error)

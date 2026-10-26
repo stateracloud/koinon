@@ -161,6 +161,46 @@ func (q *Queries) GetTask(ctx context.Context, arg GetTaskParams) (Task, error) 
 	return i, err
 }
 
+const getTaskForUpdate = `-- name: GetTaskForUpdate :one
+SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id FROM tasks
+WHERE org_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetTaskForUpdateParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// Like GetTask, and locks the row until the transaction ends, so a read-then-change of the state
+// cannot interleave with another one.
+func (q *Queries) GetTaskForUpdate(ctx context.Context, arg GetTaskForUpdateParams) (Task, error) {
+	row := q.db.QueryRow(ctx, getTaskForUpdate, arg.OrgID, arg.ID)
+	var i Task
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.Title,
+		&i.AgentID,
+		&i.CreatedByUserID,
+		&i.HarnessSessionID,
+		&i.HarnessSessionCwd,
+		&i.LastEventSeq,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HarnessSessionGeneration,
+		&i.AgentSummary,
+		&i.AgentSummaryAt,
+		&i.SessionRestartPending,
+		&i.State,
+		&i.CreatedByKind,
+		&i.CreatedByAgentID,
+		&i.CreatedByTriggerID,
+	)
+	return i, err
+}
+
 const listTaskEvents = `-- name: ListTaskEvents :many
 SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM task_events
 WHERE org_id = $1 AND task_id = $2 AND seq > $3
@@ -308,7 +348,7 @@ func (q *Queries) ListTasks(ctx context.Context, orgID pgtype.UUID) ([]Task, err
 
 const listTasksByStates = `-- name: ListTasksByStates :many
 SELECT org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id FROM tasks
-WHERE org_id = $1 AND state::text = ANY($2::text[])
+WHERE org_id = $1 AND state = ANY(($2::text[])::task_state[])
 ORDER BY created_at, id
 `
 
@@ -467,7 +507,7 @@ func (q *Queries) SetTaskState(ctx context.Context, arg SetTaskStateParams) (Tas
 const setTaskStateFrom = `-- name: SetTaskStateFrom :one
 UPDATE tasks
 SET state = $1::task_state
-WHERE org_id = $2 AND id = $3 AND state::text = ANY($4::text[])
+WHERE org_id = $2 AND id = $3 AND state = ANY(($4::text[])::task_state[])
   AND $1::task_state NOT IN ('completed', 'canceled', 'failed')
 RETURNING org_id, id, title, agent_id, created_by_user_id, harness_session_id, harness_session_cwd, last_event_seq, finished_at, created_at, updated_at, harness_session_generation, agent_summary, agent_summary_at, session_restart_pending, state, created_by_kind, created_by_agent_id, created_by_trigger_id
 `

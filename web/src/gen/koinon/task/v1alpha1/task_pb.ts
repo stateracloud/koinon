@@ -478,7 +478,7 @@ export enum TaskState {
   UNSPECIFIED = 0,
 
   /**
-   * Created; no run has started on it.
+   * Created; not yet picked up as working.
    *
    * @generated from enum value: TASK_STATE_SUBMITTED = 1;
    */
