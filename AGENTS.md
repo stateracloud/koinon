@@ -11,6 +11,14 @@ Instructions for coding agents working on Koinon.
   `test/e2e/run.sh` runs; after changing one, run `hack/docs-check.sh --update`.
 - After changing `.proto` files or `internal/db/queries/*.sql`, run `make generate` and commit the
   output. CI fails if generated code is stale.
+- Chart: `hack/chart-check.sh` (lint, every mode rendered, render assertions, kubeconform). Add an
+  assertion for every chart behaviour you change.
+- Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): the escape suite,
+  `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./test/escape/ -ginkgo.label-filter=admission`.
+- Migrations: `hack/migrate-lint.sh origin/main` (merged migrations unchanged, numbers contiguous).
+- `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
+- Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
+  every commit of a pull request, so a leak fixed in a later commit still fails.
 
 ## Conventions
 
@@ -23,7 +31,14 @@ Instructions for coding agents working on Koinon.
   merged migration. Tables owned by an org are keyed by `(org_id, id)` with composite foreign keys.
 - Every source file starts with `SPDX-License-Identifier: Apache-2.0`.
 - Tests: Ginkgo/Gomega and testcontainers-go in Go, Vitest in `web/`. CI never calls paid models:
-  use the fake model server.
+  use the fake model server. Fake secrets in tests are obviously fake and low-entropy
+  (`koinon_test_not-a-real-token`).
+- Chart renders are deterministic: no Helm `lookup` and no random values in templates. Generated
+  secrets come from the ensure-secrets hook Job; objects the reconciler owns are created by the
+  reconciler. Every image reference goes through `koinon.imageRef` and every pod spec gets
+  `koinon.imagePullSecrets` (ADR 0061). Values files without an OpenShell client TLS Secret must
+  set `openshell.insecure: true`.
+- Metric labels never carry org, agent, user, ticket or run IDs; use fixed label sets (ADR 0023).
 
 ## Hard rules
 
