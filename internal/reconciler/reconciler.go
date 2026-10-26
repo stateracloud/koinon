@@ -166,6 +166,10 @@ type Reconciler struct {
 	// carried yet. While the gateway refuses state, an agent with such a key gets no sandbox
 	// work: its provider record would name a key the gateway does not know.
 	notLive map[string]bool
+	// appliedSinceStart is set once a gateway state has been applied by this process. Before
+	// that, notLive is empty after a restart whatever the gateway serves, so a failing Apply holds
+	// back every active agent.
+	appliedSinceStart bool
 	// appliedFile is the key file (data key) each provider ID was last applied with.
 	appliedFile map[string]string
 	// appliedMCPFile is the same for org MCP servers, by server ID.
@@ -380,7 +384,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	}
 
 	for _, w := range items {
-		if applyFailed && w.key.ID != "" && r.keyNotLive(w.key.ID) {
+		if applyFailed && w.key.ID != "" && w.agent.Status == store.AgentStatusActive && r.keyNotLive(w.key.ID) {
 			r.log.Warn("the gateway does not serve the agent's new key yet; its sandbox work waits", w.logAttrs()...)
 			r.recordMessage(ctx, w, errors.New("waiting for the gateway to serve the agent's new key"))
 			continue
@@ -409,15 +413,18 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 func (r *Reconciler) keysLive(s gateway.State) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.appliedSinceStart = true
 	for _, k := range s.Keys {
 		delete(r.notLive, k.ID)
 	}
 }
 
+// keyNotLive reports whether the gateway may not serve key id yet. Until this process has applied
+// a state, it cannot tell, so every key counts as not live.
 func (r *Reconciler) keyNotLive(id string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.notLive[id]
+	return !r.appliedSinceStart || r.notLive[id]
 }
 
 // settleProviders handles providers whose key file is still settling: with a previously applied
