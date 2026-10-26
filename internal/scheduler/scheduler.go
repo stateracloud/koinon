@@ -8,7 +8,7 @@
 //   - A run gets the caps of the agent version it executes (from the
 //     template): a wall-clock cap enforced by Sweeper and a token cap enforced
 //     by RecordTokenUsage, which whoever records usage calls.
-//   - Every cancel writes a run event and a ticket event saying why.
+//   - Every cancel writes a run event and a task event saying why.
 //
 // Functions taking a *store.Queries run inside the caller's transaction.
 package scheduler
@@ -28,7 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
-// Event kinds written by the scheduler, on both the run and the ticket.
+// Event kinds written by the scheduler, on both the run and the task.
 const (
 	KindRunQueued   = "run.queued"
 	KindRunCanceled = "run.canceled"
@@ -40,8 +40,9 @@ type CancelReason string
 
 // Cancel reasons.
 const (
-	ReasonUser          CancelReason = "user"
-	ReasonTicketDone    CancelReason = "ticket_done"
+	ReasonUser CancelReason = "user"
+	// ReasonTaskDone: the task reached an end state. The value is what earlier events stored.
+	ReasonTaskDone      CancelReason = "ticket_done"
 	ReasonAgentArchived CancelReason = "agent_archived"
 	ReasonWallClockCap  CancelReason = "wall_clock_cap"
 	ReasonTokenCap      CancelReason = "token_cap"
@@ -52,14 +53,14 @@ const (
 	ReasonApprovalExpired CancelReason = "approval_expired"
 )
 
-// ErrAgentNotActive means the ticket's agent cannot take runs.
+// ErrAgentNotActive means the task's agent cannot take runs.
 var ErrAgentNotActive = errors.New("agent is not active")
 
 // ErrAgentUnhealthy means the agent's sandbox keeps getting stuck and an admin has not resumed it
 // (ADR 0054). The error wraps the reason.
 var ErrAgentUnhealthy = errors.New("agent is unhealthy")
 
-// Actor is who caused a scheduler action, for the ticket event.
+// Actor is who caused a scheduler action, for the task event.
 type Actor struct {
 	// UserID is set for a user; otherwise the actor is the system.
 	UserID pgtype.UUID
@@ -68,25 +69,25 @@ type Actor struct {
 // System is the actor for automatic actions (caps, sweeps).
 var System = Actor{}
 
-// Enqueue queues a run of the ticket's agent for the ticket, with the caps of
+// Enqueue queues a run of the task's agent for the task, with the caps of
 // the agent's active version. It queues nothing, and returns false, when the
-// ticket has no agent or already has a queued run (that run will see every
-// message appended before it starts). The caller must hold the ticket's row
-// lock (for example by having appended a ticket event in the same
-// transaction), so concurrent calls for one ticket queue at most one run.
-func Enqueue(ctx context.Context, q *store.Queries, ticket store.Ticket) (store.Run, bool, error) {
-	if !ticket.AgentID.Valid {
+// task has no agent or already has a queued run (that run will see every
+// message appended before it starts). The caller must hold the task's row
+// lock (for example by having appended a task event in the same
+// transaction), so concurrent calls for one task queue at most one run.
+func Enqueue(ctx context.Context, q *store.Queries, task store.Task) (store.Run, bool, error) {
+	if !task.AgentID.Valid {
 		return store.Run{}, false, nil
 	}
-	org := ticket.OrgID
-	queued, err := q.HasQueuedRunForTicket(ctx, store.HasQueuedRunForTicketParams{OrgID: org, TicketID: ticket.ID})
+	org := task.OrgID
+	queued, err := q.HasQueuedRunForTask(ctx, store.HasQueuedRunForTaskParams{OrgID: org, TaskID: task.ID})
 	if err != nil {
 		return store.Run{}, false, err
 	}
 	if queued {
 		return store.Run{}, false, nil
 	}
-	agent, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: ticket.AgentID})
+	agent, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: task.AgentID})
 	if err != nil {
 		return store.Run{}, false, fmt.Errorf("load agent: %w", err)
 	}
@@ -106,7 +107,7 @@ func Enqueue(ctx context.Context, q *store.Queries, ticket store.Ticket) (store.
 	}
 	wallClock, maxTokens := cfg.RunCaps()
 	run, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: org, AgentID: agent.ID, TicketID: ticket.ID,
+		OrgID: org, AgentID: agent.ID, TaskID: task.ID,
 		MaxWallClockSeconds: int32(wallClock / time.Second), //nolint:gosec // bounded by templates.MaxRunDuration
 		MaxTokens:           maxTokens,
 	})
@@ -127,11 +128,11 @@ func Enqueue(ctx context.Context, q *store.Queries, ticket store.Ticket) (store.
 		return store.Run{}, false, fmt.Errorf("append run event: %w", err)
 	}
 	run.LastEventSeq = ev.Seq
-	if _, err := q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-		OrgID: org, TicketID: ticket.ID, Kind: KindRunQueued, ActorKind: store.TicketActorKindSystem,
+	if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+		OrgID: org, TaskID: task.ID, Kind: KindRunQueued, ActorKind: store.TaskActorKindSystem,
 		RunID: run.ID, Payload: payload,
 	}); err != nil {
-		return store.Run{}, false, fmt.Errorf("append ticket event: %w", err)
+		return store.Run{}, false, fmt.Errorf("append task event: %w", err)
 	}
 	return run, true, nil
 }
@@ -146,17 +147,17 @@ func Cancel(ctx context.Context, q *store.Queries, org, runID pgtype.UUID, reaso
 	return RecordCancel(ctx, q, run, reason, message, actor, nil)
 }
 
-// CancelQueuedForTicket cancels the ticket's queued runs, when it moves to
-// Done.
-func CancelQueuedForTicket(ctx context.Context, q *store.Queries, ticket store.Ticket, actor Actor) ([]store.Run, error) {
-	const msg = "ticket moved to Done"
-	runs, err := q.CancelQueuedRunsForTicket(ctx, store.CancelQueuedRunsForTicketParams{
-		OrgID: ticket.OrgID, TicketID: ticket.ID, OutcomeReason: msg,
+// CancelQueuedForTask cancels the task's queued runs, when it reaches an end
+// state.
+func CancelQueuedForTask(ctx context.Context, q *store.Queries, task store.Task, actor Actor) ([]store.Run, error) {
+	const msg = "task ended"
+	runs, err := q.CancelQueuedRunsForTask(ctx, store.CancelQueuedRunsForTaskParams{
+		OrgID: task.OrgID, TaskID: task.ID, OutcomeReason: msg,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return recordAll(ctx, q, runs, ReasonTicketDone, msg, actor)
+	return recordAll(ctx, q, runs, ReasonTaskDone, msg, actor)
 }
 
 // CancelForAgent cancels every unfinished run of an agent, when it is
@@ -184,7 +185,7 @@ func recordAll(ctx context.Context, q *store.Queries, runs []store.Run, reason C
 	return out, nil
 }
 
-// RecordCancel writes the run and ticket events for a run that was just
+// RecordCancel writes the run and task events for a run that was just
 // canceled. extra is merged into the payload.
 func RecordCancel(ctx context.Context, q *store.Queries, run store.Run, reason CancelReason, message string, actor Actor, extra map[string]any) (store.Run, error) {
 	p := map[string]any{"reason": string(reason), "message": message}
@@ -199,15 +200,15 @@ func RecordCancel(ctx context.Context, q *store.Queries, run store.Run, reason C
 		return store.Run{}, fmt.Errorf("append run event: %w", err)
 	}
 	run.LastEventSeq = ev.Seq
-	te := store.AppendTicketEventParams{
-		OrgID: run.OrgID, TicketID: run.TicketID, Kind: KindRunCanceled,
-		ActorKind: store.TicketActorKindSystem, RunID: run.ID, Payload: payload,
+	te := store.AppendTaskEventParams{
+		OrgID: run.OrgID, TaskID: run.TaskID, Kind: KindRunCanceled,
+		ActorKind: store.TaskActorKindSystem, RunID: run.ID, Payload: payload,
 	}
 	if actor.UserID.Valid {
-		te.ActorKind, te.ActorUserID = store.TicketActorKindUser, actor.UserID
+		te.ActorKind, te.ActorUserID = store.TaskActorKindUser, actor.UserID
 	}
-	if _, err := q.AppendTicketEvent(ctx, te); err != nil {
-		return store.Run{}, fmt.Errorf("append ticket event: %w", err)
+	if _, err := q.AppendTaskEvent(ctx, te); err != nil {
+		return store.Run{}, fmt.Errorf("append task event: %w", err)
 	}
 	return run, nil
 }
@@ -221,7 +222,7 @@ type DB interface {
 // RecordTokenUsage is the token-cap hook: whoever learns a run's token usage
 // (agentd from ACP usage updates, or the spend ledger from agentgateway's
 // access log) calls it with the tokens used since the last report. When the
-// run's total reaches its cap, the run is canceled with a ticket event. It
+// run's total reaches its cap, the run is canceled with a task event. It
 // returns the updated run; pgx.ErrNoRows means the run has finished or does
 // not exist in the org, and the usage is dropped.
 func RecordTokenUsage(ctx context.Context, db DB, org, runID pgtype.UUID, tokens int64) (store.Run, error) {

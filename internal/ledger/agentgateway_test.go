@@ -96,7 +96,7 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 		needDocker()
 		// $0.03 per day; each request is 10 + 10 tokens at $50/1M, so $0.001.
 		e = newEnv(ctx, uniq("org"), "", "0.03", 1_000_000)
-		run = e.startRun(ctx, e.ticket(ctx), 1_000_000, time.Now().Add(-time.Minute))
+		run = e.startRun(ctx, e.task(ctx), 1_000_000, time.Now().Add(-time.Minute))
 
 		model, err := fakemodel.New(fakemodel.Script{Model: pricedModel, Turns: []fakemodel.Turn{{
 			Text: "ok", Usage: fakemodel.Usage{InputTokens: 10, OutputTokens: 10},

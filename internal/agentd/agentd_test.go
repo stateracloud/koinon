@@ -67,9 +67,9 @@ func eventOf(evs []store.RunEvent, kind string) []store.RunEvent {
 }
 
 var _ = Describe("Pool", func() {
-	It("drives a ticket's first run: new session, prompt, updates, permissions, end_turn", func(ctx SpecContext) {
+	It("drives a task's first run: new session, prompt, updates, permissions, end_turn", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, markPermit+" please")
+		t := e.task(ctx, markPermit+" please")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 
@@ -100,14 +100,14 @@ var _ = Describe("Pool", func() {
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/" + model}))
 		Expect(e.gw.Sandbox(e.workspace, e.sandbox).GetSpec().GetEnvironment()).To(BeEmpty())
 
-		// The session is stored on the ticket.
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		// The session is stored on the task.
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.HarnessSessionID.String).To(Equal("ses_1"))
 		Expect(got.HarnessSessionCwd.String).To(Equal("/sandbox/work"))
 
 		prompts, loads, _, _ := e.harness.snapshot()
-		Expect(prompts).To(Equal([]string{"Ticket: " + t.Title + "\n\n" + markPermit + " please"}))
+		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\n" + markPermit + " please"}))
 		Expect(loads).To(BeEmpty())
 
 		evs := events(ctx, r)
@@ -131,17 +131,17 @@ var _ = Describe("Pool", func() {
 		Expect(final.PromptThroughSeq.Int64).To(BeEquivalentTo(1))
 		Expect(final.FinishedAt.Valid).To(BeTrue())
 
-		// The agent's reply lands on the ticket.
-		tevs := ticketEvents(ctx, e, t)
+		// The agent's reply lands on the task.
+		tevs := taskEvents(ctx, e, t)
 		Expect(tevs).To(HaveLen(2))
 		Expect(tevs[1].Kind).To(Equal("message"))
-		Expect(tevs[1].ActorKind).To(Equal(store.TicketActorKindAgent))
+		Expect(tevs[1].ActorKind).To(Equal(store.TaskActorKindAgent))
 		Expect(string(tevs[1].Payload)).To(ContainSubstring("asking: edit=allow,fetch=reject"))
 	})
 
-	It("loads the ticket's session on its next run and sends only the new messages", func(ctx SpecContext) {
+	It("loads the task's session on its next run and sends only the new messages", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, "first")
+		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -152,7 +152,7 @@ var _ = Describe("Pool", func() {
 		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 
 		prompts, loads, _, _ := e.harness.snapshot()
-		Expect(prompts).To(Equal([]string{"Ticket: " + t.Title + "\n\nfirst", "second\n\nthird"}))
+		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\nfirst", "second\n\nthird"}))
 		Expect(loads).To(Equal([]string{"ses_1"}))
 
 		// The replayed history is not recorded again.
@@ -162,21 +162,21 @@ var _ = Describe("Pool", func() {
 		Expect(payload(evs[0])).To(HaveKeyWithValue("loaded", true))
 
 		// The session was stored in the sandbox's home generation, which still matches.
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.HarnessSessionGeneration.String).To(Equal(e.gw.Sandbox(e.workspace, e.sandbox).GetMetadata().GetId()))
 		Expect(got.HarnessSessionGeneration.String).NotTo(BeEmpty())
-		Expect(kindsOf(ticketEvents(ctx, e, t))).NotTo(ContainElement("run.session_reset"))
+		Expect(kindsOf(taskEvents(ctx, e, t))).NotTo(ContainElement("run.session_reset"))
 	})
 
 	It("starts a new session when the sandbox home was replaced since the session was stored", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, "first")
+		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		stop := e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		stop()
-		before, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 
 		// The reconciler recreates the sandbox (a spec change); OpenShell deletes its home.
@@ -192,11 +192,11 @@ var _ = Describe("Pool", func() {
 		prompts, loads, _, _ := e.harness.snapshot()
 		Expect(loads).To(BeEmpty(), "no session/load into an empty home")
 		Expect(prompts).To(Equal([]string{
-			"Ticket: " + t.Title + "\n\nfirst",
-			"Ticket: " + t.Title + "\n\nfirst\n\nsecond",
-		}), "the new session gets the whole ticket")
+			"Task: " + t.Title + "\n\nfirst",
+			"Task: " + t.Title + "\n\nfirst\n\nsecond",
+		}), "the new session gets the whole task")
 
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.HarnessSessionID.String).To(Equal("ses_2"))
 		Expect(got.HarnessSessionGeneration.String).To(Equal(home))
@@ -205,14 +205,14 @@ var _ = Describe("Pool", func() {
 		Expect(payload(evs[0])).To(HaveKeyWithValue("loaded", false))
 		Expect(payload(evs[0])).To(HaveKeyWithValue("reset", true))
 
-		var reset []store.TicketEvent
-		for _, ev := range ticketEvents(ctx, e, t) {
+		var reset []store.TaskEvent
+		for _, ev := range taskEvents(ctx, e, t) {
 			if ev.Kind == "run.session_reset" {
 				reset = append(reset, ev)
 			}
 		}
 		Expect(reset).To(HaveLen(1))
-		Expect(reset[0].ActorKind).To(Equal(store.TicketActorKindSystem))
+		Expect(reset[0].ActorKind).To(Equal(store.TaskActorKindSystem))
 		Expect(reset[0].RunID).To(Equal(r2.ID))
 		var p map[string]string
 		Expect(json.Unmarshal(reset[0].Payload, &p)).To(Succeed())
@@ -223,13 +223,13 @@ var _ = Describe("Pool", func() {
 
 	It("starts a new session for a session stored without a home generation", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, "first")
+		t := e.task(ctx, "first")
 		r1 := e.enqueue(ctx, t)
 		stop := e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		stop()
-		// A ticket from before home generations existed.
-		_, err := db.Exec(ctx, `UPDATE tickets SET harness_session_generation = NULL WHERE org_id = $1 AND id = $2`, e.org, t.ID)
+		// A task from before home generations existed.
+		_, err := db.Exec(ctx, `UPDATE tasks SET harness_session_generation = NULL WHERE org_id = $1 AND id = $2`, e.org, t.ID)
 		Expect(err).NotTo(HaveOccurred())
 
 		r2 := e.enqueue(ctx, t)
@@ -237,8 +237,8 @@ var _ = Describe("Pool", func() {
 		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		_, loads, _, _ := e.harness.snapshot()
 		Expect(loads).To(BeEmpty())
-		Expect(kindsOf(ticketEvents(ctx, e, t))).To(ContainElement("run.session_reset"))
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		Expect(kindsOf(taskEvents(ctx, e, t))).To(ContainElement("run.session_reset"))
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.HarnessSessionGeneration.Valid).To(BeTrue())
 	})
@@ -247,7 +247,7 @@ var _ = Describe("Pool", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.gw.SetPhase(e.workspace, e.sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED)
 		e.recordSandbox(ctx, store.SandboxStateStopped, "")
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
 
@@ -283,7 +283,7 @@ var _ = Describe("Pool", func() {
 	It("fails a run whose sandbox the reconciler does not make ready in time", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateStopped, "")
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("sandbox not ready after 1s (stopped)"))
@@ -292,7 +292,7 @@ var _ = Describe("Pool", func() {
 
 	It("honours a cancel with session/cancel and records nothing after it", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		r := e.enqueue(ctx, e.ticket(ctx, markWait))
+		r := e.enqueue(ctx, e.task(ctx, markWait))
 		e.pool("agentd-a")
 		Eventually(func() []string { return chunks(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(Equal([]string{"working"}))
 
@@ -309,9 +309,9 @@ var _ = Describe("Pool", func() {
 
 	It("cancels the run at the wall-clock cap", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, markWait)
+		t := e.task(ctx, markWait)
 		r, err := q.CreateRun(ctx, store.CreateRunParams{
-			OrgID: e.org, AgentID: e.agent.ID, TicketID: t.ID, MaxWallClockSeconds: 2, MaxTokens: 1000,
+			OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 2, MaxTokens: 1000,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		e.pool("agentd-a")
@@ -321,12 +321,12 @@ var _ = Describe("Pool", func() {
 		Expect(cancels).To(Equal(1))
 		Expect(kinds(events(ctx, r))).To(HaveLen(4))
 		Expect(kinds(events(ctx, r))[3]).To(Equal("run.canceled"))
-		Expect(ticketEvents(ctx, e, t)[1].Kind).To(Equal("run.canceled"))
+		Expect(taskEvents(ctx, e, t)[1].Kind).To(Equal("run.canceled"))
 	})
 
 	It("resumes with session/load under a new epoch when the exec stream drops", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, markCrash)
+		t := e.task(ctx, markCrash)
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -348,12 +348,12 @@ var _ = Describe("Pool", func() {
 		Expect(payload(evs[3])).To(HaveKeyWithValue("exitCode", BeEquivalentTo(137)))
 		Expect(payload(evs[5])).To(HaveKeyWithValue("resumed", true))
 		Expect(chunks(evs)).To(Equal([]string{"before the crash ", "resumed"}))
-		Expect(string(ticketEvents(ctx, e, t)[1].Payload)).To(ContainSubstring("before the crash resumed"))
+		Expect(string(taskEvents(ctx, e, t)[1].Payload)).To(ContainSubstring("before the crash resumed"))
 	})
 
 	It("lets another replica take over a killed worker's run, without duplicate events", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, markHang)
+		t := e.task(ctx, markHang)
 		r := e.enqueue(ctx, t)
 		killA := e.pool("agentd-a", func(c *agentd.Config) { c.KeepLeaseOnShutdown = true })
 		Eventually(e.harness.hangs).WithTimeout(10 * time.Second).Should(Receive())
@@ -390,9 +390,9 @@ var _ = Describe("Pool", func() {
 
 	It("fails the run with a reason when the session cannot be loaded", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		// Stored in the current home, so agentd loads it, but the harness does not know it.
-		_, err := db.Exec(ctx, `UPDATE tickets SET harness_session_id = 'ses_gone', harness_session_cwd = '/sandbox/work',
+		_, err := db.Exec(ctx, `UPDATE tasks SET harness_session_id = 'ses_gone', harness_session_cwd = '/sandbox/work',
 			harness_session_generation = $3 WHERE org_id = $1 AND id = $2`,
 			e.org, t.ID, e.gw.Sandbox(e.workspace, e.sandbox).GetMetadata().GetId())
 		Expect(err).NotTo(HaveOccurred())
@@ -402,14 +402,14 @@ var _ = Describe("Pool", func() {
 		final := getRun(ctx, r)
 		Expect(final.OutcomeReason.String).To(HavePrefix("session/load: "))
 		Expect(kinds(events(ctx, r))).To(Equal([]string{"run.failed"}))
-		tevs := ticketEvents(ctx, e, t)
+		tevs := taskEvents(ctx, e, t)
 		Expect(tevs[len(tevs)-1].Kind).To(Equal("run.failed"))
 	})
 
 	DescribeTable("runs each flavor's entry script with the agent's endpoints",
 		func(ctx SpecContext, flavor store.AgentFlavor, script, link string) {
 			e := newEnv(ctx, flavor)
-			r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a")
 			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 			// The sweep, mkdir, the instruction file and its check, the harness, the file's and
@@ -427,7 +427,7 @@ var _ = Describe("Pool", func() {
 
 	It("writes the run's instructions before the harness starts and records their hash", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -463,7 +463,7 @@ var _ = Describe("Pool", func() {
 	It("ends what an earlier run left running before the harness starts, and records it", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.files.sweep = func() (string, int) { return "ended: 41 57\n", 0 }
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		evs := events(ctx, r)
@@ -478,7 +478,7 @@ var _ = Describe("Pool", func() {
 		// The harness ignores end-of-file: closing it takes two seconds, long enough for a
 		// heartbeat to find the run finished.
 		e.harness.set(func(h *harness) { h.lingers = true })
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Eventually(e.files.sweepCount).WithTimeout(10*time.Second).Should(Equal(2), "before the harness and after it")
@@ -489,8 +489,8 @@ var _ = Describe("Pool", func() {
 		// Closing each harness takes two seconds: long enough for the next run to start its
 		// own if the run gave up the agent's slot before its sweep.
 		e.harness.set(func(h *harness) { h.lingers = true })
-		a := e.enqueue(ctx, e.ticket(ctx, "first"))
-		b := e.enqueue(ctx, e.ticket(ctx, "second"))
+		a := e.enqueue(ctx, e.task(ctx, "first"))
+		b := e.enqueue(ctx, e.task(ctx, "second"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, a)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Eventually(runState(ctx, b)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -512,7 +512,7 @@ var _ = Describe("Pool", func() {
 	It("fails the run, without starting the harness, when processes of an earlier run keep running", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.files.sweep = func() (string, int) { return "still running: 41\n", 1 }
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(And(
@@ -524,7 +524,7 @@ var _ = Describe("Pool", func() {
 	It("fails the run, without starting the harness, when the sweep cannot tell the sandbox's main process", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.files.sweep = func() (string, int) { return "sweep: unknown PID 1 (tini)\n", 2 }
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("unknown PID 1 (tini)"))
@@ -535,7 +535,7 @@ var _ = Describe("Pool", func() {
 	It("fails the run when the instructions cannot be written", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.files.failWrite = true
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("write the instructions to " + instructionsFile))
@@ -549,7 +549,7 @@ var _ = Describe("Pool", func() {
 		_, err := db.Exec(ctx, `UPDATE agent_versions SET config = '{"instructions": ["not", "a", "string"]}'
 			WHERE org_id = $1 AND agent_id = $2`, e.org, e.agent.ID)
 		Expect(err).NotTo(HaveOccurred())
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("the agent version's config is unreadable: "))
@@ -560,7 +560,7 @@ var _ = Describe("Pool", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		// The agent's directory at the path took the file: the read finds no regular file.
 		e.files.onRead = func(data map[string][]byte) { delete(data, instructionsFile) }
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("does not hold the file agentd wrote"))
@@ -579,7 +579,7 @@ var _ = Describe("Pool", func() {
 					tamper(data)
 				}
 			}
-			r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a")
 			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 
@@ -605,7 +605,7 @@ var _ = Describe("Pool", func() {
 					tamper(links, link)
 				}
 			}
-			r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a")
 			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 
@@ -633,7 +633,7 @@ var _ = Describe("Pool", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.files.failLink = true
 		delete(e.files.links, opencodeLink)
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("restore the instruction link " + opencodeLink))
@@ -644,7 +644,7 @@ var _ = Describe("Pool", func() {
 	It("fails the run when the harness never announces Koinon's MCP tools", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.harness.set(func(h *harness) { h.silent = true })
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(And(
@@ -656,7 +656,7 @@ var _ = Describe("Pool", func() {
 
 	It("selects the agent's model after session/load too, and fails when the harness keeps its own", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -674,7 +674,7 @@ var _ = Describe("Pool", func() {
 
 	It("rejects permission requests for paths outside the session directory, whatever their kind", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		r := e.enqueue(ctx, e.ticket(ctx, markOutside))
+		r := e.enqueue(ctx, e.task(ctx, markOutside))
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		evs := events(ctx, r)
@@ -689,7 +689,7 @@ var _ = Describe("Pool", func() {
 	It("waits while the reconciler recreates a failed sandbox, and runs in the new one", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateDeleting, "recreating a failed sandbox (phase Error: main process exited)")
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
 		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
@@ -702,7 +702,7 @@ var _ = Describe("Pool", func() {
 	It("fails a run after SandboxTimeout when the failed sandbox is never recreated", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateDeleting, "recreating a failed sandbox (phase Error)")
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("sandbox not ready after 1s (deleting)"))
@@ -711,7 +711,7 @@ var _ = Describe("Pool", func() {
 	It("waits for a sandbox in error to be repaired, and fails when it is not within SandboxTimeout", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
 		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
@@ -724,7 +724,7 @@ var _ = Describe("Pool", func() {
 	It("fails a run whose sandbox stays in error past SandboxTimeout", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("sandbox not ready after 1s (error: image pull failed)"))
@@ -733,7 +733,7 @@ var _ = Describe("Pool", func() {
 	It("fails a run at once when its sandbox is in error and the agent is unhealthy", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
 		_, err := q.MarkAgentUnhealthy(ctx, store.MarkAgentUnhealthyParams{OrgID: e.org, ID: e.agent.ID, Reason: "the sandbox kept failing"})
@@ -744,7 +744,7 @@ var _ = Describe("Pool", func() {
 
 	It("records a retried event once", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "test", LeaseSeconds: 60})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(claimed.ID).To(Equal(r.ID))

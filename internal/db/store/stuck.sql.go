@@ -47,17 +47,17 @@ func (q *Queries) CountRecentSandboxRecreations(ctx context.Context, arg CountRe
 }
 
 const createSystemApprovalRequest = `-- name: CreateSystemApprovalRequest :one
-INSERT INTO approval_requests (org_id, ticket_id, run_id, agent_id, connector, tool, target,
+INSERT INTO approval_requests (org_id, task_id, run_id, agent_id, connector, tool, target,
                                args_json, args_sha256, risk, decision, status, expires_at, system)
 VALUES ($1, $2, $3, $4, $5, $6, $7,
         $8, $9, '{}', 'ask', 'pending', $10, true)
 ON CONFLICT (org_id, run_id, tool, target, args_sha256) DO NOTHING
-RETURNING org_id, id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding, system
+RETURNING org_id, id, task_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding, system
 `
 
 type CreateSystemApprovalRequestParams struct {
 	OrgID      pgtype.UUID
-	TicketID   pgtype.UUID
+	TaskID     pgtype.UUID
 	RunID      pgtype.UUID
 	AgentID    pgtype.UUID
 	Connector  string
@@ -72,7 +72,7 @@ type CreateSystemApprovalRequestParams struct {
 func (q *Queries) CreateSystemApprovalRequest(ctx context.Context, arg CreateSystemApprovalRequestParams) (ApprovalRequest, error) {
 	row := q.db.QueryRow(ctx, createSystemApprovalRequest,
 		arg.OrgID,
-		arg.TicketID,
+		arg.TaskID,
 		arg.RunID,
 		arg.AgentID,
 		arg.Connector,
@@ -86,7 +86,7 @@ func (q *Queries) CreateSystemApprovalRequest(ctx context.Context, arg CreateSys
 	err := row.Scan(
 		&i.OrgID,
 		&i.ID,
-		&i.TicketID,
+		&i.TaskID,
 		&i.RunID,
 		&i.AgentID,
 		&i.Connector,
@@ -134,14 +134,14 @@ func (q *Queries) DeleteOldUploadNonces(ctx context.Context, orgID pgtype.UUID) 
 const expireSavedWork = `-- name: ExpireSavedWork :many
 UPDATE saved_work SET status = 'expired', envelope = NULL
 WHERE org_id = $1 AND status = 'saved' AND expires_at < now()
-RETURNING org_id, id, ticket_id, run_id
+RETURNING org_id, id, task_id, run_id
 `
 
 type ExpireSavedWorkRow struct {
-	OrgID    pgtype.UUID
-	ID       pgtype.UUID
-	TicketID pgtype.UUID
-	RunID    pgtype.UUID
+	OrgID  pgtype.UUID
+	ID     pgtype.UUID
+	TaskID pgtype.UUID
+	RunID  pgtype.UUID
 }
 
 // Saved work is kept for 14 days; the sealed files go with it.
@@ -157,7 +157,7 @@ func (q *Queries) ExpireSavedWork(ctx context.Context, orgID pgtype.UUID) ([]Exp
 		if err := rows.Scan(
 			&i.OrgID,
 			&i.ID,
-			&i.TicketID,
+			&i.TaskID,
 			&i.RunID,
 		); err != nil {
 			return nil, err
@@ -171,7 +171,7 @@ func (q *Queries) ExpireSavedWork(ctx context.Context, orgID pgtype.UUID) ([]Exp
 }
 
 const getRunForUpload = `-- name: GetRunForUpload :one
-SELECT org_id, id, agent_id, agent_version_id, ticket_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing FROM runs
 WHERE org_id = $1 AND id = $2 AND epoch = $3 AND state IN ('starting', 'running')
 `
 
@@ -190,7 +190,7 @@ func (q *Queries) GetRunForUpload(ctx context.Context, arg GetRunForUploadParams
 		&i.ID,
 		&i.AgentID,
 		&i.AgentVersionID,
-		&i.TicketID,
+		&i.TaskID,
 		&i.State,
 		&i.Epoch,
 		&i.OwnerID,
@@ -218,7 +218,7 @@ func (q *Queries) GetRunForUpload(ctx context.Context, arg GetRunForUploadParams
 }
 
 const getSavedWork = `-- name: GetSavedWork :one
-SELECT org_id, id, ticket_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, status, created_at, expires_at FROM saved_work
+SELECT org_id, id, task_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, status, created_at, expires_at FROM saved_work
 WHERE org_id = $1 AND id = $2
 `
 
@@ -233,7 +233,7 @@ func (q *Queries) GetSavedWork(ctx context.Context, arg GetSavedWorkParams) (Sav
 	err := row.Scan(
 		&i.OrgID,
 		&i.ID,
-		&i.TicketID,
+		&i.TaskID,
 		&i.RunID,
 		&i.AgentID,
 		&i.Repo,
@@ -250,7 +250,7 @@ func (q *Queries) GetSavedWork(ctx context.Context, arg GetSavedWorkParams) (Sav
 }
 
 const getSavedWorkManifest = `-- name: GetSavedWorkManifest :one
-SELECT org_id, id, ticket_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, status, created_at, expires_at
+SELECT org_id, id, task_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, status, created_at, expires_at
 FROM saved_work
 WHERE org_id = $1 AND id = $2
 `
@@ -263,7 +263,7 @@ type GetSavedWorkManifestParams struct {
 type GetSavedWorkManifestRow struct {
 	OrgID     pgtype.UUID
 	ID        pgtype.UUID
-	TicketID  pgtype.UUID
+	TaskID    pgtype.UUID
 	RunID     pgtype.UUID
 	AgentID   pgtype.UUID
 	Repo      string
@@ -283,7 +283,7 @@ func (q *Queries) GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkMani
 	err := row.Scan(
 		&i.OrgID,
 		&i.ID,
-		&i.TicketID,
+		&i.TaskID,
 		&i.RunID,
 		&i.AgentID,
 		&i.Repo,
@@ -299,16 +299,16 @@ func (q *Queries) GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkMani
 }
 
 const insertSandboxIncident = `-- name: InsertSandboxIncident :one
-INSERT INTO sandbox_incidents (org_id, agent_id, run_id, ticket_id, processes, outcome, work, work_note, saved_work_id)
+INSERT INTO sandbox_incidents (org_id, agent_id, run_id, task_id, processes, outcome, work, work_note, saved_work_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING org_id, id, agent_id, run_id, ticket_id, detected_at, processes, outcome, work, work_note, saved_work_id
+RETURNING org_id, id, agent_id, run_id, task_id, detected_at, processes, outcome, work, work_note, saved_work_id
 `
 
 type InsertSandboxIncidentParams struct {
 	OrgID       pgtype.UUID
 	AgentID     pgtype.UUID
 	RunID       pgtype.UUID
-	TicketID    pgtype.UUID
+	TaskID      pgtype.UUID
 	Processes   []byte
 	Outcome     string
 	Work        string
@@ -321,7 +321,7 @@ func (q *Queries) InsertSandboxIncident(ctx context.Context, arg InsertSandboxIn
 		arg.OrgID,
 		arg.AgentID,
 		arg.RunID,
-		arg.TicketID,
+		arg.TaskID,
 		arg.Processes,
 		arg.Outcome,
 		arg.Work,
@@ -334,7 +334,7 @@ func (q *Queries) InsertSandboxIncident(ctx context.Context, arg InsertSandboxIn
 		&i.ID,
 		&i.AgentID,
 		&i.RunID,
-		&i.TicketID,
+		&i.TaskID,
 		&i.DetectedAt,
 		&i.Processes,
 		&i.Outcome,
@@ -346,15 +346,15 @@ func (q *Queries) InsertSandboxIncident(ctx context.Context, arg InsertSandboxIn
 }
 
 const insertSavedWork = `-- name: InsertSavedWork :one
-INSERT INTO saved_work (org_id, id, ticket_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, expires_at)
+INSERT INTO saved_work (org_id, id, task_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, expires_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING org_id, id, ticket_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, status, created_at, expires_at
+RETURNING org_id, id, task_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, status, created_at, expires_at
 `
 
 type InsertSavedWorkParams struct {
 	OrgID     pgtype.UUID
 	ID        pgtype.UUID
-	TicketID  pgtype.UUID
+	TaskID    pgtype.UUID
 	RunID     pgtype.UUID
 	AgentID   pgtype.UUID
 	Repo      string
@@ -370,7 +370,7 @@ func (q *Queries) InsertSavedWork(ctx context.Context, arg InsertSavedWorkParams
 	row := q.db.QueryRow(ctx, insertSavedWork,
 		arg.OrgID,
 		arg.ID,
-		arg.TicketID,
+		arg.TaskID,
 		arg.RunID,
 		arg.AgentID,
 		arg.Repo,
@@ -385,7 +385,7 @@ func (q *Queries) InsertSavedWork(ctx context.Context, arg InsertSavedWorkParams
 	err := row.Scan(
 		&i.OrgID,
 		&i.ID,
-		&i.TicketID,
+		&i.TaskID,
 		&i.RunID,
 		&i.AgentID,
 		&i.Repo,
@@ -423,32 +423,32 @@ func (q *Queries) InsertUploadNonce(ctx context.Context, arg InsertUploadNoncePa
 }
 
 const listRecentAgentReplies = `-- name: ListRecentAgentReplies :many
-SELECT org_id, id, ticket_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM ticket_events
-WHERE org_id = $1 AND ticket_id = $2 AND kind = 'message' AND actor_kind = 'agent'
+SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM task_events
+WHERE org_id = $1 AND task_id = $2 AND kind = 'message' AND actor_kind = 'agent'
 ORDER BY seq DESC
 LIMIT $3
 `
 
 type ListRecentAgentRepliesParams struct {
-	OrgID    pgtype.UUID
-	TicketID pgtype.UUID
-	MaxRows  int32
+	OrgID   pgtype.UUID
+	TaskID  pgtype.UUID
+	MaxRows int32
 }
 
-// The agent's latest replies on the ticket, newest first.
-func (q *Queries) ListRecentAgentReplies(ctx context.Context, arg ListRecentAgentRepliesParams) ([]TicketEvent, error) {
-	rows, err := q.db.Query(ctx, listRecentAgentReplies, arg.OrgID, arg.TicketID, arg.MaxRows)
+// The agent's latest replies on the task, newest first.
+func (q *Queries) ListRecentAgentReplies(ctx context.Context, arg ListRecentAgentRepliesParams) ([]TaskEvent, error) {
+	rows, err := q.db.Query(ctx, listRecentAgentReplies, arg.OrgID, arg.TaskID, arg.MaxRows)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []TicketEvent
+	var items []TaskEvent
 	for rows.Next() {
-		var i TicketEvent
+		var i TaskEvent
 		if err := rows.Scan(
 			&i.OrgID,
 			&i.ID,
-			&i.TicketID,
+			&i.TaskID,
 			&i.Seq,
 			&i.Kind,
 			&i.ActorKind,
@@ -468,30 +468,30 @@ func (q *Queries) ListRecentAgentReplies(ctx context.Context, arg ListRecentAgen
 	return items, nil
 }
 
-const listTicketsWithParkedRunOfAgent = `-- name: ListTicketsWithParkedRunOfAgent :many
-SELECT DISTINCT ticket_id FROM runs
+const listTasksWithParkedRunOfAgent = `-- name: ListTasksWithParkedRunOfAgent :many
+SELECT DISTINCT task_id FROM runs
 WHERE org_id = $1 AND agent_id = $2 AND state = 'parked'
 `
 
-type ListTicketsWithParkedRunOfAgentParams struct {
+type ListTasksWithParkedRunOfAgentParams struct {
 	OrgID   pgtype.UUID
 	AgentID pgtype.UUID
 }
 
-// Tickets whose run is parked in the agent's sandbox: they resume in the new sandbox.
-func (q *Queries) ListTicketsWithParkedRunOfAgent(ctx context.Context, arg ListTicketsWithParkedRunOfAgentParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listTicketsWithParkedRunOfAgent, arg.OrgID, arg.AgentID)
+// Tasks whose run is parked in the agent's sandbox: they resume in the new sandbox.
+func (q *Queries) ListTasksWithParkedRunOfAgent(ctx context.Context, arg ListTasksWithParkedRunOfAgentParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listTasksWithParkedRunOfAgent, arg.OrgID, arg.AgentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var items []pgtype.UUID
 	for rows.Next() {
-		var ticket_id pgtype.UUID
-		if err := rows.Scan(&ticket_id); err != nil {
+		var task_id pgtype.UUID
+		if err := rows.Scan(&task_id); err != nil {
 			return nil, err
 		}
-		items = append(items, ticket_id)
+		items = append(items, task_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -499,30 +499,30 @@ func (q *Queries) ListTicketsWithParkedRunOfAgent(ctx context.Context, arg ListT
 	return items, nil
 }
 
-const listTicketsWithWaitingRunOfAgent = `-- name: ListTicketsWithWaitingRunOfAgent :many
-SELECT DISTINCT ticket_id FROM runs
+const listTasksWithWaitingRunOfAgent = `-- name: ListTasksWithWaitingRunOfAgent :many
+SELECT DISTINCT task_id FROM runs
 WHERE org_id = $1 AND agent_id = $2 AND state IN ('queued', 'parked')
 `
 
-type ListTicketsWithWaitingRunOfAgentParams struct {
+type ListTasksWithWaitingRunOfAgentParams struct {
 	OrgID   pgtype.UUID
 	AgentID pgtype.UUID
 }
 
-// Tickets with a queued or parked run of the agent: they wait while the agent is unhealthy.
-func (q *Queries) ListTicketsWithWaitingRunOfAgent(ctx context.Context, arg ListTicketsWithWaitingRunOfAgentParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listTicketsWithWaitingRunOfAgent, arg.OrgID, arg.AgentID)
+// Tasks with a queued or parked run of the agent: they wait while the agent is unhealthy.
+func (q *Queries) ListTasksWithWaitingRunOfAgent(ctx context.Context, arg ListTasksWithWaitingRunOfAgentParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listTasksWithWaitingRunOfAgent, arg.OrgID, arg.AgentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var items []pgtype.UUID
 	for rows.Next() {
-		var ticket_id pgtype.UUID
-		if err := rows.Scan(&ticket_id); err != nil {
+		var task_id pgtype.UUID
+		if err := rows.Scan(&task_id); err != nil {
 			return nil, err
 		}
-		items = append(items, ticket_id)
+		items = append(items, task_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -646,9 +646,9 @@ func (q *Queries) MarkSavedWorkPushed(ctx context.Context, arg MarkSavedWorkPush
 }
 
 const requestSessionRestartForAgent = `-- name: RequestSessionRestartForAgent :many
-UPDATE tickets
+UPDATE tasks
 SET session_restart_pending = true
-WHERE org_id = $1 AND agent_id = $2 AND status <> 'done'
+WHERE org_id = $1 AND agent_id = $2 AND state NOT IN ('completed', 'canceled', 'failed')
   AND harness_session_id IS NOT NULL AND NOT session_restart_pending
 RETURNING id
 `
@@ -658,7 +658,7 @@ type RequestSessionRestartForAgentParams struct {
 	AgentID pgtype.UUID
 }
 
-// Activating a version with "apply to open tickets": every open ticket of the agent that has a
+// Activating a version with "apply to open tasks": every open task of the agent that has a
 // session starts a new one at its next run.
 func (q *Queries) RequestSessionRestartForAgent(ctx context.Context, arg RequestSessionRestartForAgentParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, requestSessionRestartForAgent, arg.OrgID, arg.AgentID)
@@ -745,17 +745,17 @@ func (q *Queries) SetRunSummarizing(ctx context.Context, arg SetRunSummarizingPa
 	return result.RowsAffected(), nil
 }
 
-const setTicketSummary = `-- name: SetTicketSummary :execrows
-UPDATE tickets t
+const setTaskSummary = `-- name: SetTaskSummary :execrows
+UPDATE tasks t
 SET agent_summary = $1::text, agent_summary_at = now()
 WHERE t.org_id = $2 AND t.id = $3
   AND EXISTS (
       SELECT 1 FROM runs r
-      WHERE r.org_id = $2 AND r.ticket_id = t.id AND r.id = $4
+      WHERE r.org_id = $2 AND r.task_id = t.id AND r.id = $4
         AND r.epoch = $5 AND r.state IN ('starting', 'running'))
 `
 
-type SetTicketSummaryParams struct {
+type SetTaskSummaryParams struct {
 	Summary string
 	OrgID   pgtype.UUID
 	ID      pgtype.UUID
@@ -763,9 +763,9 @@ type SetTicketSummaryParams struct {
 	Epoch   int64
 }
 
-// Stores the agent's end-of-turn summary. Fenced by the run epoch like SetTicketHarnessSession.
-func (q *Queries) SetTicketSummary(ctx context.Context, arg SetTicketSummaryParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setTicketSummary,
+// Stores the agent's end-of-turn summary. Fenced by the run epoch like SetTaskHarnessSession.
+func (q *Queries) SetTaskSummary(ctx context.Context, arg SetTaskSummaryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setTaskSummary,
 		arg.Summary,
 		arg.OrgID,
 		arg.ID,

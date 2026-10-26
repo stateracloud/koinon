@@ -26,7 +26,7 @@ var _ = Describe("metrics", func() {
 		reg := prometheus.NewRegistry()
 		m := agentd.NewMetrics(reg)
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", withMetrics(m))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 
@@ -44,7 +44,7 @@ var _ = Describe("metrics", func() {
 		m := agentd.NewMetrics(prometheus.NewRegistry())
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateStopped, "")
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", withMetrics(m), func(c *agentd.Config) { c.SandboxTimeout = time.Second })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 
@@ -56,7 +56,7 @@ var _ = Describe("metrics", func() {
 	It("counts a takeover by another replica, not as a claim", func(ctx SpecContext) {
 		a, b := agentd.NewMetrics(prometheus.NewRegistry()), agentd.NewMetrics(prometheus.NewRegistry())
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		r := e.enqueue(ctx, e.ticket(ctx, markHang))
+		r := e.enqueue(ctx, e.task(ctx, markHang))
 		killA := e.pool("agentd-a", withMetrics(a), func(c *agentd.Config) { c.KeepLeaseOnShutdown = true })
 		Eventually(e.harness.hangs).WithTimeout(10 * time.Second).Should(Receive())
 		killA()

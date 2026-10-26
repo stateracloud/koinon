@@ -139,15 +139,15 @@ func (g *ghEnv) script() (ids chan string) {
 	return ids
 }
 
-func (g *ghEnv) ticketStatus(ctx context.Context, t store.Ticket) func() store.TicketStatus {
-	return func() store.TicketStatus {
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: g.org, ID: t.ID})
+func (g *ghEnv) taskStatus(ctx context.Context, t store.Task) func() store.TaskState {
+	return func() store.TaskState {
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: g.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
-		return got.Status
+		return got.State
 	}
 }
 
-func ticketKinds(evs []store.TicketEvent) []string {
+func taskKinds(evs []store.TaskEvent) []string {
 	out := make([]string, len(evs))
 	for i, e := range evs {
 		out[i] = e.Kind
@@ -159,7 +159,7 @@ var _ = Describe("Parking on approvals", func() {
 	It("parks the run, and resumes it with the pull request's URL once approved and executed", func(ctx SpecContext) {
 		g := newGitHubEnv(ctx)
 		ids := g.script()
-		t := g.ticket(ctx, markAsk+": fix the typo")
+		t := g.task(ctx, markAsk+": fix the typo")
 		r := g.enqueue(ctx, t)
 		g.pool("agentd-a")
 
@@ -170,8 +170,8 @@ var _ = Describe("Parking on approvals", func() {
 		Expect(parked.ParkReason.RunParkReason).To(Equal(store.RunParkReasonApproval))
 		Expect(parked.LeaseExpiresAt.Valid).To(BeFalse(), "the run is released")
 		Expect(parked.ParkExpiresAt.Time).To(BeTemporally("~", time.Now().Add(7*24*time.Hour), time.Minute))
-		Expect(g.ticketStatus(ctx, t)()).To(Equal(store.TicketStatusWaitingOnYou))
-		Expect(ticketKinds(ticketEvents(ctx, g.env, t))).To(Equal([]string{"message", approvals.KindRequested, "message", "run.parked"}))
+		Expect(g.taskStatus(ctx, t)()).To(Equal(store.TaskStateInputRequired))
+		Expect(taskKinds(taskEvents(ctx, g.env, t))).To(Equal([]string{"message", approvals.KindRequested, "message", "run.parked"}))
 		Expect(kinds(events(ctx, r))).To(ContainElement("run.parked"))
 		Consistently(runState(ctx, r)).WithTimeout(500 * time.Millisecond).Should(Equal(store.RunStateParked))
 
@@ -188,7 +188,7 @@ var _ = Describe("Parking on approvals", func() {
 		Expect(prompts[1]).To(HavePrefix("[Koinon] Your run was paused while a human decided"))
 		Expect(prompts[1]).To(ContainSubstring("create_pull_request (approval id=" + id))
 		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + url))
-		Expect(loads).To(Equal([]string{"ses_1"}), "the resumed run loads the ticket's session")
+		Expect(loads).To(Equal([]string{"ses_1"}), "the resumed run loads the task's session")
 
 		By("get_approval_status says the same")
 		evs := events(ctx, r)
@@ -198,7 +198,7 @@ var _ = Describe("Parking on approvals", func() {
 		final, err := q.GetApprovalRequest(ctx, store.GetApprovalRequestParams{OrgID: g.org, ID: row.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(final.DeliveredAt.Valid).To(BeTrue())
-		Expect(g.ticketStatus(ctx, t)()).To(Equal(store.TicketStatusInProgress))
+		Expect(g.taskStatus(ctx, t)()).To(Equal(store.TaskStateWorking))
 		Expect(getRun(ctx, r).ParkedSeconds).To(BeNumerically(">=", 0))
 		Expect(g.gh.Snapshot("widgets").Pulls).To(HaveLen(1))
 	})
@@ -206,7 +206,7 @@ var _ = Describe("Parking on approvals", func() {
 	It("resumes with the denial and the approver's note", func(ctx SpecContext) {
 		g := newGitHubEnv(ctx)
 		ids := g.script()
-		t := g.ticket(ctx, markAsk+": fix the typo")
+		t := g.task(ctx, markAsk+": fix the typo")
 		r := g.enqueue(ctx, t)
 		g.pool("agentd-a")
 		var id string
@@ -237,14 +237,14 @@ var _ = Describe("Parking on approvals", func() {
 			return "asked", true
 		}
 		g.harness.mu.Unlock()
-		t := g.ticket(ctx, markAsk)
+		t := g.task(ctx, markAsk)
 		r := g.enqueue(ctx, t)
 		g.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		prompts, _, _, _ := g.harness.snapshot()
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(ContainSubstring("denied by the approver, who wrote: no"))
-		Expect(g.ticketStatus(ctx, t)()).NotTo(Equal(store.TicketStatusWaitingOnYou))
+		Expect(g.taskStatus(ctx, t)()).NotTo(Equal(store.TaskStateInputRequired))
 	})
 })
 

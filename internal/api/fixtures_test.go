@@ -27,6 +27,7 @@ import (
 	providerv1alpha1connect "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
@@ -45,6 +46,7 @@ type client struct {
 	userID    string
 	agents    agentv1alpha1connect.AgentServiceClient
 	tickets   ticketv1alpha1connect.TicketServiceClient
+	tasks     taskv1alpha1connect.TaskServiceClient
 	runs      runv1alpha1connect.RunServiceClient
 	templates templatev1alpha1connect.TemplateServiceClient
 	conns     connectionv1alpha1connect.ConnectionServiceClient
@@ -60,6 +62,7 @@ func newClient(b *browser) *client {
 		b:         b,
 		agents:    agentv1alpha1connect.NewAgentServiceClient(cc),
 		tickets:   ticketv1alpha1connect.NewTicketServiceClient(cc),
+		tasks:     taskv1alpha1connect.NewTaskServiceClient(cc),
 		runs:      runv1alpha1connect.NewRunServiceClient(cc),
 		templates: templatev1alpha1connect.NewTemplateServiceClient(cc),
 		conns:     connectionv1alpha1connect.NewConnectionServiceClient(cc),

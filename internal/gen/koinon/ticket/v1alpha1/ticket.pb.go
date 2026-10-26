@@ -27,6 +27,8 @@ const (
 )
 
 // TicketStatus is the board column (ADR 0049).
+//
+// DEPRECATED: use koinon.task.v1alpha1.TaskState.
 type TicketStatus int32
 
 const (

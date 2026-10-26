@@ -146,7 +146,7 @@ stateDiagram-v2
     canceled --> [*]
 ```
 
-The diagram is a reading aid. Which run park maps to which task state is an open question below.
+The diagram is a reading aid. The mapping from today's columns and parks is recorded under Open questions (answered by TK1).
 
 ### Releases (#146)
 
@@ -192,9 +192,18 @@ The diagram is a reading aid. Which run park maps to which task state is an open
 
 ## Open questions
 
-- The mapping of today's ticket columns and run parks to task states (candidate: To do →
-  submitted, In progress → working, Waiting on you → input-required, Done → completed; an
-  approval park shows as input-required).
+- ~~The mapping of today's ticket columns and run parks to task states.~~ **Answered by TK1
+  (2026-10-26):** the candidate holds. The migration (`00020_tasks.sql`) maps To do → submitted,
+  In progress → working, Waiting on you → input-required and Done → completed; no old ticket
+  becomes canceled or failed, because a ticket could only be Done. A run parked on an approval that
+  a person has not decided moves its task from submitted or working to input-required, and the
+  decision moves it back to working; an approval that expires moves it back to submitted, as it
+  moved the ticket to To do. Every park the code makes today is an approval park, so no other
+  park reason has a mapping yet: `ask_user` (TK3) parks to input-required, and `a2a` stays
+  working. Task events keep their rows: `ticket.created` becomes `task.created`, and the `from`
+  and `to` of `status.changed` become states. `TicketService` stays as a deprecated layer over
+  tasks until TK2: the column is derived from the state (completed, canceled and failed show as
+  Done) and a move to Done completes the task.
 - How a direct message in the inbox chat (a trigger, [0066](0066-triggers-and-scheduling.md)) relates
   to [0055](0055-chat-as-its-own-object.md)'s private chat that "becomes a ticket when the person
   confirms".

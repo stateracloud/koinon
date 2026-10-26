@@ -16,10 +16,10 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND state = 'running' AND NOT su
 -- name: CreateApprovalRequest :one
 -- No row: the same call was already recorded in this run (see
 -- GetApprovalRequestByCall).
-INSERT INTO approval_requests (org_id, ticket_id, run_id, agent_id, connector, tool, target,
+INSERT INTO approval_requests (org_id, task_id, run_id, agent_id, connector, tool, target,
                                args_json, args_sha256, risk, decision, status, expires_at,
                                approvals_required, call_binding)
-VALUES (@org_id, @ticket_id, @run_id, @agent_id, @connector, @tool, @target,
+VALUES (@org_id, @task_id, @run_id, @agent_id, @connector, @tool, @target,
         @args_json, @args_sha256, @risk, @decision, @status, @expires_at,
         COALESCE(sqlc.narg(approvals_required)::smallint, 1), COALESCE(sqlc.narg(call_binding)::jsonb, '{}'))
 ON CONFLICT (org_id, run_id, tool, target, args_sha256) DO NOTHING
@@ -35,9 +35,9 @@ WHERE org_id = @org_id AND run_id = @run_id AND tool = @tool AND target = @targe
 SELECT * FROM approval_requests
 WHERE org_id = @org_id AND id = @id AND agent_id = @agent_id;
 
--- name: ListApprovalRequestsForTicket :many
+-- name: ListApprovalRequestsForTask :many
 SELECT * FROM approval_requests
-WHERE org_id = @org_id AND ticket_id = @ticket_id
+WHERE org_id = @org_id AND task_id = @task_id
 ORDER BY created_at, id;
 
 -- name: GetApprovalRequest :one
@@ -51,7 +51,7 @@ WHERE org_id = @org_id AND id = @id
 FOR UPDATE;
 
 -- name: ListPendingApprovalRequests :many
--- The org's requests waiting for a human (Waiting on you), oldest first.
+-- The org's requests waiting for a human (input_required), oldest first.
 -- Trusted-preset calls are recorded as approved and never listed here.
 SELECT * FROM approval_requests
 WHERE org_id = @org_id AND status = 'pending'

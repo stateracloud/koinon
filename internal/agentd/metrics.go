@@ -15,7 +15,7 @@ var outcomes = []store.RunState{
 	store.RunStateSucceeded, store.RunStateFailed, store.RunStateCanceled, store.RunStateParked,
 }
 
-// Metrics are koinon-agentd's Prometheus metrics. No label carries an org, agent, ticket or run ID
+// Metrics are koinon-agentd's Prometheus metrics. No label carries an org, agent, task or run ID
 // (internal/metrics states the label rule).
 type Metrics struct {
 	Claimed     prometheus.Counter

@@ -53,7 +53,7 @@ func (f *fixture) saved(ctx context.Context, mutate func(*savedwork.Work)) *save
 	_, err := q.FinishRun(ctx, store.FinishRunParams{OrgID: f.org, ID: f.run.ID, Epoch: f.run.Epoch, Outcome: store.RunStateSucceeded})
 	Expect(err).NotTo(HaveOccurred())
 	sf := &savedFixture{fixture: f, work: w, id: mustID(uniqUUID())}
-	sf.branch = savedwork.BranchName(f.ticket.ID.String(), time.Now())
+	sf.branch = savedwork.BranchName(f.task.ID.String(), time.Now())
 	packed, err := savedwork.Pack(w)
 	Expect(err).NotTo(HaveOccurred())
 	env, err := savedwork.SealPacked(f.ring, f.org.String(), sf.id.String(), packed)
@@ -62,13 +62,13 @@ func (f *fixture) saved(ctx context.Context, mutate func(*savedwork.Work)) *save
 	mj, _ := json.Marshal(w.Manifest)
 	expires := pgtype.Timestamptz{Time: time.Now().Add(savedwork.Retention), Valid: true}
 	_, err = q.InsertSavedWork(ctx, store.InsertSavedWorkParams{
-		OrgID: f.org, ID: sf.id, TicketID: f.ticket.ID, RunID: f.run.ID, AgentID: f.agent.ID, Repo: "acme/widgets",
+		OrgID: f.org, ID: sf.id, TaskID: f.task.ID, RunID: f.run.ID, AgentID: f.agent.ID, Repo: "acme/widgets",
 		BaseSha: base, Branch: sf.branch, Manifest: mj, SizeBytes: w.Manifest.Bytes(), Envelope: envJSON, ExpiresAt: expires,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	args := savedwork.PushArgsJSON(sf.id.String(), "acme/widgets", base, sf.branch, savedwork.BundleHash(packed), savedwork.ManifestHash(w.Manifest))
 	sf.approval, err = q.CreateSystemApprovalRequest(ctx, store.CreateSystemApprovalRequestParams{
-		OrgID: f.org, TicketID: f.ticket.ID, RunID: f.run.ID, AgentID: f.agent.ID, Connector: "github", Tool: savedwork.ToolPush,
+		OrgID: f.org, TaskID: f.task.ID, RunID: f.run.ID, AgentID: f.agent.ID, Connector: "github", Tool: savedwork.ToolPush,
 		Target: "github:acme/widgets", ArgsJson: args, ArgsSha256: sha(args), ExpiresAt: expires,
 	})
 	Expect(err).NotTo(HaveOccurred())
@@ -76,7 +76,7 @@ func (f *fixture) saved(ctx context.Context, mutate func(*savedwork.Work)) *save
 }
 
 var _ = Describe("Pushing saved work", func() {
-	It("pushes koinon/wip/<ticket>-<time> only after an approval, with the saved files and the base as parent", func(ctx SpecContext) {
+	It("pushes koinon/wip/<task>-<time> only after an approval, with the saved files and the base as parent", func(ctx SpecContext) {
 		f := newFixture(ctx, "standard").saved(ctx, nil)
 		Expect(f.gh.Snapshot("widgets").Calls).To(BeEmpty(), "nothing reaches GitHub before the approval")
 		Expect(f.approval.System).To(BeTrue())
@@ -114,7 +114,7 @@ var _ = Describe("Pushing saved work", func() {
 		Expect(sw.Status).To(Equal("pushed"))
 		Expect(sw.Envelope).To(BeNil())
 		Expect(f.getRun(ctx).State).To(Equal(store.RunStateSucceeded))
-		Expect(kinds(f.ticketEvents(ctx))).To(ContainElements(approvals.KindApproved, approvals.KindExecuted))
+		Expect(kinds(f.taskEvents(ctx))).To(ContainElements(approvals.KindApproved, approvals.KindExecuted))
 	})
 
 	It("is idempotent: executing again creates nothing more", func(ctx SpecContext) {
@@ -184,7 +184,7 @@ var _ = Describe("Pushing saved work", func() {
 		h := sha("x")
 		args := savedwork.PushArgsJSON(uniqUUID(), "acme/widgets", base, "koinon/wip/x-1", h, h)
 		_, err := q.CreateSystemApprovalRequest(ctx, store.CreateSystemApprovalRequestParams{
-			OrgID: f.org, TicketID: f.ticket.ID, RunID: f.run.ID, AgentID: f.agent.ID, Connector: "github", Tool: savedwork.ToolPush,
+			OrgID: f.org, TaskID: f.task.ID, RunID: f.run.ID, AgentID: f.agent.ID, Connector: "github", Tool: savedwork.ToolPush,
 			Target: "github:acme/widgets", ArgsJson: args, ArgsSha256: sha(args),
 			ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
 		})
@@ -295,7 +295,7 @@ func (sf *savedFixture) saved2(ctx context.Context) pgtype.UUID {
 	envJSON, _ := json.Marshal(env)
 	mj, _ := json.Marshal(sf.work.Manifest)
 	_, err = q.InsertSavedWork(ctx, store.InsertSavedWorkParams{
-		OrgID: sf.org, ID: id, TicketID: sf.ticket.ID, RunID: sf.run.ID, AgentID: sf.agent.ID, Repo: "acme/widgets",
+		OrgID: sf.org, ID: id, TaskID: sf.task.ID, RunID: sf.run.ID, AgentID: sf.agent.ID, Repo: "acme/widgets",
 		BaseSha: sf.work.Manifest.Base, Branch: "koinon/wip/other-1", Manifest: mj, SizeBytes: sf.work.Manifest.Bytes(), Envelope: envJSON,
 		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
 	})

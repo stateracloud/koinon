@@ -304,7 +304,7 @@ var _ = Describe("Server", func() {
 		Expect(r2.ArgsSHA256).To(Equal(r1.ArgsSHA256))
 
 		By("the record holds the exact canonical call")
-		rows, err := q.ListApprovalRequestsForTicket(ctx, store.ListApprovalRequestsForTicketParams{OrgID: f.org.ID, TicketID: f.run.TicketID})
+		rows, err := q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: f.org.ID, TaskID: f.run.TaskID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rows).To(HaveLen(1))
 		row := rows[0]
@@ -315,7 +315,7 @@ var _ = Describe("Server", func() {
 		Expect(row.Target).To(Equal("github:acme/widgets"))
 		Expect(row.AgentID).To(Equal(f.agent.ID))
 		Expect(row.RunID).To(Equal(f.run.ID))
-		Expect(row.TicketID).To(Equal(f.run.TicketID))
+		Expect(row.TaskID).To(Equal(f.run.TaskID))
 		Expect(row.Status).To(Equal(store.ApprovalStatusPending))
 		Expect(row.Decision).To(Equal(store.ApprovalDecisionAsk))
 		Expect(row.ExpiresAt.Time).To(BeTemporally("~", row.CreatedAt.Time.Add(githubtools.DefaultApprovalTTL), 5e9))
@@ -361,7 +361,7 @@ var _ = Describe("Server", func() {
 		res, _ = call(ctx, s, "create_pull_request", map[string]any{"branch": "koinon/x", "title": "X", "files": []any{}, "extra": 1})
 		Expect(res.IsError).To(BeTrue())
 
-		rows, err := q.ListApprovalRequestsForTicket(ctx, store.ListApprovalRequestsForTicketParams{OrgID: f.org.ID, TicketID: f.run.TicketID})
+		rows, err := q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: f.org.ID, TaskID: f.run.TaskID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rows).To(BeEmpty())
 	})

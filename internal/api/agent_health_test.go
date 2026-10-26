@@ -71,7 +71,7 @@ var _ = Describe("agent health and fresh sessions", func() {
 				t, r := owner.createTicket(ctx, org, agent.GetId(), "x")
 				_, err := e.pool.Exec(ctx, `UPDATE runs SET state = 'canceled', outcome_reason = 'test', finished_at = now(), ready_at = NULL WHERE id = $1`, r.GetId())
 				Expect(err).NotTo(HaveOccurred())
-				_, err = e.pool.Exec(ctx, `INSERT INTO sandbox_incidents (org_id, agent_id, run_id, ticket_id, processes, outcome, work)
+				_, err = e.pool.Exec(ctx, `INSERT INTO sandbox_incidents (org_id, agent_id, run_id, task_id, processes, outcome, work)
 					VALUES ($1, $2, $3, $4, '[]', 'recreate', 'nothing')`, org, agent.GetId(), r.GetId(), t.GetId())
 				Expect(err).NotTo(HaveOccurred())
 			}
@@ -101,11 +101,11 @@ var _ = Describe("agent health and fresh sessions", func() {
 		// open makes a ticket with a stored session; done is a finished one.
 		open := func(ctx SpecContext, title string, status string) string {
 			t, _ := owner.createTicket(ctx, org, agent.GetId(), title)
-			_, err := e.pool.Exec(ctx, `UPDATE tickets SET harness_session_id = 'ses_1', harness_session_cwd = '/sandbox/work',
+			_, err := e.pool.Exec(ctx, `UPDATE tasks SET harness_session_id = 'ses_1', harness_session_cwd = '/sandbox/work',
 				harness_session_generation = 'gen-1' WHERE id = $1`, t.GetId())
 			Expect(err).NotTo(HaveOccurred())
 			if status == "done" {
-				_, err = e.pool.Exec(ctx, `UPDATE tickets SET status = 'done', done_at = now() WHERE id = $1`, t.GetId())
+				_, err = e.pool.Exec(ctx, `UPDATE tasks SET state = 'completed', finished_at = now() WHERE id = $1`, t.GetId())
 				Expect(err).NotTo(HaveOccurred())
 			}
 			return t.GetId()
@@ -121,7 +121,7 @@ var _ = Describe("agent health and fresh sessions", func() {
 		}
 		pending := func(ctx SpecContext, id string) bool {
 			var p bool
-			Expect(e.pool.QueryRow(ctx, `SELECT session_restart_pending FROM tickets WHERE id = $1`, id).Scan(&p)).To(Succeed())
+			Expect(e.pool.QueryRow(ctx, `SELECT session_restart_pending FROM tasks WHERE id = $1`, id).Scan(&p)).To(Succeed())
 			return p
 		}
 
@@ -152,7 +152,7 @@ var _ = Describe("agent health and fresh sessions", func() {
 		It("leaves other agents' tickets alone", func(ctx SpecContext) {
 			other := owner.activeAgent(ctx, org)
 			t, _ := owner.createTicket(ctx, org, other.GetId(), "theirs")
-			_, err := e.pool.Exec(ctx, `UPDATE tickets SET harness_session_id = 's', harness_session_cwd = '/w' WHERE id = $1`, t.GetId())
+			_, err := e.pool.Exec(ctx, `UPDATE tasks SET harness_session_id = 's', harness_session_cwd = '/w' WHERE id = $1`, t.GetId())
 			Expect(err).NotTo(HaveOccurred())
 			reactivate(ctx, true)
 			Expect(pending(ctx, t.GetId())).To(BeFalse())
@@ -161,7 +161,7 @@ var _ = Describe("agent health and fresh sessions", func() {
 
 	It("shows the agent's notes to anyone who can see the ticket, in GetTicket", func(ctx SpecContext) {
 		t, _ := owner.createTicket(ctx, org, agent.GetId(), "notes")
-		_, err := e.pool.Exec(ctx, `UPDATE tickets SET agent_summary = 'Where things stand.', agent_summary_at = now() WHERE id = $1`, t.GetId())
+		_, err := e.pool.Exec(ctx, `UPDATE tasks SET agent_summary = 'Where things stand.', agent_summary_at = now() WHERE id = $1`, t.GetId())
 		Expect(err).NotTo(HaveOccurred())
 		viewer := e.userIn(ctx, org, store.OrgRoleViewer)
 		got := viewer.getTicket(ctx, org, t.GetId()).GetTicket()
@@ -180,14 +180,14 @@ var _ = Describe("agent health and fresh sessions", func() {
 		manifest := `{"repo":"acme/widgets","base":"` + strings.Repeat("a", 40) + `","files":[` +
 			`{"path":"src/a.go","status":"M","mode":"100644","size":10,"added":3,"deleted":1},{"path":"old.txt","status":"D","size":0,"added":0,"deleted":7}],` +
 			`"skipped":["acme/widgets: link: a symbolic link or submodule is not saved"]}`
-		_, err := e.pool.Exec(ctx, `INSERT INTO saved_work (org_id, id, ticket_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, expires_at)
+		_, err := e.pool.Exec(ctx, `INSERT INTO saved_work (org_id, id, task_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, expires_at)
 			VALUES ($1, $2, $3, $4, $5, 'acme/widgets', $6, 'koinon/wip/abc-1', $7, 10, '{"fmt":1}', now() + interval '14 days')`,
 			org, sid, t.GetId(), r.GetId(), agent.GetId(), strings.Repeat("a", 40), manifest)
 		Expect(err).NotTo(HaveOccurred())
 		args := savedwork.PushArgsJSON(sid, "acme/widgets", strings.Repeat("a", 40), "koinon/wip/abc-1", strings.Repeat("b", 64), strings.Repeat("c", 64))
 		sum := sha256.Sum256([]byte(args))
 		var aid string
-		Expect(e.pool.QueryRow(ctx, `INSERT INTO approval_requests (org_id, ticket_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, decision, status, expires_at, system)
+		Expect(e.pool.QueryRow(ctx, `INSERT INTO approval_requests (org_id, task_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, decision, status, expires_at, system)
 			VALUES ($1, $2, $3, $4, 'github', 'push_saved_work', 'github:acme/widgets', $5, $6, 'ask', 'pending', now() + interval '14 days', true) RETURNING id::text`,
 			org, t.GetId(), r.GetId(), agent.GetId(), args, hex.EncodeToString(sum[:])).Scan(&aid)).To(Succeed())
 

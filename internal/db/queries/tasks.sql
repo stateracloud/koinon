@@ -1,0 +1,92 @@
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Every query on an org-owned table takes @org_id and filters on it
+-- (TestQueriesAreOrgScoped).
+
+-- name: CreateTask :one
+INSERT INTO tasks (org_id, title, agent_id, created_by_kind, created_by_user_id,
+                   created_by_agent_id, created_by_trigger_id)
+VALUES (@org_id, @title, sqlc.narg(agent_id), @created_by_kind,
+        sqlc.narg(created_by_user_id), sqlc.narg(created_by_agent_id),
+        sqlc.narg(created_by_trigger_id))
+RETURNING *;
+
+-- name: GetTask :one
+SELECT * FROM tasks
+WHERE org_id = @org_id AND id = @id;
+
+-- name: ListTasks :many
+SELECT * FROM tasks
+WHERE org_id = @org_id
+ORDER BY created_at, id;
+
+-- name: ListTasksByStates :many
+-- The tasks in any of the states, oldest first (a board column of the ticket API is a set of
+-- states).
+SELECT * FROM tasks
+WHERE org_id = @org_id AND state::text = ANY(@states::text[])
+ORDER BY created_at, id;
+
+-- name: SetTaskState :one
+-- Sets a task's state. Callers moving a task to an end state also cancel its queued runs
+-- (CancelQueuedRunsForTask) in the same transaction.
+UPDATE tasks
+SET state = @state::task_state,
+    finished_at = CASE WHEN @state::task_state IN ('completed', 'canceled', 'failed')
+                       THEN coalesce(finished_at, now()) END
+WHERE org_id = @org_id AND id = @id
+RETURNING *;
+
+-- name: SetTaskHarnessSession :one
+-- Stores the harness session for the task with the home generation of the
+-- sandbox it was created in. Fenced by the run epoch: only the current owner
+-- of one of the task's active runs can set it.
+UPDATE tasks t
+SET harness_session_id = @harness_session_id::text, harness_session_cwd = @harness_session_cwd::text,
+    harness_session_generation = sqlc.narg(harness_session_generation),
+    session_restart_pending = false
+WHERE t.org_id = @org_id AND t.id = @id
+  AND EXISTS (
+      SELECT 1 FROM runs r
+      WHERE r.org_id = @org_id AND r.task_id = t.id AND r.id = @run_id
+        AND r.epoch = @epoch AND r.state IN ('starting', 'running'))
+RETURNING t.*;
+
+-- name: AppendTaskEvent :one
+WITH task AS (
+    UPDATE tasks
+    SET last_event_seq = last_event_seq + 1
+    WHERE tasks.org_id = @org_id AND tasks.id = @task_id
+    RETURNING tasks.org_id, tasks.id, tasks.last_event_seq
+)
+INSERT INTO task_events (org_id, task_id, seq, kind, actor_kind, actor_user_id,
+                           actor_agent_id, run_id, payload)
+SELECT task.org_id, task.id, task.last_event_seq, @kind, @actor_kind,
+       sqlc.narg(actor_user_id), sqlc.narg(actor_agent_id), sqlc.narg(run_id), @payload
+FROM task
+RETURNING *;
+
+-- name: ListTaskEvents :many
+-- The timeline after a sequence number (0 for the start), in order.
+SELECT * FROM task_events
+WHERE org_id = @org_id AND task_id = @task_id AND seq > @after_seq
+ORDER BY seq
+LIMIT @max_events;
+
+-- name: ListTaskMessagesAfter :many
+-- The users' messages on the task after a timeline seq, in order: what
+-- agentd sends the harness as a run's prompt.
+SELECT * FROM task_events
+WHERE org_id = @org_id AND task_id = @task_id AND seq > @after_seq
+  AND kind = 'message' AND actor_kind = 'user'
+ORDER BY seq;
+
+-- name: SetTaskStateFrom :one
+-- Moves a task between two non-end states, only if it is in one of from_states: parking on a human
+-- moves submitted or working to input_required, and a resolved approval moves it back. No row: the
+-- task is elsewhere (for example in an end state, or a person moved it).
+UPDATE tasks
+SET state = @to_state::task_state
+WHERE org_id = @org_id AND id = @id AND state::text = ANY(@from_states::text[])
+  AND @to_state::task_state NOT IN ('completed', 'canceled', 'failed')
+RETURNING *;
