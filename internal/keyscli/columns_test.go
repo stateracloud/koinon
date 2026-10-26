@@ -10,34 +10,35 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"testing"
 
-	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/keyscli"
 )
 
+const secretstorePath = "github.com/stateracloud/koinon/internal/secretstore"
+
 // Every secretstore.Binding the code builds names a column that holds envelopes; the key tool
-// must know all of them, or rotation could retire a KEK they still need (issue #96).
-var _ = Describe("keyscli.Columns", func() {
-	It("lists every table and column a secretstore.Binding names", func() {
-		known := map[keyscli.Column]bool{}
-		for _, c := range keyscli.Columns {
-			known[c] = true
-		}
-		found := bindings(filepath.Join("..", ".."))
-		Expect(found).NotTo(BeEmpty(), "the scan found no bindings; it no longer matches the code")
-		for where, c := range found {
-			Expect(known).To(HaveKey(c), "%s binds %s.%s, which keyscli.Columns does not list", where, c.Table, c.Column)
-		}
-	})
-})
+// must know all of them, or rotation could retire a KEK they still need (issue #96). A plain test,
+// not a spec of the suite, so it runs without Docker.
+func TestColumnsListEveryBinding(t *testing.T) {
+	g := NewWithT(t)
+	known := map[keyscli.Column]bool{}
+	for _, c := range keyscli.Columns {
+		known[c] = true
+	}
+	found := bindings(g, filepath.Join("..", ".."))
+	g.Expect(found).NotTo(BeEmpty(), "the scan found no bindings; it no longer matches the code")
+	for where, c := range found {
+		g.Expect(known).To(HaveKey(c), "%s binds %s.%s, which keyscli.Columns does not list", where, c.Table, c.Column)
+	}
+}
 
 // bindings returns the table and column of every secretstore.Binding composite literal in the
 // non-test Go files under root, outside secretstore and keyscli (which build bindings from
 // Columns), keyed by position. Table and Column must be string constants of the same package.
-func bindings(root string) map[string]keyscli.Column {
-	GinkgoHelper()
+func bindings(g Gomega, root string) map[string]keyscli.Column {
 	out := map[string]keyscli.Column{}
 	fset := token.NewFileSet()
 	err := filepath.WalkDir(root, func(dir string, d fs.DirEntry, err error) error {
@@ -54,18 +55,38 @@ func bindings(root string) map[string]keyscli.Column {
 		}
 		consts := stringConsts(files)
 		for _, f := range files {
+			name := importName(g, fset, f)
+			if name == "" {
+				continue
+			}
 			ast.Inspect(f, func(n ast.Node) bool {
 				lit, ok := n.(*ast.CompositeLit)
-				if ok && isBindingType(lit.Type) {
-					out[fset.Position(lit.Pos()).String()] = bindingColumn(fset, lit, consts)
+				if ok && isBindingType(lit.Type, name) {
+					out[fset.Position(lit.Pos()).String()] = bindingColumn(g, fset, lit, consts)
 				}
 				return true
 			})
 		}
 		return nil
 	})
-	Expect(err).NotTo(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 	return out
+}
+
+// importName returns the name a file uses for the secretstore package, or "" when it does not
+// import it. A dot or blank import would hide its bindings from the scan, so it fails.
+func importName(g Gomega, fset *token.FileSet, f *ast.File) string {
+	for _, imp := range f.Imports {
+		if p, _ := strconv.Unquote(imp.Path.Value); p != secretstorePath {
+			continue
+		}
+		if imp.Name == nil {
+			return "secretstore"
+		}
+		g.Expect(imp.Name.Name).NotTo(BeElementOf(".", "_"), "%s: import secretstore by name", fset.Position(imp.Pos()))
+		return imp.Name.Name
+	}
+	return ""
 }
 
 // parseDir parses the non-test Go files of one directory (one package).
@@ -89,20 +110,17 @@ func parseDir(fset *token.FileSet, dir string) ([]*ast.File, error) {
 }
 
 // bindingColumn reads the Table and Column fields of a secretstore.Binding literal.
-func bindingColumn(fset *token.FileSet, lit *ast.CompositeLit, consts map[string]string) keyscli.Column {
-	GinkgoHelper()
+func bindingColumn(g Gomega, fset *token.FileSet, lit *ast.CompositeLit, consts map[string]string) keyscli.Column {
 	var c keyscli.Column
 	for _, e := range lit.Elts {
 		kv, ok := e.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
+		g.Expect(ok).To(BeTrue(), "%s: secretstore.Binding needs field names", fset.Position(e.Pos()))
 		key, _ := kv.Key.(*ast.Ident)
 		if key == nil || (key.Name != "Table" && key.Name != "Column") {
 			continue
 		}
 		v := value(kv.Value, consts)
-		Expect(v).NotTo(BeEmpty(), "%s: %s must be a string constant", fset.Position(kv.Pos()), key.Name)
+		g.Expect(v).NotTo(BeEmpty(), "%s: %s must be a string constant", fset.Position(kv.Pos()), key.Name)
 		if key.Name == "Table" {
 			c.Table = v
 		} else {
@@ -112,13 +130,13 @@ func bindingColumn(fset *token.FileSet, lit *ast.CompositeLit, consts map[string
 	return c
 }
 
-func isBindingType(e ast.Expr) bool {
+func isBindingType(e ast.Expr, pkgName string) bool {
 	sel, ok := e.(*ast.SelectorExpr)
 	if !ok {
 		return false
 	}
 	pkg, ok := sel.X.(*ast.Ident)
-	return ok && pkg.Name == "secretstore" && sel.Sel.Name == "Binding"
+	return ok && pkg.Name == pkgName && sel.Sel.Name == "Binding"
 }
 
 // stringConsts maps the string constants of a directory's files (one package) to their values.
