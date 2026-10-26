@@ -167,6 +167,16 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   (https://docs.github.com/en/enterprise-server@latest/rest/using-the-rest-api/getting-started-with-the-rest-api).
   Unverified: GHES 3.22 support for API version `2026-03-10`.
 
+- Amendment 2026-10-27 (CH6, commit by git push): `Capabilities.Writes` is `api` (default) or
+  `push`. `internal/codehost/gitpush` wraps a provider's `Access` for `push`: `WriteCommit` shallow-fetches
+  the base into memory and builds the commit with exact modes (the approval message, trailers included, is
+  used verbatim, as on the API path); `CreateBranch` pushes it as exactly one new branch, never the default
+  branch, `refs/...`, `HEAD` or an existing branch (`ErrBranchExists`). Pure Go with go-git v5.19.2
+  (Apache-2.0), because koinon-api's image has no git CLI; the token is only the HTTP basic password,
+  scrubbed from errors, nothing on disk. If the host does not serve commits by SHA (git http-backend
+  default), the base is fetched through the branch whose tip it is. Commits are authored "Koinon
+  <noreply@koinon.dev>".
+
 ## Links
 
 - Issue [#144](https://github.com/stateracloud/koinon/issues/144); home-lab test
