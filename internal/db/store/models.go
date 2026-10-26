@@ -996,6 +996,12 @@ type ApprovalRequest struct {
 	System              bool
 }
 
+type AuditChainHead struct {
+	OrgID pgtype.UUID
+	Seq   int64
+	Hash  []byte
+}
+
 type AuditEvent struct {
 	OrgID      pgtype.UUID
 	ID         pgtype.UUID
@@ -1007,6 +1013,9 @@ type AuditEvent struct {
 	Summary    []byte
 	RequestID  string
 	CreatedAt  pgtype.Timestamptz
+	ChainSeq   int64
+	PrevHash   []byte
+	Hash       []byte
 }
 
 type Connection struct {

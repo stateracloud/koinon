@@ -58,7 +58,7 @@ flowchart LR
   provider may be wanted later) _(inferred)_.
 - Negative: Postgres becomes a critical dependency that needs backups, HA and an upgrade path
   ([0027](0027-repo-and-versioning.md), forward-only migrations).
-- Follow-ups: an outbox table for reconciler triggers and UI streaming
+- Follow-ups: an outbox table for reconciler triggers and UI streaming _Amended 2026-10-26: no outbox was built; see the amendment in [0010](0010-eventing.md)._
   ([0010](0010-eventing.md), [0022](0022-frontend-architecture.md)) _(inferred)_.
 
 ## Open questions
@@ -83,7 +83,7 @@ KEK Secret does); delete them by the labels `koinon.dev/release=<release>` and `
 ## Upstream verification
 
 - 2026-10-21: Postgres `NOTIFY` is delivered only on commit, payloads must be under 8000 bytes, and
-  missed notifications are not replayed. So an outbox table must be the source of truth, with NOTIFY
+  missed notifications are not replayed. So an outbox table must be the source of truth, with NOTIFY _Amended 2026-10-26: no outbox was built; see the amendment in [0010](0010-eventing.md)._
   only as a wake-up hint. https://www.postgresql.org/docs/current/sql-notify.html
 
 ## Links

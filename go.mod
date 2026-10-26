@@ -26,6 +26,7 @@ require (
 	github.com/onsi/gomega v1.44.0
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/pressly/goose/v3 v3.29.0
+	github.com/prometheus/client_golang v1.24.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
@@ -167,7 +168,6 @@ require (
 	github.com/pkoukk/tiktoken-go v0.1.8 // indirect
 	github.com/pkoukk/tiktoken-go-loader v0.0.2 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
-	github.com/prometheus/client_golang v1.24.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.70.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect

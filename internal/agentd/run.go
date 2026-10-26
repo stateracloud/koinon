@@ -846,6 +846,7 @@ func (r *runner) finish(ctx context.Context, outcome store.RunState, reason stri
 	if err != nil {
 		return r.dbErr(ctx, "finish the run", err)
 	}
+	r.p.cfg.Metrics.Finished.WithLabelValues(string(outcome)).Inc()
 	r.log.Info("run finished", "outcome", outcome, "reason", reason)
 	return nil
 }

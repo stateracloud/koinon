@@ -150,7 +150,13 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 			return err
 		}
 		out, err = s.agentView(ctx, q, a, nil)
-		return err
+		if err != nil {
+			return err
+		}
+		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: "agent.create", TargetKind: "agent", TargetID: a.ID.String(),
+			After: map[string]any{"displayName": name, "flavor": string(flavor), "templateId": row.ID.String()},
+		})
 	})
 	if err != nil {
 		return nil, s.dbError(err, "agent")
@@ -350,11 +356,19 @@ func (s *Server) ArchiveAgent(ctx context.Context, req *agentv1alpha1.ArchiveAge
 		if err != nil {
 			return err
 		}
-		if _, err := scheduler.CancelForAgent(ctx, q, c.org, a.ID, scheduler.Actor{UserID: c.actor()}); err != nil {
+		canceled, err := scheduler.CancelForAgent(ctx, q, c.org, a.ID, scheduler.Actor{UserID: c.actor()})
+		if err != nil {
 			return err
 		}
 		out, err = s.agentView(ctx, q, a, nil)
-		return err
+		if err != nil {
+			return err
+		}
+		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: "agent.archive", TargetKind: "agent", TargetID: a.ID.String(),
+			Before: map[string]any{"displayName": a.DisplayName},
+			After:  map[string]any{"archived": true, "runsCanceled": len(canceled)},
+		})
 	})
 	if err != nil {
 		return nil, s.dbError(err, "agent")
