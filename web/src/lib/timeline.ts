@@ -174,6 +174,16 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
       const reason = str(p.reason)
       return { key, at, type: 'note', text: `Run ${shortId(runId)} lost its harness${reason ? `: ${reason}` : ''}`, runId }
     }
+    case 'run.requeued': {
+      // agentd put the run back in the queue because its sandbox was not ready in time (ADR 0066).
+      const reason = str(p.reason)
+      return { key, at, type: 'note', text: `Run ${shortId(runId)} is waiting for a sandbox${reason ? ` (${reason})` : ''}`, runId }
+    }
+    case 'run.retry': {
+      // agentd retries a turn after a transient model fault: {failureClass, attempt, delaySeconds, reason}.
+      const attempt = typeof p.attempt === 'number' ? ` (attempt ${p.attempt})` : ''
+      return { key, at, type: 'note', text: `Run ${shortId(runId)} is retrying after a temporary model fault${attempt}`, runId }
+    }
     default:
       // The user's message chunks (already on the ticket), plans, usage and
       // mode updates, and agentd's bookkeeping are not shown.

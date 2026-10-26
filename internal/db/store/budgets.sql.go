@@ -212,7 +212,7 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 }
 
 const listOpenRunsOfOrg = `-- name: ListOpenRunsOfOrg :many
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at FROM runs
 WHERE org_id = $1 AND state IN ('queued', 'starting', 'running', 'parked')
 `
 
@@ -254,6 +254,9 @@ func (q *Queries) ListOpenRunsOfOrg(ctx context.Context, orgID pgtype.UUID) ([]R
 			&i.PromptThroughSeq,
 			&i.Takeovers,
 			&i.Summarizing,
+			&i.FailureClass,
+			&i.Origin,
+			&i.ClaimedAt,
 		); err != nil {
 			return nil, err
 		}

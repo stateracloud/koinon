@@ -51,6 +51,19 @@ describe('buildTimeline', () => {
     expect(items[0]).toMatchObject({ thought: true })
   })
 
+  it('shows a requeue and a retry as notes', () => {
+    const items = buildTimeline([], {
+      [run]: [
+        runEvent(1, 'run.requeued', { reason: 'sandbox not ready after 5m0s (pending)' }),
+        runEvent(2, 'run.retry', { failureClass: 'transient', attempt: 1, delaySeconds: 2, reason: 'x' }),
+      ],
+    })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456 is waiting for a sandbox (sandbox not ready after 5m0s (pending))',
+      'Run r-123456 is retrying after a temporary model fault (attempt 1)',
+    ])
+  })
+
   it('shows a park and its approval ticket events', () => {
     const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
     const items = buildTimeline(

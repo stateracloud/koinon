@@ -15,7 +15,7 @@ const clearAgentSandboxKey = `-- name: ClearAgentSandboxKey :one
 UPDATE agent_sandboxes
 SET gateway_key_id = NULL, gateway_key_hash = NULL
 WHERE org_id = $1 AND agent_id = $2
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
 `
 
 type ClearAgentSandboxKeyParams struct {
@@ -48,6 +48,7 @@ func (q *Queries) ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandbo
 		&i.UnhealthyAt,
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
+		&i.WokenAt,
 	)
 	return i, err
 }
@@ -86,7 +87,7 @@ func (q *Queries) CountAgentSandboxesByState(ctx context.Context) ([]CountAgentS
 const createAgentSandbox = `-- name: CreateAgentSandbox :one
 INSERT INTO agent_sandboxes (org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
 `
 
 type CreateAgentSandboxParams struct {
@@ -130,6 +131,7 @@ func (q *Queries) CreateAgentSandbox(ctx context.Context, arg CreateAgentSandbox
 		&i.UnhealthyAt,
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
+		&i.WokenAt,
 	)
 	return i, err
 }
@@ -140,7 +142,10 @@ SELECT
     coalesce(bool_or(state = 'running'), false)::boolean AS has_running,
     coalesce(bool_or(state IN ('starting', 'running', 'parked')), false)::boolean AS has_held,
     coalesce(bool_or(run_claimable(org_id, id)) FILTER (WHERE ready_at IS NOT NULL), false)::boolean AS has_demand,
-    max(greatest(finished_at, parked_at))::timestamptz AS last_activity
+    max(greatest(finished_at, parked_at))::timestamptz AS last_activity,
+    -- When the latest run that waits on a person or another agent parked: its sandbox stays warm
+    -- for the org's park window instead of the idle timeout (LT1).
+    max(parked_at) FILTER (WHERE state = 'parked' AND park_reason IN ('a2a', 'input_required'))::timestamptz AS warm_since
 FROM runs
 WHERE org_id = $1 AND agent_id = $2
   AND (state IN ('queued', 'starting', 'running', 'parked')
@@ -158,6 +163,7 @@ type GetAgentRunActivityRow struct {
 	HasHeld      bool
 	HasDemand    bool
 	LastActivity pgtype.Timestamptz
+	WarmSince    pgtype.Timestamptz
 }
 
 // What the idle timeout and start-on-demand need (ADR 0049): whether a run
@@ -175,12 +181,13 @@ func (q *Queries) GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivi
 		&i.HasHeld,
 		&i.HasDemand,
 		&i.LastActivity,
+		&i.WarmSince,
 	)
 	return i, err
 }
 
 const getAgentSandbox = `-- name: GetAgentSandbox :one
-SELECT org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation FROM agent_sandboxes
+SELECT org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at FROM agent_sandboxes
 WHERE org_id = $1 AND agent_id = $2
 `
 
@@ -214,6 +221,7 @@ func (q *Queries) GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams
 		&i.UnhealthyAt,
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
+		&i.WokenAt,
 	)
 	return i, err
 }
@@ -362,7 +370,7 @@ SET state = $1::sandbox_state,
                                 THEN NULL ELSE unhealthy_generation END,
     observed_at = now()
 WHERE org_id = $6 AND agent_id = $7
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
 `
 
 type RecordAgentSandboxParams struct {
@@ -411,6 +419,7 @@ func (q *Queries) RecordAgentSandbox(ctx context.Context, arg RecordAgentSandbox
 		&i.UnhealthyAt,
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
+		&i.WokenAt,
 	)
 	return i, err
 }
@@ -419,7 +428,7 @@ const setAgentSandboxKey = `-- name: SetAgentSandboxKey :one
 UPDATE agent_sandboxes
 SET gateway_key_id = $1, gateway_key_hash = $2
 WHERE org_id = $3 AND agent_id = $4
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
 `
 
 type SetAgentSandboxKeyParams struct {
@@ -460,6 +469,7 @@ func (q *Queries) SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKey
 		&i.UnhealthyAt,
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
+		&i.WokenAt,
 	)
 	return i, err
 }
@@ -489,4 +499,27 @@ func (q *Queries) UpsertOrgWorkspace(ctx context.Context, arg UpsertOrgWorkspace
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const wakeAgentSandbox = `-- name: WakeAgentSandbox :one
+UPDATE agent_sandboxes
+SET woken_at = now()
+WHERE org_id = $1 AND agent_id = $2
+RETURNING woken_at
+`
+
+type WakeAgentSandboxParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// The pre-wake signal (LT1, B5): a task was created, a person is typing, or a cron is about to
+// fire. It counts as activity, so an idle sandbox stays up and a stopped one starts. No row: the
+// agent has no sandbox record yet (the reconciler creates it on activation, and a new sandbox
+// starts ready anyway).
+func (q *Queries) WakeAgentSandbox(ctx context.Context, arg WakeAgentSandboxParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, wakeAgentSandbox, arg.OrgID, arg.AgentID)
+	var woken_at pgtype.Timestamptz
+	err := row.Scan(&woken_at)
+	return woken_at, err
 }

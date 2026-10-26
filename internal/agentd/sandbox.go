@@ -4,6 +4,7 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 )
 
 // waitSandbox waits until the agent's sandbox is ready and returns its row: the workspace, the
@@ -26,11 +28,17 @@ import (
 // ready agentd NOTIFYs the reconciler every ReconcileNudge, so a pass follows within a second
 // rather than a resync interval (a takeover, for example, changes no run state and so fires no
 // trigger). A missing row is waited for, since the reconciler creates it when the agent is
-// activated. The run fails if the sandbox is not ready within SandboxTimeout.
+// activated. A run whose sandbox is not ready within the org's queue wait (SandboxTimeout by
+// default) goes back to the queue (requeued) instead of failing, so a burst beyond the cluster's
+// capacity shows up as waiting, not as failed runs (ADR 0066, plan item LT1).
 func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
-	started := time.Now()
-	defer func() { r.p.cfg.Metrics.SandboxWait.Observe(time.Since(started).Seconds()) }()
-	deadline := started.Add(r.p.cfg.SandboxTimeout)
+	now := r.p.cfg.Now
+	started := now()
+	defer func() { r.p.cfg.Metrics.SandboxWait.Observe(now().Sub(started).Seconds()) }()
+	// The org's queue wait is read once the first poll finds the sandbox not ready, so the common
+	// path (a ready sandbox) costs no extra query. The deadline counts from the start of the wait.
+	wait := r.p.cfg.SandboxTimeout
+	var deadline time.Time
 	var nudged time.Time
 	var last string
 	for {
@@ -71,17 +79,31 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 			// run waits for it, within SandboxTimeout, instead of failing.
 			last = string(sb.State)
 		}
-		if time.Since(nudged) >= r.p.cfg.ReconcileNudge {
+		if deadline.IsZero() {
+			if s, err := orgsettings.Get(ctx, r.q, r.run.OrgID, orgsettings.Settings{QueueWait: wait}); err == nil {
+				wait = s.QueueWait
+			} else if ctx.Err() == nil {
+				r.log.Warn("reading the org's settings failed; using the default queue wait", "err", err)
+			}
+			deadline = started.Add(wait)
+		}
+		if now().Sub(nudged) >= r.p.cfg.ReconcileNudge {
 			if nudged.IsZero() {
 				r.log.Info("waiting for the reconciler to make the sandbox ready", "state", last)
 			}
-			nudged = time.Now()
+			nudged = now()
 			if err := r.q.NotifyReconciler(ctx, r.run.OrgID); err != nil && ctx.Err() == nil {
 				r.log.Warn("notifying the reconciler failed", "err", err)
 			}
 		}
-		if time.Now().After(deadline) {
-			return store.AgentSandbox{}, &failure{reason: fmt.Sprintf("sandbox not ready after %s (%s)", r.p.cfg.SandboxTimeout, last)}
+		if now().After(deadline) {
+			reason := fmt.Sprintf("sandbox not ready after %s (%s)", wait, last)
+			// Only a starting run can go back to the queue (RequeueRun). A run taken over while
+			// running has no queue to return to, so it fails, as it did before LT1.
+			if r.run.State != store.RunStateStarting {
+				return store.AgentSandbox{}, &failure{reason: reason, class: classTransient}
+			}
+			return store.AgentSandbox{}, &requeued{reason: reason}
 		}
 		if !sleep(ctx, r.p.cfg.Poll) {
 			return store.AgentSandbox{}, ctx.Err()
@@ -178,4 +200,34 @@ func (t *tail) String() string {
 func (r *runner) agentHealthy(ctx context.Context) bool {
 	a, err := r.q.GetAgent(ctx, store.GetAgentParams{OrgID: r.run.OrgID, ID: r.run.AgentID})
 	return err == nil && !a.UnhealthyAt.Valid
+}
+
+// requeue puts the run back in the queue: its sandbox was not ready in time. It is the run's
+// owner's last write; the next claim gives the run a new epoch.
+func (r *runner) requeue(ctx context.Context, reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.srcSeq++
+	src := r.srcSeq
+	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+		payload, _ := json.Marshal(map[string]string{"reason": reason})
+		if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
+			OrgID: r.run.OrgID, RunID: r.run.ID, Epoch: r.run.Epoch,
+			Kind: "run.requeued", Payload: payload, SourceSeq: src,
+		}); err != nil {
+			return err
+		}
+		_, err := q.RequeueRun(ctx, store.RequeueRunParams{OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch})
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errFenced // taken over, canceled or finished meanwhile
+	}
+	if err != nil {
+		return r.dbErr(ctx, "requeue the run", err)
+	}
+	r.p.cfg.Metrics.Requeued.Inc()
+	r.log.Info("run back in the queue", "reason", reason)
+	return nil
 }

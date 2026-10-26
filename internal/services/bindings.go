@@ -16,8 +16,8 @@ import (
 
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/connections"
-	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	"github.com/stateracloud/koinon/templates"
@@ -85,15 +85,19 @@ func (s *Server) bindGrants(ctx context.Context, org pgtype.UUID, t *templates.T
 			seen[strings.ToLower(r)] = true
 			repos = append(repos, r)
 		}
-		lo, hi := 1, github.MaxRepositories
+		host, isHost := s.hosts.Get(g.Connector)
+		lo, hi := 1, codehost.DefaultMaxRepositories
+		if isHost && host.Capabilities().MaxRepositories > 0 {
+			hi = host.Capabilities().MaxRepositories
+		}
 		if g.Targets != nil {
 			lo, hi = g.Targets.Min, g.Targets.Max
 		}
 		if len(repos) < lo || len(repos) > hi {
 			return nil, invalid("%s: the template allows %d to %d repositories, not %d", field, lo, hi, len(repos))
 		}
-		if g.Connector == connectors.GitHubID {
-			if repos, err = s.checkInstallation(ctx, conn, field, repos); err != nil {
+		if isHost {
+			if repos, err = s.checkInstallation(ctx, host, conn, field, repos); err != nil {
 				return nil, err
 			}
 		}
@@ -107,63 +111,64 @@ func (s *Server) bindGrants(ctx context.Context, org pgtype.UUID, t *templates.T
 	return out, nil
 }
 
-// checkInstallation asks GitHub, as the connection's App, for a metadata-read token narrowed to
-// repos, and with it reads each repository's full_name: GitHub matches names
+// checkInstallation asks the code host, as the connection, for a metadata-read credential
+// narrowed to repos, and with it reads each repository's full name: the host matches names
 // case-insensitively but OpenShell matches the read grant's paths case-sensitively, so the
-// binding stores GitHub's spelling. It returns the repositories in that spelling, in the order
-// given. Nothing is written to GitHub.
-func (s *Server) checkInstallation(ctx context.Context, conn store.Connection, field string, repos []string) ([]string, error) {
-	app, err := connections.LoadGitHubApp(ctx, s.keys, conn)
+// binding stores the host's spelling. It returns the repositories in that spelling, in the order
+// given. Nothing is written to the host.
+func (s *Server) checkInstallation(ctx context.Context, p codehost.Provider, conn store.Connection, field string, repos []string) ([]string, error) {
+	name := p.Capabilities().DisplayName
+	c, err := connections.Load(ctx, s.keys, conn)
+	if err == nil {
+		err = p.Validate(c)
+	}
 	if err != nil {
 		if errors.Is(err, connections.ErrNoKeyring) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err.Error())
 		}
 		// The messages name the Secret or say the key is malformed; never its content.
-		return nil, connect.NewError(connect.CodeFailedPrecondition, field+": the connection cannot authenticate to GitHub: "+err.Error())
+		return nil, connect.NewError(connect.CodeFailedPrecondition, field+": the connection cannot authenticate to "+name+": "+err.Error())
 	}
-	tok, err := s.github.InstallationToken(ctx, app, github.TokenRequest{
-		Repositories: repos, Permissions: map[string]string{"metadata": "read"},
-	})
+	acc, err := p.Open(ctx, c, p.MetadataScope(repos))
 	if err != nil {
-		return nil, s.githubError(conn, field, repos, err)
+		return nil, s.hostError(conn, name, field, repos, err)
 	}
 	canonical := make([]string, 0, len(repos))
 	for j, r := range repos {
-		repo, err := github.ParseRepo(r)
+		repo, err := p.ParseRepo(r)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf("%s.repositories[%d]: %v", field, j, err))
 		}
-		info, err := s.github.GetRepository(ctx, tok, repo)
+		info, err := acc.Repository(ctx, repo)
 		if err != nil {
-			return nil, s.githubError(conn, field, repos, err)
+			return nil, s.hostError(conn, name, field, repos, err)
 		}
-		// A renamed or transferred repository answers under its new name (GitHub redirects);
+		// A renamed or transferred repository answers under its new name (the host redirects);
 		// binding the old one would grant a path that no longer exists.
 		if !strings.EqualFold(info.FullName, r) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
-				"%s.repositories[%d]: %q is now %q on GitHub; bind it by that name", field, j, r, info.FullName))
+				"%s.repositories[%d]: %q is now %q on %s; bind it by that name", field, j, r, info.FullName, name))
 		}
 		canonical = append(canonical, info.FullName)
 	}
 	return canonical, nil
 }
 
-// githubError maps an error from GitHub while checking a binding to the caller's error.
-func (s *Server) githubError(conn store.Connection, field string, repos []string, err error) error {
-	var apiErr *github.APIError
+// hostError maps an error from the code host while checking a binding to the caller's error.
+func (s *Server) hostError(conn store.Connection, name, field string, repos []string, err error) error {
 	switch {
-	case errors.As(err, &apiErr) && (apiErr.Status == http.StatusUnprocessableEntity || apiErr.Status == http.StatusNotFound):
+	case codehost.IsStatus(err, http.StatusUnprocessableEntity, http.StatusNotFound):
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
 			"%s: the connection's installation cannot access every repository in %v; install the App on them first", field, repos))
-	case errors.As(err, &apiErr):
-		return connect.NewError(connect.CodeFailedPrecondition, field+": GitHub refused the connection: "+apiErr.Error())
-	case errors.Is(err, github.ErrRepositoryMismatch):
+	case isStatusError(err):
+		return connect.NewError(connect.CodeFailedPrecondition, field+": "+name+" refused the connection: "+err.Error())
+	case errors.Is(err, codehost.ErrRepositoryMismatch):
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Sprintf(
 			"%s: %v are not all repositories of the connection's installation account", field, repos))
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return connect.NewError(connect.CodeCanceled, "request canceled")
 	default:
 		s.log.Warn("github installation check failed", "connection", idString(conn.ID), "err", err)
-		return connect.NewError(connect.CodeUnavailable, field+": could not reach GitHub to check the repositories; try again")
+		return connect.NewError(connect.CodeUnavailable, field+": could not reach "+name+" to check the repositories; try again")
 	}
 }
