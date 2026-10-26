@@ -511,3 +511,9 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+// HTTPStatus implements codehost.StatusError.
+func (e *APIError) HTTPStatus() int { return e.Status }
+
+// Detail implements codehost.StatusError.
+func (e *APIError) Detail() string { return e.Message }

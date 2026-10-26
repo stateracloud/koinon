@@ -51,6 +51,8 @@ import (
 
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
@@ -75,6 +77,8 @@ type Options struct {
 	ApprovalTTL time.Duration
 	// Now defaults to time.Now.
 	Now func() time.Time
+	// Hosts are the code-host providers a grant can be on; defaults to the shipped providers.
+	Hosts *codehost.Registry
 	// Execute, if set, is called in its own goroutine for a newly recorded call the grant's
 	// preset allows without a human (Trusted), so it runs at once; the approval sweeper
 	// executes it otherwise.
@@ -86,21 +90,25 @@ const KindApprovalRequested = "approval.requested"
 
 // Server is the GitHub tools MCP server.
 type Server struct {
-	pool *pgxpool.Pool
-	q    *store.Queries
-	log  *slog.Logger
-	ttl  time.Duration
-	now  func() time.Time
-	ct   *connectors.Type
-	mcp  *mcp.Server
-	exec func(ctx context.Context, org, id pgtype.UUID)
+	pool  *pgxpool.Pool
+	q     *store.Queries
+	log   *slog.Logger
+	ttl   time.Duration
+	now   func() time.Time
+	hosts *codehost.Registry
+	mcp   *mcp.Server
+	exec  func(ctx context.Context, org, id pgtype.UUID)
 }
 
 // New returns a Server recording requests in pool.
 func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
-	ct, ok := connectors.Get(connectors.GitHubID)
-	if !ok {
-		return nil, errors.New("githubtools: the github connector type is not embedded")
+	if opts.Hosts == nil {
+		opts.Hosts = providers.Default()
+	}
+	for _, id := range opts.Hosts.IDs() {
+		if _, ok := connectors.Get(id); !ok {
+			return nil, fmt.Errorf("githubtools: the %s connector type is not embedded", id)
+		}
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -111,7 +119,7 @@ func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, ct: ct, exec: opts.Execute}
+	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, hosts: opts.Hosts, exec: opts.Execute}
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: project.Name + "-github-tools", Version: project.Version}, nil)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolCreatePullRequest,
@@ -232,34 +240,35 @@ func (s *Server) lookupErr(err error, what string) error {
 
 // authorise checks the run's grant for tool and returns the preset's
 // decision and the target repository.
-func (s *Server) authorise(c caller, tool string) (connectors.Decision, string, error) {
-	grant, ok := c.config.Grant(connectors.GitHubID)
+func (s *Server) authorise(c caller, tool string) (connectors.Decision, string, string, error) {
+	connector, grant, ok := s.hosts.Grant(c.config)
 	if !ok {
-		return connectors.Deny, "", errors.New("this agent has no GitHub grant")
+		return connectors.Deny, "", "", errors.New("this agent has no GitHub grant")
 	}
+	ct, _ := connectors.Get(connector) // checked in New
 	wt, err := LookupWriteTool(tool)
 	if err != nil {
-		return connectors.Deny, "", err
+		return connectors.Deny, "", "", err
 	}
 	scope := wt.Scope
 	granted := false
 	for _, sc := range grant.Scopes {
 		granted = granted || sc == scope
 	}
-	d := s.ct.Decide(grant.Preset, scope)
+	d := ct.Decide(grant.Preset, scope)
 	if !granted || d == connectors.Deny {
-		return connectors.Deny, "", fmt.Errorf("this agent's GitHub grant does not allow %s (scope %s)", tool, scope)
+		return connectors.Deny, "", "", fmt.Errorf("this agent's GitHub grant does not allow %s (scope %s)", tool, scope)
 	}
-	b, ok := c.config.Binding(connectors.GitHubID)
+	b, ok := c.config.Binding(connector)
 	switch {
 	case !ok || len(b.Targets) == 0:
-		return connectors.Deny, "", errors.New("this agent's GitHub grant has no repository yet; ask an admin to choose one")
+		return connectors.Deny, "", "", errors.New("this agent's GitHub grant has no repository yet; ask an admin to choose one")
 	case len(b.Targets) > 1:
-		return connectors.Deny, "", errors.New("this agent's GitHub grant has several repositories; v0.1 supports one per agent")
-	case !s.ct.ValidTarget(b.Targets[0]):
-		return connectors.Deny, "", fmt.Errorf("the granted repository %q is not owner/name", b.Targets[0])
+		return connectors.Deny, "", "", errors.New("this agent's GitHub grant has several repositories; v0.1 supports one per agent")
+	case !ct.ValidTarget(b.Targets[0]):
+		return connectors.Deny, "", "", fmt.Errorf("the granted repository %q is not owner/name", b.Targets[0])
 	}
-	return d, b.Targets[0], nil
+	return d, b.Targets[0], connector, nil
 }
 
 func (s *Server) createPullRequest(ctx context.Context, req *mcp.CallToolRequest, in PullRequestArgs) (*mcp.CallToolResult, Result, error) {
@@ -298,7 +307,7 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 	if err != nil {
 		return nil, Result{}, err
 	}
-	decision, repo, err := s.authorise(c, tool)
+	decision, repo, connector, err := s.authorise(c, tool)
 	if err != nil {
 		return nil, Result{}, err
 	}
@@ -308,7 +317,7 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 	}
 	params := store.CreateApprovalRequestParams{
 		OrgID: c.org.ID, TaskID: c.run.TaskID, RunID: c.run.ID, AgentID: c.agent.ID,
-		Connector: connectors.GitHubID, Tool: tool, Target: connectors.GitHubID + ":" + repo,
+		Connector: connector, Tool: tool, Target: connector + ":" + repo,
 		ArgsJson: string(canonical), ArgsSha256: HashArgs(canonical), Risk: riskJSON,
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
 		ExpiresAt: pgtype.Timestamptz{Time: s.now().Add(s.ttl), Valid: true},

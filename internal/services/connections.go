@@ -20,6 +20,8 @@ import (
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -91,10 +93,10 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 	if err := json.Unmarshal(c.LastTest, &results); err == nil {
 		out.LastTest = checksProto(results)
 	}
-	if c.Connector == connectors.GitHubID {
-		if cfg, err := connections.ParseGitHubConfig(c.Config); err == nil {
+	if p, ok := s.hosts.Get(c.Connector); ok {
+		if d, err := p.Describe(c.Config); err == nil {
 			out.Settings = &connectionv1alpha1.Connection_Github{Github: &connectionv1alpha1.GitHubConnection{
-				AppId: cfg.AppID, InstallationId: cfg.InstallationID, KeyFingerprint: c.SecretFingerprint,
+				AppId: d.AppID, InstallationId: d.InstallationID, KeyFingerprint: c.SecretFingerprint,
 			}}
 		}
 	}
@@ -134,14 +136,19 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	// later (protobuf-go ignores debug_redact) can show it.
 	pemKey := []byte(req.GetPrivateKey())
 	req.PrivateKey = ""
-	key, err := github.ParsePrivateKey(pemKey)
-	if err != nil {
+	host, ok := s.hosts.Get(providers.GitHub)
+	if !ok {
+		return nil, s.dbError(errors.New("github provider is not registered"), "connector type")
+	}
+	secrets := map[string][]byte{connections.GitHubPrivateKeyField: pemKey}
+	if err := host.ValidateSecrets(secrets); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "private_key: "+strings.TrimPrefix(err.Error(), "github: "))
 	}
+	key, _ := github.ParsePrivateKey(pemKey) // validated above; only its fingerprint is used
 	if s.keys == nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, connections.ErrNoKeyring.Error())
 	}
-	t, ok := connectors.Get(connectors.GitHubID)
+	t, ok := connectors.Get(host.ID())
 	if !ok {
 		return nil, s.dbError(errors.New("github connector type is not embedded"), "connector type")
 	}
@@ -306,16 +313,20 @@ func (s *Server) TestConnection(ctx context.Context, req *connectionv1alpha1.Tes
 
 func (s *Server) testConnection(ctx context.Context, row store.Connection) (store.Connection, []*connectionv1alpha1.CheckResult, error) {
 	t, ok := connectors.Get(row.Connector)
-	if !ok || row.Connector != connectors.GitHubID {
+	p, isHost := s.hosts.Get(row.Connector)
+	if !ok || !isHost {
 		return row, nil, connect.NewError(connect.CodeUnimplemented, "no checks for connector "+row.Connector)
 	}
 	var results []connections.CheckResult
-	app, err := connections.LoadGitHubApp(ctx, s.keys, row)
+	conn, err := connections.Load(ctx, s.keys, row)
+	if err == nil {
+		err = p.ValidateSecrets(conn.Fields)
+	}
 	if err != nil {
 		s.log.Warn("connection credentials unreadable", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
 		results = []connections.CheckResult{{Check: "secret", Step: "generate-key", Message: "Koinon could not read this connection's private key; create the connection again"}}
 	} else {
-		results = connections.TestGitHub(ctx, s.github, t, app)
+		results = p.Checks(ctx, conn, t)
 	}
 	status := store.ConnectionStatusOk
 	for _, r := range results {
@@ -342,7 +353,7 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection) (stor
 // cannot filter: a filtered call reads GitHub pages until it has a page's worth of matches,
 // the installation's repositories end, or it has read maxInstallationRepoPages pages.
 const (
-	installationReposPerPage = github.MaxPerPage
+	installationReposPerPage = codehost.MaxPerPage
 	maxInstallationRepoPages = 10
 	maxInstallationRepoQuery = 200
 )
@@ -373,22 +384,27 @@ func (s *Server) ListInstallationRepos(ctx context.Context, req *connectionv1alp
 	if err != nil {
 		return nil, s.dbError(err, "connection")
 	}
-	if row.Connector != connectors.GitHubID {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, "the connection is not a GitHub connection")
+	p, ok := s.hosts.Get(row.Connector)
+	if !ok {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, "the connection is not a code host connection")
 	}
-	app, err := connections.LoadGitHubApp(ctx, s.keys, row)
+	name := p.Capabilities().DisplayName
+	conn, err := connections.Load(ctx, s.keys, row)
+	if err == nil {
+		err = p.ValidateSecrets(conn.Fields)
+	}
 	if err != nil {
 		if errors.Is(err, connections.ErrNoKeyring) {
 			return nil, connect.NewError(connect.CodeFailedPrecondition, err.Error())
 		}
 		// The messages name the Secret or say the key is malformed; never its content.
-		return nil, connect.NewError(connect.CodeFailedPrecondition, "the connection cannot authenticate to GitHub: "+err.Error())
+		return nil, connect.NewError(connect.CodeFailedPrecondition, "the connection cannot authenticate to "+name+": "+err.Error())
 	}
 	// Metadata read only, the least any installation token has. No repositories named: the
 	// token covers every repository of the installation, which is what is listed.
-	tok, err := s.github.InstallationToken(ctx, app, github.TokenRequest{Permissions: map[string]string{"metadata": "read"}})
+	acc, err := p.Open(ctx, conn, p.MetadataScope(nil))
 	if err != nil {
-		return nil, s.listReposError(row, err)
+		return nil, s.listReposError(row, name, err)
 	}
 	res := &connectionv1alpha1.ListInstallationReposResponse{}
 	for read := 0; ; read++ {
@@ -396,11 +412,11 @@ func (s *Server) ListInstallationRepos(ctx context.Context, req *connectionv1alp
 			res.NextPageToken = strconv.Itoa(page)
 			break
 		}
-		got, err := s.github.ListInstallationRepositories(ctx, tok, page, installationReposPerPage)
+		got, err := acc.Repositories(ctx, page, installationReposPerPage)
 		if err != nil {
-			return nil, s.listReposError(row, err)
+			return nil, s.listReposError(row, name, err)
 		}
-		res.TotalCount = got.TotalCount
+		res.TotalCount = got.Total
 		for _, r := range got.Repositories {
 			if query == "" || strings.Contains(strings.ToLower(r.FullName), query) {
 				res.Repos = append(res.Repos, &connectionv1alpha1.InstallationRepo{
@@ -408,7 +424,7 @@ func (s *Server) ListInstallationRepos(ctx context.Context, req *connectionv1alp
 				})
 			}
 		}
-		if len(got.Repositories) == 0 || int64(page)*installationReposPerPage >= got.TotalCount {
+		if len(got.Repositories) == 0 || int64(page)*installationReposPerPage >= got.Total {
 			break
 		}
 		page++
@@ -416,16 +432,20 @@ func (s *Server) ListInstallationRepos(ctx context.Context, req *connectionv1alp
 	return res, nil
 }
 
-// listReposError maps an error from GitHub while listing an installation's repositories.
-func (s *Server) listReposError(conn store.Connection, err error) error {
-	var apiErr *github.APIError
+// listReposError maps an error from the code host while listing a connection's repositories.
+func (s *Server) listReposError(conn store.Connection, name string, err error) error {
 	switch {
-	case errors.As(err, &apiErr):
-		return connect.NewError(connect.CodeFailedPrecondition, "GitHub refused the connection; test it for details: "+apiErr.Error())
+	case isStatusError(err):
+		return connect.NewError(connect.CodeFailedPrecondition, name+" refused the connection; test it for details: "+err.Error())
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return connect.NewError(connect.CodeCanceled, "request canceled")
 	default:
 		s.log.Warn("listing installation repositories failed", "connection", idString(conn.ID), "err", err)
-		return connect.NewError(connect.CodeUnavailable, "could not reach GitHub to list the repositories; try again")
+		return connect.NewError(connect.CodeUnavailable, "could not reach "+name+" to list the repositories; try again")
 	}
+}
+
+func isStatusError(err error) bool {
+	_, ok := codehost.AsStatus(err)
+	return ok
 }

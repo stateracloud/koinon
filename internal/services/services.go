@@ -34,6 +34,8 @@ import (
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -78,7 +80,11 @@ type Options struct {
 	Keys Keys
 	// Tokens issues admin API tokens; defaults to a service on the pool.
 	Tokens *tokens.Service
-	// GitHub runs connection checks; defaults to a client for api.github.com.
+	// Hosts are the code-host providers that run connection checks and list repositories. Without
+	// it the shipped providers are used, with GitHub as the client below.
+	Hosts *codehost.Registry
+	// GitHub is the client of the shipped GitHub provider when Hosts is nil; it defaults to a
+	// client for api.github.com.
 	GitHub *github.Client
 	// Approvals decides and executes approval requests. Nil means Approve and
 	// Deny are unavailable; listing still works.
@@ -102,7 +108,7 @@ type Server struct {
 	tokens    *tokens.Service
 	budgets   *budget.Service
 	prices    *prices.Service
-	github    *github.Client
+	hosts     *codehost.Registry
 	approvals *approvals.Service
 	catalog   *catalog.Service
 	mcp       *mcpservers.Service
@@ -116,15 +122,15 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	if opts.GitHub == nil {
-		opts.GitHub = github.NewClient(github.Options{})
+	if opts.Hosts == nil {
+		opts.Hosts = providers.New(opts.GitHub)
 	}
 	if opts.Tokens == nil {
 		opts.Tokens = tokens.New(pool, nil)
 	}
 	return &Server{
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
-		keys: opts.Keys, tokens: opts.Tokens, github: opts.GitHub, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
+		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger),
 	}
 }

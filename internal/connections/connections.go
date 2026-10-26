@@ -26,7 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/project"
@@ -46,7 +46,7 @@ var (
 
 // GitHubPrivateKeyField is the setup-guide field (and Secret data key) of the
 // GitHub App private key.
-const GitHubPrivateKeyField = "privateKey"
+const GitHubPrivateKeyField = github.PrivateKeyField
 
 // Opener decrypts envelopes; *secretstore.Keyring is one.
 type Opener interface {
@@ -203,43 +203,32 @@ func ptr[T any](v T) *T { return &v }
 
 // GitHubConfig is the non-secret part of a GitHub connection, stored in
 // connections.config under the setup guide's field IDs.
-type GitHubConfig struct {
-	AppID          int64 `json:"appId"`
-	InstallationID int64 `json:"installationId"`
-}
+type GitHubConfig = github.Config
 
 // ParseGitHubConfig decodes connections.config of a GitHub connection.
-func ParseGitHubConfig(raw []byte) (GitHubConfig, error) {
-	var c GitHubConfig
-	if err := json.Unmarshal(raw, &c); err != nil {
-		return c, fmt.Errorf("connections: decode GitHub config: %w", err)
-	}
-	return c, nil
-}
+func ParseGitHubConfig(raw []byte) (GitHubConfig, error) { return github.ParseConfig(raw) }
 
 // ErrRemoved means the connection was declared by a Secret that has been deleted.
 var ErrRemoved = errors.New("connections: the connection was removed")
 
-// LoadGitHubApp reads a GitHub connection's App from its row and stored secret fields.
-func LoadGitHubApp(_ context.Context, opener Opener, c store.Connection) (github.App, error) {
-	if c.Connector != connectors.GitHubID {
-		return github.App{}, fmt.Errorf("connections: %s is a %s connection, not GitHub", c.ID.String(), c.Connector)
-	}
+// Load opens a connection's stored secret fields for its code-host provider.
+func Load(_ context.Context, opener Opener, c store.Connection) (codehost.Connection, error) {
 	if c.RemovedAt.Valid {
-		return github.App{}, fmt.Errorf("%w: the Kubernetes Secret %s that declared %q was deleted; restore the Secret, or bind the agent to another connection",
+		return codehost.Connection{}, fmt.Errorf("%w: the Kubernetes Secret %s that declared %q was deleted; restore the Secret, or bind the agent to another connection",
 			ErrRemoved, c.ManagedBySecret.String, c.DisplayName)
-	}
-	cfg, err := ParseGitHubConfig(c.Config)
-	if err != nil {
-		return github.App{}, err
 	}
 	fields, err := OpenFields(opener, c)
 	if err != nil {
+		return codehost.Connection{}, err
+	}
+	return codehost.Connection{ID: c.ID.String(), DisplayName: c.DisplayName, Connector: c.Connector, Config: c.Config, Fields: fields}, nil
+}
+
+// LoadGitHubApp reads a GitHub connection's App from its row and stored secret fields.
+func LoadGitHubApp(ctx context.Context, opener Opener, c store.Connection) (github.App, error) {
+	conn, err := Load(ctx, opener, c)
+	if err != nil {
 		return github.App{}, err
 	}
-	key, err := github.ParsePrivateKey(fields[GitHubPrivateKeyField])
-	if err != nil {
-		return github.App{}, fmt.Errorf("connections: connection %s: %w", c.ID.String(), err)
-	}
-	return github.App{AppID: cfg.AppID, InstallationID: cfg.InstallationID, Key: key}, nil
+	return github.AppOf(conn)
 }
