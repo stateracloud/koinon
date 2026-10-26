@@ -48,8 +48,8 @@ type OpenShell struct {
 	// Address is the gateway's host:port.
 	Address string
 	// TLSDir holds the client bundle OpenShell issues (tls.crt, tls.key, ca.crt). Empty
-	// connects without TLS: the chart allows an empty client TLS Secret, for example for a
-	// gateway behind a mesh that terminates mTLS.
+	// connects without TLS: the chart allows an empty client TLS Secret only with
+	// openshell.insecure=true, for a gateway behind a mesh that terminates mTLS.
 	TLSDir string
 	// ServerName overrides the name checked against the gateway's certificate.
 	ServerName string

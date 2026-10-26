@@ -367,8 +367,8 @@ func (q *Queries) GetUserByIdentity(ctx context.Context, arg GetUserByIdentityPa
 }
 
 const grantPlatformAdmin = `-- name: GrantPlatformAdmin :exec
-INSERT INTO platform_admins (user_id, granted_by)
-VALUES ($1, $2)
+INSERT INTO platform_admins (user_id, granted_by, source)
+VALUES ($1, $2, 'bootstrap')
 ON CONFLICT (user_id) DO NOTHING
 `
 
@@ -380,6 +380,22 @@ type GrantPlatformAdminParams struct {
 func (q *Queries) GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error {
 	_, err := q.db.Exec(ctx, grantPlatformAdmin, arg.UserID, arg.GrantedBy)
 	return err
+}
+
+const grantPlatformAdminFromGroup = `-- name: GrantPlatformAdminFromGroup :one
+INSERT INTO platform_admins (user_id, source)
+VALUES ($1, 'oidc_group')
+ON CONFLICT (user_id) DO NOTHING
+RETURNING user_id
+`
+
+// The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
+// no row when the user already is a platform admin (from any source), which keeps that source.
+func (q *Queries) GrantPlatformAdminFromGroup(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, grantPlatformAdminFromGroup, userID)
+	var user_id pgtype.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
 }
 
 const isPlatformAdmin = `-- name: IsPlatformAdmin :one
@@ -535,6 +551,20 @@ func (q *Queries) RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUs
 	return err
 }
 
+const revokePlatformAdminFromGroup = `-- name: RevokePlatformAdminFromGroup :one
+DELETE FROM platform_admins
+WHERE user_id = $1 AND source = 'oidc_group'
+RETURNING user_id
+`
+
+// Revokes only a grant that came from a platform admin group; it returns no row for any other.
+func (q *Queries) RevokePlatformAdminFromGroup(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, revokePlatformAdminFromGroup, userID)
+	var user_id pgtype.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
 const revokeSession = `-- name: RevokeSession :exec
 UPDATE sessions SET revoked_at = $1
 WHERE token_hash = $2 AND revoked_at IS NULL
@@ -548,6 +578,25 @@ type RevokeSessionParams struct {
 func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) error {
 	_, err := q.db.Exec(ctx, revokeSession, arg.Now, arg.TokenHash)
 	return err
+}
+
+const revokeSessionReturningUser = `-- name: RevokeSessionReturningUser :one
+UPDATE sessions SET revoked_at = $1
+WHERE token_hash = $2 AND revoked_at IS NULL
+RETURNING user_id
+`
+
+type RevokeSessionReturningUserParams struct {
+	Now       pgtype.Timestamptz
+	TokenHash []byte
+}
+
+// Logout: revokes a live session and says whose it was, for the audit log. No row: nothing was live.
+func (q *Queries) RevokeSessionReturningUser(ctx context.Context, arg RevokeSessionReturningUserParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, revokeSessionReturningUser, arg.Now, arg.TokenHash)
+	var user_id pgtype.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
 }
 
 const revokeSessionsByMethod = `-- name: RevokeSessionsByMethod :execrows

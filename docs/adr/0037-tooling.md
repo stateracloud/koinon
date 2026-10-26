@@ -68,7 +68,7 @@ read, and forward-only with an upgrade test ([0027](0027-repo-and-versioning.md)
 ## Open questions
 
 - Home-lab registry: an in-cluster registry, or GHCR with a pull secret?
-- Run migrations at API start, or as a Helm pre-upgrade Job?
+- ~~Run migrations at API start, or as a Helm pre-upgrade Job?~~ Closed by [0060](0060-migrations-as-a-job.md): as a Job.
 
 ## Upstream verification
 

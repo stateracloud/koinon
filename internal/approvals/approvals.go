@@ -44,6 +44,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -183,6 +184,22 @@ func ticketEvent(ctx context.Context, q *store.Queries, r store.ApprovalRequest,
 	return err
 }
 
+// auditDecision records a decision on an approval request in the audit log, in the transaction
+// that made it (ADR 0005, 0023: who requested, who approved). actor is the approver, or Koinon
+// itself for an expiry. The request's arguments are not copied: their hash identifies them.
+func auditDecision(ctx context.Context, q *store.Queries, r store.ApprovalRequest, action string, actor audit.Actor, note string) error {
+	after := map[string]any{
+		"status": string(r.Status), "tool": r.Tool, "target": r.Target, "argsSha256": r.ArgsSha256,
+		"runId": r.RunID.String(), "ticketId": r.TicketID.String(),
+	}
+	if note != "" {
+		after["note"] = note
+	}
+	return audit.RecordErr(ctx, q, audit.Event{
+		Org: r.OrgID, Actor: actor, Action: action, TargetKind: "approval", TargetID: r.ID.String(), After: after,
+	})
+}
+
 // Approve approves a pending request whose hash is argsSHA256 and executes it before
 // returning. A request already approved with that hash (a replay) is returned as it is, and
 // not executed again unless an earlier execution is still due.
@@ -240,7 +257,10 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 				if err != nil {
 					return err
 				}
-				return ticketEvent(ctx, q, row, KindFirstApproved, approver, map[string]any{"note": note})
+				if err := ticketEvent(ctx, q, row, KindFirstApproved, approver, map[string]any{"note": note}); err != nil {
+					return err
+				}
+				return auditDecision(ctx, q, row, "approval.first_approve", audit.User(approver), note)
 			}
 			if cur.FirstApprover == approver {
 				return ErrSameApprover
@@ -253,7 +273,10 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 		if err != nil {
 			return err
 		}
-		return ticketEvent(ctx, q, row, KindApproved, approver, map[string]any{"note": note})
+		if err := ticketEvent(ctx, q, row, KindApproved, approver, map[string]any{"note": note}); err != nil {
+			return err
+		}
+		return auditDecision(ctx, q, row, "approval.approve", audit.User(approver), note)
 	})
 	if err != nil {
 		return store.ApprovalRequest{}, err
@@ -292,6 +315,9 @@ func (s *Service) Deny(ctx context.Context, org, id, approver pgtype.UUID, note 
 			return err
 		}
 		if err := ticketEvent(ctx, q, row, KindDenied, approver, map[string]any{"note": note}); err != nil {
+			return err
+		}
+		if err := auditDecision(ctx, q, row, "approval.deny", audit.User(approver), note); err != nil {
 			return err
 		}
 		if row.System {
@@ -475,6 +501,9 @@ func (s *Service) sweepOrg(ctx context.Context, org pgtype.UUID, res *SweepResul
 		runs := map[pgtype.UUID]bool{}
 		for _, r := range expired {
 			if err := ticketEvent(ctx, q, r, KindExpired, pgtype.UUID{}, map[string]any{"expires_at": r.ExpiresAt.Time}); err != nil {
+				return err
+			}
+			if err := auditDecision(ctx, q, r, "approval.expire", audit.System(), ""); err != nil {
 				return err
 			}
 			if !r.System { // Koinon's own request: no run waits for it

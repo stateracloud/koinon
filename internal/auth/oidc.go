@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/oauth2"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -37,6 +38,10 @@ type OIDCConfig struct {
 	RedirectURL string
 	// GroupsClaim names the ID token claim holding the user's groups.
 	GroupsClaim string
+	// PlatformAdminGroups are IdP groups (in GroupsClaim) whose members are platform admins. It is
+	// reconciled at every login: gaining one of the groups grants, losing all of them revokes, but
+	// only a grant this setting made. Empty changes nothing.
+	PlatformAdminGroups []string
 	// Scopes are requested besides openid. Defaults to email and profile.
 	Scopes []string
 	// HTTPClient talks to the IdP; defaults to http.DefaultClient.
@@ -319,7 +324,49 @@ func (s *Service) upsertOIDCUser(ctx context.Context, q *store.Queries, id ident
 	}); err != nil {
 		return pgtype.UUID{}, fmt.Errorf("sync group memberships: %w", err)
 	}
+	if err := s.syncPlatformAdmin(ctx, q, user, groups); err != nil {
+		return pgtype.UUID{}, err
+	}
 	return user.ID, nil
+}
+
+// syncPlatformAdmin grants or revokes platform admin from the user's groups (oidc.platformAdminGroups).
+// It never touches a grant from another source, such as the bootstrap admin's. The audit events sit
+// in the user's personal org, the one org every user has; audit_events has no org-less rows.
+func (s *Service) syncPlatformAdmin(ctx context.Context, q *store.Queries, user store.User, groups []string) error {
+	if s.oidc == nil || len(s.oidc.cfg.PlatformAdminGroups) == 0 {
+		return nil
+	}
+	var matched []string
+	for _, g := range s.oidc.cfg.PlatformAdminGroups {
+		if slices.Contains(groups, g) {
+			matched = append(matched, g)
+		}
+	}
+	ev := audit.Event{
+		Org: user.PersonalOrgID, Actor: audit.Actor{Kind: audit.KindSystem, ID: "oidc"},
+		TargetKind: "user", TargetID: user.ID.String(),
+	}
+	if len(matched) > 0 {
+		_, err := q.GrantPlatformAdminFromGroup(ctx, user.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // already a platform admin
+		}
+		if err != nil {
+			return fmt.Errorf("grant platform admin: %w", err)
+		}
+		ev.Action, ev.After = "platform_admin.grant", map[string]any{"source": "oidc_group", "groups": matched}
+		return audit.RecordErr(ctx, q, ev)
+	}
+	_, err := q.RevokePlatformAdminFromGroup(ctx, user.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("revoke platform admin: %w", err)
+	}
+	ev.Action, ev.Before = "platform_admin.revoke", map[string]any{"source": "oidc_group"}
+	return audit.RecordErr(ctx, q, ev)
 }
 
 // safeReturnTo keeps post-login redirects on this site: only absolute paths,
