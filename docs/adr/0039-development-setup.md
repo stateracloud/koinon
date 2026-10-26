@@ -17,7 +17,7 @@ hard to undo and need a human check first.
 ## Decision
 
 - **Code:** development happens in a local git repository on Andre's Mac.
-- **Remote:** pushed to the private `procoduck/koinon`. Work goes on branches with PRs, one per
+- **Remote:** pushed to the private `stateracloud/koinon` (amended 2026-10-26; it was `procoduck/koinon`, see [0034](0034-project-identity.md)). Work goes on branches with PRs, one per
   deliverable during the bootstrap.
 - **Tests:** tests that need real isolation deploy to the **home-lab Talos cluster** with Kata
   (RuntimeClass `kata`). That cluster is for development and local testing only, never public CI
@@ -53,7 +53,7 @@ hard to undo and need a human check first.
   - The home lab is a single environment: no multi-zone tests of home restore
     ([0032](0032-agent-home-checkpoints.md)) _(inferred)_.
 - Follow-ups:
-  - The OpenShell spike ([#3](https://github.com/procoduck/koinon/issues/3)) installs Agent Sandbox
+  - The OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3)) installs Agent Sandbox
     and OpenShell on the home lab with `default_runtime_class_name` set to the Kata RuntimeClass.
   - Document the home-lab prerequisites (Talos version, Kata extension, registry) in
     `CONTRIBUTING.md` for other contributors with their own clusters _(inferred)_.
@@ -83,4 +83,4 @@ Checked 2026-10-21:
 
 - [0025 Testing](0025-testing-strategy.md), [0026 Home lab and license](0026-home-lab-and-license.md)
 - [0037 Tooling](0037-tooling.md), [0045 OpenShell hardening defaults](0045-openshell-hardening-defaults.md)
-- [#3 OpenShell spike](https://github.com/procoduck/koinon/issues/3)
+- [#3 OpenShell spike](https://github.com/stateracloud/koinon/issues/3)

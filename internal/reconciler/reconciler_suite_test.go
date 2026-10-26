@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
+	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -77,8 +78,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 
 // Every spec starts from an empty database, because a pass walks every org.
 var _ = BeforeEach(func(ctx SpecContext) {
-	_, err := pool.Exec(ctx, `TRUNCATE orgs CASCADE`)
-	Expect(err).NotTo(HaveOccurred())
+	pgtest.TruncateOrgs(ctx, pool)
 })
 
 var seq atomic.Int64

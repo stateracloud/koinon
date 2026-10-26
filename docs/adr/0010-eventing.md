@@ -57,6 +57,25 @@ both Postgres and a bus creates the dual-write problem.
 - 2026-10-21: NOTIFY is delivered only on commit, is limited to 8000 bytes, and is not replayed.
   https://www.postgresql.org/docs/current/sql-notify.html
 
+## Amendment (2026-10-26): Postgres wake-ups instead of an outbox
+
+The follow-up "a transactional outbox for reconciler and UI updates" was not built, and no outbox
+table exists. What was built instead:
+
+- Row state is the source of truth, and `NOTIFY` is only a wake-up hint. A listener re-reads the
+  rows after its last seen position, so a lost or coalesced notification loses nothing.
+- Run updates for the UI: a trigger sends `pg_notify('koinon_run', '<org_id>/<run_id>')` on every
+  new `run_events` row and every `runs` change (`internal/db/migrations/00005_run_scheduling.sql:21-42`).
+  Each API replica listens (`internal/runwatch/hub.go:28`, `:167`) and clients resume from the last
+  run event sequence number they saw, not from an outbox ID.
+- Reconciler wake-ups: a trigger sends `pg_notify('koinon_reconcile', '<org_id>')`
+  (`internal/db/migrations/00006_agent_sandboxes.sql:79-90`; the reconciler `LISTEN`s in
+  `internal/reconciler/loop.go:16`, `:67`) and the reconciler also re-reads everything on a timer.
+
+The board is still the queue for work. Webhooks, crons and subscriptions are not built (v0.2,
+[0024](0024-roadmap.md)). [0003](0003-postgres-source-of-truth.md) and
+[0022](0022-frontend-architecture.md) also mention the outbox; read them with this amendment.
+
 ## Links
 
 - [0003](0003-postgres-source-of-truth.md), [0011](0011-agent-to-agent.md),

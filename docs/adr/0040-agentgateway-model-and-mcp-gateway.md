@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-21
 - Amends: ADR 0013 (model access), ADR 0014 (MCP and tools), ADR 0016 (harness and deployment)
-- Verification: Pending: agentgateway spike (deployment mode, ExtMCP routing) and OpenShell spike ([#3](https://github.com/procoduck/koinon/issues/3))
+- Verification: Pending: agentgateway spike (deployment mode, ExtMCP routing) and OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
 
 ## Context
 
@@ -117,6 +117,18 @@ Checked 2026-10-21:
   with `llm.cost`; per-key USD/token budgets in standalone mode; rate-limit budgets in Kubernetes
   mode; CEL MCP authorization; ExtMCP gRPC callout; native `copilot` provider with a static token.
 - LiteLLM: Organizations enterprise-only (docs and code return 403 without Enterprise).
+
+## Amendment (2026-10-26): one gateway interface carries MCP
+
+Decision 6 and the follow-up promise a `ModelGateway` and an `MCPGateway` interface. Only
+`ModelGateway` exists (`internal/gateway/gateway.go:34`). There is no `MCPGateway` anywhere in
+`internal/`. MCP is part of the desired state that `ModelGateway.Apply` converges: `gateway.State`
+(`internal/gateway/gateway.go:380`) holds `MCP []MCPTarget` (the upstream servers, `:351`) and
+`Tools map[AgentRef][]ToolGrant` (the per-agent allowlists, `:370`), and each driver
+(standalone, kubernetes) renders them. [0058](0058-gateway-modes.md) also speaks of one interface.
+The goal of decision 6, replacing agentgateway with another gateway, is met by implementing
+`ModelGateway`. A separate `MCPGateway` is deferred until a gateway needs to be driven for MCP
+separately from models.
 
 ## Links
 

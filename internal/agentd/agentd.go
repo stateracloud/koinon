@@ -124,6 +124,8 @@ type Config struct {
 	KeepLeaseOnShutdown bool
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
+	// Metrics receives the pool's metrics; nil keeps them unexported.
+	Metrics *Metrics
 }
 
 func (c *Config) defaults() error {
@@ -167,6 +169,9 @@ func (c *Config) defaults() error {
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
+	}
+	if c.Metrics == nil {
+		c.Metrics = NewMetrics(nil)
 	}
 	return nil
 }
@@ -245,6 +250,7 @@ func (p *Pool) claim(ctx context.Context, owner string) (store.Run, bool, error)
 		org := orgs[(off+i)%len(orgs)]
 		r, err := p.q.TakeOverExpiredRun(ctx, store.TakeOverExpiredRunParams{OrgID: org, OwnerID: owner, LeaseSeconds: lease})
 		if err == nil {
+			p.cfg.Metrics.Takeovers.Inc()
 			return r, true, nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) && firstErr == nil {
@@ -255,6 +261,7 @@ func (p *Pool) claim(ctx context.Context, owner string) (store.Run, bool, error)
 		org := orgs[(off+i)%len(orgs)]
 		r, err := p.q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: org, OwnerID: owner, LeaseSeconds: lease})
 		if err == nil {
+			p.cfg.Metrics.Claimed.Inc()
 			return r, true, nil
 		}
 		// A unique violation is the rare race runs_one_active_per_agent backstops: another

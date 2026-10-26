@@ -580,6 +580,25 @@ func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) er
 	return err
 }
 
+const revokeSessionReturningUser = `-- name: RevokeSessionReturningUser :one
+UPDATE sessions SET revoked_at = $1
+WHERE token_hash = $2 AND revoked_at IS NULL
+RETURNING user_id
+`
+
+type RevokeSessionReturningUserParams struct {
+	Now       pgtype.Timestamptz
+	TokenHash []byte
+}
+
+// Logout: revokes a live session and says whose it was, for the audit log. No row: nothing was live.
+func (q *Queries) RevokeSessionReturningUser(ctx context.Context, arg RevokeSessionReturningUserParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, revokeSessionReturningUser, arg.Now, arg.TokenHash)
+	var user_id pgtype.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
 const revokeSessionsByMethod = `-- name: RevokeSessionsByMethod :execrows
 UPDATE sessions SET revoked_at = $1
 WHERE auth_method = $2 AND revoked_at IS NULL
