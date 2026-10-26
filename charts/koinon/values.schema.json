@@ -118,6 +118,11 @@
         "otlpPort": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "the spend ledger's OTLP/HTTP receiver for agentgateway's access log"},
         "toolsPort": {"type": "integer", "minimum": 1, "maximum": 65535},
         "savedWorkPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "durable": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"enabled": {"type": "boolean"}}
+        },
         "resources": {"$ref": "#/definitions/resources"},
         "podAnnotations": {"$ref": "#/definitions/map"},
         "nodeSelector": {"$ref": "#/definitions/map"},
