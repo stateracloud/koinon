@@ -389,7 +389,7 @@ func renderSandboxPolicy(ctx context.Context) ([]*admissionv1.ValidatingAdmissio
 	Expect(err).NotTo(HaveOccurred(), "helm renders the chart's policies")
 	var out, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, helm, "template", "koinon", "../../charts/koinon", "--namespace", "koinon",
-		"--show-only", "templates/sandbox-policy.yaml")
+		"--set", "openshell.insecure=true", "--show-only", "templates/sandbox-policy.yaml")
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	Expect(cmd.Run()).To(Succeed(), stderr.String())
 

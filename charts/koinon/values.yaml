@@ -256,8 +256,13 @@ flavors:
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:
   address: ""
-  # Secret with the client certificate (tls.crt, tls.key, ca.crt) for mTLS. Empty disables mTLS.
+  # Secret with the client certificate (tls.crt, tls.key, ca.crt) for mTLS. Required: the chart
+  # refuses to render without it unless insecure is true.
   clientTLSSecret: ""
+  # Dial the gateway in plaintext. Only for a service mesh that provides mTLS between Koinon and the
+  # gateway; otherwise the exec channel that controls every sandbox crosses the cluster in clear
+  # text. The components log a warning. Not allowed together with clientTLSSecret.
+  insecure: false
   # Default sandbox runtime class (ADR 0045).
   runtimeClassName: kata
 

@@ -17,6 +17,13 @@ Before you set bootstrapAdmin.enabled=false, set oidc.platformAdminGroups and lo
 one of those groups; otherwise nobody is left to set the platform budget ceilings.
 {{- end }}
 
+{{- if .Values.openshell.insecure }}
+
+WARNING: openshell.insecure=true. Koinon dials the OpenShell gateway without TLS, so sandbox create,
+exec and policy calls cross the cluster in clear text unless a service mesh provides mTLS. Set
+openshell.clientTLSSecret instead.
+{{- end }}
+
 Secret store: provider API keys and connection secrets are encrypted in Postgres with the key-encryption
 keys in Secret {{ include "koinon.kekSecretName" . }}{{ if not .Values.secrets.kek.existingSecret }}, which koinon-api creates on its first start{{ end }}. Back it up once it exists; without it they cannot be read:
 
