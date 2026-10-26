@@ -186,6 +186,23 @@ var _ = Describe("Failure modes", func() {
 			Eventually(func() int { return srv.Waiting("faulty") }).Should(Equal(0))
 		})
 
+		It("keeps held requests releasable after the model is re-registered", func(ctx SpecContext) {
+			srv, ts := start(faulty(fakemodel.Faults{Lockstep: true}))
+			done := make(chan int, 1)
+			go func() {
+				defer GinkgoRecover()
+				resp := openAI(ctx, ts.URL, false)
+				_ = resp.Body.Close()
+				done <- resp.StatusCode
+			}()
+			Eventually(func() int { return srv.Waiting("faulty") }).Should(Equal(1))
+			Expect(srv.Register(faulty(fakemodel.Faults{Lockstep: true}))).To(Succeed())
+			Expect(srv.Waiting("faulty")).To(Equal(1))
+			Expect(srv.Release("faulty", 1)).To(Succeed())
+			Eventually(done).Should(Receive(Equal(http.StatusOK)))
+			Eventually(func() int { return srv.Waiting("faulty") }).Should(Equal(0))
+		})
+
 		It("rejects releasing an unknown model", func() {
 			srv, _ := start(faulty(fakemodel.Faults{Lockstep: true}))
 			Expect(srv.Release("nope", 1)).To(HaveOccurred())

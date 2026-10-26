@@ -71,13 +71,18 @@ func New(scripts ...Script) (*Server, error) {
 	return s, nil
 }
 
-// Register adds or replaces the script for sc.Model and resets its fault counters.
+// Register adds or replaces the script for sc.Model and resets its fault counters. Re-registering
+// keeps the lockstep gate and the held requests, so Release and Waiting still see them.
 func (s *Server) Register(sc Script) error {
 	if err := sc.Validate(); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if e, ok := s.scripts[sc.Model]; ok {
+		e.script, e.served, e.limited = sc, 0, 0
+		return nil
+	}
 	s.scripts[sc.Model] = &entry{script: sc, gate: make(chan struct{}, gateCapacity)}
 	return nil
 }
