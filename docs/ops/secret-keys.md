@@ -1,6 +1,7 @@
 # Secret keys: rotation, backup and compromise
 
-Koinon stores provider API keys and connection secrets (a GitHub App's private key) in Postgres as
+Koinon stores provider API keys, connection secrets (a GitHub App's private key) and remote MCP
+server credentials in Postgres as
 envelopes: each value has its own data key (DEK), wrapped by a key-encryption key (KEK) that lives
 in a Kubernetes Secret. This runbook says how to look after the KEKs. The design is in
 [ADR 0056](../adr/0056-model-providers-pricing-and-budgets-per-org.md); the sources for the
@@ -11,7 +12,7 @@ numbers and the procedure are in [the research](../research/kek-rotation.md).
 | What | Where | Who can read it |
 | --- | --- | --- |
 | KEKs | Secret `koinon-kek` (or `secrets.kek.existingSecret`): one file per KEK, named by its ID, plus `active` | `koinon-api` reads it through the Kubernetes API; `koinon-reconciler` mounts it. Nothing else does. |
-| Wrapped DEKs and ciphertext | `providers.api_key`, `connections.secret_envelope`, `saved_work.envelope` (uncommitted work saved from a stuck sandbox, sealed by koinon-api, gone after 14 days) in Postgres | Anyone with the database, but they need the KEK to open them. |
+| Wrapped DEKs and ciphertext | `providers.api_key`, `connections.secret_envelope`, `mcp_servers.credential`, `saved_work.envelope` (uncommitted work saved from a stuck sandbox, sealed by koinon-api, gone after 14 days) in Postgres | Anyone with the database, but they need the KEK to open them. |
 | Saved-work upload key | Secret `<release>-saved-work`, key `key` (random, created by `koinon-api` on first use, never overwritten) | `koinon-api` reads it through the Kubernetes API; `koinon-agentd` mounts it read-only. It signs agentd's posts of a stuck sandbox's work; it is not a KEK and opens nothing. |
 | Opened provider keys | Secret `koinon-gateway-providers` | Only the gateway pod mounts it. |
 
@@ -54,7 +55,8 @@ kubectl -n koinon get secret koinon-kek -o yaml > koinon-kek-backup.yaml
 Keep the file with your other secrets, apart from the database backups. **A database backup needs the
 KEKs that wrapped it.** Keep every KEK, including retired ones, for as long as a database backup that
 used it exists. Retiring a KEK removes it from the Secret, not from your escrow. If every copy of a KEK
-is lost, the values wrapped by it are lost: add the providers and connections again.
+is lost, the values wrapped by it are lost: add the providers, connections and MCP server credentials
+again.
 
 The Secret is not part of the Helm release, so `helm uninstall` leaves it, and so does a GitOps prune.
 Delete it yourself when you delete the database.
