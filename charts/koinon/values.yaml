@@ -347,6 +347,30 @@ networkPolicy:
   # rule covers every upstream the gateway calls: model providers and remote MCP servers.
   gatewayEgressTo: []
 
+# Prometheus metrics of koinon-api, koinon-reconciler and koinon-agentd (ADR 0023, amendment
+# 2026-10-26): each serves /metrics, without authentication, on this port of its pod. A Service
+# <release>-koinon-<component>-metrics exposes it. No metric carries an org, agent, user, ticket or run ID.
+metrics:
+  port: 9090
+  # Peers allowed to scrape the three components' metrics port: NetworkPolicy `from` entries, for
+  # example Prometheus's namespace:
+  #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+  # Empty (the default) admits nobody, so with networkPolicy.enabled the metrics are not scrapable
+  # until you name the scraper. (networkPolicy.metricsFrom is separate: agentgateway's stats port.)
+  allowFrom: []
+  serviceMonitor:
+    # A prometheus-operator ServiceMonitor per component. Needs the monitoring.coreos.com/v1
+    # ServiceMonitor CRD: enabling it without the CRD fails the install.
+    enabled: false
+    # Extra labels on the ServiceMonitors, for example the release label your Prometheus selects on.
+    labels: {}
+    # Render the ServiceMonitors without checking the cluster for the CRD, for `helm template`
+    # pipelines, kustomize helmCharts without apiVersions, and a first Argo CD sync that installs
+    # the CRD in the same sync.
+    skipCapabilityCheck: false
+    # Scrape interval, for example 30s; empty uses the Prometheus default.
+    interval: ""
+
 # ValidatingAdmissionPolicy for OpenShell sandbox namespaces (ADRs 0045, 0048).
 sandboxPolicy:
   enabled: true

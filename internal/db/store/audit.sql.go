@@ -11,11 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getAuditChainHead = `-- name: GetAuditChainHead :one
+SELECT org_id, seq, hash FROM audit_chain_heads WHERE org_id = $1
+`
+
+func (q *Queries) GetAuditChainHead(ctx context.Context, orgID pgtype.UUID) (AuditChainHead, error) {
+	row := q.db.QueryRow(ctx, getAuditChainHead, orgID)
+	var i AuditChainHead
+	err := row.Scan(&i.OrgID, &i.Seq, &i.Hash)
+	return i, err
+}
+
 const insertAuditEvent = `-- name: InsertAuditEvent :one
 
 INSERT INTO audit_events (org_id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING org_id, id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at
+RETURNING org_id, id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at, chain_seq, prev_hash, hash
 `
 
 type InsertAuditEventParams struct {
@@ -59,12 +70,112 @@ func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventPara
 		&i.Summary,
 		&i.RequestID,
 		&i.CreatedAt,
+		&i.ChainSeq,
+		&i.PrevHash,
+		&i.Hash,
 	)
 	return i, err
 }
 
+const listAuditChainOrgs = `-- name: ListAuditChainOrgs :many
+SELECT org_id FROM audit_events
+UNION
+SELECT org_id FROM audit_chain_heads
+ORDER BY org_id
+`
+
+// Every org that has a chain, for the verifier.
+func (q *Queries) ListAuditChainOrgs(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAuditChainOrgs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var org_id pgtype.UUID
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditChainRows = `-- name: ListAuditChainRows :many
+SELECT org_id::text AS org_text, id::text AS id_text, chain_seq, actor_kind, actor_id, action,
+       target_kind, target_id, summary::text AS summary_text, request_id,
+       (extract(epoch FROM created_at) * 1000000)::bigint AS created_micros,
+       prev_hash, hash
+FROM audit_events
+WHERE org_id = $1 AND chain_seq > $2
+ORDER BY chain_seq
+LIMIT $3
+`
+
+type ListAuditChainRowsParams struct {
+	OrgID    pgtype.UUID
+	AfterSeq int64
+	PageSize int32
+}
+
+type ListAuditChainRowsRow struct {
+	OrgText       string
+	IDText        string
+	ChainSeq      int64
+	ActorKind     string
+	ActorID       string
+	Action        string
+	TargetKind    string
+	TargetID      string
+	SummaryText   string
+	RequestID     string
+	CreatedMicros int64
+	PrevHash      []byte
+	Hash          []byte
+}
+
+// One page of an org's chain in chain order, with the fields the hash covers as text, so the
+// verifier recomputes the hash without trusting audit_event_hash().
+func (q *Queries) ListAuditChainRows(ctx context.Context, arg ListAuditChainRowsParams) ([]ListAuditChainRowsRow, error) {
+	rows, err := q.db.Query(ctx, listAuditChainRows, arg.OrgID, arg.AfterSeq, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuditChainRowsRow
+	for rows.Next() {
+		var i ListAuditChainRowsRow
+		if err := rows.Scan(
+			&i.OrgText,
+			&i.IDText,
+			&i.ChainSeq,
+			&i.ActorKind,
+			&i.ActorID,
+			&i.Action,
+			&i.TargetKind,
+			&i.TargetID,
+			&i.SummaryText,
+			&i.RequestID,
+			&i.CreatedMicros,
+			&i.PrevHash,
+			&i.Hash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuditEvents = `-- name: ListAuditEvents :many
-SELECT org_id, id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at FROM audit_events
+SELECT org_id, id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at, chain_seq, prev_hash, hash FROM audit_events
 WHERE org_id = $1
   AND ($2::uuid IS NULL OR id < $2::uuid)
 ORDER BY id DESC
@@ -97,6 +208,143 @@ func (q *Queries) ListAuditEvents(ctx context.Context, arg ListAuditEventsParams
 			&i.Summary,
 			&i.RequestID,
 			&i.CreatedAt,
+			&i.ChainSeq,
+			&i.PrevHash,
+			&i.Hash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditEventsAllOrgs = `-- name: ListAuditEventsAllOrgs :many
+SELECT org_id, id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at, chain_seq, prev_hash, hash FROM audit_events
+WHERE ($1::uuid IS NULL OR id < $1::uuid)
+  AND ($2::timestamptz IS NULL OR created_at >= $2::timestamptz)
+  AND ($3::timestamptz IS NULL OR created_at < $3::timestamptz)
+  AND ($4::text IS NULL OR starts_with(action, $4::text))
+  AND ($5::text IS NULL OR actor_kind = $5::text)
+  AND ($6::text IS NULL OR actor_id = $6::text)
+ORDER BY id DESC
+LIMIT $7
+`
+
+type ListAuditEventsAllOrgsParams struct {
+	BeforeID     pgtype.UUID
+	Since        pgtype.Timestamptz
+	Until        pgtype.Timestamptz
+	ActionPrefix pgtype.Text
+	ActorKind    pgtype.Text
+	ActorID      pgtype.Text
+	PageSize     int32
+}
+
+// ListAuditEventsFiltered across every org, for platform admins who name no org.
+func (q *Queries) ListAuditEventsAllOrgs(ctx context.Context, arg ListAuditEventsAllOrgsParams) ([]AuditEvent, error) {
+	rows, err := q.db.Query(ctx, listAuditEventsAllOrgs,
+		arg.BeforeID,
+		arg.Since,
+		arg.Until,
+		arg.ActionPrefix,
+		arg.ActorKind,
+		arg.ActorID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditEvent
+	for rows.Next() {
+		var i AuditEvent
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.ActorKind,
+			&i.ActorID,
+			&i.Action,
+			&i.TargetKind,
+			&i.TargetID,
+			&i.Summary,
+			&i.RequestID,
+			&i.CreatedAt,
+			&i.ChainSeq,
+			&i.PrevHash,
+			&i.Hash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditEventsFiltered = `-- name: ListAuditEventsFiltered :many
+SELECT org_id, id, actor_kind, actor_id, action, target_kind, target_id, summary, request_id, created_at, chain_seq, prev_hash, hash FROM audit_events
+WHERE org_id = $1
+  AND ($2::uuid IS NULL OR id < $2::uuid)
+  AND ($3::timestamptz IS NULL OR created_at >= $3::timestamptz)
+  AND ($4::timestamptz IS NULL OR created_at < $4::timestamptz)
+  AND ($5::text IS NULL OR starts_with(action, $5::text))
+  AND ($6::text IS NULL OR actor_kind = $6::text)
+  AND ($7::text IS NULL OR actor_id = $7::text)
+ORDER BY id DESC
+LIMIT $8
+`
+
+type ListAuditEventsFilteredParams struct {
+	OrgID        pgtype.UUID
+	BeforeID     pgtype.UUID
+	Since        pgtype.Timestamptz
+	Until        pgtype.Timestamptz
+	ActionPrefix pgtype.Text
+	ActorKind    pgtype.Text
+	ActorID      pgtype.Text
+	PageSize     int32
+}
+
+// The read path (AuditService.List, GET /admin/v1/audit): newest first by id, optionally narrowed
+// by time range, action prefix and actor. before_id is the cursor, the last id of the previous page.
+func (q *Queries) ListAuditEventsFiltered(ctx context.Context, arg ListAuditEventsFilteredParams) ([]AuditEvent, error) {
+	rows, err := q.db.Query(ctx, listAuditEventsFiltered,
+		arg.OrgID,
+		arg.BeforeID,
+		arg.Since,
+		arg.Until,
+		arg.ActionPrefix,
+		arg.ActorKind,
+		arg.ActorID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditEvent
+	for rows.Next() {
+		var i AuditEvent
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.ActorKind,
+			&i.ActorID,
+			&i.Action,
+			&i.TargetKind,
+			&i.TargetID,
+			&i.Summary,
+			&i.RequestID,
+			&i.CreatedAt,
+			&i.ChainSeq,
+			&i.PrevHash,
+			&i.Hash,
 		); err != nil {
 			return nil, err
 		}

@@ -116,15 +116,15 @@ procoduck answered these in a grilling session on 2026-10-21/22. This ADR record
 
 - **Org isolation:** every query takes `org_id`, tables keep the scaffold's `(org_id, id)` keys,
   and an org-isolation test suite runs in CI from v0.1.
-- **v0.1 is private.** Images and the OCI chart go to private `ghcr.io/procoduck` packages.
+- **v0.1 is private.** Images and the OCI chart go to private `ghcr.io/stateracloud` packages (amended 2026-10-26, see [0034](0034-project-identity.md)).
   Signing and SBOM attestations are wired in the release workflow but switched on when the
   repository goes public, because keyless cosign writes names and digests to the public Rekor log.
-  The repository stays `procoduck/koinon`; the org name is chosen when going public.
+  The repository stays `stateracloud/koinon` (amended 2026-10-26: it was `procoduck/koinon`); the org name is chosen when going public.
 - **v0.1 is done** when the quickstart passes on the home lab with Kata and a real model (recorded
   run) and the same steps pass as a kind e2e test in CI without Kata, against the fake model server.
 - **Work order:** walking skeleton, then GitHub and approvals, then the remaining flavors, ledger
   and docs, then e2e, escape suite and release ([docs/plans/v0.1.md](../plans/v0.1.md)).
-- Issue [#5](https://github.com/procoduck/koinon/issues/5) closes as "build": Multica's licence
+- Issue [#5](https://github.com/stateracloud/koinon/issues/5) closes as "build": Multica's licence
   restricts hosting, and LiteLLM was dropped in ADR [0040](0040-agentgateway-model-and-mcp-gateway.md).
 
 ### Small calls (mine; overrule freely)
