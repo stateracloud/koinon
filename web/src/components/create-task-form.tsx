@@ -9,17 +9,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { AgentStatus, type Agent } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 
-export type NewTicket = { agentId: string; title: string; message: string }
+export type NewTask = { agentId: string; title: string; message: string }
 
-export type CreateTicketFormProps = {
+export type CreateTaskFormProps = {
   agents: readonly Agent[]
-  onCreate: (t: NewTicket) => void
+  onCreate: (t: NewTask) => void
   pending?: boolean
   error?: string
 }
 
-/** CreateTicketForm hands work to one of the org's active agents. */
-export function CreateTicketForm({ agents, onCreate, pending, error }: CreateTicketFormProps) {
+/** CreateTaskForm hands work to one of the org's active agents. */
+export function CreateTaskForm({ agents, onCreate, pending, error }: CreateTaskFormProps) {
   const active = agents.filter((a) => a.status === AgentStatus.ACTIVE)
   const [agentId, setAgentId] = useState('')
   const [title, setTitle] = useState('')
@@ -33,18 +33,18 @@ export function CreateTicketForm({ agents, onCreate, pending, error }: CreateTic
   }
 
   if (active.length === 0) {
-    return <p className="text-muted-foreground text-sm">No active agents yet. Activate an agent to hand it tickets.</p>
+    return <p className="text-muted-foreground text-sm">No active agents yet. Activate an agent to hand it tasks.</p>
   }
   return (
-    <form onSubmit={onSubmit} aria-label="New ticket" className="grid gap-3 md:grid-cols-[1fr_14rem_auto] md:items-end">
+    <form onSubmit={onSubmit} aria-label="New task" className="grid gap-3 md:grid-cols-[1fr_14rem_auto] md:items-end">
       <div className="grid gap-2">
-        <Label htmlFor="ticket-title">Title</Label>
-        <Input id="ticket-title" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What should the agent do?" />
+        <Label htmlFor="task-title">Title</Label>
+        <Input id="task-title" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What should the agent do?" />
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="ticket-agent">Agent</Label>
+        <Label htmlFor="task-agent">Agent</Label>
         <Select value={chosen} onValueChange={setAgentId}>
-          <SelectTrigger id="ticket-agent" className="w-full">
+          <SelectTrigger id="task-agent" className="w-full">
             <SelectValue placeholder="Choose an agent" />
           </SelectTrigger>
           <SelectContent>
@@ -57,11 +57,11 @@ export function CreateTicketForm({ agents, onCreate, pending, error }: CreateTic
         </Select>
       </div>
       <Button type="submit" disabled={pending || !title.trim()}>
-        Create ticket
+        Create task
       </Button>
       <div className="grid gap-2 md:col-span-3">
-        <Label htmlFor="ticket-message">First message (optional)</Label>
-        <Textarea id="ticket-message" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} />
+        <Label htmlFor="task-message">First message (optional)</Label>
+        <Textarea id="task-message" rows={2} value={message} onChange={(e) => setMessage(e.target.value)} />
       </div>
       {error && (
         <Alert variant="destructive" role="alert" className="md:col-span-3">

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// One timeline per ticket (ADR 0017): the ticket's own events (messages,
+// One timeline per task (ADR 0017): the task's own events (messages,
 // column moves, run notes, approvals) and the session updates of its runs,
 // by time.
 
 import type { JsonObject } from '@bufbuild/protobuf'
 import { timestampMs, type Timestamp } from '@bufbuild/protobuf/wkt'
 import type { RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
-import { ActorKind, type TicketEvent } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
+import { ActorKind, type TaskEvent } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { obj, str } from '@/lib/json'
-import { statusLabel, ticketStatusFromName } from '@/lib/labels'
+import { stateLabel, taskStateFromName } from '@/lib/labels'
 
 export type TimelineItem =
   | { key: string; at: number; type: 'message'; actor: ActorKind; text: string; runId?: string }
@@ -46,7 +46,7 @@ function approvalTarget(p: JsonObject): string {
 }
 
 /**
- * approvalText describes an approval ticket event (#34). The GitHub tools
+ * approvalText describes an approval task event (#34). The GitHub tools
  * server writes approval.requested ({decision, risk}); package approvals
  * writes the decision ({note}) and the outcome (executed {result: {url}},
  * failed {error}, expired, canceled {reason}). Every payload carries
@@ -80,7 +80,7 @@ function approvalText(kind: string, p: JsonObject): { text: string; url?: string
   }
 }
 
-function ticketItem(ev: TicketEvent): TimelineItem {
+function taskItem(ev: TaskEvent): TimelineItem {
   const key = `t:${ev.seq}`
   const at = ms(ev.createdAt)
   const p = ev.payload ?? {}
@@ -92,11 +92,12 @@ function ticketItem(ev: TicketEvent): TimelineItem {
   switch (ev.kind) {
     case 'message':
       return { key, at, type: 'message', actor: ev.actorKind, text: str(p.text) ?? '', runId }
+    case 'task.created':
     case 'ticket.created':
-      return { key, at, type: 'note', text: `Ticket created: ${str(p.title) ?? ''}`.trim() }
+      return { key, at, type: 'note', text: `Task created: ${str(p.title) ?? ''}`.trim() }
     case 'status.changed': {
-      const from = statusLabel(ticketStatusFromName(str(p.from)))
-      const to = statusLabel(ticketStatusFromName(str(p.to)))
+      const from = stateLabel(taskStateFromName(str(p.from)))
+      const to = stateLabel(taskStateFromName(str(p.to)))
       return { key, at, type: 'note', text: `Moved from ${from} to ${to}` }
     }
     case 'run.queued':
@@ -109,7 +110,7 @@ function ticketItem(ev: TicketEvent): TimelineItem {
     }
     case 'run.session_reset':
       // agentd starts a new harness session when the sandbox's home volume was
-      // replaced since the ticket's session was stored: {message,
+      // replaced since the task's session was stored: {message,
       // previousSessionId, sessionId}.
       return { key, at, type: 'note', text: str(p.message) || "The agent's workspace was reset, so this run starts a new session.", runId }
     case 'sandbox.recreated':
@@ -151,7 +152,7 @@ function ticketItem(ev: TicketEvent): TimelineItem {
  * updates (whose title and status are optional). Permission answers are
  * "acp.permission" ({toolCall, decision: {kind, tier, verdict}}). agentd's own
  * run.* events are bookkeeping (session, prompt) or are also written to the
- * ticket (parked, the outcome), which shows them.
+ * task (parked, the outcome), which shows them.
  */
 function runItem(ev: RunEvent): TimelineItem | undefined {
   const key = `r:${ev.runId}:${ev.seq}`
@@ -185,25 +186,25 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
       return { key, at, type: 'note', text: `Run ${shortId(runId)} is retrying after a temporary model fault${attempt}`, runId }
     }
     default:
-      // The user's message chunks (already on the ticket), plans, usage and
+      // The user's message chunks (already on the task), plans, usage and
       // mode updates, and agentd's bookkeeping are not shown.
       return undefined
   }
 }
 
 /**
- * buildTimeline merges the ticket's events and its runs' events by time.
+ * buildTimeline merges the task's events and its runs' events by time.
  * Consecutive agent text chunks of one run become one item; a tool call's
  * updates fold into the call's item. agentd also persists each reply as an
- * agent message on the ticket (with the run's id); once that message exists,
+ * agent message on the task (with the run's id); once that message exists,
  * the streamed text it covers (this run's agent text since its previous
  * message) is dropped so the reply shows once. Until it arrives, the live text
  * stays.
  */
-export function buildTimeline(ticketEvents: readonly TicketEvent[], runEvents: Readonly<Record<string, readonly RunEvent[]>>): TimelineItem[] {
+export function buildTimeline(taskEvents: readonly TaskEvent[], runEvents: Readonly<Record<string, readonly RunEvent[]>>): TimelineItem[] {
   const raw: { item: TimelineItem; order: number }[] = []
   let order = 0
-  for (const ev of ticketEvents) raw.push({ item: ticketItem(ev), order: order++ })
+  for (const ev of taskEvents) raw.push({ item: taskItem(ev), order: order++ })
   for (const events of Object.values(runEvents)) {
     for (const ev of events) {
       const item = runItem(ev)
