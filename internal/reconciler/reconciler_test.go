@@ -731,6 +731,23 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
 		})
 
+		It("holds back every agent after a restart until one Apply has succeeded", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			pass(ctx, newReconciler())
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+
+			restarted := newReconciler()
+			mg.fail = errors.New("gateway unreachable")
+			advance(11 * time.Minute)
+			Expect(restarted.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY),
+				"the recorded key may not be live: no sandbox work")
+
+			mg.fail = nil
+			pass(ctx, restarted)
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
+		})
+
 		It("keeps holding back a new key over later failed passes", func(ctx SpecContext) {
 			r := newReconciler()
 			newAgent(ctx, org, user)
