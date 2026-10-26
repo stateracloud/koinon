@@ -58,6 +58,7 @@ var crossOrgQueries = map[string]string{
 	"prices.sql:ListPendingMigratedPrices":     "startup: finds the prices migration 00014 made from model rates, in every org, to complete them",
 	"audit.sql:ListAuditEventsAllOrgs":         "platform admins: reads the audit log across every org",
 	"audit.sql:ListAuditChainOrgs":             "the audit verifier: lists every org that has a chain",
+	"sandboxes.sql:CountAgentSandboxesByState": "reconciler metrics: counts sandboxes by state across every org; returns counts only, no row or ID",
 	"auth.sql:ListEffectiveMemberships":        "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
 }
 

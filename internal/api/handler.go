@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"slices"
 
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
@@ -31,6 +32,8 @@ type Options struct {
 	// UI is the built web UI (web.Dist()), served for every path no other
 	// handler claims; nil serves none.
 	UI fs.FS
+	// Metrics counts RPCs by procedure and code; nil counts nothing.
+	Metrics *Metrics
 }
 
 // NewHandler returns the API's HTTP handler.
@@ -50,7 +53,11 @@ type Options struct {
 // The session cookie is also SameSite=Lax, so browsers do not send it on
 // cross-site subrequests at all.
 func NewHandler(opts Options) (http.Handler, error) {
-	server := connect.NewServer(opts.Auth.Interceptor())
+	interceptors := []connect.ServerInterceptor{opts.Auth.Interceptor()}
+	if opts.Metrics != nil {
+		interceptors = slices.Insert(interceptors, 0, opts.Metrics.Interceptor())
+	}
+	server := connect.NewServer(interceptors...)
 	opts.Auth.Register(server)
 	for _, register := range opts.Services {
 		register(server)
