@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-21
 - Amends: ADR 0013 (model access)
-- Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md)
+- Amended by: [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md)
 
 ## Context
 

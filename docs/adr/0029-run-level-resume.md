@@ -1,6 +1,6 @@
 # 0029. Run-level resume through the harness session
 
-- Status: Accepted
+- Status: Accepted; amended by [0051](0051-session-home-generations.md)
 - Date: 2026-10-21
 - Decision: [design.md#29](../design.md)
 

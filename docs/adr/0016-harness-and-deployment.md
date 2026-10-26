@@ -1,7 +1,7 @@
 # 0016. Harness and deployment: ExecutionBackend, agentd over ACP, dedicated agents cluster
 
 - Status: Accepted
-- Amended by: [0049](0049-v01-scope-decisions.md)
+- Amended by: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0049](0049-v01-scope-decisions.md)
 - Date: 2026-10-21
 - Decision: [design.md#16](../design.md)
 - Verification: Pending: OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))

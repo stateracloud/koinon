@@ -1,6 +1,6 @@
 # 0042. Ask tier: park the run, Koinon executes the approved call
 
-- Status: Accepted
+- Status: Accepted; amended by [0048](0048-openshell-spike-results.md)
 - Date: 2026-10-21
 - Amends: ADR 0008 (approvals)
 - Verification: Pending: agentgateway spike (routing ask-tier tools) and OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))

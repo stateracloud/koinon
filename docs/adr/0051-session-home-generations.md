@@ -1,6 +1,6 @@
 # 0051. Session home generations
 
-- Status: Accepted; amended by [0054](0054-unkillable-sandbox-process.md) and below (2026-10-23, 2026-10-24)
+- Status: Accepted; amended by [0054](0054-unkillable-sandbox-process.md), [0065](0065-work-model-tasks-inbox.md) and below (2026-10-23, 2026-10-24, 2026-10-26)
 - Date: 2026-10-22
 - Amends: ADR 0029 (when a ticket's session is loaded) and ADR 0049 (what holds off a sandbox
   recreation)
@@ -89,3 +89,10 @@ Decided by the product owner; it settles what was open above. Plan item AG1 buil
 Consequences: every turn costs one more short model call; a ticket whose agent was never asked
 (a session from before this) hands off from its messages alone; a handoff is a summary, not the
 session, so the agent can miss detail the old session had.
+
+## Amendment (2026-10-26): restored homes resume the session
+
+[0065](0065-work-model-tasks-inbox.md) builds home checkpoints in v0.1
+([0032](0032-agent-home-checkpoints.md)). When a recreated sandbox gets its home restored from a
+checkpoint, the harness resumes with `session/load` instead of decision 1's `session/new` and
+reset. The new-generation path above remains for a recreate without a restorable checkpoint.

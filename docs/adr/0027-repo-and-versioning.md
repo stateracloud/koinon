@@ -1,6 +1,6 @@
 # 0027. Monorepo, one version, supply-chain hygiene
 
-- Status: Accepted
+- Status: Accepted; amended 2026-10-25 (below)
 - Date: 2026-10-21
 - Decision: [design.md#27](../design.md)
 

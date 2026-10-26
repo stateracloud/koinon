@@ -1,6 +1,7 @@
 # 0018. v1 screens and automatic personal orgs
 
 - Status: Accepted
+- Amended by: [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md)
 - Date: 2026-10-21
 - Decision: [design.md#18](../design.md)
 
@@ -58,6 +59,14 @@ owner; the same screens, grants and budgets apply.
 ## Upstream verification
 
 None needed. Checked 2026-10-21.
+
+## Amendment (2026-10-26): the inbox is home; triggers on the agent editor
+
+- **Home.** The home screen is the inbox ("Waiting on you"), with chat next to it; the board is a
+  secondary view over tasks, and the Ticket screen shows a task ([0065](0065-work-model-tasks-inbox.md)).
+- **Agent editor.** "Schedule" becomes triggers: schedules, code-host events, chat events and
+  direct messages, each with a filter and an instruction, in the versioned agent config
+  ([0066](0066-triggers-and-scheduling.md)).
 
 ## Links
 
