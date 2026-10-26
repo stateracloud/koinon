@@ -15,6 +15,8 @@ data:
       mode: {{ .Values.gateway.mode }}
       {{- if eq .Values.gateway.mode "standalone" }}
       configMap: {{ include "koinon.gatewayConfigName" . }}
+      # The reconciler creates the ConfigMap when it is missing, owned by this Deployment.
+      deployment: {{ include "koinon.componentName" (list . "gateway") }}
       {{- $gwHost := include "koinon.gatewayHost" . }}
       url: http://{{ $gwHost }}:{{ .Values.gateway.standalone.port }}
       statsUrl: http://{{ $gwHost }}:15020

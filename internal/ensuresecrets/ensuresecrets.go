@@ -1,0 +1,125 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package ensuresecrets creates the Secrets the chart cannot render: ones with a generated
+// password. A password in a template is new on every render, and a render has no cluster to read
+// the live Secret from (helm template, Argo CD, Flux), so the chart's hook Job calls Ensure instead.
+// An existing Secret is never changed.
+package ensuresecrets
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"io"
+	"math/big"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+)
+
+// PasswordKey is the data key that holds the password, and the one a kept Secret must have.
+const PasswordKey = "password"
+
+// UsernameKey is the data key that holds the login name.
+const UsernameKey = "username"
+
+// PasswordLength is the length of a generated password.
+const PasswordLength = 32
+
+const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+// Spec is one Secret to ensure.
+type Spec struct {
+	Name string `json:"name"`
+	// Type is the Secret type, for example kubernetes.io/basic-auth or Opaque.
+	Type corev1.SecretType `json:"type"`
+	// Username is written under the key "username".
+	Username string            `json:"username"`
+	Labels   map[string]string `json:"labels,omitempty"`
+}
+
+// Result is what Ensure did with one Secret.
+type Result struct {
+	Name    string
+	Created bool
+}
+
+// Ensure makes sure every Spec exists in namespace. A missing Secret is created with a new random
+// password; an existing one is left exactly as it is, but must have a password, and a
+// kubernetes.io/basic-auth one (a database role's) must also have that type and the spec's username,
+// which is the role CloudNativePG logs in as. A Create that loses a
+// race counts as success. It stops at the first error. Passwords are never logged: progress goes to
+// out as names and "created" or "kept".
+func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, specs []Spec, out io.Writer) ([]Result, error) {
+	secrets := client.CoreV1().Secrets(namespace)
+	results := make([]Result, 0, len(specs))
+	for _, sp := range specs {
+		if sp.Name == "" {
+			return results, errors.New("a Secret spec has no name")
+		}
+		existing, err := secrets.Get(ctx, sp.Name, metav1.GetOptions{})
+		switch {
+		case err == nil:
+			if len(existing.Data[PasswordKey]) == 0 && existing.StringData[PasswordKey] == "" {
+				return results, fmt.Errorf("the Secret %s/%s exists but has no %q key; fix or delete it (it is not changed here)", namespace, sp.Name, PasswordKey)
+			}
+			if sp.Type == corev1.SecretTypeBasicAuth {
+				if existing.Type != corev1.SecretTypeBasicAuth {
+					return results, fmt.Errorf("the Secret %s/%s exists with type %q, want %q; fix or delete it (it is not changed here)", namespace, sp.Name, existing.Type, corev1.SecretTypeBasicAuth)
+				}
+				if got := string(existing.Data[UsernameKey]); got != sp.Username {
+					return results, fmt.Errorf("the Secret %s/%s exists with username %q, want %q; fix or delete it (it is not changed here)", namespace, sp.Name, got, sp.Username)
+				}
+			}
+			results = append(results, Result{Name: sp.Name})
+			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
+			continue
+		case !apierrors.IsNotFound(err):
+			return results, fmt.Errorf("read the Secret %s/%s: %w", namespace, sp.Name, err)
+		}
+		password, err := NewPassword()
+		if err != nil {
+			return results, err
+		}
+		typ := sp.Type
+		if typ == "" {
+			typ = corev1.SecretTypeOpaque
+		}
+		_, err = secrets.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: sp.Name, Namespace: namespace, Labels: sp.Labels},
+			Type:       typ,
+			Data: map[string][]byte{
+				UsernameKey: []byte(sp.Username),
+				PasswordKey: []byte(password),
+			},
+		}, metav1.CreateOptions{FieldManager: "koinon-api"})
+		if err != nil && !apierrors.IsAlreadyExists(err) {
+			return results, fmt.Errorf("create the Secret %s/%s: %w", namespace, sp.Name, err)
+		}
+		created := err == nil
+		results = append(results, Result{Name: sp.Name, Created: created})
+		if created {
+			_, _ = fmt.Fprintf(out, "secret %s: created\n", sp.Name)
+		} else {
+			_, _ = fmt.Fprintf(out, "secret %s: kept (created concurrently)\n", sp.Name)
+		}
+	}
+	return results, nil
+}
+
+// NewPassword returns PasswordLength random alphanumeric characters from crypto/rand.
+func NewPassword() (string, error) {
+	max := big.NewInt(int64(len(alphabet)))
+	b := make([]byte, PasswordLength)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, max)
+		if err != nil {
+			return "", fmt.Errorf("generate a password: %w", err)
+		}
+		b[i] = alphabet[n.Int64()]
+	}
+	return string(b), nil
+}

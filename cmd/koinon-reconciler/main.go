@@ -210,6 +210,15 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 			Options: standalone.Options{Port: cfg.gatewayPort, DatabaseURL: cfg.gatewayDBURL},
 			Deliverer: standalone.ConfigMapDeliverer{
 				Client: kube, Namespace: cfg.namespace, Name: cfg.gatewayConfigMap, FieldManager: reconciler.ManagedByValue,
+				OwnerDeployment: cfg.gatewayDeployment,
+				// The labels of a ConfigMap the reconciler creates: a fixed set, with no instance or
+				// chart label (the chart does not own the object, so GitOps tools must not claim it).
+				Labels: map[string]string{
+					"app.kubernetes.io/name":      project.Name,
+					"app.kubernetes.io/component": "gateway",
+					"app.kubernetes.io/part-of":   project.Name,
+					project.Domain + "/owner":     "reconciler",
+				},
 			},
 		}
 		if cfg.accessLogOTLP != "" {

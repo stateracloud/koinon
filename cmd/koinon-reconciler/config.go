@@ -25,12 +25,14 @@ import (
 // reconciler reads.
 type fileConfig struct {
 	Gateway struct {
-		Mode        project.GatewayMode `yaml:"mode"`
-		ConfigMap   string              `yaml:"configMap"`
-		URL         string              `yaml:"url"`
-		StatsURL    string              `yaml:"statsUrl"`
-		Port        int                 `yaml:"port"`
-		DatabaseURL string              `yaml:"databaseUrl"`
+		Mode      project.GatewayMode `yaml:"mode"`
+		ConfigMap string              `yaml:"configMap"`
+		// Deployment is the gateway Deployment that owns the ConfigMap the reconciler creates.
+		Deployment  string `yaml:"deployment"`
+		URL         string `yaml:"url"`
+		StatsURL    string `yaml:"statsUrl"`
+		Port        int    `yaml:"port"`
+		DatabaseURL string `yaml:"databaseUrl"`
 		// ProviderKeysSecret is the Secret the reconciler writes provider keys into; the gateway
 		// mounts it at ProviderKeysDir.
 		ProviderKeysSecret string `yaml:"providerKeysSecret"`
@@ -79,6 +81,7 @@ type config struct {
 	gatewayMode        project.GatewayMode
 	gatewayURL         string
 	gatewayConfigMap   string
+	gatewayDeployment  string
 	gatewayStatsURL    string
 	gatewayName        string
 	gatewayClass       string
@@ -118,7 +121,8 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.runtimeClass, "runtime-class", "", "sandbox runtime class (ADR 0045: kata)")
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes (default standalone)")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
-	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config")
+	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config; created when missing")
+	fs.StringVar(&c.gatewayDeployment, "gateway-deployment", "", "standalone agentgateway Deployment that owns the ConfigMap when the reconciler creates it")
 	fs.StringVar(&c.gatewayStatsURL, "gateway-stats-url", "", "agentgateway stats URL, to detect rejected configs")
 	fs.StringVar(&c.gatewayName, "gateway-name", "", "name of Koinon's Gateway in kubernetes mode")
 	fs.StringVar(&c.gatewayClass, "gateway-class", "", "GatewayClass of agentgateway's controller in kubernetes mode (default agentgateway)")
@@ -195,6 +199,7 @@ func (c *config) fill(fc fileConfig) error {
 	}
 	orDefault(&c.keySettle, 90*time.Second)
 	orDefault(&c.gatewayConfigMap, fc.Gateway.ConfigMap)
+	orDefault(&c.gatewayDeployment, fc.Gateway.Deployment)
 	orDefault(&c.gatewayStatsURL, fc.Gateway.StatsURL)
 	orDefault(&c.gatewayPort, fc.Gateway.Port)
 	orDefault(&c.gatewayDBURL, fc.Gateway.DatabaseURL)

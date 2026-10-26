@@ -60,7 +60,7 @@ type OTLPExport struct {
 const (
 	defaultPort = 4000
 	// agentgateway's listeners, rendered explicitly so the file states every
-	// one; the chart's bootstrap config uses the same values. The admin
+	// one. The admin
 	// listener serves the whole config (/config_dump) and the UI, so it stays
 	// on localhost: nothing outside the pod needs it, since reloads are
 	// detected with the probe key (ReloadProbeKey). The stats listener
@@ -76,12 +76,6 @@ const (
 	// ReloadProbeModel is the model the reload probe asks for. No config
 	// serves it, so even a probe past every policy could not reach an upstream.
 	ReloadProbeModel = "koinon/reload-probe"
-
-	// BootstrapRevision is the revision of the chart's bootstrap config
-	// (charts/koinon/templates/gateway-standalone.yaml), which cannot compute
-	// Render's content hash. Nothing waits for it; it gives the bootstrap file
-	// the same shape as a rendered one, probe key included.
-	BootstrapRevision gateway.Revision = "bootstrap"
 
 	// probeRule is the llm authorization rule that refuses the probe key with
 	// 403 before routing. agentgateway v1.6.0 checks budgets first, so with a
