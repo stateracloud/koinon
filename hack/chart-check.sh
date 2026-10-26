@@ -117,6 +117,16 @@ for f in "${value_files[@]}"; do
 		fail "port 15000 exposed with $(basename "$f")"
 	fi
 done
+# The OpenShell channel needs mTLS (#103): without a client TLS Secret the chart renders only with
+# an explicit openshell.insecure=true, never with both, and each choice reaches the components.
+if render_raw >/dev/null 2>"$out/tls.err"; then fail "no client TLS Secret and no insecure must not render"; fi
+grep -q 'openshell.clientTLSSecret is required' "$out/tls.err" && grep -q 'openshell.insecure=true' "$out/tls.err" || fail "the TLS error must name both openshell.clientTLSSecret and openshell.insecure"
+render_raw --set openshell.clientTLSSecret=tls >/dev/null 2>&1 || fail "a client TLS Secret alone must render"
+render_raw --set openshell.insecure=true >/dev/null 2>&1 || fail "openshell.insecure=true alone must render"
+if render_raw --set openshell.clientTLSSecret=tls --set openshell.insecure=true >"$out/both.out" 2>"$out/both.err"; then fail "a client TLS Secret together with insecure must not render"; fi
+grep -q 'contradict' "$out/both.err" || fail "the TLS-plus-insecure error must say the options contradict"
+has "TLS Secret reaches the reconciler config" 'tls: /etc/koinon/openshell-tls' --set openshell.insecure=false --set openshell.clientTLSSecret=tls --show-only templates/config.yaml
+has "insecure renders an empty tls dir (plaintext, warned by the components)" 'tls: ""' --show-only templates/config.yaml
 # The key-encryption keys (plan item PV1): a generated Secret kept on uninstall, or an existing one;
 # mounted into koinon-api and koinon-reconciler only, never into agentd or the gateway.
 # The chart renders no key material (a render makes new keys every time): koinon-api creates the Secret.
