@@ -178,12 +178,22 @@ file on 2026-10-26):
   `koinon-api migrate` (`dbos.Migrate`, then grants to `koinon_app` when that role exists), and
   `koinon-api` launches DBOS with `SkipMigrations`, so a missing schema fails the start. Closes the
   schema question below; the workers run in `koinon-api` only, behind `--durable`
-  (chart `api.durable.enabled`, off by default). Code: `internal/durable`.
+  (chart `api.durable.enabled`, off by default). Code: `internal/durable`. `koinon_app` gets DML
+  only on the schema (SELECT/INSERT/UPDATE/DELETE, sequence USAGE/SELECT, function EXECUTE), as in
+  the chart's CNPG bootstrap, not the SDK's `GRANT ALL`.
 
 ## Open questions
 
-- DBOS's system tables: a separate schema or a separate database in the same cluster, and which
-  Koinon processes run DBOS workers.
+- ~~DBOS's system tables: a separate schema or a separate database in the same cluster, and which
+  Koinon processes run DBOS workers.~~ Answered by the 2026-10-26 (DB1) amendment: schema `dbos`,
+  workers in `koinon-api` only.
+- DBOS executor identity and upgrades (prerequisite for TR2/TK4, before any workflow is registered):
+  DBOS recovers pending workflows for its own executor ID on Launch, and the API leaves the ID at
+  the default `local`, so with `api.replicas` > 1 or a surge during a rolling update a new pod
+  re-runs workflows another live pod is still running. Each replica needs a unique, stable executor
+  ID (for example the pod name) or the durable runtime must stay at one replica. The other side:
+  `ApplicationVersion` is the release version, so workflows left pending by the previous release
+  (a long durable timer) are not recovered after an upgrade; decide how they are carried over.
 - Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.
 - The burst window length, the pre-warm lead time and the jitter range.
 - The filter language for rules (CEL was ADR 0010's candidate) and whether a trigger has its own
