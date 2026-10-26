@@ -106,6 +106,7 @@ func (q *Queries) CreateAgentSandbox(ctx context.Context, arg CreateAgentSandbox
 const getAgentRunActivity = `-- name: GetAgentRunActivity :one
 SELECT
     coalesce(bool_or(state IN ('starting', 'running')), false)::boolean AS has_active,
+    coalesce(bool_or(state = 'running'), false)::boolean AS has_running,
     coalesce(bool_or(state IN ('starting', 'running', 'parked')), false)::boolean AS has_held,
     coalesce(bool_or(ready_at IS NOT NULL), false)::boolean AS has_demand,
     max(greatest(finished_at, parked_at))::timestamptz AS last_activity
@@ -122,6 +123,7 @@ type GetAgentRunActivityParams struct {
 
 type GetAgentRunActivityRow struct {
 	HasActive    bool
+	HasRunning   bool
 	HasHeld      bool
 	HasDemand    bool
 	LastActivity pgtype.Timestamptz
@@ -137,6 +139,7 @@ func (q *Queries) GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivi
 	var i GetAgentRunActivityRow
 	err := row.Scan(
 		&i.HasActive,
+		&i.HasRunning,
 		&i.HasHeld,
 		&i.HasDemand,
 		&i.LastActivity,

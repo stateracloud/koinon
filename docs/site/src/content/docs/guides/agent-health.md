@@ -32,7 +32,7 @@ sandbox and starts the count again.
 ## A sandbox that stopped or failed
 
 A sandbox can also fail or end on its own (its main process exits, or the platform reports an error).
-When no run of the agent is active, Koinon deletes it and creates a new one on its next pass, the same
+When no run of the agent is running, Koinon deletes it and creates a new one on its next pass, the same
 way as for a stuck sandbox; the audit log records it as a sandbox recreation. Runs that need the sandbox
 meanwhile wait for the new one (up to the sandbox timeout). These recreations count toward the same limit of three in 24 hours: when
 a sandbox fails again after that, Koinon does not recreate it but marks the agent **unhealthy**, with

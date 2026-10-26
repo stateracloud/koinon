@@ -480,7 +480,23 @@ var _ = Describe("Reconciler", func() {
 				Entry("Completed", openshellv1.SandboxPhase_SANDBOX_PHASE_COMPLETED, "Completed"),
 			)
 
-			It("is left alone while a run is active, and repaired once it has finished", func(ctx SpecContext) {
+			It("is repaired under a starting run, which waits for the new sandbox", func(ctx SpecContext) {
+				queueRun(ctx, org, user, agent.ID)
+				run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: org, OwnerID: "agentd-test", LeaseSeconds: 60})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(run.State).To(Equal(store.RunStateStarting))
+				fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(1), "repaired in the same pass")
+				Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateDeleting))
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateReady))
+				got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: run.ID})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got.State).To(Equal(store.RunStateStarting))
+			})
+
+			It("is left alone while a run is running, and repaired once it has finished", func(ctx SpecContext) {
 				queueRun(ctx, org, user, agent.ID)
 				run := claimRun(ctx, org)
 				fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
