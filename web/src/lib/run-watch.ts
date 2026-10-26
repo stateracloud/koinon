@@ -4,7 +4,7 @@
 // connect-query supports unary methods only (ADR 0022).
 
 import { Code, ConnectError, createClient, type Transport } from '@connectrpc/connect'
-import { RunService, type Run, type RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { RunService, RunState, type Run, type RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 
 export type WatchStatus = 'connecting' | 'live' | 'reconnecting' | 'ended' | 'failed'
 
@@ -37,6 +37,21 @@ const permanent = new Set([
   Code.Unimplemented,
 ])
 
+/**
+ * connect-es reports a server stream whose body ended without an
+ * EndStreamResponse as InvalidArgument. That is what a proxy or load balancer
+ * produces when it cuts a long-lived response, so it is a dropped connection,
+ * not a bad request. The server's own InvalidArgument arrives inside the
+ * end-stream message with a different message and stays permanent.
+ */
+function isTruncatedStream(err: ConnectError): boolean {
+  return err.code === Code.InvalidArgument && err.rawMessage.includes('missing EndStreamResponse')
+}
+
+function finished(state: RunState | undefined): boolean {
+  return state === RunState.SUCCEEDED || state === RunState.FAILED || state === RunState.CANCELED
+}
+
 export function defaultBackoff(attempt: number): number {
   const base = Math.min(30_000, 500 * 2 ** (attempt - 1))
   return base / 2 + Math.random() * (base / 2)
@@ -68,6 +83,7 @@ export async function watchRun(opts: WatchOptions, h: WatchHandlers): Promise<bi
   const sleep = opts.sleep ?? abortableSleep
   let after = opts.afterSeq ?? 0n
   let attempt = 0
+  let state: RunState | undefined
 
   h.onStatus('connecting')
   while (!opts.signal.aborted) {
@@ -77,6 +93,7 @@ export async function watchRun(opts: WatchOptions, h: WatchHandlers): Promise<bi
         attempt = 0
         h.onStatus('live')
         if (res.item.case === 'run') {
+          state = res.item.value.state
           h.onRun(res.item.value)
         } else if (res.item.case === 'event') {
           const ev = res.item.value
@@ -86,12 +103,20 @@ export async function watchRun(opts: WatchOptions, h: WatchHandlers): Promise<bi
         }
       }
       // The server ends the stream once the run has finished and drained.
-      h.onStatus('ended')
-      return after
+      // A clean end while the run is still open (a graceful proxy or server
+      // shutdown) is a dropped stream, so resume instead of stopping.
+      if (finished(state)) {
+        h.onStatus('ended')
+        return after
+      }
+      attempt++
+      h.onStatus('reconnecting')
+      await sleep(backoff(attempt), opts.signal)
+      continue
     } catch (e) {
       if (opts.signal.aborted) break
       const err = ConnectError.from(e)
-      if (permanent.has(err.code)) {
+      if (permanent.has(err.code) && !isTruncatedStream(err)) {
         h.onStatus('failed', err)
         return after
       }
