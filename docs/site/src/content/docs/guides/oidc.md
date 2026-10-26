@@ -52,7 +52,14 @@ oidc:
   ceilings under `/platform/budgets`). It is reconciled at every login like the group mappings: a user
   who gains a listed group becomes a platform admin, a user who loses all of them stops being one. Only
   grants made by this setting are revoked, so the bootstrap admin keeps its own. An empty list changes
-  nothing. Both changes are audited as `platform_admin.grant` and `platform_admin.revoke`.
+  nothing. Group names may contain spaces, not commas. If the IdP omits the groups claim from the ID token
+  (a missing `groups` scope, or the Azure AD groups overage, where the token carries `_claim_names`
+  instead of the list), the user counts as in no group and loses the grant at the next login, the same
+  as with `groupMappings`. Koinon only reads groups at login, so a user who is removed
+  from the IdP and never logs in again keeps platform admin. To remove one at once, delete the row
+  (`DELETE FROM platform_admins WHERE user_id = '<id>'`, in Postgres) and disable the user (set
+  `users.deleted_at`), which also blocks the login. Grants and revocations the login makes are audited
+  as `platform_admin.grant` and `platform_admin.revoke`.
 - `defaultOrgIdentityMode` is `platform` (roles from Koinon only), `idp` (from `groupMappings`) or
   `hybrid` (both, and the highest role wins).
 

@@ -304,7 +304,8 @@ oidc:
   # IdP groups (in groupsClaim) whose members are platform admins, for example [koinon-platform].
   # Reconciled at every login like groupMappings: a user who gains a listed group becomes a platform
   # admin, one who loses all of them stops being one. Only grants made by this setting are revoked;
-  # the bootstrap admin keeps its own. Empty changes nothing. Set it, and log in once as a user in
+  # the bootstrap admin keeps its own. Empty changes nothing. Names may contain spaces but not commas,
+  # because the list reaches koinon-api as a comma-separated environment variable. Set it, and log in once as a user in
   # one of the groups, before you set bootstrapAdmin.enabled=false: without it nobody can set the
   # platform budget ceilings (/platform/budgets).
   platformAdminGroups: []
