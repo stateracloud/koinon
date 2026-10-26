@@ -13,6 +13,8 @@ import (
 
 	sdk "github.com/coder/acp-go-sdk"
 
+	"github.com/stateracloud/koinon/internal/acp"
+
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -62,7 +64,8 @@ func classifyPromptError(err error) classified {
 		text = err.Error()
 	}
 	low := strings.ToLower(text)
-	if status == 0 {
+	hasStatus := status != 0
+	if !hasStatus {
 		if m := statusRe.FindStringSubmatch(low); m != nil {
 			status, _ = strconv.Atoi(m[1])
 		}
@@ -82,20 +85,58 @@ func classifyPromptError(err error) classified {
 		}
 		return false
 	}
+	// The class-specific phrases name their class whatever the status says.
 	switch {
 	case has("context_length_exceeded", "prompt is too long", "maximum context length", "context window"):
 		return classified{class: classContextOverflow, message: "The conversation no longer fits the model's context window."}
-	case status == 402, has("insufficient_quota", "spend limit", "budget exceeded", "token cap"):
+	case has("insufficient_quota"):
 		return classified{class: classBudget, message: "A spend or token limit stopped the run."}
-	case status == 403, has("denied by policy", "policy denied", "blocked by policy"):
+	}
+	// A status the harness reported in a structured field decides the rest; the text heuristics
+	// (which can match "500 tokens" or "timeout" in a 400's explanation) only run without one.
+	switch {
+	case status == 402:
+		return classified{class: classBudget, message: "A spend or token limit stopped the run."}
+	case status == 403:
 		return classified{class: classPolicy, message: "A policy denied the request."}
-	case status == 429, has("rate limit", "rate_limit", "too many requests"):
+	case status == 429:
 		return classified{class: classThrottled, retryAfter: retryAfter, message: "The model provider is rate limiting requests."}
-	case status == 500, status == 502, status == 503, status == 504, status == 529,
-		has("overloaded", "service unavailable", "timed out", "timeout", "connection reset", "unexpected eof", "bad gateway"):
+	case status == 500, status == 502, status == 503, status == 504, status == 529:
+		return classified{class: classTransient, message: "The model provider had a temporary fault."}
+	case hasStatus:
+		return classified{class: classFatal}
+	}
+	switch {
+	case has("spend limit", "budget exceeded", "token cap"):
+		return classified{class: classBudget, message: "A spend or token limit stopped the run."}
+	case has("denied by policy", "policy denied", "blocked by policy"):
+		return classified{class: classPolicy, message: "A policy denied the request."}
+	case has("rate limit", "rate_limit", "too many requests"):
+		return classified{class: classThrottled, retryAfter: retryAfter, message: "The model provider is rate limiting requests."}
+	case has("overloaded", "service unavailable", "timed out", "timeout", "connection reset", "unexpected eof", "bad gateway"):
 		return classified{class: classTransient, message: "The model provider had a temporary fault."}
 	}
 	return classified{class: classFatal}
+}
+
+// stopFailure maps an ACP stop reason that ends a turn without finishing it to a failure.
+// refusal is the model declining (policy); max_tokens and max_turn_requests are limits the turn
+// ran into, which Koinon reports as budget (neither is retried: repeating the turn hits the
+// same limit).
+func stopFailure(stop acp.StopReason) *failure {
+	f := &failure{reason: "the turn stopped: " + string(stop), class: classFatal}
+	switch stop {
+	case acp.StopRefusal:
+		f.class = classPolicy
+		f.reason = "the model refused to continue (stop reason refusal)"
+	case acp.StopMaxTokens:
+		f.class = classBudget
+		f.reason = "the model reached its output token limit (stop reason max_tokens)"
+	case acp.StopMaxTurnRequests:
+		f.class = classBudget
+		f.reason = "the turn reached its limit of model requests (stop reason max_turn_requests)"
+	}
+	return f
 }
 
 // structured reads the HTTP status and the Retry-After (seconds) that a harness put in an
@@ -134,6 +175,8 @@ func number(v any) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
 		return n, true
+	case int:
+		return float64(n), true
 	case string:
 		f, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
 		return f, err == nil

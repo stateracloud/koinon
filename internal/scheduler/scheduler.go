@@ -191,6 +191,9 @@ func RecordCancel(ctx context.Context, q *store.Queries, run store.Run, reason C
 	for k, v := range extra {
 		p[k] = v
 	}
+	if run.FailureClass.Valid {
+		p["failureClass"] = string(run.FailureClass.RunFailureClass)
+	}
 	payload := mustJSON(p)
 	ev, err := q.AppendRunControlEvent(ctx, store.AppendRunControlEventParams{
 		OrgID: run.OrgID, RunID: run.ID, Kind: KindRunCanceled, Payload: payload,

@@ -168,6 +168,7 @@ var _ = Describe("Ingester", func() {
 		Expect(payload).To(HaveKeyWithValue("reason", string(scheduler.ReasonSpendLimit)))
 		Expect(payload).To(HaveKeyWithValue("spend_limit_usd", "0.05"))
 		Expect(payload).To(HaveKeyWithValue("limit", "agent_daily"))
+		Expect(payload).To(HaveKeyWithValue("failureClass", "budget"))
 	})
 
 	It("counts entries of unknown orgs and agents as unattributed", func(ctx SpecContext) {
