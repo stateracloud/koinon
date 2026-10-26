@@ -188,6 +188,9 @@ has "Secret delete with the legacy migration" 'verbs: \[delete\]' --set secrets.
 n=$(render --show-only templates/gateway-standalone.yaml | grep -c 'kek' || true)
 [ "$n" = 0 ] || fail "the gateway references the KEK Secret"
 # The gateway mounts the provider keys Secret, and that Secret only.
+# The DBOS runtime (ADR 0066) is opt-in; its tables come from the migration Job.
+lacks "the DBOS runtime is off by default" '"-durable"' --show-only templates/deployments.yaml
+has "api.durable.enabled starts the DBOS runtime" '"-durable"' --set api.durable.enabled=true --show-only templates/deployments.yaml
 has "gateway mounts the provider keys" 'mountPath: /secrets/providers$' --show-only templates/gateway-standalone.yaml
 n=$(render | grep -c 'secretName: koinon-gateway-providers$' || true)
 [ "$n" = 1 ] || fail "the provider keys Secret is mounted by $n pods, want only the gateway"

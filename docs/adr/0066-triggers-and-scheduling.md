@@ -172,6 +172,14 @@ file on 2026-10-26):
     `SandboxTimeout` failure becomes a requeue;
   - DBOS's migrations run in the migration Job ([0060](0060-migrations-as-a-job.md)).
 
+## Amendment 2026-10-26 (DB1)
+
+- DBOS Transact for Go v1.7.0 (MIT), schema `dbos` in Koinon's database. Its tables are created by
+  `koinon-api migrate` (`dbos.Migrate`, then grants to `koinon_app` when that role exists), and
+  `koinon-api` launches DBOS with `SkipMigrations`, so a missing schema fails the start. Closes the
+  schema question below; the workers run in `koinon-api` only, behind `--durable`
+  (chart `api.durable.enabled`, off by default). Code: `internal/durable`.
+
 ## Open questions
 
 - DBOS's system tables: a separate schema or a separate database in the same cluster, and which
