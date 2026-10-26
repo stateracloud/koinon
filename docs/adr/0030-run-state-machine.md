@@ -108,12 +108,32 @@ Checked 2026-10-21:
 - **Restate:** BSL 1.1, with a four-year change date to Apache-2.0; bans only a public Restate
   Platform Service. https://github.com/restatedev/restate/blob/main/LICENSE. SDK licenses
   unverified. Design open item "Verify Restate's server license" is answered here
-  ([#11](https://github.com/procoduck/koinon/issues/11)).
+  ([#11](https://github.com/stateracloud/koinon/issues/11)).
 - **celld:** Apache-2.0, v0.6.2, a V8 daemon that runs Workers apps with Durable Objects, SQLite
   per cell and LTX replication to S3/GCS/Azure, with no consensus service.
   https://github.com/denoland/celld
 - **Postgres NOTIFY:** delivered on commit only, must be under 8000 bytes, and not replayed to
   sessions that weren't listening. https://www.postgresql.org/docs/current/sql-notify.html
+
+## Amendment (2026-10-26): timeouts are columns, not an alarms table
+
+There is no `alarms` table. The ownership epoch and the compare-and-set writes are built as
+decided: `agents.epoch` (`internal/db/migrations/00002_agents.sql:50`) and `runs.epoch`
+(`00003_tickets_and_runs.sql:58`). Timed events are columns that a worker reads when due:
+
+- `runs.lease_expires_at` (`00003_tickets_and_runs.sql:61`) is the lease of the owner of a starting or
+  running run. `TakeOverExpiredRun` finds a stale one with `FOR UPDATE SKIP LOCKED`, increments the
+  agent's epoch and takes the run over (`internal/db/queries/runs.sql:92-122`).
+- `runs.park_expires_at` (`00003_tickets_and_runs.sql:68`) is the timeout of a parked run.
+  `ListExpiredParkedRuns` (`internal/db/queries/runs.sql:279-283`) is read by the approvals code
+  (`internal/approvals/approvals.go:495`).
+- `approval_requests.expires_at` (`00008_connections_and_approvals.sql:83`) is the approval timeout.
+- `runs.max_wall_clock_seconds` caps a run (`00003_tickets_and_runs.sql:72`).
+
+Cron, A2A wait-then-park and periodic home checkpoint alarms are not built. If they arrive, they
+need their own columns or table. There is also no `AgentStateStore` interface: callers use the
+generated sqlc store (`internal/db/store`) directly. A different backend would need that interface
+introduced first.
 
 ## Links
 

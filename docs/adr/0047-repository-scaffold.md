@@ -21,7 +21,7 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
 
 ### Decided with procoduck
 
-1. **One Go module** at the root, `github.com/procoduck/koinon`, defined in `go.mod`,
+1. **One Go module** at the root, `github.com/stateracloud/koinon` (amended 2026-10-26, see [0034](0034-project-identity.md)), defined in `go.mod`,
    `internal/project.ModulePath` and the Makefile `MODULE` variable only. `web/` is a separate pnpm
    package. The org move is decided before the v0.1 plan.
 2. **Merge gates on `main`** (a repository ruleset requiring a PR and these checks; admin bypass;
@@ -141,4 +141,4 @@ a healthy state.
 
 - ADR 0004, 0022, 0026, 0027, 0034, 0037, 0038, 0039
 - [docs/dev/registry.md](../dev/registry.md)
-- Issue [#2](https://github.com/procoduck/koinon/issues/2)
+- Issue [#2](https://github.com/stateracloud/koinon/issues/2)

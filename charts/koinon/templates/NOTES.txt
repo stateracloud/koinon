@@ -1,8 +1,8 @@
 {{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
-Koinon {{ .Chart.AppVersion }} is pre-alpha (v0.1 chart skeleton).
+Koinon {{ .Chart.AppVersion }} is pre-alpha.
 
 Database: {{ .Values.postgres.mode }}{{ if eq .Values.postgres.mode "cnpg" }} (CloudNativePG Cluster {{ include "koinon.pgCluster" . }}){{ end }}
-Gateway:  {{ .Values.gateway.mode }}{{ if eq .Values.gateway.mode "kubernetes" }} (nothing rendered yet; plan item G2){{ end }}
+Gateway:  {{ .Values.gateway.mode }}{{ if eq .Values.gateway.mode "kubernetes" }} (your agentgateway, GatewayClass {{ .Values.gateway.kubernetes.gatewayClassName }}; the reconciler creates Koinon's own Gateway and routes in this namespace){{ else }} (agentgateway installed by this chart){{ end }}
 {{- if .Values.bootstrapAdmin.enabled }}
 
 Bootstrap admin: user {{ .Values.bootstrapAdmin.username | quote }}, one-time password in Secret

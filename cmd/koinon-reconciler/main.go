@@ -36,6 +36,7 @@ import (
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/memlimit"
+	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -133,6 +134,10 @@ func run() error {
 	ready.Store(true)
 	go keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log)
 
+	reg := metrics.NewRegistry()
+	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
+		return err
+	}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
@@ -155,7 +160,8 @@ func run() error {
 				Keys:   keyring,
 				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
 			},
-			Logger: log,
+			Logger:  log,
+			Metrics: reconciler.NewMetrics(reg),
 		})
 	if err != nil {
 		return err

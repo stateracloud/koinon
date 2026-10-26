@@ -12,7 +12,7 @@ installs all of them on a kind cluster. A check in CI keeps this page and that s
 
 | Prerequisite | Version | Needed for |
 | --- | --- | --- |
-| Kubernetes | 1.37 | Everything. The end-to-end test runs `kindest/node:v1.37.0`. |
+| Kubernetes | 1.30 or newer; tested on 1.37 | Everything. The chart requires 1.30 (`kubeVersion`), where ValidatingAdmissionPolicy v1 is GA. The end-to-end test runs `kindest/node:v1.37.0`. |
 | Agent Sandbox | v1.0.7 | The sandbox objects. The preflight needs a controller image tagged `v1.0.x`. |
 | OpenShell gateway | 0.1.5 | Creating and running sandboxes. |
 | A sandbox RuntimeClass | `kata`, or `runc` on kind | Isolation. The default is `kata` (ADR 0045). |
@@ -25,7 +25,7 @@ You also need `kubectl`, `jq` and a GitHub account that can create a GitHub App.
 
 ## Kubernetes and a NetworkPolicy engine
 
-Use any cluster at version 1.37 or newer that enforces NetworkPolicy. The preflight warns, and does
+Use a cluster at version 1.30 or newer that enforces NetworkPolicy. The chart refuses to install on an older one (`kubeVersion` in `Chart.yaml`), because the admission policy needs ValidatingAdmissionPolicy v1. Koinon is tested on 1.37, so prefer that version when you can. The preflight warns, and does
 not fail, when it cannot show enforcement. The chart uses standard NetworkPolicy only. It needs no
 CNI-specific feature.
 
@@ -129,8 +129,11 @@ It warns, and does not fail, when Kata guest seccomp is off (ADR 0048), or when 
 not enforce NetworkPolicy. Turn the seccomp probe off with `preflight.seccompProbe.enabled: false`
 on `runc`, where it does not apply.
 
-## Not built yet
+## Koinon's images and chart
 
-Koinon has no published images or chart yet. They arrive with the release workflow (plan item REL1).
-Until then, install from a clone of the repository (`charts/koinon`) and build the images yourself.
-The [quickstart](/quickstart/#build-the-images) has the build steps.
+Each release tag publishes the images and the chart to `ghcr.io/stateracloud`
+(`koinon-api`, `koinon-reconciler`, `koinon-agentd`, `flavor-opencode`, and the chart at
+`oci://ghcr.io/stateracloud/charts/koinon`). The packages are private while the repository is
+private, so log in to `ghcr.io` with a token that can read packages before you pull them. The
+[quickstart](/quickstart/#get-koinon) shows how to install from a release, and how to build the images
+yourself instead.

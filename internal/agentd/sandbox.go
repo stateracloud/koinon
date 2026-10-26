@@ -28,7 +28,9 @@ import (
 // trigger). A missing row is waited for, since the reconciler creates it when the agent is
 // activated. The run fails if the sandbox is not ready within SandboxTimeout.
 func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
-	deadline := time.Now().Add(r.p.cfg.SandboxTimeout)
+	started := time.Now()
+	defer func() { r.p.cfg.Metrics.SandboxWait.Observe(time.Since(started).Seconds()) }()
+	deadline := started.Add(r.p.cfg.SandboxTimeout)
 	var nudged time.Time
 	var last string
 	for {
