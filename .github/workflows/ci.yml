@@ -208,7 +208,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
-      # Three images, the builder's own store and the layer cache outgrow the runner's disk
+      # The flavor image, the builder's own store and the layer cache outgrow the runner's disk
       # (the first run died with "no space left on device"); drop what the job does not use.
       - name: Free disk space
         run: |
