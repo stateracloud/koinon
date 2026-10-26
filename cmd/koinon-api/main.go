@@ -148,7 +148,7 @@ func parseFlags(args []string) (config, error) {
 	fs.BoolVar(&c.migrate, "migrate", false, "apply database migrations before starting")
 	fs.BoolVar(&c.durable, "durable", false,
 		"run the DBOS runtime (schedules, durable timers; ADR 0066); needs the DBOS tables that "+
-			"\"koinon-api migrate\" creates")
+			"\"koinon-api -durable migrate\" creates (the migrate subcommand creates them only with this flag)")
 	fs.DurationVar(&c.wait, "wait", 5*time.Minute, "how long migrations wait for the database to come up")
 	fs.StringVar(&c.trustedOrigins, "trusted-origins", "",
 		"comma-separated extra origins allowed to make state-changing requests (CSRF)")
@@ -315,11 +315,11 @@ func run() error {
 
 	switch {
 	case len(cfg.args) == 1 && cfg.args[0] == "migrate":
-		return migrate(ctx, cfg.databaseURL, cfg.wait)
+		return migrate(ctx, cfg.databaseURL, cfg.wait, cfg.durable)
 	case len(cfg.args) > 0:
 		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\", \"preflight\", \"ensure-secrets\", \"keys\" and \"audit\" (first)", cfg.args)
 	case cfg.migrate:
-		if err := migrate(ctx, cfg.databaseURL, cfg.wait); err != nil {
+		if err := migrate(ctx, cfg.databaseURL, cfg.wait, cfg.durable); err != nil {
 			return err
 		}
 	}
@@ -631,7 +631,7 @@ func run() error {
 
 // migrate applies pending migrations, first waiting up to wait for the
 // database: on a fresh install it may still be starting.
-func migrate(ctx context.Context, dsn string, wait time.Duration) error {
+func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable bool) error {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return err
@@ -664,7 +664,12 @@ func migrate(ctx context.Context, dsn string, wait time.Duration) error {
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	// DBOS keeps its own tables in its own schema; creating them needs the migration role too.
+	// DBOS keeps its own tables in its own schema; creating that schema needs CREATE on the
+	// database, which an external migrate role may lack. So it runs only when the DBOS runtime is
+	// on (the chart passes -durable to the migration Job when api.durable.enabled).
+	if !withDurable {
+		return nil
+	}
 	return durable.Migrate(ctx, dsn, slog.Default())
 }
 

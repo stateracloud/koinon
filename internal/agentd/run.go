@@ -984,7 +984,10 @@ func (r *runner) conclude(ctx context.Context, err error) {
 	switch {
 	case err == nil:
 	case errors.As(err, &rq):
-		if rerr := r.requeue(ctx, rq.reason); rerr != nil && !errors.Is(rerr, errFenced) {
+		if rerr := r.requeue(ctx, rq.reason); errors.Is(rerr, errFenced) {
+			r.log.Warn("the run could not be requeued: it was taken over, canceled or is no longer starting", "state", r.run.State, "reason", rq.reason)
+			r.fenceFromDB(ctx)
+		} else if rerr != nil {
 			r.log.Warn("requeueing the run failed; its lease expires and a worker takes it over", "reason", rq.reason, "err", rerr)
 		}
 	case errors.As(err, &f):

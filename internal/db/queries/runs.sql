@@ -118,6 +118,9 @@ SET epoch = agent.epoch,
     summarizing = false,
     takeovers = runs.takeovers + 1,
     owner_id = @owner_id::text,
+    -- A starting run's claim time is when this owner began waiting for the sandbox, so a later
+    -- requeue does not credit the dead owner's lease time to parked_seconds.
+    claimed_at = CASE WHEN runs.state = 'starting' THEN now() ELSE runs.claimed_at END,
     lease_expires_at = now() + make_interval(secs => @lease_seconds::integer),
     heartbeat_at = now()
 FROM stale

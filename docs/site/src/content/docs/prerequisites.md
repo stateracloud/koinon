@@ -58,6 +58,13 @@ With an external Postgres, create one libpq URI per role in a Secret and name it
 `postgres.external.secretName`. The roles are `migrate`, `api`, `reconciler` and `agentd`. The
 migrate role owns the schema. The other roles need only DML. The roles may share one login.
 
+If you set `api.durable.enabled` (the DBOS runtime for schedules and durable timers), the migration
+Job also creates a `dbos` schema, so the migrate role needs `CREATE` on the database. The other
+roles need `USAGE` on that schema, `SELECT, INSERT, UPDATE, DELETE` on its tables and `USAGE,
+SELECT` on its sequences. The Job grants these to a role named `koinon_app` when one exists; with
+external roles, grant them yourself after the first migration. Without `api.durable.enabled` the
+Job does not touch the `dbos` schema and needs no database-level privilege.
+
 ## Agent Sandbox
 
 ```sh
