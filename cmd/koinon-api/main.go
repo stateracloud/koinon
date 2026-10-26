@@ -68,6 +68,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/memlimit"
+	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
@@ -110,6 +111,7 @@ type config struct {
 	watchPoll     time.Duration
 
 	otlpAddr         string
+	metricsAddr      string
 	toolsAddr        string
 	savedWorkAddr    string
 	savedWorkSecret  string
@@ -177,6 +179,8 @@ func parseFlags(args []string) (config, error) {
 		"listen address of the spend ledger's OTLP/HTTP logs receiver, for agentgateway's access log; "+
 			"it has no authentication, so restrict it to agentgateway with a NetworkPolicy; empty disables it")
 
+	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort,
+		"listen address of /metrics (Prometheus); empty disables it")
 	fs.StringVar(&c.savedWorkAddr, "saved-work-addr", "",
 		"listen address of the saved-work upload endpoint, for koinon-agentd only; empty disables it")
 	fs.StringVar(&c.savedWorkSecret, "saved-work-secret", "koinon-saved-work",
@@ -476,12 +480,14 @@ func run() error {
 	}
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default()).WithMCP(mcpSvc)
 
+	reg := metrics.NewRegistry()
+	metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default())
 	if cfg.otlpAddr != "" {
 		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
 		// the session-authenticated API handler.
 		go func() {
 			slog.Info("starting the spend ledger's OTLP receiver", "addr", cfg.otlpAddr)
-			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool}, slog.Default()); err != nil {
+			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg)}, slog.Default()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}
@@ -490,6 +496,7 @@ func run() error {
 
 	handler, err := api.NewHandler(api.Options{
 		Auth:           authSvc,
+		Metrics:        api.NewMetrics(reg),
 		TrustedOrigins: splitList(cfg.trustedOrigins),
 		Services:       []func(*connect.Server){svc.Register},
 		UI:             web.Dist(),

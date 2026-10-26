@@ -143,6 +143,8 @@ type envOptions struct {
 	groupMappings          []auth.GroupMapping
 	defaultOrgMode         store.IdentityMode
 	trustedOrigins         []string
+	// metrics counts the RPCs, if set.
+	metrics *api.Metrics
 	// watchPoll is WatchRun's backstop poll interval; tests that check
 	// NOTIFY delivery set it long so that polling cannot hide a failure.
 	watchPoll time.Duration
@@ -279,6 +281,7 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	handler, err = api.NewHandler(api.Options{
 		Auth:           svc,
 		TrustedOrigins: opts.trustedOrigins,
+		Metrics:        opts.metrics,
 		Services:       []func(*connect.Server){registerProbe, rpc.Register},
 		UI:             opts.ui,
 	})
