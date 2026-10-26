@@ -46,6 +46,13 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 			last = "recreating the stuck sandbox"
 		case sb.State == store.SandboxStateReady:
 			return sb, nil
+		case sb.State == store.SandboxStateError && r.agentHealthy(ctx):
+			// The reconciler recreates a failed sandbox once no run is active (and gives up by
+			// marking the agent unhealthy), so wait for it, within SandboxTimeout.
+			last = "error"
+			if sb.Message != "" {
+				last += ": " + sb.Message
+			}
 		case sb.State == store.SandboxStateError, sb.State == store.SandboxStateDeleted,
 			sb.State == store.SandboxStateRetained:
 			reason := "sandbox " + string(sb.State)
@@ -56,7 +63,10 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 				reason += ": " + sb.Message
 			}
 			return store.AgentSandbox{}, &failure{reason: reason}
-		default: // pending, starting, stopping, stopped, deleting (recreated with a new spec)
+		default: // pending, starting, stopping, stopped, deleting
+			// Deleting is a recreation in progress: for a changed spec, a stuck sandbox (ADR 0054)
+			// or one found in Error or Completed. The next pass creates the new sandbox, so the
+			// run waits for it, within SandboxTimeout, instead of failing.
 			last = string(sb.State)
 		}
 		if time.Since(nudged) >= r.p.cfg.ReconcileNudge {
@@ -159,4 +169,11 @@ func (t *tail) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.b)
+}
+
+// agentHealthy reports whether the agent is not marked unhealthy (ADR 0054). When it cannot tell,
+// it says no, so the run fails at once as it always did.
+func (r *runner) agentHealthy(ctx context.Context) bool {
+	a, err := r.q.GetAgent(ctx, store.GetAgentParams{OrgID: r.run.OrgID, ID: r.run.AgentID})
+	return err == nil && !a.UnhealthyAt.Valid
 }
