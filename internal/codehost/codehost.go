@@ -88,6 +88,10 @@ type Repository struct {
 	Private       bool
 }
 
+// DefaultMaxRepositories is the bound on the repositories of one grant when the provider
+// states none.
+const DefaultMaxRepositories = 500
+
 // MaxPerPage is the largest page Access.Repositories serves.
 const MaxPerPage = 100
 
@@ -247,6 +251,9 @@ type Provider interface {
 	Describe(config []byte) (Description, error)
 	// ValidateSecrets reports whether the setup-guide secret fields are well formed.
 	ValidateSecrets(fields map[string][]byte) error
+	// Validate reports whether the whole opened connection (config and secrets) is usable, so a
+	// malformed stored connection is reported as such rather than as an unreachable host.
+	Validate(conn Connection) error
 }
 
 // Errors of Access.

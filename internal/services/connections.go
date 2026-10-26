@@ -93,7 +93,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 	if err := json.Unmarshal(c.LastTest, &results); err == nil {
 		out.LastTest = checksProto(results)
 	}
-	if p, ok := s.hosts.Get(c.Connector); ok {
+	if p, ok := s.hosts.Get(c.Connector); ok && p.ID() == providers.GitHub {
 		if d, err := p.Describe(c.Config); err == nil {
 			out.Settings = &connectionv1alpha1.Connection_Github{Github: &connectionv1alpha1.GitHubConnection{
 				AppId: d.AppID, InstallationId: d.InstallationID, KeyFingerprint: c.SecretFingerprint,
@@ -320,7 +320,7 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection) (stor
 	var results []connections.CheckResult
 	conn, err := connections.Load(ctx, s.keys, row)
 	if err == nil {
-		err = p.ValidateSecrets(conn.Fields)
+		err = p.Validate(conn)
 	}
 	if err != nil {
 		s.log.Warn("connection credentials unreadable", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
@@ -391,7 +391,7 @@ func (s *Server) ListInstallationRepos(ctx context.Context, req *connectionv1alp
 	name := p.Capabilities().DisplayName
 	conn, err := connections.Load(ctx, s.keys, row)
 	if err == nil {
-		err = p.ValidateSecrets(conn.Fields)
+		err = p.Validate(conn)
 	}
 	if err != nil {
 		if errors.Is(err, connections.ErrNoKeyring) {
