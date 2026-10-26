@@ -21,6 +21,15 @@ const (
 	BearerAuthScopes = "bearerAuth.Scopes"
 )
 
+// Defines values for AuditEventActorKind.
+const (
+	AuditEventActorKindAgent  AuditEventActorKind = "agent"
+	AuditEventActorKindSecret AuditEventActorKind = "secret"
+	AuditEventActorKindSystem AuditEventActorKind = "system"
+	AuditEventActorKindToken  AuditEventActorKind = "token"
+	AuditEventActorKindUser   AuditEventActorKind = "user"
+)
+
 // Defines values for ErrorCode.
 const (
 	Conflict         ErrorCode = "conflict"
@@ -99,8 +108,17 @@ const (
 
 // Defines values for Source.
 const (
-	Secret Source = "secret"
-	Ui     Source = "ui"
+	SourceSecret Source = "secret"
+	SourceUi     Source = "ui"
+)
+
+// Defines values for ListAuditEventsParamsActorKind.
+const (
+	ListAuditEventsParamsActorKindAgent  ListAuditEventsParamsActorKind = "agent"
+	ListAuditEventsParamsActorKindSecret ListAuditEventsParamsActorKind = "secret"
+	ListAuditEventsParamsActorKindSystem ListAuditEventsParamsActorKind = "system"
+	ListAuditEventsParamsActorKindToken  ListAuditEventsParamsActorKind = "token"
+	ListAuditEventsParamsActorKindUser   ListAuditEventsParamsActorKind = "user"
 )
 
 // AgentBudget defines model for AgentBudget.
@@ -124,6 +142,42 @@ type AgentMcpServers struct {
 		// Tools Narrows the allowance to these tools. Omit to allow the whole server.
 		Tools *[]string `json:"tools,omitempty"`
 	} `json:"servers"`
+}
+
+// AuditEvent defines model for AuditEvent.
+type AuditEvent struct {
+	// Action <area>.<verb>, for example approval.approve.
+	Action    string              `json:"action"`
+	ActorId   string              `json:"actorId"`
+	ActorKind AuditEventActorKind `json:"actorKind"`
+
+	// ChainSeq Position in the org's hash chain, from 1.
+	ChainSeq  int64     `json:"chainSeq"`
+	CreatedAt time.Time `json:"createdAt"`
+
+	// Hash sha256 of the canonical event and prevHash, lower-case hex.
+	Hash string             `json:"hash"`
+	Id   openapi_types.UUID `json:"id"`
+
+	// PrevHash Hash of the previous event, lower-case hex.
+	PrevHash  string `json:"prevHash"`
+	RequestId string `json:"requestId"`
+
+	// Summary {before, after} without secret values.
+	Summary    map[string]interface{} `json:"summary"`
+	TargetId   string                 `json:"targetId"`
+	TargetKind string                 `json:"targetKind"`
+}
+
+// AuditEventActorKind defines model for AuditEvent.ActorKind.
+type AuditEventActorKind string
+
+// AuditEventList defines model for AuditEventList.
+type AuditEventList struct {
+	Events []AuditEvent `json:"events"`
+
+	// NextPageToken Absent on the last page.
+	NextPageToken *string `json:"nextPageToken,omitempty"`
 }
 
 // DefaultPriceChanges defines model for DefaultPriceChanges.
@@ -622,6 +676,29 @@ type TokenId = openapi_types.UUID
 // ToolName defines model for toolName.
 type ToolName = string
 
+// ListAuditEventsParams defines parameters for ListAuditEvents.
+type ListAuditEventsParams struct {
+	// Since RFC 3339 time; keeps events created at or after it.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+
+	// Until RFC 3339 time; keeps events created before it.
+	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
+
+	// ActionPrefix Keeps events whose action starts with it, for example `approval.` or `agent.create`.
+	ActionPrefix *string                         `form:"actionPrefix,omitempty" json:"actionPrefix,omitempty"`
+	ActorKind    *ListAuditEventsParamsActorKind `form:"actorKind,omitempty" json:"actorKind,omitempty"`
+
+	// ActorId Keeps the events of one actor; needs `actorKind`.
+	ActorId *string `form:"actorId,omitempty" json:"actorId,omitempty"`
+
+	// PageSize 50 by default, at most 200.
+	PageSize  *int    `form:"pageSize,omitempty" json:"pageSize,omitempty"`
+	PageToken *string `form:"pageToken,omitempty" json:"pageToken,omitempty"`
+}
+
+// ListAuditEventsParamsActorKind defines parameters for ListAuditEvents.
+type ListAuditEventsParamsActorKind string
+
 // GetDefaultPriceChangesParams defines parameters for GetDefaultPriceChanges.
 type GetDefaultPriceChangesParams struct {
 	From *string `form:"from,omitempty" json:"from,omitempty"`
@@ -695,6 +772,9 @@ type ServerInterface interface {
 	// whole server.
 	// (PUT /agents/{agentId}/mcp-servers)
 	SetAgentMcpServers(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// Read the org's audit log, newest first.
+	// (GET /audit)
+	ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams)
 	// The org's monthly cap (calendar month, UTC), its platform ceiling and this month's spend.
 	// (GET /budget)
 	GetBudget(w http.ResponseWriter, r *http.Request)
@@ -917,6 +997,87 @@ func (siw *ServerInterfaceWrapper) SetAgentMcpServers(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetAgentMcpServers(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAuditEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditEventsParams
+
+	// ------------- Optional query parameter "since" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "since", r.URL.Query(), &params.Since)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "since", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "until" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "until", r.URL.Query(), &params.Until)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "until", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "actionPrefix" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "actionPrefix", r.URL.Query(), &params.ActionPrefix)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actionPrefix", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "actorKind" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "actorKind", r.URL.Query(), &params.ActorKind)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actorKind", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "actorId" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "actorId", r.URL.Query(), &params.ActorId)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actorId", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "pageSize" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "pageSize", r.URL.Query(), &params.PageSize)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pageSize", Err: err})
+		return
+	}
+
+	// ------------- Optional query parameter "pageToken" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "pageToken", r.URL.Query(), &params.PageToken)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pageToken", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAuditEvents(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1909,6 +2070,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("PUT "+options.BaseURL+"/agents/{agentId}/budget", wrapper.SetAgentBudget)
 	m.HandleFunc("GET "+options.BaseURL+"/agents/{agentId}/mcp-servers", wrapper.GetAgentMcpServers)
 	m.HandleFunc("PUT "+options.BaseURL+"/agents/{agentId}/mcp-servers", wrapper.SetAgentMcpServers)
+	m.HandleFunc("GET "+options.BaseURL+"/audit", wrapper.ListAuditEvents)
 	m.HandleFunc("GET "+options.BaseURL+"/budget", wrapper.GetBudget)
 	m.HandleFunc("PUT "+options.BaseURL+"/budget", wrapper.SetBudget)
 	m.HandleFunc("GET "+options.BaseURL+"/mcp-servers", wrapper.ListMcpServers)
@@ -2058,6 +2220,35 @@ type SetAgentMcpServersdefaultJSONResponse struct {
 }
 
 func (response SetAgentMcpServersdefaultJSONResponse) VisitSetAgentMcpServersResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type ListAuditEventsRequestObject struct {
+	Params ListAuditEventsParams
+}
+
+type ListAuditEventsResponseObject interface {
+	VisitListAuditEventsResponse(w http.ResponseWriter) error
+}
+
+type ListAuditEvents200JSONResponse AuditEventList
+
+func (response ListAuditEvents200JSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListAuditEventsdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response ListAuditEventsdefaultJSONResponse) VisitListAuditEventsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 
@@ -2975,6 +3166,9 @@ type StrictServerInterface interface {
 	// whole server.
 	// (PUT /agents/{agentId}/mcp-servers)
 	SetAgentMcpServers(ctx context.Context, request SetAgentMcpServersRequestObject) (SetAgentMcpServersResponseObject, error)
+	// Read the org's audit log, newest first.
+	// (GET /audit)
+	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
 	// The org's monthly cap (calendar month, UTC), its platform ceiling and this month's spend.
 	// (GET /budget)
 	GetBudget(ctx context.Context, request GetBudgetRequestObject) (GetBudgetResponseObject, error)
@@ -3213,6 +3407,32 @@ func (sh *strictHandler) SetAgentMcpServers(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetAgentMcpServersResponseObject); ok {
 		if err := validResponse.VisitSetAgentMcpServersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAuditEvents operation middleware
+func (sh *strictHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams) {
+	var request ListAuditEventsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAuditEvents(ctx, request.(ListAuditEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAuditEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAuditEventsResponseObject); ok {
+		if err := validResponse.VisitListAuditEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -48,8 +48,7 @@ var _ = Describe("MigrateLegacy", func() {
 		org    pgtype.UUID
 	)
 	BeforeEach(func(ctx SpecContext) {
-		_, err := pool.Exec(ctx, `TRUNCATE orgs CASCADE`)
-		Expect(err).NotTo(HaveOccurred())
+		pgtest.TruncateOrgs(ctx, pool)
 		q = store.New(pool)
 		legacy = &memLegacy{secrets: map[string]connections.Secret{}}
 		org, _, _ = pgtest.NewOrg(ctx, pool)
