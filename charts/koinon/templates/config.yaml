@@ -44,6 +44,8 @@ data:
       runtimeClassName: {{ .Values.openshell.runtimeClassName }}
     reconciler:
       idleTimeout: {{ .Values.reconciler.idleTimeout }}
+      parkWarm: {{ .Values.reconciler.parkWarm }}
+      sandboxJobs: {{ .Values.reconciler.sandboxJobs }}
       resyncInterval: {{ .Values.reconciler.resyncInterval }}
       homeRetention: {{ .Values.reconciler.homeRetention }}
     mcpAsk:

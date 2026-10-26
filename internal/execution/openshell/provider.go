@@ -111,6 +111,8 @@ func (b *Backend) EnsureProvider(ctx context.Context, workspace string, p execut
 // recorded on it differs from the rendering.
 func (b *Backend) ensureProfile(ctx context.Context, workspace string, p execution.ProviderProfile) error {
 	const op = "EnsureProviderProfile"
+	b.profileMu.Lock()
+	defer b.profileMu.Unlock()
 	profile, err := renderProfile(p)
 	if err != nil {
 		return &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: err}

@@ -76,6 +76,12 @@ var System = Actor{}
 // lock (for example by having appended a task event in the same
 // transaction), so concurrent calls for one task queue at most one run.
 func Enqueue(ctx context.Context, q *store.Queries, task store.Task) (store.Run, bool, error) {
+	return EnqueueOrigin(ctx, q, task, store.RunOriginInteractive)
+}
+
+// EnqueueOrigin is Enqueue for a run of the given origin. Interactive runs are claimed before
+// scheduled ones (LT1, ADR 0066); triggers and schedules (TR1) pass RunOriginScheduled.
+func EnqueueOrigin(ctx context.Context, q *store.Queries, task store.Task, origin store.RunOrigin) (store.Run, bool, error) {
 	if !task.AgentID.Valid {
 		return store.Run{}, false, nil
 	}
@@ -108,6 +114,7 @@ func Enqueue(ctx context.Context, q *store.Queries, task store.Task) (store.Run,
 	wallClock, maxTokens := cfg.RunCaps()
 	run, err := q.CreateRun(ctx, store.CreateRunParams{
 		OrgID: org, AgentID: agent.ID, TaskID: task.ID,
+		Origin:              store.NullRunOrigin{RunOrigin: origin, Valid: true},
 		MaxWallClockSeconds: int32(wallClock / time.Second), //nolint:gosec // bounded by templates.MaxRunDuration
 		MaxTokens:           maxTokens,
 	})

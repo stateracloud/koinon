@@ -51,6 +51,8 @@ type fileConfig struct {
 	} `yaml:"openshell"`
 	Reconciler struct {
 		IdleTimeout    string `yaml:"idleTimeout"`
+		ParkWarm       string `yaml:"parkWarm"`
+		SandboxJobs    int    `yaml:"sandboxJobs"`
 		ResyncInterval string `yaml:"resyncInterval"`
 		HomeRetention  string `yaml:"homeRetention"`
 	} `yaml:"reconciler"`
@@ -99,6 +101,8 @@ type config struct {
 	accessLogOTLP      string
 
 	idleTimeout    time.Duration
+	parkWarm       time.Duration
+	sandboxJobs    int
 	resyncInterval time.Duration
 	homeRetention  string
 	flavorImages   map[string]string
@@ -142,6 +146,8 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.DurationVar(&c.keySettle, "provider-key-settle", 0,
 		"how long to wait after writing a new provider key file before applying a gateway config that names it (default 90s in standalone mode: kubelet updates a mounted Secret within about a minute; 2s in kubernetes mode: the controller reads the Secret through the API)")
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
+	fs.DurationVar(&c.parkWarm, "park-warm", 0, "keep a sandbox up this long after its run parked on a2a or input_required (default 15m)")
+	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")
@@ -210,12 +216,15 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.providerKeysDir, fc.Gateway.ProviderKeysDir)
 	orDefault(&c.accessLogOTLP, fc.Gateway.AccessLogOTLP)
 	orDefault(&c.homeRetention, fc.Reconciler.HomeRetention)
+	if c.sandboxJobs == 0 {
+		c.sandboxJobs = fc.Reconciler.SandboxJobs
+	}
 	orDefault(&c.githubToolsURL, fc.GitHubTools.URL)
 	orDefault(&c.mcpAskURL, fc.MCPAsk.URL)
 	for _, d := range []struct {
 		dst *time.Duration
 		src string
-	}{{&c.idleTimeout, fc.Reconciler.IdleTimeout}, {&c.resyncInterval, fc.Reconciler.ResyncInterval}} {
+	}{{&c.idleTimeout, fc.Reconciler.IdleTimeout}, {&c.parkWarm, fc.Reconciler.ParkWarm}, {&c.resyncInterval, fc.Reconciler.ResyncInterval}} {
 		if *d.dst == 0 && d.src != "" {
 			v, err := time.ParseDuration(d.src)
 			if err != nil {

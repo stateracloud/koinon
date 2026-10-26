@@ -36,6 +36,8 @@ const (
 	TaskServiceAppendMessageProcedure = "/koinon.task.v1alpha1.TaskService/AppendMessage"
 	// TaskServiceCancelTaskProcedure is the procedure name of the TaskService's CancelTask RPC.
 	TaskServiceCancelTaskProcedure = "/koinon.task.v1alpha1.TaskService/CancelTask"
+	// TaskServiceNotifyTypingProcedure is the procedure name of the TaskService's NotifyTyping RPC.
+	TaskServiceNotifyTypingProcedure = "/koinon.task.v1alpha1.TaskService/NotifyTyping"
 )
 
 var (
@@ -76,6 +78,13 @@ var (
 			Procedure:  TaskServiceCancelTaskProcedure,
 		}
 	})
+	taskServiceNotifyTypingSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_task_v1alpha1_task_proto.Services().ByName("TaskService").Methods().ByName("NotifyTyping"),
+			Procedure:  TaskServiceNotifyTypingProcedure,
+		}
+	})
 )
 
 // TaskServiceClient is a client for the koinon.task.v1alpha1.TaskService service.
@@ -94,6 +103,11 @@ type TaskServiceClient interface {
 	// CancelTask ends a task that has not ended: its queued runs are canceled and it moves to
 	// canceled. Members and above.
 	CancelTask(context.Context, *v1alpha1.CancelTaskRequest) (*v1alpha1.CancelTaskResponse, error)
+	// NotifyTyping tells Koinon that a person is typing in the task's conversation, so the task's
+	// agent sandbox is started (or kept up) before the message arrives (plan item LT1, ADR 0066).
+	// Clients call it when typing starts; calls for the same task within ten seconds of the last one
+	// are ignored. Members and above.
+	NotifyTyping(context.Context, *v1alpha1.NotifyTypingRequest) (*v1alpha1.NotifyTypingResponse, error)
 }
 
 // NewTaskServiceClient constructs a client for the koinon.task.v1alpha1.TaskService service.
@@ -118,6 +132,11 @@ type TaskServiceHandler interface {
 	// CancelTask ends a task that has not ended: its queued runs are canceled and it moves to
 	// canceled. Members and above.
 	CancelTask(context.Context, *v1alpha1.CancelTaskRequest) (*v1alpha1.CancelTaskResponse, error)
+	// NotifyTyping tells Koinon that a person is typing in the task's conversation, so the task's
+	// agent sandbox is started (or kept up) before the message arrives (plan item LT1, ADR 0066).
+	// Clients call it when typing starts; calls for the same task within ten seconds of the last one
+	// are ignored. Members and above.
+	NotifyTyping(context.Context, *v1alpha1.NotifyTypingRequest) (*v1alpha1.NotifyTypingResponse, error)
 }
 
 // RegisterTaskServiceHandler registers svc as the koinon.task.v1alpha1.TaskService implementation
@@ -130,6 +149,7 @@ func RegisterTaskServiceHandler(server *connect.Server, svc TaskServiceHandler) 
 		connect.Method{Spec: taskServiceGetTaskSpec(), Handler: adapter.getTask},
 		connect.Method{Spec: taskServiceAppendMessageSpec(), Handler: adapter.appendMessage},
 		connect.Method{Spec: taskServiceCancelTaskSpec(), Handler: adapter.cancelTask},
+		connect.Method{Spec: taskServiceNotifyTypingSpec(), Handler: adapter.notifyTyping},
 	)
 }
 
@@ -154,6 +174,10 @@ func (UnimplementedTaskServiceHandler) AppendMessage(context.Context, *v1alpha1.
 
 func (UnimplementedTaskServiceHandler) CancelTask(context.Context, *v1alpha1.CancelTaskRequest) (*v1alpha1.CancelTaskResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.task.v1alpha1.TaskService.CancelTask is not implemented")
+}
+
+func (UnimplementedTaskServiceHandler) NotifyTyping(context.Context, *v1alpha1.NotifyTypingRequest) (*v1alpha1.NotifyTypingResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.task.v1alpha1.TaskService.NotifyTyping is not implemented")
 }
 
 type taskServiceClient struct {
@@ -195,6 +219,14 @@ func (c *taskServiceClient) AppendMessage(ctx context.Context, req *v1alpha1.App
 func (c *taskServiceClient) CancelTask(ctx context.Context, req *v1alpha1.CancelTaskRequest) (*v1alpha1.CancelTaskResponse, error) {
 	var res v1alpha1.CancelTaskResponse
 	if err := c.client.CallUnary(ctx, taskServiceCancelTaskSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *taskServiceClient) NotifyTyping(ctx context.Context, req *v1alpha1.NotifyTypingRequest) (*v1alpha1.NotifyTypingResponse, error) {
+	var res v1alpha1.NotifyTypingResponse
+	if err := c.client.CallUnary(ctx, taskServiceNotifyTypingSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -256,6 +288,18 @@ func (h taskServiceHandler) cancelTask(ctx context.Context, _ connect.Spec, stre
 		return err
 	}
 	res, err := h.svc.CancelTask(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h taskServiceHandler) notifyTyping(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.NotifyTypingRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.NotifyTyping(ctx, &req)
 	if err != nil {
 		return err
 	}

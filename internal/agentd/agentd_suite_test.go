@@ -434,3 +434,35 @@ func taskEvents(ctx context.Context, e *env, t store.Task) []store.TaskEvent {
 	Expect(err).NotTo(HaveOccurred())
 	return evs
 }
+
+// fakeClock is the pool's clock in tests that pass the sandbox wait without waiting for it.
+type fakeClock struct {
+	mu    sync.Mutex
+	t     time.Time
+	reads int
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reads++
+	return c.t
+}
+
+// awaitWait blocks until waitSandbox has gone round its loop once: it reads the clock for the start
+// of the wait, then for the nudge and the deadline checks, which come after it has read the org's
+// queue wait and set its deadline. Advancing earlier would move the clock before the wait began.
+func (c *fakeClock) awaitWait() {
+	GinkgoHelper()
+	Eventually(func() int {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.reads
+	}).WithTimeout(10 * time.Second).Should(BeNumerically(">=", 3))
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
