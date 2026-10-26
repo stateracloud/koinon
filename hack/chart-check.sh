@@ -117,6 +117,19 @@ for f in "${value_files[@]}"; do
 		fail "port 15000 exposed with $(basename "$f")"
 	fi
 done
+# The CONNECT policy (pods/exec, attach, portforward, pods/proxy, services/proxy) and its binding
+# render in every mode that has the sandbox policies, with no exemption (no variables, no identity list), ADR 0048 decision 3.
+for f in "${value_files[@]}"; do
+	r="$out/$(basename "$f" .yaml).yaml"
+	# A value set that turns the policies off (the cluster-scoped objects need admin rights) has none.
+	grep -Eq -- '^kind: ValidatingAdmissionPolicy$' "$r" || { grep -A1 -E '^sandboxPolicy:' "$f" | grep -q 'enabled: false' && continue; }
+	grep -Eq -- '^  name: koinon-koinon-sandbox-connect$' "$r" || fail "no CONNECT policy with $(basename "$f")"
+	[ "$(grep -c -- '^  name: koinon-koinon-sandbox-connect$' "$r")" = 2 ] || fail "CONNECT policy and binding must both render with $(basename "$f")"
+	grep -Eq -- 'operations: \[CONNECT\]' "$r" || fail "no CONNECT rule with $(basename "$f")"
+	grep -Eq -- 'resources: \[pods/exec, pods/attach, pods/portforward, pods/proxy, services/proxy\]' "$r" || fail "CONNECT rule lacks a subresource with $(basename "$f")"
+done
+lacks "no CONNECT policy with sandboxPolicy.enabled=false" 'sandbox-connect' --set sandboxPolicy.enabled=false
+
 # The OpenShell channel needs mTLS (#103): without a client TLS Secret the chart renders only with
 # an explicit openshell.insecure=true, never with both, and each choice reaches the components.
 if render_raw >/dev/null 2>"$out/tls.err"; then fail "no client TLS Secret and no insecure must not render"; fi

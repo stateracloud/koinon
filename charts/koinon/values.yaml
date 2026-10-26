@@ -353,7 +353,9 @@ sandboxPolicy:
     - ghcr.io/nvidia/openshell/supervisor:0.1.5
   validationActions: [Deny]
   # Requesting identities (request.userInfo.username) allowed to write each kind of object in
-  # sandbox namespaces. Everyone else is denied, cluster admins included; there is no break-glass.
+  # sandbox namespaces. Everyone else is denied, cluster admins included. CONNECT (pods/exec, attach,
+  # portforward, proxy; services/proxy) is denied to everyone with no exemption; the break-glass
+  # is the runbook docs/ops/sandbox-break-glass.md, not an identity list.
   identities:
     # Pods: the Agent Sandbox controller.
     pods:
