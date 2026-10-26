@@ -80,8 +80,9 @@ None needed.
   when the person confirms) is not decided ([0065](0065-work-model-tasks-inbox.md) open questions).
 - **Delegation** (item 8): `ask_agent` creates a child task. Whether a read-only delegation from a
   chat stays ephemeral is not decided.
-- **Release.** This ADR put chat in v0.2. #146 puts the inbox and direct-message triggers in v0.1;
-  which parts of chat ship in v0.1 is not decided.
+- **Release.** Chat stays in v0.2 ([0024](0024-roadmap.md) amendment). #146 puts the inbox and
+  direct-message triggers in v0.1; how the v0.1 inbox chat relates to this ADR's chat is not
+  decided.
 
 ## Links
 

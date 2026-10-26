@@ -1,6 +1,7 @@
 # 0019. Personal agents call team agents through membership
 
 - Status: Accepted
+- Amended by: [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-21
 - Decision: [design.md#19](../design.md)
 
@@ -60,6 +61,14 @@ flowchart LR
 ## Upstream verification
 
 None needed: Koinon-owned authorization logic. Checked 2026-10-21.
+
+## Amendment (2026-10-26): each agent pays from its own budget
+
+[0065](0065-work-model-tasks-inbox.md) decides that each agent uses only its own grants and budget
+when one agent asks another (`ask_agent`). The team agent's spend on a call therefore counts against
+the team agent's own budget, not the personal org's: this replaces "the personal org pays for the
+call". Membership and the role cap above still apply. Inside an install the call is `ask_agent`
+over Postgres, not an A2A link ([0065](0065-work-model-tasks-inbox.md)).
 
 ## Links
 

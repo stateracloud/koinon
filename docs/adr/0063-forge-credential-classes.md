@@ -5,7 +5,9 @@
 - Relates to: [#144](https://github.com/stateracloud/koinon/issues/144) (decided in conversation on
   2026-10-26), [0062](0062-code-host-connectors.md)
 - Amends: [0043](0043-workload-identity-adapters-and-koinon-issuer.md) (a narrow exception for
-  static code-host tokens)
+  static code-host tokens), [0007](0007-connector-model.md) (a static-token auth type),
+  [0049](0049-v01-scope-decisions.md) (Gitea credentials in v0.1), [0006](0006-identity-layers.md)
+  (auth types)
 
 ## Context
 
