@@ -17,6 +17,13 @@ Before you set bootstrapAdmin.enabled=false, set oidc.platformAdminGroups and lo
 one of those groups; otherwise nobody is left to set the platform budget ceilings.
 {{- end }}
 
+{{- if and (ne .Values.image.registry "ghcr.io/stateracloud") (or (.Values.global).imageRegistry (.Values.global).registryMirrors) }}
+
+WARNING: image.registry is {{ .Values.image.registry }} and global.imageRegistry or global.registryMirrors is set.
+The rewrite starts from image.registry, so Koinon's images may not end up where you expect (a reference
+already under the mirror is left alone). Leave image.registry at its default when you use a global mirror.
+{{- end }}
+
 {{- if .Values.openshell.insecure }}
 
 WARNING: openshell.insecure=true. Koinon dials the OpenShell gateway without TLS, so sandbox create,

@@ -112,6 +112,10 @@ var _ = Describe("Sandbox image checks", func() {
 		Entry("multi-line array", "image_pull_secrets = [\n  \"a\",\n]\n", []string{"a"}, ""),
 		Entry("empty array", "image_pull_secrets = []", nil, ""),
 		Entry("comments only", "# image_pull_secrets = [\"a\"]\n  # supervisor_image = \"x\"", nil, ""),
+		Entry("single-quoted strings", "image_pull_secrets = ['a']\nsupervisor_image = 'r/s:1'", []string{"a"}, "r/s:1"),
+		Entry("comments inside the array and after values", "image_pull_secrets = [\n  \"a\", # first\n  # \"gone\",\n  \"b#c\",\n] # done\nsupervisor_image = \"r/s:1\" # pinned", []string{"a", "b#c"}, "r/s:1"),
+		Entry("keys are anchored: other keys that end in the name, and text in values", "other_image_pull_secrets = [\"x\"]\nnote = \"supervisor_image = 'y'\"\nold_supervisor_image = \"z\"", nil, ""),
+		Entry("indented keys", "[openshell.drivers.kubernetes]\n  image_pull_secrets = [\"a\"]\n  supervisor_image = \"r/s:1\"", []string{"a"}, "r/s:1"),
 		Entry("neither", "[openshell.gateway]\nbind = \"x\"", nil, ""),
 	)
 })

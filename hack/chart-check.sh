@@ -350,6 +350,22 @@ has "user/name is on docker.io" 'imageName: art.example.com/docker-remote/cnpg/p
 	--set 'global.registryMirrors.docker\.io=art.example.com/docker-remote' --set postgres.cnpg.imageName=cnpg/postgres:18
 has "a registry with a port is a host" 'imageName: art.example.com/p/img:1$' \
 	--set global.imageRegistry=art.example.com/p --set postgres.cnpg.imageName=registry.local:5000/img:1
+# A reference already under the mirror is not prefixed again, whichever setting names the mirror.
+has "a reference under another mirror value stays" 'imageName: art.example.com/ghcr-remote/org/x:1$' --set global.imageRegistry=proxy.example.com/p \
+	--set 'global.registryMirrors.ghcr\.io=art.example.com/ghcr-remote' --set postgres.cnpg.imageName=art.example.com/ghcr-remote/org/x:1
+has "image.registry already under imageRegistry does not double" 'image: art.example.com/ghcr-remote/stateracloud/koinon-api:0.0.0$' \
+	--set image.registry=art.example.com/ghcr-remote/stateracloud --set global.imageRegistry=art.example.com/ghcr-remote
+# Docker Hub's other names and upper case are docker.io.
+for h in index.docker.io registry-1.docker.io Docker.IO; do
+	has "$h is docker.io" 'imageName: art.example.com/docker-remote/library/postgres:18$' \
+		--set 'global.registryMirrors.docker\.io=art.example.com/docker-remote' --set "postgres.cnpg.imageName=$h/library/postgres:18"
+done
+# A URL is not a registry.
+if render --set global.imageRegistry=https://art.example.com >/dev/null 2>&1; then fail "imageRegistry with a scheme must not render"; fi
+if render --set 'global.registryMirrors.ghcr\.io=https://art.example.com' >/dev/null 2>&1; then fail "a mirror with a scheme must not render"; fi
+# NOTES warn when image.registry is customised next to a global mirror (helm install prints them; template does not).
+notes=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set image.registry=quay.io/m --set global.imageRegistry=art.example.com 2>&1) || true
+grep -q 'WARNING: image.registry is quay.io/m' <<<"$notes" || fail "no NOTES warning for image.registry with a global mirror"
 # An explicit image.registry is the upstream that the rewrite starts from.
 has "image.registry is rewritten too" 'image: art.example.com/ghcr-remote/mine/koinon-api:0.0.0$' \
 	--set image.registry=quay.io/mine --set 'global.registryMirrors.quay\.io=art.example.com/ghcr-remote'

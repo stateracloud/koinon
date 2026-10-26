@@ -75,6 +75,7 @@ and add it to the sandbox ServiceAccount's `imagePullSecrets`. Rejected because:
 - The preflight ClusterRole gains `configmaps get` on one name (`preflight.openshell.configMap`). It is a
   ClusterRole because the ConfigMap lives in OpenShell's namespace, which a Role in a hook could not target
   before that namespace exists. The preflight only warns about the gateway's image settings, since a gateway
-  environment variable can override its configuration file.
+  environment variable can override its configuration file. Because the rule is in a ClusterRole, the hook's
+  ServiceAccount can read a ConfigMap of that name in any namespace; that is acceptable for a short-lived hook.
 - If a future OpenShell drops `sandboxImagePullSecrets`, this decision is revisited; the Koinon-copies option
   above is the fallback.

@@ -52,9 +52,11 @@ app.kubernetes.io/part-of: koinon
 {{/*
 Rewrite an image reference for a registry mirror: koinon.imageRef (list $ "ghcr.io/org/name:tag@sha256:...").
 The leading host is the first path element that contains "." or ":" (or is "localhost"); a reference
-without one lives on docker.io, and a bare "name" is docker.io/library/name. global.registryMirrors[host]
+without one lives on docker.io (index.docker.io and registry-1.docker.io count as docker.io, and host names are compared
+in lower case), and a bare "name" is docker.io/library/name. global.registryMirrors[host]
 replaces that host if it has an entry; otherwise global.imageRegistry replaces it, if set; otherwise the
-reference is returned exactly as given. The path, tag and digest are kept, so a digest still verifies
+reference is returned exactly as given. A reference that already starts with imageRegistry or a mirror value is
+returned as given too, so nothing is prefixed twice. The path, tag and digest are kept, so a digest still verifies
 through a pull-through cache. Mirror values may carry a path prefix (art.example.com/ghcr-remote).
 */}}
 {{- define "koinon.imageRef" -}}
@@ -62,11 +64,21 @@ through a pull-through cache. Mirror values may carry a path prefix (art.example
 {{- $ref := index . 1 -}}
 {{- $g := $ctx.Values.global | default dict -}}
 {{- $mirrors := $g.registryMirrors | default dict -}}
+{{- /* A reference that already lives under imageRegistry or a mirror value stays as it is: no double prefix. */ -}}
+{{- $inside := false -}}
+{{- range $t := concat (list ($g.imageRegistry | default "")) (values $mirrors) -}}
+{{- if and $t (hasPrefix (printf "%s/" (trimSuffix "/" $t)) $ref) }}{{ $inside = true }}{{ end -}}
+{{- end -}}
+{{- if $inside -}}
+{{- $ref -}}
+{{- else -}}
 {{- $parts := splitList "/" $ref -}}
 {{- $host := "docker.io" -}}
 {{- $rest := $ref -}}
-{{- if and (gt (len $parts) 1) (or (contains "." (first $parts)) (contains ":" (first $parts)) (eq (first $parts) "localhost")) -}}
-{{- $host = first $parts -}}
+{{- if and (gt (len $parts) 1) (or (contains "." (first $parts)) (contains ":" (first $parts)) (eq (lower (first $parts)) "localhost")) -}}
+{{- /* Docker Hub has three names, and host names are not case sensitive. */ -}}
+{{- $host = lower (first $parts) -}}
+{{- if or (eq $host "index.docker.io") (eq $host "registry-1.docker.io") }}{{ $host = "docker.io" }}{{ end -}}
 {{- $rest = join "/" (rest $parts) -}}
 {{- else if eq (len $parts) 1 -}}
 {{- $rest = printf "library/%s" $ref -}}
@@ -76,6 +88,7 @@ through a pull-through cache. Mirror values may carry a path prefix (art.example
 {{- printf "%s/%s" (trimSuffix "/" $target) $rest -}}
 {{- else -}}
 {{- $ref -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 
