@@ -454,6 +454,12 @@ egress.allowedInternalHosts; both are joined. */}}
 {{- if and .Values.ingress.enabled (not .Values.ingress.host) }}
 {{- fail "ingress.host is required when ingress.enabled is true" }}
 {{- end }}
+{{- if and (not .Values.openshell.clientTLSSecret) (not .Values.openshell.insecure) }}
+{{- fail "openshell.clientTLSSecret is required: Koinon dials the OpenShell gateway (it controls every sandbox) over mTLS. Set openshell.clientTLSSecret to a Secret with the gateway's client certificate (tls.crt, tls.key, ca.crt), or set openshell.insecure=true only if a service mesh provides mTLS between Koinon and the gateway" }}
+{{- end }}
+{{- if and .Values.openshell.clientTLSSecret .Values.openshell.insecure }}
+{{- fail "openshell.clientTLSSecret and openshell.insecure=true contradict each other: set the Secret for mTLS, or insecure=true for plaintext, not both" }}
+{{- end }}
 {{- if and .Values.oidc.enabled (not .Values.oidc.redirectUrl) (not (include "koinon.publicUrl" .)) }}
 {{- fail "oidc.enabled needs oidc.redirectUrl, publicUrl or an ingress to build the redirect URL from" }}
 {{- end }}
