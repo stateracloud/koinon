@@ -586,11 +586,19 @@ type Querier interface {
 	UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclaredMCPServerParams) (McpServer, error)
 	UpdateDeclaredProvider(ctx context.Context, arg UpdateDeclaredProviderParams) (Provider, error)
 	// A change of the URL, transport or credential starts health over: the new settings are unproven.
+	// credential is written only when @set_credential is true (the patch sets or removes it). The caller
+	// read the row without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the
+	// envelope since, so writing back the envelope that was read would undo it. credential_header and
+	// credential_prefix go with it: they are written only when @set_credential_meta is true (the patch
+	// touches the credential at all), so a URL-only patch cannot pair a concurrent change's envelope with
+	// stale metadata, or break the CHECK that ties header and envelope together.
 	UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error)
 	// The server published a different description or schema for a known tool: remember it and flag
 	// the tool for review. An auto tool drops to ask until an admin reviews it; ask and never stay.
 	UpdateMCPToolContent(ctx context.Context, arg UpdateMCPToolContentParams) (McpTool, error)
 	UpdateModel(ctx context.Context, arg UpdateModelParams) (Model, error)
+	// api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
+	// without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the envelope since.
 	UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error)
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
 	// Grants the roles of every mapping that matches one of the user's groups,

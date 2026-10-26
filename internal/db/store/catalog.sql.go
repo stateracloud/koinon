@@ -649,23 +649,28 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 
 const updateProvider = `-- name: UpdateProvider :one
 UPDATE providers
-SET type = $1, url = $2, api_key = $3
-WHERE org_id = $4 AND id = $5
+SET type = $1, url = $2,
+    api_key = CASE WHEN $3::boolean THEN $4 ELSE api_key END
+WHERE org_id = $5 AND id = $6
 RETURNING org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at
 `
 
 type UpdateProviderParams struct {
-	Type   string
-	Url    string
-	ApiKey []byte
-	OrgID  pgtype.UUID
-	ID     pgtype.UUID
+	Type      string
+	Url       string
+	SetApiKey bool
+	ApiKey    []byte
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
 }
 
+// api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
+// without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the envelope since.
 func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error) {
 	row := q.db.QueryRow(ctx, updateProvider,
 		arg.Type,
 		arg.Url,
+		arg.SetApiKey,
 		arg.ApiKey,
 		arg.OrgID,
 		arg.ID,
