@@ -10,8 +10,15 @@ never Kyverno). Rules key on the requesting identity, which a pod's creator cann
   selector, affinity and deadline must stay as they were (the other spec fields are immutable);
 - only the OpenShell gateway (and the controller) writes Sandbox objects, and only the gateway
   writes Secrets;
-- everyone else is denied, cluster admins included, with no break-glass: debug through OpenShell
-  exec and logs.
+- everyone else is denied, cluster admins included: debug through OpenShell exec and logs;
+- CONNECT is denied to every identity, with no exemption: pods/exec, pods/attach, pods/portforward,
+  pods/proxy and services/proxy would run a process (or reach a port) outside the OpenShell
+  supervisor's Landlock/seccomp policy and OCSF audit. Neither the OpenShell gateway nor the Agent
+  Sandbox controller uses them (both talk through the supervisor's relay). It is a third policy
+  because an options object has no spec or metadata, and admission runs before the connection is
+  made. DELETE stays out: deleting a pod does not weaken confinement. Break-glass is not an
+  exemption but the runbook docs/ops/sandbox-break-glass.md (a cluster admin suspends the CONNECT
+  binding, which shows in the audit log and as GitOps drift).
 Shape rules apply to every pod: no ephemeral containers, host namespaces, hostPath or privileged
 containers, no io.katacontainers.* annotations (they can switch off guest seccomp, spike 8.16), and
 sandbox workload pods run on an allowed runtime class; supervisor pods run only the pinned
@@ -23,6 +30,7 @@ A CEL error denies under failurePolicy Fail; test against real OpenShell pods be
 {{- $base := printf "%s-%s" .Release.Namespace (include "koinon.fullname" .) }}
 {{- $pods := printf "%s-sandbox-pods" $base }}
 {{- $objects := printf "%s-sandbox-objects" $base }}
+{{- $connect := printf "%s-sandbox-connect" $base }}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -153,6 +161,39 @@ metadata:
 spec:
   policyName: {{ $objects }}
   validationActions: {{ toJson $p.validationActions }}
+  matchResources:
+    namespaceSelector:
+      {{- toYaml $p.namespaceSelector | nindent 6 }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $connect }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CONNECT]
+        resources: [pods/exec, pods/attach, pods/portforward, pods/proxy, services/proxy]
+  validations:
+    - expression: "false"
+      messageExpression: "request.resource.resource + '/' + request.subResource + ' is not allowed in sandbox namespaces (requested by ' + request.userInfo.username + '): use OpenShell exec and logs; see docs/ops/sandbox-break-glass.md'"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $connect }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $connect }}
+  validationActions: {{ toJson $p.validationActions }}
+  # No objectSelector: a CONNECT request's object is an options object without metadata, so a
+  # selector would match nothing. Sandbox pods are selected by their namespace.
   matchResources:
     namespaceSelector:
       {{- toYaml $p.namespaceSelector | nindent 6 }}
