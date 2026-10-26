@@ -1,6 +1,7 @@
 # 0043. Workload identity adapters and a Koinon OIDC issuer
 
 - Status: Accepted
+- Amended by: [0063](0063-forge-credential-classes.md)
 - Date: 2026-10-21
 - Amends: ADR 0006 (identity layers); replaces the "Pod Identity" wording in `docs/design.md`
   ("Execution layer details")
@@ -111,6 +112,14 @@ Checked 2026-10-21: AWS IAM OIDC provider and STS docs, EKS Pod Identity limits,
 Entra workload identity federation considerations and flexible FIC; AKS workload identity; GCP
 workload identity federation with Kubernetes and GKE; Azure DevOps service principals; Vault JWT
 auth and AWS engine; OpenShell provider refresh docs.
+
+## Amendment (2026-10-26): static code-host tokens
+
+[0063](0063-forge-credential-classes.md) makes a narrow exception to the rejected "static
+long-lived keys in provider records". Code hosts that cannot mint a short-lived credential (Gitea
+in v0.1) may use static tokens if Koinon holds them, they reach sandboxes only through OpenShell
+placeholders, and their age is shown. Koinon warns on age; it never blocks and never rotates them.
+Everything else still goes through adapters as decided above.
 
 ## Links
 

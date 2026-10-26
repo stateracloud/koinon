@@ -1,6 +1,9 @@
 # 0011. Agent-to-agent: A2A, persisted as tickets
 
-- Status: Accepted; amended by [0055](0055-chat-as-its-own-object.md)
+- Status: Accepted; amended by [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md)
+- Note: inside one install, the transport, the ticket persistence and the gateway in the diagram are
+  replaced by [0065](0065-work-model-tasks-inbox.md) (`ask_agent` and `reply` over Postgres). A2A
+  stays the protocol at the edge (external agents, v1.0).
 - Date: 2026-10-21
 - Decision: [design.md#11](../design.md)
 
@@ -20,7 +23,8 @@ Agent calls can loop, nest deeply or run up costs.
 - Guards:
   - a maximum call depth;
   - cycle detection;
-  - cost inherited by the parent ticket ([0041](0041-koinon-spend-ledger-and-budget-stops.md));
+  - each agent's spend counts against its own budget ([0065](0065-work-model-tasks-inbox.md);
+    this replaces "cost inherited by the parent ticket", [0041](0041-koinon-spend-ledger-and-budget-stops.md));
   - results returned to the caller as quoted data, never as instructions, to blunt prompt injection.
 
 ```mermaid
@@ -54,7 +58,8 @@ sequenceDiagram
 - Negative: Koinon builds an A2A gateway that maps A2A tasks to tickets and runs, and handles
   streaming (SSE) and push notifications _(inferred)_.
 - Negative: depth and cycle limits must be enforced in the gateway, not trusted to agents.
-- Follow-ups: A2A lands in v0.3 ([0024](0024-roadmap.md)).
+- Follow-ups: `ask_agent` inside an install lands in v0.2; the external A2A gateway in v1.0
+  ([0024](0024-roadmap.md) amendment, [0065](0065-work-model-tasks-inbox.md)).
 
 ## Amendment (2026-10-23): read-only delegation from a chat
 
@@ -63,9 +68,30 @@ chat to a specialist agent is **ephemeral**: it is not persisted as a ticket (th
 A2A task is persisted as a ticket" above). The caller pays for it, and only metadata is audited.
 Delegations that write, and delegations from tickets, are persisted as tickets as before.
 
+## Amendment (2026-10-26): tasks, and Postgres inside an install
+
+[0065](0065-work-model-tasks-inbox.md) changes this decision:
+
+- "Persisted as a ticket" now reads "is a task": a request to another agent is a **child task**.
+- **Inside one install the transport is Postgres plus the MCP tools `ask_agent` and `reply`**, not
+  the A2A wire protocol. The asking run parks with reason `a2a` and resumes on the reply. The
+  expert's sandbox starts as soon as the child task exists. Each agent uses only its own grants and
+  budget, membership and role caps apply ([0019](0019-personal-agents-and-teams.md)), and sandboxes
+  never talk to each other over the network.
+- **The external A2A gateway comes in v1.0** and maps onto the same tasks. The agent card path
+  `/.well-known/agent-card.json` was verified on 2026-10-26 (A2A v1.0.0 §8.2).
+- `ask_agent` ships in v0.2 (#146), not v0.3.
+- Not decided: whether a read-only delegation from a chat (amendment of 2026-10-23) stays
+  ephemeral now that a request is a child task.
+- **Guards** (#146 A3) are decided in [0065](0065-work-model-tasks-inbox.md): refused when the asked
+  agent is already in the chain, at most 3 deep, at most 5 open questions per agent, and the same
+  question to the same agent in the same task returns the existing child. This answers the open
+  question on depth and cycle key below.
+
 ## Open questions
 
-- Maximum default depth and the cycle-detection key (agent ID chain? ticket lineage?).
+- ~~Maximum default depth and the cycle-detection key~~ Answered 2026-10-26 in
+  [0065](0065-work-model-tasks-inbox.md): the agent chain, at most 3 deep.
 - Should agentgateway (which also speaks A2A, [0040](0040-agentgateway-model-and-mcp-gateway.md))
   carry the A2A transport, with Koinon owning the ticket mapping? To be evaluated in v0.3.
 - Agent card discovery path and how private, shared and public visibility filters it

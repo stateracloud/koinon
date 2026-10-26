@@ -4,9 +4,11 @@
 - Date: 2026-10-22
 - Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md) (models, budgets,
   connection secrets; the Helm model values are dropped),
-  [0058](0058-gateway-modes.md) (gateway modes)
+  [0058](0058-gateway-modes.md) (gateway modes), [0051](0051-session-home-generations.md), and on 2026-10-26 by
+  [0062](0062-code-host-connectors.md), [0063](0063-forge-credential-classes.md),
+  [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md) (v0.1 Foundation)
 - Amends: [0007](0007-connector-model.md), [0016](0016-harness-and-deployment.md),
-  [0036](0036-v01-demo.md); extends [0048](0048-openshell-spike-results.md) (Proposed, #15)
+  [0036](0036-v01-demo.md); extends [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository)
 - Verification: agentgateway Kubernetes-mode `rawConfig` budgets verified by spike S2
   (2026-10-22, below)
 
@@ -163,7 +165,7 @@ Andre answered these in a grilling session on 2026-10-21/22. This ADR records th
   restart costs a `session/load` per active run _(inferred)_.
 - Negative: approvers see agent PRs twice (Koinon card, GitHub review), for different questions.
 - Follow-ups: the issues in [docs/plans/v0.1.md](../plans/v0.1.md); ADR 0048 decision 6 (standalone
-  mode) gains the Kubernetes mode above when #15 merges.
+  mode) gains the Kubernetes mode above when PR 15 (in the previous repository) merges.
 
 ## Amendment (2026-10-23)
 
@@ -231,6 +233,27 @@ access log into one file whose every change rolls the proxy pods).
   owner's credential. Standalone mode does not contact the server at all for other orgs. Accepted by
   Andre; documented in [0058](0058-gateway-modes.md) and the gateway-modes guide.
 
+## Amendment (2026-10-26): v0.1 Foundation replaces this scope
+
+Andre replaced v0.1's scope with "v0.1 Foundation" ([#146](https://github.com/stateracloud/koinon/issues/146);
+[0024](0024-roadmap.md) amendment; [docs/plans/v0.1.md](../plans/v0.1.md)). Changes to the decisions above:
+
+- **Code hosts.** GitHub, GitHub Enterprise Server and Gitea behind a code-host interface
+  ([0062](0062-code-host-connectors.md)). Gitea uses a bot per connection with a read token and a
+  write token ([0063](0063-forge-credential-classes.md)). The agent still never pushes: GitHub
+  commits through its Git Data API, Gitea through a git push from koinon-api. Changes are refused
+  under the provider's CI paths, not only `.github/workflows/`.
+- **Tickets and board columns** give way to A2A-shaped tasks and the inbox; the board is a
+  secondary view ([0065](0065-work-model-tasks-inbox.md)).
+- **"Out of v0.1"**: agent-home checkpoints and schedules are now in v0.1. A2A (`ask_agent`),
+  webhooks and Slack/Teams stay out, in v0.2 ([0065](0065-work-model-tasks-inbox.md),
+  [0066](0066-triggers-and-scheduling.md)).
+- **Sandbox lifecycle.** A sandbox whose run waits on `a2a` or `input_required` stays warm for
+  15 minutes; otherwise it stops after 10 idle minutes. A run waits in the queue instead of
+  failing after 5 minutes. All of this is tunable per org ([0066](0066-triggers-and-scheduling.md)).
+- **Release test.** v0.1 is tested on the home lab with Gitea through three stories of #146:
+  the daily FinOps cost check (without the hand-off to the lead-engineer agent), a long-running research task, and the weekly LCM upgrade agent.
+
 ## Open questions
 
 - Whether OpenShell's Kubernetes driver runs on kind in GitHub's free runners (plan item S1).
@@ -268,4 +291,4 @@ Checked 2026-10-22:
 - ADRs [0004](0004-human-identity.md), [0007](0007-connector-model.md), [0016](0016-harness-and-deployment.md),
   [0020](0020-agent-builder-and-templates.md), [0036](0036-v01-demo.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md),
   [0042](0042-ask-tier-park-and-execute.md), [0048](0048-openshell-spike-results.md)
-- Spike results: `hack/spike/results/` (#15)
+- Spike results: `hack/spike/results/` (PR 15 in the previous repository)

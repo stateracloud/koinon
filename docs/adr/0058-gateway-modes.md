@@ -1,6 +1,6 @@
 # 0058. Gateway modes: standalone, kubernetes and shared
 
-- Status: Accepted
+- Status: Accepted; amended 2026-10-25 and 2026-10-26 (below)
 - Date: 2026-10-23
 - Amends: [0049](0049-v01-scope-decisions.md) (the two gateway modes become three)
 - Delivery: standalone and kubernetes (plan item G2, built 2026-10-25) in v0.1; shared in v0.2.

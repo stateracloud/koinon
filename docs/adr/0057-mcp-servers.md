@@ -1,6 +1,6 @@
 # 0057. MCP servers: remote and container, catalog, allowlists and discovery
 
-- Status: Accepted
+- Status: Accepted; amended 2026-10-24 (below)
 - Date: 2026-10-23
 - Amends: [0014](0014-mcp-and-tools.md) (how MCP servers are provided and allowed per agent)
 - Delivery: remote MCP servers and per-agent allowlists land in v0.1. Container servers, the
