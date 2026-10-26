@@ -46,7 +46,7 @@ are in [0046](0046-adr-conventions.md).
 | [0029](0029-run-level-resume.md) | Resume | Accepted, amended by 0051 |
 | [0030](0030-run-state-machine.md) | Run state | Accepted, amended by 0065, 0066 |
 | [0031](0031-artifacts-in-object-storage.md) | Artifacts | Accepted |
-| [0032](0032-agent-home-checkpoints.md) | Agent home | Accepted, amended by 0065 (checkpoints in v0.1) |
+| [0032](0032-agent-home-checkpoints.md) | Agent home | Accepted, amended by 0065 (checkpoints in v0.1, archive tier) |
 | [0033](0033-file-based-memory.md) | Memory | Accepted |
 | [0034](0034-project-identity.md) | Identity (repo, module, domain) | Accepted, amended 2026-10-26 |
 | [0035](0035-v01-flavors.md) | v0.1 flavors | Accepted, amended by 0059 |
@@ -56,7 +56,7 @@ are in [0046](0046-adr-conventions.md).
 | [0039](0039-development-setup.md) | Development setup | Accepted |
 | [0040](0040-agentgateway-model-and-mcp-gateway.md) | agentgateway as the model gateway and MCP gateway | Accepted, amended by 0048 and 2026-10-26 |
 | [0041](0041-koinon-spend-ledger-and-budget-stops.md) | Koinon spend ledger and budget stops | Accepted, amended by 0050, 0056 |
-| [0042](0042-ask-tier-park-and-execute.md) | Ask tier: park the run, Koinon executes the approved call | Accepted, amended by 0048 |
+| [0042](0042-ask-tier-park-and-execute.md) | Ask tier: park the run, Koinon executes the approved call | Accepted, amended by 0048, 0065 |
 | [0043](0043-workload-identity-adapters-and-koinon-issuer.md) | Workload identity adapters and a Koinon OIDC issuer | Accepted, amended by 0063 |
 | [0044](0044-in-sandbox-credential-exception.md) | In-sandbox credentials as a gated exception | Accepted |
 | [0045](0045-openshell-hardening-defaults.md) | OpenShell hardening defaults | Accepted, amended by 0048 |
