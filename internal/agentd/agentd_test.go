@@ -738,6 +738,24 @@ var _ = Describe("Pool", func() {
 		Expect(getRun(ctx, r).State).NotTo(Equal(store.RunStateFailed))
 	})
 
+	It("fails a run taken over while running whose sandbox stays unready, instead of requeueing it", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.recordSandbox(ctx, store.SandboxStateStarting, "")
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "dead-owner", LeaseSeconds: 60})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(claimed.ID).To(Equal(r.ID))
+		_, err = q.MarkRunRunning(ctx, store.MarkRunRunningParams{OrgID: e.org, ID: r.ID, Epoch: claimed.Epoch})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `UPDATE runs SET lease_expires_at = now() - interval '1 minute' WHERE org_id = $1 AND id = $2`, e.org, r.ID)
+		Expect(err).NotTo(HaveOccurred())
+
+		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
+		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("sandbox not ready"))
+		Expect(kinds(events(ctx, r))).NotTo(ContainElement("run.requeued"))
+	})
+
 	It("waits for a sandbox in error to be repaired", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")

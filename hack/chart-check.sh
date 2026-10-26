@@ -189,6 +189,8 @@ n=$(render --show-only templates/gateway-standalone.yaml | grep -c 'kek' || true
 [ "$n" = 0 ] || fail "the gateway references the KEK Secret"
 # The DBOS runtime (ADR 0066) is opt-in; its tables come from the migration Job.
 lacks "the DBOS runtime is off by default" '"-durable"' --show-only templates/deployments.yaml
+lacks "the migration Job leaves the DBOS schema alone by default" '"-durable"' --show-only templates/migrate-job.yaml
+has "api.durable.enabled makes the migration Job create the DBOS tables" '"-durable", "migrate"' --set api.durable.enabled=true --show-only templates/migrate-job.yaml
 has "api.durable.enabled starts the DBOS runtime" '"-durable"' --set api.durable.enabled=true --show-only templates/deployments.yaml
 # The gateway mounts the provider keys Secret, and that Secret only.
 has "gateway mounts the provider keys" 'mountPath: /secrets/providers$' --show-only templates/gateway-standalone.yaml

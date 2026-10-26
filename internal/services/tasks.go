@@ -230,8 +230,9 @@ func (s *Server) listTasks(ctx context.Context, c caller, states []store.TaskSta
 // appendMessage adds a user message to a task and queues a run unless one is queued already.
 func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, msg string) (store.TaskEvent, *runv1alpha1.Run, error) {
 	var (
-		ev  store.TaskEvent
-		run *runv1alpha1.Run
+		ev   store.TaskEvent
+		run  *runv1alpha1.Run
+		task store.Task
 	)
 	err := s.inTx(ctx, func(q *store.Queries) error {
 		// The row lock serialises this with concurrent messages (and so the queued-run check in
@@ -251,9 +252,17 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 		if err != nil {
 			return err
 		}
+		task = t
 		run, err = enqueue(ctx, q, t)
 		return err
 	})
+	if err == nil && run != nil {
+		// A message that queues a run acknowledges at once like a new task (ADR 0066 LT1): wake
+		// the agent's sandbox before the run is claimed. Best effort.
+		if _, werr := wake.TaskCreated(ctx, s.q, task); werr != nil {
+			s.log.Warn("waking the agent's sandbox for a new message failed", "err", werr)
+		}
+	}
 	return ev, run, err
 }
 

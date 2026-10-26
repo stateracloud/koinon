@@ -97,7 +97,13 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 			}
 		}
 		if now().After(deadline) {
-			return store.AgentSandbox{}, &requeued{reason: fmt.Sprintf("sandbox not ready after %s (%s)", wait, last)}
+			reason := fmt.Sprintf("sandbox not ready after %s (%s)", wait, last)
+			// Only a starting run can go back to the queue (RequeueRun). A run taken over while
+			// running has no queue to return to, so it fails, as it did before LT1.
+			if r.run.State != store.RunStateStarting {
+				return store.AgentSandbox{}, &failure{reason: reason, class: classTransient}
+			}
+			return store.AgentSandbox{}, &requeued{reason: reason}
 		}
 		if !sleep(ctx, r.p.cfg.Poll) {
 			return store.AgentSandbox{}, ctx.Err()

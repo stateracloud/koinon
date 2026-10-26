@@ -196,4 +196,46 @@ var _ = Describe("Reconciler latency defaults", func() {
 		close(hold)
 		Eventually(done).WithTimeout(10 * time.Second).Should(Receive(BeNil()))
 	})
+	// Early jobs run while the gateway Apply is still in flight. They may do that only because the
+	// sandbox's policy names the gateway's MCP route whatever tools any agent has (the grants
+	// are applied by the Apply, not by the sandbox): so a policy rendered by an early job cannot
+	// name a route the gateway has not applied. This pins that ordering assumption.
+	It("renders the same sandbox policy in an early job as before, whatever tools the Apply is changing", func(ctx SpecContext) {
+		cfg.ToolServers = map[string]string{"github": toolsURL}
+		tr, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
+		Expect(err).NotTo(HaveOccurred())
+		agent := newAgent(ctx, org, user)
+		Expect(tr.ReconcileAll(ctx)).To(Succeed())
+		routes := func() []string {
+			var paths []string
+			for _, rule := range osg.Profile(orgWorkspace(ctx, org), "koinon-agentgateway-opencode").GetEndpoints()[0].GetRules() {
+				paths = append(paths, rule.GetAllow().GetMethod()+" "+rule.GetAllow().GetPath())
+			}
+			return paths
+		}
+		before := routes()
+		Expect(before).To(ContainElement("POST /mcp"), "the route is named although no agent has a tool grant")
+
+		By("a tool grant arrives while an early job restarts the stopped sandbox")
+		advance(11 * time.Minute)
+		Expect(tr.ReconcileAll(ctx)).To(Succeed())
+		Expect(phase(agent.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
+		now.Store(nil)
+		grant := newAgentWithConfig(ctx, org, user, `{"instructions":"help","grants":[`+
+			`{"connector":"github","scopes":["repo.read","pull_request.create"],"preset":"standard"}]}`)
+		queueRun(ctx, org, user, agent.ID)
+		hold, entered := make(chan struct{}), make(chan struct{})
+		mg.mu.Lock()
+		mg.hold, mg.entered = hold, entered
+		mg.mu.Unlock()
+		done := make(chan error, 1)
+		go func() { done <- tr.ReconcileAll(ctx) }()
+		Eventually(entered).Should(BeClosed())
+		Eventually(func() openshellv1.SandboxPhase { return phase(agent.ID) }).WithTimeout(10 * time.Second).
+			Should(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+		Expect(routes()).To(Equal(before), "the early job's policy does not depend on the Apply")
+		Expect(grant.ID.Valid).To(BeTrue())
+		close(hold)
+		Eventually(done).WithTimeout(10 * time.Second).Should(Receive(BeNil()))
+	})
 })
