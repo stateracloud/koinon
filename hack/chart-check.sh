@@ -247,6 +247,18 @@ for name in mine-migrate mine-api mine-reconciler mine-agentd; do
 done
 lacks "the generated role Secret names are unused with existing Secrets" 'koinon-db-' "${own[@]}"
 has "the Cluster's initdb takes the given migrate Secret" 'name: mine-migrate$' "${own[@]}" --show-only templates/postgres-cnpg.yaml
+# Argo CD (#118, ADR 0060): the cnpg install Job is a Sync hook in wave 1 recreated each sync, and what
+# must follow it (the Deployments, the standalone gateway, which needs the reconciler's ConfigMap) is in wave 2.
+mig=$(render --show-only templates/migrate-job.yaml)
+for want in 'argocd.argoproj.io/hook: Sync' 'argocd.argoproj.io/hook-delete-policy: BeforeHookCreation' 'argocd.argoproj.io/sync-wave: "1"'; do
+	grep -qF -- "$want" <<<"$mig" || fail "the cnpg migration Job lacks '$want'"
+done
+lacks "the external-mode migration hook has no Argo annotations" 'argocd.argoproj.io' --set postgres.mode=external --set postgres.external.secretName=db --show-only templates/migrate-job.yaml
+n=$(render --show-only templates/deployments.yaml | grep -c 'argocd.argoproj.io/sync-wave: "2"' || true)
+[ "$n" = 3 ] || fail "$n of the 3 koinon Deployments are in sync wave 2"
+n=$(render --show-only templates/gateway-standalone.yaml | grep -c 'argocd.argoproj.io/sync-wave: "2"' || true)
+[ "$n" = 2 ] || fail "$n of the gateway's PVC and Deployment are in sync wave 2, want 2"
+has "the migration stays a plain Job on install" 'name: koinon-migrate-install$' --show-only templates/migrate-job.yaml
 has "the migration Job reads the given migrate Secret" 'name: mine-migrate$' "${own[@]}" --show-only templates/migrate-job.yaml
 # One role supplied: the hook ensures the rest only.
 lacks "the hook leaves out a supplied role" 'koinon-db-api' --set postgres.cnpg.existingSecrets.api=mine-api --show-only templates/ensure-secrets.yaml
