@@ -354,6 +354,10 @@ var _ = Describe("the ask-tier proxy", func() {
 			Expect(got.Status).To(Equal(store.ApprovalStatusPending), "one approval is not enough")
 			Expect(got.FirstApprover).To(Equal(second))
 			Expect(gw.count()).To(BeZero())
+			var first int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'approval.first_approve' AND actor_id = $2`,
+				org, second.String()).Scan(&first)).To(Succeed())
+			Expect(first).To(Equal(1))
 
 			_, err = a.Approve(ctx, org, row.ID, second, row.ArgsSha256, "")
 			Expect(err).To(MatchError(approvals.ErrSameApprover))
