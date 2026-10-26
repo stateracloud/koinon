@@ -332,6 +332,19 @@ ingress:
   # Secret with the TLS certificate for host. Empty serves plain HTTP.
   tlsSecretName: ""
 
+# Optional Gateway API HTTPRoute for the API and web UI (gateway.networking.k8s.io/v1), for clusters
+# that expose services through a Gateway instead of an Ingress. The Gateway and its TLS belong to the
+# cluster. parentRefs are rendered as given, for example
+#   parentRefs:
+#     - {group: gateway.networking.k8s.io, kind: Gateway, name: shared, namespace: gateway, sectionName: https}
+# With the route on and publicUrl empty, the public URL is https://<first hostname>; set publicUrl when
+# the Gateway serves the route over plain HTTP.
+httpRoute:
+  enabled: false
+  annotations: {}
+  hostnames: []
+  parentRefs: []
+
 networkPolicy:
   enabled: true
   # Extra peers allowed to reach the API port (for example the ingress controller's namespace).
