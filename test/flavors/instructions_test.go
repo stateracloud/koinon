@@ -4,7 +4,6 @@ package flavors_test
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"time"
 
@@ -49,30 +48,6 @@ func startSession(ctx context.Context, f flavor, sb *sandbox, cmd []string) (*ha
 		Expect(h.conn.SetModel(ctx, session, f.selectModel(contractModel))).To(Succeed())
 	}
 	return h, session
-}
-
-// offeredTools are the tools of the last chat request that offered any, each as its JSON
-// definition: name, description and parameters. A harness that defers tools behind a search
-// tool (Hermes) lists the deferred ones in that tool's description.
-func offeredTools(gw *gateway) []string {
-	GinkgoHelper()
-	bodies := gw.modelBodies()
-	for i := len(bodies) - 1; i >= 0; i-- {
-		var req struct {
-			Tools []json.RawMessage `json:"tools"`
-		}
-		Expect(json.Unmarshal([]byte(bodies[i]), &req)).To(Succeed())
-		if len(req.Tools) == 0 {
-			continue
-		}
-		out := make([]string, len(req.Tools))
-		for j, t := range req.Tools {
-			out[j] = string(t)
-		}
-		return out
-	}
-	Fail("no chat request offered tools")
-	return nil
 }
 
 // strayInstructions is what an agent would put in place of the instruction link.

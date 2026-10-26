@@ -15,8 +15,6 @@ type AgentFlavor string
 
 const (
 	AgentFlavorOpencode AgentFlavor = "opencode"
-	AgentFlavorHermes   AgentFlavor = "hermes"
-	AgentFlavorPi       AgentFlavor = "pi"
 )
 
 func (e *AgentFlavor) Scan(src interface{}) error {

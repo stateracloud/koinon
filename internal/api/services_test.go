@@ -53,7 +53,7 @@ var _ = Describe("template sync", func() {
 		orig, _ := templates.Get("repo-helper")
 		Expect("sha256:" + t.GetContentHash()).To(Equal(orig.Hash))
 		Expect(t.GetDefaultFlavor()).To(Equal(templatev1alpha1.Flavor_FLAVOR_OPENCODE))
-		Expect(t.GetAllowedFlavors()).To(HaveLen(3))
+		Expect(t.GetAllowedFlavors()).To(ConsistOf(templatev1alpha1.Flavor_FLAVOR_OPENCODE))
 		Expect(t.GetGrants()).To(ConsistOf(SatisfyAll(
 			HaveField("Connector", "github"),
 			HaveField("Scopes", ConsistOf("repo.read", "pull_request.create", "issue.comment")),

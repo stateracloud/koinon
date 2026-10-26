@@ -137,7 +137,7 @@
   },
   "$defs": {
     "flavor": {
-      "enum": ["opencode", "hermes", "pi"]
+      "enum": ["opencode"]
     },
     "grant": {
       "type": "object",

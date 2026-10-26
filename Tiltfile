@@ -8,7 +8,7 @@
 #   kind     context kind-koinon-*: images loaded into the node, runc, the fake model server and the
 #            fake GitHub. Prerequisites: `make dev-kind-up`.
 #
-# `tilt up`, or for example `tilt up -- --flavors=opencode,hermes,pi`. See docs/dev/loop.md.
+# `tilt up`, or for example `tilt up -- --flavors=opencode`. See docs/dev/loop.md.
 
 config.define_string('mode', usage='homelab or kind; default: from the kube context')
 config.define_string('flavors', usage='comma-separated flavor images to build (default: opencode)')
@@ -46,7 +46,7 @@ kind_cluster = ctx[len('kind-'):]
 os_ns = cfg.get('openshell-namespace', 'openshell')
 os_tls = cfg.get('openshell-tls-secret', 'openshell-client-tls')
 flavors = [f for f in cfg.get('flavors', 'opencode').split(',') if f]
-ALL_FLAVORS = ['opencode', 'hermes', 'pi']
+ALL_FLAVORS = ['opencode']
 for f in flavors:
     if f not in ALL_FLAVORS:
         fail('unknown flavor %s (known: %s)' % (f, ', '.join(ALL_FLAVORS)))

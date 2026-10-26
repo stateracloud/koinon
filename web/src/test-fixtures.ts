@@ -12,7 +12,7 @@ export function repoHelperTemplate(targets: { min: number; max: number } = { min
     version: '0.1.0',
     displayName: 'Repo helper',
     description: 'Makes small changes to one repository.',
-    allowedFlavors: [Flavor.OPENCODE, Flavor.HERMES, Flavor.PI],
+    allowedFlavors: [Flavor.OPENCODE],
     defaultFlavor: Flavor.OPENCODE,
     model: 'default',
     grants: [

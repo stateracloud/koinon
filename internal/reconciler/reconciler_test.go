@@ -161,14 +161,6 @@ var _ = Describe("Reconciler", func() {
 			Expect(paths).To(Equal(binaries))
 		},
 		Entry("OpenCode: its single binary", store.AgentFlavorOpencode, []string{"/usr/local/bin/opencode"}),
-		// koinon-hermes execs /opt/hermes/.venv/bin/hermes, a bash wrapper that execs the venv's
-		// python, a link to the image's own Python; the gateway daemon it starts is Python too.
-		Entry("Hermes: the image's Python, by its real path on either architecture", store.AgentFlavorHermes, []string{
-			"/opt/hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3.14",
-			"/opt/hermes/tools/python-3.14.7+20260901-linux-arm64/bin/python3.14",
-		}),
-		// pi-acp and the pi it starts per session are scripts run by Node.
-		Entry("pi: Node", store.AgentFlavorPi, []string{"/opt/node/bin/node"}),
 	)
 
 	Describe("an active agent", func() {

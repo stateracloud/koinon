@@ -41,7 +41,7 @@ const template = {
   version: '0.1.0',
   displayName: 'Repo helper',
   description: 'Makes small changes to one repository.',
-  allowedFlavors: ['FLAVOR_OPENCODE', 'FLAVOR_HERMES', 'FLAVOR_PI'],
+  allowedFlavors: ['FLAVOR_OPENCODE'],
   defaultFlavor: 'FLAVOR_OPENCODE',
   model: 'default',
   grants: [{ connector: 'github', scopes: ['repo.read', 'pull_request.create', 'issue.comment'], preset: 'PRESET_STANDARD', targetsMin: 1, targetsMax: 1 }],

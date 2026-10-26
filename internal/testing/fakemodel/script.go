@@ -73,7 +73,7 @@ type ToolCall struct {
 	// ID is the tool call ID. Empty means a deterministic generated ID.
 	ID string `yaml:"id,omitempty"`
 	// Name is the tool to call. Harnesses prefix MCP tools with their server name (OpenCode
-	// koinon_<tool>, Hermes and pi mcp__koinon__<tool>): when the request declares no tool of
+	// koinon_<tool>; other harnesses may use mcp__koinon__<tool>): when the request declares no tool of
 	// this name but exactly one of this name behind such a prefix, the call uses that tool's name.
 	Name      string         `yaml:"name"`
 	Arguments map[string]any `yaml:"arguments,omitempty"`
@@ -177,7 +177,7 @@ type conversation struct {
 }
 
 // mcpPrefixes are what harnesses put before the tools of Koinon's MCP server, which every
-// flavor names project.Name: OpenCode <server>_<tool>, Hermes and pi mcp__<server>__<tool>.
+// flavor names project.Name: OpenCode <server>_<tool>; the mcp__<server>__<tool> form is kept for other harnesses.
 // agentgateway puts the target in front of every tool (prefixMode always), and Koinon's own tools are
 // the "github" target.
 var mcpPrefixes = []string{project.Name + "_", "mcp__" + project.Name + "__", project.Name + "_github_", "mcp__" + project.Name + "__github_"}

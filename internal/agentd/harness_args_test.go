@@ -20,7 +20,7 @@ var _ = DescribeTable("HarnessArgs",
 	Entry("no harness settings", store.AgentFlavorOpencode, `{"model":"m"}`, nil),
 	Entry("an unreadable config", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":"yes"}}`, nil),
 	Entry("a config agentconfig.Parse cannot read", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":true},"model":{"name":"m"}}`, nil),
-	Entry("another flavor: the switch is OpenCode's", store.AgentFlavorHermes, `{"harness":{"pluginInstalls":true}}`, nil),
+	Entry("a flavor without the option: the switch is OpenCode's", store.AgentFlavor("other"), `{"harness":{"pluginInstalls":true}}`, nil),
 )
 
 var _ = DescribeTable("VersionModel",

@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# koinon-entry-lib.sh is sourced by every flavor's entry script (koinon-opencode, koinon-hermes,
-# koinon-pi) from /usr/local/lib/koinon/. It holds what the three share: argument parsing, URL
+# koinon-entry-lib.sh is sourced by every flavor's entry script (koinon-opencode in v0.1,
+# ADR 0059) from /usr/local/lib/koinon/. It holds what the flavors share: argument parsing, URL
 # checks, the instruction-file check, the instruction link, the environment clean-up and the
 # KOINON_* exports. What differs per flavor stays in the entry script: the value check (each
 # harness substitutes values differently), PATH, the harness's own variables, home clean-up and
 # the final exec.
 #
-# Before sourcing, the script sets KOINON_FLAVOR (opencode, hermes or pi) and defines check(),
+# Before sourcing, the script sets KOINON_FLAVOR (opencode) and defines check(),
 # which calls koinon_die for a value its harness cannot take. After sourcing it may define
 # koinon_extra_arg() for flavor-specific switches. Every refusal exits 64 with
 # "koinon-<flavor>: <message>" on stderr (the flavor contract suite asserts both).
@@ -60,13 +60,6 @@ koinon_parse_args() {
   koinon_check_url --model-base-url "$base_url"
   check --model "$model"
   koinon_check_url --mcp-url "$mcp_url"
-}
-
-# koinon_unset_prefixed PREFIX: unsets every environment variable whose name starts with PREFIX.
-koinon_unset_prefixed() {
-  for v in $(env | sed -n "s/^\\($1[A-Za-z0-9_]*\\)=.*/\\1/p"); do
-    unset "$v"
-  done
 }
 
 # koinon_export_base_env: what every flavor sets for itself because OpenShell does not pass the

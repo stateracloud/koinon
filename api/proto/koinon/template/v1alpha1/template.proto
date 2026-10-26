@@ -20,8 +20,9 @@ service TemplateService {
 enum Flavor {
   FLAVOR_UNSPECIFIED = 0;
   FLAVOR_OPENCODE = 1;
-  FLAVOR_HERMES = 2;
-  FLAVOR_PI = 3;
+  // FLAVOR_HERMES and FLAVOR_PI were removed before v0.1 shipped (ADR 0059).
+  reserved 2, 3;
+  reserved "FLAVOR_HERMES", "FLAVOR_PI";
 }
 
 // Preset maps a grant's risk tiers to allow, ask or deny (ADR 0008, 0049).

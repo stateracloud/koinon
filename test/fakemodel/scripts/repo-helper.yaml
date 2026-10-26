@@ -5,7 +5,7 @@
 # the run resumes with the outcome and the agent posts the URL. Selection is stateless: the first
 # turn whose `when` holds answers the request; an empty `when.toolResult` means "the last message
 # is not a tool result". Tool names match behind a harness's MCP prefix (koinon_create_pull_request
-# in OpenCode, mcp__koinon__create_pull_request in Hermes and pi), and behind the gateway's target
+# in OpenCode), and behind the gateway's target
 # prefix (koinon_github_create_pull_request: agentgateway runs with prefixMode always).
 #
 # The fake GitHub (internal/connectors/github/githubtest) numbers pull requests from 1 and links

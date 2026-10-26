@@ -13,7 +13,7 @@ metadata:
     Every pull request needs your approval before it reaches GitHub.
 spec:
   flavors:
-    allowed: [opencode, hermes, pi]
+    allowed: [opencode]
     default: opencode
   # No npm registry access and no external OpenCode plugins: the agent changes code, it does not
   # extend its harness.

@@ -331,9 +331,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "opencode": {"$ref": "#/definitions/flavor"},
-        "hermes": {"$ref": "#/definitions/flavor"},
-        "pi": {"$ref": "#/definitions/flavor"}
+        "opencode": {"$ref": "#/definitions/flavor"}
       }
     },
     "openshell": {

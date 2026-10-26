@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package flavor describes the harness flavors Koinon ships (ADR 0035). Everything that
+// Package flavor describes the harness flavors Koinon ships (ADR 0035; v0.1 ships OpenCode only, ADR 0059). Everything that
 // differs per flavor lives in one Descriptor here, so adding a flavor means adding one entry
 // to the table (plus its image under flavors/, the agent_flavor migration, the schema enum and
 // the proto enum, which tests keep in step).
@@ -34,17 +34,9 @@ type Descriptor struct {
 	// "github" tools target, so the prompt is github_koinon-ready
 	// (flavors/opencode/README.md, ADR 0052).
 	//
-	// Hermes and pi announce no MCP prompt, and need no wait: their first prompt already carries
-	// the Koinon tools (the contract suite checks the first chat request of every flavor).
-	//   - Hermes 0.22.3 announces only its built-in commands (acp_adapter/commands.py:74). Its
-	//     gateway daemon connects the MCP servers before it starts serving
-	//     (gateway/run_bootstrap.py:679, awaited before runner.start at :684), and `hermes acp`
-	//     waits for the daemon to be ready before session/new (hermes_cli/gateway_client.py:288).
-	//   - pi 1.3.0 connects MCP servers in the background on session_start
-	//     (dist/extensions/mcp/index.js:971), and the first prompt waits up to 10 s for servers
-	//     with "exposure": "direct", Koinon's (index.js:1014-1036, DEFAULT_STARTUP_WAIT_MS at
-	//     :39), longer than any fixed delay agentd would add. pi-acp leaves extension commands,
-	//     MCP prompts among them, out of available_commands_update (pi-acp dist/index.js:2102).
+	// A flavor whose harness announces no MCP prompt leaves this empty; it needs no wait only if
+	// its first prompt already carries the Koinon tools (the contract suite checks the first chat
+	// request of every flavor).
 	ReadyCommand string
 	// ModelPrefix is put before the model name to form the value agentd selects for the
 	// session's model option (session/set_config_option); "" when the flavor takes its model
@@ -58,9 +50,8 @@ type Descriptor struct {
 	// DefaultBinaries are the network-calling executables of the flavor
 	// (flavors/<flavor>/README.md). OpenShell matches the real path of the executable that
 	// opens a connection, or of one of its ancestors, never a symbolic link or a script: a
-	// script runs as its interpreter. Hermes is Python scripts on the image's own Python, whose
-	// path names the architecture (flavors/hermes/Dockerfile checks it); pi and pi-acp are
-	// scripts on Node.
+	// script runs as its interpreter, so a harness written as scripts lists its interpreter's
+	// real path, which may name the architecture. OpenCode is a single binary.
 	DefaultBinaries []string
 	// PluginInstalls is set when the flavor supports the template option
 	// harness.pluginInstalls: its launch command then takes PluginInstallsArg, and the
@@ -81,25 +72,6 @@ var table = []Descriptor{
 		DefaultBinaries:   []string{"/usr/local/bin/opencode"},
 		PluginInstalls:    true,
 		PluginInstallsArg: "--plugin-installs",
-	},
-	{
-		Name:        store.AgentFlavorHermes,
-		Proto:       templatev1alpha1.Flavor_FLAVOR_HERMES,
-		EntryScript: "/usr/local/bin/koinon-hermes",
-		// SOUL.md opens Hermes's system prompt (flavors/hermes/README.md).
-		InstructionLink: "/sandbox/.hermes/SOUL.md",
-		DefaultBinaries: []string{
-			"/opt/hermes/tools/python-3.14.7+20260901-linux-x64/bin/python3.14",
-			"/opt/hermes/tools/python-3.14.7+20260901-linux-arm64/bin/python3.14",
-		},
-	},
-	{
-		Name:        store.AgentFlavorPi,
-		Proto:       templatev1alpha1.Flavor_FLAVOR_PI,
-		EntryScript: "/usr/local/bin/koinon-pi",
-		// pi appends APPEND_SYSTEM.md to its system prompt (flavors/pi/README.md).
-		InstructionLink: "/sandbox/.pi/agent/APPEND_SYSTEM.md",
-		DefaultBinaries: []string{"/opt/node/bin/node"},
 	},
 }
 

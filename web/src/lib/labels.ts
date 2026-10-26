@@ -61,8 +61,6 @@ export function runFinished(s: RunState): boolean {
 const flavorLabels: Record<Flavor, string> = {
   [Flavor.UNSPECIFIED]: 'Default',
   [Flavor.OPENCODE]: 'OpenCode',
-  [Flavor.HERMES]: 'Hermes',
-  [Flavor.PI]: 'pi',
 }
 
 export function flavorLabel(f: Flavor): string {

@@ -20,7 +20,7 @@ Pronounced **KOY-non**, after the leagues of independent Greek city-states.
 | `cmd/` | `koinon-api` and `koinon-reconciler` binaries |
 | `internal/` | Go packages, database migrations and generated code |
 | `web/` | React + Vite single-page app |
-| `flavors/` | Harness images and contracts (OpenCode, Hermes, pi) |
+| `flavors/` | Harness images and contracts (OpenCode) |
 | `connectors/` | Connector types, starting with GitHub |
 | `templates/` | Agent templates |
 | `charts/koinon/` | Helm chart |
