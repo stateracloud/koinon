@@ -86,7 +86,7 @@ func (s *Server) bindGrants(ctx context.Context, org pgtype.UUID, t *templates.T
 			repos = append(repos, r)
 		}
 		host, isHost := s.hosts.Get(g.Connector)
-		lo, hi := 1, 500
+		lo, hi := 1, codehost.DefaultMaxRepositories
 		if isHost && host.Capabilities().MaxRepositories > 0 {
 			hi = host.Capabilities().MaxRepositories
 		}
@@ -120,7 +120,7 @@ func (s *Server) checkInstallation(ctx context.Context, p codehost.Provider, con
 	name := p.Capabilities().DisplayName
 	c, err := connections.Load(ctx, s.keys, conn)
 	if err == nil {
-		err = p.ValidateSecrets(c.Fields)
+		err = p.Validate(c)
 	}
 	if err != nil {
 		if errors.Is(err, connections.ErrNoKeyring) {

@@ -108,6 +108,12 @@ func (*Host) ValidateSecrets(fields map[string][]byte) error {
 	return err
 }
 
+// Validate implements codehost.Provider.
+func (*Host) Validate(conn codehost.Connection) error {
+	_, err := AppOf(conn)
+	return err
+}
+
 // Describe implements codehost.Provider.
 func (*Host) Describe(config []byte) (codehost.Description, error) {
 	c, err := ParseConfig(config)
