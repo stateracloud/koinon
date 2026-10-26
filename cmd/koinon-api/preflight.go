@@ -72,6 +72,7 @@ func parsePreflightFlags(args []string) (preflightConfig, error) {
 	if fs.NArg() > 0 {
 		return c, fmt.Errorf("unexpected arguments %q", fs.Args())
 	}
+	c.check.OpenShellPlaintext = c.tlsDir == ""
 	if c.seccompProbe && (c.probeImage == "" || c.namespace == "") {
 		return c, errors.New("--seccomp-probe needs --probe-image and --namespace (or POD_NAMESPACE)")
 	}
