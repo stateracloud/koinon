@@ -760,8 +760,8 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	return r.record(ctx, w, sb, hash, "")
 }
 
-// maxRepairs is the loop guard of ADR 0054: recreations per agent per 24 hours (agentd's
-// MaxRecreations, which counts the stuck ones).
+// maxRepairs is the loop guard of ADR 0054: recreations per agent per 24 hours, stuck and failed
+// sandboxes together (agentd's MaxRecreations; both use CountRecentSandboxRecreations).
 const maxRepairs = 3
 
 // repair recreates a sandbox in Error or Completed. After maxRepairs recreations in 24 hours it
@@ -771,7 +771,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 	if m := truncate(sb.Message, 300); m != "" {
 		detail += ": " + m
 	}
-	n, err := r.q.CountRecentAuditedRecreations(ctx, store.CountRecentAuditedRecreationsParams{OrgID: w.org.ID, AgentID: w.agent.ID})
+	n, err := r.q.CountRecentSandboxRecreations(ctx, store.CountRecentSandboxRecreationsParams{OrgID: w.org.ID, AgentID: w.agent.ID})
 	if err != nil {
 		return fmt.Errorf("count recent recreations: %w", err)
 	}
