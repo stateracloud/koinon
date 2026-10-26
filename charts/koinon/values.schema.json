@@ -214,7 +214,17 @@
               }
             },
             "resources": {"$ref": "#/definitions/resources"},
-            "operatorNamespace": {"$ref": "#/definitions/nonEmpty"}
+            "operatorNamespace": {"$ref": "#/definitions/nonEmpty"},
+            "existingSecrets": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "migrate": {"type": "string"},
+                "api": {"type": "string"},
+                "reconciler": {"type": "string"},
+                "agentd": {"type": "string"}
+              }
+            }
           }
         },
         "external": {

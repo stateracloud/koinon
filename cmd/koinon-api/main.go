@@ -272,6 +272,11 @@ func run() error {
 		defer stop()
 		return runPreflight(ctx, os.Args[2:], os.Stdout)
 	}
+	if len(os.Args) > 1 && os.Args[1] == "ensure-secrets" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runEnsureSecrets(ctx, os.Args[2:], os.Stdout)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "keys" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -289,7 +294,7 @@ func run() error {
 	case len(cfg.args) == 1 && cfg.args[0] == "migrate":
 		return migrate(ctx, cfg.databaseURL, cfg.wait)
 	case len(cfg.args) > 0:
-		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\" and \"preflight\" (first)", cfg.args)
+		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\", \"preflight\", \"ensure-secrets\" and \"keys\" (first)", cfg.args)
 	case cfg.migrate:
 		if err := migrate(ctx, cfg.databaseURL, cfg.wait); err != nil {
 			return err

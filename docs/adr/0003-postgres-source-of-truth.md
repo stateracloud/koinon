@@ -68,6 +68,18 @@ flowchart LR
 - Does the reconciler watch Postgres (outbox polling, LISTEN/NOTIFY as a wake-up) or get called by
   the API? See [0010](0010-eventing.md).
 
+## Amendment (2026-10-26, issue #98): role passwords are created by a hook Job
+
+The chart no longer generates the CNPG role passwords (`randAlphaNum` plus a `lookup` of the live
+Secret). `lookup` returns nothing under `helm template`, Argo CD and Flux, so every sync produced
+new passwords while the running pods kept the old ones. A pre-install and pre-upgrade hook Job runs
+`koinon-api ensure-secrets`, which creates each missing role Secret (and the bootstrap admin's)
+with a random 32-character password and never touches an existing one; the chart itself renders no
+password, so renders are deterministic. `postgres.cnpg.existingSecrets` and
+`bootstrapAdmin.existingSecret` bring your own Secrets, and when all are given no Job is rendered.
+The Secrets the Job creates are not owned by the release, so they survive `helm uninstall` (as the
+KEK Secret does); delete them by the label `koinon.dev/generated=password` to start over.
+
 ## Upstream verification
 
 - 2026-10-21: Postgres `NOTIFY` is delivered only on commit, payloads must be under 8000 bytes, and

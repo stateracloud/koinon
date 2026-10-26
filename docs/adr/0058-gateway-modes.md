@@ -140,6 +140,17 @@ kubelet's ConfigMap resync, and the proxy is the controller's Deployment (no PVC
 the controller picks its image). The chart's NetworkPolicy for the proxy selects it by the controller's
 `gateway.networking.k8s.io/gateway-name` label.
 
+## Amendment (2026-10-26, issue #98): the reconciler creates the standalone config ConfigMap
+
+The chart no longer renders the standalone gateway ConfigMap. Its bootstrap config was rendered
+whenever `lookup` could not read the live object (`helm template`, Argo CD, Flux), so every sync
+reset the reconciler's config to "refuse everything". Now `ConfigMapDeliverer` creates the ConfigMap
+with the full rendered config when its patch finds none, with a non-controller ownerReference to the
+gateway Deployment (so `helm uninstall` garbage-collects it). The gateway pod waits in
+`ContainerCreating` until then and the reconciler's first `Apply` waits for the revision's probe key
+as before, so reload detection is unchanged; the chart-rendered "bootstrap" revision
+(`BootstrapRevision`) and its parity test are gone. Kubernetes mode is unchanged.
+
 ## Links
 
 - ADRs [0040](0040-agentgateway-model-and-mcp-gateway.md), [0049](0049-v01-scope-decisions.md),
