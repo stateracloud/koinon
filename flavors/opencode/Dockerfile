@@ -14,7 +14,7 @@ ARG BASE=nvcr.io/nvidia/base/ubuntu:24.04@sha256:7e0f726d635d440d28a7f18e6498d3b
 # from the registry tarballs after checking them against npm's published sha512 integrity:
 #   x64:   sha512-WDBunGoImJOYjwUvDDfl0GJiKR/WbATnSXW1QTrK+VDp+oOUNLXo84QTUCBVUqvb8VsseWhs3uyWCD9o9c5JDA==
 #   arm64: sha512-n+C1XkoIB0NaHK9CQo4gGIc9FRGDhrMdCXO8heEOvUgKsH/0ROxCr3CxUuJaKolL/5+c5u3CoiXsckL+fa52ag==
-# Re-pinning is issue #85: the entry script and README name 2.0.24-specific workarounds.
+# Re-pinning is issue #54: the entry script and README name 2.0.24-specific workarounds.
 FROM ${BASE} AS fetch-amd64
 ADD --checksum=sha256:21b1ee0683841405d69541fc44481f8e5752e95bea72e8b8ec31dbcdb102e7f8 \
     https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.0.24.tgz /tmp/opencode.tgz

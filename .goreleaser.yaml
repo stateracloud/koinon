@@ -52,7 +52,7 @@ builds:
 # chart's appVersion. `latest` only moves for final releases (.Prerelease is empty for them).
 # KOINON_IMAGE_REGISTRY redirects the push to another registry, for dry runs against a throwaway
 # one (hack/mirror-release.sh is tested that way); the release workflow never sets it.
-# Flavor images are not part of the release (docs/dev/releasing.md).
+# The flavor image is built by the release workflow's flavor job (hack/release-flavor.sh), not here.
 kos:
   - &ko
     id: koinon-api
