@@ -101,6 +101,9 @@ has "HTTPRoute keeps the parentRef's sectionName" 'sectionName: https' "${route[
 has "HTTPRoute routes to the API Service" 'name: koinon-api$' "${route[@]}" --show-only templates/httproute.yaml
 env_is KOINON_PUBLIC_URL '"https://koinon.example.com"' "${route[@]}"
 if render_raw --set openshell.insecure=true --set httpRoute.enabled=true >/dev/null 2>&1; then fail "httpRoute without hostnames and parentRefs must not render"; fi
+if render "${route[@]}" --set ingress.enabled=true --set ingress.host=koinon.example.com >/dev/null 2>&1; then fail "ingress and httpRoute together must not render"; fi
+if render --set httpRoute.enabled=true --set 'httpRoute.hostnames[0]=*.example.com' --set-json 'httpRoute.parentRefs=[{"name":"shared"}]' >/dev/null 2>&1; then fail "a wildcard first hostname without publicUrl must not render"; fi
+has "httpRoute.timeouts reach the route's rule" 'backendRequest: 0s' "${route[@]}" --set httpRoute.timeouts.backendRequest=0s --show-only templates/httproute.yaml
 # oidc values map to koinon-api's --oidc-* flags; the client secret is a mounted file.
 oidc=(--set publicUrl=https://koinon.example.com --set oidc.enabled=true --set oidc.issuerUrl=https://idp.example.com
 	--set oidc.clientId=koinon --set oidc.clientSecret.existingSecret=koinon-oidc --set oidc.groupMappings.staff=member)
