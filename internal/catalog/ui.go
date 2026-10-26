@@ -144,7 +144,11 @@ func (s *Service) UpdateProvider(ctx context.Context, org pgtype.UUID, actor aud
 				}
 			}
 		}
-		out, err = q.UpdateProvider(ctx, store.UpdateProviderParams{OrgID: org, ID: pid, Type: typ, Url: u, ApiKey: key})
+		// The key is rewritten only when the patch sets it: cur was read without a lock, and a
+		// concurrent `keys rewrap` or `reencrypt` may have replaced the envelope since.
+		out, err = q.UpdateProvider(ctx, store.UpdateProviderParams{
+			OrgID: org, ID: pid, Type: typ, Url: u, SetApiKey: patch.APIKey != nil, ApiKey: key,
+		})
 		if err != nil {
 			return err
 		}

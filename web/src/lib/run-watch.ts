@@ -4,7 +4,7 @@
 // connect-query supports unary methods only (ADR 0022).
 
 import { Code, ConnectError, createClient, type Transport } from '@connectrpc/connect'
-import { RunService, type Run, type RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { RunService, RunState, type Run, type RunEvent } from '@/gen/koinon/run/v1alpha1/run_pb'
 
 export type WatchStatus = 'connecting' | 'live' | 'reconnecting' | 'ended' | 'failed'
 
@@ -26,6 +26,8 @@ export type WatchOptions = {
   /** Delay before reconnect attempt n (from 1). */
   backoff?: (attempt: number) => number
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
+  /** Clock in ms, for tests. */
+  now?: () => number
 }
 
 /** Codes that a retry cannot fix. */
@@ -36,6 +38,28 @@ const permanent = new Set([
   Code.InvalidArgument,
   Code.Unimplemented,
 ])
+
+/**
+ * connect-es reports a server stream whose body ended without an
+ * EndStreamResponse as InvalidArgument. That is what a proxy or load balancer
+ * produces when it cuts a long-lived response, so it is a dropped connection,
+ * not a bad request. The server's own InvalidArgument arrives inside the
+ * end-stream message with a different message and stays permanent.
+ */
+function isTruncatedStream(err: ConnectError): boolean {
+  return err.code === Code.InvalidArgument && err.rawMessage.includes('missing EndStreamResponse')
+}
+
+function finished(state: RunState | undefined): boolean {
+  return state === RunState.SUCCEEDED || state === RunState.FAILED || state === RunState.CANCELED
+}
+
+/**
+ * A stream that stayed up this long counts as healthy even if the run was idle
+ * and sent nothing, so a proxy that cuts an idle watch at its timeout does not
+ * make the backoff grow without bound.
+ */
+const stableMs = 10_000
 
 export function defaultBackoff(attempt: number): number {
   const base = Math.min(30_000, 500 * 2 ** (attempt - 1))
@@ -67,34 +91,56 @@ export async function watchRun(opts: WatchOptions, h: WatchHandlers): Promise<bi
   const backoff = opts.backoff ?? defaultBackoff
   const sleep = opts.sleep ?? abortableSleep
   let after = opts.afterSeq ?? 0n
+  const now = opts.now ?? Date.now
   let attempt = 0
+  let state: RunState | undefined
 
   h.onStatus('connecting')
   while (!opts.signal.aborted) {
+    const opened = now()
+    let progressed = false
+    // Backoff restarts only when the stream made progress (a new event) or
+    // stayed up for a while; a bare run snapshot on every connect is not
+    // progress, or a proxy that cuts right after it would be retried every
+    // few hundred milliseconds forever.
+    const settle = () => {
+      if (progressed || now() - opened >= stableMs) attempt = 0
+    }
     try {
       const stream = client.watchRun({ orgId: opts.orgId, runId: opts.runId, afterSeq: after }, { signal: opts.signal })
       for await (const res of stream) {
-        attempt = 0
         h.onStatus('live')
         if (res.item.case === 'run') {
+          state = res.item.value.state
           h.onRun(res.item.value)
         } else if (res.item.case === 'event') {
           const ev = res.item.value
           if (ev.seq <= after) continue
           after = ev.seq
+          progressed = true
           h.onEvent(ev)
         }
       }
       // The server ends the stream once the run has finished and drained.
-      h.onStatus('ended')
-      return after
+      // A clean end while the run is still open (a graceful proxy or server
+      // shutdown) is a dropped stream, so resume instead of stopping.
+      if (finished(state)) {
+        h.onStatus('ended')
+        return after
+      }
+      settle()
+      attempt++
+      h.onStatus('reconnecting')
+      await sleep(backoff(attempt), opts.signal)
+      continue
     } catch (e) {
       if (opts.signal.aborted) break
       const err = ConnectError.from(e)
-      if (permanent.has(err.code)) {
+      if (permanent.has(err.code) && !isTruncatedStream(err)) {
         h.onStatus('failed', err)
         return after
       }
+      settle()
       attempt++
       h.onStatus('reconnecting', err)
       await sleep(backoff(attempt), opts.signal)
