@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 )
 
 // chunks returns the text of the run's agent message chunks, in order.
@@ -280,14 +281,41 @@ var _ = Describe("Pool", func() {
 		Expect(e.gw.Calls("GetSandbox")).To(BeZero(), "sandbox state comes from agent_sandboxes")
 	})
 
-	It("fails a run whose sandbox the reconciler does not make ready in time", func(ctx SpecContext) {
+	It("keeps a run in the queue, past the 5 minute wait, when the reconciler does not make its sandbox ready", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateStopped, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
-		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
-		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("sandbox not ready after 1s (stopped)"))
+		clock := &fakeClock{t: time.Now()}
+		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = 5 * time.Minute; c.Now = clock.Now })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Consistently(runState(ctx, r)).WithTimeout(300 * time.Millisecond).Should(Equal(store.RunStateStarting))
+
+		clock.Advance(5*time.Minute + time.Second)
+		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
+		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Or(Equal(store.RunStateQueued), Equal(store.RunStateStarting)),
+			"the run waits in the queue; it does not fail")
+		Expect(getRun(ctx, r).OutcomeReason.Valid).To(BeFalse())
 		Expect(e.gw.Calls("StartSandbox")).To(BeZero())
+
+		// Capacity returns: the run goes on.
+		e.gw.SetPhase(e.workspace, e.sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_READY)
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+	})
+
+	It("waits as long as the org's queue wait says", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.recordSandbox(ctx, store.SandboxStateStopped, "")
+		wait := 20 * time.Minute
+		Expect(orgsettings.Set(ctx, q, e.org, orgsettings.Override{QueueWait: &wait})).To(Succeed())
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		clock := &fakeClock{t: time.Now()}
+		e.pool("agentd-a", func(c *agentd.Config) { c.Now = clock.Now })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		clock.Advance(6 * time.Minute)
+		Consistently(func() []string { return kinds(events(ctx, r)) }).WithTimeout(500 * time.Millisecond).ShouldNot(ContainElement("run.requeued"))
+		clock.Advance(15 * time.Minute)
+		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
 	})
 
 	It("honours a cancel with session/cancel and records nothing after it", func(ctx SpecContext) {
@@ -699,16 +727,16 @@ var _ = Describe("Pool", func() {
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 	})
 
-	It("fails a run after SandboxTimeout when the failed sandbox is never recreated", func(ctx SpecContext) {
+	It("requeues a run after SandboxTimeout when the failed sandbox is never recreated", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateDeleting, "recreating a failed sandbox (phase Error)")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
-		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("sandbox not ready after 1s (deleting)"))
+		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
+		Expect(getRun(ctx, r).State).NotTo(Equal(store.RunStateFailed))
 	})
 
-	It("waits for a sandbox in error to be repaired, and fails when it is not within SandboxTimeout", func(ctx SpecContext) {
+	It("waits for a sandbox in error to be repaired, ", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
@@ -721,13 +749,13 @@ var _ = Describe("Pool", func() {
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 	})
 
-	It("fails a run whose sandbox stays in error past SandboxTimeout", func(ctx SpecContext) {
+	It("requeues a run whose sandbox stays in error past SandboxTimeout", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
-		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("sandbox not ready after 1s (error: image pull failed)"))
+		Eventually(func() []string { return kinds(events(ctx, r)) }).WithTimeout(10 * time.Second).Should(ContainElement("run.requeued"))
+		Expect(getRun(ctx, r).State).NotTo(Equal(store.RunStateFailed))
 	})
 
 	It("fails a run at once when its sandbox is in error and the agent is unhealthy", func(ctx SpecContext) {

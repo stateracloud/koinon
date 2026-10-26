@@ -57,6 +57,7 @@ stateDiagram-v2
     running --> failed
     parked --> canceled: timeout alarm or user cancel
     starting --> failed
+    starting --> queued: sandbox not ready in time (ADR 0066)
     succeeded --> [*]
     failed --> [*]
     canceled --> [*]

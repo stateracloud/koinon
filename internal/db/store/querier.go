@@ -147,6 +147,7 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	// Queues a run of the agent's approved version. No row: the agent is not
 	// active.
+	// origin is interactive unless the caller says scheduled (LT1: interactive work is claimed first).
 	CreateRun(ctx context.Context, arg CreateRunParams) (Run, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	// A request Koinon makes itself (saved work to push). No row: it exists.
@@ -242,6 +243,10 @@ type Querier interface {
 	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
 	// The part of an org's spend since @since that came from estimated usage.
 	GetOrgEstimatedSpendSince(ctx context.Context, arg GetOrgEstimatedSpendSinceParams) (string, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Per-org latency tunables (plan item LT1). A NULL column is the platform default.
+	GetOrgSettings(ctx context.Context, orgID pgtype.UUID) (OrgSetting, error)
 	// The slug of the org the caller is acting in, for names derived from it (gateway targets).
 	GetOrgSlug(ctx context.Context, orgID pgtype.UUID) (string, error)
 	// An org's recorded USD spend since @since (the start of the calendar month in UTC), for its
@@ -507,6 +512,10 @@ type Querier interface {
 	// Activating a version with "apply to open tasks": every open task of the agent that has a
 	// session starts a new one at its next run.
 	RequestSessionRestartForAgent(ctx context.Context, arg RequestSessionRestartForAgentParams) ([]pgtype.UUID, error)
+	// starting -> queued, for the owner (epoch compare-and-set): the sandbox was not ready within the
+	// org's wait (LT1, ADR 0066), so the run waits in the queue instead of failing. It goes to the back
+	// of its origin's queue (ready_at = now) and the next claim gives it a new epoch.
+	RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error)
 	// Makes a parked run claimable again (approval decided, input given). It
 	// stays parked until an owner claims it: parked -> starting.
 	ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) (Run, error)
@@ -607,6 +616,7 @@ type Querier interface {
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.
 	UpsertGroupMemberships(ctx context.Context, arg UpsertGroupMembershipsParams) error
+	UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsParams) (OrgSetting, error)
 	UpsertOrgWorkspace(ctx context.Context, arg UpsertOrgWorkspaceParams) (OrgWorkspace, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -614,6 +624,11 @@ type Querier interface {
 	// Records a template synced from the binary. Re-syncing known content only
 	// bumps last_synced_at.
 	UpsertTemplate(ctx context.Context, arg UpsertTemplateParams) (Template, error)
+	// The pre-wake signal (LT1, B5): a task was created, a person is typing, or a cron is about to
+	// fire. It counts as activity, so an idle sandbox stays up and a stopped one starts. No row: the
+	// agent has no sandbox record yet (the reconciler creates it on activation, and a new sandbox
+	// starts ready anyway).
+	WakeAgentSandbox(ctx context.Context, arg WakeAgentSandboxParams) (pgtype.Timestamptz, error)
 }
 
 var _ Querier = (*Queries)(nil)

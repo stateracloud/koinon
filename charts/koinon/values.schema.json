@@ -138,6 +138,8 @@
         "tolerations": {"type": "array"},
         "affinity": {"$ref": "#/definitions/map"},
         "idleTimeout": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "parkWarm": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "sandboxJobs": {"type": "integer", "minimum": 1},
         "resyncInterval": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
         "homeRetention": {"enum": ["delete", "retain"]}
       }
@@ -369,6 +371,19 @@
       "additionalProperties": false,
       "properties": {
         "opencode": {"$ref": "#/definitions/flavor"}
+      }
+    },
+    "flavorPrepull": {
+      "description": "Pre-pull the flavor images on the Kata nodes (plan item LT1).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "nodeSelector": {"$ref": "#/definitions/map"},
+        "tolerations": {"type": "array"},
+        "pauseImage": {"$ref": "#/definitions/nonEmpty"},
+        "priorityClassName": {"type": "string"},
+        "resources": {"$ref": "#/definitions/resources"}
       }
     },
     "openshell": {

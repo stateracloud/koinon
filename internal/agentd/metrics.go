@@ -22,6 +22,7 @@ type Metrics struct {
 	Finished    *prometheus.CounterVec
 	Takeovers   prometheus.Counter
 	SandboxWait prometheus.Histogram
+	Requeued    prometheus.Counter
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -36,6 +37,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Takeovers: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_agentd_takeovers_total", Help: "Runs this replica took over after their owner's lease expired or was released.",
 		}),
+		Requeued: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "koinon_agentd_runs_requeued_total", Help: "Runs sent back to the queue because their sandbox was not ready in time.",
+		}),
 		SandboxWait: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name: "koinon_agentd_sandbox_wait_duration_seconds", Help: "Time a run waited for its agent's sandbox to be ready, whatever the result.",
 			Buckets: []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
@@ -45,7 +49,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.Finished.WithLabelValues(string(o))
 	}
 	if reg != nil {
-		reg.MustRegister(m.Claimed, m.Finished, m.Takeovers, m.SandboxWait)
+		reg.MustRegister(m.Claimed, m.Finished, m.Takeovers, m.SandboxWait, m.Requeued)
 	}
 	return m
 }
