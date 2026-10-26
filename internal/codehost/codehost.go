@@ -223,9 +223,19 @@ type Capabilities struct {
 	CanDenyCI bool
 	// ExactModes is whether WriteCommit sets exact file modes through the provider's API.
 	ExactModes bool
+	// Writes is how commits reach the host: WritesAPI (the default when empty) through the
+	// provider's API, or WritesPush by git push from koinon-api (ADR 0062; gitpush wraps the
+	// provider's Access).
+	Writes string
 	// CIPaths are the path prefixes whose changes run CI, which the workflow guard refuses.
 	CIPaths []string
 }
+
+// Values of Capabilities.Writes.
+const (
+	WritesAPI  = "api"
+	WritesPush = "push"
+)
 
 // Provider is one code host.
 type Provider interface {
