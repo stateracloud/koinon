@@ -3,7 +3,7 @@
 - Status: Accepted; amended by [0043](0043-workload-identity-adapters-and-koinon-issuer.md) and [0044](0044-in-sandbox-credential-exception.md)
 - Date: 2026-10-21
 - Decision: [design.md#6](../design.md)
-- Verification: Pending: OpenShell spike ([#3](https://github.com/procoduck/koinon/issues/3))
+- Verification: Pending: OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
 
 ## Context
 

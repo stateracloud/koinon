@@ -238,6 +238,17 @@ func (f *fixture) ticketEvents(ctx context.Context) []store.TicketEvent {
 	return evs
 }
 
+// decisions returns the approval audit events of the org, oldest first, as "action actor".
+func (f *fixture) decisions(ctx context.Context) []string {
+	GinkgoHelper()
+	rows, err := pool.Query(ctx, `SELECT action || ' ' || actor_kind || ' ' || actor_id FROM audit_events
+		WHERE org_id = $1 AND action LIKE 'approval.%' ORDER BY chain_seq`, f.org)
+	Expect(err).NotTo(HaveOccurred())
+	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	Expect(err).NotTo(HaveOccurred())
+	return out
+}
+
 func (f *fixture) getRun(ctx context.Context) store.Run {
 	GinkgoHelper()
 	r, err := q.GetRun(ctx, store.GetRunParams{OrgID: f.org, ID: f.run.ID})

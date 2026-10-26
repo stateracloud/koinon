@@ -24,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/memlimit"
+	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 )
 
@@ -33,6 +34,7 @@ type config struct {
 	openshellTLSDir  string
 	openshellName    string
 	savedWorkKeyFile string
+	metricsAddr      string
 	pool             agentd.Config
 }
 
@@ -44,6 +46,7 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "",
 		"directory with the OpenShell client bundle (tls.crt, tls.key, ca.crt); empty connects without TLS")
 	fs.StringVar(&c.openshellName, "openshell-server-name", "", "name checked against the gateway's certificate")
+	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort, "listen address of /metrics (Prometheus); empty disables it")
 	fs.StringVar(&c.savedWorkKeyFile, "saved-work-key-file", "", "file with the key that signs saved-work posts (the Secret koinon-api creates, mounted read-only)")
 	fs.StringVar(&c.pool.SavedWorkURL, "saved-work-url", "",
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")
@@ -122,6 +125,11 @@ func run() error {
 
 	if cfg.savedWorkKeyFile != "" {
 		cfg.pool.SavedWorkKey = func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) } //nolint:gosec // an operator-set path
+	}
+	reg := metrics.NewRegistry()
+	cfg.pool.Metrics = agentd.NewMetrics(reg)
+	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, slog.Default()); err != nil {
+		return err
 	}
 	pool, err := agentd.New(db, backend, cfg.pool)
 	if err != nil {

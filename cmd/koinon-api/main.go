@@ -19,6 +19,9 @@
 // second Deployment would add an image, a database role and RBAC without
 // separating any secret.
 //
+// "koinon-api audit verify [--org ID]" walks the audit hash chain (ADR 0023) and exits non-zero at
+// the first broken link.
+//
 // "koinon-api preflight [flags]" checks the cluster for Koinon's install
 // prerequisites and exits non-zero when one is missing (plan item H2); the chart
 // runs it as a pre-install and pre-upgrade hook Job. It needs no database.
@@ -68,6 +71,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpask"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/memlimit"
+	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
@@ -111,6 +115,7 @@ type config struct {
 	watchPoll     time.Duration
 
 	otlpAddr         string
+	metricsAddr      string
 	toolsAddr        string
 	savedWorkAddr    string
 	savedWorkSecret  string
@@ -182,6 +187,8 @@ func parseFlags(args []string) (config, error) {
 		"listen address of the spend ledger's OTLP/HTTP logs receiver, for agentgateway's access log; "+
 			"it has no authentication, so restrict it to agentgateway with a NetworkPolicy; empty disables it")
 
+	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort,
+		"listen address of /metrics (Prometheus); empty disables it")
 	fs.StringVar(&c.savedWorkAddr, "saved-work-addr", "",
 		"listen address of the saved-work upload endpoint, for koinon-agentd only; empty disables it")
 	fs.StringVar(&c.savedWorkSecret, "saved-work-secret", "koinon-saved-work",
@@ -282,6 +289,11 @@ func run() error {
 		defer stop()
 		return runEnsureSecrets(ctx, os.Args[2:], os.Stdout)
 	}
+	if len(os.Args) > 1 && os.Args[1] == "audit" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runAudit(ctx, os.Args[2:], os.Stdout)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "keys" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -299,7 +311,7 @@ func run() error {
 	case len(cfg.args) == 1 && cfg.args[0] == "migrate":
 		return migrate(ctx, cfg.databaseURL, cfg.wait)
 	case len(cfg.args) > 0:
-		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\", \"preflight\", \"ensure-secrets\" and \"keys\" (first)", cfg.args)
+		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\", \"preflight\", \"ensure-secrets\", \"keys\" and \"audit\" (first)", cfg.args)
 	case cfg.migrate:
 		if err := migrate(ctx, cfg.databaseURL, cfg.wait); err != nil {
 			return err
@@ -486,12 +498,16 @@ func run() error {
 	}
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default()).WithMCP(mcpSvc)
 
+	reg := metrics.NewRegistry()
+	if err := metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default()); err != nil {
+		return err
+	}
 	if cfg.otlpAddr != "" {
 		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
 		// the session-authenticated API handler.
 		go func() {
 			slog.Info("starting the spend ledger's OTLP receiver", "addr", cfg.otlpAddr)
-			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool}, slog.Default()); err != nil {
+			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg)}, slog.Default()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}
@@ -500,6 +516,7 @@ func run() error {
 
 	handler, err := api.NewHandler(api.Options{
 		Auth:           authSvc,
+		Metrics:        api.NewMetrics(reg),
 		TrustedOrigins: splitList(cfg.trustedOrigins),
 		Services:       []func(*connect.Server){svc.Register},
 		UI:             web.Dist(),
