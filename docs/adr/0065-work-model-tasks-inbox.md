@@ -150,8 +150,9 @@ The diagram is a reading aid. Which run park maps to which task state is an open
 
 ### Releases (#146)
 
-- v0.1: tasks, the inbox, `ask_user` (with safe defaults), home checkpoints with lineage and the
-  archive tier, failure classes.
+- v0.1: tasks, the inbox, `ask_user` (with safe defaults and scoped approvals), home checkpoints with
+  lineage and the archive tier, ephemeral agents, failure classes (Andre placed scoped approvals and
+  ephemeral agents in v0.1 on 2026-10-26).
 - v0.2: `ask_agent` with its guards; Slack and Teams with approval buttons and account linking;
   the interruption rule lands with events.
 
