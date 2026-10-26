@@ -107,7 +107,7 @@ const getAgentRunActivity = `-- name: GetAgentRunActivity :one
 SELECT
     coalesce(bool_or(state IN ('starting', 'running')), false)::boolean AS has_active,
     coalesce(bool_or(state IN ('starting', 'running', 'parked')), false)::boolean AS has_held,
-    coalesce(bool_or(ready_at IS NOT NULL), false)::boolean AS has_demand,
+    coalesce(bool_or(run_claimable(org_id, id)) FILTER (WHERE ready_at IS NOT NULL), false)::boolean AS has_demand,
     max(greatest(finished_at, parked_at))::timestamptz AS last_activity
 FROM runs
 WHERE org_id = $1 AND agent_id = $2
@@ -128,8 +128,9 @@ type GetAgentRunActivityRow struct {
 }
 
 // What the idle timeout and start-on-demand need (ADR 0049): whether a run
-// holds the agent, whether one is waiting to be claimed (queued, or parked
-// with its park resolved), and when a run last finished or parked. Parked runs
+// holds the agent, whether one can be claimed now (queued, or parked with its
+// park resolved, and run_claimable: not behind an unhealthy agent or a
+// parked sibling), and when a run last finished or parked. Parked runs
 // do not keep the sandbox up, but they hold off its recreation (has_held):
 // a parked run resumes its session in the same home volume.
 func (q *Queries) GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error) {

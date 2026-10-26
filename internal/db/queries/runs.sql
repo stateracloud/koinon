@@ -49,20 +49,14 @@ WITH next AS (
     JOIN agents a ON a.org_id = r.org_id AND a.id = r.agent_id
     WHERE r.org_id = @org_id
       AND r.ready_at IS NOT NULL
+      -- Active and healthy are repeated inline on the row locked below: after waiting for a lock,
+      -- Postgres re-checks the quals on the locked rows against their latest version (EvalPlanQual),
+      -- while run_claimable reads its own snapshot and would not see a concurrent change.
       AND a.status = 'active'
-      -- An unhealthy agent (ADR 0054) claims nothing: queued runs wait, and a parked run whose
-      -- approval was decided stays parked, until an admin resumes the agent.
       AND a.unhealthy_at IS NULL
-      AND NOT EXISTS (
-          SELECT 1 FROM runs act
-          WHERE act.org_id = r.org_id AND act.agent_id = r.agent_id
-            AND act.state IN ('starting', 'running'))
-      -- One harness session per ticket (ADR 0029): a ticket's next run waits
-      -- while another run of the same ticket is owned or parked.
-      AND NOT EXISTS (
-          SELECT 1 FROM runs sib
-          WHERE sib.org_id = r.org_id AND sib.ticket_id = r.ticket_id AND sib.id <> r.id
-            AND sib.state IN ('starting', 'running', 'parked'))
+      -- The full claim conditions live in run_claimable, which GetAgentRunActivity shares for
+      -- has_demand. It is evaluated per candidate run, in ready_at order, as the planner reaches it.
+      AND run_claimable(r.org_id, r.id)
     ORDER BY r.ready_at, r.id
     LIMIT 1
     FOR UPDATE OF a, r SKIP LOCKED
