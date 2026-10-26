@@ -127,10 +127,11 @@ if KIND:
     k8s_resource('fakemodel', resource_deps=['fakes-namespace'], labels=['fakes'])
     k8s_resource('fakegithub', resource_deps=['fakes-namespace'], labels=['fakes'])
 
-# The chart is rendered with `helm template`. Helm's lookup does not work there, so the chart would
-# generate new database and bootstrap-admin passwords on every render; the generated Secrets are
-# therefore given the password they already have in the cluster. The namespace is added to what the
-# chart leaves without one, because Tilt applies the objects one by one.
+# The chart is rendered with `helm template`, which is deterministic (the chart has no lookup and
+# renders no password). Hooks are not run by `helm template | kubectl apply`, so the ensure-secrets
+# hook Job, which creates the database and bootstrap-admin passwords, is applied as an ordinary
+# resource below, before the database. The namespace is added to what the chart leaves without
+# one, because Tilt applies the objects one by one.
 values = ['hack/dev/values.yaml', 'hack/dev/values-%s.yaml' % mode]
 sets = ['image.tag=dev']
 if not KIND and not cfg.get('sandbox-policy', False):
@@ -165,12 +166,6 @@ for o in objs:
         fail('the chart renders a %s, which the Tiltfile does not know to be namespaced or cluster-scoped; add it to NAMESPACED or CLUSTER_SCOPED' % o['kind'])
     if not o['metadata'].get('namespace'):
         o['metadata']['namespace'] = NS
-    if o['kind'] == 'Secret' and 'password' in o.get('stringData', {}):
-        live = str(local(['kubectl', '--context', ctx, '-n', NS, 'get', 'secret', o['metadata']['name'],
-                          '--ignore-not-found', '-o', 'jsonpath={.data.password}'], quiet=True)).strip()
-        if live:
-            o['stringData'].pop('password')
-            o['data'] = {'password': live}
 k8s_yaml(encode_yaml_stream(objs))
 # Everything that is not a workload, the database or a Service (which Tilt attaches to its workload)
 # is one resource that waits for the namespace, so that nothing is applied before it exists.
@@ -204,7 +199,11 @@ k8s_resource(new_name='model-provider', objects=['%s:secret' % o['metadata']['na
              resource_deps=['namespace'], labels=['koinon'])
 
 k8s_resource(new_name='koinon-config', objects=config_objs, resource_deps=['namespace'], labels=['koinon'])
-k8s_resource(new_name='postgres', objects=['koinon-pg:cluster'], resource_deps=['koinon-config'], labels=['data'])
+# The generated passwords: created by `koinon-api ensure-secrets` (the chart's pre-install hook Job,
+# applied here as an ordinary Job), never overwritten, so a re-run keeps the passwords of a running
+# database. Everything that reads them waits for it.
+k8s_resource('koinon-ensure-secrets', resource_deps=['koinon-config', 'koinon-preflight'], labels=['platform'])
+k8s_resource(new_name='postgres', objects=['koinon-pg:cluster'], resource_deps=['koinon-config', 'koinon-ensure-secrets'], labels=['data'])
 # The migration Job (on install, an ordinary release resource) waits for the database itself.
 k8s_resource('koinon-migrate-install', resource_deps=['postgres'], labels=['data'])
 k8s_resource('koinon-preflight', resource_deps=['koinon-config'], labels=['platform'])

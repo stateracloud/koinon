@@ -4,28 +4,14 @@ postgres.mode=cnpg: a CloudNativePG Cluster with least-privilege roles (ADR 0003
 - koinon_migrate owns the database and its schema and runs the migrations;
 - koinon_app (NOLOGIN) receives DML on everything koinon_migrate creates;
 - koinon_api, koinon_reconciler and koinon_agentd log in and inherit koinon_app.
-Passwords are generated once and kept across upgrades. TLS is required for every TCP connection;
+The role Secrets are not rendered: the ensure-secrets hook Job creates the missing ones with a
+random password, or postgres.cnpg.existingSecrets names your own (templates/ensure-secrets.yaml). TLS is required for every TCP connection;
 clients verify the server against the cluster CA.
 */ -}}
 {{- if eq .Values.postgres.mode "cnpg" }}
 {{- $cluster := include "koinon.pgCluster" . }}
 {{- $db := .Values.postgres.cnpg.database }}
 {{- $migrate := include "koinon.pgRole" "migrate" }}
-{{- range $role := list "migrate" "api" "reconciler" "agentd" }}
-{{- $secret := include "koinon.pgSecret" (list $ $role) }}
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ $secret }}
-  labels:
-    {{- include "koinon.labels" (list $ "postgres") | nindent 4 }}
-    cnpg.io/reload: "true"
-type: kubernetes.io/basic-auth
-stringData:
-  username: {{ include "koinon.pgRole" $role }}
-  password: {{ include "koinon.persistentPassword" (list $ $secret "password") | quote }}
-{{- end }}
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster

@@ -3,54 +3,16 @@
 gateway.mode=standalone: agentgateway v1.6.0 without CRDs or controller (ADR 0048). One replica,
 because the budget store is SQLite on a PVC.
 
-The config ConfigMap belongs to the reconciler (plan item G1), which rewrites it with per-agent key
-hashes, budgets and MCP routes; agentgateway hot-reloads it. The chart writes a bootstrap config
-(no providers and no keys, so every request is refused) on install only. On upgrade
-it renders the live data unchanged, so it never undoes the reconciler's work.
+The config ConfigMap (koinon.gatewayConfigName) is not rendered. The reconciler (plan item G1)
+creates it when it is missing, with an ownerReference to the Deployment below, and rewrites it with
+per-agent key hashes, budgets and MCP routes; agentgateway hot-reloads it. Rendering it here would
+reset it on every render that cannot read the live object (helm template, Argo CD, Flux), and all
+agent traffic would be refused until the next reconcile. The pod below waits (ContainerCreating)
+until the ConfigMap exists.
 */ -}}
 {{- if eq .Values.gateway.mode "standalone" }}
 {{- $name := include "koinon.componentName" (list . "gateway") }}
-{{- $cmName := include "koinon.gatewayConfigName" . }}
 {{- $gw := .Values.gateway.standalone }}
-{{- $existing := lookup "v1" "ConfigMap" .Release.Namespace $cmName }}
-{{- $config := "" }}
-{{- if and $existing $existing.data (hasKey $existing.data "config.yaml") }}
-{{- $config = index $existing.data "config.yaml" }}
-{{- else }}
-{{- /*
-Same document as internal/gateway/standalone renders for an empty State, for the
-fixed revision "bootstrap" (standalone.BootstrapRevision) instead of a content hash
-(internal/gateway/standalone/chart_test.go compares them): agentgateway keeps the static `config`
-section of the file it started with, and refuses to reload a file with frontendPolicies.accessLog
-while that section has the deprecated config.logging.fields, so the access-log fields go in
-frontendPolicies. The admin listener (config dump and UI) stays on localhost; the reconciler
-detects reloads with each revision's probe key on the llm listener (standalone.ReloadProbeKey).
-*/ -}}
-{{- $revision := "bootstrap" }}
-{{- $base := dict "database" (dict "url" "sqlite:///data/agentgateway.db?mode=rwc") "adminAddr" "localhost:15000" "statsAddr" "[::]:15020" "readinessAddr" "[::]:15021" "logging" (dict "format" "json") }}
-{{- $otlp := dict "host" (printf "%s.%s.svc:%v" (include "koinon.componentName" (list . "api")) .Release.Namespace .Values.api.otlpPort) "protocol" "http" }}
-{{- $accessLog := dict "add" (dict "koinon.key" "default(apiKey.name, \"\")" "koinon.agent" "default(apiKey.agent, \"\")" "koinon.request" "uuid()" "koinon.in" "llm.inputTokens" "koinon.out" "llm.outputTokens" "koinon.cache_read" "llm.cachedInputTokens" "koinon.cache_write" "llm.cacheCreationInputTokens" "koinon.reasoning" "llm.reasoningTokens" "koinon.status" "response.code" "koinon.max_tokens" "llm.params.max_tokens" "koinon.req_bytes" "int(request.headers[\"content-length\"])" "koinon.config" (quote $revision)) "otlp" $otlp }}
-{{- /* The reload probe key, refused before routing by the authorization rule and its zero budget. */ -}}
-{{- $probeBudget := dict "name" "koinon-reload-probe" "limit" (dict "unit" "Tokens" "amount" 0) "window" (dict "rolling" "24h") "onBudgetExceeded" "Block" }}
-{{- $probe := dict "keyHash" (printf "sha256:%s" (sha256sum (printf "koinon-probe-%s" $revision))) "metadata" (dict "name" "koinon-reload-probe" "agent" "") "budgets" (list $probeBudget) }}
-{{- $apiKey := dict "mode" "strict" "location" (dict "header" (dict "name" "authorization" "prefix" "Bearer ")) "keys" (list $probe) }}
-{{- $authorization := dict "rules" (list "apiKey.name != \"koinon-reload-probe\"") }}
-{{- $doc := dict "config" $base "frontendPolicies" (dict "accessLog" $accessLog) "gateways" (dict "default" (dict "port" (int $gw.port))) }}
-{{- /* The org of the key goes into a header before a model is chosen (gateway.OrgHeader). */ -}}
-{{- $transformations := dict "request" (dict "set" (dict "x-koinon-org" "default(apiKey.org, \"\")")) }}
-{{- $_ := set $doc "llm" (dict "policies" (dict "apiKey" $apiKey "authorization" $authorization "transformations" $transformations) "models" (list)) }}
-{{- $config = printf "# Bootstrap config written by the Koinon chart; the reconciler owns this ConfigMap.\n%s" (toYaml $doc) }}
-{{- end }}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ $cmName }}
-  labels:
-    {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
-    koinon.dev/owner: reconciler
-data:
-  config.yaml: |
-    {{- $config | nindent 4 }}
 ---
 apiVersion: v1
 kind: Secret
@@ -141,7 +103,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ $cmName }}
+            name: {{ include "koinon.gatewayConfigName" . }}
         - name: data
           persistentVolumeClaim:
             claimName: {{ $name }}-data

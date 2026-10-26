@@ -75,7 +75,8 @@ Install the chart. This is the start of the 15 minutes.
 helm install koinon charts/koinon --namespace koinon -f values.yaml --wait --timeout 10m
 ```
 
-The chart runs the preflight, then the database migration, then starts the API, the reconciler,
+The chart runs the preflight, then creates the generated passwords (the database roles and the
+bootstrap admin) if they do not exist, then the database migration, then starts the API, the reconciler,
 agentd and the bundled agentgateway. If the preflight fails, its message names what is missing and
 how to fix it. The install notes print the next two commands.
 
@@ -232,6 +233,33 @@ kubectl -n koinon get secret koinon-kek -o yaml > koinon-kek-backup.yaml
 
 Keep the file where you keep your other secrets. Rotation and the compromise procedure are in the
 [runbook](https://github.com/stateracloud/koinon/blob/main/docs/ops/secret-keys.md).
+
+## GitOps (Argo CD, Flux)
+
+The chart renders the same manifests every time: it reads nothing from the cluster, so it renders no
+password and no gateway config. The generated passwords come from a hook Job, `koinon-api
+ensure-secrets`, that creates a Secret only if it is missing and never changes an existing one.
+Argo CD runs it as a PreSync hook and Flux's helm-controller as a Helm hook. The gateway's config
+ConfigMap is created by the reconciler, so a sync never resets it. Syncing an unchanged release
+changes no password and no gateway config.
+
+One gap remains for Argo CD: it renders every sync as an install, so in `cnpg` mode the database
+migration is always the install-time Job and an upgrade does not run it as a hook first
+([#118](https://github.com/stateracloud/koinon/issues/118)). Flux's helm-controller runs real
+installs and upgrades and is not affected.
+
+To manage the passwords yourself, set `postgres.cnpg.existingSecrets.<role>` (Secrets with the keys
+`username` and `password`, type `kubernetes.io/basic-auth`) and `bootstrapAdmin.existingSecret`. With
+all of them set the chart renders no hook Job.
+
+The Secrets the Job created are not owned by the release, so `helm uninstall` leaves them (as it
+leaves `koinon-kek`). To start over, delete them: `kubectl -n koinon delete secret -l
+koinon.dev/release=koinon,koinon.dev/generated=password`.
+
+An install made with an earlier chart had the chart render these Secrets, so `helm upgrade` would
+delete them after the hook keeps them. Before that first upgrade, mark them to be kept:
+`kubectl -n koinon annotate secret koinon-db-migrate koinon-db-api koinon-db-reconciler
+koinon-db-agentd koinon-bootstrap-admin helm.sh/resource-policy=keep`.
 
 ## Build the images
 

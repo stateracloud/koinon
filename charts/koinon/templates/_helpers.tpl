@@ -98,7 +98,9 @@ imagePullSecrets:
 
 {{/* Secret holding a role's password in cnpg mode: koinon.pgSecret (list $ "api"). */}}
 {{- define "koinon.pgSecret" -}}
-{{- include "koinon.componentName" (list (index . 0) (printf "db-%s" (index . 1))) }}
+{{- $ctx := index . 0 -}}
+{{- $role := index . 1 -}}
+{{- index $ctx.Values.postgres.cnpg.existingSecrets $role | default (include "koinon.componentName" (list $ctx (printf "db-%s" $role))) }}
 {{- end }}
 
 {{/*
@@ -328,17 +330,39 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 {{- end }}
 
 {{/*
-A password that is generated once and then read back from the live Secret, so upgrades keep it:
-koinon.persistentPassword (list $ "<secret name>" "<key>").
+Labels of a Secret the ensure-secrets Job creates: koinon.generatedLabels (list $ "api"). The
+release does not own these Secrets, so they carry no chart version or managed-by label that would
+go stale, and no app.kubernetes.io/instance label: Argo CD's label tracking would count them as
+app resources that are missing from Git, and auto-prune would delete them (the next sync would then
+generate new passwords). koinon.dev/release names the release instead.
 */}}
-{{- define "koinon.persistentPassword" -}}
+{{- define "koinon.generatedLabels" -}}
 {{- $ctx := index . 0 -}}
-{{- $existing := lookup "v1" "Secret" $ctx.Release.Namespace (index . 1) }}
-{{- if and $existing $existing.data (hasKey $existing.data (index . 2)) }}
-{{- index $existing.data (index . 2) | b64dec }}
-{{- else -}}
-{{- randAlphaNum 32 }}
+app.kubernetes.io/name: {{ include "koinon.name" $ctx }}
+app.kubernetes.io/component: {{ index . 1 }}
+app.kubernetes.io/part-of: koinon
+koinon.dev/release: {{ $ctx.Release.Name }}
+koinon.dev/generated: password
 {{- end }}
+
+{{/*
+The Secrets the ensure-secrets hook Job creates when they are missing, as JSON (empty list: no Job):
+koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing Secret are left out.
+*/}}
+{{- define "koinon.ensureSecrets" -}}
+{{- $specs := list -}}
+{{- if eq .Values.postgres.mode "cnpg" -}}
+{{- range $role := list "migrate" "api" "reconciler" "agentd" -}}
+{{- if not (index $.Values.postgres.cnpg.existingSecrets $role) -}}
+{{- $labels := fromYaml (include "koinon.generatedLabels" (list $ "postgres")) | merge (dict "cnpg.io/reload" "true") -}}
+{{- $specs = append $specs (dict "name" (include "koinon.pgSecret" (list $ $role)) "type" "kubernetes.io/basic-auth" "username" (include "koinon.pgRole" $role) "labels" $labels) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.bootstrapAdmin.enabled (not .Values.bootstrapAdmin.existingSecret) -}}
+{{- $specs = append $specs (dict "name" (include "koinon.bootstrapSecretName" .) "type" "Opaque" "username" .Values.bootstrapAdmin.username "labels" (fromYaml (include "koinon.generatedLabels" (list . "api")))) -}}
+{{- end -}}
+{{- $specs | toJson -}}
 {{- end }}
 
 {{/*
@@ -346,6 +370,13 @@ Hook annotations of the preflight objects: koinon.preflightHook (list $ "<weight
 before every other hook; a failed run is kept for inspection and replaced on the next attempt.
 */}}
 {{- define "koinon.preflightHook" -}}
+helm.sh/hook: pre-install,pre-upgrade
+helm.sh/hook-weight: {{ index . 1 | quote }}
+helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+{{- end }}
+
+{{/* Hook annotations of the ensure-secrets objects: koinon.ensureSecretsHook (list $ "<weight>"). */}}
+{{- define "koinon.ensureSecretsHook" -}}
 helm.sh/hook: pre-install,pre-upgrade
 helm.sh/hook-weight: {{ index . 1 | quote }}
 helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded

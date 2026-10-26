@@ -9,9 +9,12 @@ import (
 	"os"
 	"path/filepath"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
 
 	"github.com/stateracloud/koinon/internal/gateway"
 )
@@ -21,15 +24,19 @@ type Deliverer interface {
 	Deliver(ctx context.Context, config []byte, rev gateway.Revision) error
 }
 
-// ConfigMapDeliverer writes the config into one data key of an existing
-// ConfigMap, which agentgateway mounts as its config file.
+// ConfigMapDeliverer writes the config into one data key of a ConfigMap, which agentgateway mounts
+// as its config file.
 //
-// It sends a JSON merge patch that touches only data[Key]. It never applies
-// the whole object (server-side apply or update), so labels, annotations and
-// other data keys owned by Helm, Argo CD or an operator are left alone, and a
-// GitOps tool that ignores differences in this data key stays in sync (in the
-// spike the platform ConfigMap belonged to an Argo CD application with
-// ignoreDifferences on its data). The ConfigMap itself is created by the chart.
+// It sends a JSON merge patch that touches only data[Key]. It never applies the whole object
+// (server-side apply or update), so labels, annotations and other data keys owned by an operator
+// are left alone, and a GitOps tool that ignores differences in this data key stays in sync.
+//
+// The chart does not render the ConfigMap: a render cannot read the live object (helm template,
+// Argo CD, Flux), so rendering it would reset the config on every sync. When the patch finds no
+// ConfigMap, the deliverer creates it with the full config. With Owner set, the new ConfigMap has
+// an ownerReference to that Deployment (not the controller, no blockOwnerDeletion), so uninstalling
+// the release garbage-collects it. The gateway pod waits for the ConfigMap, so the first delivery is
+// what lets it start.
 type ConfigMapDeliverer struct {
 	Client    kubernetes.Interface
 	Namespace string
@@ -38,6 +45,11 @@ type ConfigMapDeliverer struct {
 	Key string
 	// FieldManager is recorded in managedFields, default "koinon".
 	FieldManager string
+	// Labels are put on a ConfigMap this deliverer creates. Nothing is relabelled later.
+	Labels map[string]string
+	// OwnerDeployment is the name of the gateway Deployment that owns a created ConfigMap. Empty:
+	// the ConfigMap has no owner.
+	OwnerDeployment string
 }
 
 // Deliver implements Deliverer.
@@ -54,12 +66,38 @@ func (d ConfigMapDeliverer) Deliver(ctx context.Context, config []byte, _ gatewa
 	if err != nil {
 		return err
 	}
-	_, err = d.Client.CoreV1().ConfigMaps(d.Namespace).Patch(ctx, d.Name, types.MergePatchType, patch,
-		metav1.PatchOptions{FieldManager: manager})
+	configMaps := d.Client.CoreV1().ConfigMaps(d.Namespace)
+	_, err = configMaps.Patch(ctx, d.Name, types.MergePatchType, patch, metav1.PatchOptions{FieldManager: manager})
+	if apierrors.IsNotFound(err) {
+		err = d.create(ctx, key, manager, config)
+		if apierrors.IsAlreadyExists(err) {
+			// Created by someone else between the patch and the create.
+			_, err = configMaps.Patch(ctx, d.Name, types.MergePatchType, patch, metav1.PatchOptions{FieldManager: manager})
+		}
+	}
 	if err != nil {
-		return fmt.Errorf("standalone: patch configmap %s/%s: %w", d.Namespace, d.Name, err)
+		return fmt.Errorf("standalone: write configmap %s/%s: %w", d.Namespace, d.Name, err)
 	}
 	return nil
+}
+
+func (d ConfigMapDeliverer) create(ctx context.Context, key, manager string, config []byte) error {
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: d.Name, Namespace: d.Namespace, Labels: d.Labels},
+		Data:       map[string]string{key: string(config)},
+	}
+	if d.OwnerDeployment != "" {
+		dep, err := d.Client.AppsV1().Deployments(d.Namespace).Get(ctx, d.OwnerDeployment, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("read the owner Deployment %s: %w", d.OwnerDeployment, err)
+		}
+		cm.OwnerReferences = []metav1.OwnerReference{{
+			APIVersion: "apps/v1", Kind: "Deployment", Name: dep.Name, UID: dep.UID,
+			Controller: ptr.To(false), BlockOwnerDeletion: ptr.To(false),
+		}}
+	}
+	_, err := d.Client.CoreV1().ConfigMaps(d.Namespace).Create(ctx, cm, metav1.CreateOptions{FieldManager: manager})
+	return err
 }
 
 // FileDeliverer writes the config to a local file by atomic rename, for an

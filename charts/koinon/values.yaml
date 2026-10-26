@@ -151,6 +151,16 @@ postgres:
     resources: {}
     # Namespace of the CNPG operator, allowed through the database NetworkPolicy.
     operatorNamespace: cnpg-system
+    # Bring your own role Secrets: a Secret name per role, with the keys `username` (the role,
+    # koinon_<role>) and `password`, type kubernetes.io/basic-auth. A role left empty gets a Secret
+    # that the ensure-secrets hook Job creates with a random password if it does not exist yet
+    # (never overwritten, kept on uninstall). The chart itself renders no password, so renders are
+    # deterministic (Argo CD, Flux, helm template).
+    existingSecrets:
+      migrate: ""
+      api: ""
+      reconciler: ""
+      agentd: ""
   external:
     # Secret with one libpq URI per role (sslmode=verify-full recommended). The migration role owns
     # the schema; the component roles need only DML. Components may share one role.
@@ -260,16 +270,14 @@ openshell:
 publicUrl: ""
 
 # Bootstrap platform admin (plan item A1). The one-time password is generated once into the Secret
-# <fullname>-bootstrap-admin and kept across upgrades. Disable once OIDC works: enabled=false
+# <fullname>-bootstrap-admin by the ensure-secrets hook Job and never changed by it. Disable once OIDC works: enabled=false
 # turns the API's password login off and revokes the bootstrap sessions.
 bootstrapAdmin:
   enabled: true
   # Login name, applied on every start (changing it renames the login).
   username: admin
-  # Existing Secret holding the one-time password under the key `password`; the chart then renders
-  # no Secret of its own. Use it with `helm template` and GitOps tools (Argo CD, Flux): they render
-  # without cluster access, so the chart cannot read back the generated password and would produce
-  # a new one on every render.
+  # Bring your own Secret holding the one-time password under the key `password`; the hook Job then
+  # does not create one. The chart renders no password either way.
   existingSecret: ""
 
 # Generic OIDC login (plan item A2, ADR 0004). Users log in with the IdP; roles in the default org

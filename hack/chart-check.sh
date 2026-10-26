@@ -73,7 +73,7 @@ lacks "bootstrap login stays on by default" 'KOINON_BOOTSTRAP_LOGIN'
 env_is KOINON_BOOTSTRAP_ADMIN_USERNAME '"admin"'
 env_is KOINON_BOOTSTRAP_ADMIN_USERNAME '"ops"' --set bootstrapAdmin.username=ops
 # bootstrapAdmin.existingSecret: no generated Secret, the API mounts the given one.
-has "generated bootstrap Secret by default" 'name: koinon-bootstrap-admin$' --show-only templates/bootstrap-admin.yaml
+# The chart renders no password: the ensure-secrets hook Job creates the missing Secrets.
 lacks "no generated bootstrap Secret with existingSecret" 'name: koinon-bootstrap-admin$' --set bootstrapAdmin.existingSecret=mine
 has "existingSecret mounted" 'secretName: mine$' --set bootstrapAdmin.existingSecret=mine
 # publicUrl: explicit, or derived from the ingress.
@@ -103,14 +103,12 @@ n=$(render --show-only templates/deployments.yaml | grep -c 'KOINON_CONFIG' || t
 n=$(render --show-only templates/deployments.yaml | grep -c 'mountPath: /etc/koinon/config$' || true)
 [ "$n" = 1 ] || fail "config.yaml mounted into $n components, want only the reconciler"
 # agentgateway's admin listener (config dump and UI) binds to localhost: no Service or container
-# port exposes it, and the bootstrap config keeps it there.
+# port exposes it (the config the reconciler renders keeps it on localhost: internal/gateway/standalone tests).
 for f in "${value_files[@]}"; do
 	if grep -Eq -- '(containerPort|port|targetPort): 15000$' "$out/$(basename "$f" .yaml).yaml"; then
 		fail "port 15000 exposed with $(basename "$f")"
 	fi
 done
-has "agentgateway admin listener on localhost" 'adminAddr: localhost:15000$' --set gateway.mode=standalone \
-	--show-only templates/gateway-standalone.yaml
 # The key-encryption keys (plan item PV1): a generated Secret kept on uninstall, or an existing one;
 # mounted into koinon-api and koinon-reconciler only, never into agentd or the gateway.
 # The chart renders no key material (a render makes new keys every time): koinon-api creates the Secret.
@@ -187,6 +185,69 @@ has "preflight checks the agentgateway controller" '--agentgateway-controller=ag
 has "preflight may read the agentgateway CRDs" 'agentgatewaymodels.agentgateway.dev$' "${k8s[@]}" --show-only templates/preflight.yaml
 env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"'
 has "gateway.kubernetes.port is used" 'url: http://koinon-gateway.koinon.svc.cluster.local:4001$' "${k8s[@]}" --set gateway.kubernetes.port=4001 --show-only templates/config.yaml
+# GitOps-safe renders (issue #98). (a) Two renders of every value set are byte-identical.
+for f in "${value_files[@]}"; do
+	name=$(basename "$f" .yaml)
+	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" >"$out/$name.again"
+	cmp -s "$out/$name.yaml" "$out/$name.again" || fail "two renders of $name differ"
+	rm -f "$out/$name.again"
+done
+# (b) No lookup remains: a render must not depend on the cluster.
+if grep -rnE '\blookup\b' "$CHART/templates"; then fail "a template uses lookup"; fi
+# kinds_named <kind> <helm args...>: the names of the objects of that kind in the rendering.
+kinds_named() {
+	local kind=$1
+	shift
+	render "$@" | awk -v kind="$kind" '
+		/^---$/ { if (k == kind && n != "") print n; k = ""; n = ""; meta = 0; next }
+		/^kind: / { k = $2 }
+		/^metadata:/ { meta = 1; next }
+		meta && /^  name: / && n == "" { n = $2 }
+		/^[a-z]/ && !/^metadata:/ { meta = 0 }
+		END { if (k == kind && n != "") print n }'
+}
+# (c) cnpg mode: the hook Job exists and no Secret is rendered for the roles or the bootstrap admin.
+has "ensure-secrets hook Job in cnpg mode" '^            - ensure-secrets$' --show-only templates/ensure-secrets.yaml
+has "ensure-secrets is a pre-install,pre-upgrade hook" 'helm.sh/hook: pre-install,pre-upgrade' --show-only templates/ensure-secrets.yaml
+# Argo CD's label tracking would claim (and prune) Secrets that carry the instance label.
+lacks "generated Secrets carry no app.kubernetes.io/instance label" '--secrets=.*app\.kubernetes\.io/instance' --show-only templates/ensure-secrets.yaml --set postgres.mode=cnpg
+secrets=$(kinds_named Secret | tr '\n' ' ')
+[[ $secrets == *koinon-db-* || $secrets == *koinon-bootstrap-admin* ]] && fail "cnpg mode renders Secrets $secrets"
+for want in koinon-db-migrate koinon-db-api koinon-db-reconciler koinon-db-agentd koinon-bootstrap-admin; do
+	has "the hook Job ensures $want" "$want" --show-only templates/ensure-secrets.yaml
+done
+# (d) With every Secret supplied there is no hook Job, and the given names are referenced.
+own=(--set bootstrapAdmin.existingSecret=mine-admin
+	--set postgres.cnpg.existingSecrets.migrate=mine-migrate --set postgres.cnpg.existingSecrets.api=mine-api
+	--set postgres.cnpg.existingSecrets.reconciler=mine-reconciler --set postgres.cnpg.existingSecrets.agentd=mine-agentd)
+if render "${own[@]}" --show-only templates/ensure-secrets.yaml >/dev/null 2>&1; then
+	fail "the ensure-secrets hook renders although every Secret is supplied"
+fi
+lacks "no ensure-secrets Job with existing Secrets" 'ensure-secrets' "${own[@]}"
+for name in mine-migrate mine-api mine-reconciler mine-agentd; do
+	has "$name is referenced" "name: $name\$" "${own[@]}"
+done
+lacks "the generated role Secret names are unused with existing Secrets" 'koinon-db-' "${own[@]}"
+has "the Cluster's initdb takes the given migrate Secret" 'name: mine-migrate$' "${own[@]}" --show-only templates/postgres-cnpg.yaml
+has "the migration Job reads the given migrate Secret" 'name: mine-migrate$' "${own[@]}" --show-only templates/migrate-job.yaml
+# One role supplied: the hook ensures the rest only.
+lacks "the hook leaves out a supplied role" 'koinon-db-api' --set postgres.cnpg.existingSecrets.api=mine-api --show-only templates/ensure-secrets.yaml
+has "the hook still ensures the others" 'koinon-db-migrate' --set postgres.cnpg.existingSecrets.api=mine-api --show-only templates/ensure-secrets.yaml
+# External Postgres with a given admin Secret: no Job either.
+if render --set postgres.mode=external --set postgres.external.secretName=dsns --set bootstrapAdmin.existingSecret=mine-admin \
+	--show-only templates/ensure-secrets.yaml >/dev/null 2>&1; then
+	fail "the ensure-secrets hook renders in external mode with an existing admin Secret"
+fi
+has "external mode still ensures the bootstrap admin" 'koinon-bootstrap-admin' --set postgres.mode=external \
+	--set postgres.external.secretName=dsns --show-only templates/ensure-secrets.yaml
+# The hook Job reads exactly the Secrets it ensures and creates; it updates and deletes nothing.
+lacks "ensure-secrets can update or delete" 'verbs: \[(update|delete|patch)' --show-only templates/ensure-secrets.yaml
+# (e) Standalone mode renders no gateway config ConfigMap (the reconciler creates it); the Deployment mounts it.
+cms=$(kinds_named ConfigMap --set gateway.mode=standalone | tr '\n' ' ')
+[[ $cms == *gateway-config* ]] && fail "standalone mode renders the gateway ConfigMap ($cms)"
+has "the gateway mounts its config by name" 'name: koinon-gateway-config$' --set gateway.mode=standalone --show-only templates/gateway-standalone.yaml
+has "the reconciler may create the config and read the gateway Deployment" 'resourceNames: \[koinon-gateway\]' --set gateway.mode=standalone --show-only templates/rbac.yaml
+has "the reconciler is told the gateway Deployment" 'deployment: koinon-gateway$' --set gateway.mode=standalone --show-only templates/config.yaml
 if [ "$failures" -gt 0 ]; then
 	echo "$failures assertion(s) failed" >&2
 	exit 1
