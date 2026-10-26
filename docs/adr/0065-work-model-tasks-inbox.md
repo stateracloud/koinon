@@ -8,7 +8,9 @@
   [0011](0011-agent-to-agent.md) (transport inside an install), [0030](0030-run-state-machine.md)
   (park reasons in use), [0032](0032-agent-home-checkpoints.md) (checkpoints in v0.1),
   [0049](0049-v01-scope-decisions.md) (board columns, sandbox idle), [0055](0055-chat-as-its-own-object.md)
-  (chat next to tasks); [0017](0017-board-and-chat-interaction-model.md) is already superseded
+  (chat next to tasks), [0051](0051-session-home-generations.md) (restored homes resume the session),
+  [0006](0006-identity-layers.md), [0018](0018-v1-screens.md), [0019](0019-personal-agents-and-teams.md),
+  [0036](0036-v01-demo.md); supersedes the rest of [0017](0017-board-and-chat-interaction-model.md)
 - Triggers and latency: [0066](0066-triggers-and-scheduling.md)
 
 ## Context
@@ -58,7 +60,7 @@ with the same `taskId` answers an `input-required` task (§6.3).
 3. **People don't manage tasks.** Nobody moves cards or closes tasks to keep the system working;
    the inbox shows what needs a person.
 4. **Today's tickets migrate to tasks.** The board stays as a **secondary view** over tasks.
-5. **Koinon tasks never sync with external trackers** ([0064](0064-work-tracker-connectors.md)).
+5. **Koinon tasks never sync, link or import with external trackers** ([0064](0064-work-tracker-connectors.md)).
 
 ### The inbox is the front door
 

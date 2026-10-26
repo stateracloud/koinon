@@ -93,8 +93,9 @@ From the research (`concierge-agent.md` §3.1–3.3):
   sandbox.
 - **A privileged service account for the assistant.** Rejected by the pattern every comparable
   product follows: act as the user, capped at their role.
-- **A platform-level concierge model in Helm values.** It would spend a platform credential on a
-  platform budget. Not chosen: the concierge starts once the org's first model works.
+- **A platform-level concierge model in Helm values** (`concierge-agent.md` §3.1). It would spend
+  a platform credential on a platform budget. Not chosen as a bootstrap path: the concierge
+  switches on once the first model works. Whose budget pays is the open question below.
 - **The concierge calls the create RPCs with secrets.** Rejected: the secret would pass through the
   model (ADR 0021).
 - **Make it the personal agent.** Rejected: the personal agent lives in the personal org and holds

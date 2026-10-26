@@ -14,7 +14,8 @@ Koinon supports one code host, GitHub, and the support is GitHub-specific in man
 
 - **Type data.** `connectors/github/connector.yaml` fixes the hosts to `github.com` and
   `api.github.com` (`:28-32`) and the target pattern to `owner/name` (`:34-36`). Hosts are per
-  connector type, not per connection (`connectors/network.go:54`). The schema allows only the auth
+  connector type, not per connection: `Type.Network` (`connectors/network.go:54`) renders them from
+  the type's `hosts`. The schema allows only the auth
   types `federated`, `app-credential` and `delegated-user` (`connectors/schema/connector.schema.json:107`).
 - **Go.** `connectors.GitHubID` (`connectors/connectors.go:483`) is used in 10 other non-test Go
   files. The approval executor makes 29 direct `s.gh.*` calls (`internal/approvals/*.go`).

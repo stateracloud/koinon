@@ -1,10 +1,12 @@
 # 0064. Work-tracker connectors: tools and triggers, no sync
 
-- Status: Accepted (design); built in v0.3
+- Status: Accepted
+- Delivery: v0.3 (design accepted 2026-10-26)
 - Date: 2026-10-26
 - Relates to: [#144](https://github.com/stateracloud/koinon/issues/144) (decided in conversation
   and in the issue comment of 2026-10-26), [#146](https://github.com/stateracloud/koinon/issues/146)
   (releases)
+- Amends: [0007](0007-connector-model.md) (work trackers as connector types)
 - Builds on: [0062](0062-code-host-connectors.md) (the second seam),
   [0065](0065-work-model-tasks-inbox.md) (tasks), [0066](0066-triggers-and-scheduling.md) (triggers)
 
@@ -58,7 +60,7 @@ Research (2026-10-26, `forge-and-trackers.md` §2, §4) found:
      a tracker has no event or cannot reach Koinon.
 3. **A tracker is its own seam,** separate from the code-host interface (#144), with its data in
    `connector.yaml` like other connector types ([0007](0007-connector-model.md)).
-4. **Providers:** Jira (Cloud, and Data Center), Linear, Azure Boards, and the issues of GitHub,
+4. **Providers:** Jira (Cloud, and Data Center briefly), Linear, Azure Boards, and the issues of GitHub,
    Gitea and GitLab, each with its triggers.
 5. **Timing:** designed now; built in v0.3 (#146). Until then the only tracker action is the
    existing `comment_on_issue` tool on GitHub.
@@ -111,8 +113,8 @@ From the options #144 listed and the research (`forge-and-trackers.md` §5b):
   and Linear (`actor=app`, `client_credentials`) use. Credential classes follow
   [0063](0063-forge-credential-classes.md).
 - The correlation key for tracker events (for example provider plus item key), so an event wakes
-  the open task for that item ([0066](0066-triggers-and-scheduling.md)). A key used only for
-  routing is not a link in the sense of decision 1; whether the UI shows it is open.
+  the open task for that item ([0066](0066-triggers-and-scheduling.md)): whether storing an
+  external item key on a task for correlation is allowed under "never sync, link or import".
 - Whether to use Linear's agent sessions (an agent must post a `thought` within 10 s).
 - How much of Jira Data Center is covered ("briefly" in #144): PATs, webhooks and the dev panel
   differ from Cloud.
