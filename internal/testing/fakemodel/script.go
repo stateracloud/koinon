@@ -52,7 +52,9 @@ type Faults struct {
 	// 503 overloaded error instead.
 	OverloadedMidStream bool `yaml:"overloadedMidStream,omitempty"`
 	// Lockstep holds every request to this model after it is received until the test releases
-	// a response with [Server.Release]; [Server.Waiting] counts the held requests.
+	// a response with [Server.Release]; [Server.Waiting] counts the held requests. It works only
+	// in-process: cmd/koinon-fakemodel has no release endpoint, so a script loaded by the binary
+	// with lockstep set holds every request until the client gives up.
 	Lockstep bool `yaml:"lockstep,omitempty"`
 }
 

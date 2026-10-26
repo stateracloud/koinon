@@ -21,7 +21,8 @@
 // Retry-After header; contextLength answers 400 context_length_exceeded (OpenAI) or "prompt is
 // too long" (Anthropic); overloadedMidStream ends a stream with an overloaded error event after
 // about half the events; lockstep holds each request until the test calls [Server.Release]
-// ([Server.Waiting] counts the held ones). Unknown models get HTTP 404 with the API's native error body.
+// ([Server.Waiting] counts the held ones; lockstep works only in-process, because the
+// binary has no release endpoint). Unknown models get HTTP 404 with the API's native error body.
 //
 // Scripts load from YAML files ([LoadDir], [ParseScript]) or are registered from Go
 // ([Server.Register]). The server is an [http.Handler], so tests run it in-process with
