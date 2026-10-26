@@ -4,7 +4,7 @@
 - Amended by: [0049](0049-v01-scope-decisions.md)
 - Date: 2026-10-21
 - Decision: [design.md#16](../design.md)
-- Verification: Pending: OpenShell spike ([#3](https://github.com/procoduck/koinon/issues/3))
+- Verification: Pending: OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
 
 > Note (2026-10-26): v0.1 ships OpenCode only ([0059](0059-v01-opencode-only.md)); mentions of Hermes and pi below are history.
 
