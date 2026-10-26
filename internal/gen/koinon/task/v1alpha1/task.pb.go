@@ -31,7 +31,7 @@ type TaskState int32
 
 const (
 	TaskState_TASK_STATE_UNSPECIFIED TaskState = 0
-	// Created; no run has started on it.
+	// Created; not yet picked up as working.
 	TaskState_TASK_STATE_SUBMITTED TaskState = 1
 	// The agent is working on it.
 	TaskState_TASK_STATE_WORKING TaskState = 2

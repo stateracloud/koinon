@@ -41,7 +41,7 @@ service TaskService {
 // TaskState is where a task stands (ADR 0065, after A2A).
 enum TaskState {
   TASK_STATE_UNSPECIFIED = 0;
-  // Created; no run has started on it.
+  // Created; not yet picked up as working.
   TASK_STATE_SUBMITTED = 1;
   // The agent is working on it.
   TASK_STATE_WORKING = 2;

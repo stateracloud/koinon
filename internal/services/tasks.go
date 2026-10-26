@@ -219,13 +219,20 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 // setState moves a task to a state on behalf of the caller and records the change on the timeline.
 // Moving to an end state cancels the task's queued runs. A task already in the state is returned
 // unchanged and the canceled runs are still swept, as the ticket API always did.
-func (s *Server) setState(ctx context.Context, c caller, id pgtype.UUID, to store.TaskState) (store.Task, []store.Run, error) {
+//
+// pick chooses the state from the task's current one. It runs in the transaction, after the task
+// row is locked, so concurrent changes of one task are serialised and pick never sees a stale state.
+func (s *Server) setState(ctx context.Context, c caller, id pgtype.UUID, pick func(cur store.TaskState) (store.TaskState, error)) (store.Task, []store.Run, error) {
 	var (
 		task store.Task
 		runs []store.Run
 	)
 	err := s.inTx(ctx, func(q *store.Queries) error {
-		t, err := q.GetTask(ctx, store.GetTaskParams{OrgID: c.org, ID: id})
+		t, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: c.org, ID: id})
+		if err != nil {
+			return err
+		}
+		to, err := pick(t.State)
 		if err != nil {
 			return err
 		}
@@ -368,15 +375,14 @@ func (a taskAPI) CancelTask(ctx context.Context, req *taskv1alpha1.CancelTaskReq
 	if err != nil {
 		return nil, err
 	}
-	// Ended tasks stay as they ended; only an open task can be canceled.
-	t, err := a.q.GetTask(ctx, store.GetTaskParams{OrgID: c.org, ID: id})
-	if err != nil {
-		return nil, a.dbError(err, "task")
-	}
-	if isEnded(t.State) {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, "task has already ended")
-	}
-	t, runs, err := a.setState(ctx, c, id, store.TaskStateCanceled)
+	// Ended tasks stay as they ended; only an open task can be canceled. The check runs in
+	// setState's transaction, on the locked row.
+	t, runs, err := a.setState(ctx, c, id, func(cur store.TaskState) (store.TaskState, error) {
+		if isEnded(cur) {
+			return cur, connect.NewError(connect.CodeFailedPrecondition, "task has already ended")
+		}
+		return store.TaskStateCanceled, nil
+	})
 	if err != nil {
 		return nil, a.dbError(err, "task")
 	}

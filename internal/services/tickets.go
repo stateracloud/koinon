@@ -263,12 +263,10 @@ func (s *Server) MoveTicket(ctx context.Context, req *ticketv1alpha1.MoveTicketR
 // moveToColumn is setState, except that a task already shown in the column stays in its state (a
 // failed task moved to Done stays failed).
 func (s *Server) moveToColumn(ctx context.Context, c caller, id pgtype.UUID, col ticketv1alpha1.TicketStatus, to store.TaskState) (store.Task, []store.Run, error) {
-	cur, err := s.q.GetTask(ctx, store.GetTaskParams{OrgID: c.org, ID: id})
-	if err != nil {
-		return store.Task{}, nil, err
-	}
-	if ticketColumn[cur.State] == col {
-		to = cur.State
-	}
-	return s.setState(ctx, c, id, to)
+	return s.setState(ctx, c, id, func(cur store.TaskState) (store.TaskState, error) {
+		if ticketColumn[cur] == col {
+			return cur, nil
+		}
+		return to, nil
+	})
 }
