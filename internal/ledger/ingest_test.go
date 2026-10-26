@@ -24,9 +24,9 @@ var _ = Describe("Ingester", func() {
 	It("attributes each request to the run the agent had at its time", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
 		t0 := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
-		first := e.startRun(ctx, e.ticket(ctx), 100_000, t0)
+		first := e.startRun(ctx, e.task(ctx), 100_000, t0)
 		e.finishRun(ctx, first.ID, t0.Add(10*time.Minute))
-		second := e.startRun(ctx, e.ticket(ctx), 100_000, t0.Add(20*time.Minute))
+		second := e.startRun(ctx, e.task(ctx), 100_000, t0.Add(20*time.Minute))
 
 		before := e.entry(t0.Add(-time.Minute), "0.001", 1, 1)                 // no run yet
 		during := e.entry(t0.Add(5*time.Minute), "0.002", 10, 20)              // first run
@@ -60,7 +60,7 @@ var _ = Describe("Ingester", func() {
 
 	It("records a replayed export once and charges its tokens once", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
-		r := e.startRun(ctx, e.ticket(ctx), 100_000, time.Now().Add(-time.Minute))
+		r := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
 		batch := []ledger.Entry{e.entry(time.Now(), "0.01", 100, 50), e.entry(time.Now(), "0.02", 200, 100)}
 
 		res, err := ing.Ingest(ctx, batch)
@@ -76,7 +76,7 @@ var _ = Describe("Ingester", func() {
 
 	It("cancels the run at its token cap", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 1000)
-		r := e.startRun(ctx, e.ticket(ctx), 1000, time.Now().Add(-time.Minute))
+		r := e.startRun(ctx, e.task(ctx), 1000, time.Now().Add(-time.Minute))
 		_, err := ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.01", 600, 500)})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -119,7 +119,7 @@ var _ = Describe("Ingester", func() {
 		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
 		_, err := db.Exec(ctx, `INSERT INTO org_budgets (org_id, monthly_cap, updated_by) VALUES ($1, 1.00, 'test')`, e.org)
 		Expect(err).NotTo(HaveOccurred())
-		r := e.startRun(ctx, e.ticket(ctx), 100_000, time.Now().Add(-time.Minute))
+		r := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
 		// The agent's daily limit ($0.05) is spent first, then the org cap ($1.00) is crossed.
 		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.06", 1, 1)})
 		Expect(err).NotTo(HaveOccurred())
@@ -139,9 +139,9 @@ var _ = Describe("Ingester", func() {
 		Expect(e.run(ctx, r.ID).OutcomeReason.String).To(Or(HavePrefix("agent daily limit"), HavePrefix("org monthly cap")))
 	})
 
-	It("cancels the run with a ticket event when the agent's spend reaches its limit", func(ctx SpecContext) {
+	It("cancels the run with a task event when the agent's spend reaches its limit", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
-		t := e.ticket(ctx)
+		t := e.task(ctx)
 		r := e.startRun(ctx, t, 100_000, time.Now().Add(-time.Minute))
 		// Yesterday's spend is another window.
 		yesterday := e.entry(time.Now().Add(-ledger.Window), "1.00", 1, 1)
@@ -155,7 +155,7 @@ var _ = Describe("Ingester", func() {
 		Expect(run.State).To(Equal(store.RunStateCanceled))
 		Expect(run.OutcomeReason.String).To(HavePrefix("agent daily limit reached ($0.055 of $0.05"))
 
-		events, err := q.ListTicketEvents(ctx, store.ListTicketEventsParams{OrgID: e.org, TicketID: t.ID, MaxEvents: 100})
+		events, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: e.org, TaskID: t.ID, MaxEvents: 100})
 		Expect(err).NotTo(HaveOccurred())
 		var payload map[string]any
 		for _, ev := range events {
@@ -183,14 +183,14 @@ var _ = Describe("Ingester", func() {
 var _ = Describe("Totals", func() {
 	BeforeEach(needDocker)
 
-	It("sums cost and tokens per run and per ticket", func(ctx SpecContext) {
+	It("sums cost and tokens per run and per task", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
-		t := e.ticket(ctx)
+		t := e.task(ctx)
 		t0 := time.Now().Add(-time.Hour)
 		r1 := e.startRun(ctx, t, 100_000, t0)
 		e.finishRun(ctx, r1.ID, t0.Add(10*time.Minute))
 		r2 := e.startRun(ctx, t, 100_000, t0.Add(20*time.Minute))
-		other := e.ticket(ctx)
+		other := e.task(ctx)
 
 		_, err := ing.Ingest(ctx, []ledger.Entry{
 			e.entry(t0.Add(time.Minute), "0.0001", 10, 20),
@@ -212,13 +212,13 @@ var _ = Describe("Totals", func() {
 		Expect(ledger.FormatUSD(byRun[r1.ID].CostUsd)).To(Equal("0.0003"))
 		Expect(ledger.FormatUSD(byRun[r2.ID].CostUsd)).To(Equal("1.50"))
 
-		tickets, err := q.SumTicketCosts(ctx, store.SumTicketCostsParams{OrgID: e.org, TicketIds: []pgtype.UUID{t.ID, other.ID}})
+		tasks, err := q.SumTaskCosts(ctx, store.SumTaskCostsParams{OrgID: e.org, TaskIds: []pgtype.UUID{t.ID, other.ID}})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(tickets).To(HaveLen(1), "a ticket without spend has no row")
-		Expect(tickets[0].TicketID).To(Equal(t.ID))
-		Expect(tickets[0].Requests).To(Equal(int64(3)))
-		Expect(ledger.FormatUSD(tickets[0].CostUsd)).To(Equal("1.5003"))
-		Expect(tickets[0].Priced).To(BeTrue())
+		Expect(tasks).To(HaveLen(1), "a task without spend has no row")
+		Expect(tasks[0].TaskID).To(Equal(t.ID))
+		Expect(tasks[0].Requests).To(Equal(int64(3)))
+		Expect(ledger.FormatUSD(tasks[0].CostUsd)).To(Equal("1.5003"))
+		Expect(tasks[0].Priced).To(BeTrue())
 	})
 })
 

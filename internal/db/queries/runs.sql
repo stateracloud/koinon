@@ -11,9 +11,9 @@
 -- name: CreateRun :one
 -- Queues a run of the agent's approved version. No row: the agent is not
 -- active.
-INSERT INTO runs (org_id, agent_id, agent_version_id, ticket_id, ready_at,
+INSERT INTO runs (org_id, agent_id, agent_version_id, task_id, ready_at,
                   max_wall_clock_seconds, max_tokens)
-SELECT a.org_id, a.id, a.active_version_id, @ticket_id, now(),
+SELECT a.org_id, a.id, a.active_version_id, @task_id, now(),
        @max_wall_clock_seconds, @max_tokens
 FROM agents a
 WHERE a.org_id = @org_id AND a.id = @agent_id AND a.status = 'active'
@@ -23,15 +23,15 @@ RETURNING *;
 SELECT * FROM runs
 WHERE org_id = @org_id AND id = @id;
 
--- name: ListRunsForTicket :many
+-- name: ListRunsForTask :many
 SELECT * FROM runs
-WHERE org_id = @org_id AND ticket_id = @ticket_id
+WHERE org_id = @org_id AND task_id = @task_id
 ORDER BY created_at, id;
 
 -- name: ClaimNextRun :one
 -- queued -> starting, or a resolved parked -> starting. Takes the oldest
 -- claimable run (by ready_at) of an active agent that has no active run and
--- whose ticket has no other owned or parked run, and
+-- whose task has no other owned or parked run, and
 -- makes the caller its owner under a new epoch. Locking the agent row with
 -- SKIP LOCKED serialises claims per agent, so concurrent claimers move on to
 -- other agents, and FIFO holds per agent. runs_one_active_per_agent backstops
@@ -188,22 +188,22 @@ WHERE org_id = @org_id AND id = @id
   AND state IN ('queued', 'starting', 'running', 'parked')
 RETURNING *;
 
--- name: CancelQueuedRunsForTicket :many
--- A ticket moved to Done cancels its queued runs (plan item A4).
+-- name: CancelQueuedRunsForTask :many
+-- A task that reaches an end state cancels its queued runs (plan item A4).
 UPDATE runs
 SET state = 'canceled',
     outcome_reason = @outcome_reason::text,
     finished_at = now(),
     ready_at = NULL
-WHERE org_id = @org_id AND ticket_id = @ticket_id AND state = 'queued'
+WHERE org_id = @org_id AND task_id = @task_id AND state = 'queued'
 RETURNING *;
 
--- name: HasQueuedRunForTicket :one
--- Whether the ticket already has a queued run, which will see every message
+-- name: HasQueuedRunForTask :one
+-- Whether the task already has a queued run, which will see every message
 -- appended before it starts (plan item A4).
 SELECT EXISTS (
     SELECT 1 FROM runs
-    WHERE org_id = @org_id AND ticket_id = @ticket_id AND state = 'queued');
+    WHERE org_id = @org_id AND task_id = @task_id AND state = 'queued');
 
 -- name: CancelOpenRunsForAgent :many
 -- Archiving an agent cancels every run it has not finished.
@@ -254,20 +254,20 @@ WHERE org_id = @org_id AND id = @id AND epoch = @epoch
 RETURNING *;
 
 -- name: SetRunPromptThrough :one
--- Records, before the prompt is sent, the ticket timeline seq through which
--- the ticket's messages are in it.
+-- Records, before the prompt is sent, the task timeline seq through which
+-- the task's messages are in it.
 UPDATE runs
 SET prompt_through_seq = @prompt_through_seq::bigint
 WHERE org_id = @org_id AND id = @id AND epoch = @epoch
   AND state IN ('starting', 'running')
 RETURNING *;
 
--- name: GetTicketPromptedThrough :one
--- The highest ticket timeline seq already sent to the harness by the ticket's
+-- name: GetTaskPromptedThrough :one
+-- The highest task timeline seq already sent to the harness by the task's
 -- other runs; messages after it are new for the next run.
 SELECT coalesce(max(prompt_through_seq), 0)::bigint AS prompted_through
 FROM runs
-WHERE org_id = @org_id AND ticket_id = @ticket_id AND id <> @run_id;
+WHERE org_id = @org_id AND task_id = @task_id AND id <> @run_id;
 
 -- name: LockRun :one
 -- Serialises a park decision (agentd) with the resolution of the run's

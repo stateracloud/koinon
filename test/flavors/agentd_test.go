@@ -48,7 +48,7 @@ func describeAgentd(f flavor) bool {
 			org     pgtype.UUID
 			user    pgtype.UUID
 			agent   store.Agent
-			ticket  store.Ticket
+			task    store.Task
 			backend *dockerBackend
 		)
 
@@ -108,7 +108,7 @@ func describeAgentd(f flavor) bool {
 				OrgID: org, AgentID: agent.ID, State: store.SandboxStateReady, HomeGeneration: "flavors-home",
 			})
 			Expect(err).NotTo(HaveOccurred())
-			ticket, err = q.CreateTicket(ctx, store.CreateTicketParams{OrgID: org, Title: "Contract", AgentID: agent.ID, CreatedBy: user})
+			task, err = q.CreateTask(ctx, store.CreateTaskParams{OrgID: org, Title: "Contract", AgentID: agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user})
 			Expect(err).NotTo(HaveOccurred())
 
 			gw = newGateway(contractScript(f))
@@ -135,13 +135,13 @@ func describeAgentd(f flavor) bool {
 			})
 		}, NodeTimeout(10*time.Minute))
 
-		runTicket := func(ctx context.Context, text string) store.Run {
-			_, err := q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-				OrgID: org, TicketID: ticket.ID, Kind: "message", ActorKind: store.TicketActorKindUser,
+		runTask := func(ctx context.Context, text string) store.Run {
+			_, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+				OrgID: org, TaskID: task.ID, Kind: "message", ActorKind: store.TaskActorKindUser,
 				ActorUserID: user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)),
 			})
 			Expect(err).NotTo(HaveOccurred())
-			r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TicketID: ticket.ID, MaxWallClockSeconds: 300, MaxTokens: 100_000})
+			r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: task.ID, MaxWallClockSeconds: 300, MaxTokens: 100_000})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() store.RunState {
 				got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})
@@ -162,10 +162,10 @@ func describeAgentd(f flavor) bool {
 			return evs
 		}
 
-		It("runs a ticket's first turn on a new session", func(ctx SpecContext) {
-			r := runTicket(ctx, helloPrompt)
+		It("runs a task's first turn on a new session", func(ctx SpecContext) {
+			r := runTask(ctx, helloPrompt)
 			Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
-			t, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: org, ID: ticket.ID})
+			t, err := q.GetTask(ctx, store.GetTaskParams{OrgID: org, ID: task.ID})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(t.HarnessSessionID.String).NotTo(BeEmpty())
 			evs := eventsOf(ctx, r)
@@ -183,8 +183,8 @@ func describeAgentd(f flavor) bool {
 			// the instructions agentd wrote in the system prompt.
 			Expect(text).To(ContainSubstring(helloReply))
 			// The end-of-turn summary is one more prompt on the same session (ADR 0051 amendment).
-			// Its reply is the ticket's note, not part of the run's reply: the turn's text is there
-			// once, and the note is stored on the ticket whichever harness wrote it.
+			// Its reply is the task's note, not part of the run's reply: the turn's text is there
+			// once, and the note is stored on the task whichever harness wrote it.
 			Expect(strings.Count(text, helloReply)).To(Equal(1), "the note is not recorded as the turn's reply")
 			Expect(t.AgentSummary.String).To(Equal(helloReply))
 			Expect(evs).To(ContainElement(WithTransform(func(e store.RunEvent) string { return e.Kind }, Equal("run.summary"))))
@@ -211,7 +211,7 @@ func describeAgentd(f flavor) bool {
 		It("loads the session on the next run, after the sandbox restarted", func(ctx SpecContext) {
 			sb.stop(ctx)
 			sb.start(context.Background())
-			r := runTicket(ctx, recallPrompt)
+			r := runTask(ctx, recallPrompt)
 			Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
 			// A harness may announce its commands after a load, so run.session need not come first.
 			Expect(eventsOf(ctx, r)).To(ContainElement(WithTransform(
@@ -237,7 +237,7 @@ func describeAgentd(f flavor) bool {
 				"sh", "while :; do "+step+"; sleep 0.1; done"))
 			Expect(sb.run(ctx, "cat", "/proc/"+pid+"/cmdline")).To(ContainSubstring("while"), "the job runs")
 
-			r := runTicket(ctx, helloPrompt)
+			r := runTask(ctx, helloPrompt)
 			Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
 			Expect(requestTools(gw)).To(Equal(before), "the run has the same tools")
 			Expect(sweptPids(eventsOf(ctx, r))).To(ContainElement(pid), "agentd ended the job before the harness started")
@@ -246,7 +246,7 @@ func describeAgentd(f flavor) bool {
 
 		It("replaces a directory the agent put at the instruction file's path, and runs", func(ctx SpecContext) {
 			sb.run(ctx, "sh", "-c", `rm -rf "$1" && mkdir -p "$1/inner"`, "sh", instructionsPath)
-			r := runTicket(ctx, helloPrompt)
+			r := runTask(ctx, helloPrompt)
 			Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
 			Expect(sb.run(ctx, "stat", "-c", "%F", instructionsPath)).To(Equal("regular file\n"))
 			Expect(sb.run(ctx, "cat", instructionsPath)).To(ContainSubstring(instructionsMarker))
@@ -256,7 +256,7 @@ func describeAgentd(f flavor) bool {
 			if f.permissionCall.Name == "" {
 				Skip(f.name + " sends no permission requests")
 			}
-			r := runTicket(ctx, permitPrompt)
+			r := runTask(ctx, permitPrompt)
 			var perms []store.RunEvent
 			for _, e := range eventsOf(ctx, r) {
 				if e.Kind == "acp.permission" {

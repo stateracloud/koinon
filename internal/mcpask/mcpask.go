@@ -272,7 +272,7 @@ func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonica
 	tool := t.Name
 	run, err := s.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: c.org.ID, AgentID: c.agent.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return toolError("this agent has no running run; tools are only available while working on a ticket")
+		return toolError("this agent has no running run; tools are only available while working on a task")
 	}
 	if err != nil {
 		s.log.Error("mcp ask: read run", "err", err)
@@ -283,7 +283,7 @@ func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonica
 		return toolError("internal error; try again later")
 	}
 	params := store.CreateApprovalRequestParams{
-		OrgID: c.org.ID, TicketID: run.TicketID, RunID: run.ID, AgentID: c.agent.ID,
+		OrgID: c.org.ID, TaskID: run.TaskID, RunID: run.ID, AgentID: c.agent.ID,
 		Connector: ConnectorID, Tool: tool, Target: Target(c.server.Name),
 		ArgsJson: string(canonical), ArgsSha256: hash(canonical), Risk: []byte(`{}`),
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
@@ -318,8 +318,8 @@ func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonica
 		if err != nil {
 			return err
 		}
-		_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-			OrgID: row.OrgID, TicketID: row.TicketID, Kind: githubtools.KindApprovalRequested, ActorKind: store.TicketActorKindAgent,
+		_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: row.OrgID, TaskID: row.TaskID, Kind: githubtools.KindApprovalRequested, ActorKind: store.TaskActorKindAgent,
 			ActorAgentID: row.AgentID, RunID: row.RunID, Payload: payload,
 		})
 		return err
@@ -378,7 +378,7 @@ func (s *Server) reply(row store.ApprovalRequest) *mcp.CallToolResult {
 func statusLine(r Result) string {
 	switch store.ApprovalStatus(r.Status) {
 	case store.ApprovalStatusPending:
-		return fmt.Sprintf("approval requested: id=%s status=pending args_sha256=%s. A human decides on the ticket; "+
+		return fmt.Sprintf("approval requested: id=%s status=pending args_sha256=%s. A human decides on the task; "+
 			"your run pauses now and resumes with the result. Do not retry or work around this call.", r.ID, r.ArgsSHA256)
 	case store.ApprovalStatusApproved:
 		return fmt.Sprintf("accepted: id=%s status=approved args_sha256=%s. Koinon executes it and your run resumes with the result.", r.ID, r.ArgsSHA256)

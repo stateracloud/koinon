@@ -36,8 +36,8 @@ FROM agents a
 WHERE a.org_id = @org_id AND a.id = @agent_id;
 
 -- name: InsertSandboxIncident :one
-INSERT INTO sandbox_incidents (org_id, agent_id, run_id, ticket_id, processes, outcome, work, work_note, saved_work_id)
-VALUES (@org_id, @agent_id, @run_id, @ticket_id, @processes, @outcome, @work, @work_note, sqlc.narg(saved_work_id))
+INSERT INTO sandbox_incidents (org_id, agent_id, run_id, task_id, processes, outcome, work, work_note, saved_work_id)
+VALUES (@org_id, @agent_id, @run_id, @task_id, @processes, @outcome, @work, @work_note, sqlc.narg(saved_work_id))
 RETURNING *;
 
 -- name: MarkAgentUnhealthy :one
@@ -53,19 +53,19 @@ SET unhealthy_at = NULL, unhealthy_reason = NULL, resumed_at = now()
 WHERE org_id = @org_id AND id = @id AND unhealthy_at IS NOT NULL
 RETURNING *;
 
--- name: ListTicketsWithParkedRunOfAgent :many
--- Tickets whose run is parked in the agent's sandbox: they resume in the new sandbox.
-SELECT DISTINCT ticket_id FROM runs
+-- name: ListTasksWithParkedRunOfAgent :many
+-- Tasks whose run is parked in the agent's sandbox: they resume in the new sandbox.
+SELECT DISTINCT task_id FROM runs
 WHERE org_id = @org_id AND agent_id = @agent_id AND state = 'parked';
 
--- name: ListTicketsWithWaitingRunOfAgent :many
--- Tickets with a queued or parked run of the agent: they wait while the agent is unhealthy.
-SELECT DISTINCT ticket_id FROM runs
+-- name: ListTasksWithWaitingRunOfAgent :many
+-- Tasks with a queued or parked run of the agent: they wait while the agent is unhealthy.
+SELECT DISTINCT task_id FROM runs
 WHERE org_id = @org_id AND agent_id = @agent_id AND state IN ('queued', 'parked');
 
 -- name: InsertSavedWork :one
-INSERT INTO saved_work (org_id, id, ticket_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, expires_at)
-VALUES (@org_id, @id, @ticket_id, @run_id, @agent_id, @repo, @base_sha, @branch, @manifest, @size_bytes, @envelope, @expires_at)
+INSERT INTO saved_work (org_id, id, task_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, envelope, expires_at)
+VALUES (@org_id, @id, @task_id, @run_id, @agent_id, @repo, @base_sha, @branch, @manifest, @size_bytes, @envelope, @expires_at)
 RETURNING *;
 
 -- name: GetSavedWork :one
@@ -74,7 +74,7 @@ WHERE org_id = @org_id AND id = @id;
 
 -- name: GetSavedWorkManifest :one
 -- Everything but the sealed files.
-SELECT org_id, id, ticket_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, status, created_at, expires_at
+SELECT org_id, id, task_id, run_id, agent_id, repo, base_sha, branch, manifest, size_bytes, status, created_at, expires_at
 FROM saved_work
 WHERE org_id = @org_id AND id = @id;
 
@@ -87,13 +87,13 @@ WHERE org_id = @org_id AND id = @id AND status = 'saved';
 -- Saved work is kept for 14 days; the sealed files go with it.
 UPDATE saved_work SET status = 'expired', envelope = NULL
 WHERE org_id = @org_id AND status = 'saved' AND expires_at < now()
-RETURNING org_id, id, ticket_id, run_id;
+RETURNING org_id, id, task_id, run_id;
 
 -- name: CreateSystemApprovalRequest :one
 -- A request Koinon makes itself (saved work to push). No row: it exists.
-INSERT INTO approval_requests (org_id, ticket_id, run_id, agent_id, connector, tool, target,
+INSERT INTO approval_requests (org_id, task_id, run_id, agent_id, connector, tool, target,
                                args_json, args_sha256, risk, decision, status, expires_at, system)
-VALUES (@org_id, @ticket_id, @run_id, @agent_id, @connector, @tool, @target,
+VALUES (@org_id, @task_id, @run_id, @agent_id, @connector, @tool, @target,
         @args_json, @args_sha256, '{}', 'ask', 'pending', @expires_at, true)
 ON CONFLICT (org_id, run_id, tool, target, args_sha256) DO NOTHING
 RETURNING *;
@@ -103,29 +103,29 @@ RETURNING *;
 UPDATE runs SET summarizing = @summarizing::boolean
 WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state = 'running';
 
--- name: SetTicketSummary :execrows
--- Stores the agent's end-of-turn summary. Fenced by the run epoch like SetTicketHarnessSession.
-UPDATE tickets t
+-- name: SetTaskSummary :execrows
+-- Stores the agent's end-of-turn summary. Fenced by the run epoch like SetTaskHarnessSession.
+UPDATE tasks t
 SET agent_summary = @summary::text, agent_summary_at = now()
 WHERE t.org_id = @org_id AND t.id = @id
   AND EXISTS (
       SELECT 1 FROM runs r
-      WHERE r.org_id = @org_id AND r.ticket_id = t.id AND r.id = @run_id
+      WHERE r.org_id = @org_id AND r.task_id = t.id AND r.id = @run_id
         AND r.epoch = @epoch AND r.state IN ('starting', 'running'));
 
 -- name: RequestSessionRestartForAgent :many
--- Activating a version with "apply to open tickets": every open ticket of the agent that has a
+-- Activating a version with "apply to open tasks": every open task of the agent that has a
 -- session starts a new one at its next run.
-UPDATE tickets
+UPDATE tasks
 SET session_restart_pending = true
-WHERE org_id = @org_id AND agent_id = @agent_id AND status <> 'done'
+WHERE org_id = @org_id AND agent_id = @agent_id AND state NOT IN ('completed', 'canceled', 'failed')
   AND harness_session_id IS NOT NULL AND NOT session_restart_pending
 RETURNING id;
 
 -- name: ListRecentAgentReplies :many
--- The agent's latest replies on the ticket, newest first.
-SELECT * FROM ticket_events
-WHERE org_id = @org_id AND ticket_id = @ticket_id AND kind = 'message' AND actor_kind = 'agent'
+-- The agent's latest replies on the task, newest first.
+SELECT * FROM task_events
+WHERE org_id = @org_id AND task_id = @task_id AND kind = 'message' AND actor_kind = 'agent'
 ORDER BY seq DESC
 LIMIT @max_rows;
 

@@ -79,7 +79,7 @@ var _ = Describe("saved work", func() {
 		Entry("no files", func(w *savedwork.Work) { w.Manifest.Files = nil }),
 	)
 
-	It("names the branch koinon/wip/<ticket>-<time>, and accepts only such names", func() {
+	It("names the branch koinon/wip/<task>-<time>, and accepts only such names", func() {
 		b := savedwork.BranchName("0192a3bc-1111-7222-8333-444455556666", time.Date(2026, 10, 24, 10, 15, 30, 0, time.UTC))
 		Expect(b).To(Equal("koinon/wip/0192a3bc-20261024T101530Z"))
 		Expect(savedwork.ValidBranch(b)).To(BeTrue())

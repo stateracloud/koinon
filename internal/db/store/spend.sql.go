@@ -13,7 +13,7 @@ import (
 
 const findRunAt = `-- name: FindRunAt :one
 
-SELECT id, ticket_id, agent_version_id FROM runs
+SELECT id, task_id, agent_version_id FROM runs
 WHERE org_id = $1 AND agent_id = $2
   AND started_at IS NOT NULL AND started_at <= $3::timestamptz
   AND (finished_at IS NULL
@@ -31,7 +31,7 @@ type FindRunAtParams struct {
 
 type FindRunAtRow struct {
 	ID             pgtype.UUID
-	TicketID       pgtype.UUID
+	TaskID         pgtype.UUID
 	AgentVersionID pgtype.UUID
 }
 
@@ -55,7 +55,7 @@ func (q *Queries) FindRunAt(ctx context.Context, arg FindRunAtParams) (FindRunAt
 		arg.GraceSeconds,
 	)
 	var i FindRunAtRow
-	err := row.Scan(&i.ID, &i.TicketID, &i.AgentVersionID)
+	err := row.Scan(&i.ID, &i.TaskID, &i.AgentVersionID)
 	return i, err
 }
 
@@ -151,7 +151,7 @@ func (q *Queries) GetOrgSpendSince(ctx context.Context, arg GetOrgSpendSincePara
 
 const insertSpendEntry = `-- name: InsertSpendEntry :one
 INSERT INTO spend_entries (
-    org_id, agent_id, run_id, ticket_id, request_id, key_id, model,
+    org_id, agent_id, run_id, task_id, request_id, key_id, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at
@@ -170,7 +170,7 @@ type InsertSpendEntryParams struct {
 	OrgID            pgtype.UUID
 	AgentID          pgtype.UUID
 	RunID            pgtype.UUID
-	TicketID         pgtype.UUID
+	TaskID           pgtype.UUID
 	RequestID        string
 	KeyID            string
 	Model            string
@@ -200,7 +200,7 @@ func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryPara
 		arg.OrgID,
 		arg.AgentID,
 		arg.RunID,
-		arg.TicketID,
+		arg.TaskID,
 		arg.RequestID,
 		arg.KeyID,
 		arg.Model,
@@ -410,8 +410,8 @@ func (q *Queries) SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]Sum
 	return items, nil
 }
 
-const sumTicketCosts = `-- name: SumTicketCosts :many
-SELECT ticket_id::uuid AS ticket_id,
+const sumTaskCosts = `-- name: SumTaskCosts :many
+SELECT task_id::uuid AS task_id,
        count(*)::bigint AS requests,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
@@ -419,17 +419,17 @@ SELECT ticket_id::uuid AS ticket_id,
        bool_and(priced) AS priced,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
 FROM spend_entries
-WHERE org_id = $1 AND ticket_id = ANY($2::uuid[])
-GROUP BY ticket_id
+WHERE org_id = $1 AND task_id = ANY($2::uuid[])
+GROUP BY task_id
 `
 
-type SumTicketCostsParams struct {
-	OrgID     pgtype.UUID
-	TicketIds []pgtype.UUID
+type SumTaskCostsParams struct {
+	OrgID   pgtype.UUID
+	TaskIds []pgtype.UUID
 }
 
-type SumTicketCostsRow struct {
-	TicketID          pgtype.UUID
+type SumTaskCostsRow struct {
+	TaskID            pgtype.UUID
 	Requests          int64
 	InputTokens       int64
 	OutputTokens      int64
@@ -438,18 +438,18 @@ type SumTicketCostsRow struct {
 	EstimatedRequests int64
 }
 
-// Totals per ticket, for the tickets in @ticket_ids that have spend.
-func (q *Queries) SumTicketCosts(ctx context.Context, arg SumTicketCostsParams) ([]SumTicketCostsRow, error) {
-	rows, err := q.db.Query(ctx, sumTicketCosts, arg.OrgID, arg.TicketIds)
+// Totals per task, for the tasks in @task_ids that have spend.
+func (q *Queries) SumTaskCosts(ctx context.Context, arg SumTaskCostsParams) ([]SumTaskCostsRow, error) {
+	rows, err := q.db.Query(ctx, sumTaskCosts, arg.OrgID, arg.TaskIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []SumTicketCostsRow
+	var items []SumTaskCostsRow
 	for rows.Next() {
-		var i SumTicketCostsRow
+		var i SumTaskCostsRow
 		if err := rows.Scan(
-			&i.TicketID,
+			&i.TaskID,
 			&i.Requests,
 			&i.InputTokens,
 			&i.OutputTokens,

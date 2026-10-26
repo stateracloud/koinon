@@ -42,6 +42,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
+	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
 	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
@@ -133,6 +135,37 @@ var isolationCases = map[string]isolationCase{
 			return c.tickets.MoveTicket(ctx, &ticketv1alpha1.MoveTicketRequest{
 				OrgId: org, TicketId: f.ticket.GetId(), Status: ticketv1alpha1.TicketStatus_TICKET_STATUS_DONE,
 			})
+		},
+	},
+
+	taskv1alpha1connect.TaskServiceCreateTaskProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+				OrgId: org, AgentId: f.agent.GetId(), Title: "intruder",
+			})
+		},
+	},
+	taskv1alpha1connect.TaskServiceListTasksProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.tasks.ListTasks(ctx, &taskv1alpha1.ListTasksRequest{OrgId: org})
+		},
+	},
+	taskv1alpha1connect.TaskServiceGetTaskProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: f.ticket.GetId()})
+		},
+	},
+	taskv1alpha1connect.TaskServiceAppendMessageProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{
+				OrgId: org, TaskId: f.ticket.GetId(), Text: "intruder",
+			})
+		},
+	},
+	taskv1alpha1connect.TaskServiceCancelTaskProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.tasks.CancelTask(ctx, &taskv1alpha1.CancelTaskRequest{OrgId: org, TaskId: f.ticket.GetId()})
 		},
 	},
 
@@ -545,9 +578,9 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM agents WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM agents WHERE org_id = $1 AND status = 'active'`, org),
 		count(ctx, e, `SELECT count(*) FROM agents WHERE org_id = $1 AND status = 'draft'`, org),
-		count(ctx, e, `SELECT count(*) FROM tickets WHERE org_id = $1`, org),
-		count(ctx, e, `SELECT count(*) FROM tickets WHERE org_id = $1 AND status = 'todo'`, org),
-		count(ctx, e, `SELECT count(*) FROM ticket_events WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM tasks WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM tasks WHERE org_id = $1 AND state = 'submitted'`, org),
+		count(ctx, e, `SELECT count(*) FROM task_events WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM runs WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM runs WHERE org_id = $1 AND state = 'queued'`, org),
 		count(ctx, e, `SELECT count(*) FROM run_events WHERE org_id = $1`, org),

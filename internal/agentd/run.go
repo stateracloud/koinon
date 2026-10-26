@@ -306,9 +306,9 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.dbErr(ctx, "load agent version", err)
 	}
-	ticket, err := r.q.GetTicket(fctx, store.GetTicketParams{OrgID: r.run.OrgID, ID: r.run.TicketID})
+	task, err := r.q.GetTask(fctx, store.GetTaskParams{OrgID: r.run.OrgID, ID: r.run.TaskID})
 	if err != nil {
-		return r.dbErr(ctx, "load ticket", err)
+		return r.dbErr(ctx, "load task", err)
 	}
 	// An unreadable config would leave the run without its instructions (and model): it fails
 	// before anything starts.
@@ -391,19 +391,19 @@ func (r *runner) execute(ctx context.Context) error {
 		}
 	}
 	// The harness keeps its sessions in the sandbox's home volume, which OpenShell deletes with
-	// the sandbox. The ticket's session is loaded only in the home it was created in; after a
+	// the sandbox. The task's session is loaded only in the home it was created in; after a
 	// recreated sandbox (or for a session recorded before generations existed) the run starts a
 	// new session instead of failing on session/load.
 	//
-	// A ticket whose agent version was activated with "apply to open tickets" starts a new session
+	// A task whose agent version was activated with "apply to open tasks" starts a new session
 	// too, with a handoff (handoff.go); that takes precedence over a reset, whose prompt carries no
 	// summary.
-	restart := ticket.HarnessSessionID.Valid && ticket.SessionRestartPending
-	loaded := ticket.HarnessSessionID.Valid && !restart && sameHome(ticket.HarnessSessionGeneration, sb.HomeGeneration)
-	reset := ticket.HarnessSessionID.Valid && !loaded && !restart
+	restart := task.HarnessSessionID.Valid && task.SessionRestartPending
+	loaded := task.HarnessSessionID.Valid && !restart && sameHome(task.HarnessSessionGeneration, sb.HomeGeneration)
+	reset := task.HarnessSessionID.Valid && !loaded && !restart
 	cwd := cfg.SessionCwd
 	if loaded {
-		cwd = ticket.HarnessSessionCwd.String
+		cwd = task.HarnessSessionCwd.String
 	}
 	if err := r.mkdir(fctx, workspace, sandbox, cwd); err != nil {
 		return r.execErr(ctx, "prepare the session directory", err)
@@ -445,9 +445,9 @@ func (r *runner) execute(ctx context.Context) error {
 	var session acp.SessionID
 	if loaded {
 		if !init.AgentCapabilities.LoadSession {
-			return &failure{reason: "the harness cannot load the ticket's session (no loadSession capability)"}
+			return &failure{reason: "the harness cannot load the task's session (no loadSession capability)"}
 		}
-		session = acp.SessionID(ticket.HarnessSessionID.String)
+		session = acp.SessionID(task.HarnessSessionID.String)
 		// The harness replays the session's history as updates before it answers. They are
 		// already recorded (or belong to earlier runs), so they are not written again.
 		r.replaying.Store(true)
@@ -459,13 +459,13 @@ func (r *runner) execute(ctx context.Context) error {
 	} else {
 		if reset {
 			log.Info("the sandbox home was replaced; starting a new session",
-				"previous_session", ticket.HarnessSessionID.String,
-				"session_generation", ticket.HarnessSessionGeneration.String, "home_generation", sb.HomeGeneration.String)
+				"previous_session", task.HarnessSessionID.String,
+				"session_generation", task.HarnessSessionGeneration.String, "home_generation", sb.HomeGeneration.String)
 		}
 		if session, err = conn.NewSession(fctx, cwd); err != nil {
 			return harnessErr("session/new", err)
 		}
-		if err := r.storeSession(fctx, ticket, session, cwd, sb.HomeGeneration, reset, restart); err != nil {
+		if err := r.storeSession(fctx, task, session, cwd, sb.HomeGeneration, reset, restart); err != nil {
 			return r.dbErr(ctx, "store the session", err)
 		}
 	}
@@ -501,7 +501,7 @@ func (r *runner) execute(ctx context.Context) error {
 		return r.dbErr(ctx, "record the session", err)
 	}
 
-	text, through, err := r.prompt(fctx, ticket, loaded, reset, restart)
+	text, through, err := r.prompt(fctx, task, loaded, reset, restart)
 	if err != nil {
 		return r.dbErr(ctx, "build the prompt", err)
 	}
@@ -524,7 +524,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if !errors.Is(err, errEndTurn) {
 		return err
 	}
-	// The agent's note for the ticket, before the harness is let go.
+	// The agent's note for the task, before the harness is let go.
 	r.summarize(ctx, conn, session)
 	closeHarness()
 	sweepOnce()
@@ -532,11 +532,11 @@ func (r *runner) execute(ctx context.Context) error {
 	return r.endTurn(ctx)
 }
 
-// kindSessionReset is the ticket event of a run that started a new session because the ticket's
+// kindSessionReset is the task event of a run that started a new session because the task's
 // session was stored in a home volume the sandbox no longer has.
 const kindSessionReset = "run.session_reset"
 
-// sessionResetMessage is the session reset event's message, for the ticket's timeline.
+// sessionResetMessage is the session reset event's message, for the task's timeline.
 const sessionResetMessage = "The agent's workspace was reset, so this run starts a new session."
 
 // sameHome reports whether a session stored with generation lives in the sandbox's current home.
@@ -545,13 +545,13 @@ func sameHome(generation, home pgtype.Text) bool {
 	return generation.Valid && home.Valid && generation.String == home.String
 }
 
-// storeSession records a new session on the ticket with the home generation it lives in and,
-// when it replaces a session the home lost, a ticket event that says so.
-func (r *runner) storeSession(ctx context.Context, ticket store.Ticket, session acp.SessionID, cwd string, home pgtype.Text, reset, restart bool) error {
+// storeSession records a new session on the task with the home generation it lives in and,
+// when it replaces a session the home lost, a task event that says so.
+func (r *runner) storeSession(ctx context.Context, task store.Task, session acp.SessionID, cwd string, home pgtype.Text, reset, restart bool) error {
 	return pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
-		if _, err := q.SetTicketHarnessSession(ctx, store.SetTicketHarnessSessionParams{
-			OrgID: r.run.OrgID, ID: ticket.ID, RunID: r.run.ID, Epoch: r.run.Epoch,
+		if _, err := q.SetTaskHarnessSession(ctx, store.SetTaskHarnessSessionParams{
+			OrgID: r.run.OrgID, ID: task.ID, RunID: r.run.ID, Epoch: r.run.Epoch,
 			HarnessSessionID: string(session), HarnessSessionCwd: cwd, HarnessSessionGeneration: home,
 		}); err != nil {
 			return err
@@ -564,14 +564,14 @@ func (r *runner) storeSession(ctx context.Context, ticket store.Ticket, session 
 			return nil
 		}
 		payload, err := json.Marshal(map[string]string{
-			"message": message, "previousSessionId": ticket.HarnessSessionID.String, "sessionId": string(session),
+			"message": message, "previousSessionId": task.HarnessSessionID.String, "sessionId": string(session),
 		})
 		if err != nil {
 			return err
 		}
-		_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-			OrgID: r.run.OrgID, TicketID: ticket.ID, RunID: r.run.ID,
-			Kind: kind, ActorKind: store.TicketActorKindSystem, Payload: payload,
+		_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: r.run.OrgID, TaskID: task.ID, RunID: r.run.ID,
+			Kind: kind, ActorKind: store.TaskActorKindSystem, Payload: payload,
 		})
 		return err
 	})
@@ -706,12 +706,12 @@ func (r *runner) interrupted(ctx context.Context, reason string, exit *int, stde
 	}
 }
 
-// prompt builds the turn's prompt from the ticket's messages that no earlier run sent, and
+// prompt builds the turn's prompt from the task's messages that no earlier run sent, and
 // returns it with the timeline seq it covers. A run resumed after a takeover was already
 // prompted: it gets the resume note plus anything that arrived since. A new session that
-// replaces one the sandbox home lost (reset) knows nothing of the ticket, so it gets the
-// ticket's title and every message, plus the run's approval outcomes not sent yet.
-func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded, reset, restart bool) (string, int64, error) {
+// replaces one the sandbox home lost (reset) knows nothing of the task, so it gets the
+// task's title and every message, plus the run's approval outcomes not sent yet.
+func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, restart bool) (string, int64, error) {
 	resumed := r.run.PromptThroughSeq.Valid
 	after := r.run.PromptThroughSeq.Int64
 	switch {
@@ -719,15 +719,15 @@ func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded, reset,
 		after = 0
 	case !resumed:
 		var err error
-		after, err = r.q.GetTicketPromptedThrough(ctx, store.GetTicketPromptedThroughParams{
-			OrgID: r.run.OrgID, TicketID: ticket.ID, RunID: r.run.ID,
+		after, err = r.q.GetTaskPromptedThrough(ctx, store.GetTaskPromptedThroughParams{
+			OrgID: r.run.OrgID, TaskID: task.ID, RunID: r.run.ID,
 		})
 		if err != nil {
 			return "", 0, err
 		}
 	}
-	msgs, err := r.q.ListTicketMessagesAfter(ctx, store.ListTicketMessagesAfterParams{
-		OrgID: r.run.OrgID, TicketID: ticket.ID, AfterSeq: after,
+	msgs, err := r.q.ListTaskMessagesAfter(ctx, store.ListTaskMessagesAfterParams{
+		OrgID: r.run.OrgID, TaskID: task.ID, AfterSeq: after,
 	})
 	if err != nil {
 		return "", 0, err
@@ -744,11 +744,11 @@ func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded, reset,
 		}
 	}
 	if restart {
-		return r.handoffPrompt(ctx, ticket, outcomes, notice)
+		return r.handoffPrompt(ctx, task, outcomes, notice)
 	}
 	switch {
 	case reset:
-		parts = append(parts, "Ticket: "+ticket.Title)
+		parts = append(parts, "Task: "+task.Title)
 		if notice != "" {
 			parts = append(parts, notice)
 		}
@@ -759,7 +759,7 @@ func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded, reset,
 	case resumed:
 		parts = append(parts, resumeNote+outcomes)
 	case !loaded:
-		parts = append(parts, "Ticket: "+ticket.Title)
+		parts = append(parts, "Task: "+task.Title)
 		if notice != "" {
 			parts = append(parts, notice)
 		}
@@ -780,7 +780,7 @@ func (r *runner) prompt(ctx context.Context, ticket store.Ticket, loaded, reset,
 	// A reset reads from the start; the seq it covers never goes back.
 	through = max(through, r.run.PromptThroughSeq.Int64)
 	if len(parts) == 0 {
-		parts = append(parts, "Continue with the ticket.")
+		parts = append(parts, "Continue with the task.")
 	}
 	return strings.Join(parts, "\n\n"), through, nil
 }
@@ -833,8 +833,8 @@ func (r *runner) recordRaw(ctx context.Context, kind string, payload []byte) err
 	}
 }
 
-// finish ends the run as its owner, with a closing run event and a ticket event, in one
-// transaction. On success the ticket event is the agent's reply.
+// finish ends the run as its owner, with a closing run event and a task event, in one
+// transaction. On success the task event is the agent's reply.
 func (r *runner) finish(ctx context.Context, outcome store.RunState, reason string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -869,14 +869,14 @@ func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outc
 	if outcome == store.RunStateSucceeded {
 		return r.postReply(ctx, q)
 	}
-	_, err := q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-		OrgID: r.run.OrgID, TicketID: r.run.TicketID, RunID: r.run.ID,
-		Kind: "run." + string(outcome), ActorKind: store.TicketActorKindSystem, Payload: payload,
+	_, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+		OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
+		Kind: "run." + string(outcome), ActorKind: store.TaskActorKindSystem, Payload: payload,
 	})
 	return err
 }
 
-// postReply puts the agent's reply since the run's last park on the ticket, if it said
+// postReply puts the agent's reply since the run's last park on the task, if it said
 // anything.
 func (r *runner) postReply(ctx context.Context, q *store.Queries) error {
 	reply, err := r.reply(ctx, q)
@@ -884,9 +884,9 @@ func (r *runner) postReply(ctx context.Context, q *store.Queries) error {
 		return err
 	}
 	text, _ := json.Marshal(map[string]string{"text": reply})
-	_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-		OrgID: r.run.OrgID, TicketID: r.run.TicketID, RunID: r.run.ID,
-		Kind: "message", ActorKind: store.TicketActorKindAgent, ActorAgentID: r.run.AgentID, Payload: text,
+	_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+		OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
+		Kind: "message", ActorKind: store.TaskActorKindAgent, ActorAgentID: r.run.AgentID, Payload: text,
 	})
 	return err
 }
@@ -980,7 +980,7 @@ type handler struct{ r *runner }
 
 func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
 	if h.r.summaryUpdate(n) {
-		return nil // the summary prompt's reply is the ticket's note, not a run event
+		return nil // the summary prompt's reply is the task's note, not a run event
 	}
 	if n.Update.AvailableCommandsUpdate != nil {
 		// Harness state, not part of the run's timeline: kept for waitCommand only.

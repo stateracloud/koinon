@@ -165,7 +165,7 @@ func (rc *Receiver) store(ctx context.Context, org, runID pgtype.UUID, epoch int
 	if err != nil {
 		return UploadResult{}, err
 	}
-	branch := BranchName(run.TicketID.String(), rc.now())
+	branch := BranchName(run.TaskID.String(), rc.now())
 	if n > 1 {
 		branch += "-" + strconv.Itoa(n)
 	}
@@ -175,13 +175,13 @@ func (rc *Receiver) store(ctx context.Context, org, runID pgtype.UUID, epoch int
 	err = pgx.BeginFunc(ctx, rc.pool, func(tx pgx.Tx) error {
 		q := rc.q.WithTx(tx)
 		if _, err := q.InsertSavedWork(ctx, store.InsertSavedWorkParams{
-			OrgID: org, ID: id, TicketID: run.TicketID, RunID: run.ID, AgentID: run.AgentID, Repo: work.Manifest.Repo,
+			OrgID: org, ID: id, TaskID: run.TaskID, RunID: run.ID, AgentID: run.AgentID, Repo: work.Manifest.Repo,
 			BaseSha: work.Manifest.Base, Branch: branch, Manifest: manifest, SizeBytes: work.Manifest.Bytes(), Envelope: envJSON, ExpiresAt: expires,
 		}); err != nil {
 			return err
 		}
 		approval, err = q.CreateSystemApprovalRequest(ctx, store.CreateSystemApprovalRequestParams{
-			OrgID: org, TicketID: run.TicketID, RunID: run.ID, AgentID: run.AgentID, Connector: connectors.GitHubID, Tool: ToolPush,
+			OrgID: org, TaskID: run.TaskID, RunID: run.ID, AgentID: run.AgentID, Connector: connectors.GitHubID, Tool: ToolPush,
 			Target: connectors.GitHubID + ":" + work.Manifest.Repo, ArgsJson: args, ArgsSha256: BundleHash([]byte(args)), ExpiresAt: expires,
 		})
 		if err != nil {
@@ -194,9 +194,9 @@ func (rc *Receiver) store(ctx context.Context, org, runID pgtype.UUID, epoch int
 		if err != nil {
 			return err
 		}
-		_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-			OrgID: org, TicketID: run.TicketID, RunID: run.ID, Kind: githubtools.KindApprovalRequested,
-			ActorKind: store.TicketActorKindSystem, Payload: payload,
+		_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: org, TaskID: run.TaskID, RunID: run.ID, Kind: githubtools.KindApprovalRequested,
+			ActorKind: store.TaskActorKindSystem, Payload: payload,
 		})
 		return err
 	})

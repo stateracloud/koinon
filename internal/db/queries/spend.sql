@@ -12,7 +12,7 @@
 -- run per agent is owned at a time (ADR 0009), so the latest start wins when a
 -- parked run's window overlaps a later run. The grace covers a response that
 -- completes just after its run was canceled (for example by the token cap).
-SELECT id, ticket_id, agent_version_id FROM runs
+SELECT id, task_id, agent_version_id FROM runs
 WHERE org_id = @org_id AND agent_id = @agent_id
   AND started_at IS NOT NULL AND started_at <= sqlc.arg(at)::timestamptz
   AND (finished_at IS NULL
@@ -26,12 +26,12 @@ LIMIT 1;
 -- own computation from the raw usage and the dated price; gateway_cost_usd is
 -- what agentgateway logged (NULL when it could not price the request).
 INSERT INTO spend_entries (
-    org_id, agent_id, run_id, ticket_id, request_id, key_id, model,
+    org_id, agent_id, run_id, task_id, request_id, key_id, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at
 ) VALUES (
-    @org_id, @agent_id, sqlc.narg(run_id), sqlc.narg(ticket_id), @request_id, @key_id, @model,
+    @org_id, @agent_id, sqlc.narg(run_id), sqlc.narg(task_id), @request_id, @key_id, @model,
     @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens, @reasoning_tokens,
     (sqlc.arg(cost_usd)::text)::numeric, (sqlc.narg(gateway_cost_usd)::text)::numeric,
     sqlc.narg(price_ref), @priced, @estimated, sqlc.narg(estimate)::jsonb, @cost_flagged,
@@ -59,9 +59,9 @@ FROM spend_entries
 WHERE org_id = @org_id AND run_id = ANY(@run_ids::uuid[])
 GROUP BY run_id;
 
--- name: SumTicketCosts :many
--- Totals per ticket, for the tickets in @ticket_ids that have spend.
-SELECT ticket_id::uuid AS ticket_id,
+-- name: SumTaskCosts :many
+-- Totals per task, for the tasks in @task_ids that have spend.
+SELECT task_id::uuid AS task_id,
        count(*)::bigint AS requests,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
@@ -69,8 +69,8 @@ SELECT ticket_id::uuid AS ticket_id,
        bool_and(priced) AS priced,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
 FROM spend_entries
-WHERE org_id = @org_id AND ticket_id = ANY(@ticket_ids::uuid[])
-GROUP BY ticket_id;
+WHERE org_id = @org_id AND task_id = ANY(@task_ids::uuid[])
+GROUP BY task_id;
 
 -- name: GetOrgSpendSince :one
 -- An org's recorded USD spend since @since (the start of the calendar month in UTC), for its

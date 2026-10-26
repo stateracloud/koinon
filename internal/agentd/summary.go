@@ -5,15 +5,15 @@ package agentd
 // The end-of-turn summary (plan item AG1; ADR 0051 amendment 2026-10-24).
 //
 // When a turn ends, agentd sends the agent one more prompt on the same session and asks for a
-// short note of where things stand and what comes next. The note is stored on the ticket
+// short note of where things stand and what comes next. The note is stored on the task
 // ("Agent's notes") and is what a fresh session starts from when a new agent version is applied
-// to open tickets (handoff.go). It is a normal model call through the gateway, so the ledger
+// to open tasks (handoff.go). It is a normal model call through the gateway, so the ledger
 // charges it to the run's budget like the turn itself.
 //
 // The prompt must change nothing:
 //
 //   - the reply is not a timeline message: the agent's message chunks of the summary prompt are
-//     collected here and never recorded as run events, which is what the ticket's reply is built
+//     collected here and never recorded as run events, which is what the task's reply is built
 //     from;
 //   - tools are refused three ways: the prompt says not to use any (harness-local tools such as a shell
 //     or file edits do take effect, so it says so); permission requests during
@@ -43,7 +43,7 @@ const (
 )
 
 // summaryPrompt is the extra prompt. It starts with a marker tests and logs can recognise.
-const summaryPrompt = "[Koinon] Your turn is over. Write a short note to your future self about this ticket, " +
+const summaryPrompt = "[Koinon] Your turn is over. Write a short note to your future self about this task, " +
 	"for use if your session is restarted: where things stand, what you decided and why, and the next steps. " +
 	"Answer with the note only, in plain text, at most 1500 words. Do not use any tool at all: no shell " +
 	"commands, no file edits, no searches, no calls to Koinon or other servers. Tools that run inside your " +
@@ -68,7 +68,7 @@ func truncateSummary(s string) string {
 	return strings.TrimSpace(s[:cut]) + summaryTruncated
 }
 
-// summarize asks the agent for its note and stores it on the ticket. It never fails the run.
+// summarize asks the agent for its note and stores it on the task. It never fails the run.
 func (r *runner) summarize(ctx context.Context, conn *acp.Conn, session acp.SessionID) {
 	if r.isFenced() || ctx.Err() != nil {
 		return
@@ -136,8 +136,8 @@ func (r *runner) summarize(ctx context.Context, conn *acp.Conn, session acp.Sess
 		r.noteSummary("run.summary_failed", map[string]any{"reason": "the agent wrote nothing"})
 	default:
 		out := truncateSummary(text)
-		rows, err := r.q.SetTicketSummary(ctx, store.SetTicketSummaryParams{
-			OrgID: r.run.OrgID, ID: r.run.TicketID, RunID: r.run.ID, Epoch: r.run.Epoch, Summary: out,
+		rows, err := r.q.SetTaskSummary(ctx, store.SetTaskSummaryParams{
+			OrgID: r.run.OrgID, ID: r.run.TaskID, RunID: r.run.ID, Epoch: r.run.Epoch, Summary: out,
 		})
 		if err != nil || rows == 0 {
 			r.log.Warn("storing the summary failed", "err", err)
