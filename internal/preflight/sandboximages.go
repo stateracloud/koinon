@@ -24,10 +24,10 @@ const (
 
 var (
 	// image_pull_secrets = ["a", "b"] under [openshell.drivers.kubernetes]. The keys are unique in the
-	// file, so no TOML parser is needed (and none is a dependency).
-	pullSecretsKey = regexp.MustCompile(`image_pull_secrets\s*=\s*\[([^\]]*)\]`)
-	supervisorKey  = regexp.MustCompile(`supervisor_image\s*=\s*"([^"]*)"`)
-	quotedString   = regexp.MustCompile(`"([^"]*)"`)
+	// file, so no TOML parser is needed (and none is a dependency). Keys are anchored to a line start.
+	pullSecretsKey = regexp.MustCompile(`(?m)^\s*image_pull_secrets\s*=\s*\[([^\]]*)\]`)
+	supervisorKey  = regexp.MustCompile(`(?m)^\s*supervisor_image\s*=\s*(?:"([^"]*)"|'([^']*)')`)
+	quotedString   = regexp.MustCompile(`"([^"]*)"|'([^']*)'`)
 )
 
 const (
@@ -41,26 +41,42 @@ type gatewayImages struct {
 	supervisorImage string
 }
 
-// parseGatewayConfig reads the two settings out of the gateway.toml text. Comment lines are
-// ignored.
+// stripComment cuts a line at the first # that is outside a basic ("...") or literal ('...') string.
+func stripComment(line string) string {
+	var quote rune
+	for i, r := range line {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '"' || r == '\'':
+			quote = r
+		case r == '#':
+			return line[:i]
+		}
+	}
+	return line
+}
+
+// parseGatewayConfig reads the two settings out of the gateway.toml text. Comments are ignored,
+// whole-line or trailing, and so are # inside strings.
 func parseGatewayConfig(toml string) gatewayImages {
 	var kept []string
 	for line := range strings.SplitSeq(toml, "\n") {
-		if !strings.HasPrefix(strings.TrimSpace(line), "#") {
-			kept = append(kept, line)
-		}
+		kept = append(kept, stripComment(line))
 	}
 	text := strings.Join(kept, "\n")
 	var g gatewayImages
 	if m := pullSecretsKey.FindStringSubmatch(text); m != nil {
 		for _, q := range quotedString.FindAllStringSubmatch(m[1], -1) {
-			if q[1] != "" {
-				g.pullSecrets = append(g.pullSecrets, q[1])
+			if name := q[1] + q[2]; name != "" {
+				g.pullSecrets = append(g.pullSecrets, name)
 			}
 		}
 	}
 	if m := supervisorKey.FindStringSubmatch(text); m != nil {
-		g.supervisorImage = m[1]
+		g.supervisorImage = m[1] + m[2]
 	}
 	return g
 }
