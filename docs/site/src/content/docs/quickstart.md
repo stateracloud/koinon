@@ -243,10 +243,13 @@ Argo CD runs it as a PreSync hook and Flux's helm-controller as a Helm hook. The
 ConfigMap is created by the reconciler, so a sync never resets it. Syncing an unchanged release
 changes no password and no gateway config.
 
-One gap remains for Argo CD: it renders every sync as an install, so in `cnpg` mode the database
-migration is always the install-time Job and an upgrade does not run it as a hook first
-([#118](https://github.com/stateracloud/koinon/issues/118)). Flux's helm-controller runs real
-installs and upgrades and is not affected.
+Argo CD renders every sync as an install, so the database migration cannot be a Helm hook there.
+The chart marks it for Argo as a Sync hook in sync wave 1, recreated on every sync, and puts the
+koinon Deployments in wave 2. A sync therefore runs the preflight and the password Job (PreSync),
+brings up the database, runs the migration, and only then rolls out the new pods. Argo needs
+nothing from you: use the chart as it is, with Argo's Helm source. A sync that changes nothing reruns
+the migration, which does nothing; the Job shows in the Application as a hook.
+Flux's helm-controller runs real installs and upgrades and uses the Helm hooks.
 
 To manage the passwords yourself, set `postgres.cnpg.existingSecrets.<role>` (Secrets with the keys
 `username` and `password`, type `kubernetes.io/basic-auth`) and `bootstrapAdmin.existingSecret`. With
