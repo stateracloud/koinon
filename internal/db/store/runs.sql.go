@@ -329,9 +329,13 @@ WITH next AS (
     JOIN agents a ON a.org_id = r.org_id AND a.id = r.agent_id
     WHERE r.org_id = $3
       AND r.ready_at IS NOT NULL
-      -- The claim conditions (active agent, not unhealthy, no active run of the agent, no other
-      -- run of the ticket starting, running or parked) live in run_claimable, which
-      -- GetAgentRunActivity shares for has_demand.
+      -- Active and healthy are repeated inline on the row locked below: after waiting for a lock,
+      -- Postgres re-checks the quals on the locked rows against their latest version (EvalPlanQual),
+      -- while run_claimable reads its own snapshot and would not see a concurrent change.
+      AND a.status = 'active'
+      AND a.unhealthy_at IS NULL
+      -- The full claim conditions live in run_claimable, which GetAgentRunActivity shares for
+      -- has_demand. It is evaluated per candidate run, in ready_at order, as the planner reaches it.
       AND run_claimable(r.org_id, r.id)
     ORDER BY r.ready_at, r.id
     LIMIT 1
