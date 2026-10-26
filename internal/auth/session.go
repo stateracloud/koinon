@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -185,7 +186,49 @@ func (s *Service) createSession(ctx context.Context, q *store.Queries, userID pg
 		IdleExpiresAt: ts(now.Add(s.cfg.SessionIdleTimeout)),
 		ExpiresAt:     ts(now.Add(s.cfg.SessionMaxLifetime)),
 	})
-	return token, sess, err
+	if err != nil {
+		return "", store.Session{}, err
+	}
+	// A login is audited in the same transaction as its session. The event sits in the user's
+	// personal org, the one org every user has. It carries the method, never a password or token.
+	user, err := q.GetActiveUser(ctx, userID)
+	if err != nil {
+		return "", store.Session{}, fmt.Errorf("load user: %w", err)
+	}
+	if err := audit.RecordErr(ctx, q, audit.Event{
+		Org: user.PersonalOrgID, Actor: audit.User(userID), Action: "auth.login", TargetKind: "user", TargetID: userID.String(),
+		After: map[string]any{"method": string(method)},
+	}); err != nil {
+		return "", store.Session{}, err
+	}
+	return token, sess, nil
+}
+
+// logout revokes the end of the session that token names, if it was still live.
+func (s *Service) logout(ctx context.Context, token string) error {
+	if token == "" {
+		return nil
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		uid, err := q.RevokeSessionReturningUser(ctx, store.RevokeSessionReturningUserParams{Now: ts(s.now()), TokenHash: hashToken(token)})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // expired, revoked or unknown: nothing ended now
+		}
+		if err != nil {
+			return err
+		}
+		user, err := q.GetActiveUser(ctx, uid)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return audit.RecordErr(ctx, q, audit.Event{
+			Org: user.PersonalOrgID, Actor: audit.User(uid), Action: "auth.logout", TargetKind: "user", TargetID: uid.String(),
+		})
+	})
 }
 
 // Authenticate resolves a session token into a Principal. It extends the

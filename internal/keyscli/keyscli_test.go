@@ -61,14 +61,13 @@ var _ = Describe("koinon-api keys", func() {
 	}
 
 	BeforeEach(func(ctx SpecContext) {
-		// Every spec starts with no values, so counts are exact. (TRUNCATE is the owner's;
-		// the append-only trigger covers UPDATE and DELETE of audit_events only.)
-		_, err := pool.Exec(ctx, `TRUNCATE orgs CASCADE`)
-		Expect(err).NotTo(HaveOccurred())
+		// Every spec starts with no values, so counts are exact. (The audit log refuses TRUNCATE,
+		// so pgtest runs it with triggers off.)
+		pgtest.TruncateOrgs(ctx, pool)
 		now = time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 		kube = fake.NewClientset()
 		first := "kek-20260101-aaaa"
-		_, err = kube.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
+		_, err := kube.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "koinon-kek", Namespace: ns},
 			Data: map[string][]byte{
 				first:    secretstore.EncodeKey(newKey()),
@@ -261,16 +260,14 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(list.Items).To(BeEmpty(), "nothing was created")
 
 		By("an MCP server credential alone also counts")
-		_, err = pool.Exec(ctx, `TRUNCATE orgs CASCADE`)
-		Expect(err).NotTo(HaveOccurred())
+		pgtest.TruncateOrgs(ctx, pool)
 		org, user, _ = pgtest.NewOrg(ctx, pool)
 		seedMCP(ctx)
 		_, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now, used)
 		Expect(err).To(MatchError(keyscli.ErrKEKMissing))
 
 		By("with no encrypted value yet, a fresh install creates it")
-		_, err = pool.Exec(ctx, `TRUNCATE orgs CASCADE`)
-		Expect(err).NotTo(HaveOccurred())
+		pgtest.TruncateOrgs(ctx, pool)
 		created, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now, used)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(created).To(BeTrue())

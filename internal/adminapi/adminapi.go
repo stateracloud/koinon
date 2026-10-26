@@ -209,6 +209,8 @@ func (s *Server) problem(err error) (int, Error) {
 		return set(http.StatusBadRequest, InvalidRequest, pin.Msg)
 	case errors.As(err, &bin):
 		return set(http.StatusBadRequest, InvalidRequest, bin.Msg)
+	case errors.Is(err, audit.ErrBadFilter):
+		return set(http.StatusBadRequest, InvalidRequest, err.Error())
 	case errors.Is(err, budget.ErrForbidden):
 		return set(http.StatusForbidden, PermissionDenied, err.Error())
 	case errors.Is(err, prices.ErrNotFound), errors.Is(err, budget.ErrNotFound):
