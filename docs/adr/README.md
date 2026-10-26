@@ -49,7 +49,7 @@ are in [0046](0046-adr-conventions.md).
 | [0032](0032-agent-home-checkpoints.md) | Agent home | Accepted |
 | [0033](0033-file-based-memory.md) | Memory | Accepted |
 | [0034](0034-project-identity.md) | Identity (repo, module, domain) | Accepted |
-| [0035](0035-v01-flavors.md) | v0.1 flavors | Accepted |
+| [0035](0035-v01-flavors.md) | v0.1 flavors | Accepted, amended by 0059 |
 | [0036](0036-v01-demo.md) | v0.1 demo | Accepted, amended by 0049 |
 | [0037](0037-tooling.md) | Tooling | Accepted |
 | [0038](0038-governance.md) | Governance | Accepted |
@@ -67,9 +67,10 @@ are in [0046](0046-adr-conventions.md).
 | [0050](0050-spend-ledger-ingestion-and-net-limits.md) | Spend ledger ingestion and net limits | Proposed, amended by 0056 |
 | [0051](0051-session-home-generations.md) | Session home generations | Accepted, amended by 0054 and 2026-10-23, 2026-10-24 |
 | [0052](0052-opencode-v2-flavor.md) | OpenCode flavor on OpenCode v2 | Accepted |
-| [0053](0053-hermes-context-file-patch.md) | Hermes context-file build patch: redo on every upgrade, with a guard test | Accepted |
+| [0053](0053-hermes-context-file-patch.md) | Hermes context-file build patch: redo on every upgrade, with a guard test | Superseded by 0059 |
 | [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted, amended 2026-10-24 |
 | [0055](0055-chat-as-its-own-object.md) | Chat is its own object | Accepted |
 | [0056](0056-model-providers-pricing-and-budgets-per-org.md) | Model providers, models, pricing and budgets per org | Accepted, amended 2026-10-23 |
 | [0057](0057-mcp-servers.md) | MCP servers: remote and container, catalog, allowlists and discovery | Accepted |
 | [0058](0058-gateway-modes.md) | Gateway modes: standalone, kubernetes and shared | Accepted |
+| [0059](0059-v01-opencode-only.md) | v0.1 ships one harness: OpenCode v2 | Accepted |
