@@ -49,6 +49,10 @@ as well.
 
 ## Consequences
 
+- On an existing Argo install, the first sync after this change replaces the ordinary
+  `migrate-install` Job with the hook: `BeforeHookCreation` deletes the old Job by name and creates
+  the new one.
+
 - An Argo CD install migrates before the new pods on first install and on every upgrade.
 - A sync that changes nothing reruns the Job, which does nothing.
 - The Job is a Sync hook, so Argo shows it as a hook, not as a managed resource, and removes the old

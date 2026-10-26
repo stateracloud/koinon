@@ -238,7 +238,8 @@ done
 lacks "the external-mode migration hook has no Argo annotations" 'argocd.argoproj.io' --set postgres.mode=external --set postgres.external.secretName=db --show-only templates/migrate-job.yaml
 n=$(render --show-only templates/deployments.yaml | grep -c 'argocd.argoproj.io/sync-wave: "2"' || true)
 [ "$n" = 3 ] || fail "$n of the 3 koinon Deployments are in sync wave 2"
-has "the standalone gateway Deployment is in sync wave 2" 'argocd.argoproj.io/sync-wave: "2"' --show-only templates/gateway-standalone.yaml
+n=$(render --show-only templates/gateway-standalone.yaml | grep -c 'argocd.argoproj.io/sync-wave: "2"' || true)
+[ "$n" = 2 ] || fail "$n of the gateway's PVC and Deployment are in sync wave 2, want 2"
 has "the migration stays a plain Job on install" 'name: koinon-migrate-install$' --show-only templates/migrate-job.yaml
 has "the migration Job reads the given migrate Secret" 'name: mine-migrate$' "${own[@]}" --show-only templates/migrate-job.yaml
 # One role supplied: the hook ensures the rest only.
