@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# ko's default static base has no git. koinon-fakegitea runs git and git-http-backend, so it
+# builds on Chainguard's git image (git-core with http-backend; the entrypoint is overridden by
+# ko). Its bare repositories live under TMPDIR, so the pod must mount a writable emptyDir there
+# (CH5 wiring). Re-pin with: crane digest cgr.dev/chainguard/git:latest
+baseImageOverrides:
+  github.com/stateracloud/koinon/cmd/koinon-fakegitea: cgr.dev/chainguard/git@sha256:afd883932dfd9fe1c105b854a5bb53e60469137b90a481249fb6633375a1ff1b

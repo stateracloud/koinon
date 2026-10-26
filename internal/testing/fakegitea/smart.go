@@ -3,7 +3,9 @@
 package fakegitea
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/cgi" //nolint:gosec // test fixture; the Httpoxy fix is in every supported Go
 	"os/exec"
@@ -63,6 +65,17 @@ func (f *Fake) smartHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 	r2 := r.Clone(r.Context())
 	r2.URL.Path = "/" + f.Owner + "/" + rp.name + ".git/" + parts[2]
+	// git sends a pack above http.postBuffer chunked; net/http/cgi refuses chunked bodies.
+	if r2.ContentLength < 0 {
+		body, err := io.ReadAll(r2.Body)
+		if err != nil {
+			http.Error(w, "reading request body: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		r2.Body = io.NopCloser(bytes.NewReader(body))
+		r2.ContentLength = int64(len(body))
+		r2.TransferEncoding = nil
+	}
 	h := &cgi.Handler{
 		Path: be,
 		Env: append(slicesClone(gitBaseEnv),

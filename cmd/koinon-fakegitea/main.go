@@ -10,7 +10,9 @@
 //	GET /_fake/repos/{repo}    the repository's state: branches, pulls, comments, write calls
 //
 // The fake keeps its repositories as bare git repositories in the temporary directory and runs
-// the git binary, so the image it runs in needs git and a writable TMPDIR.
+// the git binary, so the image it runs in needs git (with git-http-backend) and a writable
+// TMPDIR. .ko.yaml points ko at a pinned Chainguard git base for this binary; mount an emptyDir
+// at TMPDIR in the pod.
 package main
 
 import (
