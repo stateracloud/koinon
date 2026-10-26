@@ -35,6 +35,33 @@ func (reads) Repository(context.Context, codehost.Repo) (codehost.Repository, er
 	return codehost.Repository{FullName: "acme/app", DefaultBranch: "main"}, nil
 }
 
+// caps is a Provider that only reports its capabilities.
+type caps struct {
+	codehost.Provider
+	writes string
+}
+
+func (c caps) Capabilities() codehost.Capabilities { return codehost.Capabilities{Writes: c.writes} }
+
+var _ = Describe("Wrap", func() {
+	inner := &reads{tok: token}
+	opts := gitpush.Options{RemoteURL: func(codehost.Repo) string { return "http://127.0.0.1:1/x.git" }}
+
+	DescribeTable("picks the writer by the provider's Writes capability",
+		func(writes string, wrapped bool) {
+			got := gitpush.Wrap(caps{writes: writes}, inner, opts)
+			if wrapped {
+				Expect(got).NotTo(BeIdenticalTo(inner))
+			} else {
+				Expect(got).To(BeIdenticalTo(inner))
+			}
+		},
+		Entry("empty means the API", "", false),
+		Entry("api", codehost.WritesAPI, false),
+		Entry("push", codehost.WritesPush, true),
+	)
+})
+
 var _ = Describe("the push writer", func() {
 	var (
 		f    *fakegitea.Fake
@@ -131,6 +158,39 @@ var _ = Describe("the push writer", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(a.CreateBranch(ctx, repo, "feature", other)).To(MatchError(codehost.ErrBranchExists))
 		Expect(f.Snapshot("app").Branches).To(HaveKeyWithValue("feature", sha))
+	})
+
+	It("refuses an existing branch that points at an ancestor of the new commit", func() {
+		a := acc(token)
+		sha, err := a.WriteCommit(ctx, repo, codehost.CommitRequest{Base: base, Message: msg, Files: files})
+		Expect(err).NotTo(HaveOccurred())
+		git("branch", "feature", base)
+		Expect(a.CreateBranch(ctx, repo, "feature", sha)).To(MatchError(codehost.ErrBranchExists))
+		Expect(f.Snapshot("app").Branches).To(HaveKeyWithValue("feature", base))
+	})
+
+	It("does not delete a file when a delete passes through it", func() {
+		a := acc(token)
+		sha, err := a.WriteCommit(ctx, repo, codehost.CommitRequest{Base: base, Message: "rm\n", Files: []codehost.FileWrite{
+			{Path: "README.md/x", Delete: true}, {Path: "new.txt", Mode: "100644", Content: []byte("n\n")},
+		}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.CreateBranch(ctx, repo, "keep", sha)).To(Succeed())
+		Expect(git("ls-tree", "-r", "--name-only", sha)).To(ContainSubstring("README.md"))
+	})
+
+	It("commits the empty tree when every file is deleted", func() {
+		a := acc(token)
+		var del []codehost.FileWrite
+		for _, n := range strings.Fields(git("ls-tree", "-r", "--name-only", base)) {
+			del = append(del, codehost.FileWrite{Path: n, Delete: true})
+		}
+		Expect(del).NotTo(BeEmpty())
+		sha, err := a.WriteCommit(ctx, repo, codehost.CommitRequest{Base: base, Message: "rm all\n", Files: del})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.CreateBranch(ctx, repo, "empty", sha)).To(Succeed())
+		Expect(git("rev-parse", sha+"^{tree}")).To(Equal("4b825dc642cb6eb9a060e54bf8d69288fbee4904"))
+		Expect(git("fsck", "--no-dangling")).NotTo(ContainSubstring("error"))
 	})
 
 	It("refuses a commit it did not write, bad modes and bad paths", func() {

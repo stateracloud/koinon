@@ -16,10 +16,12 @@
 package gitpush
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"regexp"
 	"slices"
@@ -31,11 +33,17 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
+	"github.com/go-git/go-git/v5/plumbing/format/packfile"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
+	"github.com/go-git/go-git/v5/plumbing/protocol/packp/capability"
+	"github.com/go-git/go-git/v5/plumbing/revlist"
 	"github.com/go-git/go-git/v5/plumbing/storer"
 	"github.com/go-git/go-git/v5/plumbing/transport"
+	"github.com/go-git/go-git/v5/plumbing/transport/client"
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
+	"github.com/go-git/go-git/v5/utils/ioutil"
 
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/project"
@@ -145,9 +153,15 @@ func (a *access) WriteCommit(ctx context.Context, r codehost.Repo, req codehost.
 	if err != nil {
 		return "", err
 	}
-	treeHash, _, err := rewrite(st, tree, ops)
+	treeHash, empty, err := rewrite(st, tree, ops)
 	if err != nil {
 		return "", err
+	}
+	if empty {
+		// Everything was deleted: the commit's tree is the empty tree (4b825dc...).
+		if treeHash, _, err = writeTree(st, nil); err != nil {
+			return "", err
+		}
 	}
 	sig := object.Signature{Name: a.o.AuthorName, Email: a.o.AuthorEmail, When: a.o.Now()}
 	c := &object.Commit{
@@ -224,26 +238,106 @@ func (a *access) CreateBranch(ctx context.Context, r codehost.Repo, name, sha st
 	if !ok || p.repo != r {
 		return fmt.Errorf("%w: %s", ErrUnknownCommit, sha)
 	}
-	rem := a.remote(p.st, r)
-	refs, err := rem.ListContext(ctx, &git.ListOptions{Auth: a.auth()})
-	if err != nil && !errors.Is(err, transport.ErrEmptyRemoteRepository) {
-		return a.scrub(fmt.Errorf("gitpush: listing refs of %s: %w", r, err))
+	err = a.createRef(ctx, r, p.st, plumbing.NewBranchReferenceName(name), plumbing.NewHash(sha))
+	return a.scrub(err)
+}
+
+// createRef sends one create command for want, with the old value the zero hash, so the host
+// refuses it under its ref lock when the ref exists at any value, even one the new commit
+// descends from. go-git's PushContext would fill the old value in from the refs advertised at
+// push time and fast-forward such a branch, so the update is sent here instead.
+func (a *access) createRef(ctx context.Context, r codehost.Repo, st *memory.Storage, want plumbing.ReferenceName, sha plumbing.Hash) (err error) {
+	ep, err := transport.NewEndpoint(a.o.RemoteURL(r))
+	if err != nil {
+		return err
 	}
-	want := plumbing.NewBranchReferenceName(name)
-	for _, ref := range refs {
-		if ref.Name() == want {
+	c, err := client.NewClient(ep)
+	if err != nil {
+		return err
+	}
+	sess, err := c.NewReceivePackSession(ep, a.auth())
+	if err != nil {
+		return err
+	}
+	defer ioutil.CheckClose(sess, &err)
+	ar, err := sess.AdvertisedReferencesContext(ctx)
+	if err != nil && !errors.Is(err, transport.ErrEmptyRemoteRepository) {
+		return fmt.Errorf("gitpush: listing refs of %s: %w", r, err)
+	}
+	if ar == nil {
+		ar = packp.NewAdvRefs()
+	}
+	remoteRefs, err := ar.AllReferences()
+	if err != nil {
+		return err
+	}
+	if ref, err := remoteRefs.Reference(want); err == nil && ref.Type() == plumbing.HashReference {
+		return codehost.ErrBranchExists
+	}
+
+	haves, err := referencesToHashes(remoteRefs)
+	if err != nil {
+		return err
+	}
+	stop, err := st.Shallow()
+	if err != nil {
+		return err
+	}
+	haves = append(haves, stop...)
+	hashes, err := revlist.Objects(st, []plumbing.Hash{sha}, haves)
+	if err != nil {
+		return err
+	}
+	var pack bytes.Buffer
+	if _, err := packfile.NewEncoder(&pack, st, !ar.Capabilities.Supports(capability.OFSDelta)).Encode(hashes, 10); err != nil {
+		return err
+	}
+
+	req := packp.NewReferenceUpdateRequestFromCapabilities(ar.Capabilities)
+	req.Commands = []*packp.Command{{Name: want, Old: plumbing.ZeroHash, New: sha}}
+	req.Packfile = io.NopCloser(&pack)
+	status, err := sess.ReceivePack(ctx, req)
+	if err == nil && status != nil {
+		err = status.Error()
+	}
+	if err != nil {
+		// A rejection because the ref exists (a branch created since the listing) and one for
+		// another reason read differently by host; look at the ref to tell them apart.
+		if exists, lerr := a.refExists(ctx, r, want); lerr == nil && exists {
 			return codehost.ErrBranchExists
 		}
-	}
-	// Not forced: a branch created since the listing makes the server refuse the push.
-	err = rem.PushContext(ctx, &git.PushOptions{
-		RefSpecs: []config.RefSpec{config.RefSpec(sha + ":" + want.String())},
-		Auth:     a.auth(),
-	})
-	if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
-		return a.scrub(fmt.Errorf("gitpush: pushing %s to %s: %w", name, r, err))
+		return fmt.Errorf("gitpush: pushing %s to %s: %w", want.Short(), r, err)
 	}
 	return nil
+}
+
+// refExists lists the refs of r and reports whether name is among them.
+func (a *access) refExists(ctx context.Context, r codehost.Repo, name plumbing.ReferenceName) (bool, error) {
+	refs, err := a.remote(memory.NewStorage(), r).ListContext(ctx, &git.ListOptions{Auth: a.auth()})
+	if err != nil {
+		return false, err
+	}
+	for _, ref := range refs {
+		if ref.Name() == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func referencesToHashes(refs storer.ReferenceStorer) ([]plumbing.Hash, error) {
+	iter, err := refs.IterReferences()
+	if err != nil {
+		return nil, err
+	}
+	var hs []plumbing.Hash
+	err = iter.ForEach(func(ref *plumbing.Reference) error {
+		if ref.Type() == plumbing.HashReference {
+			hs = append(hs, ref.Hash())
+		}
+		return nil
+	})
+	return hs, err
 }
 
 func validBranch(name string) error {
@@ -324,10 +418,16 @@ func rewrite(st storer.EncodedObjectStorer, tree *object.Tree, ops []fileOp) (ha
 			continue
 		}
 		var sub *object.Tree
-		if e, ok := entries[name]; ok && e.Mode == filemode.Dir {
+		e, existed := entries[name]
+		isDir := existed && e.Mode == filemode.Dir
+		if isDir {
 			if sub, err = object.GetTree(st, e.Hash); err != nil {
 				return hash, false, err
 			}
+		}
+		if !isDir && allDeletes(g) {
+			// Nothing below a file or a missing entry to delete; leave the entry alone.
+			continue
 		}
 		rest := make([]fileOp, len(g))
 		for i, op := range g {
@@ -342,6 +442,7 @@ func rewrite(st storer.EncodedObjectStorer, tree *object.Tree, ops []fileOp) (ha
 			return hash, false, err
 		}
 		if subEmpty {
+			// Only a directory can be emptied; a file the ops wrote over is replaced below.
 			delete(entries, name)
 			continue
 		}
@@ -350,6 +451,19 @@ func rewrite(st storer.EncodedObjectStorer, tree *object.Tree, ops []fileOp) (ha
 	if len(entries) == 0 {
 		return hash, true, nil
 	}
+	return writeTree(st, entries)
+}
+
+func allDeletes(g []fileOp) bool {
+	for _, op := range g {
+		if !op.delete {
+			return false
+		}
+	}
+	return true
+}
+
+func writeTree(st storer.EncodedObjectStorer, entries map[string]object.TreeEntry) (hash plumbing.Hash, empty bool, err error) {
 	out := &object.Tree{Entries: make([]object.TreeEntry, 0, len(entries))}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, e)

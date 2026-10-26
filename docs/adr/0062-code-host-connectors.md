@@ -176,6 +176,11 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   scrubbed from errors, nothing on disk. If the host does not serve commits by SHA (git http-backend
   default), the base is fetched through the branch whose tip it is. Commits are authored "Koinon
   <noreply@koinon.dev>".
+- Amendment 2026-10-27 (CH6 review): `CreateBranch` opens the receive-pack session itself and sends a
+  single create command with the old value the zero hash, so the host refuses it under the ref lock when
+  the branch exists at any value (go-git's `PushContext` would fill in the advertised value and
+  fast-forward a branch that is an ancestor of the commit). A rejection is mapped to `ErrBranchExists`
+  when the ref is then found on the host. A commit that deletes every file uses the empty tree.
 
 ## Links
 
