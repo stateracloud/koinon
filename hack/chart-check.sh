@@ -21,16 +21,24 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
 value_files=("$CHART/values.yaml" "$CHART"/ci/*-values.yaml)
+# The chart requires openshell.clientTLSSecret or openshell.insecure=true (#103); the default
+# values set neither, so they are rendered with insecure, as are the assertions below (render).
+# Value files choose for themselves. insecure_for <values file>: the extra helm arguments.
+insecure_for() { [[ $1 == "$CHART/values.yaml" ]] && echo "--set openshell.insecure=true" || true; }
 
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
 	echo "== $name"
-	"$HELM" lint --strict "$CHART" -f "$f"
-	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" >"$out/$name.yaml"
+	# shellcheck disable=SC2046
+	"$HELM" lint --strict "$CHART" -f "$f" $(insecure_for "$f")
+	# shellcheck disable=SC2046
+	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" $(insecure_for "$f") >"$out/$name.yaml"
 done
 
 # Assertions on rendered output: render with --set flags, then grep.
-render() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
+render() { "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true "$@"; }
+# render_raw renders without that default, for the assertions about the TLS choice itself.
+render_raw() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
 # Assertions capture the rendering before grepping it: piping into grep -q under pipefail fails
 # the pipeline when grep exits on the first match and helm then dies of SIGPIPE.
 failures=0
@@ -109,6 +117,16 @@ for f in "${value_files[@]}"; do
 		fail "port 15000 exposed with $(basename "$f")"
 	fi
 done
+# The OpenShell channel needs mTLS (#103): without a client TLS Secret the chart renders only with
+# an explicit openshell.insecure=true, never with both, and each choice reaches the components.
+if render_raw >/dev/null 2>"$out/tls.err"; then fail "no client TLS Secret and no insecure must not render"; fi
+grep -q 'openshell.clientTLSSecret is required' "$out/tls.err" && grep -q 'openshell.insecure=true' "$out/tls.err" || fail "the TLS error must name both openshell.clientTLSSecret and openshell.insecure"
+render_raw --set openshell.clientTLSSecret=tls >/dev/null 2>&1 || fail "a client TLS Secret alone must render"
+render_raw --set openshell.insecure=true >/dev/null 2>&1 || fail "openshell.insecure=true alone must render"
+if render_raw --set openshell.clientTLSSecret=tls --set openshell.insecure=true >"$out/both.out" 2>"$out/both.err"; then fail "a client TLS Secret together with insecure must not render"; fi
+grep -q 'contradict' "$out/both.err" || fail "the TLS-plus-insecure error must say the options contradict"
+has "TLS Secret reaches the reconciler config" 'tls: /etc/koinon/openshell-tls' --set openshell.insecure=false --set openshell.clientTLSSecret=tls --show-only templates/config.yaml
+has "insecure renders an empty tls dir (plaintext, warned by the components)" 'tls: ""' --show-only templates/config.yaml
 # The key-encryption keys (plan item PV1): a generated Secret kept on uninstall, or an existing one;
 # mounted into koinon-api and koinon-reconciler only, never into agentd or the gateway.
 # The chart renders no key material (a render makes new keys every time): koinon-api creates the Secret.
@@ -188,7 +206,7 @@ has "gateway.kubernetes.port is used" 'url: http://koinon-gateway.koinon.svc.clu
 # GitOps-safe renders (issue #98). (a) Two renders of every value set are byte-identical.
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
-	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" >"$out/$name.again"
+	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" $(insecure_for "$f") >"$out/$name.again"
 	cmp -s "$out/$name.yaml" "$out/$name.again" || fail "two renders of $name differ"
 	rm -f "$out/$name.again"
 done
@@ -256,10 +274,10 @@ fi
 # The preflight hook (plan item H2) renders unless preflight.enabled=false, as a pre-install and
 # pre-upgrade hook whose output Helm prints; the probe RBAC only with the seccomp probe on.
 echo "== preflight hook"
-preflight_job() { "$HELM" template koinon "$CHART" --namespace koinon -f "$1" --show-only templates/preflight.yaml 2>/dev/null; }
+preflight_job() { "$HELM" template koinon "$CHART" --namespace koinon -f "$1" $(insecure_for "$1") --show-only templates/preflight.yaml 2>/dev/null; }
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
-	enabled=$("$HELM" template koinon "$CHART" -f "$f" --show-only templates/preflight.yaml >/dev/null 2>&1 && echo true || echo false)
+	enabled=$("$HELM" template koinon "$CHART" -f "$f" $(insecure_for "$f") --show-only templates/preflight.yaml >/dev/null 2>&1 && echo true || echo false)
 	if [[ $name == external-standalone-values ]]; then
 		[[ $enabled == false ]] || { echo "$name: preflight.enabled=false still renders the hook" >&2; exit 1; }
 		continue

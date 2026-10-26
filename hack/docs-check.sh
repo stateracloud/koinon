@@ -74,8 +74,12 @@ done
 i=0
 while IFS= read -r -d '' f; do
   i=$((i + 1))
-  if "$HELM" lint --strict charts/koinon -f "$f" >"$tmp/lint.out" 2>&1 && \
-    "$HELM" template koinon charts/koinon --namespace koinon -f "$f" >/dev/null 2>"$tmp/tpl.out"; then
+  # A block that is an overlay (it does not choose between openshell.clientTLSSecret and
+  # openshell.insecure) is checked as if the base block's choice were made.
+  tls=(--set openshell.insecure=true)
+  if grep -qE 'clientTLSSecret|insecure' "$f"; then tls=(); fi
+  if "$HELM" lint --strict charts/koinon -f "$f" ${tls[@]+"${tls[@]}"} >"$tmp/lint.out" 2>&1 && \
+    "$HELM" template koinon charts/koinon --namespace koinon -f "$f" ${tls[@]+"${tls[@]}"} >/dev/null 2>"$tmp/tpl.out"; then
     :
   else
     cat "$tmp/lint.out" "$tmp/tpl.out" >&2
