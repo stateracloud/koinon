@@ -95,4 +95,41 @@ describe('watchRun', () => {
     expect(statuses.at(-1)).toBe('ended')
     expect(statuses).toContain('reconnecting')
   })
+
+  it('escalates the backoff while streams are cut without progress', async () => {
+    const cut = new ConnectError('protocol error: missing EndStreamResponse', Code.InvalidArgument)
+    const { transport } = drive([
+      () => seq('running', cut),
+      () => seq('running', cut),
+      () => seq('running', cut),
+      () => seq('running', 1, cut), // an event is progress: back to the first delay
+      () => seq('running', cut),
+      () => seq('succeeded'),
+    ])
+    const attempts: number[] = []
+    await watchRun(
+      {
+        transport, orgId: 'o', runId: 'r', signal: new AbortController().signal, now: () => 0,
+        backoff: (n) => (attempts.push(n), 0), sleep: async () => {},
+      },
+      { onRun: () => {}, onEvent: () => {}, onStatus: () => {} },
+    )
+    expect(attempts).toEqual([1, 2, 3, 1, 2])
+  })
+
+  it('restarts the backoff after a stream that stayed up', async () => {
+    const cut = new ConnectError('protocol error: missing EndStreamResponse', Code.InvalidArgument)
+    const { transport } = drive([() => seq('running', cut), () => seq('running', cut), () => seq('succeeded')])
+    const attempts: number[] = []
+    let t = 0
+    await watchRun(
+      {
+        transport, orgId: 'o', runId: 'r', signal: new AbortController().signal,
+        now: () => (t += 60_000), // every stream looks long-lived
+        backoff: (n) => (attempts.push(n), 0), sleep: async () => {},
+      },
+      { onRun: () => {}, onEvent: () => {}, onStatus: () => {} },
+    )
+    expect(attempts).toEqual([1, 1])
+  })
 })
