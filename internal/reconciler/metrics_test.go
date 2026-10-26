@@ -106,4 +106,15 @@ var _ = Describe("Reconciler metrics", func() {
 		Expect(testutil.ToFloat64(m.SandboxRepairs)).To(Equal(3.0))
 		Expect(testutil.ToFloat64(m.AgentsUnhealthy)).To(Equal(1.0))
 	})
+
+	It("sets a sandbox state's gauge back to 0 when the state empties", func(ctx SpecContext) {
+		m.Sandboxes.WithLabelValues("error").Set(7) // stale value from an earlier pass
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+		Expect(testutil.ToFloat64(m.Sandboxes.WithLabelValues("error"))).To(Equal(
+			func() float64 {
+				var n float64
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM agent_sandboxes WHERE state = 'error'`).Scan(&n)).To(Succeed())
+				return n
+			}()))
+	})
 })

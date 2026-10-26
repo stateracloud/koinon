@@ -32,6 +32,9 @@ The reconciler runs as one leading replica; standby replicas report the Go and p
 | `koinon_reconciler_sandbox_repairs_total` | counter | none | Stuck, failed or completed sandboxes deleted to be recreated ([stuck sandboxes](../agent-health/)). |
 | `koinon_reconciler_agents_marked_unhealthy_total` | counter | none | Agents marked unhealthy because their sandbox kept failing. |
 
+`gateway_rejected` and `gateway_apply` count once per pass, not once per object. Any counted error also makes
+the pass `result="error"`, so `result="ok"` means no error kind increased.
+
 Error `kind` values: `database` (listing orgs, agents or providers failed), `agent_prepare` (an
 agent's key or desired state), `provider` (a model provider could not be rendered), `mcp` (an org MCP
 server), `spend_limit` (an agent's budget could not be computed), `provider_keys` (delivering or
@@ -77,7 +80,9 @@ metrics:
 `monitoring.coreos.com/v1` `ServiceMonitor` CRD; without it the install fails with a message that
 says so, rather than skipping the objects. `labels` are added to each `ServiceMonitor` (many
 Prometheus installs only select monitors with their release label), and `interval` overrides the
-scrape interval. Without prometheus-operator, point any scraper at the metrics Services.
+scrape interval. If the renderer cannot see the CRD (`helm template` pipelines, kustomize
+`helmCharts` without `apiVersions`, or an Argo CD first sync that installs the CRD in the same sync),
+set `metrics.serviceMonitor.skipCapabilityCheck: true` to render the ServiceMonitors without the check. Without prometheus-operator, point any scraper at the metrics Services.
 
 ### Letting Prometheus in
 

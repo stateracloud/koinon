@@ -481,7 +481,9 @@ func run() error {
 	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default()).WithMCP(mcpSvc)
 
 	reg := metrics.NewRegistry()
-	metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default())
+	if err := metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default()); err != nil {
+		return err
+	}
 	if cfg.otlpAddr != "" {
 		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
 		// the session-authenticated API handler.

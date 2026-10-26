@@ -4,6 +4,7 @@ package api_test
 
 import (
 	"net/http"
+	"strings"
 
 	connect "connectrpc.com/connect/v2"
 	. "github.com/onsi/ginkgo/v2"
@@ -43,5 +44,20 @@ var _ = Describe("RPC metrics", func() {
 		Expect(count("ok")).To(Equal(2.0))
 		Expect(count("unauthenticated")).To(Equal(1.0))
 		Expect(testutil.ToFloat64(m.RPCRequests.WithLabelValues(authv1alpha1connect.AuthServiceChangePasswordProcedure, "ok"))).To(Equal(1.0))
+	})
+
+	It("adds no series for an unknown procedure", func(ctx SpecContext) {
+		reg := prometheus.NewRegistry()
+		m := api.NewMetrics(reg)
+		e := newEnv(ctx, envOptions{metrics: m})
+		before := testutil.CollectAndCount(m.RPCRequests)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.srv.URL+"/no.such.v1.Service/Nope", strings.NewReader("{}"))
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Connect-Protocol-Version", "1")
+		resp, err := e.srv.Client().Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		_ = resp.Body.Close()
+		Expect(testutil.CollectAndCount(m.RPCRequests)).To(Equal(before))
 	})
 })

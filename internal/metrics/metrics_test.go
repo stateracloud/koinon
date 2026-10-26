@@ -4,6 +4,8 @@ package metrics_test
 
 import (
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -88,5 +90,19 @@ func TestScrape(t *testing.T) {
 				t.Errorf("POST /metrics = %d, want an error", code)
 			}
 		})
+	}
+}
+
+func TestServeTakenPort(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	if err := metrics.Serve(t.Context(), ln.Addr().String(), metrics.NewRegistry(), slog.Default()); err == nil {
+		t.Fatal("Serve on a taken port returned no error")
+	}
+	if err := metrics.Serve(t.Context(), "", metrics.NewRegistry(), slog.Default()); err != nil {
+		t.Fatalf("empty address: %v", err)
 	}
 }

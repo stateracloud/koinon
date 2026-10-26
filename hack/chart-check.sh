@@ -203,6 +203,8 @@ has "ServiceMonitor extra labels" 'release: prom$' "${sm[@]}" --set metrics.serv
 if render --set metrics.serviceMonitor.enabled=true >/dev/null 2>&1; then
 	fail "metrics.serviceMonitor.enabled=true must fail without the ServiceMonitor CRD"
 fi
+n=$(render --set metrics.serviceMonitor.enabled=true --set metrics.serviceMonitor.skipCapabilityCheck=true | grep -c '^kind: ServiceMonitor$' || true)
+[ "$n" = 3 ] || fail "$n ServiceMonitors with skipCapabilityCheck and no --api-versions, want 3"
 lacks "metrics port closed by default" 'port: metrics$' --show-only templates/networkpolicy.yaml
 scrape=(--set 'metrics.allowFrom[0].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name=monitoring')
 n=$(render "${scrape[@]}" --show-only templates/networkpolicy.yaml | grep -c 'port: metrics$' || true)
