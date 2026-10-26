@@ -165,6 +165,7 @@ RETURNING *;
 UPDATE runs
 SET state = @outcome::run_state,
     outcome_reason = sqlc.narg(outcome_reason),
+    failure_class = sqlc.narg(failure_class)::run_failure_class,
     finished_at = now(),
     lease_expires_at = NULL,
     heartbeat_at = NULL
@@ -180,6 +181,7 @@ RETURNING *;
 UPDATE runs
 SET state = 'canceled',
     outcome_reason = @outcome_reason::text,
+    failure_class = sqlc.narg(failure_class)::run_failure_class,
     finished_at = now(),
     ready_at = NULL,
     lease_expires_at = NULL,

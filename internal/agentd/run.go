@@ -39,7 +39,13 @@ var (
 )
 
 // failure fails the run with a reason.
-type failure struct{ reason string }
+type failure struct {
+	reason string
+	// class is the failure class (classify.go); empty means fatal.
+	class store.RunFailureClass
+	// retryAfter is the provider's Retry-After of a throttled request.
+	retryAfter time.Duration
+}
 
 func (f *failure) Error() string { return f.reason }
 
@@ -520,7 +526,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.checkInstructions(fctx, workspace, sandbox, agent.Flavor, instructions); err != nil {
 		return r.execErr(ctx, "check the instructions", err)
 	}
-	err = r.turn(ctx, conn, proc, &stderr, session, text)
+	err = r.turnWithRetry(ctx, fctx, conn, proc, &stderr, session, text)
 	if !errors.Is(err, errEndTurn) {
 		return err
 	}
@@ -607,7 +613,7 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 		case acp.StopCancelled:
 			return &failure{reason: "the harness cancelled the turn"}
 		default:
-			return &failure{reason: "the turn stopped: " + string(res.stop)}
+			return stopFailure(res.stop)
 		}
 	case <-r.fenced:
 		if fence(r.fenceKind.Load()) == fenceCanceled {
@@ -621,6 +627,35 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 		return &canceled{reason: fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second)}
 	case <-ctx.Done():
 		return errShutdown
+	}
+}
+
+// turnWithRetry runs the turn and repeats it, in the same session, when the model request
+// failed with a transient or throttled error (classify.go): after the backoff, or after the
+// provider's Retry-After. Every other failure ends the turn at once. The wait ends when the worker
+// is fenced or stops.
+func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
+	cfg := r.p.cfg
+	for attempt := 0; ; attempt++ {
+		err := r.turn(ctx, conn, proc, stderr, session, text)
+		var f *failure
+		if !errors.As(err, &f) || !f.retryable() {
+			return err
+		}
+		delay := retryDelay(f, attempt, cfg.RetryBackoff)
+		if attempt >= cfg.ModelRetries || delay > cfg.MaxRetryAfter {
+			return exhausted(f, attempt, cfg.MaxRetryAfter)
+		}
+		r.log.Info("retrying the turn", "class", f.class, "attempt", attempt+1, "delay", delay)
+		if rerr := r.record(fctx, "run.retry", map[string]any{
+			"failureClass": f.class, "attempt": attempt + 1, "delaySeconds": delay.Seconds(), "reason": f.reason,
+		}); rerr != nil {
+			return r.dbErr(ctx, "record the retry", rerr)
+		}
+		if !sleep(fctx, delay) {
+			return cmp.Or(r.stopped(ctx), errShutdown)
+		}
+		text = fmt.Sprintf(retryNote, f.class)
 	}
 }
 
@@ -668,7 +703,7 @@ func (r *runner) harnessErr(ctx context.Context, conn *acp.Conn, proc execution.
 	case <-conn.Done():
 	case <-time.After(time.Second):
 		// The connection is alive: the harness answered with an error.
-		return &failure{reason: what + ": " + err.Error()}
+		return classFailure(what, err)
 	}
 	// Record what the harness sent before the drop first, so the interruption comes last.
 	wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -835,13 +870,13 @@ func (r *runner) recordRaw(ctx context.Context, kind string, payload []byte) err
 
 // finish ends the run as its owner, with a closing run event and a task event, in one
 // transaction. On success the task event is the agent's reply.
-func (r *runner) finish(ctx context.Context, outcome store.RunState, reason string) error {
+func (r *runner) finish(ctx context.Context, outcome store.RunState, reason string, class store.RunFailureClass) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.srcSeq++
 	src := r.srcSeq
 	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
-		return r.finishIn(ctx, r.q.WithTx(tx), src, outcome, reason)
+		return r.finishIn(ctx, r.q.WithTx(tx), src, outcome, reason, class)
 	})
 	if err != nil {
 		return r.dbErr(ctx, "finish the run", err)
@@ -852,8 +887,12 @@ func (r *runner) finish(ctx context.Context, outcome store.RunState, reason stri
 }
 
 // finishIn ends the run in the caller's transaction.
-func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outcome store.RunState, reason string) error {
-	payload, _ := json.Marshal(map[string]string{"reason": reason})
+func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outcome store.RunState, reason string, class store.RunFailureClass) error {
+	body := map[string]string{"reason": reason}
+	if class != "" {
+		body["failureClass"] = string(class)
+	}
+	payload, _ := json.Marshal(body)
 	if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
 		OrgID: r.run.OrgID, RunID: r.run.ID, Epoch: r.run.Epoch,
 		Kind: "run." + string(outcome), Payload: payload, SourceSeq: src,
@@ -863,6 +902,7 @@ func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outc
 	if _, err := q.FinishRun(ctx, store.FinishRunParams{
 		OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch, Outcome: outcome,
 		OutcomeReason: pgtype.Text{String: reason, Valid: reason != ""},
+		FailureClass:  store.NullRunFailureClass{RunFailureClass: class, Valid: class != ""},
 	}); err != nil {
 		return err
 	}
@@ -934,11 +974,11 @@ func (r *runner) conclude(ctx context.Context, err error) {
 	switch {
 	case err == nil:
 	case errors.As(err, &f):
-		if ferr := r.finish(ctx, store.RunStateFailed, f.reason); ferr != nil {
+		if ferr := r.finish(ctx, store.RunStateFailed, f.reason, cmp.Or(f.class, classFatal)); ferr != nil {
 			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
 		}
 	case errors.As(err, &c):
-		if ferr := r.finish(ctx, store.RunStateCanceled, c.reason); ferr != nil {
+		if ferr := r.finish(ctx, store.RunStateCanceled, c.reason, ""); ferr != nil {
 			r.log.Warn("canceling the run failed", "reason", c.reason, "err", ferr)
 		}
 	case errors.Is(err, errFenced):

@@ -556,7 +556,7 @@ func (q *Queries) GetApprovalRequestForAgent(ctx context.Context, arg GetApprova
 
 const getRunningRunForAgent = `-- name: GetRunningRunForAgent :one
 
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class FROM runs
 WHERE org_id = $1 AND agent_id = $2 AND state = 'running' AND NOT summarizing
 `
 
@@ -606,6 +606,7 @@ func (q *Queries) GetRunningRunForAgent(ctx context.Context, arg GetRunningRunFo
 		&i.PromptThroughSeq,
 		&i.Takeovers,
 		&i.Summarizing,
+		&i.FailureClass,
 	)
 	return i, err
 }

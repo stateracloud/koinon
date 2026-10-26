@@ -116,7 +116,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 			return err
 		}
 		if len(reqs) == 0 {
-			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "")
+			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "")
 		}
 		parked = true
 		ids := make([]string, 0, len(reqs))

@@ -224,7 +224,10 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 		runs = open
 	}
 	for _, r := range runs {
-		c, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: org, ID: r.ID, OutcomeReason: msg})
+		c, err := q.CancelRun(ctx, store.CancelRunParams{
+			OrgID: org, ID: r.ID, OutcomeReason: msg,
+			FailureClass: store.NullRunFailureClass{RunFailureClass: store.RunFailureClassBudget, Valid: true},
+		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue // already finished
 		} else if err != nil {

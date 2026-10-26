@@ -52,6 +52,24 @@ enum ParkReason {
   PARK_REASON_INPUT_REQUIRED = 4;
 }
 
+// FailureClass says what kind of error ended a run (ADR 0030, amendment of 2026-10-26). Retries
+// and the message to the person follow from it. Unset on a run that did not fail.
+enum FailureClass {
+  FAILURE_CLASS_UNSPECIFIED = 0;
+  // A passing fault (a 5xx, an overloaded provider, a dropped stream); retried with backoff.
+  FAILURE_CLASS_TRANSIENT = 1;
+  // The provider rate-limited the request; retried after its Retry-After.
+  FAILURE_CLASS_THROTTLED = 2;
+  // The input does not fit the model's context window.
+  FAILURE_CLASS_CONTEXT_OVERFLOW = 3;
+  // A token or spend limit stopped the run.
+  FAILURE_CLASS_BUDGET = 4;
+  // A policy denied the request; never retried.
+  FAILURE_CLASS_POLICY = 5;
+  // Anything unknown; never retried.
+  FAILURE_CLASS_FATAL = 6;
+}
+
 // Run is one execution of an agent for a ticket.
 message Run {
   string id = 1;
@@ -75,6 +93,9 @@ message Run {
   // Model spend recorded for the run by the spend ledger (plan item L1). Set
   // by GetRun and on the runs of GetTicket; unset elsewhere.
   Cost cost = 16;
+  // The class of the error that failed or stopped the run. Unspecified when the run did not
+  // fail, or failed before classes existed.
+  FailureClass failure_class = 17;
 }
 
 // Cost is model spend recorded by the spend ledger from agentgateway's access
