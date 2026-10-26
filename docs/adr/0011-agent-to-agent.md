@@ -1,6 +1,6 @@
 # 0011. Agent-to-agent: A2A, persisted as tickets
 
-- Status: Accepted; amended by [0055](0055-chat-as-its-own-object.md)
+- Status: Accepted; amended by [0055](0055-chat-as-its-own-object.md), [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-21
 - Decision: [design.md#11](../design.md)
 
@@ -62,6 +62,22 @@ sequenceDiagram
 chat to a specialist agent is **ephemeral**: it is not persisted as a ticket (this narrows "every
 A2A task is persisted as a ticket" above). The caller pays for it, and only metadata is audited.
 Delegations that write, and delegations from tickets, are persisted as tickets as before.
+
+## Amendment (2026-10-26): tasks, and Postgres inside an install
+
+[0065](0065-work-model-tasks-inbox.md) changes this decision:
+
+- "Persisted as a ticket" now reads "is a task": a request to another agent is a **child task**.
+- **Inside one install the transport is Postgres plus the MCP tools `ask_agent` and `reply`**, not
+  the A2A wire protocol. The asking run parks with reason `a2a` and resumes on the reply. The
+  expert's sandbox starts as soon as the child task exists. Each agent uses only its own grants and
+  budget, membership and role caps apply ([0019](0019-personal-agents-and-teams.md)), and sandboxes
+  never talk to each other over the network.
+- **The external A2A gateway comes in v1.0** and maps onto the same tasks. The agent card path
+  `/.well-known/agent-card.json` was verified on 2026-10-26 (A2A v1.0.0 §8.2).
+- `ask_agent` ships in v0.2 (#146), not v0.3.
+- Not decided: whether a read-only delegation from a chat (amendment of 2026-10-23) stays
+  ephemeral now that a request is a child task.
 
 ## Open questions
 

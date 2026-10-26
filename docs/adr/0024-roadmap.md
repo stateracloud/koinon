@@ -1,6 +1,7 @@
 # 0024. Release roadmap from v0.1 to v1.0
 
 - Status: Accepted
+- Amended: 2026-10-26 (releases from [#146](https://github.com/stateracloud/koinon/issues/146))
 - Date: 2026-10-21
 - Decision: [design.md#24](../design.md)
 
@@ -56,6 +57,24 @@ land in v0.2 (ADR [0044](0044-in-sandbox-credential-exception.md)).
 ## Upstream verification
 
 None needed. Checked 2026-10-21.
+
+## Amendment (2026-10-26): v0.1 to v0.3 replaced by the releases of #146
+
+Andre set three releases on 2026-10-26 ([#146](https://github.com/stateracloud/koinon/issues/146)).
+They replace the v0.1, v0.2 and v0.3 rows above; v0.4 onwards is unchanged.
+
+| Release | Theme | Includes |
+| --- | --- | --- |
+| v0.1 | Foundation | the code-host interface: GitHub, GitHub Enterprise Server and Gitea ([0062](0062-code-host-connectors.md), [0063](0063-forge-credential-classes.md)); A2A-shaped tasks, the inbox, `ask_user`, DBOS ([0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md)); schedule and direct-message triggers; home checkpoints ([0032](0032-agent-home-checkpoints.md)). Tested on the home lab with Gitea through stories 2 (without the expert hand-off), 5 and 7 |
+| v0.2 | Events and channels | code-host and Slack/Teams events (webhooks, Socket Mode, polling, correlation); the Slack and Teams connectors, with approval buttons and account linking; `ask_agent`. Stories 1, 2, 3, 4 and 6 |
+| v0.3 | (not named) | the concierge and setup checklist ([0067](0067-concierge.md)); tracker connectors (Jira, Linear, Azure Boards, and GitHub, Gitea and GitLab issues) with their triggers ([0064](0064-work-tracker-connectors.md)); the personal agent ([#55](https://github.com/stateracloud/koinon/issues/55)) |
+
+The story numbers are #146's. Items of the old rows that #146 does not place: the in-sandbox
+credential exception ([0044](0044-in-sandbox-credential-exception.md)), the agent builder
+([0020](0020-agent-builder-and-templates.md)), and the work moved to v0.2 on 2026-10-23 (chat
+[0055](0055-chat-as-its-own-object.md), container MCP servers [0057](0057-mcp-servers.md), the
+shared gateway driver [0058](0058-gateway-modes.md)). Their release is open. The external A2A
+gateway is v1.0 ([0065](0065-work-model-tasks-inbox.md)).
 
 ## Links
 

@@ -4,7 +4,9 @@
 - Date: 2026-10-22
 - Amended by: [0056](0056-model-providers-pricing-and-budgets-per-org.md) (models, budgets,
   connection secrets; the Helm model values are dropped),
-  [0058](0058-gateway-modes.md) (gateway modes)
+  [0058](0058-gateway-modes.md) (gateway modes), and on 2026-10-26 by
+  [0062](0062-code-host-connectors.md), [0063](0063-forge-credential-classes.md),
+  [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md) (v0.1 Foundation)
 - Amends: [0007](0007-connector-model.md), [0016](0016-harness-and-deployment.md),
   [0036](0036-v01-demo.md); extends [0048](0048-openshell-spike-results.md) (Proposed, #15)
 - Verification: agentgateway Kubernetes-mode `rawConfig` budgets verified by spike S2
@@ -230,6 +232,27 @@ access log into one file whose every change rolls the proxy pods).
   granted tools, but another org's `initialize`, `ping` and list requests may reach a server with its
   owner's credential. Standalone mode does not contact the server at all for other orgs. Accepted by
   Andre; documented in [0058](0058-gateway-modes.md) and the gateway-modes guide.
+
+## Amendment (2026-10-26): v0.1 Foundation replaces this scope
+
+Andre replaced v0.1's scope with "v0.1 Foundation" ([#146](https://github.com/stateracloud/koinon/issues/146);
+[0024](0024-roadmap.md) amendment; [docs/plans/v0.1.md](../plans/v0.1.md)). Changes to the decisions above:
+
+- **Code hosts.** GitHub, GitHub Enterprise Server and Gitea behind a code-host interface
+  ([0062](0062-code-host-connectors.md)). Gitea uses a bot per connection with a read token and a
+  write token ([0063](0063-forge-credential-classes.md)). The agent still never pushes: GitHub
+  commits through its Git Data API, Gitea through a git push from koinon-api. Changes are refused
+  under the provider's CI paths, not only `.github/workflows/`.
+- **Tickets and board columns** give way to A2A-shaped tasks and the inbox; the board is a
+  secondary view ([0065](0065-work-model-tasks-inbox.md)).
+- **"Out of v0.1"**: agent-home checkpoints and schedules are now in v0.1. A2A (`ask_agent`),
+  webhooks and Slack/Teams stay out, in v0.2 ([0065](0065-work-model-tasks-inbox.md),
+  [0066](0066-triggers-and-scheduling.md)).
+- **Sandbox lifecycle.** A sandbox whose run waits on `a2a` or `input_required` stays warm for
+  15 minutes; otherwise it stops after 10 idle minutes. A run waits in the queue instead of
+  failing after 5 minutes. All of this is tunable per org ([0066](0066-triggers-and-scheduling.md)).
+- **Release test.** v0.1 is tested on the home lab with Gitea through stories 2 (without the expert
+  hand-off), 5 and 7 of #146.
 
 ## Open questions
 

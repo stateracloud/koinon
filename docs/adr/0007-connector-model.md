@@ -1,7 +1,8 @@
 # 0007. Connector model: type, connection, grant
 
 - Status: Accepted
-- Amended by: [0049](0049-v01-scope-decisions.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md)
+- Amended by: [0049](0049-v01-scope-decisions.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md),
+  [0062](0062-code-host-connectors.md), [0063](0063-forge-credential-classes.md), [0064](0064-work-tracker-connectors.md)
 - Date: 2026-10-21
 - Decision: [design.md#7](../design.md)
 
@@ -77,6 +78,21 @@ entered in the UI are written by Koinon as Kubernetes Secrets.
 - 2026-10-21: GitHub App installation tokens can be narrowed by repositories and permissions
   (contents, pull_requests, issues and so on).
   https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app
+
+## Amendment (2026-10-26): code hosts and work trackers
+
+- **Hosts per connection.** A code-host connection has its own base URL and an optional CA bundle.
+  Network rules and the sandbox's git configuration are rendered from the connection, not from
+  fixed type hosts ([0062](0062-code-host-connectors.md)).
+- **More data in the type.** A code-host type also carries its CI paths and a capability descriptor
+  that says what its credentials and write API can narrow ([0062](0062-code-host-connectors.md),
+  [0063](0063-forge-credential-classes.md)).
+- **Providers.** GitHub, GitHub Enterprise Server and Gitea in v0.1; GitLab and Azure DevOps later.
+  Gitea's static bot token is allowed under a narrow exception to
+  [0043](0043-workload-identity-adapters-and-koinon-issuer.md) ([0063](0063-forge-credential-classes.md)),
+  which needs an auth type beyond the three listed above.
+- **Work trackers** are connector types too. They are reached through tools and triggers and never
+  synced with Koinon's tasks ([0064](0064-work-tracker-connectors.md), v0.3).
 
 ## Links
 
