@@ -68,10 +68,18 @@ Set it with `gh variable set RELEASE_SIGNING --body true`, and remove it again w
 ## What protects release tags
 
 The workflow's gate checks that the tagged commit is on `main`, but anyone who can push a tag can
-start a release from a commit on a branch that was merged later, or move a tag afterwards. A tag
-ruleset on `refs/tags/v*` closes that: only repository admins may create matching tags, and tags can
-be neither updated nor deleted. This ruleset is not created by the repository's code; it is a
-repository setting that an admin has to add, and until it exists the gate is the only protection.
+start a release from a commit on a branch that was merged later, or move a tag afterwards. Two tag
+rulesets on `refs/tags/v*` close that (repository settings, added 2026-10-26; not created by the
+repository's code):
+
+| Ruleset | Blocks | Bypass |
+| --- | --- | --- |
+| `release tags: admins create` | creating a matching tag | repository admins |
+| `release tags: immutable` | updating or deleting a matching tag | none |
+
+They are separate because a ruleset's bypass covers all of its rules: one ruleset with an admin
+bypass would let admins move or delete a published tag. To fix a bad tag, cut the next `rc.N`; only
+disabling the `immutable` ruleset in the repository settings lets anyone move or delete one.
 
 ## Mirror a release to the home lab
 
