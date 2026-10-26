@@ -237,3 +237,80 @@ var _ = Describe("OIDC login", func() {
 		Expect(e.browser().oidcLogin(ctx, "").StatusCode).To(Equal(http.StatusForbidden))
 	})
 })
+
+var _ = Describe("OIDC platform admin groups", func() {
+	var e *env
+
+	isAdmin := func(ctx context.Context, subject string) bool {
+		return count(ctx, e, `SELECT count(*) FROM platform_admins pa JOIN users u ON u.id = pa.user_id WHERE u.oidc_subject = $1`, subject) == 1
+	}
+	events := func(ctx context.Context, action string) int {
+		return count(ctx, e, `SELECT count(*) FROM audit_events WHERE action = $1 AND actor_kind = 'system' AND actor_id = 'oidc'`, action)
+	}
+
+	It("grants on login, revokes when the group is gone, and audits both", func(ctx SpecContext) {
+		e = newEnv(ctx, envOptions{oidc: true, platformAdminGroups: []string{"koinon-platform", "other"}})
+		e.issuer.SetUser(oidcUser("pia", "koinon-platform"))
+		b := e.browser()
+		b.oidcLogin(ctx, "")
+		who, err := b.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(who.GetPlatformAdmin()).To(BeTrue())
+		Expect(isAdmin(ctx, "pia")).To(BeTrue())
+		Expect(events(ctx, "platform_admin.grant")).To(Equal(1))
+
+		By("keeping the grant, without a second event, while the group stays")
+		e.browser().oidcLogin(ctx, "")
+		Expect(events(ctx, "platform_admin.grant")).To(Equal(1))
+
+		By("revoking when the user loses every listed group")
+		e.issuer.SetUser(oidcUser("pia", "staff"))
+		again := e.browser()
+		again.oidcLogin(ctx, "")
+		Expect(isAdmin(ctx, "pia")).To(BeFalse())
+		who, err = again.auth().WhoAmI(ctx, &authv1alpha1.WhoAmIRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(who.GetPlatformAdmin()).To(BeFalse())
+		Expect(events(ctx, "platform_admin.revoke")).To(Equal(1))
+
+		By("granting again when the group returns")
+		e.issuer.SetUser(oidcUser("pia", "other"))
+		e.browser().oidcLogin(ctx, "")
+		Expect(isAdmin(ctx, "pia")).To(BeTrue())
+		Expect(events(ctx, "platform_admin.grant")).To(Equal(2))
+	})
+
+	It("leaves the bootstrap admin and other platform admins alone", func(ctx SpecContext) {
+		e = newEnv(ctx, envOptions{oidc: true, platformAdminGroups: []string{"koinon-platform"}})
+		e.issuer.SetUser(oidcUser("sam", "staff"))
+		e.browser().oidcLogin(ctx, "")
+		_, err := e.pool.Exec(ctx, `INSERT INTO platform_admins (user_id, source) SELECT id, 'bootstrap' FROM users WHERE oidc_subject = 'sam'`)
+		Expect(err).NotTo(HaveOccurred())
+
+		e.browser().oidcLogin(ctx, "")
+		Expect(isAdmin(ctx, "sam")).To(BeTrue(), "a grant from another source is not revoked by the login")
+		Expect(count(ctx, e, `SELECT count(*) FROM platform_admins pa JOIN users u ON u.id = pa.user_id WHERE u.oidc_issuer = $1`, auth.LocalIssuer)).To(Equal(1))
+		Expect(events(ctx, "platform_admin.revoke")).To(Equal(0))
+
+		By("not turning another source's grant into a group grant")
+		e.issuer.SetUser(oidcUser("sam", "koinon-platform"))
+		e.browser().oidcLogin(ctx, "")
+		e.issuer.SetUser(oidcUser("sam"))
+		e.browser().oidcLogin(ctx, "")
+		Expect(isAdmin(ctx, "sam")).To(BeTrue())
+		Expect(events(ctx, "platform_admin.grant")).To(Equal(0))
+	})
+
+	It("changes nothing when the setting is empty", func(ctx SpecContext) {
+		e = newEnv(ctx, envOptions{oidc: true})
+		e.issuer.SetUser(oidcUser("tom", "koinon-platform"))
+		e.browser().oidcLogin(ctx, "")
+		Expect(isAdmin(ctx, "tom")).To(BeFalse())
+		_, err := e.pool.Exec(ctx, `INSERT INTO platform_admins (user_id, source) SELECT id, 'oidc_group' FROM users WHERE oidc_subject = 'tom'`)
+		Expect(err).NotTo(HaveOccurred())
+		e.issuer.SetUser(oidcUser("tom"))
+		e.browser().oidcLogin(ctx, "")
+		Expect(isAdmin(ctx, "tom")).To(BeTrue(), "an empty setting does not revoke")
+		Expect(events(ctx, "platform_admin.revoke")).To(Equal(0))
+	})
+})

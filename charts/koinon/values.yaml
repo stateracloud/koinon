@@ -275,8 +275,10 @@ openshell:
 publicUrl: ""
 
 # Bootstrap platform admin (plan item A1). The one-time password is generated once into the Secret
-# <fullname>-bootstrap-admin by the ensure-secrets hook Job and never changed by it. Disable once OIDC works: enabled=false
-# turns the API's password login off and revokes the bootstrap sessions.
+# <fullname>-bootstrap-admin by the ensure-secrets hook Job and never changed by it. Disable once OIDC works:
+# enabled=false turns the API's password login off and revokes the bootstrap sessions. The bootstrap admin
+# is the only platform admin until you set oidc.platformAdminGroups and a user in one of those groups has
+# logged in, so do that first.
 bootstrapAdmin:
   enabled: true
   # Login name, applied on every start (changing it renames the login).
@@ -304,6 +306,14 @@ oidc:
   # IdP group -> role in the default org (viewer, member, admin or owner), for example
   # {koinon-admins: admin, staff: member}. Reconciled on every start.
   groupMappings: {}
+  # IdP groups (in groupsClaim) whose members are platform admins, for example [koinon-platform].
+  # Reconciled at every login like groupMappings: a user who gains a listed group becomes a platform
+  # admin, one who loses all of them stops being one. Only grants made by this setting are revoked;
+  # the bootstrap admin keeps its own. Empty changes nothing. Names may contain spaces but not commas,
+  # because the list reaches koinon-api as a comma-separated environment variable. Set it, and log in once as a user in
+  # one of the groups, before you set bootstrapAdmin.enabled=false: without it nobody can set the
+  # platform budget ceilings (/platform/budgets).
+  platformAdminGroups: []
   # Identity mode of the default org: platform (roles from Koinon only), idp (from groupMappings)
   # or hybrid (both).
   defaultOrgIdentityMode: hybrid

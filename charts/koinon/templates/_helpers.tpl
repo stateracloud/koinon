@@ -265,6 +265,8 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 {{- end }}
 - name: KOINON_DEFAULT_ORG_GROUP_MAPPINGS
   value: {{ join "," $mappings | quote }}
+- name: KOINON_OIDC_PLATFORM_ADMIN_GROUPS
+  value: {{ join "," $o.platformAdminGroups | quote }}
 {{- end }}
 - name: KOINON_DEFAULT_ORG_IDENTITY_MODE
   value: {{ $o.defaultOrgIdentityMode | quote }}

@@ -102,6 +102,7 @@ type config struct {
 	oidcRedirectURL      string
 	oidcGroupsClaim      string
 	oidcScopes           string
+	oidcPlatformAdmins   string
 
 	sessionIdle time.Duration
 	sessionMax  time.Duration
@@ -163,6 +164,10 @@ func parseFlags(args []string) (config, error) {
 		"OIDC redirect URL; default <public-url>/auth/oidc/callback")
 	fs.StringVar(&c.oidcGroupsClaim, "oidc-groups-claim", "groups", "ID token claim holding the user's groups")
 	fs.StringVar(&c.oidcScopes, "oidc-scopes", "email,profile", "comma-separated scopes requested besides openid")
+
+	fs.StringVar(&c.oidcPlatformAdmins, "oidc-platform-admin-groups", "",
+		"comma-separated IdP groups whose members are platform admins; reconciled at every login "+
+			"(grants and revokes only what this setting granted)")
 
 	fs.DurationVar(&c.sessionIdle, "session-idle-timeout", auth.DefaultSessionIdleTimeout,
 		"end sessions after this long without requests")
@@ -317,6 +322,9 @@ func run() error {
 	if len(mappings) > 0 && cfg.oidcIssuer == "" {
 		return errors.New("--default-org-group-mappings needs --oidc-issuer-url")
 	}
+	if cfg.oidcPlatformAdmins != "" && cfg.oidcIssuer == "" {
+		return errors.New("--oidc-platform-admin-groups needs --oidc-issuer-url")
+	}
 	// On a fresh install the database and its schema come up after koinon-api starts (the chart's
 	// migration Job waits for CNPG), so bootstrap is retried for up to --wait while the database
 	// is unreachable or not migrated. Any other error fails at once.
@@ -359,6 +367,8 @@ func run() error {
 			RedirectURL:  cfg.oidcRedirectURL,
 			GroupsClaim:  cfg.oidcGroupsClaim,
 			Scopes:       splitList(cfg.oidcScopes),
+
+			PlatformAdminGroups: splitList(cfg.oidcPlatformAdmins),
 		}
 	}
 	authSvc, err := auth.New(pool, authCfg)
