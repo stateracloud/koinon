@@ -50,12 +50,12 @@ model.
     GitHub org.
 - Follow-ups:
   - Check availability of the `koinon` GitHub org, the `koinon.dev` domain and trademarks (open item
-    in design.md; tracked as [#10](https://github.com/procoduck/koinon/issues/10)).
+    in design.md; tracked as [#10](https://github.com/stateracloud/koinon/issues/10)).
 
 ## Open questions
 
 - Trademark search result, and whether it forces a rename before v0.1 (tracked in
-  [#10](https://github.com/procoduck/koinon/issues/10)).
+  [#10](https://github.com/stateracloud/koinon/issues/10)).
 
 ## Upstream verification
 
@@ -64,4 +64,4 @@ None needed; this is a naming decision. The availability checks are tracked sepa
 ## Links
 
 - [0034 Project identity](0034-project-identity.md)
-- [#10 Check availability: koinon GitHub org, koinon.dev domain, trademarks](https://github.com/procoduck/koinon/issues/10)
+- [#10 Check availability: koinon GitHub org, koinon.dev domain, trademarks](https://github.com/stateracloud/koinon/issues/10)

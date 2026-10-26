@@ -56,10 +56,19 @@ var decimalRE = regexp.MustCompile(`^[0-9]{1,10}(\.[0-9]{1,18})?$`)
 // without usage) are skipped. Records that look charged but cannot be
 // attributed are counted in rejected, with the first reason in reason.
 func Decode(req *collogspb.ExportLogsServiceRequest) (entries []Entry, rejected int64, reason string) {
-	reject := func(msg string) {
+	return decode(req, nil)
+}
+
+// decode is Decode that also reports each rejection's kind (one of the reject* constants) to
+// onReject, for the metrics.
+func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string)) (entries []Entry, rejected int64, reason string) {
+	reject := func(kind, msg string) {
 		rejected++
 		if reason == "" {
 			reason = msg
+		}
+		if onReject != nil {
+			onReject(kind)
 		}
 	}
 	for _, rl := range req.GetResourceLogs() {
@@ -134,19 +143,19 @@ func Decode(req *collogspb.ExportLogsServiceRequest) (entries []Entry, rejected 
 				e.Agent = gateway.AgentRef{Org: org, Name: name}
 				switch {
 				case !ok || e.Agent.Validate() != nil:
-					reject(fmt.Sprintf("invalid %s %q", gateway.LogFieldAgent, agent))
+					reject(rejectInvalidAgent, fmt.Sprintf("invalid %s %q", gateway.LogFieldAgent, agent))
 					continue
 				case e.RequestID == "" || len(e.RequestID) > 128:
-					reject("missing or invalid " + gateway.LogFieldRequest)
+					reject(rejectInvalidReq, "missing or invalid "+gateway.LogFieldRequest)
 					continue
 				case e.KeyID == "":
-					reject("missing " + gateway.LogFieldKey)
+					reject(rejectMissingKey, "missing "+gateway.LogFieldKey)
 					continue
 				case in < 0 || out < 0 || cacheRead < 0 || cacheWrite < 0 || reasoning < 0:
-					reject("negative token counts")
+					reject(rejectNegativeToken, "negative token counts")
 					continue
 				case attrs[attrCostTotal] != nil && cost == "":
-					reject(fmt.Sprintf("invalid %s", attrCostTotal))
+					reject(rejectInvalidCost, fmt.Sprintf("invalid %s", attrCostTotal))
 					continue
 				}
 				entries = append(entries, e)
@@ -237,7 +246,11 @@ func Handler(in *Ingester, log *slog.Logger) http.Handler {
 			http.Error(w, "invalid ExportLogsServiceRequest", http.StatusBadRequest)
 			return
 		}
-		entries, rejected, reason := Decode(&req)
+		var onReject func(string)
+		if in.Metrics != nil {
+			onReject = func(kind string) { in.Metrics.Rejected.WithLabelValues(kind).Inc() }
+		}
+		entries, rejected, reason := decode(&req, onReject)
 		res, err := in.Ingest(r.Context(), entries)
 		if err != nil {
 			log.Error("spend ledger: ingest failed", "entries", len(entries), "err", err)

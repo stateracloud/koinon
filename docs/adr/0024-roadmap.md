@@ -46,7 +46,7 @@ land in v0.2 (ADR [0044](0044-in-sandbox-credential-exception.md)).
 - Negative: the v0.1 scope grew (GitHub connector, approval flow, agentgateway) compared with the
   original roadmap line _(inferred)_.
 - Follow-ups: v0.1 milestone with issues per component (bootstrap deliverable 4,
-  [#4](https://github.com/procoduck/koinon/issues/4)).
+  [#4](https://github.com/stateracloud/koinon/issues/4)).
 
 ## Open questions
 
