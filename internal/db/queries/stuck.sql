@@ -14,12 +14,26 @@ WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
 
 -- name: CountRecentSandboxRecreations :one
--- Recreations for stuck sandboxes in the last 24 hours, since the agent was last resumed.
-SELECT count(*)::bigint FROM sandbox_incidents i
-JOIN agents a ON a.org_id = i.org_id AND a.id = i.agent_id
-WHERE i.org_id = @org_id AND i.agent_id = @agent_id AND i.outcome = 'recreate'
-  AND i.detected_at > now() - interval '24 hours'
-  AND (a.resumed_at IS NULL OR i.detected_at > a.resumed_at);
+-- Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
+-- shared by agentd (stuck sandboxes) and the reconciler (sandboxes in Error or Completed). A
+-- stuck sandbox counts from its incident, which agentd records before the reconciler recreates
+-- it; one in Error or Completed counts from the audited sandbox.recreate event that carries a
+-- phase. The audit event of a stuck recreation has none, so nothing is counted twice.
+SELECT (
+    (SELECT count(*) FROM sandbox_incidents i
+     WHERE i.org_id = a.org_id AND i.agent_id = a.id AND i.outcome = 'recreate'
+       AND i.detected_at > now() - interval '24 hours'
+       AND (a.resumed_at IS NULL OR i.detected_at > a.resumed_at))
+    +
+    (SELECT count(*) FROM audit_events e
+     WHERE e.org_id = a.org_id AND e.action = 'sandbox.recreate'
+       AND e.target_kind = 'agent' AND e.target_id = a.id::text
+       AND e.summary -> 'after' ? 'phase'
+       AND e.created_at > now() - interval '24 hours'
+       AND (a.resumed_at IS NULL OR e.created_at > a.resumed_at))
+)::bigint
+FROM agents a
+WHERE a.org_id = @org_id AND a.id = @agent_id;
 
 -- name: InsertSandboxIncident :one
 INSERT INTO sandbox_incidents (org_id, agent_id, run_id, ticket_id, processes, outcome, work, work_note, saved_work_id)
