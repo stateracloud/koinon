@@ -37,6 +37,8 @@ Secret (koinon.dev/secret-type: model-provider); see the docs site, guide "Model
 Open the UI:
 {{- if .Values.ingress.enabled }}
   http{{ if .Values.ingress.tlsSecretName }}s{{ end }}://{{ .Values.ingress.host }}/
+{{- else if .Values.httpRoute.enabled }}
+  {{ include "koinon.publicUrl" . }}/ (HTTPRoute through {{ (first .Values.httpRoute.parentRefs).name }})
 {{- else }}
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "koinon.componentName" (list . "api") }} {{ .Values.api.port }}
 {{- end }}
