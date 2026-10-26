@@ -198,8 +198,9 @@ type Querier interface {
 	GetAgentBudget(ctx context.Context, arg GetAgentBudgetParams) (GetAgentBudgetRow, error)
 	GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerParams) (AgentMcpServer, error)
 	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
-	// holds the agent, whether one is waiting to be claimed (queued, or parked
-	// with its park resolved), and when a run last finished or parked. Parked runs
+	// holds the agent, whether one can be claimed now (queued, or parked with its
+	// park resolved, and run_claimable: not behind an unhealthy agent or a
+	// parked sibling), and when a run last finished or parked. Parked runs
 	// do not keep the sandbox up, but they hold off its recreation (has_held):
 	// a parked run resumes its session in the same home volume.
 	GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error)
