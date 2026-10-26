@@ -417,6 +417,24 @@
       "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
       "then": {"required": ["host"], "properties": {"host": {"minLength": 1}}}
     },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "allowFrom": {"$ref": "#/definitions/peers"},
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "skipCapabilityCheck": {"type": "boolean"},
+            "labels": {"type": "object", "additionalProperties": {"type": "string"}},
+            "interval": {"type": "string", "pattern": "^([0-9]+(ms|s|m|h))*$"}
+          }
+        }
+      }
+    },
     "networkPolicy": {
       "type": "object",
       "additionalProperties": false,

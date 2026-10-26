@@ -110,7 +110,12 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if old, err := r.Cookie(s.SessionCookie()); err == nil {
 		_ = s.revokeToken(r.Context(), old.Value)
 	}
-	token, _, err := s.createSession(r.Context(), s.q, cred.UserID, store.AuthMethodPassword)
+	var token string
+	err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+		var err error
+		token, _, err = s.createSession(r.Context(), store.New(tx), cred.UserID, store.AuthMethodPassword)
+		return err
+	})
 	if err != nil {
 		s.log.Error("creating session failed", "err", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{"internal error"})
@@ -155,7 +160,7 @@ func (s *Service) checkPassword(ctx context.Context, username, password string) 
 // handleLogout revokes the current session. It always clears the cookie.
 func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(s.SessionCookie()); err == nil {
-		if err := s.revokeToken(r.Context(), c.Value); err != nil {
+		if err := s.logout(r.Context(), c.Value); err != nil {
 			s.log.Error("revoking session failed", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return

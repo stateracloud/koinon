@@ -44,7 +44,7 @@ reporting channel from the first public release.
 - Negative:
   - Bus factor of one.
   - **Private vulnerability reporting works only on public repositories.** While
-    `procoduck/koinon` is private there is no reporting channel. `SECURITY.md` must say so, and
+    `procoduck/koinon` (amended 2026-10-26: now `stateracloud/koinon`, see [0034](0034-project-identity.md)) is private there is no reporting channel. `SECURITY.md` must say so, and
     reporting must be switched on the day the repo goes public.
 - Follow-ups:
   - Scaffold `MAINTAINERS.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` and `CONTRIBUTING.md` (DCO, how

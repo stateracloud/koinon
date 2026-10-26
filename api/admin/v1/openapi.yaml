@@ -12,7 +12,7 @@ info:
   title: Koinon admin API
   version: 1.0.0
   description: |
-    Manage an org's model providers, models, remote MCP servers, prices, budgets and API tokens. The org is the token's org.
+    Manage an org's model providers, models, remote MCP servers, prices, budgets and API tokens, and read its audit log. The org is the token's org.
     Providers and models declared by a labelled Kubernetes Secret (`koinon.dev/secret-type:
     model-provider`) are read-only here: changing or deleting them answers 409 and names the
     Secret. When the Secret is deleted they stay, disabled and `removed`, and may then be deleted.
@@ -33,6 +33,7 @@ tags:
   - name: tokens
   - name: prices
   - name: budgets
+  - name: audit
 paths:
   /providers:
     get:
@@ -637,6 +638,58 @@ paths:
                 $ref: "#/components/schemas/AgentBudget"
         default:
           $ref: "#/components/responses/Error"
+  /audit:
+    get:
+      tags: [audit]
+      operationId: listAuditEvents
+      summary: Read the org's audit log, newest first.
+      description: |
+        The org is the token's org: a token never reads another org's events. Filters combine with
+        AND. Page with `pageToken` from the previous page's `nextPageToken`; the last page has none.
+        Each event carries its place in the org's hash chain (ADR 0023).
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: RFC 3339 time; keeps events created at or after it.
+          schema: {type: string, format: date-time}
+        - name: until
+          in: query
+          required: false
+          description: RFC 3339 time; keeps events created before it.
+          schema: {type: string, format: date-time}
+        - name: actionPrefix
+          in: query
+          required: false
+          description: Keeps events whose action starts with it, for example `approval.` or `agent.create`.
+          schema: {type: string}
+        - name: actorKind
+          in: query
+          required: false
+          schema: {type: string, enum: [user, token, agent, secret, system]}
+        - name: actorId
+          in: query
+          required: false
+          description: Keeps the events of one actor; needs `actorKind`.
+          schema: {type: string}
+        - name: pageSize
+          in: query
+          required: false
+          description: 50 by default, at most 200.
+          schema: {type: integer, minimum: 1, maximum: 200}
+        - name: pageToken
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        "200":
+          description: One page of events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventList"
+        default:
+          $ref: "#/components/responses/Error"
 components:
   securitySchemes:
     bearerAuth:
@@ -1130,6 +1183,30 @@ components:
         models:
           type: array
           items: {$ref: "#/components/schemas/SpendLine"}
+    AuditEvent:
+      type: object
+      required: [id, actorKind, actorId, action, targetKind, targetId, summary, requestId, createdAt, chainSeq, prevHash, hash]
+      properties:
+        id: {type: string, format: uuid}
+        actorKind: {type: string, enum: [user, token, agent, secret, system]}
+        actorId: {type: string}
+        action: {type: string, description: "<area>.<verb>, for example approval.approve."}
+        targetKind: {type: string}
+        targetId: {type: string}
+        summary: {type: object, description: "{before, after} without secret values.", additionalProperties: true}
+        requestId: {type: string}
+        createdAt: {type: string, format: date-time}
+        chainSeq: {type: integer, format: int64, description: "Position in the org's hash chain, from 1."}
+        prevHash: {type: string, description: "Hash of the previous event, lower-case hex."}
+        hash: {type: string, description: "sha256 of the canonical event and prevHash, lower-case hex."}
+    AuditEventList:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items: {$ref: "#/components/schemas/AuditEvent"}
+        nextPageToken: {type: string, description: "Absent on the last page."}
     OrgBudget:
       type: object
       required: [spentThisMonthUsd, monthStart]
