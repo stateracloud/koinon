@@ -63,7 +63,7 @@ function wizard(opts: { role?: OrgRole; fail?: boolean } = {}) {
 
 async function toAccessStep() {
   await userEvent.click(await screen.findByRole('button', { name: 'Next' }))
-  await userEvent.click(screen.getByRole('radio', { name: /Hermes/ }))
+  await userEvent.click(screen.getByRole('radio', { name: /OpenCode/ }))
   await userEvent.click(screen.getByRole('button', { name: 'Next' }))
 }
 

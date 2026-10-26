@@ -423,8 +423,6 @@ var _ = Describe("Pool", func() {
 			Expect(execs[6].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", link, instructionsFile))
 		},
 		Entry("opencode", store.AgentFlavorOpencode, "/usr/local/bin/koinon-opencode", opencodeLink),
-		Entry("hermes", store.AgentFlavorHermes, "/usr/local/bin/koinon-hermes", hermesLink),
-		Entry("pi", store.AgentFlavorPi, "/usr/local/bin/koinon-pi", piLink),
 	)
 
 	It("writes the run's instructions before the harness starts and records their hash", func(ctx SpecContext) {
@@ -629,10 +627,6 @@ var _ = Describe("Pool", func() {
 		},
 		Entry("OpenCode, repointed", store.AgentFlavorOpencode, opencodeLink, repoint, "changed", "/sandbox/mine.md"),
 		Entry("OpenCode, removed", store.AgentFlavorOpencode, opencodeLink, unlink, "missing", ""),
-		Entry("Hermes, repointed", store.AgentFlavorHermes, hermesLink, repoint, "changed", "/sandbox/mine.md"),
-		Entry("Hermes, removed", store.AgentFlavorHermes, hermesLink, unlink, "missing", ""),
-		Entry("pi, repointed", store.AgentFlavorPi, piLink, repoint, "changed", "/sandbox/mine.md"),
-		Entry("pi, removed", store.AgentFlavorPi, piLink, unlink, "missing", ""),
 	)
 
 	It("fails the run when the instruction link cannot be restored", func(ctx SpecContext) {

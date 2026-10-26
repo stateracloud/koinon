@@ -96,9 +96,8 @@ var _ = Describe("Embedded templates", func() {
 			Expect(ok).To(BeTrue())
 		})
 
-		It("offers the three v0.1 flavors with OpenCode as default", func() {
-			Expect(t.Spec.Flavors.Allowed).To(ConsistOf(
-				templates.FlavorOpenCode, templates.FlavorHermes, templates.FlavorPi))
+		It("offers OpenCode, the only v0.1 flavor, as default", func() {
+			Expect(t.Spec.Flavors.Allowed).To(ConsistOf(templates.FlavorOpenCode))
 			Expect(t.Spec.Flavors.Default).To(Equal(templates.FlavorOpenCode))
 		})
 

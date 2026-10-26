@@ -9,7 +9,7 @@ metadata:
   description: A near-valid template with one mistake.
 spec:
   flavors:
-    allowed: [opencode, pi]
+    allowed: [opencode]
     default: opencode
   model:
     name: default

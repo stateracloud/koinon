@@ -23,8 +23,6 @@ var _ = Describe("LaunchCommand", func() {
 			}))
 		},
 		Entry("opencode", store.AgentFlavorOpencode, "/usr/local/bin/koinon-opencode"),
-		Entry("hermes", store.AgentFlavorHermes, "/usr/local/bin/koinon-hermes"),
-		Entry("pi", store.AgentFlavorPi, "/usr/local/bin/koinon-pi"),
 	)
 
 	It("covers every flavor of the schema's agent_flavor enum", func(ctx SpecContext) {

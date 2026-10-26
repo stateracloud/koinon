@@ -165,7 +165,7 @@ var _ = Describe("Backend", func() {
 		It("updates a changed profile with its resource version", func(ctx SpecContext) {
 			Expect(b.EnsureProvider(ctx, ws, agentgatewayProvider("1"))).To(Succeed())
 			p := agentgatewayProvider("1")
-			p.Profile.Binaries = append(p.Profile.Binaries, "/usr/local/bin/hermes")
+			p.Profile.Binaries = append(p.Profile.Binaries, "/usr/local/bin/extra")
 			Expect(b.EnsureProvider(ctx, ws, p)).To(Succeed())
 
 			Expect(gw.Calls("UpdateProviderProfiles")).To(Equal(1))

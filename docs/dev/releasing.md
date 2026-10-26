@@ -86,16 +86,15 @@ referrers-API-only output is not copied. Install the mirrored chart with
 ### Flavor images when installing a release
 
 The packaged chart defaults `flavors.<x>.image` to `ghcr.io/stateracloud/flavor-<x>:<appVersion>`
-(`opencode`, `hermes`, `pi`), and no release publishes those images. Until the flavor design is
-settled, point the flavors at images you built (`make flavors`, then tag and push), or turn the ones
-you do not use off. `image.registry` is shared by all images, so for REL2 run A on the home-lab Zot:
+(`opencode` is the only v0.1 flavor, ADR 0059), and no release publishes that image yet
+(publishing `flavor-opencode` is a follow-up). Until it does, point the flavor at an image you built
+(`make flavors`, then tag and push). `image.registry` is shared by all images, so for REL2 run A on the home-lab Zot:
 
 ```sh
 helm install koinon oci://zot.apps.lab.example.invalid/koinon/charts/koinon --version 0.1.0-rc.1 \
   --set image.registry=zot.apps.lab.example.invalid/koinon \
   --set flavors.opencode.image.repository=flavor-opencode \
-  --set flavors.opencode.image.tag=dev-<hash from hack/flavor-tag.sh opencode> \
-  --set flavors.hermes=null --set flavors.pi=null
+  --set flavors.opencode.image.tag=dev-<hash from hack/flavor-tag.sh opencode>
 ```
 
 `flavors.<x>.image.registry` does not exist; a flavor in another registry needs
@@ -114,8 +113,8 @@ config whose `release` is disabled so that nothing reaches GitHub.
 
 ## Not released yet
 
-- **Flavor images** (`opencode`, `hermes`, `pi`). The flavor design is being reopened as "bring your
-  own harness", so v0.1 releases none. `make flavors` still builds them for development and CI.
+- **The flavor image** (`opencode`, the only v0.1 flavor, ADR 0059). A release does not publish it
+  yet (follow-up); `make flavors` builds it for development and CI.
 - Signatures and attestations (the `sign` job), until `RELEASE_SIGNING` is switched on (when the repository goes
   public).
 - Binary archives and checksums; the release ships images and the chart.

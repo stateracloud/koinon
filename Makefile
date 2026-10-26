@@ -95,22 +95,12 @@ FLAVOR_CACHE     ?=
 comma            := ,
 flavor_cache      = $(if $(FLAVOR_CACHE),--cache-from type=local$(comma)src=$(FLAVOR_CACHE)/$(1) --cache-to type=local$(comma)dest=$(FLAVOR_CACHE)/$(1)$(comma)mode=max)
 
-FLAVORS          := opencode hermes pi
+FLAVORS          := opencode
 
 .PHONY: flavor-opencode
 flavor-opencode: ## Build the OpenCode flavor image (koinon/flavor-opencode:dev-<hash>)
 	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,opencode) \
 		--build-context common=flavors/common --tag koinon/flavor-opencode:$(call flavor_tag,opencode) flavors/opencode
-
-.PHONY: flavor-hermes
-flavor-hermes: ## Build the Hermes flavor image (koinon/flavor-hermes:dev-<hash>)
-	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,hermes) \
-		--build-context common=flavors/common --tag koinon/flavor-hermes:$(call flavor_tag,hermes) flavors/hermes
-
-.PHONY: flavor-pi
-flavor-pi: ## Build the pi flavor image (koinon/flavor-pi:dev-<hash>)
-	docker buildx build --load $(if $(FLAVOR_PLATFORMS),--platform $(FLAVOR_PLATFORMS)) $(call flavor_cache,pi) \
-		--build-context common=flavors/common --tag koinon/flavor-pi:$(call flavor_tag,pi) flavors/pi
 
 .PHONY: flavors
 flavors: $(addprefix flavor-,$(FLAVORS)) ## Build all flavor images
