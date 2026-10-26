@@ -27,7 +27,8 @@ The Tiltfile refuses every other context, so a stray `tilt up` cannot touch anot
   `docker push`. The chart gets that tag, so a flavor change rolls the reconciler. Only `opencode`
   exists in v0.1 (ADR 0059): `tilt up -- --flavors=opencode`.
 - `postgres` (CloudNativePG `Cluster` from the chart), `koinon-migrate-install` (`koinon-api
-  migrate`), `koinon-preflight`, `koinon-gateway` (standalone agentgateway), `koinon-config` (the
+  migrate`), `koinon-preflight`, `koinon-ensure-secrets` (`koinon-api ensure-secrets`: the generated database and
+  bootstrap-admin passwords, created once and never overwritten), `koinon-gateway` (standalone agentgateway), `koinon-config` (the
   rest of the chart's objects).
 - `openshell-client-cert`: copies the OpenShell client certificate Secret into `koinon` (kind only
   by default, see below).
@@ -35,9 +36,11 @@ The Tiltfile refuses every other context, so a stray `tilt up` cannot touch anot
   `tilt up -- --web=false` leaves it out.
 - The API is port-forwarded to http://localhost:8080.
 
-The chart's hooks are rendered by `helm template` but applied without hook semantics: the preflight
-and migration Jobs are ordinary resources ordered with resource dependencies, and the preflight's
-`hook-delete-policy` is ignored (its Job stays after it succeeds).
+The chart's hooks are rendered by `helm template` but applied without hook semantics: the preflight,
+ensure-secrets and migration Jobs are ordinary resources ordered with resource dependencies, and
+their `hook-delete-policy` is ignored (the Jobs stay after they succeed). The chart renders no
+password and no gateway config, so Tilt needs no workaround for `helm template`; the gateway's
+config ConfigMap is created by the reconciler.
 
 ## kind
 
@@ -98,8 +101,8 @@ The cluster-scoped objects the home-lab profile still applies, both needed:
 
 ## Logging in
 
-The chart generates the bootstrap admin password into the Secret `koinon-bootstrap-admin` and Tilt
-keeps it across re-renders. Nothing is stored in the repository.
+The `koinon-ensure-secrets` Job generates the bootstrap admin password into the Secret
+`koinon-bootstrap-admin` once and never overwrites it. Nothing is stored in the repository.
 
 ```sh
 kubectl -n koinon get secret koinon-bootstrap-admin -o jsonpath='{.data.password}' | base64 -d

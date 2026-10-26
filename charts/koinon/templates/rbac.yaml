@@ -10,8 +10,10 @@ its first start (create cannot be limited by name); update on the KEK Secret by 
 Secrets; and delete on Secrets only while secrets.migrateLegacyConnections is set, to remove a
 legacy connection Secret after its fields were moved.
 The reconciler gets what it renders:
-- patch on the standalone agentgateway ConfigMap (by name; standalone.ConfigMapDeliverer sends a
-  merge patch and never reads it) and the per-agent key Secrets (plan items G1, R2) in this
+- on the standalone agentgateway ConfigMap: patch by name, and create (the chart does not render
+  the ConfigMap, so that a render never resets it: standalone.ConfigMapDeliverer creates it when
+  missing, owned by the gateway Deployment, which it reads by name); create cannot be limited by
+  name; and the per-agent key Secrets (plan items G1, R2) in this
   namespace; Secrets have no list or watch, so it can only reach names it already knows (they are
   recorded in Postgres);
 - the same Secret verbs write the provider keys Secret (koinon-gateway-providers, plan item PV1);
@@ -77,6 +79,14 @@ rules:
     resources: [configmaps]
     resourceNames: [{{ include "koinon.gatewayConfigName" . }}]
     verbs: [patch]
+  # create cannot be limited by resourceNames.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create]
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [{{ include "koinon.componentName" (list . "gateway") }}]
+    verbs: [get]
   {{- end }}
   {{- if eq .Values.gateway.mode "kubernetes" }}
   - apiGroups: [""]
