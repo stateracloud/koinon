@@ -43,6 +43,11 @@ type failure struct{ reason string }
 
 func (f *failure) Error() string { return f.reason }
 
+// requeued sends the run back to the queue: the sandbox did not become ready in time (ADR 0066).
+type requeued struct{ reason string }
+
+func (q *requeued) Error() string { return q.reason }
+
 // canceled cancels the run as its owner, for example at the wall-clock cap.
 type canceled struct{ reason string }
 
@@ -649,6 +654,10 @@ func (r *runner) execErr(ctx context.Context, what string, err error) error {
 	if errors.As(err, &f) {
 		return f
 	}
+	var rq *requeued
+	if errors.As(err, &rq) {
+		return rq
+	}
 	if errors.Is(err, execution.ErrUnavailable) || errors.Is(err, execution.ErrFailedPrecondition) ||
 		errors.Is(err, execution.ErrStreamClosed) {
 		// The gateway or the sandbox is not reachable right now: resume later.
@@ -931,8 +940,13 @@ func (r *runner) reply(ctx context.Context, q *store.Queries) (string, error) {
 func (r *runner) conclude(ctx context.Context, err error) {
 	var f *failure
 	var c *canceled
+	var rq *requeued
 	switch {
 	case err == nil:
+	case errors.As(err, &rq):
+		if rerr := r.requeue(ctx, rq.reason); rerr != nil && !errors.Is(rerr, errFenced) {
+			r.log.Warn("requeueing the run failed; its lease expires and a worker takes it over", "reason", rq.reason, "err", rerr)
+		}
 	case errors.As(err, &f):
 		if ferr := r.finish(ctx, store.RunStateFailed, f.reason); ferr != nil {
 			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)

@@ -74,9 +74,16 @@ reconciler:
     digest: ""
   # Extra replicas stand by: one reconciles at a time, holding a Postgres advisory lock.
   replicas: 1
-  # Stop a sandbox after this long without an active run, parked runs included (ADR 0049). It
-  # starts again when a run is queued or a park is resolved.
+  # Stop a sandbox after this long without activity (ADRs 0049, 0066): its last start, the last
+  # run that finished or parked, the last pre-wake signal (task created, a person typing, a cron
+  # about to fire). It starts again when a run is queued, a park is resolved or a signal arrives.
+  # The platform default; an org overrides it (org_settings).
   idleTimeout: 10m
+  # A sandbox whose run parked on a2a or input_required stays up this long from the park (ADR 0066
+  # decision 11); approval and budget parks use idleTimeout. Overridable per org.
+  parkWarm: 15m
+  # Sandbox start/stop jobs that run at once, outside the gateway update (plan item LT1).
+  sandboxJobs: 8
   # Time between full passes. Postgres NOTIFY wakes the reconciler earlier for new runs and
   # agent changes; the timer covers idle timeouts and drift.
   resyncInterval: 30s
@@ -286,6 +293,28 @@ flavors:
       repository: flavor-opencode
       tag: ""
       digest: ""
+
+# Pre-pull the flavor images on the nodes that run Kata sandboxes (plan item LT1, practice B6), so
+# a sandbox start does not wait for an image pull. A DaemonSet whose init containers each run one
+# flavor image (the image and its pull secrets are rewritten like every other image) and exit, then
+# a pause container keeps the pod, and so the pulled images' reference, on the node. It runs in the
+# release namespace with the default runtime class, never in a sandbox namespace, and weakens
+# nothing in ADR 0045: sandboxes still run under the kata runtime class and the admission policy.
+# Koinon does not place sandbox pods (the Agent Sandbox controller does, on the runtime class's
+# own node selector), so this cannot prefer nodes for sandboxes; it makes the nodes they land on
+# warm. Turn it on once the Kata nodes carry a label to select them by.
+flavorPrepull:
+  enabled: false
+  # Selects the Kata nodes, for example katacontainers.io/kata-runtime: "true" (kata-deploy's
+  # label). Required when enabled: without it the images would be pulled onto every node.
+  nodeSelector: {}
+  tolerations: []
+  # Keeps the pod alive after its init containers have pulled the images.
+  pauseImage: registry.k8s.io/pause:3.10
+  priorityClassName: ""
+  resources:
+    requests: {cpu: 5m, memory: 8Mi}
+    limits: {memory: 32Mi}
 
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:

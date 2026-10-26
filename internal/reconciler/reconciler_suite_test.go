@@ -171,6 +171,10 @@ type fakeModelGateway struct {
 	issued  []gateway.IssuedKey
 	applied []gateway.State
 	fail    error
+	// hold, when set, makes Apply wait for it to be closed (a slow agentgateway hot reload);
+	// entered is closed when an Apply has started waiting.
+	hold    chan struct{}
+	entered chan struct{}
 	// ledgerBudgets makes the fake report that only a limit of zero binds (Kubernetes mode).
 	ledgerBudgets bool
 }
@@ -187,6 +191,15 @@ func (f *fakeModelGateway) IssueKey(_ context.Context, agent gateway.AgentRef) (
 }
 
 func (f *fakeModelGateway) Apply(_ context.Context, s gateway.State) (gateway.Revision, error) {
+	f.mu.Lock()
+	hold, entered := f.hold, f.entered
+	f.mu.Unlock()
+	if hold != nil {
+		if entered != nil {
+			close(entered)
+		}
+		<-hold
+	}
 	if err := s.Validate(); err != nil {
 		return "", err
 	}

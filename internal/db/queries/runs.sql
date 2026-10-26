@@ -11,10 +11,12 @@
 -- name: CreateRun :one
 -- Queues a run of the agent's approved version. No row: the agent is not
 -- active.
+-- origin is interactive unless the caller says scheduled (LT1: interactive work is claimed first).
 INSERT INTO runs (org_id, agent_id, agent_version_id, task_id, ready_at,
-                  max_wall_clock_seconds, max_tokens)
+                  max_wall_clock_seconds, max_tokens, origin)
 SELECT a.org_id, a.id, a.active_version_id, @task_id, now(),
-       @max_wall_clock_seconds, @max_tokens
+       @max_wall_clock_seconds, @max_tokens,
+       coalesce(sqlc.narg(origin)::run_origin, 'interactive')
 FROM agents a
 WHERE a.org_id = @org_id AND a.id = @agent_id AND a.status = 'active'
 RETURNING *;
@@ -57,7 +59,8 @@ WITH next AS (
       -- The full claim conditions live in run_claimable, which GetAgentRunActivity shares for
       -- has_demand. It is evaluated per candidate run, in ready_at order, as the planner reaches it.
       AND run_claimable(r.org_id, r.id)
-    ORDER BY r.ready_at, r.id
+    -- Interactive work before scheduled work (LT1), then FIFO.
+    ORDER BY (r.origin = 'scheduled'), r.ready_at, r.id
     LIMIT 1
     FOR UPDATE OF a, r SKIP LOCKED
 ), agent AS (
@@ -129,6 +132,19 @@ SET heartbeat_at = now(),
     lease_expires_at = now() + make_interval(secs => @lease_seconds::integer)
 WHERE org_id = @org_id AND id = @id AND epoch = @epoch
   AND state IN ('starting', 'running')
+RETURNING *;
+
+-- name: RequeueRun :one
+-- starting -> queued, for the owner (epoch compare-and-set): the sandbox was not ready within the
+-- org's wait (LT1, ADR 0066), so the run waits in the queue instead of failing. It goes to the back
+-- of its origin's queue (ready_at = now) and the next claim gives it a new epoch.
+UPDATE runs
+SET state = 'queued',
+    ready_at = now(),
+    owner_id = NULL,
+    lease_expires_at = NULL,
+    heartbeat_at = NULL
+WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state = 'starting'
 RETURNING *;
 
 -- name: MarkRunRunning :one

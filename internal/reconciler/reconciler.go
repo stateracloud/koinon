@@ -55,6 +55,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 )
 
 // Retention decides what happens to an archived agent's home volume.
@@ -129,8 +130,14 @@ type Config struct {
 	// RuntimeClassName is the sandbox runtime class (ADR 0045: kata). Empty uses the
 	// gateway's default.
 	RuntimeClassName string
-	// IdleTimeout stops a sandbox after this long without an active run. Default 10 minutes.
+	// IdleTimeout stops a sandbox after this long without activity (see package wake), for an org
+	// that has not set idle_timeout_seconds. Default 10 minutes.
 	IdleTimeout time.Duration
+	// ParkWarm keeps a sandbox up this long after its run parked on a2a or input_required, for an
+	// org that has not set park_warm_seconds. Default 15 minutes (ADR 0066).
+	ParkWarm time.Duration
+	// SandboxJobs bounds the per-sandbox jobs running at once. Default 8.
+	SandboxJobs int
 	// ResyncInterval is the time between passes without a wake-up. Default 30 seconds.
 	ResyncInterval time.Duration
 	// HomeRetention decides the home volume's fate on archive. Default RetentionDelete.
@@ -154,6 +161,8 @@ type Reconciler struct {
 	secrets SecretStore
 
 	mu sync.Mutex
+	// wsMu guards the per-pass workspace map, which per-sandbox jobs read concurrently.
+	wsMu sync.Mutex
 	// githubRevs is the token revision last pushed per GitHub provider record, to log refreshes.
 	githubRevs map[string]string
 	// unpricedLogged is the unpriced model set last logged.
@@ -191,6 +200,12 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.IdleTimeout == 0 {
 		cfg.IdleTimeout = DefaultIdleTimeout
+	}
+	if cfg.ParkWarm == 0 {
+		cfg.ParkWarm = orgsettings.DefaultParkWarm
+	}
+	if cfg.SandboxJobs <= 0 {
+		cfg.SandboxJobs = 8
 	}
 	if cfg.MCPProbeInterval == 0 {
 		cfg.MCPProbeInterval = DefaultMCPProbeInterval
@@ -402,6 +417,20 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		r.m.PassErrors.WithLabelValues(errKindMCP).Inc()
 		return errors.Join(append(errs, err)...)
 	}
+	// Sandbox work is per-sandbox jobs, outside the sequential pass (plan item LT1, practice B4).
+	// An agent whose key the gateway already serves does not depend on the Apply below, which may
+	// wait for agentgateway's hot reload for about a minute: its sandbox starts and stops now,
+	// concurrently with it. An agent with a new key waits for the Apply, as before.
+	var early, late []*work
+	for _, w := range items {
+		if w.agent.Status == store.AgentStatusActive && w.key.ID != "" && r.keyNotLive(w.key.ID) {
+			late = append(late, w)
+			continue
+		}
+		early = append(early, w)
+	}
+	earlyJobs := r.startJobs(ctx, early, workspaces)
+
 	var rejections []gateway.Rejection
 	applyFailed := false
 	applyStart := time.Now()
@@ -441,20 +470,18 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 
 	heldBack := 0
 	defer func() { r.m.AgentsHeldBack.Set(float64(heldBack)) }()
-	for _, w := range items {
-		if applyFailed && w.key.ID != "" && w.agent.Status == store.AgentStatusActive && r.keyNotLive(w.key.ID) {
+	var lateRun []*work
+	for _, w := range late {
+		if applyFailed {
 			r.log.Warn("the gateway does not serve the agent's new key yet; its sandbox work waits", w.logAttrs()...)
 			r.recordMessage(ctx, w, errors.New("waiting for the gateway to serve the agent's new key"))
 			heldBack++
 			continue
 		}
-		if err := r.reconcileAgent(ctx, w, workspaces); err != nil {
-			r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
-			r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
-			r.recordMessage(ctx, w, err)
-			errs = append(errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
-		}
+		lateRun = append(lateRun, w)
 	}
+	errs = append(errs, r.startJobs(ctx, lateRun, workspaces).wait()...)
+	errs = append(errs, earlyJobs.wait()...)
 	// Each rejected object is reported on its org's agents, after their own pass has recorded its state.
 	// Several rejections of one org are joined into one message, not overwritten.
 	byOrg := map[string][]string{}
@@ -467,6 +494,55 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// jobs is a set of per-sandbox jobs started by startJobs.
+type jobs struct {
+	wg   sync.WaitGroup
+	mu   sync.Mutex
+	errs []error
+}
+
+// wait blocks until every job has ended and returns their errors.
+func (j *jobs) wait() []error {
+	j.wg.Wait()
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.errs
+}
+
+// startJobs starts one job per agent, at most SandboxJobs at a time, and returns at once. A job
+// is everything the reconciler does for one agent's sandbox: creating, starting, stopping,
+// recreating and recording it. A slow start (an image pull, a stuck OpenShell call) holds up
+// only its own agent, not the rest of the pass and not the gateway update.
+func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[string]string) *jobs {
+	j := &jobs{}
+	sem := make(chan struct{}, r.cfg.SandboxJobs)
+	j.wg.Add(1)
+	go func() {
+		defer j.wg.Done()
+		for _, w := range ws {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			j.wg.Add(1)
+			go func() {
+				defer j.wg.Done()
+				defer func() { <-sem }()
+				if err := r.reconcileAgent(ctx, w, workspaces); err != nil {
+					r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
+					r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
+					r.recordMessage(ctx, w, err)
+					j.mu.Lock()
+					j.errs = append(j.errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
+					j.mu.Unlock()
+				}
+			}()
+		}
+	}()
+	return j
 }
 
 // keysLive records that the applied state carries its keys.
@@ -696,6 +772,8 @@ func (r *Reconciler) ensureKey(ctx context.Context, w *work) (gateway.Key, strin
 
 // ensureWorkspace makes sure the org's workspace exists, once per pass.
 func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToReconcileRow, done map[string]string) (string, error) {
+	r.wsMu.Lock()
+	defer r.wsMu.Unlock()
 	id := execution.UUIDString(org.ID.Bytes)
 	if ws, ok := done[id]; ok {
 		return ws, nil
@@ -778,6 +856,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	if err != nil {
 		return fmt.Errorf("read run activity: %w", err)
 	}
+	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm})
+	if err != nil {
+		return fmt.Errorf("read org settings: %w", err)
+	}
 
 	sb, err := r.backend.GetSandbox(ctx, ws, names.Sandbox)
 	if errors.Is(err, execution.ErrNotFound) {
@@ -850,14 +932,14 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if _, err := r.backend.EnsurePolicy(ctx, ws, names.Sandbox, spec.Policy); err != nil {
 			return err
 		}
-		if !act.HasActive && !act.HasDemand && r.idle(w.sb, act) {
+		if !act.HasActive && !act.HasDemand && r.idle(w.sb, act, tune) {
 			if sb, err = r.backend.StopSandbox(ctx, ws, names.Sandbox); err != nil {
 				return err
 			}
 			r.log.Info("stopped idle sandbox", w.logAttrs()...)
 		}
 	case execution.PhaseStopped:
-		if act.HasActive || act.HasDemand {
+		if act.HasActive || act.HasDemand || r.woken(w.sb, tune) {
 			if sb, err = r.backend.StartSandbox(ctx, ws, names.Sandbox); err != nil {
 				return err
 			}
@@ -922,21 +1004,44 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// idle reports whether the sandbox has had no run activity for IdleTimeout, counting from the
-// later of its last start and the last run that finished or parked.
-func (r *Reconciler) idle(sb store.AgentSandbox, act store.GetAgentRunActivityRow) bool {
+// activitySince is the latest activity of the agent's sandbox, the clock the idle stop counts
+// from. Activity is the latest of the sandbox's last start, the last run that finished or parked,
+// and the last pre-wake signal (package wake). A run that is active or claimable keeps the
+// sandbox up regardless (the caller checks HasActive and HasDemand).
+func activitySince(sb store.AgentSandbox, act store.GetAgentRunActivityRow) time.Time {
 	var since time.Time
-	if sb.StartedAt.Valid {
-		since = sb.StartedAt.Time
+	for _, t := range []pgtype.Timestamptz{sb.StartedAt, act.LastActivity, sb.WokenAt} {
+		if t.Valid && t.Time.After(since) {
+			since = t.Time
+		}
 	}
-	if act.LastActivity.Valid && act.LastActivity.Time.After(since) {
-		since = act.LastActivity.Time
-	}
+	return since
+}
+
+// idle reports whether the sandbox has had no activity for the org's idle timeout. A sandbox
+// whose run parked on a2a or input_required (a person or another agent will answer soon) stays
+// up for the longer park window counted from that park (plan item LT1, ADR 0066): the later of
+// the two deadlines applies. Approval and budget parks use the idle timeout.
+func (r *Reconciler) idle(sb store.AgentSandbox, act store.GetAgentRunActivityRow, s orgsettings.Settings) bool {
+	since := activitySince(sb, act)
 	if since.IsZero() {
 		// Ready but never recorded as ready: start counting now.
 		return false
 	}
-	return r.cfg.Now().Sub(since) >= r.cfg.IdleTimeout
+	deadline := since.Add(s.IdleTimeout)
+	if act.WarmSince.Valid {
+		if warm := act.WarmSince.Time.Add(s.ParkWarm); warm.After(deadline) {
+			deadline = warm
+		}
+	}
+	return !r.cfg.Now().Before(deadline)
+}
+
+// woken reports whether a pre-wake signal came within the idle timeout, so a stopped sandbox
+// should start before any run exists. The window equals the idle timeout: a sandbox started for
+// a signal that no run follows stops again once it has passed.
+func (r *Reconciler) woken(sb store.AgentSandbox, s orgsettings.Settings) bool {
+	return sb.WokenAt.Valid && r.cfg.Now().Sub(sb.WokenAt.Time) < s.IdleTimeout
 }
 
 // reconcileDraft stops the sandbox of an agent returned to draft and keeps everything else

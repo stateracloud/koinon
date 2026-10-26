@@ -434,3 +434,21 @@ func taskEvents(ctx context.Context, e *env, t store.Task) []store.TaskEvent {
 	Expect(err).NotTo(HaveOccurred())
 	return evs
 }
+
+// fakeClock is the pool's clock in tests that pass the sandbox wait without waiting for it.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}

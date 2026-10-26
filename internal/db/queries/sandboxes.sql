@@ -96,11 +96,24 @@ SELECT
     coalesce(bool_or(state = 'running'), false)::boolean AS has_running,
     coalesce(bool_or(state IN ('starting', 'running', 'parked')), false)::boolean AS has_held,
     coalesce(bool_or(run_claimable(org_id, id)) FILTER (WHERE ready_at IS NOT NULL), false)::boolean AS has_demand,
-    max(greatest(finished_at, parked_at))::timestamptz AS last_activity
+    max(greatest(finished_at, parked_at))::timestamptz AS last_activity,
+    -- When the latest run that waits on a person or another agent parked: its sandbox stays warm
+    -- for the org's park window instead of the idle timeout (LT1).
+    max(parked_at) FILTER (WHERE state = 'parked' AND park_reason IN ('a2a', 'input_required'))::timestamptz AS warm_since
 FROM runs
 WHERE org_id = @org_id AND agent_id = @agent_id
   AND (state IN ('queued', 'starting', 'running', 'parked')
        OR finished_at > now() - interval '1 day');
+
+-- name: WakeAgentSandbox :one
+-- The pre-wake signal (LT1, B5): a task was created, a person is typing, or a cron is about to
+-- fire. It counts as activity, so an idle sandbox stays up and a stopped one starts. No row: the
+-- agent has no sandbox record yet (the reconciler creates it on activation, and a new sandbox
+-- starts ready anyway).
+UPDATE agent_sandboxes
+SET woken_at = now()
+WHERE org_id = @org_id AND agent_id = @agent_id
+RETURNING woken_at;
 
 -- name: NotifyReconciler :exec
 -- Wakes the reconciler for an org, as the agents and runs triggers do. agentd

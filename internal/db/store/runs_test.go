@@ -24,6 +24,7 @@ var allStates = []store.RunState{
 var legal = map[[2]store.RunState]bool{
 	{store.RunStateQueued, store.RunStateStarting}:   true,
 	{store.RunStateQueued, store.RunStateCanceled}:   true,
+	{store.RunStateStarting, store.RunStateQueued}:   true, // the sandbox was not ready in time (LT1)
 	{store.RunStateStarting, store.RunStateRunning}:  true,
 	{store.RunStateStarting, store.RunStateFailed}:   true,
 	{store.RunStateStarting, store.RunStateCanceled}: true,
