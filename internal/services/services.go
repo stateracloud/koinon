@@ -11,7 +11,7 @@
 //
 //	viewer  Get*, List*, WatchRun
 //	member  CreateAgentFromTemplate, CreateTicket, AppendMessage, MoveTicket, CancelRun
-//	admin   ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent,
+//	admin   AuditService.List (a platform admin may also read every org), ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent,
 //	        CreateGitHubConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
 //	        approvers are admins and owners)
 //
@@ -39,6 +39,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/audit/v1alpha1/auditv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1/budgetv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
@@ -140,6 +141,7 @@ func (s *Server) Register(server *connect.Server) {
 	approvalv1alpha1connect.RegisterApprovalServiceHandler(server, s)
 	providerv1alpha1connect.RegisterProviderServiceHandler(server, s)
 	mcpserverv1alpha1connect.RegisterMcpServerServiceHandler(server, s)
+	auditv1alpha1connect.RegisterAuditServiceHandler(server, s)
 }
 
 var (
@@ -154,6 +156,7 @@ var (
 	_ budgetv1alpha1connect.PriceServiceHandler          = (*Server)(nil)
 	_ providerv1alpha1connect.ProviderServiceHandler     = (*Server)(nil)
 	_ mcpserverv1alpha1connect.McpServerServiceHandler   = (*Server)(nil)
+	_ auditv1alpha1connect.AuditServiceHandler           = (*Server)(nil)
 )
 
 // caller is an authorised request in one org.

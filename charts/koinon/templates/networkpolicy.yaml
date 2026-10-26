@@ -65,9 +65,16 @@ spec:
             matchLabels:
               {{- include "koinon.proxySelectorLabels" . | nindent 14 }}
         {{- end }}
+    # Prometheus /metrics: nobody unless metrics.allowFrom names the scraper.
+    {{- with .Values.metrics.allowFrom }}
+    - ports:
+        - port: metrics
+      from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
 {{- range $component := list "reconciler" "agentd" "migrate" }}
 ---
-# {{ $component }} accepts no connections.
+# {{ $component }} accepts no connections{{ if ne $component "migrate" }}, except Prometheus scrapes of /metrics from metrics.allowFrom{{ end }}.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -79,6 +86,15 @@ spec:
     matchLabels:
       {{- include "koinon.selectorLabels" (list $ $component) | nindent 6 }}
   policyTypes: [Ingress]
+  {{- with $.Values.metrics.allowFrom }}
+  {{- if ne $component "migrate" }}
+  ingress:
+    - ports:
+        - port: metrics
+      from:
+        {{- toYaml . | nindent 8 }}
+  {{- end }}
+  {{- end }}
 {{- end }}
 {{- if eq .Values.gateway.mode "standalone" }}
 ---

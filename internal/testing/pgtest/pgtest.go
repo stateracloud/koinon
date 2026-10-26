@@ -68,3 +68,18 @@ func NewOrg(ctx context.Context, pool *pgxpool.Pool) (org, user pgtype.UUID, slu
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	return org, user, slug
 }
+
+// TruncateOrgs empties orgs and every table that references it, for tests that start from nothing.
+// The audit log refuses TRUNCATE for every role, the owner included (ADR 0023), and TRUNCATE ...
+// CASCADE reaches it, so this runs the statement with session_replication_role = replica, which
+// skips ordinary triggers. It needs a role that may set that (the testcontainers superuser).
+func TruncateOrgs(ctx context.Context, pool *pgxpool.Pool) {
+	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `TRUNCATE orgs CASCADE`)
+		return err
+	})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+}

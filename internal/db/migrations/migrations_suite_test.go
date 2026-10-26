@@ -21,7 +21,11 @@ import (
 // PostgresImage is the minimum supported Postgres version (ADR 0047).
 const PostgresImage = "postgres:18-alpine"
 
-var db *sql.DB
+var (
+	db *sql.DB
+	// dsn reaches the suite database; tests that migrate step by step create databases beside it.
+	dsn string
+)
 
 func TestMigrations(t *testing.T) {
 	testcontainers.SkipIfProviderIsNotHealthy(t)
@@ -37,7 +41,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
 
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
+	dsn, err = ctr.ConnectionString(ctx, "sslmode=disable")
 	Expect(err).NotTo(HaveOccurred())
 	db, err = sql.Open("pgx", dsn)
 	Expect(err).NotTo(HaveOccurred())

@@ -94,6 +94,16 @@ var _ = Describe("Service", func() {
 		Expect(kinds(evs)).To(Equal([]string{approvals.KindRequested, approvals.KindApproved, approvals.KindExecuted}))
 		Expect(evs[1].ActorUserID).To(Equal(f.admin))
 		Expect(string(evs[2].Payload)).To(ContainSubstring("https://github.test/acme/widgets/pull/1"))
+
+		By("the audit log records who approved, once")
+		Expect(f.decisions(ctx)).To(Equal([]string{"approval.approve user " + f.admin.String()}))
+		var summary string
+		Expect(pool.QueryRow(ctx, `SELECT summary::text FROM audit_events WHERE org_id = $1 AND action = 'approval.approve'`, f.org).Scan(&summary)).To(Succeed())
+		Expect(summary).To(ContainSubstring(req.ArgsSHA256))
+		Expect(summary).To(ContainSubstring("looks good"))
+		_, err = f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "looks good")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.decisions(ctx)).To(HaveLen(1), "a replay is not a new decision")
 	})
 
 	It("writes files marked executable as mode 100755 and every other file as 100644", func(ctx SpecContext) {
@@ -235,6 +245,7 @@ var _ = Describe("Service", func() {
 		Expect(run.ReadyAt.Valid).To(BeTrue(), "the run is claimable again")
 		Expect(f.getTicket(ctx).Status).To(Equal(store.TicketStatusInProgress))
 		Expect(kinds(f.ticketEvents(ctx))).To(Equal([]string{approvals.KindRequested, approvals.KindDenied}))
+		Expect(f.decisions(ctx)).To(Equal([]string{"approval.deny user " + f.owner.String()}))
 
 		By("a denied request cannot be approved afterwards")
 		_, err = f.svc.Approve(ctx, f.org, mustID(req.ID), f.owner, req.ArgsSHA256, "")
@@ -341,6 +352,7 @@ var _ = Describe("Service", func() {
 		evs := f.ticketEvents(ctx)
 		Expect(kinds(evs)).To(Equal([]string{approvals.KindRequested, approvals.KindExpired, "run.canceled"}))
 		Expect(string(evs[2].Payload)).To(ContainSubstring(`approval_expired`))
+		Expect(f.decisions(ctx)).To(Equal([]string{"approval.expire system "}))
 
 		By("an expired request cannot be approved")
 		_, err = f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
