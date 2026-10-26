@@ -103,6 +103,11 @@ jobs:
           kubectl --context kind-koinon-e1 get pods -A -o wide || true
           docker stats --no-stream || true
           free -m
+          # Issue #159: what the runner's kernel offers the OpenShell sandbox supervisor.
+          uname -a
+          cat /sys/kernel/security/lsm 2>/dev/null; echo
+          sysctl kernel.unprivileged_userns_clone user.max_user_namespaces kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true
+          sudo dmesg | tail -n 200 || true
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
