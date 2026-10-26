@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"github.com/jackc/pgx/v5"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -48,6 +49,55 @@ var _ = Describe("Runtime", func() {
 		Expect(rt.Shutdown(5 * time.Second)).To(Succeed())
 		Expect(rt.Shutdown(time.Second)).To(Succeed(), "a second shutdown is a no-op")
 	})
+
+	It("runs under the component role's DML-only grants", func(ctx SpecContext) {
+		dsn := newDatabase(ctx)
+		cfg, err := pgx.ParseConfig(dsn)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Roles are cluster-wide: use per-spec names where possible and drop them afterwards. The
+		// grants target the fixed durable.AppRole, so that one is created and dropped here too.
+		login := strings.ReplaceAll(pgtest.Uniq("api"), "-", "_")
+		_, err = pool.Exec(ctx, fmt.Sprintf("CREATE ROLE %s NOLOGIN", durable.AppRole))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, fmt.Sprintf("CREATE ROLE %s LOGIN PASSWORD 'koinon_test_not-a-real-token' IN ROLE %s", login, durable.AppRole))
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx context.Context) {
+			admin, err := pgx.Connect(ctx, dsn)
+			if err == nil {
+				_, _ = admin.Exec(ctx, fmt.Sprintf("DROP OWNED BY %s", durable.AppRole))
+				_ = admin.Close(ctx)
+			}
+			_, _ = pool.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", login))
+			_, _ = pool.Exec(ctx, fmt.Sprintf("DROP ROLE IF EXISTS %s", durable.AppRole))
+		})
+
+		Expect(durable.Migrate(ctx, dsn, nil)).To(Succeed())
+
+		admin, err := pgx.Connect(ctx, dsn)
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func(ctx context.Context) { _ = admin.Close(ctx) })
+		var truncate, insert bool
+		Expect(admin.QueryRow(ctx, `SELECT has_table_privilege($1, 'dbos.workflow_status', 'TRUNCATE'), has_table_privilege($1, 'dbos.workflow_status', 'INSERT')`, durable.AppRole).Scan(&truncate, &insert)).To(Succeed())
+		Expect(truncate).To(BeFalse(), "the component role gets DML only")
+		Expect(insert).To(BeTrue())
+
+		appDSN := connString(cfg.Host, cfg.Port, login, "koinon_test_not-a-real-token", cfg.Database)
+		hello := func(_ dbos.Context, name string) (string, error) { return "hello " + name, nil }
+		rt := durable.New(durable.Config{DatabaseURL: appDSN, ApplicationVersion: "v1"})
+		Expect(rt.Register(func(c dbos.Context) error {
+			dbos.RegisterWorkflow(c, hello, dbos.WithWorkflowName("test.hello"))
+			return nil
+		})).To(Succeed())
+		Expect(rt.Launch(ctx)).To(Succeed())
+		DeferCleanup(func() { _ = rt.Shutdown(5 * time.Second) })
+
+		h, err := dbos.RunWorkflow(rt.Context(), hello, "koinon")
+		Expect(err).NotTo(HaveOccurred())
+		res, err := h.GetResult()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal("hello koinon"))
+	}, SpecTimeout(2*time.Minute))
 
 	It("keeps its tables in the dbos schema", func(ctx SpecContext) {
 		dsn := newDatabase(ctx)
@@ -124,7 +174,8 @@ var _ = Describe("Runtime", func() {
 		Eventually(entered).Should(Receive())
 		Expect(h.GetWorkflowID()).To(Equal("nap-1"))
 
-		// Stop the runtime in the middle of the sleep. The workflow stays pending in Postgres.
+		// Stop the runtime well into the sleep. The workflow stays pending in Postgres.
+		time.Sleep(4 * time.Second)
 		_ = first.Shutdown(2 * time.Second)
 		Expect(finished.Load()).To(BeZero())
 
@@ -139,6 +190,8 @@ var _ = Describe("Runtime", func() {
 		Expect(res).To(Equal("woke reminder"))
 		// The timer was stored, not restarted: it ended no earlier than the original deadline.
 		Expect(time.Since(begin)).To(BeNumerically(">=", sleep-500*time.Millisecond))
+		// A restarted timer would end near 4s + 6s.
+		Expect(time.Since(begin)).To(BeNumerically("<", sleep+2*time.Second))
 		Expect(finished.Load()).To(Equal(int32(1)), "completes exactly once")
 		Expect(started.Load()).To(Equal(int32(2)), "the workflow body re-ran once, on recovery")
 	}, SpecTimeout(2*time.Minute))

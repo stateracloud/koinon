@@ -54,12 +54,29 @@ func Migrate(ctx context.Context, dsn string, logger *slog.Logger) error {
 	if !exists {
 		return nil
 	}
-	for _, stmt := range dbos.PermissionStatements(Schema, AppRole) {
+	for _, stmt := range appGrants() {
 		if _, err := conn.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("grant the DBOS schema to %s: %w", AppRole, err)
 		}
 	}
 	return nil
+}
+
+// appGrants is the component role's access to the DBOS schema: DML only, the same shape as the
+// chart's CNPG bootstrap (ADR 0060). dbos.PermissionStatements grants ALL, which adds TRUNCATE,
+// TRIGGER and REFERENCES, so it is not used.
+func appGrants() []string {
+	schema := pgx.Identifier{Schema}.Sanitize()
+	role := pgx.Identifier{AppRole}.Sanitize()
+	return []string{
+		fmt.Sprintf("GRANT USAGE ON SCHEMA %s TO %s", schema, role),
+		fmt.Sprintf("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %s TO %s", schema, role),
+		fmt.Sprintf("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %s TO %s", schema, role),
+		fmt.Sprintf("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA %s TO %s", schema, role),
+		fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA %s GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %s", schema, role),
+		fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA %s GRANT USAGE, SELECT ON SEQUENCES TO %s", schema, role),
+		fmt.Sprintf("ALTER DEFAULT PRIVILEGES IN SCHEMA %s GRANT EXECUTE ON FUNCTIONS TO %s", schema, role),
+	}
 }
 
 // Config configures a Runtime.
@@ -144,6 +161,7 @@ func (r *Runtime) Launch(ctx context.Context) error {
 		}
 	}
 	if err := dbos.Launch(dctx); err != nil {
+		_ = dbos.Shutdown(dctx, time.Second)
 		return fmt.Errorf("durable: launch: %w", err)
 	}
 	r.dctx = dctx
