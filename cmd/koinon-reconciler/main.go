@@ -150,6 +150,8 @@ func run() error {
 			Flavors:           cfg.flavors(),
 			RuntimeClassName:  cfg.runtimeClass,
 			IdleTimeout:       cfg.idleTimeout,
+			ParkWarm:          cfg.parkWarm,
+			SandboxJobs:       cfg.sandboxJobs,
 			ResyncInterval:    cfg.resyncInterval,
 			HomeRetention:     reconciler.Retention(cfg.homeRetention),
 			ToolServers:       cfg.toolServers(),

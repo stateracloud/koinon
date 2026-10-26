@@ -171,7 +171,7 @@ func (q *Queries) ExpireSavedWork(ctx context.Context, orgID pgtype.UUID) ([]Exp
 }
 
 const getRunForUpload = `-- name: GetRunForUpload :one
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at FROM runs
 WHERE org_id = $1 AND id = $2 AND epoch = $3 AND state IN ('starting', 'running')
 `
 
@@ -214,6 +214,8 @@ func (q *Queries) GetRunForUpload(ctx context.Context, arg GetRunForUploadParams
 		&i.Takeovers,
 		&i.Summarizing,
 		&i.FailureClass,
+		&i.Origin,
+		&i.ClaimedAt,
 	)
 	return i, err
 }
@@ -575,7 +577,7 @@ const markSandboxUnhealthy = `-- name: MarkSandboxUnhealthy :one
 UPDATE agent_sandboxes
 SET unhealthy_at = now(), unhealthy_reason = $1::text, unhealthy_generation = coalesce(nullif($2::text, ''), home_generation, '')
 WHERE org_id = $3 AND agent_id = $4
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
 `
 
 type MarkSandboxUnhealthyParams struct {
@@ -623,6 +625,7 @@ func (q *Queries) MarkSandboxUnhealthy(ctx context.Context, arg MarkSandboxUnhea
 		&i.UnhealthyAt,
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
+		&i.WokenAt,
 	)
 	return i, err
 }

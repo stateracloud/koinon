@@ -698,6 +698,48 @@ func (ns NullRunFailureClass) Value() (driver.Value, error) {
 	return string(ns.RunFailureClass), nil
 }
 
+type RunOrigin string
+
+const (
+	RunOriginInteractive RunOrigin = "interactive"
+	RunOriginScheduled   RunOrigin = "scheduled"
+)
+
+func (e *RunOrigin) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RunOrigin(s)
+	case string:
+		*e = RunOrigin(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RunOrigin: %T", src)
+	}
+	return nil
+}
+
+type NullRunOrigin struct {
+	RunOrigin RunOrigin
+	Valid     bool // Valid is true if RunOrigin is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRunOrigin) Scan(value interface{}) error {
+	if value == nil {
+		ns.RunOrigin, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RunOrigin.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRunOrigin) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RunOrigin), nil
+}
+
 type RunParkReason string
 
 const (
@@ -1028,6 +1070,7 @@ type AgentSandbox struct {
 	UnhealthyAt         pgtype.Timestamptz
 	UnhealthyReason     pgtype.Text
 	UnhealthyGeneration pgtype.Text
+	WokenAt             pgtype.Timestamptz
 }
 
 type AgentVersion struct {
@@ -1270,6 +1313,15 @@ type OrgMembership struct {
 	UpdatedAt      pgtype.Timestamptz
 }
 
+type OrgSetting struct {
+	OrgID              pgtype.UUID
+	IdleTimeoutSeconds pgtype.Int4
+	ParkWarmSeconds    pgtype.Int4
+	QueueWaitSeconds   pgtype.Int4
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+}
+
 type OrgWorkspace struct {
 	OrgID       pgtype.UUID
 	Workspace   string
@@ -1342,6 +1394,8 @@ type Run struct {
 	Takeovers           int32
 	Summarizing         bool
 	FailureClass        NullRunFailureClass
+	Origin              RunOrigin
+	ClaimedAt           pgtype.Timestamptz
 }
 
 type RunEvent struct {

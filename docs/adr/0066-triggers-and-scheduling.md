@@ -205,6 +205,45 @@ file on 2026-10-26):
 - The DBOS management plane (Conductor) is an enterprise module (`go.dbos.dev/dbos-enterprise-go`);
   how operators inspect DBOS state without it.
 
+## Amendment (2026-10-26, plan item LT1): latency defaults as built
+
+- **Sandbox wait.** A run whose sandbox is not ready within the org's queue wait (default 5
+  minutes) goes back to `queued` (new transition `starting -> queued`, owner only, migration
+  00022), behind the older runs of its origin, and is claimed again. It no longer fails. A sandbox
+  in a terminal state (deleted, retained, error with an unhealthy agent) still fails the run at once.
+  The time between the claim and the requeue (`runs.claimed_at`) is credited to `parked_seconds`,
+  so waiting for a sandbox does not count against the run's wall-clock cap.
+- **Priority.** `runs.origin` is `interactive` (default) or `scheduled`. `ClaimNextRun` orders by
+  origin, then `ready_at`: interactive work is claimed before scheduled work, FIFO within each.
+  Triggers and schedules (TR1) enqueue with `scheduler.EnqueueOrigin(..., RunOriginScheduled)`.
+- **Per-org tunables.** `org_settings` holds `idle_timeout_seconds`, `park_warm_seconds` and
+  `queue_wait_seconds`; a NULL value is the platform default (chart values
+  `reconciler.idleTimeout`, `reconciler.parkWarm`, agentd `SandboxTimeout`). They are set from Go
+  (`orgsettings.Set`) or SQL for now; the admin API to read and change them is not part of this
+  item and comes with the org settings page, in a later item.
+- **Acknowledge at once.** Decision 11's first bullet is met at the API: `CreateTask` and
+  `AppendMessage` return as soon as the task event and the queued run are committed, without
+  waiting for a sandbox. The chat-side acknowledgement (a reaction or a "working on it" message in
+  Slack or Teams) belongs to the chat connector items (TR1, CH); LT1 adds none.
+- **Activity (B5).** A sandbox's activity is the latest of its last start, the last run of the
+  agent that finished or parked, and the last pre-wake signal (`agent_sandboxes.woken_at`). A
+  claimable or active run keeps it up regardless. It stops once the idle timeout has passed since
+  its last activity; a sandbox whose run parked on `a2a` or `input_required` stays up until the
+  later of that and the park window (15 minutes by default) from the park. Approval and budget
+  parks use the idle timeout. A pre-wake signal on a stopped sandbox starts it, and one that no run
+  follows lets it stop again after the idle timeout.
+- **Pre-wake signals.** Package `wake`: `TaskCreated`, `Typing` and `CronDue`. All write
+  `woken_at` and wake the reconciler. `CreateTask` calls `TaskCreated` after its transaction
+  commits (best effort). `TaskService.NotifyTyping(task_id)` is the API hook for a person typing:
+  members and above, at most one wake per task per ten seconds per API replica, ignored for an
+  ended task. `CronDue` is called by TR1 a lead time, with jitter, ahead of a fire.
+- **Per-sandbox jobs (B4).** The reconciler runs one job per agent, at most `sandboxJobs` at once.
+  Agents whose gateway key is already live start before and during `gw.Apply`, so a start does not
+  wait for the hot reload; agents with a new key wait for the Apply, as before.
+- **Pre-pull (B6).** The chart can run a DaemonSet that pulls the flavor images onto the Kata
+  nodes (`flavorPrepull`). Koinon does not place sandbox pods, so it sets no node preference for
+  them; the runtime class's node selector decides, and the pre-pull makes those nodes warm.
+
 ## Upstream verification
 
 Checked 2026-10-26 (`messaging-and-workflows.md` §2):
