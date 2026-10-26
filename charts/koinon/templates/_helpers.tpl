@@ -202,14 +202,16 @@ gateway.networking.k8s.io/gateway-name: {{ include "koinon.componentName" (list 
 {{- end }}
 
 {{/*
-The URL browsers reach Koinon at: publicUrl, else derived from the ingress, else empty (which
-koinon-api takes as https).
+The URL browsers reach Koinon at: publicUrl, else derived from the ingress, else https:// and the
+HTTPRoute's first hostname, else empty (which koinon-api takes as https).
 */}}
 {{- define "koinon.publicUrl" -}}
 {{- if .Values.publicUrl -}}
 {{- trimSuffix "/" .Values.publicUrl -}}
 {{- else if .Values.ingress.enabled -}}
 {{- printf "%s://%s" (ternary "https" "http" (not (empty .Values.ingress.tlsSecretName))) .Values.ingress.host -}}
+{{- else if and .Values.httpRoute.enabled .Values.httpRoute.hostnames -}}
+{{- printf "https://%s" (first .Values.httpRoute.hostnames) -}}
 {{- end -}}
 {{- end }}
 
@@ -454,6 +456,9 @@ egress.allowedInternalHosts; both are joined. */}}
 {{- if and .Values.ingress.enabled (not .Values.ingress.host) }}
 {{- fail "ingress.host is required when ingress.enabled is true" }}
 {{- end }}
+{{- if and .Values.httpRoute.enabled (or (not .Values.httpRoute.hostnames) (not .Values.httpRoute.parentRefs)) }}
+{{- fail "httpRoute.hostnames and httpRoute.parentRefs are required when httpRoute.enabled is true" }}
+{{- end }}
 {{- if and (not .Values.openshell.clientTLSSecret) (not .Values.openshell.insecure) }}
 {{- fail "openshell.clientTLSSecret is required: Koinon dials the OpenShell gateway (it controls every sandbox) over mTLS. Set openshell.clientTLSSecret to a Secret with the gateway's client certificate (tls.crt, tls.key, ca.crt), or set openshell.insecure=true only if a service mesh provides mTLS between Koinon and the gateway" }}
 {{- end }}
@@ -461,7 +466,7 @@ egress.allowedInternalHosts; both are joined. */}}
 {{- fail "openshell.clientTLSSecret and openshell.insecure=true contradict each other: set the Secret for mTLS, or insecure=true for plaintext, not both" }}
 {{- end }}
 {{- if and .Values.oidc.enabled (not .Values.oidc.redirectUrl) (not (include "koinon.publicUrl" .)) }}
-{{- fail "oidc.enabled needs oidc.redirectUrl, publicUrl or an ingress to build the redirect URL from" }}
+{{- fail "oidc.enabled needs oidc.redirectUrl, publicUrl, an ingress or an httpRoute to build the redirect URL from" }}
 {{- end }}
 {{- end }}
 

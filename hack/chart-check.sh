@@ -90,6 +90,17 @@ env_is KOINON_PUBLIC_URL '"http://koinon.lan"' --set publicUrl=http://koinon.lan
 env_is KOINON_PUBLIC_URL '"http://koinon.example.com"' --set ingress.enabled=true --set ingress.host=koinon.example.com
 env_is KOINON_PUBLIC_URL '"https://koinon.example.com"' --set ingress.enabled=true --set ingress.host=koinon.example.com \
 	--set ingress.tlsSecretName=tls
+# httpRoute: a Gateway API route with the given parentRefs (as written) and hostnames; the public URL
+# derives from its first hostname over https.
+route=(--set httpRoute.enabled=true --set 'httpRoute.hostnames[0]=koinon.example.com'
+	--set-json 'httpRoute.parentRefs=[{"group":"gateway.networking.k8s.io","kind":"Gateway","name":"shared","namespace":"gateway","sectionName":"https"}]')
+lacks "no HTTPRoute by default" 'kind: HTTPRoute'
+has "HTTPRoute renders with httpRoute.enabled" '^kind: HTTPRoute$' "${route[@]}" --show-only templates/httproute.yaml
+has "HTTPRoute keeps the parentRef's group and kind" 'group: gateway.networking.k8s.io' "${route[@]}" --show-only templates/httproute.yaml
+has "HTTPRoute keeps the parentRef's sectionName" 'sectionName: https' "${route[@]}" --show-only templates/httproute.yaml
+has "HTTPRoute routes to the API Service" 'name: koinon-api$' "${route[@]}" --show-only templates/httproute.yaml
+env_is KOINON_PUBLIC_URL '"https://koinon.example.com"' "${route[@]}"
+if render_raw --set openshell.insecure=true --set httpRoute.enabled=true >/dev/null 2>&1; then fail "httpRoute without hostnames and parentRefs must not render"; fi
 # oidc values map to koinon-api's --oidc-* flags; the client secret is a mounted file.
 oidc=(--set publicUrl=https://koinon.example.com --set oidc.enabled=true --set oidc.issuerUrl=https://idp.example.com
 	--set oidc.clientId=koinon --set oidc.clientSecret.existingSecret=koinon-oidc --set oidc.groupMappings.staff=member)
