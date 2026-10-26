@@ -77,6 +77,10 @@ type Querier interface {
 	// Fills a migrated price in place, once.
 	CompleteMigratedPrice(ctx context.Context, arg CompleteMigratedPriceParams) (int64, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
+	// Sandbox recreations of the agent audited in the last 24 hours, since it was last resumed: the
+	// ones for a stuck sandbox and the ones for a sandbox in Error or Completed. The loop guard of
+	// ADR 0054 for the second kind counts these.
+	CountRecentAuditedRecreations(ctx context.Context, arg CountRecentAuditedRecreationsParams) (int64, error)
 	// Recreations for stuck sandboxes in the last 24 hours, since the agent was last resumed.
 	CountRecentSandboxRecreations(ctx context.Context, arg CountRecentSandboxRecreationsParams) (int64, error)
 	// SPDX-License-Identifier: Apache-2.0

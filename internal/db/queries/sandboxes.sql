@@ -105,3 +105,14 @@ WHERE org_id = @org_id AND agent_id = @agent_id
 -- sends it while it waits for a sandbox that is not ready, so the reconciler
 -- starts it (the waiting run is the demand) without waiting for a resync.
 SELECT pg_notify('koinon_reconcile', CAST(sqlc.arg(org_id)::uuid AS text));
+
+-- name: CountRecentAuditedRecreations :one
+-- Sandbox recreations of the agent audited in the last 24 hours, since it was last resumed: the
+-- ones for a stuck sandbox and the ones for a sandbox in Error or Completed. The loop guard of
+-- ADR 0054 for the second kind counts these.
+SELECT count(*)::bigint FROM audit_events e
+JOIN agents a ON a.org_id = e.org_id AND a.id = @agent_id::uuid
+WHERE e.org_id = @org_id AND e.action = 'sandbox.recreate'
+  AND e.target_kind = 'agent' AND e.target_id = a.id::text
+  AND e.created_at > now() - interval '24 hours'
+  AND (a.resumed_at IS NULL OR e.created_at > a.resumed_at);

@@ -686,6 +686,28 @@ var _ = Describe("Pool", func() {
 		Expect(payload(perms[0])["decision"]).NotTo(HaveKey("outsideWorkspace"))
 	})
 
+	It("waits while the reconciler recreates a failed sandbox, and runs in the new one", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.recordSandbox(ctx, store.SandboxStateDeleting, "recreating a failed sandbox (phase Error: main process exited)")
+		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
+			"a recreation in progress does not fail the run")
+
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+	})
+
+	It("fails a run after SandboxTimeout when the failed sandbox is never recreated", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.recordSandbox(ctx, store.SandboxStateDeleting, "recreating a failed sandbox (phase Error)")
+		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = time.Second })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(HavePrefix("sandbox not ready after 1s (deleting)"))
+	})
+
 	It("fails a run whose sandbox the reconciler reports in error", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
