@@ -1,6 +1,7 @@
 # 0032. Agent home on a PVC, checkpointed incrementally to object storage
 
 - Status: Accepted
+- Amended by: [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-21
 - Decision: [design.md#32](../design.md)
 
@@ -96,6 +97,17 @@ Checked 2026-10-21:
   https://github.com/NVIDIA/OpenShell
 - **restic:** v0.19.1, BSD-2-Clause, AES-256-CTR with Poly1305. https://restic.readthedocs.io/en/stable/100_references.html
 - **kopia:** v0.23.1, Apache-2.0, snapshots "always incremental". https://kopia.io/docs/features/
+
+## Amendment (2026-10-26): checkpoints in v0.1
+
+[0065](0065-work-model-tasks-inbox.md) builds checkpoints now. The home (session, notes, scratch
+work) is saved when a sandbox stops or before it is recreated, and restored afterwards, so long
+waits and long tasks survive drains and image bumps. This answers "Is checkpointing needed in
+v0.1?": yes.
+
+Still open: restic or kopia; sidecar or Job; whether the park, run-end and periodic points above
+also ship in v0.1; and which paths "scratch work" covers, given the exclusion of repository
+checkouts above.
 
 ## Links
 

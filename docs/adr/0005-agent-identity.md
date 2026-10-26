@@ -1,6 +1,7 @@
 # 0005. Agents act as themselves
 
 - Status: Accepted
+- Amended by: [0067](0067-concierge.md)
 - Date: 2026-10-21
 - Decision: [design.md#5](../design.md)
 
@@ -58,6 +59,13 @@ Acting on behalf of the requesting user has three problems:
 - 2026-10-21: GitHub App installation tokens expire after one hour and can be narrowed per request
   by repositories and permissions, which fits per-agent, least-privilege identity.
   https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app
+
+## Amendment (2026-10-26): the concierge acts as the user
+
+[0067](0067-concierge.md) makes one explicit exception. The concierge, the setup and management
+assistant built into koinon-api, acts as the logged-in user in the current org, capped at their
+role. It uses the same RPCs and audit as the UI, and audit records "via concierge". It runs no code
+and has no sandbox. Every other agent still acts as itself.
 
 ## Links
 

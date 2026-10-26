@@ -1,6 +1,7 @@
 # 0055. Chat is its own object
 
 - Status: Accepted
+- Amended by: [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-23
 - Supersedes: [0017](0017-board-and-chat-interaction-model.md) (the "chat is a ticket" rule)
 - Amends: [0011](0011-agent-to-agent.md) (read-only delegation from chat)
@@ -68,6 +69,19 @@ flowchart LR
 ## Upstream verification
 
 None needed.
+
+## Amendment (2026-10-26): chat next to tasks and the inbox
+
+- **Tickets become tasks** ([0065](0065-work-model-tasks-inbox.md)); read "ticket" above as "task".
+  The inbox ("Waiting on you") is the home screen and chat sits next to it; the board is a
+  secondary view. This changes items 1 and 2: a team org no longer opens on the board.
+- **Direct messages** to an agent in the inbox chat are a trigger type
+  ([0066](0066-triggers-and-scheduling.md)). How that relates to item 4 (a chat becomes a ticket
+  when the person confirms) is not decided ([0065](0065-work-model-tasks-inbox.md) open questions).
+- **Delegation** (item 8): `ask_agent` creates a child task. Whether a read-only delegation from a
+  chat stays ephemeral is not decided.
+- **Release.** This ADR put chat in v0.2. #146 puts the inbox and direct-message triggers in v0.1;
+  which parts of chat ship in v0.1 is not decided.
 
 ## Links
 
