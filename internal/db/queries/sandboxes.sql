@@ -92,6 +92,7 @@ RETURNING *;
 -- a parked run resumes its session in the same home volume.
 SELECT
     coalesce(bool_or(state IN ('starting', 'running')), false)::boolean AS has_active,
+    coalesce(bool_or(state = 'running'), false)::boolean AS has_running,
     coalesce(bool_or(state IN ('starting', 'running', 'parked')), false)::boolean AS has_held,
     coalesce(bool_or(ready_at IS NOT NULL), false)::boolean AS has_demand,
     max(greatest(finished_at, parked_at))::timestamptz AS last_activity

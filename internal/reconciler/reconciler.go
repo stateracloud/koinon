@@ -714,9 +714,10 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		sb.Phase = execution.PhaseDeleting
 		return r.record(ctx, w, sb, hash, "recreating a stuck sandbox: "+w.sb.UnhealthyReason.String)
 	}
-	if (sb.Phase == execution.PhaseError || sb.Phase == execution.PhaseCompleted) && !act.HasActive && !w.agent.UnhealthyAt.Valid {
-		// The sandbox's main process exited or it failed (the row would be recorded as Error and
-		// agentd fails every run at once). With no run to lose, delete it so the next pass
+	if (sb.Phase == execution.PhaseError || sb.Phase == execution.PhaseCompleted) && !act.HasRunning && !w.agent.UnhealthyAt.Valid {
+		// The sandbox's main process exited or it failed. A running run has lost it anyway and is
+		// left to fail; a starting run has not started the harness and waits for the new sandbox
+		// (agentd waits on Error and Deleting). With no running run, delete it so the next pass
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
 		return r.repair(ctx, w, ws, names.Sandbox, sb, hash)
 	}
