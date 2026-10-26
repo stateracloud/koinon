@@ -65,12 +65,15 @@ for tool in kubectl helm; do
   printf '#!/usr/bin/env bash\nexec %s %s %s "$@"\n' "$(command -v "$tool")" "$flag" "$CTX" >"$OUT/bin/$tool"
   chmod +x "$OUT/bin/$tool"
 done
-# The doc's port-forward is 8080:8080; with API_PORT set, only its local end changes.
+# The doc's port-forward is a bare 8080 (or 8080:8080); with API_PORT set, only its local end changes.
 if [[ $API_PORT != 8080 ]]; then
   cat >"$OUT/bin/kubectl" <<WRAP
 #!/usr/bin/env bash
 args=()
-for a in "\$@"; do args+=("\${a/#8080:8080/$API_PORT:8080}"); done
+for a in "\$@"; do
+  case \$a in 8080 | 8080:8080) a=$API_PORT:8080 ;; esac
+  args+=("\$a")
+done
 exec $(command -v kubectl) --context $CTX "\${args[@]}"
 WRAP
 fi
