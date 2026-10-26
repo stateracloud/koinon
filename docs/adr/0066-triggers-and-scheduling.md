@@ -194,7 +194,8 @@ file on 2026-10-26):
   ID (for example the pod name) or the durable runtime must stay at one replica. The other side:
   `ApplicationVersion` is the release version, so workflows left pending by the previous release
   (a long durable timer) are not recovered after an upgrade; decide how they are carried over.
-- Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.
+- ~~Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.~~ Answered by
+  the 2026-10-27 (DB2) amendment: `run_claimable`.
 - The burst window length, the pre-warm lead time and the jitter range.
 - The filter language for rules (CEL was ADR 0010's candidate) and whether a trigger has its own
   budget, as ADR 0010's subscriptions did.
@@ -267,3 +268,27 @@ Checked 2026-10-26 (`messaging-and-workflows.md` §2):
 - Research (session notes, 2026-10-26): `triggers-lifecycle.md`, `messaging-and-workflows.md`
 - Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the interruption rule (`system/thread.rs:240-291`, `system/defer.rs:1-17`) and the task-scoped watch (`event_processor.rs:1127-1305`). Research notes: `infinity-code-ideas.md`.
 - Prior art (ideas only, no code; its servers are AGPL-3.0): [daytonaio/daytona](https://github.com/daytonaio/daytona) v0.190.0, for warm pools of home-less sandboxes (`warm-pool.entity.ts:8-48`). Research notes: `daytona.md`.
+
+## Amendment (2026-10-27, plan item DB2): per-org concurrency and rate limits as built
+
+Settles the open question on where per-org concurrency is enforced (#146, procoduck, 2026-10-26).
+
+- **Run concurrency lives in Postgres.** `run_claimable` (migration 00025) refuses a claim while the
+  org already has `max_concurrent_runs` runs in `starting` or `running`; parked runs do not count.
+  `ClaimNextRun` and the reconciler's `has_demand` share that function, so a queued run held back by
+  the cap keeps no sandbox up. Default 20 per org, tunable in `org_settings.max_concurrent_runs`
+  (1 to 10000). Claims by different agents of one org that overlap can overshoot the cap by the
+  number of racing claimers; the cap is a fairness bound, not a billing limit.
+- **DBOS limits trigger firings, webhook processing and task creation, not runs.** One queue,
+  `koinon.org-work`, is partitioned by org with `WithPartitionConcurrency` and
+  `WithPartitionRateLimiter` (DBOS Go 1.7), so a burst from one org waits in its own partition.
+  Defaults per org: 4 items at once and 60 starts per minute. `internal/durable` exposes
+  `NewOrgWork` and `EnqueueForOrg` for TR2, TR3 and later webhooks.
+- **Per-org tuning.** DBOS applies one partition limit to all partitions of a queue, so an org whose
+  `org_settings` (`trigger_concurrency`, `trigger_rate_per_minute`) differ from the defaults is
+  enqueued on a profile queue `koinon.org-work/c<N>/r<M>`, registered on first use and still
+  partitioned by org. DBOS stores queue configuration in its tables and its runners reload the queue
+  list, so every replica serves a profile queue. Changed settings apply to work enqueued afterwards.
+  Many distinct limit pairs mean many queues; operators should keep to a few tiers.
+- **Restarts.** DBOS counts workflow starts in Postgres, so a rate limit holds when the API restarts
+  inside the window (tested by stopping and relaunching the runtime against the same database).

@@ -23,6 +23,14 @@ const (
 	DefaultIdleTimeout = 10 * time.Minute
 	DefaultParkWarm    = 15 * time.Minute
 	DefaultQueueWait   = 5 * time.Minute
+
+	// DefaultMaxConcurrentRuns is the cap on an org's owned runs. The same number is in
+	// run_claimable (migration 00025); the two must change together.
+	DefaultMaxConcurrentRuns = 20
+	// DefaultTriggerConcurrency and DefaultTriggerRatePerMinute are an org's share of the DBOS queue
+	// for trigger, webhook and task-creation work (DB2, ADR 0066).
+	DefaultTriggerConcurrency   = 4
+	DefaultTriggerRatePerMinute = 60
 )
 
 // Settings are the effective tunables of one org.
@@ -33,11 +41,20 @@ type Settings struct {
 	ParkWarm time.Duration
 	// QueueWait is how long a claimed run waits for its sandbox before it returns to the queue.
 	QueueWait time.Duration
+	// MaxConcurrentRuns caps the runs the org has starting or running at once (run_claimable).
+	MaxConcurrentRuns int
+	// TriggerConcurrency is how many trigger, webhook and task-creation items of the org run at
+	// once; TriggerRatePerMinute is how many may start per minute (internal/durable).
+	TriggerConcurrency, TriggerRatePerMinute int
 }
 
 // Defaults are the platform defaults a Settings falls back to.
 func Defaults() Settings {
-	return Settings{IdleTimeout: DefaultIdleTimeout, ParkWarm: DefaultParkWarm, QueueWait: DefaultQueueWait}
+	return Settings{
+		IdleTimeout: DefaultIdleTimeout, ParkWarm: DefaultParkWarm, QueueWait: DefaultQueueWait,
+		MaxConcurrentRuns: DefaultMaxConcurrentRuns, TriggerConcurrency: DefaultTriggerConcurrency,
+		TriggerRatePerMinute: DefaultTriggerRatePerMinute,
+	}
 }
 
 // Get returns the org's settings, with def filling every value the org did not set.
@@ -62,12 +79,23 @@ func apply(def Settings, row store.OrgSetting) Settings {
 	if row.QueueWaitSeconds.Valid {
 		def.QueueWait = time.Duration(row.QueueWaitSeconds.Int32) * time.Second
 	}
+	if row.MaxConcurrentRuns.Valid {
+		def.MaxConcurrentRuns = int(row.MaxConcurrentRuns.Int32)
+	}
+	if row.TriggerConcurrency.Valid {
+		def.TriggerConcurrency = int(row.TriggerConcurrency.Int32)
+	}
+	if row.TriggerRatePerMinute.Valid {
+		def.TriggerRatePerMinute = int(row.TriggerRatePerMinute.Int32)
+	}
 	return def
 }
 
 // Override is a change to the org's settings; a nil field means the platform default.
 type Override struct {
 	IdleTimeout, ParkWarm, QueueWait *time.Duration
+	// MaxConcurrentRuns, TriggerConcurrency and TriggerRatePerMinute are the DB2 limits.
+	MaxConcurrentRuns, TriggerConcurrency, TriggerRatePerMinute *int
 }
 
 // Set replaces the org's overrides. The database bounds each value (see migration 00022).
@@ -77,6 +105,10 @@ func Set(ctx context.Context, q *store.Queries, org pgtype.UUID, o Override) err
 		IdleTimeoutSeconds: seconds(o.IdleTimeout),
 		ParkWarmSeconds:    seconds(o.ParkWarm),
 		QueueWaitSeconds:   seconds(o.QueueWait),
+
+		MaxConcurrentRuns:    count(o.MaxConcurrentRuns),
+		TriggerConcurrency:   count(o.TriggerConcurrency),
+		TriggerRatePerMinute: count(o.TriggerRatePerMinute),
 	})
 	return err
 }
@@ -86,4 +118,11 @@ func seconds(d *time.Duration) pgtype.Int4 {
 		return pgtype.Int4{}
 	}
 	return pgtype.Int4{Int32: int32(*d / time.Second), Valid: true} //nolint:gosec // bounded by the table's CHECK
+}
+
+func count(n *int) pgtype.Int4 {
+	if n == nil {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: int32(*n), Valid: true} //nolint:gosec // bounded by the table's CHECK
 }

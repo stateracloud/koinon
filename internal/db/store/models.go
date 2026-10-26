@@ -1314,12 +1314,15 @@ type OrgMembership struct {
 }
 
 type OrgSetting struct {
-	OrgID              pgtype.UUID
-	IdleTimeoutSeconds pgtype.Int4
-	ParkWarmSeconds    pgtype.Int4
-	QueueWaitSeconds   pgtype.Int4
-	CreatedAt          pgtype.Timestamptz
-	UpdatedAt          pgtype.Timestamptz
+	OrgID                pgtype.UUID
+	IdleTimeoutSeconds   pgtype.Int4
+	ParkWarmSeconds      pgtype.Int4
+	QueueWaitSeconds     pgtype.Int4
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	MaxConcurrentRuns    pgtype.Int4
+	TriggerConcurrency   pgtype.Int4
+	TriggerRatePerMinute pgtype.Int4
 }
 
 type OrgWorkspace struct {

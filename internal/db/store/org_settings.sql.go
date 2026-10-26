@@ -13,7 +13,7 @@ import (
 
 const getOrgSettings = `-- name: GetOrgSettings :one
 
-SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at FROM org_settings
+SELECT org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute FROM org_settings
 WHERE org_id = $1
 `
 
@@ -30,25 +30,36 @@ func (q *Queries) GetOrgSettings(ctx context.Context, orgID pgtype.UUID) (OrgSet
 		&i.QueueWaitSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MaxConcurrentRuns,
+		&i.TriggerConcurrency,
+		&i.TriggerRatePerMinute,
 	)
 	return i, err
 }
 
 const upsertOrgSettings = `-- name: UpsertOrgSettings :one
-INSERT INTO org_settings (org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds)
-VALUES ($1, $2, $3, $4)
+INSERT INTO org_settings (org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds,
+                          max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute)
+VALUES ($1, $2, $3, $4,
+        $5, $6, $7)
 ON CONFLICT (org_id) DO UPDATE
 SET idle_timeout_seconds = EXCLUDED.idle_timeout_seconds,
     park_warm_seconds = EXCLUDED.park_warm_seconds,
-    queue_wait_seconds = EXCLUDED.queue_wait_seconds
-RETURNING org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at
+    queue_wait_seconds = EXCLUDED.queue_wait_seconds,
+    max_concurrent_runs = EXCLUDED.max_concurrent_runs,
+    trigger_concurrency = EXCLUDED.trigger_concurrency,
+    trigger_rate_per_minute = EXCLUDED.trigger_rate_per_minute
+RETURNING org_id, idle_timeout_seconds, park_warm_seconds, queue_wait_seconds, created_at, updated_at, max_concurrent_runs, trigger_concurrency, trigger_rate_per_minute
 `
 
 type UpsertOrgSettingsParams struct {
-	OrgID              pgtype.UUID
-	IdleTimeoutSeconds pgtype.Int4
-	ParkWarmSeconds    pgtype.Int4
-	QueueWaitSeconds   pgtype.Int4
+	OrgID                pgtype.UUID
+	IdleTimeoutSeconds   pgtype.Int4
+	ParkWarmSeconds      pgtype.Int4
+	QueueWaitSeconds     pgtype.Int4
+	MaxConcurrentRuns    pgtype.Int4
+	TriggerConcurrency   pgtype.Int4
+	TriggerRatePerMinute pgtype.Int4
 }
 
 func (q *Queries) UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsParams) (OrgSetting, error) {
@@ -57,6 +68,9 @@ func (q *Queries) UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsPa
 		arg.IdleTimeoutSeconds,
 		arg.ParkWarmSeconds,
 		arg.QueueWaitSeconds,
+		arg.MaxConcurrentRuns,
+		arg.TriggerConcurrency,
+		arg.TriggerRatePerMinute,
 	)
 	var i OrgSetting
 	err := row.Scan(
@@ -66,6 +80,9 @@ func (q *Queries) UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsPa
 		&i.QueueWaitSeconds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MaxConcurrentRuns,
+		&i.TriggerConcurrency,
+		&i.TriggerRatePerMinute,
 	)
 	return i, err
 }
