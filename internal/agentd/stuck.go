@@ -16,7 +16,7 @@ package agentd
 //  2. one transaction records the incident with what /proc said (pid, comm, state, wchan), and
 //     - under the loop guard of three recreations per agent in 24 hours - marks the sandbox
 //     unhealthy, so koinon-reconciler recreates it with a new home (the reset path of ADR 0051
-//     then starts new sessions, parked runs included), and puts a note on the ticket; or marks the
+//     then starts new sessions, parked runs included), and puts a note on the task; or marks the
 //     agent unhealthy, so new runs are refused until an admin resumes it, and tells the org's
 //     owners and admins;
 //  3. the reconciler is woken.
@@ -48,7 +48,7 @@ const (
 	MaxRecreations = 3
 )
 
-// Ticket event kinds of a stuck sandbox.
+// Task event kinds of a stuck sandbox.
 const (
 	kindSandboxRecreated = "sandbox.recreated"
 	kindAgentUnhealthy   = "agent.unhealthy"
@@ -237,7 +237,7 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 			}
 		}
 		inc, err := q.InsertSandboxIncident(ctx, store.InsertSandboxIncidentParams{
-			OrgID: r.run.OrgID, AgentID: r.run.AgentID, RunID: r.run.ID, TicketID: r.run.TicketID,
+			OrgID: r.run.OrgID, AgentID: r.run.AgentID, RunID: r.run.ID, TaskID: r.run.TaskID,
 			Processes: procJSON, Outcome: kind, Work: work, WorkNote: note, SavedWorkID: firstSaved,
 		})
 		if err != nil {
@@ -262,18 +262,18 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 			if err := r.notifyUnhealthy(ctx, q, inc.ID, reason); err != nil {
 				return err
 			}
-			waiting, err := q.ListTicketsWithWaitingRunOfAgent(ctx, store.ListTicketsWithWaitingRunOfAgentParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
+			waiting, err := q.ListTasksWithWaitingRunOfAgent(ctx, store.ListTasksWithWaitingRunOfAgentParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
 			if err != nil {
 				return err
 			}
-			notify := map[pgtype.UUID]bool{r.run.TicketID: true}
+			notify := map[pgtype.UUID]bool{r.run.TaskID: true}
 			for _, t := range waiting {
 				notify[t] = true
 			}
 			for t := range notify {
-				if err := r.ticketNote(ctx, q, t, kindAgentUnhealthy,
+				if err := r.taskNote(ctx, q, t, kindAgentUnhealthy,
 					"The agent is unhealthy: its sandbox got stuck again ("+strconv.FormatInt(n, 10)+
-						" recreations in 24 hours), so it is not recreated. New runs are refused, and this ticket's waiting run does not start until an admin resumes the agent. "+reason); err != nil {
+						" recreations in 24 hours), so it is not recreated. New runs are refused, and this task's waiting run does not start until an admin resumes the agent. "+reason); err != nil {
 					return err
 				}
 			}
@@ -284,22 +284,22 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 			}); err != nil {
 				return err
 			}
-			tickets, err := q.ListTicketsWithParkedRunOfAgent(ctx, store.ListTicketsWithParkedRunOfAgentParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
+			tasks, err := q.ListTasksWithParkedRunOfAgent(ctx, store.ListTasksWithParkedRunOfAgentParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
 			if err != nil {
 				return err
 			}
-			notify := map[pgtype.UUID]bool{r.run.TicketID: true}
-			for _, t := range tickets {
+			notify := map[pgtype.UUID]bool{r.run.TaskID: true}
+			for _, t := range tasks {
 				notify[t] = true
 			}
 			for t := range notify {
-				if err := r.ticketNote(ctx, q, t, kindSandboxRecreated, "Sandbox recreated: "+reason); err != nil {
+				if err := r.taskNote(ctx, q, t, kindSandboxRecreated, "Sandbox recreated: "+reason); err != nil {
 					return err
 				}
 			}
 		}
 		if work == "lost" {
-			if err := r.ticketNote(ctx, q, r.run.TicketID, kindWorkLost,
+			if err := r.taskNote(ctx, q, r.run.TaskID, kindWorkLost,
 				"The agent's uncommitted work was lost. Details (the sandbox reported some of them; they are not verified): "+note); err != nil {
 				return err
 			}
@@ -318,14 +318,14 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 	return outcome, nil
 }
 
-// ticketNote appends a system event with a message to a ticket's timeline.
-func (r *runner) ticketNote(ctx context.Context, q *store.Queries, ticket pgtype.UUID, kind, message string) error {
+// taskNote appends a system event with a message to a task's timeline.
+func (r *runner) taskNote(ctx context.Context, q *store.Queries, task pgtype.UUID, kind, message string) error {
 	payload, err := json.Marshal(map[string]string{"message": message})
 	if err != nil {
 		return err
 	}
-	_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-		OrgID: r.run.OrgID, TicketID: ticket, Kind: kind, ActorKind: store.TicketActorKindSystem, Payload: payload,
+	_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+		OrgID: r.run.OrgID, TaskID: task, Kind: kind, ActorKind: store.TaskActorKindSystem, Payload: payload,
 	})
 	return err
 }

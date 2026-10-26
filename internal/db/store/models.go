@@ -792,91 +792,136 @@ func (ns NullSandboxState) Value() (driver.Value, error) {
 	return string(ns.SandboxState), nil
 }
 
-type TicketActorKind string
+type TaskActorKind string
 
 const (
-	TicketActorKindUser   TicketActorKind = "user"
-	TicketActorKindAgent  TicketActorKind = "agent"
-	TicketActorKindSystem TicketActorKind = "system"
+	TaskActorKindUser   TaskActorKind = "user"
+	TaskActorKindAgent  TaskActorKind = "agent"
+	TaskActorKindSystem TaskActorKind = "system"
 )
 
-func (e *TicketActorKind) Scan(src interface{}) error {
+func (e *TaskActorKind) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = TicketActorKind(s)
+		*e = TaskActorKind(s)
 	case string:
-		*e = TicketActorKind(s)
+		*e = TaskActorKind(s)
 	default:
-		return fmt.Errorf("unsupported scan type for TicketActorKind: %T", src)
+		return fmt.Errorf("unsupported scan type for TaskActorKind: %T", src)
 	}
 	return nil
 }
 
-type NullTicketActorKind struct {
-	TicketActorKind TicketActorKind
-	Valid           bool // Valid is true if TicketActorKind is not NULL
+type NullTaskActorKind struct {
+	TaskActorKind TaskActorKind
+	Valid         bool // Valid is true if TaskActorKind is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullTicketActorKind) Scan(value interface{}) error {
+func (ns *NullTaskActorKind) Scan(value interface{}) error {
 	if value == nil {
-		ns.TicketActorKind, ns.Valid = "", false
+		ns.TaskActorKind, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.TicketActorKind.Scan(value)
+	return ns.TaskActorKind.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullTicketActorKind) Value() (driver.Value, error) {
+func (ns NullTaskActorKind) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.TicketActorKind), nil
+	return string(ns.TaskActorKind), nil
 }
 
-type TicketStatus string
+type TaskCreatorKind string
 
 const (
-	TicketStatusTodo         TicketStatus = "todo"
-	TicketStatusInProgress   TicketStatus = "in_progress"
-	TicketStatusWaitingOnYou TicketStatus = "waiting_on_you"
-	TicketStatusDone         TicketStatus = "done"
+	TaskCreatorKindUser    TaskCreatorKind = "user"
+	TaskCreatorKindTrigger TaskCreatorKind = "trigger"
+	TaskCreatorKindAgent   TaskCreatorKind = "agent"
 )
 
-func (e *TicketStatus) Scan(src interface{}) error {
+func (e *TaskCreatorKind) Scan(src interface{}) error {
 	switch s := src.(type) {
 	case []byte:
-		*e = TicketStatus(s)
+		*e = TaskCreatorKind(s)
 	case string:
-		*e = TicketStatus(s)
+		*e = TaskCreatorKind(s)
 	default:
-		return fmt.Errorf("unsupported scan type for TicketStatus: %T", src)
+		return fmt.Errorf("unsupported scan type for TaskCreatorKind: %T", src)
 	}
 	return nil
 }
 
-type NullTicketStatus struct {
-	TicketStatus TicketStatus
-	Valid        bool // Valid is true if TicketStatus is not NULL
+type NullTaskCreatorKind struct {
+	TaskCreatorKind TaskCreatorKind
+	Valid           bool // Valid is true if TaskCreatorKind is not NULL
 }
 
 // Scan implements the Scanner interface.
-func (ns *NullTicketStatus) Scan(value interface{}) error {
+func (ns *NullTaskCreatorKind) Scan(value interface{}) error {
 	if value == nil {
-		ns.TicketStatus, ns.Valid = "", false
+		ns.TaskCreatorKind, ns.Valid = "", false
 		return nil
 	}
 	ns.Valid = true
-	return ns.TicketStatus.Scan(value)
+	return ns.TaskCreatorKind.Scan(value)
 }
 
 // Value implements the driver Valuer interface.
-func (ns NullTicketStatus) Value() (driver.Value, error) {
+func (ns NullTaskCreatorKind) Value() (driver.Value, error) {
 	if !ns.Valid {
 		return nil, nil
 	}
-	return string(ns.TicketStatus), nil
+	return string(ns.TaskCreatorKind), nil
+}
+
+type TaskState string
+
+const (
+	TaskStateSubmitted     TaskState = "submitted"
+	TaskStateWorking       TaskState = "working"
+	TaskStateInputRequired TaskState = "input_required"
+	TaskStateCompleted     TaskState = "completed"
+	TaskStateCanceled      TaskState = "canceled"
+	TaskStateFailed        TaskState = "failed"
+)
+
+func (e *TaskState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TaskState(s)
+	case string:
+		*e = TaskState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TaskState: %T", src)
+	}
+	return nil
+}
+
+type NullTaskState struct {
+	TaskState TaskState
+	Valid     bool // Valid is true if TaskState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTaskState) Scan(value interface{}) error {
+	if value == nil {
+		ns.TaskState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TaskState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTaskState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TaskState), nil
 }
 
 type Agent struct {
@@ -967,7 +1012,7 @@ type ApiToken struct {
 type ApprovalRequest struct {
 	OrgID               pgtype.UUID
 	ID                  pgtype.UUID
-	TicketID            pgtype.UUID
+	TaskID              pgtype.UUID
 	RunID               pgtype.UUID
 	AgentID             pgtype.UUID
 	Connector           string
@@ -1227,7 +1272,7 @@ type Run struct {
 	ID                  pgtype.UUID
 	AgentID             pgtype.UUID
 	AgentVersionID      pgtype.UUID
-	TicketID            pgtype.UUID
+	TaskID              pgtype.UUID
 	State               RunState
 	Epoch               int64
 	OwnerID             pgtype.Text
@@ -1269,7 +1314,7 @@ type SandboxIncident struct {
 	ID          pgtype.UUID
 	AgentID     pgtype.UUID
 	RunID       pgtype.UUID
-	TicketID    pgtype.UUID
+	TaskID      pgtype.UUID
 	DetectedAt  pgtype.Timestamptz
 	Processes   []byte
 	Outcome     string
@@ -1281,7 +1326,7 @@ type SandboxIncident struct {
 type SavedWork struct {
 	OrgID     pgtype.UUID
 	ID        pgtype.UUID
-	TicketID  pgtype.UUID
+	TaskID    pgtype.UUID
 	RunID     pgtype.UUID
 	AgentID   pgtype.UUID
 	Repo      string
@@ -1319,7 +1364,7 @@ type SpendEntry struct {
 	ID               pgtype.UUID
 	AgentID          pgtype.UUID
 	RunID            pgtype.UUID
-	TicketID         pgtype.UUID
+	TaskID           pgtype.UUID
 	RequestID        string
 	KeyID            string
 	Model            string
@@ -1341,6 +1386,42 @@ type SpendEntry struct {
 	ResponseBytes    pgtype.Int8
 }
 
+type Task struct {
+	OrgID                    pgtype.UUID
+	ID                       pgtype.UUID
+	Title                    string
+	AgentID                  pgtype.UUID
+	CreatedByUserID          pgtype.UUID
+	HarnessSessionID         pgtype.Text
+	HarnessSessionCwd        pgtype.Text
+	LastEventSeq             int64
+	FinishedAt               pgtype.Timestamptz
+	CreatedAt                pgtype.Timestamptz
+	UpdatedAt                pgtype.Timestamptz
+	HarnessSessionGeneration pgtype.Text
+	AgentSummary             pgtype.Text
+	AgentSummaryAt           pgtype.Timestamptz
+	SessionRestartPending    bool
+	State                    TaskState
+	CreatedByKind            TaskCreatorKind
+	CreatedByAgentID         pgtype.UUID
+	CreatedByTriggerID       pgtype.UUID
+}
+
+type TaskEvent struct {
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+	TaskID       pgtype.UUID
+	Seq          int64
+	Kind         string
+	ActorKind    TaskActorKind
+	ActorUserID  pgtype.UUID
+	ActorAgentID pgtype.UUID
+	RunID        pgtype.UUID
+	Payload      []byte
+	CreatedAt    pgtype.Timestamptz
+}
+
 type Template struct {
 	ID           pgtype.UUID
 	Slug         string
@@ -1350,39 +1431,6 @@ type Template struct {
 	Spec         []byte
 	CreatedAt    pgtype.Timestamptz
 	LastSyncedAt pgtype.Timestamptz
-}
-
-type Ticket struct {
-	OrgID                    pgtype.UUID
-	ID                       pgtype.UUID
-	Title                    string
-	Status                   TicketStatus
-	AgentID                  pgtype.UUID
-	CreatedBy                pgtype.UUID
-	HarnessSessionID         pgtype.Text
-	HarnessSessionCwd        pgtype.Text
-	LastEventSeq             int64
-	DoneAt                   pgtype.Timestamptz
-	CreatedAt                pgtype.Timestamptz
-	UpdatedAt                pgtype.Timestamptz
-	HarnessSessionGeneration pgtype.Text
-	AgentSummary             pgtype.Text
-	AgentSummaryAt           pgtype.Timestamptz
-	SessionRestartPending    bool
-}
-
-type TicketEvent struct {
-	OrgID        pgtype.UUID
-	ID           pgtype.UUID
-	TicketID     pgtype.UUID
-	Seq          int64
-	Kind         string
-	ActorKind    TicketActorKind
-	ActorUserID  pgtype.UUID
-	ActorAgentID pgtype.UUID
-	RunID        pgtype.UUID
-	Payload      []byte
-	CreatedAt    pgtype.Timestamptz
 }
 
 type User struct {

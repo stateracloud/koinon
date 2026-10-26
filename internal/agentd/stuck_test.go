@@ -92,7 +92,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 			Expect(dir).To(Equal("/sandbox/work"))
 			return changes, 0
 		}
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, r)).WithTimeout(10*time.Second).Should(Equal(store.RunStateSucceeded), "the run itself ended well")
@@ -114,13 +114,13 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		Expect(work).To(Equal("saved"))
 		Expect(savedID).NotTo(BeNil())
 
-		// The work is sealed, tied to the ticket and the run, expiring in 14 days.
-		var id, ticketID, runID, repo, branch, status string
+		// The work is sealed, tied to the task and the run, expiring in 14 days.
+		var id, taskID, runID, repo, branch, status string
 		var envelope []byte
 		var expires time.Time
-		Expect(db.QueryRow(ctx, `SELECT id::text, ticket_id::text, run_id::text, repo, branch, status, envelope::text::bytea, expires_at FROM saved_work WHERE org_id = $1`, e.org).
-			Scan(&id, &ticketID, &runID, &repo, &branch, &status, &envelope, &expires)).To(Succeed())
-		Expect(ticketID).To(Equal(t.ID.String()))
+		Expect(db.QueryRow(ctx, `SELECT id::text, task_id::text, run_id::text, repo, branch, status, envelope::text::bytea, expires_at FROM saved_work WHERE org_id = $1`, e.org).
+			Scan(&id, &taskID, &runID, &repo, &branch, &status, &envelope, &expires)).To(Succeed())
+		Expect(taskID).To(Equal(t.ID.String()))
 		Expect(runID).To(Equal(r.ID.String()))
 		Expect(repo).To(Equal("acme/widgets"))
 		Expect(branch).To(HavePrefix("koinon/wip/" + strings.ReplaceAll(t.ID.String(), "-", "")[:8] + "-"))
@@ -137,7 +137,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		// A system-made ask-tier request, and nothing for the run to wait for.
 		var tool, target, astatus string
 		var system bool
-		Expect(db.QueryRow(ctx, `SELECT tool, target, status::text, system FROM approval_requests WHERE org_id = $1 AND ticket_id = $2`, e.org, t.ID).
+		Expect(db.QueryRow(ctx, `SELECT tool, target, status::text, system FROM approval_requests WHERE org_id = $1 AND task_id = $2`, e.org, t.ID).
 			Scan(&tool, &target, &astatus, &system)).To(Succeed())
 		Expect(tool).To(Equal("push_saved_work"))
 		Expect(target).To(Equal("github:acme/widgets"))
@@ -149,13 +149,13 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 
 		// The timeline says so; the audit log has the marking.
 		var recreated string
-		for _, ev := range ticketEvents(ctx, e, t) {
+		for _, ev := range taskEvents(ctx, e, t) {
 			if ev.Kind == "sandbox.recreated" {
 				recreated = string(ev.Payload)
 			}
 		}
 		Expect(recreated).To(ContainSubstring("Sandbox recreated: a process could not be ended"))
-		Expect(kindsOf(ticketEvents(ctx, e, t))).To(ContainElement("approval.requested"))
+		Expect(kindsOf(taskEvents(ctx, e, t))).To(ContainElement("approval.requested"))
 		var n int
 		Expect(db.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'sandbox.mark_unhealthy'`, e.org).Scan(&n)).To(Succeed())
 		Expect(n).To(Equal(1))
@@ -164,7 +164,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 	It("does nothing when the process ends before the time is up", func(ctx SpecContext) {
 		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
 		e.stuckAfterTurn("")
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Eventually(func() int { e.files.mu.Lock(); defer e.files.mu.Unlock(); return e.files.procinfoRuns }).Should(BeNumerically(">=", 1))
@@ -180,7 +180,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
 		e.stuckAfterTurn(dProc)
 		start := time.Now()
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Eventually(func() bool {
@@ -198,13 +198,13 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 			e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
 			e.stuckAfterTurn(dProc)
 			save(e.files)
-			t := e.ticket(ctx, "hello")
+			t := e.task(ctx, "hello")
 			r := e.enqueue(ctx, t)
 			e.pool("agentd-a", fastStuck(receiverURL()), mutate)
 			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			Eventually(func() []string { return kindsOf(ticketEvents(ctx, e, t)) }).WithTimeout(5 * time.Second).Should(ContainElement("sandbox.work_lost"))
+			Eventually(func() []string { return kindsOf(taskEvents(ctx, e, t)) }).WithTimeout(5 * time.Second).Should(ContainElement("sandbox.work_lost"))
 			var lost string
-			for _, ev := range ticketEvents(ctx, e, t) {
+			for _, ev := range taskEvents(ctx, e, t) {
 				if ev.Kind == "sandbox.work_lost" {
 					lost = string(ev.Payload)
 				}
@@ -247,7 +247,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 	It("says nothing was lost when the workspace is clean", func(ctx SpecContext) {
 		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
 		e.stuckAfterTurn(dProc)
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -256,18 +256,18 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 			_ = db.QueryRow(ctx, `SELECT work FROM sandbox_incidents WHERE org_id = $1`, e.org).Scan(&w)
 			return w
 		}).WithTimeout(5 * time.Second).Should(Equal("nothing"))
-		Expect(kindsOf(ticketEvents(ctx, e, t))).NotTo(ContainElement("sandbox.work_lost"))
+		Expect(kindsOf(taskEvents(ctx, e, t))).NotTo(ContainElement("sandbox.work_lost"))
 	})
 
 	It("stops recreating after three in 24 hours: the agent is unhealthy, owners are told, new runs fail", func(ctx SpecContext) {
 		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		first := e.enqueue(ctx, t)
-		other := e.ticket(ctx, "waiting")
+		other := e.task(ctx, "waiting")
 		waiting := e.enqueue(ctx, other) // queued behind the first run
 		// Three earlier recreations.
 		for range 3 {
-			_, err := db.Exec(ctx, `INSERT INTO sandbox_incidents (org_id, agent_id, run_id, ticket_id, processes, outcome, work)
+			_, err := db.Exec(ctx, `INSERT INTO sandbox_incidents (org_id, agent_id, run_id, task_id, processes, outcome, work)
 				VALUES ($1, $2, $3, $4, '[]', 'recreate', 'nothing')`, e.org, e.agent.ID, first.ID, t.ID)
 			Expect(err).NotTo(HaveOccurred())
 		}
@@ -286,8 +286,8 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		Expect(db.QueryRow(ctx, `SELECT kind, payload::text FROM notifications WHERE org_id = $1 AND user_id = $2`, e.org, e.user).Scan(&kind, &payload)).To(Succeed())
 		Expect(kind).To(Equal("agent.unhealthy"))
 		Expect(payload).To(ContainSubstring(e.agent.ID.String()))
-		Expect(kindsOf(ticketEvents(ctx, e, t))).To(ContainElement("agent.unhealthy"))
-		Expect(kindsOf(ticketEvents(ctx, e, other))).To(ContainElement("agent.unhealthy"), "a ticket whose run waits is told why")
+		Expect(kindsOf(taskEvents(ctx, e, t))).To(ContainElement("agent.unhealthy"))
+		Expect(kindsOf(taskEvents(ctx, e, other))).To(ContainElement("agent.unhealthy"), "a task whose run waits is told why")
 		Expect(getRun(ctx, waiting).State).To(Equal(store.RunStateQueued))
 		var n int
 		Expect(db.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'agent.mark_unhealthy'`, e.org).Scan(&n)).To(Succeed())
@@ -317,7 +317,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 			return "ended: none\n", 0
 		}
 		e.files.procinfo = func() string { return dProc }
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		e.pool("agentd-a", fastStuck(receiverURL()))
 
@@ -330,7 +330,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		Expect(runState(ctx, r)()).NotTo(Equal(store.RunStateSucceeded), "the run waits for the new sandbox")
 		e.recreateSandbox(ctx)
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
-		got, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: e.org, ID: t.ID})
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.HarnessSessionGeneration.String).NotTo(Equal(old), "the session lives in the new home")
 		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
@@ -340,7 +340,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 
 	It("lets a parked run resume in the new sandbox through the reset path", func(ctx SpecContext) {
 		e := newEnvWith(ctx, store.AgentFlavorOpencode, bound)
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r1 := e.enqueue(ctx, t)
 		e.pool("agentd-a", fastStuck(receiverURL()))
 		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
@@ -349,7 +349,7 @@ var _ = Describe("A sandbox with a process that survives SIGKILL", func() {
 		e.message(ctx, t, "after")
 		r2 := e.enqueue(ctx, t)
 		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-		Expect(kindsOf(ticketEvents(ctx, e, t))).To(ContainElement("run.session_reset"))
+		Expect(kindsOf(taskEvents(ctx, e, t))).To(ContainElement("run.session_reset"))
 	})
 })
 

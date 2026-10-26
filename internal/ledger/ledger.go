@@ -22,7 +22,7 @@
 //     agentgateway as the key's budget, net of the spend already recorded ([AgentLimit]), so a
 //     budget counter the gateway lost (pod replacement, key rotation) cannot hand out the
 //     full limit again. When recorded spend reaches a limit, the ingester cancels the run
-//     (every open run of the org for an org-wide limit) with a ticket event naming the limit.
+//     (every open run of the org for an org-wide limit) with a task event naming the limit.
 //
 // Unpriced models are not served at all (the gateway drivers render only
 // priced models), so every charged request has a cost. A record that still

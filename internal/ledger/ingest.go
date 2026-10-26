@@ -120,7 +120,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			return err
 		}
 		if _, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
-			OrgID: org.ID, AgentID: agent.ID, RunID: run.ID, TicketID: run.TicketID,
+			OrgID: org.ID, AgentID: agent.ID, RunID: run.ID, TaskID: run.TaskID,
 			RequestID: e.RequestID, KeyID: e.KeyID, Model: e.Model,
 			InputTokens: pr.inTokens, OutputTokens: pr.outTokens,
 			CacheReadTokens: pr.cacheRead, CacheWriteTokens: pr.cacheWrite, ReasoningTokens: pr.reasoning,
@@ -148,7 +148,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 // enforce checks the agent's daily limit, the org's monthly cap and the platform ceiling with
 // the entry just recorded, alerts at 80% and 100%, and cancels at the first limit reached: the
 // entry's run for the agent's limit, every open run of the org for an org-wide one.
-// agentgateway blocks the key's next request anyway; the cancel tells the ticket which limit.
+// agentgateway blocks the key's next request anyway; the cancel tells the task which limit.
 func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, run store.FindRunAtRow, e Entry, delta money.USD) error {
 	var fallback money.USD
 	if run.AgentVersionID.Valid {

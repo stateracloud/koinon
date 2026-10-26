@@ -8,12 +8,12 @@ package agentd
 // savework.sh, within SaveTimeout (30 s), and posts each repository's bundle to koinon-api
 // (package savedwork), which seals it - koinon-agentd holds no key-encryption key - and stores it
 // as one saved_work row and a system-made approval request, "Push saved work to a branch", on the
-// ticket: an approver decides, and only then does the API push
-// koinon/wip/<ticket>-<time> to GitHub (package approvals). Nothing leaves the sandbox for
+// task: an approver decides, and only then does the API push
+// koinon/wip/<task>-<time> to GitHub (package approvals). Nothing leaves the sandbox for
 // GitHub without that approval.
 //
 // Saving is best effort. If it fails, runs out of time, finds more than 50 MB, or the agent has no
-// GitHub access to the repository, the incident says the work was lost and why, and the ticket's
+// GitHub access to the repository, the incident says the work was lost and why, and the task's
 // timeline says so.
 
 import (

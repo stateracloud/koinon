@@ -437,6 +437,8 @@ export const MoveTicketResponseSchema: GenMessage<MoveTicketResponse> = /*@__PUR
 /**
  * TicketStatus is the board column (ADR 0049).
  *
+ * DEPRECATED: use koinon.task.v1alpha1.TaskState.
+ *
  * @generated from enum koinon.ticket.v1alpha1.TicketStatus
  */
 export enum TicketStatus {
@@ -508,6 +510,11 @@ export const ActorKindSchema: GenEnum<ActorKind> = /*@__PURE__*/
 /**
  * TicketService is the board and the conversation on each ticket (ADR 0017).
  * Every request names the org it acts in; IDs from another org are not found.
+ *
+ * DEPRECATED: tickets are tasks now (ADR 0065, plan item TK1). This service is a compatibility
+ * layer over koinon.task.v1alpha1.TaskService, kept until the web UI moves to tasks (TK2). The board
+ * column is derived from the task state: submitted is To do, working is In progress,
+ * input_required is Waiting on you, and completed, canceled and failed are Done.
  *
  * @generated from service koinon.ticket.v1alpha1.TicketService
  */

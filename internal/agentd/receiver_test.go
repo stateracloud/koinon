@@ -32,7 +32,7 @@ var _ = Describe("the saved-work receiver", func() {
 		e = newEnvWith(ctx, store.AgentFlavorOpencode, bound)
 		url = receiverURL()
 		key = uploadKey
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		e.enqueue(ctx, t)
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "x", LeaseSeconds: 600})
 		Expect(err).NotTo(HaveOccurred())
@@ -178,7 +178,7 @@ var _ = Describe("what the sandbox reports", func() {
 var _ = Describe("the summarizing mark", func() {
 	It("does not outlive its owner: a takeover or a new claim clears it", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		r := e.enqueue(ctx, e.ticket(ctx, "hello"))
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "a", LeaseSeconds: 30})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(claimed.ID).To(Equal(r.ID))
@@ -208,7 +208,7 @@ var _ = Describe("the summarizing mark", func() {
 var _ = Describe("an unhealthy agent's parked run", func() {
 	It("stays parked when its approval is decided, and is claimed once the agent is resumed", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		t := e.ticket(ctx, "hello")
+		t := e.task(ctx, "hello")
 		r := e.enqueue(ctx, t)
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "a", LeaseSeconds: 30})
 		Expect(err).NotTo(HaveOccurred())

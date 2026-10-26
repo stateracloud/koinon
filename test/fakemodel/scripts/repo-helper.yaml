@@ -20,16 +20,16 @@ model: repo-helper
 turns:
   # agentd's end-of-turn summary prompt (ADR 0051 amendment): a short note, no tool call. It comes
   # first because selection takes the first turn whose `when` holds, and the prompt is the latest
-  # user text of a conversation that also holds the ticket's earlier messages.
+  # user text of a conversation that also holds the task's earlier messages.
   - when:
       systemContains: "# Repo helper"
       userContains: "Your turn is over"
-    text: "Notes: the ticket asks for a hello.md; the pull request flow is under way."
+    text: "Notes: the task asks for a hello.md; the pull request flow is under way."
     usage:
       inputTokens: 1600
       cachedInputTokens: 1400
       outputTokens: 18
-  # A ticket that asks for the remote MCP server's approval-gated tool (the e2e step for MC1): the agent
+  # A task that asks for the remote MCP server's approval-gated tool (the e2e step for MC1): the agent
   # calls it through the gateway's "-ask" target, parks, and the resumed run reports the outcome.
   - when:
       systemContains: "# Repo helper"
@@ -74,7 +74,7 @@ turns:
         arguments:
           branch: koinon/add-hello-md
           title: Add hello.md
-          body: Adds hello.md as requested in the ticket.
+          body: Adds hello.md as requested in the task.
           files:
             - path: hello.md
               content: "hello from koinon\n"

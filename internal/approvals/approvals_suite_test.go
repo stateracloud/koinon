@@ -76,13 +76,13 @@ var seq atomic.Int64
 func uniq(prefix string) string { return fmt.Sprintf("%s-%d", prefix, seq.Add(1)) }
 
 // fixture is an org with a GitHub connection to the fake, three users, an active agent
-// bound to acme/widgets, a ticket created by the owner and its running run, the tool server
+// bound to acme/widgets, a task created by the owner and its running run, the tool server
 // and the approval service.
 type fixture struct {
 	org                  pgtype.UUID
 	owner, admin, member pgtype.UUID
 	agent                store.Agent
-	ticket               store.Ticket
+	task                 store.Task
 	run                  store.Run
 	agentHeader          string
 
@@ -164,9 +164,9 @@ func newFixture(ctx context.Context, preset string) *fixture {
 	Expect(err).NotTo(HaveOccurred())
 	f.agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: f.org, ID: agent.ID, VersionID: v.ID, ActivatedBy: f.owner})
 	Expect(err).NotTo(HaveOccurred())
-	f.ticket, err = q.CreateTicket(ctx, store.CreateTicketParams{OrgID: f.org, Title: "fix the typo", AgentID: f.agent.ID, CreatedBy: f.owner})
+	f.task, err = q.CreateTask(ctx, store.CreateTaskParams{OrgID: f.org, Title: "fix the typo", AgentID: f.agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: f.owner})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: f.org, AgentID: f.agent.ID, TicketID: f.ticket.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000})
+	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: f.org, AgentID: f.agent.ID, TaskID: f.task.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: f.org, OwnerID: "agentd-test", LeaseSeconds: 600})
 	Expect(err).NotTo(HaveOccurred())
@@ -231,9 +231,9 @@ func (f *fixture) get(ctx context.Context, id string) store.ApprovalRequest {
 	return row
 }
 
-func (f *fixture) ticketEvents(ctx context.Context) []store.TicketEvent {
+func (f *fixture) taskEvents(ctx context.Context) []store.TaskEvent {
 	GinkgoHelper()
-	evs, err := q.ListTicketEvents(ctx, store.ListTicketEventsParams{OrgID: f.org, TicketID: f.ticket.ID, MaxEvents: 100})
+	evs, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: f.org, TaskID: f.task.ID, MaxEvents: 100})
 	Expect(err).NotTo(HaveOccurred())
 	return evs
 }
@@ -256,9 +256,9 @@ func (f *fixture) getRun(ctx context.Context) store.Run {
 	return r
 }
 
-func (f *fixture) getTicket(ctx context.Context) store.Ticket {
+func (f *fixture) getTask(ctx context.Context) store.Task {
 	GinkgoHelper()
-	t, err := q.GetTicket(ctx, store.GetTicketParams{OrgID: f.org, ID: f.ticket.ID})
+	t, err := q.GetTask(ctx, store.GetTaskParams{OrgID: f.org, ID: f.task.ID})
 	Expect(err).NotTo(HaveOccurred())
 	return t
 }
@@ -271,9 +271,9 @@ func (f *fixture) park(ctx context.Context) {
 		ParkExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(7 * 24 * time.Hour), Valid: true},
 	})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = q.MoveTicketFrom(ctx, store.MoveTicketFromParams{
-		OrgID: f.org, ID: f.ticket.ID, ToStatus: store.TicketStatusWaitingOnYou,
-		FromStatuses: []string{string(store.TicketStatusTodo), string(store.TicketStatusInProgress)},
+	_, err = q.SetTaskStateFrom(ctx, store.SetTaskStateFromParams{
+		OrgID: f.org, ID: f.task.ID, ToState: store.TaskStateInputRequired,
+		FromStates: []string{string(store.TaskStateSubmitted), string(store.TaskStateWorking)},
 	})
 	Expect(err).NotTo(HaveOccurred())
 }
@@ -284,7 +284,7 @@ func mustID(s string) pgtype.UUID {
 	return id
 }
 
-func kinds(evs []store.TicketEvent) []string {
+func kinds(evs []store.TaskEvent) []string {
 	out := make([]string, len(evs))
 	for i, e := range evs {
 		out[i] = e.Kind

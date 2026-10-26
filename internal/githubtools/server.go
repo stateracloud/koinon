@@ -8,7 +8,7 @@
 //   - get_approval_status: the state of one of the agent's requests.
 //
 // A write call is validated, then recorded exactly as an approval request
-// (canonical arguments, their SHA-256, tool, target, agent, run and ticket)
+// (canonical arguments, their SHA-256, tool, target, agent, run and task)
 // and answered at once with "approval requested: id=…". Nothing is sent to
 // GitHub here and the server holds no GitHub credential: after approval,
 // Koinon executes the recorded call (plan item P1). Invalid calls are refused
@@ -81,7 +81,7 @@ type Options struct {
 	Execute func(ctx context.Context, org, id pgtype.UUID)
 }
 
-// KindApprovalRequested is the ticket event written when a call is recorded.
+// KindApprovalRequested is the task event written when a call is recorded.
 const KindApprovalRequested = "approval.requested"
 
 // Server is the GitHub tools MCP server.
@@ -115,7 +115,7 @@ func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: project.Name + "-github-tools", Version: project.Version}, nil)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolCreatePullRequest,
-		Description: "Propose a pull request on the ticket's repository. Needs human approval: returns " +
+		Description: "Propose a pull request on the task's repository. Needs human approval: returns " +
 			"\"approval requested: id=...\" at once and your run pauses; once approved, Koinon creates the branch, " +
 			"the commit and the pull request exactly as given, and you get the result when the run resumes. " +
 			"A file marked executable is written as 100755; otherwise a new file is regular (100644) and a modified file keeps its mode. " +
@@ -124,7 +124,7 @@ func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
 	}, s.createPullRequest)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolCommentOnIssue,
-		Description: "Propose a comment on an issue or pull request of the ticket's repository. Needs human " +
+		Description: "Propose a comment on an issue or pull request of the task's repository. Needs human " +
 			"approval: returns \"approval requested: id=...\" at once; Koinon posts it once approved.",
 	}, s.commentOnIssue)
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -176,7 +176,7 @@ type caller struct {
 }
 
 func (c caller) attrs() []any {
-	return []any{"org", c.org.Slug, "agent", c.agent.ID.String(), "run", c.run.ID.String(), "ticket", c.run.TicketID.String()}
+	return []any{"org", c.org.Slug, "agent", c.agent.ID.String(), "run", c.run.ID.String(), "task", c.run.TaskID.String()}
 }
 
 // identify resolves the gateway-set agent header to the agent's running run.
@@ -207,7 +207,7 @@ func (s *Server) identify(ctx context.Context, req *mcp.CallToolRequest) (caller
 	run, err := s.q.GetRunningRunForAgent(ctx, store.GetRunningRunForAgentParams{OrgID: org.ID, AgentID: agent.ID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return caller{}, errors.New("this agent has no running run; tools are only available while working on a ticket")
+			return caller{}, errors.New("this agent has no running run; tools are only available while working on a task")
 		}
 		return caller{}, s.lookupErr(err, "run")
 	}
@@ -307,7 +307,7 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 		return nil, Result{}, err
 	}
 	params := store.CreateApprovalRequestParams{
-		OrgID: c.org.ID, TicketID: c.run.TicketID, RunID: c.run.ID, AgentID: c.agent.ID,
+		OrgID: c.org.ID, TaskID: c.run.TaskID, RunID: c.run.ID, AgentID: c.agent.ID,
 		Connector: connectors.GitHubID, Tool: tool, Target: connectors.GitHubID + ":" + repo,
 		ArgsJson: string(canonical), ArgsSha256: HashArgs(canonical), Risk: riskJSON,
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
@@ -340,8 +340,8 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 		if err != nil {
 			return err
 		}
-		_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-			OrgID: row.OrgID, TicketID: row.TicketID, Kind: KindApprovalRequested, ActorKind: store.TicketActorKindAgent,
+		_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: row.OrgID, TaskID: row.TaskID, Kind: KindApprovalRequested, ActorKind: store.TaskActorKindAgent,
 			ActorAgentID: row.AgentID, RunID: row.RunID, Payload: payload,
 		})
 		return err
@@ -397,7 +397,7 @@ func resultOf(row store.ApprovalRequest) Result {
 func statusLine(r Result) string {
 	switch store.ApprovalStatus(r.Status) {
 	case store.ApprovalStatusPending:
-		return fmt.Sprintf("approval requested: id=%s status=pending args_sha256=%s. A human decides on the ticket; "+
+		return fmt.Sprintf("approval requested: id=%s status=pending args_sha256=%s. A human decides on the task; "+
 			"your run pauses now and resumes with the result. Do not retry or work around this call.", r.ID, r.ArgsSHA256)
 	case store.ApprovalStatusApproved:
 		return fmt.Sprintf("accepted: id=%s status=approved args_sha256=%s. Koinon executes it and your run resumes with the result.", r.ID, r.ArgsSHA256)

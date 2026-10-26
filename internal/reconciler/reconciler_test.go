@@ -529,7 +529,7 @@ var _ = Describe("Reconciler", func() {
 				By("agentd finds a sandbox stuck: its incident and the recreation count once")
 				run := queueRun(ctx, org, user, agent.ID)
 				_, err := q.InsertSandboxIncident(ctx, store.InsertSandboxIncidentParams{
-					OrgID: org, AgentID: agent.ID, RunID: run.ID, TicketID: run.TicketID,
+					OrgID: org, AgentID: agent.ID, RunID: run.ID, TaskID: run.TaskID,
 					Processes: []byte(`[]`), Outcome: "recreate", Work: "nothing",
 				})
 				Expect(err).NotTo(HaveOccurred())
