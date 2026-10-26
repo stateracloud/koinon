@@ -14,6 +14,7 @@ Events are written in the same transaction as the change, so a change without it
 | `approval.approve`, `approval.first_approve`, `approval.deny`, `approval.expire` | An approver decides a request (`first_approve` is the first of two approvers); Koinon expires one nobody decided in 7 days (actor `system`). |
 | `agent.create`, `agent.archive`, `agent.activate`, `agent.resume` | An agent is created, archived, activated or resumed. |
 | `auth.login`, `auth.logout` | A user logs in (with the method, never a password or token) or ends a session. Failed logins are not recorded. |
+| `platform_admin.grant`, `platform_admin.revoke` | OIDC login grants or revokes platform admin from `oidc.platformAdminGroups` (actor `system`), in the user's personal org. |
 | `provider.*`, `model.*`, `price.*`, `budget.*`, `mcp_server.*`, `mcp_tool.*`, `connection.*`, `token.*`, `sandbox.recreate`, `admin_api.call` | Configuration changes, a recreated sandbox and every admin API call. |
 
 Login and logout events sit in the user's personal org: every user has exactly one, and it is the only org
