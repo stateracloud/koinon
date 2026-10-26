@@ -171,6 +171,39 @@ var _ = Describe("Service", func() {
 			Expect(got).To(Equal("not-a-real-token"))
 		})
 
+		It("leaves the header, prefix and envelope of a concurrent credential change alone on a URL-only update", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "not-a-real-token")
+			id := uuidOf(s.ID)
+
+			// Another request replaces the credential (value, header and prefix) while this
+			// URL-only update is in its preflight.
+			var replaced []byte
+			svc.WithPreflight(func(ctx context.Context, _ mcpservers.PreflightRequest) error {
+				env, err := ring.Seal(mcpservers.CredentialBinding(org, id), []byte("not-a-concurrent-token"))
+				if err != nil {
+					return err
+				}
+				if replaced, err = json.Marshal(env); err != nil {
+					return err
+				}
+				_, err = pool.Exec(ctx, `UPDATE mcp_servers SET credential = $2, credential_header = 'X-Api-Key', credential_prefix = '' WHERE id = $1`, s.ID, replaced)
+				return err
+			})
+			u := "https://other.example.com/mcp"
+			_, err := svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &u})
+			Expect(err).NotTo(HaveOccurred())
+
+			var env []byte
+			var header, prefix string
+			Expect(pool.QueryRow(ctx, `SELECT credential, credential_header, credential_prefix FROM mcp_servers WHERE id = $1`, s.ID).Scan(&env, &header, &prefix)).To(Succeed())
+			Expect(env).To(MatchJSON(replaced))
+			Expect(header).To(Equal("X-Api-Key"))
+			Expect(prefix).To(BeEmpty())
+			got, err := mcpservers.OpenCredential(ring, org, id, env)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal("not-a-concurrent-token"))
+		})
+
 		It("still replaces and removes a credential when the patch says so", func(ctx SpecContext) {
 			s := create(ctx, "wiki", "not-a-real-token")
 			v := "not-another-token"

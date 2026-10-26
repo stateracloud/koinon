@@ -26,10 +26,14 @@ ORDER BY name, source, id;
 -- A change of the URL, transport or credential starts health over: the new settings are unproven.
 -- credential is written only when @set_credential is true (the patch sets or removes it). The caller
 -- read the row without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the
--- envelope since, so writing back the envelope that was read would undo it.
+-- envelope since, so writing back the envelope that was read would undo it. credential_header and
+-- credential_prefix go with it: they are written only when @set_credential_meta is true (the patch
+-- touches the credential at all), so a URL-only patch cannot pair a concurrent change's envelope with
+-- stale metadata, or break the CHECK that ties header and envelope together.
 UPDATE mcp_servers
-SET url = @url, transport = @transport, credential_header = sqlc.narg(credential_header),
-    credential_prefix = @credential_prefix,
+SET url = @url, transport = @transport,
+    credential_header = CASE WHEN @set_credential_meta::boolean THEN sqlc.narg(credential_header) ELSE credential_header END,
+    credential_prefix = CASE WHEN @set_credential_meta::boolean THEN @credential_prefix ELSE credential_prefix END,
     credential = CASE WHEN @set_credential::boolean THEN sqlc.narg(credential) ELSE credential END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
 WHERE org_id = @org_id AND id = @id

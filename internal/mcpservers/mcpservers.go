@@ -590,7 +590,8 @@ func (s *Service) Update(ctx context.Context, org pgtype.UUID, actor audit.Actor
 			// The envelope is rewritten only when this patch replaces or removes it. cur was read
 			// without a lock, and a concurrent `keys rewrap` or `reencrypt` may have replaced the
 			// envelope since (the preflight above widens that window); writing cur's back would undo it.
-			SetCredential: patch.RemoveCredential || (patch.Credential != nil && patch.Credential.Value != nil), Credential: cred,
+			SetCredentialMeta: patch.Credential != nil || patch.RemoveCredential,
+			SetCredential:     patch.RemoveCredential || (patch.Credential != nil && patch.Credential.Value != nil), Credential: cred,
 		})
 		if err != nil {
 			return err
