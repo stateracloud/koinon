@@ -52,6 +52,30 @@ func (q *Queries) ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandbo
 	return i, err
 }
 
+const countRecentAuditedRecreations = `-- name: CountRecentAuditedRecreations :one
+SELECT count(*)::bigint FROM audit_events e
+JOIN agents a ON a.org_id = e.org_id AND a.id = $1::uuid
+WHERE e.org_id = $2 AND e.action = 'sandbox.recreate'
+  AND e.target_kind = 'agent' AND e.target_id = a.id::text
+  AND e.created_at > now() - interval '24 hours'
+  AND (a.resumed_at IS NULL OR e.created_at > a.resumed_at)
+`
+
+type CountRecentAuditedRecreationsParams struct {
+	AgentID pgtype.UUID
+	OrgID   pgtype.UUID
+}
+
+// Sandbox recreations of the agent audited in the last 24 hours, since it was last resumed: the
+// ones for a stuck sandbox and the ones for a sandbox in Error or Completed. The loop guard of
+// ADR 0054 for the second kind counts these.
+func (q *Queries) CountRecentAuditedRecreations(ctx context.Context, arg CountRecentAuditedRecreationsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentAuditedRecreations, arg.AgentID, arg.OrgID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createAgentSandbox = `-- name: CreateAgentSandbox :one
 INSERT INTO agent_sandboxes (org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name)
 VALUES ($1, $2, $3, $4, $5, $6)

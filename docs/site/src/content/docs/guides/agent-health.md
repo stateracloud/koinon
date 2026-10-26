@@ -29,6 +29,15 @@ agent **unhealthy**: new runs are refused with the reason, and owners and admins
 cause (usually the storage), then choose **Resume agent** on the agent's page. Resuming recreates the
 sandbox and starts the count again.
 
+## A sandbox that stopped or failed
+
+A sandbox can also fail or end on its own (its main process exits, or the platform reports an error).
+When no run of the agent is active, Koinon deletes it and creates a new one on its next pass, the same
+way as for a stuck sandbox; the audit log records it as a sandbox recreation. Runs that need the sandbox
+meanwhile wait for the new one. These recreations count toward the same limit of three in 24 hours: when
+a sandbox fails again after that, Koinon does not recreate it but marks the agent **unhealthy**, with
+the reason "the sandbox kept failing" and the last failure, and you resume it as described above.
+
 ## New instructions for open tickets
 
 A new agent version normally applies from the next run, but a ticket keeps its session, so the agent

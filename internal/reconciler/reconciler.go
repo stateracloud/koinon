@@ -714,6 +714,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		sb.Phase = execution.PhaseDeleting
 		return r.record(ctx, w, sb, hash, "recreating a stuck sandbox: "+w.sb.UnhealthyReason.String)
 	}
+	if (sb.Phase == execution.PhaseError || sb.Phase == execution.PhaseCompleted) && !act.HasActive && !w.agent.UnhealthyAt.Valid {
+		// The sandbox's main process exited or it failed (the row would be recorded as Error and
+		// agentd fails every run at once). With no run to lose, delete it so the next pass
+		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
+		return r.repair(ctx, w, ws, names.Sandbox, sb, hash)
+	}
 	if sb.Labels[LabelSpecHash] != hash {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
 		// hand): OpenShell cannot change those in place, so the sandbox is recreated, which
@@ -752,6 +758,59 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		}
 	}
 	return r.record(ctx, w, sb, hash, "")
+}
+
+// maxRepairs is the loop guard of ADR 0054: recreations per agent per 24 hours (agentd's
+// MaxRecreations, which counts the stuck ones).
+const maxRepairs = 3
+
+// repair recreates a sandbox in Error or Completed. After maxRepairs recreations in 24 hours it
+// marks the agent unhealthy instead, so a sandbox that keeps failing is not recreated in a loop.
+func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb execution.Sandbox, hash string) error {
+	detail := "phase " + string(sb.Phase)
+	if m := truncate(sb.Message, 300); m != "" {
+		detail += ": " + m
+	}
+	n, err := r.q.CountRecentAuditedRecreations(ctx, store.CountRecentAuditedRecreationsParams{OrgID: w.org.ID, AgentID: w.agent.ID})
+	if err != nil {
+		return fmt.Errorf("count recent recreations: %w", err)
+	}
+	if n >= maxRepairs {
+		reason := fmt.Sprintf("the sandbox kept failing: %d recreations in 24 hours; the last failure: %s", n, detail)
+		if _, err := r.q.MarkAgentUnhealthy(ctx, store.MarkAgentUnhealthyParams{OrgID: w.org.ID, ID: w.agent.ID, Reason: reason}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return r.record(ctx, w, sb, hash, "")
+			}
+			return err
+		}
+		r.log.Error("the sandbox keeps failing; the agent is marked unhealthy", append(w.logAttrs(), "recreations_in_24h", n, "last", detail)...)
+		if err := audit.RecordErr(ctx, r.q, audit.Event{
+			Org: w.org.ID, Actor: audit.System(), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
+			After: map[string]any{"sandbox": name, "reason": reason, "recreations_in_24h": n},
+		}); err != nil {
+			return err
+		}
+		return r.record(ctx, w, sb, hash, "")
+	}
+	if err := r.backend.DeleteSandbox(ctx, ws, name); err != nil {
+		return err
+	}
+	r.log.Warn("deleting a failed sandbox to recreate it", append(w.logAttrs(), "detail", detail)...)
+	if err := audit.RecordErr(ctx, r.q, audit.Event{
+		Org: w.org.ID, Actor: audit.System(), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
+		After: map[string]any{"sandbox": name, "reason": "sandbox " + detail, "phase": string(sb.Phase), "message": truncate(sb.Message, 300), "home_generation": sb.ID},
+	}); err != nil {
+		return err
+	}
+	sb.Phase = execution.PhaseDeleting
+	return r.record(ctx, w, sb, hash, "recreating a failed sandbox ("+detail+")")
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // idle reports whether the sandbox has had no run activity for IdleTimeout, counting from the

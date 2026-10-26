@@ -56,7 +56,10 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 				reason += ": " + sb.Message
 			}
 			return store.AgentSandbox{}, &failure{reason: reason}
-		default: // pending, starting, stopping, stopped, deleting (recreated with a new spec)
+		default: // pending, starting, stopping, stopped, deleting
+			// Deleting is a recreation in progress: for a changed spec, a stuck sandbox (ADR 0054)
+			// or one found in Error or Completed. The next pass creates the new sandbox, so the
+			// run waits for it, within SandboxTimeout, instead of failing.
 			last = string(sb.State)
 		}
 		if time.Since(nudged) >= r.p.cfg.ReconcileNudge {
