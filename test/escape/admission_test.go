@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -257,6 +258,60 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	// connect sends a CONNECT-class request (exec, attach, portforward, pods/proxy, services/proxy)
+	// as user and returns the error. Admission runs before the API server opens the connection, so
+	// this needs no kubelet: a denial is the VAP's, anything else (no node, no such Service) is what
+	// happens after admission.
+	connect := func(ctx context.Context, user, namespace, resource, name, sub string) error {
+		GinkgoHelper()
+		var req *rest.Request
+		switch sub {
+		case "exec":
+			req = as[user].CoreV1().RESTClient().Post().Param("command", "id").Param("stdout", "true")
+		case "attach":
+			req = as[user].CoreV1().RESTClient().Post().Param("stdout", "true")
+		case "portforward":
+			req = as[user].CoreV1().RESTClient().Post().Param("ports", "8080")
+		default:
+			req = as[user].CoreV1().RESTClient().Get()
+		}
+		return req.Namespace(namespace).Resource(resource).Name(name).SubResource(sub).Do(ctx).Error()
+	}
+	connectCases := []struct{ resource, sub string }{
+		{"pods", "exec"}, {"pods", "attach"}, {"pods", "portforward"}, {"pods", "proxy"}, {"services", "proxy"},
+	}
+
+	It("denies exec, attach, port-forward and proxy into sandbox pods, for every identity", func(ctx SpecContext) {
+		for _, user := range []string{"admin", controllerUser, gatewayUser, otherUser} {
+			for _, c := range connectCases {
+				name := existingPod
+				if c.resource == "services" {
+					name = "some-service"
+				}
+				err := connect(ctx, user, ns, c.resource, name, c.sub)
+				denied(err, c.resource+"/"+c.sub+" is not allowed in sandbox namespaces")
+				Expect(err.Error()).To(ContainSubstring(user))
+				Expect(err.Error()).To(ContainSubstring("docs/ops/sandbox-break-glass.md"))
+			}
+		}
+	})
+
+	It("leaves exec and proxy open in other namespaces (control)", func(ctx SpecContext) {
+		_, err := admin.CoreV1().Pods(plain).Create(ctx, workload("plain-connect", func(p *corev1.Pod) { p.Spec.RuntimeClassName = nil }), metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		for _, c := range connectCases {
+			name := "plain-connect"
+			if c.resource == "services" {
+				name = "some-service"
+			}
+			err := connect(ctx, "admin", plain, c.resource, name, c.sub)
+			// Past admission it fails for want of a node or a Service, never on the policy.
+			if err != nil {
+				Expect(err.Error()).NotTo(ContainSubstring("ValidatingAdmissionPolicy"), "%s/%s", c.resource, c.sub)
+			}
+		}
+	})
+
 	It("enforces the policies: Deny actions, failurePolicy Fail, bound to OpenShell namespaces only", func() {
 		for _, p := range policies {
 			Expect(p.Spec.FailurePolicy).To(HaveValue(Equal(admissionv1.Fail)), p.Name)
@@ -265,7 +320,28 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 			Expect(b.Spec.ValidationActions).To(Equal([]admissionv1.ValidationAction{admissionv1.Deny}), b.Name)
 			Expect(b.Spec.MatchResources).NotTo(BeNil(), b.Name)
 			Expect(b.Spec.MatchResources.NamespaceSelector.MatchLabels).To(HaveKeyWithValue("openshell.ai/managed-by", "openshell"), b.Name)
+			// An options object has no labels: an objectSelector would silently match nothing.
+			Expect(b.Spec.MatchResources.ObjectSelector).To(BeNil(), b.Name)
 		}
+
+		By("a policy denies CONNECT on exec, attach, portforward and both proxies, with no exemption")
+		var rules []admissionv1.NamedRuleWithOperations
+		for _, p := range policies {
+			if p.Spec.MatchConstraints == nil {
+				continue
+			}
+			for _, r := range p.Spec.MatchConstraints.ResourceRules {
+				if slices.Contains(r.Operations, admissionv1.Connect) {
+					rules = append(rules, r)
+					Expect(p.Spec.Validations).To(HaveLen(1), p.Name)
+					Expect(p.Spec.Validations[0].Expression).To(Equal("false"), p.Name)
+					Expect(p.Spec.Variables).To(BeEmpty(), p.Name)
+				}
+			}
+		}
+		Expect(rules).To(HaveLen(1), "exactly one CONNECT rule")
+		Expect(rules[0].Operations).To(Equal([]admissionv1.OperationType{admissionv1.Connect}))
+		Expect(rules[0].Resources).To(ConsistOf("pods/exec", "pods/attach", "pods/portforward", "pods/proxy", "services/proxy"))
 	})
 
 	It("denies every io.katacontainers.* annotation on every pod kind, not one known key", func(ctx SpecContext) {
@@ -414,8 +490,8 @@ func renderSandboxPolicy(ctx context.Context) ([]*admissionv1.ValidatingAdmissio
 			Fail(fmt.Sprintf("unexpected %s in sandbox-policy.yaml", meta.Kind))
 		}
 	}
-	Expect(policies).To(HaveLen(2), "the pods and the objects policy")
-	Expect(bindings).To(HaveLen(2))
+	Expect(policies).To(HaveLen(3), "the pods, objects and connect policies")
+	Expect(bindings).To(HaveLen(3))
 	return policies, bindings
 }
 
