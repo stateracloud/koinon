@@ -54,6 +54,14 @@ type Querier interface {
 	// Takes an approved request for execution for lease_seconds. No row: it is
 	// not approved, or another executor holds it.
 	ClaimApprovalExecution(ctx context.Context, arg ClaimApprovalExecutionParams) (ApprovalRequest, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// Records the key as seen. Returns no row when it was seen before: the caller then has no second
+	// effect. A concurrent claim of the same key waits for the first transaction, so exactly one
+	// claims it; if that one rolls back, the waiting one claims it.
+	ClaimDedupeKey(ctx context.Context, arg ClaimDedupeKeyParams) (DedupeRecord, error)
 	// queued -> starting, or a resolved parked -> starting. Takes the oldest
 	// claimable run (by ready_at) of an active agent that has no active run and
 	// whose task has no other owned or parked run, and
@@ -162,6 +170,8 @@ type Querier interface {
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
 	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
+	// Sweeps records older than the cutoff; sources keep redelivering for a bounded time only.
+	DeleteDedupeRecordsBefore(ctx context.Context, arg DeleteDedupeRecordsBeforeParams) (int64, error)
 	DeleteExpiredOIDCLoginFlows(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, before pgtype.Timestamptz) (int64, error)
 	// Removing a mapping cascades to the memberships it granted.
@@ -225,6 +235,7 @@ type Querier interface {
 	// (not estimated) requests of a model, and how many there were.
 	GetCalibration(ctx context.Context, arg GetCalibrationParams) (GetCalibrationRow, error)
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
+	GetDedupeRecord(ctx context.Context, arg GetDedupeRecordParams) (DedupeRecord, error)
 	GetDefaultPriceList(ctx context.Context, version string) (DefaultPriceList, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
@@ -546,6 +557,8 @@ type Querier interface {
 	// until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
 	// at the next start.
 	SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error)
+	// Names what a claimed key produced, in the same transaction as the claim.
+	SetDedupeEffect(ctx context.Context, arg SetDedupeEffectParams) error
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)

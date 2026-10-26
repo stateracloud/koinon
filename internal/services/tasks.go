@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/durable"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
@@ -118,27 +120,27 @@ func (s *Server) createTask(ctx context.Context, c caller, agentID pgtype.UUID, 
 		task store.Task
 		run  *runv1alpha1.Run
 	)
-	err := s.inTx(ctx, func(q *store.Queries) error {
+	err := s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
 		agent, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: agentID})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if agent.Status != store.AgentStatusActive {
-			return connect.NewError(connect.CodeFailedPrecondition, "agent is not active")
+			return nil, connect.NewError(connect.CodeFailedPrecondition, "agent is not active")
 		}
 		t, err := q.CreateTask(ctx, store.CreateTaskParams{
 			OrgID: c.org, Title: title, AgentID: agent.ID,
 			CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: c.actor(),
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 			OrgID: c.org, TaskID: t.ID, Kind: KindTaskCreated,
 			ActorKind: store.TaskActorKindUser, ActorUserID: c.actor(),
 			Payload: jsonPayload(map[string]any{"title": title}),
 		}); err != nil {
-			return err
+			return nil, err
 		}
 		if msg != "" {
 			if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
@@ -146,23 +148,20 @@ func (s *Server) createTask(ctx context.Context, c caller, agentID pgtype.UUID, 
 				ActorKind: store.TaskActorKindUser, ActorUserID: c.actor(),
 				Payload: jsonPayload(map[string]any{"text": msg}),
 			}); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if run, err = enqueue(ctx, q, t); err != nil {
-			return err
+			return nil, err
 		}
 		task, err = q.GetTask(ctx, store.GetTaskParams{OrgID: c.org, ID: t.ID})
-		return err
-	})
-	if err == nil {
-		// Pre-wake the agent's sandbox before the run is claimed (plan item LT1). Best effort: the
-		// queued run is demand on its own.
-		if _, werr := wake.TaskCreated(ctx, s.q, task); werr != nil {
-			s.log.Warn("waking the agent's sandbox for a new task failed", "err", werr)
+		if err != nil {
+			return nil, err
 		}
-	}
-	return task, run, err
+		// Pre-wake the agent's sandbox before the run is claimed (plan item LT1), after the commit.
+		return []durable.Notification{wakeNotification("task-created:"+idString(task.ID), task)}, nil
+	})
+	return task, run, s.sendFailed(err, "waking the agent's sandbox for a new task failed")
 }
 
 // taskView is a task with its timeline and runs, read in one snapshot.
@@ -230,19 +229,18 @@ func (s *Server) listTasks(ctx context.Context, c caller, states []store.TaskSta
 // appendMessage adds a user message to a task and queues a run unless one is queued already.
 func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, msg string) (store.TaskEvent, *runv1alpha1.Run, error) {
 	var (
-		ev   store.TaskEvent
-		run  *runv1alpha1.Run
-		task store.Task
+		ev  store.TaskEvent
+		run *runv1alpha1.Run
 	)
-	err := s.inTx(ctx, func(q *store.Queries) error {
+	err := s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
 		// The row lock serialises this with concurrent messages (and so the queued-run check in
 		// Enqueue) and with setState, so a task that ends concurrently takes no message.
 		t, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: c.org, ID: id})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if isEnded(t.State) {
-			return errTaskEnded
+			return nil, errTaskEnded
 		}
 		ev, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 			OrgID: c.org, TaskID: t.ID, Kind: KindMessage,
@@ -250,20 +248,17 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 			Payload: jsonPayload(map[string]any{"text": msg}),
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		task = t
 		run, err = enqueue(ctx, q, t)
-		return err
-	})
-	if err == nil && run != nil {
-		// A message that queues a run acknowledges at once like a new task (ADR 0066 LT1): wake
-		// the agent's sandbox before the run is claimed. Best effort.
-		if _, werr := wake.TaskCreated(ctx, s.q, task); werr != nil {
-			s.log.Warn("waking the agent's sandbox for a new message failed", "err", werr)
+		if err != nil || run == nil {
+			return nil, err
 		}
-	}
-	return ev, run, err
+		// A message that queues a run acknowledges at once like a new task (ADR 0066 LT1): wake
+		// the agent's sandbox before the run is claimed, after the commit.
+		return []durable.Notification{wakeNotification(fmt.Sprintf("message:%s:%d", idString(t.ID), ev.Seq), t)}, nil
+	})
+	return ev, run, s.sendFailed(err, "waking the agent's sandbox for a new message failed")
 }
 
 // setState moves a task to a state on behalf of the caller and records the change on the timeline.
