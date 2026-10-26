@@ -81,8 +81,22 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
 13. **CI**: `.github/workflows/ci.yml` (jobs `go`, `web`, `proto`, `generated code`, `migrations`)
     and `dco.yml`, on free `ubuntu-latest` runners, every action pinned to a commit SHA.
     While the repository is private, runs use the account's free Actions minutes.
+    _Amended (2026-10-26):_ CI now runs on Blacksmith runners; see Amendment (CI runners).
 14. **Repository hygiene**: SPDX headers in source files; Contributor Covenant 2.1, with reports
     to the project lead on GitHub until a project address exists; `charts/koinon` is a skeleton.
+
+## Amendment (CI runners, 2026-10-26)
+
+- While the repository is private, the free GitHub minutes do not cover CI. Pull-request and kind
+  workflows run on Blacksmith runners, each job in its own Firecracker microVM:
+  `blacksmith-4vcpu-ubuntu-2404` for `go`, `flavors` and the kind workflows, and
+  `blacksmith-2vcpu-ubuntu-2404` for the rest. Larger runners use the free minutes proportionally.
+- `release.yml` and `review-prices.yml` stay on GitHub-hosted `ubuntu-latest`. The release job
+  holds `packages: write` and the signing job holds `id-token: write`, so they stay on GitHub's own
+  runners. Both run rarely.
+- Actions stay pinned to commit SHAs, `actions/checkout` included; Blacksmith's checkout action
+  is not used. The Blacksmith app is limited to this repository.
+- When the repository goes public, standard GitHub-hosted runners are free again; revisit then.
 
 ## Alternatives considered
 
