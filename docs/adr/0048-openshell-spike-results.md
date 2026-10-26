@@ -7,7 +7,7 @@
   [0045](0045-openshell-hardening-defaults.md); resolves the spike verification of
   [0006](0006-identity-layers.md), [0008](0008-approvals-and-risk-tiers.md),
   [0016](0016-harness-and-deployment.md), 0040, 0042 and 0045
-- Verification: done by the spike itself ([#3](https://github.com/procoduck/koinon/issues/3))
+- Verification: done by the spike itself ([#3](https://github.com/stateracloud/koinon/issues/3))
 
 ## Context
 
@@ -178,6 +178,19 @@ digest `sha256:e88977ce…`, SDK commit `bdb956f`), Agent Sandbox v1.0.7 (manife
 `136c10c9…`), agentgateway 1.6.0, Kata from the Talos `kata-containers` extension with guest
 seccomp enabled, OpenCode 1.19.3, Hermes Agent 0.22.3, pi 1.3.0 with pi-acp 0.0.34,
 `coder/acp-go-sdk` v0.13.5, `modelcontextprotocol/go-sdk` v1.8.0.
+
+## Amendment (2026-10-26): decision 10, the Sandbox watch and orphan collection are deferred
+
+Decision 10 says the reconciler watches `agents.x-k8s.io` Sandbox objects and garbage-collects
+OpenShell-labelled Sandbox objects the gateway no longer lists. Neither is built: nothing in `internal/`
+or `cmd/` reads or deletes Sandbox objects (the only reference to the group is the preflight's CRD
+check, `internal/preflight/preflight.go:37-44`). The reconciler learns sandbox status from the
+OpenShell gateway API. The chart still grants the reconciler read, watch and delete on Sandboxes
+cluster-wide (`charts/koinon/templates/rbac.yaml:131-133`). That grant is unused and is being
+removed (issue [#110](https://github.com/stateracloud/koinon/issues/110)).
+
+Orphan garbage collection is deferred. When it is built, it adds back only the Sandbox access it
+needs, scoped to the namespaces it works in, with its own tests.
 
 ## Links
 

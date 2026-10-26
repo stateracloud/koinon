@@ -167,6 +167,12 @@ RETURNING *;
 UPDATE sessions SET revoked_at = @now
 WHERE token_hash = @token_hash AND revoked_at IS NULL;
 
+-- name: RevokeSessionReturningUser :one
+-- Logout: revokes a live session and says whose it was, for the audit log. No row: nothing was live.
+UPDATE sessions SET revoked_at = @now
+WHERE token_hash = @token_hash AND revoked_at IS NULL
+RETURNING user_id;
+
 -- name: RevokeOtherUserSessions :exec
 UPDATE sessions SET revoked_at = @now
 WHERE user_id = @user_id AND id <> @keep_session_id AND revoked_at IS NULL;

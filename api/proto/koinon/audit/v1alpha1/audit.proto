@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.audit.v1alpha1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/audit/v1alpha1;auditv1alpha1";
+
+// AuditService reads the audit log (ADR 0023). The log is written by the services themselves and is
+// append-only; there is no way to change it here.
+service AuditService {
+  // List returns audit events, newest first. An org admin or owner lists the events of their org
+  // (org_id is required for them). A platform admin names any org, or leaves org_id empty to read
+  // every org. A caller with a lower role in the org is refused, and an org the caller is not part
+  // of is NotFound.
+  rpc List(ListRequest) returns (ListResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// AuditEvent is one entry of the log. summary holds {"before": .., "after": ..} without secret values.
+message AuditEvent {
+  string id = 1;
+  string org_id = 2;
+  // actor_kind is user, token, agent, secret or system; actor_id is that actor's ID, or the declaring
+  // Secret's name for secret.
+  string actor_kind = 3;
+  string actor_id = 4;
+  // action reads <area>.<verb>, for example approval.approve or agent.archive.
+  string action = 5;
+  string target_kind = 6;
+  string target_id = 7;
+  google.protobuf.Struct summary = 8;
+  string request_id = 9;
+  google.protobuf.Timestamp created_at = 10;
+  // chain_seq, prev_hash and hash are the org's hash chain, the hashes in lower-case hex. See ADR 0023.
+  int64 chain_seq = 11;
+  string prev_hash = 12;
+  string hash = 13;
+}
+
+message ListRequest {
+  // org_id names the org. Only a platform admin may leave it empty, to read every org.
+  string org_id = 1;
+  // since and until bound created_at: since <= created_at < until. Both are optional.
+  google.protobuf.Timestamp since = 2;
+  google.protobuf.Timestamp until = 3;
+  // action_prefix keeps the events whose action starts with it, for example "approval." or
+  // "agent.create". Lower-case letters, digits and . _ - only.
+  string action_prefix = 4;
+  // actor_kind keeps the events of one kind of actor; actor_id narrows that to one actor and needs
+  // actor_kind.
+  string actor_kind = 5;
+  string actor_id = 6;
+  // page_size is 50 by default and at most 200.
+  int32 page_size = 7;
+  // page_token is the next_page_token of the previous page.
+  string page_token = 8;
+}
+
+message ListResponse {
+  repeated AuditEvent events = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+}
