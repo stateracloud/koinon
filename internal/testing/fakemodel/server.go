@@ -15,6 +15,9 @@ import (
 	"unicode/utf8"
 )
 
+// overloadedMessage is the text of scripted overload errors.
+const overloadedMessage = "Overloaded"
+
 // maxRequestBytes bounds request bodies; harness prompts with tool schemas stay far below this.
 const maxRequestBytes = 32 << 20
 
@@ -39,9 +42,16 @@ type Server struct {
 }
 
 type entry struct {
-	script Script
-	served int // requests seen, for Faults.Unavailable
+	script  Script
+	served  int // requests seen, for Faults.Unavailable
+	limited int // 429s sent, for Faults.RateLimit
+	// gate holds one token per released response in lockstep mode.
+	gate    chan struct{}
+	waiting int // requests held by the gate
 }
+
+// gateCapacity bounds how many releases may be outstanding at once.
+const gateCapacity = 1024
 
 // New returns a server with the given scripts registered.
 func New(scripts ...Script) (*Server, error) {
@@ -68,8 +78,62 @@ func (s *Server) Register(sc Script) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.scripts[sc.Model] = &entry{script: sc}
+	s.scripts[sc.Model] = &entry{script: sc, gate: make(chan struct{}, gateCapacity)}
 	return nil
+}
+
+// Release lets n held responses of a lockstep script through, in arrival order of the waiters.
+// Releases made before the request arrives are kept, so a test may release first. It fails for
+// an unknown model or when too many releases are outstanding.
+func (s *Server) Release(model string, n int) error {
+	s.mu.Lock()
+	e, ok := s.scripts[model]
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("fakemodel: unknown model %q", model)
+	}
+	for range n {
+		select {
+		case e.gate <- struct{}{}:
+		default:
+			return fmt.Errorf("fakemodel: more than %d unconsumed releases for %q", gateCapacity, model)
+		}
+	}
+	return nil
+}
+
+// Waiting returns how many requests to model are held by its lockstep gate.
+func (s *Server) Waiting(model string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.scripts[model]; ok {
+		return e.waiting
+	}
+	return 0
+}
+
+// hold blocks a lockstep request until a response is released. It returns false when the
+// client went away first.
+func (s *Server) hold(r *http.Request, rep reply) bool {
+	if !rep.faults.Lockstep {
+		return true
+	}
+	s.mu.Lock()
+	e := s.scripts[rep.model]
+	e.waiting++
+	gate := e.gate
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		e.waiting--
+		s.mu.Unlock()
+	}()
+	select {
+	case <-gate:
+		return true
+	case <-r.Context().Done():
+		return false
+	}
 }
 
 // Requests returns a copy of the model requests received so far, in order.
@@ -125,12 +189,17 @@ const (
 	errBadRequest errorKind = iota
 	errNotFound
 	errUnavailable
+	errRateLimit
+	errContextLength
+	errOverloaded
 )
 
 // apiError is an error to send to the client.
 type apiError struct {
 	kind    errorKind
 	message string
+	// retryAfter is the Retry-After header in seconds, when positive.
+	retryAfter int
 }
 
 func (e *apiError) Error() string { return e.message }
@@ -139,8 +208,10 @@ func (e *apiError) status() int {
 	switch e.kind {
 	case errNotFound:
 		return http.StatusNotFound
-	case errUnavailable:
+	case errUnavailable, errOverloaded:
 		return http.StatusServiceUnavailable
+	case errRateLimit:
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusBadRequest
 	}
@@ -180,6 +251,16 @@ func (s *Server) plan(path, model string, body []byte, conv conversation) (reply
 	e.served++
 	if e.served <= e.script.Faults.Unavailable {
 		return reply{}, &apiError{kind: errUnavailable, message: fmt.Sprintf("fakemodel: scripted outage %d of %d", e.served, e.script.Faults.Unavailable)}
+	}
+	if e.limited < e.script.Faults.RateLimit {
+		e.limited++
+		ra := max(1, e.script.Faults.RetryAfter)
+		return reply{}, &apiError{kind: errRateLimit, retryAfter: ra, message: fmt.Sprintf("fakemodel: scripted rate limit %d of %d", e.limited, e.script.Faults.RateLimit)}
+	}
+	if e.script.Faults.ContextLength {
+		return reply{}, &apiError{kind: errContextLength, message: fmt.Sprintf(
+			"This model's maximum context length is 8192 tokens. However, your messages resulted in %d tokens. Please reduce the length of the messages.",
+			max(8193, len(body)/4))}
 	}
 	idx := e.script.selectTurn(conv)
 	if idx < 0 {
@@ -272,6 +353,19 @@ func writeBody(w http.ResponseWriter, v any, truncate bool) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(b[:len(b)/2])
 	abort(w)
+}
+
+// midStreamError keeps about half of events and ends them with errEvent, so the client sees the
+// stream fail partway and finish cleanly.
+func midStreamError(events []sseEvent, errEvent sseEvent) []sseEvent {
+	n := max(1, len(events)/2)
+	return append(slices.Clone(events[:n]), errEvent)
+}
+
+func setRetryAfter(w http.ResponseWriter, e *apiError) {
+	if e.retryAfter > 0 {
+		w.Header().Set("Retry-After", fmt.Sprint(e.retryAfter))
+	}
 }
 
 // sseEvent is one server-sent event; an empty name writes a data-only event.

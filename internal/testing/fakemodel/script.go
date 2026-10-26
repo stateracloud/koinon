@@ -39,6 +39,21 @@ type Faults struct {
 	// Truncate writes about half of the response (half the SSE events when streaming, half the
 	// JSON body otherwise) and then aborts the connection.
 	Truncate bool `yaml:"truncate,omitempty"`
+	// RateLimit answers the first N requests to this model with HTTP 429 and a Retry-After
+	// header of RetryAfter seconds (after any 503s).
+	RateLimit int `yaml:"rateLimit,omitempty"`
+	// RetryAfter is the Retry-After value, in seconds, sent with a 429. Zero means 1.
+	RetryAfter int `yaml:"retryAfter,omitempty"`
+	// ContextLength answers every request with the context-length-exceeded error: HTTP 400,
+	// code context_length_exceeded (OpenAI-compatible) or "prompt is too long" (Anthropic).
+	ContextLength bool `yaml:"contextLength,omitempty"`
+	// OverloadedMidStream makes a streaming response send about half of its events and then an
+	// "overloaded" error event, and end the stream cleanly. A non-streaming request gets the
+	// 503 overloaded error instead.
+	OverloadedMidStream bool `yaml:"overloadedMidStream,omitempty"`
+	// Lockstep holds every request to this model after it is received until the test releases
+	// a response with [Server.Release]; [Server.Waiting] counts the held requests.
+	Lockstep bool `yaml:"lockstep,omitempty"`
 }
 
 // Turn is one scripted assistant reply. It has text, tool calls, or both (text first).
@@ -98,7 +113,7 @@ func (s Script) Validate() error {
 	if len(s.Turns) == 0 {
 		errs = append(errs, errors.New("at least one turn is required"))
 	}
-	if s.Faults.Unavailable < 0 || s.Faults.Delay < 0 {
+	if s.Faults.Unavailable < 0 || s.Faults.Delay < 0 || s.Faults.RateLimit < 0 || s.Faults.RetryAfter < 0 {
 		errs = append(errs, errors.New("faults must not be negative"))
 	}
 	for i, t := range s.Turns {

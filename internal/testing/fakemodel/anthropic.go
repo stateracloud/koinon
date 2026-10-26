@@ -98,9 +98,14 @@ func writeAnthropicError(w http.ResponseWriter, err error) {
 	switch e.kind {
 	case errNotFound:
 		typ = "not_found_error"
-	case errUnavailable:
+	case errUnavailable, errOverloaded:
 		typ = "overloaded_error"
+	case errRateLimit:
+		typ = "rate_limit_error"
+	case errContextLength:
+		e.message = "prompt is too long: 8193 tokens > 8192 maximum"
 	}
+	setRetryAfter(w, e)
 	writeJSON(w, e.status(), map[string]any{
 		"type": "error", "error": map[string]any{"type": typ, "message": e.message},
 	})
@@ -138,11 +143,21 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, err)
 		return
 	}
-	if !wait(r, rep.faults.Delay) {
+	if !s.hold(r, rep) || !wait(r, rep.faults.Delay) {
+		return
+	}
+	if rep.faults.OverloadedMidStream && !req.Stream {
+		writeAnthropicError(w, &apiError{kind: errOverloaded, message: overloadedMessage})
 		return
 	}
 	if req.Stream {
-		writeSSE(w, rep.anthropicEvents(), rep.faults.Truncate)
+		events := rep.anthropicEvents()
+		if rep.faults.OverloadedMidStream {
+			events = midStreamError(events, sseEvent{name: "error", data: mustJSON(map[string]any{
+				"type": "error", "error": map[string]any{"type": "overloaded_error", "message": overloadedMessage},
+			})})
+		}
+		writeSSE(w, events, rep.faults.Truncate)
 		return
 	}
 	writeBody(w, rep.anthropicMessage(), rep.faults.Truncate)
