@@ -26,6 +26,8 @@ export type WatchOptions = {
   /** Delay before reconnect attempt n (from 1). */
   backoff?: (attempt: number) => number
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
+  /** Clock in ms, for tests. */
+  now?: () => number
 }
 
 /** Codes that a retry cannot fix. */
@@ -51,6 +53,13 @@ function isTruncatedStream(err: ConnectError): boolean {
 function finished(state: RunState | undefined): boolean {
   return state === RunState.SUCCEEDED || state === RunState.FAILED || state === RunState.CANCELED
 }
+
+/**
+ * A stream that stayed up this long counts as healthy even if the run was idle
+ * and sent nothing, so a proxy that cuts an idle watch at its timeout does not
+ * make the backoff grow without bound.
+ */
+const stableMs = 10_000
 
 export function defaultBackoff(attempt: number): number {
   const base = Math.min(30_000, 500 * 2 ** (attempt - 1))
@@ -82,15 +91,24 @@ export async function watchRun(opts: WatchOptions, h: WatchHandlers): Promise<bi
   const backoff = opts.backoff ?? defaultBackoff
   const sleep = opts.sleep ?? abortableSleep
   let after = opts.afterSeq ?? 0n
+  const now = opts.now ?? Date.now
   let attempt = 0
   let state: RunState | undefined
 
   h.onStatus('connecting')
   while (!opts.signal.aborted) {
+    const opened = now()
+    let progressed = false
+    // Backoff restarts only when the stream made progress (a new event) or
+    // stayed up for a while; a bare run snapshot on every connect is not
+    // progress, or a proxy that cuts right after it would be retried every
+    // few hundred milliseconds forever.
+    const settle = () => {
+      if (progressed || now() - opened >= stableMs) attempt = 0
+    }
     try {
       const stream = client.watchRun({ orgId: opts.orgId, runId: opts.runId, afterSeq: after }, { signal: opts.signal })
       for await (const res of stream) {
-        attempt = 0
         h.onStatus('live')
         if (res.item.case === 'run') {
           state = res.item.value.state
@@ -99,6 +117,7 @@ export async function watchRun(opts: WatchOptions, h: WatchHandlers): Promise<bi
           const ev = res.item.value
           if (ev.seq <= after) continue
           after = ev.seq
+          progressed = true
           h.onEvent(ev)
         }
       }
@@ -109,6 +128,7 @@ export async function watchRun(opts: WatchOptions, h: WatchHandlers): Promise<bi
         h.onStatus('ended')
         return after
       }
+      settle()
       attempt++
       h.onStatus('reconnecting')
       await sleep(backoff(attempt), opts.signal)
@@ -120,6 +140,7 @@ export async function watchRun(opts: WatchOptions, h: WatchHandlers): Promise<bi
         h.onStatus('failed', err)
         return after
       }
+      settle()
       attempt++
       h.onStatus('reconnecting', err)
       await sleep(backoff(attempt), opts.signal)
