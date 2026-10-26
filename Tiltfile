@@ -145,6 +145,8 @@ for f in ALL_FLAVORS:
         sets.append('flavors.%s=null' % f)  # not built, so not offered to agents
 if os_tls:
     sets.append('openshell.clientTLSSecret=' + os_tls)
+else:
+    sets.append('openshell.insecure=true')  # the chart needs one or the other
 sets += cfg.get('helm-set', [])
 watch_file('charts/koinon')
 for v in values:

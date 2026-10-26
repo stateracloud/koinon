@@ -450,6 +450,8 @@ var _ = Describe("Checker", func() {
 				Status: openshellv1.ServiceStatus_SERVICE_STATUS_DEGRADED, Version: "0.1.5",
 			}}
 		}, "OpenShell gateway", "reports degraded", "logs"),
+		Entry("plaintext OpenShell connection", func(c *cluster) { c.config.OpenShellPlaintext = true },
+			"OpenShell gateway", "connected without TLS", "openshell.clientTLSSecret"),
 	)
 })
 
