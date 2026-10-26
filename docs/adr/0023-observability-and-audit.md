@@ -108,6 +108,30 @@ outside the database or periodic external anchoring of the head hash, both still
 `created_at` of an event is the start time of its transaction, so it can differ from chain order by the
 length of a transaction. HMAC key custody and which OCSF events enter the log stay open.
 
+## Amendment (2026-10-26): metrics
+
+Metrics are built for the three Go components (issue #106). The amendment records what exists, the
+label rule and what is deferred; the metric list is in the docs site, guide "Metrics".
+
+- **Built.** koinon-api, koinon-reconciler and koinon-agentd each serve `/metrics` on their own
+  listener (port 9090, `--metrics-addr` / `KOINON_METRICS_ADDR`; each is its own pod) from a
+  registry of its own, with the Go and process collectors, using `prometheus/client_golang`. The
+  first set: reconciler pass duration and outcome, error kinds, gateway apply duration, sandboxes by
+  state, agents held back for a gateway key, sandbox repairs and unhealthy agents; agentd runs
+  claimed and finished by outcome, takeovers and the wait for a sandbox; api ledger records ingested
+  and rejected by reason, ingest lag (ADR 0050's follow-up) and RPCs by procedure and Connect code.
+- **Label rule.** Label values come from small fixed sets. Never an org, agent, user, ticket or run
+  ID, a name or free text: that makes series grow with the data and leaks tenant names to whoever
+  scrapes. The endpoint has no authentication; it exposes no secrets, and the NetworkPolicy decides
+  who can reach it.
+- **Chart.** A `metrics` container port, one metrics Service per component, an optional
+  `ServiceMonitor` per component (`metrics.serviceMonitor.enabled`, off by default; enabling it
+  without the CRD fails the render), and `metrics.allowFrom` for the NetworkPolicies. The default is
+  an empty list, which admits nobody: the scraper's location is not known, and admitting the whole
+  namespace would admit unrelated pods. This matches `networkPolicy.metricsFrom` for agentgateway.
+- **Deferred.** Run traces and the org-level OTLP endpoint; metrics on the admin API (`/admin/v1`,
+  not a Connect service), queue depth, and agentgateway's metrics; alerting rules and dashboards.
+
 ## Open questions
 
 - ~~Per-org chains vs one global chain.~~ Per org, see the 2026-10-26 amendment.

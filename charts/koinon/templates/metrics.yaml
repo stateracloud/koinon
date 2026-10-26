@@ -1,0 +1,53 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+Prometheus metrics (ADR 0023, amendment 2026-10-26). Each component serves /metrics on the pod's
+"metrics" port; a Service of its own (like the API's tools and saved-work Services) keeps the port
+off the API Service the ingress exposes. metrics.serviceMonitor.enabled adds a prometheus-operator
+ServiceMonitor per component. The NetworkPolicy side is metrics.allowFrom (networkpolicy.yaml).
+*/ -}}
+{{- $sm := .Values.metrics.serviceMonitor }}
+{{- if and $sm.enabled (not $sm.skipCapabilityCheck) (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) }}
+{{- fail "metrics.serviceMonitor.enabled is true but the cluster has no monitoring.coreos.com/v1 ServiceMonitor CRD; install prometheus-operator (or kube-prometheus-stack), set metrics.serviceMonitor.skipCapabilityCheck=true when the CRD arrives later or the renderer cannot report it, or leave metrics.serviceMonitor.enabled=false and scrape the metrics Services another way" }}
+{{- end }}
+{{- range $component := list "api" "reconciler" "agentd" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "koinon.componentName" (list $ (print $component "-metrics")) }}
+  labels:
+    {{- include "koinon.labels" (list $ $component) | nindent 4 }}
+    app.kubernetes.io/service: metrics
+spec:
+  selector:
+    {{- include "koinon.selectorLabels" (list $ $component) | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ $.Values.metrics.port }}
+      targetPort: metrics
+{{- if $sm.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "koinon.componentName" (list $ $component) }}
+  labels:
+    {{- include "koinon.labels" (list $ $component) | nindent 4 }}
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "koinon.selectorLabels" (list $ $component) | nindent 6 }}
+      app.kubernetes.io/service: metrics
+  namespaceSelector:
+    matchNames: [{{ $.Release.Namespace | quote }}]
+  endpoints:
+    - port: metrics
+      path: /metrics
+      {{- with $sm.interval }}
+      interval: {{ . | quote }}
+      {{- end }}
+{{- end }}
+{{- end }}

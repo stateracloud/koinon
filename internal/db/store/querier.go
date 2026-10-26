@@ -77,6 +77,9 @@ type Querier interface {
 	// Fills a migrated price in place, once.
 	CompleteMigratedPrice(ctx context.Context, arg CompleteMigratedPriceParams) (int64, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
+	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
+	// no org-owned row, so it takes no @org_id.
+	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
 	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
 	// shared by agentd (stuck sandboxes) and the reconciler (sandboxes in Error or Completed). A
 	// stuck sandbox counts from its incident, which agentd records before the reconciler recreates
