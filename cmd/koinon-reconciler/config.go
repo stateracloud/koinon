@@ -14,8 +14,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
@@ -284,7 +284,7 @@ func (c *config) toolServers() map[string]string {
 	if c.githubToolsURL == "" {
 		return nil
 	}
-	return map[string]string{connectors.GitHubID: c.githubToolsURL}
+	return map[string]string{providers.GitHub: c.githubToolsURL}
 }
 
 // flavors combines the configured images with each flavor's binaries.

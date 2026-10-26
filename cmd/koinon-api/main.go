@@ -60,6 +60,7 @@ import (
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/migrations"
@@ -458,6 +459,7 @@ func run() error {
 	}
 	// One GitHub client, so connection checks and approved calls share its token cache.
 	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL})
+	hosts := providers.New(gh)
 	var opener connections.Opener
 	var keys services.Keys
 	if keyring != nil {
@@ -466,7 +468,7 @@ func run() error {
 	// One egress policy for everything an org points the gateway or Koinon at: model providers and
 	// remote MCP servers.
 	urlPolicy := catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts)}
-	approvalOpts := approvals.Options{Keys: opener, GitHub: gh, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default()}
+	approvalOpts := approvals.Options{Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default()}
 	if kube != nil {
 		// Approved calls to remote MCP servers go through the gateway with the org's executor key,
 		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
@@ -484,7 +486,7 @@ func run() error {
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc,
 	})
 	if kube != nil {
 		var sealer connections.Sealer
@@ -530,6 +532,7 @@ func run() error {
 	toolsErr := make(chan error, 1)
 	if cfg.toolsAddr != "" {
 		tools, err := githubtools.New(pool, githubtools.Options{
+			Hosts: hosts,
 			// Trusted-preset calls run at once instead of on the next sweep.
 			Execute: func(ctx context.Context, org, id pgtype.UUID) {
 				ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)

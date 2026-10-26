@@ -13,6 +13,8 @@ import (
 
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -47,25 +49,40 @@ var GitHubTokenEnvVars = []string{"GITHUB_TOKEN", "GH_TOKEN"}
 // git-remote-https helper matches as a child of git.
 var DefaultGitBinaries = []string{"/usr/bin/git"}
 
-// GitHubTokens mints installation tokens for a GitHub connection.
+// GitHubTokens mints the read-only tokens of a code-host connection. The name is historical:
+// the interface is provider-neutral (internal/codehost).
 type GitHubTokens interface {
-	InstallationToken(ctx context.Context, conn store.Connection, req github.TokenRequest) (github.Token, error)
+	ReadToken(ctx context.Context, conn store.Connection, scope codehost.Scope) (codehost.Token, error)
 }
 
 // GitHubApps mints tokens as the connection's App, with the private key read from the
-// connection's stored secret fields. Client caches tokens until they near expiry.
+// connection's stored secret fields. Client caches tokens until they near expiry. Hosts
+// defaults to the shipped providers with Client as the GitHub client.
 type GitHubApps struct {
 	Keys   connections.Opener
 	Client *github.Client
+	Hosts  *codehost.Registry
 }
 
-// InstallationToken implements GitHubTokens.
-func (g GitHubApps) InstallationToken(ctx context.Context, conn store.Connection, req github.TokenRequest) (github.Token, error) {
-	app, err := connections.LoadGitHubApp(ctx, g.Keys, conn)
-	if err != nil {
-		return github.Token{}, err
+// ReadToken implements GitHubTokens.
+func (g GitHubApps) ReadToken(ctx context.Context, conn store.Connection, scope codehost.Scope) (codehost.Token, error) {
+	hosts := g.Hosts
+	if hosts == nil {
+		hosts = providers.New(g.Client)
 	}
-	return g.Client.InstallationToken(ctx, app, req)
+	p, ok := hosts.Get(conn.Connector)
+	if !ok {
+		return codehost.Token{}, fmt.Errorf("connection %s is a %s connection, which is not a code host", conn.ID.String(), conn.Connector)
+	}
+	c, err := connections.Load(ctx, g.Keys, conn)
+	if err != nil {
+		return codehost.Token{}, err
+	}
+	acc, err := p.Open(ctx, c, scope)
+	if err != nil {
+		return codehost.Token{}, err
+	}
+	return acc.Token(), nil
 }
 
 // GitHubRead is what an agent's GitHub grant renders into its sandbox.
@@ -84,13 +101,13 @@ type GitHubRead struct {
 // no allowed scope with network rules, or no repositories are bound: then nothing is rendered
 // and the sandbox cannot reach GitHub at all.
 func GitHubReadAccess(cfg agentconfig.Config) (read GitHubRead, ok bool, err error) {
-	g, found := cfg.Grant(connectors.GitHubID)
+	connector, g, found := providers.Default().Grant(cfg)
 	if !found {
 		return GitHubRead{}, false, nil
 	}
-	ct, found := connectors.Get(connectors.GitHubID)
+	ct, found := connectors.Get(connector)
 	if !found {
-		return GitHubRead{}, false, errors.New("the GitHub connector type is not embedded")
+		return GitHubRead{}, false, fmt.Errorf("the %s connector type is not embedded", connector)
 	}
 	var scopes []string
 	for _, s := range g.Scopes {
@@ -98,7 +115,7 @@ func GitHubReadAccess(cfg agentconfig.Config) (read GitHubRead, ok bool, err err
 			scopes = append(scopes, s)
 		}
 	}
-	b, bound := cfg.Binding(connectors.GitHubID)
+	b, bound := cfg.Binding(connector)
 	if len(scopes) == 0 || !bound || len(b.Targets) == 0 {
 		return GitHubRead{}, false, nil
 	}
@@ -179,7 +196,7 @@ func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names
 	if err != nil {
 		return fmt.Errorf("github grant: read connection %s: %w", read.ConnectionID, err)
 	}
-	tok, err := r.cfg.GitHub.InstallationToken(ctx, conn, github.TokenRequest{
+	tok, err := r.cfg.GitHub.ReadToken(ctx, conn, codehost.Scope{
 		Repositories: read.Repositories, Permissions: read.Permissions,
 	})
 	if err != nil {
