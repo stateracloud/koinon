@@ -272,6 +272,9 @@ type Querier interface {
 	GetTicketPromptedThrough(ctx context.Context, arg GetTicketPromptedThroughParams) (int64, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
+	// The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
+	// no row when the user already is a platform admin (from any source), which keeps that source.
+	GrantPlatformAdminFromGroup(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
 	// Whether the ticket already has a queued run, which will see every message
 	// appended before it starts (plan item A4).
 	HasQueuedRunForTicket(ctx context.Context, arg HasQueuedRunForTicketParams) (bool, error)
@@ -507,6 +510,8 @@ type Querier interface {
 	// Revokes the token and every token descended from it.
 	RevokeAPITokenTree(ctx context.Context, arg RevokeAPITokenTreeParams) ([]ApiToken, error)
 	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) error
+	// Revokes only a grant that came from a platform admin group; it returns no row for any other.
+	RevokePlatformAdminFromGroup(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
