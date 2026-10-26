@@ -82,38 +82,38 @@ describe('AgentPage unhealthy', () => {
 })
 
 describe('AgentPage activation', () => {
-  const label = 'Apply to open tickets now (starts fresh sessions with a handoff)'
+  const label = 'Apply to open tasks now (starts fresh sessions with a handoff)'
 
   it('has the checkbox off by default, with its help text, and sends false', async () => {
     const { activates } = setup({ draft: true })
     const box = await screen.findByLabelText(label)
     expect(box).not.toBeChecked()
-    expect(box).toHaveAccessibleDescription(/The next run on each open ticket starts a new session with the agent's last notes and replies/)
+    expect(box).toHaveAccessibleDescription(/The next run on each open task starts a new session with the agent's last notes and replies/)
     await userEvent.click(screen.getByRole('button', { name: 'Activate' }))
     await waitFor(() => expect(activates).toHaveLength(1))
     expect(activates[0]).toMatchObject({ agentId: 'a-1', version: 2, applyToOpenTickets: false })
   })
 
-  it('sends applyToOpenTickets when ticked and says how many tickets restart', async () => {
+  it('sends applyToOpenTickets when ticked and says how many tasks restart', async () => {
     const { activates } = setup({ draft: true, restarting: 3 })
     await userEvent.click(await screen.findByLabelText(label))
     await userEvent.click(screen.getByRole('button', { name: 'Activate' }))
     await waitFor(() => expect(activates).toHaveLength(1))
     expect(activates[0].applyToOpenTickets).toBe(true)
-    expect(await screen.findByRole('status')).toHaveTextContent('3 open tickets will start a fresh session at their next run.')
+    expect(await screen.findByRole('status')).toHaveTextContent('3 open tasks will start a fresh session at their next run.')
   })
 
-  it('says nothing about tickets when none restart', async () => {
+  it('says nothing about tasks when none restart', async () => {
     setup({ draft: true, restarting: 0 })
     await userEvent.click(await screen.findByRole('button', { name: 'Activate' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Activated.')
     expect(screen.queryByText(/will start a fresh session/)).not.toBeInTheDocument()
   })
 
-  it('uses the singular for one ticket', async () => {
+  it('uses the singular for one task', async () => {
     setup({ draft: true, restarting: 1 })
     await userEvent.click(await screen.findByLabelText(label))
     await userEvent.click(screen.getByRole('button', { name: 'Activate' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('1 open ticket will start a fresh session at their next run.')
+    expect(await screen.findByRole('status')).toHaveTextContent('1 open task will start a fresh session at their next run.')
   })
 })

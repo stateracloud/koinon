@@ -8,7 +8,7 @@ import { useOrg } from '@/lib/org-context'
 
 const route = getRouteApi('/app/approvals/$approvalId')
 
-/** ApprovalPage shows one approval request outside its ticket. */
+/** ApprovalPage shows one approval request outside its task. */
 export function ApprovalPage() {
   const { approvalId } = route.useParams()
   const { org } = useOrg()
@@ -22,8 +22,8 @@ export function ApprovalPage() {
           ← Board
         </Link>
         {ticketId && (
-          <Link to="/tickets/$ticketId" params={{ ticketId }} className="text-muted-foreground hover:underline">
-            Open the ticket
+          <Link to="/tasks/$taskId" params={{ taskId: ticketId }} className="text-muted-foreground hover:underline">
+            Open the task
           </Link>
         )}
       </div>

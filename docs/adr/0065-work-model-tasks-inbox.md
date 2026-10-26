@@ -243,3 +243,31 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   `messaging-and-workflows.md`
 - Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the interruption rule (`system/thread.rs:240-291`, `system/defer.rs`), the `ask_agent` guards (`tools/thread.rs:72-89`) and the failure classes. Research notes: `infinity-code-ideas.md`.
 - Prior art (ideas only, no code; its servers are AGPL-3.0): [daytonaio/daytona](https://github.com/daytonaio/daytona) v0.190.0, for the archive tier and checkpoint lineage. Research notes: `daytona.md`.
+
+## Amendment (2026-10-27, plan item TK2): the inbox as built
+
+- **Routes.** `/` is the inbox; `/board` is the board (secondary view); `/tasks/{id}` is a task. A
+  task keeps its ticket's id, so `/tickets/{id}` redirects to `/tasks/{id}` and old links work. The
+  web UI reads and writes only `TaskService` (`koinon.task.v1alpha1`); `TicketService` stays on the
+  server, deprecated.
+- **Inbox items.** An item is a `kind` in a union (`web/src/lib/inbox.ts`) with one renderer per
+  kind (`web/src/components/inbox.tsx`); a new kind (TK3's question, a reply to validate, a
+  report) is one more member and one more renderer. Today: `approval` (a pending approval the
+  viewer may decide, only for admins and owners as before) and `task-input` (a task in
+  input-required that no listed approval explains, for example a question the agent asked; visible
+  to every role). Newest first.
+- **Inline actions.** Approve and Deny sit on the item. Approve sends the `args_sha256` of the
+  listed approval, so a request that changed since the list was read is refused (Aborted) and the
+  item says to open it and review the new version; the full card (diff, risk, note, two-approver
+  state) stays on `/approvals/{id}` and in the task timeline.
+- **Chat.** Next to the inbox, a list of the open tasks (not completed, canceled or failed; the
+  eight most recently updated) is the list of conversations; the chosen one shows the task's
+  timeline and composer, the same components as the task page, and new tasks are started from a
+  form under it. Chat with the personal agent ([0055](0055-chat-as-its-own-object.md)) is not
+  separate yet: every conversation is a task.
+- **Board.** Six groups, one per task state, read-only. "Move to Done" is gone, because nobody moves
+  tasks by hand (decision 3); the task page has "Cancel task" (`CancelTask`) instead.
+- **Notifications.** The navigation shows a badge with the number of waiting items and the tab
+  title carries it, "(2) ...". There is no task stream yet, so the inbox, the board and the badge
+  share one poll of `ListTasks` and `ListApprovals` every 15 seconds (and on window focus). A
+  task event stream would replace the poll.

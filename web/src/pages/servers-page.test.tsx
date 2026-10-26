@@ -235,7 +235,7 @@ describe('Servers page', () => {
     const search = within(tl.getByText('search').closest('li')!)
     const box = search.getByRole('checkbox', { name: 'Require two approvers' })
     expect(box).not.toBeChecked()
-    expect(search.getByText(/Two distinct admins or owners must approve, neither the person who created the ticket/)).toBeInTheDocument()
+    expect(search.getByText(/Two distinct admins or owners must approve, neither the person who created the task/)).toBeInTheDocument()
     await userEvent.click(box)
     await waitFor(() => expect(calls.twos).toEqual([expect.objectContaining({ orgId: 'org-1', serverId: 's-docs', tool: 'search', required: true })]))
     await waitFor(() => expect(search.getByRole('checkbox', { name: 'Require two approvers' })).toBeChecked())
