@@ -9,7 +9,6 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
-	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
 	"github.com/stateracloud/koinon/internal/ledger"
 )
 
@@ -54,33 +53,26 @@ func setRunCosts(ctx context.Context, q *store.Queries, org pgtype.UUID, runs []
 	return nil
 }
 
-// setTicketCosts sets Cost on each ticket.
-func setTicketCosts(ctx context.Context, q *store.Queries, org pgtype.UUID, tickets []*ticketv1alpha1.Ticket) error {
-	if len(tickets) == 0 {
-		return nil
-	}
-	ids := make([]pgtype.UUID, 0, len(tickets))
-	for _, t := range tickets {
-		var id pgtype.UUID
-		if err := id.Scan(t.GetId()); err != nil {
-			return err
-		}
-		ids = append(ids, id)
-	}
-	rows, err := q.SumTicketCosts(ctx, store.SumTicketCostsParams{OrgID: org, TicketIds: ids})
-	if err != nil {
-		return err
-	}
+// sumTaskCosts returns the spend of each task in ids that has some, by task ID.
+func sumTaskCosts(ctx context.Context, q *store.Queries, org pgtype.UUID, ids []pgtype.UUID) (map[string]*runv1alpha1.Cost, error) {
 	byID := map[string]*runv1alpha1.Cost{}
+	if len(ids) == 0 {
+		return byID, nil
+	}
+	rows, err := q.SumTaskCosts(ctx, store.SumTaskCostsParams{OrgID: org, TaskIds: ids})
+	if err != nil {
+		return nil, err
+	}
 	for _, row := range rows {
-		byID[idString(row.TicketID)] = costProto(row.Requests, row.InputTokens, row.OutputTokens, row.CostUsd, row.Priced, row.EstimatedRequests)
+		byID[idString(row.TaskID)] = costProto(row.Requests, row.InputTokens, row.OutputTokens, row.CostUsd, row.Priced, row.EstimatedRequests)
 	}
-	for _, t := range tickets {
-		if c, ok := byID[t.GetId()]; ok {
-			t.Cost = c
-		} else {
-			t.Cost = noCost()
-		}
+	return byID, nil
+}
+
+// costOrNone is the cost of id, or a zero cost.
+func costOrNone(costs map[string]*runv1alpha1.Cost, id string) *runv1alpha1.Cost {
+	if c, ok := costs[id]; ok {
+		return c
 	}
-	return nil
+	return noCost()
 }

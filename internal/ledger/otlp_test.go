@@ -258,7 +258,7 @@ var _ = Describe("Handler", func() {
 		needDocker()
 		e := newEnv(ctx, uniq("probe"), "", "10.00", 100_000)
 		at := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC) // llmRecord's time
-		run := e.startRun(ctx, e.ticket(ctx), 100_000, at.Add(-time.Minute))
+		run := e.startRun(ctx, e.task(ctx), 100_000, at.Add(-time.Minute))
 
 		body, err := proto.Marshal(export(llmRecord(
 			str(gateway.LogFieldKey, gateway.ReloadProbeKeyName),

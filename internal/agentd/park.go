@@ -7,7 +7,7 @@ package agentd
 // An ask-tier tool call is recorded by the tool server, which answers "approval requested"
 // at once; the harness ends its turn. agentd then decides, under the run's row lock, whether
 // the run is done or must wait: if the run has approval requests whose outcome the agent has
-// not been sent, the run parks (reason approval) instead of finishing, the ticket moves to
+// not been sent, the run parks (reason approval) instead of finishing, the task moves to
 // Waiting on you, and the worker lets the harness go. Koinon's approval service resolves the
 // park once every request is decided and executed; a worker then claims the run, loads the
 // session and sends the outcomes as the next prompt.
@@ -26,7 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
-// kindParked is the run and ticket event of a run parking on approvals.
+// kindParked is the run and task event of a run parking on approvals.
 const kindParked = "run.parked"
 
 // parkResumeNote opens the prompt of a run resumed after its approvals were decided.
@@ -134,7 +134,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 			// Nothing waits for a human; the park is resolved below or by the executor.
 			expires = pgtype.Timestamptz{Time: time.Now().Add(7 * 24 * time.Hour), Valid: true}
 		}
-		// What the agent said before it parked goes on the ticket now, before the park note
+		// What the agent said before it parked goes on the task now, before the park note
 		// (and before run.parked, after which reply starts afresh).
 		if err := r.postReply(ctx, q); err != nil {
 			return err
@@ -151,16 +151,16 @@ func (r *runner) endTurn(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
-		if _, err := q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-			OrgID: r.run.OrgID, TicketID: r.run.TicketID, RunID: r.run.ID,
-			Kind: kindParked, ActorKind: store.TicketActorKindSystem, Payload: payload,
+		if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
+			Kind: kindParked, ActorKind: store.TaskActorKindSystem, Payload: payload,
 		}); err != nil {
 			return err
 		}
 		if waiting {
-			_, err := q.MoveTicketFrom(ctx, store.MoveTicketFromParams{
-				OrgID: r.run.OrgID, ID: r.run.TicketID, ToStatus: store.TicketStatusWaitingOnYou,
-				FromStatuses: []string{string(store.TicketStatusTodo), string(store.TicketStatusInProgress)},
+			_, err := q.SetTaskStateFrom(ctx, store.SetTaskStateFromParams{
+				OrgID: r.run.OrgID, ID: r.run.TaskID, ToState: store.TaskStateInputRequired,
+				FromStates: []string{string(store.TaskStateSubmitted), string(store.TaskStateWorking)},
 			})
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return err

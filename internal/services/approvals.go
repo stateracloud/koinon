@@ -41,7 +41,7 @@ var approvalDecisionToProto = map[store.ApprovalDecision]approvalv1alpha1.Decisi
 // adds the decoded call.
 func approvalProto(a store.ApprovalRequest, canDecide, detail bool) *approvalv1alpha1.Approval {
 	out := &approvalv1alpha1.Approval{
-		Id: idString(a.ID), OrgId: idString(a.OrgID), TicketId: idString(a.TicketID), RunId: idString(a.RunID),
+		Id: idString(a.ID), OrgId: idString(a.OrgID), TicketId: idString(a.TaskID), RunId: idString(a.RunID),
 		AgentId: idString(a.AgentID), Connector: a.Connector, Tool: a.Tool, Target: a.Target,
 		ArgsJson: a.ArgsJson, ArgsSha256: a.ArgsSha256,
 		Decision: approvalDecisionToProto[a.Decision], Status: approvalStatusToProto[a.Status],
@@ -83,10 +83,10 @@ func (s *Server) ListApprovals(ctx context.Context, req *approvalv1alpha1.ListAp
 		if err != nil {
 			return nil, err
 		}
-		if _, err := s.q.GetTicket(ctx, store.GetTicketParams{OrgID: c.org, ID: ticket}); err != nil {
+		if _, err := s.q.GetTask(ctx, store.GetTaskParams{OrgID: c.org, ID: ticket}); err != nil {
 			return nil, s.dbError(err, "ticket")
 		}
-		rows, err = s.q.ListApprovalRequestsForTicket(ctx, store.ListApprovalRequestsForTicketParams{OrgID: c.org, TicketID: ticket})
+		rows, err = s.q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: c.org, TaskID: ticket})
 		if err != nil {
 			return nil, s.dbError(err, "approvals")
 		}

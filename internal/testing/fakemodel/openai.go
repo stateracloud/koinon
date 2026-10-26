@@ -104,11 +104,20 @@ func writeOpenAIError(w http.ResponseWriter, err error) {
 	switch e.kind {
 	case errNotFound:
 		code = "model_not_found"
-	case errUnavailable:
+	case errUnavailable, errOverloaded:
 		typ = "server_error"
+	case errRateLimit:
+		typ, code = "requests", "rate_limit_exceeded"
+	case errContextLength:
+		code = "context_length_exceeded"
 	}
+	param := any(nil)
+	if e.kind == errContextLength {
+		param = "messages"
+	}
+	setRetryAfter(w, e)
 	writeJSON(w, e.status(), map[string]any{"error": map[string]any{
-		"message": e.message, "type": typ, "param": nil, "code": code,
+		"message": e.message, "type": typ, "param": param, "code": code,
 	}})
 }
 
@@ -142,12 +151,22 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, err)
 		return
 	}
-	if !wait(r, rep.faults.Delay) {
+	if !s.hold(r, rep) || !wait(r, rep.faults.Delay) {
+		return
+	}
+	if rep.faults.OverloadedMidStream && !req.Stream {
+		writeOpenAIError(w, &apiError{kind: errOverloaded, message: overloadedMessage})
 		return
 	}
 	if req.Stream {
 		includeUsage := req.StreamOptions != nil && req.StreamOptions.IncludeUsage
-		writeSSE(w, rep.openAIChunks(includeUsage), rep.faults.Truncate)
+		events := rep.openAIChunks(includeUsage)
+		if rep.faults.OverloadedMidStream {
+			events = midStreamError(events, sseEvent{data: mustJSON(map[string]any{"error": map[string]any{
+				"message": overloadedMessage, "type": "server_error", "param": nil, "code": "overloaded",
+			}})})
+		}
+		writeSSE(w, events, rep.faults.Truncate)
 		return
 	}
 	writeBody(w, rep.openAICompletion(), rep.faults.Truncate)

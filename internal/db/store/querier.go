@@ -34,15 +34,15 @@ type Querier interface {
 	// after an ambiguous failure is safe. No row: stale epoch, the run is not
 	// active, or the event exists (GetRunEventBySource tells which).
 	AppendRunEventOnce(ctx context.Context, arg AppendRunEventOnceParams) (RunEvent, error)
-	AppendTicketEvent(ctx context.Context, arg AppendTicketEventParams) (TicketEvent, error)
+	AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams) (TaskEvent, error)
 	ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Agent, error)
 	// Archiving an agent cancels every run it has not finished.
 	CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRunsForAgentParams) ([]Run, error)
 	// pending -> canceled, for a run that finished without them (for example a
 	// user canceled the parked run).
 	CancelPendingApprovalRequestsForRun(ctx context.Context, arg CancelPendingApprovalRequestsForRunParams) ([]ApprovalRequest, error)
-	// A ticket moved to Done cancels its queued runs (plan item A4).
-	CancelQueuedRunsForTicket(ctx context.Context, arg CancelQueuedRunsForTicketParams) ([]Run, error)
+	// A task that reaches an end state cancels its queued runs (plan item A4).
+	CancelQueuedRunsForTask(ctx context.Context, arg CancelQueuedRunsForTaskParams) ([]Run, error)
 	// Control-plane cancel from any non-terminal state (user cancel, run caps,
 	// park expiry). Needs no epoch; an owner's next write then matches no rows
 	// because the state changed.
@@ -56,7 +56,7 @@ type Querier interface {
 	ClaimApprovalExecution(ctx context.Context, arg ClaimApprovalExecutionParams) (ApprovalRequest, error)
 	// queued -> starting, or a resolved parked -> starting. Takes the oldest
 	// claimable run (by ready_at) of an active agent that has no active run and
-	// whose ticket has no other owned or parked run, and
+	// whose task has no other owned or parked run, and
 	// makes the caller its owner under a new epoch. Locking the agent row with
 	// SKIP LOCKED serialises claims per agent, so concurrent claimers move on to
 	// other agents, and FIFO holds per agent. runs_one_active_per_agent backstops
@@ -155,7 +155,7 @@ type Querier interface {
 	//
 	// Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
-	CreateTicket(ctx context.Context, arg CreateTicketParams) (Ticket, error)
+	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// pending -> approved | denied by a human. No row: already decided.
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
@@ -269,19 +269,22 @@ type Querier interface {
 	// Everything but the sealed files.
 	GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkManifestParams) (GetSavedWorkManifestRow, error)
 	GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error)
-	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
-	GetTicket(ctx context.Context, arg GetTicketParams) (Ticket, error)
-	// The highest ticket timeline seq already sent to the harness by the ticket's
+	GetTask(ctx context.Context, arg GetTaskParams) (Task, error)
+	// Like GetTask, and locks the row until the transaction ends, so a read-then-change of the state
+	// cannot interleave with another one.
+	GetTaskForUpdate(ctx context.Context, arg GetTaskForUpdateParams) (Task, error)
+	// The highest task timeline seq already sent to the harness by the task's
 	// other runs; messages after it are new for the next run.
-	GetTicketPromptedThrough(ctx context.Context, arg GetTicketPromptedThroughParams) (int64, error)
+	GetTaskPromptedThrough(ctx context.Context, arg GetTaskPromptedThroughParams) (int64, error)
+	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
 	// The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
 	// no row when the user already is a platform admin (from any source), which keeps that source.
 	GrantPlatformAdminFromGroup(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
-	// Whether the ticket already has a queued run, which will see every message
+	// Whether the task already has a queued run, which will see every message
 	// appended before it starts (plan item A4).
-	HasQueuedRunForTicket(ctx context.Context, arg HasQueuedRunForTicketParams) (bool, error)
+	HasQueuedRunForTask(ctx context.Context, arg HasQueuedRunForTaskParams) (bool, error)
 	// Extends the owner's lease. No row: the caller is no longer the owner and
 	// must stop (ADR 0030).
 	HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run, error)
@@ -328,7 +331,7 @@ type Querier interface {
 	// Agents that are not archived, plus archived agents whose sandbox is not
 	// cleaned up yet.
 	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
-	ListApprovalRequestsForTicket(ctx context.Context, arg ListApprovalRequestsForTicketParams) ([]ApprovalRequest, error)
+	ListApprovalRequestsForTask(ctx context.Context, arg ListApprovalRequestsForTaskParams) ([]ApprovalRequest, error)
 	// Every org that has a chain, for the verifier.
 	ListAuditChainOrgs(ctx context.Context) ([]pgtype.UUID, error)
 	// One page of an org's chain in chain order, with the fields the hash covers as text, so the
@@ -386,7 +389,7 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	// The reconciler walks orgs one at a time, so every later query is org-scoped.
 	ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcileRow, error)
-	// The org's requests waiting for a human (Waiting on you), oldest first.
+	// The org's requests waiting for a human (input_required), oldest first.
 	// Trusted-preset calls are recorded as approved and never listed here.
 	ListPendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	ListPendingApprovalRequestsOfFinishedRuns(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
@@ -401,12 +404,12 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	ListPriceOverrides(ctx context.Context, orgID pgtype.UUID) ([]PriceOverride, error)
 	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
-	// The agent's latest replies on the ticket, newest first.
-	ListRecentAgentReplies(ctx context.Context, arg ListRecentAgentRepliesParams) ([]TicketEvent, error)
+	// The agent's latest replies on the task, newest first.
+	ListRecentAgentReplies(ctx context.Context, arg ListRecentAgentRepliesParams) ([]TaskEvent, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
-	ListRunsForTicket(ctx context.Context, arg ListRunsForTicketParams) ([]Run, error)
+	ListRunsForTask(ctx context.Context, arg ListRunsForTaskParams) ([]Run, error)
 	// Every enabled provider of the org with its enabled models, for the gateway.
 	ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]ListServedCatalogRow, error)
 	// Enabled servers, for the gateway and the prober.
@@ -414,17 +417,18 @@ type Querier interface {
 	// Enabled providers (with or without models), for key delivery.
 	ListServedProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
 	// The timeline after a sequence number (0 for the start), in order.
-	ListTicketEvents(ctx context.Context, arg ListTicketEventsParams) ([]TicketEvent, error)
-	// The users' messages on the ticket after a timeline seq, in order: what
+	ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) ([]TaskEvent, error)
+	// The users' messages on the task after a timeline seq, in order: what
 	// agentd sends the harness as a run's prompt.
-	ListTicketMessagesAfter(ctx context.Context, arg ListTicketMessagesAfterParams) ([]TicketEvent, error)
-	ListTickets(ctx context.Context, orgID pgtype.UUID) ([]Ticket, error)
-	// One board column, oldest first.
-	ListTicketsByStatus(ctx context.Context, arg ListTicketsByStatusParams) ([]Ticket, error)
-	// Tickets whose run is parked in the agent's sandbox: they resume in the new sandbox.
-	ListTicketsWithParkedRunOfAgent(ctx context.Context, arg ListTicketsWithParkedRunOfAgentParams) ([]pgtype.UUID, error)
-	// Tickets with a queued or parked run of the agent: they wait while the agent is unhealthy.
-	ListTicketsWithWaitingRunOfAgent(ctx context.Context, arg ListTicketsWithWaitingRunOfAgentParams) ([]pgtype.UUID, error)
+	ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessagesAfterParams) ([]TaskEvent, error)
+	ListTasks(ctx context.Context, orgID pgtype.UUID) ([]Task, error)
+	// The tasks in any of the states, oldest first (a board column of the ticket API is a set of
+	// states).
+	ListTasksByStates(ctx context.Context, arg ListTasksByStatesParams) ([]Task, error)
+	// Tasks whose run is parked in the agent's sandbox: they resume in the new sandbox.
+	ListTasksWithParkedRunOfAgent(ctx context.Context, arg ListTasksWithParkedRunOfAgentParams) ([]pgtype.UUID, error)
+	// Tasks with a queued or parked run of the agent: they wait while the agent is unhealthy.
+	ListTasksWithWaitingRunOfAgent(ctx context.Context, arg ListTasksWithWaitingRunOfAgentParams) ([]pgtype.UUID, error)
 	// The servers an agent may use that are down or disabled right now, for the note agentd gives the
 	// agent when a session starts.
 	ListUnavailableMCPServersOfAgent(ctx context.Context, arg ListUnavailableMCPServersOfAgentParams) ([]ListUnavailableMCPServersOfAgentRow, error)
@@ -473,14 +477,6 @@ type Querier interface {
 	MarkSandboxUnhealthy(ctx context.Context, arg MarkSandboxUnhealthyParams) (AgentSandbox, error)
 	// The files are dropped once they are on GitHub.
 	MarkSavedWorkPushed(ctx context.Context, arg MarkSavedWorkPushedParams) (int64, error)
-	// Moves a ticket to a board column. Callers moving to Done also cancel its
-	// queued runs (CancelQueuedRunsForTicket) in the same transaction.
-	MoveTicket(ctx context.Context, arg MoveTicketParams) (Ticket, error)
-	// Moves a ticket between two columns other than Done, only if it is in
-	// from: parking moves In progress or To do to Waiting on you, and a resolved
-	// approval moves it back. No row: the ticket is elsewhere (for example Done,
-	// or a user moved it).
-	MoveTicketFrom(ctx context.Context, arg MoveTicketFromParams) (Ticket, error)
 	// Wakes the reconciler for an org, as the agents and runs triggers do. agentd
 	// sends it while it waits for a sandbox that is not ready, so the reconciler
 	// starts it (the waiting run is the demand) without waiting for a resync.
@@ -508,7 +504,7 @@ type Querier interface {
 	// exec stream to the harness dropped: the lease ends now, so any agentd can
 	// take the run over at once (TakeOverExpiredRun) and resume the session.
 	ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams) (Run, error)
-	// Activating a version with "apply to open tickets": every open ticket of the agent that has a
+	// Activating a version with "apply to open tasks": every open task of the agent that has a
 	// session starts a new one at its next run.
 	RequestSessionRestartForAgent(ctx context.Context, arg RequestSessionRestartForAgentParams) ([]pgtype.UUID, error)
 	// Makes a parked run claimable again (approval decided, input given). It
@@ -550,17 +546,24 @@ type Querier interface {
 	// Sets or clears (NULL) the platform ceiling of an org, keeping its monthly cap.
 	SetOrgPlatformCeiling(ctx context.Context, arg SetOrgPlatformCeilingParams) (SetOrgPlatformCeilingRow, error)
 	SetProviderDisabled(ctx context.Context, arg SetProviderDisabledParams) error
-	// Records, before the prompt is sent, the ticket timeline seq through which
-	// the ticket's messages are in it.
+	// Records, before the prompt is sent, the task timeline seq through which
+	// the task's messages are in it.
 	SetRunPromptThrough(ctx context.Context, arg SetRunPromptThroughParams) (Run, error)
 	// Fenced by the run's epoch.
 	SetRunSummarizing(ctx context.Context, arg SetRunSummarizingParams) (int64, error)
-	// Stores the harness session for the ticket with the home generation of the
+	// Stores the harness session for the task with the home generation of the
 	// sandbox it was created in. Fenced by the run epoch: only the current owner
-	// of one of the ticket's active runs can set it.
-	SetTicketHarnessSession(ctx context.Context, arg SetTicketHarnessSessionParams) (Ticket, error)
-	// Stores the agent's end-of-turn summary. Fenced by the run epoch like SetTicketHarnessSession.
-	SetTicketSummary(ctx context.Context, arg SetTicketSummaryParams) (int64, error)
+	// of one of the task's active runs can set it.
+	SetTaskHarnessSession(ctx context.Context, arg SetTaskHarnessSessionParams) (Task, error)
+	// Sets a task's state. Callers moving a task to an end state also cancel its queued runs
+	// (CancelQueuedRunsForTask) in the same transaction.
+	SetTaskState(ctx context.Context, arg SetTaskStateParams) (Task, error)
+	// Moves a task between two non-end states, only if it is in one of from_states: parking on a human
+	// moves submitted or working to input_required, and a resolved approval moves it back. No row: the
+	// task is elsewhere (for example in an end state, or a person moved it).
+	SetTaskStateFrom(ctx context.Context, arg SetTaskStateFromParams) (Task, error)
+	// Stores the agent's end-of-turn summary. Fenced by the run epoch like SetTaskHarnessSession.
+	SetTaskSummary(ctx context.Context, arg SetTaskSummaryParams) (int64, error)
 	// A declared server of this name now exists: disable the UI ones.
 	ShadowUIMCPServers(ctx context.Context, arg ShadowUIMCPServersParams) error
 	ShadowUIModels(ctx context.Context, arg ShadowUIModelsParams) error
@@ -570,8 +573,8 @@ type Querier interface {
 	SpendReport(ctx context.Context, arg SpendReportParams) ([]SpendReportRow, error)
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
-	// Totals per ticket, for the tickets in @ticket_ids that have spend.
-	SumTicketCosts(ctx context.Context, arg SumTicketCostsParams) ([]SumTicketCostsRow, error)
+	// Totals per task, for the tasks in @task_ids that have spend.
+	SumTaskCosts(ctx context.Context, arg SumTaskCostsParams) ([]SumTaskCostsRow, error)
 	// Takes ownership of a starting or running run whose owner's lease expired
 	// (for example a killed agentd). The state is unchanged; the new epoch makes
 	// every later write of the old owner match no rows.

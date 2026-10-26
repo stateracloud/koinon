@@ -23,12 +23,12 @@ const (
 	maxTokens = 200_000
 )
 
-// fixture is one org with an owner, an active agent and a ticket for it.
+// fixture is one org with an owner, an active agent and a task for it.
 type fixture struct {
 	org, user pgtype.UUID
 	agent     store.Agent
 	version   store.AgentVersion
-	ticket    store.Ticket
+	task      store.Task
 }
 
 // newOrg creates a team org with a manual owner.
@@ -70,9 +70,9 @@ func newAgent(ctx context.Context, org, user pgtype.UUID) (store.Agent, store.Ag
 	return agent, version
 }
 
-func newTicket(ctx context.Context, org, user, agent pgtype.UUID) store.Ticket {
-	t, err := q.CreateTicket(ctx, store.CreateTicketParams{
-		OrgID: org, Title: uniq("ticket"), AgentID: agent, CreatedBy: user,
+func newTask(ctx context.Context, org, user, agent pgtype.UUID) store.Task {
+	t, err := q.CreateTask(ctx, store.CreateTaskParams{
+		OrgID: org, Title: uniq("task"), AgentID: agent, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return t
@@ -82,14 +82,14 @@ func newFixture(ctx context.Context) fixture {
 	var f fixture
 	f.org, f.user = newOrg(ctx)
 	f.agent, f.version = newAgent(ctx, f.org, f.user)
-	f.ticket = newTicket(ctx, f.org, f.user, f.agent.ID)
+	f.task = newTask(ctx, f.org, f.user, f.agent.ID)
 	return f
 }
 
-// enqueue queues a run of agent for ticket.
-func enqueue(ctx context.Context, org, agent, ticket pgtype.UUID) store.Run {
+// enqueue queues a run of agent for task.
+func enqueue(ctx context.Context, org, agent, task pgtype.UUID) store.Run {
 	r, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: org, AgentID: agent, TicketID: ticket, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
+		OrgID: org, AgentID: agent, TaskID: task, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(r.State).To(Equal(store.RunStateQueued))
@@ -140,7 +140,7 @@ func getRun(ctx context.Context, r store.Run) store.Run {
 // the queries.
 func runIn(ctx context.Context, state store.RunState) store.Run {
 	f := newFixture(ctx)
-	r := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+	r := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 	var err error
 	switch state {
 	case store.RunStateQueued:

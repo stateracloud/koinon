@@ -297,11 +297,11 @@ func ManifestHash(m Manifest) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// BranchName is the branch saved work for a ticket is pushed to: koinon/wip/<ticket>-<time>, the
-// ticket's first 8 hex digits and the time in UTC. A repository's n-th saved work of the incident
+// BranchName is the branch saved work for a task is pushed to: koinon/wip/<task>-<time>, the
+// task's first 8 hex digits and the time in UTC. A repository's n-th saved work of the incident
 // gets a numeric suffix from the caller when it must be told apart.
-func BranchName(ticketID string, t time.Time) string {
-	short := strings.ReplaceAll(ticketID, "-", "")
+func BranchName(taskID string, t time.Time) string {
+	short := strings.ReplaceAll(taskID, "-", "")
 	if len(short) > 8 {
 		short = short[:8]
 	}

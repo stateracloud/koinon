@@ -9,11 +9,11 @@
 //
 //   - before the harness starts, the run's instructions are written to the sandbox
 //     (/sandbox/.koinon/AGENTS.md), and their hash is recorded with the session;
-//   - initialize, then session/new on a ticket's first run (the session ID is stored on the
-//     ticket) or session/load afterwards;
+//   - initialize, then session/new on a task's first run (the session ID is stored on the
+//     task) or session/load afterwards;
 //   - for flavors that announce it, agentd waits until Koinon's MCP tools are there and
 //     selects the agent's model on the session;
-//   - the ticket's new messages are sent as the prompt, after the instruction file is checked
+//   - the task's new messages are sent as the prompt, after the instruction file is checked
 //     and, if it changed, restored;
 //   - every session update is written as a run event, in order and at most once;
 //   - permission requests for paths outside the session directory are rejected; the others

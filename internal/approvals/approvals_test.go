@@ -74,7 +74,7 @@ var _ = Describe("Service", func() {
 			"scripts/check.sh": []byte("#!/bin/sh\nexit 0\n"),
 		}))
 
-		By("the trailers name the ticket's creator, the approver and the request")
+		By("the trailers name the task's creator, the approver and the request")
 		Expect(head.Message).To(Equal("Fix the typo\n\nFixes the typo in the docs.\n\n" +
 			"Requested-by: Olive <olive@example.test>\nApproved-by: Adam <adam@example.test>\n" +
 			"Koinon-Approval: " + req.ID + "\n"))
@@ -89,8 +89,8 @@ var _ = Describe("Service", func() {
 		Expect(pool.QueryRow(ctx, `SELECT row_to_json(a)::text FROM approval_requests a WHERE id = $1`, row.ID).Scan(&stored)).To(Succeed())
 		Expect(stored).NotTo(ContainSubstring("ghs_"), "tokens are never stored")
 
-		By("the ticket timeline records the request, the decision and the outcome")
-		evs := f.ticketEvents(ctx)
+		By("the task timeline records the request, the decision and the outcome")
+		evs := f.taskEvents(ctx)
 		Expect(kinds(evs)).To(Equal([]string{approvals.KindRequested, approvals.KindApproved, approvals.KindExecuted}))
 		Expect(evs[1].ActorUserID).To(Equal(f.admin))
 		Expect(string(evs[2].Payload)).To(ContainSubstring("https://github.test/acme/widgets/pull/1"))
@@ -212,7 +212,7 @@ var _ = Describe("Service", func() {
 		Expect(row.DecidedBy.Valid).To(BeFalse())
 		Expect(f.gh.Mints()).To(BeZero(), "no token was even minted")
 		Expect(f.gh.Snapshot("widgets").Calls).To(BeEmpty())
-		Expect(kinds(f.ticketEvents(ctx))).To(Equal([]string{approvals.KindRequested}))
+		Expect(kinds(f.taskEvents(ctx))).To(Equal([]string{approvals.KindRequested}))
 	})
 
 	It("fails a recorded call of an unknown tool permanently and mints no token", func(ctx SpecContext) {
@@ -233,7 +233,7 @@ var _ = Describe("Service", func() {
 		f := newFixture(ctx, "standard")
 		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
 		f.park(ctx)
-		Expect(f.getTicket(ctx).Status).To(Equal(store.TicketStatusWaitingOnYou))
+		Expect(f.getTask(ctx).State).To(Equal(store.TaskStateInputRequired))
 
 		row, err := f.svc.Deny(ctx, f.org, mustID(req.ID), f.owner, "use a smaller change")
 		Expect(err).NotTo(HaveOccurred())
@@ -243,8 +243,8 @@ var _ = Describe("Service", func() {
 		run := f.getRun(ctx)
 		Expect(run.State).To(Equal(store.RunStateParked))
 		Expect(run.ReadyAt.Valid).To(BeTrue(), "the run is claimable again")
-		Expect(f.getTicket(ctx).Status).To(Equal(store.TicketStatusInProgress))
-		Expect(kinds(f.ticketEvents(ctx))).To(Equal([]string{approvals.KindRequested, approvals.KindDenied}))
+		Expect(f.getTask(ctx).State).To(Equal(store.TaskStateWorking))
+		Expect(kinds(f.taskEvents(ctx))).To(Equal([]string{approvals.KindRequested, approvals.KindDenied}))
 		Expect(f.decisions(ctx)).To(Equal([]string{"approval.deny user " + f.owner.String()}))
 
 		By("a denied request cannot be approved afterwards")
@@ -262,12 +262,12 @@ var _ = Describe("Service", func() {
 		_, err := f.svc.Deny(ctx, f.org, mustID(comment.ID), f.owner, "")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.getRun(ctx).ReadyAt.Valid).To(BeFalse())
-		Expect(f.getTicket(ctx).Status).To(Equal(store.TicketStatusWaitingOnYou))
+		Expect(f.getTask(ctx).State).To(Equal(store.TaskStateInputRequired))
 
 		_, err = f.svc.Approve(ctx, f.org, mustID(pr.ID), f.owner, pr.ArgsSHA256, "")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.getRun(ctx).ReadyAt.Valid).To(BeTrue())
-		Expect(f.getTicket(ctx).Status).To(Equal(store.TicketStatusInProgress))
+		Expect(f.getTask(ctx).State).To(Equal(store.TaskStateWorking))
 	})
 
 	It("executes a call the Trusted preset allows without a card", func(ctx SpecContext) {
@@ -325,10 +325,10 @@ var _ = Describe("Service", func() {
 		Expect(row.Status).To(Equal(store.ApprovalStatusFailed))
 		Expect(row.Error.String).To(ContainSubstring("was not created for this approval"))
 		Expect(f.gh.Snapshot("widgets").Calls).To(BeEmpty())
-		Expect(kinds(f.ticketEvents(ctx))).To(ContainElement(approvals.KindFailed))
+		Expect(kinds(f.taskEvents(ctx))).To(ContainElement(approvals.KindFailed))
 	})
 
-	It("expires a request nobody decided and cancels its parked run with a ticket event", func(ctx SpecContext) {
+	It("expires a request nobody decided and cancels its parked run with a task event", func(ctx SpecContext) {
 		f := newFixture(ctx, "standard")
 		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
 		f.park(ctx)
@@ -348,8 +348,8 @@ var _ = Describe("Service", func() {
 		run := f.getRun(ctx)
 		Expect(run.State).To(Equal(store.RunStateCanceled))
 		Expect(run.OutcomeReason.String).To(ContainSubstring("expired"))
-		Expect(f.getTicket(ctx).Status).To(Equal(store.TicketStatusTodo))
-		evs := f.ticketEvents(ctx)
+		Expect(f.getTask(ctx).State).To(Equal(store.TaskStateSubmitted))
+		evs := f.taskEvents(ctx)
 		Expect(kinds(evs)).To(Equal([]string{approvals.KindRequested, approvals.KindExpired, "run.canceled"}))
 		Expect(string(evs[2].Payload)).To(ContainSubstring(`approval_expired`))
 		Expect(f.decisions(ctx)).To(Equal([]string{"approval.expire system "}))

@@ -145,12 +145,12 @@ func newAgentWithConfig(ctx context.Context, org, user pgtype.UUID, config strin
 	return agent
 }
 
-// queueRun creates a ticket for agent and queues a run on it.
+// queueRun creates a task for agent and queues a run on it.
 func queueRun(ctx context.Context, org, user, agent pgtype.UUID) store.Run {
-	t, err := q.CreateTicket(ctx, store.CreateTicketParams{OrgID: org, Title: uniq("ticket"), AgentID: agent, CreatedBy: user})
+	t, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: org, Title: uniq("task"), AgentID: agent, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: org, AgentID: agent, TicketID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000,
+		OrgID: org, AgentID: agent, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return run

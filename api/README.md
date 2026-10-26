@@ -8,7 +8,8 @@ Packages are `koinon.<area>.v1alpha1` under `api/proto/koinon/`. Run `make gener
 | --- | --- | --- |
 | `koinon.auth.v1alpha1` | `AuthService` | `internal/auth` |
 | `koinon.agent.v1alpha1` | `AgentService` | `internal/services` |
-| `koinon.ticket.v1alpha1` | `TicketService` | `internal/services` |
+| `koinon.task.v1alpha1` | `TaskService` | `internal/services` |
+| `koinon.ticket.v1alpha1` | `TicketService` (deprecated; compat layer over tasks until TK2) | `internal/services` |
 | `koinon.run.v1alpha1` | `RunService` (`WatchRun` streams) | `internal/services`, `internal/runwatch` |
 | `koinon.template.v1alpha1` | `TemplateService` | `internal/services` |
 

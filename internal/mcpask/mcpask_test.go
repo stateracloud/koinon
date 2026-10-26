@@ -111,9 +111,9 @@ var _ = Describe("the ask-tier proxy", func() {
 		Expect(err).NotTo(HaveOccurred())
 		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: a.ID, VersionID: v.ID, ActivatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
-		t, err := q.CreateTicket(ctx, store.CreateTicketParams{OrgID: org, Title: "fix", AgentID: agent.ID, CreatedBy: user})
+		t, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: org, Title: "fix", AgentID: agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TicketID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000})
+		_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000})
 		Expect(err).NotTo(HaveOccurred())
 		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: org, OwnerID: "test", LeaseSeconds: 60})
 		Expect(err).NotTo(HaveOccurred())
@@ -204,7 +204,7 @@ var _ = Describe("the ask-tier proxy", func() {
 		Expect(res.Content[0].(*mcp.TextContent).Text).To(HavePrefix("approval requested: id="))
 		Expect(gw.count()).To(BeZero())
 
-		rows, err := q.ListApprovalRequestsForTicket(ctx, store.ListApprovalRequestsForTicketParams{OrgID: org, TicketID: run.TicketID})
+		rows, err := q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: org, TaskID: run.TaskID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rows).To(HaveLen(1))
 		Expect(rows[0].Connector).To(Equal("mcp"))
@@ -216,7 +216,7 @@ var _ = Describe("the ask-tier proxy", func() {
 		By("the same call again is the same request")
 		_, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "create_issue", Arguments: map[string]any{"a": 1, "title": "b"}})
 		Expect(err).NotTo(HaveOccurred())
-		rows, _ = q.ListApprovalRequestsForTicket(ctx, store.ListApprovalRequestsForTicketParams{OrgID: org, TicketID: run.TicketID})
+		rows, _ = q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: org, TaskID: run.TaskID})
 		Expect(rows).To(HaveLen(1))
 	})
 
@@ -228,7 +228,7 @@ var _ = Describe("the ask-tier proxy", func() {
 				Expect(res.IsError).To(BeTrue(), tool)
 			}
 		}
-		rows, _ := q.ListApprovalRequestsForTicket(ctx, store.ListApprovalRequestsForTicketParams{OrgID: org, TicketID: run.TicketID})
+		rows, _ := q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: org, TaskID: run.TaskID})
 		Expect(rows).To(BeEmpty())
 	})
 
@@ -239,7 +239,7 @@ var _ = Describe("the ask-tier proxy", func() {
 		GinkgoHelper()
 		_, err := session(ctx, me()).CallTool(ctx, &mcp.CallToolParams{Name: "create_issue", Arguments: args})
 		Expect(err).NotTo(HaveOccurred())
-		rows, _ := q.ListApprovalRequestsForTicket(ctx, store.ListApprovalRequestsForTicketParams{OrgID: org, TicketID: run.TicketID})
+		rows, _ := q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: org, TaskID: run.TaskID})
 		Expect(rows).NotTo(BeEmpty())
 		return rows[len(rows)-1]
 	}
@@ -341,13 +341,13 @@ var _ = Describe("the ask-tier proxy", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("needs two distinct approvers, neither the ticket's creator, and runs once after the second", func(ctx SpecContext) {
+		It("needs two distinct approvers, neither the task's creator, and runs once after the second", func(ctx SpecContext) {
 			row := request(ctx, map[string]any{"title": "b"})
 			Expect(row.ApprovalsRequired).To(BeEquivalentTo(2))
 			a := exec()
 
 			_, err := a.Approve(ctx, org, row.ID, user, row.ArgsSha256, "")
-			Expect(err).To(MatchError(approvals.ErrRequesterApproves), "the ticket's creator is user")
+			Expect(err).To(MatchError(approvals.ErrRequesterApproves), "the task's creator is user")
 
 			got, err := a.Approve(ctx, org, row.ID, second, row.ArgsSha256, "")
 			Expect(err).NotTo(HaveOccurred())
