@@ -240,7 +240,10 @@ func RecordTokenUsage(ctx context.Context, db DB, org, runID pgtype.UUID, tokens
 			return nil
 		}
 		msg := fmt.Sprintf("token cap exceeded (%d of %d tokens)", run.TokensUsed, run.MaxTokens)
-		canceled, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: org, ID: runID, OutcomeReason: msg})
+		canceled, err := q.CancelRun(ctx, store.CancelRunParams{
+			OrgID: org, ID: runID, OutcomeReason: msg,
+			FailureClass: store.NullRunFailureClass{RunFailureClass: store.RunFailureClassBudget, Valid: true},
+		})
 		if err != nil {
 			return err
 		}

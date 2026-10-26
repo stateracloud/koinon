@@ -106,6 +106,15 @@ type Config struct {
 	// MaxTakeovers fails a run that has been taken over more often than this, instead of
 	// resuming it again. Default 5.
 	MaxTakeovers int
+	// ModelRetries is how often a turn is repeated after a transient or throttled model
+	// error (ADR 0030, failure classes) before the run fails. Default 3.
+	ModelRetries int
+	// RetryBackoff is the first wait before a transient retry; it doubles per retry up to a
+	// minute. Default 2s.
+	RetryBackoff time.Duration
+	// MaxRetryAfter is the longest Retry-After Koinon waits out; a provider asking for more
+	// fails the run as throttled. Default 5m.
+	MaxRetryAfter time.Duration
 	// GatewayURL is agentgateway's base URL as sandboxes reach it, for example
 	// http://koinon-gateway.koinon.svc:8080. Flavors get <GatewayURL>/v1 for models and
 	// <GatewayURL>/mcp for tools. Required; it must not carry credentials.
@@ -153,6 +162,9 @@ func (c *Config) defaults() error {
 	setDefault(&c.ReadyTimeout, time.Minute)
 	setDefault(&c.ReadySettle, time.Second)
 	setDefault(&c.MaxTakeovers, 5)
+	setDefault(&c.ModelRetries, 3)
+	setDefault(&c.RetryBackoff, 2*time.Second)
+	setDefault(&c.MaxRetryAfter, 5*time.Minute)
 	setDefault(&c.SummaryTimeout, defaultSummaryWait)
 	setDefault(&c.StuckAfter, defaultStuckAfter)
 	setDefault(&c.StuckPoll, defaultStuckPoll)

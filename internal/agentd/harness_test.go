@@ -65,6 +65,9 @@ type harness struct {
 	// onPrompt, if set, may answer a prompt itself (for example by calling Koinon's tools as
 	// the agent would): it returns the reply and true, or false to fall through.
 	onPrompt func(ctx context.Context, text string) (string, bool)
+	// modelFault, if set, runs before every prompt is answered, as the harness's request to its
+	// model would: a non-nil error is what the prompt fails with.
+	modelFault func(ctx context.Context, text string) error
 	// models are the values of session/set_config_option for the model, in order.
 	models []string
 	// silent: announce no ready command; stubborn: keep its own model.
@@ -275,10 +278,16 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		p.h.hung = true
 	}
 	onPrompt := p.h.onPrompt
+	modelFault := p.h.modelFault
 	p.h.mu.Unlock()
 	id := r.SessionId
 	end := sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}
 
+	if modelFault != nil {
+		if err := modelFault(ctx, text); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+	}
 	if onPrompt != nil {
 		if reply, ok := onPrompt(ctx, text); ok {
 			if err := p.say(ctx, id, sdk.UpdateAgentMessageText(reply)); err != nil {
