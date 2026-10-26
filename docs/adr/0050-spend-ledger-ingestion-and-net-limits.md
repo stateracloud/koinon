@@ -1,6 +1,6 @@
 # 0050. Spend ledger ingestion and net limits
 
-- Status: Proposed; amended by [0056](0056-model-providers-pricing-and-budgets-per-org.md)
+- Status: Accepted (2026-10-26, accepted after implementation); amended by [0056](0056-model-providers-pricing-and-budgets-per-org.md) and 2026-10-23 (below)
 - Date: 2026-10-22
 - Amends: [0041](0041-koinon-spend-ledger-and-budget-stops.md) (answers its open questions on the
   transport and on unpriced models, for v0.1)

@@ -1,7 +1,9 @@
 # 0010. Eventing: the ticket board is the queue
 
-- Status: Accepted
-- Amended by: [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md)
+- Status: Superseded by [0065](0065-work-model-tasks-inbox.md) and [0066](0066-triggers-and-scheduling.md)
+- Note: what still describes the code is the 2026-10-26 wake-up amendment below: row state is the
+  truth, `LISTEN/NOTIFY` is only a hint, and the `runs` table is the queue for runs. Work arrives
+  as tasks ([0065](0065-work-model-tasks-inbox.md)) through triggers ([0066](0066-triggers-and-scheduling.md)).
 - Date: 2026-10-21
 - Decision: [design.md#10](../design.md)
 
@@ -73,8 +75,8 @@ table exists. What was built instead:
   (`internal/db/migrations/00006_agent_sandboxes.sql:79-90`; the reconciler `LISTEN`s in
   `internal/reconciler/loop.go:16`, `:67`) and the reconciler also re-reads everything on a timer.
 
-The board is still the queue for work. Webhooks, crons and subscriptions are not built (v0.2,
-[0024](0024-roadmap.md)). [0003](0003-postgres-source-of-truth.md) and
+When this amendment was written the board was still the queue for work and webhooks, crons and
+subscriptions were not built. Tasks and triggers replace both (amendment below). [0003](0003-postgres-source-of-truth.md) and
 [0022](0022-frontend-architecture.md) also mention the outbox; read them with this amendment.
 
 ## Amendment (2026-10-26): tasks and triggers

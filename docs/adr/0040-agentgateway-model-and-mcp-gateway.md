@@ -1,6 +1,6 @@
 # 0040. agentgateway as the model gateway and MCP gateway
 
-- Status: Accepted
+- Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and 2026-10-26 (below)
 - Date: 2026-10-21
 - Amends: ADR 0013 (model access), ADR 0014 (MCP and tools), ADR 0016 (harness and deployment)
 - Verification: Pending: agentgateway spike (deployment mode, ExtMCP routing) and OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))

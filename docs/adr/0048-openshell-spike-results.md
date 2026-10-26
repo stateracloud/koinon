@@ -1,8 +1,8 @@
 # 0048. OpenShell spike results
 
-- Status: Proposed
+- Status: Accepted (2026-10-26, accepted after implementation)
 - Date: 2026-10-21
-- Amended by: [0052](0052-opencode-v2-flavor.md)
+- Amended by: [0052](0052-opencode-v2-flavor.md) and 2026-10-26 (below)
 - Amends: [0040](0040-agentgateway-model-and-mcp-gateway.md), [0042](0042-ask-tier-park-and-execute.md),
   [0045](0045-openshell-hardening-defaults.md); resolves the spike verification of
   [0006](0006-identity-layers.md), [0008](0008-approvals-and-risk-tiers.md),

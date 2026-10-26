@@ -1,6 +1,6 @@
 # 0004. Human identity: generic OIDC with roles in Postgres
 
-- Status: Accepted; amended below
+- Status: Accepted; amended 2026-10-23 and 2026-10-26 (below)
 - Date: 2026-10-21
 - Decision: [design.md#4](../design.md)
 

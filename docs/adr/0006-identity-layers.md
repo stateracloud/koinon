@@ -1,6 +1,6 @@
 # 0006. Identity layers: per-agent ServiceAccount, no usable token in the sandbox
 
-- Status: Accepted; amended by [0043](0043-workload-identity-adapters-and-koinon-issuer.md) and [0044](0044-in-sandbox-credential-exception.md)
+- Status: Accepted; amended by [0043](0043-workload-identity-adapters-and-koinon-issuer.md), [0044](0044-in-sandbox-credential-exception.md), [0063](0063-forge-credential-classes.md) and [0065](0065-work-model-tasks-inbox.md)
 - Date: 2026-10-21
 - Decision: [design.md#6](../design.md)
 - Verification: Pending: OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
@@ -111,6 +111,16 @@ sequenceDiagram
   https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html
 - 2026-10-21: Agent Sandbox templates default `automountServiceAccountToken` to false.
   https://github.com/kubernetes-sigs/agent-sandbox
+
+## Amendment (2026-10-26): no traffic between sandboxes; static code-host tokens
+
+- **Agent to agent.** Sandboxes never talk to each other over the network. Inside an install one
+  agent asks another through the MCP tools `ask_agent` and `reply`, carried by Postgres
+  ([0065](0065-work-model-tasks-inbox.md)), so the A2A authentication bullet above applies only to
+  the later external A2A gateway.
+- **Auth types.** [0063](0063-forge-credential-classes.md) adds a credential class beyond
+  `federated`, `app-credential` and `delegated-user`: static code-host tokens (Gitea), held by
+  Koinon and delivered only through OpenShell placeholders.
 
 ## Links
 

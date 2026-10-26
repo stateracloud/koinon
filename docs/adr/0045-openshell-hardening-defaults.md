@@ -1,6 +1,6 @@
 # 0045. OpenShell hardening defaults
 
-- Status: Accepted
+- Status: Accepted; amended by [0048](0048-openshell-spike-results.md)
 - Date: 2026-10-21
 - Amends: none (implements ADR 0002, ADR 0006, ADR 0016 and "Execution layer details")
 - Verification: Pending: OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
