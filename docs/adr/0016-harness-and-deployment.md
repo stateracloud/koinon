@@ -6,6 +6,8 @@
 - Decision: [design.md#16](../design.md)
 - Verification: Pending: OpenShell spike ([#3](https://github.com/procoduck/koinon/issues/3))
 
+> Note (2026-10-26): v0.1 ships OpenCode only ([0059](0059-v01-opencode-only.md)); mentions of Hermes and pi below are history.
+
 ## Context
 
 Koinon reuses an execution layer (OpenShell on Agent Sandbox) instead of building one. It needs:

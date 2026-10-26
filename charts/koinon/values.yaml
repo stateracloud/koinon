@@ -242,16 +242,6 @@ flavors:
       repository: flavor-opencode
       tag: ""
       digest: ""
-  hermes:
-    image:
-      repository: flavor-hermes
-      tag: ""
-      digest: ""
-  pi:
-    image:
-      repository: flavor-pi
-      tag: ""
-      digest: ""
 
 # OpenShell gateway that the reconciler and agentd talk to over gRPC.
 openshell:

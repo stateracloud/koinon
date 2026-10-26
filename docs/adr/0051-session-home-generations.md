@@ -5,6 +5,8 @@
 - Amends: ADR 0029 (when a ticket's session is loaded) and ADR 0049 (what holds off a sandbox
   recreation)
 
+> Note (2026-10-26): v0.1 ships OpenCode only ([0059](0059-v01-opencode-only.md)); mentions of Hermes and pi below are history.
+
 ## Context
 
 ADR 0029 keeps one harness session per ticket: `session/new` on the first run, `session/load`

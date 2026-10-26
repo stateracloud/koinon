@@ -61,6 +61,7 @@ export function runFinished(s: RunState): boolean {
 const flavorLabels: Record<Flavor, string> = {
   [Flavor.UNSPECIFIED]: 'Default',
   [Flavor.OPENCODE]: 'OpenCode',
+  // Deprecated: dropped before v0.1 (ADR 0059); the API never returns them.
   [Flavor.HERMES]: 'Hermes',
   [Flavor.PI]: 'pi',
 }

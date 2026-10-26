@@ -5,6 +5,8 @@
 - Amends: ADR 0006 (identity layers), ADR 0013 (model access, GitHub Copilot), ADR 0015 (agent
   environment and browser)
 
+> Note (2026-10-26): v0.1 ships OpenCode only ([0059](0059-v01-opencode-only.md)); mentions of Hermes and pi below are history.
+
 ## Context
 
 Koinon's core promise is that real credentials stay outside the sandbox (decisions 6 and 15).

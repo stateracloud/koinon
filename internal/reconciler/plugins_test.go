@@ -119,9 +119,9 @@ var _ = Describe("Plugin installs in the sandbox policy", func() {
 		)))
 	})
 
-	It("renders nothing for another flavor, which has no plugin installs", func() {
+	It("renders nothing for a flavor without the option, which has no plugin installs", func() {
 		_, ok := reconciler.PluginInstallRule(agentconfig.Config{Harness: templates.Harness{PluginInstalls: true}},
-			store.AgentFlavorHermes, reconciler.Flavor{Image: image, Binaries: []string{"/opt/hermes/bin/hermes"}})
+			store.AgentFlavor("other"), reconciler.Flavor{Image: image, Binaries: []string{"/opt/other/bin/other"}})
 		Expect(ok).To(BeFalse())
 	})
 })

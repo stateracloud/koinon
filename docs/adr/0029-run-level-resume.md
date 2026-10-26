@@ -4,6 +4,8 @@
 - Date: 2026-10-21
 - Decision: [design.md#29](../design.md)
 
+> Note (2026-10-26): v0.1 ships OpenCode only ([0059](0059-v01-opencode-only.md)); mentions of Hermes and pi below are history.
+
 ## Context
 
 Runs get interrupted in several ways:

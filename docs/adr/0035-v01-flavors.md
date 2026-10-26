@@ -1,6 +1,6 @@
 # 0035. v0.1 flavors: OpenCode, Hermes and pi over ACP
 
-- Status: Accepted
+- Status: Accepted; amended by [0059](0059-v01-opencode-only.md)
 - Date: 2026-10-21
 - Decision: [design.md#35](../design.md)
 
@@ -75,6 +75,12 @@ with any model.
 - Is Hermes's broader tool set (messaging, self-improvement) disabled by config, or by OpenShell
   policy, or both?
 - Which flavor does the v0.1 demo template use ([0036](0036-v01-demo.md))?
+
+## Amendment (2026-10-26)
+
+v0.1 ships OpenCode only; Hermes and pi are removed and come back, if at all, in a later release.
+The flavor seam (descriptor table, template field, database column, API field) stays. See
+[0059](0059-v01-opencode-only.md).
 
 ## Upstream verification
 

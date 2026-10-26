@@ -24,17 +24,12 @@ the end-to-end test runs.
 
 Save this as `values.yaml`. It uses Kata. Change `image.registry` and `image.tag` to
 where you pushed the images ([Build the images](#build-the-images)), and `openshell.address` if your
-gateway lives elsewhere. The chart runs only the flavors it has an entry for, so this file turns off
-Hermes and pi, whose images the build below does not make.
+gateway lives elsewhere.
 
 ```yaml chart-values
 image:
   registry: registry.example.com/koinon
   tag: v0.1.0
-
-flavors:
-  hermes: null
-  pi: null
 
 openshell:
   address: openshell.openshell.svc:8080
@@ -180,8 +175,7 @@ Create a GitHub App first. [GitHub App](/guides/github-app/) lists the permissio
 2. Choose **Repo helper**, then **Next**. The template gives the agent read access to one
    repository, the right to propose pull requests and issue comments (each needs your approval), a
    30-minute cap on a run and a spend limit of $10.00 per day.
-3. Choose the **OpenCode** flavor, then **Next**. The wizard also lists Hermes and pi; this install
-   has no images for them, so pick OpenCode.
+3. Choose the **OpenCode** flavor, then **Next**. OpenCode is the only flavor in v0.1.
 4. Pick the repository in **Repository 1**, then **Next**.
 5. Press **Create draft**, then **Activate**.
 
