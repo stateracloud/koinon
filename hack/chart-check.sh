@@ -206,8 +206,11 @@ has "proxy egress to the controller's xDS port" 'port: 9978$' "${k8s[@]}" --show
 has "proxy egress carves out the private ranges" '10.0.0.0/8' "${k8s[@]}" --show-only templates/networkpolicy.yaml
 has "reconciler manages the agentgateway objects" 'agentgatewaymodels' "${k8s[@]}" --show-only templates/rbac.yaml
 lacks "no agentgateway rules in standalone mode" 'agentgatewaymodels' --show-only templates/rbac.yaml
-cr=$(render "${k8s[@]}" --show-only templates/rbac.yaml | awk '/^kind: ClusterRole$/{p=1} /^---$/{p=0} p')
-grep -Eq 'agentgateway|configmaps|gateways' <<<"$cr" && fail "a ClusterRole grants access to gateway objects or ConfigMaps in kubernetes mode"
+# The reconciler never talks to the agents.x-k8s.io API (sandboxes go through the OpenShell gateway),
+# so no rule in any mode grants it Sandbox permissions, and the chart has no ClusterRole for it.
+lacks "no Sandbox permissions in the reconciler's RBAC" 'x-k8s\.io|sandboxes' --show-only templates/rbac.yaml
+lacks "no Sandbox permissions in the reconciler's RBAC (gateway.mode=kubernetes)" 'x-k8s\.io|sandboxes' "${k8s[@]}" --show-only templates/rbac.yaml
+lacks "no ClusterRole in rbac.yaml" '^kind: ClusterRole' --show-only templates/rbac.yaml
 has "reconciler config names the Gateway" 'name: koinon-gateway$' "${k8s[@]}" --show-only templates/config.yaml
 has "reconciler config names the GatewayClass" 'gatewayClassName: agentgateway$' "${k8s[@]}" --show-only templates/config.yaml
 has "sandboxes reach the Gateway's Service" 'http://koinon-gateway.koinon.svc.cluster.local:4000' "${k8s[@]}" --show-only templates/deployments.yaml

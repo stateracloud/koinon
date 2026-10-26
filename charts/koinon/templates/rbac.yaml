@@ -22,10 +22,10 @@ The reconciler gets what it renders:
   -Backend, -Parameters) and on ConfigMaps (the per-org key lists and the model catalog; create and list
   cannot be limited by name, so it can reach every ConfigMap here), and list on Events, to read the
   controller's NACK warnings. It never reads or writes objects of other namespaces, and its apply and
-  prune only touch objects that carry its labels;
-- read and delete on Agent Sandbox objects cluster-wide, to garbage-collect sandboxes the OpenShell
-  gateway no longer lists (ADR 0048 finding 1.8).
-Sandboxes, workspaces, providers and policies go through the OpenShell gateway, not this API.
+  prune only touch objects that carry its labels.
+Nothing here is cluster-scoped, and nothing touches Agent Sandbox objects: sandboxes, workspaces,
+providers and policies go through the OpenShell gateway, not the Kubernetes API. Garbage-collecting
+orphaned sandboxes is not built; when it is, scope it to the sandbox namespaces with a Role.
 */ -}}
 {{- $api := include "koinon.componentName" (list . "api") }}
 apiVersion: rbac.authorization.k8s.io/v1
@@ -116,32 +116,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: {{ $name }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ $name }}
-    namespace: {{ .Release.Namespace }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ printf "%s-%s" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
-  labels:
-    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
-rules:
-  - apiGroups: [agents.x-k8s.io]
-    resources: [sandboxes]
-    verbs: [get, list, watch, delete]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ printf "%s-%s" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
-  labels:
-    {{- include "koinon.labels" (list . "reconciler") | nindent 4 }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ printf "%s-%s" .Release.Namespace $name | trunc 63 | trimSuffix "-" }}
 subjects:
   - kind: ServiceAccount
     name: {{ $name }}
