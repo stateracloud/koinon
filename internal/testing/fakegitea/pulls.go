@@ -117,7 +117,7 @@ func (f *Fake) createPull(w http.ResponseWriter, r *http.Request, rp *repo, logi
 		return errf(http.StatusUnprocessableEntity, "[Head]: Required")
 	}
 	if body.Base == "" {
-		body.Base = rp.defaultBranch()
+		return errf(http.StatusUnprocessableEntity, "[Base]: Required")
 	}
 	headSHA, ok := rp.branchHead(head)
 	if !ok {

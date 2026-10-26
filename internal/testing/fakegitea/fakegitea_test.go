@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/exec"
@@ -135,6 +136,16 @@ var _ = Describe("fake Gitea", func() {
 			Expect(one["commit"].(map[string]any)["id"]).To(Equal(sha))
 			Expect(do("GET", repo+"/branches/nope", nil).Status).To(Equal(404))
 		})
+		It("honours the deprecated old_branch_name", func() {
+			do("POST", repo+"/contents", map[string]any{"new_branch": "src", "files": []map[string]any{{"operation": "create", "path": "s", "content": "cw=="}}})
+			Expect(do("POST", repo+"/branches", map[string]any{"new_branch_name": "cut", "old_branch_name": "src"}).Status).To(Equal(201))
+			s := f.Snapshot("widgets")
+			Expect(s.Branches["cut"]).To(Equal(s.Branches["src"]))
+		})
+		It("refuses refs that look like git options", func() {
+			Expect(do("GET", repo+"/git/trees/--output=x", nil).Status).To(Equal(404))
+			Expect(do("GET", repo+"/contents/README.md?ref=--output=x", nil).Status).To(Equal(404))
+		})
 		It("creates a branch from old_ref_name, and refuses duplicates", func() {
 			r := do("POST", repo+"/branches", map[string]any{"new_branch_name": "feature/x", "old_ref_name": "main"})
 			Expect(r.Status).To(Equal(201))
@@ -202,7 +213,7 @@ var _ = Describe("fake Gitea", func() {
 			Expect(do("GET", repo+"/git/trees/"+tree.(string), nil).JSON()["tree"]).To(HaveLen(2))
 		})
 		It("commits to an existing branch and moves it", func() {
-			r := change(map[string]any{"branch": "main", "files": []map[string]any{{"path": "x.txt", "content": b64("x")}}})
+			r := change(map[string]any{"branch": "main", "files": []map[string]any{{"operation": "create", "path": "x.txt", "content": b64("x")}}})
 			Expect(r.Status).To(Equal(201))
 			Expect(f.Snapshot("widgets").Branches["main"]).To(Equal(r.JSON()["commit"].(map[string]any)["sha"]))
 		})
@@ -221,22 +232,35 @@ var _ = Describe("fake Gitea", func() {
 			Expect(r.Status).To(Equal(201), string(r.Body))
 			Expect(do("GET", repo+"/contents?ref=mv", nil).List()).To(BeEmpty())
 		})
+		It("updates and deletes without a sha, and treats upload as create-or-update", func() {
+			one := func(op, p, c string) resp {
+				return change(map[string]any{"files": []map[string]any{{"operation": op, "path": p, "content": b64(c)}}})
+			}
+			Expect(one("update", "README.md", "v2").Status).To(Equal(201))
+			Expect(one("upload", "README.md", "v3").Status).To(Equal(201), "upload over a file")
+			Expect(one("upload", "new.txt", "n").Status).To(Equal(201), "upload of a new file")
+			Expect(one("create", "my.git/x", "y").Status).To(Equal(201), "my.git is a legal directory")
+			Expect(one("delete", "new.txt", "").Status).To(Equal(201))
+			Expect(do("GET", repo+"/contents/new.txt", nil).Status).To(Equal(404))
+		})
 		It("refuses what Gitea refuses", func() {
 			readme := do("GET", repo+"/contents/README.md", nil).JSON()
 			file := func(op, path, sha string) []map[string]any {
 				return []map[string]any{{"operation": op, "path": path, "content": b64("z"), "sha": sha}}
 			}
 			Expect(change(map[string]any{"files": file("create", "README.md", "")}).Status).To(Equal(422), "create over a file")
-			Expect(change(map[string]any{"files": file("update", "README.md", "")}).Status).To(Equal(409), "update without sha")
-			Expect(change(map[string]any{"files": file("update", "README.md", "deadbeef")}).Status).To(Equal(409), "stale sha")
+			Expect(change(map[string]any{"files": file("update", "README.md", "deadbeef")}).Status).To(Equal(422), "stale sha")
 			Expect(change(map[string]any{"files": file("update", "nope", readme["sha"].(string))}).Status).To(Equal(404), "update missing")
 			Expect(change(map[string]any{"files": file("delete", "nope", "x")}).Status).To(Equal(404), "delete missing")
 			Expect(change(map[string]any{"branch": "nope", "files": file("create", "a", "")}).Status).To(Equal(404), "missing branch")
-			Expect(change(map[string]any{"new_branch": "main", "files": file("create", "a", "")}).Status).To(Equal(409), "new_branch exists")
+			Expect(change(map[string]any{"new_branch": "main", "files": file("create", "a", "")}).Status).To(Equal(422), "new_branch exists")
+			Expect(change(map[string]any{"files": file("", "a", "")}).Status).To(Equal(422), "operation required")
+			Expect(change(map[string]any{"files": file("create", "README.md/x", "")}).Status).To(Equal(422), "parent is a file")
+			Expect(change(map[string]any{"files": file("create", ".GIT/x", "")}).Status).To(Equal(422), ".GIT component")
 			Expect(change(map[string]any{"files": file("create", "../x", "")}).Status).To(Equal(422), "path escape")
 			Expect(change(map[string]any{"files": file("create", ".git/config", "")}).Status).To(Equal(422), ".git")
 			Expect(change(map[string]any{"files": []map[string]any{}}).Status).To(Equal(422), "no files")
-			Expect(change(map[string]any{"files": []map[string]any{{"path": "a", "content": "!!"}}}).Status).To(Equal(422), "bad base64")
+			Expect(change(map[string]any{"files": []map[string]any{{"operation": "create", "path": "a", "content": "!!"}}}).Status).To(Equal(422), "bad base64")
 			Expect(f.Snapshot("widgets").Calls).NotTo(HaveKey("POST contents"))
 		})
 		It("keeps the executable bit of an updated file and makes new files regular", func() {
@@ -264,7 +288,7 @@ var _ = Describe("fake Gitea", func() {
 		It("lists recursively with paging and 404s for unknown objects", func() {
 			b64 := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 			do("POST", repo+"/contents", map[string]any{"files": []map[string]any{
-				{"path": "a/b/c.txt", "content": b64("c")}, {"path": "a/d.txt", "content": b64("d")},
+				{"operation": "create", "path": "a/b/c.txt", "content": b64("c")}, {"operation": "create", "path": "a/d.txt", "content": b64("d")},
 			}})
 			flat := do("GET", repo+"/git/trees/main", nil).JSON()
 			Expect(flat["tree"]).To(HaveLen(2)) // README.md and the directory a
@@ -284,7 +308,7 @@ var _ = Describe("fake Gitea", func() {
 		BeforeEach(func() {
 			r := do("POST", repo+"/contents", map[string]any{
 				"new_branch": "feature", "message": "work",
-				"files": []map[string]any{{"path": "f.txt", "content": base64.StdEncoding.EncodeToString([]byte("f"))}},
+				"files": []map[string]any{{"operation": "create", "path": "f.txt", "content": base64.StdEncoding.EncodeToString([]byte("f"))}},
 			})
 			Expect(r.Status).To(Equal(201))
 			featureSHA = f.Snapshot("widgets").Branches["feature"]
@@ -332,10 +356,9 @@ var _ = Describe("fake Gitea", func() {
 			Expect(do("POST", repo+"/pulls", map[string]any{"title": "t", "head": "main", "base": "main"}).Status).To(Equal(422))
 			Expect(f.Snapshot("widgets").Pulls).To(HaveLen(1))
 		})
-		It("defaults the base to the default branch", func() {
+		It("requires the base like Gitea", func() {
 			r := do("POST", repo+"/pulls", map[string]any{"title": "t", "head": "feature"})
-			Expect(r.Status).To(Equal(201))
-			Expect(r.JSON()["base"].(map[string]any)["ref"]).To(Equal("main"))
+			Expect(r.Status).To(Equal(422))
 		})
 	})
 
@@ -360,8 +383,8 @@ var _ = Describe("fake Gitea", func() {
 			Expect(do("GET", path+"?before=2000-01-01T00:00:00Z", nil).List()).To(BeEmpty())
 
 			// A pull request shares the issue numbering.
-			do("POST", repo+"/contents", map[string]any{"new_branch": "p", "files": []map[string]any{{"path": "p", "content": "cA=="}}})
-			pr := do("POST", repo+"/pulls", map[string]any{"title": "t", "head": "p"}).JSON()
+			do("POST", repo+"/contents", map[string]any{"new_branch": "p", "files": []map[string]any{{"operation": "create", "path": "p", "content": "cA=="}}})
+			pr := do("POST", repo+"/pulls", map[string]any{"title": "t", "head": "p", "base": "main"}).JSON()
 			Expect(pr["number"]).To(BeEquivalentTo(2))
 			Expect(do("POST", repo+"/issues/2/comments", map[string]any{"body": "on the PR"}).Status).To(Equal(201))
 			Expect(f.Snapshot("widgets").Comments).To(HaveLen(3))
@@ -420,7 +443,7 @@ var _ = Describe("fake Gitea", func() {
 			// A commit made through ChangeFiles is fetched by git, and a fast-forward push works.
 			ch := doAuth(f, "POST", repo+"/contents", map[string]any{
 				"branch": "feature", "message": "via api",
-				"files": []map[string]any{{"path": "api.txt", "content": base64.StdEncoding.EncodeToString([]byte("api\n"))}},
+				"files": []map[string]any{{"operation": "create", "path": "api.txt", "content": base64.StdEncoding.EncodeToString([]byte("api\n"))}},
 			},
 				"token "+fakegitea.DefaultToken)
 			Expect(ch.Status).To(Equal(201), string(ch.Body))
@@ -438,6 +461,22 @@ var _ = Describe("fake Gitea", func() {
 			// Deleting the branch over git is reflected too.
 			git(one, "push", "-q", "origin", "--delete", "feature")
 			Expect(f.Snapshot("widgets").Branches).NotTo(HaveKey("feature"))
+		})
+
+		It("accepts a push larger than http.postBuffer (chunked request body)", func() {
+			tmp := GinkgoT().TempDir()
+			one := filepath.Join(tmp, "one")
+			git(tmp, "clone", "-q", cloneURL(fakegitea.DefaultToken), one)
+			blob := make([]byte, 4<<20)
+			rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // incompressible filler, not a secret
+			for i := range blob {
+				blob[i] = byte(rng.UintN(256))
+			}
+			Expect(os.WriteFile(filepath.Join(one, "big.bin"), blob, 0o644)).To(Succeed())
+			git(one, "add", ".")
+			git(one, "commit", "-q", "-m", "big")
+			git(one, "push", "-q", "origin", "HEAD:refs/heads/big")
+			Expect(f.Snapshot("widgets").Branches["big"]).To(Equal(strings.TrimSpace(git(one, "rev-parse", "HEAD"))))
 		})
 
 		It("serves the owner/repo path case-insensitively", func() {

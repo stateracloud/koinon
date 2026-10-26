@@ -49,9 +49,15 @@ func (f *Fake) fullCommitJSON(base string, rp *repo, c gitCommit) map[string]any
 // getTree answers GET git/trees/{sha}, paged as Gitea does (per_page, page, truncated).
 func (f *Fake) getTree(w http.ResponseWriter, r *http.Request, rp *repo, _ string) error {
 	ref := r.PathValue("sha")
-	treeish := ref
+	// A branch, a tag, a commit, or a tree SHA. Anything else is a 404; never pass a raw value
+	// (which could start with "-") to git.
+	var treeish string
 	if sha, ok := rp.resolve(ref); ok {
 		treeish = sha
+	} else if isHex(ref) && len(ref) >= 7 {
+		treeish = ref
+	} else {
+		return errf(http.StatusNotFound, "object does not exist [id: %s, rel_path: ]", ref)
 	}
 	q := r.URL.Query()
 	recursive := q.Get("recursive") == "1" || q.Get("recursive") == "true"
@@ -87,14 +93,14 @@ func (f *Fake) getTree(w http.ResponseWriter, r *http.Request, rp *repo, _ strin
 	return nil
 }
 
-func (f *Fake) contentEntry(base string, rp *repo, ref string, e entry, withContent bool) map[string]any {
+func (f *Fake) contentEntry(base string, rp *repo, ref, commit string, e entry, withContent bool) map[string]any {
 	repoURL := base + "/api/v1/repos/" + f.Owner + "/" + rp.name
 	html := base + "/" + f.Owner + "/" + rp.name
 	typ := map[string]string{"blob": "file", "tree": "dir", "commit": "submodule"}[e.Type]
 	if e.Type == "blob" && e.Mode == "120000" {
 		typ = "symlink"
 	}
-	last, _ := rp.git(nil, nil, "log", "-1", "--format=%H", ref, "--", e.Path)
+	last, _ := rp.git(nil, nil, "log", "-1", "--format=%H", commit, "--", e.Path)
 	m := map[string]any{
 		"name": path.Base(e.Path), "path": e.Path, "sha": e.SHA, "last_commit_sha": strings.TrimSpace(last),
 		"type": typ, "size": e.Size, "encoding": nil, "content": nil, "target": nil,
@@ -132,7 +138,7 @@ func (f *Fake) getContents(w http.ResponseWriter, r *http.Request, rp *repo, _ s
 		}
 		out := []map[string]any{}
 		for _, e := range es {
-			out = append(out, f.contentEntry(base, rp, ref, e, false))
+			out = append(out, f.contentEntry(base, rp, ref, commit, e, false))
 		}
 		writeJSON(w, http.StatusOK, out)
 		return nil
@@ -142,7 +148,7 @@ func (f *Fake) getContents(w http.ResponseWriter, r *http.Request, rp *repo, _ s
 		return notFound
 	}
 	if e.Type != "tree" {
-		writeJSON(w, http.StatusOK, f.contentEntry(base, rp, ref, e, true))
+		writeJSON(w, http.StatusOK, f.contentEntry(base, rp, ref, commit, e, true))
 		return nil
 	}
 	children, err := rp.lsTree(commit+":"+p, false)
@@ -152,7 +158,7 @@ func (f *Fake) getContents(w http.ResponseWriter, r *http.Request, rp *repo, _ s
 	out := []map[string]any{}
 	for _, c := range children {
 		c.Path = p + "/" + c.Path
-		out = append(out, f.contentEntry(base, rp, ref, c, false))
+		out = append(out, f.contentEntry(base, rp, ref, commit, c, false))
 	}
 	writeJSON(w, http.StatusOK, out)
 	return nil
@@ -215,7 +221,7 @@ func (f *Fake) changeFiles(w http.ResponseWriter, r *http.Request, rp *repo, log
 		return errf(http.StatusNotFound, "branch does not exist [name: %s]", body.Branch)
 	}
 	if body.NewBranch != "" && rp.branchExists(body.NewBranch) {
-		return errf(http.StatusConflict, "branch already exists [name: %s]", body.NewBranch)
+		return errf(http.StatusUnprocessableEntity, "branch already exists [name: %s]", body.NewBranch)
 	}
 	parent, _ := rp.resolve(body.Branch)
 	tree, err := rp.lsTree(parent, true)
@@ -233,8 +239,8 @@ func (f *Fake) changeFiles(w http.ResponseWriter, r *http.Request, rp *repo, log
 
 	var ops []fileOp
 	for _, cf := range body.Files {
-		p := strings.Trim(path.Clean("/"+cf.Path), "/")
-		if p == "" || strings.HasPrefix(strings.Trim(cf.Path, "/"), "..") || strings.Contains(p, ".git/") || p == ".git" {
+		p, ok := cleanTreePath(cf.Path)
+		if !ok {
 			return errf(http.StatusUnprocessableEntity, "invalid file path [path: %s]", cf.Path)
 		}
 		content, err := base64.StdEncoding.DecodeString(cf.Content)
@@ -243,40 +249,58 @@ func (f *Fake) changeFiles(w http.ResponseWriter, r *http.Request, rp *repo, log
 		}
 		op := cf.Operation
 		if op == "" {
-			op = "create"
+			return errf(http.StatusUnprocessableEntity, "[Operation]: Required")
 		}
 		cur, exists := existing[p]
 		if exists && cur.Type != "blob" {
 			return errf(http.StatusUnprocessableEntity, "path is a directory [path: %s]", p)
 		}
+		if op != "delete" {
+			// A parent that is a file makes the path invalid (ErrFilePathInvalid).
+			for d := path.Dir(p); d != "."; d = path.Dir(d) {
+				if pe, ok := existing[d]; ok && pe.Type != "tree" {
+					return errf(http.StatusUnprocessableEntity, "invalid file path, a parent is a file [path: %s]", p)
+				}
+			}
+		}
 		o := fileOp{op: op, path: p, content: content}
+		if op == "upload" {
+			// Create-or-update: an existing file is updated and keeps its mode.
+			op = "create"
+			if exists {
+				op = "update"
+			}
+			o.op = op
+		}
 		switch op {
-		case "create", "upload":
+		case "create":
 			if exists {
 				return errf(http.StatusUnprocessableEntity, "repository file already exists [path: %s]", p)
 			}
-			o.op = "create"
-			delete(existing, p)
 			existing[p] = entry{Type: "blob", Mode: "100644", Path: p}
 		case "update":
 			if !exists {
 				return errf(http.StatusNotFound, "repository file does not exist [path: %s]", p)
 			}
-			if cf.SHA == "" || cf.SHA != cur.SHA {
-				return errf(http.StatusConflict, "file does not match [path: %s, given: %s, expected: %s]", p, cf.SHA, cur.SHA)
+			if cf.Operation != "upload" && cf.SHA != "" && cf.SHA != cur.SHA {
+				return errf(http.StatusUnprocessableEntity, "file does not match [path: %s, given: %s, expected: %s]", p, cf.SHA, cur.SHA)
 			}
 		case "delete":
 			if !exists {
 				return errf(http.StatusNotFound, "repository file does not exist [path: %s]", p)
 			}
-			if cf.SHA == "" || cf.SHA != cur.SHA {
-				return errf(http.StatusConflict, "file does not match [path: %s, given: %s, expected: %s]", p, cf.SHA, cur.SHA)
+			// Gitea fills a missing sha with the branch head, so none is required.
+			if cf.SHA != "" && cf.SHA != cur.SHA {
+				return errf(http.StatusUnprocessableEntity, "file does not match [path: %s, given: %s, expected: %s]", p, cf.SHA, cur.SHA)
 			}
 			delete(existing, p)
 		case "rename":
-			from := strings.Trim(path.Clean("/"+cf.FromPath), "/")
-			src, ok := existing[from]
+			from, ok := cleanTreePath(cf.FromPath)
 			if !ok {
+				return errf(http.StatusUnprocessableEntity, "invalid file path [path: %s]", cf.FromPath)
+			}
+			src, found := existing[from]
+			if !found || src.Type != "blob" {
 				return errf(http.StatusNotFound, "repository file does not exist [path: %s]", from)
 			}
 			if exists {
@@ -285,6 +309,9 @@ func (f *Fake) changeFiles(w http.ResponseWriter, r *http.Request, rp *repo, log
 			o.fromPath = from
 			if cf.Content == "" {
 				o.content = nil
+			}
+			if cf.SHA != "" && cf.SHA != src.SHA {
+				return errf(http.StatusUnprocessableEntity, "file does not match [path: %s, given: %s, expected: %s]", from, cf.SHA, src.SHA)
 			}
 			delete(existing, from)
 			existing[p] = src
@@ -335,7 +362,7 @@ func (f *Fake) changeFiles(w http.ResponseWriter, r *http.Request, rp *repo, log
 		if !ok {
 			continue
 		}
-		files = append(files, f.contentEntry(base, rp, target, e, false))
+		files = append(files, f.contentEntry(base, rp, target, sha, e, false))
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"files": files,
@@ -350,4 +377,23 @@ func (f *Fake) changeFiles(w http.ResponseWriter, r *http.Request, rp *repo, log
 		"verification": map[string]any{"verified": false, "reason": "gpg.error.not_signed_commit", "signature": "", "payload": ""},
 	})
 	return nil
+}
+
+// cleanTreePath normalises a repository path like Gitea's CleanGitTreePath and rejects an empty
+// path, a path escaping the root and any component equal to ".git" (case-insensitive).
+func cleanTreePath(p string) (string, bool) {
+	p = strings.ReplaceAll(p, "\\", "/")
+	if strings.HasPrefix(strings.Trim(p, "/"), "..") {
+		return "", false
+	}
+	p = strings.Trim(path.Clean("/"+p), "/")
+	if p == "" {
+		return "", false
+	}
+	for c := range strings.SplitSeq(p, "/") {
+		if strings.EqualFold(c, ".git") {
+			return "", false
+		}
+	}
+	return p, true
 }

@@ -108,12 +108,16 @@ func (f *Fake) createBranch(w http.ResponseWriter, r *http.Request, rp *repo, _ 
 	var body struct {
 		NewBranchName string `json:"new_branch_name"`
 		OldRefName    string `json:"old_ref_name"`
+		OldBranchName string `json:"old_branch_name"` // deprecated, still honoured by Gitea 28.2
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		return errf(http.StatusUnprocessableEntity, "invalid body: %v", err)
 	}
 	if body.NewBranchName == "" {
 		return errf(http.StatusUnprocessableEntity, "[NewBranchName]: Required")
+	}
+	if body.OldRefName == "" {
+		body.OldRefName = body.OldBranchName
 	}
 	if body.OldRefName == "" {
 		body.OldRefName = rp.defaultBranch()
