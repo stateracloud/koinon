@@ -1,6 +1,6 @@
 # 0023. Optional observability, hash-chained audit on by default
 
-- Status: Accepted
+- Status: Accepted; amended below
 - Date: 2026-10-21
 - Decision: [design.md#23](../design.md)
 
@@ -53,7 +53,62 @@ triggers block `UPDATE`, `DELETE` and `TRUNCATE`; a verifier job walks the chain
   _(inferred)_.
 - Follow-ups: audit table and verifier in early migrations; decide per-org vs global chain.
 
-## Amendment (2026-10-26)
+## Amendment (2026-10-26): what is built
+
+Audit is a hash chain, one per org, with a verifier and a TRUNCATE block (issue 104).
+
+- **Chains are per org.** `audit_events` keeps `chain_seq` (1, 2, ... per org, no gaps), `prev_hash`
+  (the previous row's `hash`, 32 zero bytes for the first) and `hash`. Per-org chains keep one org's
+  inserts from waiting on another's, and a verifier can read one org's rows alone. `audit_events.org_id`
+  is not null, so there are no org-less events and no platform chain: events about a user (login,
+  logout) are written in the user's personal org, and so are platform admin grants (ADR 0004).
+- **Who computes it.** A `BEFORE INSERT` trigger on `audit_events` (running as the table owner) takes a
+  row lock on the org's row in `audit_chain_heads`, sets `chain_seq`, `prev_hash` and `hash`, and
+  moves the head. Values a writer supplies are overwritten, so no writer can forget or choose them.
+  Inserts of one org serialise on the head lock until their transaction ends, so a long transaction
+  that audits delays other writers of the same org; transactions that audit in two orgs should take
+  them in the same order. The head changes only from inside the trigger (`audit_chain_heads` refuses
+  direct `UPDATE` and `DELETE`, and `koinon_app` has no write privilege on it).
+- **Canonical encoding (version 1).** `hash = sha256(canonical_row || prev_hash)`. `canonical_row` is the
+  concatenation of these fields, each as an 8-byte big-endian byte length followed by its UTF-8 bytes:
+  the tag `koinon.audit.v1`; `org_id` and `id` as lower-case UUID text; `chain_seq` in decimal;
+  `actor_kind`, `actor_id`, `action`, `target_kind`, `target_id`; `summary` as the text Postgres prints
+  for the `jsonb` value; `request_id`; `created_at` as decimal microseconds since the Unix epoch.
+  `prev_hash` is appended as its 32 raw bytes. The SQL function `audit_event_hash` and the Go function
+  `audit.RowHash` implement it, and a test checks that they agree. A change to the encoding gets a new
+  tag and a new migration.
+- **Existing rows** were chained by the migration, per org in `id` order (UUIDv7, so creation order), with
+  the append-only trigger off for the backfill only.
+- **Verifier.** `koinon-api audit verify [--org <id>]` walks each chain in `chain_seq` order, recomputes
+  every hash in Go and compares it, checks `prev_hash` links and the sequence, and compares the head
+  with the last row, which also shows rows removed from the end. It prints the first broken link per org
+  and exits non-zero. It is a command to run (`kubectl exec`), not a scheduled job.
+- **TRUNCATE.** A statement-level `BEFORE TRUNCATE` trigger on `audit_events` and `audit_chain_heads`
+  raises for every role, the owner included, besides the existing `UPDATE`/`DELETE` trigger. Because
+  `TRUNCATE orgs CASCADE` reaches the audit tables, tests that reset the database use
+  `pgtest.TruncateOrgs`, which runs it with `session_replication_role = replica`.
+- **Read path.** `AuditService.List` and `GET /admin/v1/audit` (org admins and owners for their org;
+  platform admins for any org or all). There is no web UI page yet.
+- **Coverage added.** `approval.approve`, `approval.first_approve`, `approval.deny`, `approval.expire`,
+  `agent.create`, `agent.archive`, `auth.login`, `auth.logout`. Failed logins and ticket actions are not
+  recorded.
+
+- **Lock order.** A transaction that audits in more than one org must do it in org ID order, so two
+  such transactions cannot deadlock on the chain heads. No current path audits two orgs in one
+  transaction.
+- **jsonb text.** The verifier relies on Postgres's text form of `jsonb` (key order and spacing),
+  which the SQL hash function and the verifier's query share by construction; a Postgres change to
+  that form would be a new encoding version.
+- **Integrity, not authenticity.** The chain shows that events were not changed or removed. It does not
+  show who wrote them: `koinon_app` can insert an event with any actor, and it is chained like any other.
+
+What remains: a database superuser (or the table owner, who can disable triggers) can rewrite a whole
+chain, head included, and `koinon-api audit verify` will pass. Closing that needs an HMAC key kept
+outside the database or periodic external anchoring of the head hash, both still deferred. The
+`created_at` of an event is the start time of its transaction, so it can differ from chain order by the
+length of a transaction. HMAC key custody and which OCSF events enter the log stay open.
+
+## Amendment (2026-10-26): metrics
 
 Metrics are built for the three Go components (issue #106). The amendment records what exists, the
 label rule and what is deferred; the metric list is in the docs site, guide "Metrics".
@@ -79,7 +134,7 @@ label rule and what is deferred; the metric list is in the docs site, guide "Met
 
 ## Open questions
 
-- Per-org chains vs one global chain.
+- ~~Per-org chains vs one global chain.~~ Per org, see the 2026-10-26 amendment.
 - HMAC key custody or external anchoring (e.g. periodic signed checkpoint to object storage).
 - Which OCSF events are copied into audit vs only kept in OpenShell logs.
 

@@ -610,6 +610,48 @@ func (ns NullOrgRole) Value() (driver.Value, error) {
 	return string(ns.OrgRole), nil
 }
 
+type PlatformAdminSource string
+
+const (
+	PlatformAdminSourceBootstrap PlatformAdminSource = "bootstrap"
+	PlatformAdminSourceOidcGroup PlatformAdminSource = "oidc_group"
+)
+
+func (e *PlatformAdminSource) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = PlatformAdminSource(s)
+	case string:
+		*e = PlatformAdminSource(s)
+	default:
+		return fmt.Errorf("unsupported scan type for PlatformAdminSource: %T", src)
+	}
+	return nil
+}
+
+type NullPlatformAdminSource struct {
+	PlatformAdminSource PlatformAdminSource
+	Valid               bool // Valid is true if PlatformAdminSource is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullPlatformAdminSource) Scan(value interface{}) error {
+	if value == nil {
+		ns.PlatformAdminSource, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.PlatformAdminSource.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullPlatformAdminSource) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.PlatformAdminSource), nil
+}
+
 type RunParkReason string
 
 const (
@@ -954,6 +996,12 @@ type ApprovalRequest struct {
 	System              bool
 }
 
+type AuditChainHead struct {
+	OrgID pgtype.UUID
+	Seq   int64
+	Hash  []byte
+}
+
 type AuditEvent struct {
 	OrgID      pgtype.UUID
 	ID         pgtype.UUID
@@ -965,6 +1013,9 @@ type AuditEvent struct {
 	Summary    []byte
 	RequestID  string
 	CreatedAt  pgtype.Timestamptz
+	ChainSeq   int64
+	PrevHash   []byte
+	Hash       []byte
 }
 
 type Connection struct {
@@ -1140,6 +1191,7 @@ type PlatformAdmin struct {
 	UserID    pgtype.UUID
 	GrantedBy pgtype.UUID
 	GrantedAt pgtype.Timestamptz
+	Source    PlatformAdminSource
 }
 
 type PriceOverride struct {

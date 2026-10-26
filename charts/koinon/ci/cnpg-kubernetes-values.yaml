@@ -1,4 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
+# No client TLS Secret: the mesh provides mTLS (openshell.insecure).
+openshell:
+  insecure: true
 gateway:
   mode: kubernetes
 postgres:
