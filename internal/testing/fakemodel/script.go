@@ -6,8 +6,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -152,30 +153,35 @@ func ParseScript(data []byte) (Script, error) {
 
 // LoadDir parses every *.yaml and *.yml file in dir (not recursively), one script per file.
 func LoadDir(dir string) ([]Script, error) {
-	entries, err := os.ReadDir(dir)
+	return LoadFS(os.DirFS(dir), ".")
+}
+
+// LoadFS is [LoadDir] on a directory of fsys, such as an embedded one.
+func LoadFS(fsys fs.FS, dir string) ([]Script, error) {
+	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
 		return nil, fmt.Errorf("read scripts: %w", err)
 	}
 	var scripts []Script
 	seen := map[string]string{}
 	for _, e := range entries {
-		ext := filepath.Ext(e.Name())
+		ext := path.Ext(e.Name())
 		if e.IsDir() || (ext != ".yaml" && ext != ".yml") {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
-		data, err := os.ReadFile(path) //nolint:gosec // test scripts from an operator-chosen directory
+		name := path.Join(dir, e.Name())
+		data, err := fs.ReadFile(fsys, name)
 		if err != nil {
 			return nil, fmt.Errorf("read script: %w", err)
 		}
 		s, err := ParseScript(data)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 		if prev, ok := seen[s.Model]; ok {
-			return nil, fmt.Errorf("%s: model %q already defined in %s", path, s.Model, prev)
+			return nil, fmt.Errorf("%s: model %q already defined in %s", name, s.Model, prev)
 		}
-		seen[s.Model] = path
+		seen[s.Model] = name
 		scripts = append(scripts, s)
 	}
 	return scripts, nil

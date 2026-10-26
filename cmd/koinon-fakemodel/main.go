@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Command koinon-fakemodel serves scripted OpenAI- and Anthropic-compatible model responses for
-// tests and e2e (ADR 0025). Scripts are YAML files in the scripts directory; see package
+// tests and e2e (ADR 0025). Scripts are YAML files, built in from test/fakemodel/scripts or read from -scripts; see package
 // internal/testing/fakemodel for the format.
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -13,17 +14,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	fakemodelscripts "github.com/stateracloud/koinon/test/fakemodel"
 )
 
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
-	scripts := flag.String("scripts", defaultScripts(), "directory of YAML scripts")
+	scripts := flag.String("scripts", "", "directory of YAML scripts (default: the example scripts built into the binary)")
 	flag.Parse()
 
 	if err := run(*addr, *scripts); err != nil {
@@ -32,17 +33,8 @@ func main() {
 	}
 }
 
-// defaultScripts is the example scripts shipped in the ko image (kodata), or the repository's
-// example directory when run from the repository root.
-func defaultScripts() string {
-	if dir := os.Getenv("KO_DATA_PATH"); dir != "" {
-		return filepath.Join(dir, "scripts")
-	}
-	return "test/fakemodel/scripts"
-}
-
 func run(addr, dir string) error {
-	scripts, err := fakemodel.LoadDir(dir)
+	scripts, err := loadScripts(dir)
 	if err != nil {
 		return err
 	}
@@ -67,9 +59,18 @@ func run(addr, dir string) error {
 		_ = hs.Shutdown(shutdownCtx)
 	}()
 
-	slog.Info("starting koinon-fakemodel", "version", project.Version, "addr", addr, "scripts", dir, "models", models)
+	slog.Info("starting koinon-fakemodel", "version", project.Version, "addr", addr, "scripts", cmp.Or(dir, "built-in"), "models", models)
 	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil
+}
+
+// loadScripts reads dir, or the example scripts embedded from test/fakemodel/scripts when dir is
+// empty.
+func loadScripts(dir string) ([]fakemodel.Script, error) {
+	if dir == "" {
+		return fakemodel.LoadFS(fakemodelscripts.FS, "scripts")
+	}
+	return fakemodel.LoadDir(dir)
 }
