@@ -111,8 +111,12 @@ The chart generates a client certificate Secret, `openshell-client-tls`, in the 
 namespace. The [quickstart](/quickstart/) copies it into Koinon's namespace.
 
 OpenShell 0.1.5 pulls its supervisor image from `ghcr.io/nvidia/openshell/supervisor:0.1.5`. Koinon's
-admission policy allows exactly that image. If you mirror it, add your reference to
-`sandboxPolicy.supervisorImages`.
+admission policy allows exactly that image. If you pull it through a mirror, set the OpenShell chart's
+`global.image.registry` to the mirror followed by `/nvidia` (its image paths are `openshell/...`, and its
+default is `ghcr.io/nvidia`) and Koinon's `global.imageRegistry` or `global.registryMirrors` to
+the same place, and the two agree; otherwise list your reference in `sandboxPolicy.supervisorImages`.
+For a private registry, set `server.sandboxImagePullSecrets` on the OpenShell release. See
+[Private registries and mirrors](/guides/private-registries/).
 
 ## The preflight
 

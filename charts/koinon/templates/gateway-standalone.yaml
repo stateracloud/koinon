@@ -75,11 +75,14 @@ spec:
       serviceAccountName: {{ $name }}
       automountServiceAccountToken: false
       enableServiceLinks: false
+      {{- with include "koinon.imagePullSecrets" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
       securityContext:
         {{- include "koinon.podSecurityContext" . | nindent 8 }}
       containers:
         - name: agentgateway
-          image: {{ printf "%s:%s" $gw.image.repository $gw.image.tag }}{{ with $gw.image.digest }}@{{ . }}{{ end }}
+          image: {{ include "koinon.imageRef" (list . (printf "%s:%s%s" $gw.image.repository $gw.image.tag (ternary (printf "@%s" $gw.image.digest) "" (not (empty $gw.image.digest))))) }}
           imagePullPolicy: IfNotPresent
           args: ["-f", "/config/config.yaml"]
           ports:

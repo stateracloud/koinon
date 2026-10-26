@@ -7,3 +7,8 @@ var (
 	ImageTag           = imageTag
 	CheckNetworkPolicy = (*Checker).checkNetworkPolicy
 )
+
+var ParseGatewayConfig = func(toml string) (pullSecrets []string, supervisorImage string) {
+	g := parseGatewayConfig(toml)
+	return g.pullSecrets, g.supervisorImage
+}

@@ -75,3 +75,4 @@ are in [0046](0046-adr-conventions.md).
 | [0058](0058-gateway-modes.md) | Gateway modes: standalone, kubernetes and shared | Accepted |
 | [0059](0059-v01-opencode-only.md) | v0.1 ships one harness: OpenCode v2 | Accepted |
 | [0060](0060-migrations-as-a-job.md) | Migrations run as a Job, not on start; an Argo CD Sync hook under Argo | Accepted |
+| [0061](0061-image-pull-secrets-and-registry-mirrors.md) | Image pull secrets and registry mirrors: Koinon rewrites its images; OpenShell pulls for sandboxes | Accepted |

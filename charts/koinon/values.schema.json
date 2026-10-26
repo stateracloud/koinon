@@ -7,6 +7,19 @@
   "definitions": {
     "nonEmpty": {"type": "string", "minLength": 1},
     "map": {"type": "object"},
+    "pullSecrets": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "#/definitions/nonEmpty"},
+          {
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"$ref": "#/definitions/nonEmpty"}}
+          }
+        ]
+      }
+    },
     "resources": {
       "type": "object",
       "additionalProperties": false,
@@ -71,6 +84,19 @@
     "clusterDomain": {"$ref": "#/definitions/nonEmpty"},
     "nameOverride": {"type": "string"},
     "fullnameOverride": {"type": "string"},
+    "global": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "imagePullSecrets": {"$ref": "#/definitions/pullSecrets"},
+        "imageRegistry": {"type": "string", "pattern": "^([^/\\s:]+(:[0-9]+)?(/[^\\s:]+)*)?$"},
+        "registryMirrors": {
+          "type": "object",
+          "propertyNames": {"minLength": 1},
+          "additionalProperties": {"type": "string", "pattern": "^[^/\\s:]+(:[0-9]+)?(/[^\\s:]+)*$"}
+        }
+      }
+    },
     "image": {
       "type": "object",
       "additionalProperties": false,
@@ -80,14 +106,7 @@
         "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
       }
     },
-    "imagePullSecrets": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["name"],
-        "properties": {"name": {"$ref": "#/definitions/nonEmpty"}}
-      }
-    },
+    "imagePullSecrets": {"$ref": "#/definitions/pullSecrets"},
     "api": {
       "type": "object",
       "additionalProperties": false,
@@ -156,6 +175,14 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "activeDeadlineSeconds": {"type": "integer", "minimum": 1},
+        "openshell": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "namespace": {"$ref": "#/definitions/nonEmpty"},
+            "configMap": {"$ref": "#/definitions/nonEmpty"}
+          }
+        },
         "agentSandbox": {
           "type": "object",
           "additionalProperties": false,
@@ -482,7 +509,6 @@
         },
         "supervisorImages": {
           "type": "array",
-          "minItems": 1,
           "items": {"type": "string", "minLength": 1}
         },
         "validationActions": {
