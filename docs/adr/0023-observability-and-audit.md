@@ -93,6 +93,15 @@ Audit is a hash chain, one per org, with a verifier and a TRUNCATE block (issue 
   `agent.create`, `agent.archive`, `auth.login`, `auth.logout`. Failed logins and ticket actions are not
   recorded.
 
+- **Lock order.** A transaction that audits in more than one org must do it in org ID order, so two
+  such transactions cannot deadlock on the chain heads. No current path audits two orgs in one
+  transaction.
+- **jsonb text.** The verifier relies on Postgres's text form of `jsonb` (key order and spacing),
+  which the SQL hash function and the verifier's query share by construction; a Postgres change to
+  that form would be a new encoding version.
+- **Integrity, not authenticity.** The chain shows that events were not changed or removed. It does not
+  show who wrote them: `koinon_app` can insert an event with any actor, and it is chained like any other.
+
 What remains: a database superuser (or the table owner, who can disable triggers) can rewrite a whole
 chain, head included, and `koinon-api audit verify` will pass. Closing that needs an HMAC key kept
 outside the database or periodic external anchoring of the head hash, both still deferred. The

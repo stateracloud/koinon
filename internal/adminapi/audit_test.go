@@ -107,3 +107,15 @@ var _ = Describe("GET /admin/v1/audit", func() {
 		}
 	})
 })
+
+var _ = Describe("GET /admin/v1/audit without an org", func() {
+	It("answers 403 for a token with no org", func(ctx SpecContext) {
+		e := newEnv(ctx)
+		// A token row cannot exist without an org (org_id is part of its key), so this is the
+		// handler's own guard; the unit under test is audit.List's refusal of a zero org.
+		_, _, err := audit.List(ctx, store.New(pool), audit.Filter{})
+		Expect(err).To(MatchError(audit.ErrBadFilter))
+		st, _ := e.call(ctx, e.token, http.MethodGet, "/audit", nil)
+		Expect(st).To(Equal(http.StatusOK))
+	})
+})

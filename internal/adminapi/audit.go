@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
@@ -31,6 +32,12 @@ func auditEvent(e store.AuditEvent) AuditEvent {
 // ListAuditEvents implements StrictServerInterface.
 func (s *Server) ListAuditEvents(ctx context.Context, req ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error) {
 	p, _ := s.actor(ctx)
+	if !p.Org.Valid {
+		return ListAuditEventsdefaultJSONResponse{Body: Error{Error: struct {
+			Code    ErrorCode `json:"code"`
+			Message string    `json:"message"`
+		}{PermissionDenied, "this token has no org"}}, StatusCode: http.StatusForbidden}, nil
+	}
 	prm := req.Params
 	f := audit.Filter{Org: p.Org}
 	if prm.Since != nil {
