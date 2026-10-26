@@ -447,6 +447,140 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, agent.ID).UnhealthyAt.Valid).To(BeFalse(), "recording the new home clears the stale mark")
 		})
 
+		Describe("a sandbox in Error or Completed", func() {
+			var names execution.AgentNames
+			fail := func(phase openshellv1.SandboxPhase) {
+				osg.SetPhase(row.Workspace, names.Sandbox, phase)
+			}
+			recreations := func(ctx context.Context) int {
+				var n int
+				Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'sandbox.recreate'`, org).Scan(&n)).To(Succeed())
+				return n
+			}
+			BeforeEach(func() { names = execution.AgentObjectNames(org.Bytes, agent.ID.Bytes) })
+
+			DescribeTable("is deleted and recreated with an audit event once no run is active",
+				func(ctx SpecContext, phase openshellv1.SandboxPhase, name string) {
+					old := sandboxRow(ctx, agent.ID).HomeGeneration.String
+					fail(phase)
+					pass(ctx, r) // deletes
+					Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+					Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateDeleting))
+					Expect(sandboxRow(ctx, agent.ID).Message).To(ContainSubstring("recreating a failed sandbox (phase " + name))
+					pass(ctx, r) // creates
+					recreated := sandboxRow(ctx, agent.ID)
+					Expect(recreated.State).To(Equal(store.SandboxStateReady))
+					Expect(recreated.HomeGeneration.String).NotTo(Equal(old))
+					Expect(recreations(ctx)).To(Equal(1))
+					var summary string
+					Expect(pool.QueryRow(ctx, `SELECT summary::text FROM audit_events WHERE org_id = $1 AND action = 'sandbox.recreate'`, org).Scan(&summary)).To(Succeed())
+					Expect(summary).To(ContainSubstring(`"phase": "` + name + `"`))
+				},
+				Entry("Error", openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR, "Error"),
+				Entry("Completed", openshellv1.SandboxPhase_SANDBOX_PHASE_COMPLETED, "Completed"),
+			)
+
+			It("is repaired under a starting run, which waits for the new sandbox", func(ctx SpecContext) {
+				queueRun(ctx, org, user, agent.ID)
+				run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: org, OwnerID: "agentd-test", LeaseSeconds: 60})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(run.State).To(Equal(store.RunStateStarting))
+				fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(1), "repaired in the same pass")
+				Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateDeleting))
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateReady))
+				got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: run.ID})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got.State).To(Equal(store.RunStateStarting))
+			})
+
+			It("is left alone while a run is running, and repaired once it has finished", func(ctx SpecContext) {
+				queueRun(ctx, org, user, agent.ID)
+				run := claimRun(ctx, org)
+				fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+				Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateError))
+
+				_, err := q.FinishRun(ctx, store.FinishRunParams{
+					OrgID: org, ID: run.ID, Epoch: run.Epoch, Outcome: store.RunStateFailed,
+					OutcomeReason: pgtype.Text{String: "sandbox error", Valid: true},
+				})
+				Expect(err).NotTo(HaveOccurred())
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			})
+
+			It("shares one budget of three with stuck recreations, for the reconciler and for agentd", func(ctx SpecContext) {
+				count := func() int64 {
+					n, err := q.CountRecentSandboxRecreations(ctx, store.CountRecentSandboxRecreationsParams{OrgID: org, AgentID: agent.ID})
+					Expect(err).NotTo(HaveOccurred())
+					return n
+				}
+				for range 2 {
+					fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+					pass(ctx, r) // deletes
+					pass(ctx, r) // creates
+				}
+				Expect(count()).To(BeEquivalentTo(2))
+
+				By("agentd finds a sandbox stuck: its incident and the recreation count once")
+				run := queueRun(ctx, org, user, agent.ID)
+				_, err := q.InsertSandboxIncident(ctx, store.InsertSandboxIncidentParams{
+					OrgID: org, AgentID: agent.ID, RunID: run.ID, TicketID: run.TicketID,
+					Processes: []byte(`[]`), Outcome: "recreate", Work: "nothing",
+				})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = q.MarkSandboxUnhealthy(ctx, store.MarkSandboxUnhealthyParams{
+					OrgID: org, AgentID: agent.ID, Reason: "stuck", Generation: sandboxRow(ctx, agent.ID).HomeGeneration.String,
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(count()).To(BeEquivalentTo(3), "agentd's guard now refuses a further recreation")
+				pass(ctx, r) // deletes the stuck one
+				pass(ctx, r) // creates
+				Expect(count()).To(BeEquivalentTo(3), "the stuck recreation's audit event is not counted again")
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(3))
+
+				By("and the reconciler's guard refuses the next failure")
+				_, err = pool.Exec(ctx, `UPDATE runs SET state = 'canceled', finished_at = now(), ready_at = NULL WHERE org_id = $1 AND id = $2`, org, run.ID)
+				Expect(err).NotTo(HaveOccurred())
+				fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(3))
+				a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(a.UnhealthyAt.Valid).To(BeTrue())
+			})
+
+			It("marks the agent unhealthy instead of recreating a fourth time in 24 hours, and recreates again once resumed", func(ctx SpecContext) {
+				for i := 1; i <= 3; i++ {
+					fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+					pass(ctx, r) // deletes
+					pass(ctx, r) // creates
+					Expect(recreations(ctx)).To(Equal(i))
+				}
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(3))
+
+				fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(3), "not recreated in a loop")
+				a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(a.UnhealthyAt.Valid).To(BeTrue())
+				Expect(a.UnhealthyReason.String).To(And(
+					ContainSubstring("the sandbox kept failing"), ContainSubstring("3 recreations in 24 hours"), ContainSubstring("phase Error")))
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(3), "an unhealthy agent's failed sandbox waits for the admin")
+
+				_, err = q.ResumeAgent(ctx, store.ResumeAgentParams{OrgID: org, ID: agent.ID})
+				Expect(err).NotTo(HaveOccurred())
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(4), "a new count after the resume")
+			})
+		})
+
 		It("stops after the idle timeout and starts again for a queued run", func(ctx SpecContext) {
 			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
 			phase := func() openshellv1.SandboxPhase {
@@ -677,6 +811,86 @@ var _ = Describe("Reconciler", func() {
 		Expect(newReconciler().ReconcileAll(ctx)).To(MatchError(ContainSubstring("rejected")))
 		Expect(osg.Calls("CreateSandbox")).To(Equal(0))
 		Expect(osg.Calls("CreateProvider")).To(Equal(0))
+	})
+
+	Describe("when the gateway cannot apply the state", func() {
+		phase := func(row store.AgentSandbox, agent pgtype.UUID) openshellv1.SandboxPhase {
+			names := execution.AgentObjectNames(org.Bytes, agent.Bytes)
+			return osg.Sandbox(row.Workspace, names.Sandbox).GetStatus().GetPhase()
+		}
+
+		It("still starts a stopped sandbox with demand and stops an idle one, and reports the error", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			b := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+
+			mg.fail = errors.New("gateway unreachable")
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("gateway unreachable")))
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED), "idle stop")
+			Expect(sandboxRow(ctx, b.ID).State).To(Equal(store.SandboxStateStopped))
+
+			now.Store(nil)
+			queueRun(ctx, org, user, a.ID)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(ContainSubstring("gateway unreachable")))
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY), "start on demand")
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateReady))
+			Expect(sandboxRow(ctx, b.ID).State).To(Equal(store.SandboxStateStopped), "no demand for b")
+		})
+
+		It("records sandbox state of agents whose keys did not change, and holds back an agent whose new key is not live", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			keyBefore := sandboxRow(ctx, a.ID).GatewayKeyID
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
+
+			// A reload that does not complete in time, as a slow Waiter reports it.
+			mg.fail = fmt.Errorf("wait for revision: %w", context.DeadlineExceeded)
+			fresh := newAgent(ctx, org, user)
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(context.DeadlineExceeded))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "a's state is recorded")
+			Expect(sandboxRow(ctx, a.ID).GatewayKeyID).To(Equal(keyBefore))
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1), "the fresh agent's key is not live: no sandbox yet")
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for the gateway"))
+
+			By("the gateway is back")
+			mg.fail = nil
+			now.Store(nil)
+			pass(ctx, r)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(2))
+			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("holds back every agent after a restart until one Apply has succeeded", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			pass(ctx, newReconciler())
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+
+			restarted := newReconciler()
+			mg.fail = errors.New("gateway unreachable")
+			advance(11 * time.Minute)
+			Expect(restarted.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY),
+				"the recorded key may not be live: no sandbox work")
+
+			mg.fail = nil
+			pass(ctx, restarted)
+			Expect(phase(sandboxRow(ctx, a.ID), a.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
+		})
+
+		It("keeps holding back a new key over later failed passes", func(ctx SpecContext) {
+			r := newReconciler()
+			newAgent(ctx, org, user)
+			mg.fail = errors.New("gateway unreachable")
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(osg.Calls("CreateSandbox")).To(Equal(0))
+			Expect(osg.Calls("CreateProvider")).To(Equal(0))
+		})
 	})
 
 	It("goes on when the gateway rejects only some orgs' objects, and reports them on the org's agents", func(ctx SpecContext) {
