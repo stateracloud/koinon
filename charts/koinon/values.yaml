@@ -339,15 +339,20 @@ ingress:
 #     - {group: gateway.networking.k8s.io, kind: Gateway, name: shared, namespace: gateway, sectionName: https}
 # With the route on and publicUrl empty, the public URL is https://<first hostname>; set publicUrl when
 # the Gateway serves the route over plain HTTP.
+# Leave networkPolicy.apiFrom empty with a Gateway whose proxy is not a pod a NetworkPolicy can select
+# (Cilium's node-level Envoy, for example). The web UI follows runs over long-lived streams: if the
+# Gateway closes idle or long requests, raise its limits with timeouts (Gateway API HTTPRouteTimeouts,
+# rendered into the route's rule as given), for example {request: "0s", backendRequest: "0s"} for none.
 httpRoute:
   enabled: false
   annotations: {}
   hostnames: []
   parentRefs: []
+  timeouts: {}
 
 networkPolicy:
   enabled: true
-  # Extra peers allowed to reach the API port (for example the ingress controller's namespace).
+  # Extra peers allowed to reach the API port (for example the ingress controller's or Gateway's namespace).
   # Empty allows every source.
   apiFrom: []
   # Peers allowed to scrape agentgateway's stats port.

@@ -459,6 +459,12 @@ egress.allowedInternalHosts; both are joined. */}}
 {{- if and .Values.httpRoute.enabled (or (not .Values.httpRoute.hostnames) (not .Values.httpRoute.parentRefs)) }}
 {{- fail "httpRoute.hostnames and httpRoute.parentRefs are required when httpRoute.enabled is true" }}
 {{- end }}
+{{- if and .Values.httpRoute.enabled .Values.ingress.enabled }}
+{{- fail "ingress.enabled and httpRoute.enabled are both set: expose Koinon through one of them" }}
+{{- end }}
+{{- if and .Values.httpRoute.enabled .Values.httpRoute.hostnames (not .Values.publicUrl) (contains "*" (first .Values.httpRoute.hostnames)) }}
+{{- fail "the first httpRoute hostname is a wildcard, so it cannot be the public URL: set publicUrl" }}
+{{- end }}
 {{- if and (not .Values.openshell.clientTLSSecret) (not .Values.openshell.insecure) }}
 {{- fail "openshell.clientTLSSecret is required: Koinon dials the OpenShell gateway (it controls every sandbox) over mTLS. Set openshell.clientTLSSecret to a Secret with the gateway's client certificate (tls.crt, tls.key, ca.crt), or set openshell.insecure=true only if a service mesh provides mTLS between Koinon and the gateway" }}
 {{- end }}
