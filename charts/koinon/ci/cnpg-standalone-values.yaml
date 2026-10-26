@@ -29,6 +29,7 @@ oidc:
   groupMappings:
     koinon-admins: admin
     staff: member
+  platformAdminGroups: [koinon-platform]
 bootstrapAdmin:
   existingSecret: koinon-bootstrap-admin-gitops
 imagePullSecrets:

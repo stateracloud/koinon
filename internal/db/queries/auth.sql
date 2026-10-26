@@ -46,9 +46,23 @@ VALUES (@org_id, @user_id, 'manual', @role)
 ON CONFLICT (org_id, user_id, group_mapping_id) DO NOTHING;
 
 -- name: GrantPlatformAdmin :exec
-INSERT INTO platform_admins (user_id, granted_by)
-VALUES (@user_id, sqlc.narg(granted_by))
+INSERT INTO platform_admins (user_id, granted_by, source)
+VALUES (@user_id, sqlc.narg(granted_by), 'bootstrap')
 ON CONFLICT (user_id) DO NOTHING;
+
+-- name: GrantPlatformAdminFromGroup :one
+-- The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
+-- no row when the user already is a platform admin (from any source), which keeps that source.
+INSERT INTO platform_admins (user_id, source)
+VALUES (@user_id, 'oidc_group')
+ON CONFLICT (user_id) DO NOTHING
+RETURNING user_id;
+
+-- name: RevokePlatformAdminFromGroup :one
+-- Revokes only a grant that came from a platform admin group; it returns no row for any other.
+DELETE FROM platform_admins
+WHERE user_id = @user_id AND source = 'oidc_group'
+RETURNING user_id;
 
 -- name: IsPlatformAdmin :one
 SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = @user_id);
