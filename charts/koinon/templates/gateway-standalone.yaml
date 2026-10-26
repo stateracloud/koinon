@@ -46,6 +46,11 @@ metadata:
   name: {{ $name }}
   labels:
     {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+  annotations:
+    # Argo CD only: its config ConfigMap is created by koinon-reconciler, so this Deployment cannot
+    # become healthy before the reconciler runs, which is in sync wave 2 (after the migration Job).
+    # Left in wave 0 it would stall the sync before the migration. Helm and Flux ignore it.
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   # SQLite budget store: exactly one replica, and the old pod stops before the new one starts.
   replicas: 1
