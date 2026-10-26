@@ -106,6 +106,7 @@ type Server struct {
 	approvals *approvals.Service
 	catalog   *catalog.Service
 	mcp       *mcpservers.Service
+	typing    typingGate
 }
 
 // New returns a Server backed by pool.

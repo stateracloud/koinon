@@ -169,6 +169,12 @@ var isolationCases = map[string]isolationCase{
 		},
 	},
 
+	taskv1alpha1connect.TaskServiceNotifyTypingProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.tasks.NotifyTyping(ctx, &taskv1alpha1.NotifyTypingRequest{OrgId: org, TaskId: f.ticket.GetId()})
+		},
+	},
+
 	runv1alpha1connect.RunServiceGetRunProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.runs.GetRun(ctx, &runv1alpha1.GetRunRequest{OrgId: org, RunId: f.run.GetId()})

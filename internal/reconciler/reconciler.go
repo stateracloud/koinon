@@ -429,7 +429,10 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		}
 		early = append(early, w)
 	}
-	earlyJobs := r.startJobs(ctx, early, workspaces)
+	// One semaphore for the whole pass, so the early and the late jobs together stay within
+	// SandboxJobs.
+	sem := make(chan struct{}, r.cfg.SandboxJobs)
+	earlyJobs := r.startJobs(ctx, early, workspaces, sem)
 
 	var rejections []gateway.Rejection
 	applyFailed := false
@@ -480,7 +483,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		}
 		lateRun = append(lateRun, w)
 	}
-	errs = append(errs, r.startJobs(ctx, lateRun, workspaces).wait()...)
+	errs = append(errs, r.startJobs(ctx, lateRun, workspaces, sem).wait()...)
 	errs = append(errs, earlyJobs.wait()...)
 	// Each rejected object is reported on its org's agents, after their own pass has recorded its state.
 	// Several rejections of one org are joined into one message, not overwritten.
@@ -511,13 +514,12 @@ func (j *jobs) wait() []error {
 	return j.errs
 }
 
-// startJobs starts one job per agent, at most SandboxJobs at a time, and returns at once. A job
+// startJobs starts one job per agent, holding a slot of sem (sized SandboxJobs, shared by every call of a pass), and returns at once. A job
 // is everything the reconciler does for one agent's sandbox: creating, starting, stopping,
 // recreating and recording it. A slow start (an image pull, a stuck OpenShell call) holds up
 // only its own agent, not the rest of the pass and not the gateway update.
-func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[string]string) *jobs {
+func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[string]string, sem chan struct{}) *jobs {
 	j := &jobs{}
-	sem := make(chan struct{}, r.cfg.SandboxJobs)
 	j.wg.Add(1)
 	go func() {
 		defer j.wg.Done()

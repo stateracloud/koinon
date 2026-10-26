@@ -288,6 +288,7 @@ var _ = Describe("Pool", func() {
 		clock := &fakeClock{t: time.Now()}
 		e.pool("agentd-a", func(c *agentd.Config) { c.SandboxTimeout = 5 * time.Minute; c.Now = clock.Now })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		clock.awaitWait()
 		Consistently(runState(ctx, r)).WithTimeout(300 * time.Millisecond).Should(Equal(store.RunStateStarting))
 
 		clock.Advance(5*time.Minute + time.Second)
@@ -312,6 +313,7 @@ var _ = Describe("Pool", func() {
 		clock := &fakeClock{t: time.Now()}
 		e.pool("agentd-a", func(c *agentd.Config) { c.Now = clock.Now })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		clock.awaitWait()
 		clock.Advance(6 * time.Minute)
 		Consistently(func() []string { return kinds(events(ctx, r)) }).WithTimeout(500 * time.Millisecond).ShouldNot(ContainElement("run.requeued"))
 		clock.Advance(15 * time.Minute)
@@ -736,7 +738,7 @@ var _ = Describe("Pool", func() {
 		Expect(getRun(ctx, r).State).NotTo(Equal(store.RunStateFailed))
 	})
 
-	It("waits for a sandbox in error to be repaired, ", func(ctx SpecContext) {
+	It("waits for a sandbox in error to be repaired", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.recordSandbox(ctx, store.SandboxStateError, "image pull failed")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))

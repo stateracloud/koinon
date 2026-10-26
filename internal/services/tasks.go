@@ -8,6 +8,8 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	connect "connectrpc.com/connect/v2"
@@ -18,6 +20,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/wake"
 )
 
 // Task event kinds written by the API.
@@ -57,6 +60,37 @@ func jsonPayload(v map[string]any) []byte {
 var endStates = []store.TaskState{store.TaskStateCompleted, store.TaskStateCanceled, store.TaskStateFailed}
 
 func isEnded(s store.TaskState) bool { return slices.Contains(endStates, s) }
+
+// typingThrottle is how often NotifyTyping wakes the same task's sandbox.
+const typingThrottle = 10 * time.Second
+
+// typingGate lets one NotifyTyping per task through every typingThrottle. It is per replica; a
+// second replica may let one more through, which only wakes the sandbox again.
+type typingGate struct {
+	mu   sync.Mutex
+	last map[[16]byte]time.Time
+}
+
+// allow reports whether key may wake its sandbox now, and records the wake if so.
+func (g *typingGate) allow(key [16]byte, now time.Time) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if t, ok := g.last[key]; ok && now.Sub(t) < typingThrottle {
+		return false
+	}
+	if g.last == nil {
+		g.last = map[[16]byte]time.Time{}
+	}
+	if len(g.last) >= 1024 {
+		for k, t := range g.last {
+			if now.Sub(t) >= typingThrottle {
+				delete(g.last, k)
+			}
+		}
+	}
+	g.last[key] = now
+	return true
+}
 
 // errTaskEnded means the task has ended and takes no messages.
 var errTaskEnded = errors.New("task has ended")
@@ -121,6 +155,13 @@ func (s *Server) createTask(ctx context.Context, c caller, agentID pgtype.UUID, 
 		task, err = q.GetTask(ctx, store.GetTaskParams{OrgID: c.org, ID: t.ID})
 		return err
 	})
+	if err == nil {
+		// Pre-wake the agent's sandbox before the run is claimed (plan item LT1). Best effort: the
+		// queued run is demand on its own.
+		if _, werr := wake.TaskCreated(ctx, s.q, task); werr != nil {
+			s.log.Warn("waking the agent's sandbox for a new task failed", "err", werr)
+		}
+	}
 	return task, run, err
 }
 
@@ -392,4 +433,28 @@ func (a taskAPI) CancelTask(ctx context.Context, req *taskv1alpha1.CancelTaskReq
 		return nil, a.dbError(err, "task")
 	}
 	return &taskv1alpha1.CancelTaskResponse{Task: taskProto(t), CanceledRuns: runsProto(runs)}, nil
+}
+
+// NotifyTyping implements TaskService.
+func (a taskAPI) NotifyTyping(ctx context.Context, req *taskv1alpha1.NotifyTypingRequest) (*taskv1alpha1.NotifyTypingResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleMember)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("task_id", req.GetTaskId())
+	if err != nil {
+		return nil, err
+	}
+	// The task is read first, so a task of another org is not found, throttled or not.
+	t, err := a.q.GetTask(ctx, store.GetTaskParams{OrgID: c.org, ID: id})
+	if err != nil {
+		return nil, a.dbError(err, "task")
+	}
+	if isEnded(t.State) || !a.typing.allow(id.Bytes, time.Now()) {
+		return &taskv1alpha1.NotifyTypingResponse{}, nil
+	}
+	if _, err := wake.TaskCreated(ctx, a.q, t); err != nil {
+		return nil, a.dbError(err, "task")
+	}
+	return &taskv1alpha1.NotifyTypingResponse{}, nil
 }

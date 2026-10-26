@@ -67,6 +67,25 @@ var _ = Describe("latency defaults", func() {
 		Expect(again.Epoch).To(BeNumerically(">", claimed.Epoch))
 	})
 
+	It("does not count the wait for a sandbox against the wall-clock cap", func(ctx SpecContext) {
+		f := newFixture(ctx)
+		enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+		claimed := mustClaim(ctx, f.org, "agentd-a")
+		// The run waits 40 minutes for its sandbox, longer than its 30 minute cap, then goes back.
+		_, err := pool.Exec(ctx, `UPDATE runs SET claimed_at = claimed_at - interval '40 minutes',
+			started_at = started_at - interval '40 minutes' WHERE org_id = $1 AND id = $2`, f.org, claimed.ID)
+		Expect(err).NotTo(HaveOccurred())
+		r, err := q.RequeueRun(ctx, store.RequeueRunParams{OrgID: f.org, ID: claimed.ID, Epoch: claimed.Epoch})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.ParkedSeconds).To(BeNumerically(">=", 40*60))
+
+		again := mustClaim(ctx, f.org, "agentd-b")
+		Expect(again.ID).To(Equal(claimed.ID))
+		swept, err := q.CancelRunsOverWallClock(ctx, store.CancelRunsOverWallClockParams{OrgID: f.org, OutcomeReason: "wall-clock cap"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(swept).To(BeEmpty(), "the time in the queue was credited")
+	})
+
 	It("does not requeue a running run", func(ctx SpecContext) {
 		r := runIn(ctx, store.RunStateRunning)
 		_, err := q.RequeueRun(ctx, store.RequeueRunParams{OrgID: r.OrgID, ID: r.ID, Epoch: r.Epoch})
