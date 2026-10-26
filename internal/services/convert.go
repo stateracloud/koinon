@@ -14,8 +14,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/flavor"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
+	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
-	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -94,15 +94,17 @@ func agentGrantsProto(cfg agentconfig.Config) []*templatev1alpha1.Grant {
 	return out
 }
 
-var ticketStatusToProto = map[store.TicketStatus]ticketv1alpha1.TicketStatus{
-	store.TicketStatusTodo:         ticketv1alpha1.TicketStatus_TICKET_STATUS_TODO,
-	store.TicketStatusInProgress:   ticketv1alpha1.TicketStatus_TICKET_STATUS_IN_PROGRESS,
-	store.TicketStatusWaitingOnYou: ticketv1alpha1.TicketStatus_TICKET_STATUS_WAITING_ON_YOU,
-	store.TicketStatusDone:         ticketv1alpha1.TicketStatus_TICKET_STATUS_DONE,
+var taskStateToProto = map[store.TaskState]taskv1alpha1.TaskState{
+	store.TaskStateSubmitted:     taskv1alpha1.TaskState_TASK_STATE_SUBMITTED,
+	store.TaskStateWorking:       taskv1alpha1.TaskState_TASK_STATE_WORKING,
+	store.TaskStateInputRequired: taskv1alpha1.TaskState_TASK_STATE_INPUT_REQUIRED,
+	store.TaskStateCompleted:     taskv1alpha1.TaskState_TASK_STATE_COMPLETED,
+	store.TaskStateCanceled:      taskv1alpha1.TaskState_TASK_STATE_CANCELED,
+	store.TaskStateFailed:        taskv1alpha1.TaskState_TASK_STATE_FAILED,
 }
 
-func ticketStatusFromProto(s ticketv1alpha1.TicketStatus) (store.TicketStatus, bool) {
-	for k, v := range ticketStatusToProto {
+func taskStateFromProto(s taskv1alpha1.TaskState) (store.TaskState, bool) {
+	for k, v := range taskStateToProto {
 		if v == s {
 			return k, true
 		}
@@ -110,29 +112,40 @@ func ticketStatusFromProto(s ticketv1alpha1.TicketStatus) (store.TicketStatus, b
 	return "", false
 }
 
-var actorKindToProto = map[store.TicketActorKind]ticketv1alpha1.ActorKind{
-	store.TicketActorKindUser:   ticketv1alpha1.ActorKind_ACTOR_KIND_USER,
-	store.TicketActorKindAgent:  ticketv1alpha1.ActorKind_ACTOR_KIND_AGENT,
-	store.TicketActorKindSystem: ticketv1alpha1.ActorKind_ACTOR_KIND_SYSTEM,
+var actorKindToProto = map[store.TaskActorKind]taskv1alpha1.ActorKind{
+	store.TaskActorKindUser:   taskv1alpha1.ActorKind_ACTOR_KIND_USER,
+	store.TaskActorKindAgent:  taskv1alpha1.ActorKind_ACTOR_KIND_AGENT,
+	store.TaskActorKindSystem: taskv1alpha1.ActorKind_ACTOR_KIND_SYSTEM,
 }
 
-func ticketProto(t store.Ticket) *ticketv1alpha1.Ticket {
-	return &ticketv1alpha1.Ticket{
-		Id:           idString(t.ID),
-		OrgId:        idString(t.OrgID),
-		Title:        t.Title,
-		Status:       ticketStatusToProto[t.Status],
-		AgentId:      idString(t.AgentID),
-		CreatedBy:    idString(t.CreatedBy),
+var creatorKindToProto = map[store.TaskCreatorKind]taskv1alpha1.CreatorKind{
+	store.TaskCreatorKindUser:    taskv1alpha1.CreatorKind_CREATOR_KIND_USER,
+	store.TaskCreatorKindTrigger: taskv1alpha1.CreatorKind_CREATOR_KIND_TRIGGER,
+	store.TaskCreatorKindAgent:   taskv1alpha1.CreatorKind_CREATOR_KIND_AGENT,
+}
+
+func taskProto(t store.Task) *taskv1alpha1.Task {
+	return &taskv1alpha1.Task{
+		Id:      idString(t.ID),
+		OrgId:   idString(t.OrgID),
+		Title:   t.Title,
+		State:   taskStateToProto[t.State],
+		AgentId: idString(t.AgentID),
+		CreatedBy: &taskv1alpha1.Creator{
+			Kind:      creatorKindToProto[t.CreatedByKind],
+			UserId:    idString(t.CreatedByUserID),
+			AgentId:   idString(t.CreatedByAgentID),
+			TriggerId: idString(t.CreatedByTriggerID),
+		},
 		LastEventSeq: t.LastEventSeq,
 		CreatedAt:    tsProto(t.CreatedAt),
 		UpdatedAt:    tsProto(t.UpdatedAt),
-		DoneAt:       tsProto(t.DoneAt),
+		FinishedAt:   tsProto(t.FinishedAt),
 	}
 }
 
-func ticketEventProto(e store.TicketEvent) *ticketv1alpha1.TicketEvent {
-	return &ticketv1alpha1.TicketEvent{
+func taskEventProto(e store.TaskEvent) *taskv1alpha1.TaskEvent {
+	return &taskv1alpha1.TaskEvent{
 		Seq:          e.Seq,
 		Kind:         e.Kind,
 		ActorKind:    actorKindToProto[e.ActorKind],
@@ -165,7 +178,7 @@ func runProto(r store.Run) *runv1alpha1.Run {
 	out := &runv1alpha1.Run{
 		Id:                  idString(r.ID),
 		OrgId:               idString(r.OrgID),
-		TicketId:            idString(r.TicketID),
+		TicketId:            idString(r.TaskID),
 		AgentId:             idString(r.AgentID),
 		AgentVersionId:      idString(r.AgentVersionID),
 		State:               runStateToProto[r.State],

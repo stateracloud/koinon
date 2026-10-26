@@ -144,7 +144,7 @@ turns:
 			Expect(call.Function.Arguments).To(MatchJSON(`{
 				"branch": "koinon/add-hello-md",
 				"title": "Add hello.md",
-				"body": "Adds hello.md as requested in the ticket.",
+				"body": "Adds hello.md as requested in the task.",
 				"files": [{"path": "hello.md", "content": "hello from koinon\n"}]
 			}`))
 

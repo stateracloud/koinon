@@ -138,18 +138,18 @@ func (e *env) ref() gateway.AgentRef {
 	return gateway.AgentRef{Org: e.slug, Name: e.agent.ID.String()}
 }
 
-func (e *env) ticket(ctx context.Context) store.Ticket {
-	t, err := q.CreateTicket(ctx, store.CreateTicketParams{
-		OrgID: e.org, Title: uniq("ticket"), AgentID: e.agent.ID, CreatedBy: e.user,
+func (e *env) task(ctx context.Context) store.Task {
+	t, err := q.CreateTask(ctx, store.CreateTaskParams{
+		OrgID: e.org, Title: uniq("task"), AgentID: e.agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: e.user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return t
 }
 
 // startRun queues a run for t and moves it to running as of startedAt, as agentd would.
-func (e *env) startRun(ctx context.Context, t store.Ticket, maxTokens int64, startedAt time.Time) store.Run {
+func (e *env) startRun(ctx context.Context, t store.Task, maxTokens int64, startedAt time.Time) store.Run {
 	r, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: e.org, AgentID: e.agent.ID, TicketID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
+		OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	_, err = db.Exec(ctx, `UPDATE runs SET state = 'starting', owner_id = 'test', lease_expires_at = now() + interval '1 hour',

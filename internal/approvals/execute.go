@@ -127,15 +127,15 @@ func (s *Service) appFor(ctx context.Context, row store.ApprovalRequest, full st
 	return app, nil
 }
 
-// people names the ticket's creator and the approver for the commit trailers.
+// people names the task's creator and the approver for the commit trailers.
 func (s *Service) people(ctx context.Context, row store.ApprovalRequest) (requested, approved string, err error) {
-	t, err := s.q.GetTicket(ctx, store.GetTicketParams{OrgID: row.OrgID, ID: row.TicketID})
+	t, err := s.q.GetTask(ctx, store.GetTaskParams{OrgID: row.OrgID, ID: row.TaskID})
 	if err != nil {
 		return "", "", err
 	}
 	requested = "Koinon"
-	if t.CreatedBy.Valid {
-		if requested, err = s.person(ctx, t.CreatedBy); err != nil {
+	if t.CreatedByUserID.Valid {
+		if requested, err = s.person(ctx, t.CreatedByUserID); err != nil {
 			return "", "", err
 		}
 	}

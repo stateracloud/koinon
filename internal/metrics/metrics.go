@@ -5,7 +5,7 @@
 //
 // Label rule, for every metric in every component: label values come from small fixed sets
 // (a state, an outcome, an error kind, an RPC procedure and code). Never an org, agent, user,
-// ticket or run ID, a name or a free-text message: that would make the series count grow with the
+// task or run ID, a name or a free-text message: that would make the series count grow with the
 // data and leak tenant names to whoever scrapes. The /metrics endpoint has no authentication; the
 // chart's NetworkPolicy decides who can reach it.
 package metrics

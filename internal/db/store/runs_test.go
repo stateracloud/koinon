@@ -39,7 +39,7 @@ var _ = Describe("runs", func() {
 	Describe("legal transitions through the queries", func() {
 		It("queued -> starting -> running -> succeeded", func(ctx SpecContext) {
 			f := newFixture(ctx)
-			r := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			r := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			Expect(r.ReadyAt.Valid).To(BeTrue())
 
 			r = mustClaim(ctx, f.org, "agentd-a")
@@ -177,9 +177,9 @@ var _ = Describe("runs", func() {
 				OrgID: org, DisplayName: "draft", Flavor: store.AgentFlavorOpencode, CreatedBy: user,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			t := newTicket(ctx, org, user, draft.ID)
+			t := newTask(ctx, org, user, draft.ID)
 			_, err = q.CreateRun(ctx, store.CreateRunParams{
-				OrgID: org, AgentID: draft.ID, TicketID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
+				OrgID: org, AgentID: draft.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
 			})
 			Expect(err).To(MatchError(pgx.ErrNoRows))
 		})
@@ -221,10 +221,10 @@ var _ = Describe("runs", func() {
 		It("requires new runs to be queued", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			_, err := pool.Exec(ctx, `
-				INSERT INTO runs (org_id, agent_id, agent_version_id, ticket_id, state, owner_id,
+				INSERT INTO runs (org_id, agent_id, agent_version_id, task_id, state, owner_id,
 				                  lease_expires_at, max_tokens)
 				VALUES ($1, $2, $3, $4, 'starting', 'raw', now(), 1)`,
-				f.org, f.agent.ID, f.version.ID, f.ticket.ID)
+				f.org, f.agent.ID, f.version.ID, f.task.ID)
 			Expect(err).To(MatchError(ContainSubstring("must be created queued")))
 		})
 
@@ -238,7 +238,7 @@ var _ = Describe("runs", func() {
 	Describe("ownership epoch", func() {
 		It("rejects every write of a stale owner after a takeover", func(ctx SpecContext) {
 			f := newFixture(ctx)
-			enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			old := markRunning(ctx, mustClaim(ctx, f.org, "agentd-a"))
 
 			_, err := q.TakeOverExpiredRun(ctx, store.TakeOverExpiredRunParams{OrgID: f.org, OwnerID: "agentd-b", LeaseSeconds: lease})
@@ -264,8 +264,8 @@ var _ = Describe("runs", func() {
 			Expect(err).To(MatchError(pgx.ErrNoRows))
 			_, err = finish(ctx, old, store.RunStateSucceeded)
 			Expect(err).To(MatchError(pgx.ErrNoRows))
-			_, err = q.SetTicketHarnessSession(ctx, store.SetTicketHarnessSessionParams{
-				OrgID: f.org, ID: f.ticket.ID, RunID: old.ID, Epoch: old.Epoch,
+			_, err = q.SetTaskHarnessSession(ctx, store.SetTaskHarnessSessionParams{
+				OrgID: f.org, ID: f.task.ID, RunID: old.ID, Epoch: old.Epoch,
 				HarnessSessionID: "stale", HarnessSessionCwd: "/home/agent",
 			})
 			Expect(err).To(MatchError(pgx.ErrNoRows))
@@ -309,8 +309,8 @@ var _ = Describe("runs", func() {
 	Describe("claiming", func() {
 		It("keeps one active run per agent", func(ctx SpecContext) {
 			f := newFixture(ctx)
-			first := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			second := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			first := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 
 			Expect(mustClaim(ctx, f.org, "agentd-a").ID).To(Equal(first.ID))
 			_, err := claim(ctx, f.org, "agentd-b")
@@ -327,8 +327,8 @@ var _ = Describe("runs", func() {
 
 		It("enforces one active run per agent in the schema", func(ctx SpecContext) {
 			f := newFixture(ctx)
-			enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			other := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			other := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			mustClaim(ctx, f.org, "agentd-a")
 			_, err := pool.Exec(ctx, `
 				UPDATE runs SET state = 'starting', owner_id = 'raw', lease_expires_at = now(), ready_at = NULL
@@ -338,8 +338,8 @@ var _ = Describe("runs", func() {
 
 		It("does not count a parked run as active", func(ctx SpecContext) {
 			f := newFixture(ctx)
-			first := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			second := enqueue(ctx, f.org, f.agent.ID, newTicket(ctx, f.org, f.user, f.agent.ID).ID)
+			first := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, newTask(ctx, f.org, f.user, f.agent.ID).ID)
 			parked, err := park(ctx, markRunning(ctx, mustClaim(ctx, f.org, "agentd-a")))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(parked.ID).To(Equal(first.ID))
@@ -358,15 +358,15 @@ var _ = Describe("runs", func() {
 			Expect(mustClaim(ctx, f.org, "agentd-b").ID).To(Equal(first.ID))
 		})
 
-		It("keeps a ticket's next run waiting while another of its runs is owned or parked", func(ctx SpecContext) {
+		It("keeps a task's next run waiting while another of its runs is owned or parked", func(ctx SpecContext) {
 			f := newFixture(ctx)
-			first := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			second := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			first := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			parked, err := park(ctx, markRunning(ctx, mustClaim(ctx, f.org, "agentd-a")))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(parked.ID).To(Equal(first.ID))
 			_, err = claim(ctx, f.org, "agentd-a")
-			Expect(err).To(MatchError(pgx.ErrNoRows), "one harness session per ticket")
+			Expect(err).To(MatchError(pgx.ErrNoRows), "one harness session per task")
 
 			_, err = q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: f.org, ID: first.ID})
 			Expect(err).NotTo(HaveOccurred())
@@ -378,13 +378,13 @@ var _ = Describe("runs", func() {
 			Expect(mustClaim(ctx, f.org, "agentd-a").ID).To(Equal(second.ID))
 		})
 
-		// #27's per-ticket rule with #28's takeover columns: a run whose lease was released or
-		// expired is still owned, so the ticket's next run waits through every takeover, and
+		// #27's per-task rule with #28's takeover columns: a run whose lease was released or
+		// expired is still owned, so the task's next run waits through every takeover, and
 		// the next run sees how far the taken-over run prompted.
-		It("keeps a ticket's next run waiting while another of its runs is taken over", func(ctx SpecContext) {
+		It("keeps a task's next run waiting while another of its runs is taken over", func(ctx SpecContext) {
 			f := newFixture(ctx)
-			first := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			second := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			first := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			second := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			a := markRunning(ctx, mustClaim(ctx, f.org, "agentd-a"))
 			Expect(a.ID).To(Equal(first.ID))
 			Expect(a.Takeovers).To(BeZero())
@@ -395,7 +395,7 @@ var _ = Describe("runs", func() {
 			_, err = q.ReleaseRunLease(ctx, store.ReleaseRunLeaseParams{OrgID: f.org, ID: a.ID, Epoch: a.Epoch})
 			Expect(err).NotTo(HaveOccurred())
 			_, err = claim(ctx, f.org, "agentd-b")
-			Expect(err).To(MatchError(pgx.ErrNoRows), "a released run still holds its ticket")
+			Expect(err).To(MatchError(pgx.ErrNoRows), "a released run still holds its task")
 			b, err := q.TakeOverExpiredRun(ctx, store.TakeOverExpiredRunParams{OrgID: f.org, OwnerID: "agentd-b", LeaseSeconds: lease})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(b.ID).To(Equal(first.ID))
@@ -404,7 +404,7 @@ var _ = Describe("runs", func() {
 			// The new owner is killed: its lease expires and a third worker takes over.
 			expireLease(ctx, b)
 			_, err = claim(ctx, f.org, "agentd-c")
-			Expect(err).To(MatchError(pgx.ErrNoRows), "an expired run still holds its ticket")
+			Expect(err).To(MatchError(pgx.ErrNoRows), "an expired run still holds its task")
 			c, err := q.TakeOverExpiredRun(ctx, store.TakeOverExpiredRunParams{OrgID: f.org, OwnerID: "agentd-c", LeaseSeconds: lease})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(c.Takeovers).To(BeEquivalentTo(2))
@@ -415,7 +415,7 @@ var _ = Describe("runs", func() {
 			next := mustClaim(ctx, f.org, "agentd-a")
 			Expect(next.ID).To(Equal(second.ID))
 			Expect(next.Takeovers).To(BeZero())
-			through, err := q.GetTicketPromptedThrough(ctx, store.GetTicketPromptedThroughParams{OrgID: f.org, TicketID: f.ticket.ID, RunID: next.ID})
+			through, err := q.GetTaskPromptedThrough(ctx, store.GetTaskPromptedThroughParams{OrgID: f.org, TaskID: f.task.ID, RunID: next.ID})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(through).To(BeEquivalentTo(3))
 		})
@@ -423,12 +423,12 @@ var _ = Describe("runs", func() {
 		It("claims in FIFO order, across agents too", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			other, _ := newAgent(ctx, f.org, f.user)
-			otherTicket := newTicket(ctx, f.org, f.user, other.ID)
+			otherTask := newTask(ctx, f.org, f.user, other.ID)
 
-			a1 := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			b1 := enqueue(ctx, f.org, other.ID, otherTicket.ID)
-			a2 := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			a3 := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			a1 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			b1 := enqueue(ctx, f.org, other.ID, otherTask.ID)
+			a2 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			a3 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 
 			Expect(mustClaim(ctx, f.org, "w").ID).To(Equal(a1.ID))
 			Expect(mustClaim(ctx, f.org, "w").ID).To(Equal(b1.ID))
@@ -449,10 +449,10 @@ var _ = Describe("runs", func() {
 		It("skips agents another claimer holds, without blocking", func(ctx SpecContext) {
 			f := newFixture(ctx)
 			other, _ := newAgent(ctx, f.org, f.user)
-			otherTicket := newTicket(ctx, f.org, f.user, other.ID)
-			a1 := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			b1 := enqueue(ctx, f.org, other.ID, otherTicket.ID)
+			otherTask := newTask(ctx, f.org, f.user, other.ID)
+			a1 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			b1 := enqueue(ctx, f.org, other.ID, otherTask.ID)
 
 			tx, err := pool.Begin(ctx)
 			Expect(err).NotTo(HaveOccurred())
@@ -475,7 +475,7 @@ var _ = Describe("runs", func() {
 			const rounds, claimers = 40, 12
 			for range rounds {
 				f := newFixture(ctx)
-				enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+				enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 				start := make(chan struct{})
 				won := make(chan store.Run, claimers)
 				var wg sync.WaitGroup
@@ -504,21 +504,21 @@ var _ = Describe("runs", func() {
 
 		It("never claims another org's runs", func(ctx SpecContext) {
 			f := newFixture(ctx)
-			enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			otherOrg, _ := newOrg(ctx)
 			_, err := claim(ctx, otherOrg, "w")
 			Expect(err).To(MatchError(pgx.ErrNoRows))
 		})
 
-		It("cancels a Done ticket's queued runs only", func(ctx SpecContext) {
+		It("cancels a Done task's queued runs only", func(ctx SpecContext) {
 			f := newFixture(ctx)
-			active := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			active := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 			mustClaim(ctx, f.org, "w")
-			q1 := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-			q2 := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+			q1 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+			q2 := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 
-			canceled, err := q.CancelQueuedRunsForTicket(ctx, store.CancelQueuedRunsForTicketParams{
-				OrgID: f.org, TicketID: f.ticket.ID, OutcomeReason: "ticket moved to Done",
+			canceled, err := q.CancelQueuedRunsForTask(ctx, store.CancelQueuedRunsForTaskParams{
+				OrgID: f.org, TaskID: f.task.ID, OutcomeReason: "task moved to Done",
 			})
 			Expect(err).NotTo(HaveOccurred())
 			ids := []pgtype.UUID{}

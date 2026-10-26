@@ -71,7 +71,7 @@ func uniq(prefix string) string { return fmt.Sprintf("%s-%d", prefix, seq.Add(1)
 const (
 	gatewayURL   = "http://gateway.koinon.test:8080"
 	model        = "fake/model-1"
-	instructions = "You help with the ticket."
+	instructions = "You help with the task."
 	// instructionsFile is what agentd writes for instructions.
 	instructionsFile = "/sandbox/.koinon/AGENTS.md"
 	// opencodeLink is the flavor's link to the instruction file.
@@ -79,7 +79,7 @@ const (
 )
 
 // env is one org with an active agent, its sandbox in a fake OpenShell gateway whose exec
-// runs the fake harness, and helpers to create tickets and runs. Pools scan every org, so
+// runs the fake harness, and helpers to create tasks and runs. Pools scan every org, so
 // an env stops its pools and cancels its unfinished runs when the spec ends.
 type env struct {
 	org, user pgtype.UUID
@@ -331,27 +331,27 @@ func (e *env) recreateSandbox(ctx context.Context) {
 	e.recordSandbox(ctx, store.SandboxStateReady, "")
 }
 
-// ticket creates a ticket for the agent with one user message.
-func (e *env) ticket(ctx context.Context, message string) store.Ticket {
-	t, err := q.CreateTicket(ctx, store.CreateTicketParams{
-		OrgID: e.org, Title: uniq("ticket"), AgentID: e.agent.ID, CreatedBy: e.user,
+// task creates a task for the agent with one user message.
+func (e *env) task(ctx context.Context, message string) store.Task {
+	t, err := q.CreateTask(ctx, store.CreateTaskParams{
+		OrgID: e.org, Title: uniq("task"), AgentID: e.agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: e.user,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	e.message(ctx, t, message)
 	return t
 }
 
-func (e *env) message(ctx context.Context, t store.Ticket, text string) {
-	_, err := q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-		OrgID: e.org, TicketID: t.ID, Kind: "message", ActorKind: store.TicketActorKindUser,
+func (e *env) message(ctx context.Context, t store.Task, text string) {
+	_, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+		OrgID: e.org, TaskID: t.ID, Kind: "message", ActorKind: store.TaskActorKindUser,
 		ActorUserID: e.user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)),
 	})
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func (e *env) enqueue(ctx context.Context, t store.Ticket) store.Run {
+func (e *env) enqueue(ctx context.Context, t store.Task) store.Run {
 	r, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: e.org, AgentID: e.agent.ID, TicketID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 100_000,
+		OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 100_000,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return r
@@ -421,7 +421,7 @@ func kinds(evs []store.RunEvent) []string {
 	return out
 }
 
-func kindsOf(evs []store.TicketEvent) []string {
+func kindsOf(evs []store.TaskEvent) []string {
 	out := make([]string, len(evs))
 	for i, e := range evs {
 		out[i] = e.Kind
@@ -429,8 +429,8 @@ func kindsOf(evs []store.TicketEvent) []string {
 	return out
 }
 
-func ticketEvents(ctx context.Context, e *env, t store.Ticket) []store.TicketEvent {
-	evs, err := q.ListTicketEvents(ctx, store.ListTicketEventsParams{OrgID: e.org, TicketID: t.ID, MaxEvents: 100})
+func taskEvents(ctx context.Context, e *env, t store.Task) []store.TaskEvent {
+	evs, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: e.org, TaskID: t.ID, MaxEvents: 100})
 	Expect(err).NotTo(HaveOccurred())
 	return evs
 }

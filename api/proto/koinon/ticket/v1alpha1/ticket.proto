@@ -12,6 +12,11 @@ option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v
 
 // TicketService is the board and the conversation on each ticket (ADR 0017).
 // Every request names the org it acts in; IDs from another org are not found.
+//
+// DEPRECATED: tickets are tasks now (ADR 0065, plan item TK1). This service is a compatibility
+// layer over koinon.task.v1alpha1.TaskService, kept until the web UI moves to tasks (TK2). The board
+// column is derived from the task state: submitted is To do, working is In progress,
+// input_required is Waiting on you, and completed, canceled and failed are Done.
 service TicketService {
   // CreateTicket creates a ticket for an active agent and queues a run for it
   // (plan item A4). Members and above.
@@ -39,6 +44,8 @@ service TicketService {
 }
 
 // TicketStatus is the board column (ADR 0049).
+//
+// DEPRECATED: use koinon.task.v1alpha1.TaskState.
 enum TicketStatus {
   TICKET_STATUS_UNSPECIFIED = 0;
   TICKET_STATUS_TODO = 1;

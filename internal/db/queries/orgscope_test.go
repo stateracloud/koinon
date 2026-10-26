@@ -65,7 +65,7 @@ var crossOrgQueries = map[string]string{
 var _ = Describe("org scoping", func() {
 	It("scopes every query on an org-owned table by @org_id", func() {
 		owned := orgOwnedTables("../migrations")
-		for _, table := range []string{"agents", "agent_versions", "tickets", "ticket_events", "runs", "run_events"} {
+		for _, table := range []string{"agents", "agent_versions", "tasks", "task_events", "runs", "run_events"} {
 			Expect(owned).To(HaveKey(table), "expected %s to be detected as org-owned; detection is broken", table)
 		}
 		Expect(owned).NotTo(HaveKey("templates"), "templates is not org-owned; detection is broken")
@@ -126,6 +126,8 @@ var _ = Describe("org scoping", func() {
 	)
 })
 
+var renameTableRE = regexp.MustCompile(`(?i)ALTER\s+TABLE\s+(\w+)\s+RENAME\s+TO\s+(\w+)`)
+
 func orgOwnedTables(dir string) map[string]bool {
 	files, err := filepath.Glob(filepath.Join(dir, "*.sql"))
 	Expect(err).NotTo(HaveOccurred())
@@ -137,6 +139,13 @@ func orgOwnedTables(dir string) map[string]bool {
 		for _, m := range createTableRE.FindAllStringSubmatch(string(data), -1) {
 			if orgColumnRE.MatchString(m[2]) {
 				owned[strings.ToLower(m[1])] = true
+			}
+		}
+		// A renamed table keeps its owner column (migration 00020 renames tickets to tasks).
+		for _, m := range renameTableRE.FindAllStringSubmatch(string(data), -1) {
+			if owned[strings.ToLower(m[1])] {
+				delete(owned, strings.ToLower(m[1]))
+				owned[strings.ToLower(m[2])] = true
 			}
 		}
 	}

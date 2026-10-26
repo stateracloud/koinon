@@ -10,7 +10,7 @@ package approvals
 // the diffstat, approves the hash of the arguments, and only then does Koinon open the sealed
 // files and write them to GitHub through the same connection and the same Git Data calls as a
 // pull request - blobs, a tree on top of the recorded base commit, one commit, and a new branch
-// koinon/wip/<ticket>-<time>. The default branch is never written, an existing branch is never
+// koinon/wip/<task>-<time>. The default branch is never written, an existing branch is never
 // overwritten, and a repository the run's agent version is not bound to, or the installation
 // cannot reach, is refused. The request ID is the idempotency key, as for pull requests.
 
@@ -51,7 +51,7 @@ func (s *Service) executeSavedWork(ctx context.Context, row store.ApprovalReques
 		return nil, permanent("the saved work is gone")
 	}
 	switch {
-	case sw.RunID != row.RunID || sw.TicketID != row.TicketID, sw.Repo != args.Repo, sw.BaseSha != args.Base, sw.Branch != args.Branch:
+	case sw.RunID != row.RunID || sw.TaskID != row.TaskID, sw.Repo != args.Repo, sw.BaseSha != args.Base, sw.Branch != args.Branch:
 		return nil, permanent("the request does not match the saved work")
 	case sw.Status == "expired" || !sw.ExpiresAt.Time.After(time.Now()):
 		return nil, permanent("the saved work expired (it is kept for 14 days)")
@@ -108,11 +108,11 @@ func (s *Service) executeSavedWork(ctx context.Context, row store.ApprovalReques
 		if err != nil {
 			return nil, err
 		}
-		ticket, err := s.q.GetTicket(ctx, store.GetTicketParams{OrgID: row.OrgID, ID: row.TicketID})
+		task, err := s.q.GetTask(ctx, store.GetTaskParams{OrgID: row.OrgID, ID: row.TaskID})
 		if err != nil {
 			return nil, err
 		}
-		msg := savedWorkMessage(ticket.Title, row.ID.String(), requested, approved)
+		msg := savedWorkMessage(task.Title, row.ID.String(), requested, approved)
 		if head, err = s.commitSaved(ctx, tok, repo, work, msg); err != nil {
 			return nil, err
 		}
@@ -133,10 +133,10 @@ func (s *Service) executeSavedWork(ctx context.Context, row store.ApprovalReques
 }
 
 // savedWorkMessage is the commit message of pushed saved work, with the trailers.
-func savedWorkMessage(ticketTitle, approvalID, requestedBy, approvedBy string) string {
+func savedWorkMessage(taskTitle, approvalID, requestedBy, approvedBy string) string {
 	var b strings.Builder
 	b.WriteString("WIP: work saved from a stuck sandbox\n\n")
-	fmt.Fprintf(&b, "Koinon saved this uncommitted work when the agent's sandbox had to be recreated.\nTicket: %s\n\n", oneLine(ticketTitle))
+	fmt.Fprintf(&b, "Koinon saved this uncommitted work when the agent's sandbox had to be recreated.\nTask: %s\n\n", oneLine(taskTitle))
 	fmt.Fprintf(&b, "%s: %s\n%s: %s\n%s: %s\n", TrailerRequestedBy, requestedBy, TrailerApprovedBy, approvedBy, TrailerApproval, approvalID)
 	return b.String()
 }

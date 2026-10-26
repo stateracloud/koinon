@@ -17,7 +17,12 @@
 // Selection is stateless (it looks only at the request's conversation), so retries and parallel
 // tests see the same answer. A script may also inject [Faults]: HTTP 503 for the first N
 // requests, a delay before answering, and a truncated response (the connection is aborted
-// mid-body). Unknown models get HTTP 404 with the API's native error body.
+// mid-body). Further modes (FM2): rateLimit answers the first N requests with HTTP 429 and a
+// Retry-After header; contextLength answers 400 context_length_exceeded (OpenAI) or "prompt is
+// too long" (Anthropic); overloadedMidStream ends a stream with an overloaded error event after
+// about half the events; lockstep holds each request until the test calls [Server.Release]
+// ([Server.Waiting] counts the held ones; lockstep works only in-process, because the
+// binary has no release endpoint). Unknown models get HTTP 404 with the API's native error body.
 //
 // Scripts load from YAML files ([LoadDir], [ParseScript]) or are registered from Go
 // ([Server.Register]). The server is an [http.Handler], so tests run it in-process with

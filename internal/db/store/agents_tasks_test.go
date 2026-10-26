@@ -117,83 +117,83 @@ var _ = Describe("agents", func() {
 	})
 })
 
-var _ = Describe("tickets", func() {
-	It("moves between board columns", func(ctx SpecContext) {
+var _ = Describe("tasks", func() {
+	It("moves between states", func(ctx SpecContext) {
 		f := newFixture(ctx)
-		Expect(f.ticket.Status).To(Equal(store.TicketStatusTodo))
-		for _, s := range []store.TicketStatus{store.TicketStatusInProgress, store.TicketStatusWaitingOnYou, store.TicketStatusDone} {
-			t, err := q.MoveTicket(ctx, store.MoveTicketParams{OrgID: f.org, ID: f.ticket.ID, Status: s})
+		Expect(f.task.State).To(Equal(store.TaskStateSubmitted))
+		for _, s := range []store.TaskState{store.TaskStateWorking, store.TaskStateInputRequired, store.TaskStateCompleted} {
+			t, err := q.SetTaskState(ctx, store.SetTaskStateParams{OrgID: f.org, ID: f.task.ID, State: s})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(t.Status).To(Equal(s))
-			Expect(t.DoneAt.Valid).To(Equal(s == store.TicketStatusDone))
+			Expect(t.State).To(Equal(s))
+			Expect(t.FinishedAt.Valid).To(Equal(s == store.TaskStateCompleted))
 		}
-		done, err := q.ListTicketsByStatus(ctx, store.ListTicketsByStatusParams{OrgID: f.org, Status: store.TicketStatusDone})
+		done, err := q.ListTasksByStates(ctx, store.ListTasksByStatesParams{OrgID: f.org, States: []string{string(store.TaskStateCompleted)}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(done).To(HaveLen(1))
 
-		t, err := q.MoveTicket(ctx, store.MoveTicketParams{OrgID: f.org, ID: f.ticket.ID, Status: store.TicketStatusTodo})
+		t, err := q.SetTaskState(ctx, store.SetTaskStateParams{OrgID: f.org, ID: f.task.ID, State: store.TaskStateSubmitted})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(t.DoneAt.Valid).To(BeFalse(), "reopening clears done_at")
+		Expect(t.FinishedAt.Valid).To(BeFalse(), "reopening clears finished_at")
 	})
 
 	It("rejects an agent from another org", func(ctx SpecContext) {
 		f := newFixture(ctx)
 		other, user := newOrg(ctx)
-		_, err := q.CreateTicket(ctx, store.CreateTicketParams{OrgID: other, Title: "x", AgentID: f.agent.ID, CreatedBy: user})
-		Expect(err).To(MatchError(ContainSubstring("tickets_org_id_agent_id_fkey")))
+		_, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: other, Title: "x", AgentID: f.agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user})
+		Expect(err).To(MatchError(ContainSubstring("tasks_org_id_agent_id_fkey")))
 	})
 
 	It("stores the harness session for the current run owner only", func(ctx SpecContext) {
 		f := newFixture(ctx)
-		enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
+		enqueue(ctx, f.org, f.agent.ID, f.task.ID)
 		r := mustClaim(ctx, f.org, "agentd-a")
-		t, err := q.SetTicketHarnessSession(ctx, store.SetTicketHarnessSessionParams{
-			OrgID: f.org, ID: f.ticket.ID, RunID: r.ID, Epoch: r.Epoch,
+		t, err := q.SetTaskHarnessSession(ctx, store.SetTaskHarnessSessionParams{
+			OrgID: f.org, ID: f.task.ID, RunID: r.ID, Epoch: r.Epoch,
 			HarnessSessionID: "ses_1", HarnessSessionCwd: "/sandbox/work",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(t.HarnessSessionID.String).To(Equal("ses_1"))
 		Expect(t.HarnessSessionCwd.String).To(Equal("/sandbox/work"))
 
-		other := newTicket(ctx, f.org, f.user, f.agent.ID)
-		_, err = q.SetTicketHarnessSession(ctx, store.SetTicketHarnessSessionParams{
+		other := newTask(ctx, f.org, f.user, f.agent.ID)
+		_, err = q.SetTaskHarnessSession(ctx, store.SetTaskHarnessSessionParams{
 			OrgID: f.org, ID: other.ID, RunID: r.ID, Epoch: r.Epoch,
 			HarnessSessionID: "ses_2", HarnessSessionCwd: "/sandbox/work",
 		})
-		Expect(err).To(MatchError(pgx.ErrNoRows), "the run belongs to another ticket")
+		Expect(err).To(MatchError(pgx.ErrNoRows), "the run belongs to another task")
 	})
 
-	It("orders the timeline per ticket", func(ctx SpecContext) {
+	It("orders the timeline per task", func(ctx SpecContext) {
 		f := newFixture(ctx)
-		r := enqueue(ctx, f.org, f.agent.ID, f.ticket.ID)
-		e1, err := q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-			OrgID: f.org, TicketID: f.ticket.ID, Kind: "message", ActorKind: store.TicketActorKindUser,
+		r := enqueue(ctx, f.org, f.agent.ID, f.task.ID)
+		e1, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: f.org, TaskID: f.task.ID, Kind: "message", ActorKind: store.TaskActorKindUser,
 			ActorUserID: f.user, Payload: []byte(`{"text":"please fix the README"}`),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		e2, err := q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-			OrgID: f.org, TicketID: f.ticket.ID, Kind: "run.canceled", ActorKind: store.TicketActorKindSystem,
+		e2, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: f.org, TaskID: f.task.ID, Kind: "run.canceled", ActorKind: store.TaskActorKindSystem,
 			RunID: r.ID, Payload: []byte(`{"reason":"wall-clock cap"}`),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect([]int64{e1.Seq, e2.Seq}).To(Equal([]int64{1, 2}))
 
-		events, err := q.ListTicketEvents(ctx, store.ListTicketEventsParams{OrgID: f.org, TicketID: f.ticket.ID, AfterSeq: 1, MaxEvents: 10})
+		events, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: f.org, TaskID: f.task.ID, AfterSeq: 1, MaxEvents: 10})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(events).To(HaveLen(1))
 		Expect(events[0].ID).To(Equal(e2.ID))
 
-		_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-			OrgID: f.org, TicketID: f.ticket.ID, Kind: "message", ActorKind: store.TicketActorKindAgent,
+		_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: f.org, TaskID: f.task.ID, Kind: "message", ActorKind: store.TaskActorKindAgent,
 			Payload: []byte(`{}`),
 		})
-		Expect(err).To(MatchError(ContainSubstring("ticket_events_check")), "an agent event needs the agent")
+		Expect(err).To(MatchError(ContainSubstring("task_events_check")), "an agent event needs the agent")
 
-		otherTicket := newTicket(ctx, f.org, f.user, f.agent.ID)
-		_, err = q.AppendTicketEvent(ctx, store.AppendTicketEventParams{
-			OrgID: f.org, TicketID: otherTicket.ID, Kind: "run.canceled", ActorKind: store.TicketActorKindSystem,
+		otherTask := newTask(ctx, f.org, f.user, f.agent.ID)
+		_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: f.org, TaskID: otherTask.ID, Kind: "run.canceled", ActorKind: store.TaskActorKindSystem,
 			RunID: r.ID, Payload: []byte(`{}`),
 		})
-		Expect(err).To(MatchError(ContainSubstring("ticket_events_org_id_ticket_id_run_id_fkey")))
+		Expect(err).To(MatchError(ContainSubstring("task_events_org_id_task_id_run_id_fkey")))
 	})
 })

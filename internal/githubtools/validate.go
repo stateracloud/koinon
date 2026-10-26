@@ -134,7 +134,7 @@ func pathProblem(p string) string {
 	// Case-insensitive: a checkout on a case-insensitive file system would
 	// merge .GitHub/Workflows into .github/workflows.
 	if strings.HasPrefix(strings.ToLower(p), workflowDir) {
-		return fmt.Sprintf("path %q is under .github/workflows/: Koinon never proposes workflow changes; say on the ticket that the change needs one and stop", p)
+		return fmt.Sprintf("path %q is under .github/workflows/: Koinon never proposes workflow changes; say on the task that the change needs one and stop", p)
 	}
 	return ""
 }
@@ -162,7 +162,7 @@ func ValidatePullRequest(a PullRequestArgs) error {
 	case n == 0:
 		reasons = append(reasons, "files is empty: list every changed file")
 	case n > MaxFiles:
-		reasons = append(reasons, fmt.Sprintf("%d files is more than the limit of %d; split the change or ask on the ticket", n, MaxFiles))
+		reasons = append(reasons, fmt.Sprintf("%d files is more than the limit of %d; split the change or ask on the task", n, MaxFiles))
 	}
 	total := 0
 	seen := map[string]bool{}
@@ -183,7 +183,7 @@ func ValidatePullRequest(a PullRequestArgs) error {
 		total += len(f.Content)
 	}
 	if total > MaxTotalBytes {
-		reasons = append(reasons, fmt.Sprintf("the files total %d bytes, more than the limit of %d (1 MiB); split the change or ask on the ticket", total, MaxTotalBytes))
+		reasons = append(reasons, fmt.Sprintf("the files total %d bytes, more than the limit of %d (1 MiB); split the change or ask on the task", total, MaxTotalBytes))
 	}
 	return refuse(reasons)
 }

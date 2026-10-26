@@ -146,7 +146,7 @@ var _ = Describe("Cost truth", func() {
 	It("estimates missing usage, marks it and counts it toward the limit", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "0.01", 1<<40)
 		e.model(ctx, "openrouter", deepseek)
-		t := e.ticket(ctx)
+		t := e.task(ctx)
 		r := e.startRun(ctx, t, 1<<40, time.Now().Add(-time.Minute))
 		x := ledger.Entry{
 			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: deepseek, Status: 200,
@@ -319,7 +319,7 @@ var _ = Describe("Budgets", func() {
 		e.model(ctx, "openrouter", deepseek)
 		svc := budget.New(db)
 		Expect(svc.SetOrgCap(ctx, e.org, audit.User(e.user), ptr(money.MustParse("0.10")))).To(Succeed())
-		t := e.ticket(ctx)
+		t := e.task(ctx)
 		r := e.startRun(ctx, t, 1<<40, time.Now().Add(-time.Minute))
 
 		// 0.02 per entry: 20%, 40%, 60%, 80%.
@@ -394,7 +394,7 @@ var _ = Describe("Budgets", func() {
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func(ctx SpecContext) { _, _ = db.Exec(ctx, `DELETE FROM platform_admins WHERE user_id = $1`, e.user) })
 		Expect(budget.New(db).SetPlatformCeiling(ctx, e.org, audit.User(e.user), e.user, ptr(money.MustParse("0.02")))).To(Succeed())
-		t := e.ticket(ctx)
+		t := e.task(ctx)
 		r := e.startRun(ctx, t, 1<<40, time.Now().Add(-time.Minute))
 		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), deepseek, 1_000_000, 0, 0, "")})
 		Expect(err).NotTo(HaveOccurred())
