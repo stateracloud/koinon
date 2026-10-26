@@ -222,7 +222,7 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(usage(ctx)).To(Equal(map[string]int{"kek-20260101-aaaa": 4}))
 		var mcpBefore []byte
-		Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE id = $1`, mcp).Scan(&mcpBefore)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE org_id = $1 AND id = $2`, org, mcp).Scan(&mcpBefore)).To(Succeed())
 
 		var before []byte
 		Expect(pool.QueryRow(ctx, `SELECT api_key FROM providers WHERE id = $1`, ids[0]).Scan(&before)).To(Succeed())
@@ -241,7 +241,7 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(fields[connections.GitHubPrivateKeyField])).To(Equal("pem"))
 		var mcpAfter []byte
-		Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE id = $1`, mcp).Scan(&mcpAfter)).To(Succeed())
+		Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE org_id = $1 AND id = $2`, org, mcp).Scan(&mcpAfter)).To(Succeed())
 		var ma, mb secretstore.Envelope
 		Expect(json.Unmarshal(mcpBefore, &ma)).To(Succeed())
 		Expect(json.Unmarshal(mcpAfter, &mb)).To(Succeed())
