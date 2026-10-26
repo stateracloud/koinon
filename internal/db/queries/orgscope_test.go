@@ -56,6 +56,7 @@ var crossOrgQueries = map[string]string{
 	"connections.sql:ListConnectionsToMigrate": "startup: moves every org's connection secrets from Kubernetes Secrets into the store",
 	"budget.sql:ListOrgBudgetSummaries":        "platform admins: lists every org with its cap, ceiling and spend",
 	"prices.sql:ListPendingMigratedPrices":     "startup: finds the prices migration 00014 made from model rates, in every org, to complete them",
+	"sandboxes.sql:CountAgentSandboxesByState": "reconciler metrics: counts sandboxes by state across every org; returns counts only, no row or ID",
 	"auth.sql:ListEffectiveMemberships":        "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
 }
 
