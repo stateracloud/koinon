@@ -18,8 +18,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -142,7 +142,7 @@ func (rc *Receiver) store(ctx context.Context, org, runID pgtype.UUID, epoch int
 	if err != nil {
 		return UploadResult{}, err
 	}
-	b, ok := cfg.Binding(connectors.GitHubID)
+	connector, b, ok := providers.Default().Binding(cfg)
 	bound := false
 	if ok {
 		for _, t := range b.Targets {
@@ -181,8 +181,8 @@ func (rc *Receiver) store(ctx context.Context, org, runID pgtype.UUID, epoch int
 			return err
 		}
 		approval, err = q.CreateSystemApprovalRequest(ctx, store.CreateSystemApprovalRequestParams{
-			OrgID: org, TaskID: run.TaskID, RunID: run.ID, AgentID: run.AgentID, Connector: connectors.GitHubID, Tool: ToolPush,
-			Target: connectors.GitHubID + ":" + work.Manifest.Repo, ArgsJson: args, ArgsSha256: BundleHash([]byte(args)), ExpiresAt: expires,
+			OrgID: org, TaskID: run.TaskID, RunID: run.ID, AgentID: run.AgentID, Connector: connector, Tool: ToolPush,
+			Target: connector + ":" + work.Manifest.Repo, ArgsJson: args, ArgsSha256: BundleHash([]byte(args)), ExpiresAt: expires,
 		})
 		if err != nil {
 			return err

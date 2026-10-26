@@ -1076,6 +1076,96 @@ func (x *CancelTaskResponse) GetCanceledRuns() []*v1alpha1.Run {
 	return nil
 }
 
+// NotifyTypingRequest names the task.
+type NotifyTypingRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NotifyTypingRequest) Reset() {
+	*x = NotifyTypingRequest{}
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotifyTypingRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotifyTypingRequest) ProtoMessage() {}
+
+func (x *NotifyTypingRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotifyTypingRequest.ProtoReflect.Descriptor instead.
+func (*NotifyTypingRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *NotifyTypingRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *NotifyTypingRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+// NotifyTypingResponse is empty.
+type NotifyTypingResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NotifyTypingResponse) Reset() {
+	*x = NotifyTypingResponse{}
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotifyTypingResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotifyTypingResponse) ProtoMessage() {}
+
+func (x *NotifyTypingResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_task_v1alpha1_task_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotifyTypingResponse.ProtoReflect.Descriptor instead.
+func (*NotifyTypingResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_task_v1alpha1_task_proto_rawDescGZIP(), []int{14}
+}
+
 var File_koinon_task_v1alpha1_task_proto protoreflect.FileDescriptor
 
 const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
@@ -1149,7 +1239,11 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\"\x83\x01\n" +
 	"\x12CancelTaskResponse\x12.\n" +
 	"\x04task\x18\x01 \x01(\v2\x1a.koinon.task.v1alpha1.TaskR\x04task\x12=\n" +
-	"\rcanceled_runs\x18\x02 \x03(\v2\x18.koinon.run.v1alpha1.RunR\fcanceledRuns*\xc2\x01\n" +
+	"\rcanceled_runs\x18\x02 \x03(\v2\x18.koinon.run.v1alpha1.RunR\fcanceledRuns\"E\n" +
+	"\x13NotifyTypingRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\"\x16\n" +
+	"\x14NotifyTypingResponse*\xc2\x01\n" +
 	"\tTaskState\x12\x1a\n" +
 	"\x16TASK_STATE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14TASK_STATE_SUBMITTED\x10\x01\x12\x16\n" +
@@ -1167,7 +1261,7 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\x18CREATOR_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11CREATOR_KIND_USER\x10\x01\x12\x18\n" +
 	"\x14CREATOR_KIND_TRIGGER\x10\x02\x12\x16\n" +
-	"\x12CREATOR_KIND_AGENT\x10\x032\xf9\x03\n" +
+	"\x12CREATOR_KIND_AGENT\x10\x032\xe0\x04\n" +
 	"\vTaskService\x12_\n" +
 	"\n" +
 	"CreateTask\x12'.koinon.task.v1alpha1.CreateTaskRequest\x1a(.koinon.task.v1alpha1.CreateTaskResponse\x12a\n" +
@@ -1175,7 +1269,8 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\aGetTask\x12$.koinon.task.v1alpha1.GetTaskRequest\x1a%.koinon.task.v1alpha1.GetTaskResponse\"\x03\x90\x02\x01\x12h\n" +
 	"\rAppendMessage\x12*.koinon.task.v1alpha1.AppendMessageRequest\x1a+.koinon.task.v1alpha1.AppendMessageResponse\x12_\n" +
 	"\n" +
-	"CancelTask\x12'.koinon.task.v1alpha1.CancelTaskRequest\x1a(.koinon.task.v1alpha1.CancelTaskResponseBOZMgithub.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1;taskv1alpha1b\x06proto3"
+	"CancelTask\x12'.koinon.task.v1alpha1.CancelTaskRequest\x1a(.koinon.task.v1alpha1.CancelTaskResponse\x12e\n" +
+	"\fNotifyTyping\x12).koinon.task.v1alpha1.NotifyTypingRequest\x1a*.koinon.task.v1alpha1.NotifyTypingResponseBOZMgithub.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1;taskv1alpha1b\x06proto3"
 
 var (
 	file_koinon_task_v1alpha1_task_proto_rawDescOnce sync.Once
@@ -1190,7 +1285,7 @@ func file_koinon_task_v1alpha1_task_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_task_v1alpha1_task_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_koinon_task_v1alpha1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_koinon_task_v1alpha1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_koinon_task_v1alpha1_task_proto_goTypes = []any{
 	(TaskState)(0),                // 0: koinon.task.v1alpha1.TaskState
 	(ActorKind)(0),                // 1: koinon.task.v1alpha1.ActorKind
@@ -1208,46 +1303,50 @@ var file_koinon_task_v1alpha1_task_proto_goTypes = []any{
 	(*AppendMessageResponse)(nil), // 13: koinon.task.v1alpha1.AppendMessageResponse
 	(*CancelTaskRequest)(nil),     // 14: koinon.task.v1alpha1.CancelTaskRequest
 	(*CancelTaskResponse)(nil),    // 15: koinon.task.v1alpha1.CancelTaskResponse
-	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
-	(*v1alpha1.Cost)(nil),         // 17: koinon.run.v1alpha1.Cost
-	(*structpb.Struct)(nil),       // 18: google.protobuf.Struct
-	(*v1alpha1.Run)(nil),          // 19: koinon.run.v1alpha1.Run
+	(*NotifyTypingRequest)(nil),   // 16: koinon.task.v1alpha1.NotifyTypingRequest
+	(*NotifyTypingResponse)(nil),  // 17: koinon.task.v1alpha1.NotifyTypingResponse
+	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
+	(*v1alpha1.Cost)(nil),         // 19: koinon.run.v1alpha1.Cost
+	(*structpb.Struct)(nil),       // 20: google.protobuf.Struct
+	(*v1alpha1.Run)(nil),          // 21: koinon.run.v1alpha1.Run
 }
 var file_koinon_task_v1alpha1_task_proto_depIdxs = []int32{
 	2,  // 0: koinon.task.v1alpha1.Creator.kind:type_name -> koinon.task.v1alpha1.CreatorKind
 	0,  // 1: koinon.task.v1alpha1.Task.state:type_name -> koinon.task.v1alpha1.TaskState
 	3,  // 2: koinon.task.v1alpha1.Task.created_by:type_name -> koinon.task.v1alpha1.Creator
-	16, // 3: koinon.task.v1alpha1.Task.created_at:type_name -> google.protobuf.Timestamp
-	16, // 4: koinon.task.v1alpha1.Task.updated_at:type_name -> google.protobuf.Timestamp
-	16, // 5: koinon.task.v1alpha1.Task.finished_at:type_name -> google.protobuf.Timestamp
-	17, // 6: koinon.task.v1alpha1.Task.cost:type_name -> koinon.run.v1alpha1.Cost
-	16, // 7: koinon.task.v1alpha1.Task.agent_summary_at:type_name -> google.protobuf.Timestamp
+	18, // 3: koinon.task.v1alpha1.Task.created_at:type_name -> google.protobuf.Timestamp
+	18, // 4: koinon.task.v1alpha1.Task.updated_at:type_name -> google.protobuf.Timestamp
+	18, // 5: koinon.task.v1alpha1.Task.finished_at:type_name -> google.protobuf.Timestamp
+	19, // 6: koinon.task.v1alpha1.Task.cost:type_name -> koinon.run.v1alpha1.Cost
+	18, // 7: koinon.task.v1alpha1.Task.agent_summary_at:type_name -> google.protobuf.Timestamp
 	1,  // 8: koinon.task.v1alpha1.TaskEvent.actor_kind:type_name -> koinon.task.v1alpha1.ActorKind
-	18, // 9: koinon.task.v1alpha1.TaskEvent.payload:type_name -> google.protobuf.Struct
-	16, // 10: koinon.task.v1alpha1.TaskEvent.created_at:type_name -> google.protobuf.Timestamp
+	20, // 9: koinon.task.v1alpha1.TaskEvent.payload:type_name -> google.protobuf.Struct
+	18, // 10: koinon.task.v1alpha1.TaskEvent.created_at:type_name -> google.protobuf.Timestamp
 	4,  // 11: koinon.task.v1alpha1.CreateTaskResponse.task:type_name -> koinon.task.v1alpha1.Task
-	19, // 12: koinon.task.v1alpha1.CreateTaskResponse.run:type_name -> koinon.run.v1alpha1.Run
+	21, // 12: koinon.task.v1alpha1.CreateTaskResponse.run:type_name -> koinon.run.v1alpha1.Run
 	0,  // 13: koinon.task.v1alpha1.ListTasksRequest.state:type_name -> koinon.task.v1alpha1.TaskState
 	4,  // 14: koinon.task.v1alpha1.ListTasksResponse.tasks:type_name -> koinon.task.v1alpha1.Task
 	4,  // 15: koinon.task.v1alpha1.GetTaskResponse.task:type_name -> koinon.task.v1alpha1.Task
 	5,  // 16: koinon.task.v1alpha1.GetTaskResponse.events:type_name -> koinon.task.v1alpha1.TaskEvent
-	19, // 17: koinon.task.v1alpha1.GetTaskResponse.runs:type_name -> koinon.run.v1alpha1.Run
+	21, // 17: koinon.task.v1alpha1.GetTaskResponse.runs:type_name -> koinon.run.v1alpha1.Run
 	5,  // 18: koinon.task.v1alpha1.AppendMessageResponse.event:type_name -> koinon.task.v1alpha1.TaskEvent
-	19, // 19: koinon.task.v1alpha1.AppendMessageResponse.run:type_name -> koinon.run.v1alpha1.Run
+	21, // 19: koinon.task.v1alpha1.AppendMessageResponse.run:type_name -> koinon.run.v1alpha1.Run
 	4,  // 20: koinon.task.v1alpha1.CancelTaskResponse.task:type_name -> koinon.task.v1alpha1.Task
-	19, // 21: koinon.task.v1alpha1.CancelTaskResponse.canceled_runs:type_name -> koinon.run.v1alpha1.Run
+	21, // 21: koinon.task.v1alpha1.CancelTaskResponse.canceled_runs:type_name -> koinon.run.v1alpha1.Run
 	6,  // 22: koinon.task.v1alpha1.TaskService.CreateTask:input_type -> koinon.task.v1alpha1.CreateTaskRequest
 	8,  // 23: koinon.task.v1alpha1.TaskService.ListTasks:input_type -> koinon.task.v1alpha1.ListTasksRequest
 	10, // 24: koinon.task.v1alpha1.TaskService.GetTask:input_type -> koinon.task.v1alpha1.GetTaskRequest
 	12, // 25: koinon.task.v1alpha1.TaskService.AppendMessage:input_type -> koinon.task.v1alpha1.AppendMessageRequest
 	14, // 26: koinon.task.v1alpha1.TaskService.CancelTask:input_type -> koinon.task.v1alpha1.CancelTaskRequest
-	7,  // 27: koinon.task.v1alpha1.TaskService.CreateTask:output_type -> koinon.task.v1alpha1.CreateTaskResponse
-	9,  // 28: koinon.task.v1alpha1.TaskService.ListTasks:output_type -> koinon.task.v1alpha1.ListTasksResponse
-	11, // 29: koinon.task.v1alpha1.TaskService.GetTask:output_type -> koinon.task.v1alpha1.GetTaskResponse
-	13, // 30: koinon.task.v1alpha1.TaskService.AppendMessage:output_type -> koinon.task.v1alpha1.AppendMessageResponse
-	15, // 31: koinon.task.v1alpha1.TaskService.CancelTask:output_type -> koinon.task.v1alpha1.CancelTaskResponse
-	27, // [27:32] is the sub-list for method output_type
-	22, // [22:27] is the sub-list for method input_type
+	16, // 27: koinon.task.v1alpha1.TaskService.NotifyTyping:input_type -> koinon.task.v1alpha1.NotifyTypingRequest
+	7,  // 28: koinon.task.v1alpha1.TaskService.CreateTask:output_type -> koinon.task.v1alpha1.CreateTaskResponse
+	9,  // 29: koinon.task.v1alpha1.TaskService.ListTasks:output_type -> koinon.task.v1alpha1.ListTasksResponse
+	11, // 30: koinon.task.v1alpha1.TaskService.GetTask:output_type -> koinon.task.v1alpha1.GetTaskResponse
+	13, // 31: koinon.task.v1alpha1.TaskService.AppendMessage:output_type -> koinon.task.v1alpha1.AppendMessageResponse
+	15, // 32: koinon.task.v1alpha1.TaskService.CancelTask:output_type -> koinon.task.v1alpha1.CancelTaskResponse
+	17, // 33: koinon.task.v1alpha1.TaskService.NotifyTyping:output_type -> koinon.task.v1alpha1.NotifyTypingResponse
+	28, // [28:34] is the sub-list for method output_type
+	22, // [22:28] is the sub-list for method input_type
 	22, // [22:22] is the sub-list for extension type_name
 	22, // [22:22] is the sub-list for extension extendee
 	0,  // [0:22] is the sub-list for field type_name
@@ -1264,7 +1363,7 @@ func file_koinon_task_v1alpha1_task_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_task_v1alpha1_task_proto_rawDesc), len(file_koinon_task_v1alpha1_task_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

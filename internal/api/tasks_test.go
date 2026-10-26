@@ -165,6 +165,37 @@ var _ = Describe("TaskService", func() {
 		Expect(payload).To(Equal(map[string]any{"from": "todo", "to": "done"}))
 	})
 
+	It("wakes the agent's sandbox when a person types, once per ten seconds, and when a task is created", func(ctx SpecContext) {
+		_, err := e.pool.Exec(ctx, `INSERT INTO org_workspaces (org_id, workspace) VALUES ($1, 'ws-typing')`, org)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = e.pool.Exec(ctx, `INSERT INTO agent_sandboxes (org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, home_generation)
+			VALUES ($1, $2, 'ws-typing', 'sb-typing', 'pv-typing', 'key-typing', 'gen-1')`, org, agent.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		woken := func() int {
+			return count(ctx, e, `SELECT count(*) FROM agent_sandboxes WHERE agent_id = $1 AND woken_at IS NOT NULL`, agent.GetId())
+		}
+		reset := func() {
+			_, err := e.pool.Exec(ctx, `UPDATE agent_sandboxes SET woken_at = NULL WHERE agent_id = $1`, agent.GetId())
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		t, _ := create(ctx, member, "type")
+		Expect(woken()).To(Equal(1), "creating a task is a pre-wake signal")
+		reset()
+
+		_, err = member.tasks.NotifyTyping(ctx, &taskv1alpha1.NotifyTypingRequest{OrgId: org, TaskId: t.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(woken()).To(Equal(1))
+		reset()
+		_, err = member.tasks.NotifyTyping(ctx, &taskv1alpha1.NotifyTypingRequest{OrgId: org, TaskId: t.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(woken()).To(BeZero(), "a second call within the throttle is ignored")
+
+		viewer := e.userIn(ctx, org, store.OrgRoleViewer)
+		_, err = viewer.tasks.NotifyTyping(ctx, &taskv1alpha1.NotifyTypingRequest{OrgId: org, TaskId: t.GetId()})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+	})
+
 	It("is not found in another org", func(ctx SpecContext) {
 		t, _ := create(ctx, member, "mine")
 		otherOrg, other := e.newTeamOrg(ctx)

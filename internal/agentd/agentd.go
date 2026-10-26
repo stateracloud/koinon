@@ -48,6 +48,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 )
 
 // Backend is the part of [execution.Backend] agentd uses. agentd only execs: sandbox state
@@ -73,8 +74,13 @@ type Config struct {
 	// Poll is how often an idle worker looks for runs, and how often a worker checks on a
 	// sandbox it waits for. Default 1s.
 	Poll time.Duration
-	// SandboxTimeout bounds the wait for the agent's sandbox to be ready. Default 5m.
+	// SandboxTimeout bounds the wait for the agent's sandbox to be ready, for an org that has not
+	// set queue_wait_seconds (orgsettings). Default 5m. A run whose sandbox is not ready in time
+	// goes back to the queue instead of failing (ADR 0066), so a burst beyond the cluster's
+	// capacity waits.
 	SandboxTimeout time.Duration
+	// Now defaults to time.Now; tests move it forward to pass SandboxTimeout.
+	Now func() time.Time
 	// ReconcileNudge is how often a worker waiting for a sandbox NOTIFYs the reconciler.
 	// Default 5s.
 	ReconcileNudge time.Duration
@@ -106,6 +112,15 @@ type Config struct {
 	// MaxTakeovers fails a run that has been taken over more often than this, instead of
 	// resuming it again. Default 5.
 	MaxTakeovers int
+	// ModelRetries is how often a turn is repeated after a transient or throttled model
+	// error (ADR 0030, failure classes) before the run fails. Default 3.
+	ModelRetries int
+	// RetryBackoff is the first wait before a transient retry; it doubles per retry up to a
+	// minute. Default 2s.
+	RetryBackoff time.Duration
+	// MaxRetryAfter is the longest Retry-After Koinon waits out; a provider asking for more
+	// fails the run as throttled. Default 5m.
+	MaxRetryAfter time.Duration
 	// GatewayURL is agentgateway's base URL as sandboxes reach it, for example
 	// http://koinon-gateway.koinon.svc:8080. Flavors get <GatewayURL>/v1 for models and
 	// <GatewayURL>/mcp for tools. Required; it must not carry credentials.
@@ -147,12 +162,18 @@ func (c *Config) defaults() error {
 	setDefault(&c.Lease, 30*time.Second)
 	setDefault(&c.Heartbeat, c.Lease/3)
 	setDefault(&c.Poll, time.Second)
-	setDefault(&c.SandboxTimeout, 5*time.Minute)
+	setDefault(&c.SandboxTimeout, orgsettings.DefaultQueueWait)
+	if c.Now == nil {
+		c.Now = time.Now
+	}
 	setDefault(&c.ReconcileNudge, 5*time.Second)
 	setDefault(&c.CancelGrace, 10*time.Second)
 	setDefault(&c.ReadyTimeout, time.Minute)
 	setDefault(&c.ReadySettle, time.Second)
 	setDefault(&c.MaxTakeovers, 5)
+	setDefault(&c.ModelRetries, 3)
+	setDefault(&c.RetryBackoff, 2*time.Second)
+	setDefault(&c.MaxRetryAfter, 5*time.Minute)
 	setDefault(&c.SummaryTimeout, defaultSummaryWait)
 	setDefault(&c.StuckAfter, defaultStuckAfter)
 	setDefault(&c.StuckPoll, defaultStuckPoll)

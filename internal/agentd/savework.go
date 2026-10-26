@@ -27,7 +27,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/stateracloud/koinon/connectors"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/savedwork"
 )
 
@@ -146,7 +146,7 @@ func (r *runner) saveWork(ctx context.Context, workspace, sandbox string) saveRe
 // githubTargets are the repositories (lower case owner/name) the run's agent version is bound to.
 func (r *runner) githubTargets() map[string]bool {
 	out := map[string]bool{}
-	if b, ok := r.vcfg.Binding(connectors.GitHubID); ok {
+	if _, b, ok := providers.Default().Binding(r.vcfg); ok {
 		for _, t := range b.Targets {
 			out[strings.ToLower(t)] = true
 		}

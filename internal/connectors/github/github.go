@@ -51,6 +51,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/stateracloud/koinon/internal/codehost"
 )
 
 // DefaultBaseURL is GitHub's REST API.
@@ -70,7 +72,7 @@ const DefaultRefreshMargin = 10 * time.Minute
 var ErrRepositoryMismatch = errors.New("github: repositories do not match the request")
 
 // MaxRepositories is GitHub's limit on repositories per installation token.
-const MaxRepositories = 500
+const MaxRepositories = codehost.DefaultMaxRepositories
 
 const redacted = "[redacted]"
 
@@ -511,3 +513,9 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+// HTTPStatus implements codehost.StatusError.
+func (e *APIError) HTTPStatus() int { return e.Status }
+
+// Detail implements codehost.StatusError.
+func (e *APIError) Detail() string { return e.Message }

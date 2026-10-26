@@ -57,6 +57,7 @@ stateDiagram-v2
     running --> failed
     parked --> canceled: timeout alarm or user cancel
     starting --> failed
+    starting --> queued: sandbox not ready in time (ADR 0066)
     succeeded --> [*]
     failed --> [*]
     canceled --> [*]
@@ -166,7 +167,16 @@ from the class:
 | `policy` | no retry |
 | `fatal` | anything unknown; no retry |
 
-Today a failure is free text (`internal/agentd/run.go:42`, `:603-611`, `:663-692`); exit codes
+Status (FC1): `runs.failure_class` (migration 00021) and `Run.failure_class` on the API carry the
+class. agentd classifies an answered `session/prompt` error from the HTTP status, `Retry-After` and
+error text the harness reports (`internal/agentd/classify.go`), and repeats the turn in the same
+session for `transient` (backoff from `RetryBackoff`) and `throttled` (the provider's `Retry-After`,
+at most `MaxRetryAfter`), up to `ModelRetries` times, recording a `run.retry` event each time. Token
+and spend limits cancel the run with class `budget`. `context_overflow` fails the run with a clear
+message; shrinking the largest input and `ask_user` wait for the inbox work (ADR 0065). Every other
+failure is `fatal`.
+
+Before FC1 a failure was free text (`internal/agentd/run.go:42`, `:603-611`, `:663-692`); exit codes
 64, 126 and 127 are already treated as permanent (`run.go:67`).
 
 ## Links

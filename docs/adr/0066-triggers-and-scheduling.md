@@ -172,10 +172,28 @@ file on 2026-10-26):
     `SandboxTimeout` failure becomes a requeue;
   - DBOS's migrations run in the migration Job ([0060](0060-migrations-as-a-job.md)).
 
+## Amendment 2026-10-26 (DB1)
+
+- DBOS Transact for Go v1.7.0 (MIT), schema `dbos` in Koinon's database. Its tables are created by
+  `koinon-api migrate` (`dbos.Migrate`, then grants to `koinon_app` when that role exists), and
+  `koinon-api` launches DBOS with `SkipMigrations`, so a missing schema fails the start. Closes the
+  schema question below; the workers run in `koinon-api` only, behind `--durable`
+  (chart `api.durable.enabled`, off by default). Code: `internal/durable`. `koinon_app` gets DML
+  only on the schema (SELECT/INSERT/UPDATE/DELETE, sequence USAGE/SELECT, function EXECUTE), as in
+  the chart's CNPG bootstrap, not the SDK's `GRANT ALL`.
+
 ## Open questions
 
-- DBOS's system tables: a separate schema or a separate database in the same cluster, and which
-  Koinon processes run DBOS workers.
+- ~~DBOS's system tables: a separate schema or a separate database in the same cluster, and which
+  Koinon processes run DBOS workers.~~ Answered by the 2026-10-26 (DB1) amendment: schema `dbos`,
+  workers in `koinon-api` only.
+- DBOS executor identity and upgrades (prerequisite for TR2/TK4, before any workflow is registered):
+  DBOS recovers pending workflows for its own executor ID on Launch, and the API leaves the ID at
+  the default `local`, so with `api.replicas` > 1 or a surge during a rolling update a new pod
+  re-runs workflows another live pod is still running. Each replica needs a unique, stable executor
+  ID (for example the pod name) or the durable runtime must stay at one replica. The other side:
+  `ApplicationVersion` is the release version, so workflows left pending by the previous release
+  (a long durable timer) are not recovered after an upgrade; decide how they are carried over.
 - Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.
 - The burst window length, the pre-warm lead time and the jitter range.
 - The filter language for rules (CEL was ADR 0010's candidate) and whether a trigger has its own
@@ -186,6 +204,45 @@ file on 2026-10-26):
   lists correlation under v0.2.
 - The DBOS management plane (Conductor) is an enterprise module (`go.dbos.dev/dbos-enterprise-go`);
   how operators inspect DBOS state without it.
+
+## Amendment (2026-10-26, plan item LT1): latency defaults as built
+
+- **Sandbox wait.** A run whose sandbox is not ready within the org's queue wait (default 5
+  minutes) goes back to `queued` (new transition `starting -> queued`, owner only, migration
+  00022), behind the older runs of its origin, and is claimed again. It no longer fails. A sandbox
+  in a terminal state (deleted, retained, error with an unhealthy agent) still fails the run at once.
+  The time between the claim and the requeue (`runs.claimed_at`) is credited to `parked_seconds`,
+  so waiting for a sandbox does not count against the run's wall-clock cap.
+- **Priority.** `runs.origin` is `interactive` (default) or `scheduled`. `ClaimNextRun` orders by
+  origin, then `ready_at`: interactive work is claimed before scheduled work, FIFO within each.
+  Triggers and schedules (TR1) enqueue with `scheduler.EnqueueOrigin(..., RunOriginScheduled)`.
+- **Per-org tunables.** `org_settings` holds `idle_timeout_seconds`, `park_warm_seconds` and
+  `queue_wait_seconds`; a NULL value is the platform default (chart values
+  `reconciler.idleTimeout`, `reconciler.parkWarm`, agentd `SandboxTimeout`). They are set from Go
+  (`orgsettings.Set`) or SQL for now; the admin API to read and change them is not part of this
+  item and comes with the org settings page, in a later item.
+- **Acknowledge at once.** Decision 11's first bullet is met at the API: `CreateTask` and
+  `AppendMessage` return as soon as the task event and the queued run are committed, without
+  waiting for a sandbox. The chat-side acknowledgement (a reaction or a "working on it" message in
+  Slack or Teams) belongs to the chat connector items (TR1, CH); LT1 adds none.
+- **Activity (B5).** A sandbox's activity is the latest of its last start, the last run of the
+  agent that finished or parked, and the last pre-wake signal (`agent_sandboxes.woken_at`). A
+  claimable or active run keeps it up regardless. It stops once the idle timeout has passed since
+  its last activity; a sandbox whose run parked on `a2a` or `input_required` stays up until the
+  later of that and the park window (15 minutes by default) from the park. Approval and budget
+  parks use the idle timeout. A pre-wake signal on a stopped sandbox starts it, and one that no run
+  follows lets it stop again after the idle timeout.
+- **Pre-wake signals.** Package `wake`: `TaskCreated`, `Typing` and `CronDue`. All write
+  `woken_at` and wake the reconciler. `CreateTask` calls `TaskCreated` after its transaction
+  commits (best effort). `TaskService.NotifyTyping(task_id)` is the API hook for a person typing:
+  members and above, at most one wake per task per ten seconds per API replica, ignored for an
+  ended task. `CronDue` is called by TR1 a lead time, with jitter, ahead of a fire.
+- **Per-sandbox jobs (B4).** The reconciler runs one job per agent, at most `sandboxJobs` at once.
+  Agents whose gateway key is already live start before and during `gw.Apply`, so a start does not
+  wait for the hot reload; agents with a new key wait for the Apply, as before.
+- **Pre-pull (B6).** The chart can run a DaemonSet that pulls the flavor images onto the Kata
+  nodes (`flavorPrepull`). Koinon does not place sandbox pods, so it sets no node preference for
+  them; the runtime class's node selector decides, and the pre-pull makes those nodes warm.
 
 ## Upstream verification
 

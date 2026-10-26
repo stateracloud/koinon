@@ -83,6 +83,7 @@ var _ = Describe("Ingester", func() {
 		run := e.run(ctx, r.ID)
 		Expect(run.State).To(Equal(store.RunStateCanceled))
 		Expect(run.OutcomeReason.String).To(ContainSubstring("token cap"))
+		Expect(run.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
 	})
 
 	It("wakes the reconciler once, when a request reaches the limit (Kubernetes mode revokes the key then)", func(ctx SpecContext) {
@@ -154,6 +155,7 @@ var _ = Describe("Ingester", func() {
 		run := e.run(ctx, r.ID)
 		Expect(run.State).To(Equal(store.RunStateCanceled))
 		Expect(run.OutcomeReason.String).To(HavePrefix("agent daily limit reached ($0.055 of $0.05"))
+		Expect(run.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
 
 		events, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: e.org, TaskID: t.ID, MaxEvents: 100})
 		Expect(err).NotTo(HaveOccurred())
@@ -166,6 +168,7 @@ var _ = Describe("Ingester", func() {
 		Expect(payload).To(HaveKeyWithValue("reason", string(scheduler.ReasonSpendLimit)))
 		Expect(payload).To(HaveKeyWithValue("spend_limit_usd", "0.05"))
 		Expect(payload).To(HaveKeyWithValue("limit", "agent_daily"))
+		Expect(payload).To(HaveKeyWithValue("failureClass", "budget"))
 	})
 
 	It("counts entries of unknown orgs and agents as unattributed", func(ctx SpecContext) {

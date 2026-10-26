@@ -24,7 +24,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -34,7 +34,7 @@ import (
 var savedWorkPermissions = map[string]string{"metadata": "read", "contents": "write"}
 
 // executeSavedWork pushes the approved saved work to its branch.
-func (s *Service) executeSavedWork(ctx context.Context, row store.ApprovalRequest) (map[string]any, error) {
+func (s *Service) executeSavedWork(ctx context.Context, p codehost.Provider, row store.ApprovalRequest) (map[string]any, error) {
 	args, err := savedwork.DecodePushArgs(row.ArgsJson)
 	if err != nil {
 		return nil, permanentError{err}
@@ -80,26 +80,26 @@ func (s *Service) executeSavedWork(ctx context.Context, row store.ApprovalReques
 	case savedwork.ManifestHash(work.Manifest) != args.ManifestSHA256, savedwork.ManifestHash(shown) != args.ManifestSHA256:
 		return nil, permanent("the saved files are not the ones that were approved (manifest hash differs)")
 	}
-	repo, err := github.ParseRepo(args.Repo)
+	repo, err := p.ParseRepo(args.Repo)
 	if err != nil {
 		return nil, permanentError{err}
 	}
-	app, err := s.appFor(ctx, row, args.Repo, false)
+	conn, err := s.connectionFor(ctx, p, row, args.Repo, false)
 	if err != nil {
 		return nil, err
 	}
-	tok, err := s.gh.InstallationToken(ctx, app, github.TokenRequest{Repositories: []string{repo.String()}, Permissions: savedWorkPermissions})
+	acc, err := p.Open(ctx, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: savedWorkPermissions})
 	if err != nil {
 		return nil, err
 	}
-	info, err := s.gh.GetRepository(ctx, tok, repo)
+	info, err := acc.Repository(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
 	if args.Branch == info.DefaultBranch {
 		return nil, permanent("saved work is never written to the default branch")
 	}
-	head, err := s.existingHead(ctx, tok, repo, args.Branch, row.ID.String())
+	head, err := s.existingHead(ctx, acc, repo, args.Branch, row.ID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -113,12 +113,12 @@ func (s *Service) executeSavedWork(ctx context.Context, row store.ApprovalReques
 			return nil, err
 		}
 		msg := savedWorkMessage(task.Title, row.ID.String(), requested, approved)
-		if head, err = s.commitSaved(ctx, tok, repo, work, msg); err != nil {
+		if head, err = s.commitSaved(ctx, p, acc, repo, work, msg); err != nil {
 			return nil, err
 		}
-		err = s.gh.CreateBranch(ctx, tok, repo, args.Branch, head)
-		if errors.Is(err, github.ErrRefExists) {
-			if head, err = s.existingHead(ctx, tok, repo, args.Branch, row.ID.String()); err == nil && head == "" {
+		err = acc.CreateBranch(ctx, repo, args.Branch, head)
+		if errors.Is(err, codehost.ErrBranchExists) {
+			if head, err = s.existingHead(ctx, acc, repo, args.Branch, row.ID.String()); err == nil && head == "" {
 				err = permanent("branch %s appeared while it was being created", args.Branch)
 			}
 		}
@@ -127,7 +127,7 @@ func (s *Service) executeSavedWork(ctx context.Context, row store.ApprovalReques
 		}
 	}
 	return map[string]any{
-		"url": "https://github.com/" + repo.String() + "/tree/" + args.Branch, "branch": args.Branch, "base": args.Base,
+		"url": p.BranchURL(repo, args.Branch), "branch": args.Branch, "base": args.Base,
 		"commit": head, "repo": args.Repo, "files": len(work.Manifest.Files),
 	}, nil
 }
@@ -141,35 +141,27 @@ func savedWorkMessage(taskTitle, approvalID, requestedBy, approvedBy string) str
 	return b.String()
 }
 
-// commitSaved creates the blobs, the tree on top of the base commit and the commit with the saved
-// files, and returns its SHA. The base commit must be on GitHub.
-func (s *Service) commitSaved(ctx context.Context, tok github.Token, repo github.Repo, w savedwork.Work, message string) (string, error) {
-	base, err := s.gh.GetCommit(ctx, tok, repo, w.Manifest.Base)
-	if github.IsStatus(err, 404) || github.IsStatus(err, 422) {
-		return "", permanent("the commit the work is based on (%s) is not on GitHub in %s; push the branch it came from first", w.Manifest.Base, repo)
+// commitSaved writes the commit with the saved files on top of the base commit, and returns its
+// SHA. The base commit must be on the code host.
+func (s *Service) commitSaved(ctx context.Context, p codehost.Provider, acc codehost.Access, repo codehost.Repo, w savedwork.Work, message string) (string, error) {
+	_, err := acc.Commit(ctx, repo, w.Manifest.Base)
+	if codehost.IsStatus(err, 404) || codehost.IsStatus(err, 422) {
+		return "", permanent("the commit the work is based on (%s) is not on %s in %s; push the branch it came from first", w.Manifest.Base, p.Capabilities().DisplayName, repo)
 	}
 	if err != nil {
 		return "", err
 	}
-	entries := make([]github.TreeEntry, 0, len(w.Manifest.Files))
+	files := make([]codehost.FileWrite, 0, len(w.Manifest.Files))
 	for _, f := range w.Manifest.Files {
 		mode := f.Mode
 		if f.Status == savedwork.Deleted {
 			mode = "100644"
 		}
-		e := github.TreeEntry{Path: f.Path, Mode: mode, Type: "blob"}
-		if f.Status != savedwork.Deleted {
-			sha, err := s.gh.CreateBlob(ctx, tok, repo, w.Content[f.Path])
-			if err != nil {
-				return "", err
-			}
-			e.SHA = &sha
+		fw := codehost.FileWrite{Path: f.Path, Mode: mode, Delete: f.Status == savedwork.Deleted}
+		if !fw.Delete {
+			fw.Content = w.Content[f.Path]
 		}
-		entries = append(entries, e)
+		files = append(files, fw)
 	}
-	tree, err := s.gh.CreateTree(ctx, tok, repo, base.Tree.SHA, entries)
-	if err != nil {
-		return "", err
-	}
-	return s.gh.CreateCommit(ctx, tok, repo, message, tree, []string{w.Manifest.Base})
+	return acc.WriteCommit(ctx, repo, codehost.CommitRequest{Base: w.Manifest.Base, Message: message, Files: files})
 }

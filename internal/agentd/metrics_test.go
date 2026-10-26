@@ -43,9 +43,9 @@ var _ = Describe("metrics", func() {
 	It("counts a failed run", func(ctx SpecContext) {
 		m := agentd.NewMetrics(prometheus.NewRegistry())
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.recordSandbox(ctx, store.SandboxStateStopped, "")
+		e.recordSandbox(ctx, store.SandboxStateDeleted, "")
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
-		e.pool("agentd-a", withMetrics(m), func(c *agentd.Config) { c.SandboxTimeout = time.Second })
+		e.pool("agentd-a", withMetrics(m))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 
 		Eventually(func() float64 { return finished(m, "failed") }).Should(Equal(1.0))

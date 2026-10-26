@@ -60,11 +60,13 @@ import (
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
+	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
@@ -88,6 +90,7 @@ type config struct {
 	addr           string
 	databaseURL    string
 	migrate        bool
+	durable        bool
 	wait           time.Duration
 	trustedOrigins string
 	args           []string
@@ -143,6 +146,9 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.addr, "addr", ":8080", "listen address")
 	fs.StringVar(&c.databaseURL, "database-url", "", "Postgres connection string")
 	fs.BoolVar(&c.migrate, "migrate", false, "apply database migrations before starting")
+	fs.BoolVar(&c.durable, "durable", false,
+		"run the DBOS runtime (schedules, durable timers; ADR 0066); needs the DBOS tables that "+
+			"\"koinon-api -durable migrate\" creates (the migrate subcommand creates them only with this flag)")
 	fs.DurationVar(&c.wait, "wait", 5*time.Minute, "how long migrations wait for the database to come up")
 	fs.StringVar(&c.trustedOrigins, "trusted-origins", "",
 		"comma-separated extra origins allowed to make state-changing requests (CSRF)")
@@ -309,11 +315,11 @@ func run() error {
 
 	switch {
 	case len(cfg.args) == 1 && cfg.args[0] == "migrate":
-		return migrate(ctx, cfg.databaseURL, cfg.wait)
+		return migrate(ctx, cfg.databaseURL, cfg.wait, cfg.durable)
 	case len(cfg.args) > 0:
 		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\", \"preflight\", \"ensure-secrets\", \"keys\" and \"audit\" (first)", cfg.args)
 	case cfg.migrate:
-		if err := migrate(ctx, cfg.databaseURL, cfg.wait); err != nil {
+		if err := migrate(ctx, cfg.databaseURL, cfg.wait, cfg.durable); err != nil {
 			return err
 		}
 	}
@@ -413,6 +419,24 @@ func run() error {
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
 	go hub.Run(bgCtx)
 	go scheduler.Sweeper(bgCtx, pool, cfg.sweepInterval, slog.Default())
+	if cfg.durable {
+		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
+		// missing schema fails the start instead of the API running without its timers.
+		rt := durable.New(durable.Config{
+			DatabaseURL:        cfg.databaseURL,
+			ApplicationVersion: project.Version,
+			Logger:             slog.Default(),
+		})
+		if err := rt.Launch(bgCtx); err != nil {
+			return err
+		}
+		defer func() { // before pool.Close
+			if err := rt.Shutdown(30 * time.Second); err != nil {
+				slog.Warn("stopping the DBOS runtime", "err", err)
+			}
+		}()
+		slog.Info("DBOS runtime started")
+	}
 	kube, err := kubeClient(cfg)
 	if err != nil {
 		return err
@@ -458,6 +482,7 @@ func run() error {
 	}
 	// One GitHub client, so connection checks and approved calls share its token cache.
 	gh := github.NewClient(github.Options{BaseURL: cfg.githubAPIURL})
+	hosts := providers.New(gh)
 	var opener connections.Opener
 	var keys services.Keys
 	if keyring != nil {
@@ -466,7 +491,7 @@ func run() error {
 	// One egress policy for everything an org points the gateway or Koinon at: model providers and
 	// remote MCP servers.
 	urlPolicy := catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts)}
-	approvalOpts := approvals.Options{Keys: opener, GitHub: gh, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default()}
+	approvalOpts := approvals.Options{Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default()}
 	if kube != nil {
 		// Approved calls to remote MCP servers go through the gateway with the org's executor key,
 		// which the reconciler keeps in a Secret; koinon-api never holds a server credential.
@@ -484,7 +509,7 @@ func run() error {
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, GitHub: gh, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc,
 	})
 	if kube != nil {
 		var sealer connections.Sealer
@@ -530,6 +555,7 @@ func run() error {
 	toolsErr := make(chan error, 1)
 	if cfg.toolsAddr != "" {
 		tools, err := githubtools.New(pool, githubtools.Options{
+			Hosts: hosts,
 			// Trusted-preset calls run at once instead of on the next sweep.
 			Execute: func(ctx context.Context, org, id pgtype.UUID) {
 				ctx, cancel := context.WithTimeout(ctx, approvals.DefaultExecutionLease)
@@ -605,7 +631,7 @@ func run() error {
 
 // migrate applies pending migrations, first waiting up to wait for the
 // database: on a fresh install it may still be starting.
-func migrate(ctx context.Context, dsn string, wait time.Duration) error {
+func migrate(ctx context.Context, dsn string, wait time.Duration, withDurable bool) error {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return err
@@ -638,7 +664,13 @@ func migrate(ctx context.Context, dsn string, wait time.Duration) error {
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	return nil
+	// DBOS keeps its own tables in its own schema; creating that schema needs CREATE on the
+	// database, which an external migrate role may lack. So it runs only when the DBOS runtime is
+	// on (the chart passes -durable to the migration Job when api.durable.enabled).
+	if !withDurable {
+		return nil
+	}
+	return durable.Migrate(ctx, dsn, slog.Default())
 }
 
 // savedWorkKey returns the key that signs saved-work uploads, creating its Secret (32 random bytes

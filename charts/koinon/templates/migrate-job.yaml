@@ -84,7 +84,7 @@ spec:
         - name: migrate
           image: {{ include "koinon.image" (list . .Values.api.image) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args: ["-wait", {{ .Values.migrations.wait | quote }}, "migrate"]
+          args: ["-wait", {{ .Values.migrations.wait | quote }}{{ if .Values.api.durable.enabled }}, "-durable"{{ end }}, "migrate"]
           env:
             {{- include "koinon.dbEnv" (list . "migrate") | nindent 12 }}
           securityContext:

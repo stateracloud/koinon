@@ -58,6 +58,8 @@ jobs:
       # Postgres tests use testcontainers; Docker is available on ubuntu runners.
       # test/flavors needs the flavor images, which the flavors job builds and tests.
       - run: go test $(go list ./... | grep -v '/test/flavors$')
+      # The reconciler runs per-sandbox jobs concurrently (LT1); keep its state guarded.
+      - run: go test -race -count=1 ./internal/reconciler/
 
   web:
     needs: changes

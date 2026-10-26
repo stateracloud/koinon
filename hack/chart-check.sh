@@ -187,6 +187,11 @@ lacks "no Secret delete by default" 'verbs: \[delete\]'
 has "Secret delete with the legacy migration" 'verbs: \[delete\]' --set secrets.migrateLegacyConnections=true
 n=$(render --show-only templates/gateway-standalone.yaml | grep -c 'kek' || true)
 [ "$n" = 0 ] || fail "the gateway references the KEK Secret"
+# The DBOS runtime (ADR 0066) is opt-in; its tables come from the migration Job.
+lacks "the DBOS runtime is off by default" '"-durable"' --show-only templates/deployments.yaml
+lacks "the migration Job leaves the DBOS schema alone by default" '"-durable"' --show-only templates/migrate-job.yaml
+has "api.durable.enabled makes the migration Job create the DBOS tables" '"-durable", "migrate"' --set api.durable.enabled=true --show-only templates/migrate-job.yaml
+has "api.durable.enabled starts the DBOS runtime" '"-durable"' --set api.durable.enabled=true --show-only templates/deployments.yaml
 # The gateway mounts the provider keys Secret, and that Secret only.
 has "gateway mounts the provider keys" 'mountPath: /secrets/providers$' --show-only templates/gateway-standalone.yaml
 n=$(render | grep -c 'secretName: koinon-gateway-providers$' || true)
@@ -410,6 +415,28 @@ has "the preflight expects sandbox pull secrets with a pull secret" '--expect-sa
 has "the preflight expects sandbox pull secrets with a mirror" '--expect-sandbox-pull-secrets' --set global.imageRegistry=art.example.com
 lacks "the preflight expects none by default" '--expect-sandbox-pull-secrets'
 has "the preflight may read OpenShell's gateway ConfigMap, by name" 'resourceNames: \[openshell-config\]'
+
+# Latency defaults (plan item LT1): the reconciler's warm window and job bound reach its config.
+has "reconciler config carries the park warm window" 'parkWarm: 15m' --show-only templates/config.yaml
+has "reconciler config carries the park warm window override" 'parkWarm: 30m' --set reconciler.parkWarm=30m --show-only templates/config.yaml
+has "reconciler config carries the sandbox job bound" 'sandboxJobs: 8' --show-only templates/config.yaml
+# Flavor pre-pull (practice B6): off by default; needs a node selector; one init container per
+# flavor image through koinon.imageRef and the pull secrets; never in a sandbox namespace.
+prepull=(--set flavorPrepull.enabled=true --set-string 'flavorPrepull.nodeSelector.katacontainers\.io/kata-runtime=true')
+lacks "no flavor pre-pull by default" 'kind: DaemonSet'
+has "flavor pre-pull renders a DaemonSet" '^kind: DaemonSet$' "${prepull[@]}" --show-only templates/flavor-prepull.yaml
+has "flavor pre-pull selects the Kata nodes" 'katacontainers.io/kata-runtime: "true"' "${prepull[@]}" --show-only templates/flavor-prepull.yaml
+has "flavor pre-pull pulls the flavor image" 'image: "ghcr.io/stateracloud/flavor-opencode:' "${prepull[@]}" --show-only templates/flavor-prepull.yaml
+has "flavor pre-pull image follows the registry mirror" 'image: "mirror.example.com/stateracloud/flavor-opencode:' "${prepull[@]}" \
+	--set global.imageRegistry=mirror.example.com --show-only templates/flavor-prepull.yaml
+has "flavor pre-pull pause image follows the registry mirror" 'image: "mirror.example.com/pause:3.10"' "${prepull[@]}" \
+	--set global.imageRegistry=mirror.example.com --show-only templates/flavor-prepull.yaml
+has "flavor pre-pull uses the image pull secrets" '- name: regcred' "${prepull[@]}" --set 'global.imagePullSecrets[0].name=regcred' \
+	--show-only templates/flavor-prepull.yaml
+lacks "flavor pre-pull sets no runtime class (it is not a sandbox)" 'runtimeClassName' "${prepull[@]}" --show-only templates/flavor-prepull.yaml
+lacks "flavor pre-pull is not privileged" 'privileged: true' "${prepull[@]}" --show-only templates/flavor-prepull.yaml
+has "flavor pre-pull drops all capabilities" 'drop: \[ALL\]' "${prepull[@]}" --show-only templates/flavor-prepull.yaml
+if render --set flavorPrepull.enabled=true >/dev/null 2>&1; then fail "flavorPrepull without a nodeSelector must not render"; fi
 
 if [ "$failures" -gt 0 ]; then
 	echo "$failures assertion(s) failed" >&2
