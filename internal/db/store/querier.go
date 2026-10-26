@@ -77,6 +77,9 @@ type Querier interface {
 	// Fills a migrated price in place, once.
 	CompleteMigratedPrice(ctx context.Context, arg CompleteMigratedPriceParams) (int64, error)
 	ConsumeOIDCLoginFlow(ctx context.Context, arg ConsumeOIDCLoginFlowParams) (OidcLoginFlow, error)
+	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
+	// no org-owned row, so it takes no @org_id.
+	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
 	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
 	// shared by agentd (stuck sandboxes) and the reconciler (sandboxes in Error or Completed). A
 	// stuck sandbox counts from its incident, which agentd records before the reconciler recreates
@@ -216,6 +219,7 @@ type Querier interface {
 	GetApprovalRequestByCall(ctx context.Context, arg GetApprovalRequestByCallParams) (ApprovalRequest, error)
 	// An agent may only read its own requests.
 	GetApprovalRequestForAgent(ctx context.Context, arg GetApprovalRequestForAgentParams) (ApprovalRequest, error)
+	GetAuditChainHead(ctx context.Context, orgID pgtype.UUID) (AuditChainHead, error)
 	// The p90 of provider-reported input tokens per request byte over the newest 500 real
 	// (not estimated) requests of a model, and how many there were.
 	GetCalibration(ctx context.Context, arg GetCalibrationParams) (GetCalibrationRow, error)
@@ -325,7 +329,17 @@ type Querier interface {
 	// cleaned up yet.
 	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
 	ListApprovalRequestsForTicket(ctx context.Context, arg ListApprovalRequestsForTicketParams) ([]ApprovalRequest, error)
+	// Every org that has a chain, for the verifier.
+	ListAuditChainOrgs(ctx context.Context) ([]pgtype.UUID, error)
+	// One page of an org's chain in chain order, with the fields the hash covers as text, so the
+	// verifier recomputes the hash without trusting audit_event_hash().
+	ListAuditChainRows(ctx context.Context, arg ListAuditChainRowsParams) ([]ListAuditChainRowsRow, error)
 	ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error)
+	// ListAuditEventsFiltered across every org, for platform admins who name no org.
+	ListAuditEventsAllOrgs(ctx context.Context, arg ListAuditEventsAllOrgsParams) ([]AuditEvent, error)
+	// The read path (AuditService.List, GET /admin/v1/audit): newest first by id, optionally narrowed
+	// by time range, action prefix and actor. before_id is the cursor, the last id of the previous page.
+	ListAuditEventsFiltered(ctx context.Context, arg ListAuditEventsFilteredParams) ([]AuditEvent, error)
 	ListConnections(ctx context.Context, orgID pgtype.UUID) ([]Connection, error)
 	ListConnectionsByConnector(ctx context.Context, arg ListConnectionsByConnectorParams) ([]Connection, error)
 	// Connections that still name a Kubernetes Secret: not yet moved, or moved but the old Secret not
@@ -513,6 +527,8 @@ type Querier interface {
 	// Revokes only a grant that came from a platform admin group; it returns no row for any other.
 	RevokePlatformAdminFromGroup(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
+	// Logout: revokes a live session and says whose it was, for the audit log. No row: nothing was live.
+	RevokeSessionReturningUser(ctx context.Context, arg RevokeSessionReturningUserParams) (pgtype.UUID, error)
 	RevokeSessionsByMethod(ctx context.Context, arg RevokeSessionsByMethodParams) (int64, error)
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
 	// Records a newly issued agentgateway key by ID and hash.
