@@ -417,6 +417,21 @@
       "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
       "then": {"required": ["host"], "properties": {"host": {"minLength": 1}}}
     },
+    "httpRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "annotations": {"type": "object", "additionalProperties": {"type": "string"}},
+        "hostnames": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "parentRefs": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {
+          "group": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string", "minLength": 1},
+          "namespace": {"type": "string"}, "sectionName": {"type": "string"}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}}}},
+        "timeouts": {"type": "object", "additionalProperties": false, "properties": {"request": {"type": "string"}, "backendRequest": {"type": "string"}}}
+      },
+      "if": {"properties": {"enabled": {"const": true}}, "required": ["enabled"]},
+      "then": {"required": ["hostnames", "parentRefs"], "properties": {"hostnames": {"minItems": 1}, "parentRefs": {"minItems": 1}}}
+    },
     "metrics": {
       "type": "object",
       "additionalProperties": false,
