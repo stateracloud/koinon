@@ -29,6 +29,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -47,13 +51,16 @@ type Column struct {
 	Column string
 }
 
-// Columns lists every place Koinon stores an envelope. Add new ones here, or status, rewrap,
-// retire and reencrypt would miss them.
+// Columns lists every place Koinon stores an envelope, named by the constants the writers bind.
+// Add new ones here, or status, rewrap, retire, reencrypt and the KEK Secret check would miss
+// them; a test fails for any secretstore.Binding in the code whose table and column are not here.
 var Columns = []Column{
-	{Table: "providers", Column: "api_key"},
-	{Table: "connections", Column: "secret_envelope"},
+	{Table: catalog.ProvidersTable, Column: catalog.KeyColumn},
+	{Table: connections.Table, Column: connections.Column},
 	// Uncommitted work saved from a stuck sandbox (ADR 0054); NULL once pushed or expired.
-	{Table: "saved_work", Column: "envelope"},
+	{Table: savedwork.Table, Column: savedwork.Column},
+	// Remote MCP server credentials (ADR 0057).
+	{Table: mcpservers.ServersTable, Column: mcpservers.CredentialColumn},
 }
 
 // KeySet is the KEK Secret's content.

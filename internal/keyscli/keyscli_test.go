@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/keyscli"
+	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 )
@@ -94,6 +95,26 @@ var _ = Describe("koinon-api keys", func() {
 		}
 		return ids
 	}
+	// seedMCP adds a remote MCP server whose credential is sealed under the active KEK.
+	seedMCP := func(ctx SpecContext) pgtype.UUID {
+		GinkgoHelper()
+		svc := mcpservers.New(pool, ring(ctx), nil).WithURLPolicy(catalog.URLPolicy{Namespace: ns})
+		s, err := svc.Create(ctx, org, audit.User(user), user, mcpservers.Input{
+			Name: pgtest.Uniq("m"), URL: "https://mcp.example.com/mcp", CredentialPrefix: "Bearer ", CredentialValue: "fake-mcp-token",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var id pgtype.UUID
+		Expect(id.Scan(s.ID)).To(Succeed())
+		return id
+	}
+	openMCP := func(ctx SpecContext, r *secretstore.Keyring, id pgtype.UUID) {
+		GinkgoHelper()
+		var env []byte
+		Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE org_id = $1 AND id = $2`, org, id).Scan(&env)).To(Succeed())
+		got, err := mcpservers.OpenCredential(r, org, id, env)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(Equal("fake-mcp-token"))
+	}
 	openAll := func(ctx SpecContext, r *secretstore.Keyring, ids []string) {
 		GinkgoHelper()
 		for i, id := range ids {
@@ -131,6 +152,7 @@ var _ = Describe("koinon-api keys", func() {
 
 	It("rotates: add, activate, rewrap without decrypting payloads, then retire", func(ctx SpecContext) {
 		ids := seed(ctx, 2)
+		mcp := seedMCP(ctx)
 		old := "kek-20260101-aaaa"
 		before := map[string]json.RawMessage{}
 		for _, id := range ids {
@@ -158,11 +180,11 @@ var _ = Describe("koinon-api keys", func() {
 
 		Expect(tool.Retire(ctx, old)).To(MatchError(ContainSubstring("was activated")), "pods may not wrap with the new KEK yet")
 		now = now.Add(6 * time.Minute)
-		Expect(tool.Retire(ctx, old)).To(MatchError(ContainSubstring("2 value(s) still use")))
+		Expect(tool.Retire(ctx, old)).To(MatchError(ContainSubstring("3 value(s) still use")), "the MCP credential counts")
 		Expect(tool.Retire(ctx, next)).To(MatchError(ContainSubstring("active KEK")))
 
 		Expect(tool.Rewrap(ctx)).To(Succeed())
-		Expect(usage(ctx)).To(Equal(map[string]int{next: 2}))
+		Expect(usage(ctx)).To(Equal(map[string]int{next: 3}))
 		for _, id := range ids {
 			var after []byte
 			Expect(pool.QueryRow(ctx, `SELECT api_key FROM providers WHERE id = $1`, id).Scan(&after)).To(Succeed())
@@ -178,6 +200,7 @@ var _ = Describe("koinon-api keys", func() {
 		set, _ = ks.Load(ctx)
 		Expect(set.Keys).To(HaveLen(1))
 		openAll(ctx, ring(ctx), ids)
+		openMCP(ctx, ring(ctx), mcp)
 
 		By("rewrap is idempotent")
 		out.Reset()
@@ -185,8 +208,9 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(out.String()).To(ContainSubstring("0 value(s) rewrapped"))
 	})
 
-	It("reencrypt seals every value under a new data key, connections included", func(ctx SpecContext) {
+	It("reencrypt seals every value under a new data key, connections and MCP credentials included", func(ctx SpecContext) {
 		ids := seed(ctx, 2)
+		mcp := seedMCP(ctx)
 		r := ring(ctx)
 		connID := pgtype.UUID{Bytes: [16]byte{1, 2, 3}, Valid: true}
 		env, err := connections.SealFields(r, org, connID, map[string][]byte{connections.GitHubPrivateKeyField: []byte("pem")})
@@ -196,7 +220,9 @@ var _ = Describe("koinon-api keys", func() {
 			SecretEnvelope: env, Source: store.ConfigSourceUi,
 		})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(usage(ctx)).To(Equal(map[string]int{"kek-20260101-aaaa": 3}))
+		Expect(usage(ctx)).To(Equal(map[string]int{"kek-20260101-aaaa": 4}))
+		var mcpBefore []byte
+		Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE org_id = $1 AND id = $2`, org, mcp).Scan(&mcpBefore)).To(Succeed())
 
 		var before []byte
 		Expect(pool.QueryRow(ctx, `SELECT api_key FROM providers WHERE id = $1`, ids[0]).Scan(&before)).To(Succeed())
@@ -214,6 +240,13 @@ var _ = Describe("koinon-api keys", func() {
 		fields, err := connections.OpenFields(r, row)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(fields[connections.GitHubPrivateKeyField])).To(Equal("pem"))
+		var mcpAfter []byte
+		Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE org_id = $1 AND id = $2`, org, mcp).Scan(&mcpAfter)).To(Succeed())
+		var ma, mb secretstore.Envelope
+		Expect(json.Unmarshal(mcpBefore, &ma)).To(Succeed())
+		Expect(json.Unmarshal(mcpAfter, &mb)).To(Succeed())
+		Expect(mb.Ciphertext).NotTo(Equal(ma.Ciphertext), "the MCP credential is sealed again")
+		openMCP(ctx, r, mcp)
 	})
 
 	It("refuses to make a new KEK Secret when the database holds encrypted values", func(ctx SpecContext) {
@@ -226,6 +259,14 @@ var _ = Describe("koinon-api keys", func() {
 		Expect(created).To(BeFalse())
 		list, _ := fresh.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
 		Expect(list.Items).To(BeEmpty(), "nothing was created")
+
+		By("an MCP server credential alone also counts")
+		_, err = pool.Exec(ctx, `TRUNCATE orgs CASCADE`)
+		Expect(err).NotTo(HaveOccurred())
+		org, user, _ = pgtest.NewOrg(ctx, pool)
+		seedMCP(ctx)
+		_, err = keyscli.EnsureKubeSecret(ctx, fresh, ns, "koinon-kek", now, used)
+		Expect(err).To(MatchError(keyscli.ErrKEKMissing))
 
 		By("with no encrypted value yet, a fresh install creates it")
 		_, err = pool.Exec(ctx, `TRUNCATE orgs CASCADE`)
