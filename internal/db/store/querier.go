@@ -514,7 +514,9 @@ type Querier interface {
 	RequestSessionRestartForAgent(ctx context.Context, arg RequestSessionRestartForAgentParams) ([]pgtype.UUID, error)
 	// starting -> queued, for the owner (epoch compare-and-set): the sandbox was not ready within the
 	// org's wait (LT1, ADR 0066), so the run waits in the queue instead of failing. It goes to the back
-	// of its origin's queue (ready_at = now) and the next claim gives it a new epoch.
+	// of its origin's queue (ready_at = now) and the next claim gives it a new epoch. The time since the
+	// claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
+	// against the wall-clock cap.
 	RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error)
 	// Makes a parked run claimable again (approval decided, input given). It
 	// stays parked until an owner claims it: parked -> starting.

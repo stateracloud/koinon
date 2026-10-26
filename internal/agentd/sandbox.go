@@ -35,13 +35,10 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 	now := r.p.cfg.Now
 	started := now()
 	defer func() { r.p.cfg.Metrics.SandboxWait.Observe(now().Sub(started).Seconds()) }()
+	// The org's queue wait is read once the first poll finds the sandbox not ready, so the common
+	// path (a ready sandbox) costs no extra query. The deadline counts from the start of the wait.
 	wait := r.p.cfg.SandboxTimeout
-	if s, err := orgsettings.Get(ctx, r.q, r.run.OrgID, orgsettings.Settings{QueueWait: wait}); err == nil {
-		wait = s.QueueWait
-	} else if ctx.Err() == nil {
-		r.log.Warn("reading the org's settings failed; using the default queue wait", "err", err)
-	}
-	deadline := started.Add(wait)
+	var deadline time.Time
 	var nudged time.Time
 	var last string
 	for {
@@ -81,6 +78,14 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 			// or one found in Error or Completed. The next pass creates the new sandbox, so the
 			// run waits for it, within SandboxTimeout, instead of failing.
 			last = string(sb.State)
+		}
+		if deadline.IsZero() {
+			if s, err := orgsettings.Get(ctx, r.q, r.run.OrgID, orgsettings.Settings{QueueWait: wait}); err == nil {
+				wait = s.QueueWait
+			} else if ctx.Err() == nil {
+				r.log.Warn("reading the org's settings failed; using the default queue wait", "err", err)
+			}
+			deadline = started.Add(wait)
 		}
 		if now().Sub(nudged) >= r.p.cfg.ReconcileNudge {
 			if nudged.IsZero() {

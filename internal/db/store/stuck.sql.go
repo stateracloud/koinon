@@ -171,7 +171,7 @@ func (q *Queries) ExpireSavedWork(ctx context.Context, orgID pgtype.UUID) ([]Exp
 }
 
 const getRunForUpload = `-- name: GetRunForUpload :one
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, origin FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, origin, claimed_at FROM runs
 WHERE org_id = $1 AND id = $2 AND epoch = $3 AND state IN ('starting', 'running')
 `
 
@@ -214,6 +214,7 @@ func (q *Queries) GetRunForUpload(ctx context.Context, arg GetRunForUploadParams
 		&i.Takeovers,
 		&i.Summarizing,
 		&i.Origin,
+		&i.ClaimedAt,
 	)
 	return i, err
 }

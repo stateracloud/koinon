@@ -30,6 +30,10 @@ ALTER TABLE runs ADD COLUMN origin run_origin NOT NULL DEFAULT 'interactive';
 
 ALTER TABLE agent_sandboxes ADD COLUMN woken_at timestamptz;
 
+-- When the current owner claimed the run. A requeue credits the time since then to parked_seconds,
+-- so the wait for a sandbox does not count against the wall-clock cap.
+ALTER TABLE runs ADD COLUMN claimed_at timestamptz;
+
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION runs_check_transition() RETURNS trigger
 LANGUAGE plpgsql AS $$

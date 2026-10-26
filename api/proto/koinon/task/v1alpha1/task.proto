@@ -36,6 +36,12 @@ service TaskService {
   // CancelTask ends a task that has not ended: its queued runs are canceled and it moves to
   // canceled. Members and above.
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
+
+  // NotifyTyping tells Koinon that a person is typing in the task's conversation, so the task's
+  // agent sandbox is started (or kept up) before the message arrives (plan item LT1, ADR 0066).
+  // Clients call it when typing starts; calls for the same task within ten seconds of the last one
+  // are ignored. Members and above.
+  rpc NotifyTyping(NotifyTypingRequest) returns (NotifyTypingResponse);
 }
 
 // TaskState is where a task stands (ADR 0065, after A2A).
@@ -181,3 +187,12 @@ message CancelTaskResponse {
   Task task = 1;
   repeated koinon.run.v1alpha1.Run canceled_runs = 2;
 }
+
+// NotifyTypingRequest names the task.
+message NotifyTypingRequest {
+  string org_id = 1;
+  string task_id = 2;
+}
+
+// NotifyTypingResponse is empty.
+message NotifyTypingResponse {}

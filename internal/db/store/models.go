@@ -1348,6 +1348,7 @@ type Run struct {
 	Takeovers           int32
 	Summarizing         bool
 	Origin              RunOrigin
+	ClaimedAt           pgtype.Timestamptz
 }
 
 type RunEvent struct {

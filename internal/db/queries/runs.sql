@@ -85,7 +85,8 @@ SET state = 'starting',
     park_reason = NULL,
     parked_at = NULL,
     park_expires_at = NULL,
-    started_at = coalesce(runs.started_at, now())
+    started_at = coalesce(runs.started_at, now()),
+    claimed_at = now()
 FROM next
 JOIN agent ON agent.id = next.agent_id
 WHERE runs.org_id = @org_id AND runs.id = next.run_id
@@ -137,9 +138,15 @@ RETURNING *;
 -- name: RequeueRun :one
 -- starting -> queued, for the owner (epoch compare-and-set): the sandbox was not ready within the
 -- org's wait (LT1, ADR 0066), so the run waits in the queue instead of failing. It goes to the back
--- of its origin's queue (ready_at = now) and the next claim gives it a new epoch.
+-- of its origin's queue (ready_at = now) and the next claim gives it a new epoch. The time since the
+-- claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
+-- against the wall-clock cap.
 UPDATE runs
 SET state = 'queued',
+    parked_seconds = parked_seconds + CASE
+        WHEN claimed_at IS NULL THEN 0
+        ELSE greatest(0, floor(extract(epoch FROM now() - claimed_at)))::bigint END,
+    claimed_at = NULL,
     ready_at = now(),
     owner_id = NULL,
     lease_expires_at = NULL,
