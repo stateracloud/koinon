@@ -61,8 +61,10 @@ Only a cluster admin does this. Suspend **only** the CONNECT binding; the pod an
 stay on.
 
 1. Tell the incident channel who is doing it and why. Note the time.
-2. Switch the binding to audit-only (the connections are allowed, and each one is written to the
-   audit log with the policy's message):
+2. Switch the binding to audit-only. The connections are allowed. Each one is recorded with the
+   policy's message in the API server audit log only if the cluster has an audit policy at
+   Metadata level or higher for these requests; otherwise `Audit` just allows them, so check that
+   first:
 
    ```sh
    kubectl patch validatingadmissionpolicybinding koinon-koinon-sandbox-connect \
@@ -89,9 +91,10 @@ stay on.
    ```
 
    If you deleted it, `helm upgrade` (or a GitOps sync) recreates it; by hand, render it with
-   `helm template <release> charts/koinon -n <namespace> --show-only templates/sandbox-policy.yaml`
+   `helm template <release> charts/koinon -n <namespace> -f <your values> --show-only templates/sandbox-policy.yaml`
    and apply the `...-sandbox-connect` binding. Use the same value as `sandboxPolicy.validationActions`
-   (default `[Deny]`).
+   (default `[Deny]`). Without `-f <your values>` a non-default `validationActions` or
+   `namespaceSelector` is lost.
 5. Check it is back: `kubectl -n <workspace-namespace> exec <pod> -- true` must be denied with
    "use OpenShell exec and logs".
 6. Record the incident: who, when, why, which pod, what was run, and what you changed in the
@@ -102,6 +105,15 @@ stay on.
 - The Kubernetes audit log records the `patch` or `delete` of the binding and every exec, attach
   and port-forward made while it was open (with the `Audit` action, also the policy's
   `validation.policy.admission.k8s.io` annotation).
-- Under Argo CD or Flux the changed binding shows as drift until the next sync, and a self-heal
+- Under Argo CD the changed binding shows as drift until the next sync; Flux shows it only with
+  helm-controller `driftDetection.mode: enabled`. A self-heal
   policy puts it back by itself. That is the intended safety net; turn self-heal off for the
   binding only if you need the window to last longer, and turn it back on.
+
+## Keep the boundary intact
+
+- Do not label Koinon's namespace or the OpenShell gateway's namespace with
+  `openshell.ai/managed-by=openshell`. The policies would then cover them and block exec into
+  those pods. OpenShell labels only its workspace namespaces.
+- Do not grant RBAC on `nodes/proxy`. It reaches the kubelet's exec API directly, bypassing
+  admission just like node access does, so it is a way around this policy.
