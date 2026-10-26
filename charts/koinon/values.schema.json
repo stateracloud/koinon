@@ -381,6 +381,7 @@
         "redirectUrl": {"type": "string", "pattern": "^(https?://.+)?$"},
         "scopes": {"type": "array", "items": {"type": "string", "pattern": "^[^,\\s]+$"}},
         "groupsClaim": {"$ref": "#/definitions/nonEmpty"},
+        "platformAdminGroups": {"type": "array", "items": {"type": "string", "pattern": "^[^,\\s]+$"}},
         "groupMappings": {
           "type": "object",
           "propertyNames": {"pattern": "^[^,=]+$"},

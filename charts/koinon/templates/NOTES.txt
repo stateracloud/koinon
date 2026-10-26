@@ -12,6 +12,9 @@ Bootstrap admin: user {{ .Values.bootstrapAdmin.username | quote }}, one-time pa
   kubectl -n {{ .Release.Namespace }} get secret {{ include "koinon.bootstrapSecretName" . }} -o jsonpath='{.data.password}' | base64 -d
 
 The first login asks for a new password.
+
+Before you set bootstrapAdmin.enabled=false, set oidc.platformAdminGroups and log in once as a user in
+one of those groups; otherwise nobody is left to set the platform budget ceilings.
 {{- end }}
 
 Secret store: provider API keys and connection secrets are encrypted in Postgres with the key-encryption
