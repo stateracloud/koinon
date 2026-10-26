@@ -31,6 +31,10 @@ metadata:
   name: {{ $name }}-data
   labels:
     {{- include "koinon.labels" (list . "gateway") | nindent 4 }}
+  annotations:
+    # Argo CD only: with a WaitForFirstConsumer storage class the claim binds once the gateway pod
+    # (sync wave 2) is scheduled, so it must not hold up wave 0. Helm and Flux ignore it.
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   accessModes: [ReadWriteOnce]
   {{- with $gw.persistence.storageClass }}
