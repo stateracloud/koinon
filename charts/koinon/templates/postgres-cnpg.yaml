@@ -21,7 +21,10 @@ metadata:
     {{- include "koinon.labels" (list . "postgres") | nindent 4 }}
 spec:
   instances: {{ .Values.postgres.cnpg.instances }}
-  imageName: {{ .Values.postgres.cnpg.imageName }}
+  imageName: {{ include "koinon.imageRef" (list . .Values.postgres.cnpg.imageName) }}
+  {{- with include "koinon.imagePullSecrets" . }}
+  {{- . | nindent 2 }}
+  {{- end }}
   enableSuperuserAccess: false
   postgresql:
     pg_hba:

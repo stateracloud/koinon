@@ -66,6 +66,13 @@ rules:
     resources: [endpointslices]
     verbs: [list]
   {{- end }}
+  # OpenShell's gateway configuration, to check its sandbox pull secrets and supervisor image. A
+  # ClusterRole because the ConfigMap is in OpenShell's namespace, which may not exist yet (a Role
+  # there would fail the hook before the preflight can say so); resourceNames pins the one object.
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [{{ .Values.preflight.openshell.configMap }}]
+    verbs: [get]
   - apiGroups: [node.k8s.io]
     resources: [runtimeclasses]
     resourceNames: [{{ .Values.openshell.runtimeClassName }}]
@@ -178,16 +185,22 @@ spec:
             {{- if .Values.openshell.clientTLSSecret }}
             - --openshell-tls-dir=/etc/koinon/openshell-tls
             {{- end }}
+            - --openshell-config-namespace={{ .Values.preflight.openshell.namespace }}
+            - --openshell-config-map={{ .Values.preflight.openshell.configMap }}
+            {{- if include "koinon.expectSandboxPullSecrets" . }}
+            - --expect-sandbox-pull-secrets
+            {{- end }}
+            {{- if .Values.sandboxPolicy.enabled }}
+            - --supervisor-images={{ join "," (include "koinon.supervisorImages" . | fromJsonArray) }}
+            {{- end }}
             - --agent-sandbox-namespace={{ .Values.preflight.agentSandbox.namespace }}
             - --agent-sandbox-controller={{ .Values.preflight.agentSandbox.controller }}
             - --seccomp-probe={{ $probe }}
             - --netpol-probe={{ $netpol }}
             {{- if or $probe $netpol }}
             - --probe-image={{ include "koinon.image" (list . .Values.api.image) }}
-            {{- with .Values.imagePullSecrets }}
-            {{- $secrets := list }}
-            {{- range . }}{{ $secrets = append $secrets .name }}{{ end }}
-            - --probe-image-pull-secrets={{ join "," $secrets }}
+            {{- with (include "koinon.pullSecretNames" . | fromJsonArray) }}
+            - --probe-image-pull-secrets={{ join "," . }}
             {{- end }}
             - --probe-instance={{ .Release.Name }}
             {{- end }}

@@ -10,6 +10,12 @@ server:
   drivers:
     kubernetes:
       workspaceMode: managed
+  # Pull secrets for sandbox pods from a private registry or mirror (#130). OpenShell copies these
+  # Secrets, which must exist in its own namespace, into each sandbox's namespace and attaches them
+  # to the workload and supervisor pods; Koinon's chart cannot do this. See the guide "Private
+  # registries and mirrors".
+  # sandboxImagePullSecrets:
+  #   - name: regcred
   # No credentialDrivers: the gateway's default store (provider credentials and
   # sandbox SSH identities encrypted in its SQLite database with AES-256-GCM,
   # key-encryption key in a chart-generated Secret). No external secret store.
