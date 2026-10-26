@@ -48,7 +48,7 @@ func Serve(ctx context.Context, addr string, reg *prometheus.Registry, log *slog
 	if addr == "" {
 		return nil
 	}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("metrics listener: %w", err)
 	}
