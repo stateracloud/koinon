@@ -45,8 +45,9 @@ What is removed:
 - The `koinon_unset_prefixed` and `koinon_link_instructions` helpers of the shared entry
   library, which only the Hermes and pi entry scripts used (OpenCode's instruction link is made
   in its Dockerfile).
-- The proto enum values `FLAVOR_HERMES` (2) and `FLAVOR_PI` (3). The numbers and names are
-  `reserved`, so they cannot be reused with another meaning.
+- Nothing in the proto: `FLAVOR_HERMES` (2) and `FLAVOR_PI` (3) stay in the enum, marked
+  `deprecated`, because the API's breaking-change check (`buf breaking`, FILE rules) refuses to
+  delete enum values. No flavor-table entry matches them, so the API rejects both.
 
 Migration `00002_agents.sql` is edited in place, so `agent_flavor` is `('opencode')`. This is a
 deliberate, one-time exception to the rule that a merged migration is never edited

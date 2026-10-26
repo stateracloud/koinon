@@ -29,6 +29,13 @@ type Flavor int32
 const (
 	Flavor_FLAVOR_UNSPECIFIED Flavor = 0
 	Flavor_FLAVOR_OPENCODE    Flavor = 1
+	// Hermes and pi were dropped before v0.1 shipped (ADR 0059). The values stay so the API stays
+	// wire- and source-compatible; no flavor matches them, so the API rejects them.
+	//
+	// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
+	Flavor_FLAVOR_HERMES Flavor = 2
+	// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
+	Flavor_FLAVOR_PI Flavor = 3
 )
 
 // Enum value maps for Flavor.
@@ -36,10 +43,14 @@ var (
 	Flavor_name = map[int32]string{
 		0: "FLAVOR_UNSPECIFIED",
 		1: "FLAVOR_OPENCODE",
+		2: "FLAVOR_HERMES",
+		3: "FLAVOR_PI",
 	}
 	Flavor_value = map[string]int32{
 		"FLAVOR_UNSPECIFIED": 0,
 		"FLAVOR_OPENCODE":    1,
+		"FLAVOR_HERMES":      2,
+		"FLAVOR_PI":          3,
 	}
 )
 
@@ -552,10 +563,12 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\x0fspend_limit_usd\x18\r \x01(\tR\rspendLimitUsd\"\x16\n" +
 	"\x14ListTemplatesRequest\"Y\n" +
 	"\x15ListTemplatesResponse\x12@\n" +
-	"\ttemplates\x18\x01 \x03(\v2\".koinon.template.v1alpha1.TemplateR\ttemplates*[\n" +
+	"\ttemplates\x18\x01 \x03(\v2\".koinon.template.v1alpha1.TemplateR\ttemplates*_\n" +
 	"\x06Flavor\x12\x16\n" +
 	"\x12FLAVOR_UNSPECIFIED\x10\x00\x12\x13\n" +
-	"\x0fFLAVOR_OPENCODE\x10\x01\"\x04\b\x02\x10\x02\"\x04\b\x03\x10\x03*\rFLAVOR_HERMES*\tFLAVOR_PI*_\n" +
+	"\x0fFLAVOR_OPENCODE\x10\x01\x12\x15\n" +
+	"\rFLAVOR_HERMES\x10\x02\x1a\x02\b\x01\x12\x11\n" +
+	"\tFLAVOR_PI\x10\x03\x1a\x02\b\x01*_\n" +
 	"\x06Preset\x12\x16\n" +
 	"\x12PRESET_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10PRESET_READ_ONLY\x10\x01\x12\x13\n" +
