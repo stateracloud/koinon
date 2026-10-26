@@ -38,6 +38,11 @@ openshell:
 
 ```
 
+`openshell.clientTLSSecret` is required: the OpenShell gateway controls every sandbox, so Koinon
+talks to it over mTLS and the chart refuses to render without the Secret. Only if a service mesh
+already provides mTLS between Koinon and the gateway, set `openshell.insecure: true` instead (not
+together with the Secret); the components then log a warning and the preflight reports it.
+
 The model provider is not a chart value. You add it in the UI after you sign in (step 4), and
 [Models](/guides/models/) explains the options. The chart also creates the key-encryption keys that
 protect stored provider keys; see [Back up the encryption keys](#back-up-the-encryption-keys).

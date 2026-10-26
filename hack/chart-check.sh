@@ -21,16 +21,24 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
 value_files=("$CHART/values.yaml" "$CHART"/ci/*-values.yaml)
+# The chart requires openshell.clientTLSSecret or openshell.insecure=true (#103); the default
+# values set neither, so they are rendered with insecure, as are the assertions below (render).
+# Value files choose for themselves. insecure_for <values file>: the extra helm arguments.
+insecure_for() { [[ $1 == "$CHART/values.yaml" ]] && echo "--set openshell.insecure=true" || true; }
 
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
 	echo "== $name"
-	"$HELM" lint --strict "$CHART" -f "$f"
-	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" >"$out/$name.yaml"
+	# shellcheck disable=SC2046
+	"$HELM" lint --strict "$CHART" -f "$f" $(insecure_for "$f")
+	# shellcheck disable=SC2046
+	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" $(insecure_for "$f") >"$out/$name.yaml"
 done
 
 # Assertions on rendered output: render with --set flags, then grep.
-render() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
+render() { "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true "$@"; }
+# render_raw renders without that default, for the assertions about the TLS choice itself.
+render_raw() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
 # Assertions capture the rendering before grepping it: piping into grep -q under pipefail fails
 # the pipeline when grep exits on the first match and helm then dies of SIGPIPE.
 failures=0
@@ -188,7 +196,7 @@ has "gateway.kubernetes.port is used" 'url: http://koinon-gateway.koinon.svc.clu
 # GitOps-safe renders (issue #98). (a) Two renders of every value set are byte-identical.
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
-	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" >"$out/$name.again"
+	"$HELM" template koinon "$CHART" --namespace koinon -f "$f" $(insecure_for "$f") >"$out/$name.again"
 	cmp -s "$out/$name.yaml" "$out/$name.again" || fail "two renders of $name differ"
 	rm -f "$out/$name.again"
 done
@@ -256,10 +264,10 @@ fi
 # The preflight hook (plan item H2) renders unless preflight.enabled=false, as a pre-install and
 # pre-upgrade hook whose output Helm prints; the probe RBAC only with the seccomp probe on.
 echo "== preflight hook"
-preflight_job() { "$HELM" template koinon "$CHART" --namespace koinon -f "$1" --show-only templates/preflight.yaml 2>/dev/null; }
+preflight_job() { "$HELM" template koinon "$CHART" --namespace koinon -f "$1" $(insecure_for "$1") --show-only templates/preflight.yaml 2>/dev/null; }
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
-	enabled=$("$HELM" template koinon "$CHART" -f "$f" --show-only templates/preflight.yaml >/dev/null 2>&1 && echo true || echo false)
+	enabled=$("$HELM" template koinon "$CHART" -f "$f" $(insecure_for "$f") --show-only templates/preflight.yaml >/dev/null 2>&1 && echo true || echo false)
 	if [[ $name == external-standalone-values ]]; then
 		[[ $enabled == false ]] || { echo "$name: preflight.enabled=false still renders the hook" >&2; exit 1; }
 		continue
