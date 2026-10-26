@@ -39,6 +39,7 @@ import (
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1/agentv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1/approvalv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/audit/v1alpha1/auditv1alpha1connect"
@@ -94,6 +95,9 @@ type Options struct {
 	Catalog *catalog.Service
 	// MCP manages remote MCP servers (ADR 0057). Nil means McpServerService answers UNIMPLEMENTED.
 	MCP *mcpservers.Service
+	// Notifier delivers the notifications that follow a commit (ADR 0066, practice B2). Nil means
+	// an inline one: best effort, no retry. koinon-api passes a DBOS-backed one with --durable.
+	Notifier *durable.Notifier
 }
 
 // Server implements the four services.
@@ -113,6 +117,7 @@ type Server struct {
 	catalog   *catalog.Service
 	mcp       *mcpservers.Service
 	typing    typingGate
+	notifier  *durable.Notifier
 }
 
 // New returns a Server backed by pool.
@@ -129,8 +134,13 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.Tokens == nil {
 		opts.Tokens = tokens.New(pool, nil)
 	}
+	if opts.Notifier == nil {
+		opts.Notifier = durable.NewNotifier(nil, opts.Logger)
+		RegisterNotifications(opts.Notifier, pool)
+	}
 	return &Server{
-		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
+		notifier: opts.Notifier,
+		pool:     pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger),
 	}

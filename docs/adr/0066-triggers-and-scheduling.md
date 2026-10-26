@@ -182,6 +182,35 @@ file on 2026-10-26):
   only on the schema (SELECT/INSERT/UPDATE/DELETE, sequence USAGE/SELECT, function EXECUTE), as in
   the chart's CNPG bootstrap, not the SDK's `GRANT ALL`.
 
+## Amendment 2026-10-27 (DB3)
+
+- **Dedupe (B1).** Table `dedupe_records (org_id, source, key)` (migration 00026), written by
+  `durable.Once` in the same transaction as the effect. Sources: `webhook` (delivery ID), `slack`
+  (`event_id`), `trigger` (`durable.TriggerFireKey`: trigger ID plus the scheduled fire time in
+  Unix seconds, not the processing time), `question`, `child_task`. A concurrent duplicate waits on
+  the first transaction (`ON CONFLICT DO NOTHING`); if the effect fails the claim rolls back with
+  it, so the redelivery runs. The record names the effect (`task`, id), so a replay returns the
+  existing task. `services.CreateTriggeredTask` is the helper TR2 and TR3 call: record, task,
+  events and queued run in one transaction. Records are not swept yet (`DeleteDedupeRecordsBefore`
+  exists; the retention window is TR's decision). Approval and inbox effects have no source key
+  today: their natural key is the question ID, used when TK3 lands.
+- **Ordering (B2).** `durable.Commit` runs a transaction and sends the notifications it returns
+  only after the commit. A `durable.Notifier` sends them as a DBOS workflow `koinon.notify` whose
+  workflow ID is the notification ID (derived from the effect, e.g. `wake.agent:task-created:<task>`),
+  so a second send is the same workflow, and one step (8 retries, DBOS backoff) runs the handler:
+  a failure after the commit is retried and recovered after a restart, and the checkpointed step
+  does not run again once it succeeded. Handlers must still be idempotent. Without `--durable` the
+  Notifier is inline and best effort, as before.
+- **Audit.** `createTask` and `appendMessage` already woke after the commit, inline and
+  unretried; both now return a pre-wake notification from `commit`. `NotifyTyping` is not a state
+  change and stays a direct call. LT1's reconciler pre-wakes and the sandbox start already run
+  after the state write that causes them.
+- **Not covered.** A crash between the commit and the start of the notification workflow loses that
+  notification (the sandbox then starts when the queued run is claimed, which is the pre-LT1
+  behaviour). Closing it needs an outbox row written in the effect's transaction; not built, since
+  a lost pre-wake only costs latency. TK3's inbox notifications, where a loss is visible, should
+  use one.
+
 ## Open questions
 
 - ~~DBOS's system tables: a separate schema or a separate database in the same cluster, and which
