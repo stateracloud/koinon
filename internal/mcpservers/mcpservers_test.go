@@ -134,6 +134,93 @@ var _ = Describe("Service", func() {
 			Expect(list).To(BeEmpty())
 		})
 
+		It("keeps an envelope that a rewrap replaced while the update was in flight", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "not-a-real-token")
+			id := uuidOf(s.ID)
+			var before []byte
+			Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE id = $1`, s.ID).Scan(&before)).To(Succeed())
+
+			// The preflight runs between the update's read and its write, like a `keys rewrap` that
+			// commits in that window: it re-seals the credential into a different envelope.
+			var rewrapped []byte
+			svc.WithPreflight(func(ctx context.Context, _ mcpservers.PreflightRequest) error {
+				plain, err := mcpservers.OpenCredential(ring, org, id, before)
+				if err != nil {
+					return err
+				}
+				env, err := ring.Seal(mcpservers.CredentialBinding(org, id), []byte(plain))
+				if err != nil {
+					return err
+				}
+				if rewrapped, err = json.Marshal(env); err != nil {
+					return err
+				}
+				_, err = pool.Exec(ctx, `UPDATE mcp_servers SET credential = $2 WHERE id = $1`, s.ID, rewrapped)
+				return err
+			})
+			u := "https://other.example.com/mcp"
+			_, err := svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &u})
+			Expect(err).NotTo(HaveOccurred())
+
+			var after []byte
+			Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE id = $1`, s.ID).Scan(&after)).To(Succeed())
+			Expect(rewrapped).NotTo(Equal(before))
+			Expect(after).To(MatchJSON(rewrapped), "the update wrote back the envelope it read")
+			got, err := mcpservers.OpenCredential(ring, org, id, after)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal("not-a-real-token"))
+		})
+
+		It("leaves the header, prefix and envelope of a concurrent credential change alone on a URL-only update", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "not-a-real-token")
+			id := uuidOf(s.ID)
+
+			// Another request replaces the credential (value, header and prefix) while this
+			// URL-only update is in its preflight.
+			var replaced []byte
+			svc.WithPreflight(func(ctx context.Context, _ mcpservers.PreflightRequest) error {
+				env, err := ring.Seal(mcpservers.CredentialBinding(org, id), []byte("not-a-concurrent-token"))
+				if err != nil {
+					return err
+				}
+				if replaced, err = json.Marshal(env); err != nil {
+					return err
+				}
+				_, err = pool.Exec(ctx, `UPDATE mcp_servers SET credential = $2, credential_header = 'X-Api-Key', credential_prefix = '' WHERE id = $1`, s.ID, replaced)
+				return err
+			})
+			u := "https://other.example.com/mcp"
+			_, err := svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{URL: &u})
+			Expect(err).NotTo(HaveOccurred())
+
+			var env []byte
+			var header, prefix string
+			Expect(pool.QueryRow(ctx, `SELECT credential, credential_header, credential_prefix FROM mcp_servers WHERE id = $1`, s.ID).Scan(&env, &header, &prefix)).To(Succeed())
+			Expect(env).To(MatchJSON(replaced))
+			Expect(header).To(Equal("X-Api-Key"))
+			Expect(prefix).To(BeEmpty())
+			got, err := mcpservers.OpenCredential(ring, org, id, env)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal("not-a-concurrent-token"))
+		})
+
+		It("still replaces and removes a credential when the patch says so", func(ctx SpecContext) {
+			s := create(ctx, "wiki", "not-a-real-token")
+			v := "not-another-token"
+			_, err := svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{Credential: &mcpservers.CredentialPatch{Header: "X-Api-Key", Value: &v}})
+			Expect(err).NotTo(HaveOccurred())
+			var env []byte
+			Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE id = $1`, s.ID).Scan(&env)).To(Succeed())
+			got, err := mcpservers.OpenCredential(ring, org, uuidOf(s.ID), env)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal(v))
+
+			_, err = svc.Update(ctx, org, actor, s.ID, mcpservers.Patch{RemoveCredential: true})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(pool.QueryRow(ctx, `SELECT credential FROM mcp_servers WHERE id = $1`, s.ID).Scan(&env)).To(Succeed())
+			Expect(env).To(BeNil())
+		})
+
 		It("serves an org's servers to that org only", func(ctx SpecContext) {
 			create(ctx, "mine", "")
 			other, _, _ := pgtest.NewOrg(ctx, pool)

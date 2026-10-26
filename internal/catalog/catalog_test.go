@@ -206,6 +206,47 @@ var _ = Describe("Service", func() {
 			}
 		})
 
+		It("keeps a key envelope that a rewrap replaced while the update was in flight", func(ctx SpecContext) {
+			p := create(ctx, "openrouter", "sk-1")
+			id := mustUUID(p.ID)
+			var before []byte
+			Expect(pool.QueryRow(ctx, `SELECT api_key FROM providers WHERE id = $1`, p.ID).Scan(&before)).To(Succeed())
+
+			// The URL policy's lookup runs between the update's read and its write, like a
+			// `keys rewrap` that commits in that window: it re-seals the key into a different envelope.
+			var rewrapped []byte
+			racing := catalog.New(pool, ring, nil).WithURLPolicy(catalog.URLPolicy{
+				Namespace: "koinon",
+				Resolver: func(ctx context.Context, _ string) ([]netip.Addr, error) {
+					plain, err := catalog.OpenKey(ring, org, id, before)
+					if err != nil {
+						return nil, err
+					}
+					env, err := ring.Seal(catalog.KeyBinding(org, id), []byte(plain))
+					if err != nil {
+						return nil, err
+					}
+					if rewrapped, err = json.Marshal(env); err != nil {
+						return nil, err
+					}
+					_, err = pool.Exec(ctx, `UPDATE providers SET api_key = $2 WHERE id = $1`, p.ID, rewrapped)
+					return []netip.Addr{netip.MustParseAddr("93.184.216.34")}, err
+				},
+			})
+			newURL := "https://openrouter.ai/api/v1/"
+			_, err := racing.UpdateProvider(ctx, org, actor, p.ID, catalog.ProviderPatch{URL: &newURL})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(rewrapped).NotTo(BeNil(), "the lookup ran")
+
+			var after []byte
+			Expect(pool.QueryRow(ctx, `SELECT api_key FROM providers WHERE id = $1`, p.ID).Scan(&after)).To(Succeed())
+			Expect(rewrapped).NotTo(Equal(before))
+			Expect(after).To(MatchJSON(rewrapped), "the update wrote back the envelope it read")
+			got, err := catalog.OpenKey(ring, org, id, after)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal("sk-1"))
+		})
+
 		It("keeps names unique per org, not across orgs", func(ctx SpecContext) {
 			create(ctx, "dup", "")
 			_, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{Name: "dup", Type: "ollama", URL: "http://x.example.com/v1"})
