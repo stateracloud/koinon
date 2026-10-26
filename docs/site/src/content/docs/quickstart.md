@@ -14,19 +14,20 @@ You need:
 - a cluster with the prerequisites, and `kubectl`, `helm` and `jq` pointed at it;
 - a GitHub App installed on one repository you can write to ([GitHub App](/guides/github-app/));
 - an OpenRouter API key, or an Ollama server ([Models](/guides/models/));
-- Koinon's images and chart. There is no published release yet, so work from a clone of the
-  repository and [build the images](#build-the-images).
+- Koinon's images and chart, from a release or built from a clone ([Get Koinon](#get-koinon)).
 
-Run the commands from the root of the clone. The shell commands in blocks marked `e1` are the ones
-the end-to-end test runs.
+The shell commands in blocks marked `e1` are the ones the end-to-end test runs. They install from a
+clone of the repository, so run them from its root. If you install from a release, see
+[Get Koinon](#get-koinon) for the `helm install` line to use instead.
 
 ## 1. Write your values
 
-Save this as `values.yaml`. It uses Kata. Change `image.registry` and `image.tag` to
-where you pushed the images ([Build the images](#build-the-images)), and `openshell.address` if your
-gateway lives elsewhere.
+Save this as `values.yaml`. It uses Kata. Set `image.registry` and `image.tag` to where the images
+are ([Get Koinon](#get-koinon)), and `openshell.address` if your gateway lives elsewhere.
 
 ```yaml chart-values
+# From a release these are the defaults (ghcr.io/stateracloud, the chart's own version), so you
+# can leave the image block out. Set them if you built and pushed the images yourself.
 image:
   registry: registry.example.com/koinon
   tag: v0.1.0
@@ -44,8 +45,8 @@ already provides mTLS between Koinon and the gateway, set `openshell.insecure: t
 together with the Secret); the components then log a warning and the preflight reports it.
 
 The model provider is not a chart value. You add it in the UI after you sign in (step 4), and
-[Models](/guides/models/) explains the options. The chart also creates the key-encryption keys that
-protect stored provider keys; see [Back up the encryption keys](#back-up-the-encryption-keys).
+[Models](/guides/models/) explains the options. `koinon-api` creates the key-encryption keys that
+protect stored provider keys on its first start (the chart renders none); see [Back up the encryption keys](#back-up-the-encryption-keys).
 
 On kind, use `runc`. Add these lines and leave the rest:
 
@@ -216,10 +217,8 @@ spend of the run.
 ## Changing in v0.1
 
 Providers, models, prices and budgets per org have UI pages, Secrets and an admin API under
-`/admin/v1` (plan items PV1, PV2, BG1 and W4). ADR 0056 and ADR 0058 decided more for v0.1. It is
-**not built yet**, so these pages do not describe it as available.
-
-- The Kubernetes-mode gateway (plan item G2). See [Gateway modes](/guides/gateway-modes/).
+`/admin/v1` (plan items PV1, PV2, BG1 and W4). Both gateway modes are built
+([Gateway modes](/guides/gateway-modes/)).
 
 [ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md)
 and [ADR 0058](https://github.com/stateracloud/koinon/blob/main/docs/adr/0058-gateway-modes.md) have
@@ -269,9 +268,38 @@ delete them after the hook keeps them. Before that first upgrade, mark them to b
 `kubectl -n koinon annotate secret koinon-db-migrate koinon-db-api koinon-db-reconciler
 koinon-db-agentd koinon-bootstrap-admin helm.sh/resource-policy=keep`.
 
-## Build the images
+## Get Koinon
 
-There is no published release yet (plan item REL1), so you build and push the images yourself. You
+### From a release
+
+A release tag (for example `v0.1.0-rc.2`) publishes `koinon-api`, `koinon-reconciler`, `koinon-agentd`
+and `flavor-opencode` to `ghcr.io/stateracloud`, and the chart to
+`oci://ghcr.io/stateracloud/charts/koinon`, all at the version of the tag without the `v`. The
+packages are private while the repository is private. Log in with a GitHub token that has
+`read:packages`. After you create the namespace in step 2, give the cluster a pull Secret for `ghcr.io`:
+
+```sh
+echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "$GITHUB_USER" --password-stdin
+kubectl -n koinon create secret docker-registry ghcr-pull --docker-server=ghcr.io \
+  --docker-username="$GITHUB_USER" --docker-password="$GITHUB_TOKEN"
+```
+
+Add `imagePullSecrets: [{name: ghcr-pull}]` to `values.yaml`. It covers Koinon's own pods only.
+Sandbox pods need the nodes to be able to pull `flavor-opencode` themselves: use node registry
+credentials, or a mirror the nodes can pull anonymously (see `hack/mirror-release.sh`). OpenShell's
+sandbox API has no pull-secret field, so Koinon passes none
+([#130](https://github.com/stateracloud/koinon/issues/130)). Leave out the `image` block (the
+registry defaults to `ghcr.io/stateracloud` and the tag to the chart's version), and install the
+chart in step 2 from the registry instead of the clone:
+
+```sh
+helm install koinon oci://ghcr.io/stateracloud/charts/koinon --version 0.1.0-rc.2 \
+  --namespace koinon -f values.yaml --wait --timeout 10m
+```
+
+### Build from source
+
+Build and push the images yourself and install the chart from the clone. You
 need Go, `ko`, Docker with buildx, Node and pnpm, and a registry your cluster can pull from. Run this
 from the root of the clone. Replace `registry.example.com/koinon` and `v0.1.0` with your registry and
 a tag, the same ones as `image.registry` and `image.tag` in `values.yaml`.
@@ -299,7 +327,6 @@ the images straight into kind, and its browser suite goes through the Vite dev s
 
 ## Not built yet
 
-- Published images and chart (plan item REL1).
 - A recorded run on Kata with a real model (plan item REL2).
 
 ## How these steps are tested

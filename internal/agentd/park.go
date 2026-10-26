@@ -180,8 +180,10 @@ func (r *runner) endTurn(ctx context.Context) error {
 		return r.dbErr(ctx, "end the turn", err)
 	}
 	if parked {
+		r.p.cfg.Metrics.Finished.WithLabelValues(string(store.RunStateParked)).Inc()
 		r.log.Info("run parked on approvals", "waiting_on_human", waiting)
 	} else {
+		r.p.cfg.Metrics.Finished.WithLabelValues(string(store.RunStateSucceeded)).Inc()
 		r.log.Info("run finished", "outcome", store.RunStateSucceeded)
 	}
 	return nil
