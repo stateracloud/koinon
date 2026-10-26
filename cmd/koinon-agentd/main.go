@@ -128,7 +128,9 @@ func run() error {
 	}
 	reg := metrics.NewRegistry()
 	cfg.pool.Metrics = agentd.NewMetrics(reg)
-	metrics.Serve(ctx, cfg.metricsAddr, reg, slog.Default())
+	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, slog.Default()); err != nil {
+		return err
+	}
 	pool, err := agentd.New(db, backend, cfg.pool)
 	if err != nil {
 		return err

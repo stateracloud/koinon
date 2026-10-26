@@ -349,6 +349,10 @@ metrics:
     enabled: false
     # Extra labels on the ServiceMonitors, for example the release label your Prometheus selects on.
     labels: {}
+    # Render the ServiceMonitors without checking the cluster for the CRD, for `helm template`
+    # pipelines, kustomize helmCharts without apiVersions, and a first Argo CD sync that installs
+    # the CRD in the same sync.
+    skipCapabilityCheck: false
     # Scrape interval, for example 30s; empty uses the Prometheus default.
     interval: ""
 

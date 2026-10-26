@@ -6,8 +6,8 @@ off the API Service the ingress exposes. metrics.serviceMonitor.enabled adds a p
 ServiceMonitor per component. The NetworkPolicy side is metrics.allowFrom (networkpolicy.yaml).
 */ -}}
 {{- $sm := .Values.metrics.serviceMonitor }}
-{{- if and $sm.enabled (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) }}
-{{- fail "metrics.serviceMonitor.enabled is true but the cluster has no monitoring.coreos.com/v1 ServiceMonitor CRD; install prometheus-operator (or kube-prometheus-stack), or leave metrics.serviceMonitor.enabled=false and scrape the metrics Services another way" }}
+{{- if and $sm.enabled (not $sm.skipCapabilityCheck) (not (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor")) }}
+{{- fail "metrics.serviceMonitor.enabled is true but the cluster has no monitoring.coreos.com/v1 ServiceMonitor CRD; install prometheus-operator (or kube-prometheus-stack), set metrics.serviceMonitor.skipCapabilityCheck=true when the CRD arrives later or the renderer cannot report it, or leave metrics.serviceMonitor.enabled=false and scrape the metrics Services another way" }}
 {{- end }}
 {{- range $component := list "api" "reconciler" "agentd" }}
 ---

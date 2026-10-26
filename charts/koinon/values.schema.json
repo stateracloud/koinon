@@ -426,6 +426,7 @@
           "additionalProperties": false,
           "properties": {
             "enabled": {"type": "boolean"},
+            "skipCapabilityCheck": {"type": "boolean"},
             "labels": {"type": "object", "additionalProperties": {"type": "string"}},
             "interval": {"type": "string", "pattern": "^([0-9]+(ms|s|m|h))*$"}
           }

@@ -311,7 +311,8 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		for _, a := range agents {
 			w, err := r.prepare(ctx, org, a, workspaces)
 			if errors.Is(err, errAbortPass) {
-				r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
+				// prepare aborts only on a database read.
+				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 				return err
 			}
 			if err != nil {
@@ -439,6 +440,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	}
 
 	heldBack := 0
+	defer func() { r.m.AgentsHeldBack.Set(float64(heldBack)) }()
 	for _, w := range items {
 		if applyFailed && w.key.ID != "" && w.agent.Status == store.AgentStatusActive && r.keyNotLive(w.key.ID) {
 			r.log.Warn("the gateway does not serve the agent's new key yet; its sandbox work waits", w.logAttrs()...)
@@ -453,7 +455,6 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
 		}
 	}
-	r.m.AgentsHeldBack.Set(float64(heldBack))
 	// Each rejected object is reported on its org's agents, after their own pass has recorded its state.
 	// Several rejections of one org are joined into one message, not overwritten.
 	byOrg := map[string][]string{}

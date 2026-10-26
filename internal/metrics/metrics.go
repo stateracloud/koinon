@@ -13,7 +13,9 @@ package metrics
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -40,12 +42,20 @@ func Handler(reg *prometheus.Registry) http.Handler {
 	return mux
 }
 
-// Serve serves reg on addr until ctx ends. An empty addr disables the listener.
-func Serve(ctx context.Context, addr string, reg *prometheus.Registry, log *slog.Logger) {
+// Serve listens on addr at once, so a port that is taken fails startup with the returned error,
+// then serves reg in the background until ctx ends. An empty addr disables the listener.
+func Serve(ctx context.Context, addr string, reg *prometheus.Registry, log *slog.Logger) error {
 	if addr == "" {
-		return
+		return nil
 	}
-	srv := &http.Server{Addr: addr, Handler: Handler(reg), ReadHeaderTimeout: 10 * time.Second}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("metrics listener: %w", err)
+	}
+	srv := &http.Server{
+		Handler: Handler(reg), ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute,
+	}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -53,8 +63,9 @@ func Serve(ctx context.Context, addr string, reg *prometheus.Registry, log *slog
 		_ = srv.Shutdown(sctx)
 	}()
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("metrics listener failed", "addr", addr, "err", err)
 		}
 	}()
+	return nil
 }

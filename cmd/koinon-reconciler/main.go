@@ -135,7 +135,9 @@ func run() error {
 	go keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log)
 
 	reg := metrics.NewRegistry()
-	metrics.Serve(ctx, cfg.metricsAddr, reg, log)
+	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
+		return err
+	}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
