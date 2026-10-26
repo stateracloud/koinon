@@ -6,7 +6,7 @@
 // seccomp, and whether the cluster enforces NetworkPolicy. Every check only reads, except the
 // probes: the seccomp probe runs one short-lived unprivileged pod, the NetworkPolicy probe two
 // pods and a NetworkPolicy in the release namespace. A missing prerequisite fails; guest
-// seccomp and NetworkPolicy enforcement only warn.
+// seccomp, NetworkPolicy enforcement and the gateway's sandbox image settings only warn.
 package preflight
 
 import (
@@ -132,6 +132,15 @@ type Config struct {
 	// (kubernetes mode), whose image tag carries its release.
 	AgentgatewayNamespace  string
 	AgentgatewayController string
+	// OpenShellConfigNamespace and OpenShellConfigMap locate OpenShell's gateway configuration
+	// (preflight.openshell). An empty ConfigMap skips the sandbox image checks.
+	OpenShellConfigNamespace string
+	OpenShellConfigMap       string
+	// ExpectSandboxPullSecrets is true when global.imagePullSecrets, global.imageRegistry or
+	// global.registryMirrors is set: the gateway should then have sandbox pull secrets.
+	ExpectSandboxPullSecrets bool
+	// SupervisorImages is the effective sandboxPolicy.supervisorImages; empty when the policy is off.
+	SupervisorImages []string
 }
 
 // OpenShell is the part of the OpenShell gateway API the preflight calls.
@@ -170,6 +179,7 @@ func (c *Checker) Run(ctx context.Context) []Result {
 		c.checkOpenShell(ctx),
 		c.checkRuntimeClass(ctx),
 	}
+	results = append(results, c.checkSandboxImages(ctx)...)
 	if c.Config.PostgresMode == project.PostgresCNPG {
 		results = append(results, c.checkCNPG(ctx))
 	}

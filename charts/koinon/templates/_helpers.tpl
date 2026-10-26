@@ -49,14 +49,48 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: koinon
 {{- end }}
 
-{{/* Koinon image reference: koinon.image (list $ .Values.api.image). */}}
+{{/*
+Rewrite an image reference for a registry mirror: koinon.imageRef (list $ "ghcr.io/org/name:tag@sha256:...").
+The leading host is the first path element that contains "." or ":" (or is "localhost"); a reference
+without one lives on docker.io, and a bare "name" is docker.io/library/name. global.registryMirrors[host]
+replaces that host if it has an entry; otherwise global.imageRegistry replaces it, if set; otherwise the
+reference is returned exactly as given. The path, tag and digest are kept, so a digest still verifies
+through a pull-through cache. Mirror values may carry a path prefix (art.example.com/ghcr-remote).
+*/}}
+{{- define "koinon.imageRef" -}}
+{{- $ctx := index . 0 -}}
+{{- $ref := index . 1 -}}
+{{- $g := $ctx.Values.global | default dict -}}
+{{- $mirrors := $g.registryMirrors | default dict -}}
+{{- $parts := splitList "/" $ref -}}
+{{- $host := "docker.io" -}}
+{{- $rest := $ref -}}
+{{- if and (gt (len $parts) 1) (or (contains "." (first $parts)) (contains ":" (first $parts)) (eq (first $parts) "localhost")) -}}
+{{- $host = first $parts -}}
+{{- $rest = join "/" (rest $parts) -}}
+{{- else if eq (len $parts) 1 -}}
+{{- $rest = printf "library/%s" $ref -}}
+{{- end -}}
+{{- $target := (get $mirrors $host) | default ($g.imageRegistry | default "") -}}
+{{- if $target -}}
+{{- printf "%s/%s" (trimSuffix "/" $target) $rest -}}
+{{- else -}}
+{{- $ref -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Koinon image reference: koinon.image (list $ .Values.api.image). Built from image.registry (the
+upstream; leave it at its default when a mirror is set), the repository and the tag or digest, then
+rewritten by koinon.imageRef.
+*/}}
 {{- define "koinon.image" -}}
 {{- $ctx := index . 0 -}}
 {{- $img := index . 1 }}
 {{- $tag := $img.tag | default $ctx.Values.image.tag | default $ctx.Chart.AppVersion }}
 {{- $ref := printf "%s/%s:%s" $ctx.Values.image.registry $img.repository $tag }}
 {{- if $img.digest }}{{ $ref = printf "%s@%s" $ref $img.digest }}{{ end }}
-{{- $ref }}
+{{- include "koinon.imageRef" (list $ctx $ref) }}
 {{- end }}
 
 {{- define "koinon.podSecurityContext" -}}
@@ -79,11 +113,47 @@ seccompProfile:
   type: RuntimeDefault
 {{- end }}
 
-{{- define "koinon.imagePullSecrets" -}}
-{{- with .Values.imagePullSecrets -}}
-imagePullSecrets:
-  {{- toYaml . | nindent 2 }}
+{{/*
+The image pull Secret names, as JSON: global.imagePullSecrets and the deprecated top-level
+imagePullSecrets, merged and de-duplicated. Each entry is {name: x} or a plain "x".
+*/}}
+{{- define "koinon.pullSecretNames" -}}
+{{- $names := list -}}
+{{- $g := .Values.global | default dict -}}
+{{- range concat ($g.imagePullSecrets | default list) (.Values.imagePullSecrets | default list) -}}
+{{- if kindIs "string" . }}{{ $names = append $names . }}{{ else }}{{ $names = append $names .name }}{{ end -}}
+{{- end -}}
+{{- $names | uniq | toJson -}}
 {{- end }}
+
+{{/* imagePullSecrets: [{name: x}] for a pod spec or the CNPG Cluster; empty when there are none. */}}
+{{- define "koinon.imagePullSecrets" -}}
+{{- $names := include "koinon.pullSecretNames" . | fromJsonArray -}}
+{{- if $names -}}
+imagePullSecrets:
+{{- range $names }}
+  - name: {{ . }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+The images OpenShell's supervisor pods may run, as JSON (the sandbox admission policy's pin):
+sandboxPolicy.supervisorImages, or when that is empty OpenShell 0.1.5's own default, rewritten by
+koinon.imageRef so that a mirror needs no extra setting. An explicit list is used as written.
+*/}}
+{{- define "koinon.supervisorImages" -}}
+{{- if .Values.sandboxPolicy.supervisorImages -}}
+{{- .Values.sandboxPolicy.supervisorImages | toJson -}}
+{{- else -}}
+{{- list (include "koinon.imageRef" (list . "ghcr.io/nvidia/openshell/supervisor:0.1.5")) | toJson -}}
+{{- end -}}
+{{- end }}
+
+{{/* "true" when sandboxes will pull through a mirror or with credentials: the preflight then checks OpenShell's pull-secret setting. */}}
+{{- define "koinon.expectSandboxPullSecrets" -}}
+{{- $g := .Values.global | default dict -}}
+{{- if or (include "koinon.pullSecretNames" . | fromJsonArray) $g.imageRegistry $g.registryMirrors -}}true{{- end -}}
 {{- end }}
 
 {{/* Name of the CNPG Cluster. */}}

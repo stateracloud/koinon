@@ -284,11 +284,12 @@ kubectl -n koinon create secret docker-registry ghcr-pull --docker-server=ghcr.i
   --docker-username="$GITHUB_USER" --docker-password="$GITHUB_TOKEN"
 ```
 
-Add `imagePullSecrets: [{name: ghcr-pull}]` to `values.yaml`. It covers Koinon's own pods only.
-Sandbox pods need the nodes to be able to pull `flavor-opencode` themselves: use node registry
-credentials, or a mirror the nodes can pull anonymously (see `hack/mirror-release.sh`). OpenShell's
-sandbox API has no pull-secret field, so Koinon passes none
-([#130](https://github.com/stateracloud/koinon/issues/130)). Leave out the `image` block (the
+Add `global: {imagePullSecrets: [{name: ghcr-pull}]}` to `values.yaml`. It covers every pod the Koinon
+chart renders, the database included. Sandbox pods are created by OpenShell, so give it the pull
+Secret too: create `ghcr-pull` in the `openshell` namespace as well and set
+`server.sandboxImagePullSecrets: [{name: ghcr-pull}]` on the OpenShell release
+(`test/e2e/kind/openshell-values.yaml` shows the line). To pull through Artifactory, Nexus or Harbor
+instead, see [Private registries and mirrors](/guides/private-registries/). Leave out the `image` block (the
 registry defaults to `ghcr.io/stateracloud` and the tag to the chart's version), and install the
 chart in step 2 from the registry instead of the clone:
 
@@ -320,7 +321,8 @@ docker buildx build --push --build-context common=flavors/common \
 
 Without `-tags=webui`, `koinon-api` serves no UI. Without `--base-import-paths`, `ko` gives the images
 other names than the chart expects. The chart takes the flavor image tag from `image.tag`. The images
-have to be pullable by the cluster; add `imagePullSecrets` for a private registry.
+have to be pullable by the cluster; add `global.imagePullSecrets` for a private registry (see
+[Private registries and mirrors](/guides/private-registries/)).
 
 The end-to-end test does not run this build. It builds with `ko` without the `webui` tag and loads
 the images straight into kind, and its browser suite goes through the Vite dev server.

@@ -10,11 +10,37 @@ fullnameOverride: ""
 # because OpenShell's policy DNS resolves names without the pod's search domains.
 clusterDomain: cluster.local
 
+# Settings for every image the chart runs or hands to Koinon: the three Koinon images, the hook
+# Jobs, the preflight probe pods, the flavor images that become sandboxes, agentgateway (standalone
+# mode), the CNPG Postgres image and the default sandboxPolicy.supervisorImages. See the guide
+# "Private registries and mirrors". OpenShell, the CNPG operator, Agent Sandbox and agentgateway's
+# controller are separate releases; set the same things on their charts.
+global:
+  # Image pull Secrets (type kubernetes.io/dockerconfigjson, in the release namespace) for every pod
+  # the chart renders and for the CNPG Cluster: [{name: regcred}]. A plain string also works:
+  # [regcred]. Merged with the deprecated top-level imagePullSecrets, de-duplicated.
+  # Sandbox pods are not Koinon's to configure: set server.sandboxImagePullSecrets on the OpenShell
+  # release (the preflight checks it).
+  imagePullSecrets: []
+  # Replace the registry host of every image with this one (a path prefix is fine):
+  # imageRegistry: artifactory.example.com/proxy turns ghcr.io/stateracloud/koinon-api:1 into
+  # artifactory.example.com/proxy/stateracloud/koinon-api:1. The rest of the reference, digest
+  # included, is kept. Empty leaves every image as is.
+  imageRegistry: ""
+  # Replace the registry host per upstream, for mirrors that have one repository per upstream:
+  #   registryMirrors: {ghcr.io: artifactory.example.com/ghcr-remote, docker.io: artifactory.example.com/docker-remote}
+  # A host listed here wins over imageRegistry; a bare name or user/name is on docker.io. With
+  # --set, escape the dots: --set 'global.registryMirrors.ghcr\.io=artifactory.example.com/ghcr-remote'.
+  registryMirrors: {}
+
 # Koinon images: <registry>/<repository>:<tag>[@<digest>]. The tag defaults to .Chart.AppVersion.
+# registry is the upstream the images are published at; leave it at its default when you use
+# global.imageRegistry or global.registryMirrors, which rewrite whatever this says.
 image:
   registry: ghcr.io/stateracloud
   tag: ""
   pullPolicy: IfNotPresent
+# DEPRECATED: use global.imagePullSecrets. Still honoured, and merged with it.
 imagePullSecrets: []
 
 api:
@@ -105,6 +131,14 @@ preflight:
   enabled: true
   # Kills the Job after this long; keep it below helm's --timeout (default 5m).
   activeDeadlineSeconds: 240
+  # OpenShell's gateway configuration: the ConfigMap <openshell fullname>-config in the OpenShell
+  # release's namespace (key gateway.toml). The preflight reads it to check that the gateway has
+  # sandbox pull secrets (when global.imagePullSecrets, imageRegistry or registryMirrors is set) and
+  # that sandboxPolicy admits its supervisor image. Read-only, by name; a ConfigMap it cannot read
+  # only warns.
+  openshell:
+    namespace: openshell
+    configMap: openshell-config
   # Where the Agent Sandbox controller runs; its image tag must be v1.0.x.
   agentSandbox:
     namespace: agent-sandbox-system
@@ -380,11 +414,14 @@ sandboxPolicy:
   # Runtime classes allowed for sandbox workload pods.
   runtimeClasses: [kata, kata-qemu]
   # Images allowed in OpenShell supervisor pods (label openshell.ai/boundary-role=supervisor),
-  # for every container and init container (ADR 0045: a pinned supervisor image). The default is
-  # OpenShell 0.1.5's own; change it with the OpenShell version, and add your mirror's reference
-  # (by tag or digest) when the gateway pulls the image from one.
-  supervisorImages:
-    - ghcr.io/nvidia/openshell/supervisor:0.1.5
+  # for every container and init container (ADR 0045: a pinned supervisor image). Empty uses
+  # OpenShell 0.1.5's own, ghcr.io/nvidia/openshell/supervisor:0.1.5, rewritten by
+  # global.imageRegistry and global.registryMirrors like every other image: set the mirror on the
+  # OpenShell release to the same place and the two agree. Change the list with the OpenShell
+  # version, or when the gateway pulls the image from somewhere the rewrite does not produce (it is
+  # used exactly as written, by tag or digest). The preflight compares it with the gateway's
+  # supervisor_image.
+  supervisorImages: []
   validationActions: [Deny]
   # Requesting identities (request.userInfo.username) allowed to write each kind of object in
   # sandbox namespaces. Everyone else is denied, cluster admins included. CONNECT (pods/exec, attach,

@@ -458,14 +458,18 @@ var _ = Describe("Sandbox admission policy", Label("escape", "admission"), Order
 	})
 })
 
-// renderSandboxPolicy renders charts/koinon's sandbox-policy template with default values.
-func renderSandboxPolicy(ctx context.Context) ([]*admissionv1.ValidatingAdmissionPolicy, []*admissionv1.ValidatingAdmissionPolicyBinding) {
+// renderSandboxPolicy renders charts/koinon's sandbox-policy template with default values, plus
+// any extra helm arguments.
+func renderSandboxPolicy(ctx context.Context, extraArgs ...string) ([]*admissionv1.ValidatingAdmissionPolicy, []*admissionv1.ValidatingAdmissionPolicyBinding) {
 	GinkgoHelper()
 	helm, err := exec.LookPath(envOr("HELM", "helm"))
 	Expect(err).NotTo(HaveOccurred(), "helm renders the chart's policies")
 	var out, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, helm, "template", "koinon", "../../charts/koinon", "--namespace", "koinon",
-		"--set", "openshell.insecure=true", "--show-only", "templates/sandbox-policy.yaml")
+	args := append([]string{
+		"template", "koinon", "../../charts/koinon", "--namespace", "koinon",
+		"--set", "openshell.insecure=true", "--show-only", "templates/sandbox-policy.yaml",
+	}, extraArgs...)
+	cmd := exec.CommandContext(ctx, helm, args...)
 	cmd.Stdout, cmd.Stderr = &out, &stderr
 	Expect(cmd.Run()).To(Succeed(), stderr.String())
 

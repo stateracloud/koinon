@@ -12,7 +12,7 @@ export default defineConfig({
         { label: 'Start here', items: ['prerequisites', 'quickstart'] },
         {
           label: 'Guides',
-          items: ['guides/models', 'guides/prices', 'guides/budgets', 'guides/mcp-servers', 'guides/github-app', 'guides/oidc', 'guides/gateway-modes', 'guides/agent-health', 'guides/audit', 'guides/metrics'],
+          items: ['guides/models', 'guides/prices', 'guides/budgets', 'guides/mcp-servers', 'guides/github-app', 'guides/oidc', 'guides/gateway-modes', 'guides/agent-health', 'guides/audit', 'guides/metrics', 'guides/private-registries'],
         },
       ],
     }),
