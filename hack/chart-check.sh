@@ -216,6 +216,31 @@ has "preflight checks the agentgateway controller" '--agentgateway-controller=ag
 has "preflight may read the agentgateway CRDs" 'agentgatewaymodels.agentgateway.dev$' "${k8s[@]}" --show-only templates/preflight.yaml
 env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"'
 has "gateway.kubernetes.port is used" 'url: http://koinon-gateway.koinon.svc.cluster.local:4001$' "${k8s[@]}" --set gateway.kubernetes.port=4001 --show-only templates/config.yaml
+# Metrics (issue #106, ADR 0023): every component has a "metrics" container port and a Service of its
+# own; the ServiceMonitors are off by default and need the CRD; the NetworkPolicies admit the port only
+# from metrics.allowFrom.
+n=$(render --show-only templates/deployments.yaml | grep -c -- '- name: metrics$' || true)
+[ "$n" = 3 ] || fail "the metrics container port is on $n Deployments, want 3"
+has "metrics port follows metrics.port" 'containerPort: 9191$' --set metrics.port=9191 --show-only templates/deployments.yaml
+env_is KOINON_METRICS_ADDR '":9191"' --set metrics.port=9191
+n=$(render --show-only templates/metrics.yaml | grep -c '^kind: Service$' || true)
+[ "$n" = 3 ] || fail "$n metrics Services, want 3"
+lacks "no ServiceMonitor by default" 'kind: ServiceMonitor'
+sm=(--set metrics.serviceMonitor.enabled=true --api-versions monitoring.coreos.com/v1/ServiceMonitor)
+n=$(render "${sm[@]}" | grep -c '^kind: ServiceMonitor$' || true)
+[ "$n" = 3 ] || fail "$n ServiceMonitors with metrics.serviceMonitor.enabled, want 3"
+has "ServiceMonitor interval and labels" 'interval: "30s"' "${sm[@]}" --set metrics.serviceMonitor.interval=30s --set metrics.serviceMonitor.labels.release=prom --show-only templates/metrics.yaml
+has "ServiceMonitor extra labels" 'release: prom$' "${sm[@]}" --set metrics.serviceMonitor.labels.release=prom --show-only templates/metrics.yaml
+if render --set metrics.serviceMonitor.enabled=true >/dev/null 2>&1; then
+	fail "metrics.serviceMonitor.enabled=true must fail without the ServiceMonitor CRD"
+fi
+n=$(render --set metrics.serviceMonitor.enabled=true --set metrics.serviceMonitor.skipCapabilityCheck=true | grep -c '^kind: ServiceMonitor$' || true)
+[ "$n" = 3 ] || fail "$n ServiceMonitors with skipCapabilityCheck and no --api-versions, want 3"
+lacks "metrics port closed by default" 'port: metrics$' --show-only templates/networkpolicy.yaml
+scrape=(--set 'metrics.allowFrom[0].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name=monitoring')
+n=$(render "${scrape[@]}" --show-only templates/networkpolicy.yaml | grep -c 'port: metrics$' || true)
+[ "$n" = 3 ] || fail "metrics.allowFrom opens the metrics port in $n policies, want api, reconciler and agentd (3)"
+has "metrics.allowFrom peer is rendered" 'kubernetes.io/metadata.name: monitoring$' "${scrape[@]}" --show-only templates/networkpolicy.yaml
 # GitOps-safe renders (issue #98). (a) Two renders of every value set are byte-identical.
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)

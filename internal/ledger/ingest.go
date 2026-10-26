@@ -28,6 +28,8 @@ type Ingester struct {
 	Notifier budget.Notifier
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// Metrics counts what Ingest and Handler do; nil counts nothing.
+	Metrics *Metrics
 }
 
 func (in *Ingester) now() time.Time {
@@ -61,10 +63,17 @@ func (in *Ingester) Ingest(ctx context.Context, entries []Entry) (Result, error)
 		switch {
 		case errors.Is(err, errUnattributed):
 			res.Unattributed++
+			if in.Metrics != nil {
+				in.Metrics.Rejected.WithLabelValues(rejectUnattributed).Inc()
+			}
 		case err != nil:
 			return res, err
 		case recorded:
 			res.Recorded++
+			if in.Metrics != nil {
+				in.Metrics.Ingested.Inc()
+				in.Metrics.IngestLag.Observe(max(in.now().Sub(e.Time), 0).Seconds())
+			}
 		default:
 			res.Duplicates++
 		}

@@ -52,6 +52,37 @@ func (q *Queries) ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandbo
 	return i, err
 }
 
+const countAgentSandboxesByState = `-- name: CountAgentSandboxesByState :many
+SELECT state, count(*)::bigint AS n FROM agent_sandboxes GROUP BY state
+`
+
+type CountAgentSandboxesByStateRow struct {
+	State SandboxState
+	N     int64
+}
+
+// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
+// no org-owned row, so it takes no @org_id.
+func (q *Queries) CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error) {
+	rows, err := q.db.Query(ctx, countAgentSandboxesByState)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountAgentSandboxesByStateRow
+	for rows.Next() {
+		var i CountAgentSandboxesByStateRow
+		if err := rows.Scan(&i.State, &i.N); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createAgentSandbox = `-- name: CreateAgentSandbox :one
 INSERT INTO agent_sandboxes (org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name)
 VALUES ($1, $2, $3, $4, $5, $6)

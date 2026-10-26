@@ -21,7 +21,7 @@ browser storage are an XSS liability. Run live view includes a desktop for the i
   - Streaming updates use the plain connect-web client with server-streaming RPCs, because
     connect-query supports unary methods only.
 - Streaming updates come from a Postgres transactional outbox: the outbox table is the source of
-  truth, `LISTEN/NOTIFY` is only a wake-up hint, and clients resume from the last outbox ID they saw.
+  truth, `LISTEN/NOTIFY` is only a wake-up hint, and clients resume from the last outbox ID they saw. _Amended 2026-10-26: no outbox was built; see the amendment in [0010](0010-eventing.md)._
 - Authentication is backend-for-frontend OIDC: the Go API runs the OIDC code flow and holds tokens;
   the browser gets an httpOnly, Secure, SameSite cookie. No tokens in JavaScript.
 - noVNC live view is proxied through the API, which checks permissions per ticket.

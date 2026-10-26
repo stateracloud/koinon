@@ -107,3 +107,8 @@ WHERE org_id = @org_id AND agent_id = @agent_id
 -- sends it while it waits for a sandbox that is not ready, so the reconciler
 -- starts it (the waiting run is the demand) without waiting for a resync.
 SELECT pg_notify('koinon_reconcile', CAST(sqlc.arg(org_id)::uuid AS text));
+
+-- name: CountAgentSandboxesByState :many
+-- Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
+-- no org-owned row, so it takes no @org_id.
+SELECT state, count(*)::bigint AS n FROM agent_sandboxes GROUP BY state;

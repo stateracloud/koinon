@@ -137,6 +137,8 @@ type Config struct {
 	HomeRetention Retention
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
+	// Metrics receives the pass metrics; nil keeps them unexported.
+	Metrics *Metrics
 	// Now defaults to time.Now; tests move it forward to pass the idle timeout.
 	Now func() time.Time
 }
@@ -179,6 +181,7 @@ type Reconciler struct {
 	probeKeys map[gateway.AgentRef]gateway.IssuedKey
 	probes    []mcpProbe
 	mcp       *mcpservers.Service
+	m         *Metrics
 }
 
 // New returns a Reconciler.
@@ -208,13 +211,16 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.Metrics == nil {
+		cfg.Metrics = NewMetrics(nil)
+	}
 	if cfg.GitBinaries == nil {
 		cfg.GitBinaries = DefaultGitBinaries
 	}
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
 		backend: backend, gw: gw, secrets: secrets, githubRevs: map[string]string{},
-		mcp: mcpservers.New(pool, nil, cfg.Logger),
+		mcp: mcpservers.New(pool, nil, cfg.Logger), m: cfg.Metrics,
 	}, nil
 }
 
@@ -251,8 +257,41 @@ func (w *work) logAttrs() []any {
 // ReconcileAll runs one pass over every org and agent. It returns the errors of the agents it
 // could not converge; the others are converged regardless.
 func (r *Reconciler) ReconcileAll(ctx context.Context) error {
+	start := time.Now()
+	err := r.reconcileAll(ctx)
+	r.m.PassDuration.Observe(time.Since(start).Seconds())
+	result := "ok"
+	if err != nil {
+		result = "error"
+	}
+	r.m.Passes.WithLabelValues(result).Inc()
+	r.observeSandboxes(ctx)
+	return err
+}
+
+// observeSandboxes sets the sandboxes gauge from the recorded states. A failed read keeps the
+// previous values.
+func (r *Reconciler) observeSandboxes(ctx context.Context) {
+	rows, err := r.q.CountAgentSandboxesByState(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			r.log.Debug("counting sandboxes for metrics failed", "err", err)
+		}
+		return
+	}
+	counts := map[store.SandboxState]int64{}
+	for _, row := range rows {
+		counts[row.State] = row.N
+	}
+	for _, s := range sandboxStates {
+		r.m.Sandboxes.WithLabelValues(string(s)).Set(float64(counts[s]))
+	}
+}
+
+func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	orgs, err := r.q.ListOrgsToReconcile(ctx)
 	if err != nil {
+		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 		return fmt.Errorf("reconciler: list orgs: %w", err)
 	}
 	workspaces := map[string]string{} // org ID -> workspace, ensured in this pass
@@ -266,14 +305,18 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		agents, err := r.q.ListAgentsToReconcile(ctx, org.ID)
 		if err != nil {
 			// Without the full list, an Apply would revoke this org's keys.
+			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 			return fmt.Errorf("reconciler: list agents of org %s: %w", org.Slug, err)
 		}
 		for _, a := range agents {
 			w, err := r.prepare(ctx, org, a, workspaces)
 			if errors.Is(err, errAbortPass) {
+				// prepare aborts only on a database read.
+				r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 				return err
 			}
 			if err != nil {
+				r.m.PassErrors.WithLabelValues(errKindAgentPrepare).Inc()
 				errs = append(errs, err)
 				continue
 			}
@@ -294,14 +337,18 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	// model, so a database error aborts the pass.
 	served, provErrs, err := r.loadProviders(ctx, orgs)
 	if err != nil {
+		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 		return errors.Join(append(errs, fmt.Errorf("%w: %w", errAbortPass, err))...)
 	}
+	r.m.PassErrors.WithLabelValues(errKindProvider).Add(float64(len(provErrs)))
 	errs = append(errs, provErrs...)
 	// The orgs' remote MCP servers (MC1), likewise.
 	mcpServed, mcpErrs, err := r.loadMCP(ctx, orgs)
 	if err != nil {
+		r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
 		return errors.Join(append(errs, fmt.Errorf("%w: %w", errAbortPass, err))...)
 	}
+	r.m.PassErrors.WithLabelValues(errKindMCP).Add(float64(len(mcpErrs)))
 	errs = append(errs, mcpErrs...)
 
 	// One gateway state for every agent: keys of archived agents are revoked by omission.
@@ -322,6 +369,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		}
 		l, err := limitFor(ctx, r.q, w.agent, now)
 		if err != nil {
+			r.m.PassErrors.WithLabelValues(errKindSpendLimit).Inc()
 			failed := r.failClosedLimit(w.key.Agent, now)
 			r.log.Error("agent budget not computed; its key keeps its last pushed limit, or zero if it had none",
 				"agent", execution.UUIDString(w.agent.ID.Bytes), "org", w.key.Agent.Org, "err", err)
@@ -342,6 +390,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	if len(files) > 0 {
 		var err error
 		if written, err = r.cfg.ProviderKeys.Put(ctx, files); err != nil {
+			r.m.PassErrors.WithLabelValues(errKindProviderKeys).Inc()
 			return errors.Join(append(errs, fmt.Errorf("reconciler: deliver provider keys: %w", err))...)
 		}
 	}
@@ -350,11 +399,15 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 	maps.Copy(keep, r.settleMCP(&mcpServed, settling))
 	probes, err := r.applyMCP(ctx, &state, &mcpServed, items)
 	if err != nil {
+		r.m.PassErrors.WithLabelValues(errKindMCP).Inc()
 		return errors.Join(append(errs, err)...)
 	}
 	var rejections []gateway.Rejection
 	applyFailed := false
-	if _, err := r.gw.Apply(ctx, state); err != nil {
+	applyStart := time.Now()
+	_, applyErr := r.gw.Apply(ctx, state)
+	r.m.GatewayApply.Observe(time.Since(applyStart).Seconds())
+	if err := applyErr; err != nil {
 		// A Kubernetes-mode gateway judges objects one by one: the revision is live for everything
 		// but the objects named, which are reported on their org and do not hold back the others.
 		var rej *gateway.RejectedError
@@ -363,9 +416,11 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 			// depend on it (start on demand, idle stop), so it goes on, except for agents whose
 			// new key is not live yet. Nothing is recorded as applied and nothing is pruned.
 			applyFailed = true
+			r.m.PassErrors.WithLabelValues(errKindGatewayApply).Inc()
 			errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
 		} else {
 			rejections = rej.Rejected
+			r.m.PassErrors.WithLabelValues(errKindGatewayRejected).Inc()
 			for _, x := range rej.Rejected {
 				r.log.Error("the gateway rejected an object; the rest is live", "org", x.Org, "kind", x.Kind, "object", x.Name, "reason", x.Reason)
 			}
@@ -378,18 +433,23 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		r.recordAppliedMCP(mcpServed, probes)
 		if r.cfg.ProviderKeys != nil && len(provErrs) == 0 && len(mcpErrs) == 0 {
 			if err := r.cfg.ProviderKeys.Prune(ctx, keep); err != nil {
+				r.m.PassErrors.WithLabelValues(errKindProviderKeys).Inc()
 				errs = append(errs, fmt.Errorf("reconciler: prune provider keys: %w", err))
 			}
 		}
 	}
 
+	heldBack := 0
+	defer func() { r.m.AgentsHeldBack.Set(float64(heldBack)) }()
 	for _, w := range items {
 		if applyFailed && w.key.ID != "" && w.agent.Status == store.AgentStatusActive && r.keyNotLive(w.key.ID) {
 			r.log.Warn("the gateway does not serve the agent's new key yet; its sandbox work waits", w.logAttrs()...)
 			r.recordMessage(ctx, w, errors.New("waiting for the gateway to serve the agent's new key"))
+			heldBack++
 			continue
 		}
 		if err := r.reconcileAgent(ctx, w, workspaces); err != nil {
+			r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
 			r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
 			r.recordMessage(ctx, w, err)
 			errs = append(errs, fmt.Errorf("agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
@@ -749,6 +809,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
 			return err
 		}
+		r.m.SandboxRepairs.Inc()
 		r.log.Warn("deleting a stuck sandbox to recreate it", append(w.logAttrs(), "reason", w.sb.UnhealthyReason.String)...)
 		if err := audit.RecordErr(ctx, r.q, audit.Event{
 			Org: w.org.ID, Actor: audit.System(), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
@@ -829,6 +890,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 			}
 			return err
 		}
+		r.m.AgentsUnhealthy.Inc()
 		r.log.Error("the sandbox keeps failing; the agent is marked unhealthy", append(w.logAttrs(), "recreations_in_24h", n, "last", detail)...)
 		if err := audit.RecordErr(ctx, r.q, audit.Event{
 			Org: w.org.ID, Actor: audit.System(), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
@@ -841,6 +903,7 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 	if err := r.backend.DeleteSandbox(ctx, ws, name); err != nil {
 		return err
 	}
+	r.m.SandboxRepairs.Inc()
 	r.log.Warn("deleting a failed sandbox to recreate it", append(w.logAttrs(), "detail", detail)...)
 	if err := audit.RecordErr(ctx, r.q, audit.Event{
 		Org: w.org.ID, Actor: audit.System(), Action: "sandbox.recreate", TargetKind: "agent", TargetID: w.agent.ID.String(),
