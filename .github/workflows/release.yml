@@ -2,8 +2,9 @@
 #
 # Release (plan item REL1, ADR 0027, docs/dev/releasing.md). A pushed tag vX.Y.Z or vX.Y.Z-rc.N
 # publishes the three Go images, the OpenCode flavor image (ADR 0059) and the OCI Helm chart to
-# ghcr.io/stateracloud and drafts the GitHub release (-rc.N is a prerelease). Nothing is rebuilt or retested for the gate: it only checks that
-# the tagged commit is on main and that the required CI checks succeeded on it.
+# ghcr.io/stateracloud and drafts the GitHub release (-rc.N is a prerelease). Nothing is rebuilt or
+# retested for the gate: it only checks that the tagged commit is on main and that the required CI
+# checks succeeded on it.
 #
 # Signing and SBOM attestations (cosign, keyless) are a separate `sign` job, the only one with
 # id-token: write. It runs only when the repository variable RELEASE_SIGNING is 'true' (ADR 0049:
@@ -134,6 +135,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false # the job never uses git auth
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
           image: ${{ env.BINFMT_IMAGE }}
