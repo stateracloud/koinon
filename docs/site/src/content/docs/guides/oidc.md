@@ -39,6 +39,7 @@ oidc:
   groupMappings:
     koinon-admins: admin
     staff: member
+  platformAdminGroups: [koinon-platform]
   defaultOrgIdentityMode: hybrid
 ```
 
@@ -47,6 +48,18 @@ oidc:
 - Leave `clientSecret.existingSecret` empty for a public client (PKCE only).
 - `groupMappings` map an IdP group to a role in the default org: `viewer`, `member`, `admin` or `owner`.
   The chart reconciles them on every start.
+- `platformAdminGroups` lists IdP groups whose members are platform admins (they set the per-org budget
+  ceilings under `/platform/budgets`). It is reconciled at every login like the group mappings: a user
+  who gains a listed group becomes a platform admin, a user who loses all of them stops being one. Only
+  grants made by this setting are revoked, so the bootstrap admin keeps its own. An empty list changes
+  nothing. Group names may contain spaces, not commas. If the IdP omits the groups claim from the ID token
+  (a missing `groups` scope, or the Azure AD groups overage, where the token carries `_claim_names`
+  instead of the list), the user counts as in no group and loses the grant at the next login, the same
+  as with `groupMappings`. Koinon only reads groups at login, so a user who is removed
+  from the IdP and never logs in again keeps platform admin. To remove one at once, delete the row
+  (`DELETE FROM platform_admins WHERE user_id = '<id>'`, in Postgres) and disable the user (set
+  `users.deleted_at`), which also blocks the login. Grants and revocations the login makes are audited
+  as `platform_admin.grant` and `platform_admin.revoke`.
 - `defaultOrgIdentityMode` is `platform` (roles from Koinon only), `idp` (from `groupMappings`) or
   `hybrid` (both, and the highest role wins).
 
@@ -61,7 +74,13 @@ until the session ends. `session.maxLifetime` (12 hours by default) bounds that 
 
 ## Turn off the bootstrap admin
 
-When OIDC works and an OIDC user is an owner, turn off the password login:
+The bootstrap admin is the only platform admin until you set `oidc.platformAdminGroups` (above) and
+a user in one of those groups has signed in once through OIDC. Do that first, and check that the user
+can open `/platform/budgets`. Without a platform admin nobody can set the platform budget ceilings, and
+the only way back is to enable the bootstrap admin again.
+
+When OIDC works, an OIDC user is an owner and an OIDC user is a platform admin, turn off the password
+login:
 
 ```yaml chart-values
 bootstrapAdmin:

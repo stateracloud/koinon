@@ -121,6 +121,9 @@ type Config struct {
 	RuntimeClassName string
 	// OpenShellAddress is openshell.address, for messages.
 	OpenShellAddress string
+	// OpenShellPlaintext is true when the gateway is dialled without TLS (openshell.insecure=true):
+	// a healthy gateway is then reported as a warning.
+	OpenShellPlaintext bool
 	// AgentSandboxNamespace and AgentSandboxController locate the Agent Sandbox controller
 	// Deployment, whose image tag carries the release version.
 	AgentSandboxNamespace  string
@@ -327,6 +330,14 @@ func (c *Checker) checkOpenShell(ctx context.Context) Result {
 	}
 	switch resp.GetStatus() {
 	case openshellv1.ServiceStatus_SERVICE_STATUS_HEALTHY:
+		if c.Config.OpenShellPlaintext {
+			return Result{
+				Check: check, Status: Warn,
+				Message: fmt.Sprintf("%s healthy, version %s, but connected without TLS", c.Config.OpenShellAddress, version),
+				Fix: "set openshell.clientTLSSecret so that sandbox create, exec and policy calls use mTLS; " +
+					"openshell.insecure=true is only for a service mesh that provides mTLS",
+			}
+		}
 		return Result{Check: check, Status: Pass, Message: fmt.Sprintf("%s healthy, version %s", c.Config.OpenShellAddress, version)}
 	case openshellv1.ServiceStatus_SERVICE_STATUS_DEGRADED:
 		return Result{

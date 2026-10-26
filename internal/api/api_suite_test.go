@@ -141,6 +141,7 @@ type envOptions struct {
 	bootstrapLoginDisabled bool
 	oidc                   bool
 	groupMappings          []auth.GroupMapping
+	platformAdminGroups    []string
 	defaultOrgMode         store.IdentityMode
 	trustedOrigins         []string
 	// watchPoll is WatchRun's backstop poll interval; tests that check
@@ -247,6 +248,8 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 			ClientID:     "koinon",
 			ClientSecret: "client-secret",
 			RedirectURL:  e.srv.URL + "/auth/oidc/callback",
+
+			PlatformAdminGroups: opts.platformAdminGroups,
 		}
 	}
 	svc, err := auth.New(e.pool, cfg)
