@@ -58,6 +58,11 @@ api:
   toolsPort: 8081
   # Saved work from a stuck sandbox, for koinon-agentd only (ADR 0054).
   savedWorkPort: 8082
+  # The DBOS runtime inside koinon-api (ADR 0066, plan item DB1): schedules and durable timers. No
+  # new Deployment. Its tables are created by the migration Job (ADR 0060), so the Job must run
+  # this image first; off until a feature needs it.
+  durable:
+    enabled: false
   # 512Mi: a password hash or check holds 64 MiB, and at most two run at once (internal/auth).
   resources:
     requests: {cpu: 50m, memory: 128Mi}

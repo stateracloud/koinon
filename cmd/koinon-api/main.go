@@ -65,6 +65,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
+	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/keyscli"
 	"github.com/stateracloud/koinon/internal/ledger"
@@ -88,6 +89,7 @@ type config struct {
 	addr           string
 	databaseURL    string
 	migrate        bool
+	durable        bool
 	wait           time.Duration
 	trustedOrigins string
 	args           []string
@@ -143,6 +145,9 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.addr, "addr", ":8080", "listen address")
 	fs.StringVar(&c.databaseURL, "database-url", "", "Postgres connection string")
 	fs.BoolVar(&c.migrate, "migrate", false, "apply database migrations before starting")
+	fs.BoolVar(&c.durable, "durable", false,
+		"run the DBOS runtime (schedules, durable timers; ADR 0066); needs the DBOS tables that "+
+			"\"koinon-api migrate\" creates")
 	fs.DurationVar(&c.wait, "wait", 5*time.Minute, "how long migrations wait for the database to come up")
 	fs.StringVar(&c.trustedOrigins, "trusted-origins", "",
 		"comma-separated extra origins allowed to make state-changing requests (CSRF)")
@@ -413,6 +418,24 @@ func run() error {
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
 	go hub.Run(bgCtx)
 	go scheduler.Sweeper(bgCtx, pool, cfg.sweepInterval, slog.Default())
+	if cfg.durable {
+		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
+		// missing schema fails the start instead of the API running without its timers.
+		rt := durable.New(durable.Config{
+			DatabaseURL:        cfg.databaseURL,
+			ApplicationVersion: project.Version,
+			Logger:             slog.Default(),
+		})
+		if err := rt.Launch(bgCtx); err != nil {
+			return err
+		}
+		defer func() { // before pool.Close
+			if err := rt.Shutdown(30 * time.Second); err != nil {
+				slog.Warn("stopping the DBOS runtime", "err", err)
+			}
+		}()
+		slog.Info("DBOS runtime started")
+	}
 	kube, err := kubeClient(cfg)
 	if err != nil {
 		return err
@@ -638,7 +661,8 @@ func migrate(ctx context.Context, dsn string, wait time.Duration) error {
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
-	return nil
+	// DBOS keeps its own tables in its own schema; creating them needs the migration role too.
+	return durable.Migrate(ctx, dsn, slog.Default())
 }
 
 // savedWorkKey returns the key that signs saved-work uploads, creating its Secret (32 random bytes

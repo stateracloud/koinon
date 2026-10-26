@@ -58,7 +58,7 @@ spec:
             httpGet: {path: /healthz, port: health}
           {{- end }}
           {{- if eq $component "api" }}
-          args: ["-addr", ":{{ $v.port }}", "-otlp-addr", ":{{ $v.otlpPort }}", "-tools-addr", ":{{ $v.toolsPort }}", "-saved-work-addr", ":{{ $v.savedWorkPort }}", "-saved-work-secret", "{{ include "koinon.savedWorkSecretName" $ }}"]
+          args: ["-addr", ":{{ $v.port }}", "-otlp-addr", ":{{ $v.otlpPort }}", "-tools-addr", ":{{ $v.toolsPort }}", "-saved-work-addr", ":{{ $v.savedWorkPort }}", "-saved-work-secret", "{{ include "koinon.savedWorkSecretName" $ }}"{{ if $v.durable.enabled }}, "-durable"{{ end }}]
           ports:
             - name: http
               containerPort: {{ $v.port }}
