@@ -1003,30 +1003,42 @@ func (q *Queries) UpdateDeclaredMCPServer(ctx context.Context, arg UpdateDeclare
 
 const updateMCPServer = `-- name: UpdateMCPServer :one
 UPDATE mcp_servers
-SET url = $1, transport = $2, credential_header = $3,
-    credential_prefix = $4, credential = $5,
+SET url = $1, transport = $2,
+    credential_header = CASE WHEN $3::boolean THEN $4 ELSE credential_header END,
+    credential_prefix = CASE WHEN $3::boolean THEN $5 ELSE credential_prefix END,
+    credential = CASE WHEN $6::boolean THEN $7 ELSE credential END,
     health = 'unknown', health_reason = NULL, consecutive_failures = 0, health_since = NULL
-WHERE org_id = $6 AND id = $7
+WHERE org_id = $8 AND id = $9
 RETURNING org_id, id, name, url, transport, credential_header, credential_prefix, credential, source, managed_by_secret, declared_version, removed_at, disabled_reason, health, health_reason, health_checked_at, health_since, consecutive_failures, tools_synced_at, created_by, created_at, updated_at
 `
 
 type UpdateMCPServerParams struct {
-	Url              string
-	Transport        McpTransport
-	CredentialHeader pgtype.Text
-	CredentialPrefix string
-	Credential       []byte
-	OrgID            pgtype.UUID
-	ID               pgtype.UUID
+	Url               string
+	Transport         McpTransport
+	SetCredentialMeta bool
+	CredentialHeader  pgtype.Text
+	CredentialPrefix  string
+	SetCredential     bool
+	Credential        []byte
+	OrgID             pgtype.UUID
+	ID                pgtype.UUID
 }
 
 // A change of the URL, transport or credential starts health over: the new settings are unproven.
+// credential is written only when @set_credential is true (the patch sets or removes it). The caller
+// read the row without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the
+// envelope since, so writing back the envelope that was read would undo it. credential_header and
+// credential_prefix go with it: they are written only when @set_credential_meta is true (the patch
+// touches the credential at all), so a URL-only patch cannot pair a concurrent change's envelope with
+// stale metadata, or break the CHECK that ties header and envelope together.
 func (q *Queries) UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error) {
 	row := q.db.QueryRow(ctx, updateMCPServer,
 		arg.Url,
 		arg.Transport,
+		arg.SetCredentialMeta,
 		arg.CredentialHeader,
 		arg.CredentialPrefix,
+		arg.SetCredential,
 		arg.Credential,
 		arg.OrgID,
 		arg.ID,

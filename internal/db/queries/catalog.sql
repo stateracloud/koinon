@@ -21,8 +21,11 @@ WHERE org_id = @org_id
 ORDER BY name, source, id;
 
 -- name: UpdateProvider :one
+-- api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
+-- without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the envelope since.
 UPDATE providers
-SET type = @type, url = @url, api_key = sqlc.narg(api_key)
+SET type = @type, url = @url,
+    api_key = CASE WHEN @set_api_key::boolean THEN sqlc.narg(api_key) ELSE api_key END
 WHERE org_id = @org_id AND id = @id
 RETURNING *;
 
