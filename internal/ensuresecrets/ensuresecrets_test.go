@@ -51,7 +51,8 @@ var _ = Describe("Ensure", func() {
 	It("keeps an existing Secret and its password", func(ctx SpecContext) {
 		existing := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: "db-api", Namespace: "koinon"},
-			Data:       map[string][]byte{"username": []byte("someone"), "password": []byte("not-a-real-password")},
+			Type:       corev1.SecretTypeBasicAuth,
+			Data:       map[string][]byte{"username": []byte("koinon_api"), "password": []byte("not-a-real-password")},
 		}
 		client := fake.NewClientset(existing)
 		res, err := ensuresecrets.Ensure(ctx, client, "koinon", specs[:1], &out)
@@ -76,6 +77,24 @@ var _ = Describe("Ensure", func() {
 		Expect(got).To(Equal(existing))
 		_, err = client.CoreV1().Secrets("koinon").Get(ctx, "admin", metav1.GetOptions{})
 		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "nothing after the failure is created")
+	})
+
+	It("fails on an existing database role Secret with another username or type", func(ctx SpecContext) {
+		for _, existing := range []*corev1.Secret{{
+			ObjectMeta: metav1.ObjectMeta{Name: "db-api", Namespace: "koinon"},
+			Type:       corev1.SecretTypeBasicAuth,
+			Data:       map[string][]byte{"username": []byte("someone"), "password": []byte("not-a-real-password")},
+		}, {
+			ObjectMeta: metav1.ObjectMeta{Name: "db-api", Namespace: "koinon"},
+			Type:       corev1.SecretTypeOpaque,
+			Data:       map[string][]byte{"username": []byte("koinon_api"), "password": []byte("not-a-real-password")},
+		}} {
+			client := fake.NewClientset(existing)
+			_, err := ensuresecrets.Ensure(ctx, client, "koinon", specs[:1], &out)
+			Expect(err).To(MatchError(ContainSubstring("koinon/db-api exists with")))
+			got, _ := client.CoreV1().Secrets("koinon").Get(ctx, "db-api", metav1.GetOptions{})
+			Expect(got).To(Equal(existing), "it is not changed")
+		}
 	})
 
 	It("treats AlreadyExists on create as success", func(ctx SpecContext) {

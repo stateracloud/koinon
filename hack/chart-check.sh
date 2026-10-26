@@ -209,6 +209,8 @@ kinds_named() {
 # (c) cnpg mode: the hook Job exists and no Secret is rendered for the roles or the bootstrap admin.
 has "ensure-secrets hook Job in cnpg mode" '^            - ensure-secrets$' --show-only templates/ensure-secrets.yaml
 has "ensure-secrets is a pre-install,pre-upgrade hook" 'helm.sh/hook: pre-install,pre-upgrade' --show-only templates/ensure-secrets.yaml
+# Argo CD's label tracking would claim (and prune) Secrets that carry the instance label.
+lacks "generated Secrets carry no app.kubernetes.io/instance label" '--secrets=.*app\.kubernetes\.io/instance' --show-only templates/ensure-secrets.yaml --set postgres.mode=cnpg
 secrets=$(kinds_named Secret | tr '\n' ' ')
 [[ $secrets == *koinon-db-* || $secrets == *koinon-bootstrap-admin* ]] && fail "cnpg mode renders Secrets $secrets"
 for want in koinon-db-migrate koinon-db-api koinon-db-reconciler koinon-db-agentd koinon-bootstrap-admin; do

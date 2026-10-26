@@ -48,7 +48,9 @@ type Result struct {
 }
 
 // Ensure makes sure every Spec exists in namespace. A missing Secret is created with a new random
-// password; an existing one is left exactly as it is, but must have a password. A Create that loses a
+// password; an existing one is left exactly as it is, but must have a password, and a
+// kubernetes.io/basic-auth one (a database role's) must also have that type and the spec's username,
+// which is the role CloudNativePG logs in as. A Create that loses a
 // race counts as success. It stops at the first error. Passwords are never logged: progress goes to
 // out as names and "created" or "kept".
 func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, specs []Spec, out io.Writer) ([]Result, error) {
@@ -63,6 +65,14 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		case err == nil:
 			if len(existing.Data[PasswordKey]) == 0 && existing.StringData[PasswordKey] == "" {
 				return results, fmt.Errorf("the Secret %s/%s exists but has no %q key; fix or delete it (it is not changed here)", namespace, sp.Name, PasswordKey)
+			}
+			if sp.Type == corev1.SecretTypeBasicAuth {
+				if existing.Type != corev1.SecretTypeBasicAuth {
+					return results, fmt.Errorf("the Secret %s/%s exists with type %q, want %q; fix or delete it (it is not changed here)", namespace, sp.Name, existing.Type, corev1.SecretTypeBasicAuth)
+				}
+				if got := string(existing.Data[UsernameKey]); got != sp.Username {
+					return results, fmt.Errorf("the Secret %s/%s exists with username %q, want %q; fix or delete it (it is not changed here)", namespace, sp.Name, got, sp.Username)
+				}
 			}
 			results = append(results, Result{Name: sp.Name})
 			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)

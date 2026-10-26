@@ -78,7 +78,7 @@ with a random 32-character password and never touches an existing one; the chart
 password, so renders are deterministic. `postgres.cnpg.existingSecrets` and
 `bootstrapAdmin.existingSecret` bring your own Secrets, and when all are given no Job is rendered.
 The Secrets the Job creates are not owned by the release, so they survive `helm uninstall` (as the
-KEK Secret does); delete them by the label `koinon.dev/generated=password` to start over.
+KEK Secret does); delete them by the labels `koinon.dev/release=<release>` and `koinon.dev/generated=password` to start over. They carry no `app.kubernetes.io/instance` label, so Argo CD does not count them as app resources missing from Git and prune them.
 
 ## Upstream verification
 

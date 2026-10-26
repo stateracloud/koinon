@@ -330,12 +330,18 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 {{- end }}
 
 {{/*
-Labels of a Secret the ensure-secrets Job creates. The Job's objects are not owned by the release,
-so they carry no chart version or managed-by label that would go stale: koinon.generatedLabels (list $ "api").
+Labels of a Secret the ensure-secrets Job creates: koinon.generatedLabels (list $ "api"). The
+release does not own these Secrets, so they carry no chart version or managed-by label that would
+go stale, and no app.kubernetes.io/instance label: Argo CD's label tracking would count them as
+app resources that are missing from Git, and auto-prune would delete them (the next sync would then
+generate new passwords). koinon.dev/release names the release instead.
 */}}
 {{- define "koinon.generatedLabels" -}}
-{{ include "koinon.selectorLabels" . }}
+{{- $ctx := index . 0 -}}
+app.kubernetes.io/name: {{ include "koinon.name" $ctx }}
+app.kubernetes.io/component: {{ index . 1 }}
 app.kubernetes.io/part-of: koinon
+koinon.dev/release: {{ $ctx.Release.Name }}
 koinon.dev/generated: password
 {{- end }}
 

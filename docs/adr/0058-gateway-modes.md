@@ -149,7 +149,9 @@ with the full rendered config when its patch finds none, with a non-controller o
 gateway Deployment (so `helm uninstall` garbage-collects it). The gateway pod waits in
 `ContainerCreating` until then and the reconciler's first `Apply` waits for the revision's probe key
 as before, so reload detection is unchanged; the chart-rendered "bootstrap" revision
-(`BootstrapRevision`) and its parity test are gone. Kubernetes mode is unchanged.
+(`BootstrapRevision`) and its parity test are gone. Kubernetes mode is unchanged. Because of the
+ownerReference, deleting or recreating the gateway Deployment also deletes the ConfigMap; the new
+pod waits until the reconciler's next pass (at most the resync, 30 s by default) recreates it.
 
 ## Links
 

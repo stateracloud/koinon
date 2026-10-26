@@ -7,7 +7,7 @@ Gateway:  {{ .Values.gateway.mode }}{{ if eq .Values.gateway.mode "kubernetes" }
 
 Bootstrap admin: user {{ .Values.bootstrapAdmin.username | quote }}, one-time password in Secret
 {{ include "koinon.bootstrapSecretName" . }}{{ if not .Values.bootstrapAdmin.existingSecret }} (created by the ensure-secrets hook Job; `helm uninstall` leaves it, delete it with
-`kubectl -n {{ .Release.Namespace }} delete secret -l koinon.dev/generated=password`){{ end }}:
+`kubectl -n {{ .Release.Namespace }} delete secret -l koinon.dev/release={{ .Release.Name }},koinon.dev/generated=password`){{ end }}:
 
   kubectl -n {{ .Release.Namespace }} get secret {{ include "koinon.bootstrapSecretName" . }} -o jsonpath='{.data.password}' | base64 -d
 
