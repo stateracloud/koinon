@@ -497,6 +497,47 @@ var _ = Describe("Reconciler", func() {
 				Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
 			})
 
+			It("shares one budget of three with stuck recreations, for the reconciler and for agentd", func(ctx SpecContext) {
+				count := func() int64 {
+					n, err := q.CountRecentSandboxRecreations(ctx, store.CountRecentSandboxRecreationsParams{OrgID: org, AgentID: agent.ID})
+					Expect(err).NotTo(HaveOccurred())
+					return n
+				}
+				for range 2 {
+					fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+					pass(ctx, r) // deletes
+					pass(ctx, r) // creates
+				}
+				Expect(count()).To(BeEquivalentTo(2))
+
+				By("agentd finds a sandbox stuck: its incident and the recreation count once")
+				run := queueRun(ctx, org, user, agent.ID)
+				_, err := q.InsertSandboxIncident(ctx, store.InsertSandboxIncidentParams{
+					OrgID: org, AgentID: agent.ID, RunID: run.ID, TicketID: run.TicketID,
+					Processes: []byte(`[]`), Outcome: "recreate", Work: "nothing",
+				})
+				Expect(err).NotTo(HaveOccurred())
+				_, err = q.MarkSandboxUnhealthy(ctx, store.MarkSandboxUnhealthyParams{
+					OrgID: org, AgentID: agent.ID, Reason: "stuck", Generation: sandboxRow(ctx, agent.ID).HomeGeneration.String,
+				})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(count()).To(BeEquivalentTo(3), "agentd's guard now refuses a further recreation")
+				pass(ctx, r) // deletes the stuck one
+				pass(ctx, r) // creates
+				Expect(count()).To(BeEquivalentTo(3), "the stuck recreation's audit event is not counted again")
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(3))
+
+				By("and the reconciler's guard refuses the next failure")
+				_, err = pool.Exec(ctx, `UPDATE runs SET state = 'canceled', finished_at = now(), ready_at = NULL WHERE org_id = $1 AND id = $2`, org, run.ID)
+				Expect(err).NotTo(HaveOccurred())
+				fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+				pass(ctx, r)
+				Expect(osg.Calls("DeleteSandbox")).To(Equal(3))
+				a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(a.UnhealthyAt.Valid).To(BeTrue())
+			})
+
 			It("marks the agent unhealthy instead of recreating a fourth time in 24 hours, and recreates again once resumed", func(ctx SpecContext) {
 				for i := 1; i <= 3; i++ {
 					fail(openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
