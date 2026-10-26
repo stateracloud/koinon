@@ -45,6 +45,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/audit"
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -110,7 +112,11 @@ type Options struct {
 	// SavedWorkKeys opens saved work sealed by koinon-agentd (package savedwork). Without it a
 	// push of saved work fails permanently.
 	SavedWorkKeys *secretstore.Keyring
-	// GitHub defaults to a client for api.github.com.
+	// Hosts are the code-host providers, by connector type ID. Without it the shipped providers
+	// are used, with GitHub as the client below.
+	Hosts *codehost.Registry
+	// GitHub is the client of the shipped GitHub provider when Hosts is nil; it defaults to a
+	// client for api.github.com.
 	GitHub *github.Client
 	// ExecutionLease is how long one executor holds a request. Default
 	// DefaultExecutionLease.
@@ -130,7 +136,7 @@ type Service struct {
 	gwURL     string
 	execKey   ExecKeys
 	savedKeys *secretstore.Keyring
-	gh        *github.Client
+	hosts     *codehost.Registry
 	lease     time.Duration
 	maxExec   int
 	log       *slog.Logger
@@ -138,8 +144,8 @@ type Service struct {
 
 // New returns a Service.
 func New(pool *pgxpool.Pool, opts Options) *Service {
-	if opts.GitHub == nil {
-		opts.GitHub = github.NewClient(github.Options{})
+	if opts.Hosts == nil {
+		opts.Hosts = providers.New(opts.GitHub)
 	}
 	if opts.ExecutionLease <= 0 {
 		opts.ExecutionLease = DefaultExecutionLease
@@ -151,7 +157,7 @@ func New(pool *pgxpool.Pool, opts Options) *Service {
 		opts.Logger = slog.Default()
 	}
 	return &Service{
-		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, savedKeys: opts.SavedWorkKeys, gh: opts.GitHub,
+		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, savedKeys: opts.SavedWorkKeys, hosts: opts.Hosts,
 		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger,
 	}
 }
@@ -382,9 +388,8 @@ func isPermanent(err error) bool {
 	if errors.As(err, &p) {
 		return true
 	}
-	var api *github.APIError
-	if errors.As(err, &api) {
-		return api.Status >= 400 && api.Status < 500 && api.Status != 429 && api.Status != 408
+	if status := codehost.Status(err); status != 0 {
+		return status >= 400 && status < 500 && status != 429 && status != 408
 	}
 	return false
 }
@@ -635,4 +640,12 @@ func (s *Service) Sweeper(ctx context.Context, interval time.Duration) {
 		case <-t.C:
 		}
 	}
+}
+
+// hostName is how messages name the code host of a connector type.
+func (s *Service) hostName(connector string) string {
+	if p, ok := s.hosts.Get(connector); ok {
+		return p.Capabilities().DisplayName
+	}
+	return "the code host"
 }

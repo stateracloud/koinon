@@ -11,8 +11,7 @@ import (
 
 	"github.com/pmezard/go-difflib/difflib"
 
-	"github.com/stateracloud/koinon/connectors"
-	"github.com/stateracloud/koinon/internal/connectors/github"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
 )
@@ -102,37 +101,38 @@ func (s *Service) Diff(ctx context.Context, row store.ApprovalRequest) (Diff, er
 		}
 		return out
 	}
-	if row.Connector != connectors.GitHubID {
-		return fallback(permanent("no GitHub connector for %q", row.Connector)), nil
+	p, ok := s.hosts.Get(row.Connector)
+	if !ok {
+		return fallback(permanent("no code host connector for %q", row.Connector)), nil
 	}
-	repo, app, err := s.target(ctx, row)
+	repo, conn, err := s.target(ctx, p, row)
 	if err != nil {
 		return fallback(err), nil
 	}
-	tok, err := s.gh.InstallationToken(ctx, app, github.TokenRequest{Repositories: []string{repo.String()}, Permissions: diffPermissions})
+	acc, err := p.Open(ctx, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: diffPermissions})
 	if err != nil {
 		return fallback(err), nil
 	}
 	if out.Base == "" {
-		r, err := s.gh.GetRepository(ctx, tok, repo)
+		r, err := acc.Repository(ctx, repo)
 		if err != nil {
 			return fallback(err), nil
 		}
 		out.Base = r.DefaultBranch
 	}
 	// One commit for every file, so the files compare against the same snapshot.
-	head, found, err := s.gh.GetBranch(ctx, tok, repo, out.Base)
+	head, found, err := acc.Branch(ctx, repo, out.Base)
 	if err == nil && !found {
 		err = permanent("the base branch %s does not exist in %s", out.Base, repo)
 	}
 	if err != nil {
 		return fallback(err), nil
 	}
-	s.modes(ctx, row, tok, repo, head, args.Files, out.Files)
+	s.modes(ctx, row, acc, repo, head, args.Files, out.Files)
 	budget := maxBaseTotalBytes
 	for i, f := range args.Files {
 		d := &out.Files[i]
-		cur, found, err := s.gh.GetFileContent(ctx, tok, repo, f.Path, head)
+		cur, found, err := acc.File(ctx, repo, f.Path, head)
 		switch {
 		case err != nil:
 			d.Fallback = s.fallbackReason(row, err)
@@ -169,12 +169,8 @@ func (s *Service) Diff(ctx context.Context, row store.ApprovalRequest) (Diff, er
 // modes fills each file's OldMode and NewMode from the base commit's tree, the same read
 // the executor makes. A tree that cannot be read leaves them empty; the diff itself does
 // not depend on it.
-func (s *Service) modes(ctx context.Context, row store.ApprovalRequest, tok github.Token, repo github.Repo, head string, files []githubtools.FileChange, out []FileDiff) {
-	c, err := s.gh.GetCommit(ctx, tok, repo, head)
-	var base map[string]string
-	if err == nil {
-		base, err = s.baseModes(ctx, tok, repo, c.Tree.SHA, files)
-	}
+func (s *Service) modes(ctx context.Context, row store.ApprovalRequest, acc codehost.Access, repo codehost.Repo, head string, files []githubtools.FileChange, out []FileDiff) {
+	base, err := acc.Modes(ctx, repo, head, writtenPaths(files))
 	if err != nil {
 		s.log.Warn("approval diff: could not read the base modes", append(attrs(row), "err", err)...)
 		return
@@ -196,14 +192,14 @@ func (s *Service) fallbackReason(row store.ApprovalRequest, err error) string {
 		return p.Error()
 	}
 	s.log.Warn("approval diff: could not read the current version", append(attrs(row), "err", err)...)
-	var apiErr *github.APIError
-	if errors.As(err, &apiErr) {
-		return fmt.Sprintf("GitHub answered %d %s when Koinon read the current version", apiErr.Status, http.StatusText(apiErr.Status))
+	name := s.hostName(row.Connector)
+	if status := codehost.Status(err); status != 0 {
+		return fmt.Sprintf("%s answered %d %s when Koinon read the current version", name, status, http.StatusText(status))
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return "reading the current version from GitHub timed out"
+		return "reading the current version from " + name + " timed out"
 	}
-	return "Koinon could not read the current version from GitHub"
+	return "Koinon could not read the current version from " + name
 }
 
 // UnifiedDiff is the unified diff from old to new for path, with three lines of context,
