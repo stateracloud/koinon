@@ -191,6 +191,9 @@ func RecordCancel(ctx context.Context, q *store.Queries, run store.Run, reason C
 	for k, v := range extra {
 		p[k] = v
 	}
+	if run.FailureClass.Valid {
+		p["failureClass"] = string(run.FailureClass.RunFailureClass)
+	}
 	payload := mustJSON(p)
 	ev, err := q.AppendRunControlEvent(ctx, store.AppendRunControlEventParams{
 		OrgID: run.OrgID, RunID: run.ID, Kind: KindRunCanceled, Payload: payload,
@@ -240,7 +243,10 @@ func RecordTokenUsage(ctx context.Context, db DB, org, runID pgtype.UUID, tokens
 			return nil
 		}
 		msg := fmt.Sprintf("token cap exceeded (%d of %d tokens)", run.TokensUsed, run.MaxTokens)
-		canceled, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: org, ID: runID, OutcomeReason: msg})
+		canceled, err := q.CancelRun(ctx, store.CancelRunParams{
+			OrgID: org, ID: runID, OutcomeReason: msg,
+			FailureClass: store.NullRunFailureClass{RunFailureClass: store.RunFailureClassBudget, Valid: true},
+		})
 		if err != nil {
 			return err
 		}

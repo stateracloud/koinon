@@ -167,6 +167,15 @@ var runStateToProto = map[store.RunState]runv1alpha1.RunState{
 	store.RunStateCanceled:  runv1alpha1.RunState_RUN_STATE_CANCELED,
 }
 
+var failureClassToProto = map[store.RunFailureClass]runv1alpha1.FailureClass{
+	store.RunFailureClassTransient:       runv1alpha1.FailureClass_FAILURE_CLASS_TRANSIENT,
+	store.RunFailureClassThrottled:       runv1alpha1.FailureClass_FAILURE_CLASS_THROTTLED,
+	store.RunFailureClassContextOverflow: runv1alpha1.FailureClass_FAILURE_CLASS_CONTEXT_OVERFLOW,
+	store.RunFailureClassBudget:          runv1alpha1.FailureClass_FAILURE_CLASS_BUDGET,
+	store.RunFailureClassPolicy:          runv1alpha1.FailureClass_FAILURE_CLASS_POLICY,
+	store.RunFailureClassFatal:           runv1alpha1.FailureClass_FAILURE_CLASS_FATAL,
+}
+
 var parkReasonToProto = map[store.RunParkReason]runv1alpha1.ParkReason{
 	store.RunParkReasonApproval:      runv1alpha1.ParkReason_PARK_REASON_APPROVAL,
 	store.RunParkReasonBudget:        runv1alpha1.ParkReason_PARK_REASON_BUDGET,
@@ -193,6 +202,9 @@ func runProto(r store.Run) *runv1alpha1.Run {
 	}
 	if r.ParkReason.Valid {
 		out.ParkReason = parkReasonToProto[r.ParkReason.RunParkReason]
+	}
+	if r.FailureClass.Valid {
+		out.FailureClass = failureClassToProto[r.FailureClass.RunFailureClass]
 	}
 	return out
 }

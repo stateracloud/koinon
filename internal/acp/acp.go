@@ -59,6 +59,8 @@ const (
 	StopCancelled = sdk.StopReasonCancelled
 	StopRefusal   = sdk.StopReasonRefusal
 	StopMaxTokens = sdk.StopReasonMaxTokens
+	// StopMaxTurnRequests: the turn hit its limit of model requests.
+	StopMaxTurnRequests = sdk.StopReasonMaxTurnRequests
 )
 
 // Permission option kinds.

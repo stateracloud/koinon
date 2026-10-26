@@ -489,6 +489,7 @@ var _ = Describe("TicketService and run scheduling", func() {
 			got, err = recordTokens(ctx, e, run, 1)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got.State).To(Equal(store.RunStateCanceled))
+			Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
 			Expect(member.getRun(ctx, org, r.GetId()).GetTokensUsed()).To(Equal(int64(2_000_000)))
 
 			ticket := member.getTicket(ctx, org, t.GetId())
