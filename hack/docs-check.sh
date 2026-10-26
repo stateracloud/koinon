@@ -131,6 +131,7 @@ done
 node=$(pin $up NODE_IMAGE)
 need "$pre" "NODE_IMAGE from $up" "$node"
 need "$pre" "Kubernetes version of the node image" "$(sed -n 's/.*node:v\([0-9]*\.[0-9]*\)\..*/\1/p' <<<"$node")"
+need "$pre" "kubeVersion floor in Chart.yaml" "$(sed -n 's/^kubeVersion: *">=\([0-9]*\.[0-9]*\)\..*/\1/p' charts/koinon/Chart.yaml)"
 need "$pre" "agent sandbox version in the preflight" "$(sed -n 's#.*agent-sandbox/releases/download/\(v[0-9.]*\)/.*#\1#p' internal/preflight/preflight.go | head -1)"
 need "$pre" "OpenShell version in the preflight" "$(sed -n 's/.*SupportedOpenShellVersions = \[\]string{"\([^"]*\)"}.*/\1/p' internal/preflight/preflight.go)"
 need "$pre" "Postgres image tag in values.yaml" "$(sed -n 's#.*postgresql:\([0-9][0-9.]*\)-.*#\1#p' charts/koinon/values.yaml | head -1)"
