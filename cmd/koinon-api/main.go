@@ -19,6 +19,9 @@
 // second Deployment would add an image, a database role and RBAC without
 // separating any secret.
 //
+// "koinon-api audit verify [--org ID]" walks the audit hash chain (ADR 0023) and exits non-zero at
+// the first broken link.
+//
 // "koinon-api preflight [flags]" checks the cluster for Koinon's install
 // prerequisites and exits non-zero when one is missing (plan item H2); the chart
 // runs it as a pre-install and pre-upgrade hook Job. It needs no database.
@@ -277,6 +280,11 @@ func run() error {
 		defer stop()
 		return runEnsureSecrets(ctx, os.Args[2:], os.Stdout)
 	}
+	if len(os.Args) > 1 && os.Args[1] == "audit" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runAudit(ctx, os.Args[2:], os.Stdout)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "keys" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -294,7 +302,7 @@ func run() error {
 	case len(cfg.args) == 1 && cfg.args[0] == "migrate":
 		return migrate(ctx, cfg.databaseURL, cfg.wait)
 	case len(cfg.args) > 0:
-		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\", \"preflight\", \"ensure-secrets\" and \"keys\" (first)", cfg.args)
+		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\", \"preflight\", \"ensure-secrets\", \"keys\" and \"audit\" (first)", cfg.args)
 	case cfg.migrate:
 		if err := migrate(ctx, cfg.databaseURL, cfg.wait); err != nil {
 			return err
