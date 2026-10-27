@@ -163,6 +163,19 @@ func (r *runner) endTurn(ctx context.Context) error {
 		if run.Epoch != r.run.Epoch || run.State != store.RunStateRunning {
 			return pgx.ErrNoRows // fenced
 		}
+		// The agent canceled the task in this turn (cancel_task): there is nothing to wait for. The
+		// questions it asked are canceled instead of opened, and the approvals are canceled by the
+		// approvals sweep once the run has ended.
+		task, err := q.GetTask(ctx, store.GetTaskParams{OrgID: r.run.OrgID, ID: r.run.TaskID})
+		if err != nil {
+			return err
+		}
+		if task.State == store.TaskStateCanceled {
+			if _, err := questions.CancelForRun(ctx, q, r.run.OrgID, r.run.ID, "the task was canceled"); err != nil {
+				return err
+			}
+			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "")
+		}
 		reqs, err := q.ListUndeliveredApprovalRequestsForRun(ctx, store.ListUndeliveredApprovalRequestsForRunParams{
 			OrgID: r.run.OrgID, RunID: r.run.ID,
 		})

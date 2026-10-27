@@ -347,6 +347,24 @@ func Expire(ctx context.Context, q *store.Queries, org, id pgtype.UUID) (store.Q
 	return resolve(ctx, q, org, id, pgtype.UUID{}, store.QuestionStateExpired, func(r store.Question) (Answer, error) { return defaultOf(r) })
 }
 
+// CancelForRun cancels the run's asked and open questions, with a question.canceled task event each,
+// and returns how many it canceled.
+func CancelForRun(ctx context.Context, q *store.Queries, org, run pgtype.UUID, reason string) (int, error) {
+	rows, err := q.CancelOpenQuestionsForRun(ctx, store.CancelOpenQuestionsForRunParams{OrgID: org, RunID: run})
+	if err != nil {
+		return 0, err
+	}
+	for _, row := range rows {
+		if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: org, TaskID: row.TaskID, RunID: row.RunID, Kind: KindCanceled, ActorKind: store.TaskActorKindSystem,
+			Payload: mustJSON(map[string]any{"question_id": row.ID.String(), "reason": reason}),
+		}); err != nil {
+			return 0, err
+		}
+	}
+	return len(rows), nil
+}
+
 // CancelOfFinishedRuns cancels the asked and open questions of every run that has ended, with a
 // question.canceled task event each, and returns how many it canceled. A question outlives no run:
 // cancel, run caps, a ledger budget cancel and archiving an agent all end a parked run without
@@ -372,20 +390,9 @@ func CancelOfFinishedRuns(ctx context.Context, pool *pgxpool.Pool) (int, error) 
 				if _, err := tq.LockRun(ctx, store.LockRunParams{OrgID: org, ID: run}); err != nil {
 					return err
 				}
-				rows, err := tq.CancelOpenQuestionsForRun(ctx, store.CancelOpenQuestionsForRunParams{OrgID: org, RunID: run})
-				if err != nil {
-					return err
-				}
-				for _, row := range rows {
-					if _, err := tq.AppendTaskEvent(ctx, store.AppendTaskEventParams{
-						OrgID: org, TaskID: row.TaskID, RunID: row.RunID, Kind: KindCanceled, ActorKind: store.TaskActorKindSystem,
-						Payload: mustJSON(map[string]any{"question_id": row.ID.String(), "reason": "the run ended before an answer"}),
-					}); err != nil {
-						return err
-					}
-				}
-				n = len(rows)
-				return nil
+				var err error
+				n, err = CancelForRun(ctx, tq, org, run, "the run ended before an answer")
+				return err
 			})
 			if err != nil {
 				errs = append(errs, fmt.Errorf("cancel questions of run %s: %w", run, err))
