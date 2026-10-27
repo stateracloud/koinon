@@ -52,10 +52,15 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 				return store.AgentSandbox{}, ctx.Err()
 			}
 			last = err.Error()
-		case agentconfig.IsEphemeral(r.vcfg) && sb.SandboxName != r.taskSandboxName():
+		case agentconfig.IsEphemeral(r.vcfg) && sb.SandboxName != r.taskSandboxName() &&
+			sb.SandboxName != execution.AgentSandboxName(r.run.OrgID.Bytes, r.run.AgentID.Bytes):
 			// An ephemeral agent has one sandbox per task (ADR 0065 decision 13c). The row still
 			// names the previous task's, which the reconciler is deleting before it renders this
-			// task's. Never run in it.
+			// task's. Never run in it. The source of truth for ephemeral is the agent's ACTIVE
+			// version, which the reconciler reads; the run's pinned version (vcfg) can be older. If
+			// a persistent version was activated since, the row moves back to the agent's own
+			// sandbox, which is accepted here so the run does not wait for a task sandbox that
+			// will never come.
 			last = "waiting for the task's own sandbox"
 		case sb.State == store.SandboxStateReady && sb.UnhealthyAt.Valid:
 			// Found stuck: the reconciler recreates it (ADR 0054).

@@ -228,8 +228,9 @@ type Querier interface {
 	GetDefaultPriceList(ctx context.Context, version string) (DefaultPriceList, error)
 	// The task an ephemeral agent's sandbox belongs to (ADR 0065 decision 13c): the task of the run
 	// that holds the agent (starting or running), else of the run that would be claimed next (the
-	// claim's own order: interactive before scheduled, then FIFO), else of a parked run. No row: no
-	// run needs a sandbox, so the task's sandbox is deleted.
+	// claim's own order: interactive before scheduled, then FIFO), else of a parked run, else (a task
+	// between runs) the task of the agent's latest finished run whose task is not in an end state.
+	// Only a task's end (completed, canceled, failed) deletes its sandbox. No row: no task needs one.
 	GetEphemeralFocusTask(ctx context.Context, arg GetEphemeralFocusTaskParams) (pgtype.UUID, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
