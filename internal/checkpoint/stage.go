@@ -198,8 +198,16 @@ func cleanName(n string) (string, bool) {
 	return c, true
 }
 
-// WriteTar writes the files below dir as a tar stream, names relative to dir. Owners are not
-// written (the sandbox's tar runs as the sandbox user and extracts as itself).
+// WriteTar writes the files below dir as a tar stream, names relative to dir. The stream is
+// shaped for the sandbox's fixed extraction command, `tar xf - -C /sandbox` as the sandbox user
+// (OpenShell's upload channel; ADR 0032):
+//
+//   - there is no "." or "./" entry for the root, which tar would try to chmod, and which fails
+//     for a user that does not own it;
+//   - entries that Excluded names are left out (with their contents), so that a checkpoint made
+//     before the list grew, or one that holds lost+found, restores without them;
+//   - owners are not written, and the sandbox's tar runs as a user that cannot chown, so every
+//     file is extracted as that user.
 func WriteTar(dir string, w io.Writer) error {
 	tw := tar.NewWriter(w)
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -211,6 +219,12 @@ func WriteTar(dir string, w io.Writer) error {
 			return err
 		}
 		if rel == "." {
+			return nil
+		}
+		if Excluded(filepath.ToSlash(rel)) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		info, err := d.Info()
