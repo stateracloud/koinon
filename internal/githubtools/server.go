@@ -128,7 +128,7 @@ func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
 			"the commit and the pull request exactly as given, and you get the result when the run resumes. " +
 			"A file marked executable is written as 100755; otherwise a new file is regular (100644) and a modified file keeps its mode. " +
 			"Symbolic links and submodules cannot be written. " +
-			"Refused: changes under .github/workflows/, more than 100 files or 1 MiB, unsafe paths.",
+			"Refused: changes to the code host's CI paths (for GitHub .github/workflows/, and any the connection lists), more than 100 files or 1 MiB, unsafe paths.",
 	}, s.createPullRequest)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolCommentOnIssue,
@@ -272,7 +272,11 @@ func (s *Server) authorise(c caller, tool string) (connectors.Decision, string, 
 }
 
 func (s *Server) createPullRequest(ctx context.Context, req *mcp.CallToolRequest, in PullRequestArgs) (*mcp.CallToolResult, Result, error) {
-	if err := ValidatePullRequest(in); err != nil {
+	guard, err := s.guardFor(ctx, req)
+	if err != nil {
+		return nil, Result{}, err
+	}
+	if err := ValidatePullRequest(in, guard); err != nil {
 		return nil, Result{}, err
 	}
 	canonical, err := canonicalPullRequest(in)
@@ -280,6 +284,46 @@ func (s *Server) createPullRequest(ctx context.Context, req *mcp.CallToolRequest
 		return nil, Result{}, err
 	}
 	return s.record(ctx, req, ToolCreatePullRequest, canonical, AssessRisk(in))
+}
+
+// guardFor builds the workflow guard of the connection the caller's grant uses: the provider's
+// CI paths plus the directories configured on the connection. A grant whose connection cannot be
+// read gets the provider's paths alone; the executor needs the connection and fails without it.
+func (s *Server) guardFor(ctx context.Context, req *mcp.CallToolRequest) (codehost.Guard, error) {
+	c, err := s.identify(ctx, req)
+	if err != nil {
+		return codehost.Guard{}, err
+	}
+	connector, _, ok := s.hosts.Grant(c.config)
+	if !ok {
+		return codehost.Guard{}, nil // record refuses a call without a grant
+	}
+	b, ok := c.config.Binding(connector)
+	if !ok {
+		return codehost.Guard{}, nil // record refuses a grant without a repository
+	}
+	p, ok := s.hosts.Get(connector)
+	if !ok {
+		return codehost.Guard{}, fmt.Errorf("no code host %q", connector)
+	}
+	var config []byte
+	var id pgtype.UUID
+	if id.Scan(b.ConnectionID) == nil && id.Valid {
+		row, err := s.q.GetConnection(ctx, store.GetConnectionParams{OrgID: c.org.ID, ID: id})
+		switch {
+		case err == nil:
+			config = row.Config
+		case !errors.Is(err, pgx.ErrNoRows):
+			s.log.Error("github tools: load the connection", append(c.attrs(), "err", err)...)
+			return codehost.Guard{}, errors.New("internal error; try again later")
+		}
+	}
+	g, err := codehost.GuardOf(p.Capabilities(), config)
+	if err != nil {
+		s.log.Error("github tools: build the workflow guard", append(c.attrs(), "err", err)...)
+		return codehost.Guard{}, errors.New("this agent's connection has invalid CI directories; ask an admin to fix the connection")
+	}
+	return g, nil
 }
 
 func (s *Server) commentOnIssue(ctx context.Context, req *mcp.CallToolRequest, in CommentArgs) (*mcp.CallToolResult, Result, error) {

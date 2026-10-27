@@ -75,6 +75,21 @@ describe('GitHub connection page', () => {
     expect(screen.getByText('Contents').tagName).toBe('STRONG')
   })
 
+  it('sends the extra CI directories, one per line, and refuses unsafe ones', async () => {
+    const { creates } = setup()
+    await fill()
+    await userEvent.type(screen.getByLabelText('Extra CI directories (optional)'), '../up')
+    await userEvent.click(screen.getByRole('button', { name: 'Create and test connection' }))
+    expect(await screen.findByText('../up leaves the repository.')).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+
+    await userEvent.clear(screen.getByLabelText('Extra CI directories (optional)'))
+    await userEvent.type(screen.getByLabelText('Extra CI directories (optional)'), 'ci/pipelines{Enter}.build/')
+    await userEvent.click(screen.getByRole('button', { name: 'Create and test connection' }))
+    await waitFor(() => expect(creates).toHaveLength(1))
+    expect(creates[0].ciDirs).toEqual(['ci/pipelines', '.build/'])
+  })
+
   it('sends the private key once, clears it, and never shows it again', async () => {
     const { creates, tests } = setup()
     await fill()
@@ -84,7 +99,7 @@ describe('GitHub connection page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Create and test connection' }))
 
     await waitFor(() => expect(creates).toHaveLength(1))
-    expect(creates[0]).toMatchObject({ orgId, displayName: 'Acme GitHub', appId: 12n, installationId: 34n, privateKey: fakePem, test: true })
+    expect(creates[0]).toMatchObject({ orgId, displayName: 'Acme GitHub', appId: 12n, installationId: 34n, privateKey: fakePem, test: true, ciDirs: [] })
 
     // The connection page: per-step results, the fingerprint, never the key.
     expect(await screen.findByRole('heading', { name: 'Acme GitHub' })).toBeInTheDocument()

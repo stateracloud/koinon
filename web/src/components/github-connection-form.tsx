@@ -7,10 +7,12 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import type { CheckResult } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { GuideField, SetupGuide } from '@/lib/connector'
+import { ciDirsError, parseCiDirs } from '@/lib/ci-paths'
 
-export type GitHubConnectionInput = { displayName: string; appId: bigint; installationId: bigint; privateKey: string }
+export type GitHubConnectionInput = { displayName: string; appId: bigint; installationId: bigint; privateKey: string; ciDirs: string[] }
 
 export type GitHubConnectionFormProps = {
   guide: SetupGuide
@@ -46,21 +48,24 @@ function fieldError(f: GuideField, value: string): string | undefined {
 export function GitHubConnectionForm({ guide, onSubmit, pending, error, results }: GitHubConnectionFormProps) {
   const [displayName, setDisplayName] = useState('GitHub')
   const [values, setValues] = useState<Record<string, string>>({})
+  const [ciDirsText, setCiDirsText] = useState('')
   const [secretCleared, setSecretCleared] = useState(false)
   const [touched, setTouched] = useState(false)
 
   const errors = Object.fromEntries(guide.fields.map((f) => [f.id, fieldError(f, values[f.id] ?? '')]).filter(([, e]) => e)) as Record<string, string>
   const nameError = displayName.trim() ? undefined : 'Name is required.'
+  const ciError = ciDirsError(ciDirsText)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setTouched(true)
-    if (nameError || Object.keys(errors).length) return
+    if (nameError || ciError || Object.keys(errors).length) return
     const input: GitHubConnectionInput = {
       displayName: displayName.trim(),
       appId: BigInt((values.appId ?? '').trim()),
       installationId: BigInt((values.installationId ?? '').trim()),
       privateKey: values.privateKey ?? '',
+      ciDirs: parseCiDirs(ciDirsText),
     }
     // Clear every secret before the request leaves: the key lives in this
     // component only for as long as it takes to send it.
@@ -142,6 +147,25 @@ export function GitHubConnectionForm({ guide, onSubmit, pending, error, results 
           return fs.length ? <div className="grid gap-3 border-t pt-3">{fs.map(renderField)}</div> : null
         }}
       />
+      <div className="grid gap-1.5">
+        <Label htmlFor="connection-ci-dirs">Extra CI directories (optional)</Label>
+        <Textarea
+          id="connection-ci-dirs"
+          rows={3}
+          autoComplete="off"
+          spellCheck={false}
+          value={ciDirsText}
+          onChange={(e) => setCiDirsText(e.target.value)}
+          aria-invalid={touched && !!ciError}
+          aria-describedby="connection-ci-dirs-help"
+          placeholder="ci/pipelines"
+        />
+        <p id="connection-ci-dirs-help" className="text-muted-foreground text-xs">
+          One directory per line, relative to the repository root. Koinon never proposes changes under these or under GitHub&apos;s own workflow directory,
+          because a pushed branch could run them with the repository&apos;s secrets.
+        </p>
+        {touched && ciError && <p className="text-destructive text-xs">{ciError}</p>}
+      </div>
       {unplaced.length > 0 && <div className="grid gap-3">{unplaced.map(renderField)}</div>}
       {error && (
         <Alert variant="destructive" role="alert">

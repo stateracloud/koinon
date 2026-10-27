@@ -54,6 +54,10 @@
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[A-Za-z0-9._][A-Za-z0-9._/-]*$", "maxLength": 200 }
         },
+        "ciPathsFoldCase": {
+          "description": "Match ciPaths without regard to case, for a provider whose file system ignores it. Default: exact.",
+          "type": "boolean"
+        },
         "targets": {
           "description": "What a grant is narrowed to (for GitHub: repositories).",
           "type": "object",
