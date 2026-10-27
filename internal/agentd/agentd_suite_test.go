@@ -276,6 +276,14 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 			finished_at = now(), ready_at = NULL, lease_expires_at = NULL, heartbeat_at = NULL
 			WHERE org_id = $1 AND state NOT IN ('succeeded', 'failed', 'canceled')`, e.org)
 		Expect(err).NotTo(HaveOccurred())
+		// Pools claim across every org in the shared database and each spec has its own fake
+		// gateway: a sandbox row left ready, or a request left open, would be worked by a later
+		// spec's pool against a gateway that lacks the sandbox and starve that spec's own.
+		_, err = db.Exec(ctx, `UPDATE agent_sandboxes SET state = 'stopped' WHERE org_id = $1 AND state = 'ready'`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `UPDATE home_checkpoints SET status = 'failed', error = 'spec ended', finished_at = now()
+			WHERE org_id = $1 AND status IN ('requested', 'running')`, e.org)
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
