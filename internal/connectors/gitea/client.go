@@ -191,6 +191,7 @@ type apiRepo struct {
 	FullName      string          `json:"full_name"`
 	DefaultBranch string          `json:"default_branch"`
 	Private       bool            `json:"private"`
+	HasIssues     bool            `json:"has_issues"`
 	Permissions   *apiPermissions `json:"permissions"`
 }
 

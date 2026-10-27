@@ -361,6 +361,9 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 			}
 			return audit.RecordErr(ctx, tq, audit.Event{Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: id.String(), After: after})
 		}
+		if cur.Connector != d.Connector {
+			return &invalidError{fmt.Errorf("%s cannot change from %s to %s; delete the Secret and declare a new one", KeyConnector, cur.Connector, d.Connector)}
+		}
 		env, err := connections.SealFields(i.Sealer, org, cur.ID, d.SecretFields())
 		if err != nil {
 			return err

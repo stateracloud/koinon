@@ -84,6 +84,7 @@ var _ = Describe("parseConfig", func() {
 
 		Expect(c.toolServers()).To(Equal(map[string]string{
 			"github": "http://koinon-api-tools.koinon.svc:8081/mcp",
+			"gitea":  "http://koinon-api-tools.koinon.svc:8081/mcp",
 			"koinon": "http://koinon-api-tools.koinon.svc:8081/mcp-koinon", // ask_user (TK3)
 		}))
 

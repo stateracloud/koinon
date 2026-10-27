@@ -304,7 +304,11 @@ func (c *config) gatewayEndpoint() (reconciler.Endpoint, error) {
 func (c *config) toolServers() map[string]string {
 	out := map[string]string{}
 	if c.githubToolsURL != "" {
-		out[providers.GitHub] = c.githubToolsURL
+		// One code-host tool server serves every code-host connector; it picks the connector
+		// from the grant (hosts.Grant).
+		for _, id := range providers.Default().IDs() {
+			out[id] = c.githubToolsURL
+		}
 	}
 	if c.koinonToolsURL != "" {
 		out[gateway.KoinonTarget] = c.koinonToolsURL
