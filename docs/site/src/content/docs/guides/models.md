@@ -87,7 +87,8 @@ stringData:
   Secret and a line in the `koinon-api` log say why. Run `kubectl -n koinon describe secret <name>`.
 - Every apply and removal is written to the audit log with the actor `secret <name>`.
 - The same labels and mechanism declare a GitHub connection: `koinon.dev/secret-type: connection`
-  with `name`, `connector: github`, `appId`, `installationId` and `privateKey`, plus optional `baseUrl` and `caBundle` for a GitHub Enterprise Server.
+  with `name`, `connector: github`, `appId`, `installationId` and `privateKey`, plus optional `baseUrl` and `caBundle` for a GitHub Enterprise Server, and optional `ciDirs`
+  (extra CI directories Koinon refuses changes under: one per line or comma-separated, at most 20, relative, no `..`).
 
 `apiKey` and the other values stay in the Secret's `stringData`, as in Argo CD. Turn on etcd encryption
 at rest, and generate the Secret with External Secrets Operator or Sealed Secrets instead of keeping it

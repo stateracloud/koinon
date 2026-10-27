@@ -285,6 +285,7 @@ var _ = Describe("the code-host data of the GitHub type", func() {
 		}))
 		Expect(t.Spec.Auth.TokenLifetime).To(Equal("1h"))
 		Expect(t.Spec.CIPaths).To(Equal([]string{".github/workflows/"}))
+		Expect(t.Spec.CIPathsFoldCase).To(BeTrue())
 		Expect(t.Spec.Site).To(Equal(&connectors.Site{BaseURL: "https://github.com", APIURL: "https://api.github.com", APIPath: "/api/v3"}))
 	})
 })

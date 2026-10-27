@@ -98,6 +98,8 @@ type runner struct {
 	// delivered are the approval requests whose outcomes this turn's prompt carries; they are
 	// marked delivered when the turn ends.
 	delivered []pgtype.UUID
+	// deliveredQ are the resolved questions whose outcomes this turn's prompt carries.
+	deliveredQ []pgtype.UUID
 
 	// cwd is the session directory, set before the harness starts; permission requests for
 	// paths outside it are rejected.

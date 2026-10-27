@@ -41,6 +41,24 @@ var _ = Describe("ToolGrants", func() {
 	})
 })
 
+var _ = Describe("ToolGrants for Koinon's own tools", func() {
+	It("offers ask_user and cancel_task to every agent when the koinon tool server is configured, grant or not", func() {
+		servers := map[string]string{gateway.KoinonTarget: "http://koinon-api-tools.koinon.svc:8081/mcp-koinon"}
+		ask := gateway.ToolGrant{Target: "koinon", Tools: []string{"ask_user", "cancel_task"}}
+		Expect(reconciler.ToolGrants(agentconfig.Config{}, servers)).To(Equal([]gateway.ToolGrant{ask}))
+
+		both := map[string]string{"github": toolsURL, gateway.KoinonTarget: servers[gateway.KoinonTarget]}
+		cfg := agentconfig.Config{Grants: []templates.Grant{{Connector: "github", Scopes: []string{"repo.read", "pull_request.create"}, Preset: templates.PresetStandard}}}
+		Expect(reconciler.ToolGrants(cfg, both)).To(Equal([]gateway.ToolGrant{
+			ask,
+			{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}},
+		}))
+	})
+	It("offers nothing without the server", func() {
+		Expect(reconciler.ToolGrants(agentconfig.Config{}, map[string]string{"github": toolsURL})).To(BeEmpty())
+	})
+})
+
 var _ = Describe("Reconciler with the GitHub tool server", func() {
 	It("routes the tool server and allows each active agent its granted tools", func(ctx SpecContext) {
 		osg := fakegateway.New()

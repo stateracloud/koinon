@@ -17,7 +17,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/task/v1alpha1/task.proto.
  */
 export const file_koinon_task_v1alpha1_task: GenFile = /*@__PURE__*/
-  fileDesc("Ch9rb2lub24vdGFzay92MWFscGhhMS90YXNrLnByb3RvEhRrb2lub24udGFzay52MWFscGhhMSJxCgdDcmVhdG9yEi8KBGtpbmQYASABKA4yIS5rb2lub24udGFzay52MWFscGhhMS5DcmVhdG9yS2luZBIPCgd1c2VyX2lkGAIgASgJEhAKCGFnZW50X2lkGAMgASgJEhIKCnRyaWdnZXJfaWQYBCABKAkixQMKBFRhc2sSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEg0KBXRpdGxlGAMgASgJEi4KBXN0YXRlGAQgASgOMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza1N0YXRlEhAKCGFnZW50X2lkGAUgASgJEjEKCmNyZWF0ZWRfYnkYBiABKAsyHS5rb2lub24udGFzay52MWFscGhhMS5DcmVhdG9yEhYKDmxhc3RfZXZlbnRfc2VxGAcgASgDEi4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBInCgRjb3N0GAsgASgLMhkua29pbm9uLnJ1bi52MWFscGhhMS5Db3N0EhUKDWFnZW50X3N1bW1hcnkYDCABKAkSNAoQYWdlbnRfc3VtbWFyeV9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAi9AEKCVRhc2tFdmVudBILCgNzZXEYASABKAMSDAoEa2luZBgCIAEoCRIzCgphY3Rvcl9raW5kGAMgASgOMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuQWN0b3JLaW5kEhUKDWFjdG9yX3VzZXJfaWQYBCABKAkSFgoOYWN0b3JfYWdlbnRfaWQYBSABKAkSDgoGcnVuX2lkGAYgASgJEigKB3BheWxvYWQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Ei4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIlUKEUNyZWF0ZVRhc2tSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRINCgV0aXRsZRgDIAEoCRIPCgdtZXNzYWdlGAQgASgJImUKEkNyZWF0ZVRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIlCgNydW4YAiABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1biJSChBMaXN0VGFza3NSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIuCgVzdGF0ZRgCIAEoDjIfLmtvaW5vbi50YXNrLnYxYWxwaGExLlRhc2tTdGF0ZSI+ChFMaXN0VGFza3NSZXNwb25zZRIpCgV0YXNrcxgBIAMoCzIaLmtvaW5vbi50YXNrLnYxYWxwaGExLlRhc2siMQoOR2V0VGFza1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkilAEKD0dldFRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIvCgZldmVudHMYAiADKAsyHy5rb2lub24udGFzay52MWFscGhhMS5UYXNrRXZlbnQSJgoEcnVucxgDIAMoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIkUKFEFwcGVuZE1lc3NhZ2VSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEgwKBHRleHQYAyABKAkibgoVQXBwZW5kTWVzc2FnZVJlc3BvbnNlEi4KBWV2ZW50GAEgASgLMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza0V2ZW50EiUKA3J1bhgCIAEoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIjQKEUNhbmNlbFRhc2tSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJIm8KEkNhbmNlbFRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIvCg1jYW5jZWxlZF9ydW5zGAIgAygLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW4iNgoTTm90aWZ5VHlwaW5nUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDwoHdGFza19pZBgCIAEoCSIWChROb3RpZnlUeXBpbmdSZXNwb25zZSrCAQoJVGFza1N0YXRlEhoKFlRBU0tfU1RBVEVfVU5TUEVDSUZJRUQQABIYChRUQVNLX1NUQVRFX1NVQk1JVFRFRBABEhYKElRBU0tfU1RBVEVfV09SS0lORxACEh0KGVRBU0tfU1RBVEVfSU5QVVRfUkVRVUlSRUQQAxIYChRUQVNLX1NUQVRFX0NPTVBMRVRFRBAEEhcKE1RBU0tfU1RBVEVfQ0FOQ0VMRUQQBRIVChFUQVNLX1NUQVRFX0ZBSUxFRBAGKmkKCUFjdG9yS2luZBIaChZBQ1RPUl9LSU5EX1VOU1BFQ0lGSUVEEAASEwoPQUNUT1JfS0lORF9VU0VSEAESFAoQQUNUT1JfS0lORF9BR0VOVBACEhUKEUFDVE9SX0tJTkRfU1lTVEVNEAMqdAoLQ3JlYXRvcktpbmQSHAoYQ1JFQVRPUl9LSU5EX1VOU1BFQ0lGSUVEEAASFQoRQ1JFQVRPUl9LSU5EX1VTRVIQARIYChRDUkVBVE9SX0tJTkRfVFJJR0dFUhACEhYKEkNSRUFUT1JfS0lORF9BR0VOVBADMuAECgtUYXNrU2VydmljZRJfCgpDcmVhdGVUYXNrEicua29pbm9uLnRhc2sudjFhbHBoYTEuQ3JlYXRlVGFza1JlcXVlc3QaKC5rb2lub24udGFzay52MWFscGhhMS5DcmVhdGVUYXNrUmVzcG9uc2USYQoJTGlzdFRhc2tzEiYua29pbm9uLnRhc2sudjFhbHBoYTEuTGlzdFRhc2tzUmVxdWVzdBonLmtvaW5vbi50YXNrLnYxYWxwaGExLkxpc3RUYXNrc1Jlc3BvbnNlIgOQAgESWwoHR2V0VGFzaxIkLmtvaW5vbi50YXNrLnYxYWxwaGExLkdldFRhc2tSZXF1ZXN0GiUua29pbm9uLnRhc2sudjFhbHBoYTEuR2V0VGFza1Jlc3BvbnNlIgOQAgESaAoNQXBwZW5kTWVzc2FnZRIqLmtvaW5vbi50YXNrLnYxYWxwaGExLkFwcGVuZE1lc3NhZ2VSZXF1ZXN0Gisua29pbm9uLnRhc2sudjFhbHBoYTEuQXBwZW5kTWVzc2FnZVJlc3BvbnNlEl8KCkNhbmNlbFRhc2sSJy5rb2lub24udGFzay52MWFscGhhMS5DYW5jZWxUYXNrUmVxdWVzdBooLmtvaW5vbi50YXNrLnYxYWxwaGExLkNhbmNlbFRhc2tSZXNwb25zZRJlCgxOb3RpZnlUeXBpbmcSKS5rb2lub24udGFzay52MWFscGhhMS5Ob3RpZnlUeXBpbmdSZXF1ZXN0Gioua29pbm9uLnRhc2sudjFhbHBoYTEuTm90aWZ5VHlwaW5nUmVzcG9uc2VCT1pNZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vdGFzay92MWFscGhhMTt0YXNrdjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp, file_koinon_run_v1alpha1_run]);
+  fileDesc("Ch9rb2lub24vdGFzay92MWFscGhhMS90YXNrLnByb3RvEhRrb2lub24udGFzay52MWFscGhhMSJxCgdDcmVhdG9yEi8KBGtpbmQYASABKA4yIS5rb2lub24udGFzay52MWFscGhhMS5DcmVhdG9yS2luZBIPCgd1c2VyX2lkGAIgASgJEhAKCGFnZW50X2lkGAMgASgJEhIKCnRyaWdnZXJfaWQYBCABKAkimQQKBFRhc2sSCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEg0KBXRpdGxlGAMgASgJEi4KBXN0YXRlGAQgASgOMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza1N0YXRlEhAKCGFnZW50X2lkGAUgASgJEjEKCmNyZWF0ZWRfYnkYBiABKAsyHS5rb2lub24udGFzay52MWFscGhhMS5DcmVhdG9yEhYKDmxhc3RfZXZlbnRfc2VxGAcgASgDEi4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBInCgRjb3N0GAsgASgLMhkua29pbm9uLnJ1bi52MWFscGhhMS5Db3N0EhUKDWFnZW50X3N1bW1hcnkYDCABKAkSNAoQYWdlbnRfc3VtbWFyeV9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGgoSd2FpdGluZ19vbl91c2VyX2lkGA4gASgJEhcKD3dhaXRpbmdfb25fbmFtZRgPIAEoCRIdChVkaXJlY3RfbWVzc2FnZV90aHJlYWQYECABKAgi9AEKCVRhc2tFdmVudBILCgNzZXEYASABKAMSDAoEa2luZBgCIAEoCRIzCgphY3Rvcl9raW5kGAMgASgOMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuQWN0b3JLaW5kEhUKDWFjdG9yX3VzZXJfaWQYBCABKAkSFgoOYWN0b3JfYWdlbnRfaWQYBSABKAkSDgoGcnVuX2lkGAYgASgJEigKB3BheWxvYWQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Ei4KCmNyZWF0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIlUKEUNyZWF0ZVRhc2tSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCRINCgV0aXRsZRgDIAEoCRIPCgdtZXNzYWdlGAQgASgJImUKEkNyZWF0ZVRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIlCgNydW4YAiABKAsyGC5rb2lub24ucnVuLnYxYWxwaGExLlJ1biJSChBMaXN0VGFza3NSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIuCgVzdGF0ZRgCIAEoDjIfLmtvaW5vbi50YXNrLnYxYWxwaGExLlRhc2tTdGF0ZSI+ChFMaXN0VGFza3NSZXNwb25zZRIpCgV0YXNrcxgBIAMoCzIaLmtvaW5vbi50YXNrLnYxYWxwaGExLlRhc2siMQoOR2V0VGFza1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkilAEKD0dldFRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIvCgZldmVudHMYAiADKAsyHy5rb2lub24udGFzay52MWFscGhhMS5UYXNrRXZlbnQSJgoEcnVucxgDIAMoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIkUKFEFwcGVuZE1lc3NhZ2VSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJEgwKBHRleHQYAyABKAkibgoVQXBwZW5kTWVzc2FnZVJlc3BvbnNlEi4KBWV2ZW50GAEgASgLMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza0V2ZW50EiUKA3J1bhgCIAEoCzIYLmtvaW5vbi5ydW4udjFhbHBoYTEuUnVuIjQKEUNhbmNlbFRhc2tSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJIm8KEkNhbmNlbFRhc2tSZXNwb25zZRIoCgR0YXNrGAEgASgLMhoua29pbm9uLnRhc2sudjFhbHBoYTEuVGFzaxIvCg1jYW5jZWxlZF9ydW5zGAIgAygLMhgua29pbm9uLnJ1bi52MWFscGhhMS5SdW4iNgoTTm90aWZ5VHlwaW5nUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDwoHdGFza19pZBgCIAEoCSIWChROb3RpZnlUeXBpbmdSZXNwb25zZSJvChhTZW5kRGlyZWN0TWVzc2FnZVJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSDAoEdGV4dBgEIAEoCRISCgptZXNzYWdlX2lkGAUgASgJIpgBChlTZW5kRGlyZWN0TWVzc2FnZVJlc3BvbnNlEigKBHRhc2sYASABKAsyGi5rb2lub24udGFzay52MWFscGhhMS5UYXNrEi4KBWV2ZW50GAIgASgLMh8ua29pbm9uLnRhc2sudjFhbHBoYTEuVGFza0V2ZW50Eg8KB2NyZWF0ZWQYAyABKAgSEAoIcmVvcGVuZWQYBCABKAgqwgEKCVRhc2tTdGF0ZRIaChZUQVNLX1NUQVRFX1VOU1BFQ0lGSUVEEAASGAoUVEFTS19TVEFURV9TVUJNSVRURUQQARIWChJUQVNLX1NUQVRFX1dPUktJTkcQAhIdChlUQVNLX1NUQVRFX0lOUFVUX1JFUVVJUkVEEAMSGAoUVEFTS19TVEFURV9DT01QTEVURUQQBBIXChNUQVNLX1NUQVRFX0NBTkNFTEVEEAUSFQoRVEFTS19TVEFURV9GQUlMRUQQBippCglBY3RvcktpbmQSGgoWQUNUT1JfS0lORF9VTlNQRUNJRklFRBAAEhMKD0FDVE9SX0tJTkRfVVNFUhABEhQKEEFDVE9SX0tJTkRfQUdFTlQQAhIVChFBQ1RPUl9LSU5EX1NZU1RFTRADKnQKC0NyZWF0b3JLaW5kEhwKGENSRUFUT1JfS0lORF9VTlNQRUNJRklFRBAAEhUKEUNSRUFUT1JfS0lORF9VU0VSEAESGAoUQ1JFQVRPUl9LSU5EX1RSSUdHRVIQAhIWChJDUkVBVE9SX0tJTkRfQUdFTlQQAzLWBQoLVGFza1NlcnZpY2USXwoKQ3JlYXRlVGFzaxInLmtvaW5vbi50YXNrLnYxYWxwaGExLkNyZWF0ZVRhc2tSZXF1ZXN0Gigua29pbm9uLnRhc2sudjFhbHBoYTEuQ3JlYXRlVGFza1Jlc3BvbnNlEmEKCUxpc3RUYXNrcxImLmtvaW5vbi50YXNrLnYxYWxwaGExLkxpc3RUYXNrc1JlcXVlc3QaJy5rb2lub24udGFzay52MWFscGhhMS5MaXN0VGFza3NSZXNwb25zZSIDkAIBElsKB0dldFRhc2sSJC5rb2lub24udGFzay52MWFscGhhMS5HZXRUYXNrUmVxdWVzdBolLmtvaW5vbi50YXNrLnYxYWxwaGExLkdldFRhc2tSZXNwb25zZSIDkAIBEmgKDUFwcGVuZE1lc3NhZ2USKi5rb2lub24udGFzay52MWFscGhhMS5BcHBlbmRNZXNzYWdlUmVxdWVzdBorLmtvaW5vbi50YXNrLnYxYWxwaGExLkFwcGVuZE1lc3NhZ2VSZXNwb25zZRJfCgpDYW5jZWxUYXNrEicua29pbm9uLnRhc2sudjFhbHBoYTEuQ2FuY2VsVGFza1JlcXVlc3QaKC5rb2lub24udGFzay52MWFscGhhMS5DYW5jZWxUYXNrUmVzcG9uc2USZQoMTm90aWZ5VHlwaW5nEikua29pbm9uLnRhc2sudjFhbHBoYTEuTm90aWZ5VHlwaW5nUmVxdWVzdBoqLmtvaW5vbi50YXNrLnYxYWxwaGExLk5vdGlmeVR5cGluZ1Jlc3BvbnNlEnQKEVNlbmREaXJlY3RNZXNzYWdlEi4ua29pbm9uLnRhc2sudjFhbHBoYTEuU2VuZERpcmVjdE1lc3NhZ2VSZXF1ZXN0Gi8ua29pbm9uLnRhc2sudjFhbHBoYTEuU2VuZERpcmVjdE1lc3NhZ2VSZXNwb25zZUJPWk1naXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi90YXNrL3YxYWxwaGExO3Rhc2t2MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_struct, file_google_protobuf_timestamp, file_koinon_run_v1alpha1_run]);
 
 /**
  * Creator is who or what created a task. Exactly the field of its kind is set.
@@ -134,6 +134,28 @@ export type Task = Message<"koinon.task.v1alpha1.Task"> & {
    * @generated from field: google.protobuf.Timestamp agent_summary_at = 13;
    */
   agentSummaryAt?: Timestamp | undefined;
+
+  /**
+   * Set by ListTasks and GetTask while an open question of the task waits on a person: who it is
+   * addressed to. The inbox uses it so that a task waiting on someone else's answer is not shown
+   * to its creator as theirs to act on.
+   *
+   * @generated from field: string waiting_on_user_id = 14;
+   */
+  waitingOnUserId: string;
+
+  /**
+   * @generated from field: string waiting_on_name = 15;
+   */
+  waitingOnName: string;
+
+  /**
+   * True when a direct message to the agent started the task: replies in its inbox-chat thread
+   * go to SendDirectMessage with this task_id (plan item TR3).
+   *
+   * @generated from field: bool direct_message_thread = 16;
+   */
+  directMessageThread: boolean;
 };
 
 /**
@@ -506,6 +528,94 @@ export const NotifyTypingResponseSchema: GenMessage<NotifyTypingResponse> = /*@_
   messageDesc(file_koinon_task_v1alpha1_task, 14);
 
 /**
+ * SendDirectMessageRequest is a message to an agent, starting a thread or replying in one.
+ *
+ * @generated from message koinon.task.v1alpha1.SendDirectMessageRequest
+ */
+export type SendDirectMessageRequest = Message<"koinon.task.v1alpha1.SendDirectMessageRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * The agent the message is for. With task_id it must be the task's agent.
+   *
+   * @generated from field: string agent_id = 2;
+   */
+  agentId: string;
+
+  /**
+   * The thread to reply in: a task started by a direct message. Empty starts a new thread.
+   *
+   * @generated from field: string task_id = 3;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string text = 4;
+   */
+  text: string;
+
+  /**
+   * Chosen by the client for this message (a UUID); sending it again, for example after a lost
+   * response, has no second effect and returns the first result.
+   *
+   * @generated from field: string message_id = 5;
+   */
+  messageId: string;
+};
+
+/**
+ * Describes the message koinon.task.v1alpha1.SendDirectMessageRequest.
+ * Use `create(SendDirectMessageRequestSchema)` to create a new message.
+ */
+export const SendDirectMessageRequestSchema: GenMessage<SendDirectMessageRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_task_v1alpha1_task, 15);
+
+/**
+ * SendDirectMessageResponse holds the thread's task.
+ *
+ * @generated from message koinon.task.v1alpha1.SendDirectMessageResponse
+ */
+export type SendDirectMessageResponse = Message<"koinon.task.v1alpha1.SendDirectMessageResponse"> & {
+  /**
+   * @generated from field: koinon.task.v1alpha1.Task task = 1;
+   */
+  task?: Task | undefined;
+
+  /**
+   * The message as it entered the timeline. A replay of an earlier call returns no event when
+   * the API runs the delivery inline; with the durable queue it attaches to the finished
+   * delivery and returns the original event and created flag.
+   *
+   * @generated from field: koinon.task.v1alpha1.TaskEvent event = 2;
+   */
+  event?: TaskEvent | undefined;
+
+  /**
+   * True when this call created the task.
+   *
+   * @generated from field: bool created = 3;
+   */
+  created: boolean;
+
+  /**
+   * True when this call reopened a completed task as a follow-up.
+   *
+   * @generated from field: bool reopened = 4;
+   */
+  reopened: boolean;
+};
+
+/**
+ * Describes the message koinon.task.v1alpha1.SendDirectMessageResponse.
+ * Use `create(SendDirectMessageResponseSchema)` to create a new message.
+ */
+export const SendDirectMessageResponseSchema: GenMessage<SendDirectMessageResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_task_v1alpha1_task, 16);
+
+/**
  * TaskState is where a task stands (ADR 0065, after A2A).
  *
  * @generated from enum koinon.task.v1alpha1.TaskState
@@ -699,6 +809,22 @@ export const TaskService: GenService<{
     methodKind: "unary";
     input: typeof NotifyTypingRequestSchema;
     output: typeof NotifyTypingResponseSchema;
+  },
+  /**
+   * SendDirectMessage sends a message to an agent in the inbox chat (plan item TR3, ADR 0066). The
+   * agent must have a direct_message trigger in its active version, else the call fails with
+   * FAILED_PRECONDITION. Without task_id it starts a thread: a new task (created by the trigger,
+   * interactive priority) whose first message is the trigger's instruction plus the text. With
+   * task_id it replies in that thread: an open task takes the message and its agent is woken; a
+   * completed task is reopened as a follow-up; a canceled or failed one takes no message. The
+   * message_id makes a retry or replay a no-op. Members and above.
+   *
+   * @generated from rpc koinon.task.v1alpha1.TaskService.SendDirectMessage
+   */
+  sendDirectMessage: {
+    methodKind: "unary";
+    input: typeof SendDirectMessageRequestSchema;
+    output: typeof SendDirectMessageResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_task_v1alpha1_task, 0);

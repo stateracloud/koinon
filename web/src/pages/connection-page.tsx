@@ -79,10 +79,30 @@ export function ConnectionPage() {
           <dd>{gh.appId.toString()}</dd>
           <dt className="text-muted-foreground">Installation ID</dt>
           <dd>{gh.installationId.toString()}</dd>
+          {gh.baseUrl && (
+            <>
+              <dt className="text-muted-foreground">Base URL</dt>
+              <dd className="break-all">{gh.baseUrl}</dd>
+            </>
+          )}
+          {gh.caBundle && (
+            <>
+              <dt className="text-muted-foreground">CA bundle</dt>
+              <dd>
+                {gh.caBundle.match(/-----BEGIN CERTIFICATE-----/g)?.length ?? 0} certificate(s)
+                <details className="mt-1">
+                  <summary className="text-muted-foreground cursor-pointer text-xs">Show</summary>
+                  <pre className="mt-1 max-h-48 overflow-auto text-xs">{gh.caBundle}</pre>
+                </details>
+              </dd>
+            </>
+          )}
           <dt className="text-muted-foreground">Private key</dt>
           <dd>
             Stored encrypted{gh.keyFingerprint && <> · fingerprint <code className="text-xs">{gh.keyFingerprint}</code></>}
           </dd>
+          <dt className="text-muted-foreground">CI directories</dt>
+          <dd>{gh.ciDirs.length ? gh.ciDirs.join(', ') : "none besides the connector's"}</dd>
           {c.lastTestedAt && (
             <>
               <dt className="text-muted-foreground">Last tested</dt>

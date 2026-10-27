@@ -197,6 +197,25 @@ var _ = Describe("ConnectionService", func() {
 		Expect(res.GetConnection().GetGithub().GetBaseUrl()).To(BeEmpty())
 	})
 
+	It("stores the connection's CI directories cleaned and returns them", func(ctx SpecContext) {
+		res, err := owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+			OrgId: org, AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM),
+			CiDirs: []string{"./ci//pipelines/", " build/ci ", "ci/pipelines", ""},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetConnection().GetGithub().GetCiDirs()).To(Equal([]string{"ci/pipelines", "build/ci"}))
+		got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: res.GetConnection().GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetConnection().GetGithub().GetCiDirs()).To(Equal([]string{"ci/pipelines", "build/ci"}))
+
+		for _, bad := range [][]string{{"/abs"}, {"../up"}, {"."}, {"a\\b"}, make([]string, 21)} {
+			_, err := owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+				OrgId: org, AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM), CiDirs: bad,
+			})
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "%v", bad)
+		}
+	})
+
 	It("rejects a base URL that is not a bare https host and a CA bundle that is not certificates", func(ctx SpecContext) {
 		for _, req := range []*connectionv1alpha1.CreateGitHubConnectionRequest{
 			{BaseUrl: "http://ghes.example.test"},

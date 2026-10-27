@@ -9,14 +9,29 @@
 //	GET /_fake/app            {"appId", "installationId", "account", "privateKey"}
 //	GET /_fake/repos/{repo}   the repository's state: refs, commits, pulls, write calls, and
 //	                          the files of every branch
+//	GET /_fake/ca             the PEM certificate to trust, with -tls
+//
+// With -api-prefix /api/v3 it serves the REST API under that path, as GitHub Enterprise Server
+// does (the /_fake endpoints stay at the root). With -tls it serves HTTPS with a certificate it
+// generates for -tls-hosts at start; -ca-file writes that certificate (self-signed, so also its
+// own CA) for a connection's caBundle.
 package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"log/slog"
+	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -34,7 +49,20 @@ func main() {
 	repos := flag.String("repos", "hello", "comma-separated repositories of the installation")
 	appID := flag.Int64("app-id", 4242, "GitHub App ID")
 	installationID := flag.Int64("installation-id", 777, "installation ID")
+	apiPrefix := flag.String("api-prefix", "", "serve the REST API under this path, e.g. /api/v3 (GitHub Enterprise Server)")
+	useTLS := flag.Bool("tls", false, "serve HTTPS with a generated self-signed certificate")
+	tlsHosts := flag.String("tls-hosts", "localhost,127.0.0.1", "comma-separated host names and IPs of the generated certificate")
+	caFile := flag.String("ca-file", "", "with -tls: write the generated certificate (the CA to trust) to this file")
 	flag.Parse()
+	if *caFile != "" && !*useTLS {
+		slog.Error("-ca-file needs -tls")
+		os.Exit(2)
+	}
+	prefix := strings.TrimRight(strings.TrimSpace(*apiPrefix), "/")
+	if prefix != "" && !strings.HasPrefix(prefix, "/") {
+		slog.Error("-api-prefix must start with /")
+		os.Exit(2)
+	}
 
 	f := githubtest.NewUnstarted()
 	f.Account, f.AppID, f.InstallationID = *account, *appID, *installationID
@@ -66,9 +94,33 @@ func main() {
 			"pulls": snap.Pulls, "comments": snap.Comments, "calls": snap.Calls, "files": files, "mints": f.Mints(),
 		})
 	})
-	mux.Handle("/", f.Handler)
+	if prefix != "" {
+		mux.Handle(prefix+"/", http.StripPrefix(prefix, f.Handler))
+	} else {
+		mux.Handle("/", f.Handler)
+	}
 
 	srv := &http.Server{Addr: *addr, Handler: logRequests(mux), ReadHeaderTimeout: 10 * time.Second}
+	var caPEM []byte
+	if *useTLS {
+		cert, pemBytes, err := selfSigned(strings.Split(*tlsHosts, ","))
+		if err != nil {
+			slog.Error("generate the TLS certificate", "err", err)
+			os.Exit(1)
+		}
+		caPEM = pemBytes
+		srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
+		mux.HandleFunc("GET /_fake/ca", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/x-pem-file")
+			_, _ = w.Write(caPEM)
+		})
+		if *caFile != "" {
+			if err := os.WriteFile(*caFile, caPEM, 0o644); err != nil { //nolint:gosec // a public certificate
+				slog.Error("write the CA file", "err", err)
+				os.Exit(1)
+			}
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
@@ -77,9 +129,15 @@ func main() {
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
-	slog.Info("starting koinon-fakegithub", "version", project.Version, "addr", *addr,
+	slog.Info("starting koinon-fakegithub", "version", project.Version, "addr", *addr, "apiPrefix", prefix, "tls", *useTLS,
 		"account", f.Account, "repositories", f.Repositories)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	var serveErr error
+	if *useTLS {
+		serveErr = srv.ListenAndServeTLS("", "")
+	} else {
+		serveErr = srv.ListenAndServe()
+	}
+	if err := serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("koinon-fakegithub failed", "err", err)
 		os.Exit(1)
 	}
@@ -107,4 +165,39 @@ type statusRecorder struct {
 func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// selfSigned makes a certificate for hosts (names and IPs) that is its own CA, and returns it
+// with its PEM, which a connection's caBundle trusts.
+func selfSigned(hosts []string) (tls.Certificate, []byte, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	tpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: "koinon-fakegithub test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	for _, h := range hosts {
+		if h = strings.TrimSpace(h); h == "" {
+			continue
+		}
+		if ip := net.ParseIP(h); ip != nil {
+			tpl.IPAddresses = append(tpl.IPAddresses, ip)
+		} else {
+			tpl.DNSNames = append(tpl.DNSNames, h)
+		}
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key},
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), nil
 }

@@ -97,7 +97,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 		if d, err := p.Describe(c.Config); err == nil {
 			out.Settings = &connectionv1alpha1.Connection_Github{Github: &connectionv1alpha1.GitHubConnection{
 				AppId: d.AppID, InstallationId: d.InstallationID, KeyFingerprint: c.SecretFingerprint,
-				BaseUrl: d.Site.BaseURL, CaBundle: d.Site.CABundle,
+				BaseUrl: d.Site.BaseURL, CaBundle: d.Site.CABundle, CiDirs: d.Site.CIDirs,
 			}}
 		}
 	}
@@ -174,6 +174,10 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 			return nil, connect.NewError(connect.CodeInvalidArgument, "ca_bundle: "+err.Error())
 		}
 	}
+	ciDirs, err := codehost.CleanCIDirs(req.GetCiDirs())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "ci_dirs: "+err.Error())
+	}
 
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -182,7 +186,7 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	connID := pgtype.UUID{Bytes: id, Valid: true}
 	config, err := json.Marshal(connections.GitHubConfig{
 		AppID: req.GetAppId(), InstallationID: req.GetInstallationId(),
-		Site: codehost.Site{BaseURL: baseURL, CABundle: caBundle},
+		Site: codehost.Site{BaseURL: baseURL, CABundle: caBundle, CIDirs: ciDirs},
 	})
 	if err != nil {
 		return nil, s.dbError(err, "connection")
@@ -207,7 +211,7 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 			After: map[string]any{
 				"connector": t.Metadata.ID, "displayName": name, "appId": req.GetAppId(),
 				"installationId": req.GetInstallationId(), "keyFingerprint": key.Fingerprint(), "source": "ui",
-				"baseUrl": baseURL, "caBundle": caBundle != "",
+				"baseUrl": baseURL, "caBundle": caBundle != "", "ciDirs": ciDirs,
 			},
 		})
 	})

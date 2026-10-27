@@ -137,6 +137,48 @@ func (ns NullApprovalDecision) Value() (driver.Value, error) {
 	return string(ns.ApprovalDecision), nil
 }
 
+type ApprovalScopeKind string
+
+const (
+	ApprovalScopeKindTask  ApprovalScopeKind = "task"
+	ApprovalScopeKindAgent ApprovalScopeKind = "agent"
+)
+
+func (e *ApprovalScopeKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ApprovalScopeKind(s)
+	case string:
+		*e = ApprovalScopeKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ApprovalScopeKind: %T", src)
+	}
+	return nil
+}
+
+type NullApprovalScopeKind struct {
+	ApprovalScopeKind ApprovalScopeKind
+	Valid             bool // Valid is true if ApprovalScopeKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullApprovalScopeKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.ApprovalScopeKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ApprovalScopeKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullApprovalScopeKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ApprovalScopeKind), nil
+}
+
 type ApprovalStatus string
 
 const (
@@ -739,6 +781,96 @@ func (ns NullPlatformAdminSource) Value() (driver.Value, error) {
 	return string(ns.PlatformAdminSource), nil
 }
 
+type QuestionAnswerKind string
+
+const (
+	QuestionAnswerKindChoice  QuestionAnswerKind = "choice"
+	QuestionAnswerKindDraft   QuestionAnswerKind = "draft"
+	QuestionAnswerKindText    QuestionAnswerKind = "text"
+	QuestionAnswerKindDefault QuestionAnswerKind = "default"
+)
+
+func (e *QuestionAnswerKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = QuestionAnswerKind(s)
+	case string:
+		*e = QuestionAnswerKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for QuestionAnswerKind: %T", src)
+	}
+	return nil
+}
+
+type NullQuestionAnswerKind struct {
+	QuestionAnswerKind QuestionAnswerKind
+	Valid              bool // Valid is true if QuestionAnswerKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullQuestionAnswerKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.QuestionAnswerKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.QuestionAnswerKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullQuestionAnswerKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.QuestionAnswerKind), nil
+}
+
+type QuestionState string
+
+const (
+	QuestionStateAsked     QuestionState = "asked"
+	QuestionStateOpen      QuestionState = "open"
+	QuestionStateAnswered  QuestionState = "answered"
+	QuestionStateDismissed QuestionState = "dismissed"
+	QuestionStateExpired   QuestionState = "expired"
+	QuestionStateCanceled  QuestionState = "canceled"
+)
+
+func (e *QuestionState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = QuestionState(s)
+	case string:
+		*e = QuestionState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for QuestionState: %T", src)
+	}
+	return nil
+}
+
+type NullQuestionState struct {
+	QuestionState QuestionState
+	Valid         bool // Valid is true if QuestionState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullQuestionState) Scan(value interface{}) error {
+	if value == nil {
+		ns.QuestionState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.QuestionState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullQuestionState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.QuestionState), nil
+}
+
 type RunFailureClass string
 
 const (
@@ -1218,6 +1350,25 @@ type ApprovalRequest struct {
 	FirstApprover       pgtype.UUID
 	CallBinding         []byte
 	System              bool
+	ScopeID             pgtype.UUID
+}
+
+type ApprovalScope struct {
+	OrgID            pgtype.UUID
+	ID               pgtype.UUID
+	AgentID          pgtype.UUID
+	Connector        string
+	Tool             string
+	Target           string
+	Kind             ApprovalScopeKind
+	TaskID           pgtype.UUID
+	ExpiresAt        pgtype.Timestamptz
+	CreatedBy        pgtype.UUID
+	SourceApprovalID pgtype.UUID
+	CallBinding      []byte
+	RevokedAt        pgtype.Timestamptz
+	RevokedBy        pgtype.UUID
+	CreatedAt        pgtype.Timestamptz
 }
 
 type AuditChainHead struct {
@@ -1491,6 +1642,35 @@ type Provider struct {
 	CreatedBy       pgtype.UUID
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
+}
+
+type Question struct {
+	OrgID          pgtype.UUID
+	ID             pgtype.UUID
+	TaskID         pgtype.UUID
+	RunID          pgtype.UUID
+	AgentID        pgtype.UUID
+	AskedTo        pgtype.UUID
+	Question       string
+	Choices        []byte
+	Draft          pgtype.Text
+	DefaultAnswer  string
+	State          QuestionState
+	Answer         pgtype.Text
+	AnswerKind     NullQuestionAnswerKind
+	AnsweredBy     pgtype.UUID
+	CallSha256     string
+	ExpiresAt      pgtype.Timestamptz
+	OpenedAt       pgtype.Timestamptz
+	NotifiedAt     pgtype.Timestamptz
+	NotifyFailures int32
+	ResolvedAt     pgtype.Timestamptz
+	DeliveredAt    pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	RemindAt       pgtype.Timestamptz
+	RemindedAt     pgtype.Timestamptz
+	RemindFailures int32
 }
 
 type Run struct {

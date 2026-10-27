@@ -148,6 +148,25 @@ var _ = Describe("Pool", func() {
 		Expect(string(tevs[1].Payload)).To(ContainSubstring("asking: edit=allow,fetch=reject"))
 	})
 
+	It("sends a trigger's instruction, a system message carrying its source, as the first prompt", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		t, err := q.CreateTask(ctx, store.CreateTaskParams{
+			OrgID: e.org, Title: uniq("Scheduled"), AgentID: e.agent.ID, CreatedByKind: store.TaskCreatorKindTrigger,
+			CreatedByTriggerID: pgtype.UUID{Bytes: [16]byte{7}, Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: e.org, TaskID: t.ID, Kind: "message", ActorKind: store.TaskActorKindSystem,
+			Payload: []byte(`{"text":"summarise yesterday's issues","source":"schedule"}`),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		r := e.enqueue(ctx, t)
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		prompts, _, _, _ := e.harness.snapshot()
+		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\nsummarise yesterday's issues"}))
+	})
+
 	It("loads the task's session on its next run and sends only the new messages", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		t := e.task(ctx, "first")

@@ -38,6 +38,8 @@ type Querier interface {
 	AppendRunEventOnce(ctx context.Context, arg AppendRunEventOnceParams) (RunEvent, error)
 	AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams) (TaskEvent, error)
 	ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Agent, error)
+	// asked | open -> canceled, for a run that ended without them being answered.
+	CancelOpenQuestionsForRun(ctx context.Context, arg CancelOpenQuestionsForRunParams) ([]Question, error)
 	// Archiving an agent cancels every run it has not finished.
 	CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRunsForAgentParams) ([]Run, error)
 	// pending -> canceled, for a run that finished without them (for example a
@@ -99,6 +101,8 @@ type Querier interface {
 	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 	// no org-owned row, so it takes no @org_id.
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
+	// Questions of the run that still wait for a person (asked or open).
+	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
 	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
 	// shared by agentd (stuck sandboxes) and the reconciler (sandboxes in Error or Completed). A
 	// stuck sandbox counts from its incident, which agentd records before the reconciler recreates
@@ -125,6 +129,13 @@ type Querier interface {
 	// No row: the same call was already recorded in this run (see
 	// GetApprovalRequestByCall).
 	CreateApprovalRequest(ctx context.Context, arg CreateApprovalRequestParams) (ApprovalRequest, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Scoped approvals (plan item AP1, ADR 0042 amendment).
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	CreateApprovalScope(ctx context.Context, arg CreateApprovalScopeParams) (ApprovalScope, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Connections (plan item C1). No query reads or writes secret material: it
@@ -155,6 +166,9 @@ type Querier interface {
 	// Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
 	CreateProvider(ctx context.Context, arg CreateProviderParams) (Provider, error)
+	// Records a question as 'asked'. No row for the same call in the same run: use
+	// GetQuestionByCall.
+	CreateQuestion(ctx context.Context, arg CreateQuestionParams) (Question, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Run state machine (ADR 0030). Every transition is a compare-and-set on the
@@ -205,6 +219,19 @@ type Querier interface {
 	FailHomeCheckpoint(ctx context.Context, arg FailHomeCheckpointParams) (HomeCheckpoint, error)
 	// Requests that never started because the sandbox was not ready for the configured wait.
 	FailStaleHomeCheckpoints(ctx context.Context, arg FailStaleHomeCheckpointsParams) ([]HomeCheckpoint, error)
+	// The scope that allows this call now: exact on agent, connector, tool and target; a task scope
+	// only for its task. A task scope wins over an agent scope (the narrower one is named). When
+	// call_binding is given the scope's binding must equal it (a code-host scope covers only the
+	// connection and base URL it was granted on).
+	FindActiveApprovalScope(ctx context.Context, arg FindActiveApprovalScopeParams) (ApprovalScope, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Questions an agent asks a person with ask_user (plan item TK3; ADR 0065). Every query on an
+	// org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
+	// A user of the org named by its ID or its email (case-insensitive) who may answer a question
+	// (role member or higher: a viewer cannot answer or dismiss). Members through any source count;
+	// deleted users do not. role is the user's highest role in the org.
+	FindOrgMemberByIdent(ctx context.Context, arg FindOrgMemberByIdentParams) (FindOrgMemberByIdentRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// The spend ledger (plan item L1). USD amounts cross the Go boundary as
@@ -246,6 +273,7 @@ type Querier interface {
 	GetApprovalRequestByCall(ctx context.Context, arg GetApprovalRequestByCallParams) (ApprovalRequest, error)
 	// An agent may only read its own requests.
 	GetApprovalRequestForAgent(ctx context.Context, arg GetApprovalRequestForAgentParams) (ApprovalRequest, error)
+	GetApprovalScope(ctx context.Context, arg GetApprovalScopeParams) (ApprovalScope, error)
 	GetAuditChainHead(ctx context.Context, orgID pgtype.UUID) (AuditChainHead, error)
 	// The p90 of provider-reported input tokens per request byte over the newest 500 real
 	// (not estimated) requests of a model, and how many there were.
@@ -297,6 +325,8 @@ type Querier interface {
 	GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWorkspace, error)
 	GetPriceOverride(ctx context.Context, arg GetPriceOverrideParams) (PriceOverride, error)
 	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
+	GetQuestion(ctx context.Context, arg GetQuestionParams) (Question, error)
+	GetQuestionByCall(ctx context.Context, arg GetQuestionByCallParams) (Question, error)
 	GetRun(ctx context.Context, arg GetRunParams) (Run, error)
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
 	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
@@ -362,6 +392,8 @@ type Querier interface {
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	// Zero rows: the nonce was used before (a replay).
 	InsertUploadNonce(ctx context.Context, arg InsertUploadNonceParams) (int64, error)
+	// Whether the user may answer questions in the org: role member or higher.
+	IsOrgMember(ctx context.Context, arg IsOrgMemberParams) (bool, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
 	// The newest complete checkpoint (hourly, stop or recreate) taken for this sandbox. The recreate
 	// gate uses it for a sandbox that cannot be read (phase Error or Completed), which no new
@@ -371,14 +403,20 @@ type Querier interface {
 	// reads it: a complete one newer than the sandbox's last activity lets the recreation go on, a
 	// failed one blocks it.
 	LatestHomeCheckpointOfSandbox(ctx context.Context, arg LatestHomeCheckpointOfSandboxParams) (HomeCheckpoint, error)
+	// The person who wrote the task's latest user message (the person on the other end of a chat thread).
+	LatestUserMessageActor(ctx context.Context, arg LatestUserMessageActorParams) (pgtype.UUID, error)
 	ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiToken, error)
 	// The active version of each active agent, for the triggers they define (ADR 0066). A draft
 	// agent, an archived one and a proposed version are not included.
 	ListActiveAgentVersions(ctx context.Context, orgID pgtype.UUID) ([]ListActiveAgentVersionsRow, error)
 	// ListActiveAgentVersions across every live org, for the scheduler (ADR 0066).
 	ListActiveAgentVersionsAllOrgs(ctx context.Context) ([]ListActiveAgentVersionsAllOrgsRow, error)
+	ListActiveApprovalScopesForAgent(ctx context.Context, arg ListActiveApprovalScopesForAgentParams) ([]ApprovalScope, error)
 	// The config of each agent's active version, for the template default of its daily limit.
 	ListActiveVersionConfigs(ctx context.Context, orgID pgtype.UUID) ([]ListActiveVersionConfigsRow, error)
+	// When each active agent's current version was activated, across every live org, so the schedule
+	// trigger fires nothing that was due before the version took effect (ADR 0066, TR2).
+	ListAgentActivationsAllOrgs(ctx context.Context) ([]ListAgentActivationsAllOrgsRow, error)
 	ListAgentBudgets(ctx context.Context, orgID pgtype.UUID) ([]ListAgentBudgetsRow, error)
 	ListAgentMCPServers(ctx context.Context, orgID pgtype.UUID) ([]AgentMcpServer, error)
 	ListAgentMCPServersOfAgent(ctx context.Context, arg ListAgentMCPServersOfAgentParams) ([]AgentMcpServer, error)
@@ -417,6 +455,8 @@ type Querier interface {
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// Every default list version this installation has run, newest first.
 	ListDefaultPriceLists(ctx context.Context) ([]DefaultPriceList, error)
+	// Open questions past their expiry (the expiry sweep applies the default to them).
+	ListDueQuestions(ctx context.Context, arg ListDueQuestionsParams) ([]Question, error)
 	// The effective role per org honours the org's identity mode (ADR 0004):
 	// platform counts manual rows, idp counts IdP rows plus the manual owner,
 	// hybrid counts both. The highest role wins.
@@ -436,6 +476,10 @@ type Querier interface {
 	ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfServerParams) ([]McpTool, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
+	// The inbox: open questions asked to the user, newest first.
+	// Only those whose run is still parked: a question outlives no run (the sweep closes it, this
+	// hides it meanwhile).
+	ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQuestionsForUserParams) ([]Question, error)
 	// Runs that can still be canceled, when an org-wide limit is reached.
 	ListOpenRunsOfOrg(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
 	// The users who are told about an org's budget: owners and admins.
@@ -454,6 +498,12 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	// The reconciler walks orgs one at a time, so every later query is org-scoped.
 	ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcileRow, error)
+	// Orgs with an open question past its expiry at @now or a reminder due at @now.
+	ListOrgsWithDueQuestions(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error)
+	// Orgs with a question whose run ended (the sweeper then queries per org).
+	ListOrgsWithQuestionsOfFinishedRuns(ctx context.Context) ([]pgtype.UUID, error)
+	// Orgs that have at least one opened question to notify about (the sweeper then queries per org).
+	ListOrgsWithQuestionsToNotify(ctx context.Context) ([]pgtype.UUID, error)
 	// The org's requests waiting for a human (input_required), oldest first.
 	// Trusted-preset calls are recorded as approved and never listed here.
 	ListPendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
@@ -469,6 +519,16 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	ListPriceOverrides(ctx context.Context, orgID pgtype.UUID) ([]PriceOverride, error)
 	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
+	// Who the open questions of these tasks wait on (only where the run is still parked), for the
+	// inbox: a task waiting on someone else's question is not its creator's to act on.
+	ListQuestionAddresseesForTasks(ctx context.Context, arg ListQuestionAddresseesForTasksParams) ([]ListQuestionAddresseesForTasksRow, error)
+	// Runs that ended while a question of theirs was still asked or open.
+	ListQuestionRunsOfFinishedRuns(ctx context.Context, orgID pgtype.UUID) ([]pgtype.UUID, error)
+	ListQuestionsForTask(ctx context.Context, arg ListQuestionsForTaskParams) ([]Question, error)
+	// Opened questions whose notification has not gone out, oldest first.
+	ListQuestionsToNotify(ctx context.Context, arg ListQuestionsToNotifyParams) ([]Question, error)
+	// Open questions whose reminder is due at @now and has not gone out, oldest reminder first.
+	ListQuestionsToRemind(ctx context.Context, arg ListQuestionsToRemindParams) ([]Question, error)
 	// The agent's latest replies on the task, newest first.
 	ListRecentAgentReplies(ctx context.Context, arg ListRecentAgentRepliesParams) ([]TaskEvent, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
@@ -484,7 +544,8 @@ type Querier interface {
 	// The timeline after a sequence number (0 for the start), in order.
 	ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) ([]TaskEvent, error)
 	// The users' messages on the task after a timeline seq, in order: what
-	// agentd sends the harness as a run's prompt.
+	// agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose
+	// payload carries its source) is part of it, so a scheduled run sees what it was scheduled to do.
 	ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessagesAfterParams) ([]TaskEvent, error)
 	ListTasks(ctx context.Context, orgID pgtype.UUID) ([]Task, error)
 	// The tasks in any of the states, oldest first (a board column of the ticket API is a set of
@@ -499,6 +560,8 @@ type Querier interface {
 	ListUnavailableMCPServersOfAgent(ctx context.Context, arg ListUnavailableMCPServersOfAgentParams) ([]ListUnavailableMCPServersOfAgentRow, error)
 	// A run's requests whose outcome the agent has not been sent yet.
 	ListUndeliveredApprovalRequestsForRun(ctx context.Context, arg ListUndeliveredApprovalRequestsForRunParams) ([]ApprovalRequest, error)
+	// A run's questions whose outcome the agent has not been sent yet (asked, open or resolved).
+	ListUndeliveredQuestionsForRun(ctx context.Context, arg ListUndeliveredQuestionsForRunParams) ([]Question, error)
 	// Users by ID, deleted ones included, to name who created something.
 	ListUsersByIDs(ctx context.Context, ids []pgtype.UUID) ([]ListUsersByIDsRow, error)
 	// A token being used to create a child holds a share lock on itself until the child is committed,
@@ -514,6 +577,7 @@ type Querier interface {
 	// principal and sync IdP groups at login), always keyed by user_id.
 	// Serialises bootstrap across API replicas for the rest of the transaction.
 	LockBootstrap(ctx context.Context) error
+	LockQuestion(ctx context.Context, arg LockQuestionParams) (Question, error)
 	// Serialises a park decision (agentd) with the resolution of the run's
 	// approvals (the executor), so neither misses the other.
 	LockRun(ctx context.Context, arg LockRunParams) (Run, error)
@@ -529,6 +593,10 @@ type Querier interface {
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error)
 	// The declaring Secret was deleted: keep the row, stop serving it.
 	MarkProviderRemoved(ctx context.Context, arg MarkProviderRemovedParams) error
+	MarkQuestionNotified(ctx context.Context, arg MarkQuestionNotifiedParams) (int64, error)
+	MarkQuestionReminded(ctx context.Context, arg MarkQuestionRemindedParams) (int64, error)
+	// Records that the outcomes were sent to the agent.
+	MarkQuestionsDelivered(ctx context.Context, arg MarkQuestionsDeliveredParams) (int64, error)
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
 	// SPDX-License-Identifier: Apache-2.0
@@ -547,6 +615,9 @@ type Querier interface {
 	// sends it while it waits for a sandbox that is not ready, so the reconciler
 	// starts it (the waiting run is the demand) without waiting for a resync.
 	NotifyReconciler(ctx context.Context, orgID pgtype.UUID) error
+	// The turn ended: the run's asked questions become visible. Called in the transaction that parks
+	// the run.
+	OpenAskedQuestionsForRun(ctx context.Context, arg OpenAskedQuestionsForRunParams) ([]Question, error)
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
@@ -560,6 +631,11 @@ type Querier interface {
 	// One probe's result. Three failures in a row make a server unhealthy; one success makes it
 	// healthy again. health_since moves only when the health changes.
 	RecordMCPServerProbe(ctx context.Context, arg RecordMCPServerProbeParams) (McpServer, error)
+	// One failed delivery of the notification. At @give_up failures the question counts as notified
+	// (notified_at is set), so the sweep stops re-sending it; the caller logs that it gave up.
+	RecordQuestionNotifyFailure(ctx context.Context, arg RecordQuestionNotifyFailureParams) (Question, error)
+	// One failed delivery of the reminder. At @give_up failures the question counts as reminded.
+	RecordQuestionRemindFailure(ctx context.Context, arg RecordQuestionRemindFailureParams) (Question, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
 	ReenableUIMCPServers(ctx context.Context, orgID pgtype.UUID) error
 	// Re-enable UI models whose provider is enabled and that no declared model shadows.
@@ -589,6 +665,8 @@ type Querier interface {
 	// claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
 	// against the wall-clock cap.
 	RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error)
+	// open -> answered | dismissed | expired. No row: the question is not open (already resolved).
+	ResolveQuestion(ctx context.Context, arg ResolveQuestionParams) (Question, error)
 	// Makes a parked run claimable again (approval decided, input given). It
 	// stays parked until an owner claims it: parked -> starting.
 	ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) (Run, error)
@@ -601,6 +679,8 @@ type Querier interface {
 	ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraftParams) (Agent, error)
 	// Revokes the token and every token descended from it.
 	RevokeAPITokenTree(ctx context.Context, arg RevokeAPITokenTreeParams) ([]ApiToken, error)
+	// No row: unknown, or already revoked.
+	RevokeApprovalScope(ctx context.Context, arg RevokeApprovalScopeParams) (ApprovalScope, error)
 	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) error
 	// Revokes only a grant that came from a platform admin group; it returns no row for any other.
 	RevokePlatformAdminFromGroup(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
@@ -618,6 +698,7 @@ type Querier interface {
 	SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error)
 	// The first of two approvals: remembered, the request stays pending.
 	SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error)
+	SetApprovalRequestScope(ctx context.Context, arg SetApprovalRequestScopeParams) error
 	// Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays
 	// until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
 	// at the next start.

@@ -7,10 +7,20 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import type { CheckResult } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { GuideField, SetupGuide } from '@/lib/connector'
+import { ciDirsError, parseCiDirs } from '@/lib/ci-paths'
 
-export type GitHubConnectionInput = { displayName: string; appId: bigint; installationId: bigint; privateKey: string }
+export type GitHubConnectionInput = {
+  displayName: string
+  appId: bigint
+  installationId: bigint
+  privateKey: string
+  baseUrl: string
+  caBundle: string
+  ciDirs: string[]
+}
 
 export type GitHubConnectionFormProps = {
   guide: SetupGuide
@@ -22,6 +32,37 @@ export type GitHubConnectionFormProps = {
 }
 
 const integerPattern = /^[1-9][0-9]{0,18}$/
+
+const maxCaBundleBytes = 256 << 10
+
+/** baseUrlError mirrors the API: an https URL that is only a host and an optional port. */
+function baseUrlError(raw: string): string | undefined {
+  const v = raw.trim()
+  if (!v) return undefined
+  let u: URL
+  try {
+    u = new URL(v)
+  } catch {
+    return 'Base URL must be an https URL such as https://github.example.com.'
+  }
+  if (u.protocol !== 'https:') return 'Base URL must start with https://.'
+  if (u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '') || /[?#]/.test(v)) {
+    return 'Base URL must be only a host and an optional port; the API is reached at /api/v3 on it.'
+  }
+  return undefined
+}
+
+/** caBundleError mirrors the API: PEM CERTIFICATE blocks only, at most 256 KiB. */
+function caBundleError(raw: string): string | undefined {
+  const v = raw.trim()
+  if (!v) return undefined
+  if (new TextEncoder().encode(v).length > maxCaBundleBytes) return 'CA bundle is larger than 256 KiB.'
+  const blocks = [...v.matchAll(/-----BEGIN ([A-Z0-9 ]+)-----/g)].map((m) => m[1])
+  if (!blocks.length) return 'CA bundle must be PEM certificates (-----BEGIN CERTIFICATE-----).'
+  const other = blocks.find((b) => b !== 'CERTIFICATE')
+  if (other) return `CA bundle holds a "${other}" block; only certificates are allowed.`
+  return undefined
+}
 
 function fieldError(f: GuideField, value: string): string | undefined {
   if (!value.trim()) return f.required ? `${f.label} is required.` : undefined
@@ -46,21 +87,30 @@ function fieldError(f: GuideField, value: string): string | undefined {
 export function GitHubConnectionForm({ guide, onSubmit, pending, error, results }: GitHubConnectionFormProps) {
   const [displayName, setDisplayName] = useState('GitHub')
   const [values, setValues] = useState<Record<string, string>>({})
+  const [ciDirsText, setCiDirsText] = useState('')
   const [secretCleared, setSecretCleared] = useState(false)
   const [touched, setTouched] = useState(false)
+  const [baseUrl, setBaseUrl] = useState('')
+  const [caBundle, setCaBundle] = useState('')
+  const baseUrlErr = baseUrlError(baseUrl)
+  const caBundleErr = caBundleError(caBundle)
 
   const errors = Object.fromEntries(guide.fields.map((f) => [f.id, fieldError(f, values[f.id] ?? '')]).filter(([, e]) => e)) as Record<string, string>
   const nameError = displayName.trim() ? undefined : 'Name is required.'
+  const ciError = ciDirsError(ciDirsText)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
     setTouched(true)
-    if (nameError || Object.keys(errors).length) return
+    if (nameError || baseUrlErr || caBundleErr || ciError || Object.keys(errors).length) return
     const input: GitHubConnectionInput = {
       displayName: displayName.trim(),
       appId: BigInt((values.appId ?? '').trim()),
       installationId: BigInt((values.installationId ?? '').trim()),
       privateKey: values.privateKey ?? '',
+      baseUrl: baseUrl.trim(),
+      caBundle: caBundle.trim(),
+      ciDirs: parseCiDirs(ciDirsText),
     }
     // Clear every secret before the request leaves: the key lives in this
     // component only for as long as it takes to send it.
@@ -142,6 +192,66 @@ export function GitHubConnectionForm({ guide, onSubmit, pending, error, results 
           return fs.length ? <div className="grid gap-3 border-t pt-3">{fs.map(renderField)}</div> : null
         }}
       />
+      <details className="grid gap-3 rounded-md border p-3" open={!!baseUrl || !!caBundle}>
+        <summary className="cursor-pointer text-sm font-medium">GitHub Enterprise Server (optional)</summary>
+        <div className="mt-3 grid gap-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="field-baseUrl">Base URL</Label>
+            <Input
+              id="field-baseUrl"
+              autoComplete="off"
+              placeholder="https://github.example.com"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              aria-invalid={touched && !!baseUrlErr}
+              aria-describedby="field-baseUrl-help"
+            />
+            <p id="field-baseUrl-help" className="text-muted-foreground text-xs">
+              Leave empty for github.com. Koinon reaches the REST API at /api/v3 on this host, and agents' sandboxes may reach it.
+            </p>
+            {touched && baseUrlErr && <p className="text-destructive text-xs">{baseUrlErr}</p>}
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="field-caBundle">CA bundle</Label>
+            <textarea
+              id="field-caBundle"
+              rows={5}
+              spellCheck={false}
+              autoComplete="off"
+              className="border-input bg-background w-full rounded-md border px-3 py-2 font-mono text-xs"
+              placeholder="-----BEGIN CERTIFICATE-----"
+              value={caBundle}
+              onChange={(e) => setCaBundle(e.target.value)}
+              aria-invalid={touched && !!caBundleErr}
+              aria-describedby="field-caBundle-help"
+            />
+            <p id="field-caBundle-help" className="text-muted-foreground text-xs">
+              PEM certificates that sign the server&apos;s TLS certificate, when the system roots do not. Public: it is stored as plain configuration
+              and copied into sandboxes for git.
+            </p>
+            {touched && caBundleErr && <p className="text-destructive text-xs">{caBundleErr}</p>}
+          </div>
+        </div>
+      </details>
+      <div className="grid gap-1.5">
+        <Label htmlFor="connection-ci-dirs">Extra CI directories (optional)</Label>
+        <Textarea
+          id="connection-ci-dirs"
+          rows={3}
+          autoComplete="off"
+          spellCheck={false}
+          value={ciDirsText}
+          onChange={(e) => setCiDirsText(e.target.value)}
+          aria-invalid={touched && !!ciError}
+          aria-describedby="connection-ci-dirs-help"
+          placeholder="ci/pipelines"
+        />
+        <p id="connection-ci-dirs-help" className="text-muted-foreground text-xs">
+          One directory per line, relative to the repository root. Koinon never proposes changes under these or under GitHub&apos;s own workflow directory,
+          because a pushed branch could run them with the repository&apos;s secrets.
+        </p>
+        {touched && ciError && <p className="text-destructive text-xs">{ciError}</p>}
+      </div>
       {unplaced.length > 0 && <div className="grid gap-3">{unplaced.map(renderField)}</div>}
       {error && (
         <Alert variant="destructive" role="alert">
