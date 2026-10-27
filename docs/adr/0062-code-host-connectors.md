@@ -226,3 +226,12 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   base URL and bundle). A connection's base URL passes the platform's egress URL policy
   (`egress.allowedInternalHosts`) in the API, in declarative import and, with a fresh lookup, in the
   reconciler: private and internal hosts only when allow-listed.
+
+- Amendment 2026-10-27 (CH3, GitHub Enterprise Server): GHES stays the `github` connector type with
+  a base URL. Every GitHub call (the App JWT and installation token, the Git Data API commit, the
+  pull request, comments, connection checks) already goes through `Host.clientFor`, which derives a
+  client from the connection's API base (`https://HOST/api/v3`) and CA bundle; the chart-wide
+  `github.apiUrl` and `--github-api-url` only set the client for connections without a base URL
+  (github.com). No other place uses them. The new-connection form takes the optional base URL and
+  CA bundle, validated as the API does, and the connection page shows them. The GitHub fake serves
+  in GHES mode (`githubtest.NewGHES`; `koinon-fakegithub -api-prefix /api/v3 -tls -ca-file`).

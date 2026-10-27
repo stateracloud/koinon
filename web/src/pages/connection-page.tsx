@@ -26,16 +26,28 @@ export function ConnectionPage() {
   const { org } = useOrg()
   const orgId = org.orgId
   const queryClient = useQueryClient()
-  const get = useQuery(ConnectionService.method.getConnection, { orgId, connectionId })
+  const get = useQuery(ConnectionService.method.getConnection, {
+    orgId,
+    connectionId,
+  })
   const types = useQuery(ConnectionService.method.listConnectorTypes, {})
   const c = get.data?.connection
   const guide = useMemo(() => setupGuide(types.data?.connectorTypes.find((t) => t.id === c?.connector)), [types.data, c?.connector])
 
   const navigate = useNavigate()
   const remove = useMutation(ConnectionService.method.deleteConnection)
-  const [refusal, setRefusal] = useState<{ message: string; agents: { id: string; displayName: string }[] }>()
+  const [refusal, setRefusal] = useState<{
+    message: string
+    agents: { id: string; displayName: string }[]
+  }>()
   const test = useMutation(ConnectionService.method.testConnection, {
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: createConnectQueryKey({
+          schema: ConnectionService,
+          cardinality: undefined,
+        }),
+      }),
   })
 
   if (get.isPending) return <p role="status">Loading connection…</p>
@@ -79,9 +91,33 @@ export function ConnectionPage() {
           <dd>{gh.appId.toString()}</dd>
           <dt className="text-muted-foreground">Installation ID</dt>
           <dd>{gh.installationId.toString()}</dd>
+          {gh.baseUrl && (
+            <>
+              <dt className="text-muted-foreground">Base URL</dt>
+              <dd className="break-all">{gh.baseUrl}</dd>
+            </>
+          )}
+          {gh.caBundle && (
+            <>
+              <dt className="text-muted-foreground">CA bundle</dt>
+              <dd>
+                {gh.caBundle.match(/-----BEGIN CERTIFICATE-----/g)?.length ?? 0} certificate(s)
+                <details className="mt-1">
+                  <summary className="text-muted-foreground cursor-pointer text-xs">Show</summary>
+                  <pre className="mt-1 max-h-48 overflow-auto text-xs">{gh.caBundle}</pre>
+                </details>
+              </dd>
+            </>
+          )}
           <dt className="text-muted-foreground">Private key</dt>
           <dd>
-            Stored encrypted{gh.keyFingerprint && <> · fingerprint <code className="text-xs">{gh.keyFingerprint}</code></>}
+            Stored encrypted
+            {gh.keyFingerprint && (
+              <>
+                {' '}
+                · fingerprint <code className="text-xs">{gh.keyFingerprint}</code>
+              </>
+            )}
           </dd>
           {c.lastTestedAt && (
             <>
@@ -120,10 +156,20 @@ export function ConnectionPage() {
             onConfirm={async () => {
               setRefusal(undefined)
               await remove.mutateAsync({ orgId, connectionId })
-              await queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ConnectionService, cardinality: undefined }) })
+              await queryClient.invalidateQueries({
+                queryKey: createConnectQueryKey({
+                  schema: ConnectionService,
+                  cardinality: undefined,
+                }),
+              })
               await navigate({ to: '/connections' })
             }}
-            onError={(message, err) => setRefusal({ message, agents: err.findDetails(BoundAgentsSchema).flatMap((d) => d.agents) })}
+            onError={(message, err) =>
+              setRefusal({
+                message,
+                agents: err.findDetails(BoundAgentsSchema).flatMap((d) => d.agents),
+              })
+            }
           />
         </div>
       )}
