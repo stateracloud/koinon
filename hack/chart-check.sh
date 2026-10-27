@@ -517,7 +517,13 @@ secret_key KOINON_CHECKPOINTS_S3_REGION region
 has "agentd gets a scratch volume with the size limit" 'sizeLimit: "9Gi"' "${ckpt[@]}" --set checkpoints.scratchSize=9Gi
 # The default holds 2 backups and 1 restore of 4Gi each plus caches (values.yaml).
 has "the default scratch size covers the backups, a restore and the caches" 'sizeLimit: "14Gi"' "${ckpt[@]}"
-lacks "agentd holds no KEK: koinon-api hands out the repository passwords (ADR 0054)" 'KOINON_KEK_DIR' "${ckpt[@]}"
+agentd_kekenv=$(render --show-only templates/deployments.yaml "${ckpt[@]}" | awk 'BEGIN{RS="\n---\n"} /name: koinon-agentd|component: agentd/ && /KOINON_KEK_DIR/{n++} END{print n+0}')
+[[ $agentd_kekenv == 0 ]] || fail "koinon-agentd must not get KOINON_KEK_DIR (koinon-api hands out the repository passwords, ADR 0054)"
+for mode in default checkpoints; do
+  args=(); [[ $mode == checkpoints ]] && args=("${ckpt[@]}")
+  rec_kek=$(render --show-only templates/deployments.yaml ${args[@]+"${args[@]}"} | awk 'BEGIN{RS="\n---\n"} /name: koinon-reconciler/ && /name: KOINON_KEK_DIR/ && /\/secrets\/kek/{n++} END{print n+0}')
+  [[ $rec_kek == 1 ]] || fail "the reconciler must render KOINON_KEK_DIR=/secrets/kek ($mode mode), found $rec_kek"
+done
 agentd_kek=$(render --show-only templates/deployments.yaml "${ckpt[@]}" | awk 'BEGIN{RS="\n---\n"} /name: koinon-agentd|component: agentd/ && /mountPath: \/secrets\/kek/{n++} END{print n+0}')
 [[ $agentd_kek == 0 ]] || fail "koinon-agentd must not mount the KEKs with checkpoints on (ADR 0054)"
 holders=$(render --show-only templates/deployments.yaml "${ckpt[@]}" | awk 'BEGIN{RS="\n---\n"} /AWS_SECRET_ACCESS_KEY/{n++} END{print n+0}')

@@ -516,6 +516,8 @@ egress.allowedInternalHosts; both are joined. */}}
 
 {{- define "koinon.kekEnv" -}}
 {{- if eq .component "reconciler" }}
+- name: KOINON_KEK_DIR
+  value: /secrets/kek
 {{- else }}
 - name: KOINON_KEK_SECRET
   value: {{ include "koinon.kekSecretName" .root | quote }}
