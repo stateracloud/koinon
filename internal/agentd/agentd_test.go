@@ -870,6 +870,9 @@ var _ = Describe("Pool", func() {
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		// Mark it once the run waits on the sandbox, not before execute loads the agent (that
+		// fails the run as unhealthy, a different path).
+		Consistently(runState(ctx, r)).WithTimeout(500 * time.Millisecond).Should(Equal(store.RunStateStarting))
 		_, err := q.MarkAgentUnhealthy(ctx, store.MarkAgentUnhealthyParams{OrgID: e.org, ID: e.agent.ID, Reason: "the sandbox kept failing"})
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
