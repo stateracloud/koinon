@@ -9,8 +9,8 @@ import { describe, expect, it } from 'vitest'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { CostSchema, RunEventSchema, RunSchema, RunService, RunState, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
-import { ActorKind, TicketEventSchema, TicketSchema, TicketService, TicketStatus, type TicketEvent } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
-import { agent, orgId, renderApp, ticket, whoAmI } from '@/test-utils'
+import { ActorKind, TaskEventSchema, TaskSchema, TaskService, TaskState, type TaskEvent } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { agent, orgId, renderApp, task, whoAmI } from '@/test-utils'
 
 const t0 = Date.now() - 60_000
 
@@ -24,25 +24,25 @@ function chunk(seq: number, text: string) {
   })
 }
 
-function ticketEvent(seq: number, kind: string, payload: Record<string, string>, actor = ActorKind.USER) {
-  return create(TicketEventSchema, { seq: BigInt(seq), kind, actorKind: actor, payload, createdAt: timestampFromMs(t0 + seq) })
+function taskEvent(seq: number, kind: string, payload: Record<string, string>, actor = ActorKind.USER) {
+  return create(TaskEventSchema, { seq: BigInt(seq), kind, actorKind: actor, payload, createdAt: timestampFromMs(t0 + seq) })
 }
 
-describe('TicketPage', () => {
+describe('TaskPage', () => {
   it('streams run events into the timeline and resumes after a drop without duplicates', async () => {
     const watchCalls: WatchRunRequest[] = []
     const run = (state: RunState) => create(RunSchema, { id: 'r-1', orgId, ticketId: 't-1', state })
-    const events: TicketEvent[] = [
-      ticketEvent(1, 'ticket.created', { title: 'Say hello' }, ActorKind.SYSTEM),
-      ticketEvent(2, 'message', { text: 'Please say hello' }),
+    const events: TaskEvent[] = [
+      taskEvent(1, 'task.created', { title: 'Say hello' }, ActorKind.SYSTEM),
+      taskEvent(2, 'message', { text: 'Please say hello' }),
     ]
     const transport = createRouterTransport(({ service }) => {
       service(AuthService, { whoAmI: () => whoAmI() })
       service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
-      service(TicketService, {
-        getTicket: () => ({ ticket: ticket('t-1', 'Say hello', TicketStatus.IN_PROGRESS), events, runs: [run(RunState.RUNNING)] }),
+      service(TaskService, {
+        getTask: () => ({ task: task('t-1', 'Say hello', TaskState.WORKING), events, runs: [run(RunState.RUNNING)] }),
         appendMessage: (req) => {
-          const ev = ticketEvent(events.length + 1, 'message', { text: req.text })
+          const ev = taskEvent(events.length + 1, 'message', { text: req.text })
           events.push(ev)
           return { event: ev }
         },
@@ -66,7 +66,7 @@ describe('TicketPage', () => {
       })
     })
 
-    renderApp(transport, '/tickets/t-1')
+    renderApp(transport, '/tasks/t-1')
     expect(await screen.findByRole('heading', { name: 'Say hello' })).toBeInTheDocument()
     expect(await screen.findByText('Please say hello')).toBeInTheDocument()
 
@@ -86,7 +86,7 @@ describe('TicketPage', () => {
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('')
   })
 
-  it('shows the ticket total and each run\'s cost in USD', async () => {
+  it('shows the task total and each run\'s cost in USD', async () => {
     const cost = (usd: string, priced = true) => create(CostSchema, { requests: 2n, inputTokens: 1500n, outputTokens: 90n, usd, priced })
     const runs = [
       create(RunSchema, { id: 'r-1aaaaaaa-0', orgId, ticketId: 't-1', state: RunState.SUCCEEDED, cost: cost('0.0021') }),
@@ -95,15 +95,15 @@ describe('TicketPage', () => {
     const transport = createRouterTransport(({ service }) => {
       service(AuthService, { whoAmI: () => whoAmI() })
       service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
-      service(TicketService, {
-        getTicket: () => ({
-          ticket: { ...ticket('t-1', 'Say hello', TicketStatus.DONE), cost: cost('1234.5021', false) },
-          events: [ticketEvent(1, 'ticket.created', { title: 'Say hello' }, ActorKind.SYSTEM)],
+      service(TaskService, {
+        getTask: () => ({
+          task: { ...task('t-1', 'Say hello', TaskState.COMPLETED), cost: cost('1234.5021', false) },
+          events: [taskEvent(1, 'task.created', { title: 'Say hello' }, ActorKind.SYSTEM)],
           runs,
         }),
       })
       service(RunService, {
-        // A watched run carries no cost; the page keeps GetTicket's.
+        // A watched run carries no cost; the page keeps GetTask's.
         async *watchRun(req) {
           const r = runs.find((x) => x.id === req.runId)
           if (r) yield { item: { case: 'run', value: { ...r, cost: undefined } } }
@@ -111,7 +111,7 @@ describe('TicketPage', () => {
       })
     })
 
-    renderApp(transport, '/tickets/t-1')
+    renderApp(transport, '/tasks/t-1')
     expect(await screen.findByRole('heading', { name: 'Say hello' })).toBeInTheDocument()
     expect(screen.getByText('Cost at least $1,234.5021')).toHaveAttribute('title', '2 model requests, 1500 input and 90 output tokens; some requests had no price')
     const list = screen.getByRole('region', { name: 'Run costs' })
@@ -125,15 +125,15 @@ describe('TicketPage', () => {
       const transport = createRouterTransport(({ service }) => {
         service(AuthService, { whoAmI: () => whoAmI({ role }) })
         service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
-        service(TicketService, {
-          getTicket: () => ({
-            ticket: create(TicketSchema, { ...ticket('t-1', 'Say hello', TicketStatus.IN_PROGRESS), agentSummary, agentSummaryAt: agentSummary ? timestampFromMs(t0) : undefined }),
+        service(TaskService, {
+          getTask: () => ({
+            task: create(TaskSchema, { ...task('t-1', 'Say hello', TaskState.WORKING), agentSummary, agentSummaryAt: agentSummary ? timestampFromMs(t0) : undefined }),
             events: [],
             runs: [],
           }),
         })
       })
-      renderApp(transport, '/tickets/t-1')
+      renderApp(transport, '/tasks/t-1')
     }
 
     it('is collapsed by default, opens to plain preformatted text with the time, and injects no HTML', async () => {
@@ -170,15 +170,15 @@ describe('TicketPage', () => {
         service(AgentService, {
           listAgents: () => ({ agents: [{ ...agent('a-1', 'Repo helper'), unhealthyAt: timestampFromMs(t0), unhealthyReason: 'sandbox stuck three times' }] }),
         })
-        service(TicketService, { getTicket: () => ({ ticket: ticket('t-1', 'Say hello', TicketStatus.TODO), events: [], runs: [] }) })
+        service(TaskService, { getTask: () => ({ task: task('t-1', 'Say hello', TaskState.SUBMITTED), events: [], runs: [] }) })
       })
-      renderApp(transport, '/tickets/t-1')
+      renderApp(transport, '/tasks/t-1')
     }
 
     it('says why the run waits and links admins to Resume', async () => {
       setup(OrgRole.ADMIN)
       const alert = await screen.findByRole('alert')
-      expect(alert).toHaveTextContent('runs on this ticket wait until it is resumed')
+      expect(alert).toHaveTextContent('runs on this task wait until it is resumed')
       expect(alert).toHaveTextContent('sandbox stuck three times')
       expect(screen.getByRole('link', { name: 'Open the agent to resume it' })).toHaveAttribute('href', '/agents/a-1')
     })

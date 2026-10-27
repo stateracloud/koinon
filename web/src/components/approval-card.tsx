@@ -138,7 +138,7 @@ export function ApprovalCard({
       {two && (
         <section aria-label="Approvers" className="rounded-md border p-3 text-sm">
           <p className="font-medium">Needs two approvers</p>
-          {isPending && a.firstApprover && <p className="text-muted-foreground">First approval given; a second person (not the first approver, not the ticket&apos;s creator) must approve.</p>}
+          {isPending && a.firstApprover && <p className="text-muted-foreground">First approval given; a second person (not the first approver, not the task&apos;s creator) must approve.</p>}
         </section>
       )}
 
@@ -565,7 +565,7 @@ function DecisionForm({
   return (
     <div className="grid gap-2 border-t pt-3">
       <Label htmlFor={noteId}>Note (optional)</Label>
-      <Textarea id={noteId} rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Shown on the ticket; on denial the agent reads it." />
+      <Textarea id={noteId} rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Shown on the task; on denial the agent reads it." />
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-muted-foreground text-xs" title={sha}>
           Approves exactly this change (sha256 {sha.slice(0, 12)}…)

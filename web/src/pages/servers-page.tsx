@@ -279,7 +279,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
           Require two approvers
         </label>
         <p id={`${idBase}-two-help`} className="text-muted-foreground text-xs">
-          Two distinct admins or owners must approve, neither the person who created the ticket.
+          Two distinct admins or owners must approve, neither the person who created the task.
           {!askTier && ' This only applies in the Ask tier.'}
         </p>
       </div>

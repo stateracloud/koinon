@@ -4,12 +4,13 @@ import { Code, ConnectError } from '@connectrpc/connect'
 import { useQuery } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, Navigate, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NoticeBanner } from '@/components/notice-banner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AuthService, type WhoAmIResponse } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { useInbox } from '@/hooks/use-inbox'
 import { isApprover } from '@/lib/approvals'
 import { OrgProvider } from '@/lib/org'
 import { useOrg } from '@/lib/org-context'
@@ -79,6 +80,9 @@ function Shell({ who }: { who: WhoAmIResponse }) {
   const navLink = 'block rounded-md px-3 py-1.5 text-sm hover:bg-accent'
   const active = { 'aria-current': 'page' as const, className: 'bg-accent font-medium' }
   const admin = isApprover(org.role)
+  // The same polled queries the inbox page uses: one request serves both.
+  const waiting = useInbox().items.length
+  useDocumentTitle(waiting)
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside className="bg-card w-full shrink-0 border-b p-3 md:w-56 md:border-r md:border-b-0">
@@ -87,6 +91,14 @@ function Shell({ who }: { who: WhoAmIResponse }) {
         </Link>
         <nav aria-label="Main" className="flex flex-wrap gap-1 md:grid">
           <Link to="/" className={navLink} activeOptions={{ exact: true }} activeProps={active}>
+            Inbox
+            {waiting > 0 && (
+              <span data-testid="inbox-badge" aria-label={`${waiting} waiting on you`} className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-amber-600 px-1.5 text-xs font-semibold text-white">
+                {waiting}
+              </span>
+            )}
+          </Link>
+          <Link to="/board" className={navLink} activeProps={active}>
             Board
           </Link>
           <Link to="/agents" className={navLink} activeProps={active}>
@@ -167,4 +179,15 @@ function Shell({ who }: { who: WhoAmIResponse }) {
       </div>
     </div>
   )
+}
+
+/** useDocumentTitle puts the waiting count in the tab title so a background tab shows it. */
+function useDocumentTitle(waiting: number) {
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\) /, '')
+    document.title = waiting > 0 ? `(${waiting}) ${base}`.trim() : base
+    return () => {
+      document.title = base
+    }
+  }, [waiting])
 }
