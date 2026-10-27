@@ -219,3 +219,10 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   [0063](0063-forge-credential-classes.md), [0064](0064-work-tracker-connectors.md),
   [0066](0066-triggers-and-scheduling.md)
 - Research (session notes, 2026-10-26): `gitea-overlap.md`, `forge-and-trackers.md`
+
+- Amendment 2026-10-27 (wave-2 integration): `spec.capabilities.writes` (`api|push`) is connector
+  data and `CapabilitiesOf` copies it. The push writer takes the connection's CA bundle for the
+  fetch, the ref listing and the push (`gitpush.ForSite` builds the options from the connection's
+  base URL and bundle). A connection's base URL passes the platform's egress URL policy
+  (`egress.allowedInternalHosts`) in the API, in declarative import and, with a fresh lookup, in the
+  reconciler: private and internal hosts only when allow-listed.

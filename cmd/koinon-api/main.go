@@ -75,6 +75,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
@@ -436,6 +437,15 @@ func run() error {
 		if err := rt.Register(notifier.Registrar()); err != nil {
 			return err
 		}
+		// The org-partitioned queue for trigger and task-creation work (DB2): each org's limits are
+		// its trigger_concurrency and trigger_rate_per_minute settings. The trigger paths (TR2, TR3)
+		// enqueue through it with durable.EnqueueForOrg; until they land it only registers the queue.
+		if _, err := durable.NewOrgWork(rt, durable.OrgQueueConfig{
+			Defaults: orgsettings.QueueDefaults(),
+			Limits:   orgsettings.QueueLimits(store.New(pool), orgsettings.Defaults()),
+		}); err != nil {
+			return err
+		}
 		if err := rt.Launch(bgCtx); err != nil {
 			return err
 		}
@@ -518,14 +528,14 @@ func run() error {
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, URLPolicy: urlPolicy,
 	})
 	if kube != nil {
 		var sealer connections.Sealer
 		if keyring != nil {
 			sealer = keyring
 		}
-		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Sealer: sealer, Log: slog.Default()}
+		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
 		go imp.Run(bgCtx)
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
