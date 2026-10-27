@@ -194,7 +194,8 @@ file on 2026-10-26):
   ID (for example the pod name) or the durable runtime must stay at one replica. The other side:
   `ApplicationVersion` is the release version, so workflows left pending by the previous release
   (a long durable timer) are not recovered after an upgrade; decide how they are carried over.
-- Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.
+- ~~Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.~~ Answered by
+  the 2026-10-27 (DB2) amendment: `run_claimable`.
 - The burst window length, the pre-warm lead time and the jitter range.
 - The filter language for rules (CEL was ADR 0010's candidate) and whether a trigger has its own
   budget, as ADR 0010's subscriptions did.
@@ -277,3 +278,33 @@ Checked 2026-10-26 (`messaging-and-workflows.md` §2):
 - **Read side.** `internal/triggers`: `ForOrg`, `All` (every live org; query `ListActiveAgentVersionsAllOrgs`, on the cross-org allowlist) and `ForAgent`, each optionally filtered by type. A trigger is in effect when it is in the active version of an `active` agent; draft, archived and proposed versions contribute none. They do not check `unhealthy_at`; TR2 and TR3 decide what to do for an unhealthy agent. `templates.Trigger.Next(t)` computes the next schedule firing in the trigger's zone. Nothing is scheduled or fired by TR1; trigger state such as last-fired belongs to TR2 (no migration).
 - **Concurrency (review fix).** `ActivateAgent`'s UPDATE only matches a draft, or an active agent whose active version differs from the one named, so a concurrent duplicate gets no row and `Aborted`. `SetAgentTriggers` locks the agent row (`GetAgentForUpdate`, `FOR UPDATE`) before checking `base_version`, so two proposals on the same base cannot both succeed.
 - **Web.** The agent page has a Triggers section (the active version's, or the proposed ones while a version is pending) and, for admins and owners, an editor that proposes a new version; the existing Activate button activates it.
+
+## Amendment (2026-10-27, plan item DB2): per-org concurrency and rate limits as built
+
+Settles the open question on where per-org concurrency is enforced (#146, Andre, 2026-10-26).
+
+- **Run concurrency lives in Postgres.** `run_claimable` (migration 00025) refuses a claim while the
+  org already has `max_concurrent_runs` runs in `starting` or `running`; parked runs do not count.
+  `ClaimNextRun` and the reconciler's `has_demand` share that function, so a queued run held back by
+  the cap keeps no sandbox up. Default 20 per org, tunable in `org_settings.max_concurrent_runs`
+  (1 to 10000). Claims by different agents of one org that overlap can overshoot the cap by the
+  number of racing claimers; the cap is a fairness bound, not a billing limit.
+- **DBOS limits trigger firings, webhook processing and task creation, not runs.** One queue,
+  `koinon.org-work`, is partitioned by org with `WithPartitionConcurrency` and
+  `WithPartitionRateLimiter` (DBOS Go 1.7), so a burst from one org waits in its own partition.
+  Defaults per org: 4 items at once and 60 starts per minute. `internal/durable` exposes
+  `NewOrgWork` and `EnqueueForOrg` for TR2, TR3 and later webhooks.
+- **Per-org tuning.** DBOS applies one partition limit to all partitions of a queue, so an org whose
+  `org_settings` (`trigger_concurrency`, `trigger_rate_per_minute`) differ from the defaults is
+  enqueued on a profile queue `koinon.org-work/c<N>/r<M>p<seconds>`, registered on first use and still
+  partitioned by org. DBOS stores queue configuration in its tables and its runners reload the queue
+  list, so every replica serves a profile queue. Changed settings apply to work enqueued afterwards.
+  Many distinct limit pairs mean many queues; operators should keep to a few tiers.
+- **Restarts.** DBOS counts workflow starts in Postgres, so a rate limit holds when the API restarts
+  inside the window (tested by stopping and relaunching the runtime against the same database).
+- **2026-10-27 (DB2 review):** `orgsettings.QueueLimits` reads the org's `trigger_concurrency` and
+  `trigger_rate_per_minute` for `OrgQueueConfig.Limits`, and `orgsettings.QueueDefaults` fills
+  `OrgQueueConfig.Defaults` so an org left at the defaults stays on the main queue. The settings are
+  per minute, so production keeps `RateWindow` at one minute; the window is also part of the profile
+  queue name. Merge order: this PR carries migration 00025 and merges after the items that own 00023
+  and 00024 (or is renumbered at merge), because `hack/migrate-lint.sh` needs contiguous numbers.

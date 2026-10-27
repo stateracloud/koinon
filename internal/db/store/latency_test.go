@@ -114,7 +114,10 @@ var _ = Describe("latency defaults", func() {
 			def := orgsettings.Defaults()
 			got, err := orgsettings.Get(ctx, q, f.org, def)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(got).To(Equal(orgsettings.Settings{IdleTimeout: 10 * time.Minute, ParkWarm: 15 * time.Minute, QueueWait: 5 * time.Minute}))
+			Expect(got).To(Equal(orgsettings.Settings{
+				IdleTimeout: 10 * time.Minute, ParkWarm: 15 * time.Minute, QueueWait: 5 * time.Minute,
+				MaxConcurrentRuns: 20, TriggerConcurrency: 4, TriggerRatePerMinute: 60,
+			}))
 
 			warm := 30 * time.Minute
 			Expect(orgsettings.Set(ctx, q, f.org, orgsettings.Override{ParkWarm: &warm})).To(Succeed())
