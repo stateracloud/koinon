@@ -599,6 +599,9 @@ type Querier interface {
 	MarkQuestionsDelivered(ctx context.Context, arg MarkQuestionsDeliveredParams) (int64, error)
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
+	// The sandbox and its volume were deleted for the archive tier; the home is in the checkpoint
+	// that restore_checkpoint_id names.
+	MarkSandboxArchived(ctx context.Context, arg MarkSandboxArchivedParams) (AgentSandbox, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// A stuck sandbox, the work saved from it, and the end-of-turn summary and fresh-session

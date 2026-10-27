@@ -299,6 +299,44 @@ var _ = Describe("home checkpoints", func() {
 		Expect(got.HarnessSessionGeneration.String).To(Equal(generation))
 	})
 
+	It("restores an archived agent's home on its next run and loads the same session (plan item AR1)", func(ctx SpecContext) {
+		t := e.task(ctx, "first")
+		r1 := e.enqueue(ctx, t)
+		stop := e.pool("agentd-a")
+		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		stop()
+		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
+		Expect(err).NotTo(HaveOccurred())
+		generation := before.HarnessSessionGeneration.String
+
+		By("the sandbox stops; its stop backup completes")
+		id := request(ctx, store.CheckpointReasonStop)
+		e.pool("agentd-b", cps(ctx))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+
+		By("the reconciler archives it: restore pointed at the backup, sandbox and volume deleted")
+		_, err = q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: e.org, AgentID: e.agent.ID, CheckpointID: id})
+		Expect(err).NotTo(HaveOccurred())
+		e.recreateSandbox(ctx)
+		home.set(nil)
+		_, err = q.MarkSandboxArchived(ctx, store.MarkSandboxArchivedParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("the next run restores before the harness starts and reloads the session, not a reset")
+		e.message(ctx, t, "second")
+		r2 := e.enqueue(ctx, t)
+		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Expect(home.get()).To(HaveKeyWithValue("notes/today.md", "remember the milk"))
+		_, loads, _, _ := e.harness.snapshot()
+		Expect(loads).To(Equal([]string{"ses_1"}), "session/load")
+		evs := events(ctx, r2)
+		Expect(kinds(evs)[:2]).To(Equal([]string{"run.home_restored", "run.session"}))
+		Expect(kindsOf(taskEvents(ctx, e, t))).NotTo(ContainElement("run.session_reset"))
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.HarnessSessionGeneration.String).To(Equal(generation))
+	})
+
 	It("fails a backup that cannot be taken, after its attempts, and leaves the sandbox alone", func(ctx SpecContext) {
 		id := request(ctx, store.CheckpointReasonRecreate)
 		e.pool("agentd-a", cps(ctx, func(c *agentd.Checkpoints) {

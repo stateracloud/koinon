@@ -147,6 +147,10 @@ type Config struct {
 	// CheckpointStopWait is how long an idle stop waits for its checkpoint. Default
 	// DefaultCheckpointStopWait.
 	CheckpointStopWait time.Duration
+	// ArchiveAfter is how long a sandbox stays stopped before it and its volume are deleted, once
+	// its home's latest checkpoint is complete (plan item AR1, ADR 0032). Zero means
+	// DefaultArchiveAfter; negative turns the archive tier off. Needs Checkpoints.
+	ArchiveAfter time.Duration
 	// HomeRetention decides the home volume's fate on archive. Default RetentionDelete.
 	HomeRetention Retention
 	// Logger defaults to slog.Default().
@@ -204,6 +208,9 @@ type Reconciler struct {
 func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway, secrets SecretStore, cfg Config) (*Reconciler, error) {
 	if cfg.Gateway.Host == "" || cfg.Gateway.Port == 0 {
 		return nil, errors.New("reconciler: the agentgateway endpoint is required")
+	}
+	if cfg.ArchiveAfter == 0 {
+		cfg.ArchiveAfter = DefaultArchiveAfter
 	}
 	if cfg.IdleTimeout == 0 {
 		cfg.IdleTimeout = DefaultIdleTimeout
@@ -882,6 +889,11 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 
 	sb, err := r.backend.GetSandbox(ctx, ws, names.Sandbox)
 	if errors.Is(err, execution.ErrNotFound) {
+		if w.sb.ArchivedAt.Valid && !act.HasActive && !act.HasDemand && !r.woken(w.sb, tune) {
+			// Archived (archive.go): nothing wants the agent, so no sandbox is created. A run,
+			// a claimable park or a pre-wake signal creates one; the first run restores the home.
+			return r.recordState(ctx, w, store.SandboxStateDeleting, archivedPhase, archivedMessage)
+		}
 		if !hasRead {
 			// No sandbox references a GitHub record now: drop one left by a removed grant.
 			if err := r.deleteGitHub(ctx, ws, names); err != nil {
@@ -981,6 +993,8 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 				return err
 			}
 			r.log.Info("started sandbox for a run", w.logAttrs()...)
+		} else if done, err := r.archive(ctx, w, ws, sb, act, hash); err != nil || done {
+			return err
 		}
 	}
 	return r.record(ctx, w, sb, hash, "")

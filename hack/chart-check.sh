@@ -422,6 +422,9 @@ has "reconciler config carries the park warm window" 'parkWarm: 15m' --show-only
 has "reconciler config names the ask_user tool server" 'koinonTools:' --show-only templates/config.yaml
 has "the ask_user tool server is on the tools Service" 'svc:[0-9]+/mcp-koinon$' --show-only templates/config.yaml
 has "reconciler config carries the park warm window override" 'parkWarm: 30m' --set reconciler.parkWarm=30m --show-only templates/config.yaml
+has "reconciler config carries the archive window (AR1)" 'archiveAfter: 168h' --show-only templates/config.yaml
+has "reconciler config carries the archive window override" 'archiveAfter: 24h' --set reconciler.archiveAfter=24h --show-only templates/config.yaml
+has "reconciler config can turn the archive tier off" 'archiveAfter: -1h' --set reconciler.archiveAfter=-1h --show-only templates/config.yaml
 has "reconciler config carries the sandbox job bound" 'sandboxJobs: 8' --show-only templates/config.yaml
 # Flavor pre-pull (practice B6): off by default; needs a node selector; one init container per
 # flavor image through koinon.imageRef and the pull secrets; never in a sandbox namespace.
