@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -45,7 +46,13 @@ type Backend struct {
 	// workspace, which the reconciler converges concurrently (plan item LT1), and a profile
 	// imported twice at once is an AlreadyExists error.
 	profileMu sync.Mutex
+	// UploadTimeout ends an Upload that runs longer, besides the caller's own context. Zero
+	// means DefaultUploadTimeout.
+	UploadTimeout time.Duration
 }
+
+// DefaultUploadTimeout bounds one Upload when Backend.UploadTimeout is not set.
+const DefaultUploadTimeout = 30 * time.Minute
 
 var _ execution.Backend = (*Backend)(nil)
 
