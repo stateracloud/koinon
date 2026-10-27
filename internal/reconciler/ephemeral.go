@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 )
@@ -22,23 +23,20 @@ import (
 // workspace volume OpenShell 0.1.5 gives every sandbox and deletes with it (see sandboxSpec). The
 // agent keeps its single agent_sandboxes row, which points at the sandbox of the task that needs
 // one: the task of the run that holds the agent, else of the run claimed next, else of a parked
-// run (GetEphemeralFocusTask). When that task changes, the previous sandbox is deleted, volume and
-// all, and the row moves to the new name once it is gone. When no run needs a sandbox (the task
-// ended, or has no run left) the sandbox is deleted and not recreated. Nothing carries over
+// run, else of the latest run of a task that is still open (GetEphemeralFocusTask). When that task
+// changes, the previous sandbox is deleted, volume and all, and the row moves to the new name
+// once it is gone. A task between runs keeps its sandbox (the idle stop still applies); only the
+// task's end (completed, canceled, failed) deletes it, and it is not recreated. Nothing carries over
 // between tasks: memory is the task's notes and the ADR 0033 stores.
 //
 // A persistent agent whose row still names a task sandbox (the version that made it ephemeral is
 // no longer the active one) is moved back to the agent's own sandbox the same way. A running run
 // is never cut off: the row is left alone until it ends.
-func (r *Reconciler) ephemeralTurn(ctx context.Context, w *work, ws string) (done bool, err error) {
+func (r *Reconciler) ephemeralTurn(ctx context.Context, w *work, ws string, act store.GetAgentRunActivityRow) (done bool, err error) {
 	ephemeral := agentconfig.IsEphemeral(w.cfg)
 	persistent := execution.AgentSandboxName(w.org.ID.Bytes, w.agent.ID.Bytes)
 	if !ephemeral && w.sb.SandboxName == persistent {
 		return false, nil
-	}
-	act, err := r.q.GetAgentRunActivity(ctx, store.GetAgentRunActivityParams{OrgID: w.org.ID, AgentID: w.agent.ID})
-	if err != nil {
-		return false, fmt.Errorf("read run activity: %w", err)
 	}
 	want := persistent
 	focused := true
@@ -74,6 +72,13 @@ func (r *Reconciler) ephemeralTurn(ctx context.Context, w *work, ws string) (don
 				return false, err
 			}
 			r.log.Info("deleted the sandbox of an ended task", w.logAttrs()...)
+			// Not "sandbox.recreate" and no phase: ADR 0054's loop guard counts those.
+			if err := audit.RecordErr(ctx, r.q, audit.Event{
+				Org: w.org.ID, Actor: audit.System(), Action: "sandbox.delete", TargetKind: "agent", TargetID: w.agent.ID.String(),
+				After: map[string]any{"sandbox": cur, "reason": "ephemeral task ended"},
+			}); err != nil {
+				return false, err
+			}
 		}
 		sb.Phase = execution.PhaseDeleting
 		return true, r.record(ctx, w, sb, w.sb.SpecHash, "deleting the sandbox of the previous task")

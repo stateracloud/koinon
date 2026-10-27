@@ -736,15 +736,19 @@ var _ = Describe("Pool", func() {
 		})
 		task := e.task(ctx, "hello")
 		r := e.enqueue(ctx, task)
+		// The row still names a previous task's sandbox, which is ready: not this task's.
+		prev := execution.TaskSandboxName(e.org.Bytes, e.agent.ID.Bytes, [16]byte{1})
+		_, err := q.SetAgentSandboxName(ctx, store.SetAgentSandboxNameParams{OrgID: e.org, AgentID: e.agent.ID, SandboxName: prev})
+		Expect(err).NotTo(HaveOccurred())
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
-		// The row still names the agent's own sandbox, which is ready: not the task's.
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
 		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
 			"never runs in another task's sandbox")
 
 		// The reconciler renders the task's sandbox and moves the row.
 		name := execution.TaskSandboxName(e.org.Bytes, e.agent.ID.Bytes, task.ID.Bytes)
-		_, err := e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: name, Image: "ghcr.io/stateracloud/flavor-opencode:test"})
+		_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: name, Image: "ghcr.io/stateracloud/flavor-opencode:test"})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = q.SetAgentSandboxName(ctx, store.SetAgentSandboxNameParams{OrgID: e.org, AgentID: e.agent.ID, SandboxName: name})
 		Expect(err).NotTo(HaveOccurred())
