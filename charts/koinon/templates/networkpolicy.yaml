@@ -42,7 +42,8 @@ spec:
               {{- include "koinon.proxySelectorLabels" . | nindent 14 }}
               {{- end }}
     # Saved work from a stuck sandbox: koinon-agentd, which holds no key-encryption key, posts it here
-    # to be sealed (an HMAC credential per upload). Its own port, so agentd cannot reach the tools
+    # to be sealed (an HMAC credential per upload). Home checkpoints (ADR 0032) also ask here for
+    # each repository's password, which koinon-api opens with the KEK (an HMAC credential per request). Its own port, so agentd cannot reach the tools
     # below, which trust agentgateway's agent header. Sandboxes cannot reach it.
     - ports:
         - port: savedwork

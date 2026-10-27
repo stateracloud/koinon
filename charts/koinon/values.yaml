@@ -289,10 +289,11 @@ secrets:
 # recreation, and restores it into a recreated sandbox before the harness starts. A sandbox is
 # recreated only after its latest backup completed; a failed backup blocks the recreation and marks
 # the agent unhealthy with the reason. One repository per agent at orgs/<org>/homes/<agent>/; its
-# random password is sealed with the secret store's KEK. koinon-agentd is the only component with the
+# random password is sealed with the secret store's KEK, which only koinon-api holds: koinon-agentd
+# asks it for the password per checkpoint (ADR 0054). koinon-agentd is the only component with the
 # storage credentials, so the NetworkPolicy of the bucket's namespace needs to admit koinon-agentd
 # (and koinon-api) pods only. Give koinon-agentd room: about 512Mi of memory per concurrent backup
-# (agentd.resources) and as much scratch space as the largest home (scratchSize).
+# (agentd.resources) and scratch space for the staged homes (scratchSize).
 checkpoints:
   enabled: false
   s3:
@@ -307,7 +308,11 @@ checkpoints:
   # Time between a running sandbox's checkpoints.
   interval: 1h
   # Size limit of the emptyDir where koinon-agentd stages a home while it is saved or restored.
-  scratchSize: 8Gi
+  # A home stages up to 4Gi (checkpoint.DefaultLimits); 2 backups and 1 restore run at once
+  # (agentd Checkpoints.Concurrency and RestoreConcurrency), plus about 2Gi for kopia's caches:
+  # (2 + 1) * 4Gi + 2Gi. Going over the limit evicts the agentd pod, so lower it only together
+  # with the per-home limit.
+  scratchSize: 14Gi
 
 # GitHub connector (plan item C1). The REST API base URL used to verify connections, mint
 # installation tokens and open approved pull requests; GitHub Enterprise Server uses

@@ -516,8 +516,6 @@ egress.allowedInternalHosts; both are joined. */}}
 
 {{- define "koinon.kekEnv" -}}
 {{- if eq .component "reconciler" }}
-- name: KOINON_KEK_DIR
-  value: /secrets/kek
 {{- else }}
 - name: KOINON_KEK_SECRET
   value: {{ include "koinon.kekSecretName" .root | quote }}
@@ -625,11 +623,9 @@ it carries no credentials.
 - name: KOINON_LEASE
   value: {{ .Values.agentd.lease | default "30s" | quote }}
 {{- if .Values.checkpoints.enabled }}
-{{- /* Home checkpoints: agentd is the writer, the only holder of the S3 credentials (ADR 0032). */}}
+{{- /* Home checkpoints: agentd is the writer, the only holder of the S3 credentials, and holds no KEK: koinon-api hands it each repository password (ADR 0032, 0054). */}}
 - name: KOINON_CHECKPOINTS
   value: "true"
-- name: KOINON_KEK_DIR
-  value: /secrets/kek
 - name: KOINON_CHECKPOINTS_INTERVAL
   value: {{ .Values.checkpoints.interval | quote }}
 - name: KOINON_CHECKPOINTS_S3_BUCKET
