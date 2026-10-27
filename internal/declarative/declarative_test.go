@@ -462,6 +462,21 @@ var _ = Describe("Importer", func() {
 			Expect(site.CIDirs).To(Equal([]string{"ci/pipelines", "build/ci"}))
 		})
 
+		It("updates the stored CI directories when the Secret's ciDirs changes", func(ctx SpecContext) {
+			d := conn()
+			d["ciDirs"] = "ci/pipelines"
+			put(ctx, "gh", declarative.TypeConnection, slug, d)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			d["ciDirs"] = "build/ci\ndeploy"
+			put(ctx, "gh", declarative.TypeConnection, slug, d)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, _ := store.New(pool).ListConnections(ctx, org)
+			Expect(rows).To(HaveLen(1))
+			site, err := codehost.SiteOf(rows[0].Config)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(site.CIDirs).To(Equal([]string{"build/ci", "deploy"}))
+		})
+
 		It("ignores a connection Secret with an unsafe CI directory", func(ctx SpecContext) {
 			for _, v := range []string{"../up", "/abs", "."} {
 				d := conn()
