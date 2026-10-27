@@ -198,6 +198,7 @@ var _ = Describe("direct messages", func() {
 		again, err := c.tasks.SendDirectMessage(ctx, req)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(again.GetTask().GetId()).To(Equal(res.GetTask().GetId()))
+		Expect(again.GetEvent().GetSeq()).To(Equal(res.GetEvent().GetSeq()))
 		Expect(n(ctx, `SELECT count(*) FROM tasks WHERE org_id = $1`)).To(Equal(1))
 
 		reply, err := c.tasks.SendDirectMessage(ctx, &taskv1alpha1.SendDirectMessageRequest{

@@ -28,6 +28,8 @@ const (
 	SourceQuestion = "question"
 	// SourceChildTask keys on a child task ID.
 	SourceChildTask = "child_task"
+	// SourceDirectMessage keys on the client's message ID of a direct message (TR3).
+	SourceDirectMessage = "direct_message"
 )
 
 // TriggerFireKey is the dedupe key of one fire of a trigger: the trigger's ID and the scheduled

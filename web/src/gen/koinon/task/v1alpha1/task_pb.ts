@@ -571,7 +571,9 @@ export type SendDirectMessageResponse = Message<"koinon.task.v1alpha1.SendDirect
   task?: Task | undefined;
 
   /**
-   * The message as it entered the timeline. Unset when this call was a replay of an earlier one.
+   * The message as it entered the timeline. A replay of an earlier call returns no event when
+   * the API runs the delivery inline; with the durable queue it attaches to the finished
+   * delivery and returns the original event and created flag.
    *
    * @generated from field: koinon.task.v1alpha1.TaskEvent event = 2;
    */

@@ -392,3 +392,9 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
 - **Not done here.** Interruption of a running turn (v0.2, decision 12), burst batching, and the
   `ask_user` reply path of the same thread.
 
+
+- **2026-10-27 (TR3 review):** with the durable queue an API error is recorded as workflow output
+  under `dm:<org>:<message_id>` and replays for that ID. The web client therefore keeps a message ID
+  only after Unavailable and DeadlineExceeded (a possibly lost response) and takes a new one after any
+  other error. A durable replay returns the original event and created flag; an inline replay returns
+  no event. `SourceDirectMessage` lives with the other dedupe sources in `internal/durable`.

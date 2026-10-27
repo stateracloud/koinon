@@ -24,9 +24,6 @@ import (
 // agent's active version it starts a task, or, in an existing thread, reaches that thread's task.
 // The thread is the task; there is no table of its own.
 
-// SourceDirectMessage is the dedupe source of direct messages, keyed by the client's message ID.
-const SourceDirectMessage = "direct_message"
-
 // KindStatusChanged payload reason of a completed task reopened by a follow-up message.
 const reasonFollowUp = "follow_up"
 
@@ -91,7 +88,7 @@ func (s *Server) DeliverDirectMessage(ctx context.Context, in DirectMessage) (Di
 	var res DirectMessageResult
 	err := s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
 		res = DirectMessageResult{}
-		out, err := durable.Once(ctx, q, in.Org, SourceDirectMessage, in.MessageID, func(q *store.Queries) (string, pgtype.UUID, error) {
+		out, err := durable.Once(ctx, q, in.Org, durable.SourceDirectMessage, in.MessageID, func(q *store.Queries) (string, pgtype.UUID, error) {
 			id, err := s.deliverDirectMessage(ctx, q, in, &res)
 			return "task", id, err
 		})
@@ -141,7 +138,7 @@ func (s *Server) deliverDirectMessage(ctx context.Context, q *store.Queries, in 
 		}
 		if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 			OrgID: in.Org, TaskID: task.ID, Kind: KindTaskCreated, ActorKind: store.TaskActorKindSystem,
-			Payload: jsonPayload(map[string]any{"title": title, "source": SourceDirectMessage, "trigger": tr[0].ID}),
+			Payload: jsonPayload(map[string]any{"title": title, "source": durable.SourceDirectMessage, "trigger": tr[0].ID}),
 		}); err != nil {
 			return pgtype.UUID{}, err
 		}
@@ -177,7 +174,7 @@ func (s *Server) deliverDirectMessage(ctx context.Context, q *store.Queries, in 
 	}
 	// The message is the person's: agentd's prompt carries user messages. "display" is what the
 	// timeline shows, without the trigger's instruction.
-	payload := map[string]any{"text": text, "source": SourceDirectMessage, "message_id": in.MessageID}
+	payload := map[string]any{"text": text, "source": durable.SourceDirectMessage, "message_id": in.MessageID}
 	if text != in.Text {
 		payload["display"] = in.Text
 	}

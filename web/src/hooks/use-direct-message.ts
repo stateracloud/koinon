@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ConnectError } from '@connectrpc/connect'
+import { Code, ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRef } from 'react'
@@ -25,9 +25,17 @@ export function useDirectMessage(orgId: string, onSent?: (res: SendDirectMessage
   async function send({ agentId, text, taskId = '' }: DirectMessageInput) {
     const key = JSON.stringify([agentId, taskId, text])
     if (pendingId.current?.key !== key) pendingId.current = { key, id: crypto.randomUUID() }
-    const res = await mutation.mutateAsync({ orgId, agentId, taskId, text, messageId: pendingId.current.id })
-    pendingId.current = undefined
-    return res
+    try {
+      const res = await mutation.mutateAsync({ orgId, agentId, taskId, text, messageId: pendingId.current.id })
+      pendingId.current = undefined
+      return res
+    } catch (err) {
+      // Keep the ID only when the response may have been lost. Any other error is a verdict the
+      // server may have cached under this ID, so the next send must be a new message.
+      const code = ConnectError.from(err).code
+      if (code !== Code.Unavailable && code !== Code.DeadlineExceeded) pendingId.current = undefined
+      throw err
+    }
   }
   return { send, pending: mutation.isPending, error: mutation.error ? ConnectError.from(mutation.error).rawMessage : undefined }
 }
