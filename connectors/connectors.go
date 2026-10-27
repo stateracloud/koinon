@@ -82,7 +82,7 @@ const (
 	AuthDelegatedUser AuthType = "delegated-user"
 	// AuthStaticToken is a long-lived token of a bot account, for a code host that cannot mint
 	// credentials per use (ADR 0063).
-	AuthStaticToken AuthType = "static-token" //nolint:gosec // an auth type name, not a credential
+	AuthStaticToken AuthType = "static-token"
 )
 
 // Type is a validated connector type. Treat values returned by this package
