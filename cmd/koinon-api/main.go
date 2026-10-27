@@ -430,6 +430,7 @@ func run() error {
 	if !cfg.durable {
 		slog.Warn("schedule triggers do not fire: they run on the DBOS runtime (api.durable.enabled, --durable)")
 	}
+	var directMessages *services.DirectMessageQueue
 	if cfg.durable {
 		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
 		// missing schema fails the start instead of the API running without its timers.
@@ -457,6 +458,10 @@ func run() error {
 		// due time fire once. It starts below, once the services exist.
 		sched = schedule.New(schedule.Config{Logger: slog.Default()}, pool, orgWork)
 		if err := rt.Register(sched.Registrar()); err != nil {
+			return err
+		}
+		// Direct messages in the inbox chat (TR3) create their tasks on that queue.
+		if directMessages, err = services.RegisterDirectMessages(rt, orgWork); err != nil {
 			return err
 		}
 		if err := rt.Launch(bgCtx); err != nil {
@@ -541,7 +546,7 @@ func run() error {
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, URLPolicy: urlPolicy,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, URLPolicy: urlPolicy,
 	})
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
 	go svc.QuestionSweeper(bgCtx, cfg.sweepInterval)
