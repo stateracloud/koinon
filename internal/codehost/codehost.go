@@ -232,6 +232,9 @@ type Capabilities struct {
 	Writes string
 	// CIPaths are the path prefixes whose changes run CI, which the workflow guard refuses.
 	CIPaths []string
+	// CIPathsFoldCase is whether the provider's file system ignores case, so the guard matches
+	// CIPaths without regard to case. False (exact) unless the connector data says so.
+	CIPathsFoldCase bool
 }
 
 // Values of Capabilities.Writes.

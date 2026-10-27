@@ -84,6 +84,8 @@ var _ = Describe("ApprovalService", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.GetApproval().GetComment().GetBody()).To(Equal("Opened a PR."))
 		Expect(got.GetApproval().GetArgsSha256()).To(Equal(req.ArgsSha256))
+		Expect(got.GetApproval().GetCiPaths()).To(ContainElement(".github/workflows/"), "the card reads the CI paths from the connector data")
+		Expect(got.GetApproval().GetCiFoldCase()).To(BeTrue())
 
 		_, err = member.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: f.org, ApprovalId: id, ArgsSha256: req.ArgsSha256})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))

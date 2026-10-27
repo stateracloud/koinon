@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/stateracloud/koinon/internal/codehost"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 )
 
@@ -96,8 +97,10 @@ func decodeAs[T any, P interface {
 // Tool implements Call.
 func (*PullRequestArgs) Tool() string { return ToolCreatePullRequest }
 
-// Validate implements Call.
-func (a *PullRequestArgs) Validate() error { return ValidatePullRequest(*a) }
+// Validate implements Call. It checks the arguments' shape only: the workflow guard needs the
+// connection, so the tool server applies it when the call is recorded and the executor again
+// before it writes.
+func (a *PullRequestArgs) Validate() error { return ValidatePullRequest(*a, codehost.Guard{}) }
 
 // SetApprovalCall implements Call.
 func (a *PullRequestArgs) SetApprovalCall(out *approvalv1alpha1.Approval) {

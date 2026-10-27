@@ -215,6 +215,30 @@ var _ = Describe("Service", func() {
 		Expect(kinds(f.taskEvents(ctx))).To(Equal([]string{approvals.KindRequested}))
 	})
 
+	It("refuses a directory configured on the connection when the call is made and again when it runs", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard")
+		pr := func(path string) map[string]any {
+			return map[string]any{"branch": "koinon/ci", "title": "CI", "files": []map[string]any{{"path": path, "content": "x"}}}
+		}
+		By("recorded while the directory is not configured")
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, pr("ci/pipelines/build.yml"))
+
+		By("an admin configures the directory on the connection")
+		_, err := pool.Exec(ctx, `UPDATE connections SET config = config || '{"ciDirs":["ci/pipelines"]}'::jsonb WHERE org_id = $1`, f.org)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("the new call is refused at the tool server")
+		Expect(f.callRefused(ctx, githubtools.ToolCreatePullRequest, pr("ci/pipelines/other.yml"))).To(ContainSubstring("under ci/pipelines"))
+		Expect(f.callRefused(ctx, githubtools.ToolCreatePullRequest, pr(".github/workflows/ci.yml"))).To(ContainSubstring("under .github/workflows/"))
+
+		By("the recorded call is refused when it is approved, and nothing is written")
+		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).To(Equal(store.ApprovalStatusFailed))
+		Expect(row.Error.String).To(ContainSubstring("under ci/pipelines"))
+		Expect(f.gh.Snapshot("widgets").Calls).NotTo(HaveKey("POST git/commits"))
+	})
+
 	It("fails a recorded call of an unknown tool permanently and mints no token", func(ctx SpecContext) {
 		f := newFixture(ctx, "standard")
 		req := f.call(ctx, githubtools.ToolCommentOnIssue, map[string]any{"issue_number": 7, "body": "x"})

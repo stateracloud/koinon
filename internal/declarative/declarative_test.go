@@ -450,6 +450,29 @@ var _ = Describe("Importer", func() {
 			Expect(site.BaseURL).To(Equal("https://ghes.example.test:8443"))
 		})
 
+		It("imports a connection's CI directories, one per line or comma-separated", func(ctx SpecContext) {
+			d := conn()
+			d["ciDirs"] = "./ci/pipelines/\nbuild/ci, ci/pipelines"
+			put(ctx, "gh", declarative.TypeConnection, slug, d)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, _ := store.New(pool).ListConnections(ctx, org)
+			Expect(rows).To(HaveLen(1))
+			site, err := codehost.SiteOf(rows[0].Config)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(site.CIDirs).To(Equal([]string{"ci/pipelines", "build/ci"}))
+		})
+
+		It("ignores a connection Secret with an unsafe CI directory", func(ctx SpecContext) {
+			for _, v := range []string{"../up", "/abs", "."} {
+				d := conn()
+				d["ciDirs"] = v
+				put(ctx, "gh", declarative.TypeConnection, slug, d)
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				Expect(rows).To(BeEmpty(), v)
+			}
+		})
+
 		It("ignores a connection Secret with a bad base URL or CA bundle", func(ctx SpecContext) {
 			for k, v := range map[string]string{"baseUrl": "http://ghes.example.test", "caBundle": "not pem"} {
 				d := conn()

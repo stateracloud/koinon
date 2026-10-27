@@ -13,6 +13,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/stateracloud/koinon/internal/codehost"
 )
 
 // Limits on create_pull_request (ADR 0049, plan item C3).
@@ -100,10 +102,6 @@ func validLine(s string, maxRunes int) bool {
 	return !strings.ContainsFunc(s, unicode.IsControl)
 }
 
-// workflowDir is refused outright (ADR 0049): a workflow change would run in
-// CI with the repository's secrets as soon as the branch exists.
-const workflowDir = ".github/workflows/"
-
 // pathProblem returns why p is not a safe repository path, or "".
 func pathProblem(p string) string {
 	switch {
@@ -131,17 +129,15 @@ func pathProblem(p string) string {
 	if path.Clean(p) != p {
 		return fmt.Sprintf("path %q is not clean; write it as %q", p, path.Clean(p))
 	}
-	// Case-insensitive: a checkout on a case-insensitive file system would
-	// merge .GitHub/Workflows into .github/workflows.
-	if strings.HasPrefix(strings.ToLower(p), workflowDir) {
-		return fmt.Sprintf("path %q is under .github/workflows/: Koinon never proposes workflow changes; say on the task that the change needs one and stop", p)
-	}
 	return ""
 }
 
 // ValidatePullRequest checks args before anything is recorded. Every problem
-// is reported, so the agent can fix them in one go.
-func ValidatePullRequest(a PullRequestArgs) error {
+// is reported, so the agent can fix them in one go. The workflow guard g (ADR 0049, 0062)
+// refuses a change to the provider's CI paths, and to the connection's configured ones: a
+// workflow change would run in CI with the repository's secrets as soon as the branch exists.
+// The zero Guard refuses nothing.
+func ValidatePullRequest(a PullRequestArgs, g codehost.Guard) error {
 	var reasons []string
 	if !strings.HasPrefix(a.Branch, BranchPrefix) || len(a.Branch) == len(BranchPrefix) || !validRef(a.Branch) {
 		reasons = append(reasons, fmt.Sprintf("branch %q must be a new branch name starting with %s, for example %sfix-typo", a.Branch, BranchPrefix, BranchPrefix))
@@ -169,6 +165,8 @@ func ValidatePullRequest(a PullRequestArgs) error {
 	for _, f := range a.Files {
 		if p := pathProblem(f.Path); p != "" {
 			reasons = append(reasons, p)
+		} else if hit := g.Refuse(f.Path); hit != "" {
+			reasons = append(reasons, fmt.Sprintf("path %q is under %s: Koinon never proposes CI changes; say on the task that the change needs one and stop", f.Path, hit))
 		}
 		if seen[f.Path] {
 			reasons = append(reasons, fmt.Sprintf("path %q is listed twice", f.Path))
@@ -207,8 +205,8 @@ type Risk struct {
 	Files     int      `json:"files"`
 	Bytes     int      `json:"bytes"`
 	Deletions []string `json:"deletions,omitempty"`
-	// CI lists CI and automation configuration outside .github/workflows/
-	// (which is refused): actions, other CI systems, Dependabot and the like.
+	// CI lists CI and automation configuration outside the provider's CI paths
+	// (which are refused): actions, other CI systems, Dependabot and the like.
 	CI []string `json:"ci,omitempty"`
 	// Scripts lists files that are executed by tooling or people: shell and
 	// build scripts, Makefiles, git hooks.
