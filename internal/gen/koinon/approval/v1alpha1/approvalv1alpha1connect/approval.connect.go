@@ -39,6 +39,12 @@ const (
 	ApprovalServiceApproveProcedure = "/koinon.approval.v1alpha1.ApprovalService/Approve"
 	// ApprovalServiceDenyProcedure is the procedure name of the ApprovalService's Deny RPC.
 	ApprovalServiceDenyProcedure = "/koinon.approval.v1alpha1.ApprovalService/Deny"
+	// ApprovalServiceListApprovalScopesProcedure is the procedure name of the ApprovalService's
+	// ListApprovalScopes RPC.
+	ApprovalServiceListApprovalScopesProcedure = "/koinon.approval.v1alpha1.ApprovalService/ListApprovalScopes"
+	// ApprovalServiceRevokeApprovalScopeProcedure is the procedure name of the ApprovalService's
+	// RevokeApprovalScope RPC.
+	ApprovalServiceRevokeApprovalScopeProcedure = "/koinon.approval.v1alpha1.ApprovalService/RevokeApprovalScope"
 )
 
 var (
@@ -81,6 +87,22 @@ var (
 			Procedure:  ApprovalServiceDenyProcedure,
 		}
 	})
+	approvalServiceListApprovalScopesSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_approval_v1alpha1_approval_proto.Services().ByName("ApprovalService").Methods().ByName("ListApprovalScopes"),
+			Procedure:        ApprovalServiceListApprovalScopesProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	approvalServiceRevokeApprovalScopeSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_approval_v1alpha1_approval_proto.Services().ByName("ApprovalService").Methods().ByName("RevokeApprovalScope"),
+			Procedure:        ApprovalServiceRevokeApprovalScopeProcedure,
+			IdempotencyLevel: connect.IdempotencyIdempotent,
+		}
+	})
 )
 
 // ApprovalServiceClient is a client for the koinon.approval.v1alpha1.ApprovalService service.
@@ -111,6 +133,12 @@ type ApprovalServiceClient interface {
 	// Deny denies a pending request; the run resumes with the denial and the
 	// note. Admins and owners.
 	Deny(context.Context, *v1alpha1.DenyRequest) (*v1alpha1.DenyResponse, error)
+	// ListApprovalScopes returns the scopes that are active now (not revoked, not expired) for one
+	// agent, oldest first: what the agent's page shows next to its grants. Viewers and above.
+	ListApprovalScopes(context.Context, *v1alpha1.ListApprovalScopesRequest) (*v1alpha1.ListApprovalScopesResponse, error)
+	// RevokeApprovalScope ends a scope at once; the agent's next matching call needs a new
+	// approval. Revoking a scope that is already revoked returns it as it is. Admins and owners.
+	RevokeApprovalScope(context.Context, *v1alpha1.RevokeApprovalScopeRequest) (*v1alpha1.RevokeApprovalScopeResponse, error)
 }
 
 // NewApprovalServiceClient constructs a client for the koinon.approval.v1alpha1.ApprovalService
@@ -148,6 +176,12 @@ type ApprovalServiceHandler interface {
 	// Deny denies a pending request; the run resumes with the denial and the
 	// note. Admins and owners.
 	Deny(context.Context, *v1alpha1.DenyRequest) (*v1alpha1.DenyResponse, error)
+	// ListApprovalScopes returns the scopes that are active now (not revoked, not expired) for one
+	// agent, oldest first: what the agent's page shows next to its grants. Viewers and above.
+	ListApprovalScopes(context.Context, *v1alpha1.ListApprovalScopesRequest) (*v1alpha1.ListApprovalScopesResponse, error)
+	// RevokeApprovalScope ends a scope at once; the agent's next matching call needs a new
+	// approval. Revoking a scope that is already revoked returns it as it is. Admins and owners.
+	RevokeApprovalScope(context.Context, *v1alpha1.RevokeApprovalScopeRequest) (*v1alpha1.RevokeApprovalScopeResponse, error)
 }
 
 // RegisterApprovalServiceHandler registers svc as the koinon.approval.v1alpha1.ApprovalService
@@ -160,6 +194,8 @@ func RegisterApprovalServiceHandler(server *connect.Server, svc ApprovalServiceH
 		connect.Method{Spec: approvalServiceGetApprovalDiffSpec(), Handler: adapter.getApprovalDiff},
 		connect.Method{Spec: approvalServiceApproveSpec(), Handler: adapter.approve},
 		connect.Method{Spec: approvalServiceDenySpec(), Handler: adapter.deny},
+		connect.Method{Spec: approvalServiceListApprovalScopesSpec(), Handler: adapter.listApprovalScopes},
+		connect.Method{Spec: approvalServiceRevokeApprovalScopeSpec(), Handler: adapter.revokeApprovalScope},
 	)
 }
 
@@ -184,6 +220,14 @@ func (UnimplementedApprovalServiceHandler) Approve(context.Context, *v1alpha1.Ap
 
 func (UnimplementedApprovalServiceHandler) Deny(context.Context, *v1alpha1.DenyRequest) (*v1alpha1.DenyResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.approval.v1alpha1.ApprovalService.Deny is not implemented")
+}
+
+func (UnimplementedApprovalServiceHandler) ListApprovalScopes(context.Context, *v1alpha1.ListApprovalScopesRequest) (*v1alpha1.ListApprovalScopesResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.approval.v1alpha1.ApprovalService.ListApprovalScopes is not implemented")
+}
+
+func (UnimplementedApprovalServiceHandler) RevokeApprovalScope(context.Context, *v1alpha1.RevokeApprovalScopeRequest) (*v1alpha1.RevokeApprovalScopeResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.approval.v1alpha1.ApprovalService.RevokeApprovalScope is not implemented")
 }
 
 type approvalServiceClient struct {
@@ -225,6 +269,22 @@ func (c *approvalServiceClient) Approve(ctx context.Context, req *v1alpha1.Appro
 func (c *approvalServiceClient) Deny(ctx context.Context, req *v1alpha1.DenyRequest) (*v1alpha1.DenyResponse, error) {
 	var res v1alpha1.DenyResponse
 	if err := c.client.CallUnary(ctx, approvalServiceDenySpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *approvalServiceClient) ListApprovalScopes(ctx context.Context, req *v1alpha1.ListApprovalScopesRequest) (*v1alpha1.ListApprovalScopesResponse, error) {
+	var res v1alpha1.ListApprovalScopesResponse
+	if err := c.client.CallUnary(ctx, approvalServiceListApprovalScopesSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *approvalServiceClient) RevokeApprovalScope(ctx context.Context, req *v1alpha1.RevokeApprovalScopeRequest) (*v1alpha1.RevokeApprovalScopeResponse, error) {
+	var res v1alpha1.RevokeApprovalScopeResponse
+	if err := c.client.CallUnary(ctx, approvalServiceRevokeApprovalScopeSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -286,6 +346,30 @@ func (h approvalServiceHandler) deny(ctx context.Context, _ connect.Spec, stream
 		return err
 	}
 	res, err := h.svc.Deny(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h approvalServiceHandler) listApprovalScopes(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListApprovalScopesRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListApprovalScopes(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h approvalServiceHandler) revokeApprovalScope(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.RevokeApprovalScopeRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.RevokeApprovalScope(ctx, &req)
 	if err != nil {
 		return err
 	}

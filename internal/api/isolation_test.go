@@ -277,6 +277,16 @@ var isolationCases = map[string]isolationCase{
 			})
 		},
 	},
+	approvalv1alpha1connect.ApprovalServiceListApprovalScopesProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.approvals.ListApprovalScopes(ctx, &approvalv1alpha1.ListApprovalScopesRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	approvalv1alpha1connect.ApprovalServiceRevokeApprovalScopeProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.approvals.RevokeApprovalScope(ctx, &approvalv1alpha1.RevokeApprovalScopeRequest{OrgId: org, ScopeId: "0197a2f0-0000-7000-8000-000000000000"})
+		},
+	},
 	approvalv1alpha1connect.ApprovalServiceDenyProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.approvals.Deny(ctx, &approvalv1alpha1.DenyRequest{OrgId: org, ApprovalId: f.approval.ID.String()})
