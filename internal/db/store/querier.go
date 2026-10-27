@@ -131,6 +131,13 @@ type Querier interface {
 	CreateApprovalRequest(ctx context.Context, arg CreateApprovalRequestParams) (ApprovalRequest, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
+	// Scoped approvals (plan item AP1, ADR 0042 amendment).
+	//
+	// Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	CreateApprovalScope(ctx context.Context, arg CreateApprovalScopeParams) (ApprovalScope, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
 	// Connections (plan item C1). No query reads or writes secret material: it
 	// lives in the Kubernetes Secret named by secret_name.
 	//
@@ -212,6 +219,9 @@ type Querier interface {
 	FailHomeCheckpoint(ctx context.Context, arg FailHomeCheckpointParams) (HomeCheckpoint, error)
 	// Requests that never started because the sandbox was not ready for the configured wait.
 	FailStaleHomeCheckpoints(ctx context.Context, arg FailStaleHomeCheckpointsParams) ([]HomeCheckpoint, error)
+	// The scope that allows this call now: exact on agent, connector, tool and target; a task scope
+	// only for its task. A task scope wins over an agent scope (the narrower one is named).
+	FindActiveApprovalScope(ctx context.Context, arg FindActiveApprovalScopeParams) (ApprovalScope, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Questions an agent asks a person with ask_user (plan item TK3; ADR 0065). Every query on an
@@ -261,6 +271,7 @@ type Querier interface {
 	GetApprovalRequestByCall(ctx context.Context, arg GetApprovalRequestByCallParams) (ApprovalRequest, error)
 	// An agent may only read its own requests.
 	GetApprovalRequestForAgent(ctx context.Context, arg GetApprovalRequestForAgentParams) (ApprovalRequest, error)
+	GetApprovalScope(ctx context.Context, arg GetApprovalScopeParams) (ApprovalScope, error)
 	GetAuditChainHead(ctx context.Context, orgID pgtype.UUID) (AuditChainHead, error)
 	// The p90 of provider-reported input tokens per request byte over the newest 500 real
 	// (not estimated) requests of a model, and how many there were.
@@ -396,6 +407,7 @@ type Querier interface {
 	ListActiveAgentVersions(ctx context.Context, orgID pgtype.UUID) ([]ListActiveAgentVersionsRow, error)
 	// ListActiveAgentVersions across every live org, for the scheduler (ADR 0066).
 	ListActiveAgentVersionsAllOrgs(ctx context.Context) ([]ListActiveAgentVersionsAllOrgsRow, error)
+	ListActiveApprovalScopesForAgent(ctx context.Context, arg ListActiveApprovalScopesForAgentParams) ([]ApprovalScope, error)
 	// The config of each agent's active version, for the template default of its daily limit.
 	ListActiveVersionConfigs(ctx context.Context, orgID pgtype.UUID) ([]ListActiveVersionConfigsRow, error)
 	ListAgentBudgets(ctx context.Context, orgID pgtype.UUID) ([]ListAgentBudgetsRow, error)
@@ -652,6 +664,8 @@ type Querier interface {
 	ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraftParams) (Agent, error)
 	// Revokes the token and every token descended from it.
 	RevokeAPITokenTree(ctx context.Context, arg RevokeAPITokenTreeParams) ([]ApiToken, error)
+	// No row: unknown, or already revoked.
+	RevokeApprovalScope(ctx context.Context, arg RevokeApprovalScopeParams) (ApprovalScope, error)
 	RevokeOtherUserSessions(ctx context.Context, arg RevokeOtherUserSessionsParams) error
 	// Revokes only a grant that came from a platform admin group; it returns no row for any other.
 	RevokePlatformAdminFromGroup(ctx context.Context, userID pgtype.UUID) (pgtype.UUID, error)
@@ -669,6 +683,7 @@ type Querier interface {
 	SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error)
 	// The first of two approvals: remembered, the request stays pending.
 	SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error)
+	SetApprovalRequestScope(ctx context.Context, arg SetApprovalRequestScopeParams) error
 	// Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays
 	// until the old Secret is deleted (ClearConnectionSecretName), so a crash in between is finished
 	// at the next start.

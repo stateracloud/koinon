@@ -15,7 +15,172 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/approval/v1alpha1/approval.proto.
  */
 export const file_koinon_approval_v1alpha1_approval: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vYXBwcm92YWwvdjFhbHBoYTEvYXBwcm92YWwucHJvdG8SGGtvaW5vbi5hcHByb3ZhbC52MWFscGhhMSKOAQoEUmlzaxINCgVmaWxlcxgBIAEoAxINCgVieXRlcxgCIAEoAxIRCglkZWxldGlvbnMYAyADKAkSCgoCY2kYBCADKAkSDwoHc2NyaXB0cxgFIAMoCRIUCgxkZXBlbmRlbmNpZXMYBiADKAkSDgoGYmluYXJ5GAcgAygJEhIKCmV4ZWN1dGFibGUYCCADKAkiTwoKRmlsZUNoYW5nZRIMCgRwYXRoGAEgASgJEg8KB2NvbnRlbnQYAiABKAkSDgoGZGVsZXRlGAMgASgIEhIKCmV4ZWN1dGFibGUYBCABKAgigQEKD1B1bGxSZXF1ZXN0Q2FsbBIOCgZicmFuY2gYASABKAkSDAoEYmFzZRgCIAEoCRINCgV0aXRsZRgDIAEoCRIMCgRib2R5GAQgASgJEjMKBWZpbGVzGAUgAygLMiQua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkZpbGVDaGFuZ2UiMQoLQ29tbWVudENhbGwSFAoMaXNzdWVfbnVtYmVyGAEgASgDEgwKBGJvZHkYAiABKAki0AcKCEFwcHJvdmFsEgoKAmlkGAEgASgJEg4KBm9yZ19pZBgCIAEoCRIRCgl0aWNrZXRfaWQYAyABKAkSDgoGcnVuX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhEKCWNvbm5lY3RvchgGIAEoCRIMCgR0b29sGAcgASgJEg4KBnRhcmdldBgIIAEoCRIRCglhcmdzX2pzb24YCSABKAkSEwoLYXJnc19zaGEyNTYYCiABKAkSNAoIZGVjaXNpb24YCyABKA4yIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVjaXNpb24SMAoGc3RhdHVzGAwgASgOMiAua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlN0YXR1cxIsCgRyaXNrGA0gASgLMh4ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlJpc2sSQQoMcHVsbF9yZXF1ZXN0GA4gASgLMikua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlB1bGxSZXF1ZXN0Q2FsbEgAEjgKB2NvbW1lbnQYDyABKAsyJS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQ29tbWVudENhbGxIABIwCgNtY3AYHCABKAsyIS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuTWNwQ2FsbEgAEj0KCnNhdmVkX3dvcmsYHSABKAsyJy5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuU2F2ZWRXb3JrQ2FsbEgAEhIKCmRlY2lkZWRfYnkYECABKAkSLgoKZGVjaWRlZF9hdBgRIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASFQoNZGVjaXNpb25fbm90ZRgSIAEoCRInCgZyZXN1bHQYEyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Eg0KBWVycm9yGBQgASgJEhIKCmV4ZWN1dGlvbnMYFSABKAMSLgoKZXhwaXJlc19hdBgWIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKY3JlYXRlZF9hdBgXIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLwoLZXhlY3V0ZWRfYXQYGCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNhbl9kZWNpZGUYGSABKAgSGgoSYXBwcm92YWxzX3JlcXVpcmVkGBogASgFEhYKDmZpcnN0X2FwcHJvdmVyGBsgASgJEg4KBnN5c3RlbRgeIAEoCEIGCgRjYWxsIpYBCgdNY3BDYWxsEhEKCXNlcnZlcl9pZBgBIAEoCRITCgtzZXJ2ZXJfbmFtZRgCIAEoCRIUCgxjb250ZW50X2hhc2gYAyABKAkSHAoUY3VycmVudF9jb250ZW50X2hhc2gYBCABKAkSFQoNcmV2aWV3X3JlYXNvbhgFIAEoCRIYChB0b29sX2Rlc2NyaXB0aW9uGAYgASgJItoBCg1TYXZlZFdvcmtDYWxsEhIKCnJlcG9zaXRvcnkYASABKAkSDAoEYmFzZRgCIAEoCRIOCgZicmFuY2gYAyABKAkSMgoFZmlsZXMYBCADKAsyIy5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuU2F2ZWRGaWxlEhIKCnNpemVfYnl0ZXMYBSABKAMSDwoHc2tpcHBlZBgGIAMoCRIOCgZzdGF0dXMYByABKAkSLgoKZXhwaXJlc19hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiZwoJU2F2ZWRGaWxlEgwKBHBhdGgYASABKAkSDgoGc3RhdHVzGAIgASgJEg0KBWFkZGVkGAMgASgFEg8KB2RlbGV0ZWQYBCABKAUSDAoEc2l6ZRgFIAEoAxIOCgZiaW5hcnkYBiABKAgiOQoUTGlzdEFwcHJvdmFsc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhEKCXRpY2tldF9pZBgCIAEoCSJOChVMaXN0QXBwcm92YWxzUmVzcG9uc2USNQoJYXBwcm92YWxzGAEgAygLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmFsIjkKEkdldEFwcHJvdmFsUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkiSwoTR2V0QXBwcm92YWxSZXNwb25zZRI0CghhcHByb3ZhbBgBIAEoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZhbCI9ChZHZXRBcHByb3ZhbERpZmZSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgthcHByb3ZhbF9pZBgCIAEoCSKxAQoIRmlsZURpZmYSDAoEcGF0aBgBIAEoCRI0CgZzdGF0dXMYAiABKA4yJC5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRmlsZVN0YXR1cxIUCgx1bmlmaWVkX2RpZmYYAyABKAkSDgoGYmluYXJ5GAQgASgIEhcKD2ZhbGxiYWNrX3JlYXNvbhgFIAEoCRIQCghvbGRfbW9kZRgGIAEoCRIQCghuZXdfbW9kZRgHIAEoCSJaChdHZXRBcHByb3ZhbERpZmZSZXNwb25zZRIMCgRiYXNlGAEgASgJEjEKBWZpbGVzGAIgAygLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkZpbGVEaWZmIlgKDkFwcHJvdmVSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgthcHByb3ZhbF9pZBgCIAEoCRITCgthcmdzX3NoYTI1NhgDIAEoCRIMCgRub3RlGAQgASgJIkcKD0FwcHJvdmVSZXNwb25zZRI0CghhcHByb3ZhbBgBIAEoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZhbCJACgtEZW55UmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkSDAoEbm90ZRgDIAEoCSJECgxEZW55UmVzcG9uc2USNAoIYXBwcm92YWwYASABKAsyIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQXBwcm92YWwqrQEKBlN0YXR1cxIWChJTVEFUVVNfVU5TUEVDSUZJRUQQABISCg5TVEFUVVNfUEVORElORxABEhMKD1NUQVRVU19BUFBST1ZFRBACEhEKDVNUQVRVU19ERU5JRUQQAxITCg9TVEFUVVNfRVhFQ1VURUQQBBIRCg1TVEFUVVNfRkFJTEVEEAUSEgoOU1RBVFVTX0VYUElSRUQQBhITCg9TVEFUVVNfQ0FOQ0VMRUQQBypKCghEZWNpc2lvbhIYChRERUNJU0lPTl9VTlNQRUNJRklFRBAAEhAKDERFQ0lTSU9OX0FTSxABEhIKDkRFQ0lTSU9OX0FMTE9XEAIqcwoKRmlsZVN0YXR1cxIbChdGSUxFX1NUQVRVU19VTlNQRUNJRklFRBAAEhUKEUZJTEVfU1RBVFVTX0FEREVEEAESGAoURklMRV9TVEFUVVNfTU9ESUZJRUQQAhIXChNGSUxFX1NUQVRVU19ERUxFVEVEEAMysgQKD0FwcHJvdmFsU2VydmljZRJ1Cg1MaXN0QXBwcm92YWxzEi4ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkxpc3RBcHByb3ZhbHNSZXF1ZXN0Gi8ua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkxpc3RBcHByb3ZhbHNSZXNwb25zZSIDkAIBEm8KC0dldEFwcHJvdmFsEiwua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkdldEFwcHJvdmFsUmVxdWVzdBotLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5HZXRBcHByb3ZhbFJlc3BvbnNlIgOQAgESewoPR2V0QXBwcm92YWxEaWZmEjAua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkdldEFwcHJvdmFsRGlmZlJlcXVlc3QaMS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuR2V0QXBwcm92YWxEaWZmUmVzcG9uc2UiA5ACARJjCgdBcHByb3ZlEigua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmVSZXF1ZXN0Gikua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmVSZXNwb25zZSIDkAICElUKBERlbnkSJS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVueVJlcXVlc3QaJi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuRGVueVJlc3BvbnNlQldaVWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL2FwcHJvdmFsL3YxYWxwaGExO2FwcHJvdmFsdjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("Cidrb2lub24vYXBwcm92YWwvdjFhbHBoYTEvYXBwcm92YWwucHJvdG8SGGtvaW5vbi5hcHByb3ZhbC52MWFscGhhMSKGAwoNQXBwcm92YWxTY29wZRIKCgJpZBgBIAEoCRIOCgZvcmdfaWQYAiABKAkSEAoIYWdlbnRfaWQYAyABKAkSEQoJY29ubmVjdG9yGAQgASgJEgwKBHRvb2wYBSABKAkSDgoGdGFyZ2V0GAYgASgJEjEKBGtpbmQYByABKA4yIy5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuU2NvcGVLaW5kEg8KB3Rhc2tfaWQYCCABKAkSLgoKZXhwaXJlc19hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKY3JlYXRlZF9ieRgKIAEoCRIuCgpjcmVhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIaChJzb3VyY2VfYXBwcm92YWxfaWQYDCABKAkSLgoKcmV2b2tlZF9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKcmV2b2tlZF9ieRgOIAEoCSI9ChlMaXN0QXBwcm92YWxTY29wZXNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghhZ2VudF9pZBgCIAEoCSJVChpMaXN0QXBwcm92YWxTY29wZXNSZXNwb25zZRI3CgZzY29wZXMYASADKAsyJy5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQXBwcm92YWxTY29wZSI+ChpSZXZva2VBcHByb3ZhbFNjb3BlUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIc2NvcGVfaWQYAiABKAkiVQobUmV2b2tlQXBwcm92YWxTY29wZVJlc3BvbnNlEjYKBXNjb3BlGAEgASgLMicua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmFsU2NvcGUijgEKBFJpc2sSDQoFZmlsZXMYASABKAMSDQoFYnl0ZXMYAiABKAMSEQoJZGVsZXRpb25zGAMgAygJEgoKAmNpGAQgAygJEg8KB3NjcmlwdHMYBSADKAkSFAoMZGVwZW5kZW5jaWVzGAYgAygJEg4KBmJpbmFyeRgHIAMoCRISCgpleGVjdXRhYmxlGAggAygJIk8KCkZpbGVDaGFuZ2USDAoEcGF0aBgBIAEoCRIPCgdjb250ZW50GAIgASgJEg4KBmRlbGV0ZRgDIAEoCBISCgpleGVjdXRhYmxlGAQgASgIIoEBCg9QdWxsUmVxdWVzdENhbGwSDgoGYnJhbmNoGAEgASgJEgwKBGJhc2UYAiABKAkSDQoFdGl0bGUYAyABKAkSDAoEYm9keRgEIAEoCRIzCgVmaWxlcxgFIAMoCzIkLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5GaWxlQ2hhbmdlIjEKC0NvbW1lbnRDYWxsEhQKDGlzc3VlX251bWJlchgBIAEoAxIMCgRib2R5GAIgASgJIpsICghBcHByb3ZhbBIKCgJpZBgBIAEoCRIOCgZvcmdfaWQYAiABKAkSEQoJdGlja2V0X2lkGAMgASgJEg4KBnJ1bl9pZBgEIAEoCRIQCghhZ2VudF9pZBgFIAEoCRIRCgljb25uZWN0b3IYBiABKAkSDAoEdG9vbBgHIAEoCRIOCgZ0YXJnZXQYCCABKAkSEQoJYXJnc19qc29uGAkgASgJEhMKC2FyZ3Nfc2hhMjU2GAogASgJEjQKCGRlY2lzaW9uGAsgASgOMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkRlY2lzaW9uEjAKBnN0YXR1cxgMIAEoDjIgLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5TdGF0dXMSLAoEcmlzaxgNIAEoCzIeLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5SaXNrEkEKDHB1bGxfcmVxdWVzdBgOIAEoCzIpLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5QdWxsUmVxdWVzdENhbGxIABI4Cgdjb21tZW50GA8gASgLMiUua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkNvbW1lbnRDYWxsSAASMAoDbWNwGBwgASgLMiEua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLk1jcENhbGxIABI9CgpzYXZlZF93b3JrGB0gASgLMicua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlNhdmVkV29ya0NhbGxIABISCgpkZWNpZGVkX2J5GBAgASgJEi4KCmRlY2lkZWRfYXQYESABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDWRlY2lzaW9uX25vdGUYEiABKAkSJwoGcmVzdWx0GBMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBINCgVlcnJvchgUIAEoCRISCgpleGVjdXRpb25zGBUgASgDEi4KCmV4cGlyZXNfYXQYFiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmNyZWF0ZWRfYXQYFyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2V4ZWN1dGVkX2F0GBggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpjYW5fZGVjaWRlGBkgASgIEhoKEmFwcHJvdmFsc19yZXF1aXJlZBgaIAEoBRIWCg5maXJzdF9hcHByb3ZlchgbIAEoCRIOCgZzeXN0ZW0YHiABKAgSEAoIc2NvcGVfaWQYHyABKAkSNwoKc2NvcGVfa2luZBggIAEoDjIjLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5TY29wZUtpbmRCBgoEY2FsbCKWAQoHTWNwQ2FsbBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLc2VydmVyX25hbWUYAiABKAkSFAoMY29udGVudF9oYXNoGAMgASgJEhwKFGN1cnJlbnRfY29udGVudF9oYXNoGAQgASgJEhUKDXJldmlld19yZWFzb24YBSABKAkSGAoQdG9vbF9kZXNjcmlwdGlvbhgGIAEoCSLaAQoNU2F2ZWRXb3JrQ2FsbBISCgpyZXBvc2l0b3J5GAEgASgJEgwKBGJhc2UYAiABKAkSDgoGYnJhbmNoGAMgASgJEjIKBWZpbGVzGAQgAygLMiMua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLlNhdmVkRmlsZRISCgpzaXplX2J5dGVzGAUgASgDEg8KB3NraXBwZWQYBiADKAkSDgoGc3RhdHVzGAcgASgJEi4KCmV4cGlyZXNfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wImcKCVNhdmVkRmlsZRIMCgRwYXRoGAEgASgJEg4KBnN0YXR1cxgCIAEoCRINCgVhZGRlZBgDIAEoBRIPCgdkZWxldGVkGAQgASgFEgwKBHNpemUYBSABKAMSDgoGYmluYXJ5GAYgASgIIjkKFExpc3RBcHByb3ZhbHNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIRCgl0aWNrZXRfaWQYAiABKAkiTgoVTGlzdEFwcHJvdmFsc1Jlc3BvbnNlEjUKCWFwcHJvdmFscxgBIAMoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZhbCI5ChJHZXRBcHByb3ZhbFJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC2FwcHJvdmFsX2lkGAIgASgJIksKE0dldEFwcHJvdmFsUmVzcG9uc2USNAoIYXBwcm92YWwYASABKAsyIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQXBwcm92YWwiPQoWR2V0QXBwcm92YWxEaWZmUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLYXBwcm92YWxfaWQYAiABKAkisQEKCEZpbGVEaWZmEgwKBHBhdGgYASABKAkSNAoGc3RhdHVzGAIgASgOMiQua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkZpbGVTdGF0dXMSFAoMdW5pZmllZF9kaWZmGAMgASgJEg4KBmJpbmFyeRgEIAEoCBIXCg9mYWxsYmFja19yZWFzb24YBSABKAkSEAoIb2xkX21vZGUYBiABKAkSEAoIbmV3X21vZGUYByABKAkiWgoXR2V0QXBwcm92YWxEaWZmUmVzcG9uc2USDAoEYmFzZRgBIAEoCRIxCgVmaWxlcxgCIAMoCzIiLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5GaWxlRGlmZiK9AQoOQXBwcm92ZVJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC2FwcHJvdmFsX2lkGAIgASgJEhMKC2FyZ3Nfc2hhMjU2GAMgASgJEgwKBG5vdGUYBCABKAkSMgoFc2NvcGUYBSABKA4yIy5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuU2NvcGVLaW5kEi8KC3Njb3BlX3VudGlsGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJHCg9BcHByb3ZlUmVzcG9uc2USNAoIYXBwcm92YWwYASABKAsyIi5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuQXBwcm92YWwiQAoLRGVueVJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC2FwcHJvdmFsX2lkGAIgASgJEgwKBG5vdGUYAyABKAkiRAoMRGVueVJlc3BvbnNlEjQKCGFwcHJvdmFsGAEgASgLMiIua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkFwcHJvdmFsKmcKCVNjb3BlS2luZBIaChZTQ09QRV9LSU5EX1VOU1BFQ0lGSUVEEAASEwoPU0NPUEVfS0lORF9PTkNFEAESEwoPU0NPUEVfS0lORF9UQVNLEAISFAoQU0NPUEVfS0lORF9BR0VOVBADKq0BCgZTdGF0dXMSFgoSU1RBVFVTX1VOU1BFQ0lGSUVEEAASEgoOU1RBVFVTX1BFTkRJTkcQARITCg9TVEFUVVNfQVBQUk9WRUQQAhIRCg1TVEFUVVNfREVOSUVEEAMSEwoPU1RBVFVTX0VYRUNVVEVEEAQSEQoNU1RBVFVTX0ZBSUxFRBAFEhIKDlNUQVRVU19FWFBJUkVEEAYSEwoPU1RBVFVTX0NBTkNFTEVEEAcqSgoIRGVjaXNpb24SGAoUREVDSVNJT05fVU5TUEVDSUZJRUQQABIQCgxERUNJU0lPTl9BU0sQARISCg5ERUNJU0lPTl9BTExPVxACKnMKCkZpbGVTdGF0dXMSGwoXRklMRV9TVEFUVVNfVU5TUEVDSUZJRUQQABIVChFGSUxFX1NUQVRVU19BRERFRBABEhgKFEZJTEVfU1RBVFVTX01PRElGSUVEEAISFwoTRklMRV9TVEFUVVNfREVMRVRFRBADMsMGCg9BcHByb3ZhbFNlcnZpY2USdQoNTGlzdEFwcHJvdmFscxIuLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5MaXN0QXBwcm92YWxzUmVxdWVzdBovLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5MaXN0QXBwcm92YWxzUmVzcG9uc2UiA5ACARJvCgtHZXRBcHByb3ZhbBIsLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5HZXRBcHByb3ZhbFJlcXVlc3QaLS5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuR2V0QXBwcm92YWxSZXNwb25zZSIDkAIBEnsKD0dldEFwcHJvdmFsRGlmZhIwLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5HZXRBcHByb3ZhbERpZmZSZXF1ZXN0GjEua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkdldEFwcHJvdmFsRGlmZlJlc3BvbnNlIgOQAgESYwoHQXBwcm92ZRIoLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZlUmVxdWVzdBopLmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5BcHByb3ZlUmVzcG9uc2UiA5ACAhJVCgREZW55EiUua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkRlbnlSZXF1ZXN0GiYua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkRlbnlSZXNwb25zZRKEAQoSTGlzdEFwcHJvdmFsU2NvcGVzEjMua29pbm9uLmFwcHJvdmFsLnYxYWxwaGExLkxpc3RBcHByb3ZhbFNjb3Blc1JlcXVlc3QaNC5rb2lub24uYXBwcm92YWwudjFhbHBoYTEuTGlzdEFwcHJvdmFsU2NvcGVzUmVzcG9uc2UiA5ACARKHAQoTUmV2b2tlQXBwcm92YWxTY29wZRI0LmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5SZXZva2VBcHByb3ZhbFNjb3BlUmVxdWVzdBo1LmtvaW5vbi5hcHByb3ZhbC52MWFscGhhMS5SZXZva2VBcHByb3ZhbFNjb3BlUmVzcG9uc2UiA5ACAkJXWlVnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9hcHByb3ZhbC92MWFscGhhMTthcHByb3ZhbHYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+
+/**
+ * ApprovalScope is an approval that reaches beyond one call. Matching is exact on agent,
+ * connector, tool and target; arguments are not part of it.
+ *
+ * @generated from message koinon.approval.v1alpha1.ApprovalScope
+ */
+export type ApprovalScope = Message<"koinon.approval.v1alpha1.ApprovalScope"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string org_id = 2;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string agent_id = 3;
+   */
+  agentId: string;
+
+  /**
+   * @generated from field: string connector = 4;
+   */
+  connector: string;
+
+  /**
+   * @generated from field: string tool = 5;
+   */
+  tool: string;
+
+  /**
+   * @generated from field: string target = 6;
+   */
+  target: string;
+
+  /**
+   * @generated from field: koinon.approval.v1alpha1.ScopeKind kind = 7;
+   */
+  kind: ScopeKind;
+
+  /**
+   * Set for a task scope.
+   *
+   * @generated from field: string task_id = 8;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp expires_at = 9;
+   */
+  expiresAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string created_by = 10;
+   */
+  createdBy: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 11;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string source_approval_id = 12;
+   */
+  sourceApprovalId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp revoked_at = 13;
+   */
+  revokedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: string revoked_by = 14;
+   */
+  revokedBy: string;
+};
+
+/**
+ * Describes the message koinon.approval.v1alpha1.ApprovalScope.
+ * Use `create(ApprovalScopeSchema)` to create a new message.
+ */
+export const ApprovalScopeSchema: GenMessage<ApprovalScope> = /*@__PURE__*/
+  messageDesc(file_koinon_approval_v1alpha1_approval, 0);
+
+/**
+ * @generated from message koinon.approval.v1alpha1.ListApprovalScopesRequest
+ */
+export type ListApprovalScopesRequest = Message<"koinon.approval.v1alpha1.ListApprovalScopesRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string agent_id = 2;
+   */
+  agentId: string;
+};
+
+/**
+ * Describes the message koinon.approval.v1alpha1.ListApprovalScopesRequest.
+ * Use `create(ListApprovalScopesRequestSchema)` to create a new message.
+ */
+export const ListApprovalScopesRequestSchema: GenMessage<ListApprovalScopesRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_approval_v1alpha1_approval, 1);
+
+/**
+ * @generated from message koinon.approval.v1alpha1.ListApprovalScopesResponse
+ */
+export type ListApprovalScopesResponse = Message<"koinon.approval.v1alpha1.ListApprovalScopesResponse"> & {
+  /**
+   * @generated from field: repeated koinon.approval.v1alpha1.ApprovalScope scopes = 1;
+   */
+  scopes: ApprovalScope[];
+};
+
+/**
+ * Describes the message koinon.approval.v1alpha1.ListApprovalScopesResponse.
+ * Use `create(ListApprovalScopesResponseSchema)` to create a new message.
+ */
+export const ListApprovalScopesResponseSchema: GenMessage<ListApprovalScopesResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_approval_v1alpha1_approval, 2);
+
+/**
+ * @generated from message koinon.approval.v1alpha1.RevokeApprovalScopeRequest
+ */
+export type RevokeApprovalScopeRequest = Message<"koinon.approval.v1alpha1.RevokeApprovalScopeRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string scope_id = 2;
+   */
+  scopeId: string;
+};
+
+/**
+ * Describes the message koinon.approval.v1alpha1.RevokeApprovalScopeRequest.
+ * Use `create(RevokeApprovalScopeRequestSchema)` to create a new message.
+ */
+export const RevokeApprovalScopeRequestSchema: GenMessage<RevokeApprovalScopeRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_approval_v1alpha1_approval, 3);
+
+/**
+ * @generated from message koinon.approval.v1alpha1.RevokeApprovalScopeResponse
+ */
+export type RevokeApprovalScopeResponse = Message<"koinon.approval.v1alpha1.RevokeApprovalScopeResponse"> & {
+  /**
+   * @generated from field: koinon.approval.v1alpha1.ApprovalScope scope = 1;
+   */
+  scope?: ApprovalScope | undefined;
+};
+
+/**
+ * Describes the message koinon.approval.v1alpha1.RevokeApprovalScopeResponse.
+ * Use `create(RevokeApprovalScopeResponseSchema)` to create a new message.
+ */
+export const RevokeApprovalScopeResponseSchema: GenMessage<RevokeApprovalScopeResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_approval_v1alpha1_approval, 4);
 
 /**
  * Risk is the push-and-run summary the approval card leads with (plan item
@@ -80,7 +245,7 @@ export type Risk = Message<"koinon.approval.v1alpha1.Risk"> & {
  * Use `create(RiskSchema)` to create a new message.
  */
 export const RiskSchema: GenMessage<Risk> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 0);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 5);
 
 /**
  * FileChange is one file of a proposed pull request, with its full new
@@ -119,7 +284,7 @@ export type FileChange = Message<"koinon.approval.v1alpha1.FileChange"> & {
  * Use `create(FileChangeSchema)` to create a new message.
  */
 export const FileChangeSchema: GenMessage<FileChange> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 1);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 6);
 
 /**
  * PullRequestCall is create_pull_request's arguments.
@@ -162,7 +327,7 @@ export type PullRequestCall = Message<"koinon.approval.v1alpha1.PullRequestCall"
  * Use `create(PullRequestCallSchema)` to create a new message.
  */
 export const PullRequestCallSchema: GenMessage<PullRequestCall> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 2);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 7);
 
 /**
  * CommentCall is comment_on_issue's arguments.
@@ -186,7 +351,7 @@ export type CommentCall = Message<"koinon.approval.v1alpha1.CommentCall"> & {
  * Use `create(CommentCallSchema)` to create a new message.
  */
 export const CommentCallSchema: GenMessage<CommentCall> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 3);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 8);
 
 /**
  * Approval is one recorded ask-tier call.
@@ -380,6 +545,19 @@ export type Approval = Message<"koinon.approval.v1alpha1.Approval"> & {
    * @generated from field: bool system = 30;
    */
   system: boolean;
+
+  /**
+   * scope_id is the scope that let this call run without a decision; empty when a person (or the
+   * Trusted preset) decided it. scope_kind says which kind it was.
+   *
+   * @generated from field: string scope_id = 31;
+   */
+  scopeId: string;
+
+  /**
+   * @generated from field: koinon.approval.v1alpha1.ScopeKind scope_kind = 32;
+   */
+  scopeKind: ScopeKind;
 };
 
 /**
@@ -387,7 +565,7 @@ export type Approval = Message<"koinon.approval.v1alpha1.Approval"> & {
  * Use `create(ApprovalSchema)` to create a new message.
  */
 export const ApprovalSchema: GenMessage<Approval> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 4);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 9);
 
 /**
  * McpCall describes a call to a remote MCP server (ADR 0057). The call is bound to the server, its URL
@@ -440,7 +618,7 @@ export type McpCall = Message<"koinon.approval.v1alpha1.McpCall"> & {
  * Use `create(McpCallSchema)` to create a new message.
  */
 export const McpCallSchema: GenMessage<McpCall> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 5);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 10);
 
 /**
  * SavedWorkCall describes uncommitted work saved from a stuck sandbox, as a diffstat. The files
@@ -502,7 +680,7 @@ export type SavedWorkCall = Message<"koinon.approval.v1alpha1.SavedWorkCall"> & 
  * Use `create(SavedWorkCallSchema)` to create a new message.
  */
 export const SavedWorkCallSchema: GenMessage<SavedWorkCall> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 6);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 11);
 
 /**
  * SavedFile is one file of saved work.
@@ -548,7 +726,7 @@ export type SavedFile = Message<"koinon.approval.v1alpha1.SavedFile"> & {
  * Use `create(SavedFileSchema)` to create a new message.
  */
 export const SavedFileSchema: GenMessage<SavedFile> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 7);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 12);
 
 /**
  * ListApprovalsRequest names the org and, optionally, a ticket.
@@ -575,7 +753,7 @@ export type ListApprovalsRequest = Message<"koinon.approval.v1alpha1.ListApprova
  * Use `create(ListApprovalsRequestSchema)` to create a new message.
  */
 export const ListApprovalsRequestSchema: GenMessage<ListApprovalsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 8);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 13);
 
 /**
  * ListApprovalsResponse holds the requests, without their decoded calls.
@@ -594,7 +772,7 @@ export type ListApprovalsResponse = Message<"koinon.approval.v1alpha1.ListApprov
  * Use `create(ListApprovalsResponseSchema)` to create a new message.
  */
 export const ListApprovalsResponseSchema: GenMessage<ListApprovalsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 9);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 14);
 
 /**
  * GetApprovalRequest names a request.
@@ -618,7 +796,7 @@ export type GetApprovalRequest = Message<"koinon.approval.v1alpha1.GetApprovalRe
  * Use `create(GetApprovalRequestSchema)` to create a new message.
  */
 export const GetApprovalRequestSchema: GenMessage<GetApprovalRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 10);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 15);
 
 /**
  * GetApprovalResponse holds the request with its decoded call.
@@ -637,7 +815,7 @@ export type GetApprovalResponse = Message<"koinon.approval.v1alpha1.GetApprovalR
  * Use `create(GetApprovalResponseSchema)` to create a new message.
  */
 export const GetApprovalResponseSchema: GenMessage<GetApprovalResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 11);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 16);
 
 /**
  * GetApprovalDiffRequest names a request.
@@ -661,7 +839,7 @@ export type GetApprovalDiffRequest = Message<"koinon.approval.v1alpha1.GetApprov
  * Use `create(GetApprovalDiffRequestSchema)` to create a new message.
  */
 export const GetApprovalDiffRequestSchema: GenMessage<GetApprovalDiffRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 12);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 17);
 
 /**
  * FileDiff compares one file with its current version on the base branch.
@@ -726,7 +904,7 @@ export type FileDiff = Message<"koinon.approval.v1alpha1.FileDiff"> & {
  * Use `create(FileDiffSchema)` to create a new message.
  */
 export const FileDiffSchema: GenMessage<FileDiff> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 13);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 18);
 
 /**
  * GetApprovalDiffResponse holds one FileDiff per file of the call, in the
@@ -754,7 +932,7 @@ export type GetApprovalDiffResponse = Message<"koinon.approval.v1alpha1.GetAppro
  * Use `create(GetApprovalDiffResponseSchema)` to create a new message.
  */
 export const GetApprovalDiffResponseSchema: GenMessage<GetApprovalDiffResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 14);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 19);
 
 /**
  * ApproveRequest names a request and the hash the approver saw.
@@ -783,6 +961,24 @@ export type ApproveRequest = Message<"koinon.approval.v1alpha1.ApproveRequest"> 
    * @generated from field: string note = 4;
    */
   note: string;
+
+  /**
+   * scope widens the approval beyond this call: SCOPE_KIND_TASK or SCOPE_KIND_AGENT (unspecified
+   * and once are this call only). Needs an admin or owner (the same role as approving), and fails
+   * with INVALID_ARGUMENT for a request that needs two approvers or that Koinon made itself.
+   * Applies when the approval takes effect (the second approval of two is never scoped).
+   *
+   * @generated from field: koinon.approval.v1alpha1.ScopeKind scope = 5;
+   */
+  scope: ScopeKind;
+
+  /**
+   * scope_until is when a wider scope ends. Required for SCOPE_KIND_AGENT (at most one year
+   * ahead); a task scope defaults to 30 days and may not be longer than that.
+   *
+   * @generated from field: google.protobuf.Timestamp scope_until = 6;
+   */
+  scopeUntil?: Timestamp | undefined;
 };
 
 /**
@@ -790,7 +986,7 @@ export type ApproveRequest = Message<"koinon.approval.v1alpha1.ApproveRequest"> 
  * Use `create(ApproveRequestSchema)` to create a new message.
  */
 export const ApproveRequestSchema: GenMessage<ApproveRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 15);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 20);
 
 /**
  * ApproveResponse holds the request after execution: executed with its
@@ -810,7 +1006,7 @@ export type ApproveResponse = Message<"koinon.approval.v1alpha1.ApproveResponse"
  * Use `create(ApproveResponseSchema)` to create a new message.
  */
 export const ApproveResponseSchema: GenMessage<ApproveResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 16);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 21);
 
 /**
  * DenyRequest names a request.
@@ -841,7 +1037,7 @@ export type DenyRequest = Message<"koinon.approval.v1alpha1.DenyRequest"> & {
  * Use `create(DenyRequestSchema)` to create a new message.
  */
 export const DenyRequestSchema: GenMessage<DenyRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 17);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 22);
 
 /**
  * DenyResponse holds the denied request.
@@ -860,7 +1056,50 @@ export type DenyResponse = Message<"koinon.approval.v1alpha1.DenyResponse"> & {
  * Use `create(DenyResponseSchema)` to create a new message.
  */
 export const DenyResponseSchema: GenMessage<DenyResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_approval_v1alpha1_approval, 18);
+  messageDesc(file_koinon_approval_v1alpha1_approval, 23);
+
+/**
+ * ScopeKind is how far an approval reaches (ADR 0042 amendment, ADR 0065 decision 10a).
+ *
+ * @generated from enum koinon.approval.v1alpha1.ScopeKind
+ */
+export enum ScopeKind {
+  /**
+   * SCOPE_KIND_UNSPECIFIED means once: this exact call, as before.
+   *
+   * @generated from enum value: SCOPE_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * SCOPE_KIND_ONCE is this exact call only.
+   *
+   * @generated from enum value: SCOPE_KIND_ONCE = 1;
+   */
+  ONCE = 1,
+
+  /**
+   * SCOPE_KIND_TASK: later calls of this agent to the same connector, tool and target while
+   * working on the same task, until the scope expires.
+   *
+   * @generated from enum value: SCOPE_KIND_TASK = 2;
+   */
+  TASK = 2,
+
+  /**
+   * SCOPE_KIND_AGENT: later calls of this agent to the same connector, tool and target, in any
+   * task, until a date.
+   *
+   * @generated from enum value: SCOPE_KIND_AGENT = 3;
+   */
+  AGENT = 3,
+}
+
+/**
+ * Describes the enum koinon.approval.v1alpha1.ScopeKind.
+ */
+export const ScopeKindSchema: GenEnum<ScopeKind> = /*@__PURE__*/
+  enumDesc(file_koinon_approval_v1alpha1_approval, 0);
 
 /**
  * Status is the ADR 0042 lifecycle: pending -> approved -> executed | failed,
@@ -914,7 +1153,7 @@ export enum Status {
  * Describes the enum koinon.approval.v1alpha1.Status.
  */
 export const StatusSchema: GenEnum<Status> = /*@__PURE__*/
-  enumDesc(file_koinon_approval_v1alpha1_approval, 0);
+  enumDesc(file_koinon_approval_v1alpha1_approval, 1);
 
 /**
  * Decision is what the grant's preset decided for the call.
@@ -946,7 +1185,7 @@ export enum Decision {
  * Describes the enum koinon.approval.v1alpha1.Decision.
  */
 export const DecisionSchema: GenEnum<Decision> = /*@__PURE__*/
-  enumDesc(file_koinon_approval_v1alpha1_approval, 1);
+  enumDesc(file_koinon_approval_v1alpha1_approval, 2);
 
 /**
  * FileStatus is what a proposed pull request does to one file.
@@ -981,7 +1220,7 @@ export enum FileStatus {
  * Describes the enum koinon.approval.v1alpha1.FileStatus.
  */
 export const FileStatusSchema: GenEnum<FileStatus> = /*@__PURE__*/
-  enumDesc(file_koinon_approval_v1alpha1_approval, 2);
+  enumDesc(file_koinon_approval_v1alpha1_approval, 3);
 
 /**
  * ApprovalService shows and decides ask-tier tool calls (ADRs 0008, 0042,
@@ -1060,6 +1299,28 @@ export const ApprovalService: GenService<{
     methodKind: "unary";
     input: typeof DenyRequestSchema;
     output: typeof DenyResponseSchema;
+  },
+  /**
+   * ListApprovalScopes returns the scopes that are active now (not revoked, not expired) for one
+   * agent, oldest first: what the agent's page shows next to its grants. Viewers and above.
+   *
+   * @generated from rpc koinon.approval.v1alpha1.ApprovalService.ListApprovalScopes
+   */
+  listApprovalScopes: {
+    methodKind: "unary";
+    input: typeof ListApprovalScopesRequestSchema;
+    output: typeof ListApprovalScopesResponseSchema;
+  },
+  /**
+   * RevokeApprovalScope ends a scope at once; the agent's next matching call needs a new
+   * approval. Revoking a scope that is already revoked returns it as it is. Admins and owners.
+   *
+   * @generated from rpc koinon.approval.v1alpha1.ApprovalService.RevokeApprovalScope
+   */
+  revokeApprovalScope: {
+    methodKind: "unary";
+    input: typeof RevokeApprovalScopeRequestSchema;
+    output: typeof RevokeApprovalScopeResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_approval_v1alpha1_approval, 0);

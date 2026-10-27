@@ -106,6 +106,33 @@ Checked 2026-10-21: OpenShell policy docs (`docs/how-it-works/policies/schema.md
   and this kind of action until a date. A scope wider than once needs an admin, shows in the
   agent's grants, and is audited.
 
+## Amendment (2026-10-27, AP1): how scoped approvals work
+
+Plan item AP1 builds the scopes above (migration `00031_approval_scopes.sql`):
+
+- **Who and what.** The approver of a request (an org admin or owner, as for every approval) may
+  choose "this call only" (the default and the behaviour of this ADR), "this task", or "this agent
+  until a date" when approving. A scope records agent, connector, tool and target of the approved
+  call, its kind, the task (task scope), the end date, the admin who granted it and the approval it
+  came from.
+- **Matching is exact** on agent, connector, tool and target (a task scope also on the task); there
+  are no wildcards in v0.1. The arguments are not part of a scope, so a later call with other
+  arguments is covered, and it still passes argument validation, the executor's checks and the
+  executor's re-check of the grant. A call that matches runs without parking: it is recorded as
+  approved with `decision = allow` and `scope_id` set, and executed like a Trusted-preset call. The
+  `approval.requested` task event carries `scope_id`, `scope_kind` and `scope_expires_at`, so the
+  run's timeline shows which scope allowed it; the commit trailer names the admin who granted the
+  scope ("scoped approval").
+- **Limits (the conservative choices).** An agent scope needs an end date, at most one year ahead;
+  a task scope ends at the latest 30 days after it was granted (its default). A scope is never
+  granted for a request that needs two approvers or one Koinon made itself (saved work), and a tool
+  that needs two approvers is never covered by a scope: the second person cannot be waived. A
+  `create_pull_request` call whose push-and-run risk is flagged (CI or automation files, scripts,
+  dependency manifests, binary or executable files) is never covered, so a person still reads it.
+- **Lifecycle.** A scope shows in the agent's page next to its grants (`ListApprovalScopes`), can be
+  revoked by an admin (`RevokeApprovalScope`; calls already approved keep running), and ends at its
+  date. Creating and revoking a scope are audited (`approval_scope.create`, `approval_scope.revoke`).
+
 ## Links
 
 - https://github.com/NVIDIA/OpenShell/blob/main/docs/how-it-works/policies/schema.mdx
