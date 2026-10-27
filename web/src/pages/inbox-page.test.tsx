@@ -7,8 +7,9 @@ import { describe, expect, it } from 'vitest'
 import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ApprovalService, type ApproveRequest, type DenyRequest } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { QuestionService, QuestionState, type AnswerQuestionRequest, type DismissQuestionRequest } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { TaskService, TaskState, type AppendMessageRequest, type CreateTaskRequest } from '@/gen/koinon/task/v1alpha1/task_pb'
-import { agent, approval, renderApp, task, whoAmI } from '@/test-utils'
+import { agent, approval, question, renderApp, task, whoAmI } from '@/test-utils'
 
 type Opts = {
   role?: OrgRole
@@ -193,5 +194,90 @@ describe('Board', () => {
   it('sends old ticket links to the task', async () => {
     const { history } = renderApp(transport(), '/tickets/t-2')
     await waitFor(() => expect(history.location.pathname).toBe('/tasks/t-2'))
+  })
+})
+
+describe('Inbox questions (ask_user)', () => {
+  type QOpts = { choices?: string[]; draft?: string; answers?: AnswerQuestionRequest[]; dismissals?: DismissQuestionRequest[]; answerError?: ConnectError }
+
+  function qTransport(opts: QOpts = {}) {
+    let open = [question('q-1', 't-1', { question: 'Which region should I deploy to?', choices: opts.choices, draft: opts.draft })]
+    const tasks = [task('t-1', 'Deploy the app', TaskState.INPUT_REQUIRED), task('t-2', 'Write notes', TaskState.WORKING)]
+    return createRouterTransport(({ service }) => {
+      service(AuthService, { whoAmI: () => whoAmI() })
+      service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+      service(TaskService, { listTasks: () => ({ tasks }), getTask: (req) => ({ task: tasks.find((t) => t.id === req.taskId), events: [], runs: [] }) })
+      service(ApprovalService, { listApprovals: () => ({ approvals: [] }) })
+      service(QuestionService, {
+        listQuestions: () => ({ questions: open }),
+        answerQuestion: (req) => {
+          if (opts.answerError) throw opts.answerError
+          opts.answers?.push(req)
+          open = []
+          tasks[0].state = TaskState.WORKING
+          return { question: question('q-1', 't-1', { state: QuestionState.ANSWERED }) }
+        },
+        dismissQuestion: (req) => {
+          opts.dismissals?.push(req)
+          open = []
+          return { question: question('q-1', 't-1', { state: QuestionState.DISMISSED }) }
+        },
+      })
+    })
+  }
+
+  it('shows the question with its choices, its default and a badge, once, in place of the task item', async () => {
+    renderApp(qTransport(), '/')
+    const list = await screen.findByRole('list', { name: 'Waiting on you' })
+    const rows = within(list).getAllByTestId('inbox-item')
+    expect(rows.map((r) => r.dataset.kind)).toEqual(['question'])
+    expect(within(list).getByText('Which region should I deploy to?')).toBeInTheDocument()
+    expect(within(list).getByRole('link', { name: 'Deploy the app' })).toHaveAttribute('href', '/tasks/t-1')
+    expect(within(list).getByRole('button', { name: 'eu-west-1' })).toBeInTheDocument()
+    expect(within(list).getByRole('button', { name: 'us-east-1' })).toBeInTheDocument()
+    expect(within(list).getByText(/Dismissing, or no answer in time, tells the agent/)).toHaveTextContent('eu-west-1')
+    expect(await screen.findByTestId('inbox-badge')).toHaveTextContent('1')
+  })
+
+  it('answers with a choice and drops the item', async () => {
+    const answers: AnswerQuestionRequest[] = []
+    renderApp(qTransport({ answers }), '/')
+    await userEvent.click(await screen.findByRole('button', { name: 'us-east-1' }))
+    await waitFor(() => expect(answers).toHaveLength(1))
+    expect(answers[0]).toMatchObject({ orgId: 'org-1', questionId: 'q-1', answer: { case: 'choice', value: 'us-east-1' } })
+    expect(await screen.findByText('Nothing is waiting on you.')).toBeInTheDocument()
+  })
+
+  it('accepts the draft, or sends it edited', async () => {
+    const answers: AnswerQuestionRequest[] = []
+    renderApp(qTransport({ choices: [], draft: 'Fixed in 1.2.', answers }), '/')
+    const draft = await screen.findByRole('textbox', { name: 'Draft from the agent' })
+    expect(draft).toHaveValue('Fixed in 1.2.')
+    await userEvent.type(draft, ' Thanks!')
+    await userEvent.click(screen.getByRole('button', { name: 'Use edited draft' }))
+    await waitFor(() => expect(answers).toHaveLength(1))
+    expect(answers[0].answer).toEqual({ case: 'draft', value: 'Fixed in 1.2. Thanks!' })
+  })
+
+  it('answers with free text', async () => {
+    const answers: AnswerQuestionRequest[] = []
+    renderApp(qTransport({ answers }), '/')
+    await userEvent.type(await screen.findByRole('textbox', { name: /Your answer to/ }), 'ap-south-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Send answer' }))
+    await waitFor(() => expect(answers).toHaveLength(1))
+    expect(answers[0].answer).toEqual({ case: 'text', value: 'ap-south-1' })
+  })
+
+  it('dismisses the question', async () => {
+    const dismissals: DismissQuestionRequest[] = []
+    renderApp(qTransport({ dismissals }), '/')
+    await userEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
+    await waitFor(() => expect(dismissals).toEqual([expect.objectContaining({ orgId: 'org-1', questionId: 'q-1' })]))
+  })
+
+  it('says so when the question was already resolved elsewhere', async () => {
+    renderApp(qTransport({ answerError: new ConnectError('gone', Code.Aborted) }), '/')
+    await userEvent.click(await screen.findByRole('button', { name: 'eu-west-1' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('already answered, dismissed or expired')
   })
 })

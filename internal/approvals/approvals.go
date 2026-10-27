@@ -337,7 +337,8 @@ func (s *Service) Deny(ctx context.Context, org, id, approver pgtype.UUID, note 
 	return row, err
 }
 
-// ResolveRun makes a run parked on approvals claimable once none of its requests is open,
+// ResolveRun makes a run parked on approvals or questions (reasons approval and input_required)
+// claimable once none of its approval requests is open and no question of it waits for a person,
 // and moves its task back from Waiting on you. It locks the run row first; call it in the
 // transaction that resolved a request.
 func ResolveRun(ctx context.Context, q *store.Queries, org, runID pgtype.UUID) error {
@@ -345,7 +346,9 @@ func ResolveRun(ctx context.Context, q *store.Queries, org, runID pgtype.UUID) e
 	if err != nil {
 		return err
 	}
-	if run.State != store.RunStateParked || run.ParkReason.RunParkReason != store.RunParkReasonApproval || run.ReadyAt.Valid {
+	reason := run.ParkReason.RunParkReason
+	if run.State != store.RunStateParked || run.ReadyAt.Valid ||
+		(reason != store.RunParkReasonApproval && reason != store.RunParkReasonInputRequired) {
 		// Still running: agentd sees the outcome when it ends the turn.
 		return nil
 	}
@@ -357,6 +360,9 @@ func ResolveRun(ctx context.Context, q *store.Queries, org, runID pgtype.UUID) e
 		if r.Status.Open() {
 			return nil
 		}
+	}
+	if n, err := q.CountOpenQuestionsForRun(ctx, store.CountOpenQuestionsForRunParams{OrgID: org, RunID: runID}); err != nil || n > 0 {
+		return err
 	}
 	if _, err := q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: org, ID: runID}); err != nil {
 		return err

@@ -181,6 +181,13 @@ const ReadyPrompt = "koinon-ready"
 // the name of its target (prefixMode always), and Koinon's MCP server is the "github" target.
 const ReadyPromptExposed = "github_" + ReadyPrompt
 
+// KoinonTarget is the MCP target of Koinon's own agent tools (ask_user, plan item TK3), offered to
+// every active agent; the agent sees "koinon_ask_user". The tool server is koinon-api's.
+const KoinonTarget = "koinon"
+
+// ToolAskUser is the name of the ask_user tool on KoinonTarget.
+const ToolAskUser = "ask_user"
+
 // Key is the gateway-side record of an API key: its ID, owner and hash. It
 // holds no key material and is safe to persist and to render into config.
 type Key struct {
