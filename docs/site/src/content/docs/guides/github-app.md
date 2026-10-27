@@ -54,12 +54,8 @@ connection. Only org admins and owners can connect GitHub.
 
 ## GitHub Enterprise Server
 
-Create the App on your server and connect it the same way. In the form's "GitHub Enterprise Server"
-section, enter the server's base URL (`https://github.example.com`, only a host and an optional
-port) and, when its TLS certificate is signed by a CA the system roots do not include, the CA bundle
-(PEM certificates only). Koinon reaches the REST API at `/api/v3` on that host for the App flow,
-installation tokens, commits through the Git Data API and pull requests, and trusts the bundle for
-those calls and for git in sandboxes. The sandbox network policy names that host instead of
-`github.com` and `api.github.com`. The host must pass the platform's egress URL policy: private and
-internal addresses only when `egress.allowedInternalHosts` lists them. The chart's `github.apiUrl`
-is only the API of connections that have no base URL.
+Create the App on your server and connect it the same way, with the server's base URL (and its CA
+bundle when the certificate needs one) in the form's "GitHub Enterprise Server" section. Koinon then
+reaches the REST API at `/api/v3` on that host, and the sandbox network policy names that host instead
+of `github.com`. [GitHub Enterprise Server](/guides/ghes/) has the details. Gitea is a different
+connector: see [Gitea](/guides/gitea/).

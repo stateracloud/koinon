@@ -80,6 +80,9 @@ const (
 	AuthFederated     AuthType = "federated"
 	AuthAppCredential AuthType = "app-credential" //nolint:gosec // an auth type name, not a credential
 	AuthDelegatedUser AuthType = "delegated-user"
+	// AuthStaticToken is a long-lived token of a bot account, for a code host that cannot mint
+	// credentials per use (ADR 0063).
+	AuthStaticToken AuthType = "static-token"
 )
 
 // Type is a validated connector type. Treat values returned by this package
@@ -124,6 +127,8 @@ type Auth struct {
 	Permissions          map[string]string `json:"permissions,omitempty"`
 	ForbiddenPermissions []string          `json:"forbiddenPermissions,omitempty"`
 	TokenLifetime        string            `json:"tokenLifetime,omitempty"`
+	// TokenWarnAfter is the age of a static token after which Koinon warns (ADR 0063).
+	TokenWarnAfter string `json:"tokenWarnAfter,omitempty"`
 }
 
 // Host is one host the connector talks to.
@@ -138,6 +143,9 @@ type Site struct {
 	APIURL  string `json:"apiURL"`
 	// APIPath is where the REST API is served on a connection's own host.
 	APIPath string `json:"apiPath,omitempty"`
+	// SelfHosted means there is no default host: a connection always names its base URL, which
+	// may have a sub-path, and BaseURL and APIURL are placeholders.
+	SelfHosted bool `json:"selfHosted,omitempty"`
 }
 
 // Capabilities is a code host's capability descriptor (ADR 0062, 0063).
@@ -423,6 +431,14 @@ func (t *Type) check() error {
 		if _, err := time.ParseDuration(t.Spec.Auth.TokenLifetime); err != nil {
 			return fmt.Errorf("auth.tokenLifetime: %w", err)
 		}
+	}
+	if t.Spec.Auth.TokenWarnAfter != "" {
+		if _, err := time.ParseDuration(t.Spec.Auth.TokenWarnAfter); err != nil {
+			return fmt.Errorf("auth.tokenWarnAfter: %w", err)
+		}
+	}
+	if st := t.Spec.Site; st != nil && st.SelfHosted && st.APIPath == "" {
+		return errors.New("site: a selfHosted connector needs an apiPath")
 	}
 	seen := map[string]bool{}
 	for i, s := range t.Spec.Scopes {

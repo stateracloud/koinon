@@ -101,7 +101,10 @@ export function AgentPage() {
           <dt className="text-muted-foreground">Model</dt>
           <dd>{a.model || 'default'}</dd>
           <dt className="text-muted-foreground">Sandbox</dt>
-          <dd>{a.ephemeral ? 'Ephemeral: fresh sandbox per task, no home' : 'Persistent home'}</dd>
+          <dd>
+            {a.ephemeral ? 'Ephemeral: fresh sandbox per task, no home' : 'Persistent home'}
+            {a.sandboxArchivedAt && ` (archived ${timestampDate(a.sandboxArchivedAt).toLocaleString()}, restores on next run)`}
+          </dd>
           <dt className="text-muted-foreground">Version</dt>
           <dd>
             {a.latestVersion}

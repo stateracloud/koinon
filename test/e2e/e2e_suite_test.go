@@ -2,7 +2,7 @@
 
 // Package e2e is the quickstart end-to-end test on kind (plan item E1, ADR 0049). It drives an
 // installed Koinon through its public API exactly as the quickstart does: bootstrap login,
-// GitHub connection, repo-helper agent, ticket, approval, pull request. The model is the fake
+// GitHub connection, repo-helper agent, task, approval, pull request. The model is the fake
 // model server and GitHub is the fake GitHub App API; nothing external is called.
 //
 // The cluster, images and install come from test/e2e/run.sh, which port-forwards the services

@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/gitpush"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -88,7 +89,7 @@ func (s *Service) executeSavedWork(ctx context.Context, p codehost.Provider, row
 	if err != nil {
 		return nil, err
 	}
-	acc, err := p.Open(ctx, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: savedWorkPermissions})
+	acc, err := gitpush.Open(ctx, p, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: savedWorkPermissions})
 	if err != nil {
 		return nil, err
 	}

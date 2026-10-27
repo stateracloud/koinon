@@ -88,7 +88,7 @@ func (s *sandbox) run(ctx context.Context, cmd ...string) string {
 // does not fail the spec when the command fails.
 func (s *sandbox) try(ctx context.Context, cmd ...string) (stdout, stderr string, code int) {
 	var o, e bytes.Buffer
-	c := exec.CommandContext(ctx, "docker", append([]string{"exec", s.name}, cmd...)...) //nolint:gosec // test-controlled arguments
+	c := exec.CommandContext(ctx, "docker", append([]string{"exec", s.name}, cmd...)...)
 	c.Stdout, c.Stderr = &o, &e
 	err := c.Run()
 	var exit *exec.ExitError
@@ -111,7 +111,7 @@ func (s *sandbox) write(ctx context.Context, path, content string) {
 // connects an ACP client to its stdin and stdout.
 func (s *sandbox) harness(ctx context.Context, workdir string, cmd []string) *harness {
 	args := append([]string{"exec", "--interactive", "--workdir", workdir, s.name}, cmd...)
-	c := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // test-controlled arguments
+	c := exec.CommandContext(ctx, "docker", args...)
 	stdin, err := c.StdinPipe()
 	Expect(err).NotTo(HaveOccurred())
 	stdout, err := c.StdoutPipe()
@@ -205,7 +205,7 @@ func (c *client) take() ([]acp.Update, []acp.PermissionRequest) {
 
 func docker(ctx context.Context, args ...string) string {
 	var stdout, stderr bytes.Buffer
-	c := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // test-controlled arguments
+	c := exec.CommandContext(ctx, "docker", args...)
 	c.Stdout, c.Stderr = &stdout, &stderr
 	err := c.Run()
 	Expect(err).NotTo(HaveOccurred(), "docker %s: %s", strings.Join(args, " "), stderr.String())

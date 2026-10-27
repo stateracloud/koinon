@@ -116,7 +116,7 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "enum": ["federated", "app-credential", "delegated-user"] },
+        "type": { "enum": ["federated", "app-credential", "delegated-user", "static-token"] },
         "permissions": {
           "description": "The permissions the connection's app must have, and no more.",
           "$ref": "#/$defs/permissions"
@@ -131,6 +131,11 @@
           "description": "Lifetime of a minted credential, as a Go duration.",
           "type": "string",
           "pattern": "^[1-9][0-9]*(h|m|s)$"
+        },
+        "tokenWarnAfter": {
+          "description": "For a static token that does not expire (ADR 0063): its age, as a Go duration, after which Koinon warns that it is old. Nothing blocks on age and nothing rotates the token.",
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(h|m|s)$"
         }
       }
     },
@@ -142,7 +147,8 @@
       "properties": {
         "baseURL": { "description": "The web and git host.", "type": "string", "pattern": "^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$" },
         "apiURL": { "description": "The REST API of the default host.", "type": "string", "pattern": "^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$" },
-        "apiPath": { "description": "Where the REST API is served on a connection's own host; empty when it is not served there.", "type": "string", "pattern": "^/[A-Za-z0-9._/-]*$" }
+        "apiPath": { "description": "Where the REST API is served on a connection's own host; empty when it is not served there.", "type": "string", "pattern": "^/[A-Za-z0-9._/-]*$" },
+        "selfHosted": { "description": "The connector has no host of its own: every connection names its base URL, which may carry a sub-path (https://host[:port][/path]), and baseURL and apiURL here are placeholders on a reserved .invalid host. The rules in spec.scopes are written for the root of that host and get the sub-path as a prefix.", "type": "boolean" }
       }
     },
     "capabilities": {

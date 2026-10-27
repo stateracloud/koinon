@@ -37,6 +37,7 @@ func (f *Fake) routes() http.Handler {
 	mux.HandleFunc(rw+"/contents", f.scoped(f.changeFiles))
 	mux.HandleFunc(rr+"/pulls", f.scoped(f.listPulls))
 	mux.HandleFunc(rw+"/pulls", f.scoped(f.createPull))
+	mux.HandleFunc(rw+"/issues", f.scoped(f.createIssue))
 	mux.HandleFunc(rr+"/pulls/{index}", f.scoped(f.getPull))
 	mux.HandleFunc(rr+"/pulls/{base}/{head...}", f.scoped(f.getPullByBaseHead))
 	mux.HandleFunc(rr+"/issues/{index}/comments", f.scoped(f.listComments))
@@ -53,15 +54,22 @@ func (f *Fake) routes() http.Handler {
 	return mux
 }
 
+func isWrite(r *http.Request) bool { return r.Method != http.MethodGet && r.Method != http.MethodHead }
+
 func (f *Fake) authed(h func(w http.ResponseWriter, r *http.Request, login string) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		login, ok := f.authenticate(r)
+		token, login, ok := f.identify(r)
 		if !ok {
 			writeErr(w, errf(http.StatusUnauthorized, "token is required"))
 			return
 		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		// Gitea checks the token's scope before it reads the request.
+		if isWrite(r) && f.scopes[token] == "read" {
+			writeErr(w, errf(http.StatusForbidden, "token does not have at least one of required scope(s): [write:repository]"))
+			return
+		}
 		if err := h(w, r, login); err != nil {
 			writeErr(w, err)
 		}
@@ -75,6 +83,13 @@ func (f *Fake) scoped(h repoHandler) http.HandlerFunc {
 		rp, err := f.lookup(r.PathValue("owner"), r.PathValue("repo"))
 		if err != nil {
 			return err
+		}
+		perm := f.permission(login, rp.name)
+		if perm == "" {
+			return errf(http.StatusNotFound, "The target couldn't be found.")
+		}
+		if isWrite(r) && !canWrite(perm) {
+			return errf(http.StatusForbidden, "user should have a permission to write to a repository")
 		}
 		return h(w, r, rp, login)
 	})

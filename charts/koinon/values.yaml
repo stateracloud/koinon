@@ -87,6 +87,11 @@ reconciler:
   # A sandbox whose run parked on a2a or input_required stays up this long from the park (ADR 0066
   # decision 11); approval and budget parks use idleTimeout. Overridable per org.
   parkWarm: 15m
+  # Archive tier (plan item AR1, ADR 0032): a sandbox stopped this long, whose home's latest
+  # checkpoint is complete, is deleted with its volume; the next run restores the home and reloads
+  # the same session. Needs checkpoints.enabled. A negative value (-1h) turns it off. The same value
+  # for every org; per-org tuning is not built.
+  archiveAfter: 168h
   # Sandbox start/stop jobs that run at once, outside the gateway update (plan item LT1).
   sandboxJobs: 8
   # Time between full passes. Postgres NOTIFY wakes the reconciler earlier for new runs and

@@ -1,7 +1,7 @@
 # connectors
 
 Connector types as data: auth, hosts, scopes, risk tiers and setup guides (ADR 0007, 0021).
-v0.1 ships `github/` (ADR 0036, 0049).
+v0.1 ships `github/` (ADR 0036, 0049) and `gitea/` (ADR 0062, 0063).
 
 - `<id>/connector.yaml`: one connector type per directory, named after `metadata.id`,
   `apiVersion: connectors.koinon.dev/v1alpha1`, `kind: ConnectorType`.
@@ -13,8 +13,13 @@ v0.1 ships `github/` (ADR 0036, 0049).
 
 ## Format
 
-- `spec.auth`: the auth type (`app-credential` for GitHub), the provider permissions the app must
+- `spec.auth`: the auth type (`app-credential` for GitHub, `static-token` for Gitea, whose
+  `tokenWarnAfter` is the age after which Koinon warns about a token), the provider permissions the app must
   have (and no more), the permissions it must not have, and the credential lifetime.
+- `spec.site.selfHosted: true` (Gitea): the connector has no host of its own. `hosts` and `site` hold
+  a placeholder on a reserved `.invalid` name, each connection names its base URL, which may carry a
+  sub-path (`https://host[:port][/path]`), and the network rules, written for the root of the host, are
+  rendered under that path. GitHub's base URL is a host and a port only.
 - `spec.hosts`: every host the connector talks to; scope network rules may only name these.
 - `spec.targets`: what grants are narrowed to (GitHub: `owner/name` repositories).
 - `spec.scopes`: each with a risk tier (ADR 0008), the provider permissions a credential for it is

@@ -104,7 +104,7 @@ describe('RepoPicker in the agent wizard', () => {
 
     await userEvent.clear(input)
     await userEvent.type(input, 'other-org/private-thing')
-    expect(await screen.findByText(/No repository of the installation matches; you can still type owner\/name/)).toBeInTheDocument()
+    expect(await screen.findByText(/No repository of the connection matches; you can still type owner\/name/)).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
@@ -115,7 +115,7 @@ describe('RepoPicker in the agent wizard', () => {
     wizard({ fail: true })
     await toAccessStep()
     await userEvent.type(screen.getByRole('combobox', { name: 'Repository 1' }), 'acme/widgets')
-    expect(await screen.findByText(/Could not list the installation’s repositories \(GitHub refused the connection\); type owner\/name/)).toBeInTheDocument()
+    expect(await screen.findByText(/Could not list the connection’s repositories \(GitHub refused the connection\); type owner\/name/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Next' }))
     expect(await screen.findByRole('region', { name: 'Draft summary' })).toHaveTextContent('Repositories: acme/widgets')
   })

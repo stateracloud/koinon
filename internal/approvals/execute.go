@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/gitpush"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
@@ -55,7 +56,7 @@ func (s *Service) execute(ctx context.Context, row store.ApprovalRequest) (map[s
 	if err != nil {
 		return nil, err
 	}
-	acc, err := p.Open(ctx, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: tool.Permissions})
+	acc, err := gitpush.Open(ctx, p, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: tool.Permissions})
 	if err != nil {
 		return nil, err
 	}
@@ -258,8 +259,9 @@ func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, ac
 	}
 	if !found {
 		pr, err = acc.CreatePullRequest(ctx, repo, codehost.PullRequestInput{Title: args.Title, Body: args.Body, Head: args.Branch, Base: base})
-		if codehost.IsStatus(err, 422) {
-			// "A pull request already exists": a concurrent attempt created it.
+		if codehost.IsStatus(err, 422, 409) {
+			// "A pull request already exists" (GitHub: 422, Gitea: 409): a concurrent attempt
+			// created it.
 			var again bool
 			if pr, again, err = s.findPullRequest(ctx, acc, repo, args.Branch); err == nil && !again {
 				err = permanent("%s refused the pull request from %s into %s", p.Capabilities().DisplayName, args.Branch, base)

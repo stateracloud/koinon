@@ -66,12 +66,12 @@ func startStandalone(ctx context.Context, hostPorts []int, files map[string]stri
 		return nil, err
 	}
 	for _, d := range []string{cfgDir, secretsDir} {
-		if err := os.Chmod(d, 0o755); err != nil { //nolint:gosec // test directories
+		if err := os.Chmod(d, 0o755); err != nil {
 			return nil, err
 		}
 	}
 	for name, v := range files {
-		if err := os.WriteFile(filepath.Join(secretsDir, name), []byte(v), 0o644); err != nil { //nolint:gosec // dummy
+		if err := os.WriteFile(filepath.Join(secretsDir, name), []byte(v), 0o644); err != nil {
 			return nil, err
 		}
 	}
@@ -252,7 +252,7 @@ var _ = Describe("golden files", func() {
 		secrets := GinkgoT().TempDir()
 		Expect(os.Chmod(secrets, 0o755)).To(Succeed())
 		for _, name := range []string{"api_key", "mcp_wiki", "mcp_search"} {
-			Expect(os.WriteFile(filepath.Join(secrets, name), []byte("not-a-real-key"), 0o644)).To(Succeed()) //nolint:gosec // dummy
+			Expect(os.WriteFile(filepath.Join(secrets, name), []byte("not-a-real-key"), 0o644)).To(Succeed())
 		}
 		for _, f := range fixtures() {
 			ctr, err := testcontainers.Run(ctx, AgentgatewayImage,

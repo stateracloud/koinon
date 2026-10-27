@@ -17,6 +17,7 @@ import { ProvidersPage } from '@/pages/providers-page'
 import { ServersPage } from '@/pages/servers-page'
 import { TokensPage } from '@/pages/tokens-page'
 import { NewAgentPage } from '@/pages/new-agent-page'
+import { NewGiteaConnectionPage } from '@/pages/new-gitea-connection-page'
 import { NewGitHubConnectionPage } from '@/pages/new-github-connection-page'
 import { LoginPage } from '@/pages/login-page'
 import { TaskPage } from '@/pages/task-page'
@@ -70,6 +71,11 @@ export const newGitHubConnectionRoute = createRoute({
   path: '/connections/new/github',
   component: NewGitHubConnectionPage,
 })
+export const newGiteaConnectionRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/connections/new/gitea',
+  component: NewGiteaConnectionPage,
+})
 export const connectionRoute = createRoute({ getParentRoute: () => appRoute, path: '/connections/$connectionId', component: ConnectionPage })
 
 export const providersRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/providers', component: ProvidersPage })
@@ -92,6 +98,7 @@ const routeTree = rootRoute.addChildren([
     agentRoute,
     connectionsRoute,
     newGitHubConnectionRoute,
+    newGiteaConnectionRoute,
     connectionRoute,
     providersRoute,
     serversRoute,

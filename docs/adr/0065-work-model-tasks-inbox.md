@@ -418,3 +418,44 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   expiry in the tool result instead of a fixed 7 days. When `cancel_task` and `ask_user` run in
   one turn, `endTurn` cancels the asked questions and finishes the run instead of parking it. The chat
   shows "waiting on ..." instead of the composer while the task is `input_required`.
+
+## Amendment (2026-10-27, plan item QA1): restart tests and hygiene
+
+- **Restart tests.** `internal/agentd/restart_test.go` runs two process sets on one Postgres, each a
+  tool server plus an agentd pool on its own connection pool, with one fake gateway. The harness uses
+  the tool server of the set that owns each turn. Both sets stay alive through the decision, so both
+  pools race to claim the resume: one executed pull request or one answered question, two prompts,
+  epoch 2. A second variant blocks the harness inside the resume prompt, kills the set that claimed it
+  while its lease is held (`KeepLeaseOnShutdown`), and asserts that the survivor takes over after the
+  lease expires: epoch 3, one takeover, one executed pull request or answered question, and a final
+  prompt carrying the interruption note.
+- **`nolintlint`** is on with `require-explanation`, `require-specific` and `allow-unused: false`.
+  Unused directives (gosec is off in tests; several gosec findings no longer fire) were removed rather
+  than kept.
+- **`internal/safego`**: `Go`, `GoOrStop` and `Do` recover a panic and log it with the stack. `Go` is for
+  listeners and shutdown goroutines in `cmd/*` and the reconciler's prober; `GoOrStop` is for the loops
+  the process must not run without (sweepers, schedule triggers, the importer, the run hub, key
+  watchers, the OTLP, tools and saved-work listeners): a panic cancels the process context so the pod
+  restarts. `Do` wraps one iteration of a loop: a worker iteration, a checkpoint tick, one checkpoint
+  backup, one MCP probe round, one `reconcileAgent` (a panic there becomes an error of the pass, so it
+  is retried). In `drive`, a panic in `execute` becomes a failure (`internal error: the run panicked`):
+  the heartbeat is stopped and the run concludes as failed on its own path. Recovering without stopping
+  the heartbeat would have kept the lease alive forever; a spec with a panicking backend covers it.
+- **Clock, IDs and golden prompts.** The park expiry uses `Config.Now`. The outcome text is the pure
+  `renderOutcomes(questions, requests)`: no clock and no generated IDs, IDs are row inputs. Golden files
+  in `internal/agentd/testdata/*.golden` (`go test ./internal/agentd -update`) cover answered, dismissed
+  and expired questions (with the no-answer instruction), every approval outcome, and the prompt shapes
+  built by the pure `assemblePrompt` (new task, scheduled task with the title from `schedule.TaskTitle`,
+  follow-up, takeover and park resumes, reset with outcomes, the empty fallback), the retry note and
+  the fresh-session handoff (`handoff.build` adds the park note itself).
+- **Typed IDs** were not introduced at TK1; they stay `pgtype.UUID` from sqlc. A wrapper for task and run
+  IDs touches every sqlc call and was left out of this item.
+
+- 2026-10-27 (DOC2, E1 on tasks): the docs site gained guides for tasks and the inbox, `ask_user`
+  with its reminder and expiry, schedule and direct-message triggers, scoped approvals, Gitea, GHES and
+  home checkpoints. The quickstart's e2e driver (`test/e2e`) moved from `TicketService` to
+  `TaskService` and keeps its step labels except the words "Ticket" and "ticket", now "Task" and
+  "task"; the real-cluster Playwright spec is `web/e2e-real/task-stream.spec.ts` (renamed, same flow:
+  it already drove the inbox and `/tasks/{id}`). Approval requests still carry the field `ticket_id`
+  (the task's ID) in `ApprovalService`, so the driver sets `TicketId` there. AR1 landed in the
+  same wave, so the archive tier section of the home checkpoints guide describes the built behaviour.

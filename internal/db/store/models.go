@@ -1293,6 +1293,7 @@ type AgentSandbox struct {
 	SandboxID           pgtype.Text
 	RestoreCheckpointID pgtype.UUID
 	RestoreClaimedAt    pgtype.Timestamptz
+	ArchivedAt          pgtype.Timestamptz
 }
 
 type AgentVersion struct {

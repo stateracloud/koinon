@@ -35,7 +35,7 @@ var _ = Describe("Host", func() {
 	})
 
 	It("is the only provider of the default registry and describes its credential", func() {
-		Expect(providers.Default().IDs()).To(Equal([]string{"github"}))
+		Expect(providers.Default().IDs()).To(Equal([]string{"gitea", "github"}))
 		caps := host.Capabilities()
 		Expect(caps.DisplayName).To(Equal("GitHub"))
 		Expect(caps.NarrowsRepositories).To(BeTrue())
