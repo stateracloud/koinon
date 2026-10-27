@@ -11,6 +11,7 @@ import { ApprovalSchema, Decision, Status as ApprovalStatus } from '@/gen/koinon
 import { AgentSchema, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { MembershipSchema, OrgRole, UserSchema, WhoAmIResponseSchema } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { QuestionSchema, QuestionState } from '@/gen/koinon/question/v1alpha1/question_pb'
+import { TriggerSchema, TriggerType } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { CreatorKind, CreatorSchema, TaskSchema, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 
 export const orgId = 'org-1'
@@ -80,4 +81,23 @@ export function renderApp(transport: Transport, path: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const history = createMemoryHistory({ initialEntries: [path] })
   return { ...render(<App transport={transport} queryClient={queryClient} history={history} />), history, queryClient }
+}
+
+/** dmAgent is an active agent whose active version has a direct_message trigger (TR3). */
+export function dmAgent(id: string, name: string) {
+  return create(AgentSchema, {
+    id,
+    orgId,
+    displayName: name,
+    status: AgentStatus.ACTIVE,
+    approvedTriggers: [create(TriggerSchema, { id: 'chat', type: TriggerType.DIRECT_MESSAGE, instruction: 'Answer briefly.' })],
+  })
+}
+
+/** dmThread is a task that a direct message started. */
+export function dmThread(id: string, title: string, state: TaskState, agentId = 'a-1') {
+  const t = task(id, title, state, agentId)
+  t.createdBy = create(CreatorSchema, { kind: CreatorKind.TRIGGER, triggerId: 'trg-1' })
+  t.directMessageThread = true
+  return t
 }

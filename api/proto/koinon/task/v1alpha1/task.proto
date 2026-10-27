@@ -42,6 +42,15 @@ service TaskService {
   // Clients call it when typing starts; calls for the same task within ten seconds of the last one
   // are ignored. Members and above.
   rpc NotifyTyping(NotifyTypingRequest) returns (NotifyTypingResponse);
+
+  // SendDirectMessage sends a message to an agent in the inbox chat (plan item TR3, ADR 0066). The
+  // agent must have a direct_message trigger in its active version, else the call fails with
+  // FAILED_PRECONDITION. Without task_id it starts a thread: a new task (created by the trigger,
+  // interactive priority) whose first message is the trigger's instruction plus the text. With
+  // task_id it replies in that thread: an open task takes the message and its agent is woken; a
+  // completed task is reopened as a follow-up; a canceled or failed one takes no message. The
+  // message_id makes a retry or replay a no-op. Members and above.
+  rpc SendDirectMessage(SendDirectMessageRequest) returns (SendDirectMessageResponse);
 }
 
 // TaskState is where a task stands (ADR 0065, after A2A).
@@ -108,6 +117,9 @@ message Task {
   // to its creator as theirs to act on.
   string waiting_on_user_id = 14;
   string waiting_on_name = 15;
+  // True when a direct message to the agent started the task: replies in its inbox-chat thread
+  // go to SendDirectMessage with this task_id (plan item TR3).
+  bool direct_message_thread = 16;
 }
 
 // TaskEvent is one entry of the task timeline: a message, a state change or a run note such as
@@ -201,3 +213,29 @@ message NotifyTypingRequest {
 
 // NotifyTypingResponse is empty.
 message NotifyTypingResponse {}
+
+// SendDirectMessageRequest is a message to an agent, starting a thread or replying in one.
+message SendDirectMessageRequest {
+  string org_id = 1;
+  // The agent the message is for. With task_id it must be the task's agent.
+  string agent_id = 2;
+  // The thread to reply in: a task started by a direct message. Empty starts a new thread.
+  string task_id = 3;
+  string text = 4;
+  // Chosen by the client for this message (a UUID); sending it again, for example after a lost
+  // response, has no second effect and returns the first result.
+  string message_id = 5;
+}
+
+// SendDirectMessageResponse holds the thread's task.
+message SendDirectMessageResponse {
+  Task task = 1;
+  // The message as it entered the timeline. A replay of an earlier call returns no event when
+  // the API runs the delivery inline; with the durable queue it attaches to the finished
+  // delivery and returns the original event and created flag.
+  TaskEvent event = 2;
+  // True when this call created the task.
+  bool created = 3;
+  // True when this call reopened a completed task as a follow-up.
+  bool reopened = 4;
+}
