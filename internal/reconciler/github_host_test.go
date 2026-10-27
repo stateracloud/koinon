@@ -3,11 +3,24 @@
 package reconciler_test
 
 import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/templates"
 )
@@ -73,3 +86,83 @@ func mustRead(cfg agentconfig.Config) reconciler.GitHubRead {
 	Expect(ok).To(BeTrue())
 	return read
 }
+
+// fixedTokens mints the same fake token for any connection, so no request leaves the test for
+// a connection's own host.
+type fixedTokens struct{}
+
+func (fixedTokens) ReadToken(_ context.Context, _ store.Connection, scope codehost.Scope) (codehost.Token, error) {
+	return codehost.NewToken("koinon_test_not-a-real-token", time.Now().Add(time.Hour), scope.Repositories), nil
+}
+
+var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server connection", func() {
+	It("reads the host from the connection and renders only it, in the profile and the policy", func(ctx SpecContext) {
+		osg := fakegateway.New()
+		cc, err := osg.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
+
+		org, user := newOrg(ctx)
+		id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		envelope, err := connections.SealFields(ring, org, id, map[string][]byte{connections.GitHubPrivateKeyField: []byte("unused")})
+		Expect(err).NotTo(HaveOccurred())
+		config, err := json.Marshal(map[string]any{"appId": 1, "installationId": 2, "baseUrl": "https://ghes.example.test"})
+		Expect(err).NotTo(HaveOccurred())
+		conn, err := q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+			OrgID: org, ID: id, Connector: "github", DisplayName: "ghes", Config: config,
+			SecretEnvelope: envelope, Source: store.ConfigSourceUi, CreatedBy: user,
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		raw, err := agentconfig.Config{
+			Instructions: "help",
+			Grants:       []templates.Grant{{Connector: "github", Scopes: []string{"repo.read"}, Preset: templates.PresetStandard}},
+			Bindings:     []agentconfig.Binding{{Connector: "github", ConnectionID: uuidOf(conn.ID), Targets: []string{"acme/widgets"}}},
+		}.Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "GHES helper", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
+		Expect(err).NotTo(HaveOccurred())
+		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent.ID, Config: raw, CreatedBy: user})
+		Expect(err).NotTo(HaveOccurred())
+		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user})
+		Expect(err).NotTo(HaveOccurred())
+
+		r, err := reconciler.New(pool, openshell.New(cc), &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
+			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			Flavors: map[store.AgentFlavor]reconciler.Flavor{
+				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			},
+			GitHub: fixedTokens{},
+			Logger: slog.New(slog.NewTextHandler(&syncBuffer{}, nil)),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+
+		n := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+		ws := execution.WorkspaceName(org.Bytes)
+
+		profile := osg.Profile(ws, n.GitHubProfile)
+		Expect(profile).NotTo(BeNil())
+		Expect(profile.GetEndpoints()).To(HaveLen(1))
+		ep := profile.GetEndpoints()[0]
+		Expect(ep.GetHost()).To(Equal("ghes.example.test"))
+		var paths []string
+		for _, rule := range ep.GetRules() {
+			paths = append(paths, rule.GetAllow().GetPath())
+		}
+		Expect(paths).To(ContainElement("/api/v3/repos/acme/widgets"))
+		Expect(paths).To(ContainElement("/acme/widgets.git/git-upload-pack"))
+
+		revs := osg.Policies(ws, n.Sandbox)
+		Expect(revs).NotTo(BeEmpty())
+		rule := revs[len(revs)-1].GetNetworkPolicies()["github_read"]
+		Expect(rule).NotTo(BeNil())
+		Expect(rule.GetEndpoints()).To(HaveLen(1))
+		Expect(rule.GetEndpoints()[0].GetHost()).To(Equal("ghes.example.test"))
+		for _, e := range rule.GetEndpoints() {
+			for _, r := range e.GetRules() {
+				Expect(r.GetAllow().GetPath()).NotTo(HavePrefix("/repos/"), "no github.com API paths")
+			}
+		}
+	})
+})

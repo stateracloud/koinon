@@ -186,6 +186,15 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   OpenShell proxy certificate keeps verifying) before every harness start; `/etc/gitconfig`
   includes the file after the image's own. `koinon-git-credential` takes `--host`; `savework.sh`
   takes the host.
+- 2026-10-27 (CH2 review): the CA file is built from `${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}`
+  and the write fails (non-zero exit, so the run fails with the reason) when no system roots are
+  found, instead of writing a bundle-only file that would drop any other trust OpenShell
+  delivers. OpenShell terminates TLS in the sandbox, so git there trusts OpenShell's CA, not the
+  host's certificate; the bundle matters to OpenShell's upstream connection, which Koinon does
+  not configure yet. Not verified against the home lab (no cluster access in this item): if
+  OpenShell's CA is delivered through neither path, drop `http.sslCAInfo` in the sandbox.
+- 2026-10-27 (CH2 review): a declared connection Secret takes optional `baseUrl` and `caBundle`
+  keys, validated as the API does.
 
 ## Links
 

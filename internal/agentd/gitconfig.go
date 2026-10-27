@@ -34,11 +34,14 @@ const (
 const writeGitScript = `# ` + gitConfigMarker + `
 umask 077 && mkdir -p "$1" && t=$(mktemp "$1/.git.XXXXXX") && cat > "$t" && rm -rf -- "$2" && mv -f -- "$t" "$2"`
 
-// writeCAScript writes $2 as the sandbox's system roots (when it has a bundle) followed by
-// stdin, so setting http.sslCAInfo does not drop the roots OpenShell's proxy certificate chains
-// to. With no stdin content the file is removed.
+// writeCAScript writes $2 as the sandbox's system roots followed by stdin. http.sslCAInfo
+// replaces git's default trust store, so the roots are taken from SSL_CERT_FILE (where OpenShell
+// may deliver its interception CA) or else the image's bundle; with neither present the script
+// fails rather than leave a file holding only the connection's bundle.
 const writeCAScript = `# ` + gitCAMarker + `
-umask 077 && mkdir -p "$1" && t=$(mktemp "$1/.ca.XXXXXX") && { cat /etc/ssl/certs/ca-certificates.crt 2>/dev/null; cat; } > "$t" && rm -rf -- "$2" && mv -f -- "$t" "$2"`
+src="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}"
+[ -s "$src" ] || { echo "no system CA roots at $src" >&2; exit 1; }
+umask 077 && mkdir -p "$1" && t=$(mktemp "$1/.ca.XXXXXX") && { cat -- "$src"; cat; } > "$t" && rm -rf -- "$2" && mv -f -- "$t" "$2"`
 
 const removeCAScript = `# ` + gitCAMarker + `
 rm -rf -- "$2"`
