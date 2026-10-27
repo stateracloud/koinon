@@ -126,6 +126,26 @@ with the same `taskId` answers an `input-required` task (§6.3).
 13c. **Ephemeral agents** (#146 A8): an agent or template can be marked ephemeral. Each task gets a
     fresh sandbox without a home volume, deleted when the task ends; memory lives in task notes and
     the [0033](0033-file-based-memory.md) stores. The default stays persistent.
+    **Amendment (EP1, 2026-10-27):** the flag is `ephemeral` in a template's `spec` and in the agent
+    version's config (no migration), set at agent creation from the template and overridable there.
+    The predicate is `agentconfig.IsEphemeral`; checkpoints (HC1) and the archive tier call it and
+    skip ephemeral agents. The agent keeps its one `agent_sandboxes` row, which points at the
+    sandbox of one task, `execution.TaskSandboxName` (`kt-` and 16 hex characters of a hash of org,
+    agent and task). The reconciler picks the task from the run that holds the agent, else the run
+    claimed next, else a parked run (`GetEphemeralFocusTask`); when it changes, or when no run needs
+    a sandbox, it deletes the previous sandbox, and with it OpenShell's workspace volume, and moves
+    the row once the sandbox is gone. A running run is never cut off. agentd waits until the row
+    names its task's sandbox. Only the task's end deletes the sandbox: a task
+    between runs (for example input-required with no parked run) keeps it, so a follow-up message
+    reuses the same home and files; the idle stop still applies. The reconciler falls back to the
+    latest run of a task that is not completed, canceled or failed. If another task's run needs the
+    agent's single row, the open task's sandbox is deleted (one sandbox per agent at a time). An ephemeral agent is not pre-woken, since no
+    sandbox exists before its task does.
+    **Amendment (EP1 review, 2026-10-27):** ephemeral is decided from the agent's active version (the
+    reconciler); agentd also accepts the agent's own sandbox name, so a run pinned to an ephemeral
+    version does not wait forever after a persistent version is activated. Deleting a task sandbox
+    is audited as `sandbox.delete` (no phase, so ADR 0054's recreation loop guard does not count it);
+    the event names the sandbox, whose name is a hash of org, agent and task, not the task ID.
 13d. **Failure classes** (#146 A1): a failed run carries a `failure_class` (`transient`,
     `throttled`, `context_overflow`, `budget`, `policy`, `fatal`) that drives retries and inbox
     messages; `context_overflow` shrinks the largest input once, then asks the user
@@ -243,3 +263,39 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   `messaging-and-workflows.md`
 - Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the interruption rule (`system/thread.rs:240-291`, `system/defer.rs`), the `ask_agent` guards (`tools/thread.rs:72-89`) and the failure classes. Research notes: `infinity-code-ideas.md`.
 - Prior art (ideas only, no code; its servers are AGPL-3.0): [daytonaio/daytona](https://github.com/daytonaio/daytona) v0.190.0, for the archive tier and checkpoint lineage. Research notes: `daytona.md`.
+
+## Amendment (2026-10-27, plan item TK2): the inbox as built
+
+- **Routes.** `/` is the inbox; `/board` is the board (secondary view); `/tasks/{id}` is a task. A
+  task keeps its ticket's id, so `/tickets/{id}` redirects to `/tasks/{id}` and old links work. The
+  web UI reads and writes only `TaskService` (`koinon.task.v1alpha1`); `TicketService` stays on the
+  server, deprecated.
+- **Inbox items.** An item is a `kind` in a union (`web/src/lib/inbox.ts`) with one renderer per
+  kind (`web/src/components/inbox.tsx`); a new kind (TK3's question, a reply to validate, a
+  report) is one more member and one more renderer. Today: `approval` (a pending approval the
+  viewer may decide, only for admins and owners as before) and `task-input` (a task in
+  input-required that no listed approval explains, for example a question the agent asked, and
+  that the viewer created). Newest first.
+- **Inline actions.** Approve and Deny sit on the item. Approve sends the `args_sha256` of the
+  listed approval, so a request that changed since the list was read is refused (Aborted) and the
+  item says to open it and review the new version; the full card (diff, risk, note, two-approver
+  state) stays on `/approvals/{id}` and in the task timeline.
+- **Chat.** Next to the inbox, a list of the open tasks (not completed, canceled or failed; the
+  eight most recently updated) is the list of conversations; the chosen one shows the task's
+  timeline and composer, the same components as the task page, and new tasks are started from a
+  form under it. Chat with the personal agent ([0055](0055-chat-as-its-own-object.md)) is not
+  separate yet: every conversation is a task.
+- **Board.** Six groups, one per task state, read-only. "Move to Done" is gone, because nobody moves
+  tasks by hand (decision 3); the task page has "Cancel task" (`CancelTask`) instead.
+- **Notifications.** The navigation shows a badge with the number of waiting items and the tab
+  title carries it, "(2) ...". There is no task stream yet, so the inbox, the board and the badge
+  share one poll of `ListTasks` and `ListApprovals` every 15 seconds (and on window focus). A
+  task event stream would replace the poll.
+- **Review fixes (2026-10-27).** `ListApprovals` is fetched for every role (the proto says viewers
+  and above). Every pending approval explains its task, so a member or viewer never sees an
+  approval-parked task as "needs your reply"; only `canDecide` approvals become items.
+  `task-input` items are limited to tasks the viewer created (`Task.created_by.user_id`), a
+  deliberate conservative choice until TK3 adds targeted asks; before this they listed every
+  input-required task in the org. The inbox and board show an `ListAgents` error too. The e2e spec
+  and the quickstart follow the inbox: Inbox heading, "Hand it a task from the inbox", "Create
+  task", "Open task", `/tasks/{id}`.

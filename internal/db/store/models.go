@@ -226,6 +226,93 @@ func (ns NullAuthMethod) Value() (driver.Value, error) {
 	return string(ns.AuthMethod), nil
 }
 
+type CheckpointReason string
+
+const (
+	CheckpointReasonHourly   CheckpointReason = "hourly"
+	CheckpointReasonStop     CheckpointReason = "stop"
+	CheckpointReasonRecreate CheckpointReason = "recreate"
+)
+
+func (e *CheckpointReason) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CheckpointReason(s)
+	case string:
+		*e = CheckpointReason(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CheckpointReason: %T", src)
+	}
+	return nil
+}
+
+type NullCheckpointReason struct {
+	CheckpointReason CheckpointReason
+	Valid            bool // Valid is true if CheckpointReason is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCheckpointReason) Scan(value interface{}) error {
+	if value == nil {
+		ns.CheckpointReason, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CheckpointReason.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCheckpointReason) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CheckpointReason), nil
+}
+
+type CheckpointStatus string
+
+const (
+	CheckpointStatusRequested CheckpointStatus = "requested"
+	CheckpointStatusRunning   CheckpointStatus = "running"
+	CheckpointStatusComplete  CheckpointStatus = "complete"
+	CheckpointStatusFailed    CheckpointStatus = "failed"
+)
+
+func (e *CheckpointStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CheckpointStatus(s)
+	case string:
+		*e = CheckpointStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CheckpointStatus: %T", src)
+	}
+	return nil
+}
+
+type NullCheckpointStatus struct {
+	CheckpointStatus CheckpointStatus
+	Valid            bool // Valid is true if CheckpointStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCheckpointStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.CheckpointStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CheckpointStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCheckpointStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CheckpointStatus), nil
+}
+
 type ConfigSource string
 
 const (
@@ -1071,6 +1158,9 @@ type AgentSandbox struct {
 	UnhealthyReason     pgtype.Text
 	UnhealthyGeneration pgtype.Text
 	WokenAt             pgtype.Timestamptz
+	SandboxID           pgtype.Text
+	RestoreCheckpointID pgtype.UUID
+	RestoreClaimedAt    pgtype.Timestamptz
 }
 
 type AgentVersion struct {
@@ -1173,11 +1263,46 @@ type Connection struct {
 	RemovedAt         pgtype.Timestamptz
 }
 
+type DedupeRecord struct {
+	OrgID      pgtype.UUID
+	Source     string
+	Key        string
+	EffectKind pgtype.Text
+	EffectID   pgtype.UUID
+	CreatedAt  pgtype.Timestamptz
+}
+
 type DefaultPriceList struct {
 	Version  string
 	Seq      pgtype.Int8
 	Entries  []byte
 	LoadedAt pgtype.Timestamptz
+}
+
+type HomeCheckpoint struct {
+	OrgID       pgtype.UUID
+	ID          pgtype.UUID
+	AgentID     pgtype.UUID
+	Reason      CheckpointReason
+	Status      CheckpointStatus
+	SandboxID   string
+	Generation  string
+	Epoch       int64
+	SnapshotID  pgtype.Text
+	SizeBytes   pgtype.Int8
+	Attempts    int32
+	Error       pgtype.Text
+	RequestedAt pgtype.Timestamptz
+	StartedAt   pgtype.Timestamptz
+	FinishedAt  pgtype.Timestamptz
+}
+
+type HomeRepository struct {
+	OrgID            pgtype.UUID
+	AgentID          pgtype.UUID
+	Prefix           string
+	PasswordEnvelope []byte
+	CreatedAt        pgtype.Timestamptz
 }
 
 type LocalCredential struct {
@@ -1314,12 +1439,15 @@ type OrgMembership struct {
 }
 
 type OrgSetting struct {
-	OrgID              pgtype.UUID
-	IdleTimeoutSeconds pgtype.Int4
-	ParkWarmSeconds    pgtype.Int4
-	QueueWaitSeconds   pgtype.Int4
-	CreatedAt          pgtype.Timestamptz
-	UpdatedAt          pgtype.Timestamptz
+	OrgID                pgtype.UUID
+	IdleTimeoutSeconds   pgtype.Int4
+	ParkWarmSeconds      pgtype.Int4
+	QueueWaitSeconds     pgtype.Int4
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	MaxConcurrentRuns    pgtype.Int4
+	TriggerConcurrency   pgtype.Int4
+	TriggerRatePerMinute pgtype.Int4
 }
 
 type OrgWorkspace struct {

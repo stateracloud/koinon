@@ -137,6 +137,8 @@ type Config struct {
 	// stops, as if the process had been killed. By default they are released so another
 	// replica resumes at once. Tests set it to emulate a killed pod.
 	KeepLeaseOnShutdown bool
+	// Checkpoints turns on home checkpoints (checkpoint.go); nil leaves them off.
+	Checkpoints *Checkpoints
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pool's metrics; nil keeps them unexported.
@@ -188,6 +190,12 @@ func (c *Config) defaults() error {
 	if c.Permissions == nil {
 		c.Permissions = DefaultPermissions()
 	}
+	if c.Checkpoints != nil {
+		if c.Checkpoints.Store == nil || c.Checkpoints.Repositories == nil {
+			return errors.New("agentd: Checkpoints needs a Store and Repositories")
+		}
+		c.Checkpoints.defaults()
+	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
 	}
@@ -230,6 +238,9 @@ func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 // Run drives runs until ctx ends, then waits for the workers to stop.
 func (p *Pool) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
+	if p.cfg.Checkpoints != nil {
+		wg.Go(func() { p.checkpointLoop(ctx) })
+	}
 	for i := range p.cfg.Workers {
 		wg.Go(func() { p.work(ctx, p.cfg.OwnerID+"/"+strconv.Itoa(i)) })
 	}

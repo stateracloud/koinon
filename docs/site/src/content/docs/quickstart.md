@@ -4,7 +4,7 @@ description: From helm install to an approved pull request in about 15 minutes.
 ---
 
 You will install Koinon, sign in, add a model provider, connect a GitHub App, create the
-repo-helper agent, give it a ticket and approve the pull request it proposes.
+repo-helper agent, give it a task and approve the pull request it proposes.
 
 The clock starts at `helm install`. The prerequisites are not on it. Install them first
 ([Prerequisites](/prerequisites/)).
@@ -109,8 +109,8 @@ the spec's own. A check in CI fails when a bold label here is not in the spec.
    **Sign in**.
 2. On **Choose a new password**, enter the one-time password as the **Current password**. Enter a new
    one twice, in **New password** and **Repeat new password**. Press **Change password**.
-   You land on the board, with the columns **To do**, **In progress**, **Waiting on you** and
-   **Done**. You are the owner of the default org.
+   You land on the **Inbox**, with the list **Waiting on you**. The board is a
+   secondary view at `/board`. You are the owner of the default org.
 
 ## 4. Add a model provider
 
@@ -190,28 +190,29 @@ The agent's model is the first model of the org's providers. It starts with the 
 as its own daily limit, which an admin can change ([Budgets](/guides/budgets/)). See
 [Changing in v0.1](#changing-in-v01).
 
-## 7. Create a ticket
+## 7. Create a task
 
-1. On the agent's page, follow **Create a ticket for it on the board**.
+1. On the agent's page, follow **Hand it a task from the inbox**.
 2. Enter a **Title** and a **First message (optional)**. For example: "Add hello.md" and "Please add
    a hello.md that says hello from koinon."
-3. Press **Create ticket**.
+3. Press **Create task**. The task opens as a conversation next to the inbox. Follow **Open task**
+   to see its page.
 
 Koinon starts a sandbox for the agent. The agent clones the repository (read-only), makes the
-change and calls `create_pull_request`. Its reply streams into the ticket's timeline. The first run
+change and calls `create_pull_request`. Its reply streams into the task's timeline. The first run
 takes longer, because the sandbox starts from nothing.
 
 ## 8. Approve
 
-The call parks the run. The ticket moves to **Waiting on you** and shows an approval card with the
+The call parks the run. The task moves to **Waiting on you** and shows an approval card with the
 branch, the title and every changed file. Nothing has reached GitHub yet.
 
 1. Read the files in the card.
 2. Press **Approve**.
 
 Koinon creates the branch, the commit and the pull request through the GitHub API, exactly once. The
-run resumes. The agent posts the pull request URL on the ticket and the run ends as `succeeded`.
-Open the pull request on GitHub. The **Run costs** section of the ticket shows the tokens and the
+run resumes. The agent posts the pull request URL on the task and the run ends as `succeeded`.
+Open the pull request on GitHub. The **Run costs** section of the task shows the tokens and the
 spend of the run.
 
 ## Changing in v0.1

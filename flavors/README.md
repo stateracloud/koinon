@@ -19,7 +19,10 @@ flavor-<name>` passes it): `koinon-git-credential`, git's credential helper for
 `https://github.com`, configured in the read-only `/etc/koinon/git/config` and included from
 `/etc/gitconfig`. It prints the GitHub provider's OpenShell placeholder from `$GITHUB_TOKEN`,
 which OpenShell swaps for the installation token on the wire, and stores nothing
-(`connectors/README.md`).
+(`connectors/README.md`). For a connection on another host (GitHub Enterprise Server),
+koinon-agentd renders the same sections for that host, and `http.sslCAInfo` for its CA bundle,
+into `/sandbox/.koinon/git/config` before every run, which `/etc/gitconfig` also includes; the
+helper then takes `--host HOST[:PORT]`.
 
 The entry scripts source `common/koinon-entry-lib.sh` (installed as
 `/usr/local/lib/koinon/koinon-entry-lib.sh`): `koinon_die` (exit 64), argument parsing, URL

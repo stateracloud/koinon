@@ -114,6 +114,8 @@ type files struct {
 	procinfoRuns int
 	savework     func(dir string) (string, int)
 	saveworkRuns int
+	// tar answers the home checkpoint's tar execs (checkpoint_test.go); nil: no tar.
+	tar func(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 }
 
 func (f *files) link(path string) (string, bool) {
@@ -171,7 +173,7 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		}
 		return 0
 	}
-	if len(args) == 5 && args[0] == "-c" && args[1] == agentd.SaveworkScript {
+	if len(args) == 6 && args[0] == "-c" && args[1] == agentd.SaveworkScript {
 		f.mu.Lock()
 		f.saveworkRuns++
 		fn := f.savework
@@ -183,11 +185,26 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		_, _ = io.WriteString(stdout, out)
 		return code
 	}
+	if len(args) >= 4 && args[0] == "-c" && args[2] == "tar" && f.tar != nil {
+		return f.tar(args[3:], stdin, stdout, stderr)
+	}
 	if len(args) < 4 || args[0] != "-c" {
 		_, _ = fmt.Fprintf(stderr, "unexpected sh %q", args)
 		return 2
 	}
 	in, _ := io.ReadAll(stdin)
+	if strings.Contains(args[1], "koinon-gitconfig") || strings.Contains(args[1], "koinon-gitca") {
+		// The rendered git configuration and CA file (gitconfig.go); the file is kept by path.
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		switch {
+		case strings.Contains(args[1], "mktemp"):
+			f.data[args[4]] = in
+		case len(args) == 5:
+			delete(f.data, args[4])
+		}
+		return 0
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch script := args[1]; {

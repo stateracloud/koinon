@@ -167,6 +167,49 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   (https://docs.github.com/en/enterprise-server@latest/rest/using-the-rest-api/getting-started-with-the-rest-api).
   Unverified: GHES 3.22 support for API version `2026-03-10`.
 
+## Amendments
+
+- 2026-10-27 (CH2): the capability descriptor is data. `connector.yaml` carries
+  `spec.capabilities` (display name, credential class, repository and permission narrowing,
+  `maxRepositories`, `canDenyCI`, `exactModes`), `spec.ciPaths` and `spec.site` (default web and
+  API URLs, and `apiPath` where a connection's own host serves the REST API); the token lifetime
+  stays `auth.tokenLifetime`. `codehost.CapabilitiesOf` builds `Capabilities` from them.
+- 2026-10-27 (CH2): a connection's `baseUrl` and `caBundle` live in `connections.config`
+  (non-secret JSON, no migration); the CA bundle is public. A base URL is an `https` host with an
+  optional port and no path. On another host the REST API is the same host under
+  `spec.site.apiPath`, so GHES stays the GitHub type with a base URL (answers the open question
+  for CH3; a path prefix such as a Gitea sub-path is not supported yet). `Provider.BranchURL`
+  takes the connection.
+- 2026-10-27 (CH2): network rules are rendered at the connection's host (`Type.NetworkAt`).
+  koinon-agentd writes `/sandbox/.koinon/git/config` (credential helper scoped to the host,
+  `http.sslCAInfo`) and `/sandbox/.koinon/git/ca.pem` (system roots plus the bundle, so the
+  OpenShell proxy certificate keeps verifying) before every harness start; `/etc/gitconfig`
+  includes the file after the image's own. `koinon-git-credential` takes `--host`; `savework.sh`
+  takes the host.
+- 2026-10-27 (CH2 review): the CA file is built from `${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}`
+  and the write fails (non-zero exit, so the run fails with the reason) when no system roots are
+  found, instead of writing a bundle-only file that would drop any other trust OpenShell
+  delivers. OpenShell terminates TLS in the sandbox, so git there trusts OpenShell's CA, not the
+  host's certificate; the bundle matters to OpenShell's upstream connection, which Koinon does
+  not configure yet. Not verified against the home lab (no cluster access in this item): if
+  OpenShell's CA is delivered through neither path, drop `http.sslCAInfo` in the sandbox.
+- 2026-10-27 (CH2 review): a declared connection Secret takes optional `baseUrl` and `caBundle`
+  keys, validated as the API does.
+- Amendment 2026-10-27 (CH6, commit by git push): `Capabilities.Writes` is `api` (default) or
+  `push`. `internal/codehost/gitpush` wraps a provider's `Access` for `push`: `WriteCommit` shallow-fetches
+  the base into memory and builds the commit with exact modes (the approval message, trailers included, is
+  used verbatim, as on the API path); `CreateBranch` pushes it as exactly one new branch, never the default
+  branch, `refs/...`, `HEAD` or an existing branch (`ErrBranchExists`). Pure Go with go-git v5.19.2
+  (Apache-2.0), because koinon-api's image has no git CLI; the token is only the HTTP basic password,
+  scrubbed from errors, nothing on disk. If the host does not serve commits by SHA (git http-backend
+  default), the base is fetched through the branch whose tip it is. Commits are authored "Koinon
+  <noreply@koinon.dev>".
+- Amendment 2026-10-27 (CH6 review): `CreateBranch` opens the receive-pack session itself and sends a
+  single create command with the old value the zero hash, so the host refuses it under the ref lock when
+  the branch exists at any value (go-git's `PushContext` would fill in the advertised value and
+  fast-forward a branch that is an ancestor of the commit). A rejection is mapped to `ErrBranchExists`
+  when the ref is then found on the host. A commit that deletes every file uses the empty tree.
+
 ## Links
 
 - Issue [#144](https://github.com/stateracloud/koinon/issues/144); home-lab test
@@ -176,3 +219,10 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   [0063](0063-forge-credential-classes.md), [0064](0064-work-tracker-connectors.md),
   [0066](0066-triggers-and-scheduling.md)
 - Research (session notes, 2026-10-26): `gitea-overlap.md`, `forge-and-trackers.md`
+
+- Amendment 2026-10-27 (wave-2 integration): `spec.capabilities.writes` (`api|push`) is connector
+  data and `CapabilitiesOf` copies it. The push writer takes the connection's CA bundle for the
+  fetch, the ref listing and the push (`gitpush.ForSite` builds the options from the connection's
+  base URL and bundle). A connection's base URL passes the platform's egress URL policy
+  (`egress.allowedInternalHosts`) in the API, in declarative import and, with a fresh lookup, in the
+  reconciler: private and internal hosts only when allow-listed.

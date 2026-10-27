@@ -65,7 +65,17 @@ SET state = @state::sandbox_state,
     phase = @phase,
     message = @message,
     spec_hash = @spec_hash,
-    home_generation = coalesce(nullif(@home_generation::text, ''), agent_sandboxes.home_generation),
+    -- The home generation is the home's lineage (ADR 0051 amendment): the OpenShell ID of the
+    -- first sandbox, kept by a sandbox that is restored from a checkpoint (restore_checkpoint_id,
+    -- set when the old one was deleted). @home_generation is the observed sandbox's ID.
+    home_generation = CASE
+        WHEN nullif(@home_generation::text, '') IS NULL THEN agent_sandboxes.home_generation
+        WHEN nullif(agent_sandboxes.home_generation, '') IS NULL THEN @home_generation::text
+        WHEN @home_generation::text = coalesce(agent_sandboxes.sandbox_id, agent_sandboxes.home_generation)
+            THEN agent_sandboxes.home_generation
+        WHEN agent_sandboxes.restore_checkpoint_id IS NOT NULL THEN agent_sandboxes.home_generation
+        ELSE @home_generation::text END,
+    sandbox_id = coalesce(nullif(@home_generation::text, ''), agent_sandboxes.sandbox_id),
     started_at = CASE WHEN @state::sandbox_state = 'ready' AND agent_sandboxes.state <> 'ready'
                       THEN now() ELSE agent_sandboxes.started_at END,
     stopped_at = CASE WHEN @state::sandbox_state = 'stopped' AND agent_sandboxes.state <> 'stopped'
@@ -104,6 +114,57 @@ FROM runs
 WHERE org_id = @org_id AND agent_id = @agent_id
   AND (state IN ('queued', 'starting', 'running', 'parked')
        OR finished_at > now() - interval '1 day');
+
+-- name: GetEphemeralFocusTask :one
+-- The task an ephemeral agent's sandbox belongs to (ADR 0065 decision 13c): the task of the run
+-- that holds the agent (starting or running), else of the run that would be claimed next (the
+-- claim's own order: interactive before scheduled, then FIFO), else of a parked run, else (a task
+-- between runs) the task of the agent's latest finished run whose task is not in an end state.
+-- Only a task's end (completed, canceled, failed) deletes its sandbox. No row: no task needs one.
+SELECT r.task_id
+FROM runs r
+WHERE r.org_id = @org_id AND r.agent_id = @agent_id
+  AND (
+      (r.state IN ('queued', 'starting', 'running', 'parked')
+       AND (r.state <> 'queued' OR (r.ready_at IS NOT NULL AND run_claimable(r.org_id, r.id))))
+      OR (r.state NOT IN ('queued', 'starting', 'running', 'parked')
+          AND EXISTS (SELECT 1 FROM tasks t
+                      WHERE t.org_id = r.org_id AND t.id = r.task_id
+                        AND t.state NOT IN ('completed', 'canceled', 'failed')))
+  )
+ORDER BY CASE
+             WHEN r.state IN ('starting', 'running') THEN 0
+             WHEN r.state = 'queued' AND r.ready_at IS NOT NULL AND run_claimable(r.org_id, r.id) THEN 1
+             WHEN r.state IN ('queued', 'parked') THEN 2
+             ELSE 3
+         END,
+         CASE WHEN r.state IN ('queued', 'starting', 'running', 'parked') THEN 0 ELSE 1 END,
+         (r.origin = 'scheduled'), r.ready_at NULLS LAST,
+         coalesce(r.finished_at, r.created_at) DESC, r.id
+LIMIT 1;
+
+-- name: SetAgentSandboxName :one
+-- Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
+-- new name yet, so the row starts over as pending. The previous sandbox is gone by now (the
+-- reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged
+-- to that sandbox: a task sandbox starts its own lineage and nothing carries over between tasks.
+UPDATE agent_sandboxes
+SET sandbox_name = @sandbox_name,
+    state = 'pending',
+    phase = '',
+    message = '',
+    spec_hash = '',
+    started_at = NULL,
+    stopped_at = NULL,
+    unhealthy_at = NULL,
+    unhealthy_reason = NULL,
+    unhealthy_generation = NULL,
+    restore_checkpoint_id = NULL,
+    restore_claimed_at = NULL,
+    sandbox_id = NULL,
+    home_generation = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id
+RETURNING *;
 
 -- name: WakeAgentSandbox :one
 -- The pre-wake signal (LT1, B5): a task was created, a person is typing, or a cron is about to

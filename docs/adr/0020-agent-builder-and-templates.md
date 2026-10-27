@@ -59,6 +59,10 @@ stateDiagram-v2
 - What the v0.1 demo template agent does (listed as still open in BOOTSTRAP.md).
 - Whether changing grants on an active agent returns it to draft or creates a pending change.
 
+## Amendment 2026-10-27 (TR1)
+
+- `ActivateAgent` also moves an active agent to its newer proposed version ([0066](0066-triggers-and-scheduling.md)); re-activating the version it already runs is refused, so a concurrent duplicate activation gets `Aborted`.
+
 ## Upstream verification
 
 None needed. Checked 2026-10-21.

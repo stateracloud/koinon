@@ -59,6 +59,7 @@ import (
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
@@ -74,6 +75,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
@@ -419,6 +421,9 @@ func run() error {
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
 	go hub.Run(bgCtx)
 	go scheduler.Sweeper(bgCtx, pool, cfg.sweepInterval, slog.Default())
+	// Notifications that follow a commit (pre-wakes) are DBOS steps with --durable, and inline
+	// best effort without it (ADR 0066, practice B2).
+	var notifier *durable.Notifier
 	if cfg.durable {
 		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
 		// missing schema fails the start instead of the API running without its timers.
@@ -427,6 +432,20 @@ func run() error {
 			ApplicationVersion: project.Version,
 			Logger:             slog.Default(),
 		})
+		notifier = durable.NewNotifier(rt, slog.Default())
+		services.RegisterNotifications(notifier, pool)
+		if err := rt.Register(notifier.Registrar()); err != nil {
+			return err
+		}
+		// The org-partitioned queue for trigger and task-creation work (DB2): each org's limits are
+		// its trigger_concurrency and trigger_rate_per_minute settings. The trigger paths (TR2, TR3)
+		// enqueue through it with durable.EnqueueForOrg; until they land it only registers the queue.
+		if _, err := durable.NewOrgWork(rt, durable.OrgQueueConfig{
+			Defaults: orgsettings.QueueDefaults(),
+			Limits:   orgsettings.QueueLimits(store.New(pool), orgsettings.Defaults()),
+		}); err != nil {
+			return err
+		}
 		if err := rt.Launch(bgCtx); err != nil {
 			return err
 		}
@@ -509,14 +528,14 @@ func run() error {
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, URLPolicy: urlPolicy,
 	})
 	if kube != nil {
 		var sealer connections.Sealer
 		if keyring != nil {
 			sealer = keyring
 		}
-		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, Sealer: sealer, Log: slog.Default()}
+		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
 		go imp.Run(bgCtx)
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
@@ -596,6 +615,9 @@ func run() error {
 		}
 		mux := http.NewServeMux()
 		mux.Handle(savedwork.UploadPath, savedwork.NewReceiver(pool, keyring, keyFn, slog.Default()))
+		// The password of an agent's home repository (ADR 0032): koinon-agentd, the checkpoint
+		// writer, asks per checkpoint and holds no key-encryption key.
+		mux.Handle(checkpoint.RepositoryPath, checkpoint.Server{Passwords: checkpoint.Passwords{Q: store.New(pool), Keys: keyring}, Key: keyFn})
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		swSrv := &http.Server{Addr: cfg.savedWorkAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, swSrv)

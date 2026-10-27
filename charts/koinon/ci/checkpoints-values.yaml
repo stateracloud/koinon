@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# Home checkpoints on (HC1): kubeconform and the duplicate-entry check see the extra volume, mount
+# and env of koinon-agentd. No client TLS Secret: the mesh provides mTLS (openshell.insecure).
+openshell:
+  insecure: true
+gateway:
+  mode: kubernetes
+postgres:
+  cnpg:
+    instances: 3
+    storage:
+      storageClass: fast
+checkpoints:
+  enabled: true
+  s3:
+    existingSecret: koinon-homes-s3
+    bucket: koinon-homes

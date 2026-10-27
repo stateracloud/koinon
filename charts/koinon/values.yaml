@@ -283,6 +283,37 @@ secrets:
   # it off again afterwards.
   migrateLegacyConnections: false
 
+# Home checkpoints (plan item HC1, ADR 0032, practice B3). Off by default. When on, koinon-agentd saves
+# each agent's home (sessions, notes, scratch work; caches and node_modules excluded) to an
+# S3-compatible bucket with kopia: hourly while the sandbox runs, before an idle stop and before a
+# recreation, and restores it into a recreated sandbox before the harness starts. A sandbox is
+# recreated only after its latest backup completed; a failed backup blocks the recreation and marks
+# the agent unhealthy with the reason. One repository per agent at orgs/<org>/homes/<agent>/; its
+# random password is sealed with the secret store's KEK, which only koinon-api holds: koinon-agentd
+# asks it for the password per checkpoint (ADR 0054). koinon-agentd is the only component with the
+# storage credentials, so the NetworkPolicy of the bucket's namespace needs to admit koinon-agentd
+# (and koinon-api) pods only. Give koinon-agentd room: about 512Mi of memory per concurrent backup
+# (agentd.resources) and scratch space for the staged homes (scratchSize).
+checkpoints:
+  enabled: false
+  s3:
+    # Secret with the keys AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, endpoint (host:port or an
+    # http(s) URL; the scheme decides TLS) and region. Required when enabled.
+    existingSecret: ""
+    # Required when enabled. Create the bucket first.
+    bucket: ""
+    # The S3 client addresses buckets path-style on every endpoint but AWS's, which is what Garage,
+    # SeaweedFS, Ceph RGW and MinIO need. Kept as a statement of the requirement: false is refused.
+    pathStyle: true
+  # Time between a running sandbox's checkpoints.
+  interval: 1h
+  # Size limit of the emptyDir where koinon-agentd stages a home while it is saved or restored.
+  # A home stages up to 4Gi (checkpoint.DefaultLimits); 2 backups and 1 restore run at once
+  # (agentd Checkpoints.Concurrency and RestoreConcurrency), plus about 2Gi for kopia's caches:
+  # (2 + 1) * 4Gi + 2Gi. Going over the limit evicts the agentd pod, so lower it only together
+  # with the per-home limit.
+  scratchSize: 14Gi
+
 # GitHub connector (plan item C1). The REST API base URL used to verify connections, mint
 # installation tokens and open approved pull requests; GitHub Enterprise Server uses
 # https://<host>/api/v3. The e2e test points it at a fake.

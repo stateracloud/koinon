@@ -30,9 +30,9 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   await page.getByLabel('New password', { exact: true }).fill(newPassword)
   await page.getByLabel('Repeat new password').fill(newPassword)
   await page.getByRole('button', { name: 'Change password' }).click()
-  for (const col of ['To do', 'In progress', 'Waiting on you', 'Done']) {
-    await expect(page.getByRole('heading', { level: 2, name: new RegExp(`^${col}`) })).toBeVisible()
-  }
+  // The home screen is the inbox; the board is its secondary view, at /board.
+  await expect(page.getByRole('heading', { name: 'Inbox', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: 'Waiting on you' })).toBeVisible()
 
   // 2. Model provider: added in the UI (the fake model server as an OpenAI-compatible provider), with
   // one model. The key is write-only: it is not on the page afterwards.
@@ -114,11 +114,14 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   await expect(page.getByText('Activated.')).toBeVisible()
 
   // 5. Ticket: the run starts in a sandbox and streams the agent's reply.
-  await page.getByRole('link', { name: 'Create a ticket for it on the board' }).click()
+  await page.getByRole('link', { name: 'Hand it a task from the inbox' }).click()
   await page.getByLabel('Title').fill(title)
   await page.getByLabel('First message (optional)').fill(`Please add a hello.md to ${repository} that says hello from koinon.`)
-  await page.getByRole('button', { name: 'Create ticket' }).click()
-  await expect(page).toHaveURL(/\/tickets\/[^/]+$/)
+  await page.getByRole('button', { name: 'Create task' }).click()
+  // The new task opens in place as a conversation next to the inbox; open its page.
+  await expect(page.getByRole('region', { name: `Conversation: ${title}` })).toBeVisible()
+  await page.getByRole('link', { name: 'Open task' }).click()
+  await expect(page).toHaveURL(/\/tasks\/[^/]+$/)
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 
   const timeline = page.getByRole('list', { name: 'Timeline' })
