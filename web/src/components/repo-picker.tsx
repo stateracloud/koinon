@@ -116,16 +116,16 @@ export function RepoPicker({ connectionId, value, onChange, searchable, 'aria-la
           </ul>
           <p className="text-muted-foreground border-t px-3 py-1.5 text-xs" role="status">
             {list.isError && settled
-              ? `Could not list the installation’s repositories (${ConnectError.from(list.error).rawMessage}); type owner/name.`
+              ? `Could not list the connection’s repositories (${ConnectError.from(list.error).rawMessage}); type owner/name.`
               : searching
-                ? 'Searching the installation…'
+                ? 'Searching the connection’s repositories…'
                 : repos.length === 0
-                  ? 'No repository of the installation matches; you can still type owner/name.'
+                  ? 'No repository of the connection matches; you can still type owner/name.'
                   : list.data?.nextPageToken
                     ? 'More repositories match; keep typing to narrow the list.'
                     : query
-                      ? `${repos.length} of the installation’s ${list.data?.totalCount ?? repos.length} repositories match.`
-                      : `The installation’s ${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'}.`}
+                      ? `${repos.length} of the connection’s ${list.data?.totalCount ?? repos.length} repositories match.`
+                      : `The connection’s ${repos.length} ${repos.length === 1 ? 'repository' : 'repositories'}.`}
           </p>
         </div>
       )}
