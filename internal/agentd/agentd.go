@@ -34,6 +34,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -56,6 +57,9 @@ import (
 // stops sandboxes.
 type Backend interface {
 	Exec(ctx context.Context, workspace, sandbox string, req execution.ExecRequest) (execution.Process, error)
+	// Upload extracts a tar stream into a directory of the sandbox through the execution layer's
+	// flow-controlled upload channel (the home restore, ADR 0032).
+	Upload(ctx context.Context, workspace, sandbox, destDir string, tar io.Reader) error
 }
 
 var _ Backend = execution.Backend(nil)
