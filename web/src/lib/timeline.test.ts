@@ -102,6 +102,21 @@ describe('buildTimeline', () => {
     expect(items[3]).toMatchObject({ ask: false })
   })
 
+  it('names the scope that allowed a call without a decision', () => {
+    const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
+    const items = buildTimeline(
+      [
+        taskEvent(1, 100, 'approval.approved', { ...base, scope_id: 'sc-1', scope_kind: 'agent', scope_expires_at: '2099-03-04T12:00:00Z' }, ActorKind.USER),
+        taskEvent(2, 200, 'approval.requested', { ...base, decision: 'allow', scope_id: 'sc-1', scope_kind: 'task', scope_expires_at: '2099-03-04T12:00:00Z' }, ActorKind.AGENT),
+      ],
+      {},
+    )
+    const texts = items.map((i) => ('text' in i ? i.text : ''))
+    expect(texts[0]).toMatch(/^Approved create_pull_request on Acme\/Widgets for this agent until /)
+    expect(texts[1]).toMatch(/^Running create_pull_request on Acme\/Widgets, allowed by a scope for this task until /)
+    expect(items[1]).toMatchObject({ ask: false })
+  })
+
   it('shows a session reset as a note', () => {
     const message = "The agent's workspace was reset, so this run starts a new session."
     const items = buildTimeline(

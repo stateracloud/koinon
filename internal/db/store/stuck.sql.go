@@ -52,7 +52,7 @@ INSERT INTO approval_requests (org_id, task_id, run_id, agent_id, connector, too
 VALUES ($1, $2, $3, $4, $5, $6, $7,
         $8, $9, '{}', 'ask', 'pending', $10, true)
 ON CONFLICT (org_id, run_id, tool, target, args_sha256) DO NOTHING
-RETURNING org_id, id, task_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding, system
+RETURNING org_id, id, task_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding, system, scope_id
 `
 
 type CreateSystemApprovalRequestParams struct {
@@ -113,6 +113,7 @@ func (q *Queries) CreateSystemApprovalRequest(ctx context.Context, arg CreateSys
 		&i.FirstApprover,
 		&i.CallBinding,
 		&i.System,
+		&i.ScopeID,
 	)
 	return i, err
 }

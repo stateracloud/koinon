@@ -124,6 +124,8 @@ type Options struct {
 	// MaxExecutions fails a request whose execution kept hitting transient errors. Default
 	// DefaultMaxExecutions.
 	MaxExecutions int
+	// Now is the clock; it defaults to time.Now. Scope expiry is measured against it.
+	Now func() time.Time
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 }
@@ -139,6 +141,7 @@ type Service struct {
 	hosts     *codehost.Registry
 	lease     time.Duration
 	maxExec   int
+	now       func() time.Time
 	log       *slog.Logger
 }
 
@@ -156,7 +159,11 @@ func New(pool *pgxpool.Pool, opts Options) *Service {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
 	return &Service{
+		now:  opts.Now,
 		pool: pool, q: store.New(pool), keys: opts.Keys, gwURL: opts.GatewayMCPURL, execKey: opts.ExecKeys, savedKeys: opts.SavedWorkKeys, hosts: opts.Hosts,
 		lease: opts.ExecutionLease, maxExec: opts.MaxExecutions, log: opts.Logger,
 	}
@@ -210,8 +217,19 @@ func auditDecision(ctx context.Context, q *store.Queries, r store.ApprovalReques
 // returning. A request already approved with that hash (a replay) is returned as it is, and
 // not executed again unless an earlier execution is still due.
 func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, argsSHA256, note string) (store.ApprovalRequest, error) {
+	return s.ApproveScoped(ctx, org, id, approver, argsSHA256, note, Scope{})
+}
+
+// ApproveScoped is Approve with a scope: a zero Scope (or ScopeOnce) approves this call only; a
+// wider one also records an approval scope for the agent (see Scope). The caller checks that the
+// approver is an org admin or owner, as for any approval.
+func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UUID, argsSHA256, note string, scope Scope) (store.ApprovalRequest, error) {
+	scope, err := scope.normalize(s.now())
+	if err != nil {
+		return store.ApprovalRequest{}, err
+	}
 	var row store.ApprovalRequest
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		cur, err := q.LockApprovalRequest(ctx, store.LockApprovalRequestParams{OrgID: org, ID: id})
 		if err != nil {
@@ -248,6 +266,10 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 				}
 			}
 		}
+		if scope.Kind != ScopeOnce && (cur.ApprovalsRequired >= 2 || cur.System) {
+			// The second person of a two-approver request, and Koinon's own requests, cannot be waived.
+			return ErrScopeNotAllowed
+		}
 		if cur.ApprovalsRequired >= 2 {
 			// Two approvers: distinct people, neither the one who created the task (they asked for
 			// the work; a second pair of eyes is the point). The role check is the caller's.
@@ -279,7 +301,15 @@ func (s *Service) Approve(ctx context.Context, org, id, approver pgtype.UUID, ar
 		if err != nil {
 			return err
 		}
-		if err := taskEvent(ctx, q, row, KindApproved, approver, map[string]any{"note": note}); err != nil {
+		extra := map[string]any{"note": note}
+		if scope.Kind != ScopeOnce {
+			sc, err := s.createScope(ctx, q, row, approver, scope)
+			if err != nil {
+				return err
+			}
+			extra["scope_id"], extra["scope_kind"], extra["scope_expires_at"] = sc.ID.String(), string(sc.Kind), sc.ExpiresAt.Time
+		}
+		if err := taskEvent(ctx, q, row, KindApproved, approver, extra); err != nil {
 			return err
 		}
 		return auditDecision(ctx, q, row, "approval.approve", audit.User(approver), note)

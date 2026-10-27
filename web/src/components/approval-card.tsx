@@ -7,10 +7,12 @@ import { useId, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
-import { FileStatus, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type McpCall, type SavedWorkCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
-import { approvalStatusLabel, approveLabel, targetRepo, toolChanged, toolVersion } from '@/lib/approvals'
+import { FileStatus, ScopeKind, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type McpCall, type SavedWorkCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
+import { approvalStatusLabel, approveLabel, defaultScopeEnd, endOfLocalDay, targetRepo, toolChanged, toolVersion, type ScopeChoice } from '@/lib/approvals'
 import { formatBytes, riskFlagsFor, riskItems, type RiskItem } from '@/lib/risk'
 import { cn } from '@/lib/utils'
 
@@ -18,7 +20,8 @@ export type ApprovalCardProps = {
   approval: Approval
   /** Whether the viewer may decide: an org admin or owner, and the API agrees. */
   canDecide: boolean
-  onApprove?: (note: string) => void
+  /** The scope is only passed when it is wider than once. */
+  onApprove?: (note: string, scope?: ScopeChoice) => void
   onDeny?: (note: string) => void
   pending?: boolean
   error?: string
@@ -148,12 +151,27 @@ export function ApprovalCard({
 
       {pr && <FileList files={pr.files} items={items} diff={diff} diffPending={diffPending} diffError={diffError} />}
 
+      {a.scopeId && (
+        <p role="note" className="bg-muted/30 rounded-md border p-2 text-sm" data-testid="scope-note">
+          Ran without a new decision: allowed by a scope you or another admin granted ({a.scopeKind === ScopeKind.TASK ? 'this task' : 'this agent'}).
+        </p>
+      )}
+
       <Outcome approval={a} resultUrl={resultUrl} />
 
       {isPending &&
         !savedClosed &&
         (canDecide ? (
-          <DecisionForm onApprove={onApprove} onDeny={onDeny} pending={pending} sha={a.argsSha256} approveText={approveLabel(a.approvalsRequired, a.firstApprover)} blocked={blocked} />
+          <DecisionForm
+            onApprove={onApprove}
+            onDeny={onDeny}
+            pending={pending}
+            sha={a.argsSha256}
+            approveText={approveLabel(a.approvalsRequired, a.firstApprover)}
+            blocked={blocked}
+            canScope={!two && !a.system && !saved}
+            agentTool={`${a.tool} on ${saved?.repository || targetRepo(a.target)}`}
+          />
         ) : (
           <p className="text-muted-foreground text-sm">Only org admins and owners can approve or deny this request.</p>
         ))}
@@ -551,21 +569,63 @@ function DecisionForm({
   sha,
   approveText,
   blocked,
+  canScope,
+  agentTool,
 }: {
-  onApprove?: (note: string) => void
+  onApprove?: (note: string, scope?: ScopeChoice) => void
   onDeny?: (note: string) => void
   pending?: boolean
   sha: string
   approveText: string
   blocked?: string
+  /** Whether a scope wider than once can be offered (not for two approvers or Koinon's own requests). */
+  canScope?: boolean
+  agentTool?: string
 }) {
   const noteId = useId()
   const blockedId = useId()
+  const scopeId = useId()
+  const untilId = useId()
   const [note, setNote] = useState('')
+  const [scope, setScope] = useState<'once' | 'task' | 'agent'>('once')
+  const [until, setUntil] = useState(() => defaultScopeEnd())
+  // The form lives for one decision; the clock it checks the date against is read when it opens.
+  const [openedAt] = useState(() => Date.now())
+  const end = endOfLocalDay(until)
+  const badDate = scope === 'agent' && (!end || end.getTime() <= openedAt)
+  const approve = () => {
+    const n = note.trim()
+    if (scope === 'once' || !canScope) onApprove?.(n)
+    else if (scope === 'task') onApprove?.(n, { kind: 'task' })
+    else if (end) onApprove?.(n, { kind: 'agent', until: end })
+  }
   return (
     <div className="grid gap-2 border-t pt-3">
       <Label htmlFor={noteId}>Note (optional)</Label>
       <Textarea id={noteId} rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Shown on the task; on denial the agent reads it." />
+      {canScope && (
+        <div className="grid gap-2" data-testid="scope-choice">
+          <Label htmlFor={scopeId}>How far does this approval reach?</Label>
+          <NativeSelect id={scopeId} value={scope} onChange={(e) => setScope(e.target.value as 'once' | 'task' | 'agent')}>
+            <option value="once">Only this call</option>
+            <option value="task">This task: later {agentTool ?? 'calls like this'}, until the task is over</option>
+            <option value="agent">This agent: later {agentTool ?? 'calls like this'}, until a date</option>
+          </NativeSelect>
+          {scope === 'agent' && (
+            <div className="grid gap-1">
+              <Label htmlFor={untilId}>Until (end of day)</Label>
+              <Input id={untilId} type="date" value={until} onChange={(e) => setUntil(e.target.value)} aria-invalid={badDate} className="max-w-48" />
+              {badDate && <p className="text-destructive text-sm">Choose a date in the future.</p>}
+            </div>
+          )}
+          {scope !== 'once' && (
+            <p role="note" className="text-muted-foreground text-xs">
+              Same tool, same repository or server, arguments may differ. It shows on the agent&apos;s page, is audited and can be revoked. Changes to CI files, scripts,
+              dependencies, binary or executable files always ask again.
+            </p>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-muted-foreground text-xs" title={sha}>
           Approves exactly this change (sha256 {sha.slice(0, 12)}…)
@@ -573,7 +633,7 @@ function DecisionForm({
         <Button variant="outline" className="ml-auto" disabled={pending} onClick={() => onDeny?.(note.trim())}>
           Deny
         </Button>
-        <Button disabled={pending || !!blocked} aria-describedby={blocked ? blockedId : undefined} onClick={() => onApprove?.(note.trim())}>
+        <Button disabled={pending || !!blocked || badDate} aria-describedby={blocked ? blockedId : undefined} onClick={approve}>
           {approveText}
         </Button>
       </div>

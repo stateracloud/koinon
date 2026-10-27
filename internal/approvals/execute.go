@@ -140,7 +140,18 @@ func (s *Service) people(ctx context.Context, row store.ApprovalRequest) (reques
 		}
 	}
 	approved = trustedApprover
-	if row.DecidedBy.Valid {
+	if row.ScopeID.Valid {
+		// A scoped approval: the trailer names the admin who granted the scope.
+		sc, err := s.q.GetApprovalScope(ctx, store.GetApprovalScopeParams{OrgID: row.OrgID, ID: row.ScopeID})
+		if err != nil {
+			return "", "", err
+		}
+		who, err := s.person(ctx, sc.CreatedBy)
+		if err != nil {
+			return "", "", err
+		}
+		approved = who + " (scoped approval)"
+	} else if row.DecidedBy.Valid {
 		if approved, err = s.person(ctx, row.DecidedBy); err != nil {
 			return "", "", err
 		}

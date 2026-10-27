@@ -225,6 +225,13 @@ type Risk struct {
 	Executable []string `json:"executable,omitempty"`
 }
 
+// PushAndRun is true when the change could start code with the repository's secrets or change
+// what runs later: CI or automation files, scripts, dependency manifests, binary or executable
+// files. A scoped approval never covers such a call (ADR 0042 amendment).
+func (r Risk) PushAndRun() bool {
+	return len(r.CI)+len(r.Scripts)+len(r.Dependencies)+len(r.Binary)+len(r.Executable) > 0
+}
+
 var (
 	ciPrefixes = []string{".github/", ".gitlab-ci", ".circleci/", ".buildkite/", ".drone", ".travis", "azure-pipelines", ".azure-pipelines/", "jenkinsfile", ".woodpecker", "bitbucket-pipelines", "cloudbuild", ".tekton/", "renovate.json", ".pre-commit-config"}
 	scriptExts = []string{".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".py", ".rb", ".pl", ".mk"}

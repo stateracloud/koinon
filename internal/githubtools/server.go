@@ -51,6 +51,7 @@ import (
 
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/approvalscope"
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -331,6 +332,22 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		var err error
+		// A scoped approval of this agent (or task) for exactly this connector, tool and target
+		// lets the call run without parking; the timeline records the scope. Calls that could
+		// push and run code are never covered.
+		var scope store.ApprovalScope
+		if params.Status == store.ApprovalStatusPending {
+			if r, isPR := risk.(Risk); !isPR || !r.PushAndRun() {
+				sc, ok, err := approvalscope.Match(ctx, q, params.OrgID, params.AgentID, params.TaskID, connector, tool, params.Target, s.now())
+				if err != nil {
+					return err
+				}
+				if ok {
+					scope = sc
+					params.Decision, params.Status, params.ScopeID = store.ApprovalDecisionAllow, store.ApprovalStatusApproved, sc.ID
+				}
+			}
+		}
 		row, err = q.CreateApprovalRequest(ctx, params)
 		if errors.Is(err, pgx.ErrNoRows) {
 			created = false
@@ -342,10 +359,16 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 		if err != nil {
 			return err
 		}
-		payload, err := json.Marshal(map[string]any{
+		pm := map[string]any{
 			"approval_id": row.ID.String(), "tool": tool, "target": row.Target, "args_sha256": row.ArgsSha256,
 			"decision": string(row.Decision), "risk": json.RawMessage(riskJSON),
-		})
+		}
+		if scope.ID.Valid {
+			for k, v := range approvalscope.Payload(scope) {
+				pm[k] = v
+			}
+		}
+		payload, err := json.Marshal(pm)
 		if err != nil {
 			return err
 		}

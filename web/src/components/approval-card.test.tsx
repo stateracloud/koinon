@@ -2,6 +2,7 @@
 
 import { create, type MessageInitShape } from '@bufbuild/protobuf'
 import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
+import { timestampDate } from '@bufbuild/protobuf/wkt'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
@@ -15,6 +16,7 @@ import {
   McpCallSchema,
   PullRequestCallSchema,
   RiskSchema,
+  ScopeKind,
   Status,
   type ApproveRequest,
   type DenyRequest,
@@ -410,5 +412,66 @@ describe('ApprovalCard', () => {
     setup({ role: OrgRole.MEMBER, canDecide: true })
     const card = await screen.findByTestId('approval-card')
     expect(within(card).queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+  })
+
+  describe('scope choice', () => {
+    it('approves once by default, without a scope', async () => {
+      const { approves } = setup({ mcp: true })
+      await screen.findByTestId('approval-card')
+      expect(screen.getByLabelText('How far does this approval reach?')).toHaveValue('once')
+      await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
+      await waitFor(() => expect(approves).toHaveLength(1))
+      expect(approves[0].scope).toBe(ScopeKind.UNSPECIFIED)
+      expect(approves[0].scopeUntil).toBeUndefined()
+    })
+
+    it('approves for this agent until a date', async () => {
+      const { approves } = setup({ mcp: true })
+      await screen.findByTestId('approval-card')
+      await userEvent.selectOptions(screen.getByLabelText('How far does this approval reach?'), 'agent')
+      const until = screen.getByLabelText('Until (end of day)')
+      await userEvent.clear(until)
+      await userEvent.type(until, '2099-03-04')
+      expect(screen.getByText(/always ask again/)).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
+      await waitFor(() => expect(approves).toHaveLength(1))
+      expect(approves[0].scope).toBe(ScopeKind.AGENT)
+      const sent = timestampDate(approves[0].scopeUntil!)
+      expect([sent.getFullYear(), sent.getMonth(), sent.getDate()]).toEqual([2099, 2, 4])
+    })
+
+    it('approves for this task', async () => {
+      const { approves } = setup({ mcp: true })
+      await screen.findByTestId('approval-card')
+      await userEvent.selectOptions(screen.getByLabelText('How far does this approval reach?'), 'task')
+      expect(screen.queryByLabelText('Until (end of day)')).not.toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
+      await waitFor(() => expect(approves).toHaveLength(1))
+      expect(approves[0].scope).toBe(ScopeKind.TASK)
+    })
+
+    it('does not accept an agent scope without a future date', async () => {
+      const { approves } = setup({ mcp: true })
+      await screen.findByTestId('approval-card')
+      await userEvent.selectOptions(screen.getByLabelText('How far does this approval reach?'), 'agent')
+      const until = screen.getByLabelText('Until (end of day)')
+      await userEvent.clear(until)
+      await userEvent.type(until, '2001-01-01')
+      expect(screen.getByText('Choose a date in the future.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled()
+      expect(approves).toHaveLength(0)
+    })
+
+    it('offers no scope to a viewer or for a request that needs two approvers', async () => {
+      setup({ role: OrgRole.MEMBER, canDecide: false })
+      await screen.findByTestId('approval-card')
+      expect(screen.queryByLabelText('How far does this approval reach?')).not.toBeInTheDocument()
+    })
+
+    it('offers no scope for two approvers', async () => {
+      setup({ mcp: true, mcpInit: { approvalsRequired: 2 } })
+      await screen.findByTestId('approval-card')
+      expect(screen.queryByLabelText('How far does this approval reach?')).not.toBeInTheDocument()
+    })
   })
 })
