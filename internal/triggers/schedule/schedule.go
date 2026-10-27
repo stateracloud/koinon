@@ -31,6 +31,7 @@ import (
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/robfig/cron/v3"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
@@ -80,6 +81,11 @@ type FireInput struct {
 	Agent   string `json:"agent"`
 	Trigger string `json:"trigger"`
 	Version int32  `json:"version"`
+	// Cron, Timezone and Instruction are the trigger's content when the due time was enqueued; the
+	// fire goes ahead only while the trigger in effect still has the same content.
+	Cron        string `json:"cron"`
+	Timezone    string `json:"timezone"`
+	Instruction string `json:"instruction"`
 	// Due is the scheduled due time in Unix seconds (not the jittered start).
 	Due int64 `json:"due"`
 }
@@ -191,9 +197,13 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) error {
 	if !now.After(from) {
 		return nil
 	}
-	list, err := triggers.All(ctx, s.q, templates.TriggerSchedule)
+	list, skipped, err := triggers.AllLenient(ctx, s.q, templates.TriggerSchedule)
 	if err != nil {
 		return err
+	}
+	for _, sk := range skipped {
+		s.log.Warn("schedule triggers: agent config does not parse, its schedules are skipped",
+			"org", sk.OrgID.String(), "agent", sk.AgentID.String(), "version", sk.Version, "err", sk.Err)
 	}
 	acts, err := s.q.ListAgentActivationsAllOrgs(ctx)
 	if err != nil {
@@ -205,7 +215,13 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) error {
 	}
 	woken := map[pgtype.UUID]bool{}
 	for _, tr := range list {
-		fire, wakeAgent := s.plan(tr, activated[tr.AgentID], from, now)
+		sched, loc, err := templates.ParseSchedule(tr.Filter.Cron, tr.Filter.Timezone)
+		if err != nil {
+			s.log.Warn("schedule triggers: schedule does not parse, skipped",
+				"org", tr.OrgID.String(), "agent", tr.AgentID.String(), "trigger", tr.ID, "err", err)
+			continue
+		}
+		fire, wakeAgent := s.plan(tr, sched, loc, activated[tr.AgentID], from, now)
 		if wakeAgent && !woken[tr.AgentID] {
 			woken[tr.AgentID] = true
 			if _, err := s.cfg.Wake(ctx, s.q, tr.OrgID, tr.AgentID); err != nil {
@@ -215,7 +231,10 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) error {
 		if fire.IsZero() {
 			continue
 		}
-		in := FireInput{Org: tr.OrgID.String(), Agent: tr.AgentID.String(), Trigger: tr.ID, Version: tr.Version, Due: fire.Unix()}
+		in := FireInput{
+			Org: tr.OrgID.String(), Agent: tr.AgentID.String(), Trigger: tr.ID, Version: tr.Version,
+			Cron: tr.Filter.Cron, Timezone: tr.Filter.Timezone, Instruction: tr.Instruction, Due: fire.Unix(),
+		}
 		key := durable.TriggerFireKey(TriggerUUID(tr.AgentID, tr.ID).String(), fire)
 		if _, err := durable.EnqueueForOrg[string](ctx, s.work, in.Org, FireWorkflow, in, dbos.WithEnqueueWorkflowID("trigger-fire:"+in.Org+":"+key)); err != nil {
 			return fmt.Errorf("enqueue fire of %s/%s: %w", in.Agent, tr.ID, err)
@@ -228,10 +247,14 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) error {
 // plan returns, for one trigger and the window (from, to], the due time to fire (the latest one
 // whose start falls in the window; zero for none) and whether the agent's sandbox is to be woken
 // (a run is coming but has not started).
-func (s *Scheduler) plan(tr triggers.Active, activated, from, to time.Time) (fire time.Time, wakeAgent bool) {
+func (s *Scheduler) plan(tr triggers.Active, sched cron.Schedule, loc *time.Location, activated, from, to time.Time) (fire time.Time, wakeAgent bool) {
+	next := func(t time.Time) (time.Time, bool) {
+		n := sched.Next(t.In(loc))
+		return n, !n.IsZero()
+	}
 	// Starts follow due times by less than JitterWindow, so due times after from-JitterWindow
 	// are the only candidates; wakes are Lead earlier than starts.
-	d, ok := tr.Next(from.Add(-JitterWindow))
+	d, ok := next(from.Add(-JitterWindow))
 	for n := 0; ok && !d.After(to.Add(s.cfg.Lead)) && n < maxDuesPerTrigger; n++ {
 		if d.After(activated) {
 			start := d.Add(Jitter(tr.AgentID, d))
@@ -242,7 +265,7 @@ func (s *Scheduler) plan(tr triggers.Active, activated, from, to time.Time) (fir
 				wakeAgent = true
 			}
 		}
-		d, ok = tr.Next(d)
+		d, ok = next(d)
 	}
 	return fire, wakeAgent
 }
@@ -268,25 +291,27 @@ func (s *Scheduler) createTask(ctx context.Context, in FireInput) (string, error
 		return "", fmt.Errorf("agent: %w", err)
 	}
 	// Only a trigger still in effect fires: a version activated since the due time was enqueued
-	// may have changed or removed it.
+	// may have changed or removed it. The trigger's content is compared, not the version number:
+	// an unrelated version (an instructions edit, another trigger) activated between the due time
+	// and the start must not drop the run. The version is for the log only.
 	cur, err := triggers.ForAgent(ctx, s.q, org, agent, templates.TriggerSchedule)
 	if err != nil {
 		return "", err
 	}
 	var tr *triggers.Active
 	for i := range cur {
-		if cur[i].ID == in.Trigger && cur[i].Version == in.Version {
+		if cur[i].ID == in.Trigger && sameSchedule(cur[i].Trigger, in) {
 			tr = &cur[i]
 		}
 	}
 	if tr == nil {
-		s.log.Info("schedule triggers: trigger changed or removed before it fired, dropped", "agent", in.Agent, "trigger", in.Trigger)
+		s.log.Info("schedule triggers: trigger changed or removed before it fired, dropped", "agent", in.Agent, "trigger", in.Trigger, "version", in.Version)
 		return "", nil
 	}
 	due := time.Unix(in.Due, 0).UTC()
 	trig := TriggerUUID(agent, in.Trigger)
-	_, loc, _ := templates.ParseSchedule(tr.Filter.Cron, tr.Filter.Timezone)
-	if loc == nil {
+	_, loc, perr := templates.ParseSchedule(tr.Filter.Cron, tr.Filter.Timezone)
+	if perr != nil {
 		loc = time.UTC
 	}
 	task, _, err := s.tasks.CreateTriggeredTask(ctx, services.TriggeredTask{
@@ -303,4 +328,8 @@ func (s *Scheduler) createTask(ctx context.Context, in FireInput) (string, error
 		return "", err
 	}
 	return task.ID.String(), nil
+}
+
+func sameSchedule(t templates.Trigger, in FireInput) bool {
+	return t.Filter.Cron == in.Cron && t.Filter.Timezone == in.Timezone && t.Instruction == in.Instruction
 }
