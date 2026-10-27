@@ -244,7 +244,7 @@ func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 func (p *Pool) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	if p.cfg.Checkpoints != nil {
-		wg.Go(func() { safego.Do(p.log, "checkpoint-loop", func() { p.checkpointLoop(ctx) }) })
+		wg.Go(func() { p.checkpointLoop(ctx) })
 	}
 	for i := range p.cfg.Workers {
 		wg.Go(func() { p.work(ctx, p.cfg.OwnerID+"/"+strconv.Itoa(i)) })

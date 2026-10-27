@@ -133,7 +133,7 @@ func run() error {
 		}
 	}
 	ready.Store(true)
-	go keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log)
+	safego.GoOrStop(ctx, log, "keyring-watch-dir", stop, func(ctx context.Context) { keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log) })
 
 	reg := metrics.NewRegistry()
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {

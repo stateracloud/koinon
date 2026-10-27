@@ -400,7 +400,7 @@ func run() error {
 	}
 	purgeCtx, cancelPurge := context.WithCancel(ctx)
 	defer cancelPurge() // before pool.Close
-	go authSvc.RunPurger(purgeCtx, time.Hour, 7*24*time.Hour)
+	safego.GoOrStop(purgeCtx, slog.Default(), "auth-purger", stop, func(ctx context.Context) { authSvc.RunPurger(ctx, time.Hour, 7*24*time.Hour) })
 
 	// Templates embedded in the binary become rows, versioned by content hash.
 	embedded, err := templates.All()
@@ -422,8 +422,10 @@ func run() error {
 	bgCtx, cancelBg := context.WithCancel(ctx)
 	defer cancelBg() // before pool.Close
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
-	go hub.Run(bgCtx)
-	go scheduler.Sweeper(bgCtx, pool, cfg.sweepInterval, slog.Default())
+	safego.GoOrStop(bgCtx, slog.Default(), "runwatch-hub", stop, func(ctx context.Context) { hub.Run(ctx) })
+	safego.GoOrStop(bgCtx, slog.Default(), "scheduler-sweeper", stop, func(ctx context.Context) {
+		scheduler.Sweeper(ctx, pool, cfg.sweepInterval, slog.Default())
+	})
 	// Notifications that follow a commit (pre-wakes) are DBOS steps with --durable, and inline
 	// best effort without it (ADR 0066, practice B2).
 	var notifier *durable.Notifier
@@ -500,12 +502,14 @@ func run() error {
 		if keyring, err = loadKeyring(ctx, kekStore); err != nil {
 			return err
 		}
-		go watchKeyring(bgCtx, keyring, kekStore, time.Minute)
+		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch", stop, func(ctx context.Context) { watchKeyring(ctx, keyring, kekStore, time.Minute) })
 	case cfg.kekDir != "":
 		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
 			return err
 		}
-		go keyring.WatchDir(bgCtx, cfg.kekDir, time.Minute, slog.Default())
+		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch-dir", stop, func(ctx context.Context) {
+			keyring.WatchDir(ctx, cfg.kekDir, time.Minute, slog.Default())
+		})
 	default:
 		slog.Warn("no --kek-secret or --kek-dir: provider keys and connections cannot be stored")
 	}
@@ -537,7 +541,7 @@ func run() error {
 	}
 	approvalOpts.SavedWorkKeys = keyring // opens the work saved from stuck sandboxes (ADR 0054)
 	approvalSvc := approvals.New(pool, approvalOpts)
-	go approvalSvc.Sweeper(bgCtx, cfg.sweepInterval)
+	safego.GoOrStop(bgCtx, slog.Default(), "approval-sweeper", stop, func(ctx context.Context) { approvalSvc.Sweeper(ctx, cfg.sweepInterval) })
 	tokenSvc := tokens.New(pool, nil)
 	var catalogKeys catalog.Keys
 	if keyring != nil {
@@ -550,10 +554,10 @@ func run() error {
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, URLPolicy: urlPolicy,
 	})
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
-	go svc.QuestionSweeper(bgCtx, cfg.sweepInterval)
+	safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
 	if sched != nil {
 		sched.Bind(svc)
-		go sched.Run(bgCtx)
+		safego.GoOrStop(bgCtx, slog.Default(), "schedule-triggers", stop, func(ctx context.Context) { sched.Run(ctx) })
 		slog.Info("schedule triggers started")
 	}
 	if kube != nil {
@@ -562,7 +566,7 @@ func run() error {
 			sealer = keyring
 		}
 		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
-		go imp.Run(bgCtx)
+		safego.GoOrStop(bgCtx, slog.Default(), "declarative-importer", stop, func(ctx context.Context) { imp.Run(ctx) })
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
 	}
@@ -575,7 +579,7 @@ func run() error {
 	if cfg.otlpAddr != "" {
 		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
 		// the session-authenticated API handler.
-		safego.Go(ctx, slog.Default(), "ledger-otlp", func(context.Context) {
+		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
 			slog.Info("starting the spend ledger's OTLP receiver", "addr", cfg.otlpAddr)
 			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg)}, slog.Default()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
@@ -622,7 +626,7 @@ func run() error {
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		toolsSrv := &http.Server{Addr: cfg.toolsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, toolsSrv)
-		safego.Go(ctx, slog.Default(), "tools-server", func(context.Context) {
+		safego.GoOrStop(ctx, slog.Default(), "tools-server", stop, func(context.Context) {
 			slog.Info("serving GitHub tools", "addr", cfg.toolsAddr)
 			if err := toolsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				toolsErr <- err
@@ -649,7 +653,7 @@ func run() error {
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		swSrv := &http.Server{Addr: cfg.savedWorkAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, swSrv)
-		safego.Go(ctx, slog.Default(), "saved-work-server", func(context.Context) {
+		safego.GoOrStop(ctx, slog.Default(), "saved-work-server", stop, func(context.Context) {
 			slog.Info("serving saved-work uploads", "addr", cfg.savedWorkAddr)
 			if err := swSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				toolsErr <- err

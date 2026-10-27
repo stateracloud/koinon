@@ -19,6 +19,16 @@ func Go(ctx context.Context, log *slog.Logger, name string, fn func(ctx context.
 	go Do(log, name, func() { fn(ctx) })
 }
 
+// GoOrStop is Go for a loop the process must not run without: when fn panics, onPanic is called
+// (typically the cancel of the process's signal context, so the pod restarts).
+func GoOrStop(ctx context.Context, log *slog.Logger, name string, onPanic func(), fn func(ctx context.Context)) {
+	go func() {
+		if Do(log, name, func() { fn(ctx) }) && onPanic != nil {
+			onPanic()
+		}
+	}()
+}
+
 // Do runs fn on the calling goroutine and recovers a panic the same way. It reports whether fn
 // panicked.
 func Do(log *slog.Logger, name string, fn func()) (panicked bool) {

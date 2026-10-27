@@ -33,6 +33,22 @@ func BuildHandoff(title, notice, summary string, replies, messages []string, out
 	return handoff{Title: title, Notice: notice, Summary: summary, Replies: replies, Messages: messages, Outcomes: outcomes}.build()
 }
 
+// AssemblePrompt exposes the pure prompt assembly to the golden tests; mode is one of the
+// Prompt* constants.
+func AssemblePrompt(mode PromptMode, title, notice string, msgs []string, outcomes string) string {
+	return assemblePrompt(mode, title, notice, msgs, outcomes)
+}
+
+type PromptMode = promptMode
+
+const (
+	PromptNew        = promptNew
+	PromptContinue   = promptContinue
+	PromptTakeover   = promptTakeover
+	PromptParkResume = promptParkResume
+	PromptReset      = promptReset
+)
+
 const (
 	ParkResumeNote = parkResumeNote
 	ResumeNote     = resumeNote
