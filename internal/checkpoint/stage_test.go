@@ -5,6 +5,8 @@ package checkpoint_test
 import (
 	"archive/tar"
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -141,5 +143,54 @@ var _ = Describe("Excluded", func() {
 		Entry("notes", "notes/today.md", false),
 		Entry("a similar name", "my.cache/x", false),
 		Entry("with ./", "./.cargo/registry/x", true),
+		Entry("lost+found at the top, with ./", "./lost+found", true),
+		Entry("lost+found at the top", "lost+found", true),
+		Entry("inside lost+found", "lost+found/x", true),
+		Entry("lost+found deeper is a user's directory", "work/lost+found/x", false),
 	)
+})
+
+var _ = Describe("TarExcludeArgs", func() {
+	It("leaves out lost+found at the top of the home only", func() {
+		Expect(checkpoint.TarExcludeArgs()).To(ContainElement("--exclude=./lost+found"))
+		Expect(checkpoint.TarExcludeArgs()).NotTo(ContainElement("--exclude=lost+found"))
+	})
+})
+
+var _ = Describe("WriteTar", func() {
+	It("writes a tar for the sandbox's fixed `tar xf - -C /sandbox`: no root entry, no excluded paths, no owners", func() {
+		dir := GinkgoT().TempDir()
+		put := func(name, body string) {
+			Expect(os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o750)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600)).To(Succeed())
+		}
+		put("notes/today.md", "remember the milk")
+		put("lost+found/orphan", "fsck")
+		put("work/lost+found/x", "a user's")
+		put("work/app/node_modules/x/index.js", "cache")
+		put(".cache/pip/x", "cache")
+		put("tmp/scratch", "scratch")
+		Expect(os.Symlink("notes/today.md", filepath.Join(dir, "link"))).To(Succeed())
+
+		var buf bytes.Buffer
+		Expect(checkpoint.WriteTar(dir, &buf)).To(Succeed())
+		var names []string
+		tr := tar.NewReader(&buf)
+		for {
+			h, err := tr.Next()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			Expect(err).NotTo(HaveOccurred())
+			names = append(names, h.Name)
+			Expect(h.Uid).To(BeZero())
+			Expect(h.Gid).To(BeZero())
+			Expect(h.Uname).To(BeEmpty())
+			Expect(h.Gname).To(BeEmpty())
+		}
+		Expect(names).To(ConsistOf("notes/", "notes/today.md", "work/", "work/lost+found/", "work/lost+found/x", "work/app/", "link"))
+		for _, n := range names {
+			Expect(n).NotTo(Or(Equal("."), Equal("./"), HavePrefix("./"), HavePrefix("/")))
+		}
+	})
 })
