@@ -195,7 +195,6 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   OpenShell's CA is delivered through neither path, drop `http.sslCAInfo` in the sandbox.
 - 2026-10-27 (CH2 review): a declared connection Secret takes optional `baseUrl` and `caBundle`
   keys, validated as the API does.
-
 - Amendment 2026-10-27 (CH6, commit by git push): `Capabilities.Writes` is `api` (default) or
   `push`. `internal/codehost/gitpush` wraps a provider's `Access` for `push`: `WriteCommit` shallow-fetches
   the base into memory and builds the commit with exact modes (the approval message, trailers included, is

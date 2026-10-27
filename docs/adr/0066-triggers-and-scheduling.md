@@ -184,7 +184,7 @@ file on 2026-10-26):
 
 ## Amendment 2026-10-27 (DB3)
 
-- **Dedupe (B1).** Table `dedupe_records (org_id, source, key)` (migration 00026), written by
+- **Dedupe (B1).** Table `dedupe_records (org_id, source, key)` (migration 00024), written by
   `durable.Once` in the same transaction as the effect. Sources: `webhook` (delivery ID), `slack`
   (`event_id`), `trigger` (`durable.TriggerFireKey`: trigger ID plus the scheduled fire time in
   Unix seconds, not the processing time), `question`, `child_task`. A concurrent duplicate waits on
@@ -316,7 +316,7 @@ Checked 2026-10-26 (`messaging-and-workflows.md` §2):
 
 Settles the open question on where per-org concurrency is enforced (#146, Andre, 2026-10-26).
 
-- **Run concurrency lives in Postgres.** `run_claimable` (migration 00025) refuses a claim while the
+- **Run concurrency lives in Postgres.** `run_claimable` (migration 00023) refuses a claim while the
   org already has `max_concurrent_runs` runs in `starting` or `running`; parked runs do not count.
   `ClaimNextRun` and the reconciler's `has_demand` share that function, so a queued run held back by
   the cap keeps no sandbox up. Default 20 per org, tunable in `org_settings.max_concurrent_runs`
@@ -339,5 +339,5 @@ Settles the open question on where per-org concurrency is enforced (#146, Andre,
   `trigger_rate_per_minute` for `OrgQueueConfig.Limits`, and `orgsettings.QueueDefaults` fills
   `OrgQueueConfig.Defaults` so an org left at the defaults stays on the main queue. The settings are
   per minute, so production keeps `RateWindow` at one minute; the window is also part of the profile
-  queue name. Merge order: this PR carries migration 00025 and merges after the items that own 00023
-  and 00024 (or is renumbered at merge), because `hack/migrate-lint.sh` needs contiguous numbers.
+  queue name. Renumbered at integration (wave 2) to migration 00023; it was planned as 00025 behind two other
+  migrations, because `hack/migrate-lint.sh` needs contiguous numbers.
