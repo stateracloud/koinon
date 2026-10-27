@@ -18,3 +18,10 @@ needs `opencode` among the allowed flavors. `repo-helper` sets it to `false` exp
 
 Bump `metadata.version` whenever you change a template's content. Scopes are checked against the
 connector type when templates are synced to the database, not by the schema.
+
+`spec.triggers` (optional) lists what starts work on agents made from the template (ADR 0066):
+`{id, type, filter, instruction}`. `type` is `schedule` (`filter: {cron: "0 9 * * 1-5", timezone:
+Europe/Tallinn}`, five cron fields and an IANA zone) or `direct_message` (no filter); `code_host_event`
+and `channel_event` are reserved for v0.2. The filter is typed per type; there is no expression
+language. The triggers are copied into the agent's first version and fire only once an admin or
+owner activates a version that holds them.
