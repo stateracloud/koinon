@@ -203,8 +203,8 @@ restore 7.2 s on a 186 MB home.
     already staged file, so no name of a linked file is lost.
 
 Still open: the fallback pod (above); an admin override of a blocked recreation with an audit
-entry; kopia maintenance (reclaiming space of expired snapshots) and a periodic test restore;
-exec throughput on the home lab, which has to be measured.
+entry; kopia maintenance (reclaiming space of expired snapshots) and a periodic test restore.
+Throughput was measured on the home lab on 2026-10-27; see the measurement amendment below.
 
 ## Links
 
@@ -273,9 +273,23 @@ subsystem (NVIDIA/OpenShell#4448, in v0.1.4 and later). The backup stays tar ove
   at once instead of waiting for kopia to finish staging the snapshot.
 - **Caveats.** Upstream calls the protocol internal, but the subsystem name is versioned. Extraction
   is not atomic, which is acceptable because the harness does not start unless the restore
-  succeeded. Throughput is bounded by 1 MiB per round trip and has to be measured on the home
-  lab. The Go SDK has no upload transport (it returns `ErrTransportNotAvailable`), which is why
+  succeeded. Throughput is bounded by 1 MiB per round trip; the home-lab numbers are below. The Go SDK has no upload transport (it returns `ErrTransportNotAvailable`), which is why
   agentd carries the client.
 - **Tests.** The fake OpenShell gateway serves the subsystem as upstream does (window enforcement
   with exit 74, acknowledgments, plan parsing) and caps exec stdin at 4 MiB, so the old failure
   reproduces in a test.
+
+### 2026-10-27: measured on the home lab
+
+Measured on main e520d87 on the home lab (Kata sandboxes, Garage S3, OpenShell v0.1.5), with
+200 MiB of random data in an agent's home (210 MB with the rest of the home), #169:
+
+| | Time |
+| --- | --- |
+| Backup, first (tar over exec, kopia, Garage) | 11.4 s and 14.2 s on two runs |
+| Backup, unchanged home | 6.4–7.5 s |
+| Restore through `openshell-upload-v1` (kopia staging and upload, from run queued to `run.home_restored`) | 16 s |
+
+The restored files' SHA-256 sums matched the originals. Before the fix, every restore failed with
+exit 74; a prototype that sent 3 MiB pieces over exec took 19.9 s and needed twice the disk space.
+A home at the 4 GiB stage limit would take about 5 minutes at these rates.
