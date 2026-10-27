@@ -234,8 +234,9 @@ file on 2026-10-26):
   budget, as ADR 0010's subscriptions did.
 - Which process hosts the webhook listener, and how the chart exposes it.
 - Gitea's webhook signature scheme, and the polling interval per provider.
-- Whether the inbox chat's thread correlation ships in v0.1 with direct-message triggers, since #146
-  lists correlation under v0.2.
+- ~~Whether the inbox chat's thread correlation ships in v0.1 with direct-message triggers, since #146
+  lists correlation under v0.2.~~ Answered by the 2026-10-27 (TR3) amendment: it ships in v0.1 for the
+  inbox chat (#146, procoduck, 2026-10-26); Slack and Teams stay in v0.2.
 - The DBOS management plane (Conductor) is an enterprise module (`go.dbos.dev/dbos-enterprise-go`);
   how operators inspect DBOS state without it.
 
@@ -341,3 +342,53 @@ Settles the open question on where per-org concurrency is enforced (#146, procod
   per minute, so production keeps `RateWindow` at one minute; the window is also part of the profile
   queue name. Renumbered at integration (wave 2) to migration 00023; it was planned as 00025 behind two other
   migrations, because `hack/migrate-lint.sh` needs contiguous numbers.
+
+## Amendment (2026-10-27, plan item TR3): the direct-message trigger as built
+
+Settles the open question on thread correlation in v0.1 (#146, procoduck, 2026-10-26, decision 2): inbox-chat
+thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0.2.
+
+- **The thread is the task.** No table and no migration. `TaskService.SendDirectMessage(agent_id,
+  task_id?, text, message_id)`, members and above. Without `task_id` it starts a thread; with it, it
+  replies in that thread.
+- **A direct-message trigger must be in effect.** The agent must be `active` and have a `direct_message`
+  trigger in its active version (`triggers.ForAgent`, TR1); a proposed trigger does not count. Otherwise
+  the API answers `FAILED_PRECONDITION` "this agent does not take direct messages". Replies need it too,
+  so removing the trigger stops the chat with that agent. The web chat says so next to the composer and
+  offers no text box. An unhealthy agent is refused by `scheduler.Enqueue` as for any task.
+- **New thread.** A task with `created_by_kind = trigger` (the "origin"), `created_by_trigger_id` the v5
+  UUID of the agent (`services.DirectMessageTriggerID`; triggers are slugs in the agent config and the
+  column is a uuid, and an agent has at most one direct-message trigger, so the ID is stable across
+  versions), a `task.created` event, and a `message` event written as the sender's own message
+  (`actor_kind = user`, because agentd's prompt carries only user messages). The message's `text`
+  is the trigger's instruction, a blank line and the person's text; `display` holds the person's text,
+  which the timeline shows. The title is the message's first line, at most 80 characters. The run is
+  queued with origin `interactive`: a person is waiting. Tasks have `direct_message_thread` in the API
+  so the web can tell these threads from other trigger-created tasks (schedules, TR2).
+- **Reply in an open thread.** The message (without the instruction) is appended and a run is queued
+  unless one is queued already, which will see it; the agent's sandbox is pre-woken after the commit
+  (LT1). Replies to a task that a direct message did not start are refused (use `AppendMessage`), as
+  are replies for another agent's thread.
+- **Reply to a completed thread: a follow-up reopens the same task.** `completed` moves to `submitted`
+  (`finished_at` cleared), a `status.changed` event records `reason: follow_up`, then the message and the
+  run follow as for an open task. The task keeps its timeline, runs, cost and harness session (a
+  recreated sandbox continues through the handoff, ADR 0051); an ephemeral agent gets a fresh sandbox,
+  as its home ended with the task. The follow-up is not a new task and has no parent link.
+  **Canceled and failed** threads take no reply (`FAILED_PRECONDITION`, "start a new thread"):
+  conservative, since a person ended or the system failed them. The chat lists open threads and
+  completed ones.
+- **Dedupe (DB3).** The client's `message_id` (a UUID, kept across retries by the web client until the
+  send succeeds) is the dedupe key, source `direct_message`. The record, task, events and run commit in
+  one transaction; a replay returns the first result without an `event` and has no second effect.
+- **Rate limits (DB2).** With `api.durable.enabled` the message is delivered by the workflow
+  `koinon.direct-message` on the org-partitioned queue (`durable.EnqueueForOrg`, workflow ID
+  `dm:<org>:<message_id>`), so one org's chat burst is limited by its own `trigger_concurrency` and
+  `trigger_rate_per_minute`. The request waits up to 30 s for its turn and then answers `UNAVAILABLE`;
+  sending again attaches to the same workflow. The API errors travel as workflow output, since an error
+  loses its code in Postgres. Without durable, the same delivery runs inline in one transaction.
+- **Authorisation.** Any member may start or reply in any thread of the org, as with `AppendMessage`;
+  the person's ID is on the message event (the task's creator is the trigger, because
+  `tasks_created_by_actor` allows a user only for `created_by_kind = user`).
+- **Not done here.** Interruption of a running turn (v0.2, decision 12), burst batching, and the
+  `ask_user` reply path of the same thread.
+

@@ -9,8 +9,11 @@ import { Timeline } from '@/components/timeline'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { ApprovalView } from '@/components/approval-view'
-import { TaskService, type Task } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { TaskService, TaskState, type Task } from '@/gen/koinon/task/v1alpha1/task_pb'
+import type { Agent } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { useDirectMessage } from '@/hooks/use-direct-message'
 import { useTaskConversation } from '@/hooks/use-task-conversation'
+import { isReplyThread, noDirectMessagesText, takesDirectMessages } from '@/lib/direct-message'
 import { isEnded, runFinished, runStateLabel, stateLabel } from '@/lib/labels'
 
 export type ChatPanelProps = {
@@ -18,6 +21,8 @@ export type ChatPanelProps = {
   /** The org's tasks; the open ones are the conversations. */
   tasks: readonly Task[]
   agentNames: ReadonlyMap<string, string>
+  /** The org's agents, to tell which take direct messages. */
+  agents?: readonly Agent[]
   canEdit: boolean
   selectedId?: string
   onSelect: (taskId: string) => void
@@ -26,9 +31,10 @@ export type ChatPanelProps = {
 const maxChats = 8
 
 /** ChatPanel lists the open conversations with agents and shows one, next to the inbox. */
-export function ChatPanel({ orgId, tasks, agentNames, canEdit, selectedId, onSelect }: ChatPanelProps) {
+export function ChatPanel({ orgId, tasks, agentNames, agents = [], canEdit, selectedId, onSelect }: ChatPanelProps) {
+  // Open tasks, and completed threads of direct messages, which a reply reopens.
   const open = tasks
-    .filter((t) => !isEnded(t.state))
+    .filter((t) => !isEnded(t.state) || (t.state === TaskState.COMPLETED && t.directMessageThread))
     .sort((a, b) => Number(b.updatedAt?.seconds ?? 0n) - Number(a.updatedAt?.seconds ?? 0n))
     .slice(0, maxChats)
   const current = open.find((t) => t.id === selectedId) ?? open[0]
@@ -51,21 +57,27 @@ export function ChatPanel({ orgId, tasks, agentNames, canEdit, selectedId, onSel
         ))}
       </ul>
       {/* Remount per task so no conversation shows another's events. */}
-      <Conversation key={current.id} orgId={orgId} task={current} agentName={agentNames.get(current.agentId)} canEdit={canEdit} />
+      <Conversation key={current.id} orgId={orgId} task={current} agentName={agentNames.get(current.agentId)} agent={agents.find((a) => a.id === current.agentId)} canEdit={canEdit} />
     </div>
   )
 }
 
-function Conversation({ orgId, task, agentName, canEdit }: { orgId: string; task: Task; agentName?: string; canEdit: boolean }) {
+function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: string; task: Task; agentName?: string; agent?: Agent; canEdit: boolean }) {
   const { task: query, watches, items, refresh } = useTaskConversation(orgId, task.id)
   const append = useMutation(TaskService.method.appendMessage, { onSuccess: refresh })
+  const direct = useDirectMessage(orgId, () => void refresh())
+  const state = query.data?.task?.state ?? task.state
+  // A reply in a direct-message thread goes through the agent's direct-message trigger; the
+  // thread's task resumes, or is reopened when it was completed.
+  const thread = isReplyThread(task)
+  const takes = agent ? takesDirectMessages(agent) : false
   const runs = (query.data?.runs ?? []).map((r) => watches[r.id]?.run ?? r)
   const active = runs.filter((r) => !runFinished(r.state))
   return (
     <section aria-label={`Conversation: ${task.title}`} className="grid gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-medium">{task.title}</h3>
-        <Badge variant="secondary">{stateLabel(query.data?.task?.state ?? task.state)}</Badge>
+        <Badge variant="secondary">{stateLabel(state)}</Badge>
         {agentName && <span className="text-muted-foreground text-sm">{agentName}</span>}
         <Link to="/tasks/$taskId" params={{ taskId: task.id }} className="text-muted-foreground ml-auto text-sm hover:underline">
           Open task
@@ -83,12 +95,22 @@ function Conversation({ orgId, task, agentName, canEdit }: { orgId: string; task
           <Timeline items={items} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
         </>
       )}
-      {canEdit && (
+      {canEdit && thread && !takes && (
+        <p role="status" className="text-muted-foreground text-sm">
+          {noDirectMessagesText(agentName ?? 'This agent')}
+        </p>
+      )}
+      {canEdit && thread && takes && state === TaskState.COMPLETED && (
+        <p role="status" className="text-muted-foreground text-sm">
+          This thread is complete. A reply reopens it as a follow-up.
+        </p>
+      )}
+      {canEdit && (!thread || takes) && !(task.directMessageThread && !thread) && (
         <Composer
           idPrefix="chat-composer"
-          pending={append.isPending}
-          error={append.error ? ConnectError.from(append.error).rawMessage : undefined}
-          onSend={(text) => append.mutateAsync({ orgId, taskId: task.id, text })}
+          pending={thread ? direct.pending : append.isPending}
+          error={thread ? direct.error : append.error ? ConnectError.from(append.error).rawMessage : undefined}
+          onSend={(text) => (thread ? direct.send({ agentId: task.agentId, taskId: task.id, text }) : append.mutateAsync({ orgId, taskId: task.id, text }))}
         />
       )}
     </section>

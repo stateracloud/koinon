@@ -91,7 +91,8 @@ function taskItem(ev: TaskEvent): TimelineItem {
   }
   switch (ev.kind) {
     case 'message':
-      return { key, at, type: 'message', actor: ev.actorKind, text: str(p.text) ?? '', runId }
+      // A direct message's text carries the trigger's instruction; "display" is what the person wrote.
+      return { key, at, type: 'message', actor: ev.actorKind, text: str(p.display) ?? str(p.text) ?? '', runId }
     case 'task.created':
     case 'ticket.created':
       return { key, at, type: 'note', text: `Task created: ${str(p.title) ?? ''}`.trim() }
