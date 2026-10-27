@@ -1173,6 +1173,15 @@ type Connection struct {
 	RemovedAt         pgtype.Timestamptz
 }
 
+type DedupeRecord struct {
+	OrgID      pgtype.UUID
+	Source     string
+	Key        string
+	EffectKind pgtype.Text
+	EffectID   pgtype.UUID
+	CreatedAt  pgtype.Timestamptz
+}
+
 type DefaultPriceList struct {
 	Version  string
 	Seq      pgtype.Int8

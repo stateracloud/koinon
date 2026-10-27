@@ -419,6 +419,9 @@ func run() error {
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
 	go hub.Run(bgCtx)
 	go scheduler.Sweeper(bgCtx, pool, cfg.sweepInterval, slog.Default())
+	// Notifications that follow a commit (pre-wakes) are DBOS steps with --durable, and inline
+	// best effort without it (ADR 0066, practice B2).
+	var notifier *durable.Notifier
 	if cfg.durable {
 		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
 		// missing schema fails the start instead of the API running without its timers.
@@ -427,6 +430,11 @@ func run() error {
 			ApplicationVersion: project.Version,
 			Logger:             slog.Default(),
 		})
+		notifier = durable.NewNotifier(rt, slog.Default())
+		services.RegisterNotifications(notifier, pool)
+		if err := rt.Register(notifier.Registrar()); err != nil {
+			return err
+		}
 		if err := rt.Launch(bgCtx); err != nil {
 			return err
 		}
@@ -509,7 +517,7 @@ func run() error {
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier,
 	})
 	if kube != nil {
 		var sealer connections.Sealer
