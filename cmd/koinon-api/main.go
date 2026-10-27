@@ -443,8 +443,8 @@ func run() error {
 			return err
 		}
 		// The org-partitioned queue for trigger and task-creation work (DB2): each org's limits are
-		// its trigger_concurrency and trigger_rate_per_minute settings. The trigger paths (TR2, TR3)
-		// enqueue through it with durable.EnqueueForOrg; until they land it only registers the queue.
+		// its trigger_concurrency and trigger_rate_per_minute settings. Schedule triggers (TR2) enqueue
+		// through it with durable.EnqueueForOrg; TR3 will follow.
 		orgWork, err := durable.NewOrgWork(rt, durable.OrgQueueConfig{
 			Defaults: orgsettings.QueueDefaults(),
 			Limits:   orgsettings.QueueLimits(store.New(pool), orgsettings.Defaults()),

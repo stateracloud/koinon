@@ -31,6 +31,14 @@ type replica struct {
 
 func startReplica(ctx context.Context, start time.Time) *replica {
 	GinkgoHelper()
+	r := startUnbound(ctx, start)
+	r.sched.Bind(services.New(pool, services.Options{}))
+	return r
+}
+
+// startUnbound is startReplica without the task creator, so enqueued fires wait.
+func startUnbound(ctx context.Context, start time.Time) *replica {
+	GinkgoHelper()
 	r := &replica{now: start, wakes: map[pgtype.UUID][]time.Time{}}
 	r.rt = durable.New(durable.Config{DatabaseURL: dsn, ApplicationVersion: "v1"})
 	work, err := durable.NewOrgWork(r.rt, durable.OrgQueueConfig{
@@ -49,7 +57,6 @@ func startReplica(ctx context.Context, start time.Time) *replica {
 	}, pool, work)
 	Expect(r.rt.Register(r.sched.Registrar())).To(Succeed())
 	Expect(r.rt.Launch(ctx)).To(Succeed())
-	r.sched.Bind(services.New(pool, services.Options{}))
 	return r
 }
 
@@ -249,6 +256,44 @@ var _ = Describe("schedule triggers", func() {
 		r.tick(ctx, base.Add(2*time.Hour+55*time.Minute)) // :05, :10 ... are not due times any more
 		Consistently(func() int { return tasksOf(ctx, org) }, "1s", "100ms").Should(Equal(1))
 		_ = agent
+	}, SpecTimeout(time.Minute))
+
+	It("fires a due time even when an unrelated version is activated before the fire runs", func(ctx SpecContext) {
+		agent := newAgent(ctx, org, cronTrigger("hourly", "0 * * * *"))
+		due := hourAfterNow()
+		start := due.Add(schedule.Jitter(agent.ID, due))
+		r := startUnbound(ctx, due.Add(-time.Minute))
+		DeferCleanup(r.stop)
+		r.tick(ctx, due.Add(-time.Minute))
+		r.tick(ctx, start.Add(time.Second)) // enqueued; the fire waits for the creator
+
+		// A new version: same trigger, other instructions and another trigger.
+		raw, err := agentconfig.Config{Instructions: "changed", Triggers: []templates.Trigger{
+			cronTrigger("hourly", "0 * * * *"), cronTrigger("other", "30 * * * *"),
+		}}.Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		q := store.New(pool)
+		v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent.ID, Config: raw})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: v.ID})
+		Expect(err).NotTo(HaveOccurred())
+
+		r.sched.Bind(services.New(pool, services.Options{}))
+		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(1))
+	}, SpecTimeout(time.Minute))
+
+	It("skips an agent whose config does not parse instead of failing the tick", func(ctx SpecContext) {
+		good := newAgent(ctx, org, cronTrigger("hourly", "0 * * * *"))
+		bad := newAgent(ctx, org, cronTrigger("hourly", "0 * * * *"))
+		_, err := pool.Exec(ctx, `UPDATE agent_versions SET config = '{"triggers": 5}' WHERE org_id = $1 AND agent_id = $2`, org, bad.ID)
+		Expect(err).NotTo(HaveOccurred())
+		due := hourAfterNow()
+		r := startReplica(ctx, due.Add(-time.Minute))
+		DeferCleanup(r.stop)
+		r.tick(ctx, due.Add(-time.Minute))
+		r.tick(ctx, due.Add(schedule.JitterWindow+time.Second))
+		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(1))
+		_ = good
 	}, SpecTimeout(time.Minute))
 
 	It("fires nothing for an agent that is not active", func(ctx SpecContext) {

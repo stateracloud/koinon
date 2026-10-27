@@ -378,3 +378,9 @@ Settles the open question on where per-org concurrency is enforced (#146, Andre,
 - **Without `api.durable.enabled`** schedule triggers do not fire; `koinon-api` logs a warning once
   at start. The simpler alternative (a timer without DBOS) has no cross-replica once-only guarantee
   other than the dedupe key, and was not built.
+- **Review fixes (2026-10-27).** A fire goes ahead while the trigger in effect still has the same
+  cron, timezone and instruction as when the due time was enqueued; the version number is only
+  logged, so an unrelated new version no longer drops a pending run. The tick reads triggers with
+  `triggers.AllLenient`: an active version whose config does not parse, or a schedule that does not
+  parse, is logged and skipped, and one bad row no longer stops the cursor for every org. A schedule
+  is parsed once per trigger per tick, not once per due time.
