@@ -254,3 +254,28 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   `ci_fold_case` (additive, set by `GetApproval`) give the card the same paths; it no longer
   hard-codes `.github/`. The Gitea paths are connector data for CH5 (there is no Gitea connector
   yet); the guard test uses them directly.
+
+- Amendment 2026-10-27 (CH5, Gitea connector): `connectors/gitea/connector.yaml` is the Gitea type
+  (`auth.type: static-token`, `capabilities.writes: push`, `credentialClass: static-token`, the three
+  CI paths of decision 5, `.gitea/*` matched exactly). Gitea has no default host, so `spec.site.selfHosted:
+  true` makes the base URL required and lets it carry a **sub-path**: `https://host[:port][/path]`,
+  segments of letters, digits, `.`, `_`, `~` and `-` only (the path becomes part of OpenShell globs, so no
+  glob, brace, escape, `.`/`..` segment or empty segment; at most 100 characters; no query, fragment or
+  credentials). GitHub's rule is unchanged: a host and a port, no path. `connectors.Location` gains
+  `WebPath`; `BaseURL()` includes it and `APIBaseURL()` is `https://host/sub/api/v1`. The type's rules are
+  written for the root of the placeholder host `gitea.invalid` (the first host in `spec.hosts`) and the
+  network renderer prefixes every rule with the sub-path, so the git rules, the REST rules and the deny
+  rules all sit under it. The deny rule on the REST API is `/api/v1/**` for POST, PUT, PATCH and
+  DELETE, not `/**` as for GitHub, because git's `git-upload-pack` POST shares the host. The git config
+  (`codehost.GitConfig`) still scopes the credential helper to the host's authority; `savework.sh` takes
+  `host/sub-path` as its origin prefix.
+- Amendment 2026-10-27 (CH5): the Gitea provider (`internal/connectors/gitea`) reads through Gitea's v1 REST
+  API (`token` authorization) and leaves commits and branches to `gitpush`, whose writer
+  `gitpush.Open(ctx, provider, connection, scope)` now wraps the provider's Access for every provider whose
+  data says `writes: push`; the approval executor and saved work open their Access through it. `Open` picks
+  the credential by the scope: the WRITE token when any permission is `write`, the READ token otherwise (a
+  Gitea token cannot be narrowed per use, 0063). A duplicate pull request answers 409 on Gitea (422 on
+  GitHub); the executor treats both as "look for the one that exists". `codehost.Token` gains `Revision`, a
+  non-secret name that changes with the token, because a static token has no expiry to name it by; the
+  reconciler uses it as the provider record's credential revision, so a replaced token is pushed into the
+  same record and a token that did not change is never pushed again.

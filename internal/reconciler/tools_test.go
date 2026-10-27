@@ -41,6 +41,14 @@ var _ = Describe("ToolGrants", func() {
 	})
 })
 
+var _ = Describe("ToolGrants for a Gitea grant", func() {
+	It("offers the code-host tools when the tool server is registered for gitea", func() {
+		cfg := agentconfig.Config{Grants: []templates.Grant{{Connector: "gitea", Scopes: []string{"repo.read", "pull_request.create", "issue.comment"}, Preset: templates.PresetStandard}}}
+		Expect(reconciler.ToolGrants(cfg, map[string]string{"gitea": toolsURL})).To(Equal(
+			[]gateway.ToolGrant{{Target: "gitea", Tools: []string{"comment_on_issue", "create_pull_request", "get_approval_status"}}}))
+	})
+})
+
 var _ = Describe("ToolGrants for Koinon's own tools", func() {
 	It("offers ask_user and cancel_task to every agent when the koinon tool server is configured, grant or not", func() {
 		servers := map[string]string{gateway.KoinonTarget: "http://koinon-api-tools.koinon.svc:8081/mcp-koinon"}
