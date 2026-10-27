@@ -33,7 +33,8 @@ question was dismissed or timed out, that the default was applied and what it is
 told.
 
 An answer within the org's park-warm time (15 minutes by default) finds the sandbox still running. A later one starts the stopped
-sandbox, and the agent continues the same session. Questions of a run end with the run.
+sandbox, or, after the archive window, a fresh sandbox with the home restored from its checkpoint, and
+the agent continues the same session. Questions of a run end with the run.
 
 ## Reminders and expiry
 

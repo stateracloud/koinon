@@ -258,7 +258,7 @@ func (p *Pool) work(ctx context.Context, owner string) {
 	for ctx.Err() == nil {
 		// One iteration at a time, so a panic in a run is logged and the worker goes on: the run's
 		// lease expires and another worker takes it over (bounded by MaxTakeovers).
-		safego.Do(log, "agentd-worker", func() {
+		panicked := safego.Do(log, "agentd-worker", func() {
 			run, ok, err := p.claim(ctx, owner)
 			if err != nil && ctx.Err() == nil {
 				log.Warn("claiming a run failed", "err", err)
@@ -270,6 +270,10 @@ func (p *Pool) work(ctx context.Context, owner string) {
 			}
 			p.drive(ctx, run, log)
 		})
+		if panicked {
+			// Back off after a panic, so a bad row does not spin the worker and flood the log.
+			sleep(ctx, p.cfg.Poll)
+		}
 	}
 }
 

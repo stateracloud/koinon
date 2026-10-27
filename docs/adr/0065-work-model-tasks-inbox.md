@@ -457,5 +457,5 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   `TaskService` and keeps its step labels except the words "Ticket" and "ticket", now "Task" and
   "task"; the real-cluster Playwright spec is `web/e2e-real/task-stream.spec.ts` (renamed, same flow:
   it already drove the inbox and `/tasks/{id}`). Approval requests still carry the field `ticket_id`
-  (the task's ID) in `ApprovalService`, so the driver sets `TicketId` there. Judgement call: the
-  archive tier (AR1) is documented from ADR 0032 and says so, since the item is not in this base.
+  (the task's ID) in `ApprovalService`, so the driver sets `TicketId` there. AR1 landed in the
+  same wave, so the archive tier section of the home checkpoints guide describes the built behaviour.
