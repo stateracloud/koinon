@@ -29,7 +29,7 @@ var DefaultLimits = Limits{MaxBytes: 4 << 30, MaxEntries: 2_000_000}
 // StageStats is what a stream held.
 type StageStats struct {
 	Bytes, Files, Dirs, Symlinks int64
-	// Skipped counts entries that are not saved: excluded paths, hard links, devices, pipes.
+	// Skipped counts entries that are not saved: excluded paths, hard links to files outside the stream, devices, pipes.
 	Skipped int64
 }
 
@@ -119,7 +119,27 @@ func Stage(r io.Reader, dir string, lim Limits) (StageStats, error) {
 				return st, err
 			}
 			st.Symlinks++
-		default: // hard links, devices, pipes, sockets
+		case tar.TypeLink:
+			// A later name of a hard-linked file: copy the earlier, already staged file (the backup asks
+			// tar to send every name in full, so this is the fallback). Targets outside the home or not
+			// staged are skipped.
+			target, ok := cleanName(h.Linkname)
+			if !ok || target == "." || Excluded(target) {
+				st.Skipped++
+				continue
+			}
+			n, err := copyStaged(root, target, name, perm, lim, st.Bytes)
+			switch {
+			case errors.Is(err, fs.ErrNotExist) || errors.Is(err, errNotRegular):
+				st.Skipped++
+				continue
+			case err != nil:
+				return st, err
+			}
+			st.Bytes += n
+			st.Files++
+			fixes = append(fixes, fix{name, perm, h.ModTime})
+		default: // devices, pipes, sockets
 			st.Skipped++
 		}
 	}
@@ -134,6 +154,36 @@ func Stage(r io.Reader, dir string, lim Limits) (StageStats, error) {
 		}
 	}
 	return st, nil
+}
+
+var errNotRegular = errors.New("not a regular file")
+
+// copyStaged copies the staged regular file src to dst, within root.
+func copyStaged(root *os.Root, src, dst string, perm fs.FileMode, lim Limits, have int64) (int64, error) {
+	in, err := root.Open(src)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = in.Close() }()
+	fi, err := in.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if !fi.Mode().IsRegular() {
+		return 0, errNotRegular
+	}
+	if lim.MaxBytes > 0 && have+fi.Size() > lim.MaxBytes {
+		return 0, fmt.Errorf("%w: more than %d bytes", ErrTooLarge, lim.MaxBytes)
+	}
+	if err := root.MkdirAll(path.Dir(dst), 0o700); err != nil {
+		return 0, err
+	}
+	out, err := root.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	n, err := io.Copy(out, in)
+	return n, errors.Join(err, out.Close())
 }
 
 // cleanName cleans a tar entry name to a path relative to the home, or reports that it leaves it.

@@ -41,6 +41,15 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND sandbox_id = @sandbox_id
 ORDER BY requested_at DESC, id DESC
 LIMIT 1;
 
+-- name: LatestCompleteHomeCheckpointOfSandbox :one
+-- The newest complete checkpoint (hourly, stop or recreate) taken for this sandbox. The recreate
+-- gate uses it for a sandbox that cannot be read (phase Error or Completed), which no new
+-- checkpoint can be taken of.
+SELECT * FROM home_checkpoints
+WHERE org_id = @org_id AND agent_id = @agent_id AND sandbox_id = @sandbox_id AND status = 'complete'
+ORDER BY finished_at DESC, id DESC
+LIMIT 1;
+
 -- name: ListCompleteHomeCheckpoints :many
 -- Newest first, for the restore. A checkpoint from a higher ownership epoch than any run of the
 -- agent has seen is not restored (ADR 0032).
@@ -90,6 +99,10 @@ WHERE org_id = @org_id AND id = @id AND status IN ('requested', 'running')
 RETURNING *;
 
 -- name: RequestHourlyHomeCheckpoints :many
+-- TODO(EP1): ephemeral agents have no home that outlives a run and must not be checkpointed. The
+-- check lives only in the reconciler (checkpoint.Ephemeral, a stub until EP1); when EP1 lands, filter
+-- here too, for example with a join on the active version's ephemeral flag, and make agentd's
+-- restoreHome skip them.
 -- One request per agent whose sandbox is ready, has no restore pending (an empty home must not
 -- become the newest checkpoint) and has had no checkpoint requested for @interval_seconds.
 INSERT INTO home_checkpoints (org_id, agent_id, reason, sandbox_id, generation)

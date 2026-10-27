@@ -387,6 +387,45 @@ func (q *Queries) InsertHomeRepository(ctx context.Context, arg InsertHomeReposi
 	return i, err
 }
 
+const latestCompleteHomeCheckpointOfSandbox = `-- name: LatestCompleteHomeCheckpointOfSandbox :one
+SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at FROM home_checkpoints
+WHERE org_id = $1 AND agent_id = $2 AND sandbox_id = $3 AND status = 'complete'
+ORDER BY finished_at DESC, id DESC
+LIMIT 1
+`
+
+type LatestCompleteHomeCheckpointOfSandboxParams struct {
+	OrgID     pgtype.UUID
+	AgentID   pgtype.UUID
+	SandboxID string
+}
+
+// The newest complete checkpoint (hourly, stop or recreate) taken for this sandbox. The recreate
+// gate uses it for a sandbox that cannot be read (phase Error or Completed), which no new
+// checkpoint can be taken of.
+func (q *Queries) LatestCompleteHomeCheckpointOfSandbox(ctx context.Context, arg LatestCompleteHomeCheckpointOfSandboxParams) (HomeCheckpoint, error) {
+	row := q.db.QueryRow(ctx, latestCompleteHomeCheckpointOfSandbox, arg.OrgID, arg.AgentID, arg.SandboxID)
+	var i HomeCheckpoint
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.AgentID,
+		&i.Reason,
+		&i.Status,
+		&i.SandboxID,
+		&i.Generation,
+		&i.Epoch,
+		&i.SnapshotID,
+		&i.SizeBytes,
+		&i.Attempts,
+		&i.Error,
+		&i.RequestedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const latestHomeCheckpointOfSandbox = `-- name: LatestHomeCheckpointOfSandbox :one
 SELECT org_id, id, agent_id, reason, status, sandbox_id, generation, epoch, snapshot_id, size_bytes, attempts, error, requested_at, started_at, finished_at FROM home_checkpoints
 WHERE org_id = $1 AND agent_id = $2 AND sandbox_id = $3
@@ -620,6 +659,10 @@ type RequestHourlyHomeCheckpointsParams struct {
 	IntervalSeconds int32
 }
 
+// TODO(EP1): ephemeral agents have no home that outlives a run and must not be checkpointed. The
+// check lives only in the reconciler (checkpoint.Ephemeral, a stub until EP1); when EP1 lands, filter
+// here too, for example with a join on the active version's ephemeral flag, and make agentd's
+// restoreHome skip them.
 // One request per agent whose sandbox is ready, has no restore pending (an empty home must not
 // become the newest checkpoint) and has had no checkpoint requested for @interval_seconds.
 func (q *Queries) RequestHourlyHomeCheckpoints(ctx context.Context, arg RequestHourlyHomeCheckpointsParams) ([]HomeCheckpoint, error) {

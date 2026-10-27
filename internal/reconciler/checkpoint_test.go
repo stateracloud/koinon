@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/reconciler"
 )
 
@@ -215,6 +216,39 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		Expect(osg.Calls("DeleteSandbox")).To(Equal(2), "the home is still in the checkpoint; the empty sandbox holds nothing")
 		_, err = q.GetOpenHomeCheckpoint(ctx, store.GetOpenHomeCheckpointParams{OrgID: org, AgentID: agent.ID})
 		Expect(err).To(HaveOccurred())
+	})
+
+	Describe("a sandbox that cannot be read (phase Error)", func() {
+		fail := func() {
+			GinkgoHelper()
+			sb := row(context.Background())
+			osg.SetPhase(sb.Workspace, names.Sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_ERROR)
+		}
+
+		It("is not recreated and no unclaimable request is filed when no backup is fresh", func(ctx SpecContext) {
+			fail()
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+			_, err := q.GetOpenHomeCheckpoint(ctx, store.GetOpenHomeCheckpointParams{OrgID: org, AgentID: agent.ID})
+			Expect(err).To(HaveOccurred(), "agentd reads only a ready sandbox: a request would never be claimed")
+			a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(a.UnhealthyAt.Valid).To(BeTrue())
+			Expect(a.UnhealthyReason.String).To(ContainSubstring("cannot be read"))
+		})
+
+		It("is recreated from the newest complete backup taken since its last activity", func(ctx SpecContext) {
+			_, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{
+				OrgID: org, AgentID: agent.ID, Reason: store.CheckpointReasonHourly, SandboxID: sandboxID(), Generation: row(ctx).HomeGeneration.String,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			done := finish(ctx, true)
+			fail()
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(row(ctx).RestoreCheckpointID).To(Equal(pgtype.UUID{Bytes: done.ID.Bytes, Valid: true}))
+		})
 	})
 
 	Describe("the idle stop", func() {

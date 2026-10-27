@@ -342,6 +342,10 @@ type Querier interface {
 	// Zero rows: the nonce was used before (a replay).
 	InsertUploadNonce(ctx context.Context, arg InsertUploadNonceParams) (int64, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
+	// The newest complete checkpoint (hourly, stop or recreate) taken for this sandbox. The recreate
+	// gate uses it for a sandbox that cannot be read (phase Error or Completed), which no new
+	// checkpoint can be taken of.
+	LatestCompleteHomeCheckpointOfSandbox(ctx context.Context, arg LatestCompleteHomeCheckpointOfSandboxParams) (HomeCheckpoint, error)
 	// The newest checkpoint of any reason taken for this sandbox. The reconciler's recreate gate
 	// reads it: a complete one newer than the sandbox's last activity lets the recreation go on, a
 	// failed one blocks it.
@@ -546,6 +550,10 @@ type Querier interface {
 	// No row: the agent already has an open request (home_checkpoints_open); read it with
 	// GetOpenHomeCheckpoint.
 	RequestHomeCheckpoint(ctx context.Context, arg RequestHomeCheckpointParams) (HomeCheckpoint, error)
+	// TODO(EP1): ephemeral agents have no home that outlives a run and must not be checkpointed. The
+	// check lives only in the reconciler (checkpoint.Ephemeral, a stub until EP1); when EP1 lands, filter
+	// here too, for example with a join on the active version's ephemeral flag, and make agentd's
+	// restoreHome skip them.
 	// One request per agent whose sandbox is ready, has no restore pending (an empty home must not
 	// become the newest checkpoint) and has had no checkpoint requested for @interval_seconds.
 	RequestHourlyHomeCheckpoints(ctx context.Context, arg RequestHourlyHomeCheckpointsParams) ([]HomeCheckpoint, error)

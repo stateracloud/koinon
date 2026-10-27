@@ -180,6 +180,27 @@ restore 7.2 s on a 186 MB home.
   lab: Secret `koinon/koinon-homes-s3`, bucket `koinon-homes`, region `garage`, a plain HTTP
   endpoint. No off-site copy in v0.1; one (for example R2) can be added later as configuration.
 
+- **2026-10-27, review fixes (HC1):**
+  - *No KEK in agentd.* The writer holds the S3 credentials but not the key-encryption keys (ADR
+    0054 stands): koinon-api creates or opens an agent's repository password and returns it to
+    agentd per checkpoint at `/internal/home-repository` on the saved-work listener, which only
+    agentd may reach. The request is authenticated with an HMAC under the saved-work key (a
+    separate message prefix; org, agent and an expiry of at most a minute). The password is
+    released to the writer only, with `Cache-Control: no-store`, and never logged. Conservative
+    choice: the credential is not single-use (unlike a saved-work post), because the answer is
+    one password for one agent and the lifetime is a minute.
+  - *A sandbox that cannot be read* (phase Error or Completed) files no request, since agentd
+    reads a home only from a ready sandbox and the request would never be claimed. The recreation
+    uses the sandbox's newest complete checkpoint if it was taken since the sandbox's last
+    activity, and otherwise is blocked at once: the agent is marked unhealthy with the reason and
+    the home is kept. A resume repeats this until the fallback pod exists.
+  - *Restore claim and scratch space.* The restore claim lasts as long as the run waits for it
+    (`Timeout * (tries * (1 + fallbacks) + 1)`), so a second run never extracts into the same
+    home. Restores take one slot each (`RestoreConcurrency`, default 1), and the default
+    `checkpoints.scratchSize` is 14Gi: (2 backups + 1 restore) * 4 GiB + 2 GiB of kopia caches.
+  - *Hard links:* the backup runs GNU tar with `--hard-dereference`, and Stage copies a link to an
+    already staged file, so no name of a linked file is lost.
+
 Still open: the fallback pod (above); an admin override of a blocked recreation with an audit
 entry; kopia maintenance (reclaiming space of expired snapshots) and a periodic test restore;
 exec throughput on the home lab, which has to be measured.

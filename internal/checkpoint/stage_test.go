@@ -84,7 +84,21 @@ var _ = Describe("Stage", func() {
 		Expect(filepath.Join(outside, "pwned")).NotTo(BeAnExistingFile())
 	})
 
-	It("skips hard links, devices and excluded paths", func() {
+	It("copies a hard link to a staged file and skips links to anything else", func() {
+		st, err := checkpoint.Stage(makeTar(
+			entry{name: "a", body: "shared"},
+			entry{name: "sub/b", typ: tar.TypeLink, link: "a"},
+			entry{name: "gone", typ: tar.TypeLink, link: "nothing"},
+		), dir, checkpoint.DefaultLimits)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(st.Files).To(BeEquivalentTo(2))
+		Expect(st.Skipped).To(BeEquivalentTo(1))
+		b, err := os.ReadFile(filepath.Join(dir, "sub", "b"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(b)).To(Equal("shared"))
+	})
+
+	It("skips hard links outside the home, devices and excluded paths", func() {
 		st, err := checkpoint.Stage(makeTar(
 			entry{name: "h", typ: tar.TypeLink, link: "/etc/passwd"},
 			entry{name: "dev", typ: tar.TypeChar},

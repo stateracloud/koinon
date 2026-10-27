@@ -123,7 +123,6 @@ spec:
             {{- if eq $component "agentd" }}
             {{- include "koinon.savedWorkVolumeMount" $ | nindent 12 }}
             {{- if $.Values.checkpoints.enabled }}
-            {{- include "koinon.kekVolumeMount" $ | nindent 12 }}
             - name: checkpoints
               mountPath: /var/lib/koinon/checkpoints
             {{- end }}
@@ -148,7 +147,6 @@ spec:
         {{- if eq $component "agentd" }}
         {{- include "koinon.savedWorkVolume" $ | nindent 8 }}
         {{- if $.Values.checkpoints.enabled }}
-        {{- include "koinon.kekVolume" $ | nindent 8 }}
         - name: checkpoints
           emptyDir:
             sizeLimit: {{ $.Values.checkpoints.scratchSize | quote }}

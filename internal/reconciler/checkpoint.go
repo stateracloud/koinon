@@ -68,6 +68,9 @@ func (r *Reconciler) homeGate(ctx context.Context, w *work, ws string, sb execut
 		// still in that checkpoint, and the sandbox holds nothing newer.
 		return true, "", nil
 	}
+	if sb.Phase == execution.PhaseError || sb.Phase == execution.PhaseCompleted {
+		return r.unreadableGate(ctx, w, sb, since)
+	}
 	cp, err := r.q.LatestHomeCheckpointOfSandbox(ctx, store.LatestHomeCheckpointOfSandboxParams{OrgID: w.org.ID, AgentID: w.agent.ID, SandboxID: sb.ID})
 	hasCP := err == nil
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -92,6 +95,31 @@ func (r *Reconciler) homeGate(ctx context.Context, w *work, ws string, sb execut
 	return false, "waiting for the home backup before recreating the sandbox", r.wakeForBackup(ctx, w, ws, sb)
 }
 
+// unreadableGate is the gate for a sandbox in phase Error or Completed. agentd reads a home only
+// from a ready sandbox, so a request filed now would never be claimed; instead the newest complete
+// checkpoint of the sandbox (hourly, stop or recreate) is used when it was taken since the
+// sandbox's last activity, and otherwise the recreation is blocked at once: the home is kept and
+// the agent is marked unhealthy with the reason. Stopgap until the fallback pod that reads the
+// volume directly exists (ADR 0032).
+func (r *Reconciler) unreadableGate(ctx context.Context, w *work, sb execution.Sandbox, since time.Time) (bool, string, error) {
+	cp, err := r.q.LatestCompleteHomeCheckpointOfSandbox(ctx, store.LatestCompleteHomeCheckpointOfSandboxParams{OrgID: w.org.ID, AgentID: w.agent.ID, SandboxID: sb.ID})
+	hasCP := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return false, "", fmt.Errorf("read the latest complete home checkpoint: %w", err)
+	}
+	if hasCP && fresh(cp, since) {
+		if _, err := r.q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: w.org.ID, AgentID: w.agent.ID, CheckpointID: cp.ID}); err != nil {
+			return false, "", fmt.Errorf("record the home restore: %w", err)
+		}
+		return true, "", nil
+	}
+	reason := fmt.Sprintf("the sandbox is in phase %s, so its home cannot be read and has no backup since its last activity; it is not recreated and its home is kept", sb.Phase)
+	if hasCP {
+		reason += fmt.Sprintf(" (the last backup is from %s)", cp.FinishedAt.Time.UTC().Format(time.RFC3339))
+	}
+	return false, reason, r.markBlocked(ctx, w, sb, reason, cp.ID.String())
+}
+
 // wakeForBackup starts a stopped sandbox: agentd reads the home over exec. It stops again once
 // idle, with its checkpoint complete.
 func (r *Reconciler) wakeForBackup(ctx context.Context, w *work, ws string, sb execution.Sandbox) error {
@@ -108,10 +136,14 @@ func (r *Reconciler) wakeForBackup(ctx context.Context, w *work, ws string, sb e
 // blockRecreate marks the agent unhealthy with the failed backup as the reason, once. An admin
 // resumes it (ResumeAgent), which makes the next pass request a new backup.
 func (r *Reconciler) blockRecreate(ctx context.Context, w *work, sb execution.Sandbox, cp store.HomeCheckpoint) error {
+	return r.markBlocked(ctx, w, sb, "the home backup failed, so the sandbox is not recreated and its home is kept: "+cp.Error.String, cp.ID.String())
+}
+
+// markBlocked marks the agent unhealthy with reason, once, and audits it.
+func (r *Reconciler) markBlocked(ctx context.Context, w *work, sb execution.Sandbox, reason, checkpointID string) error {
 	if w.agent.UnhealthyAt.Valid {
 		return nil
 	}
-	reason := "the home backup failed, so the sandbox is not recreated and its home is kept: " + cp.Error.String
 	if _, err := r.q.MarkAgentUnhealthy(ctx, store.MarkAgentUnhealthyParams{OrgID: w.org.ID, ID: w.agent.ID, Reason: reason}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
@@ -119,10 +151,10 @@ func (r *Reconciler) blockRecreate(ctx context.Context, w *work, sb execution.Sa
 		return err
 	}
 	r.m.AgentsUnhealthy.Inc()
-	r.log.Error("the home backup failed; the sandbox is not recreated", append(w.logAttrs(), "err", cp.Error.String)...)
+	r.log.Error("the sandbox is not recreated without a backup of its home", append(w.logAttrs(), "reason", reason)...)
 	return audit.RecordErr(ctx, r.q, audit.Event{
 		Org: w.org.ID, Actor: audit.System(), Action: "agent.mark_unhealthy", TargetKind: "agent", TargetID: w.agent.ID.String(),
-		After: map[string]any{"sandbox": w.names().Sandbox, "reason": reason, "checkpoint": cp.ID.String()},
+		After: map[string]any{"sandbox": w.names().Sandbox, "reason": reason, "checkpoint": checkpointID},
 	})
 }
 

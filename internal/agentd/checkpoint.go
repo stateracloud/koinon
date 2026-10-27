@@ -70,9 +70,15 @@ type Checkpoints struct {
 	SandboxWait time.Duration
 	// Concurrency is how many backups run at once (default 2).
 	Concurrency int
+	// RestoreConcurrency is how many restores stage a home at once (default 1). A restore stages
+	// the whole snapshot on the scratch disk, so the scratch size must cover
+	// (Concurrency + RestoreConcurrency) homes of checkpoint.DefaultLimits.MaxBytes.
+	RestoreConcurrency int
 	// RestoreTries is how many times each checkpoint is tried at restore, newest first, and
 	// RestoreFallbacks how many older checkpoints are tried after it (defaults 2 and 2).
 	RestoreTries, RestoreFallbacks int
+
+	restoreSlots chan struct{}
 }
 
 func (c *Checkpoints) defaults() {
@@ -84,6 +90,10 @@ func (c *Checkpoints) defaults() {
 	setDefault(&c.Retry, 30*time.Second)
 	setDefault(&c.SandboxWait, 30*time.Minute)
 	setDefault(&c.Concurrency, 2)
+	setDefault(&c.RestoreConcurrency, 1)
+	if c.restoreSlots == nil {
+		c.restoreSlots = make(chan struct{}, c.RestoreConcurrency)
+	}
 	setDefault(&c.RestoreTries, 2)
 	setDefault(&c.RestoreFallbacks, 2)
 }
@@ -117,6 +127,8 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 		return
 	}
 	for _, org := range orgs {
+		// TODO(EP1): skip ephemeral agents (checkpoint.Ephemeral is a stub until EP1 lands);
+		// RequestHourlyHomeCheckpoints and restoreHome do not check it yet.
 		if _, err := p.q.RequestHourlyHomeCheckpoints(ctx, store.RequestHourlyHomeCheckpointsParams{
 			OrgID: org, IntervalSeconds: int32(c.Interval.Seconds()), //nolint:gosec // bounded by configuration
 		}); err != nil && ctx.Err() == nil {
@@ -230,7 +242,7 @@ func (p *Pool) backupHome(ctx context.Context, cp store.HomeCheckpoint) (backupR
 	defer cancel()
 	var stderr tail
 	proc, err := p.backend.Exec(actx, sb.Workspace, sb.SandboxName, execution.ExecRequest{
-		Command: tarCommand(append([]string{"-C", checkpoint.HomeDir}, append(checkpoint.TarExcludeArgs(), "-cf", "-", ".")...)...),
+		Command: tarCommand(append([]string{"-C", checkpoint.HomeDir}, append(checkpoint.TarExcludeArgs(), "--hard-dereference", "-cf", "-", ".")...)...),
 		Stderr:  &stderr, Timeout: c.Timeout,
 	})
 	if err != nil {
@@ -280,9 +292,12 @@ func (r *runner) restoreHome(ctx context.Context, sb store.AgentSandbox) error {
 		return nil
 	}
 	org, agent := r.run.OrgID, r.run.AgentID
-	deadline := r.p.cfg.Now().Add(c.Timeout * time.Duration(c.RestoreTries*(1+c.RestoreFallbacks)+1))
+	// One restore can take Timeout for each try of each checkpoint; the claim lasts as long as the
+	// run is willing to wait for it, so a second run never takes it over while the first extracts.
+	budget := c.Timeout * time.Duration(c.RestoreTries*(1+c.RestoreFallbacks)+1)
+	deadline := r.p.cfg.Now().Add(budget)
 	for {
-		_, err := r.q.ClaimSandboxRestore(ctx, store.ClaimSandboxRestoreParams{OrgID: org, AgentID: agent, LeaseSeconds: int32(c.Timeout.Seconds()) * 2}) //nolint:gosec // bounded by configuration
+		_, err := r.q.ClaimSandboxRestore(ctx, store.ClaimSandboxRestoreParams{OrgID: org, AgentID: agent, LeaseSeconds: int32(budget.Seconds())}) //nolint:gosec // bounded by configuration
 		if err == nil {
 			break
 		}
@@ -357,6 +372,13 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 // restoreOne streams one checkpoint into the sandbox's home.
 func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo checkpoint.Repository, cp store.HomeCheckpoint) error {
 	c := r.p.cfg.Checkpoints
+	// The restore stages the snapshot on the scratch disk: only so many at once.
+	select {
+	case c.restoreSlots <- struct{}{}:
+		defer func() { <-c.restoreSlots }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	actx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
 	var stderr tail
