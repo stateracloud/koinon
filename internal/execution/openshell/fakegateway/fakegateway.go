@@ -18,6 +18,7 @@
 package fakegateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"net"
 	"regexp"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -73,6 +75,8 @@ type Gateway struct {
 	calls      map[string]int
 	faults     map[string][]error
 
+	ssh *sshState
+
 	srv *grpc.Server
 	lis *bufconn.Listener
 }
@@ -88,6 +92,7 @@ func New() *Gateway {
 		commands:   map[string]Command{},
 		calls:      map[string]int{},
 		faults:     map[string][]error{},
+		ssh:        newSSHState(),
 	}
 }
 
@@ -679,16 +684,23 @@ func (g *Gateway) ExecSandboxInteractive(stream grpc.BidiStreamingServer[openshe
 		defer sendMu.Unlock()
 		return stream.Send(ev)
 	}
-	stdinR, stdinW := io.Pipe()
+	// Stdin is queued as the supervisor queues it, with its cap on what the command has not read:
+	// a command that reads slower than the client sends is killed with exit status 74 and no
+	// stderr (supervisor ssh/input.rs MAX_PENDING_INPUT, ssh.rs reject_exec_input), as OpenShell
+	// 0.1.3 and later do. Credit cannot help a client: SSH grants it before the data is read.
+	ectx, cancelExec := context.WithCancel(stream.Context())
+	defer cancelExec()
+	stdinQ := newInputQueue()
+	var rejected atomic.Bool
 	go func() {
 		for {
 			msg, err := stream.Recv()
 			if errors.Is(err, io.EOF) {
-				_ = stdinW.Close()
+				stdinQ.closeInput()
 				return
 			}
 			if err != nil {
-				_ = stdinW.CloseWithError(err)
+				stdinQ.fail(err)
 				return
 			}
 			data := msg.GetStdin()
@@ -696,16 +708,23 @@ func (g *Gateway) ExecSandboxInteractive(stream grpc.BidiStreamingServer[openshe
 				if msg.GetResize() != nil {
 					continue
 				}
-				_ = stdinW.CloseWithError(errors.New("expected stdin or resize after exec start"))
+				stdinQ.fail(errors.New("expected stdin or resize after exec start"))
 				return
 			}
-			if _, err := stdinW.Write(data); err != nil {
+			if stdinQ.pendingBytes()+len(data) > MaxPendingStdin {
+				// The exit status goes out before the command is stopped, or the handler could
+				// end the stream first.
+				_ = send(&openshellv1.ExecSandboxEvent{Payload: &openshellv1.ExecSandboxEvent_Exit{Exit: &openshellv1.ExecSandboxExit{ExitCode: 74}}})
+				rejected.Store(true)
+				stdinQ.fail(errors.New("stdin queue full"))
+				cancelExec()
 				return
 			}
+			stdinQ.push(bytes.Clone(data))
 		}
 	}()
 
-	code := cmd(stream.Context(), req.GetCommand()[1:], stdinR,
+	code := cmd(ectx, req.GetCommand()[1:], stdinQ,
 		eventWriter(send, func(b []byte) *openshellv1.ExecSandboxEvent {
 			return &openshellv1.ExecSandboxEvent{Payload: &openshellv1.ExecSandboxEvent_Stdout{Stdout: &openshellv1.ExecSandboxStdout{Data: b}}}
 		}),
@@ -713,8 +732,11 @@ func (g *Gateway) ExecSandboxInteractive(stream grpc.BidiStreamingServer[openshe
 			return &openshellv1.ExecSandboxEvent{Payload: &openshellv1.ExecSandboxEvent_Stderr{Stderr: &openshellv1.ExecSandboxStderr{Data: b}}}
 		}),
 	)
+	if rejected.Load() {
+		return nil // the exit status 74 is sent
+	}
 	// Unblock the stdin goroutine if the command stopped reading.
-	_ = stdinR.Close()
+	stdinQ.fail(io.ErrClosedPipe)
 	if err := stream.Context().Err(); err != nil {
 		return status.FromContextError(err).Err()
 	}
