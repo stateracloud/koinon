@@ -25,7 +25,9 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
+	"github.com/stateracloud/koinon/internal/testing/fakegitea"
 )
 
 // markAsk makes the fake harness call create_pull_request through Koinon's tool server.
@@ -44,15 +46,20 @@ func (h headerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 type ghEnv struct {
 	*env
 	gh    *githubtest.Fake
+	gt    *fakegitea.Fake // a Gitea in place of gh (newGiteaEnv)
 	svc   *approvals.Service
 	tools *httptest.Server
 	slug  string
+	ring  *secretstore.Keyring
+	// toolsMu guards tools, which a restart test points at the surviving process set.
+	toolsMu sync.Mutex
 }
 
 func newGitHubEnv(ctx context.Context) *ghEnv {
 	g := &ghEnv{gh: githubtest.New()}
 	DeferCleanup(g.gh.Server.Close)
 	ring := secretstoretest.Keyring()
+	g.ring = ring
 	g.env = newEnvWith(ctx, store.AgentFlavorOpencode, func(e *env) string {
 		connID := uuid.New()
 		id := pgtype.UUID{Bytes: connID, Valid: true}
@@ -80,11 +87,17 @@ func newGitHubEnv(ctx context.Context) *ghEnv {
 	return g
 }
 
+func (g *ghEnv) toolsURL() string {
+	g.toolsMu.Lock()
+	defer g.toolsMu.Unlock()
+	return g.tools.URL
+}
+
 // callTool calls a Koinon tool as the agent and returns its text.
 func (g *ghEnv) callTool(ctx context.Context, tool string, args any) (string, githubtools.Result) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "fake-harness", Version: "1"}, nil)
 	s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint: g.tools.URL, HTTPClient: &http.Client{Transport: headerTransport{agent: g.slug + "/" + g.agent.ID.String()}},
+		Endpoint: g.toolsURL(), HTTPClient: &http.Client{Transport: headerTransport{agent: g.slug + "/" + g.agent.ID.String()}},
 		DisableStandaloneSSE: true, MaxRetries: -1,
 	}, nil)
 	if err != nil {

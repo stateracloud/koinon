@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // The prober (plan item MC1). Every MCP probe interval it connects to the gateway with each served
@@ -61,7 +62,7 @@ func (r *Reconciler) RunProber(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			r.ProbeAll(ctx)
+			safego.Do(r.log, "mcp-probe", func() { r.ProbeAll(ctx) })
 		}
 	}
 }
@@ -76,11 +77,11 @@ func (r *Reconciler) ProbeAll(ctx context.Context) {
 	for _, p := range probes {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func() {
+		safego.Go(ctx, r.log, "mcp-probe", func(ctx context.Context) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			r.probeOne(ctx, p)
-		}()
+		})
 	}
 	wg.Wait()
 }

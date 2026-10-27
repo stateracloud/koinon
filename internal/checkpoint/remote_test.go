@@ -40,7 +40,7 @@ var _ = Describe("Repository passwords over HTTP", func() {
 		_, err := checkpoint.Remote{BaseURL: srv.URL, Key: func() ([]byte, error) { return []byte("wrong"), nil }}.Get(context.Background(), org, agent)
 		Expect(err).To(MatchError(ContainSubstring("401")))
 
-		res, err := http.Get(srv.URL + checkpoint.RepositoryPath) //nolint:noctx // a plain probe
+		res, err := http.Get(srv.URL + checkpoint.RepositoryPath)
 		Expect(err).NotTo(HaveOccurred())
 		_ = res.Body.Close()
 		Expect(res.StatusCode).To(Equal(http.StatusMethodNotAllowed))

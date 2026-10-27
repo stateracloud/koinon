@@ -97,6 +97,46 @@ var _ = Describe("agent health and fresh sessions", func() {
 		})
 	})
 
+	Describe("an archived sandbox (plan item AR1)", func() {
+		It("shows sandbox_archived_at on the agent in Get and List, and clears it when the sandbox is observed again", func(ctx SpecContext) {
+			_, err := e.pool.Exec(ctx, `INSERT INTO org_workspaces (org_id, workspace) VALUES ($1, 'ws-archive')`, org)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = e.pool.Exec(ctx, `INSERT INTO agent_sandboxes (org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, home_generation)
+				VALUES ($1, $2, 'ws-archive', 'sb-archive', 'pv-archive', 'key-archive', 'gen-1')`, org, agent.GetId())
+			Expect(err).NotTo(HaveOccurred())
+			shown := func(ctx SpecContext) (get, list bool) {
+				res, err := owner.agents.GetAgent(ctx, &agentv1alpha1.GetAgentRequest{OrgId: org, AgentId: agent.GetId()})
+				Expect(err).NotTo(HaveOccurred())
+				all, err := owner.agents.ListAgents(ctx, &agentv1alpha1.ListAgentsRequest{OrgId: org})
+				Expect(err).NotTo(HaveOccurred())
+				for _, a := range all.GetAgents() {
+					if a.GetId() == agent.GetId() {
+						list = a.GetSandboxArchivedAt() != nil
+					}
+				}
+				return res.GetAgent().GetSandboxArchivedAt() != nil, list
+			}
+			get, list := shown(ctx)
+			Expect(get).To(BeFalse())
+			Expect(list).To(BeFalse())
+
+			qs := store.New(e.pool)
+			_, err = qs.MarkSandboxArchived(ctx, store.MarkSandboxArchivedParams{OrgID: mustUUID(org), AgentID: mustUUID(agent.GetId())})
+			Expect(err).NotTo(HaveOccurred())
+			get, list = shown(ctx)
+			Expect(get).To(BeTrue())
+			Expect(list).To(BeTrue())
+
+			_, err = qs.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
+				OrgID: mustUUID(org), AgentID: mustUUID(agent.GetId()), State: store.SandboxStateReady, HomeGeneration: "gen-2",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			get, list = shown(ctx)
+			Expect(get).To(BeFalse())
+			Expect(list).To(BeFalse())
+		})
+	})
+
 	Describe("activating with 'apply to open tickets'", func() {
 		// open makes a ticket with a stored session; done is a finished one.
 		open := func(ctx SpecContext, title string, status string) string {

@@ -271,7 +271,7 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 		Expect(err).NotTo(HaveOccurred())
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+dkey.Material)
-		_, err = http.DefaultClient.Do(req) //nolint:bodyclose // the request fails before a response
+		_, err = http.DefaultClient.Do(req)
 		Expect(err).To(HaveOccurred(), "the client gave up before the headers")
 
 		var row spendRow

@@ -548,6 +548,99 @@ func (x *GitHubConnection) GetCiDirs() []string {
 	return nil
 }
 
+// GiteaConnection is the non-secret part of a Gitea connection (ADR 0063).
+type GiteaConnection struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The server's web base URL, https://host[:port][/path]; the REST API is at /api/v1 under it.
+	BaseUrl string `protobuf:"bytes,1,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	// PEM certificates trusted for that server besides the system roots. Public.
+	CaBundle string `protobuf:"bytes,2,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	// Directories, relative to the repository root, that run CI on this server besides the
+	// connector's own CI paths (WORKFLOW_DIRS).
+	CiDirs []string `protobuf:"bytes,3,rep,name=ci_dirs,json=ciDirs,proto3" json:"ci_dirs,omitempty"`
+	// When each token was entered in Koinon. Gitea does not expose a token's creation date, so
+	// this is the age Koinon can show (ADR 0063).
+	ReadTokenSetAt  *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=read_token_set_at,json=readTokenSetAt,proto3" json:"read_token_set_at,omitempty"`
+	WriteTokenSetAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=write_token_set_at,json=writeTokenSetAt,proto3" json:"write_token_set_at,omitempty"`
+	// The age after which Koinon warns that a token is old, from the connector type. Nothing
+	// blocks on age and Koinon never rotates a token. Zero for no warning.
+	TokenWarnAfterSeconds int64 `protobuf:"varint,6,opt,name=token_warn_after_seconds,json=tokenWarnAfterSeconds,proto3" json:"token_warn_after_seconds,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *GiteaConnection) Reset() {
+	*x = GiteaConnection{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GiteaConnection) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GiteaConnection) ProtoMessage() {}
+
+func (x *GiteaConnection) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GiteaConnection.ProtoReflect.Descriptor instead.
+func (*GiteaConnection) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GiteaConnection) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *GiteaConnection) GetCaBundle() string {
+	if x != nil {
+		return x.CaBundle
+	}
+	return ""
+}
+
+func (x *GiteaConnection) GetCiDirs() []string {
+	if x != nil {
+		return x.CiDirs
+	}
+	return nil
+}
+
+func (x *GiteaConnection) GetReadTokenSetAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ReadTokenSetAt
+	}
+	return nil
+}
+
+func (x *GiteaConnection) GetWriteTokenSetAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.WriteTokenSetAt
+	}
+	return nil
+}
+
+func (x *GiteaConnection) GetTokenWarnAfterSeconds() int64 {
+	if x != nil {
+		return x.TokenWarnAfterSeconds
+	}
+	return 0
+}
+
 // Connection is a configured connector instance.
 type Connection struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -571,6 +664,7 @@ type Connection struct {
 	// Types that are valid to be assigned to Settings:
 	//
 	//	*Connection_Github
+	//	*Connection_Gitea
 	Settings      isConnection_Settings `protobuf_oneof:"settings"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -578,7 +672,7 @@ type Connection struct {
 
 func (x *Connection) Reset() {
 	*x = Connection{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[6]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -590,7 +684,7 @@ func (x *Connection) String() string {
 func (*Connection) ProtoMessage() {}
 
 func (x *Connection) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[6]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -603,7 +697,7 @@ func (x *Connection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Connection.ProtoReflect.Descriptor instead.
 func (*Connection) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{6}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Connection) GetId() string {
@@ -699,6 +793,15 @@ func (x *Connection) GetGithub() *GitHubConnection {
 	return nil
 }
 
+func (x *Connection) GetGitea() *GiteaConnection {
+	if x != nil {
+		if x, ok := x.Settings.(*Connection_Gitea); ok {
+			return x.Gitea
+		}
+	}
+	return nil
+}
+
 type isConnection_Settings interface {
 	isConnection_Settings()
 }
@@ -707,7 +810,13 @@ type Connection_Github struct {
 	Github *GitHubConnection `protobuf:"bytes,10,opt,name=github,proto3,oneof"`
 }
 
+type Connection_Gitea struct {
+	Gitea *GiteaConnection `protobuf:"bytes,14,opt,name=gitea,proto3,oneof"`
+}
+
 func (*Connection_Github) isConnection_Settings() {}
+
+func (*Connection_Gitea) isConnection_Settings() {}
 
 // CreateGitHubConnectionRequest carries the setup guide's fields.
 type CreateGitHubConnectionRequest struct {
@@ -736,7 +845,7 @@ type CreateGitHubConnectionRequest struct {
 
 func (x *CreateGitHubConnectionRequest) Reset() {
 	*x = CreateGitHubConnectionRequest{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[7]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -748,7 +857,7 @@ func (x *CreateGitHubConnectionRequest) String() string {
 func (*CreateGitHubConnectionRequest) ProtoMessage() {}
 
 func (x *CreateGitHubConnectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[7]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -761,7 +870,7 @@ func (x *CreateGitHubConnectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateGitHubConnectionRequest.ProtoReflect.Descriptor instead.
 func (*CreateGitHubConnectionRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{7}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CreateGitHubConnectionRequest) GetOrgId() string {
@@ -839,7 +948,7 @@ type CreateGitHubConnectionResponse struct {
 
 func (x *CreateGitHubConnectionResponse) Reset() {
 	*x = CreateGitHubConnectionResponse{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[8]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -851,7 +960,7 @@ func (x *CreateGitHubConnectionResponse) String() string {
 func (*CreateGitHubConnectionResponse) ProtoMessage() {}
 
 func (x *CreateGitHubConnectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[8]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -864,7 +973,7 @@ func (x *CreateGitHubConnectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateGitHubConnectionResponse.ProtoReflect.Descriptor instead.
 func (*CreateGitHubConnectionResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{8}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CreateGitHubConnectionResponse) GetConnection() *Connection {
@@ -875,6 +984,166 @@ func (x *CreateGitHubConnectionResponse) GetConnection() *Connection {
 }
 
 func (x *CreateGitHubConnectionResponse) GetResults() []*CheckResult {
+	if x != nil {
+		return x.Results
+	}
+	return nil
+}
+
+// CreateGiteaConnectionRequest carries the setup guide's fields.
+type CreateGiteaConnectionRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	OrgId       string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	DisplayName string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	// The server's web base URL, https://host[:port][/path]. Required.
+	BaseUrl string `protobuf:"bytes,3,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	// Secure input (ADR 0021): the bot's read token and write token. Stored only as an envelope in
+	// Postgres (ADR 0056), never returned or logged.
+	ReadToken  string `protobuf:"bytes,4,opt,name=read_token,json=readToken,proto3" json:"read_token,omitempty"`
+	WriteToken string `protobuf:"bytes,5,opt,name=write_token,json=writeToken,proto3" json:"write_token,omitempty"`
+	// PEM certificates that sign the server's TLS certificate, when the system roots do not.
+	CaBundle string `protobuf:"bytes,6,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	// Directories that run CI on this server besides the connector's own CI paths. At most 20.
+	CiDirs []string `protobuf:"bytes,7,rep,name=ci_dirs,json=ciDirs,proto3" json:"ci_dirs,omitempty"`
+	// Run TestConnection right after creating it.
+	Test          bool `protobuf:"varint,8,opt,name=test,proto3" json:"test,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateGiteaConnectionRequest) Reset() {
+	*x = CreateGiteaConnectionRequest{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateGiteaConnectionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateGiteaConnectionRequest) ProtoMessage() {}
+
+func (x *CreateGiteaConnectionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateGiteaConnectionRequest.ProtoReflect.Descriptor instead.
+func (*CreateGiteaConnectionRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CreateGiteaConnectionRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *CreateGiteaConnectionRequest) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *CreateGiteaConnectionRequest) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *CreateGiteaConnectionRequest) GetReadToken() string {
+	if x != nil {
+		return x.ReadToken
+	}
+	return ""
+}
+
+func (x *CreateGiteaConnectionRequest) GetWriteToken() string {
+	if x != nil {
+		return x.WriteToken
+	}
+	return ""
+}
+
+func (x *CreateGiteaConnectionRequest) GetCaBundle() string {
+	if x != nil {
+		return x.CaBundle
+	}
+	return ""
+}
+
+func (x *CreateGiteaConnectionRequest) GetCiDirs() []string {
+	if x != nil {
+		return x.CiDirs
+	}
+	return nil
+}
+
+func (x *CreateGiteaConnectionRequest) GetTest() bool {
+	if x != nil {
+		return x.Test
+	}
+	return false
+}
+
+// CreateGiteaConnectionResponse holds the new connection and, when asked for, the test results.
+type CreateGiteaConnectionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Connection    *Connection            `protobuf:"bytes,1,opt,name=connection,proto3" json:"connection,omitempty"`
+	Results       []*CheckResult         `protobuf:"bytes,2,rep,name=results,proto3" json:"results,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateGiteaConnectionResponse) Reset() {
+	*x = CreateGiteaConnectionResponse{}
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateGiteaConnectionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateGiteaConnectionResponse) ProtoMessage() {}
+
+func (x *CreateGiteaConnectionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateGiteaConnectionResponse.ProtoReflect.Descriptor instead.
+func (*CreateGiteaConnectionResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *CreateGiteaConnectionResponse) GetConnection() *Connection {
+	if x != nil {
+		return x.Connection
+	}
+	return nil
+}
+
+func (x *CreateGiteaConnectionResponse) GetResults() []*CheckResult {
 	if x != nil {
 		return x.Results
 	}
@@ -892,7 +1161,7 @@ type GetConnectionRequest struct {
 
 func (x *GetConnectionRequest) Reset() {
 	*x = GetConnectionRequest{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[9]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -904,7 +1173,7 @@ func (x *GetConnectionRequest) String() string {
 func (*GetConnectionRequest) ProtoMessage() {}
 
 func (x *GetConnectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[9]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -917,7 +1186,7 @@ func (x *GetConnectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConnectionRequest.ProtoReflect.Descriptor instead.
 func (*GetConnectionRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{9}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GetConnectionRequest) GetOrgId() string {
@@ -944,7 +1213,7 @@ type GetConnectionResponse struct {
 
 func (x *GetConnectionResponse) Reset() {
 	*x = GetConnectionResponse{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[10]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -956,7 +1225,7 @@ func (x *GetConnectionResponse) String() string {
 func (*GetConnectionResponse) ProtoMessage() {}
 
 func (x *GetConnectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[10]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -969,7 +1238,7 @@ func (x *GetConnectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConnectionResponse.ProtoReflect.Descriptor instead.
 func (*GetConnectionResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{10}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GetConnectionResponse) GetConnection() *Connection {
@@ -989,7 +1258,7 @@ type DeleteConnectionRequest struct {
 
 func (x *DeleteConnectionRequest) Reset() {
 	*x = DeleteConnectionRequest{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[11]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1001,7 +1270,7 @@ func (x *DeleteConnectionRequest) String() string {
 func (*DeleteConnectionRequest) ProtoMessage() {}
 
 func (x *DeleteConnectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[11]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1014,7 +1283,7 @@ func (x *DeleteConnectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteConnectionRequest.ProtoReflect.Descriptor instead.
 func (*DeleteConnectionRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{11}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeleteConnectionRequest) GetOrgId() string {
@@ -1039,7 +1308,7 @@ type DeleteConnectionResponse struct {
 
 func (x *DeleteConnectionResponse) Reset() {
 	*x = DeleteConnectionResponse{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[12]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1051,7 +1320,7 @@ func (x *DeleteConnectionResponse) String() string {
 func (*DeleteConnectionResponse) ProtoMessage() {}
 
 func (x *DeleteConnectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[12]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1064,7 +1333,7 @@ func (x *DeleteConnectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteConnectionResponse.ProtoReflect.Descriptor instead.
 func (*DeleteConnectionResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{12}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{15}
 }
 
 // BoundAgents is the error detail of a DeleteConnection refused with FAILED_PRECONDITION because
@@ -1078,7 +1347,7 @@ type BoundAgents struct {
 
 func (x *BoundAgents) Reset() {
 	*x = BoundAgents{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[13]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1090,7 +1359,7 @@ func (x *BoundAgents) String() string {
 func (*BoundAgents) ProtoMessage() {}
 
 func (x *BoundAgents) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[13]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1103,7 +1372,7 @@ func (x *BoundAgents) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BoundAgents.ProtoReflect.Descriptor instead.
 func (*BoundAgents) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{13}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *BoundAgents) GetAgents() []*BoundAgent {
@@ -1123,7 +1392,7 @@ type BoundAgent struct {
 
 func (x *BoundAgent) Reset() {
 	*x = BoundAgent{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[14]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1135,7 +1404,7 @@ func (x *BoundAgent) String() string {
 func (*BoundAgent) ProtoMessage() {}
 
 func (x *BoundAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[14]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1148,7 +1417,7 @@ func (x *BoundAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BoundAgent.ProtoReflect.Descriptor instead.
 func (*BoundAgent) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{14}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *BoundAgent) GetId() string {
@@ -1175,7 +1444,7 @@ type ListConnectionsRequest struct {
 
 func (x *ListConnectionsRequest) Reset() {
 	*x = ListConnectionsRequest{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[15]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1187,7 +1456,7 @@ func (x *ListConnectionsRequest) String() string {
 func (*ListConnectionsRequest) ProtoMessage() {}
 
 func (x *ListConnectionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[15]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1200,7 +1469,7 @@ func (x *ListConnectionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListConnectionsRequest.ProtoReflect.Descriptor instead.
 func (*ListConnectionsRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{15}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListConnectionsRequest) GetOrgId() string {
@@ -1220,7 +1489,7 @@ type ListConnectionsResponse struct {
 
 func (x *ListConnectionsResponse) Reset() {
 	*x = ListConnectionsResponse{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[16]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1232,7 +1501,7 @@ func (x *ListConnectionsResponse) String() string {
 func (*ListConnectionsResponse) ProtoMessage() {}
 
 func (x *ListConnectionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[16]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1245,7 +1514,7 @@ func (x *ListConnectionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListConnectionsResponse.ProtoReflect.Descriptor instead.
 func (*ListConnectionsResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{16}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListConnectionsResponse) GetConnections() []*Connection {
@@ -1266,7 +1535,7 @@ type TestConnectionRequest struct {
 
 func (x *TestConnectionRequest) Reset() {
 	*x = TestConnectionRequest{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[17]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1278,7 +1547,7 @@ func (x *TestConnectionRequest) String() string {
 func (*TestConnectionRequest) ProtoMessage() {}
 
 func (x *TestConnectionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[17]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1291,7 +1560,7 @@ func (x *TestConnectionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestConnectionRequest.ProtoReflect.Descriptor instead.
 func (*TestConnectionRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{17}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *TestConnectionRequest) GetOrgId() string {
@@ -1319,7 +1588,7 @@ type TestConnectionResponse struct {
 
 func (x *TestConnectionResponse) Reset() {
 	*x = TestConnectionResponse{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[18]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1331,7 +1600,7 @@ func (x *TestConnectionResponse) String() string {
 func (*TestConnectionResponse) ProtoMessage() {}
 
 func (x *TestConnectionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[18]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1344,7 +1613,7 @@ func (x *TestConnectionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestConnectionResponse.ProtoReflect.Descriptor instead.
 func (*TestConnectionResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{18}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *TestConnectionResponse) GetConnection() *Connection {
@@ -1378,7 +1647,7 @@ type ListInstallationReposRequest struct {
 
 func (x *ListInstallationReposRequest) Reset() {
 	*x = ListInstallationReposRequest{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[19]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1390,7 +1659,7 @@ func (x *ListInstallationReposRequest) String() string {
 func (*ListInstallationReposRequest) ProtoMessage() {}
 
 func (x *ListInstallationReposRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[19]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1403,7 +1672,7 @@ func (x *ListInstallationReposRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListInstallationReposRequest.ProtoReflect.Descriptor instead.
 func (*ListInstallationReposRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{19}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ListInstallationReposRequest) GetOrgId() string {
@@ -1447,7 +1716,7 @@ type InstallationRepo struct {
 
 func (x *InstallationRepo) Reset() {
 	*x = InstallationRepo{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[20]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1459,7 +1728,7 @@ func (x *InstallationRepo) String() string {
 func (*InstallationRepo) ProtoMessage() {}
 
 func (x *InstallationRepo) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[20]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1472,7 +1741,7 @@ func (x *InstallationRepo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallationRepo.ProtoReflect.Descriptor instead.
 func (*InstallationRepo) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{20}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *InstallationRepo) GetFullName() string {
@@ -1511,7 +1780,7 @@ type ListInstallationReposResponse struct {
 
 func (x *ListInstallationReposResponse) Reset() {
 	*x = ListInstallationReposResponse{}
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[21]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1523,7 +1792,7 @@ func (x *ListInstallationReposResponse) String() string {
 func (*ListInstallationReposResponse) ProtoMessage() {}
 
 func (x *ListInstallationReposResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[21]
+	mi := &file_koinon_connection_v1alpha1_connection_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1536,7 +1805,7 @@ func (x *ListInstallationReposResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListInstallationReposResponse.ProtoReflect.Descriptor instead.
 func (*ListInstallationReposResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{21}
+	return file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ListInstallationReposResponse) GetRepos() []*InstallationRepo {
@@ -1592,7 +1861,14 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x0fkey_fingerprint\x18\x03 \x01(\tR\x0ekeyFingerprint\x12\x19\n" +
 	"\bbase_url\x18\x04 \x01(\tR\abaseUrl\x12\x1b\n" +
 	"\tca_bundle\x18\x05 \x01(\tR\bcaBundle\x12\x17\n" +
-	"\aci_dirs\x18\x06 \x03(\tR\x06ciDirs\"\xaf\x04\n" +
+	"\aci_dirs\x18\x06 \x03(\tR\x06ciDirs\"\xab\x02\n" +
+	"\x0fGiteaConnection\x12\x19\n" +
+	"\bbase_url\x18\x01 \x01(\tR\abaseUrl\x12\x1b\n" +
+	"\tca_bundle\x18\x02 \x01(\tR\bcaBundle\x12\x17\n" +
+	"\aci_dirs\x18\x03 \x03(\tR\x06ciDirs\x12E\n" +
+	"\x11read_token_set_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x0ereadTokenSetAt\x12G\n" +
+	"\x12write_token_set_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x0fwriteTokenSetAt\x127\n" +
+	"\x18token_warn_after_seconds\x18\x06 \x01(\x03R\x15tokenWarnAfterSeconds\"\xf4\x04\n" +
 	"\n" +
 	"Connection\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
@@ -1608,7 +1884,8 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x11managed_by_secret\x18\f \x01(\tR\x0fmanagedBySecret\x12\x18\n" +
 	"\aremoved\x18\r \x01(\bR\aremoved\x12F\n" +
 	"\x06github\x18\n" +
-	" \x01(\v2,.koinon.connection.v1alpha1.GitHubConnectionH\x00R\x06githubB\n" +
+	" \x01(\v2,.koinon.connection.v1alpha1.GitHubConnectionH\x00R\x06github\x12C\n" +
+	"\x05gitea\x18\x0e \x01(\v2+.koinon.connection.v1alpha1.GiteaConnectionH\x00R\x05giteaB\n" +
 	"\n" +
 	"\bsettings\"\xa4\x02\n" +
 	"\x1dCreateGitHubConnectionRequest\x12\x15\n" +
@@ -1623,6 +1900,22 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\tca_bundle\x18\b \x01(\tR\bcaBundle\x12\x17\n" +
 	"\aci_dirs\x18\t \x03(\tR\x06ciDirs\"\xab\x01\n" +
 	"\x1eCreateGitHubConnectionResponse\x12F\n" +
+	"\n" +
+	"connection\x18\x01 \x01(\v2&.koinon.connection.v1alpha1.ConnectionR\n" +
+	"connection\x12A\n" +
+	"\aresults\x18\x02 \x03(\v2'.koinon.connection.v1alpha1.CheckResultR\aresults\"\x87\x02\n" +
+	"\x1cCreateGiteaConnectionRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12!\n" +
+	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x19\n" +
+	"\bbase_url\x18\x03 \x01(\tR\abaseUrl\x12\"\n" +
+	"\n" +
+	"read_token\x18\x04 \x01(\tB\x03\x80\x01\x01R\treadToken\x12$\n" +
+	"\vwrite_token\x18\x05 \x01(\tB\x03\x80\x01\x01R\n" +
+	"writeToken\x12\x1b\n" +
+	"\tca_bundle\x18\x06 \x01(\tR\bcaBundle\x12\x17\n" +
+	"\aci_dirs\x18\a \x03(\tR\x06ciDirs\x12\x12\n" +
+	"\x04test\x18\b \x01(\bR\x04test\"\xaa\x01\n" +
+	"\x1dCreateGiteaConnectionResponse\x12F\n" +
 	"\n" +
 	"connection\x18\x01 \x01(\v2&.koinon.connection.v1alpha1.ConnectionR\n" +
 	"connection\x12A\n" +
@@ -1681,10 +1974,11 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x1dCONNECTION_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aCONNECTION_STATUS_UNTESTED\x10\x01\x12\x18\n" +
 	"\x14CONNECTION_STATUS_OK\x10\x02\x12\x1d\n" +
-	"\x19CONNECTION_STATUS_FAILING\x10\x032\xb8\a\n" +
+	"\x19CONNECTION_STATUS_FAILING\x10\x032\xc7\b\n" +
 	"\x11ConnectionService\x12\x88\x01\n" +
 	"\x12ListConnectorTypes\x125.koinon.connection.v1alpha1.ListConnectorTypesRequest\x1a6.koinon.connection.v1alpha1.ListConnectorTypesResponse\"\x03\x90\x02\x01\x12\x8f\x01\n" +
-	"\x16CreateGitHubConnection\x129.koinon.connection.v1alpha1.CreateGitHubConnectionRequest\x1a:.koinon.connection.v1alpha1.CreateGitHubConnectionResponse\x12y\n" +
+	"\x16CreateGitHubConnection\x129.koinon.connection.v1alpha1.CreateGitHubConnectionRequest\x1a:.koinon.connection.v1alpha1.CreateGitHubConnectionResponse\x12\x8c\x01\n" +
+	"\x15CreateGiteaConnection\x128.koinon.connection.v1alpha1.CreateGiteaConnectionRequest\x1a9.koinon.connection.v1alpha1.CreateGiteaConnectionResponse\x12y\n" +
 	"\rGetConnection\x120.koinon.connection.v1alpha1.GetConnectionRequest\x1a1.koinon.connection.v1alpha1.GetConnectionResponse\"\x03\x90\x02\x01\x12\x7f\n" +
 	"\x0fListConnections\x122.koinon.connection.v1alpha1.ListConnectionsRequest\x1a3.koinon.connection.v1alpha1.ListConnectionsResponse\"\x03\x90\x02\x01\x12w\n" +
 	"\x0eTestConnection\x121.koinon.connection.v1alpha1.TestConnectionRequest\x1a2.koinon.connection.v1alpha1.TestConnectionResponse\x12}\n" +
@@ -1704,7 +1998,7 @@ func file_koinon_connection_v1alpha1_connection_proto_rawDescGZIP() []byte {
 }
 
 var file_koinon_connection_v1alpha1_connection_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_koinon_connection_v1alpha1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_koinon_connection_v1alpha1_connection_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_koinon_connection_v1alpha1_connection_proto_goTypes = []any{
 	(Tier)(0),                              // 0: koinon.connection.v1alpha1.Tier
 	(ConnectionStatus)(0),                  // 1: koinon.connection.v1alpha1.ConnectionStatus
@@ -1714,62 +2008,72 @@ var file_koinon_connection_v1alpha1_connection_proto_goTypes = []any{
 	(*ListConnectorTypesResponse)(nil),     // 5: koinon.connection.v1alpha1.ListConnectorTypesResponse
 	(*CheckResult)(nil),                    // 6: koinon.connection.v1alpha1.CheckResult
 	(*GitHubConnection)(nil),               // 7: koinon.connection.v1alpha1.GitHubConnection
-	(*Connection)(nil),                     // 8: koinon.connection.v1alpha1.Connection
-	(*CreateGitHubConnectionRequest)(nil),  // 9: koinon.connection.v1alpha1.CreateGitHubConnectionRequest
-	(*CreateGitHubConnectionResponse)(nil), // 10: koinon.connection.v1alpha1.CreateGitHubConnectionResponse
-	(*GetConnectionRequest)(nil),           // 11: koinon.connection.v1alpha1.GetConnectionRequest
-	(*GetConnectionResponse)(nil),          // 12: koinon.connection.v1alpha1.GetConnectionResponse
-	(*DeleteConnectionRequest)(nil),        // 13: koinon.connection.v1alpha1.DeleteConnectionRequest
-	(*DeleteConnectionResponse)(nil),       // 14: koinon.connection.v1alpha1.DeleteConnectionResponse
-	(*BoundAgents)(nil),                    // 15: koinon.connection.v1alpha1.BoundAgents
-	(*BoundAgent)(nil),                     // 16: koinon.connection.v1alpha1.BoundAgent
-	(*ListConnectionsRequest)(nil),         // 17: koinon.connection.v1alpha1.ListConnectionsRequest
-	(*ListConnectionsResponse)(nil),        // 18: koinon.connection.v1alpha1.ListConnectionsResponse
-	(*TestConnectionRequest)(nil),          // 19: koinon.connection.v1alpha1.TestConnectionRequest
-	(*TestConnectionResponse)(nil),         // 20: koinon.connection.v1alpha1.TestConnectionResponse
-	(*ListInstallationReposRequest)(nil),   // 21: koinon.connection.v1alpha1.ListInstallationReposRequest
-	(*InstallationRepo)(nil),               // 22: koinon.connection.v1alpha1.InstallationRepo
-	(*ListInstallationReposResponse)(nil),  // 23: koinon.connection.v1alpha1.ListInstallationReposResponse
-	(*structpb.Struct)(nil),                // 24: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil),          // 25: google.protobuf.Timestamp
+	(*GiteaConnection)(nil),                // 8: koinon.connection.v1alpha1.GiteaConnection
+	(*Connection)(nil),                     // 9: koinon.connection.v1alpha1.Connection
+	(*CreateGitHubConnectionRequest)(nil),  // 10: koinon.connection.v1alpha1.CreateGitHubConnectionRequest
+	(*CreateGitHubConnectionResponse)(nil), // 11: koinon.connection.v1alpha1.CreateGitHubConnectionResponse
+	(*CreateGiteaConnectionRequest)(nil),   // 12: koinon.connection.v1alpha1.CreateGiteaConnectionRequest
+	(*CreateGiteaConnectionResponse)(nil),  // 13: koinon.connection.v1alpha1.CreateGiteaConnectionResponse
+	(*GetConnectionRequest)(nil),           // 14: koinon.connection.v1alpha1.GetConnectionRequest
+	(*GetConnectionResponse)(nil),          // 15: koinon.connection.v1alpha1.GetConnectionResponse
+	(*DeleteConnectionRequest)(nil),        // 16: koinon.connection.v1alpha1.DeleteConnectionRequest
+	(*DeleteConnectionResponse)(nil),       // 17: koinon.connection.v1alpha1.DeleteConnectionResponse
+	(*BoundAgents)(nil),                    // 18: koinon.connection.v1alpha1.BoundAgents
+	(*BoundAgent)(nil),                     // 19: koinon.connection.v1alpha1.BoundAgent
+	(*ListConnectionsRequest)(nil),         // 20: koinon.connection.v1alpha1.ListConnectionsRequest
+	(*ListConnectionsResponse)(nil),        // 21: koinon.connection.v1alpha1.ListConnectionsResponse
+	(*TestConnectionRequest)(nil),          // 22: koinon.connection.v1alpha1.TestConnectionRequest
+	(*TestConnectionResponse)(nil),         // 23: koinon.connection.v1alpha1.TestConnectionResponse
+	(*ListInstallationReposRequest)(nil),   // 24: koinon.connection.v1alpha1.ListInstallationReposRequest
+	(*InstallationRepo)(nil),               // 25: koinon.connection.v1alpha1.InstallationRepo
+	(*ListInstallationReposResponse)(nil),  // 26: koinon.connection.v1alpha1.ListInstallationReposResponse
+	(*structpb.Struct)(nil),                // 27: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),          // 28: google.protobuf.Timestamp
 }
 var file_koinon_connection_v1alpha1_connection_proto_depIdxs = []int32{
 	0,  // 0: koinon.connection.v1alpha1.Scope.tier:type_name -> koinon.connection.v1alpha1.Tier
 	2,  // 1: koinon.connection.v1alpha1.ConnectorType.scopes:type_name -> koinon.connection.v1alpha1.Scope
-	24, // 2: koinon.connection.v1alpha1.ConnectorType.document:type_name -> google.protobuf.Struct
+	27, // 2: koinon.connection.v1alpha1.ConnectorType.document:type_name -> google.protobuf.Struct
 	3,  // 3: koinon.connection.v1alpha1.ListConnectorTypesResponse.connector_types:type_name -> koinon.connection.v1alpha1.ConnectorType
-	1,  // 4: koinon.connection.v1alpha1.Connection.status:type_name -> koinon.connection.v1alpha1.ConnectionStatus
-	25, // 5: koinon.connection.v1alpha1.Connection.last_tested_at:type_name -> google.protobuf.Timestamp
-	6,  // 6: koinon.connection.v1alpha1.Connection.last_test:type_name -> koinon.connection.v1alpha1.CheckResult
-	25, // 7: koinon.connection.v1alpha1.Connection.created_at:type_name -> google.protobuf.Timestamp
-	7,  // 8: koinon.connection.v1alpha1.Connection.github:type_name -> koinon.connection.v1alpha1.GitHubConnection
-	8,  // 9: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
-	6,  // 10: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
-	8,  // 11: koinon.connection.v1alpha1.GetConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
-	16, // 12: koinon.connection.v1alpha1.BoundAgents.agents:type_name -> koinon.connection.v1alpha1.BoundAgent
-	8,  // 13: koinon.connection.v1alpha1.ListConnectionsResponse.connections:type_name -> koinon.connection.v1alpha1.Connection
-	8,  // 14: koinon.connection.v1alpha1.TestConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
-	6,  // 15: koinon.connection.v1alpha1.TestConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
-	22, // 16: koinon.connection.v1alpha1.ListInstallationReposResponse.repos:type_name -> koinon.connection.v1alpha1.InstallationRepo
-	4,  // 17: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:input_type -> koinon.connection.v1alpha1.ListConnectorTypesRequest
-	9,  // 18: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:input_type -> koinon.connection.v1alpha1.CreateGitHubConnectionRequest
-	11, // 19: koinon.connection.v1alpha1.ConnectionService.GetConnection:input_type -> koinon.connection.v1alpha1.GetConnectionRequest
-	17, // 20: koinon.connection.v1alpha1.ConnectionService.ListConnections:input_type -> koinon.connection.v1alpha1.ListConnectionsRequest
-	19, // 21: koinon.connection.v1alpha1.ConnectionService.TestConnection:input_type -> koinon.connection.v1alpha1.TestConnectionRequest
-	13, // 22: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:input_type -> koinon.connection.v1alpha1.DeleteConnectionRequest
-	21, // 23: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:input_type -> koinon.connection.v1alpha1.ListInstallationReposRequest
-	5,  // 24: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:output_type -> koinon.connection.v1alpha1.ListConnectorTypesResponse
-	10, // 25: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:output_type -> koinon.connection.v1alpha1.CreateGitHubConnectionResponse
-	12, // 26: koinon.connection.v1alpha1.ConnectionService.GetConnection:output_type -> koinon.connection.v1alpha1.GetConnectionResponse
-	18, // 27: koinon.connection.v1alpha1.ConnectionService.ListConnections:output_type -> koinon.connection.v1alpha1.ListConnectionsResponse
-	20, // 28: koinon.connection.v1alpha1.ConnectionService.TestConnection:output_type -> koinon.connection.v1alpha1.TestConnectionResponse
-	14, // 29: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:output_type -> koinon.connection.v1alpha1.DeleteConnectionResponse
-	23, // 30: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:output_type -> koinon.connection.v1alpha1.ListInstallationReposResponse
-	24, // [24:31] is the sub-list for method output_type
-	17, // [17:24] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	28, // 4: koinon.connection.v1alpha1.GiteaConnection.read_token_set_at:type_name -> google.protobuf.Timestamp
+	28, // 5: koinon.connection.v1alpha1.GiteaConnection.write_token_set_at:type_name -> google.protobuf.Timestamp
+	1,  // 6: koinon.connection.v1alpha1.Connection.status:type_name -> koinon.connection.v1alpha1.ConnectionStatus
+	28, // 7: koinon.connection.v1alpha1.Connection.last_tested_at:type_name -> google.protobuf.Timestamp
+	6,  // 8: koinon.connection.v1alpha1.Connection.last_test:type_name -> koinon.connection.v1alpha1.CheckResult
+	28, // 9: koinon.connection.v1alpha1.Connection.created_at:type_name -> google.protobuf.Timestamp
+	7,  // 10: koinon.connection.v1alpha1.Connection.github:type_name -> koinon.connection.v1alpha1.GitHubConnection
+	8,  // 11: koinon.connection.v1alpha1.Connection.gitea:type_name -> koinon.connection.v1alpha1.GiteaConnection
+	9,  // 12: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	6,  // 13: koinon.connection.v1alpha1.CreateGitHubConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
+	9,  // 14: koinon.connection.v1alpha1.CreateGiteaConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	6,  // 15: koinon.connection.v1alpha1.CreateGiteaConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
+	9,  // 16: koinon.connection.v1alpha1.GetConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	19, // 17: koinon.connection.v1alpha1.BoundAgents.agents:type_name -> koinon.connection.v1alpha1.BoundAgent
+	9,  // 18: koinon.connection.v1alpha1.ListConnectionsResponse.connections:type_name -> koinon.connection.v1alpha1.Connection
+	9,  // 19: koinon.connection.v1alpha1.TestConnectionResponse.connection:type_name -> koinon.connection.v1alpha1.Connection
+	6,  // 20: koinon.connection.v1alpha1.TestConnectionResponse.results:type_name -> koinon.connection.v1alpha1.CheckResult
+	25, // 21: koinon.connection.v1alpha1.ListInstallationReposResponse.repos:type_name -> koinon.connection.v1alpha1.InstallationRepo
+	4,  // 22: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:input_type -> koinon.connection.v1alpha1.ListConnectorTypesRequest
+	10, // 23: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:input_type -> koinon.connection.v1alpha1.CreateGitHubConnectionRequest
+	12, // 24: koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection:input_type -> koinon.connection.v1alpha1.CreateGiteaConnectionRequest
+	14, // 25: koinon.connection.v1alpha1.ConnectionService.GetConnection:input_type -> koinon.connection.v1alpha1.GetConnectionRequest
+	20, // 26: koinon.connection.v1alpha1.ConnectionService.ListConnections:input_type -> koinon.connection.v1alpha1.ListConnectionsRequest
+	22, // 27: koinon.connection.v1alpha1.ConnectionService.TestConnection:input_type -> koinon.connection.v1alpha1.TestConnectionRequest
+	16, // 28: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:input_type -> koinon.connection.v1alpha1.DeleteConnectionRequest
+	24, // 29: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:input_type -> koinon.connection.v1alpha1.ListInstallationReposRequest
+	5,  // 30: koinon.connection.v1alpha1.ConnectionService.ListConnectorTypes:output_type -> koinon.connection.v1alpha1.ListConnectorTypesResponse
+	11, // 31: koinon.connection.v1alpha1.ConnectionService.CreateGitHubConnection:output_type -> koinon.connection.v1alpha1.CreateGitHubConnectionResponse
+	13, // 32: koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection:output_type -> koinon.connection.v1alpha1.CreateGiteaConnectionResponse
+	15, // 33: koinon.connection.v1alpha1.ConnectionService.GetConnection:output_type -> koinon.connection.v1alpha1.GetConnectionResponse
+	21, // 34: koinon.connection.v1alpha1.ConnectionService.ListConnections:output_type -> koinon.connection.v1alpha1.ListConnectionsResponse
+	23, // 35: koinon.connection.v1alpha1.ConnectionService.TestConnection:output_type -> koinon.connection.v1alpha1.TestConnectionResponse
+	17, // 36: koinon.connection.v1alpha1.ConnectionService.DeleteConnection:output_type -> koinon.connection.v1alpha1.DeleteConnectionResponse
+	26, // 37: koinon.connection.v1alpha1.ConnectionService.ListInstallationRepos:output_type -> koinon.connection.v1alpha1.ListInstallationReposResponse
+	30, // [30:38] is the sub-list for method output_type
+	22, // [22:30] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_koinon_connection_v1alpha1_connection_proto_init() }
@@ -1777,8 +2081,9 @@ func file_koinon_connection_v1alpha1_connection_proto_init() {
 	if File_koinon_connection_v1alpha1_connection_proto != nil {
 		return
 	}
-	file_koinon_connection_v1alpha1_connection_proto_msgTypes[6].OneofWrappers = []any{
+	file_koinon_connection_v1alpha1_connection_proto_msgTypes[7].OneofWrappers = []any{
 		(*Connection_Github)(nil),
+		(*Connection_Gitea)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1786,7 +2091,7 @@ func file_koinon_connection_v1alpha1_connection_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_connection_v1alpha1_connection_proto_rawDesc), len(file_koinon_connection_v1alpha1_connection_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   22,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

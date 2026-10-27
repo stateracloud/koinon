@@ -29,7 +29,7 @@ var agentStatusToProto = map[store.AgentStatus]agentv1alpha1.AgentStatus{
 }
 
 // agentView renders an agent with its latest and active versions.
-func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent, slugs map[pgtype.UUID]string) (*agentv1alpha1.Agent, error) {
+func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent, slugs map[pgtype.UUID]string, archived map[pgtype.UUID]pgtype.Timestamptz) (*agentv1alpha1.Agent, error) {
 	out := &agentv1alpha1.Agent{
 		Id:              idString(a.ID),
 		OrgId:           idString(a.OrgID),
@@ -43,6 +43,13 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		ArchivedAt:      tsProto(a.ArchivedAt),
 		UnhealthyAt:     tsProto(a.UnhealthyAt),
 		UnhealthyReason: a.UnhealthyReason.String,
+	}
+	if archived != nil {
+		out.SandboxArchivedAt = tsProto(archived[a.ID])
+	} else if sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: a.OrgID, AgentID: a.ID}); err == nil {
+		out.SandboxArchivedAt = tsProto(sb.ArchivedAt)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
 	}
 	if a.TemplateID.Valid {
 		slug, ok := slugs[a.TemplateID]
@@ -155,7 +162,7 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 		if a, err = q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: a.ID}); err != nil {
 			return err
 		}
-		out, err = s.agentView(ctx, q, a, nil)
+		out, err = s.agentView(ctx, q, a, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -184,7 +191,7 @@ func (s *Server) GetAgent(ctx context.Context, req *agentv1alpha1.GetAgentReques
 	if err != nil {
 		return nil, s.dbError(err, "agent")
 	}
-	out, err := s.agentView(ctx, s.q, a, nil)
+	out, err := s.agentView(ctx, s.q, a, nil, nil)
 	if err != nil {
 		return nil, s.dbError(err, "agent")
 	}
@@ -203,8 +210,16 @@ func (s *Server) ListAgents(ctx context.Context, req *agentv1alpha1.ListAgentsRe
 	}
 	res := &agentv1alpha1.ListAgentsResponse{}
 	slugs := map[pgtype.UUID]string{}
+	rows, err := s.q.ListArchivedAgentSandboxes(ctx, c.org)
+	if err != nil {
+		return nil, s.dbError(err, "agents")
+	}
+	archived := map[pgtype.UUID]pgtype.Timestamptz{}
+	for _, r := range rows {
+		archived[r.AgentID] = r.ArchivedAt
+	}
 	for _, a := range agents {
-		v, err := s.agentView(ctx, s.q, a, slugs)
+		v, err := s.agentView(ctx, s.q, a, slugs, archived)
 		if err != nil {
 			return nil, s.dbError(err, "agent")
 		}
@@ -281,7 +296,7 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 			}
 			restarting = len(marked)
 		}
-		out, err = s.agentView(ctx, q, a, nil)
+		out, err = s.agentView(ctx, q, a, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -300,7 +315,7 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 	s.log.Info("agent activated", "org", c.org.String(), "agent", out.GetId(),
 		"version", out.GetActiveVersion(), "by", c.actor().String(),
 		"apply_to_open_tickets", req.GetApplyToOpenTickets(), "tickets_restarting", restarting)
-	return &agentv1alpha1.ActivateAgentResponse{Agent: out, TicketsRestarting: int32(restarting)}, nil //nolint:gosec // a count of tickets
+	return &agentv1alpha1.ActivateAgentResponse{Agent: out, TicketsRestarting: int32(restarting)}, nil
 }
 
 // triggerAudit renders triggers for an audit event; instruction text only when asked for.
@@ -377,7 +392,7 @@ func (s *Server) SetAgentTriggers(ctx context.Context, req *agentv1alpha1.SetAge
 		if a, err = q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: a.ID}); err != nil {
 			return err
 		}
-		if out, err = s.agentView(ctx, q, a, nil); err != nil {
+		if out, err = s.agentView(ctx, q, a, nil, nil); err != nil {
 			return err
 		}
 		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
@@ -423,7 +438,7 @@ func (s *Server) ResumeAgent(ctx context.Context, req *agentv1alpha1.ResumeAgent
 		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		out, err = s.agentView(ctx, q, a, nil)
+		out, err = s.agentView(ctx, q, a, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -470,7 +485,7 @@ func (s *Server) ArchiveAgent(ctx context.Context, req *agentv1alpha1.ArchiveAge
 		if err != nil {
 			return err
 		}
-		out, err = s.agentView(ctx, q, a, nil)
+		out, err = s.agentView(ctx, q, a, nil, nil)
 		if err != nil {
 			return err
 		}

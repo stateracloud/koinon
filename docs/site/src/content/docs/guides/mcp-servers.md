@@ -81,7 +81,7 @@ Every tool a server lists enters the **ask** tier. You decide, tool by tool, on 
 
 | Tier | What happens when an agent calls the tool |
 | --- | --- |
-| **Ask** (the default) | The call is recorded with its exact arguments as an approval card on the ticket, and the run pauses. After a human approves, Koinon calls the server itself and the run resumes with the result. |
+| **Ask** (the default) | The call is recorded with its exact arguments as an approval card on the task, and the run pauses. After a human approves, Koinon calls the server itself and the run resumes with the result. |
 | **Auto** | The agent calls the tool directly through the gateway. |
 | **Never** | No agent can call it. |
 
@@ -95,7 +95,7 @@ Every tool a server lists enters the **ask** tier. You decide, tool by tool, on 
   version of the tool it was made against: if the tool changes before a human approves, Koinon will not
   run it.
 - **Require two approvers** (per tool, off by default): the call needs two different admins or owners,
-  and neither may be the person who created the ticket. The first approval leaves the card pending.
+  and neither may be the person who created the task. The first approval leaves the card pending.
 - Tool names must be at most what model APIs accept. Agents see `<org>-<server>-ask_<tool>` behind the
   harness' prefix, so a long server name leaves less room; a tool that does not fit, or has characters such
   as `.`, shows "unavailable" and is not offered.
