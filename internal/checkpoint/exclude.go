@@ -24,6 +24,9 @@ var excludedPaths = []string{
 	".cache", ".bun/install/cache", ".cargo/registry", ".cargo/git", ".local/share/pnpm",
 	".local/share/uv", ".local/share/Trash", "go/pkg/mod", "go/pkg/sumdb", ".opencode/cache", ".claude/cache",
 	".claude/statsig", ".claude/shell-snapshots", ".codex/cache", ".config/Code/Cache", "tmp",
+	// The volume's filesystem root: ext4 creates it, root owns it and the sandbox user cannot
+	// extract into it (issue 169). Top level only: "work/lost+found" is a user's directory.
+	"lost+found",
 }
 
 // Excluded reports whether the path (relative to the home, with or without a leading "./") is not
