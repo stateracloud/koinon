@@ -286,9 +286,15 @@ Settles the open question on where per-org concurrency is enforced (#146, Andre,
   `NewOrgWork` and `EnqueueForOrg` for TR2, TR3 and later webhooks.
 - **Per-org tuning.** DBOS applies one partition limit to all partitions of a queue, so an org whose
   `org_settings` (`trigger_concurrency`, `trigger_rate_per_minute`) differ from the defaults is
-  enqueued on a profile queue `koinon.org-work/c<N>/r<M>`, registered on first use and still
+  enqueued on a profile queue `koinon.org-work/c<N>/r<M>p<seconds>`, registered on first use and still
   partitioned by org. DBOS stores queue configuration in its tables and its runners reload the queue
   list, so every replica serves a profile queue. Changed settings apply to work enqueued afterwards.
   Many distinct limit pairs mean many queues; operators should keep to a few tiers.
 - **Restarts.** DBOS counts workflow starts in Postgres, so a rate limit holds when the API restarts
   inside the window (tested by stopping and relaunching the runtime against the same database).
+- **2026-10-27 (DB2 review):** `orgsettings.QueueLimits` reads the org's `trigger_concurrency` and
+  `trigger_rate_per_minute` for `OrgQueueConfig.Limits`, and `orgsettings.QueueDefaults` fills
+  `OrgQueueConfig.Defaults` so an org left at the defaults stays on the main queue. The settings are
+  per minute, so production keeps `RateWindow` at one minute; the window is also part of the profile
+  queue name. Merge order: this PR carries migration 00025 and merges after the items that own 00023
+  and 00024 (or is renumbered at merge), because `hack/migrate-lint.sh` needs contiguous numbers.
