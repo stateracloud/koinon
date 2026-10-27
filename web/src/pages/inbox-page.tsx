@@ -24,7 +24,7 @@ export function InboxPage() {
   const orgId = org.orgId
   const canEdit = org.role >= OrgRole.MEMBER
   const queryClient = useQueryClient()
-  const { items, tasks, agents, error, isPending } = useInbox()
+  const { items, tasks, agents, agentNames, error, isPending } = useInbox()
   const [selected, setSelected] = useState<string>()
   const [deciding, setDeciding] = useState<ReadonlySet<string>>(new Set())
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map())
@@ -113,7 +113,7 @@ export function InboxPage() {
             <ChatPanel
               orgId={orgId}
               tasks={tasks.data?.tasks ?? []}
-              agentNames={new Map((agents.data?.agents ?? []).map((a) => [a.id, a.displayName]))}
+              agentNames={agentNames}
               canEdit={canEdit}
               selectedId={selected}
               onSelect={setSelected}

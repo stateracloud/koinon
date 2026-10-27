@@ -37,18 +37,21 @@ export type InboxInput = {
   tasks: readonly Task[]
   approvals: readonly Approval[]
   agentNames: ReadonlyMap<string, string>
+  /** The signed-in user. Input-required tasks are the viewer's own until targeted asks exist (TK3). */
+  userId: string
 }
 
 const ms = (t?: { seconds: bigint; nanos: number }) => (t ? Number(t.seconds) * 1000 + Math.floor(t.nanos / 1e6) : 0)
 
 /** buildInbox lists what waits on the viewer: decidable approvals, then input-required tasks they do not explain. */
-export function buildInbox({ tasks, approvals, agentNames }: InboxInput): InboxItem[] {
+export function buildInbox({ tasks, approvals, agentNames, userId }: InboxInput): InboxItem[] {
   const byId = new Map(tasks.map((t) => [t.id, t]))
   const items: InboxItem[] = []
   const covered = new Set<string>()
   for (const a of approvals) {
-    if (!a.canDecide) continue
+    // An approval explains its task whoever may decide it; only deciders get an item.
     covered.add(a.ticketId)
+    if (!a.canDecide) continue
     const task = byId.get(a.ticketId)
     items.push({
       kind: 'approval',
@@ -63,6 +66,7 @@ export function buildInbox({ tasks, approvals, agentNames }: InboxInput): InboxI
   }
   for (const t of tasks) {
     if (t.state !== TaskState.INPUT_REQUIRED || covered.has(t.id)) continue
+    if (t.createdBy?.userId !== userId) continue
     items.push({ kind: 'task-input', key: `task-input:${t.id}`, taskId: t.id, taskTitle: t.title, agentName: agentNames.get(t.agentId), at: ms(t.updatedAt) })
   }
   return items.sort((a, b) => b.at - a.at)

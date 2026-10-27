@@ -50,7 +50,8 @@ function transport(opts: Opts = {}) {
       },
     })
     service(ApprovalService, {
-      listApprovals: () => ({ approvals }),
+      // The server lists pending approvals to every role; only admins and owners may decide them.
+      listApprovals: () => ({ approvals: approvals.map((a) => approval(a.id, a.ticketId, { canDecide: (opts.role ?? OrgRole.OWNER) >= OrgRole.ADMIN })) }),
       approve: (req) => {
         if (opts.approveError) throw opts.approveError
         opts.approves?.push(req)
@@ -103,11 +104,11 @@ describe('Inbox home', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('This request changed. Open it to review the new version.')
   })
 
-  it('shows no approvals to a member, only tasks that wait for a reply', async () => {
+  it('shows no approvals to a member, only a task that waits for a reply and no approval explains', async () => {
     renderApp(transport({ role: OrgRole.MEMBER }), '/')
     const list = await screen.findByRole('list', { name: 'Waiting on you' })
     expect(within(list).queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument()
-    expect(within(list).getAllByTestId('inbox-item').map((r) => r.dataset.kind)).toEqual(['task-input', 'task-input'])
+    expect(within(list).getAllByTestId('inbox-item').map((r) => r.dataset.kind)).toEqual(['task-input'])
   })
 
   it('shows the count of waiting items as a badge in the navigation', async () => {

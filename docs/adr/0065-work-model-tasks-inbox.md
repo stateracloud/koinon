@@ -254,8 +254,8 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   kind (`web/src/components/inbox.tsx`); a new kind (TK3's question, a reply to validate, a
   report) is one more member and one more renderer. Today: `approval` (a pending approval the
   viewer may decide, only for admins and owners as before) and `task-input` (a task in
-  input-required that no listed approval explains, for example a question the agent asked; visible
-  to every role). Newest first.
+  input-required that no listed approval explains, for example a question the agent asked, and
+  that the viewer created). Newest first.
 - **Inline actions.** Approve and Deny sit on the item. Approve sends the `args_sha256` of the
   listed approval, so a request that changed since the list was read is refused (Aborted) and the
   item says to open it and review the new version; the full card (diff, risk, note, two-approver
@@ -271,3 +271,11 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   title carries it, "(2) ...". There is no task stream yet, so the inbox, the board and the badge
   share one poll of `ListTasks` and `ListApprovals` every 15 seconds (and on window focus). A
   task event stream would replace the poll.
+- **Review fixes (2026-10-27).** `ListApprovals` is fetched for every role (the proto says viewers
+  and above). Every pending approval explains its task, so a member or viewer never sees an
+  approval-parked task as "needs your reply"; only `canDecide` approvals become items.
+  `task-input` items are limited to tasks the viewer created (`Task.created_by.user_id`), a
+  deliberate conservative choice until TK3 adds targeted asks; before this they listed every
+  input-required task in the org. The inbox and board show an `ListAgents` error too. The e2e spec
+  and the quickstart follow the inbox: Inbox heading, "Hand it a task from the inbox", "Create
+  task", "Open task", `/tasks/{id}`.

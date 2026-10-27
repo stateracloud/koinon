@@ -32,7 +32,7 @@ export function ChatPanel({ orgId, tasks, agentNames, canEdit, selectedId, onSel
     .sort((a, b) => Number(b.updatedAt?.seconds ?? 0n) - Number(a.updatedAt?.seconds ?? 0n))
     .slice(0, maxChats)
   const current = open.find((t) => t.id === selectedId) ?? open[0]
-  if (!current) return <p className="text-muted-foreground text-sm">No open conversations. Start one below.</p>
+  if (!current) return <p className="text-muted-foreground text-sm">{canEdit ? 'No open conversations. Start one below.' : 'No open conversations.'}</p>
   return (
     <div className="grid gap-4">
       <ul aria-label="Conversations" className="flex flex-wrap gap-2">
