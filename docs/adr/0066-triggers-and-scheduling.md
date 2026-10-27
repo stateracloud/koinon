@@ -341,3 +341,40 @@ Settles the open question on where per-org concurrency is enforced (#146, procod
   per minute, so production keeps `RateWindow` at one minute; the window is also part of the profile
   queue name. Renumbered at integration (wave 2) to migration 00023; it was planned as 00025 behind two other
   migrations, because `hack/migrate-lint.sh` needs contiguous numbers.
+
+## Amendment 2026-10-27 (TR2): the schedule trigger as built
+
+- **No schedule state, no migration.** Every `koinon-api` replica with `api.durable.enabled` runs a
+  `schedule.Scheduler` (`internal/triggers/schedule`). Each tick (5 s) reads the schedule triggers in
+  effect (`triggers.All`) and the activation time of each agent's version, computes the due times
+  in the window since its last tick, and enqueues one DBOS workflow `koinon.trigger-fire` per due
+  time with `durable.EnqueueForOrg` (so the org's concurrency and rate limits apply). The workflow
+  ID and the DB3 dedupe key (`trigger` source, `durable.TriggerFireKey`) both name the trigger and the
+  scheduled due time (not the jittered start), so a due time fires once across replicas, overlapping
+  ticks, DBOS recovery and restarts. The fire creates the task with `services.CreateTriggeredTask`:
+  first message is the trigger's instruction, creator kind `trigger`, run origin `scheduled`
+  (the origin enum has `interactive` and `scheduled`; there is no `trigger` origin, so scheduled
+  runs use `scheduled`, which interactive work outranks). The trigger ID is a slug unique only within
+  its agent, so the creator ID and dedupe key use `schedule.TriggerUUID(agent, slug)`.
+- **Defaults (tunable in `schedule.Config`).** Pre-warm lead 2 minutes, jitter 0 to 30 s
+  (millisecond resolution), tick 5 s, catch-up window 1 hour. The burst window (60 s) stays with
+  TR3 and v0.2.
+- **Jitter and pre-warm.** A run starts `Jitter(agent, due)` after its due time: the first 8 bytes of
+  SHA-256 over the agent ID and the due time, modulo 30 000 ms. Many agents due in the same minute
+  therefore spread over 30 s, the same every time and on every replica. The sandbox is woken
+  (`wake.CronDue`, the LT1 pre-wake) `Lead` before that start, once per agent per due time.
+  Start times are accurate to the tick interval, because the tick enqueues the workflow when the
+  start has passed; a DBOS delay would not follow a test clock.
+- **Missed due times.** A replica that starts, and the first tick after it, looks back at most
+  `CatchUp` (1 hour) and fires only the latest due time whose start has passed, never a backlog; the
+  same coalescing applies after a stall. It never fires a due time at or before the activation of
+  the version that defines the trigger. A due time older than the window is skipped. A due time that
+  another replica already fired is a dedupe replay and creates nothing. Without stored state, "down
+  since" is not known, so the window is a bound rather than an exact rule.
+- **Changed or removed triggers.** The next tick reads the active version, so a new version
+  activated with a changed cron or without the trigger stops the old schedule at once; a fire
+  enqueued before that is dropped by the workflow when its trigger (ID and version) is no longer in
+  effect. An agent that is not active fires nothing (`ErrAgentInactive` drops the fire).
+- **Without `api.durable.enabled`** schedule triggers do not fire; `koinon-api` logs a warning once
+  at start. The simpler alternative (a timer without DBOS) has no cross-replica once-only guarantee
+  other than the dedupe key, and was not built.

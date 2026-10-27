@@ -379,6 +379,9 @@ type Querier interface {
 	ListActiveAgentVersionsAllOrgs(ctx context.Context) ([]ListActiveAgentVersionsAllOrgsRow, error)
 	// The config of each agent's active version, for the template default of its daily limit.
 	ListActiveVersionConfigs(ctx context.Context, orgID pgtype.UUID) ([]ListActiveVersionConfigsRow, error)
+	// When each active agent's current version was activated, across every live org, so the schedule
+	// trigger fires nothing that was due before the version took effect (ADR 0066, TR2).
+	ListAgentActivationsAllOrgs(ctx context.Context) ([]ListAgentActivationsAllOrgsRow, error)
 	ListAgentBudgets(ctx context.Context, orgID pgtype.UUID) ([]ListAgentBudgetsRow, error)
 	ListAgentMCPServers(ctx context.Context, orgID pgtype.UUID) ([]AgentMcpServer, error)
 	ListAgentMCPServersOfAgent(ctx context.Context, arg ListAgentMCPServersOfAgentParams) ([]AgentMcpServer, error)
