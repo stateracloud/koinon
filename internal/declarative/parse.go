@@ -12,7 +12,9 @@ import (
 	"go.yaml.in/yaml/v3"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/project"
@@ -58,6 +60,8 @@ const (
 	KeyAppID          = "appId"
 	KeyInstallationID = "installationId"
 	KeyPrivateKey     = "privateKey"
+	KeyBaseURL        = "baseUrl"  // optional: a GitHub Enterprise Server host
+	KeyCABundle       = "caBundle" // optional: the public CA bundle of that host
 )
 
 // maxValue bounds one Secret value; a Kubernetes Secret is at most 1 MiB in all.
@@ -175,6 +179,7 @@ type DeclaredConnection struct {
 	InstallationID int64
 	PrivateKeyPEM  []byte
 	Fingerprint    string
+	Site           codehost.Site // the connection's own host; the zero value is github.com
 }
 
 // ParseConnection reads a connection Secret.
@@ -194,6 +199,22 @@ func ParseConnection(sec *corev1.Secret, version string) (DeclaredConnection, er
 			errs = append(errs, fmt.Errorf("%s must be a positive number", k))
 		}
 		*dst = n
+	}
+	if t, ok := connectors.Get(d.Connector); ok {
+		loc, err := t.Locate(get(KeyBaseURL))
+		switch {
+		case err != nil:
+			errs = append(errs, fmt.Errorf("%s: %w", KeyBaseURL, err))
+		case !loc.Default:
+			d.Site.BaseURL = loc.BaseURL()
+		}
+		if bundle := get(KeyCABundle); bundle != "" {
+			if _, err := codehost.CertPool(bundle); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", KeyCABundle, err))
+			} else {
+				d.Site.CABundle = bundle
+			}
+		}
 	}
 	d.PrivateKeyPEM = sec.Data[KeyPrivateKey]
 	key, err := github.ParsePrivateKey(d.PrivateKeyPEM)

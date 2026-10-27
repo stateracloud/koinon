@@ -14,7 +14,7 @@ import (
 )
 
 func connectionConfig(d DeclaredConnection) ([]byte, error) {
-	return json.Marshal(connections.GitHubConfig{AppID: d.AppID, InstallationID: d.InstallationID})
+	return json.Marshal(connections.GitHubConfig{AppID: d.AppID, InstallationID: d.InstallationID, Site: d.Site})
 }
 
 func newConnID() (pgtype.UUID, error) {
