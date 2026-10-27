@@ -123,3 +123,11 @@ What cannot be tested end to end: a process in uninterruptible sleep cannot be m
 detection, the saving, the recreation and the loop guard are tested against a fake `/proc` and a
 fake sandbox that cannot end a process; only the shell scripts run against real git and a real
 `/proc` layout.
+
+## Amendment (2026-10-27, HC1 review): agentd still holds no key-encryption key with home checkpoints
+
+Home checkpoints (ADR 0032) make koinon-agentd the writer of agents' homes, which needs a password
+per agent repository. That password is sealed with the secret store, so the rule above holds: agentd
+does not mount the KEK Secret. koinon-api opens (or creates) the password and returns it to agentd
+per checkpoint, on the same listener and with the same kind of HMAC credential as saved work
+(`/internal/home-repository`).

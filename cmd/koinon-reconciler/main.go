@@ -154,6 +154,7 @@ func run() error {
 			SandboxJobs:       cfg.sandboxJobs,
 			ResyncInterval:    cfg.resyncInterval,
 			HomeRetention:     reconciler.Retention(cfg.homeRetention),
+			Checkpoints:       cfg.checkpoints,
 			ToolServers:       cfg.toolServers(),
 			MCPAskURL:         cfg.mcpAskURL,
 			// repo.read grants (plan item C2): tokens minted with the App key opened from the

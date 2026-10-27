@@ -48,6 +48,7 @@ data:
       sandboxJobs: {{ .Values.reconciler.sandboxJobs }}
       resyncInterval: {{ .Values.reconciler.resyncInterval }}
       homeRetention: {{ .Values.reconciler.homeRetention }}
+      checkpoints: {{ .Values.checkpoints.enabled }}
     mcpAsk:
       url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp-ask
     githubTools:
