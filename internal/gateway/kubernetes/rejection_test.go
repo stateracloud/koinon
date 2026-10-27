@@ -62,7 +62,7 @@ var _ = Describe("kubernetes mode: a rejected object (plan item G2)", Ordered, f
 		up := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}}`))
 		}))
-		l, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "0.0.0.0:0") //nolint:gosec // pods reach the test host over the Docker network
+		l, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "0.0.0.0:0")
 		Expect(err).NotTo(HaveOccurred())
 		up.Listener = l
 		up.Start()

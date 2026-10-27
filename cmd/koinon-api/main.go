@@ -80,6 +80,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
+	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/secretstore"
@@ -574,13 +575,13 @@ func run() error {
 	if cfg.otlpAddr != "" {
 		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
 		// the session-authenticated API handler.
-		go func() {
+		safego.Go(ctx, slog.Default(), "ledger-otlp", func(context.Context) {
 			slog.Info("starting the spend ledger's OTLP receiver", "addr", cfg.otlpAddr)
 			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg)}, slog.Default()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}
-		}()
+		})
 	}
 
 	handler, err := api.NewHandler(api.Options{
@@ -621,13 +622,13 @@ func run() error {
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		toolsSrv := &http.Server{Addr: cfg.toolsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, toolsSrv)
-		go func() {
+		safego.Go(ctx, slog.Default(), "tools-server", func(context.Context) {
 			slog.Info("serving GitHub tools", "addr", cfg.toolsAddr)
 			if err := toolsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				toolsErr <- err
 				stop()
 			}
-		}()
+		})
 	}
 	// Saved work from a stuck sandbox (ADR 0054) arrives on its own listener, which only koinon-agentd
 	// may reach: koinon-agentd holds no KEK, so it posts the bundle here to be sealed. The tools
@@ -648,22 +649,22 @@ func run() error {
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		swSrv := &http.Server{Addr: cfg.savedWorkAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, swSrv)
-		go func() {
+		safego.Go(ctx, slog.Default(), "saved-work-server", func(context.Context) {
 			slog.Info("serving saved-work uploads", "addr", cfg.savedWorkAddr)
 			if err := swSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				toolsErr <- err
 				stop()
 			}
-		}()
+		})
 	}
-	go func() {
+	safego.Go(ctx, slog.Default(), "shutdown", func(context.Context) {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for _, s := range servers {
 			_ = s.Shutdown(shutdownCtx)
 		}
-	}()
+	})
 
 	slog.Info("starting koinon-api", "version", project.Version, "addr", cfg.addr,
 		"oidc", cfg.oidcIssuer != "", "web_ui", web.Dist() != nil)

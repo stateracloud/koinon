@@ -39,6 +39,7 @@ import (
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -110,11 +111,11 @@ func run() error {
 			w.WriteHeader(http.StatusOK)
 		})
 		health := &http.Server{Addr: cfg.healthAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-		go func() {
+		safego.Go(ctx, log, "health-listener", func(context.Context) {
 			if err := health.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Error("health listener failed", "err", err)
 			}
-		}()
+		})
 		defer func() { _ = health.Close() }()
 	}
 	var keyring *secretstore.Keyring

@@ -108,7 +108,7 @@ func (f flavor) tag() string {
 	if err != nil {
 		Fail("repository root: " + err.Error())
 	}
-	out, err := exec.CommandContext(context.Background(), filepath.Join(root, "hack", "flavor-tag.sh"), f.name).Output() //nolint:gosec // test-controlled
+	out, err := exec.CommandContext(context.Background(), filepath.Join(root, "hack", "flavor-tag.sh"), f.name).Output()
 	if err != nil {
 		Fail("hack/flavor-tag.sh " + f.name + ": " + err.Error())
 	}
@@ -244,7 +244,7 @@ func describeContract(f flavor) bool {
 				f.command("file:///etc/passwd", contractModel, gw.url("/mcp")),
 				f.command(gw.url("/v1"), contractModel, "")[:5],
 			} {
-				c := exec.CommandContext(ctx, "docker", append([]string{"exec", sb.name}, args...)...) //nolint:gosec // test-controlled
+				c := exec.CommandContext(ctx, "docker", append([]string{"exec", sb.name}, args...)...)
 				out, err := c.CombinedOutput()
 				var exit *exec.ExitError
 				Expect(errors.As(err, &exit)).To(BeTrue(), "%v: %s", args, out)
@@ -257,7 +257,7 @@ func describeContract(f flavor) bool {
 			// git asks its helpers as it would before a clone; without an answer it would
 			// prompt, which GIT_TERMINAL_PROMPT=0 turns into a failure.
 			credential := func(op, input string) (string, error) {
-				c := exec.CommandContext(ctx, "docker", "exec", "--interactive", "--env", "GIT_TERMINAL_PROMPT=0", //nolint:gosec // test-controlled
+				c := exec.CommandContext(ctx, "docker", "exec", "--interactive", "--env", "GIT_TERMINAL_PROMPT=0",
 					"--workdir", workdir, sb.name, "/usr/bin/git", "credential", op)
 				c.Stdin = strings.NewReader(input)
 				out, err := c.CombinedOutput()
@@ -280,7 +280,7 @@ func describeContract(f flavor) bool {
 				To(ContainSubstring("file:/etc/koinon/git/config\t/usr/local/bin/koinon-git-credential"))
 			Expect(sb.run(ctx, "stat", "-c", "%u %A", "/etc/koinon/git/config", "/usr/local/bin/koinon-git-credential")).
 				To(Equal("0 -rw-r--r--\n0 -rwxr-xr-x\n"))
-			grep := exec.CommandContext(ctx, "docker", "exec", sb.name, "grep", "-rlsF", fakeGitHubPlaceholder, "/sandbox", "/tmp", "/etc") //nolint:gosec // test-controlled
+			grep := exec.CommandContext(ctx, "docker", "exec", sb.name, "grep", "-rlsF", fakeGitHubPlaceholder, "/sandbox", "/tmp", "/etc")
 			found, err := grep.Output()
 			Expect(err).To(HaveOccurred(), "grep found the placeholder in %s", found)
 		})
@@ -455,7 +455,7 @@ func ensureImage(f flavor) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	img := f.image()
-	if exec.CommandContext(ctx, "docker", "image", "inspect", img).Run() == nil { //nolint:gosec // test-controlled
+	if exec.CommandContext(ctx, "docker", "image", "inspect", img).Run() == nil {
 		return
 	}
 	if os.Getenv("KOINON_FLAVOR_BUILD") != "1" {
@@ -464,7 +464,7 @@ func ensureImage(f flavor) {
 	}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	Expect(err).NotTo(HaveOccurred())
-	out, err := exec.CommandContext(ctx, "docker", "buildx", "build", "--load", "--tag", img, //nolint:gosec // test-controlled
+	out, err := exec.CommandContext(ctx, "docker", "buildx", "build", "--load", "--tag", img,
 		"--build-context", "common="+filepath.Join(root, "flavors", "common"),
 		filepath.Join(root, f.dockerfile)).CombinedOutput()
 	Expect(err).NotTo(HaveOccurred(), "build %s: %s", img, out)

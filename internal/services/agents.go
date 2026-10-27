@@ -300,7 +300,7 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 	s.log.Info("agent activated", "org", c.org.String(), "agent", out.GetId(),
 		"version", out.GetActiveVersion(), "by", c.actor().String(),
 		"apply_to_open_tickets", req.GetApplyToOpenTickets(), "tickets_restarting", restarting)
-	return &agentv1alpha1.ActivateAgentResponse{Agent: out, TicketsRestarting: int32(restarting)}, nil //nolint:gosec // a count of tickets
+	return &agentv1alpha1.ActivateAgentResponse{Agent: out, TicketsRestarting: int32(restarting)}, nil
 }
 
 // triggerAudit renders triggers for an audit event; instruction text only when asked for.

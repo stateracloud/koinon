@@ -468,7 +468,7 @@ var _ = Describe("fake Gitea", func() {
 			one := filepath.Join(tmp, "one")
 			git(tmp, "clone", "-q", cloneURL(fakegitea.DefaultToken), one)
 			blob := make([]byte, 4<<20)
-			rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // incompressible filler, not a secret
+			rng := rand.New(rand.NewPCG(1, 2))
 			for i := range blob {
 				blob[i] = byte(rng.UintN(256))
 			}

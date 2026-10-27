@@ -362,7 +362,7 @@ func (s *Server) ListModels(ctx context.Context, _ ListModelsRequestObject) (Lis
 // CreateModel implements StrictServerInterface.
 func (s *Server) CreateModel(ctx context.Context, req CreateModelRequestObject) (CreateModelResponseObject, error) {
 	p, actor := s.actor(ctx)
-	in := catalog.ModelInput{ProviderID: uid(req.Body.ProviderId), Name: req.Body.Name, Rates: fromRates(req.Body.Rates)} //nolint:staticcheck // deprecated field, refused by the catalog
+	in := catalog.ModelInput{ProviderID: uid(req.Body.ProviderId), Name: req.Body.Name, Rates: fromRates(req.Body.Rates)}
 	if req.Body.Guard != nil {
 		in.Guard = *req.Body.Guard
 	}
@@ -388,8 +388,8 @@ func (s *Server) GetModel(ctx context.Context, req GetModelRequestObject) (GetMo
 // UpdateModel implements StrictServerInterface.
 func (s *Server) UpdateModel(ctx context.Context, req UpdateModelRequestObject) (UpdateModelResponseObject, error) {
 	p, actor := s.actor(ctx)
-	patch := catalog.ModelPatch{Guard: req.Body.Guard, Rates: fromRates(req.Body.Rates)} //nolint:staticcheck // deprecated field, refused by the catalog
-	patch.ClearRates = req.Body.ClearRates != nil && *req.Body.ClearRates                //nolint:staticcheck // deprecated, refused by the catalog
+	patch := catalog.ModelPatch{Guard: req.Body.Guard, Rates: fromRates(req.Body.Rates)}
+	patch.ClearRates = req.Body.ClearRates != nil && *req.Body.ClearRates
 	got, err := s.catalog.UpdateModel(ctx, p.Org, actor, uid(req.ModelId), patch)
 	if err != nil {
 		st, e := s.problem(err)
