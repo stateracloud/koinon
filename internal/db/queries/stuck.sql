@@ -9,7 +9,7 @@
 -- agentd found the sandbox stuck: the reconciler recreates it. The mark clears when the
 -- reconciler records another home generation.
 UPDATE agent_sandboxes
-SET unhealthy_at = now(), unhealthy_reason = @reason::text, unhealthy_generation = coalesce(nullif(@generation::text, ''), home_generation, '')
+SET unhealthy_at = now(), unhealthy_reason = @reason::text, unhealthy_generation = coalesce(nullif(@generation::text, ''), sandbox_id, home_generation, '')
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
 
