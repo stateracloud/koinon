@@ -8,10 +8,15 @@ linters:
     - gosec
     - misspell
     - noctx
+    - nolintlint
     - revive
     - sqlclosecheck
     - unconvert
   settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
     revive:
       rules:
         - name: dot-imports

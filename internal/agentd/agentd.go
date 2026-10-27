@@ -50,6 +50,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // Backend is the part of [execution.Backend] agentd uses. agentd only execs: sandbox state
@@ -255,16 +256,20 @@ func (p *Pool) Run(ctx context.Context) error {
 func (p *Pool) work(ctx context.Context, owner string) {
 	log := p.log.With("owner", owner)
 	for ctx.Err() == nil {
-		run, ok, err := p.claim(ctx, owner)
-		if err != nil && ctx.Err() == nil {
-			log.Warn("claiming a run failed", "err", err)
-		}
-		if !ok {
-			// Jitter keeps idle workers of all replicas from polling in step.
-			sleep(ctx, p.cfg.Poll/2+rand.N(p.cfg.Poll)) //nolint:gosec // jitter, not security
-			continue
-		}
-		p.drive(ctx, run, log)
+		// One iteration at a time, so a panic in a run is logged and the worker goes on: the run's
+		// lease expires and another worker takes it over (bounded by MaxTakeovers).
+		safego.Do(log, "agentd-worker", func() {
+			run, ok, err := p.claim(ctx, owner)
+			if err != nil && ctx.Err() == nil {
+				log.Warn("claiming a run failed", "err", err)
+			}
+			if !ok {
+				// Jitter keeps idle workers of all replicas from polling in step.
+				sleep(ctx, p.cfg.Poll/2+rand.N(p.cfg.Poll)) //nolint:gosec // jitter, not security
+				return
+			}
+			p.drive(ctx, run, log)
+		})
 	}
 }
 
@@ -280,7 +285,7 @@ func (p *Pool) claim(ctx context.Context, owner string) (store.Run, bool, error)
 	if len(orgs) > 0 {
 		off = rand.N(len(orgs)) //nolint:gosec // fairness, not security
 	}
-	lease := int32(p.cfg.Lease.Seconds()) //nolint:gosec // bounded by configuration
+	lease := int32(p.cfg.Lease.Seconds())
 	var firstErr error
 	for i := range orgs {
 		org := orgs[(off+i)%len(orgs)]

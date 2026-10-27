@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // Access-log attributes agentgateway v1.6.0 sets on LLM requests
@@ -307,12 +308,12 @@ func readBody(r *http.Request) ([]byte, error) {
 // Serve runs the OTLP receiver on addr until ctx ends.
 func Serve(ctx context.Context, addr string, in *Ingester, log *slog.Logger) error {
 	srv := &http.Server{Addr: addr, Handler: Handler(in, log), ReadHeaderTimeout: 10 * time.Second}
-	go func() {
+	safego.Go(ctx, log, "otlp-shutdown", func(context.Context) {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
-	}()
+	})
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

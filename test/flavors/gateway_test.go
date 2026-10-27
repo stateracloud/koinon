@@ -52,7 +52,7 @@ func newGateway(scripts ...fakemodel.Script) *gateway {
 	var lc net.ListenConfig
 	l, err := lc.Listen(context.Background(), "tcp", "0.0.0.0:0")
 	Expect(err).NotTo(HaveOccurred())
-	g.srv = &httptest.Server{Listener: l, Config: &http.Server{Handler: mux}} //nolint:gosec // test server
+	g.srv = &httptest.Server{Listener: l, Config: &http.Server{Handler: mux}}
 	g.srv.Start()
 	DeferCleanup(func() {
 		g.srv.CloseClientConnections()

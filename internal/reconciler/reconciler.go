@@ -56,6 +56,7 @@ import (
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // Retention decides what happens to an archived agent's home volume.
@@ -535,7 +536,7 @@ func (j *jobs) wait() []error {
 func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[string]string, sem chan struct{}) *jobs {
 	j := &jobs{}
 	j.wg.Add(1)
-	go func() {
+	safego.Go(ctx, r.log, "reconcile-pass", func(context.Context) {
 		defer j.wg.Done()
 		for _, w := range ws {
 			select {
@@ -547,7 +548,11 @@ func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[s
 			go func() {
 				defer j.wg.Done()
 				defer func() { <-sem }()
-				if err := r.reconcileAgent(ctx, w, workspaces); err != nil {
+				var err error
+				if safego.Do(r.log, "reconcile-agent", func() { err = r.reconcileAgent(ctx, w, workspaces) }) {
+					err = errors.New("internal error: reconciling the agent panicked")
+				}
+				if err != nil {
 					r.m.PassErrors.WithLabelValues(errKindSandbox).Inc()
 					r.log.Warn("agent not converged", append(w.logAttrs(), "err", err)...)
 					r.recordMessage(ctx, w, err)
@@ -557,7 +562,7 @@ func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[s
 				}
 			}()
 		}
-	}()
+	})
 	return j
 }
 

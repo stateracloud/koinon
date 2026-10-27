@@ -44,7 +44,7 @@ type sunk struct {
 
 func newSink(host string) *otlpSink {
 	s := &otlpSink{}
-	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "0.0.0.0:0") //nolint:gosec // pods reach the test host over the Docker network
+	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "0.0.0.0:0")
 	Expect(err).NotTo(HaveOccurred())
 	s.Server = &httptest.Server{Listener: ln, Config: &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -116,7 +116,7 @@ var _ = Describe("kubernetes mode: fallback budgets (plan items S2 and G2)", Ord
 			upHits.Add(1)
 			_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}}`))
 		}))
-		l, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "0.0.0.0:0") //nolint:gosec // pods reach the test host over the Docker network
+		l, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "0.0.0.0:0")
 		Expect(err).NotTo(HaveOccurred())
 		up.Listener = l
 		up.Start()

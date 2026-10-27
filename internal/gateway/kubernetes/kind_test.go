@@ -183,7 +183,7 @@ func (g *kubeGateway) forward() (string, error) {
 	if g.pf != nil && g.pf.ProcessState == nil && g.pfa != "" {
 		return g.pfa, nil
 	}
-	cmd := exec.CommandContext(context.Background(), "kubectl", "--kubeconfig", g.c.cfgPath, "-n", g.ns, "port-forward", "--address", "127.0.0.1", "svc/"+gatewayName, ":4000") //nolint:gosec // test helper
+	cmd := exec.CommandContext(context.Background(), "kubectl", "--kubeconfig", g.c.cfgPath, "-n", g.ns, "port-forward", "--address", "127.0.0.1", "svc/"+gatewayName, ":4000")
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
