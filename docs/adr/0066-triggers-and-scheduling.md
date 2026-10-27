@@ -441,3 +441,8 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
   only after Unavailable and DeadlineExceeded (a possibly lost response) and takes a new one after any
   other error. A durable replay returns the original event and created flag; an inline replay returns
   no event. `SourceDirectMessage` lives with the other dedupe sources in `internal/durable`.
+- 2026-10-27 (wave-3 integration): a trigger's instruction is a system message whose payload carries
+  its `source`; `ListTaskMessagesAfter` returns user messages and these, so a scheduled run's first
+  prompt contains its instruction. A direct-message replay (`!First`) returns the recorded task only
+  when it belongs to the same agent (and the same thread when one is given); otherwise it is
+  `AlreadyExists`.
