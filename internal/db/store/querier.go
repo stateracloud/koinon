@@ -220,7 +220,9 @@ type Querier interface {
 	// Requests that never started because the sandbox was not ready for the configured wait.
 	FailStaleHomeCheckpoints(ctx context.Context, arg FailStaleHomeCheckpointsParams) ([]HomeCheckpoint, error)
 	// The scope that allows this call now: exact on agent, connector, tool and target; a task scope
-	// only for its task. A task scope wins over an agent scope (the narrower one is named).
+	// only for its task. A task scope wins over an agent scope (the narrower one is named). When
+	// call_binding is given the scope's binding must equal it (a code-host scope covers only the
+	// connection and base URL it was granted on).
 	FindActiveApprovalScope(ctx context.Context, arg FindActiveApprovalScopeParams) (ApprovalScope, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -401,6 +403,8 @@ type Querier interface {
 	// reads it: a complete one newer than the sandbox's last activity lets the recreation go on, a
 	// failed one blocks it.
 	LatestHomeCheckpointOfSandbox(ctx context.Context, arg LatestHomeCheckpointOfSandboxParams) (HomeCheckpoint, error)
+	// The person who wrote the task's latest user message (the person on the other end of a chat thread).
+	LatestUserMessageActor(ctx context.Context, arg LatestUserMessageActorParams) (pgtype.UUID, error)
 	ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiToken, error)
 	// The active version of each active agent, for the triggers they define (ADR 0066). A draft
 	// agent, an archived one and a proposed version are not included.
@@ -540,7 +544,8 @@ type Querier interface {
 	// The timeline after a sequence number (0 for the start), in order.
 	ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) ([]TaskEvent, error)
 	// The users' messages on the task after a timeline seq, in order: what
-	// agentd sends the harness as a run's prompt.
+	// agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose
+	// payload carries its source) is part of it, so a scheduled run sees what it was scheduled to do.
 	ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessagesAfterParams) ([]TaskEvent, error)
 	ListTasks(ctx context.Context, orgID pgtype.UUID) ([]Task, error)
 	// The tasks in any of the states, oldest first (a board column of the ticket API is a set of

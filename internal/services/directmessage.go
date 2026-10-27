@@ -100,7 +100,16 @@ func (s *Server) DeliverDirectMessage(ctx context.Context, in DirectMessage) (Di
 				return nil, connect.NewError(connect.CodeAlreadyExists, "message_id was used for something else")
 			}
 			res.Task, err = q.GetTask(ctx, store.GetTaskParams{OrgID: in.Org, ID: out.EffectID})
-			return nil, err
+			if err != nil {
+				return nil, err
+			}
+			// A replay returns the task recorded under the ID; another agent's or thread's task is
+			// a reused ID, not a replay.
+			if res.Task.AgentID != in.Agent || (in.Task.Valid && res.Task.ID != in.Task) {
+				res = DirectMessageResult{}
+				return nil, connect.NewError(connect.CodeAlreadyExists, "message_id was used for another agent or thread")
+			}
+			return nil, nil
 		}
 		return wakeNotification("dm:"+idString(res.Task.ID)+":"+in.MessageID, res.Task), nil
 	})
