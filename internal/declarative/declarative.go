@@ -83,6 +83,8 @@ type Importer struct {
 	Catalog   *catalog.Service
 	// MCP imports mcp-server Secrets (plan item MC1); nil ignores them with a Warning Event.
 	MCP *mcpservers.Service
+	// URLPolicy decides which hosts a declared connection's base URL may name.
+	URLPolicy catalog.URLPolicy
 	// Sealer seals declared connections' secret fields.
 	Sealer connections.Sealer
 	Log    *slog.Logger
@@ -299,6 +301,11 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 	}
 	if i.Sealer == nil {
 		return connections.ErrNoKeyring
+	}
+	if d.Site.BaseURL != "" {
+		if err := i.URLPolicy.Check(ctx, d.Site.BaseURL); err != nil {
+			return &invalidError{fmt.Errorf("%s: %w", KeyBaseURL, err)}
+		}
 	}
 	q := store.New(i.Pool)
 	all, err := q.ListConnections(ctx, org)

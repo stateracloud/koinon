@@ -163,6 +163,11 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 		baseURL = "" // github.com is the default; nothing to store
 	} else {
 		baseURL = loc.BaseURL()
+		// The API and the reconciler send App JWTs to this host and the reconciler opens sandbox
+		// egress to it: private and internal addresses only when the platform allow-lists them.
+		if err := s.urlPolicy.Check(requestCtx(ctx), baseURL); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "base_url: "+err.Error())
+		}
 	}
 	if caBundle != "" {
 		if _, err := codehost.CertPool(caBundle); err != nil {

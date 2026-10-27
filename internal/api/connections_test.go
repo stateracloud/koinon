@@ -201,6 +201,9 @@ var _ = Describe("ConnectionService", func() {
 		for _, req := range []*connectionv1alpha1.CreateGitHubConnectionRequest{
 			{BaseUrl: "http://ghes.example.test"},
 			{BaseUrl: "https://ghes.example.test/enterprise"},
+			{BaseUrl: "https://10.0.0.1"},
+			{BaseUrl: "https://127.0.0.1:8443"},
+			{BaseUrl: "https://koinon-postgres"},
 			{CaBundle: "not pem"},
 			{CaBundle: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("not-a-real-key")}))},
 		} {

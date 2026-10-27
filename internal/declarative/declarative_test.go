@@ -461,6 +461,17 @@ var _ = Describe("Importer", func() {
 			}
 		})
 
+		It("ignores a connection Secret whose base URL is a private or internal host", func(ctx SpecContext) {
+			for _, v := range []string{"https://10.0.0.1", "https://127.0.0.1:8443", "https://koinon-postgres"} {
+				d := conn()
+				d["baseUrl"] = v
+				put(ctx, "gh", declarative.TypeConnection, slug, d)
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				Expect(rows).To(BeEmpty(), v)
+			}
+		})
+
 		It("ignores a connection Secret with a bad key without quoting it", func(ctx SpecContext) {
 			d := conn()
 			d["privateKey"] = "-----BEGIN RSA PRIVATE KEY-----\nTOPSECRETSTUFF\n-----END RSA PRIVATE KEY-----\n"
