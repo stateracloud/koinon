@@ -210,7 +210,8 @@ func (s *Server) ListAgents(ctx context.Context, req *agentv1alpha1.ListAgentsRe
 }
 
 // ActivateAgent implements AgentService: an admin or owner activates the
-// draft's latest version and so approves the grants it proposes (ADR 0020).
+// draft's latest version and so approves the grants it proposes (ADR 0020), or moves an active
+// agent to its newer proposed version (ADR 0066).
 // The approved grants are the active version's; a later grant change adds a
 // version and returns the agent to draft.
 func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateAgentRequest) (*agentv1alpha1.ActivateAgentResponse, error) {
@@ -332,7 +333,9 @@ func (s *Server) SetAgentTriggers(ctx context.Context, req *agentv1alpha1.SetAge
 	}
 	var out *agentv1alpha1.Agent
 	err = s.inTx(ctx, func(q *store.Queries) error {
-		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: id})
+		// The row lock makes the base_version check and the new version one step: a concurrent
+		// proposal waits, then fails the check against the version this one created.
+		a, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: c.org, ID: id})
 		if err != nil {
 			return err
 		}

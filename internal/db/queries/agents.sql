@@ -31,6 +31,12 @@ SELECT agent.org_id, agent.id, agent.latest_version, @config, sqlc.narg(created_
 FROM agent
 RETURNING *;
 
+-- name: GetAgentForUpdate :one
+-- Locks the agent row for the rest of the transaction (serialises read-check-write on versions).
+SELECT * FROM agents
+WHERE org_id = @org_id AND id = @id
+FOR UPDATE;
+
 -- name: GetAgentVersion :one
 SELECT * FROM agent_versions
 WHERE org_id = @org_id AND id = @id;
@@ -42,11 +48,15 @@ ORDER BY version;
 
 -- name: ActivateAgent :one
 -- draft -> active with the given version (ADR 0020), or an active agent moving to a newer version
--- (a trigger-only proposal, ADR 0066). No row: archived.
+-- (a trigger-only proposal, ADR 0066). No row: archived, or the agent already runs this version
+-- (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 UPDATE agents
 SET status = 'active', active_version_id = @version_id,
     activated_by = sqlc.narg(activated_by), activated_at = now()
-WHERE org_id = @org_id AND id = @id AND status IN ('draft', 'active')
+WHERE agents.org_id = @org_id AND agents.id = @id
+  AND (agents.status = 'draft' OR (agents.status = 'active' AND agents.active_version_id IS DISTINCT FROM @version_id
+    AND (SELECT nv.version FROM agent_versions nv WHERE nv.org_id = @org_id AND nv.id = @version_id)
+      > (SELECT av.version FROM agent_versions av WHERE av.org_id = agents.org_id AND av.id = agents.active_version_id)))
 RETURNING *;
 
 -- name: ReturnAgentToDraft :one

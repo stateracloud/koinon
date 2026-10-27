@@ -26,8 +26,8 @@ service AgentService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // ActivateAgent activates a draft and so approves the grants its version
-  // proposes. Admins and owners only.
+  // ActivateAgent activates a draft, or moves an active agent to its newer proposed version
+  // (ADR 0066), and so approves the grants that version proposes. Admins and owners only.
   rpc ActivateAgent(ActivateAgentRequest) returns (ActivateAgentResponse);
 
   // SetAgentTriggers proposes a new version with the given triggers (everything else carried over

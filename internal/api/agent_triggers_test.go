@@ -3,6 +3,8 @@
 package api_test
 
 import (
+	"sync"
+
 	connect "connectrpc.com/connect/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -137,4 +139,59 @@ var _ = Describe("agent triggers", func() {
 		Entry("no instruction", &templatev1alpha1.Trigger{Id: "a", Type: templatev1alpha1.TriggerType_TRIGGER_TYPE_DIRECT_MESSAGE}),
 		Entry("unspecified type", &templatev1alpha1.Trigger{Id: "a", Instruction: "x"}),
 	)
+	It("lets one of two concurrent activations of the same version win", func(ctx SpecContext) {
+		proposed, err := set(ctx, owner, agent, daily)
+		Expect(err).NotTo(HaveOccurred())
+		const n = 4
+		errs := make([]error, n)
+		var wg sync.WaitGroup
+		for i := range errs {
+			wg.Add(1)
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				_, errs[i] = owner.agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{
+					OrgId: org, AgentId: agent.GetId(), Version: proposed.GetLatestVersion(),
+				})
+			}()
+		}
+		wg.Wait()
+		wins := 0
+		for _, err := range errs {
+			if err == nil {
+				wins++
+				continue
+			}
+			Expect(codeOf(err)).To(BeElementOf(connect.CodeAborted, connect.CodeFailedPrecondition))
+		}
+		Expect(wins).To(Equal(1))
+		Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'agent.activate' AND target_id = $2`,
+			org, agent.GetId())).To(Equal(2), "the first activation and one for the proposed version")
+	})
+
+	It("lets one of two concurrent proposals on the same base version win", func(ctx SpecContext) {
+		const n = 4
+		errs := make([]error, n)
+		var wg sync.WaitGroup
+		for i := range errs {
+			wg.Add(1)
+			go func() {
+				defer GinkgoRecover()
+				defer wg.Done()
+				_, errs[i] = set(ctx, owner, agent, daily)
+			}()
+		}
+		wg.Wait()
+		wins := 0
+		for _, err := range errs {
+			if err == nil {
+				wins++
+				continue
+			}
+			Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+		}
+		Expect(wins).To(Equal(1))
+		Expect(count(ctx, e, `SELECT latest_version FROM agents WHERE org_id = $1 AND id = $2`,
+			org, agent.GetId())).To(Equal(int(agent.GetLatestVersion()) + 1))
+	})
 })

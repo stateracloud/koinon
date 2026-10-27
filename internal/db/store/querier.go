@@ -13,7 +13,8 @@ import (
 type Querier interface {
 	AcknowledgeMCPToolReview(ctx context.Context, arg AcknowledgeMCPToolReviewParams) (McpTool, error)
 	// draft -> active with the given version (ADR 0020), or an active agent moving to a newer version
-	// (a trigger-only proposal, ADR 0066). No row: archived.
+	// (a trigger-only proposal, ADR 0066). No row: archived, or the agent already runs this version
+	// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
 	// Adds reported token usage to an unfinished run. The caller cancels the run
@@ -205,6 +206,8 @@ type Querier interface {
 	GetActiveUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetAgent(ctx context.Context, arg GetAgentParams) (Agent, error)
 	GetAgentBudget(ctx context.Context, arg GetAgentBudgetParams) (GetAgentBudgetRow, error)
+	// Locks the agent row for the rest of the transaction (serialises read-check-write on versions).
+	GetAgentForUpdate(ctx context.Context, arg GetAgentForUpdateParams) (Agent, error)
 	GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerParams) (AgentMcpServer, error)
 	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
 	// holds the agent, whether one can be claimed now (queued, or parked with its
