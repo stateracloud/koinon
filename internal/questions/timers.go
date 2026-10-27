@@ -104,7 +104,7 @@ func deliverReminder(ctx context.Context, pool *pgxpool.Pool, note durable.Notif
 }
 
 // SweepResult is what one RunTimers pass did.
-type SweepResult struct{ Reminded, Expired int }
+type SweepResult struct{ Sent, Expired int }
 
 // RunTimers sends the reminders due at now and expires the questions past their expiry at now, in
 // every org. now is a parameter so tests can move the clock. One question or org that keeps failing
@@ -118,7 +118,7 @@ func RunTimers(ctx context.Context, pool *pgxpool.Pool, send durable.Sender, now
 	var errs []error
 	for _, org := range orgs {
 		r, err := RunOrgTimers(ctx, pool, send, org, now)
-		res.Reminded += r.Reminded
+		res.Sent += r.Sent
 		res.Expired += r.Expired
 		if err != nil {
 			errs = append(errs, err)
@@ -156,13 +156,16 @@ func RunOrgTimers(ctx context.Context, pool *pgxpool.Pool, send durable.Sender, 
 	if err != nil {
 		return res, errors.Join(append(errs, err)...)
 	}
+	// Sent counts reminders handed to the sender, not reminders delivered: with durable on, Send only
+	// records the workflow and the handler sets reminded_at later, so until then every sweep sends
+	// the same workflow ID again. That is a no-op, but it is counted here again.
 	for _, row := range remind {
 		if err := send.Send(ctx, reminderNotification(row)); err != nil {
 			slog.Error("question reminder failed", "org", org.String(), "question", row.ID.String(), "err", err)
 			errs = append(errs, fmt.Errorf("remind question %s: %w", row.ID, err))
 			continue
 		}
-		res.Reminded++
+		res.Sent++
 	}
 	return res, errors.Join(errs...)
 }

@@ -90,8 +90,8 @@ func (r *runner) outcomes(ctx context.Context) (string, error) {
 // to react.
 const noAnswerNote = "\n\n[Koinon system] This is a short \"no answer\" run: at least one question above expired " +
 	"because nobody answered, and Koinon applied its default. Decide now and keep it brief. Either carry on with " +
-	"the default, cancel the task and say why, or ask someone else with ask_user (not the same person about the " +
-	"same thing). You will not be reminded about this again."
+	"the default, cancel the task with cancel_task (give the reason), or ask someone else with ask_user (not the " +
+	"same person about the same thing). This question will not come back."
 
 // questionOutcomeText describes one resolved question to the agent. A default that was applied
 // because the question was dismissed or expired is said so (ADR 0065 decision 10a).

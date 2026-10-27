@@ -49,8 +49,8 @@ func ToolGrants(cfg agentconfig.Config, servers map[string]string) []gateway.Too
 	var out []gateway.ToolGrant
 	if _, ok := servers[gateway.KoinonTarget]; ok {
 		// Koinon's own tools need no grant: ask_user parks the run and puts a question in a person's
-		// inbox, and costs nothing (ADR 0065).
-		out = append(out, gateway.ToolGrant{Target: gateway.KoinonTarget, Tools: []string{gateway.ToolAskUser}})
+		// inbox, and costs nothing; cancel_task closes the agent's own task as canceled (ADR 0065).
+		out = append(out, gateway.ToolGrant{Target: gateway.KoinonTarget, Tools: []string{gateway.ToolAskUser, gateway.ToolCancelTask}})
 	}
 	for _, g := range cfg.Grants {
 		if _, ok := servers[g.Connector]; !ok {
