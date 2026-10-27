@@ -20,12 +20,14 @@ package askuser
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -37,6 +39,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
 // Target is the gateway target (and tool server key) of this server.
@@ -47,6 +50,9 @@ const Path = "/mcp-koinon"
 
 // ToolAskUser is the tool's name.
 const ToolAskUser = gateway.ToolAskUser
+
+// ToolCancelTask is the name of the cancel_task tool.
+const ToolCancelTask = gateway.ToolCancelTask
 
 // Options configures a Server.
 type Options struct {
@@ -88,6 +94,12 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 			"is safe to act on without a person (for example 'do not post', 'skip'). You are told when the default " +
 			"was applied. Do not ask twice, and do not work around the pause.",
 	}, s.askUser)
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: ToolCancelTask,
+		Description: "Close the task you are working on as canceled, when it cannot or should not go on (for example nobody " +
+			"answered your question and the safe default is not enough to continue). 'reason' is shown on the task's " +
+			"timeline. It cannot be undone; the person can start a new task. After calling it, end your turn.",
+	}, s.cancelTask)
 	return s
 }
 
@@ -186,7 +198,7 @@ func (s *Server) timers(ctx context.Context, a store.Agent) (reminder, ttl time.
 			reminder = 0
 		}
 	}
-	if s.reminder > 0 {
+	if s.reminder > 0 && s.reminder < ttl {
 		reminder = s.reminder
 	}
 	return reminder, ttl, nil
@@ -266,4 +278,68 @@ func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args)
 		"and you get it as your next message. If the question is dismissed or not answered by %s, Koinon applies your default (%q) "+
 		"and tells you. Do not ask again and do not work around the pause.", out.ID, label, out.ExpiresAt, row.DefaultAnswer)
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, out, nil
+}
+
+// CancelArgs are the arguments of cancel_task.
+type CancelArgs struct {
+	Reason string `json:"reason" jsonschema:"why the task is canceled, in plain words; shown on the task's timeline"`
+}
+
+// CancelResult is the structured result of cancel_task.
+type CancelResult struct {
+	Status string `json:"status"`
+}
+
+// kindStatusChanged is the task event of a state change (the same kind the task service writes).
+const kindStatusChanged = "status.changed"
+
+// cancelTask closes the caller's task as canceled, with the reason on the task's timeline, and
+// cancels its queued runs. The caller's own run is running and ends with the turn.
+func (s *Server) cancelTask(ctx context.Context, req *mcp.CallToolRequest, in CancelArgs) (*mcp.CallToolResult, CancelResult, error) {
+	c, err := s.identify(ctx, req)
+	if err != nil {
+		return nil, CancelResult{}, err
+	}
+	reason := strings.TrimSpace(in.Reason)
+	if reason == "" {
+		return nil, CancelResult{}, errors.New("reason is required: say why the task is canceled")
+	}
+	if n := utf8.RuneCountInString(reason); n > 1000 {
+		return nil, CancelResult{}, fmt.Errorf("reason is %d characters; at most 1000", n)
+	}
+	status := "canceled"
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		t, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: c.org.ID, ID: c.run.TaskID})
+		if err != nil {
+			return err
+		}
+		switch t.State {
+		case store.TaskStateCompleted, store.TaskStateCanceled, store.TaskStateFailed:
+			status = string(t.State)
+			return nil
+		}
+		if _, err := q.SetTaskState(ctx, store.SetTaskStateParams{OrgID: c.org.ID, ID: t.ID, State: store.TaskStateCanceled}); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"from": string(t.State), "to": string(store.TaskStateCanceled), "reason": reason})
+		if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: c.org.ID, TaskID: t.ID, RunID: c.run.ID, Kind: kindStatusChanged,
+			ActorKind: store.TaskActorKindAgent, ActorAgentID: c.agent.ID, Payload: payload,
+		}); err != nil {
+			return err
+		}
+		_, err = scheduler.CancelQueuedForTask(ctx, q, t, "task canceled by the agent", scheduler.System)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, CancelResult{}, errNoIdentity
+		}
+		s.log.Error("cancel_task: cancel the task", "org", c.org.Slug, "agent", c.agent.ID.String(), "run", c.run.ID.String(), "err", err)
+		return nil, CancelResult{}, errors.New("internal error canceling the task; try again later")
+	}
+	s.log.Info("task canceled by its agent", "org", c.org.Slug, "agent", c.agent.ID.String(), "task", c.run.TaskID.String())
+	text := "The task is " + status + ". End your turn now."
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, CancelResult{Status: status}, nil
 }

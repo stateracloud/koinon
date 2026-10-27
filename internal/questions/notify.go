@@ -142,7 +142,7 @@ func Sweeper(ctx context.Context, pool *pgxpool.Pool, send durable.Sender, inter
 		if res, err := RunTimers(ctx, pool, send, time.Now()); err != nil && ctx.Err() == nil {
 			log.Error("question reminder and expiry sweep failed", "err", err)
 		} else if res != (SweepResult{}) {
-			log.Info("question timers", "reminded", res.Reminded, "expired", res.Expired)
+			log.Info("question timers", "reminders_sent", res.Sent, "expired", res.Expired)
 		}
 		if _, err := CancelOfFinishedRuns(ctx, pool); err != nil && ctx.Err() == nil {
 			log.Error("canceling the questions of finished runs failed", "err", err)

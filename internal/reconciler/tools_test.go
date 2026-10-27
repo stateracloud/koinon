@@ -42,9 +42,9 @@ var _ = Describe("ToolGrants", func() {
 })
 
 var _ = Describe("ToolGrants for Koinon's own tools", func() {
-	It("offers ask_user to every agent when the koinon tool server is configured, grant or not", func() {
+	It("offers ask_user and cancel_task to every agent when the koinon tool server is configured, grant or not", func() {
 		servers := map[string]string{gateway.KoinonTarget: "http://koinon-api-tools.koinon.svc:8081/mcp-koinon"}
-		ask := gateway.ToolGrant{Target: "koinon", Tools: []string{"ask_user"}}
+		ask := gateway.ToolGrant{Target: "koinon", Tools: []string{"ask_user", "cancel_task"}}
 		Expect(reconciler.ToolGrants(agentconfig.Config{}, servers)).To(Equal([]gateway.ToolGrant{ask}))
 
 		both := map[string]string{"github": toolsURL, gateway.KoinonTarget: servers[gateway.KoinonTarget]}

@@ -396,5 +396,18 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
     Chat reminders join with the chat connectors (v0.2).
   - **The "no answer" run** is the resume of the parked run: expiry applies the safe default and
     resolves the park, and the next prompt carries the outcome plus a system instruction (`[Koinon
-    system] This is a short "no answer" run ...`): carry on with the default, cancel the task, or ask
-    someone else with `ask_user`. No second run is created; the run is not given a smaller cap.
+    system] This is a short "no answer" run ...`): carry on with the default, cancel the task with
+    `cancel_task`, or ask someone else with `ask_user`. No second run is created; the run is not
+    given a smaller cap.
+  - **Amendment 2026-10-27 (TK4 review).** Canceling is a tool, not a convention: Koinon's tool
+    server has a second tool, `cancel_task(reason)` (target `koinon`, offered to every agent like
+    `ask_user`), which closes the caller's task as canceled in one transaction, with the reason in
+    the `status.changed` event on the task timeline, and cancels its queued runs. Called on an
+    already ended task it changes nothing. The system instruction no longer says the agent "will not
+    be reminded again": a question it asks someone else gets its own reminder and its own no-answer
+    run. A tool-server `Reminder` override is applied only when it is before the expiry, like the
+    expiry override. `SweepResult.Sent` counts reminders handed to the sender: with durable on, a
+    resend of the same workflow ID until the handler sets `reminded_at` is a no-op but is counted
+    again. The template picker (`TemplateService`) does not show `spec.questions` yet; the reminder
+    and expiry are set in the template file only, like the agent editor, and a UI for them is a
+    follow-up.

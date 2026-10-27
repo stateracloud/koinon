@@ -86,7 +86,7 @@ var _ = Describe("reminders and expiry (TK4)", func() {
 		at := base.Add(questions.DefaultReminder + time.Minute)
 		res, err := run(ctx, sends, at)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res).To(Equal(questions.SweepResult{Reminded: 1}))
+		Expect(res).To(Equal(questions.SweepResult{Sent: 1}))
 		Expect(count(ctx, questions.ReminderNotificationKind)).To(Equal(1))
 		var msg string
 		Expect(pool.QueryRow(ctx, `SELECT payload->>'message' FROM notifications WHERE org_id = $1 AND kind = $2`, w.org, questions.ReminderNotificationKind).Scan(&msg)).To(Succeed())
@@ -120,7 +120,7 @@ var _ = Describe("reminders and expiry (TK4)", func() {
 		By("a sweep before the expiry changes nothing but the reminder")
 		res, err := run(ctx, sends, base.Add(questions.DefaultTTL-time.Minute))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res).To(Equal(questions.SweepResult{Reminded: 1}))
+		Expect(res).To(Equal(questions.SweepResult{Sent: 1}))
 		Expect(ready(ctx)).To(BeFalse())
 
 		at := base.Add(questions.DefaultTTL + time.Minute)

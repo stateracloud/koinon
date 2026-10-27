@@ -35,7 +35,9 @@ type askEnv struct {
 	tools *httptest.Server
 	mu    sync.Mutex
 	args  map[string]any
-	ids   chan string
+	// cancelReason, when set, makes the harness cancel the task in the "no answer" run.
+	cancelReason string
+	ids          chan string
 }
 
 func newAskEnv(ctx context.Context) *askEnv {
@@ -48,12 +50,16 @@ func newAskEnv(ctx context.Context) *askEnv {
 	}
 	a.harness.mu.Lock()
 	a.harness.onPrompt = func(ctx context.Context, text string) (string, bool) {
+		a.mu.Lock()
+		args, cancelReason := a.args, a.cancelReason
+		a.mu.Unlock()
+		if cancelReason != "" && strings.Contains(text, "short \"no answer\" run") {
+			out, _ := a.callTool(ctx, askuser.ToolCancelTask, map[string]any{"reason": cancelReason})
+			return "Canceling. " + out, true
+		}
 		if !strings.Contains(text, markQuestion) {
 			return "", false
 		}
-		a.mu.Lock()
-		args := a.args
-		a.mu.Unlock()
 		out, id := a.call(ctx, args)
 		a.ids <- id
 		return "Asked. " + out, true
@@ -77,6 +83,10 @@ func (a *askEnv) serve() *pgxpool.Pool {
 }
 
 func (a *askEnv) call(ctx context.Context, args map[string]any) (text, id string) {
+	return a.callTool(ctx, askuser.ToolAskUser, args)
+}
+
+func (a *askEnv) callTool(ctx context.Context, tool string, args map[string]any) (text, id string) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "fake-harness", Version: "1"}, nil)
 	s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: a.tools.URL, HTTPClient: &http.Client{Transport: headerTransport{agent: a.slug + "/" + a.agent.ID.String()}},
@@ -86,7 +96,7 @@ func (a *askEnv) call(ctx context.Context, args map[string]any) (text, id string
 		return "connect: " + err.Error(), ""
 	}
 	defer func() { _ = s.Close() }()
-	res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: askuser.ToolAskUser, Arguments: args})
+	res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
 	if err != nil {
 		return "call: " + err.Error(), ""
 	}
@@ -286,9 +296,29 @@ var _ = Describe("ask_user", func() {
 		Expect(prompts).To(HaveLen(2), "the one no-answer run, not more")
 		Expect(prompts[1]).To(ContainSubstring(`nobody answered in time, so your default was applied: "eu-west-1"`))
 		Expect(prompts[1]).To(ContainSubstring("short \"no answer\" run"))
-		Expect(prompts[1]).To(ContainSubstring("cancel the task"))
+		Expect(prompts[1]).To(ContainSubstring("cancel_task"))
 		Expect(prompts[1]).To(ContainSubstring("ask someone else"))
 		Expect(kindsOf(taskEvents(ctx, a.env, t))).To(ContainElement(questions.KindExpired))
+	})
+
+	It("lets the no-answer run cancel the task, which ends canceled with the reason on its timeline (TK4)", func(ctx SpecContext) {
+		asked(ctx)
+		a.mu.Lock()
+		a.cancelReason = "nobody answered and the region matters"
+		a.mu.Unlock()
+		notifier := durable.NewNotifier(nil, nil)
+		questions.RegisterNotifications(notifier, db)
+		_, err := questions.RunOrgTimers(ctx, db, notifier, a.org, time.Now().Add(questions.DefaultTTL+time.Minute))
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: a.org, ID: t.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.State).To(Equal(store.TaskStateCanceled))
+		var reason string
+		Expect(db.QueryRow(ctx, `SELECT payload->>'reason' FROM task_events WHERE org_id = $1 AND task_id = $2 AND kind = 'status.changed'`,
+			a.org, t.ID).Scan(&reason)).To(Succeed())
+		Expect(reason).To(Equal("nobody answered and the region matters"))
 	})
 
 	It("resumes exactly once when koinon-api is killed between the park and the answer (B8)", func(ctx SpecContext) {
