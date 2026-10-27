@@ -6,11 +6,13 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ChatPanel } from '@/components/chat-panel'
 import { CreateTaskForm } from '@/components/create-task-form'
+import { DirectMessageForm } from '@/components/direct-message-form'
 import { Inbox } from '@/components/inbox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { useDirectMessage } from '@/hooks/use-direct-message'
 import { useInbox } from '@/hooks/use-inbox'
 import type { ApprovalItem } from '@/lib/inbox'
 import { useOrg } from '@/lib/org-context'
@@ -68,6 +70,10 @@ export function InboxPage() {
     }
   }
 
+  const newThread = useDirectMessage(orgId, (res) => {
+    if (res.task) setSelected(res.task.id)
+  })
+
   const createTask = useMutation(TaskService.method.createTask, {
     onSuccess: async (res) => {
       await refresh()
@@ -114,9 +120,18 @@ export function InboxPage() {
               orgId={orgId}
               tasks={tasks.data?.tasks ?? []}
               agentNames={agentNames}
+              agents={agents.data?.agents}
               canEdit={canEdit}
               selectedId={selected}
               onSelect={setSelected}
+            />
+          )}
+          {canEdit && agents.data && (
+            <DirectMessageForm
+              agents={agents.data.agents}
+              pending={newThread.pending}
+              error={newThread.error}
+              onSend={(agentId, text) => newThread.send({ agentId, text })}
             />
           )}
           {canEdit && agents.data && (

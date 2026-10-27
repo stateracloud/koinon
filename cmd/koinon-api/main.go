@@ -424,6 +424,7 @@ func run() error {
 	// Notifications that follow a commit (pre-wakes) are DBOS steps with --durable, and inline
 	// best effort without it (ADR 0066, practice B2).
 	var notifier *durable.Notifier
+	var directMessages *services.DirectMessageQueue
 	if cfg.durable {
 		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
 		// missing schema fails the start instead of the API running without its timers.
@@ -440,10 +441,15 @@ func run() error {
 		// The org-partitioned queue for trigger and task-creation work (DB2): each org's limits are
 		// its trigger_concurrency and trigger_rate_per_minute settings. The trigger paths (TR2, TR3)
 		// enqueue through it with durable.EnqueueForOrg; until they land it only registers the queue.
-		if _, err := durable.NewOrgWork(rt, durable.OrgQueueConfig{
+		orgWork, err := durable.NewOrgWork(rt, durable.OrgQueueConfig{
 			Defaults: orgsettings.QueueDefaults(),
 			Limits:   orgsettings.QueueLimits(store.New(pool), orgsettings.Defaults()),
-		}); err != nil {
+		})
+		if err != nil {
+			return err
+		}
+		// Direct messages in the inbox chat (TR3) create their tasks on that queue.
+		if directMessages, err = services.RegisterDirectMessages(rt, orgWork); err != nil {
 			return err
 		}
 		if err := rt.Launch(bgCtx); err != nil {
@@ -528,7 +534,7 @@ func run() error {
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, URLPolicy: urlPolicy,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, URLPolicy: urlPolicy,
 	})
 	if kube != nil {
 		var sealer connections.Sealer
