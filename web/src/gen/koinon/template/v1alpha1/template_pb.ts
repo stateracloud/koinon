@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/template/v1alpha1/template.proto.
  */
 export const file_koinon_template_v1alpha1_template: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vdGVtcGxhdGUvdjFhbHBoYTEvdGVtcGxhdGUucHJvdG8SGGtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMSLEAQoFR3JhbnQSEQoJY29ubmVjdG9yGAEgASgJEg4KBnNjb3BlcxgCIAMoCRIwCgZwcmVzZXQYAyABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUHJlc2V0EhMKC3RhcmdldHNfbWluGAQgASgFEhMKC3RhcmdldHNfbWF4GAUgASgFEg8KB3B1cnBvc2UYBiABKAkSFQoNY29ubmVjdGlvbl9pZBgHIAEoCRIUCgxyZXBvc2l0b3JpZXMYCCADKAkiPQoJUnVuTGltaXRzEhwKFG1heF9kdXJhdGlvbl9zZWNvbmRzGAEgASgDEhIKCm1heF90b2tlbnMYAiABKAMikwMKCFRlbXBsYXRlEgoKAmlkGAEgASgJEgwKBHNsdWcYAiABKAkSFAoMY29udGVudF9oYXNoGAMgASgJEg8KB3ZlcnNpb24YBCABKAkSFAoMZGlzcGxheV9uYW1lGAUgASgJEhMKC2Rlc2NyaXB0aW9uGAYgASgJEjkKD2FsbG93ZWRfZmxhdm9ycxgHIAMoDjIgLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5GbGF2b3ISOAoOZGVmYXVsdF9mbGF2b3IYCCABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuRmxhdm9yEg0KBW1vZGVsGAkgASgJEhQKDGluc3RydWN0aW9ucxgKIAEoCRIvCgZncmFudHMYCyADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSNwoKcnVuX2xpbWl0cxgMIAEoCzIjLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5SdW5MaW1pdHMSFwoPc3BlbmRfbGltaXRfdXNkGA0gASgJIhYKFExpc3RUZW1wbGF0ZXNSZXF1ZXN0Ik4KFUxpc3RUZW1wbGF0ZXNSZXNwb25zZRI1Cgl0ZW1wbGF0ZXMYASADKAsyIi5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuVGVtcGxhdGUqXwoGRmxhdm9yEhYKEkZMQVZPUl9VTlNQRUNJRklFRBAAEhMKD0ZMQVZPUl9PUEVOQ09ERRABEhUKDUZMQVZPUl9IRVJNRVMQAhoCCAESEQoJRkxBVk9SX1BJEAMaAggBKl8KBlByZXNldBIWChJQUkVTRVRfVU5TUEVDSUZJRUQQABIUChBQUkVTRVRfUkVBRF9PTkxZEAESEwoPUFJFU0VUX1NUQU5EQVJEEAISEgoOUFJFU0VUX1RSVVNURUQQAzKIAQoPVGVtcGxhdGVTZXJ2aWNlEnUKDUxpc3RUZW1wbGF0ZXMSLi5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTGlzdFRlbXBsYXRlc1JlcXVlc3QaLy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTGlzdFRlbXBsYXRlc1Jlc3BvbnNlIgOQAgFCV1pVZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vdGVtcGxhdGUvdjFhbHBoYTE7dGVtcGxhdGV2MWFscGhhMWIGcHJvdG8z");
+  fileDesc("Cidrb2lub24vdGVtcGxhdGUvdjFhbHBoYTEvdGVtcGxhdGUucHJvdG8SGGtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMSLEAQoFR3JhbnQSEQoJY29ubmVjdG9yGAEgASgJEg4KBnNjb3BlcxgCIAMoCRIwCgZwcmVzZXQYAyABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuUHJlc2V0EhMKC3RhcmdldHNfbWluGAQgASgFEhMKC3RhcmdldHNfbWF4GAUgASgFEg8KB3B1cnBvc2UYBiABKAkSFQoNY29ubmVjdGlvbl9pZBgHIAEoCRIUCgxyZXBvc2l0b3JpZXMYCCADKAkiPQoJUnVuTGltaXRzEhwKFG1heF9kdXJhdGlvbl9zZWNvbmRzGAEgASgDEhIKCm1heF90b2tlbnMYAiABKAMifwoHVHJpZ2dlchIKCgJpZBgBIAEoCRIzCgR0eXBlGAIgASgOMiUua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlRyaWdnZXJUeXBlEgwKBGNyb24YAyABKAkSEAoIdGltZXpvbmUYBCABKAkSEwoLaW5zdHJ1Y3Rpb24YBSABKAkiyAMKCFRlbXBsYXRlEgoKAmlkGAEgASgJEgwKBHNsdWcYAiABKAkSFAoMY29udGVudF9oYXNoGAMgASgJEg8KB3ZlcnNpb24YBCABKAkSFAoMZGlzcGxheV9uYW1lGAUgASgJEhMKC2Rlc2NyaXB0aW9uGAYgASgJEjkKD2FsbG93ZWRfZmxhdm9ycxgHIAMoDjIgLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5GbGF2b3ISOAoOZGVmYXVsdF9mbGF2b3IYCCABKA4yIC5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuRmxhdm9yEg0KBW1vZGVsGAkgASgJEhQKDGluc3RydWN0aW9ucxgKIAEoCRIvCgZncmFudHMYCyADKAsyHy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuR3JhbnQSNwoKcnVuX2xpbWl0cxgMIAEoCzIjLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5SdW5MaW1pdHMSFwoPc3BlbmRfbGltaXRfdXNkGA0gASgJEjMKCHRyaWdnZXJzGA4gAygLMiEua29pbm9uLnRlbXBsYXRlLnYxYWxwaGExLlRyaWdnZXIiFgoUTGlzdFRlbXBsYXRlc1JlcXVlc3QiTgoVTGlzdFRlbXBsYXRlc1Jlc3BvbnNlEjUKCXRlbXBsYXRlcxgBIAMoCzIiLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5UZW1wbGF0ZSpfCgZGbGF2b3ISFgoSRkxBVk9SX1VOU1BFQ0lGSUVEEAASEwoPRkxBVk9SX09QRU5DT0RFEAESFQoNRkxBVk9SX0hFUk1FUxACGgIIARIRCglGTEFWT1JfUEkQAxoCCAEqXwoGUHJlc2V0EhYKElBSRVNFVF9VTlNQRUNJRklFRBAAEhQKEFBSRVNFVF9SRUFEX09OTFkQARITCg9QUkVTRVRfU1RBTkRBUkQQAhISCg5QUkVTRVRfVFJVU1RFRBADKqkBCgtUcmlnZ2VyVHlwZRIcChhUUklHR0VSX1RZUEVfVU5TUEVDSUZJRUQQABIZChVUUklHR0VSX1RZUEVfU0NIRURVTEUQARIfChtUUklHR0VSX1RZUEVfRElSRUNUX01FU1NBR0UQAhIgChxUUklHR0VSX1RZUEVfQ09ERV9IT1NUX0VWRU5UEAMSHgoaVFJJR0dFUl9UWVBFX0NIQU5ORUxfRVZFTlQQBDKIAQoPVGVtcGxhdGVTZXJ2aWNlEnUKDUxpc3RUZW1wbGF0ZXMSLi5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTGlzdFRlbXBsYXRlc1JlcXVlc3QaLy5rb2lub24udGVtcGxhdGUudjFhbHBoYTEuTGlzdFRlbXBsYXRlc1Jlc3BvbnNlIgOQAgFCV1pVZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vdGVtcGxhdGUvdjFhbHBoYTE7dGVtcGxhdGV2MWFscGhhMWIGcHJvdG8z");
 
 /**
  * Grant is a grant on a connector type. On a template or a draft agent it is a
@@ -106,6 +106,54 @@ export const RunLimitsSchema: GenMessage<RunLimits> = /*@__PURE__*/
   messageDesc(file_koinon_template_v1alpha1_template, 1);
 
 /**
+ * Trigger is one way work starts on an agent, with the instruction it gets when the trigger fires.
+ * It belongs to a version and takes effect when that version is activated.
+ *
+ * @generated from message koinon.template.v1alpha1.Trigger
+ */
+export type Trigger = Message<"koinon.template.v1alpha1.Trigger"> & {
+  /**
+   * Names the trigger within the agent, a lowercase slug; stable across versions.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: koinon.template.v1alpha1.TriggerType type = 2;
+   */
+  type: TriggerType;
+
+  /**
+   * Schedule only: a five-field cron expression (minute hour day-of-month month day-of-week).
+   *
+   * @generated from field: string cron = 3;
+   */
+  cron: string;
+
+  /**
+   * Schedule only: an IANA zone name, for example "Europe/Tallinn".
+   *
+   * @generated from field: string timezone = 4;
+   */
+  timezone: string;
+
+  /**
+   * Text given to the agent when the trigger fires.
+   *
+   * @generated from field: string instruction = 5;
+   */
+  instruction: string;
+};
+
+/**
+ * Describes the message koinon.template.v1alpha1.Trigger.
+ * Use `create(TriggerSchema)` to create a new message.
+ */
+export const TriggerSchema: GenMessage<Trigger> = /*@__PURE__*/
+  messageDesc(file_koinon_template_v1alpha1_template, 2);
+
+/**
  * Template is one version of an agent template.
  *
  * @generated from message koinon.template.v1alpha1.Template
@@ -187,6 +235,11 @@ export type Template = Message<"koinon.template.v1alpha1.Template"> & {
    * @generated from field: string spend_limit_usd = 13;
    */
   spendLimitUsd: string;
+
+  /**
+   * @generated from field: repeated koinon.template.v1alpha1.Trigger triggers = 14;
+   */
+  triggers: Trigger[];
 };
 
 /**
@@ -194,7 +247,7 @@ export type Template = Message<"koinon.template.v1alpha1.Template"> & {
  * Use `create(TemplateSchema)` to create a new message.
  */
 export const TemplateSchema: GenMessage<Template> = /*@__PURE__*/
-  messageDesc(file_koinon_template_v1alpha1_template, 2);
+  messageDesc(file_koinon_template_v1alpha1_template, 3);
 
 /**
  * ListTemplatesRequest is empty.
@@ -209,7 +262,7 @@ export type ListTemplatesRequest = Message<"koinon.template.v1alpha1.ListTemplat
  * Use `create(ListTemplatesRequestSchema)` to create a new message.
  */
 export const ListTemplatesRequestSchema: GenMessage<ListTemplatesRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_template_v1alpha1_template, 3);
+  messageDesc(file_koinon_template_v1alpha1_template, 4);
 
 /**
  * ListTemplatesResponse lists the templates, sorted by slug.
@@ -228,7 +281,7 @@ export type ListTemplatesResponse = Message<"koinon.template.v1alpha1.ListTempla
  * Use `create(ListTemplatesResponseSchema)` to create a new message.
  */
 export const ListTemplatesResponseSchema: GenMessage<ListTemplatesResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_template_v1alpha1_template, 4);
+  messageDesc(file_koinon_template_v1alpha1_template, 5);
 
 /**
  * Flavor is the harness an agent runs on (ADR 0035).
@@ -300,6 +353,48 @@ export enum Preset {
  */
 export const PresetSchema: GenEnum<Preset> = /*@__PURE__*/
   enumDesc(file_koinon_template_v1alpha1_template, 1);
+
+/**
+ * TriggerType says what starts work on an agent (ADR 0066).
+ *
+ * @generated from enum koinon.template.v1alpha1.TriggerType
+ */
+export enum TriggerType {
+  /**
+   * @generated from enum value: TRIGGER_TYPE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: TRIGGER_TYPE_SCHEDULE = 1;
+   */
+  SCHEDULE = 1,
+
+  /**
+   * @generated from enum value: TRIGGER_TYPE_DIRECT_MESSAGE = 2;
+   */
+  DIRECT_MESSAGE = 2,
+
+  /**
+   * Reserved for v0.2; rejected until then.
+   *
+   * @generated from enum value: TRIGGER_TYPE_CODE_HOST_EVENT = 3;
+   */
+  CODE_HOST_EVENT = 3,
+
+  /**
+   * Reserved for v0.2; rejected until then.
+   *
+   * @generated from enum value: TRIGGER_TYPE_CHANNEL_EVENT = 4;
+   */
+  CHANNEL_EVENT = 4,
+}
+
+/**
+ * Describes the enum koinon.template.v1alpha1.TriggerType.
+ */
+export const TriggerTypeSchema: GenEnum<TriggerType> = /*@__PURE__*/
+  enumDesc(file_koinon_template_v1alpha1_template, 2);
 
 /**
  * TemplateService lists the agent templates shipped with Koinon (ADR 0020).

@@ -41,11 +41,12 @@ WHERE org_id = @org_id AND agent_id = @agent_id
 ORDER BY version;
 
 -- name: ActivateAgent :one
--- draft -> active with the given version (ADR 0020). No row: not a draft.
+-- draft -> active with the given version (ADR 0020), or an active agent moving to a newer version
+-- (a trigger-only proposal, ADR 0066). No row: archived.
 UPDATE agents
 SET status = 'active', active_version_id = @version_id,
     activated_by = sqlc.narg(activated_by), activated_at = now()
-WHERE org_id = @org_id AND id = @id AND status = 'draft'
+WHERE org_id = @org_id AND id = @id AND status IN ('draft', 'active')
 RETURNING *;
 
 -- name: ReturnAgentToDraft :one
@@ -61,3 +62,21 @@ UPDATE agents
 SET status = 'archived', archived_at = now()
 WHERE org_id = @org_id AND id = @id AND status <> 'archived'
 RETURNING *;
+
+-- name: ListActiveAgentVersions :many
+-- The active version of each active agent, for the triggers they define (ADR 0066). A draft
+-- agent, an archived one and a proposed version are not included.
+SELECT a.org_id, a.id AS agent_id, v.version, v.config
+FROM agents a
+JOIN agent_versions v ON v.org_id = a.org_id AND v.id = a.active_version_id
+WHERE a.org_id = @org_id AND a.status = 'active'
+ORDER BY a.created_at, a.id;
+
+-- name: ListActiveAgentVersionsAllOrgs :many
+-- ListActiveAgentVersions across every live org, for the scheduler (ADR 0066).
+SELECT a.org_id, a.id AS agent_id, v.version, v.config
+FROM agents a
+JOIN agent_versions v ON v.org_id = a.org_id AND v.id = a.active_version_id
+JOIN orgs o ON o.id = a.org_id AND o.deleted_at IS NULL
+WHERE a.status = 'active'
+ORDER BY a.org_id, a.created_at, a.id;
