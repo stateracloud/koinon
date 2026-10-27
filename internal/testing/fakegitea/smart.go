@@ -39,7 +39,7 @@ func (f *Fake) smartHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	login, ok := f.authenticate(r)
+	token, login, ok := f.identify(r)
 	if !ok {
 		w.Header().Set("WWW-Authenticate", `Basic realm="Gitea"`)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -48,10 +48,19 @@ func (f *Fake) smartHTTP(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSuffix(parts[1], ".git")
 	f.mu.Lock()
 	_, err := f.lookup(parts[0], name)
+	perm := f.permission(login, name)
+	scope := f.scopes[token]
 	f.mu.Unlock()
-	if err != nil {
+	if err != nil || perm == "" {
 		http.NotFound(w, r)
 		return
+	}
+	// A push is the receive-pack service, announced by info/refs and then posted.
+	if strings.HasSuffix(parts[2], "git-receive-pack") || r.URL.Query().Get("service") == "git-receive-pack" {
+		if scope == "read" || !canWrite(perm) {
+			http.Error(w, "token does not have write access to this repository", http.StatusForbidden)
+			return
+		}
 	}
 	be := httpBackend()
 	if be == "" {

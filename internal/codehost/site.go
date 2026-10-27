@@ -125,5 +125,12 @@ func CapabilitiesOf(t *connectors.Type) (Capabilities, error) {
 		}
 		out.TokenLifetime = d
 	}
+	if w := t.Spec.Auth.TokenWarnAfter; w != "" {
+		d, err := time.ParseDuration(w)
+		if err != nil {
+			return Capabilities{}, fmt.Errorf("codehost: %s token warning age: %w", t.Metadata.ID, err)
+		}
+		out.TokenWarnAfter = d
+	}
 	return out, nil
 }

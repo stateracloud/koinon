@@ -15,6 +15,8 @@ import (
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/gitea"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/project"
@@ -60,9 +62,11 @@ const (
 	KeyAppID          = "appId"
 	KeyInstallationID = "installationId"
 	KeyPrivateKey     = "privateKey"
-	KeyBaseURL        = "baseUrl"  // optional: a GitHub Enterprise Server host
-	KeyCABundle       = "caBundle" // optional: the public CA bundle of that host
-	KeyCIDirs         = "ciDirs"   // optional: directories that run CI on the host, one per line or comma-separated
+	KeyBaseURL        = "baseUrl"    // GitHub: optional, a GitHub Enterprise Server host. Gitea: required, https://host[:port][/path]
+	KeyCABundle       = "caBundle"   // optional: the public CA bundle of that host
+	KeyReadToken      = "readToken"  // Gitea: the bot's read token
+	KeyWriteToken     = "writeToken" // Gitea: the bot's write token
+	KeyCIDirs         = "ciDirs"     // optional: directories that run CI on the host, one per line or comma-separated
 )
 
 // maxValue bounds one Secret value; a Kubernetes Secret is at most 1 MiB in all.
@@ -181,6 +185,16 @@ type DeclaredConnection struct {
 	PrivateKeyPEM  []byte
 	Fingerprint    string
 	Site           codehost.Site // the connection's own host; the zero value is github.com
+	// Gitea (ADR 0063): the bot's two tokens.
+	ReadToken, WriteToken []byte
+}
+
+// SecretFields are the connection's secret fields, by setup-guide field ID, for the secret store.
+func (d DeclaredConnection) SecretFields() map[string][]byte {
+	if d.Connector == gitea.HostID {
+		return map[string][]byte{gitea.ReadTokenField: d.ReadToken, gitea.WriteTokenField: d.WriteToken}
+	}
+	return map[string][]byte{connections.GitHubPrivateKeyField: d.PrivateKeyPEM}
 }
 
 // ParseConnection reads a connection Secret.
@@ -191,8 +205,14 @@ func ParseConnection(sec *corev1.Secret, version string) (DeclaredConnection, er
 	if d.DisplayName == "" || len(d.DisplayName) > 200 {
 		errs = append(errs, fmt.Errorf("%s is required and at most 200 characters", KeyName))
 	}
-	if d.Connector != "github" {
-		errs = append(errs, fmt.Errorf("%s must be github (the only connector with a declarative form)", KeyConnector))
+	switch d.Connector {
+	case github.HostID, gitea.HostID:
+	default:
+		errs = append(errs, fmt.Errorf("%s must be github or gitea (the connectors with a declarative form)", KeyConnector))
+	}
+	if d.Connector == gitea.HostID {
+		errs = append(errs, parseGitea(&d, get)...)
+		return d, errors.Join(errs...)
 	}
 	for k, dst := range map[string]*int64{KeyAppID: &d.AppID, KeyInstallationID: &d.InstallationID} {
 		n, err := strconv.ParseInt(get(k), 10, 64)
@@ -201,6 +221,20 @@ func ParseConnection(sec *corev1.Secret, version string) (DeclaredConnection, er
 		}
 		*dst = n
 	}
+	errs = append(errs, parseSite(&d, get)...)
+	d.PrivateKeyPEM = sec.Data[KeyPrivateKey]
+	key, err := github.ParsePrivateKey(d.PrivateKeyPEM)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("%s: %s", KeyPrivateKey, strings.TrimPrefix(err.Error(), "github: ")))
+	} else {
+		d.Fingerprint = key.Fingerprint()
+	}
+	return d, errors.Join(errs...)
+}
+
+// parseSite reads the host keys common to code-host connections: baseUrl, caBundle and ciDirs.
+func parseSite(d *DeclaredConnection, get func(string) string) []error {
+	var errs []error
 	if t, ok := connectors.Get(d.Connector); ok {
 		loc, err := t.Locate(get(KeyBaseURL))
 		switch {
@@ -224,12 +258,17 @@ func ParseConnection(sec *corev1.Secret, version string) (DeclaredConnection, er
 		}
 		d.Site.CIDirs = dirs
 	}
-	d.PrivateKeyPEM = sec.Data[KeyPrivateKey]
-	key, err := github.ParsePrivateKey(d.PrivateKeyPEM)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("%s: %s", KeyPrivateKey, strings.TrimPrefix(err.Error(), "github: ")))
+	return errs
+}
+
+// parseGitea reads the keys of a Gitea connection Secret. Errors never quote a token.
+func parseGitea(d *DeclaredConnection, get func(string) string) []error {
+	errs := parseSite(d, get)
+	d.ReadToken, d.WriteToken = []byte(get(KeyReadToken)), []byte(get(KeyWriteToken))
+	if err := (&gitea.Host{}).ValidateSecrets(map[string][]byte{gitea.ReadTokenField: d.ReadToken, gitea.WriteTokenField: d.WriteToken}); err != nil {
+		errs = append(errs, fmt.Errorf("%s, %s: %s", KeyReadToken, KeyWriteToken, strings.TrimPrefix(err.Error(), "gitea: ")))
 	} else {
-		d.Fingerprint = key.Fingerprint()
+		d.Fingerprint = gitea.Fingerprint(d.ReadToken) + "." + gitea.Fingerprint(d.WriteToken)
 	}
-	return d, errors.Join(errs...)
+	return errs
 }

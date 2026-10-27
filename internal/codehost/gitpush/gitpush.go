@@ -104,6 +104,32 @@ func Wrap(p codehost.Provider, inner codehost.Access, o Options) codehost.Access
 	return New(inner, o)
 }
 
+// Open opens p's Access for scope on conn and, for a provider that writes by git push, wraps it
+// with the push writer built from the connection's base URL and CA bundle. It is the one call
+// koinon-api's executors use, so a provider's write path follows its connector data.
+func Open(ctx context.Context, p codehost.Provider, conn codehost.Connection, scope codehost.Scope) (codehost.Access, error) {
+	acc, err := p.Open(ctx, conn, scope)
+	if err != nil {
+		return nil, err
+	}
+	if p.Capabilities().Writes != codehost.WritesPush {
+		return acc, nil
+	}
+	t, ok := connectors.Get(p.ID())
+	if !ok {
+		return nil, fmt.Errorf("gitpush: the %s connector type is not embedded", p.ID())
+	}
+	site, err := codehost.SiteOf(conn.Config)
+	if err != nil {
+		return nil, err
+	}
+	o, err := ForSite(t, site)
+	if err != nil {
+		return nil, fmt.Errorf("gitpush: connection %s: %w", conn.ID, err)
+	}
+	return Wrap(p, acc, o), nil
+}
+
 // New returns an Access that reads through inner and writes by git push.
 func New(inner codehost.Access, o Options) codehost.Access {
 	if o.Username == "" {
