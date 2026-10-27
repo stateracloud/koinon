@@ -72,6 +72,7 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 			out.ProposedTriggers = triggersProto(cfg.Triggers)
 			out.Instructions = cfg.Instructions
 			out.Model = cfg.Model
+			out.Ephemeral = agentconfig.IsEphemeral(cfg)
 			wall, tokens := cfg.RunCaps()
 			out.RunLimits = &templatev1alpha1.RunLimits{MaxDurationSeconds: int64(wall.Seconds()), MaxTokens: tokens}
 		}
@@ -123,6 +124,9 @@ func (s *Server) CreateAgentFromTemplate(ctx context.Context, req *agentv1alpha1
 	}
 	cfg := agentconfig.FromTemplate(t, row.ContentHash)
 	cfg.Bindings = bindings
+	if req.Ephemeral != nil {
+		cfg.Ephemeral = req.GetEphemeral()
+	}
 	config, err := cfg.Marshal()
 	if err != nil {
 		return nil, s.dbError(err, "agent config")

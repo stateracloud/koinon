@@ -39,6 +39,35 @@ var _ = Describe("Harness settings", func() {
 	})
 })
 
+var _ = Describe("IsEphemeral", func() {
+	It("is off by default, including for a config stored before it existed", func() {
+		cfg, err := agentconfig.Parse([]byte(`{"instructions":"x"}`))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(agentconfig.IsEphemeral(cfg)).To(BeFalse())
+		raw, err := agentconfig.FromTemplate(&templates.Template{}, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).NotTo(ContainSubstring("ephemeral"))
+	})
+
+	It("follows the template and survives storage", func() {
+		t := &templates.Template{Spec: templates.Spec{Ephemeral: true}}
+		raw, err := agentconfig.FromTemplate(t, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(ContainSubstring(`"ephemeral":true`))
+		cfg, err := agentconfig.Parse(raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(agentconfig.IsEphemeral(cfg)).To(BeTrue())
+	})
+
+	It("is on for no shipped template", func() {
+		ts, err := templates.All()
+		Expect(err).NotTo(HaveOccurred())
+		for _, t := range ts {
+			Expect(agentconfig.IsEphemeral(agentconfig.FromTemplate(t, t.Hash))).To(BeFalse(), t.Metadata.ID)
+		}
+	})
+})
+
 var _ = Describe("Parse", func() {
 	It("reads back what FromTemplate writes, with the model as a plain string", func() {
 		t := &templates.Template{Spec: templates.Spec{Instructions: "help", Model: templates.Model{Name: "fake/model-1"}}}

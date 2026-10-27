@@ -15,7 +15,7 @@ import { grantNeedsTargets, validateRepositories } from '@/lib/agents'
 import { flavorLabel, presetLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 
-export type NewAgent = { templateId: string; displayName: string; flavor: Flavor; grants: Pick<GrantBinding, 'connector' | 'connectionId' | 'repositories'>[] }
+export type NewAgent = { templateId: string; displayName: string; flavor: Flavor; grants: Pick<GrantBinding, 'connector' | 'connectionId' | 'repositories'>[]; ephemeral?: boolean }
 
 export type AgentWizardProps = {
   templates: readonly Template[]
@@ -62,8 +62,11 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
   const [name, setName] = useState('')
   const [bindings, setBindings] = useState<Record<number, Binding>>({})
   const [showErrors, setShowErrors] = useState(false)
+  // Unset follows the template; the toggle overrides it for this agent.
+  const [ephemeralChoice, setEphemeralChoice] = useState<boolean | undefined>(undefined)
 
   const chosenFlavor = template && template.allowedFlavors.includes(flavor) ? flavor : (template?.defaultFlavor ?? Flavor.UNSPECIFIED)
+  const ephemeral = ephemeralChoice ?? template?.ephemeral ?? false
   const targetGrants = (template?.grants ?? []).map((g, i) => ({ g, i })).filter(({ g }) => grantNeedsTargets(g))
 
   function binding(i: number, g: Grant): Binding {
@@ -115,6 +118,7 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
       templateId: template.id,
       displayName: name.trim(),
       flavor: chosenFlavor,
+      ephemeral: ephemeral === (template.ephemeral ?? false) ? undefined : ephemeral,
       grants: targetGrants.map(({ g, i }) => {
         const b = binding(i, g)
         return { connector: g.connector, connectionId: b.connectionId, repositories: b.repositories.map((r) => r.trim()).filter(Boolean) }
@@ -187,6 +191,15 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
             <Label htmlFor="agent-name">Name</Label>
             <Input id="agent-name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={showErrors && !name.trim()} />
           </div>
+          <div className="flex items-start gap-2">
+            <input id="agent-ephemeral" type="checkbox" className="mt-1" checked={ephemeral} onChange={(e) => setEphemeralChoice(e.target.checked)} />
+            <div>
+              <Label htmlFor="agent-ephemeral">Ephemeral: fresh sandbox per task, no home</Label>
+              <p className="text-muted-foreground text-xs">
+                Each task runs in a new sandbox that is deleted when the task ends. Nothing carries over except the task’s notes and the memory stores.
+              </p>
+            </div>
+          </div>
           <section aria-label="Draft summary" className="bg-card grid gap-2 rounded-lg border p-4 text-sm">
             <h2 className="font-semibold">The draft will propose</h2>
             <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
@@ -198,6 +211,8 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
               <dd>{flavorLabel(chosenFlavor)}</dd>
               <dt className="text-muted-foreground">Model</dt>
               <dd>{template.model || 'default'}</dd>
+              <dt className="text-muted-foreground">Sandbox</dt>
+              <dd>{ephemeral ? 'Ephemeral: fresh sandbox per task, no home' : 'Persistent home'}</dd>
               {template.runLimits && (
                 <>
                   <dt className="text-muted-foreground">Run limits</dt>
