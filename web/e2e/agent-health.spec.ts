@@ -71,7 +71,7 @@ function api(role = 'ORG_ROLE_OWNER') {
   })
   const ev = (seq: number, kind: string, payload: Json, actorKind = 'ACTOR_KIND_SYSTEM') => ({ seq: String(seq), kind, actorKind, payload, createdAt: at(-60_000 + seq * 100), runId: 'r-1' })
   const events = [
-    ev(1, 'ticket.created', { title: 'Fix the README typo' }),
+    ev(1, 'task.created', { title: 'Fix the README typo' }),
     ev(2, 'sandbox.recreated', { message: 'Sandbox recreated: its process could not be stopped' }),
     ev(3, 'sandbox.work_lost', { message: 'Unsaved work in the old sandbox could not be saved' }),
     ev(4, 'approval.requested', { system: true, approval_id: 'ap-1', tool: 'push_saved_work', target: 'github:acme/widgets', args_sha256: sha }),
@@ -107,12 +107,12 @@ function api(role = 'ORG_ROLE_OWNER') {
         ],
       }),
       'koinon.budget.v1alpha1.BudgetService/ListAgentBudgets': () => ({ budgets: [{ agentId: 'a-1', agentName: 'Repo helper', dailyLimitUsd: '5.00', templateDefaultUsd: '5.00', spentTodayUsd: '0.00' }] }),
-      'koinon.ticket.v1alpha1.TicketService/GetTicket': () => ({
-        ticket: {
+      'koinon.task.v1alpha1.TaskService/GetTask': () => ({
+        task: {
           id: 't-1',
           orgId: org,
           title: 'Fix the README typo',
-          status: 'TICKET_STATUS_WAITING_ON_YOU',
+          state: 'TASK_STATE_INPUT_REQUIRED',
           agentId: 'a-1',
           agentSummary: 'Fixed the typo in README.md.\n\n<b>Next</b>: add a test.\n- push the branch',
           agentSummaryAt: at(-120_000),
@@ -120,7 +120,7 @@ function api(role = 'ORG_ROLE_OWNER') {
         events,
         runs: [{ id: 'r-1', orgId: org, ticketId: 't-1', agentId: 'a-1', state: 'RUN_STATE_PARKED' }],
       }),
-      'koinon.ticket.v1alpha1.TicketService/ListTickets': () => ({ tickets: [] }),
+      'koinon.task.v1alpha1.TaskService/ListTasks': () => ({ tasks: [] }),
       'koinon.approval.v1alpha1.ApprovalService/GetApproval': () => ({ approval: savedApproval() }),
       'koinon.approval.v1alpha1.ApprovalService/GetApprovalDiff': () => {
         seen.diffs++
@@ -150,10 +150,10 @@ for (const vp of viewports) {
       await page.setViewportSize({ width: vp.width, height: vp.height })
     })
 
-    test('ticket page: agent notes, system notes and the saved-work approval card', async ({ page }) => {
+    test('task page: agent notes, system notes and the saved-work approval card', async ({ page }) => {
       const { handlers, seen } = api()
       await mockApi(page, handlers)
-      await page.goto('/tickets/t-1')
+      await page.goto('/tasks/t-1')
       await expect(page.getByRole('heading', { name: 'Fix the README typo', level: 1 })).toBeVisible()
 
       // The unhealthy notice banner is on every page for admins; the unknown kind does not crash it.
@@ -233,13 +233,13 @@ for (const vp of viewports) {
       setUnhealthy(false)
       await mockApi(page, handlers)
       await page.goto('/agents/a-1')
-      const box = page.getByLabel('Apply to open tickets now (starts fresh sessions with a handoff)')
+      const box = page.getByLabel('Apply to open tasks now (starts fresh sessions with a handoff)')
       await expect(box).not.toBeChecked()
       await expectNoHorizontalScroll(page)
       await expectAccessible(page)
       await box.check()
       await page.getByRole('button', { name: 'Activate' }).click()
-      await expect(page.getByRole('status').filter({ hasText: 'Activated.' })).toContainText('2 open tickets will start a fresh session at their next run.')
+      await expect(page.getByRole('status').filter({ hasText: 'Activated.' })).toContainText('2 open tasks will start a fresh session at their next run.')
       expect(seen.activate).toEqual([expect.objectContaining({ agentId: 'a-1', version: 2, applyToOpenTickets: true })])
       await expectNoHorizontalScroll(page)
       await expectAccessible(page)

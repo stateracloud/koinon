@@ -7,7 +7,7 @@ import { ApprovalCard } from '@/components/approval-card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
-import { TicketService } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
+import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { isApprover } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
 
@@ -29,11 +29,11 @@ export function ApprovalView({ approvalId, showPermalink }: { approvalId: string
   const diff = useQuery(ApprovalService.method.getApprovalDiff, { orgId, approvalId }, { enabled: isPullRequest, retry: false })
 
   const refresh = async () => {
-    // The decision writes ticket events (approved, executed) and leaves
-    // Waiting on you, so the ticket, the lists and this card re-read.
+    // The decision writes task events (approved, executed) and leaves
+    // Waiting on you, so the task, the lists and this card re-read.
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ApprovalService, cardinality: undefined }) }),
-      queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: TicketService, cardinality: undefined }) }),
+      queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: TaskService, cardinality: undefined }) }),
     ])
   }
   const approve = useMutation(ApprovalService.method.approve, { onSettled: refresh })

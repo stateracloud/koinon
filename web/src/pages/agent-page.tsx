@@ -120,7 +120,7 @@ export function AgentPage() {
         <section aria-label="Activation" className="grid gap-2">
           {isApprover(org.role) ? (
             <>
-              <p className="text-sm">Activating approves these grants for version {a.latestVersion}. The agent can then take tickets.</p>
+              <p className="text-sm">Activating approves these grants for version {a.latestVersion}. The agent can then take tasks.</p>
               <div className="flex items-start gap-2">
                 <input
                   id="apply-to-open-tickets"
@@ -131,9 +131,9 @@ export function AgentPage() {
                   onChange={(e) => setApplyToOpenTickets(e.target.checked)}
                 />
                 <div className="grid gap-0.5">
-                  <Label htmlFor="apply-to-open-tickets">Apply to open tickets now (starts fresh sessions with a handoff)</Label>
+                  <Label htmlFor="apply-to-open-tickets">Apply to open tasks now (starts fresh sessions with a handoff)</Label>
                   <p id="apply-to-open-tickets-help" className="text-muted-foreground text-sm">
-                    The next run on each open ticket starts a new session with the agent&apos;s last notes and replies, so the new instructions apply. Tickets keep their messages.
+                    The next run on each open task starts a new session with the agent&apos;s last notes and replies, so the new instructions apply. Tasks keep their messages.
                   </p>
                 </div>
               </div>
@@ -159,11 +159,11 @@ export function AgentPage() {
           {activate.data.ticketsRestarting > 0 && (
             <>
               {' '}
-              {activate.data.ticketsRestarting} open {activate.data.ticketsRestarting === 1 ? 'ticket' : 'tickets'} will start a fresh session at their next run.
+              {activate.data.ticketsRestarting} open {activate.data.ticketsRestarting === 1 ? 'task' : 'tasks'} will start a fresh session at their next run.
             </>
           )}{' '}
           <Link to="/" className="underline">
-            Create a ticket for it on the board
+            Hand it a task from the inbox
           </Link>
         </p>
       )}
