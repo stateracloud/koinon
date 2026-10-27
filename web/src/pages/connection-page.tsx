@@ -83,6 +83,8 @@ export function ConnectionPage() {
           <dd>
             Stored encrypted{gh.keyFingerprint && <> · fingerprint <code className="text-xs">{gh.keyFingerprint}</code></>}
           </dd>
+          <dt className="text-muted-foreground">CI directories</dt>
+          <dd>{gh.ciDirs.length ? gh.ciDirs.join(', ') : "none besides the connector's"}</dd>
           {c.lastTestedAt && (
             <>
               <dt className="text-muted-foreground">Last tested</dt>

@@ -21,7 +21,8 @@ Set these repository permissions and leave everything else at "No access":
 | Metadata | Read-only (GitHub sets it) |
 | Pull requests | Read and write |
 
-Do not grant Workflows. Koinon refuses changes under `.github/workflows/`, and the connection test
+Do not grant Workflows. Koinon refuses changes under `.github/workflows/` and under any extra CI directories set on the
+connection, and the connection test
 fails if the App can change workflows. Choose "Only on this account" for where the App can be
 installed.
 
