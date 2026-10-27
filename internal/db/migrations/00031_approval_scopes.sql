@@ -24,6 +24,9 @@ CREATE TABLE approval_scopes (
     created_by         uuid                NOT NULL REFERENCES users (id),
     -- The approval that granted it.
     source_approval_id uuid                NOT NULL,
+    -- For an MCP scope: the server, URL and tool version the approver saw (the source approval's
+    -- call_binding). A call matches only while the tool is still that version (ADR 0057). NULL otherwise.
+    call_binding       jsonb,
     revoked_at         timestamptz,
     revoked_by         uuid                REFERENCES users (id),
     created_at         timestamptz         NOT NULL DEFAULT now(),

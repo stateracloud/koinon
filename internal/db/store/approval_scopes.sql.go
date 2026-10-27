@@ -14,10 +14,10 @@ import (
 const createApprovalScope = `-- name: CreateApprovalScope :one
 
 INSERT INTO approval_scopes (org_id, agent_id, connector, tool, target, kind, task_id, expires_at,
-                             created_by, source_approval_id)
+                             created_by, source_approval_id, call_binding)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10)
-RETURNING org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, revoked_at, revoked_by, created_at
+        $9, $10, $11)
+RETURNING org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, call_binding, revoked_at, revoked_by, created_at
 `
 
 type CreateApprovalScopeParams struct {
@@ -31,6 +31,7 @@ type CreateApprovalScopeParams struct {
 	ExpiresAt        pgtype.Timestamptz
 	CreatedBy        pgtype.UUID
 	SourceApprovalID pgtype.UUID
+	CallBinding      []byte
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -51,6 +52,7 @@ func (q *Queries) CreateApprovalScope(ctx context.Context, arg CreateApprovalSco
 		arg.ExpiresAt,
 		arg.CreatedBy,
 		arg.SourceApprovalID,
+		arg.CallBinding,
 	)
 	var i ApprovalScope
 	err := row.Scan(
@@ -65,6 +67,7 @@ func (q *Queries) CreateApprovalScope(ctx context.Context, arg CreateApprovalSco
 		&i.ExpiresAt,
 		&i.CreatedBy,
 		&i.SourceApprovalID,
+		&i.CallBinding,
 		&i.RevokedAt,
 		&i.RevokedBy,
 		&i.CreatedAt,
@@ -73,7 +76,7 @@ func (q *Queries) CreateApprovalScope(ctx context.Context, arg CreateApprovalSco
 }
 
 const findActiveApprovalScope = `-- name: FindActiveApprovalScope :one
-SELECT org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, revoked_at, revoked_by, created_at FROM approval_scopes
+SELECT org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, call_binding, revoked_at, revoked_by, created_at FROM approval_scopes
 WHERE org_id = $1 AND agent_id = $2 AND connector = $3 AND tool = $4
   AND target = $5 AND revoked_at IS NULL AND expires_at > $6::timestamptz
   AND (kind = 'agent' OR task_id = $7)
@@ -116,6 +119,7 @@ func (q *Queries) FindActiveApprovalScope(ctx context.Context, arg FindActiveApp
 		&i.ExpiresAt,
 		&i.CreatedBy,
 		&i.SourceApprovalID,
+		&i.CallBinding,
 		&i.RevokedAt,
 		&i.RevokedBy,
 		&i.CreatedAt,
@@ -124,7 +128,7 @@ func (q *Queries) FindActiveApprovalScope(ctx context.Context, arg FindActiveApp
 }
 
 const getApprovalScope = `-- name: GetApprovalScope :one
-SELECT org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, revoked_at, revoked_by, created_at FROM approval_scopes WHERE org_id = $1 AND id = $2
+SELECT org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, call_binding, revoked_at, revoked_by, created_at FROM approval_scopes WHERE org_id = $1 AND id = $2
 `
 
 type GetApprovalScopeParams struct {
@@ -147,6 +151,7 @@ func (q *Queries) GetApprovalScope(ctx context.Context, arg GetApprovalScopePara
 		&i.ExpiresAt,
 		&i.CreatedBy,
 		&i.SourceApprovalID,
+		&i.CallBinding,
 		&i.RevokedAt,
 		&i.RevokedBy,
 		&i.CreatedAt,
@@ -155,7 +160,7 @@ func (q *Queries) GetApprovalScope(ctx context.Context, arg GetApprovalScopePara
 }
 
 const listActiveApprovalScopesForAgent = `-- name: ListActiveApprovalScopesForAgent :many
-SELECT org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, revoked_at, revoked_by, created_at FROM approval_scopes
+SELECT org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, call_binding, revoked_at, revoked_by, created_at FROM approval_scopes
 WHERE org_id = $1 AND agent_id = $2 AND revoked_at IS NULL AND expires_at > $3::timestamptz
 ORDER BY created_at, id
 `
@@ -187,6 +192,7 @@ func (q *Queries) ListActiveApprovalScopesForAgent(ctx context.Context, arg List
 			&i.ExpiresAt,
 			&i.CreatedBy,
 			&i.SourceApprovalID,
+			&i.CallBinding,
 			&i.RevokedAt,
 			&i.RevokedBy,
 			&i.CreatedAt,
@@ -204,7 +210,7 @@ func (q *Queries) ListActiveApprovalScopesForAgent(ctx context.Context, arg List
 const revokeApprovalScope = `-- name: RevokeApprovalScope :one
 UPDATE approval_scopes SET revoked_at = now(), revoked_by = $1
 WHERE org_id = $2 AND id = $3 AND revoked_at IS NULL
-RETURNING org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, revoked_at, revoked_by, created_at
+RETURNING org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at, created_by, source_approval_id, call_binding, revoked_at, revoked_by, created_at
 `
 
 type RevokeApprovalScopeParams struct {
@@ -229,6 +235,7 @@ func (q *Queries) RevokeApprovalScope(ctx context.Context, arg RevokeApprovalSco
 		&i.ExpiresAt,
 		&i.CreatedBy,
 		&i.SourceApprovalID,
+		&i.CallBinding,
 		&i.RevokedAt,
 		&i.RevokedBy,
 		&i.CreatedAt,

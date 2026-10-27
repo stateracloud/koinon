@@ -76,7 +76,7 @@ func (s *Service) createScope(ctx context.Context, q *store.Queries, r store.App
 	p := store.CreateApprovalScopeParams{
 		OrgID: r.OrgID, AgentID: r.AgentID, Connector: r.Connector, Tool: r.Tool, Target: r.Target,
 		Kind: store.ApprovalScopeKindAgent, ExpiresAt: pgtype.Timestamptz{Time: sc.Until, Valid: true},
-		CreatedBy: approver, SourceApprovalID: r.ID,
+		CreatedBy: approver, SourceApprovalID: r.ID, CallBinding: r.CallBinding,
 	}
 	if sc.Kind == ScopeTask {
 		p.Kind, p.TaskID = store.ApprovalScopeKindTask, r.TaskID

@@ -301,6 +301,20 @@ func HashArgs(canonical []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// scopeable says whether a scoped approval may cover a call with this risk. Coverage is decided
+// per risk type: the empty risk is covered, a Risk only when it cannot push and run code, and any
+// other type (a pointer, a new risk type) is not covered until it is added here.
+func scopeable(risk any) bool {
+	switch r := risk.(type) {
+	case struct{}:
+		return true
+	case Risk:
+		return !r.PushAndRun()
+	default:
+		return false
+	}
+}
+
 // record stores the call as an approval request, or returns the existing one
 // for the same call in the same run.
 func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool string, canonical []byte, risk any) (*mcp.CallToolResult, Result, error) {
@@ -337,7 +351,7 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 		// push and run code are never covered.
 		var scope store.ApprovalScope
 		if params.Status == store.ApprovalStatusPending {
-			if r, isPR := risk.(Risk); !isPR || !r.PushAndRun() {
+			if scopeable(risk) {
 				sc, ok, err := approvalscope.Match(ctx, q, params.OrgID, params.AgentID, params.TaskID, connector, tool, params.Target, s.now())
 				if err != nil {
 					return err

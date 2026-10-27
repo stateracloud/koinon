@@ -7,9 +7,9 @@
 
 -- name: CreateApprovalScope :one
 INSERT INTO approval_scopes (org_id, agent_id, connector, tool, target, kind, task_id, expires_at,
-                             created_by, source_approval_id)
+                             created_by, source_approval_id, call_binding)
 VALUES (@org_id, @agent_id, @connector, @tool, @target, @kind, sqlc.narg(task_id), @expires_at,
-        @created_by, @source_approval_id)
+        @created_by, @source_approval_id, sqlc.narg(call_binding))
 RETURNING *;
 
 -- name: FindActiveApprovalScope :one

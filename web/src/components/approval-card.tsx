@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import { FileStatus, ScopeKind, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type McpCall, type SavedWorkCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
-import { approvalStatusLabel, approveLabel, defaultScopeEnd, endOfLocalDay, targetRepo, toolChanged, toolVersion, type ScopeChoice } from '@/lib/approvals'
+import { approvalStatusLabel, approveLabel, defaultScopeEnd, endOfLocalDay, localDate, targetRepo, toolChanged, toolVersion, type ScopeChoice } from '@/lib/approvals'
 import { formatBytes, riskFlagsFor, riskItems, type RiskItem } from '@/lib/risk'
 import { cn } from '@/lib/utils'
 
@@ -562,6 +562,8 @@ function Outcome({ approval: a, resultUrl }: { approval: Approval; resultUrl?: s
   )
 }
 
+const DAY = 24 * 3600 * 1000
+
 function DecisionForm({
   onApprove,
   onDeny,
@@ -592,7 +594,10 @@ function DecisionForm({
   // The form lives for one decision; the clock it checks the date against is read when it opens.
   const [openedAt] = useState(() => Date.now())
   const end = endOfLocalDay(until)
-  const badDate = scope === 'agent' && (!end || end.getTime() <= openedAt)
+  const minDate = localDate(new Date(openedAt + DAY))
+  // 364 days keeps 23:59:59 of the last day inside the server's 365-day limit in every time zone.
+  const maxDate = localDate(new Date(openedAt + 364 * DAY))
+  const badDate = scope === 'agent' && (!end || until < minDate || until > maxDate)
   const approve = () => {
     const n = note.trim()
     if (scope === 'once' || !canScope) onApprove?.(n)
@@ -608,14 +613,14 @@ function DecisionForm({
           <Label htmlFor={scopeId}>How far does this approval reach?</Label>
           <NativeSelect id={scopeId} value={scope} onChange={(e) => setScope(e.target.value as 'once' | 'task' | 'agent')}>
             <option value="once">Only this call</option>
-            <option value="task">This task: later {agentTool ?? 'calls like this'}, until the task is over</option>
+            <option value="task">This task: later {agentTool ?? 'calls like this'}, for this task (at most 30 days)</option>
             <option value="agent">This agent: later {agentTool ?? 'calls like this'}, until a date</option>
           </NativeSelect>
           {scope === 'agent' && (
             <div className="grid gap-1">
               <Label htmlFor={untilId}>Until (end of day)</Label>
-              <Input id={untilId} type="date" value={until} onChange={(e) => setUntil(e.target.value)} aria-invalid={badDate} className="max-w-48" />
-              {badDate && <p className="text-destructive text-sm">Choose a date in the future.</p>}
+              <Input id={untilId} type="date" min={minDate} max={maxDate} value={until} onChange={(e) => setUntil(e.target.value)} aria-invalid={badDate} className="max-w-48" />
+              {badDate && <p className="text-destructive text-sm">Choose a date from tomorrow to a year ahead.</p>}
             </div>
           )}
           {scope !== 'once' && (
