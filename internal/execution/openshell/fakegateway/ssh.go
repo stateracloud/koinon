@@ -358,7 +358,17 @@ func (g *Gateway) serveSSH(ctx context.Context, conn net.Conn) {
 
 func (g *Gateway) session(ctx context.Context, ch ssh.Channel, reqs <-chan *ssh.Request) {
 	defer func() { _ = ch.Close() }()
+	pty := false
 	for r := range reqs {
+		if r.Type == "pty-req" {
+			// The supervisor remembers the PTY and refuses the upload subsystem on such a channel
+			// (ssh.rs L739-742).
+			pty = true
+			if r.WantReply {
+				_ = r.Reply(true, nil)
+			}
+			continue
+		}
 		if r.Type != "subsystem" {
 			if r.WantReply {
 				_ = r.Reply(false, nil)
@@ -367,7 +377,7 @@ func (g *Gateway) session(ctx context.Context, ch ssh.Channel, reqs <-chan *ssh.
 		}
 		var p struct{ Name string }
 		g.ssh.mu.Lock()
-		refuse := ssh.Unmarshal(r.Payload, &p) != nil || p.Name != UploadSubsystem || g.ssh.noUpload
+		refuse := pty || ssh.Unmarshal(r.Payload, &p) != nil || p.Name != UploadSubsystem || g.ssh.noUpload
 		g.ssh.mu.Unlock()
 		if refuse {
 			if r.WantReply {
@@ -401,7 +411,11 @@ func ack(total uint64) []byte {
 // upload serves one upload subsystem channel (ssh/upload.rs and ssh.rs data handling).
 func (g *Gateway) upload(ctx context.Context, ch ssh.Channel) {
 	fail := func(code int, msg string) {
-		_, _ = io.WriteString(ch.Stderr(), msg+"\n")
+		// A startup failure carries a message; a rejection later must not queue output
+		// (ssh.rs reject_upload).
+		if msg != "" {
+			_, _ = io.WriteString(ch.Stderr(), msg+"\n")
+		}
 		exitStatus(ch, code)
 	}
 	// The plan line: read up to the first newline, keep what follows it as archive bytes.
@@ -420,11 +434,11 @@ func (g *Gateway) upload(ctx context.Context, ch ssh.Channel) {
 			line = append(line, buf[:n]...)
 		}
 		if len(line) > maxPlanBytes {
-			fail(1, "invalid upload plan: plan exceeds limit")
+			fail(74, "openshell: invalid upload plan: plan exceeds limit")
 			return
 		}
 		if err != nil && rest == nil {
-			fail(1, "upload ended before its plan")
+			fail(74, "")
 			return
 		}
 	}
@@ -432,7 +446,7 @@ func (g *Gateway) upload(ctx context.Context, ch ssh.Channel) {
 	dec := json.NewDecoder(bytes.NewReader(line))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&plan); err != nil || plan.DestinationDirectory == "" {
-		fail(1, fmt.Sprintf("invalid upload plan: %v", err))
+		fail(74, fmt.Sprintf("openshell: invalid upload plan: %v", err))
 		return
 	}
 
@@ -451,6 +465,13 @@ func (g *Gateway) upload(ctx context.Context, ch ssh.Channel) {
 	}
 	var ackMu sync.Mutex // orders acks, so a late periodic ack cannot follow the final one
 	finished := make(chan int, 1)
+	// An extractor that fails while the client still sends ends the channel at once, with its exit
+	// status and no final total, as the supervisor does: it stops reading and closes stdout.
+	var killMu sync.Mutex
+	killed := false
+	var stopOnce sync.Once
+	stopAcks := make(chan struct{})
+	stop := func() { stopOnce.Do(func() { close(stopAcks) }) }
 	go func() {
 		var code int
 		if h == nil {
@@ -458,11 +479,24 @@ func (g *Gateway) upload(ctx context.Context, ch ssh.Channel) {
 		} else {
 			code = h(ctx, plan.DestinationDirectory, q, ch.Stderr())
 		}
+		if code != 0 {
+			killMu.Lock()
+			killed = true
+			killMu.Unlock()
+			q.fail(io.ErrClosedPipe)
+			stop()
+			ackMu.Lock()
+			exitStatus(ch, code)
+			_ = ch.Close()
+			ackMu.Unlock()
+			finished <- code
+			return
+		}
 		// cat reads the rest of the archive after tar stops.
 		_, _ = io.Copy(io.Discard, q)
 		finished <- code
 	}()
-	stopAcks := make(chan struct{})
+	wasKilled := func() bool { killMu.Lock(); defer killMu.Unlock(); return killed }
 	acksDone := make(chan struct{})
 	go func() {
 		defer close(acksDone)
@@ -498,10 +532,10 @@ func (g *Gateway) upload(ctx context.Context, ch ssh.Channel) {
 				g.ssh.mu.Lock()
 				g.ssh.stats.Violations++
 				g.ssh.mu.Unlock()
-				close(stopAcks)
+				stop()
 				<-acksDone
 				q.fail(errors.New("window exceeded"))
-				fail(74, "upload exceeded its window")
+				fail(74, "")
 				return
 			}
 			q.push(bytes.Clone(buf[:n]))
@@ -510,9 +544,14 @@ func (g *Gateway) upload(ctx context.Context, ch ssh.Channel) {
 			break
 		}
 	}
+	if wasKilled() {
+		<-finished
+		<-acksDone
+		return
+	}
 	q.closeInput()
 	code := <-finished
-	close(stopAcks)
+	stop()
 	<-acksDone
 	if code == 0 {
 		ackMu.Lock()

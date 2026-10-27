@@ -69,7 +69,8 @@ const (
 	// sends no expected destination), named for the error text.
 	uploadDestinationChanged = 73
 	// uploadWindowExceeded is the exit status the supervisor gives a client that sent beyond its
-	// window (ssh.rs reject path; upload.rs Finisher::finish uses it for an undrained extractor).
+	// window, and for every other rejected upload stream (ssh.rs reject_upload L1166-1215: invalid
+	// plan, EOF before the plan, extractor start failure, not drained; upload.rs Finisher::finish).
 	uploadWindowExceeded = 74
 	// uploadNegotiationTimeout bounds the wait for the first (zero) total after the plan
 	// (cli ssh/upload.rs NEGOTIATION_TIMEOUT).
@@ -112,12 +113,9 @@ func (b *Backend) Upload(ctx context.Context, workspace, sandbox, destDir string
 	if err != nil {
 		return &execution.Error{Op: op, Kind: execution.ErrInvalid, Err: err}
 	}
-	timeout := b.UploadTimeout
-	if timeout <= 0 {
-		timeout = DefaultUploadTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	// There is no timeout of the backend's own: the caller's context bounds the upload, so the
+	// checkpoint timeout (Checkpoints.Timeout in agentd) is the only limit and nothing caps it
+	// silently.
 
 	sess, err := b.c.CreateSshSession(ctx, &openshellv1.CreateSshSessionRequest{
 		WorkspaceScope: scope(workspace), Sandbox: sandbox,
@@ -192,7 +190,9 @@ func (b *Backend) openRelay(ctx context.Context, workspace, sandbox, token strin
 		cancel()
 		return nil, wrap(op, relayErr(stream, err))
 	}
-	return &relayConn{stream: stream, cancel: cancel}, nil
+	c := &relayConn{stream: stream, cancel: cancel, rdone: make(chan struct{}), frames: make(chan []byte), stop: make(chan struct{})}
+	go c.pump()
+	return c, nil
 }
 
 // relayErr returns the stream's status when Send reports io.EOF, which only says the stream ended.
@@ -216,18 +216,59 @@ type relayConn struct {
 	wmu    sync.Mutex
 	rbuf   []byte
 	closed sync.Once
+
+	// pump is the stream's only receiver. Its terminal error is kept here for Read and for Write,
+	// which only waits for it.
+	rmu     sync.Mutex
+	rerr    error // the stream's terminal error; io.EOF for a clean end
+	rdone   chan struct{}
+	rdoneOn sync.Once
+	frames  chan []byte
+	stop    chan struct{} // closed by Close
+}
+
+func (c *relayConn) finishRead(err error) {
+	c.rmu.Lock()
+	c.rerr = err
+	c.rmu.Unlock()
+	c.rdoneOn.Do(func() { close(c.rdone) })
+}
+
+// pump is the stream's only receiver: a gRPC stream must not be received from by two goroutines,
+// and Write has to learn why the stream ended even while nothing is reading (the SSH client writes
+// its version line first). Data goes to Read through an unbuffered channel, so a slow reader slows
+// the stream.
+func (c *relayConn) pump() {
+	for {
+		f, err := c.stream.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				c.finishRead(io.EOF)
+			} else {
+				c.finishRead(wrapRelay(err))
+			}
+			return
+		}
+		select {
+		case c.frames <- f.GetData():
+		case <-c.stop:
+			return
+		}
+	}
 }
 
 func (c *relayConn) Read(p []byte) (int, error) {
 	for len(c.rbuf) == 0 {
-		f, err := c.stream.Recv()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return 0, io.EOF
-			}
-			return 0, wrapRelay(err)
+		select {
+		case d := <-c.frames:
+			c.rbuf = d
+		case <-c.rdone:
+			// Frames the pump handed over are already taken; the stream is at its end.
+			c.rmu.Lock()
+			err := c.rerr
+			c.rmu.Unlock()
+			return 0, err
 		}
-		c.rbuf = f.GetData()
 	}
 	n := copy(p, c.rbuf)
 	c.rbuf = c.rbuf[n:]
@@ -258,9 +299,17 @@ func (c *relayConn) Write(p []byte) (int, error) {
 	defer c.wmu.Unlock()
 	if err := c.stream.Send(&openshellv1.TcpForwardFrame{Payload: &openshellv1.TcpForwardFrame_Data{Data: append([]byte(nil), p...)}}); err != nil {
 		if errors.Is(err, io.EOF) {
-			// Send reports io.EOF for any ended stream; the status is on the receive side.
-			if _, rerr := c.stream.Recv(); rerr != nil && !errors.Is(rerr, io.EOF) {
-				return 0, wrapRelay(rerr)
+			// Send reports io.EOF for any ended stream; the status reaches Read, which is the
+			// only receiver. Wait briefly for it instead of receiving here.
+			select {
+			case <-c.rdone:
+			case <-time.After(time.Second):
+			}
+			c.rmu.Lock()
+			rerr := c.rerr
+			c.rmu.Unlock()
+			if rerr != nil && !errors.Is(rerr, io.EOF) {
+				return 0, rerr
 			}
 			return 0, io.ErrClosedPipe
 		}
@@ -274,6 +323,7 @@ func (c *relayConn) Close() error {
 		c.wmu.Lock()
 		_ = c.stream.CloseSend()
 		c.wmu.Unlock()
+		close(c.stop)
 		c.cancel()
 	})
 	return nil
@@ -329,8 +379,8 @@ func runUpload(ctx context.Context, conn net.Conn, fingerprint string, plan []by
 	go func() { defer close(stderrDone); _, _ = io.Copy(&stderr, ch.Stderr()) }()
 
 	// No PTY is requested: the supervisor refuses the subsystem on a channel that has one
-	// (ssh.rs L731-735). An old supervisor refuses the subsystem itself (L724-729 is the
-	// "channel_failure" for any unknown name), which the CLI reports as Unsupported.
+	// (ssh.rs L739-742). An old supervisor refuses an unknown subsystem with channel_failure
+	// (ssh.rs about L890-893), which the CLI reports as Unsupported.
 	ok, err := ch.SendRequest("subsystem", true, ssh.Marshal(struct{ Name string }{UploadSubsystem}))
 	if err != nil {
 		return ctxErr(fmt.Errorf("requesting the upload subsystem: %w", err))
@@ -376,7 +426,9 @@ func runUpload(ctx context.Context, conn net.Conn, fingerprint string, plan []by
 	case code == uploadDestinationChanged:
 		return fmt.Errorf("upload destination changed type before extraction; retry the upload: %s", stderr.String())
 	case code == uploadWindowExceeded:
-		return fmt.Errorf("extraction in the sandbox exited with status %d (the sandbox did not drain the upload, or the window was exceeded): %s", code, stderr.String())
+		// Upstream gives 74 to every rejection (reject_upload): invalid plan, EOF before the
+		// plan, extractor start failure, a window overrun or an extractor not drained in 5 s.
+		return fmt.Errorf("the supervisor rejected the upload stream (exit %d): %s", code, stderr.String())
 	case code != 0:
 		return fmt.Errorf("extraction in the sandbox exited with status %d: %s", code, stderr.String())
 	case aerr != nil:
@@ -656,6 +708,9 @@ func (e *exitWatch) explain(err error, stderr *tailBuffer) error {
 	case <-t.C:
 	}
 	if code, ok := e.get(); ok {
+		if code == uploadWindowExceeded {
+			return fmt.Errorf("%w; the supervisor rejected the upload stream (exit %d): %s", err, code, stderr.String())
+		}
 		return fmt.Errorf("%w; the sandbox's upload channel exited with status %d: %s", err, code, stderr.String())
 	}
 	if s := stderr.String(); s != "" {

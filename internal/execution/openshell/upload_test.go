@@ -156,7 +156,10 @@ var _ = Describe("Upload", func() {
 			_, _ = io.WriteString(stderr, "tar: /sandbox/x: Cannot open: Permission denied\n")
 			return 2
 		})
-		body := make([]byte, 2<<20)
+		// The extractor stops reading after 1000 bytes and fails while the client still has
+		// megabytes to send: the supervisor ends the channel with the exit status, and the client
+		// learns of it while it waits for credit or in a write.
+		body := make([]byte, 8<<20)
 		_, _ = rand.Read(body)
 		err := b.Upload(ctx, ws, "sb", "/sandbox", bytes.NewReader(buildTar(map[string][]byte{"x": body})))
 		Expect(err).To(HaveOccurred())
@@ -165,6 +168,17 @@ var _ = Describe("Upload", func() {
 		Expect(gw.ActiveSSHSessions()).To(BeZero())
 		noTokens(err)
 	}, SpecTimeout(30*time.Second))
+
+	It("reports a gateway that ends the relay while the client is writing, without a second receiver", func(ctx SpecContext) {
+		// The gateway refuses the token right after the init frame; the SSH client is already
+		// writing its version line, so Write sees the ended stream while Read holds the status.
+		for range 20 {
+			gw.ExpireSSHSessions()
+			err := b.Upload(ctx, ws, "sb", "/sandbox", bytes.NewReader(buildTar(map[string][]byte{"a": []byte("a")})))
+			Expect(err).To(MatchError(execution.ErrPermissionDenied))
+			Expect(err.Error()).To(ContainSubstring("expired"))
+		}
+	}, SpecTimeout(time.Minute))
 
 	It("refuses a host key that does not match the gateway's fingerprint, before sending the plan", func(ctx SpecContext) {
 		gw.SpoofHostKeyFingerprint("SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
