@@ -80,22 +80,26 @@ SELECT org_id, id, agent_id, connector, tool, target, kind, task_id, expires_at,
 WHERE org_id = $1 AND agent_id = $2 AND connector = $3 AND tool = $4
   AND target = $5 AND revoked_at IS NULL AND expires_at > $6::timestamptz
   AND (kind = 'agent' OR task_id = $7)
+  AND ($8::jsonb IS NULL OR call_binding = $8::jsonb)
 ORDER BY (kind = 'task') DESC, created_at, id
 LIMIT 1
 `
 
 type FindActiveApprovalScopeParams struct {
-	OrgID     pgtype.UUID
-	AgentID   pgtype.UUID
-	Connector string
-	Tool      string
-	Target    string
-	Now       pgtype.Timestamptz
-	TaskID    pgtype.UUID
+	OrgID       pgtype.UUID
+	AgentID     pgtype.UUID
+	Connector   string
+	Tool        string
+	Target      string
+	Now         pgtype.Timestamptz
+	TaskID      pgtype.UUID
+	CallBinding []byte
 }
 
 // The scope that allows this call now: exact on agent, connector, tool and target; a task scope
-// only for its task. A task scope wins over an agent scope (the narrower one is named).
+// only for its task. A task scope wins over an agent scope (the narrower one is named). When
+// call_binding is given the scope's binding must equal it (a code-host scope covers only the
+// connection and base URL it was granted on).
 func (q *Queries) FindActiveApprovalScope(ctx context.Context, arg FindActiveApprovalScopeParams) (ApprovalScope, error) {
 	row := q.db.QueryRow(ctx, findActiveApprovalScope,
 		arg.OrgID,
@@ -105,6 +109,7 @@ func (q *Queries) FindActiveApprovalScope(ctx context.Context, arg FindActiveApp
 		arg.Target,
 		arg.Now,
 		arg.TaskID,
+		arg.CallBinding,
 	)
 	var i ApprovalScope
 	err := row.Scan(

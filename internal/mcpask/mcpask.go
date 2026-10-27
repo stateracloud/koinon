@@ -316,7 +316,7 @@ func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonica
 		// person cannot be waived.
 		var scope store.ApprovalScope
 		if !t.RequiresTwoApprovers {
-			sc, ok, err := approvalscope.Match(ctx, q, params.OrgID, params.AgentID, params.TaskID, ConnectorID, tool, params.Target, s.now())
+			sc, ok, err := approvalscope.Match(ctx, q, params.OrgID, params.AgentID, params.TaskID, ConnectorID, tool, params.Target, nil, s.now())
 			if err != nil {
 				return err
 			}

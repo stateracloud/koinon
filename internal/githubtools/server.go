@@ -359,6 +359,37 @@ func scopeable(risk any) bool {
 	}
 }
 
+// callBinding is what a code-host approval request is bound to: the connection the grant uses and
+// its base URL. A scope created from the request carries it, and covers only calls with the same
+// binding, so a scope granted on github.com does not cover the same owner/repo on a GHES
+// connection after the agent is rebound or the connection replaced (ADR 0065 AP1).
+func (s *Server) callBinding(ctx context.Context, c caller, connector string) ([]byte, error) {
+	b, ok := c.config.Binding(connector)
+	if !ok {
+		return nil, errors.New("this agent's GitHub grant has no repository yet; ask an admin to choose one")
+	}
+	bind := struct {
+		ConnectionID string `json:"connectionId"`
+		BaseURL      string `json:"baseUrl,omitempty"`
+	}{ConnectionID: b.ConnectionID}
+	var id pgtype.UUID
+	if id.Scan(b.ConnectionID) == nil && id.Valid {
+		row, err := s.q.GetConnection(ctx, store.GetConnectionParams{OrgID: c.org.ID, ID: id})
+		switch {
+		case err == nil:
+			site, err := codehost.SiteOf(row.Config)
+			if err != nil {
+				return nil, errors.New("this agent's connection has an invalid configuration; ask an admin to fix the connection")
+			}
+			bind.BaseURL = site.BaseURL
+		case !errors.Is(err, pgx.ErrNoRows):
+			s.log.Error("github tools: load the connection", append(c.attrs(), "err", err)...)
+			return nil, errors.New("internal error; try again later")
+		}
+	}
+	return json.Marshal(bind)
+}
+
 // record stores the call as an approval request, or returns the existing one
 // for the same call in the same run.
 func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool string, canonical []byte, risk any) (*mcp.CallToolResult, Result, error) {
@@ -374,8 +405,13 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 	if err != nil {
 		return nil, Result{}, err
 	}
+	binding, err := s.callBinding(ctx, c, connector)
+	if err != nil {
+		return nil, Result{}, err
+	}
 	params := store.CreateApprovalRequestParams{
-		OrgID: c.org.ID, TaskID: c.run.TaskID, RunID: c.run.ID, AgentID: c.agent.ID,
+		CallBinding: binding,
+		OrgID:       c.org.ID, TaskID: c.run.TaskID, RunID: c.run.ID, AgentID: c.agent.ID,
 		Connector: connector, Tool: tool, Target: connector + ":" + repo,
 		ArgsJson: string(canonical), ArgsSha256: HashArgs(canonical), Risk: riskJSON,
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
@@ -396,7 +432,7 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 		var scope store.ApprovalScope
 		if params.Status == store.ApprovalStatusPending {
 			if scopeable(risk) {
-				sc, ok, err := approvalscope.Match(ctx, q, params.OrgID, params.AgentID, params.TaskID, connector, tool, params.Target, s.now())
+				sc, ok, err := approvalscope.Match(ctx, q, params.OrgID, params.AgentID, params.TaskID, connector, tool, params.Target, binding, s.now())
 				if err != nil {
 					return err
 				}

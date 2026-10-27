@@ -149,3 +149,9 @@ matches only while all three are unchanged, so a republished tool or a new serve
 `comment_on_issue`; an unknown risk type is never covered. Replaying an approval with a wider scope
 returns `ErrNotPending` instead of silently creating none. The agent scope's date picker allows
 tomorrow to 364 days ahead, and the task option reads "for this task (at most 30 days)".
+
+2026-10-27 (wave-3 integration): a code-host approval request records its connection ID and the
+connection's base URL as its `call_binding`; a scope copies it, and `FindActiveApprovalScope` requires
+it to equal the call's binding. A scope granted on github.com therefore does not cover the same
+owner/repo on another connection or host. Scopes created before this change carry an empty binding
+and no longer match (the next call asks again).
