@@ -289,6 +289,16 @@ var _ = Describe("the code-host data of the GitHub type", func() {
 	})
 })
 
+var _ = Describe("a connector that writes by push", func() {
+	It("carries writes: push from its data", func() {
+		doc := githubYAML()
+		Expect(doc).To(ContainSubstring("    exactModes: true\n"))
+		got, err := connectors.Parse([]byte(strings.Replace(doc, "    exactModes: true\n", "    exactModes: false\n    writes: push\n", 1)))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Spec.Capabilities.Writes).To(Equal("push"))
+	})
+})
+
 var _ = DescribeTable("Parse rejects",
 	func(from, to, want string) {
 		doc := githubYAML()
@@ -296,6 +306,7 @@ var _ = DescribeTable("Parse rejects",
 		_, err := connectors.Parse([]byte(strings.Replace(doc, from, to, 1)))
 		Expect(err).To(MatchError(ContainSubstring(want)))
 	},
+	Entry("an unknown way of writing", "    exactModes: true\n", "    exactModes: true\n    writes: sftp\n", "schema"),
 	Entry("an unknown tier", "tier: reversible-write", "tier: sometimes", "schema"),
 	Entry("a forbidden tier that is not denied", "      forbidden: deny\n    standard:", "      forbidden: allow\n    standard:", "schema"),
 	Entry("network rules on a write scope", "      tools: [comment_on_issue, get_approval_status]",

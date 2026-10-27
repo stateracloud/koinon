@@ -110,6 +110,7 @@ func CapabilitiesOf(t *connectors.Type) (Capabilities, error) {
 		MaxRepositories:     c.MaxRepositories,
 		CanDenyCI:           c.CanDenyCI,
 		ExactModes:          c.ExactModes,
+		Writes:              c.Writes,
 		CIPaths:             append([]string(nil), t.Spec.CIPaths...),
 	}
 	if l := t.Spec.Auth.TokenLifetime; l != "" {

@@ -146,6 +146,9 @@ type Capabilities struct {
 	MaxRepositories     int    `json:"maxRepositories,omitempty"`
 	CanDenyCI           bool   `json:"canDenyCI,omitempty"`
 	ExactModes          bool   `json:"exactModes,omitempty"`
+	// Writes is how commits reach the host: "api" (the default) or "push" (git push from
+	// koinon-api, ADR 0062).
+	Writes string `json:"writes,omitempty"`
 }
 
 // Targets describes what grants are narrowed to.

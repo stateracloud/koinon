@@ -45,6 +45,7 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/go-git/go-git/v5/utils/ioutil"
 
+	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/project"
 )
@@ -62,6 +63,9 @@ var (
 type Options struct {
 	// RemoteURL is the git smart HTTP URL of a repository.
 	RemoteURL func(codehost.Repo) string
+	// CABundle is PEM certificates that sign the host's TLS certificate, besides the system
+	// roots: the connection's caBundle (ForSite).
+	CABundle []byte
 	// Username is the HTTP basic user name; the token is the password. Default "koinon".
 	Username string
 	// AuthorName and AuthorEmail identify the commits. Default "Koinon" and
@@ -69,6 +73,26 @@ type Options struct {
 	AuthorName, AuthorEmail string
 	// Now is the commit time; default time.Now.
 	Now func() time.Time
+}
+
+// ForSite returns the options for a connection on the host at site: the remote URLs are built
+// from the connection's base URL (the connector's default host when it has none) and its CA
+// bundle is trusted for the fetch and the push (ADR 0062), so a Gitea or GHES host with a private
+// CA can be pushed to. Username, author and clock keep their defaults; set them on the result.
+func ForSite(t *connectors.Type, site codehost.Site) (Options, error) {
+	loc, err := site.Location(t)
+	if err != nil {
+		return Options{}, err
+	}
+	if _, err := site.Pool(); err != nil {
+		return Options{}, err
+	}
+	base := loc.BaseURL()
+	o := Options{RemoteURL: func(r codehost.Repo) string { return base + "/" + r.String() + ".git" }}
+	if strings.TrimSpace(site.CABundle) != "" {
+		o.CABundle = []byte(site.CABundle)
+	}
+	return o, nil
 }
 
 // Wrap returns inner when the provider writes through its API, and an Access that writes by
@@ -194,6 +218,7 @@ func (a *access) fetchBase(ctx context.Context, st *memory.Storage, r codehost.R
 			Depth:    1,
 			Tags:     git.NoTags,
 			Auth:     a.auth(),
+			CABundle: a.o.CABundle,
 		})
 		if errors.Is(err, git.NoErrAlreadyUpToDate) {
 			return nil
@@ -204,7 +229,7 @@ func (a *access) fetchBase(ctx context.Context, st *memory.Storage, r codehost.R
 	if err == nil {
 		return nil
 	}
-	refs, lerr := rem.ListContext(ctx, &git.ListOptions{Auth: a.auth()})
+	refs, lerr := rem.ListContext(ctx, &git.ListOptions{Auth: a.auth(), CABundle: a.o.CABundle})
 	if lerr != nil {
 		return fmt.Errorf("gitpush: listing refs of %s: %w", r, lerr)
 	}
@@ -251,6 +276,7 @@ func (a *access) createRef(ctx context.Context, r codehost.Repo, st *memory.Stor
 	if err != nil {
 		return err
 	}
+	ep.CaBundle = a.o.CABundle
 	c, err := client.NewClient(ep)
 	if err != nil {
 		return err
@@ -313,7 +339,7 @@ func (a *access) createRef(ctx context.Context, r codehost.Repo, st *memory.Stor
 
 // refExists lists the refs of r and reports whether name is among them.
 func (a *access) refExists(ctx context.Context, r codehost.Repo, name plumbing.ReferenceName) (bool, error) {
-	refs, err := a.remote(memory.NewStorage(), r).ListContext(ctx, &git.ListOptions{Auth: a.auth()})
+	refs, err := a.remote(memory.NewStorage(), r).ListContext(ctx, &git.ListOptions{Auth: a.auth(), CABundle: a.o.CABundle})
 	if err != nil {
 		return false, err
 	}

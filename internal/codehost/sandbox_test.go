@@ -78,6 +78,18 @@ var _ = Describe("CapabilitiesOf", func() {
 	})
 })
 
+var _ = Describe("CapabilitiesOf writes", func() {
+	It("copies how a data-defined connector writes commits", func() {
+		t := *githubType()
+		caps := *t.Spec.Capabilities
+		caps.Writes = "push"
+		t.Spec.Capabilities = &caps
+		c, err := codehost.CapabilitiesOf(&t)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.Writes).To(Equal(codehost.WritesPush))
+	})
+})
+
 var _ = Describe("Site", func() {
 	It("reads the base URL and CA bundle from the connection's config", func() {
 		s, err := codehost.SiteOf([]byte(`{"appId": 1, "baseUrl": "https://ghes.example.test", "caBundle": "x"}`))
