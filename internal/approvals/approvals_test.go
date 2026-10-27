@@ -106,6 +106,46 @@ var _ = Describe("Service", func() {
 		Expect(f.decisions(ctx)).To(HaveLen(1), "a replay is not a new decision")
 	})
 
+	It("opens the pull request on a GitHub Enterprise Server: the App flow and the Git Data API go to the connection's host, trusting its CA bundle", func(ctx SpecContext) {
+		f := newGHESFixture(ctx, "standard")
+		Expect(f.gh.URL()).To(HaveSuffix("/api/v3"))
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		Expect(req.Status).To(Equal("pending"))
+		f.park(ctx)
+
+		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "looks good")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).To(Equal(store.ApprovalStatusExecuted), row.Error.String)
+		Expect(result(row)).To(HaveKeyWithValue("branch", "koinon/fix-typo"))
+
+		By("the token was minted at the GHES, and the branch, commit and pull request are there")
+		Expect(f.gh.Mints()).To(Equal(1))
+		repo := f.gh.Snapshot("widgets")
+		Expect(repo.Calls).To(Equal(map[string]int{
+			"POST git/blobs": 2, "POST git/trees": 1, "POST git/commits": 1, "POST git/refs": 1, "POST pulls": 1,
+		}))
+		Expect(repo.Pulls).To(HaveLen(1))
+		Expect(f.gh.Files("widgets", "koinon/fix-typo")).To(HaveKey("docs/guide.md"))
+		Expect(f.logs.String()).NotTo(ContainSubstring("ghs_"))
+	})
+
+	It("fails a GitHub Enterprise Server call when its CA bundle is missing, without falling back to github.com", func(ctx SpecContext) {
+		f := newGHESFixture(ctx, "standard")
+		_, err := pool.Exec(ctx, `UPDATE connections SET config = config - 'caBundle' WHERE org_id = $1`, f.org)
+		Expect(err).NotTo(HaveOccurred())
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		f.park(ctx)
+		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).NotTo(Equal(store.ApprovalStatusExecuted))
+		// A TLS failure is a network error: the request stays approved for the sweeper's
+		// retry, so the reason is in the log, not in the row.
+		Expect(row.Status).To(Equal(store.ApprovalStatusApproved))
+		Expect(f.logs.String()).To(ContainSubstring("certificate"))
+		Expect(f.gh.Mints()).To(BeZero())
+		Expect(f.gh.Snapshot("widgets").Pulls).To(BeEmpty())
+	})
+
 	It("writes files marked executable as mode 100755 and every other file as 100644", func(ctx SpecContext) {
 		f := newFixture(ctx, "standard")
 		req := f.call(ctx, githubtools.ToolCreatePullRequest, map[string]any{
