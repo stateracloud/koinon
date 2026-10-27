@@ -54,6 +54,10 @@ func main() {
 	tlsHosts := flag.String("tls-hosts", "localhost,127.0.0.1", "comma-separated host names and IPs of the generated certificate")
 	caFile := flag.String("ca-file", "", "with -tls: write the generated certificate (the CA to trust) to this file")
 	flag.Parse()
+	if *caFile != "" && !*useTLS {
+		slog.Error("-ca-file needs -tls")
+		os.Exit(2)
+	}
 	prefix := strings.TrimRight(strings.TrimSpace(*apiPrefix), "/")
 	if prefix != "" && !strings.HasPrefix(prefix, "/") {
 		slog.Error("-api-prefix must start with /")

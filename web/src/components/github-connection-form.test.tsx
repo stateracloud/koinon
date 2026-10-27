@@ -23,24 +23,9 @@ function setup(opts: { fail?: boolean; site?: boolean } = {}) {
   const creates: CreateGitHubConnectionRequest[] = []
   let tests = 0
   const results = [
-    create(CheckResultSchema, {
-      check: 'github.app',
-      step: 'generate-key',
-      ok: true,
-      message: 'App koinon-test',
-    }),
-    create(CheckResultSchema, {
-      check: 'github.installation',
-      step: 'install-app',
-      ok: true,
-      message: '2 repositories',
-    }),
-    create(CheckResultSchema, {
-      check: 'github.token',
-      step: 'test-token',
-      ok: false,
-      message: 'token has workflows permission',
-    }),
+    create(CheckResultSchema, { check: 'github.app', step: 'generate-key', ok: true, message: 'App koinon-test' }),
+    create(CheckResultSchema, { check: 'github.installation', step: 'install-app', ok: true, message: '2 repositories' }),
+    create(CheckResultSchema, { check: 'github.token', step: 'test-token', ok: false, message: 'token has workflows permission' }),
   ]
   const conn = create(ConnectionSchema, {
     id: 'c-1',
@@ -109,16 +94,7 @@ describe('GitHub connection page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Create and test connection' }))
 
     await waitFor(() => expect(creates).toHaveLength(1))
-    expect(creates[0]).toMatchObject({
-      orgId,
-      displayName: 'Acme GitHub',
-      appId: 12n,
-      installationId: 34n,
-      privateKey: fakePem,
-      baseUrl: '',
-      caBundle: '',
-      test: true,
-    })
+    expect(creates[0]).toMatchObject({ orgId, displayName: 'Acme GitHub', appId: 12n, installationId: 34n, privateKey: fakePem, baseUrl: '', caBundle: '', test: true })
 
     // The connection page: per-step results, the fingerprint, never the key.
     expect(await screen.findByRole('heading', { name: 'Acme GitHub' })).toBeInTheDocument()
