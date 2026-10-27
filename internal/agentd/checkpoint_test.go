@@ -337,8 +337,7 @@ var _ = Describe("home checkpoints", func() {
 
 		By("the next run waits while no sandbox exists, restoring nothing yet")
 		e.message(ctx, t, "second")
-		r2 := e.enqueue(ctx, t)
-		e.pool("agentd-c")
+		r2 := e.enqueue(ctx, t) // agentd-b takes it: a pool without Checkpoints would skip the restore
 		Consistently(runState(ctx, r2)).WithTimeout(1500 * time.Millisecond).ShouldNot(Or(Equal(store.RunStateSucceeded), Equal(store.RunStateFailed)))
 
 		By("the reconciler creates the sandbox for the run and records it ready: the archive ends, the restore is still owed")
