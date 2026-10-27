@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file koinon/connection/v1alpha1/connection.proto.
  */
 export const file_koinon_connection_v1alpha1_connection: GenFile = /*@__PURE__*/
-  fileDesc("Citrb2lub24vY29ubmVjdGlvbi92MWFscGhhMS9jb25uZWN0aW9uLnByb3RvEhprb2lub24uY29ubmVjdGlvbi52MWFscGhhMSJnCgVTY29wZRIKCgJpZBgBIAEoCRIuCgR0aWVyGAIgASgOMiAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGllchITCgtkZXNjcmlwdGlvbhgDIAEoCRINCgV0b29scxgEIAMoCSLIAQoNQ29ubmVjdG9yVHlwZRIKCgJpZBgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIRCglhdXRoX3R5cGUYBSABKAkSMQoGc2NvcGVzGAYgAygLMiEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU2NvcGUSKQoIZG9jdW1lbnQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IhsKGUxpc3RDb25uZWN0b3JUeXBlc1JlcXVlc3QiYAoaTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2USQgoPY29ubmVjdG9yX3R5cGVzGAEgAygLMikua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdG9yVHlwZSJHCgtDaGVja1Jlc3VsdBINCgVjaGVjaxgBIAEoCRIMCgRzdGVwGAIgASgJEgoKAm9rGAMgASgIEg8KB21lc3NhZ2UYBCABKAkiigEKEEdpdEh1YkNvbm5lY3Rpb24SDgoGYXBwX2lkGAEgASgDEhcKD2luc3RhbGxhdGlvbl9pZBgCIAEoAxIXCg9rZXlfZmluZ2VycHJpbnQYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSEQoJY2FfYnVuZGxlGAUgASgJEg8KB2NpX2RpcnMYBiADKAkitwMKCkNvbm5lY3Rpb24SCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhEKCWNvbm5lY3RvchgDIAEoCRIUCgxkaXNwbGF5X25hbWUYBCABKAkSPAoGc3RhdHVzGAUgASgOMiwua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvblN0YXR1cxIyCg5sYXN0X3Rlc3RlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASOgoJbGFzdF90ZXN0GAcgAygLMicua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ2hlY2tSZXN1bHQSLgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGc291cmNlGAsgASgJEhkKEW1hbmFnZWRfYnlfc2VjcmV0GAwgASgJEg8KB3JlbW92ZWQYDSABKAgSPgoGZ2l0aHViGAogASgLMiwua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuR2l0SHViQ29ubmVjdGlvbkgAQgoKCHNldHRpbmdzIswBCh1DcmVhdGVHaXRIdWJDb25uZWN0aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJEg4KBmFwcF9pZBgDIAEoAxIXCg9pbnN0YWxsYXRpb25faWQYBCABKAMSGAoLcHJpdmF0ZV9rZXkYBSABKAlCA4ABARIMCgR0ZXN0GAYgASgIEhAKCGJhc2VfdXJsGAcgASgJEhEKCWNhX2J1bmRsZRgIIAEoCRIPCgdjaV9kaXJzGAkgAygJIpYBCh5DcmVhdGVHaXRIdWJDb25uZWN0aW9uUmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24SOAoHcmVzdWx0cxgCIAMoCzInLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNoZWNrUmVzdWx0Ij0KFEdldENvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJIlMKFUdldENvbm5lY3Rpb25SZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbiJAChdEZWxldGVDb25uZWN0aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSFQoNY29ubmVjdGlvbl9pZBgCIAEoCSIaChhEZWxldGVDb25uZWN0aW9uUmVzcG9uc2UiRQoLQm91bmRBZ2VudHMSNgoGYWdlbnRzGAEgAygLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQm91bmRBZ2VudCIuCgpCb3VuZEFnZW50EgoKAmlkGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCSIoChZMaXN0Q29ubmVjdGlvbnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJWChdMaXN0Q29ubmVjdGlvbnNSZXNwb25zZRI7Cgtjb25uZWN0aW9ucxgBIAMoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24iPgoVVGVzdENvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJIo4BChZUZXN0Q29ubmVjdGlvblJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uEjgKB3Jlc3VsdHMYAiADKAsyJy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DaGVja1Jlc3VsdCJoChxMaXN0SW5zdGFsbGF0aW9uUmVwb3NSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJEhIKCnBhZ2VfdG9rZW4YAyABKAkSDQoFcXVlcnkYBCABKAkiTgoQSW5zdGFsbGF0aW9uUmVwbxIRCglmdWxsX25hbWUYASABKAkSDwoHcHJpdmF0ZRgCIAEoCBIWCg5kZWZhdWx0X2JyYW5jaBgDIAEoCSKKAQodTGlzdEluc3RhbGxhdGlvblJlcG9zUmVzcG9uc2USOwoFcmVwb3MYASADKAsyLC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5JbnN0YWxsYXRpb25SZXBvEhcKD25leHRfcGFnZV90b2tlbhgCIAEoCRITCgt0b3RhbF9jb3VudBgDIAEoAyp9CgRUaWVyEhQKEFRJRVJfVU5TUEVDSUZJRUQQABINCglUSUVSX1JFQUQQARIZChVUSUVSX1JFVkVSU0lCTEVfV1JJVEUQAhIhCh1USUVSX0VYVEVSTkFMX09SX0lSUkVWRVJTSUJMRRADEhIKDlRJRVJfRk9SQklEREVOEAQqjgEKEENvbm5lY3Rpb25TdGF0dXMSIQodQ09OTkVDVElPTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIeChpDT05ORUNUSU9OX1NUQVRVU19VTlRFU1RFRBABEhgKFENPTk5FQ1RJT05fU1RBVFVTX09LEAISHQoZQ09OTkVDVElPTl9TVEFUVVNfRkFJTElORxADMrgHChFDb25uZWN0aW9uU2VydmljZRKIAQoSTGlzdENvbm5lY3RvclR5cGVzEjUua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3RvclR5cGVzUmVxdWVzdBo2LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RDb25uZWN0b3JUeXBlc1Jlc3BvbnNlIgOQAgESjwEKFkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb24SOS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DcmVhdGVHaXRIdWJDb25uZWN0aW9uUmVxdWVzdBo6LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXNwb25zZRJ5Cg1HZXRDb25uZWN0aW9uEjAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuR2V0Q29ubmVjdGlvblJlcXVlc3QaMS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5HZXRDb25uZWN0aW9uUmVzcG9uc2UiA5ACARJ/Cg9MaXN0Q29ubmVjdGlvbnMSMi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdGlvbnNSZXF1ZXN0GjMua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3Rpb25zUmVzcG9uc2UiA5ACARJ3Cg5UZXN0Q29ubmVjdGlvbhIxLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLlRlc3RDb25uZWN0aW9uUmVxdWVzdBoyLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLlRlc3RDb25uZWN0aW9uUmVzcG9uc2USfQoQRGVsZXRlQ29ubmVjdGlvbhIzLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkRlbGV0ZUNvbm5lY3Rpb25SZXF1ZXN0GjQua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuRGVsZXRlQ29ubmVjdGlvblJlc3BvbnNlEpEBChVMaXN0SW5zdGFsbGF0aW9uUmVwb3MSOC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0SW5zdGFsbGF0aW9uUmVwb3NSZXF1ZXN0Gjkua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdEluc3RhbGxhdGlvblJlcG9zUmVzcG9uc2UiA5ACAUJbWllnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9jb25uZWN0aW9uL3YxYWxwaGExO2Nvbm5lY3Rpb252MWFscGhhMWIGcHJvdG8z", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
+  fileDesc("Citrb2lub24vY29ubmVjdGlvbi92MWFscGhhMS9jb25uZWN0aW9uLnByb3RvEhprb2lub24uY29ubmVjdGlvbi52MWFscGhhMSJnCgVTY29wZRIKCgJpZBgBIAEoCRIuCgR0aWVyGAIgASgOMiAua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuVGllchITCgtkZXNjcmlwdGlvbhgDIAEoCRINCgV0b29scxgEIAMoCSLIAQoNQ29ubmVjdG9yVHlwZRIKCgJpZBgBIAEoCRIPCgd2ZXJzaW9uGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIRCglhdXRoX3R5cGUYBSABKAkSMQoGc2NvcGVzGAYgAygLMiEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuU2NvcGUSKQoIZG9jdW1lbnQYByABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IhsKGUxpc3RDb25uZWN0b3JUeXBlc1JlcXVlc3QiYAoaTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2USQgoPY29ubmVjdG9yX3R5cGVzGAEgAygLMikua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdG9yVHlwZSJHCgtDaGVja1Jlc3VsdBINCgVjaGVjaxgBIAEoCRIMCgRzdGVwGAIgASgJEgoKAm9rGAMgASgIEg8KB21lc3NhZ2UYBCABKAkiigEKEEdpdEh1YkNvbm5lY3Rpb24SDgoGYXBwX2lkGAEgASgDEhcKD2luc3RhbGxhdGlvbl9pZBgCIAEoAxIXCg9rZXlfZmluZ2VycHJpbnQYAyABKAkSEAoIYmFzZV91cmwYBCABKAkSEQoJY2FfYnVuZGxlGAUgASgJEg8KB2NpX2RpcnMYBiADKAki2AEKD0dpdGVhQ29ubmVjdGlvbhIQCghiYXNlX3VybBgBIAEoCRIRCgljYV9idW5kbGUYAiABKAkSDwoHY2lfZGlycxgDIAMoCRI1ChFyZWFkX3Rva2VuX3NldF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASNgoSd3JpdGVfdG9rZW5fc2V0X2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIgChh0b2tlbl93YXJuX2FmdGVyX3NlY29uZHMYBiABKAMi9QMKCkNvbm5lY3Rpb24SCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEhEKCWNvbm5lY3RvchgDIAEoCRIUCgxkaXNwbGF5X25hbWUYBCABKAkSPAoGc3RhdHVzGAUgASgOMiwua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvblN0YXR1cxIyCg5sYXN0X3Rlc3RlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASOgoJbGFzdF90ZXN0GAcgAygLMicua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ2hlY2tSZXN1bHQSLgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGc291cmNlGAsgASgJEhkKEW1hbmFnZWRfYnlfc2VjcmV0GAwgASgJEg8KB3JlbW92ZWQYDSABKAgSPgoGZ2l0aHViGAogASgLMiwua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuR2l0SHViQ29ubmVjdGlvbkgAEjwKBWdpdGVhGA4gASgLMisua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuR2l0ZWFDb25uZWN0aW9uSABCCgoIc2V0dGluZ3MizAEKHUNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIUCgxkaXNwbGF5X25hbWUYAiABKAkSDgoGYXBwX2lkGAMgASgDEhcKD2luc3RhbGxhdGlvbl9pZBgEIAEoAxIYCgtwcml2YXRlX2tleRgFIAEoCUIDgAEBEgwKBHRlc3QYBiABKAgSEAoIYmFzZV91cmwYByABKAkSEQoJY2FfYnVuZGxlGAggASgJEg8KB2NpX2RpcnMYCSADKAkilgEKHkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbhI4CgdyZXN1bHRzGAIgAygLMicua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ2hlY2tSZXN1bHQiuwEKHENyZWF0ZUdpdGVhQ29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIQCghiYXNlX3VybBgDIAEoCRIXCgpyZWFkX3Rva2VuGAQgASgJQgOAAQESGAoLd3JpdGVfdG9rZW4YBSABKAlCA4ABARIRCgljYV9idW5kbGUYBiABKAkSDwoHY2lfZGlycxgHIAMoCRIMCgR0ZXN0GAggASgIIpUBCh1DcmVhdGVHaXRlYUNvbm5lY3Rpb25SZXNwb25zZRI6Cgpjb25uZWN0aW9uGAEgASgLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbhI4CgdyZXN1bHRzGAIgAygLMicua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ2hlY2tSZXN1bHQiPQoUR2V0Q29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkiUwoVR2V0Q29ubmVjdGlvblJlc3BvbnNlEjoKCmNvbm5lY3Rpb24YASABKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Db25uZWN0aW9uIkAKF0RlbGV0ZUNvbm5lY3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIVCg1jb25uZWN0aW9uX2lkGAIgASgJIhoKGERlbGV0ZUNvbm5lY3Rpb25SZXNwb25zZSJFCgtCb3VuZEFnZW50cxI2CgZhZ2VudHMYASADKAsyJi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5Cb3VuZEFnZW50Ii4KCkJvdW5kQWdlbnQSCgoCaWQYASABKAkSFAoMZGlzcGxheV9uYW1lGAIgASgJIigKFkxpc3RDb25uZWN0aW9uc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIlYKF0xpc3RDb25uZWN0aW9uc1Jlc3BvbnNlEjsKC2Nvbm5lY3Rpb25zGAEgAygLMiYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ29ubmVjdGlvbiI+ChVUZXN0Q29ubmVjdGlvblJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkijgEKFlRlc3RDb25uZWN0aW9uUmVzcG9uc2USOgoKY29ubmVjdGlvbhgBIAEoCzImLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNvbm5lY3Rpb24SOAoHcmVzdWx0cxgCIAMoCzInLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNoZWNrUmVzdWx0ImgKHExpc3RJbnN0YWxsYXRpb25SZXBvc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhUKDWNvbm5lY3Rpb25faWQYAiABKAkSEgoKcGFnZV90b2tlbhgDIAEoCRINCgVxdWVyeRgEIAEoCSJOChBJbnN0YWxsYXRpb25SZXBvEhEKCWZ1bGxfbmFtZRgBIAEoCRIPCgdwcml2YXRlGAIgASgIEhYKDmRlZmF1bHRfYnJhbmNoGAMgASgJIooBCh1MaXN0SW5zdGFsbGF0aW9uUmVwb3NSZXNwb25zZRI7CgVyZXBvcxgBIAMoCzIsLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkluc3RhbGxhdGlvblJlcG8SFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJEhMKC3RvdGFsX2NvdW50GAMgASgDKn0KBFRpZXISFAoQVElFUl9VTlNQRUNJRklFRBAAEg0KCVRJRVJfUkVBRBABEhkKFVRJRVJfUkVWRVJTSUJMRV9XUklURRACEiEKHVRJRVJfRVhURVJOQUxfT1JfSVJSRVZFUlNJQkxFEAMSEgoOVElFUl9GT1JCSURERU4QBCqOAQoQQ29ubmVjdGlvblN0YXR1cxIhCh1DT05ORUNUSU9OX1NUQVRVU19VTlNQRUNJRklFRBAAEh4KGkNPTk5FQ1RJT05fU1RBVFVTX1VOVEVTVEVEEAESGAoUQ09OTkVDVElPTl9TVEFUVVNfT0sQAhIdChlDT05ORUNUSU9OX1NUQVRVU19GQUlMSU5HEAMyxwgKEUNvbm5lY3Rpb25TZXJ2aWNlEogBChJMaXN0Q29ubmVjdG9yVHlwZXMSNS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5MaXN0Q29ubmVjdG9yVHlwZXNSZXF1ZXN0GjYua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3RvclR5cGVzUmVzcG9uc2UiA5ACARKPAQoWQ3JlYXRlR2l0SHViQ29ubmVjdGlvbhI5LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkNyZWF0ZUdpdEh1YkNvbm5lY3Rpb25SZXF1ZXN0Gjoua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ3JlYXRlR2l0SHViQ29ubmVjdGlvblJlc3BvbnNlEowBChVDcmVhdGVHaXRlYUNvbm5lY3Rpb24SOC5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5DcmVhdGVHaXRlYUNvbm5lY3Rpb25SZXF1ZXN0Gjkua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuQ3JlYXRlR2l0ZWFDb25uZWN0aW9uUmVzcG9uc2USeQoNR2V0Q29ubmVjdGlvbhIwLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkdldENvbm5lY3Rpb25SZXF1ZXN0GjEua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuR2V0Q29ubmVjdGlvblJlc3BvbnNlIgOQAgESfwoPTGlzdENvbm5lY3Rpb25zEjIua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdENvbm5lY3Rpb25zUmVxdWVzdBozLmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RDb25uZWN0aW9uc1Jlc3BvbnNlIgOQAgESdwoOVGVzdENvbm5lY3Rpb24SMS5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5UZXN0Q29ubmVjdGlvblJlcXVlc3QaMi5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5UZXN0Q29ubmVjdGlvblJlc3BvbnNlEn0KEERlbGV0ZUNvbm5lY3Rpb24SMy5rb2lub24uY29ubmVjdGlvbi52MWFscGhhMS5EZWxldGVDb25uZWN0aW9uUmVxdWVzdBo0LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkRlbGV0ZUNvbm5lY3Rpb25SZXNwb25zZRKRAQoVTGlzdEluc3RhbGxhdGlvblJlcG9zEjgua29pbm9uLmNvbm5lY3Rpb24udjFhbHBoYTEuTGlzdEluc3RhbGxhdGlvblJlcG9zUmVxdWVzdBo5LmtvaW5vbi5jb25uZWN0aW9uLnYxYWxwaGExLkxpc3RJbnN0YWxsYXRpb25SZXBvc1Jlc3BvbnNlIgOQAgFCW1pZZ2l0aHViLmNvbS9zdGF0ZXJhY2xvdWQva29pbm9uL2ludGVybmFsL2dlbi9rb2lub24vY29ubmVjdGlvbi92MWFscGhhMTtjb25uZWN0aW9udjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp]);
 
 /**
  * Scope is a grantable capability of a connector type.
@@ -239,6 +239,63 @@ export const GitHubConnectionSchema: GenMessage<GitHubConnection> = /*@__PURE__*
   messageDesc(file_koinon_connection_v1alpha1_connection, 5);
 
 /**
+ * GiteaConnection is the non-secret part of a Gitea connection (ADR 0063).
+ *
+ * @generated from message koinon.connection.v1alpha1.GiteaConnection
+ */
+export type GiteaConnection = Message<"koinon.connection.v1alpha1.GiteaConnection"> & {
+  /**
+   * The server's web base URL, https://host[:port][/path]; the REST API is at /api/v1 under it.
+   *
+   * @generated from field: string base_url = 1;
+   */
+  baseUrl: string;
+
+  /**
+   * PEM certificates trusted for that server besides the system roots. Public.
+   *
+   * @generated from field: string ca_bundle = 2;
+   */
+  caBundle: string;
+
+  /**
+   * Directories, relative to the repository root, that run CI on this server besides the
+   * connector's own CI paths (WORKFLOW_DIRS).
+   *
+   * @generated from field: repeated string ci_dirs = 3;
+   */
+  ciDirs: string[];
+
+  /**
+   * When each token was entered in Koinon. Gitea does not expose a token's creation date, so
+   * this is the age Koinon can show (ADR 0063).
+   *
+   * @generated from field: google.protobuf.Timestamp read_token_set_at = 4;
+   */
+  readTokenSetAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp write_token_set_at = 5;
+   */
+  writeTokenSetAt?: Timestamp | undefined;
+
+  /**
+   * The age after which Koinon warns that a token is old, from the connector type. Nothing
+   * blocks on age and Koinon never rotates a token. Zero for no warning.
+   *
+   * @generated from field: int64 token_warn_after_seconds = 6;
+   */
+  tokenWarnAfterSeconds: bigint;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.GiteaConnection.
+ * Use `create(GiteaConnectionSchema)` to create a new message.
+ */
+export const GiteaConnectionSchema: GenMessage<GiteaConnection> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 6);
+
+/**
  * Connection is a configured connector instance.
  *
  * @generated from message koinon.connection.v1alpha1.Connection
@@ -317,6 +374,12 @@ export type Connection = Message<"koinon.connection.v1alpha1.Connection"> & {
      */
     value: GitHubConnection;
     case: "github";
+  } | {
+    /**
+     * @generated from field: koinon.connection.v1alpha1.GiteaConnection gitea = 14;
+     */
+    value: GiteaConnection;
+    case: "gitea";
   } | { case: undefined; value?: undefined };
 };
 
@@ -325,7 +388,7 @@ export type Connection = Message<"koinon.connection.v1alpha1.Connection"> & {
  * Use `create(ConnectionSchema)` to create a new message.
  */
 export const ConnectionSchema: GenMessage<Connection> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 6);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 7);
 
 /**
  * CreateGitHubConnectionRequest carries the setup guide's fields.
@@ -398,7 +461,7 @@ export type CreateGitHubConnectionRequest = Message<"koinon.connection.v1alpha1.
  * Use `create(CreateGitHubConnectionRequestSchema)` to create a new message.
  */
 export const CreateGitHubConnectionRequestSchema: GenMessage<CreateGitHubConnectionRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 7);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 8);
 
 /**
  * CreateGitHubConnectionResponse holds the new connection and, when asked
@@ -423,7 +486,96 @@ export type CreateGitHubConnectionResponse = Message<"koinon.connection.v1alpha1
  * Use `create(CreateGitHubConnectionResponseSchema)` to create a new message.
  */
 export const CreateGitHubConnectionResponseSchema: GenMessage<CreateGitHubConnectionResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 8);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 9);
+
+/**
+ * CreateGiteaConnectionRequest carries the setup guide's fields.
+ *
+ * @generated from message koinon.connection.v1alpha1.CreateGiteaConnectionRequest
+ */
+export type CreateGiteaConnectionRequest = Message<"koinon.connection.v1alpha1.CreateGiteaConnectionRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string display_name = 2;
+   */
+  displayName: string;
+
+  /**
+   * The server's web base URL, https://host[:port][/path]. Required.
+   *
+   * @generated from field: string base_url = 3;
+   */
+  baseUrl: string;
+
+  /**
+   * Secure input (ADR 0021): the bot's read token and write token. Stored only as an envelope in
+   * Postgres (ADR 0056), never returned or logged.
+   *
+   * @generated from field: string read_token = 4;
+   */
+  readToken: string;
+
+  /**
+   * @generated from field: string write_token = 5;
+   */
+  writeToken: string;
+
+  /**
+   * PEM certificates that sign the server's TLS certificate, when the system roots do not.
+   *
+   * @generated from field: string ca_bundle = 6;
+   */
+  caBundle: string;
+
+  /**
+   * Directories that run CI on this server besides the connector's own CI paths. At most 20.
+   *
+   * @generated from field: repeated string ci_dirs = 7;
+   */
+  ciDirs: string[];
+
+  /**
+   * Run TestConnection right after creating it.
+   *
+   * @generated from field: bool test = 8;
+   */
+  test: boolean;
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.CreateGiteaConnectionRequest.
+ * Use `create(CreateGiteaConnectionRequestSchema)` to create a new message.
+ */
+export const CreateGiteaConnectionRequestSchema: GenMessage<CreateGiteaConnectionRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 10);
+
+/**
+ * CreateGiteaConnectionResponse holds the new connection and, when asked for, the test results.
+ *
+ * @generated from message koinon.connection.v1alpha1.CreateGiteaConnectionResponse
+ */
+export type CreateGiteaConnectionResponse = Message<"koinon.connection.v1alpha1.CreateGiteaConnectionResponse"> & {
+  /**
+   * @generated from field: koinon.connection.v1alpha1.Connection connection = 1;
+   */
+  connection?: Connection | undefined;
+
+  /**
+   * @generated from field: repeated koinon.connection.v1alpha1.CheckResult results = 2;
+   */
+  results: CheckResult[];
+};
+
+/**
+ * Describes the message koinon.connection.v1alpha1.CreateGiteaConnectionResponse.
+ * Use `create(CreateGiteaConnectionResponseSchema)` to create a new message.
+ */
+export const CreateGiteaConnectionResponseSchema: GenMessage<CreateGiteaConnectionResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_connection_v1alpha1_connection, 11);
 
 /**
  * GetConnectionRequest names a connection.
@@ -447,7 +599,7 @@ export type GetConnectionRequest = Message<"koinon.connection.v1alpha1.GetConnec
  * Use `create(GetConnectionRequestSchema)` to create a new message.
  */
 export const GetConnectionRequestSchema: GenMessage<GetConnectionRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 9);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 12);
 
 /**
  * GetConnectionResponse holds the connection.
@@ -466,7 +618,7 @@ export type GetConnectionResponse = Message<"koinon.connection.v1alpha1.GetConne
  * Use `create(GetConnectionResponseSchema)` to create a new message.
  */
 export const GetConnectionResponseSchema: GenMessage<GetConnectionResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 10);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 13);
 
 /**
  * @generated from message koinon.connection.v1alpha1.DeleteConnectionRequest
@@ -488,7 +640,7 @@ export type DeleteConnectionRequest = Message<"koinon.connection.v1alpha1.Delete
  * Use `create(DeleteConnectionRequestSchema)` to create a new message.
  */
 export const DeleteConnectionRequestSchema: GenMessage<DeleteConnectionRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 11);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 14);
 
 /**
  * @generated from message koinon.connection.v1alpha1.DeleteConnectionResponse
@@ -501,7 +653,7 @@ export type DeleteConnectionResponse = Message<"koinon.connection.v1alpha1.Delet
  * Use `create(DeleteConnectionResponseSchema)` to create a new message.
  */
 export const DeleteConnectionResponseSchema: GenMessage<DeleteConnectionResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 12);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 15);
 
 /**
  * BoundAgents is the error detail of a DeleteConnection refused with FAILED_PRECONDITION because
@@ -521,7 +673,7 @@ export type BoundAgents = Message<"koinon.connection.v1alpha1.BoundAgents"> & {
  * Use `create(BoundAgentsSchema)` to create a new message.
  */
 export const BoundAgentsSchema: GenMessage<BoundAgents> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 13);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 16);
 
 /**
  * @generated from message koinon.connection.v1alpha1.BoundAgent
@@ -543,7 +695,7 @@ export type BoundAgent = Message<"koinon.connection.v1alpha1.BoundAgent"> & {
  * Use `create(BoundAgentSchema)` to create a new message.
  */
 export const BoundAgentSchema: GenMessage<BoundAgent> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 14);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 17);
 
 /**
  * ListConnectionsRequest names the org.
@@ -562,7 +714,7 @@ export type ListConnectionsRequest = Message<"koinon.connection.v1alpha1.ListCon
  * Use `create(ListConnectionsRequestSchema)` to create a new message.
  */
 export const ListConnectionsRequestSchema: GenMessage<ListConnectionsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 15);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 18);
 
 /**
  * ListConnectionsResponse lists the org's connections.
@@ -581,7 +733,7 @@ export type ListConnectionsResponse = Message<"koinon.connection.v1alpha1.ListCo
  * Use `create(ListConnectionsResponseSchema)` to create a new message.
  */
 export const ListConnectionsResponseSchema: GenMessage<ListConnectionsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 16);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 19);
 
 /**
  * TestConnectionRequest names a connection.
@@ -605,7 +757,7 @@ export type TestConnectionRequest = Message<"koinon.connection.v1alpha1.TestConn
  * Use `create(TestConnectionRequestSchema)` to create a new message.
  */
 export const TestConnectionRequestSchema: GenMessage<TestConnectionRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 17);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 20);
 
 /**
  * TestConnectionResponse holds the checks in setup-guide order.
@@ -629,7 +781,7 @@ export type TestConnectionResponse = Message<"koinon.connection.v1alpha1.TestCon
  * Use `create(TestConnectionResponseSchema)` to create a new message.
  */
 export const TestConnectionResponseSchema: GenMessage<TestConnectionResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 18);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 21);
 
 /**
  * ListInstallationReposRequest names a GitHub connection and a page.
@@ -669,7 +821,7 @@ export type ListInstallationReposRequest = Message<"koinon.connection.v1alpha1.L
  * Use `create(ListInstallationReposRequestSchema)` to create a new message.
  */
 export const ListInstallationReposRequestSchema: GenMessage<ListInstallationReposRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 19);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 22);
 
 /**
  * InstallationRepo is one repository the installation can access.
@@ -700,7 +852,7 @@ export type InstallationRepo = Message<"koinon.connection.v1alpha1.InstallationR
  * Use `create(InstallationRepoSchema)` to create a new message.
  */
 export const InstallationRepoSchema: GenMessage<InstallationRepo> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 20);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 23);
 
 /**
  * ListInstallationReposResponse is one page, in GitHub's order.
@@ -734,7 +886,7 @@ export type ListInstallationReposResponse = Message<"koinon.connection.v1alpha1.
  * Use `create(ListInstallationReposResponseSchema)` to create a new message.
  */
 export const ListInstallationReposResponseSchema: GenMessage<ListInstallationReposResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_connection_v1alpha1_connection, 21);
+  messageDesc(file_koinon_connection_v1alpha1_connection, 24);
 
 /**
  * Tier is a scope's risk tier (ADR 0008).
@@ -837,6 +989,18 @@ export const ConnectionService: GenService<{
     methodKind: "unary";
     input: typeof CreateGitHubConnectionRequestSchema;
     output: typeof CreateGitHubConnectionResponseSchema;
+  },
+  /**
+   * CreateGiteaConnection creates a Gitea connection: a bot account on a Gitea server with a read
+   * token and a write token (ADR 0063). Both tokens are stored encrypted and never returned.
+   * Admins and owners.
+   *
+   * @generated from rpc koinon.connection.v1alpha1.ConnectionService.CreateGiteaConnection
+   */
+  createGiteaConnection: {
+    methodKind: "unary";
+    input: typeof CreateGiteaConnectionRequestSchema;
+    output: typeof CreateGiteaConnectionResponseSchema;
   },
   /**
    * GetConnection returns one connection. Viewers and above.

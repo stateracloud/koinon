@@ -15,7 +15,7 @@ import { useDebounced } from '@/hooks/use-debounced'
  * pages them: what an agent on this connection can be bound to. Admins and
  * owners.
  */
-export function InstallationRepos({ orgId, connectionId }: { orgId: string; connectionId: string }) {
+export function InstallationRepos({ orgId, connectionId, noun = 'the installation can access' }: { orgId: string; connectionId: string; noun?: string }) {
   const id = useId()
   const [search, setSearch] = useState('')
   const query = useDebounced(search.trim())
@@ -36,7 +36,7 @@ export function InstallationRepos({ orgId, connectionId }: { orgId: string; conn
         </h2>
         {total !== undefined && (
           <span className="text-muted-foreground text-sm">
-            {total.toString()} the installation can access
+            {total.toString()} {noun}
           </span>
         )}
       </div>
@@ -55,7 +55,7 @@ export function InstallationRepos({ orgId, connectionId }: { orgId: string; conn
       ) : (
         <>
           {repos.length === 0 && !list.hasNextPage && (
-            <p className="text-muted-foreground text-sm">{query ? 'No repository matches.' : 'The installation can access no repositories yet.'}</p>
+            <p className="text-muted-foreground text-sm">{query ? 'No repository matches.' : `${noun.replace(/^./, (ch) => ch.toUpperCase())} no repositories yet.`}</p>
           )}
           {repos.length > 0 && (
             <ul aria-label="Installation repositories" className="grid gap-1 text-sm">

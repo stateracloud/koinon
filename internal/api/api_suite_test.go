@@ -159,6 +159,8 @@ type envOptions struct {
 	github *github.Client
 	ghFake *githubtest.Fake
 	noKeys bool
+	// allowedHosts are exempt from the connection base URL policy (a test server on 127.0.0.1).
+	allowedHosts []string
 	// logs, when set, receives the services' and auth's logs as well.
 	logs io.Writer
 	// plainHTTP serves over http:// instead of TLS, with a matching PublicURL.
@@ -278,6 +280,7 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 		Hub:     e.hub, WatchPollInterval: opts.watchPoll, DirectMessages: opts.directMessages,
 		Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 		Keys:   servicesKeys(opts.keys), GitHub: opts.github,
+		URLPolicy: catalog.URLPolicy{Namespace: "koinon", AllowedHosts: opts.allowedHosts},
 		Approvals: approvals.New(e.pool, approvals.Options{
 			Keys: openerOf(opts.keys), GitHub: opts.github, Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 		}),

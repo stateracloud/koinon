@@ -158,3 +158,45 @@ Checked 2026-10-26 (research notes `gitea-overlap.md` §3, `forge-and-trackers.m
   [0044](0044-in-sandbox-credential-exception.md), [0045](0045-openshell-hardening-defaults.md),
   [0049](0049-v01-scope-decisions.md), [0062](0062-code-host-connectors.md)
 - Spike: `hack/spike/results/2-credentials.md`, `hack/spike/gitea-setup.sh:44-57`
+
+## Amendments
+
+- Amendment 2026-10-27 (CH5, Gitea connector). Decisions that answer the open questions above or that
+  the plan item left to the implementation:
+  - **Token scopes.** Read token: `read:repository`, `read:issue`, `read:user`. Write token:
+    `write:repository`, `write:issue`, `read:user` (`read:user` lets the connection check name the bot;
+    unverified for Gitea 28.2 whether `GET /user` needs it). The sandbox's network rules and the tools'
+    scopes name two permissions, `repository` and `issue`, for the two tokens' categories.
+  - **Token age** means the time since the token was entered in Koinon (UI, API or declarative Secret):
+    Gitea's token API needs the user's password to list tokens, so the provider's creation date is not
+    available. It is kept in the non-secret connection config (`readTokenSetAt`, `writeTokenSetAt`) with a
+    short SHA-256 fingerprint of each token, so declaring the same Secret again keeps the date and a
+    replaced token restarts it. The warning threshold is connector data, `auth.tokenWarnAfter`, **90 days**
+    (`2160h`). The connection page shows each token's age and, from the threshold on, a warning; nothing
+    blocks on age and nothing rotates.
+  - **Placeholders.** The sandbox sees the read token as OpenShell's placeholder in `GITHUB_TOKEN` and
+    `GH_TOKEN`, the same names as GitHub's: the provider record, profile, credential helper and
+    `koinon-git-credential` are the same code, and a profile's endpoints bind the value to the connection's
+    host. The write token is never given to OpenShell: only koinon-api (the push writer and the REST calls
+    after an approval) reads it from the secret store. Both are sealed in the connection's envelope.
+  - **The connection check** has four steps and writes nothing: `gitea.server` (the server answers, and its
+    version), `gitea.tokens` (both tokens authenticate as the same bot), `gitea.repositories` (lists what the
+    bot can see with its permission per repository and how many it can push to) and `gitea.read-token`
+    (a write that Gitea must refuse before it reads the request, `POST issues` with an empty body, is
+    refused with 403 for the read token; a 422 means the token has a write scope and the check fails).
+    The open question "more repositories than the connection declares" is settled this way: a v0.1
+    connection declares no repositories (agents bind them), so the check does not fail on the count. It
+    reports the list, notes administrator permission on any, and fails only when the bot sees none or can
+    push to none. Whether Gitea refuses the probe with 403 for a read-scoped token before validation is
+    from Gitea's source reading (scope middleware runs first), not run against a real server.
+  - **Weaker-credential warning.** It is driven by the descriptor (`credentialClass: static-token`), shown in
+    the agent builder's access step and review, on the new-connection page and on the connection page. All
+    presets stay. A second template, `repo-helper-gitea`, is the repo-helper on a Gitea grant (a template
+    names one connector).
+  - **Permission model in the tests.** `internal/testing/fakegitea` enforces, as Gitea does in two layers: a
+    token's scope (a read-scoped token is refused with 403 on every write, API or git push, before the body
+    is read) and the login's permission on the repository (none: 404; read only: writes 403). Gitea's real
+    categories are finer (`write:repository`, `write:issue`), and its git-over-HTTP push check of the
+    token scope is not confirmed against a real server in this item; the escape suite's Gitea cases
+    (`test/escape/gitea_read_test.go`) assert the OpenShell policy, which is independent of the server, and
+    the home-lab test confirms the server side.

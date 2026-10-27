@@ -228,6 +228,14 @@ var isolationCases = map[string]isolationCase{
 			})
 		},
 	},
+	connectionv1alpha1connect.ConnectionServiceCreateGiteaConnectionProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.conns.CreateGiteaConnection(ctx, &connectionv1alpha1.CreateGiteaConnectionRequest{
+				OrgId: org, BaseUrl: "https://git.example.test", ReadToken: "koinon_test_not-a-real-read-token", WriteToken: "koinon_test_not-a-real-write-token",
+			})
+		},
+	},
 	connectionv1alpha1connect.ConnectionServiceDeleteConnectionProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.conns.DeleteConnection(ctx, &connectionv1alpha1.DeleteConnectionRequest{OrgId: org, ConnectionId: f.connection})

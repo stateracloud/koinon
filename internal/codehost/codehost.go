@@ -56,6 +56,10 @@ type Token struct {
 	value        string
 	ExpiresAt    time.Time
 	Repositories []string
+	// Revision names the credential without revealing it, for a token that does not expire (a
+	// static token has a zero ExpiresAt): it changes when the token does, so the reconciler
+	// knows to push a new value.
+	Revision string
 }
 
 // NewToken returns a Token holding value.
@@ -201,6 +205,11 @@ type Description struct {
 	InstallationID int64
 	// Site is the connection's host when it is not the connector's default.
 	Site Site
+	// Token-based providers (Gitea, ADR 0063): the bot's login, when each token was entered in
+	// Koinon (the provider does not expose its creation date), and a short fingerprint of the
+	// two tokens. The tokens themselves never leave the secret store.
+	BotLogin                        string
+	ReadTokenSetAt, WriteTokenSetAt time.Time
 }
 
 // Capabilities says what a provider's credential and write API can and cannot narrow, so risk
@@ -215,6 +224,9 @@ type Capabilities struct {
 	CredentialClass string
 	// TokenLifetime is zero for a credential that does not expire.
 	TokenLifetime time.Duration
+	// TokenWarnAfter is the age of a static token after which Koinon warns; zero for none. It
+	// never blocks and never rotates (ADR 0063).
+	TokenWarnAfter time.Duration
 	// NarrowsRepositories and NarrowsPermissions say whether one use of the credential can
 	// be limited to the call's repositories and permissions.
 	NarrowsRepositories bool

@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import type { CheckResult } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { GuideField, SetupGuide } from '@/lib/connector'
+import { caBundleError } from '@/lib/ca-bundle'
 import { ciDirsError, parseCiDirs } from '@/lib/ci-paths'
 
 export type GitHubConnectionInput = {
@@ -33,8 +34,6 @@ export type GitHubConnectionFormProps = {
 
 const integerPattern = /^[1-9][0-9]{0,18}$/
 
-const maxCaBundleBytes = 256 << 10
-
 /** baseUrlError mirrors the API: an https URL that is only a host and an optional port. */
 function baseUrlError(raw: string): string | undefined {
   const v = raw.trim()
@@ -49,18 +48,6 @@ function baseUrlError(raw: string): string | undefined {
   if (u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '') || /[?#]/.test(v)) {
     return 'Base URL must be only a host and an optional port; the API is reached at /api/v3 on it.'
   }
-  return undefined
-}
-
-/** caBundleError mirrors the API: PEM CERTIFICATE blocks only, at most 256 KiB. */
-function caBundleError(raw: string): string | undefined {
-  const v = raw.trim()
-  if (!v) return undefined
-  if (new TextEncoder().encode(v).length > maxCaBundleBytes) return 'CA bundle is larger than 256 KiB.'
-  const blocks = [...v.matchAll(/-----BEGIN ([A-Z0-9 ]+)-----/g)].map((m) => m[1])
-  if (!blocks.length) return 'CA bundle must be PEM certificates (-----BEGIN CERTIFICATE-----).'
-  const other = blocks.find((b) => b !== 'CERTIFICATE')
-  if (other) return `CA bundle holds a "${other}" block; only certificates are allowed.`
   return undefined
 }
 

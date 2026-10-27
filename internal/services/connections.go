@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	connect "connectrpc.com/connect/v2"
@@ -23,6 +24,7 @@ import (
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/gitea"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/db/store"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
@@ -93,12 +95,24 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 	if err := json.Unmarshal(c.LastTest, &results); err == nil {
 		out.LastTest = checksProto(results)
 	}
-	if p, ok := s.hosts.Get(c.Connector); ok && p.ID() == providers.GitHub {
-		if d, err := p.Describe(c.Config); err == nil {
-			out.Settings = &connectionv1alpha1.Connection_Github{Github: &connectionv1alpha1.GitHubConnection{
-				AppId: d.AppID, InstallationId: d.InstallationID, KeyFingerprint: c.SecretFingerprint,
-				BaseUrl: d.Site.BaseURL, CaBundle: d.Site.CABundle, CiDirs: d.Site.CIDirs,
-			}}
+	if p, ok := s.hosts.Get(c.Connector); ok {
+		switch p.ID() {
+		case providers.GitHub:
+			if d, err := p.Describe(c.Config); err == nil {
+				out.Settings = &connectionv1alpha1.Connection_Github{Github: &connectionv1alpha1.GitHubConnection{
+					AppId: d.AppID, InstallationId: d.InstallationID, KeyFingerprint: c.SecretFingerprint,
+					BaseUrl: d.Site.BaseURL, CaBundle: d.Site.CABundle, CiDirs: d.Site.CIDirs,
+				}}
+			}
+		case providers.Gitea:
+			if d, err := p.Describe(c.Config); err == nil {
+				out.Settings = &connectionv1alpha1.Connection_Gitea{Gitea: &connectionv1alpha1.GiteaConnection{
+					BaseUrl: d.Site.BaseURL, CaBundle: d.Site.CABundle, CiDirs: d.Site.CIDirs,
+					ReadTokenSetAt:        tsProto(pgtype.Timestamptz{Time: d.ReadTokenSetAt, Valid: !d.ReadTokenSetAt.IsZero()}),
+					WriteTokenSetAt:       tsProto(pgtype.Timestamptz{Time: d.WriteTokenSetAt, Valid: !d.WriteTokenSetAt.IsZero()}),
+					TokenWarnAfterSeconds: int64(p.Capabilities().TokenWarnAfter / time.Second),
+				}}
+			}
 		}
 	}
 	return out
@@ -233,6 +247,114 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	return res, nil
 }
 
+// CreateGiteaConnection implements ConnectionService. The two tokens go from the request straight
+// into the secret store (ADR 0056): they are validated (so a bad paste fails here, at the step that
+// caused it), stored only as an envelope in Postgres, never returned and never logged; errors about
+// them never quote them. The connection's config holds the server's address, when each token was
+// entered (Gitea does not expose a creation date) and a short fingerprint of each.
+func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alpha1.CreateGiteaConnectionRequest) (*connectionv1alpha1.CreateGiteaConnectionResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(req.GetDisplayName())
+	if name == "" {
+		name = "Gitea"
+	}
+	if len(name) > 200 {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "display_name is longer than 200 characters")
+	}
+	baseURL, caBundle := strings.TrimSpace(req.GetBaseUrl()), strings.TrimSpace(req.GetCaBundle())
+	// Take the tokens out of the request, so nothing that prints the request later
+	// (protobuf-go ignores debug_redact) can show them.
+	readToken, writeToken := []byte(strings.TrimSpace(req.GetReadToken())), []byte(strings.TrimSpace(req.GetWriteToken()))
+	req.ReadToken, req.WriteToken = "", ""
+	host, ok := s.hosts.Get(providers.Gitea)
+	if !ok {
+		return nil, s.dbError(errors.New("gitea provider is not registered"), "connector type")
+	}
+	secrets := map[string][]byte{gitea.ReadTokenField: readToken, gitea.WriteTokenField: writeToken}
+	if err := host.ValidateSecrets(secrets); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "tokens: "+strings.TrimPrefix(err.Error(), "gitea: "))
+	}
+	if s.keys == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, connections.ErrNoKeyring.Error())
+	}
+	t, ok := connectors.Get(host.ID())
+	if !ok {
+		return nil, s.dbError(errors.New("gitea connector type is not embedded"), "connector type")
+	}
+	loc, err := t.Locate(baseURL)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
+	}
+	baseURL = loc.BaseURL()
+	// The API sends the tokens to this host and the reconciler opens sandbox egress to it: private
+	// and internal addresses only when the platform allow-lists them.
+	if err := s.urlPolicy.Check(requestCtx(ctx), baseURL); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "base_url: "+err.Error())
+	}
+	if caBundle != "" {
+		if _, err := codehost.CertPool(caBundle); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "ca_bundle: "+err.Error())
+		}
+	}
+	ciDirs, err := codehost.CleanCIDirs(req.GetCiDirs())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "ci_dirs: "+err.Error())
+	}
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		return nil, s.dbError(err, "connection")
+	}
+	connID := pgtype.UUID{Bytes: id, Valid: true}
+	cfg := gitea.NewConfig(codehost.Site{BaseURL: baseURL, CABundle: caBundle, CIDirs: ciDirs}, readToken, writeToken, nil, time.Now())
+	config, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, s.dbError(err, "connection")
+	}
+	envelope, err := connections.SealFields(s.keys, c.org, connID, secrets)
+	if err != nil {
+		s.log.Error("could not seal connection secret", "org", c.org.String(), "connection", connID.String(), "err", err)
+		return nil, connect.NewError(connect.CodeUnavailable, "could not store the tokens; try again")
+	}
+	fingerprint := cfg.ReadTokenFingerprint + "." + cfg.WriteTokenFp
+	var row store.Connection
+	err = s.inTx(requestCtx(ctx), func(q *store.Queries) error {
+		var err error
+		row, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+			OrgID: c.org, ID: connID, Connector: t.Metadata.ID, DisplayName: name, Config: config,
+			SecretEnvelope: envelope, SecretFingerprint: fingerprint, Source: store.ConfigSourceUi, CreatedBy: c.actor(),
+		})
+		if err != nil {
+			return err
+		}
+		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: "connection.create", TargetKind: "connection", TargetID: connID.String(),
+			After: map[string]any{
+				"connector": t.Metadata.ID, "displayName": name, "baseUrl": baseURL, "caBundle": caBundle != "",
+				"ciDirs": ciDirs, "fingerprints": fingerprint, "source": "ui",
+			},
+		})
+	})
+	if err != nil {
+		return nil, s.dbError(err, "connection")
+	}
+	s.log.Info("connection created", "org", c.org.String(), "connection", connID.String(), "connector", t.Metadata.ID,
+		"token_fingerprints", fingerprint, "by", c.actor().String())
+
+	res := &connectionv1alpha1.CreateGiteaConnectionResponse{}
+	if req.GetTest() {
+		row, res.Results, err = s.testConnection(ctx, row)
+		if err != nil {
+			return nil, err
+		}
+	}
+	res.Connection = s.connectionProto(row)
+	return res, nil
+}
+
 // DeleteConnection implements ConnectionService, by the rules of DeleteProvider: a connection entered
 // here can be deleted, a declared one only after its Secret was deleted (removed), and none while an
 // agent is bound to it.
@@ -354,7 +476,11 @@ func (s *Server) testConnection(ctx context.Context, row store.Connection) (stor
 	}
 	if err != nil {
 		s.log.Warn("connection credentials unreadable", "org", row.OrgID.String(), "connection", row.ID.String(), "err", err)
-		results = []connections.CheckResult{{Check: "secret", Step: "generate-key", Message: "Koinon could not read this connection's private key; create the connection again"}}
+		res := connections.CheckResult{Check: "secret", Step: "generate-key", Message: "Koinon could not read this connection's private key; create the connection again"}
+		if p.ID() != providers.GitHub {
+			res.Step, res.Message = "create-tokens", "Koinon could not read this connection's tokens or address; create the connection again"
+		}
+		results = []connections.CheckResult{res}
 	} else {
 		results = p.Checks(ctx, conn, t)
 	}
