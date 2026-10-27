@@ -20,22 +20,26 @@ package askuser
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
 // Target is the gateway target (and tool server key) of this server.
@@ -47,22 +51,26 @@ const Path = "/mcp-koinon"
 // ToolAskUser is the tool's name.
 const ToolAskUser = gateway.ToolAskUser
 
+// ToolCancelTask is the name of the cancel_task tool.
+const ToolCancelTask = gateway.ToolCancelTask
+
 // Options configures a Server.
 type Options struct {
 	Logger *slog.Logger
-	// TTL is how long a question waits before it expires; defaults to questions.DefaultTTL.
-	TTL time.Duration
-	Now func() time.Time
+	// TTL and Reminder override, when positive, the agent's question timers (the active version's
+	// questions settings, 7 days and 24 hours by default; ADR 0065 decision 10). For tests.
+	TTL, Reminder time.Duration
+	Now           func() time.Time
 }
 
 // Server is the ask_user MCP server.
 type Server struct {
-	pool *pgxpool.Pool
-	q    *store.Queries
-	log  *slog.Logger
-	ttl  time.Duration
-	now  func() time.Time
-	mcp  *mcp.Server
+	pool          *pgxpool.Pool
+	q             *store.Queries
+	log           *slog.Logger
+	ttl, reminder time.Duration
+	now           func() time.Time
+	mcp           *mcp.Server
 }
 
 // New returns a Server recording questions in pool.
@@ -70,13 +78,10 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	if opts.TTL <= 0 {
-		opts.TTL = questions.DefaultTTL
-	}
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.TTL, now: opts.Now}
+	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.TTL, reminder: opts.Reminder, now: opts.Now}
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: project.Name + "-agent-tools", Version: project.Version}, nil)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolAskUser,
@@ -89,6 +94,12 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 			"is safe to act on without a person (for example 'do not post', 'skip'). You are told when the default " +
 			"was applied. Do not ask twice, and do not work around the pause.",
 	}, s.askUser)
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: ToolCancelTask,
+		Description: "Close the task you are working on as canceled, when it cannot or should not go on (for example nobody " +
+			"answered your question and the safe default is not enough to continue). 'reason' is shown on the task's " +
+			"timeline. It cannot be undone; the person can start a new task. After calling it, end your turn.",
+	}, s.cancelTask)
 	return s
 }
 
@@ -166,6 +177,40 @@ func (s *Server) lookupErr(err error, what string) error {
 	return errors.New("internal error; try again later")
 }
 
+// timers returns the reminder and the expiry of the agent's questions: the active version's
+// settings, or the overrides in Options.
+func (s *Server) timers(ctx context.Context, a store.Agent) (reminder, ttl time.Duration, err error) {
+	var cfg agentconfig.Config
+	if a.ActiveVersionID.Valid {
+		v, err := s.q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: a.OrgID, ID: a.ActiveVersionID})
+		if err != nil {
+			return 0, 0, s.lookupErr(err, "agent version")
+		}
+		if cfg, err = agentconfig.Parse(v.Config); err != nil {
+			s.log.Error("ask_user: read the agent's config", "agent", a.ID.String(), "err", err)
+			return 0, 0, errors.New("internal error; try again later")
+		}
+	}
+	reminder, ttl = cfg.QuestionTimers()
+	if s.ttl > 0 {
+		ttl = s.ttl
+		if reminder >= ttl {
+			reminder = 0
+		}
+	}
+	if s.reminder > 0 && s.reminder < ttl {
+		reminder = s.reminder
+	}
+	return reminder, ttl, nil
+}
+
+func remindAt(now time.Time, after time.Duration) time.Time {
+	if after <= 0 {
+		return time.Time{}
+	}
+	return now.Add(after)
+}
+
 // addressee resolves "to": a member named by email or ID, or the task's creator.
 func (s *Server) addressee(ctx context.Context, c caller, to string) (pgtype.UUID, string, error) {
 	to = strings.TrimSpace(to)
@@ -201,6 +246,10 @@ func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args)
 	if err != nil {
 		return nil, Result{}, err
 	}
+	remind, ttl, err := s.timers(ctx, c.agent)
+	if err != nil {
+		return nil, Result{}, err
+	}
 	var row store.Question
 	var created bool
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -208,7 +257,7 @@ func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args)
 		row, created, err = questions.Create(ctx, store.New(tx), questions.Ask{
 			Org: c.org.ID, Task: c.run.TaskID, Run: c.run.ID, Agent: c.agent.ID, To: to,
 			Question: in.Question, Choices: in.Choices, Draft: in.Draft, Default: in.Default,
-			ExpiresAt: s.now().Add(s.ttl),
+			ExpiresAt: s.now().Add(ttl), RemindAt: remindAt(s.now(), remind),
 		})
 		return err
 	})
@@ -229,4 +278,68 @@ func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args)
 		"and you get it as your next message. If the question is dismissed or not answered by %s, Koinon applies your default (%q) "+
 		"and tells you. Do not ask again and do not work around the pause.", out.ID, label, out.ExpiresAt, row.DefaultAnswer)
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, out, nil
+}
+
+// CancelArgs are the arguments of cancel_task.
+type CancelArgs struct {
+	Reason string `json:"reason" jsonschema:"why the task is canceled, in plain words; shown on the task's timeline"`
+}
+
+// CancelResult is the structured result of cancel_task.
+type CancelResult struct {
+	Status string `json:"status"`
+}
+
+// kindStatusChanged is the task event of a state change (the same kind the task service writes).
+const kindStatusChanged = "status.changed"
+
+// cancelTask closes the caller's task as canceled, with the reason on the task's timeline, and
+// cancels its queued runs. The caller's own run is running and ends with the turn.
+func (s *Server) cancelTask(ctx context.Context, req *mcp.CallToolRequest, in CancelArgs) (*mcp.CallToolResult, CancelResult, error) {
+	c, err := s.identify(ctx, req)
+	if err != nil {
+		return nil, CancelResult{}, err
+	}
+	reason := strings.TrimSpace(in.Reason)
+	if reason == "" {
+		return nil, CancelResult{}, errors.New("reason is required: say why the task is canceled")
+	}
+	if n := utf8.RuneCountInString(reason); n > 1000 {
+		return nil, CancelResult{}, fmt.Errorf("reason is %d characters; at most 1000", n)
+	}
+	status := "canceled"
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		t, err := q.GetTaskForUpdate(ctx, store.GetTaskForUpdateParams{OrgID: c.org.ID, ID: c.run.TaskID})
+		if err != nil {
+			return err
+		}
+		switch t.State {
+		case store.TaskStateCompleted, store.TaskStateCanceled, store.TaskStateFailed:
+			status = string(t.State)
+			return nil
+		}
+		if _, err := q.SetTaskState(ctx, store.SetTaskStateParams{OrgID: c.org.ID, ID: t.ID, State: store.TaskStateCanceled}); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(map[string]any{"from": string(t.State), "to": string(store.TaskStateCanceled), "reason": reason})
+		if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: c.org.ID, TaskID: t.ID, RunID: c.run.ID, Kind: kindStatusChanged,
+			ActorKind: store.TaskActorKindAgent, ActorAgentID: c.agent.ID, Payload: payload,
+		}); err != nil {
+			return err
+		}
+		_, err = scheduler.CancelQueuedForTask(ctx, q, t, "task canceled by the agent", scheduler.System)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, CancelResult{}, errNoIdentity
+		}
+		s.log.Error("cancel_task: cancel the task", "org", c.org.Slug, "agent", c.agent.ID.String(), "run", c.run.ID.String(), "err", err)
+		return nil, CancelResult{}, errors.New("internal error canceling the task; try again later")
+	}
+	s.log.Info("task canceled by its agent", "org", c.org.Slug, "agent", c.agent.ID.String(), "task", c.run.TaskID.String())
+	text := "The task is " + status + ". End your turn now."
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, CancelResult{Status: status}, nil
 }

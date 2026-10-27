@@ -82,6 +82,15 @@
           "type": "boolean",
           "default": false
         },
+        "questions": {
+          "description": "When the questions this agent asks with ask_user get their reminder and when they expire and apply their safe default (ADR 0065 decision 10). Durations from the moment of asking, as whole hours, minutes or seconds. Omitted values take the defaults: reminderAfter 24h, expireAfter 168h (7 days).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reminderAfter": { "type": "string", "pattern": "^[1-9][0-9]*(h|m|s)$" },
+            "expireAfter": { "type": "string", "pattern": "^[1-9][0-9]*(h|m|s)$" }
+          }
+        },
         "harness": {
           "description": "Harness settings beyond the flavor choice. Omitted means every setting is off.",
           "type": "object",

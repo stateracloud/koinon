@@ -57,6 +57,7 @@ var crossOrgQueries = map[string]string{
 	"budget.sql:ListOrgBudgetSummaries":                 "platform admins: lists every org with its cap, ceiling and spend",
 	"prices.sql:ListPendingMigratedPrices":              "startup: finds the prices migration 00014 made from model rates, in every org, to complete them",
 	"questions.sql:ListOrgsWithQuestionsToNotify":       "the question notifier: finds every org that has an opened question not yet announced",
+	"questions.sql:ListOrgsWithDueQuestions":            "the question timers: finds every org that has an open question with a reminder or an expiry due",
 	"questions.sql:ListOrgsWithQuestionsOfFinishedRuns": "the question sweep: finds every org that has a question whose run ended",
 	"audit.sql:ListAuditEventsAllOrgs":                  "platform admins: reads the audit log across every org",
 	"audit.sql:ListAuditChainOrgs":                      "the audit verifier: lists every org that has a chain",
