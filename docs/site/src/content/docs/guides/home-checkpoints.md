@@ -77,8 +77,17 @@ is skipped.
 An agent that has been stopped for N days (7 by default) needs neither its sandbox nor its volume. Once
 a complete home checkpoint exists, Koinon deletes the sandbox and its volume, and the next run restores
 the home into a fresh sandbox and reloads the same session. An agent whose latest backup is incomplete is
-not archived, and ephemeral agents are not archived. Archiving therefore needs checkpoints to be on. The archive tier is plan item AR1: until a release
-includes it, stopped sandboxes keep their volume.
+not archived, and ephemeral agents are not archived. Archiving therefore needs checkpoints to be on. The 7 days count from the later of the stop and the
+last activity.
+
+The window is the chart value `reconciler.archiveAfter` (default `168h`; the flag is `--archive-after`).
+A negative value such as `-1h` turns the archive tier off. It is one value for every org; per-org tuning
+is not built.
+
+```yaml
+reconciler:
+  archiveAfter: 168h
+```
 
 This is separate from archiving an agent, which retires it. The chart's `reconciler.homeRetention`
 decides what happens to the volume of an agent that was archived by an admin (`delete` or `retain`).
