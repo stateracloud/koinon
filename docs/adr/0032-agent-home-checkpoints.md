@@ -210,3 +210,13 @@ exec throughput on the home lab, which has to be measured.
 - [0009 Agent runtime](0009-agent-runtime.md), [0029 Run-level resume](0029-run-level-resume.md)
 - [0030 Run state machine](0030-run-state-machine.md), [0033 Memory](0033-file-based-memory.md)
 - [0044 In-sandbox credential exception](0044-in-sandbox-credential-exception.md)
+
+## Amendment (2026-10-27, wave-2 integration): ephemeral agents
+
+Ephemeral agents are skipped everywhere: the reconciler (`agentconfig.IsEphemeral` replaces the
+`checkpoint.Ephemeral` stub), `RequestHourlyHomeCheckpoints` (the active version's `ephemeral` flag)
+and agentd's `restoreHome` (clears a pending restore). A persistent agent that becomes ephemeral is
+backed up by the recreate gate before its home is deleted; that checkpoint is kept, is not restored
+into a task sandbox, and serves a later persistent version. Moving the row to a task's sandbox
+clears any pending restore and the sandbox lineage, so nothing carries over between tasks (ADR 0065
+13c).
