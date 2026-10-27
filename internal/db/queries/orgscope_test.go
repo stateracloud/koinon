@@ -62,6 +62,7 @@ var crossOrgQueries = map[string]string{
 	"audit.sql:ListAuditChainOrgs":                      "the audit verifier: lists every org that has a chain",
 	"sandboxes.sql:CountAgentSandboxesByState":          "reconciler metrics: counts sandboxes by state across every org; returns counts only, no row or ID",
 	"agents.sql:ListActiveAgentVersionsAllOrgs":         "the trigger scheduler: lists the active triggers of every live org's active agents; read-only",
+	"agents.sql:ListAgentActivationsAllOrgs":            "the schedule trigger: when each live org's active agent version was activated; read-only",
 	"auth.sql:ListEffectiveMemberships":                 "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
 }
 

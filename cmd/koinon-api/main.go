@@ -85,6 +85,7 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/internal/triggers/schedule"
 	"github.com/stateracloud/koinon/templates"
 	"github.com/stateracloud/koinon/web"
 )
@@ -425,6 +426,10 @@ func run() error {
 	// Notifications that follow a commit (pre-wakes) are DBOS steps with --durable, and inline
 	// best effort without it (ADR 0066, practice B2).
 	var notifier *durable.Notifier
+	var sched *schedule.Scheduler
+	if !cfg.durable {
+		slog.Warn("schedule triggers do not fire: they run on the DBOS runtime (api.durable.enabled, --durable)")
+	}
 	if cfg.durable {
 		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
 		// missing schema fails the start instead of the API running without its timers.
@@ -439,12 +444,19 @@ func run() error {
 			return err
 		}
 		// The org-partitioned queue for trigger and task-creation work (DB2): each org's limits are
-		// its trigger_concurrency and trigger_rate_per_minute settings. The trigger paths (TR2, TR3)
-		// enqueue through it with durable.EnqueueForOrg; until they land it only registers the queue.
-		if _, err := durable.NewOrgWork(rt, durable.OrgQueueConfig{
+		// its trigger_concurrency and trigger_rate_per_minute settings. Schedule triggers (TR2) enqueue
+		// through it with durable.EnqueueForOrg; TR3 will follow.
+		orgWork, err := durable.NewOrgWork(rt, durable.OrgQueueConfig{
 			Defaults: orgsettings.QueueDefaults(),
 			Limits:   orgsettings.QueueLimits(store.New(pool), orgsettings.Defaults()),
-		}); err != nil {
+		})
+		if err != nil {
+			return err
+		}
+		// Schedule triggers (TR2): every replica ticks; the fire workflow and the dedupe key make a
+		// due time fire once. It starts below, once the services exist.
+		sched = schedule.New(schedule.Config{Logger: slog.Default()}, pool, orgWork)
+		if err := rt.Register(sched.Registrar()); err != nil {
 			return err
 		}
 		if err := rt.Launch(bgCtx); err != nil {
@@ -533,6 +545,11 @@ func run() error {
 	})
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
 	go svc.QuestionSweeper(bgCtx, cfg.sweepInterval)
+	if sched != nil {
+		sched.Bind(svc)
+		go sched.Run(bgCtx)
+		slog.Info("schedule triggers started")
+	}
 	if kube != nil {
 		var sealer connections.Sealer
 		if keyring != nil {
