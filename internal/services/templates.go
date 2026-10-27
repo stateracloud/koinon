@@ -73,6 +73,7 @@ func templateProto(row store.Template, t *templates.Template) *templatev1alpha1.
 		},
 		SpendLimitUsd: t.Spec.Limits.SpendUSD.String(),
 		DefaultFlavor: flavorProto(string(t.Spec.Flavors.Default)),
+		Ephemeral:     t.Spec.Ephemeral,
 	}
 	for _, f := range t.Spec.Flavors.Allowed {
 		out.AllowedFlavors = append(out.AllowedFlavors, flavorProto(string(f)))

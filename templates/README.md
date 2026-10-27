@@ -16,6 +16,10 @@ OpenCode agent install plugins: its sandbox may read the npm registry (GET and H
 from the OpenCode binary, and OpenCode loads external plugins (`flavors/opencode/README.md`). It
 needs `opencode` among the allowed flavors. `repo-helper` sets it to `false` explicitly.
 
+`spec.ephemeral: true` makes agents created from the template ephemeral: each task runs in a fresh
+sandbox with no persistent home, deleted when the task ends (ADR 0065 decision 13c). Off when
+omitted. Whoever creates the agent can change it.
+
 Bump `metadata.version` whenever you change a template's content. Scopes are checked against the
 connector type when templates are synced to the database, not by the schema.
 

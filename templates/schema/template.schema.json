@@ -77,6 +77,11 @@
             }
           }
         },
+        "ephemeral": {
+          "description": "Agents made from this template are ephemeral: each task runs in a fresh sandbox with no persistent home, deleted when the task ends. Memory lives in task notes and the memory stores. Off by default (persistent).",
+          "type": "boolean",
+          "default": false
+        },
         "harness": {
           "description": "Harness settings beyond the flavor choice. Omitted means every setting is off.",
           "type": "object",

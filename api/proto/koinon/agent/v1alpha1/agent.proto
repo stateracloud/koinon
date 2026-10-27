@@ -86,6 +86,9 @@ message Agent {
   repeated koinon.template.v1alpha1.Trigger proposed_triggers = 20;
   // Triggers of the active version: the ones in effect.
   repeated koinon.template.v1alpha1.Trigger approved_triggers = 21;
+  // The latest version is ephemeral: each task gets a fresh sandbox without a home, deleted when
+  // the task ends (ADR 0065 decision 13c).
+  bool ephemeral = 22;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -101,6 +104,8 @@ message CreateAgentFromTemplateRequest {
   // needs one. Stored with the agent's version; ActivateAgent approves it with
   // the grant.
   repeated GrantBinding grants = 5;
+  // Overrides the template's ephemeral setting; unset keeps it.
+  optional bool ephemeral = 6;
 }
 
 // GrantBinding binds a template grant to one of the org's connections and

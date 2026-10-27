@@ -459,6 +459,9 @@ type Template struct {
 	// Spend limit as a decimal string, for example "10.00".
 	SpendLimitUsd string     `protobuf:"bytes,13,opt,name=spend_limit_usd,json=spendLimitUsd,proto3" json:"spend_limit_usd,omitempty"`
 	Triggers      []*Trigger `protobuf:"bytes,14,rep,name=triggers,proto3" json:"triggers,omitempty"`
+	// Agents made from the template are ephemeral by default: each task gets a fresh sandbox
+	// without a home, deleted when the task ends (ADR 0065 decision 13c).
+	Ephemeral     bool `protobuf:"varint,15,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -591,6 +594,13 @@ func (x *Template) GetTriggers() []*Trigger {
 	return nil
 }
 
+func (x *Template) GetEphemeral() bool {
+	if x != nil {
+		return x.Ephemeral
+	}
+	return false
+}
+
 // ListTemplatesRequest is empty.
 type ListTemplatesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -698,7 +708,7 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\x04type\x18\x02 \x01(\x0e2%.koinon.template.v1alpha1.TriggerTypeR\x04type\x12\x12\n" +
 	"\x04cron\x18\x03 \x01(\tR\x04cron\x12\x1a\n" +
 	"\btimezone\x18\x04 \x01(\tR\btimezone\x12 \n" +
-	"\vinstruction\x18\x05 \x01(\tR\vinstruction\"\xe2\x04\n" +
+	"\vinstruction\x18\x05 \x01(\tR\vinstruction\"\x80\x05\n" +
 	"\bTemplate\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04slug\x18\x02 \x01(\tR\x04slug\x12!\n" +
@@ -715,7 +725,8 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\n" +
 	"run_limits\x18\f \x01(\v2#.koinon.template.v1alpha1.RunLimitsR\trunLimits\x12&\n" +
 	"\x0fspend_limit_usd\x18\r \x01(\tR\rspendLimitUsd\x12=\n" +
-	"\btriggers\x18\x0e \x03(\v2!.koinon.template.v1alpha1.TriggerR\btriggers\"\x16\n" +
+	"\btriggers\x18\x0e \x03(\v2!.koinon.template.v1alpha1.TriggerR\btriggers\x12\x1c\n" +
+	"\tephemeral\x18\x0f \x01(\bR\tephemeral\"\x16\n" +
 	"\x14ListTemplatesRequest\"Y\n" +
 	"\x15ListTemplatesResponse\x12@\n" +
 	"\ttemplates\x18\x01 \x03(\v2\".koinon.template.v1alpha1.TemplateR\ttemplates*_\n" +

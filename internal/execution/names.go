@@ -56,6 +56,14 @@ func AgentSandboxName(org, agent [16]byte) string {
 	return AgentObjectNames(org, agent).Sandbox
 }
 
+// TaskSandboxName is the sandbox of one task of an ephemeral agent (ADR 0065 decision 13c): "kt-"
+// and 16 hex characters of a hash of org, agent and task ID. A task always maps to the same
+// name, so a second run of the same task finds (or recreates) its sandbox, and two tasks never
+// share one.
+func TaskSandboxName(org, agent, task [16]byte) string {
+	return "kt-" + shortHash("task", UUIDString(org), UUIDString(agent), UUIDString(task))
+}
+
 // shortHash is 16 hex characters (64 bits) of SHA-256 over the parts, each terminated by a
 // NUL so that ("ab","c") and ("a","bc") differ.
 func shortHash(parts ...string) string {

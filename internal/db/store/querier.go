@@ -241,6 +241,12 @@ type Querier interface {
 	GetConnection(ctx context.Context, arg GetConnectionParams) (Connection, error)
 	GetDedupeRecord(ctx context.Context, arg GetDedupeRecordParams) (DedupeRecord, error)
 	GetDefaultPriceList(ctx context.Context, version string) (DefaultPriceList, error)
+	// The task an ephemeral agent's sandbox belongs to (ADR 0065 decision 13c): the task of the run
+	// that holds the agent (starting or running), else of the run that would be claimed next (the
+	// claim's own order: interactive before scheduled, then FIFO), else of a parked run, else (a task
+	// between runs) the task of the agent's latest finished run whose task is not in an end state.
+	// Only a task's end (completed, canceled, failed) deletes its sandbox. No row: no task needs one.
+	GetEphemeralFocusTask(ctx context.Context, arg GetEphemeralFocusTaskParams) (pgtype.UUID, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	GetMCPServer(ctx context.Context, arg GetMCPServerParams) (McpServer, error)
@@ -560,6 +566,10 @@ type Querier interface {
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
+	// Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
+	// new name yet, so the row starts over as pending. The previous sandbox is gone by now (the
+	// reconciler waits for its deletion first). The unhealthy mark belonged to that sandbox.
+	SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error)
 	// The first of two approvals: remembered, the request stays pending.
 	SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error)
 	// Moves a connection's secret fields from its Kubernetes Secret into Postgres. secret_name stays

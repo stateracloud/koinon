@@ -857,11 +857,17 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		network[npmRule] = rule
 	}
 
-	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network)
+	// An ephemeral agent's sandbox belongs to a task (ephemeral.go); the row moves between them.
 	act, err := r.q.GetAgentRunActivity(ctx, store.GetAgentRunActivityParams{OrgID: w.org.ID, AgentID: w.agent.ID})
 	if err != nil {
 		return fmt.Errorf("read run activity: %w", err)
 	}
+	if done, err := r.ephemeralTurn(ctx, w, ws, act); err != nil || done {
+		return err
+	}
+	names = w.names()
+
+	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network)
 	tune, err := orgsettings.Get(ctx, r.q, w.org.ID, orgsettings.Settings{IdleTimeout: r.cfg.IdleTimeout, ParkWarm: r.cfg.ParkWarm})
 	if err != nil {
 		return fmt.Errorf("read org settings: %w", err)
