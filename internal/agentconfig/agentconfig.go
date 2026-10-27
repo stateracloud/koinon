@@ -41,7 +41,16 @@ type Config struct {
 	// Harness holds the template's harness settings: harness.pluginInstalls makes agentd
 	// pass --plugin-installs to OpenCode and the reconciler open the npm registry.
 	Harness templates.Harness `json:"harness,omitzero"`
+	// Ephemeral marks an ephemeral agent: every task runs in a fresh sandbox without a persistent
+	// home, deleted when the task ends (ADR 0065 decision 13c). Checkpoints and the archive tier
+	// do not apply to it; callers ask IsEphemeral.
+	Ephemeral bool `json:"ephemeral,omitempty"`
 }
+
+// IsEphemeral reports whether the agent version with config c is ephemeral. It is the one
+// predicate behind every ephemeral special case: the reconciler's sandbox-per-task lifecycle and
+// the places that skip home checkpoints and the archive tier (ADR 0032, ADR 0065 decision 13b).
+func IsEphemeral(c Config) bool { return c.Ephemeral }
 
 // Binding ties the grant on Connector to one connection and its targets.
 type Binding struct {
@@ -84,6 +93,7 @@ func FromTemplate(t *templates.Template, contentHash string) Config {
 		Grants:       t.Spec.Grants,
 		Limits:       t.Spec.Limits,
 		Harness:      t.Spec.Harness,
+		Ephemeral:    t.Spec.Ephemeral,
 	}
 }
 

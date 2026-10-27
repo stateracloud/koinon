@@ -76,6 +76,9 @@ message Agent {
   // recreated again (ADR 0054). New runs are refused until ResumeAgent.
   google.protobuf.Timestamp unhealthy_at = 18;
   string unhealthy_reason = 19;
+  // The latest version is ephemeral: each task gets a fresh sandbox without a home, deleted when
+  // the task ends (ADR 0065 decision 13c).
+  bool ephemeral = 20;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -91,6 +94,8 @@ message CreateAgentFromTemplateRequest {
   // needs one. Stored with the agent's version; ActivateAgent approves it with
   // the grant.
   repeated GrantBinding grants = 5;
+  // Overrides the template's ephemeral setting; unset keeps it.
+  optional bool ephemeral = 6;
 }
 
 // GrantBinding binds a template grant to one of the org's connections and

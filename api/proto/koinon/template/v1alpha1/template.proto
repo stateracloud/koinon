@@ -81,6 +81,9 @@ message Template {
   RunLimits run_limits = 12;
   // Spend limit as a decimal string, for example "10.00".
   string spend_limit_usd = 13;
+  // Agents made from the template are ephemeral by default: each task gets a fresh sandbox
+  // without a home, deleted when the task ends (ADR 0065 decision 13c).
+  bool ephemeral = 14;
 }
 
 // ListTemplatesRequest is empty.

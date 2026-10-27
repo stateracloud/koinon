@@ -226,6 +226,37 @@ func (q *Queries) GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams
 	return i, err
 }
 
+const getEphemeralFocusTask = `-- name: GetEphemeralFocusTask :one
+SELECT r.task_id
+FROM runs r
+WHERE r.org_id = $1 AND r.agent_id = $2
+  AND r.state IN ('queued', 'starting', 'running', 'parked')
+  AND (r.state <> 'queued' OR (r.ready_at IS NOT NULL AND run_claimable(r.org_id, r.id)))
+ORDER BY CASE
+             WHEN r.state IN ('starting', 'running') THEN 0
+             WHEN r.ready_at IS NOT NULL AND run_claimable(r.org_id, r.id) THEN 1
+             ELSE 2
+         END,
+         (r.origin = 'scheduled'), r.ready_at NULLS LAST, r.id
+LIMIT 1
+`
+
+type GetEphemeralFocusTaskParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// The task an ephemeral agent's sandbox belongs to (ADR 0065 decision 13c): the task of the run
+// that holds the agent (starting or running), else of the run that would be claimed next (the
+// claim's own order: interactive before scheduled, then FIFO), else of a parked run. No row: no
+// run needs a sandbox, so the task's sandbox is deleted.
+func (q *Queries) GetEphemeralFocusTask(ctx context.Context, arg GetEphemeralFocusTaskParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getEphemeralFocusTask, arg.OrgID, arg.AgentID)
+	var task_id pgtype.UUID
+	err := row.Scan(&task_id)
+	return task_id, err
+}
+
 const getOrgWorkspace = `-- name: GetOrgWorkspace :one
 SELECT org_id, workspace, workspace_id, created_at, updated_at FROM org_workspaces
 WHERE org_id = $1
@@ -446,6 +477,61 @@ func (q *Queries) SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKey
 		arg.OrgID,
 		arg.AgentID,
 	)
+	var i AgentSandbox
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.Workspace,
+		&i.SandboxName,
+		&i.ProviderName,
+		&i.KeySecretName,
+		&i.GatewayKeyID,
+		&i.GatewayKeyHash,
+		&i.State,
+		&i.Phase,
+		&i.Message,
+		&i.SpecHash,
+		&i.StartedAt,
+		&i.StoppedAt,
+		&i.ObservedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HomeGeneration,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.UnhealthyGeneration,
+		&i.WokenAt,
+	)
+	return i, err
+}
+
+const setAgentSandboxName = `-- name: SetAgentSandboxName :one
+UPDATE agent_sandboxes
+SET sandbox_name = $1,
+    state = 'pending',
+    phase = '',
+    message = '',
+    spec_hash = '',
+    started_at = NULL,
+    stopped_at = NULL,
+    unhealthy_at = NULL,
+    unhealthy_reason = NULL,
+    unhealthy_generation = NULL
+WHERE org_id = $2 AND agent_id = $3
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
+`
+
+type SetAgentSandboxNameParams struct {
+	SandboxName string
+	OrgID       pgtype.UUID
+	AgentID     pgtype.UUID
+}
+
+// Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
+// new name yet, so the row starts over as pending. The previous sandbox is gone by now (the
+// reconciler waits for its deletion first). The unhealthy mark belonged to that sandbox.
+func (q *Queries) SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error) {
+	row := q.db.QueryRow(ctx, setAgentSandboxName, arg.SandboxName, arg.OrgID, arg.AgentID)
 	var i AgentSandbox
 	err := row.Scan(
 		&i.OrgID,

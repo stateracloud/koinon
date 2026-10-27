@@ -113,6 +113,23 @@ describe('AgentWizard', () => {
     expect(await screen.findByText('Active')).toBeInTheDocument()
   })
 
+  it('offers an ephemeral toggle, off by default, and sends it only when chosen', async () => {
+    const { creates } = setup({ targets: { min: 1, max: 1 } })
+    await toAccessStep()
+    await userEvent.type(screen.getByLabelText('Repository 1'), 'acme/widgets')
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    const toggle = await screen.findByRole('checkbox', { name: 'Ephemeral: fresh sandbox per task, no home' })
+    expect(toggle).not.toBeChecked()
+    expect(screen.getByRole('region', { name: 'Draft summary' })).toHaveTextContent('Persistent home')
+    await userEvent.click(toggle)
+    expect(screen.getByRole('region', { name: 'Draft summary' })).toHaveTextContent('SandboxEphemeral: fresh sandbox per task, no home')
+    await userEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+
+    await waitFor(() => expect(creates).toHaveLength(1))
+    expect(creates[0].ephemeral).toBe(true)
+  })
+
   it('requires the template minimum and stops adding at the maximum', async () => {
     setup({ targets: { min: 2, max: 3 } })
     await toAccessStep()

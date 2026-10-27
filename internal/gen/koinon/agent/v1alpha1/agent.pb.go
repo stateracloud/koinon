@@ -107,8 +107,11 @@ type Agent struct {
 	// recreated again (ADR 0054). New runs are refused until ResumeAgent.
 	UnhealthyAt     *timestamppb.Timestamp `protobuf:"bytes,18,opt,name=unhealthy_at,json=unhealthyAt,proto3" json:"unhealthy_at,omitempty"`
 	UnhealthyReason string                 `protobuf:"bytes,19,opt,name=unhealthy_reason,json=unhealthyReason,proto3" json:"unhealthy_reason,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The latest version is ephemeral: each task gets a fresh sandbox without a home, deleted when
+	// the task ends (ADR 0065 decision 13c).
+	Ephemeral     bool `protobuf:"varint,20,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Agent) Reset() {
@@ -274,6 +277,13 @@ func (x *Agent) GetUnhealthyReason() string {
 	return ""
 }
 
+func (x *Agent) GetEphemeral() bool {
+	if x != nil {
+		return x.Ephemeral
+	}
+	return false
+}
+
 // CreateAgentFromTemplateRequest names the template and the user's choices.
 type CreateAgentFromTemplateRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -287,7 +297,9 @@ type CreateAgentFromTemplateRequest struct {
 	// type with targets. A grant whose template sets targets min above zero
 	// needs one. Stored with the agent's version; ActivateAgent approves it with
 	// the grant.
-	Grants        []*GrantBinding `protobuf:"bytes,5,rep,name=grants,proto3" json:"grants,omitempty"`
+	Grants []*GrantBinding `protobuf:"bytes,5,rep,name=grants,proto3" json:"grants,omitempty"`
+	// Overrides the template's ephemeral setting; unset keeps it.
+	Ephemeral     *bool `protobuf:"varint,6,opt,name=ephemeral,proto3,oneof" json:"ephemeral,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -355,6 +367,13 @@ func (x *CreateAgentFromTemplateRequest) GetGrants() []*GrantBinding {
 		return x.Grants
 	}
 	return nil
+}
+
+func (x *CreateAgentFromTemplateRequest) GetEphemeral() bool {
+	if x != nil && x.Ephemeral != nil {
+		return *x.Ephemeral
+	}
+	return false
 }
 
 // GrantBinding binds a template grant to one of the org's connections and
@@ -985,7 +1004,7 @@ var File_koinon_agent_v1alpha1_agent_proto protoreflect.FileDescriptor
 
 const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\n" +
-	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\x8e\a\n" +
+	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\xac\a\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12!\n" +
@@ -1010,14 +1029,18 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\varchived_at\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"archivedAt\x12=\n" +
 	"\funhealthy_at\x18\x12 \x01(\v2\x1a.google.protobuf.TimestampR\vunhealthyAt\x12)\n" +
-	"\x10unhealthy_reason\x18\x13 \x01(\tR\x0funhealthyReason\"\xf2\x01\n" +
+	"\x10unhealthy_reason\x18\x13 \x01(\tR\x0funhealthyReason\x12\x1c\n" +
+	"\tephemeral\x18\x14 \x01(\bR\tephemeral\"\xa3\x02\n" +
 	"\x1eCreateAgentFromTemplateRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vtemplate_id\x18\x02 \x01(\tR\n" +
 	"templateId\x12!\n" +
 	"\fdisplay_name\x18\x03 \x01(\tR\vdisplayName\x128\n" +
 	"\x06flavor\x18\x04 \x01(\x0e2 .koinon.template.v1alpha1.FlavorR\x06flavor\x12;\n" +
-	"\x06grants\x18\x05 \x03(\v2#.koinon.agent.v1alpha1.GrantBindingR\x06grants\"u\n" +
+	"\x06grants\x18\x05 \x03(\v2#.koinon.agent.v1alpha1.GrantBindingR\x06grants\x12!\n" +
+	"\tephemeral\x18\x06 \x01(\bH\x00R\tephemeral\x88\x01\x01B\f\n" +
+	"\n" +
+	"_ephemeral\"u\n" +
 	"\fGrantBinding\x12\x1c\n" +
 	"\tconnector\x18\x01 \x01(\tR\tconnector\x12#\n" +
 	"\rconnection_id\x18\x02 \x01(\tR\fconnectionId\x12\"\n" +
@@ -1142,6 +1165,7 @@ func file_koinon_agent_v1alpha1_agent_proto_init() {
 	if File_koinon_agent_v1alpha1_agent_proto != nil {
 		return
 	}
+	file_koinon_agent_v1alpha1_agent_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
