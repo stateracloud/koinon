@@ -10,10 +10,14 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/questions"
 )
 
 // prArgs proposes text, a byte-exact edge case (no trailing newline, CRLF, tab, non-ASCII,
@@ -422,6 +426,48 @@ var _ = Describe("Service", func() {
 		_, err = f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
 		Expect(err).To(MatchError(approvals.ErrNotPending))
 		Expect(f.gh.Mints()).To(BeZero())
+	})
+
+	It("does not cancel a run parked on an open question when its approval expires (ADR 0065 TK3)", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard")
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		_, err := q.ParkRun(ctx, store.ParkRunParams{
+			OrgID: f.org, ID: f.run.ID, Epoch: f.run.Epoch, ParkReason: store.RunParkReasonInputRequired,
+			ParkExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.SetTaskStateFrom(ctx, store.SetTaskStateFromParams{
+			OrgID: f.org, ID: f.task.ID, ToState: store.TaskStateInputRequired,
+			FromStates: []string{string(store.TaskStateSubmitted), string(store.TaskStateWorking)},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		qrow, _, err := questions.Create(ctx, q, questions.Ask{
+			Org: f.org, Task: f.task.ID, Run: f.run.ID, Agent: f.agent.ID, To: f.owner,
+			Question: "Which region?", Default: "eu-west-1", ExpiresAt: time.Now().Add(24 * time.Hour),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.OpenAskedQuestionsForRun(ctx, store.OpenAskedQuestionsForRunParams{OrgID: f.org, RunID: f.run.ID})
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = pool.Exec(ctx, `UPDATE approval_requests SET expires_at = now() - interval '1 minute' WHERE id = $1`, mustID(req.ID))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = f.svc.Sweep(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.get(ctx, req.ID).Status).To(Equal(store.ApprovalStatusExpired))
+		Expect(f.getRun(ctx).State).To(Equal(store.RunStateParked), "the open question keeps the run parked")
+		Expect(f.getTask(ctx).State).To(Equal(store.TaskStateInputRequired))
+
+		By("answering the question resumes the run, which is not canceled")
+		Expect(pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			_, err := questions.Respond(ctx, store.New(tx), f.org, qrow.ID, f.owner, questions.Answer{Kind: store.QuestionAnswerKindText, Text: "us-east-1"})
+			if err != nil {
+				return err
+			}
+			return approvals.ResolveRun(ctx, store.New(tx), f.org, f.run.ID)
+		})).To(Succeed())
+		run := f.getRun(ctx)
+		Expect(run.State).To(Equal(store.RunStateParked))
+		Expect(run.ReadyAt.Valid).To(BeTrue(), "ready to be claimed")
 	})
 
 	It("cancels pending requests of a run that was canceled", func(ctx SpecContext) {

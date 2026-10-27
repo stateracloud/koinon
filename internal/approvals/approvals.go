@@ -645,6 +645,12 @@ func (s *Service) cancelExpiredRun(ctx context.Context, q *store.Queries, org, r
 		// A running run sees the expiry as the outcome when its turn ends.
 		return false, nil
 	}
+	if run.ParkReason.RunParkReason == store.RunParkReasonInputRequired {
+		// The run is parked on an open question too (ADR 0065 TK3: only parks with reason
+		// approval are canceled here). The approval is expired, so the run resumes with
+		// "approval expired" once its questions are resolved.
+		return false, ResolveRun(ctx, q, org, runID)
+	}
 	if _, err := scheduler.Cancel(ctx, q, org, runID, scheduler.ReasonApprovalExpired, expiredMessage, scheduler.System); err != nil {
 		return false, err
 	}
