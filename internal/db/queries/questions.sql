@@ -27,9 +27,9 @@ SELECT EXISTS (
 -- Records a question as 'asked'. No row for the same call in the same run: use
 -- GetQuestionByCall.
 INSERT INTO questions (org_id, task_id, run_id, agent_id, asked_to, question, choices, draft,
-                       default_answer, call_sha256, expires_at)
+                       default_answer, call_sha256, expires_at, remind_at)
 VALUES (@org_id, @task_id, @run_id, @agent_id, @asked_to, @question, @choices, sqlc.narg(draft),
-        @default_answer, @call_sha256, @expires_at)
+        @default_answer, @call_sha256, @expires_at, sqlc.narg(remind_at))
 ON CONFLICT (org_id, run_id, call_sha256) DO NOTHING
 RETURNING *;
 
@@ -138,7 +138,7 @@ UPDATE questions SET notified_at = now()
 WHERE org_id = @org_id AND id = @id AND notified_at IS NULL;
 
 -- name: ListDueQuestions :many
--- Open questions past their expiry (TK4 applies the default to them).
+-- Open questions past their expiry (the expiry sweep applies the default to them).
 SELECT * FROM questions
 WHERE org_id = @org_id AND state = 'open' AND expires_at <= @now
 ORDER BY expires_at, id
@@ -156,4 +156,28 @@ UPDATE questions
 SET notify_failures = notify_failures + 1,
     notified_at = CASE WHEN notify_failures + 1 >= @give_up::int THEN now() ELSE notified_at END
 WHERE org_id = @org_id AND id = @id AND notified_at IS NULL
+RETURNING *;
+
+-- name: ListOrgsWithDueQuestions :many
+-- Orgs with an open question past its expiry at @now or a reminder due at @now.
+SELECT DISTINCT org_id FROM questions
+WHERE state = 'open' AND (expires_at <= @now OR (remind_at <= @now AND reminded_at IS NULL));
+
+-- name: ListQuestionsToRemind :many
+-- Open questions whose reminder is due at @now and has not gone out, oldest reminder first.
+SELECT * FROM questions
+WHERE org_id = @org_id AND state = 'open' AND remind_at <= @now AND reminded_at IS NULL
+ORDER BY remind_at, id
+LIMIT @max_rows;
+
+-- name: MarkQuestionReminded :execrows
+UPDATE questions SET reminded_at = now()
+WHERE org_id = @org_id AND id = @id AND reminded_at IS NULL;
+
+-- name: RecordQuestionRemindFailure :one
+-- One failed delivery of the reminder. At @give_up failures the question counts as reminded.
+UPDATE questions
+SET remind_failures = remind_failures + 1,
+    reminded_at = CASE WHEN remind_failures + 1 >= @give_up::int THEN now() ELSE reminded_at END
+WHERE org_id = @org_id AND id = @id AND reminded_at IS NULL
 RETURNING *;

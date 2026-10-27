@@ -58,10 +58,12 @@ func (r *runner) outcomes(ctx context.Context) (string, error) {
 	}
 	r.delivered, r.deliveredQ = r.delivered[:0], r.deliveredQ[:0]
 	var b strings.Builder
+	noAnswer := false
 	for _, row := range qs {
 		if row.State == store.QuestionStateAsked || row.State == store.QuestionStateOpen {
 			continue
 		}
+		noAnswer = noAnswer || row.State == store.QuestionStateExpired
 		r.deliveredQ = append(r.deliveredQ, row.ID)
 		fmt.Fprintf(&b, "\n- ask_user (question id=%s): %q: %s", row.ID.String(), row.Question, questionOutcomeText(row))
 	}
@@ -77,8 +79,19 @@ func (r *runner) outcomes(ctx context.Context) (string, error) {
 	}
 	b.WriteString("\nThese outcomes are final: do not call the tools again for them. Continue the task from here, " +
 		"and tell the user what happened.")
+	if noAnswer {
+		b.WriteString(noAnswerNote)
+	}
 	return b.String(), nil
 }
+
+// noAnswerNote is the system instruction of the "no answer" run (ADR 0065 decision 10, plan item
+// TK4): a question expired, Koinon applied its default, and this is the one short run the agent gets
+// to react.
+const noAnswerNote = "\n\n[Koinon system] This is a short \"no answer\" run: at least one question above expired " +
+	"because nobody answered, and Koinon applied its default. Decide now and keep it brief. Either carry on with " +
+	"the default, cancel the task and say why, or ask someone else with ask_user (not the same person about the " +
+	"same thing). You will not be reminded about this again."
 
 // questionOutcomeText describes one resolved question to the agent. A default that was applied
 // because the question was dismissed or expired is said so (ADR 0065 decision 10a).
