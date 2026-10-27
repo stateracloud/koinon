@@ -409,16 +409,17 @@ func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo che
 	uerr := r.p.backend.Upload(actx, sb.Workspace, sb.SandboxName, checkpoint.HomeDir, pr)
 	if uerr == nil {
 		// The upload read an end-of-file, so the writer is done.
-		uerr = <-restored
-		if uerr != nil {
-			return uerr
-		}
-		return nil
+		return <-restored
 	}
+	// The upload failed first (an old supervisor, a host key mismatch, an expired token, a
+	// connection limit): stop the writer instead of waiting for it. kopia stages the whole
+	// snapshot before it writes the first byte.
 	_ = pr.CloseWithError(uerr)
-	rerr := <-restored
-	if rerr != nil && !errors.Is(rerr, io.ErrClosedPipe) {
-		return rerr
+	cancel()
+	if rerr := <-restored; rerr != nil && !errors.Is(rerr, uerr) {
+		r.log.Debug("the home writer ended after the upload failed", "err", rerr)
 	}
+	// If the writer failed first, the upload read its error and uerr wraps it; otherwise the
+	// writer's error is only the cancellation we caused.
 	return uerr
 }

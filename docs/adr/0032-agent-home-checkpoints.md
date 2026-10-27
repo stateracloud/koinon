@@ -267,6 +267,10 @@ subsystem (NVIDIA/OpenShell#4448, in v0.1.4 and later). The backup stays tar ove
   does not support openshell-upload-v1; OpenShell v0.1.4 or later is needed". Expired tokens and
   connection limits are reported as such. The restore gate is unchanged otherwise: a failed
   restore fails the run, the restore stays owed, retries and fallback to older checkpoints stand.
+- **Timeouts.** The upload has no timeout of its own: the caller's context bounds it, which for the
+  restore is `Checkpoints.Timeout` per try. A backend-level default would cap that setting
+  silently, so there is none. When the upload fails before it starts, agentd cancels the writer
+  at once instead of waiting for kopia to finish staging the snapshot.
 - **Caveats.** Upstream calls the protocol internal, but the subsystem name is versioned. Extraction
   is not atomic, which is acceptable because the harness does not start unless the restore
   succeeded. Throughput is bounded by 1 MiB per round trip and has to be measured on the home
