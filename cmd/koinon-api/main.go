@@ -57,6 +57,7 @@ import (
 	"github.com/stateracloud/koinon/internal/adminapi"
 	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/askuser"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
@@ -530,6 +531,8 @@ func run() error {
 	svc := services.New(pool, services.Options{
 		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, URLPolicy: urlPolicy,
 	})
+	// The notification of an opened question (the park that opens it commits in koinon-agentd).
+	go svc.QuestionSweeper(bgCtx, cfg.sweepInterval)
 	if kube != nil {
 		var sealer connections.Sealer
 		if keyring != nil {
@@ -591,6 +594,8 @@ func run() error {
 		mux.Handle("/mcp", tools.Handler())
 		// The ask-tier tools of org MCP servers (plan item MC1), for agentgateway only like /mcp.
 		mux.Handle(mcpask.Path, mcpask.New(pool, mcpask.Options{}).Handler())
+		// ask_user (plan item TK3), the "koinon" target of the gateway.
+		mux.Handle(askuser.Path, askuser.New(pool, askuser.Options{}).Handler())
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		toolsSrv := &http.Server{Addr: cfg.toolsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, toolsSrv)
