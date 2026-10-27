@@ -92,7 +92,7 @@ var _ = Describe("Render", func() {
 		Expect(err).NotTo(HaveOccurred())
 		path := filepath.Join("testdata", "full.yaml")
 		if *update {
-			Expect(os.WriteFile(path, dump(r), 0o644)).To(Succeed()) //nolint:gosec // golden file
+			Expect(os.WriteFile(path, dump(r), 0o644)).To(Succeed())
 		}
 		want, err := os.ReadFile(path)
 		Expect(err).NotTo(HaveOccurred())

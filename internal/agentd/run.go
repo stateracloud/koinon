@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // How a driven run ends, besides success (nil).
@@ -192,7 +193,12 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	hctx, stop := context.WithCancel(ctx)
 	var hb sync.WaitGroup
 	hb.Go(func() { r.heartbeat(hctx) })
-	err := r.execute(ctx)
+	// A panic in the run becomes a failure: the heartbeat stops and the run concludes as failed on
+	// its own path, instead of keeping a live lease no other worker would ever take over.
+	var err error
+	if safego.Do(r.log, "run", func() { err = r.execute(ctx) }) {
+		err = &failure{reason: "internal error: the run panicked"}
+	}
 	stop()
 	hb.Wait()
 	r.conclude(ctx, err)
@@ -200,7 +206,7 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 
 func (r *runner) fence(k fence) {
 	r.fenceOnce.Do(func() {
-		r.fenceKind.Store(int32(k)) //nolint:gosec // fence is an int32
+		r.fenceKind.Store(int32(k))
 		close(r.fenced)
 	})
 }
@@ -264,7 +270,7 @@ func (r *runner) heartbeat(ctx context.Context) {
 }
 
 func (p *Pool) leaseSeconds() int32 {
-	return int32(p.cfg.Lease.Seconds()) //nolint:gosec // bounded by configuration
+	return int32(p.cfg.Lease.Seconds())
 }
 
 // stopped returns errFenced or errShutdown when either applies.
@@ -790,7 +796,6 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	if err != nil {
 		return "", 0, err
 	}
-	var parts []string
 	outcomes, err := r.outcomes(ctx)
 	if err != nil {
 		return "", 0, err
@@ -804,43 +809,79 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	if restart {
 		return r.handoffPrompt(ctx, task, outcomes, notice)
 	}
-	switch {
-	case reset:
-		parts = append(parts, "Task: "+task.Title)
-		if notice != "" {
-			parts = append(parts, notice)
-		}
-	// A claimed parked run is starting with its prompt already recorded: it resumes after
-	// its approvals were decided. A takeover keeps the state it had.
-	case resumed && r.run.State == store.RunStateStarting:
-		parts = append(parts, parkResumeNote+outcomes)
-	case resumed:
-		parts = append(parts, resumeNote+outcomes)
-	case !loaded:
-		parts = append(parts, "Task: "+task.Title)
-		if notice != "" {
-			parts = append(parts, notice)
-		}
-	}
+	var texts []string
 	through := after
 	for _, m := range msgs {
 		var body struct {
 			Text string `json:"text"`
 		}
 		if json.Unmarshal(m.Payload, &body) == nil && strings.TrimSpace(body.Text) != "" {
-			parts = append(parts, body.Text)
+			texts = append(texts, body.Text)
 		}
 		through = m.Seq
 	}
-	if reset && outcomes != "" {
-		parts = append(parts, parkResumeNote+outcomes)
+	mode := promptNew
+	switch {
+	case reset:
+		mode = promptReset
+	// A claimed parked run is starting with its prompt already recorded: it resumes after
+	// its approvals were decided. A takeover keeps the state it had.
+	case resumed && r.run.State == store.RunStateStarting:
+		mode = promptParkResume
+	case resumed:
+		mode = promptTakeover
+	case loaded:
+		mode = promptContinue
 	}
 	// A reset reads from the start; the seq it covers never goes back.
 	through = max(through, r.run.PromptThroughSeq.Int64)
+	return assemblePrompt(mode, task.Title, notice, texts, outcomes), through, nil
+}
+
+// promptMode says which of the turn's prompt shapes assemblePrompt builds.
+type promptMode int
+
+const (
+	// promptNew is the first prompt of a session that has not loaded the task yet.
+	promptNew promptMode = iota
+	// promptContinue is a follow-up message in a session that knows the task.
+	promptContinue
+	// promptTakeover resumes a run another worker lost.
+	promptTakeover
+	// promptParkResume resumes a parked run after its approvals and questions were decided.
+	promptParkResume
+	// promptReset is a new session that replaces one the sandbox home lost.
+	promptReset
+)
+
+// assemblePrompt joins the parts of a turn's prompt: the task header and MCP notice (new and
+// reset sessions), the resume note with the outcomes, the task messages, and for a reset the
+// outcomes after the messages. With nothing to say it falls back to a nudge.
+func assemblePrompt(mode promptMode, title, notice string, msgs []string, outcomes string) string {
+	var parts []string
+	header := func() {
+		parts = append(parts, "Task: "+title)
+		if notice != "" {
+			parts = append(parts, notice)
+		}
+	}
+	switch mode {
+	case promptReset, promptNew:
+		header()
+	case promptParkResume:
+		parts = append(parts, parkResumeNote+outcomes)
+	case promptTakeover:
+		parts = append(parts, resumeNote+outcomes)
+	case promptContinue:
+	}
+	parts = append(parts, msgs...)
+	if mode == promptReset && outcomes != "" {
+		parts = append(parts, parkResumeNote+outcomes)
+	}
 	if len(parts) == 0 {
 		parts = append(parts, "Continue with the task.")
 	}
-	return strings.Join(parts, "\n\n"), through, nil
+	return strings.Join(parts, "\n\n")
 }
 
 // record appends a run event under the next source seq, retrying transient failures. The

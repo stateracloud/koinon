@@ -79,7 +79,7 @@ func Stage(r io.Reader, dir string, lim Limits) (StageStats, error) {
 			st.Skipped++
 			continue
 		}
-		perm := fs.FileMode(h.Mode & 0o777) //nolint:gosec // masked to the permission bits
+		perm := fs.FileMode(h.Mode & 0o777)
 		switch h.Typeflag {
 		case tar.TypeDir:
 			if err := root.MkdirAll(name, 0o700); err != nil {

@@ -118,7 +118,7 @@ func NewID(now time.Time) (string, error) {
 func (t *Tool) Usage(ctx context.Context) (map[string]int, error) {
 	out := map[string]int{}
 	for _, c := range Columns {
-		rows, err := t.Pool.Query(ctx, fmt.Sprintf( //nolint:gosec // names come from Columns
+		rows, err := t.Pool.Query(ctx, fmt.Sprintf(
 			`SELECT %[2]s->>'kek_id', count(*) FROM %[1]s WHERE %[2]s IS NOT NULL GROUP BY 1`, c.Table, c.Column))
 		if err != nil {
 			return nil, err
@@ -144,7 +144,7 @@ func (t *Tool) Usage(ctx context.Context) (map[string]int, error) {
 func AnyEnvelope(ctx context.Context, pool *pgxpool.Pool) (bool, error) {
 	for _, c := range Columns {
 		var found bool
-		if err := pool.QueryRow(ctx, fmt.Sprintf( //nolint:gosec // names come from Columns
+		if err := pool.QueryRow(ctx, fmt.Sprintf(
 			`SELECT EXISTS (SELECT 1 FROM %s WHERE %s IS NOT NULL)`, c.Table, c.Column)).Scan(&found); err != nil {
 			return false, err
 		}
@@ -332,7 +332,7 @@ func (t *Tool) each(ctx context.Context, verb string, fn rowFn) error {
 type rowRef struct{ org, id string }
 
 func (t *Tool) rowIDs(ctx context.Context, c Column) ([]rowRef, error) {
-	rows, err := t.Pool.Query(ctx, fmt.Sprintf( //nolint:gosec // names come from Columns
+	rows, err := t.Pool.Query(ctx, fmt.Sprintf(
 		`SELECT org_id::text, %[3]s::text FROM %[1]s WHERE %[2]s IS NOT NULL ORDER BY org_id, %[3]s`, c.Table, c.Column, c.rowKey()))
 	if err != nil {
 		return nil, err
@@ -353,7 +353,7 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 	changed := false
 	err := pgx.BeginFunc(ctx, t.Pool, func(tx pgx.Tx) error {
 		var raw []byte
-		err := tx.QueryRow(ctx, fmt.Sprintf( //nolint:gosec // names come from Columns
+		err := tx.QueryRow(ctx, fmt.Sprintf(
 			`SELECT %[2]s FROM %[1]s WHERE org_id = $1 AND %[3]s = $2 FOR UPDATE`, c.Table, c.Column, c.rowKey()), r.org, r.id).Scan(&raw)
 		if errors.Is(err, pgx.ErrNoRows) || raw == nil {
 			return nil // deleted meanwhile
@@ -376,7 +376,7 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, fmt.Sprintf( //nolint:gosec // names come from Columns
+		if _, err := tx.Exec(ctx, fmt.Sprintf(
 			`UPDATE %[1]s SET %[2]s = $3 WHERE org_id = $1 AND %[3]s = $2`, c.Table, c.Column, c.rowKey()), r.org, r.id, nb); err != nil {
 			return err
 		}

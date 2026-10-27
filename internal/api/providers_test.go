@@ -24,7 +24,7 @@ var _ = Describe("ProviderService", func() {
 		org, owner = e.newTeamOrg(ctx)
 	})
 
-	rates := &providerv1alpha1.Rates{Input: "0.30", Output: "1.20"} //nolint:staticcheck // deprecated, only to test that it is refused
+	rates := &providerv1alpha1.Rates{Input: "0.30", Output: "1.20"}
 	create := func(ctx SpecContext, c *client, name, typ, url, key string) (*providerv1alpha1.CreateProviderResponse, error) {
 		return c.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{OrgId: org, Name: name, Type: typ, Url: url, ApiKey: key})
 	}

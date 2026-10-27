@@ -1,0 +1,3 @@
+[Koinon] Your run was paused while a human decided on your approval requests, and has now resumed. The outcomes:
+- ask_user (question id=00000000-0000-0000-0000-000000000001): "Which region should I deploy to?": the person answered: "us-east-1"
+These outcomes are final: do not call the tools again for them. Continue the task from here, and tell the user what happened.

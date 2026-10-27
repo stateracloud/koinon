@@ -34,8 +34,10 @@ type askEnv struct {
 	*env
 	slug  string
 	tools *httptest.Server
-	mu    sync.Mutex
-	args  map[string]any
+	// toolsMu guards tools, which serve and a restart test replace.
+	toolsMu sync.Mutex
+	mu      sync.Mutex
+	args    map[string]any
 	// cancelReason, when set, makes the harness cancel the task in the "no answer" run.
 	cancelReason string
 	ids          chan string
@@ -72,15 +74,27 @@ func newAskEnv(ctx context.Context) *askEnv {
 // serve starts (or restarts, after a kill) the tool server on a fresh connection pool, like a new
 // koinon-api process.
 func (a *askEnv) serve() *pgxpool.Pool {
-	if a.tools != nil {
-		a.tools.Close()
+	a.toolsMu.Lock()
+	old := a.tools
+	a.toolsMu.Unlock()
+	if old != nil {
+		old.Close()
 	}
 	pool, err := pgxpool.New(context.Background(), db.Config().ConnString())
 	Expect(err).NotTo(HaveOccurred())
 	DeferCleanup(pool.Close)
-	a.tools = httptest.NewServer(askuser.New(pool, askuser.Options{Logger: slog.New(slog.NewTextHandler(GinkgoWriter, nil))}).Handler())
-	DeferCleanup(a.tools.Close)
+	srv := httptest.NewServer(askuser.New(pool, askuser.Options{Logger: slog.New(slog.NewTextHandler(GinkgoWriter, nil))}).Handler())
+	a.toolsMu.Lock()
+	a.tools = srv
+	a.toolsMu.Unlock()
+	DeferCleanup(srv.Close)
 	return pool
+}
+
+func (a *askEnv) toolsURL() string {
+	a.toolsMu.Lock()
+	defer a.toolsMu.Unlock()
+	return a.tools.URL
 }
 
 func (a *askEnv) call(ctx context.Context, args map[string]any) (text, id string) {
@@ -90,7 +104,7 @@ func (a *askEnv) call(ctx context.Context, args map[string]any) (text, id string
 func (a *askEnv) callTool(ctx context.Context, tool string, args map[string]any) (text, id string) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "fake-harness", Version: "1"}, nil)
 	s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint: a.tools.URL, HTTPClient: &http.Client{Transport: headerTransport{agent: a.slug + "/" + a.agent.ID.String()}},
+		Endpoint: a.toolsURL(), HTTPClient: &http.Client{Transport: headerTransport{agent: a.slug + "/" + a.agent.ID.String()}},
 		DisableStandaloneSSE: true, MaxRetries: -1,
 	}, nil)
 	if err != nil {
