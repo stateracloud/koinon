@@ -54,7 +54,13 @@ type Effect func(q *store.Queries) (kind string, id pgtype.UUID, err error)
 // Once runs effect at most once per (org, source, key). q must be bound to a transaction, the
 // same one the effect writes in: the claim and the effect then commit or roll back together, so
 // a failed effect leaves the key free for the redelivery, and a committed one blocks it. A
-// concurrent claim of the same key waits for that transaction and then sees its outcome.
+// concurrent claim of the same key waits for that transaction and then sees its outcome. That
+// needs READ COMMITTED (pgx.BeginFunc's default): the follow-up read needs a fresh snapshot, and
+// under REPEATABLE READ or SERIALIZABLE the waiting claim fails with a serialization error.
+//
+// One (source, key) guards exactly one effect kind. A caller that gets a replay must check
+// Outcome.EffectKind before using EffectID: a record written by another effect, or by one that
+// named none, is not its own.
 func Once(ctx context.Context, q *store.Queries, org pgtype.UUID, source, key string, effect Effect) (Outcome, error) {
 	if !org.Valid || source == "" || key == "" {
 		return Outcome{}, errors.New("durable: dedupe needs an org, a source and a key")

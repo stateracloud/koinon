@@ -194,6 +194,10 @@ file on 2026-10-26):
   events and queued run in one transaction. Records are not swept yet (`DeleteDedupeRecordsBefore`
   exists; the retention window is TR's decision). Approval and inbox effects have no source key
   today: their natural key is the question ID, used when TK3 lands.
+- **Review fixes (DB3).** One `(source, key)` guards exactly one effect kind; `CreateTriggeredTask`
+  rejects a replay whose record names another kind or none. `Once` needs READ COMMITTED (the
+  default). The sweep index is `(org_id, created_at)`. `services.ErrAgentInactive` marks the
+  permanent inactive-agent failure (drop, do not retry). A task without an agent sends no pre-wake.
 - **Ordering (B2).** `durable.Commit` runs a transaction and sends the notifications it returns
   only after the commit. A `durable.Notifier` sends them as a DBOS workflow `koinon.notify` whose
   workflow ID is the notification ID (derived from the effect, e.g. `wake.agent:task-created:<task>`),

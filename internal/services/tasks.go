@@ -159,7 +159,7 @@ func (s *Server) createTask(ctx context.Context, c caller, agentID pgtype.UUID, 
 			return nil, err
 		}
 		// Pre-wake the agent's sandbox before the run is claimed (plan item LT1), after the commit.
-		return []durable.Notification{wakeNotification("task-created:"+idString(task.ID), task)}, nil
+		return wakeNotification("task-created:"+idString(task.ID), task), nil
 	})
 	return task, run, s.sendFailed(err, "waking the agent's sandbox for a new task failed")
 }
@@ -256,7 +256,7 @@ func (s *Server) appendMessage(ctx context.Context, c caller, id pgtype.UUID, ms
 		}
 		// A message that queues a run acknowledges at once like a new task (ADR 0066 LT1): wake
 		// the agent's sandbox before the run is claimed, after the commit.
-		return []durable.Notification{wakeNotification(fmt.Sprintf("message:%s:%d", idString(t.ID), ev.Seq), t)}, nil
+		return wakeNotification(fmt.Sprintf("message:%s:%d", idString(t.ID), ev.Seq), t), nil
 	})
 	return ev, run, s.sendFailed(err, "waking the agent's sandbox for a new message failed")
 }
