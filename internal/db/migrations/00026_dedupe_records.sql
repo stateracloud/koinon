@@ -19,5 +19,5 @@ CREATE TABLE dedupe_records (
     CHECK ((effect_kind IS NULL) = (effect_id IS NULL))
 );
 
--- Old records can be swept by age.
-CREATE INDEX dedupe_records_created_at ON dedupe_records (created_at);
+-- Old records can be swept by age, per org (the sweep query is org scoped).
+CREATE INDEX dedupe_records_created_at ON dedupe_records (org_id, created_at);

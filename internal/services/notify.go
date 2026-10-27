@@ -17,6 +17,10 @@ import (
 	"github.com/stateracloud/koinon/internal/wake"
 )
 
+// ErrAgentInactive is returned when a task is created for an agent that is not active. It is a
+// permanent failure: callers drop the event instead of retrying it.
+var ErrAgentInactive = errors.New("agent is not active")
+
 // NotifyWakeAgent is the notification kind that pre-wakes an agent's sandbox (plan item LT1).
 const NotifyWakeAgent = "wake.agent"
 
@@ -27,9 +31,14 @@ type wakePayload struct {
 
 // wakeNotification is the pre-wake for a task, to send after the commit that made the task or the
 // message. effect names the effect, so a repeat of it is the same workflow (ADR 0066, B2).
-func wakeNotification(effect string, task store.Task) durable.Notification {
+// A task without an agent (old rows predate the tasks_owned_by_agent check) has nothing to wake,
+// so it yields no notification.
+func wakeNotification(effect string, task store.Task) []durable.Notification {
+	if !task.AgentID.Valid {
+		return nil
+	}
 	p, _ := json.Marshal(wakePayload{Org: idString(task.OrgID), Agent: idString(task.AgentID)})
-	return durable.Notification{ID: NotifyWakeAgent + ":" + effect, Kind: NotifyWakeAgent, Payload: string(p)}
+	return []durable.Notification{{ID: NotifyWakeAgent + ":" + effect, Kind: NotifyWakeAgent, Payload: string(p)}}
 }
 
 // RegisterNotifications registers the handlers of the notifications that services sends. Call it
@@ -101,7 +110,7 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 				return "", pgtype.UUID{}, err
 			}
 			if agent.Status != store.AgentStatusActive {
-				return "", pgtype.UUID{}, errors.New("agent is not active")
+				return "", pgtype.UUID{}, ErrAgentInactive
 			}
 			t, err := q.CreateTask(ctx, store.CreateTaskParams{
 				OrgID: in.Org, Title: in.Title, AgentID: agent.ID,
@@ -132,13 +141,16 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 		if err != nil {
 			return nil, err
 		}
+		if !out.First && (out.EffectKind != "task" || !out.EffectID.Valid) {
+			return nil, fmt.Errorf("dedupe key %s/%s already used by %q", in.Source, in.Key, out.EffectKind)
+		}
 		created = out.First
 		task, err = q.GetTask(ctx, store.GetTaskParams{OrgID: in.Org, ID: out.EffectID})
 		if err != nil {
 			return nil, err
 		}
 		if out.First {
-			notes = append(notes, wakeNotification("task-created:"+idString(task.ID), task))
+			notes = append(notes, wakeNotification("task-created:"+idString(task.ID), task)...)
 		}
 		return notes, nil
 	})
