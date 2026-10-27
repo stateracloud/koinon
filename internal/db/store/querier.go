@@ -432,6 +432,8 @@ type Querier interface {
 	// cleaned up yet.
 	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
 	ListApprovalRequestsForTask(ctx context.Context, arg ListApprovalRequestsForTaskParams) ([]ApprovalRequest, error)
+	// Which of an org's agents have their sandbox archived (plan item AR1), for one read of a list.
+	ListArchivedAgentSandboxes(ctx context.Context, orgID pgtype.UUID) ([]ListArchivedAgentSandboxesRow, error)
 	// Every org that has a chain, for the verifier.
 	ListAuditChainOrgs(ctx context.Context) ([]pgtype.UUID, error)
 	// One page of an org's chain in chain order, with the fields the hash covers as text, so the
@@ -599,6 +601,9 @@ type Querier interface {
 	MarkQuestionsDelivered(ctx context.Context, arg MarkQuestionsDeliveredParams) (int64, error)
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
+	// The sandbox and its volume were deleted for the archive tier; the home is in the checkpoint
+	// that restore_checkpoint_id names.
+	MarkSandboxArchived(ctx context.Context, arg MarkSandboxArchivedParams) (AgentSandbox, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// A stuck sandbox, the work saved from it, and the end-of-turn summary and fresh-session

@@ -12,7 +12,7 @@ import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { orgId, renderApp, whoAmI } from '@/test-utils'
 
-function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; resumeFails?: boolean; restarting?: number; scopes?: boolean } = {}) {
+function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; resumeFails?: boolean; restarting?: number; scopes?: boolean; archived?: boolean } = {}) {
   const resumes: ResumeAgentRequest[] = []
   const revokes: RevokeApprovalScopeRequest[] = []
   let scopes = opts.scopes
@@ -40,6 +40,7 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
       status,
       latestVersion: 2,
       activeVersion: opts.draft ? 1 : 2,
+      sandboxArchivedAt: opts.archived ? timestampFromMs(Date.now() - 60_000) : undefined,
       unhealthyAt,
       unhealthyReason: unhealthyAt ? 'its sandbox was recreated three times in a row' : '',
     })
@@ -103,6 +104,20 @@ describe('AgentPage unhealthy', () => {
     setup()
     await screen.findByRole('heading', { name: 'Repo helper' })
     expect(screen.queryByRole('region', { name: 'Agent health' })).not.toBeInTheDocument()
+  })
+})
+
+describe('AgentPage archive', () => {
+  it('says an archived sandbox restores on the next run', async () => {
+    setup({ archived: true })
+    await screen.findByRole('heading', { name: 'Repo helper' })
+    expect(screen.getByText(/archived .*restores on next run/)).toBeInTheDocument()
+  })
+
+  it('says nothing about an archive otherwise', async () => {
+    setup()
+    await screen.findByRole('heading', { name: 'Repo helper' })
+    expect(screen.queryByText(/restores on next run/)).not.toBeInTheDocument()
   })
 })
 

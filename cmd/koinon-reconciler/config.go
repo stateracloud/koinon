@@ -53,6 +53,7 @@ type fileConfig struct {
 	Reconciler struct {
 		IdleTimeout    string `yaml:"idleTimeout"`
 		ParkWarm       string `yaml:"parkWarm"`
+		ArchiveAfter   string `yaml:"archiveAfter"`
 		SandboxJobs    int    `yaml:"sandboxJobs"`
 		ResyncInterval string `yaml:"resyncInterval"`
 		HomeRetention  string `yaml:"homeRetention"`
@@ -107,6 +108,7 @@ type config struct {
 	accessLogOTLP      string
 
 	idleTimeout    time.Duration
+	archiveAfter   time.Duration
 	parkWarm       time.Duration
 	sandboxJobs    int
 	resyncInterval time.Duration
@@ -153,6 +155,7 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.allowedHosts, "provider-allowed-hosts", "", "deprecated alias of --egress-allowed-hosts, kept for one release")
 	fs.DurationVar(&c.keySettle, "provider-key-settle", 0,
 		"how long to wait after writing a new provider key file before applying a gateway config that names it (default 90s in standalone mode: kubelet updates a mounted Secret within about a minute; 2s in kubernetes mode: the controller reads the Secret through the API)")
+	fs.DurationVar(&c.archiveAfter, "archive-after", 0, "archive a sandbox (delete it and its volume, home checkpointed) after this long stopped (default 168h; negative turns it off; needs checkpoints)")
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.parkWarm, "park-warm", 0, "keep a sandbox up this long after its run parked on a2a or input_required (default 15m)")
 	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")
@@ -236,7 +239,7 @@ func (c *config) fill(fc fileConfig) error {
 	for _, d := range []struct {
 		dst *time.Duration
 		src string
-	}{{&c.idleTimeout, fc.Reconciler.IdleTimeout}, {&c.parkWarm, fc.Reconciler.ParkWarm}, {&c.resyncInterval, fc.Reconciler.ResyncInterval}} {
+	}{{&c.idleTimeout, fc.Reconciler.IdleTimeout}, {&c.archiveAfter, fc.Reconciler.ArchiveAfter}, {&c.parkWarm, fc.Reconciler.ParkWarm}, {&c.resyncInterval, fc.Reconciler.ResyncInterval}} {
 		if *d.dst == 0 && d.src != "" {
 			v, err := time.ParseDuration(d.src)
 			if err != nil {
