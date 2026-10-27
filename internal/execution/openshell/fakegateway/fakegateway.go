@@ -27,7 +27,6 @@ import (
 	"net"
 	"regexp"
 	"sync"
-	"sync/atomic"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -691,7 +690,9 @@ func (g *Gateway) ExecSandboxInteractive(stream grpc.BidiStreamingServer[openshe
 	ectx, cancelExec := context.WithCancel(stream.Context())
 	defer cancelExec()
 	stdinQ := newInputQueue()
-	var rejected atomic.Bool
+	// A rejection only applies while the command runs, and the exit status is sent once.
+	var stateMu sync.Mutex
+	running, rejected := true, false
 	go func() {
 		for {
 			msg, err := stream.Recv()
@@ -714,8 +715,14 @@ func (g *Gateway) ExecSandboxInteractive(stream grpc.BidiStreamingServer[openshe
 			if stdinQ.pendingBytes()+len(data) > MaxPendingStdin {
 				// The exit status goes out before the command is stopped, or the handler could
 				// end the stream first.
+				stateMu.Lock()
+				if !running {
+					stateMu.Unlock()
+					return
+				}
+				rejected = true
 				_ = send(&openshellv1.ExecSandboxEvent{Payload: &openshellv1.ExecSandboxEvent_Exit{Exit: &openshellv1.ExecSandboxExit{ExitCode: 74}}})
-				rejected.Store(true)
+				stateMu.Unlock()
 				stdinQ.fail(errors.New("stdin queue full"))
 				cancelExec()
 				return
@@ -732,7 +739,11 @@ func (g *Gateway) ExecSandboxInteractive(stream grpc.BidiStreamingServer[openshe
 			return &openshellv1.ExecSandboxEvent{Payload: &openshellv1.ExecSandboxEvent_Stderr{Stderr: &openshellv1.ExecSandboxStderr{Data: b}}}
 		}),
 	)
-	if rejected.Load() {
+	stateMu.Lock()
+	running = false
+	wasRejected := rejected
+	stateMu.Unlock()
+	if wasRejected {
 		return nil // the exit status 74 is sent
 	}
 	// Unblock the stdin goroutine if the command stopped reading.
@@ -785,9 +796,16 @@ func (f writerFunc) Write(b []byte) (int, error) { return f(b) }
 
 func eventWriter(send func(*openshellv1.ExecSandboxEvent) error, wrap func([]byte) *openshellv1.ExecSandboxEvent) io.Writer {
 	return writerFunc(func(b []byte) (int, error) {
-		if err := send(wrap(append([]byte(nil), b...))); err != nil {
-			return 0, err
+		// The supervisor sends output in small messages, never one write as one message.
+		n := 0
+		for len(b) > 0 {
+			c := b[:min(len(b), 32<<10)]
+			if err := send(wrap(append([]byte(nil), c...))); err != nil {
+				return n, err
+			}
+			n += len(c)
+			b = b[len(c):]
 		}
-		return len(b), nil
+		return n, nil
 	})
 }
