@@ -140,6 +140,13 @@ type Config struct {
 	SandboxJobs int
 	// ResyncInterval is the time between passes without a wake-up. Default 30 seconds.
 	ResyncInterval time.Duration
+	// Checkpoints turns on home checkpoints (checkpoint.go): a sandbox is stopped, recreated or
+	// archived only after its home was backed up, and a recreated sandbox keeps its home
+	// generation and gets the home restored. koinon-agentd writes the checkpoints.
+	Checkpoints bool
+	// CheckpointStopWait is how long an idle stop waits for its checkpoint. Default
+	// DefaultCheckpointStopWait.
+	CheckpointStopWait time.Duration
 	// HomeRetention decides the home volume's fate on archive. Default RetentionDelete.
 	HomeRetention Retention
 	// Logger defaults to slog.Default().
@@ -890,6 +897,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// recreated at once, parked runs included: they stay parked in Postgres and resume in the new
 		// sandbox through the reset path (ADR 0051). The new sandbox has a new ID, which clears the
 		// mark (RecordAgentSandbox).
+		if ok, note, err := r.homeGate(ctx, w, ws, sb, activitySince(w.sb, act)); err != nil || !ok {
+			if err != nil {
+				return err
+			}
+			return r.record(ctx, w, sb, hash, note)
+		}
 		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
 			return err
 		}
@@ -909,7 +922,7 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// left to fail; a starting run has not started the harness and waits for the new sandbox
 		// (agentd waits on Error and Deleting). With no running run, delete it so the next pass
 		// recreates it, as for a stuck one; parked runs resume in the new sandbox (ADR 0051).
-		return r.repair(ctx, w, ws, names.Sandbox, sb, hash)
+		return r.repair(ctx, w, ws, names.Sandbox, sb, hash, activitySince(w.sb, act))
 	}
 	if sb.Labels[LabelSpecHash] != hash {
 		// Image, providers or filesystem rules changed (or the sandbox was replaced by
@@ -920,6 +933,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		// agent_sandboxes.home_generation.)
 		if act.HasHeld {
 			return r.record(ctx, w, sb, hash, "sandbox spec changed; recreating it after the active and parked runs finish")
+		}
+		if ok, note, err := r.homeGate(ctx, w, ws, sb, activitySince(w.sb, act)); err != nil || !ok {
+			if err != nil {
+				return err
+			}
+			return r.record(ctx, w, sb, hash, note)
 		}
 		if err := r.backend.DeleteSandbox(ctx, ws, names.Sandbox); err != nil {
 			return err
@@ -935,6 +954,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 			return err
 		}
 		if !act.HasActive && !act.HasDemand && r.idle(w.sb, act, tune) {
+			// The home is backed up before the stop (practice B3).
+			if ok, err := r.stopGate(ctx, w, sb, activitySince(w.sb, act)); err != nil {
+				return err
+			} else if !ok {
+				return r.record(ctx, w, sb, hash, "waiting for the home backup before stopping")
+			}
 			if sb, err = r.backend.StopSandbox(ctx, ws, names.Sandbox); err != nil {
 				return err
 			}
@@ -957,7 +982,7 @@ const maxRepairs = 3
 
 // repair recreates a sandbox in Error or Completed. After maxRepairs recreations in 24 hours it
 // marks the agent unhealthy instead, so a sandbox that keeps failing is not recreated in a loop.
-func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb execution.Sandbox, hash string) error {
+func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb execution.Sandbox, hash string, since time.Time) error {
 	detail := "phase " + string(sb.Phase)
 	if m := truncate(sb.Message, 300); m != "" {
 		detail += ": " + m
@@ -983,6 +1008,12 @@ func (r *Reconciler) repair(ctx context.Context, w *work, ws, name string, sb ex
 			return err
 		}
 		return r.record(ctx, w, sb, hash, "")
+	}
+	if ok, note, err := r.homeGate(ctx, w, ws, sb, since); err != nil || !ok {
+		if err != nil {
+			return err
+		}
+		return r.record(ctx, w, sb, hash, note)
 	}
 	if err := r.backend.DeleteSandbox(ctx, ws, name); err != nil {
 		return err

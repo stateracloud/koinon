@@ -527,6 +527,17 @@ egress.allowedInternalHosts; both are joined. */}}
 {{- end }}
 
 {{- define "koinon.validate" -}}
+{{- if .Values.checkpoints.enabled }}
+{{- if not .Values.checkpoints.s3.existingSecret }}
+{{- fail "checkpoints.s3.existingSecret is required when checkpoints.enabled is true: a Secret with AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, endpoint and region" }}
+{{- end }}
+{{- if not .Values.checkpoints.s3.bucket }}
+{{- fail "checkpoints.s3.bucket is required when checkpoints.enabled is true" }}
+{{- end }}
+{{- if not .Values.checkpoints.s3.pathStyle }}
+{{- fail "checkpoints.s3.pathStyle=false is not supported: the S3 client addresses buckets path-style except on AWS" }}
+{{- end }}
+{{- end }}
 {{- if and .Values.flavorPrepull.enabled (not .Values.flavorPrepull.nodeSelector) }}
 {{- fail "flavorPrepull.nodeSelector is required when flavorPrepull.enabled is true: select the Kata nodes, or the images are pulled onto every node" }}
 {{- end }}
@@ -613,4 +624,22 @@ it carries no credentials.
   value: {{ .Values.agentd.workers | default 8 | quote }}
 - name: KOINON_LEASE
   value: {{ .Values.agentd.lease | default "30s" | quote }}
+{{- if .Values.checkpoints.enabled }}
+{{- /* Home checkpoints: agentd is the writer, the only holder of the S3 credentials (ADR 0032). */}}
+- name: KOINON_CHECKPOINTS
+  value: "true"
+- name: KOINON_KEK_DIR
+  value: /secrets/kek
+- name: KOINON_CHECKPOINTS_INTERVAL
+  value: {{ .Values.checkpoints.interval | quote }}
+- name: KOINON_CHECKPOINTS_S3_BUCKET
+  value: {{ .Values.checkpoints.s3.bucket | quote }}
+{{- range $env, $key := dict "KOINON_CHECKPOINTS_S3_ENDPOINT" "endpoint" "KOINON_CHECKPOINTS_S3_REGION" "region" "AWS_ACCESS_KEY_ID" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_SECRET_ACCESS_KEY" }}
+- name: {{ $env }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ $.Values.checkpoints.s3.existingSecret | quote }}
+      key: {{ $key }}
+{{- end }}
+{{- end }}
 {{- end }}

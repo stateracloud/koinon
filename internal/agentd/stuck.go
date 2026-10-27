@@ -280,7 +280,7 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 		} else {
 			ev.Action = "sandbox.mark_unhealthy"
 			if _, err := q.MarkSandboxUnhealthy(ctx, store.MarkSandboxUnhealthyParams{
-				OrgID: r.run.OrgID, AgentID: r.run.AgentID, Reason: reason, Generation: r.home.String,
+				OrgID: r.run.OrgID, AgentID: r.run.AgentID, Reason: reason, Generation: r.sandboxID,
 			}); err != nil {
 				return err
 			}

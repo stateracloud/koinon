@@ -65,7 +65,17 @@ SET state = @state::sandbox_state,
     phase = @phase,
     message = @message,
     spec_hash = @spec_hash,
-    home_generation = coalesce(nullif(@home_generation::text, ''), agent_sandboxes.home_generation),
+    -- The home generation is the home's lineage (ADR 0051 amendment): the OpenShell ID of the
+    -- first sandbox, kept by a sandbox that is restored from a checkpoint (restore_checkpoint_id,
+    -- set when the old one was deleted). @home_generation is the observed sandbox's ID.
+    home_generation = CASE
+        WHEN nullif(@home_generation::text, '') IS NULL THEN agent_sandboxes.home_generation
+        WHEN nullif(agent_sandboxes.home_generation, '') IS NULL THEN @home_generation::text
+        WHEN @home_generation::text = coalesce(agent_sandboxes.sandbox_id, agent_sandboxes.home_generation)
+            THEN agent_sandboxes.home_generation
+        WHEN agent_sandboxes.restore_checkpoint_id IS NOT NULL THEN agent_sandboxes.home_generation
+        ELSE @home_generation::text END,
+    sandbox_id = coalesce(nullif(@home_generation::text, ''), agent_sandboxes.sandbox_id),
     started_at = CASE WHEN @state::sandbox_state = 'ready' AND agent_sandboxes.state <> 'ready'
                       THEN now() ELSE agent_sandboxes.started_at END,
     stopped_at = CASE WHEN @state::sandbox_state = 'stopped' AND agent_sandboxes.state <> 'stopped'

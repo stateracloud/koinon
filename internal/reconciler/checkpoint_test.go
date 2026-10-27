@@ -1,0 +1,263 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package reconciler_test
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/reconciler"
+)
+
+// The reconciler's side of home checkpoints (plan item HC1): it asks koinon-agentd for them,
+// waits, and deletes a sandbox only after a checkpoint taken since its last activity is complete.
+var _ = Describe("Reconciler home checkpoints", func() {
+	var (
+		osg     *fakegateway.Gateway
+		backend *openshell.Backend
+		cfg     reconciler.Config
+		r       *reconciler.Reconciler
+		org     pgtype.UUID
+		user    pgtype.UUID
+		agent   store.Agent
+		names   execution.AgentNames
+		now     time.Time
+	)
+	pass := func(ctx context.Context) {
+		GinkgoHelper()
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+	}
+	row := func(ctx context.Context) store.AgentSandbox {
+		GinkgoHelper()
+		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: org, AgentID: agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		return sb
+	}
+	open := func(ctx context.Context) store.HomeCheckpoint {
+		GinkgoHelper()
+		cp, err := q.GetOpenHomeCheckpoint(ctx, store.GetOpenHomeCheckpointParams{OrgID: org, AgentID: agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		return cp
+	}
+	// finish plays koinon-agentd's writer: it takes the open request and completes or fails it.
+	finish := func(ctx context.Context, ok bool) store.HomeCheckpoint {
+		GinkgoHelper()
+		cp, err := q.ClaimHomeCheckpoint(ctx, store.ClaimHomeCheckpointParams{OrgID: org, LeaseSeconds: 60})
+		Expect(err).NotTo(HaveOccurred())
+		if ok {
+			cp, err = q.CompleteHomeCheckpoint(ctx, store.CompleteHomeCheckpointParams{
+				OrgID: org, ID: cp.ID, SnapshotID: pgtype.Text{String: "k" + cp.ID.String(), Valid: true},
+				SizeBytes: pgtype.Int8{Int64: 10, Valid: true}, Generation: row(ctx).HomeGeneration.String,
+			})
+		} else {
+			cp, err = q.FailHomeCheckpoint(ctx, store.FailHomeCheckpointParams{
+				OrgID: org, ID: cp.ID, Error: pgtype.Text{String: "S3 said no", Valid: true},
+			})
+		}
+		Expect(err).NotTo(HaveOccurred())
+		return cp
+	}
+	bump := func() {
+		cfg.Flavors[store.AgentFlavorOpencode] = reconciler.Flavor{
+			Image: image + "-2", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode],
+		}
+		var err error
+		r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	BeforeEach(func(ctx SpecContext) {
+		osg = fakegateway.New()
+		conn, err := osg.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = conn.Close(); osg.Stop() })
+		backend = openshell.New(conn)
+		now = time.Now()
+		cfg = reconciler.Config{
+			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			Keys:           ring,
+			ProviderKeys:   reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},
+			ProviderKeyDir: "/secrets/providers",
+			URLPolicy:      testPolicy,
+			Flavors: map[store.AgentFlavor]reconciler.Flavor{
+				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			},
+			RuntimeClassName: "kata",
+			Logger:           slog.New(slog.NewTextHandler(GinkgoWriter, nil)),
+			Now:              func() time.Time { return now },
+			Checkpoints:      true,
+			// The idle stop needs 10 minutes on the test clock, which the request's real age does not follow.
+			CheckpointStopWait: 30 * time.Minute,
+		}
+		org, user = newOrg(ctx)
+		addProvider(ctx, org, user, "upstream", "", "fake")
+		agent = newAgent(ctx, org, user)
+		names = execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+		r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
+		Expect(err).NotTo(HaveOccurred())
+		pass(ctx)
+		Expect(row(ctx).State).To(Equal(store.SandboxStateReady))
+	})
+
+	sandboxID := func() string {
+		return osg.Sandbox(row(context.Background()).Workspace, names.Sandbox).GetMetadata().GetId()
+	}
+
+	It("keeps the sandbox until its home is backed up, then recreates it with the same home generation", func(ctx SpecContext) {
+		lineage, oldID := row(ctx).HomeGeneration.String, sandboxID()
+		Expect(lineage).To(Equal(oldID))
+		bump()
+
+		By("a changed spec asks for a backup and deletes nothing")
+		pass(ctx)
+		pass(ctx)
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+		cp := open(ctx)
+		Expect(cp.Reason).To(Equal(store.CheckpointReasonRecreate))
+		Expect(cp.SandboxID).To(Equal(oldID))
+		Expect(row(ctx).Message).To(Equal("waiting for the home backup before recreating the sandbox"))
+
+		By("the finished backup lets it go, and the new sandbox keeps the generation")
+		done := finish(ctx, true)
+		pass(ctx) // deletes
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+		Expect(row(ctx).RestoreCheckpointID).To(Equal(pgtype.UUID{Bytes: done.ID.Bytes, Valid: true}))
+		pass(ctx) // creates
+		Expect(sandboxID()).NotTo(Equal(oldID))
+		got := row(ctx)
+		Expect(got.State).To(Equal(store.SandboxStateReady))
+		Expect(got.HomeGeneration.String).To(Equal(lineage), "a restored home keeps its generation (ADR 0051)")
+		Expect(got.SandboxID.String).To(Equal(sandboxID()))
+
+		By("the generation stays through the restore and later passes")
+		Expect(q.ClearSandboxRestore(ctx, store.ClearSandboxRestoreParams{OrgID: org, AgentID: agent.ID})).To(Succeed())
+		pass(ctx)
+		Expect(row(ctx).HomeGeneration.String).To(Equal(lineage))
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+	})
+
+	It("a sandbox recreated without a checkpoint gets a new generation", func(ctx SpecContext) {
+		cfg.Checkpoints = false
+		old := row(ctx).HomeGeneration.String
+		bump()
+		pass(ctx)
+		pass(ctx)
+		Expect(row(ctx).HomeGeneration.String).NotTo(Equal(old))
+	})
+
+	It("blocks the recreation when the backup fails, says why on the agent, and tries again after a resume", func(ctx SpecContext) {
+		oldID := sandboxID()
+		bump()
+		pass(ctx)
+		finish(ctx, false)
+
+		pass(ctx)
+		pass(ctx)
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+		Expect(sandboxID()).To(Equal(oldID))
+		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.UnhealthyAt.Valid).To(BeTrue())
+		Expect(a.UnhealthyReason.String).To(And(ContainSubstring("home backup failed"), ContainSubstring("S3 said no")))
+		Expect(row(ctx).Message).To(ContainSubstring("the home backup failed"))
+		var n int
+		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'agent.mark_unhealthy'`, org).Scan(&n)).To(Succeed())
+		Expect(n).To(Equal(1), "marked once")
+
+		By("an admin resumes the agent: a new backup is requested")
+		_, err = q.ResumeAgent(ctx, store.ResumeAgentParams{OrgID: org, ID: agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		pass(ctx)
+		Expect(open(ctx).Status).To(Equal(store.CheckpointStatusRequested))
+		finish(ctx, true)
+		pass(ctx)
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+	})
+
+	It("recreates a sandbox found stuck only after its backup, and the new one keeps the generation", func(ctx SpecContext) {
+		lineage, oldID := row(ctx).HomeGeneration.String, sandboxID()
+		_, err := q.MarkSandboxUnhealthy(ctx, store.MarkSandboxUnhealthyParams{OrgID: org, AgentID: agent.ID, Reason: "a process could not be ended", Generation: oldID})
+		Expect(err).NotTo(HaveOccurred())
+		pass(ctx)
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+		Expect(open(ctx).Reason).To(Equal(store.CheckpointReasonRecreate))
+		finish(ctx, true)
+		pass(ctx)
+		pass(ctx)
+		Expect(sandboxID()).NotTo(Equal(oldID))
+		got := row(ctx)
+		Expect(got.HomeGeneration.String).To(Equal(lineage))
+		Expect(got.UnhealthyAt.Valid).To(BeFalse(), "the mark ended with the sandbox it was made for")
+	})
+
+	It("does not ask again while the previous recreation's restore is pending", func(ctx SpecContext) {
+		bump()
+		pass(ctx)
+		finish(ctx, true)
+		pass(ctx)
+		pass(ctx)
+		Expect(row(ctx).RestoreCheckpointID.Valid).To(BeTrue())
+		cfg.Flavors[store.AgentFlavorOpencode] = reconciler.Flavor{Image: image + "-3", Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]}
+		var err error
+		r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
+		Expect(err).NotTo(HaveOccurred())
+		pass(ctx)
+		Expect(osg.Calls("DeleteSandbox")).To(Equal(2), "the home is still in the checkpoint; the empty sandbox holds nothing")
+		_, err = q.GetOpenHomeCheckpoint(ctx, store.GetOpenHomeCheckpointParams{OrgID: org, AgentID: agent.ID})
+		Expect(err).To(HaveOccurred())
+	})
+
+	Describe("the idle stop", func() {
+		It("is preceded by a backup", func(ctx SpecContext) {
+			now = time.Now().Add(11 * time.Minute)
+			pass(ctx)
+			Expect(open(ctx).Reason).To(Equal(store.CheckpointReasonStop))
+			Expect(osg.Calls("StopSandbox")).To(Equal(0))
+			Expect(row(ctx).Message).To(Equal("waiting for the home backup before stopping"))
+			finish(ctx, true)
+			pass(ctx)
+			Expect(osg.Calls("StopSandbox")).To(Equal(1))
+		})
+
+		It("goes ahead when the backup failed, because a stop keeps the volume", func(ctx SpecContext) {
+			now = time.Now().Add(11 * time.Minute)
+			pass(ctx)
+			finish(ctx, false)
+			pass(ctx)
+			Expect(osg.Calls("StopSandbox")).To(Equal(1))
+		})
+
+		It("does not wait for ever for a backup that is not taken", func(ctx SpecContext) {
+			now = time.Now().Add(11 * time.Minute)
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("StopSandbox")).To(Equal(0))
+			now = now.Add(cfg.CheckpointStopWait + time.Minute)
+			pass(ctx)
+			Expect(osg.Calls("StopSandbox")).To(Equal(1))
+		})
+
+		It("lets a stopped sandbox be recreated on its stop backup, without a new one", func(ctx SpecContext) {
+			now = time.Now().Add(11 * time.Minute)
+			pass(ctx)
+			finish(ctx, true)
+			pass(ctx)
+			Expect(row(ctx).State).To(Equal(store.SandboxStateStopped))
+			bump()
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			_, err := q.GetOpenHomeCheckpoint(ctx, store.GetOpenHomeCheckpointParams{OrgID: org, AgentID: agent.ID})
+			Expect(err).To(HaveOccurred())
+		})
+	})
+})
