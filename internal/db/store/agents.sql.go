@@ -377,6 +377,41 @@ func (q *Queries) ListActiveAgentVersionsAllOrgs(ctx context.Context) ([]ListAct
 	return items, nil
 }
 
+const listAgentActivationsAllOrgs = `-- name: ListAgentActivationsAllOrgs :many
+SELECT a.org_id, a.id AS agent_id, a.activated_at
+FROM agents a
+JOIN orgs o ON o.id = a.org_id AND o.deleted_at IS NULL
+WHERE a.status = 'active'
+`
+
+type ListAgentActivationsAllOrgsRow struct {
+	OrgID       pgtype.UUID
+	AgentID     pgtype.UUID
+	ActivatedAt pgtype.Timestamptz
+}
+
+// When each active agent's current version was activated, across every live org, so the schedule
+// trigger fires nothing that was due before the version took effect (ADR 0066, TR2).
+func (q *Queries) ListAgentActivationsAllOrgs(ctx context.Context) ([]ListAgentActivationsAllOrgsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentActivationsAllOrgs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentActivationsAllOrgsRow
+	for rows.Next() {
+		var i ListAgentActivationsAllOrgsRow
+		if err := rows.Scan(&i.OrgID, &i.AgentID, &i.ActivatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentVersions = `-- name: ListAgentVersions :many
 SELECT org_id, id, agent_id, version, config, created_by, created_at FROM agent_versions
 WHERE org_id = $1 AND agent_id = $2
