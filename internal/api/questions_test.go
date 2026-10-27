@@ -64,6 +64,11 @@ var _ = Describe("QuestionService", func() {
 	}
 
 	It("lists the open question to its addressee only, with the choices, draft and default", func(ctx SpecContext) {
+		// The inbox lists the questions of parked runs only.
+		ad := e.agentd("agentd-list")
+		run := ad.mustClaim(ctx, f.org)
+		_, err := ad.q.ParkRun(ctx, store.ParkRunParams{OrgID: run.OrgID, ID: run.ID, Epoch: run.Epoch, ParkReason: store.RunParkReasonInputRequired})
+		Expect(err).NotTo(HaveOccurred())
 		got := list(ctx, f.owner, "")
 		Expect(got).To(HaveLen(1))
 		Expect(got[0].GetId()).To(Equal(q.ID.String()))

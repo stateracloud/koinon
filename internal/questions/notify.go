@@ -5,6 +5,7 @@ package questions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -40,36 +41,61 @@ func notification(row store.Question) durable.Notification {
 // DBOS runtime launches, so a workflow recovered at start finds it.
 func RegisterNotifications(n *durable.Notifier, pool *pgxpool.Pool) {
 	n.Handle(NotifyAsked, func(ctx context.Context, note durable.Notification) error {
+		err := deliver(ctx, pool, note)
+		if err == nil {
+			return nil
+		}
+		// Each attempt of the DBOS step (and each inline sweep) lands here. After giveUpAfter the
+		// question counts as notified, so the sweep stops re-sending a workflow that failed for
+		// good (its fixed ID returns the recorded failure) and the inbox still lists the question.
 		var p payload
-		if err := json.Unmarshal([]byte(note.Payload), &p); err != nil {
-			return fmt.Errorf("decode %s payload: %w", note.Kind, err)
-		}
-		var org, id pgtype.UUID
-		if err := org.Scan(p.Org); err != nil {
-			return fmt.Errorf("org %q: %w", p.Org, err)
-		}
-		if err := id.Scan(p.Question); err != nil {
-			return fmt.Errorf("question %q: %w", p.Question, err)
-		}
-		q := store.New(pool)
-		row, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: org, ID: id})
-		if err != nil {
-			return err
-		}
-		// A question answered before this ran needs no announcement.
-		if row.State == store.QuestionStateOpen {
-			body, _ := json.Marshal(map[string]any{
-				"question_id": row.ID.String(), "task_id": row.TaskID.String(), "question": row.Question,
-			})
-			if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
-				OrgID: org, UserID: row.AskedTo, Kind: NotificationKind, DedupeKey: "question:" + row.ID.String(), Payload: body,
-			}); err != nil {
-				return err
+		if json.Unmarshal([]byte(note.Payload), &p) == nil {
+			var org, id pgtype.UUID
+			if org.Scan(p.Org) == nil && id.Scan(p.Question) == nil {
+				row, rerr := store.New(pool).RecordQuestionNotifyFailure(ctx, store.RecordQuestionNotifyFailureParams{OrgID: org, ID: id, GiveUp: giveUpAfter})
+				if rerr == nil && row.NotifiedAt.Valid {
+					slog.Error("question notification abandoned after repeated failures; the question stays in the inbox",
+						"org", p.Org, "question", p.Question, "failures", row.NotifyFailures, "err", err)
+				}
 			}
 		}
-		_, err = q.MarkQuestionNotified(ctx, store.MarkQuestionNotifiedParams{OrgID: org, ID: id})
 		return err
 	})
+}
+
+// giveUpAfter is how many failed deliveries a question's notification gets before it is abandoned.
+const giveUpAfter = 8
+
+func deliver(ctx context.Context, pool *pgxpool.Pool, note durable.Notification) error {
+	var p payload
+	if err := json.Unmarshal([]byte(note.Payload), &p); err != nil {
+		return fmt.Errorf("decode %s payload: %w", note.Kind, err)
+	}
+	var org, id pgtype.UUID
+	if err := org.Scan(p.Org); err != nil {
+		return fmt.Errorf("org %q: %w", p.Org, err)
+	}
+	if err := id.Scan(p.Question); err != nil {
+		return fmt.Errorf("question %q: %w", p.Question, err)
+	}
+	q := store.New(pool)
+	row, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: org, ID: id})
+	if err != nil {
+		return err
+	}
+	// A question answered before this ran needs no announcement.
+	if row.State == store.QuestionStateOpen {
+		body, _ := json.Marshal(map[string]any{
+			"question_id": row.ID.String(), "task_id": row.TaskID.String(), "question": row.Question,
+		})
+		if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
+			OrgID: org, UserID: row.AskedTo, Kind: NotificationKind, DedupeKey: "question:" + row.ID.String(), Payload: body,
+		}); err != nil {
+			return err
+		}
+	}
+	_, err = q.MarkQuestionNotified(ctx, store.MarkQuestionNotifiedParams{OrgID: org, ID: id})
+	return err
 }
 
 // NotifyPending sends the notification of every opened question that has none yet. The park that
@@ -83,19 +109,25 @@ func NotifyPending(ctx context.Context, pool *pgxpool.Pool, send durable.Sender)
 		return 0, err
 	}
 	sent := 0
+	// One question or org that keeps failing must not block the others: log each failure, go on and
+	// return them joined.
+	var errs []error
 	for _, org := range orgs {
 		rows, err := q.ListQuestionsToNotify(ctx, store.ListQuestionsToNotifyParams{OrgID: org, MaxRows: 100})
 		if err != nil {
-			return sent, err
+			errs = append(errs, err)
+			continue
 		}
 		for _, row := range rows {
 			if err := send.Send(ctx, notification(row)); err != nil {
-				return sent, err
+				slog.Error("question notification failed", "org", org.String(), "question", row.ID.String(), "err", err)
+				errs = append(errs, fmt.Errorf("question %s: %w", row.ID, err))
+				continue
 			}
 			sent++
 		}
 	}
-	return sent, nil
+	return sent, errors.Join(errs...)
 }
 
 // Sweeper calls NotifyPending every interval until ctx ends.
@@ -105,6 +137,9 @@ func Sweeper(ctx context.Context, pool *pgxpool.Pool, send durable.Sender, inter
 	for {
 		if _, err := NotifyPending(ctx, pool, send); err != nil && ctx.Err() == nil {
 			log.Error("question notification sweep failed", "err", err)
+		}
+		if _, err := CancelOfFinishedRuns(ctx, pool); err != nil && ctx.Err() == nil {
+			log.Error("canceling the questions of finished runs failed", "err", err)
 		}
 		select {
 		case <-ctx.Done():

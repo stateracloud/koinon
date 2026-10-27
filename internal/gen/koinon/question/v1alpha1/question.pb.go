@@ -38,6 +38,8 @@ const (
 	QuestionState_QUESTION_STATE_DISMISSED QuestionState = 4
 	// Nobody answered in time; the default was applied.
 	QuestionState_QUESTION_STATE_EXPIRED QuestionState = 5
+	// The run ended (canceled, failed or finished) before anyone answered; nothing was applied.
+	QuestionState_QUESTION_STATE_CANCELED QuestionState = 6
 )
 
 // Enum value maps for QuestionState.
@@ -49,6 +51,7 @@ var (
 		3: "QUESTION_STATE_ANSWERED",
 		4: "QUESTION_STATE_DISMISSED",
 		5: "QUESTION_STATE_EXPIRED",
+		6: "QUESTION_STATE_CANCELED",
 	}
 	QuestionState_value = map[string]int32{
 		"QUESTION_STATE_UNSPECIFIED": 0,
@@ -57,6 +60,7 @@ var (
 		"QUESTION_STATE_ANSWERED":    3,
 		"QUESTION_STATE_DISMISSED":   4,
 		"QUESTION_STATE_EXPIRED":     5,
+		"QUESTION_STATE_CANCELED":    6,
 	}
 )
 
@@ -752,14 +756,15 @@ const file_koinon_question_v1alpha1_question_proto_rawDesc = "" +
 	"\vquestion_id\x18\x02 \x01(\tR\n" +
 	"questionId\"Y\n" +
 	"\x17DismissQuestionResponse\x12>\n" +
-	"\bquestion\x18\x01 \x01(\v2\".koinon.question.v1alpha1.QuestionR\bquestion*\xb9\x01\n" +
+	"\bquestion\x18\x01 \x01(\v2\".koinon.question.v1alpha1.QuestionR\bquestion*\xd6\x01\n" +
 	"\rQuestionState\x12\x1e\n" +
 	"\x1aQUESTION_STATE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14QUESTION_STATE_ASKED\x10\x01\x12\x17\n" +
 	"\x13QUESTION_STATE_OPEN\x10\x02\x12\x1b\n" +
 	"\x17QUESTION_STATE_ANSWERED\x10\x03\x12\x1c\n" +
 	"\x18QUESTION_STATE_DISMISSED\x10\x04\x12\x1a\n" +
-	"\x16QUESTION_STATE_EXPIRED\x10\x05*\x87\x01\n" +
+	"\x16QUESTION_STATE_EXPIRED\x10\x05\x12\x1b\n" +
+	"\x17QUESTION_STATE_CANCELED\x10\x06*\x87\x01\n" +
 	"\n" +
 	"AnswerKind\x12\x1b\n" +
 	"\x17ANSWER_KIND_UNSPECIFIED\x10\x00\x12\x16\n" +

@@ -288,8 +288,13 @@ type Task struct {
 	// last turn (ADR 0051 amendment). Set by GetTask only.
 	AgentSummary   string                 `protobuf:"bytes,12,opt,name=agent_summary,json=agentSummary,proto3" json:"agent_summary,omitempty"`
 	AgentSummaryAt *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=agent_summary_at,json=agentSummaryAt,proto3" json:"agent_summary_at,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Set by ListTasks and GetTask while an open question of the task waits on a person: who it is
+	// addressed to. The inbox uses it so that a task waiting on someone else's answer is not shown
+	// to its creator as theirs to act on.
+	WaitingOnUserId string `protobuf:"bytes,14,opt,name=waiting_on_user_id,json=waitingOnUserId,proto3" json:"waiting_on_user_id,omitempty"`
+	WaitingOnName   string `protobuf:"bytes,15,opt,name=waiting_on_name,json=waitingOnName,proto3" json:"waiting_on_name,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Task) Reset() {
@@ -411,6 +416,20 @@ func (x *Task) GetAgentSummaryAt() *timestamppb.Timestamp {
 		return x.AgentSummaryAt
 	}
 	return nil
+}
+
+func (x *Task) GetWaitingOnUserId() string {
+	if x != nil {
+		return x.WaitingOnUserId
+	}
+	return ""
+}
+
+func (x *Task) GetWaitingOnName() string {
+	if x != nil {
+		return x.WaitingOnName
+	}
+	return ""
 }
 
 // TaskEvent is one entry of the task timeline: a message, a state change or a run note such as
@@ -1176,7 +1195,7 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x19\n" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1d\n" +
 	"\n" +
-	"trigger_id\x18\x04 \x01(\tR\ttriggerId\"\xc6\x04\n" +
+	"trigger_id\x18\x04 \x01(\tR\ttriggerId\"\x9b\x05\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x14\n" +
@@ -1195,7 +1214,9 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"finishedAt\x12-\n" +
 	"\x04cost\x18\v \x01(\v2\x19.koinon.run.v1alpha1.CostR\x04cost\x12#\n" +
 	"\ragent_summary\x18\f \x01(\tR\fagentSummary\x12D\n" +
-	"\x10agent_summary_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\x0eagentSummaryAt\"\xc0\x02\n" +
+	"\x10agent_summary_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\x0eagentSummaryAt\x12+\n" +
+	"\x12waiting_on_user_id\x18\x0e \x01(\tR\x0fwaitingOnUserId\x12&\n" +
+	"\x0fwaiting_on_name\x18\x0f \x01(\tR\rwaitingOnName\"\xc0\x02\n" +
 	"\tTaskEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12>\n" +

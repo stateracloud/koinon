@@ -85,6 +85,17 @@ var _ = Describe("a question", func() {
 		})).To(Succeed())
 	}
 
+	park := func(ctx context.Context) {
+		GinkgoHelper()
+		Expect(tx(ctx, func(q *store.Queries) error {
+			_, err := q.ParkRun(ctx, store.ParkRunParams{
+				OrgID: w.org, ID: w.run.ID, Epoch: w.run.Epoch, ParkReason: store.RunParkReasonInputRequired,
+				ParkExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+			})
+			return err
+		})).To(Succeed())
+	}
+
 	It("is the same question when asked twice in one run", func(ctx SpecContext) {
 		first, created := create(ctx, ask)
 		Expect(created).To(BeTrue())
@@ -115,6 +126,7 @@ var _ = Describe("a question", func() {
 		Expect(inbox).To(BeEmpty())
 
 		open(ctx)
+		park(ctx)
 		inbox, _ = q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: w.org, UserID: w.user})
 		Expect(inbox).To(HaveLen(1))
 		bob := w.member(ctx)
@@ -194,6 +206,80 @@ var _ = Describe("a question", func() {
 		Expect(undelivered).To(HaveLen(2))
 	})
 
+	It("cannot be addressed to a viewer, who cannot answer", func(ctx SpecContext) {
+		viewer := w.member(ctx)
+		_, err := pool.Exec(ctx, `UPDATE org_memberships SET role = 'viewer' WHERE org_id = $1 AND user_id = $2`, w.org, viewer)
+		Expect(err).NotTo(HaveOccurred())
+		ask.To = viewer
+		err = tx(ctx, func(q *store.Queries) error { _, _, err := questions.Create(ctx, q, ask); return err })
+		Expect(err).To(MatchError(questions.ErrNotMember))
+	})
+
+	It("is canceled with its run: it leaves the inbox and can no longer be answered", func(ctx SpecContext) {
+		row, _ := create(ctx, ask)
+		ask.Question = "Never opened?"
+		asked, _ := create(ctx, ask)
+		Expect(tx(ctx, func(q *store.Queries) error {
+			_, err := questions.OpenForRun(ctx, q, w.org, w.run.ID, w.task)
+			return err
+		})).To(Succeed())
+		park(ctx)
+		inbox, _ := q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: w.org, UserID: w.user})
+		Expect(inbox).To(HaveLen(2))
+
+		_, err := q.CancelRun(ctx, store.CancelRunParams{OrgID: w.org, ID: w.run.ID, OutcomeReason: "canceled by user"})
+		Expect(err).NotTo(HaveOccurred())
+		inbox, _ = q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: w.org, UserID: w.user})
+		Expect(inbox).To(BeEmpty(), "hidden at once, before the sweep")
+		err = tx(ctx, func(q *store.Queries) error {
+			_, err := questions.Respond(ctx, q, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+			return err
+		})
+		Expect(err).To(MatchError(questions.ErrNotOpen))
+
+		n, err := questions.CancelOfFinishedRuns(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(Equal(2))
+		for _, id := range []pgtype.UUID{row.ID, asked.ID} {
+			got, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: w.org, ID: id})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.State).To(Equal(store.QuestionStateCanceled))
+			Expect(got.ResolvedAt.Valid).To(BeTrue())
+		}
+		evs, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: w.org, TaskID: w.task, MaxEvents: 100})
+		Expect(err).NotTo(HaveOccurred())
+		var kinds []string
+		for _, e := range evs {
+			kinds = append(kinds, e.Kind)
+		}
+		Expect(kinds).To(ContainElement(questions.KindCanceled))
+		n, err = questions.CancelOfFinishedRuns(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeZero(), "a second sweep finds nothing")
+	})
+
+	It("keeps notifying the other questions when one keeps failing, and gives up on the failing one", func(ctx SpecContext) {
+		bad, _ := create(ctx, ask)
+		ask.Question = "Another?"
+		good, _ := create(ctx, ask)
+		open(ctx)
+		n := durable.NewNotifier(nil, nil)
+		questions.RegisterNotifications(n, pool)
+		send := senderFunc(func(ctx context.Context, note durable.Notification) error {
+			if note.ID == questions.NotifyAsked+":"+bad.ID.String() {
+				return n.Send(ctx, durable.Notification{ID: note.ID, Kind: "no.such.kind"})
+			}
+			return n.Send(ctx, note)
+		})
+		sent, err := questions.NotifyPending(ctx, pool, send)
+		Expect(err).To(HaveOccurred())
+		Expect(sent).To(BeNumerically(">=", 1), "the others are still sent")
+		got, _ := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: w.org, ID: good.ID})
+		Expect(got.NotifiedAt.Valid).To(BeTrue())
+		got, _ = q.GetQuestion(ctx, store.GetQuestionParams{OrgID: w.org, ID: bad.ID})
+		Expect(got.NotifiedAt.Valid).To(BeFalse())
+	})
+
 	It("expires without an actor and keeps the default as the answer", func(ctx SpecContext) {
 		row, _ := create(ctx, ask)
 		open(ctx)
@@ -245,3 +331,7 @@ var _ = Describe("a question", func() {
 		Expect(got.NotifiedAt.Valid).To(BeTrue())
 	})
 })
+
+type senderFunc func(ctx context.Context, n durable.Notification) error
+
+func (f senderFunc) Send(ctx context.Context, n durable.Notification) error { return f(ctx, n) }

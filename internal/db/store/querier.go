@@ -38,6 +38,8 @@ type Querier interface {
 	AppendRunEventOnce(ctx context.Context, arg AppendRunEventOnceParams) (RunEvent, error)
 	AppendTaskEvent(ctx context.Context, arg AppendTaskEventParams) (TaskEvent, error)
 	ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Agent, error)
+	// asked | open -> canceled, for a run that ended without them being answered.
+	CancelOpenQuestionsForRun(ctx context.Context, arg CancelOpenQuestionsForRunParams) ([]Question, error)
 	// Archiving an agent cancels every run it has not finished.
 	CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRunsForAgentParams) ([]Run, error)
 	// pending -> canceled, for a run that finished without them (for example a
@@ -214,8 +216,9 @@ type Querier interface {
 	//
 	// Questions an agent asks a person with ask_user (plan item TK3; ADR 0065). Every query on an
 	// org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
-	// A user of the org named by its ID or its email (case-insensitive). Members through any source
-	// count; deleted users do not.
+	// A user of the org named by its ID or its email (case-insensitive) who may answer a question
+	// (role member or higher: a viewer cannot answer or dismiss). Members through any source count;
+	// deleted users do not. role is the user's highest role in the org.
 	FindOrgMemberByIdent(ctx context.Context, arg FindOrgMemberByIdentParams) (FindOrgMemberByIdentRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -376,6 +379,7 @@ type Querier interface {
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	// Zero rows: the nonce was used before (a replay).
 	InsertUploadNonce(ctx context.Context, arg InsertUploadNonceParams) (int64, error)
+	// Whether the user may answer questions in the org: role member or higher.
 	IsOrgMember(ctx context.Context, arg IsOrgMemberParams) (bool, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
 	// The newest complete checkpoint (hourly, stop or recreate) taken for this sandbox. The recreate
@@ -454,6 +458,8 @@ type Querier interface {
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
 	// The inbox: open questions asked to the user, newest first.
+	// Only those whose run is still parked: a question outlives no run (the sweep closes it, this
+	// hides it meanwhile).
 	ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQuestionsForUserParams) ([]Question, error)
 	// Runs that can still be canceled, when an org-wide limit is reached.
 	ListOpenRunsOfOrg(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
@@ -473,6 +479,8 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	// The reconciler walks orgs one at a time, so every later query is org-scoped.
 	ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcileRow, error)
+	// Orgs with a question whose run ended (the sweeper then queries per org).
+	ListOrgsWithQuestionsOfFinishedRuns(ctx context.Context) ([]pgtype.UUID, error)
 	// Orgs that have at least one opened question to notify about (the sweeper then queries per org).
 	ListOrgsWithQuestionsToNotify(ctx context.Context) ([]pgtype.UUID, error)
 	// The org's requests waiting for a human (input_required), oldest first.
@@ -490,6 +498,11 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	ListPriceOverrides(ctx context.Context, orgID pgtype.UUID) ([]PriceOverride, error)
 	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
+	// Who the open questions of these tasks wait on (only where the run is still parked), for the
+	// inbox: a task waiting on someone else's question is not its creator's to act on.
+	ListQuestionAddresseesForTasks(ctx context.Context, arg ListQuestionAddresseesForTasksParams) ([]ListQuestionAddresseesForTasksRow, error)
+	// Runs that ended while a question of theirs was still asked or open.
+	ListQuestionRunsOfFinishedRuns(ctx context.Context, orgID pgtype.UUID) ([]pgtype.UUID, error)
 	ListQuestionsForTask(ctx context.Context, arg ListQuestionsForTaskParams) ([]Question, error)
 	// Opened questions whose notification has not gone out, oldest first.
 	ListQuestionsToNotify(ctx context.Context, arg ListQuestionsToNotifyParams) ([]Question, error)
@@ -593,6 +606,9 @@ type Querier interface {
 	// One probe's result. Three failures in a row make a server unhealthy; one success makes it
 	// healthy again. health_since moves only when the health changes.
 	RecordMCPServerProbe(ctx context.Context, arg RecordMCPServerProbeParams) (McpServer, error)
+	// One failed delivery of the notification. At @give_up failures the question counts as notified
+	// (notified_at is set), so the sweep stops re-sending it; the caller logs that it gave up.
+	RecordQuestionNotifyFailure(ctx context.Context, arg RecordQuestionNotifyFailureParams) (Question, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
 	ReenableUIMCPServers(ctx context.Context, orgID pgtype.UUID) error
 	// Re-enable UI models whose provider is enabled and that no declared model shadows.

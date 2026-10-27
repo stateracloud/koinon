@@ -9,7 +9,9 @@
 
 -- +goose Up
 
-CREATE TYPE question_state AS ENUM ('asked', 'open', 'answered', 'dismissed', 'expired');
+CREATE TYPE question_state AS ENUM ('asked', 'open', 'answered', 'dismissed', 'expired', 'canceled');
+-- 'canceled': the run ended (canceled, failed, finished) while the question was still asked or open,
+-- so nobody can answer it any more.
 
 -- How the question was resolved: a listed choice, the draft as offered, free text, or the safe
 -- default (dismissed or expired).
@@ -42,6 +44,9 @@ CREATE TABLE questions (
     opened_at      timestamptz,
     -- The in-app notification (and later chat messages) went out for this question.
     notified_at    timestamptz,
+    -- Failed deliveries of the notification; at the limit the handler gives up and sets notified_at,
+    -- so a question whose notification cannot be written is not retried by every sweep forever.
+    notify_failures int NOT NULL DEFAULT 0,
     resolved_at    timestamptz,
     -- The outcome was sent to the agent in a prompt.
     delivered_at   timestamptz,
@@ -52,9 +57,12 @@ CREATE TABLE questions (
     FOREIGN KEY (org_id, task_id, run_id) REFERENCES runs (org_id, task_id, id),
     FOREIGN KEY (org_id, agent_id) REFERENCES agents (org_id, id),
     CHECK (jsonb_typeof(choices) = 'array'),
-    CHECK ((state IN ('answered', 'dismissed', 'expired')) = (resolved_at IS NOT NULL)),
+    CHECK ((state IN ('answered', 'dismissed', 'expired', 'canceled')) = (resolved_at IS NOT NULL)),
     CHECK ((state IN ('answered', 'dismissed', 'expired')) = (answer IS NOT NULL)),
-    CHECK ((state IN ('open', 'answered', 'dismissed', 'expired')) = (opened_at IS NOT NULL))
+    CHECK (state <> 'asked' OR opened_at IS NULL),
+    CHECK (state NOT IN ('open', 'answered', 'dismissed', 'expired') OR opened_at IS NOT NULL),
+    -- A question that was never notified and is not in a state a person acted on.
+    CHECK (state <> 'canceled' OR answered_by IS NULL)
 );
 
 -- The inbox: what waits on a person.
@@ -64,7 +72,7 @@ CREATE INDEX questions_run ON questions (org_id, run_id, created_at);
 -- Expiry and reminders (TK4).
 CREATE INDEX questions_open_expiry ON questions (org_id, expires_at) WHERE state = 'open';
 -- Notifications still to send.
-CREATE INDEX questions_unnotified ON questions (org_id, opened_at) WHERE state <> 'asked' AND notified_at IS NULL;
+CREATE INDEX questions_unnotified ON questions (org_id, opened_at) WHERE state IN ('open', 'answered', 'dismissed', 'expired') AND notified_at IS NULL;
 
 CREATE TRIGGER questions_set_updated_at BEFORE UPDATE ON questions
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

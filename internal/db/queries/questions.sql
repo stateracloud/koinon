@@ -4,9 +4,10 @@
 -- org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 
 -- name: FindOrgMemberByIdent :one
--- A user of the org named by its ID or its email (case-insensitive). Members through any source
--- count; deleted users do not.
-SELECT u.id, u.email, u.display_name
+-- A user of the org named by its ID or its email (case-insensitive) who may answer a question
+-- (role member or higher: a viewer cannot answer or dismiss). Members through any source count;
+-- deleted users do not. role is the user's highest role in the org.
+SELECT u.id, u.email, u.display_name, (SELECT max(om.role) FROM org_memberships om WHERE om.org_id = @org_id AND om.user_id = u.id)::org_role AS role
 FROM users u
 WHERE u.deleted_at IS NULL
   AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.org_id = @org_id AND om.user_id = u.id)
@@ -14,10 +15,12 @@ WHERE u.deleted_at IS NULL
 LIMIT 1;
 
 -- name: IsOrgMember :one
+-- Whether the user may answer questions in the org: role member or higher.
 SELECT EXISTS (
     SELECT 1 FROM org_memberships om
     JOIN users u ON u.id = om.user_id
     WHERE om.org_id = @org_id AND om.user_id = @user_id AND u.deleted_at IS NULL
+      AND om.role >= 'member'
 );
 
 -- name: CreateQuestion :one
@@ -46,7 +49,7 @@ FOR UPDATE;
 -- name: ListUndeliveredQuestionsForRun :many
 -- A run's questions whose outcome the agent has not been sent yet (asked, open or resolved).
 SELECT * FROM questions
-WHERE org_id = @org_id AND run_id = @run_id AND delivered_at IS NULL
+WHERE org_id = @org_id AND run_id = @run_id AND delivered_at IS NULL AND state <> 'canceled'
 ORDER BY created_at, id;
 
 -- name: OpenAskedQuestionsForRun :many
@@ -77,9 +80,41 @@ RETURNING *;
 
 -- name: ListOpenQuestionsForUser :many
 -- The inbox: open questions asked to the user, newest first.
-SELECT * FROM questions
-WHERE org_id = @org_id AND asked_to = @user_id AND state = 'open'
-ORDER BY opened_at DESC, id DESC;
+-- Only those whose run is still parked: a question outlives no run (the sweep closes it, this
+-- hides it meanwhile).
+SELECT qn.* FROM questions qn
+JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+WHERE qn.org_id = @org_id AND qn.asked_to = @user_id AND qn.state = 'open' AND r.state = 'parked'
+ORDER BY qn.opened_at DESC, qn.id DESC;
+
+-- name: ListQuestionAddresseesForTasks :many
+-- Who the open questions of these tasks wait on (only where the run is still parked), for the
+-- inbox: a task waiting on someone else's question is not its creator's to act on.
+SELECT DISTINCT qn.task_id, qn.asked_to, u.display_name
+FROM questions qn
+JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+JOIN users u ON u.id = qn.asked_to
+WHERE qn.org_id = @org_id AND qn.task_id = ANY(@task_ids::uuid[]) AND qn.state = 'open' AND r.state = 'parked';
+
+-- name: ListQuestionRunsOfFinishedRuns :many
+-- Runs that ended while a question of theirs was still asked or open.
+SELECT DISTINCT qn.run_id FROM questions qn
+JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+WHERE qn.org_id = @org_id AND qn.state IN ('asked', 'open')
+  AND r.state IN ('succeeded', 'failed', 'canceled');
+
+-- name: CancelOpenQuestionsForRun :many
+-- asked | open -> canceled, for a run that ended without them being answered.
+UPDATE questions
+SET state = 'canceled', resolved_at = now()
+WHERE org_id = @org_id AND run_id = @run_id AND state IN ('asked', 'open')
+RETURNING *;
+
+-- name: ListOrgsWithQuestionsOfFinishedRuns :many
+-- Orgs with a question whose run ended (the sweeper then queries per org).
+SELECT DISTINCT qn.org_id FROM questions qn
+JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+WHERE qn.state IN ('asked', 'open') AND r.state IN ('succeeded', 'failed', 'canceled');
 
 -- name: ListQuestionsForTask :many
 SELECT * FROM questions
@@ -89,14 +124,14 @@ ORDER BY created_at, id;
 -- name: ListQuestionsToNotify :many
 -- Opened questions whose notification has not gone out, oldest first.
 SELECT * FROM questions
-WHERE org_id = @org_id AND state <> 'asked' AND notified_at IS NULL
+WHERE org_id = @org_id AND state IN ('open', 'answered', 'dismissed', 'expired') AND notified_at IS NULL
 ORDER BY opened_at, id
 LIMIT @max_rows;
 
 -- name: ListOrgsWithQuestionsToNotify :many
 -- Orgs that have at least one opened question to notify about (the sweeper then queries per org).
 SELECT DISTINCT org_id FROM questions
-WHERE state <> 'asked' AND notified_at IS NULL;
+WHERE state IN ('open', 'answered', 'dismissed', 'expired') AND notified_at IS NULL;
 
 -- name: MarkQuestionNotified :execrows
 UPDATE questions SET notified_at = now()
@@ -113,3 +148,12 @@ LIMIT @max_rows;
 -- Questions of the run that still wait for a person (asked or open).
 SELECT count(*) FROM questions
 WHERE org_id = @org_id AND run_id = @run_id AND state IN ('asked', 'open');
+
+-- name: RecordQuestionNotifyFailure :one
+-- One failed delivery of the notification. At @give_up failures the question counts as notified
+-- (notified_at is set), so the sweep stops re-sending it; the caller logs that it gave up.
+UPDATE questions
+SET notify_failures = notify_failures + 1,
+    notified_at = CASE WHEN notify_failures + 1 >= @give_up::int THEN now() ELSE notified_at END
+WHERE org_id = @org_id AND id = @id AND notified_at IS NULL
+RETURNING *;
