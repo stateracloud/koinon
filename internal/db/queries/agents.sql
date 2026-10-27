@@ -90,3 +90,11 @@ JOIN agent_versions v ON v.org_id = a.org_id AND v.id = a.active_version_id
 JOIN orgs o ON o.id = a.org_id AND o.deleted_at IS NULL
 WHERE a.status = 'active'
 ORDER BY a.org_id, a.created_at, a.id;
+
+-- name: ListAgentActivationsAllOrgs :many
+-- When each active agent's current version was activated, across every live org, so the schedule
+-- trigger fires nothing that was due before the version took effect (ADR 0066, TR2).
+SELECT a.org_id, a.id AS agent_id, a.activated_at
+FROM agents a
+JOIN orgs o ON o.id = a.org_id AND o.deleted_at IS NULL
+WHERE a.status = 'active';

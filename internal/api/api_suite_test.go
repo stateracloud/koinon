@@ -165,6 +165,8 @@ type envOptions struct {
 	plainHTTP bool
 	// username is the bootstrap admin's login name; empty means the default.
 	username string
+	// directMessages delivers direct messages through a DBOS queue (TR3), if set.
+	directMessages *services.DirectMessageQueue
 }
 
 // env is one API server on its own database.
@@ -273,7 +275,7 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 	rpc := services.New(e.pool, services.Options{
 		Catalog: catalog.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
 		MCP:     mcpservers.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
-		Hub:     e.hub, WatchPollInterval: opts.watchPoll,
+		Hub:     e.hub, WatchPollInterval: opts.watchPoll, DirectMessages: opts.directMessages,
 		Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 		Keys:   servicesKeys(opts.keys), GitHub: opts.github,
 		Approvals: approvals.New(e.pool, approvals.Options{

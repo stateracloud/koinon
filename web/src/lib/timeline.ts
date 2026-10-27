@@ -58,9 +58,17 @@ function approvalText(kind: string, p: JsonObject): { text: string; url?: string
   const withNote = (t: string) => (note ? `${t}: ${note}` : t)
   switch (kind) {
     case 'approval.requested':
+      if (str(p.scope_id)) {
+        const until = str(p.scope_expires_at)
+        const kind = str(p.scope_kind) === 'task' ? 'this task' : 'this agent'
+        return { text: `Running ${what}, allowed by a scope for ${kind}${until ? ` until ${new Date(until).toLocaleDateString()}` : ''}` }
+      }
       return { text: str(p.decision) === 'allow' ? `Running ${what} (trusted)` : `Approval requested: ${what}` }
-    case 'approval.approved':
-      return { text: withNote(`Approved ${what}`) }
+    case 'approval.approved': {
+      const until = str(p.scope_expires_at)
+      const scoped = str(p.scope_id) ? ` for ${str(p.scope_kind) === 'task' ? 'this task' : 'this agent'}${until ? ` until ${new Date(until).toLocaleDateString()}` : ''}` : ''
+      return { text: withNote(`Approved ${what}${scoped}`) }
+    }
     case 'approval.denied':
       return { text: withNote(`Denied ${what}`) }
     case 'approval.executed':
@@ -91,7 +99,8 @@ function taskItem(ev: TaskEvent): TimelineItem {
   }
   switch (ev.kind) {
     case 'message':
-      return { key, at, type: 'message', actor: ev.actorKind, text: str(p.text) ?? '', runId }
+      // A direct message's text carries the trigger's instruction; "display" is what the person wrote.
+      return { key, at, type: 'message', actor: ev.actorKind, text: str(p.display) ?? str(p.text) ?? '', runId }
     case 'task.created':
     case 'ticket.created':
       return { key, at, type: 'note', text: `Task created: ${str(p.title) ?? ''}`.trim() }

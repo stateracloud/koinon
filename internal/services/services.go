@@ -47,6 +47,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
@@ -98,6 +99,9 @@ type Options struct {
 	// Notifier delivers the notifications that follow a commit (ADR 0066, practice B2). Nil means
 	// an inline one: best effort, no retry. koinon-api passes a DBOS-backed one with --durable.
 	Notifier *durable.Notifier
+	// DirectMessages delivers direct messages through the org-partitioned DBOS queue (TR3). Nil
+	// means inline, in one transaction. koinon-api passes one with --durable.
+	DirectMessages *DirectMessageQueue
 	// URLPolicy decides which hosts a connection's base URL may name (the platform's egress
 	// policy, as for providers and MCP servers). The zero policy still denies private and internal
 	// addresses.
@@ -122,6 +126,7 @@ type Server struct {
 	mcp       *mcpservers.Service
 	typing    typingGate
 	notifier  *durable.Notifier
+	dm        *DirectMessageQueue
 	urlPolicy catalog.URLPolicy
 }
 
@@ -143,12 +148,17 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		opts.Notifier = durable.NewNotifier(nil, opts.Logger)
 		RegisterNotifications(opts.Notifier, pool)
 	}
-	return &Server{
+	s := &Server{
+		dm:       opts.DirectMessages,
 		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger),
 	}
+	if s.dm != nil {
+		s.dm.bind(s)
+	}
+	return s
 }
 
 // Register registers every service on server.
@@ -156,6 +166,7 @@ func (s *Server) Register(server *connect.Server) {
 	agentv1alpha1connect.RegisterAgentServiceHandler(server, s)
 	ticketv1alpha1connect.RegisterTicketServiceHandler(server, s)
 	taskv1alpha1connect.RegisterTaskServiceHandler(server, taskAPI{s})
+	questionv1alpha1connect.RegisterQuestionServiceHandler(server, s)
 	runv1alpha1connect.RegisterRunServiceHandler(server, s)
 	templatev1alpha1connect.RegisterTemplateServiceHandler(server, s)
 	connectionv1alpha1connect.RegisterConnectionServiceHandler(server, s)

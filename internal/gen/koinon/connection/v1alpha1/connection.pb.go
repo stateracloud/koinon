@@ -467,7 +467,11 @@ type GitHubConnection struct {
 	BaseUrl string `protobuf:"bytes,4,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
 	// PEM certificates trusted for that host besides the system roots. Public;
 	// empty when the host's certificate chains to the system roots.
-	CaBundle      string `protobuf:"bytes,5,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	CaBundle string `protobuf:"bytes,5,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	// Directories, relative to the repository root, that run CI on this host besides the
+	// connector's own CI paths (a Gitea server's WORKFLOW_DIRS). create_pull_request refuses
+	// changes to them.
+	CiDirs        []string `protobuf:"bytes,6,rep,name=ci_dirs,json=ciDirs,proto3" json:"ci_dirs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -535,6 +539,13 @@ func (x *GitHubConnection) GetCaBundle() string {
 		return x.CaBundle
 	}
 	return ""
+}
+
+func (x *GitHubConnection) GetCiDirs() []string {
+	if x != nil {
+		return x.CiDirs
+	}
+	return nil
 }
 
 // Connection is a configured connector instance.
@@ -715,7 +726,10 @@ type CreateGitHubConnectionRequest struct {
 	BaseUrl string `protobuf:"bytes,7,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
 	// PEM certificates that sign the host's TLS certificate, when the system
 	// roots do not. Used for Koinon's API calls and for git in sandboxes.
-	CaBundle      string `protobuf:"bytes,8,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	CaBundle string `protobuf:"bytes,8,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	// Directories that run CI on this host besides the connector's own CI paths, relative to the
+	// repository root. Optional; at most 20.
+	CiDirs        []string `protobuf:"bytes,9,rep,name=ci_dirs,json=ciDirs,proto3" json:"ci_dirs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -804,6 +818,13 @@ func (x *CreateGitHubConnectionRequest) GetCaBundle() string {
 		return x.CaBundle
 	}
 	return ""
+}
+
+func (x *CreateGitHubConnectionRequest) GetCiDirs() []string {
+	if x != nil {
+		return x.CiDirs
+	}
+	return nil
 }
 
 // CreateGitHubConnectionResponse holds the new connection and, when asked
@@ -1564,13 +1585,14 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x05check\x18\x01 \x01(\tR\x05check\x12\x12\n" +
 	"\x04step\x18\x02 \x01(\tR\x04step\x12\x0e\n" +
 	"\x02ok\x18\x03 \x01(\bR\x02ok\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\"\xb3\x01\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"\xcc\x01\n" +
 	"\x10GitHubConnection\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\x03R\x05appId\x12'\n" +
 	"\x0finstallation_id\x18\x02 \x01(\x03R\x0einstallationId\x12'\n" +
 	"\x0fkey_fingerprint\x18\x03 \x01(\tR\x0ekeyFingerprint\x12\x19\n" +
 	"\bbase_url\x18\x04 \x01(\tR\abaseUrl\x12\x1b\n" +
-	"\tca_bundle\x18\x05 \x01(\tR\bcaBundle\"\xaf\x04\n" +
+	"\tca_bundle\x18\x05 \x01(\tR\bcaBundle\x12\x17\n" +
+	"\aci_dirs\x18\x06 \x03(\tR\x06ciDirs\"\xaf\x04\n" +
 	"\n" +
 	"Connection\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
@@ -1588,7 +1610,7 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x06github\x18\n" +
 	" \x01(\v2,.koinon.connection.v1alpha1.GitHubConnectionH\x00R\x06githubB\n" +
 	"\n" +
-	"\bsettings\"\x8b\x02\n" +
+	"\bsettings\"\xa4\x02\n" +
 	"\x1dCreateGitHubConnectionRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x15\n" +
@@ -1598,7 +1620,8 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"privateKey\x12\x12\n" +
 	"\x04test\x18\x06 \x01(\bR\x04test\x12\x19\n" +
 	"\bbase_url\x18\a \x01(\tR\abaseUrl\x12\x1b\n" +
-	"\tca_bundle\x18\b \x01(\tR\bcaBundle\"\xab\x01\n" +
+	"\tca_bundle\x18\b \x01(\tR\bcaBundle\x12\x17\n" +
+	"\aci_dirs\x18\t \x03(\tR\x06ciDirs\"\xab\x01\n" +
 	"\x1eCreateGitHubConnectionResponse\x12F\n" +
 	"\n" +
 	"connection\x18\x01 \x01(\v2&.koinon.connection.v1alpha1.ConnectionR\n" +

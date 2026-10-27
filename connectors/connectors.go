@@ -108,11 +108,14 @@ type Spec struct {
 	// is not a code host.
 	Capabilities *Capabilities `json:"capabilities,omitempty"`
 	// CIPaths are the path prefixes whose changes run CI.
-	CIPaths    []string                    `json:"ciPaths,omitempty"`
-	Targets    Targets                     `json:"targets"`
-	Scopes     []Scope                     `json:"scopes"`
-	Presets    map[templates.Preset]Preset `json:"presets"`
-	SetupGuide SetupGuide                  `json:"setupGuide"`
+	CIPaths []string `json:"ciPaths,omitempty"`
+	// CIPathsFoldCase makes the workflow guard match CIPaths without regard to case, for a
+	// provider whose file system ignores it. Default: exact.
+	CIPathsFoldCase bool                        `json:"ciPathsFoldCase,omitempty"`
+	Targets         Targets                     `json:"targets"`
+	Scopes          []Scope                     `json:"scopes"`
+	Presets         map[templates.Preset]Preset `json:"presets"`
+	SetupGuide      SetupGuide                  `json:"setupGuide"`
 }
 
 // Auth describes the credential.

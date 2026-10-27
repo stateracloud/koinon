@@ -60,17 +60,51 @@ func All(ctx context.Context, q *store.Queries, types ...templates.TriggerType) 
 	return out, nil
 }
 
-// ForAgent lists the triggers in effect on one agent: empty when it is not active.
-func ForAgent(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, types ...templates.TriggerType) ([]Active, error) {
-	all, err := ForOrg(ctx, q, org, types...)
+// Skipped is an active agent version whose config did not parse, so its triggers are unknown.
+type Skipped struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+	Version int32
+	Err     error
+}
+
+// AllLenient is All for a loop that must not stop at one bad row: an active version whose config
+// does not parse is returned in the second result instead of failing the listing.
+func AllLenient(ctx context.Context, q *store.Queries, types ...templates.TriggerType) ([]Active, []Skipped, error) {
+	rows, err := q.ListActiveAgentVersionsAllOrgs(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, fmt.Errorf("list active agent versions: %w", err)
 	}
 	var out []Active
-	for _, a := range all {
-		if a.AgentID == agent {
-			out = append(out, a)
+	var skipped []Skipped
+	for _, r := range rows {
+		a, err := collect(r.OrgID, r.AgentID, r.Version, r.Config, types)
+		if err != nil {
+			skipped = append(skipped, Skipped{OrgID: r.OrgID, AgentID: r.AgentID, Version: r.Version, Err: err})
+			continue
 		}
+		out = append(out, a...)
+	}
+	return out, skipped, nil
+}
+
+// ForAgent lists the triggers in effect on one agent: empty when it is not active.
+func ForAgent(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, types ...templates.TriggerType) ([]Active, error) {
+	rows, err := q.ListActiveAgentVersions(ctx, org)
+	if err != nil {
+		return nil, fmt.Errorf("list active agent versions: %w", err)
+	}
+	var out []Active
+	for _, r := range rows {
+		// Only this agent's config is parsed: another agent's bad row is not this caller's error.
+		if r.AgentID != agent {
+			continue
+		}
+		a, err := collect(r.OrgID, r.AgentID, r.Version, r.Config, types)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a...)
 	}
 	return out, nil
 }

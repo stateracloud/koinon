@@ -170,6 +170,28 @@ var _ = Describe("Parse", func() {
 		Expect(t.Spec.Ephemeral).To(BeTrue())
 	})
 
+	It("takes question timers, with the defaults when omitted", func() {
+		t, err := templates.Parse(valid)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.Spec.Questions).To(Equal(templates.QuestionTimers{}))
+		t, err = templates.Parse([]byte(strings.Replace(string(valid),
+			"  model:\n", "  questions:\n    reminderAfter: 2h\n    expireAfter: 48h\n  model:\n", 1)))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.Spec.Questions.ReminderAfter.Duration).To(Equal(2 * time.Hour))
+		Expect(t.Spec.Questions.ExpireAfter.Duration).To(Equal(48 * time.Hour))
+	})
+
+	DescribeTable("refuses question timers out of bounds",
+		func(body, want string) {
+			_, err := templates.Parse([]byte(strings.Replace(string(valid), "  model:\n", "  questions:\n"+body+"  model:\n", 1)))
+			Expect(err).To(MatchError(ContainSubstring(want)))
+		},
+		Entry("a reminder after the expiry", "    reminderAfter: 48h\n    expireAfter: 24h\n", "must be shorter"),
+		Entry("an expiry over 30 days", "    expireAfter: 800h\n", "must be between"),
+		Entry("a reminder under a minute", "    reminderAfter: 5s\n", "must be between"),
+		Entry("a zero duration", "    reminderAfter: 0s\n", "reminderAfter"),
+	)
+
 	It("accepts plugin installs on an OpenCode template", func() {
 		t, err := templates.Parse([]byte(strings.Replace(string(valid),
 			"  model:\n", "  harness:\n    pluginInstalls: true\n  model:\n", 1)))

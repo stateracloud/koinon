@@ -299,3 +299,122 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   input-required task in the org. The inbox and board show an `ListAgents` error too. The e2e spec
   and the quickstart follow the inbox: Inbox heading, "Hand it a task from the inbox", "Create
   task", "Open task", `/tasks/{id}`.
+
+## Amendment (2026-10-27, plan item TK3): `ask_user` as built
+
+- **The tool.** `ask_user(to?, question, draft?, choices?, default)` is on koinon-api's tools listener at
+  `/mcp-koinon` (package `askuser`), the gateway target `koinon`, so an agent sees `koinon_ask_user`.
+  The reconciler grants it to every active agent when `koinonTools.url` is set (chart `config.yaml`);
+  it needs no grant, since it costs nothing and only waits for a person. `to` names a member of the
+  org by email or user ID; left out it is the task's creator, and a task not created by a person
+  (trigger, agent) must name `to`. A role or a group is not accepted yet (open question above: kept
+  to the conservative reading). Only the addressee can answer or dismiss; admins cannot answer for
+  someone else (reassigning is TK4 or later).
+- **`default` is a required argument** (no documented fallback): free text, and when `choices` are
+  given it must be one of them. It is stored with the question and shown in the inbox next to
+  Dismiss.
+- **The tool answers at once** ("question recorded ... end your turn") and records the question
+  as `asked`, invisible. The park is agentd's turn-end transaction (ADR 0029, the approval pattern),
+  and in that one transaction it opens the run's asked questions (`open`, so they show in the inbox),
+  parks the run with reason `input_required`, moves the task to input-required and appends
+  `question.asked` and `run.parked`. Nothing is visible before the park and nothing is parked
+  without the item. A run with both pending approvals and a question parks as `input_required`
+  (the longer warm window); `approvals.ResolveRun` resolves a park of either reason only when no
+  approval request and no question of the run is open.
+- **The answer is the next prompt, not the tool result.** The tool result ended the turn before the
+  person could answer, and the resumed run is a new prompt on the loaded session (`session/load`).
+  agentd adds one line per resolved question to the resume prompt: `the person answered: "..."`, or
+  `the person dismissed the question, so your default was applied: "..."` / `nobody answered in
+  time, so your default was applied: "..."` (decision 10a: the agent is told). Delivery is marked in
+  the turn-end transaction (`questions.delivered_at`), like approvals.
+- **State and API.** Migration `00026_questions.sql`: `questions` (`asked`, `open`, `answered`,
+  `dismissed`, `expired`; `answer_kind` choice, draft, text or default; `expires_at` 7 days after the
+  ask; `call_sha256` makes the same question in one run one question). `QuestionService`
+  (`ListQuestions`: the caller's open questions, or with `task_id` the caller's questions of a task;
+  `AnswerQuestion`: a choice, the draft as offered or edited, or text; `DismissQuestion`). A second
+  answer to a resolved question is `Aborted`, so an answer resumes a run exactly once: it is a
+  state-guarded update under the run's row lock, in the transaction that calls `ResolveRunPark`.
+  Answer, dismissal and expiry are audited (`question.answer`, `question.dismiss`,
+  `question.expire`) and written to the task timeline.
+- **For TK4.** `questions.Expire(ctx, q, org, id)` applies the default as an expiry (no actor), and
+  `ListDueQuestions` finds open questions past `expires_at`; TK4 adds the 24-hour reminder column and
+  the sweep, and the "no answer" run of decision 10 (today the default is delivered in the resumed
+  run's prompt, which is that run). `park_expires_at` of a question park is the earliest open
+  `expires_at`, and the approvals sweeper cancels only parks with reason `approval`.
+- **Inbox.** The web inbox gets the item kind `question` (choices as buttons, the draft in a text area
+  with "Use draft" or "Use edited draft", free text, Dismiss with the default shown). A question
+  explains its task, so no `task-input` item repeats it. The page polls `ListQuestions` with the
+  tasks and approvals; a server without `QuestionService` (`Unimplemented`) counts as no questions.
+- **Notifications (B2).** The park commits in koinon-agentd, which has no DBOS runtime, so
+  koinon-api notifies from the committed state: a sweeper (`questions.Sweeper`, every sweep interval)
+  sends `question.asked:<id>` for each opened question with no `notified_at`, as a DBOS step with
+  `api.durable.enabled` and inline without it. The handler writes the in-app notification row
+  (`notifications`, dedupe key `question:<id>`) and sets `notified_at`; chat messages join it in
+  v0.2. A resolution sends the sandbox pre-wake (`wake.agent`) after its commit, so a late answer
+  does not wait for the reconciler's next pass.
+- **Warm window.** No new code: the reconciler already keeps a sandbox of a run parked with reason
+  `input_required` up for `parkWarm` (15 minutes). Tests: an answer 14 minutes after the park
+  creates and stops nothing; an answer after 16 minutes starts the stopped sandbox without recreating
+  it, and agentd resumes through `session/load` (`internal/reconciler/latency_test.go`,
+  `internal/agentd/askuser_test.go`).
+- **Questions end with their run (2026-10-27).** A question outlives no run. `question_state` has
+  `canceled`; the question sweeper (`questions.CancelOfFinishedRuns`, with the notification sweep)
+  cancels the asked and open questions of every succeeded, failed or canceled run and appends a
+  `question.canceled` task event. Until the sweep runs, `ListOpenQuestionsForUser` lists only the
+  questions of parked runs, and `resolve` refuses (ErrNotOpen) a question whose run has ended.
+- **Addressee role (2026-10-27).** `to` must hold the member role or higher: `ask_user` answers
+  "X cannot answer questions (viewer)" otherwise, and `can_answer` needs the member role, like
+  AnswerQuestion and DismissQuestion.
+- **Notification failures (2026-10-27).** `NotifyPending` logs each failing question, continues and
+  returns the failures joined. A failed delivery adds to `notify_failures`; at 8 the question counts
+  as notified (logged at error level) so a workflow that failed for good is not re-sent every sweep.
+- **Pre-wake only on resume (2026-10-27).** A resolution sends `wake.agent` only when the run is
+  parked and ready after it; other open questions or approvals keep it parked and need no wake.
+- **Waiting on someone else (2026-10-27).** `Task.waiting_on_user_id` and `waiting_on_name` (ListTasks,
+  GetTask) name the addressee of the task's open question; the inbox shows no `task-input` item to a
+  creator who is not that person.
+- **Reminders and expiry (TK4, 2026-10-27).** Decision 10 is built as follows.
+  - **Settings.** `spec.questions` in a template and `questions` in an agent version's config hold
+    `reminderAfter` (default 24h) and `expireAfter` (default 7 days), as Go durations between 1m and
+    720h, the reminder before the expiry. `ask_user` reads the agent's active version when the
+    question is asked and stores `remind_at` and `expires_at` on the question (migration 00027), so a
+    later version does not move the deadlines of questions already open. A reminder that would not
+    come before the expiry is dropped. Changing the settings of one agent without a new template
+    version is a new agent version; the agent editor does not expose them yet.
+  - **Timers are a sweep, not a DBOS sleep per question.** The deadlines are columns, and the
+    question sweeper in koinon-api (`questions.Sweeper`, every sweep interval) runs `RunTimers`; that
+    works the same with and without `api.durable.enabled`, and after a restart or on a second
+    replica the next sweep finds the same due questions. Cost: a reminder or expiry is late by up to
+    one sweep interval.
+  - **Once.** The reminder is the notification `question.reminder:<id>` (one DBOS workflow with
+    durable on; the handler writes the in-app notification, dedupe key `question-reminder:<id>`, then
+    sets `reminded_at`; eight failures abandon it, like `question.asked`). The expiry is the state
+    change open to expired under the run's row lock (`questions.Expire`), so a repeated sweep, a
+    second replica or a late answer finds it made (`ErrNotOpen`). No dedupe record is needed.
+  - **The reminder** is an in-app notification for the person asked (kind `question.reminder`, with
+    a message naming the question, the expiry and the default). The question stays in the inbox.
+    Chat reminders join with the chat connectors (v0.2).
+  - **The "no answer" run** is the resume of the parked run: expiry applies the safe default and
+    resolves the park, and the next prompt carries the outcome plus a system instruction (`[Koinon
+    system] This is a short "no answer" run ...`): carry on with the default, cancel the task with
+    `cancel_task`, or ask someone else with `ask_user`. No second run is created; the run is not
+    given a smaller cap.
+  - **Amendment 2026-10-27 (TK4 review).** Canceling is a tool, not a convention: Koinon's tool
+    server has a second tool, `cancel_task(reason)` (target `koinon`, offered to every agent like
+    `ask_user`), which closes the caller's task as canceled in one transaction, with the reason in
+    the `status.changed` event on the task timeline, and cancels its queued runs. Called on an
+    already ended task it changes nothing. The system instruction no longer says the agent "will not
+    be reminded again": a question it asks someone else gets its own reminder and its own no-answer
+    run. A tool-server `Reminder` override is applied only when it is before the expiry, like the
+    expiry override. `SweepResult.Sent` counts reminders handed to the sender: with durable on, a
+    resend of the same workflow ID until the handler sets `reminded_at` is a no-op but is counted
+    again. The template picker (`TemplateService`) does not show `spec.questions` yet; the reminder
+    and expiry are set in the template file only, like the agent editor, and a UI for them is a
+    follow-up.
+- 2026-10-27 (wave-3 integration): an approval's expiry never cancels a run parked with reason
+  `input_required`: `cancelExpiredRun` resolves the park instead, so the run resumes with "approval
+  expired" once its questions are answered or expire. `ask_user` without `to` in a direct-message
+  thread asks the author of the thread's latest user message. The `ask_user` text points to the
+  expiry in the tool result instead of a fixed 7 days. When `cancel_task` and `ask_user` run in
+  one turn, `endTurn` cancels the asked questions and finishes the run instead of parking it. The chat
+  shows "waiting on ..." instead of the composer while the task is `input_required`.

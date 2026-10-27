@@ -28,6 +28,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
@@ -118,7 +119,21 @@ func agentConfig(preset, connID string) string {
 
 func newFixture(ctx context.Context, preset string) *fixture {
 	GinkgoHelper()
-	f := &fixture{gh: githubtest.New(), logs: &lockedBuffer{}}
+	return newFixtureOn(ctx, preset, githubtest.New(), false)
+}
+
+// newGHESFixture is newFixture with a connection to a GitHub Enterprise Server: the fake serves
+// TLS with a certificate no system root signs and the REST API under /api/v3, the connection
+// carries its base URL and CA bundle, and the service's own client points at api.github.com,
+// which no test may reach: only the connection can send a call to the fake.
+func newGHESFixture(ctx context.Context, preset string) *fixture {
+	GinkgoHelper()
+	return newFixtureOn(ctx, preset, githubtest.NewGHES(), true)
+}
+
+func newFixtureOn(ctx context.Context, preset string, gh *githubtest.Fake, ghes bool) *fixture {
+	GinkgoHelper()
+	f := &fixture{gh: gh, logs: &lockedBuffer{}}
 	DeferCleanup(f.gh.Server.Close)
 	slug := uniq("org")
 	user := func(tx pgx.Tx, role store.OrgRole, name string) pgtype.UUID {
@@ -149,7 +164,13 @@ func newFixture(ctx context.Context, preset string) *fixture {
 	connPG := pgtype.UUID{Bytes: connID, Valid: true}
 	env, err := connections.SealFields(ring, f.org, connPG, map[string][]byte{connections.GitHubPrivateKeyField: f.gh.PEM})
 	Expect(err).NotTo(HaveOccurred())
-	cfg, _ := json.Marshal(connections.GitHubConfig{AppID: f.gh.AppID, InstallationID: f.gh.InstallationID})
+	gc := connections.GitHubConfig{AppID: f.gh.AppID, InstallationID: f.gh.InstallationID}
+	client := github.NewClient(github.Options{BaseURL: f.gh.URL()})
+	if ghes {
+		gc.Site = codehost.Site{BaseURL: f.gh.WebURL(), CABundle: f.gh.CAPEM()}
+		client = github.NewClient(github.Options{})
+	}
+	cfg, _ := json.Marshal(gc)
 	_, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
 		OrgID: f.org, ID: connPG, Connector: "github", DisplayName: "acme",
 		Config: cfg, SecretEnvelope: env, Source: store.ConfigSourceUi, CreatedBy: f.owner,
@@ -176,7 +197,7 @@ func newFixture(ctx context.Context, preset string) *fixture {
 
 	log := slog.New(slog.NewTextHandler(f.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	f.svc = approvals.New(pool, approvals.Options{
-		Keys: ring, SavedWorkKeys: ring, GitHub: github.NewClient(github.Options{BaseURL: f.gh.URL()}), Logger: log,
+		Keys: ring, SavedWorkKeys: ring, GitHub: client, Logger: log,
 		ExecutionLease: 2 * time.Second,
 	})
 	tools, err := githubtools.New(pool, githubtools.Options{
@@ -200,6 +221,25 @@ func (a agentHeader) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
 	r.Header.Set(gateway.AgentHeader, a.agent)
 	return a.base.RoundTrip(r)
+}
+
+// callRefused makes a tool call the server refuses and returns the reason.
+func (f *fixture) callRefused(ctx context.Context, tool string, args any) string {
+	GinkgoHelper()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-agent", Version: "0.0.1"}, nil)
+	s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:             f.tools.URL,
+		HTTPClient:           &http.Client{Transport: agentHeader{agent: f.agentHeader, base: http.DefaultTransport}},
+		DisableStandaloneSSE: true,
+		MaxRetries:           -1,
+	}, nil)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = s.Close() }()
+	res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(res.IsError).To(BeTrue())
+	b, _ := json.Marshal(res.Content)
+	return string(b)
 }
 
 // call makes a tool call as the agent, through the tool server, and returns its result.

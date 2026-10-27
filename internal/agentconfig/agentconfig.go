@@ -48,6 +48,32 @@ type Config struct {
 	// home, deleted when the task ends (ADR 0065 decision 13c). Checkpoints and the archive tier
 	// do not apply to it; callers ask IsEphemeral.
 	Ephemeral bool `json:"ephemeral,omitempty"`
+	// Questions sets the reminder and expiry of the questions the agent asks (ADR 0065 decision
+	// 10); unset values take the defaults, see QuestionTimers.
+	Questions templates.QuestionTimers `json:"questions,omitzero"`
+}
+
+// Defaults for the questions an agent asks (ADR 0065 decision 10).
+const (
+	DefaultQuestionReminder = 24 * time.Hour
+	DefaultQuestionExpiry   = 7 * 24 * time.Hour
+)
+
+// QuestionTimers returns when a question this version's agent asks gets its reminder and when it
+// expires, both from the moment it is asked, with the defaults for unset values. A reminder that
+// would not come before the expiry is dropped (reminder 0 means none).
+func (c Config) QuestionTimers() (reminder, expiry time.Duration) {
+	reminder, expiry = c.Questions.ReminderAfter.Duration, c.Questions.ExpireAfter.Duration
+	if expiry <= 0 {
+		expiry = DefaultQuestionExpiry
+	}
+	if reminder <= 0 {
+		reminder = DefaultQuestionReminder
+	}
+	if reminder >= expiry {
+		reminder = 0
+	}
+	return reminder, expiry
 }
 
 // IsEphemeral reports whether the agent version with config c is ephemeral. It is the one
@@ -98,6 +124,7 @@ func FromTemplate(t *templates.Template, contentHash string) Config {
 		Triggers:     t.Spec.Triggers,
 		Harness:      t.Spec.Harness,
 		Ephemeral:    t.Spec.Ephemeral,
+		Questions:    t.Spec.Questions,
 	}
 }
 

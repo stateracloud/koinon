@@ -337,6 +337,36 @@ func (a taskAPI) CreateTask(ctx context.Context, req *taskv1alpha1.CreateTaskReq
 	return &taskv1alpha1.CreateTaskResponse{Task: taskProto(t), Run: run}, nil
 }
 
+// setWaitingOn marks the input-required tasks whose open question waits on a person (and whom).
+func (s *Server) setWaitingOn(ctx context.Context, c caller, tasks []*taskv1alpha1.Task) error {
+	var ids []pgtype.UUID
+	byID := map[string]*taskv1alpha1.Task{}
+	for _, t := range tasks {
+		if t.GetState() != taskv1alpha1.TaskState_TASK_STATE_INPUT_REQUIRED {
+			continue
+		}
+		id, err := parseID("task_id", t.GetId())
+		if err != nil {
+			return err
+		}
+		ids = append(ids, id)
+		byID[t.GetId()] = t
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := s.q.ListQuestionAddresseesForTasks(ctx, store.ListQuestionAddresseesForTasksParams{OrgID: c.org, TaskIds: ids})
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if t := byID[idString(r.TaskID)]; t != nil && t.WaitingOnUserId == "" {
+			t.WaitingOnUserId, t.WaitingOnName = idString(r.AskedTo), r.DisplayName
+		}
+	}
+	return nil
+}
+
 // ListTasks implements TaskService.
 func (a taskAPI) ListTasks(ctx context.Context, req *taskv1alpha1.ListTasksRequest) (*taskv1alpha1.ListTasksResponse, error) {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
@@ -360,6 +390,9 @@ func (a taskAPI) ListTasks(ctx context.Context, req *taskv1alpha1.ListTasksReque
 		p := taskProto(t)
 		p.Cost = costOrNone(costs, p.GetId())
 		res.Tasks = append(res.Tasks, p)
+	}
+	if err := a.setWaitingOn(ctx, c, res.Tasks); err != nil {
+		return nil, a.dbError(err, "tasks")
 	}
 	return res, nil
 }
@@ -385,6 +418,9 @@ func (a taskAPI) GetTask(ctx context.Context, req *taskv1alpha1.GetTaskRequest) 
 	}
 	res.Task.AgentSummary = v.task.AgentSummary.String
 	res.Task.AgentSummaryAt = tsProto(v.task.AgentSummaryAt)
+	if err := a.setWaitingOn(ctx, c, []*taskv1alpha1.Task{res.Task}); err != nil {
+		return nil, a.dbError(err, "task")
+	}
 	for _, e := range v.events {
 		res.Events = append(res.Events, taskEventProto(e))
 	}

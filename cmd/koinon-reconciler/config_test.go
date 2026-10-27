@@ -36,6 +36,10 @@ reconciler:
   idleTimeout: 10m
   resyncInterval: 30s
   homeRetention: delete
+koinonTools:
+  url: http://koinon-api-tools.koinon.svc:8081/mcp-koinon
+githubTools:
+  url: http://koinon-api-tools.koinon.svc:8081/mcp
 flavors:
   opencode:
     image: ghcr.io/stateracloud/flavor-opencode:0.1.0
@@ -77,6 +81,11 @@ var _ = Describe("parseConfig", func() {
 		Expect(c.providerKeysSecret).To(Equal("koinon-gateway-providers"))
 		Expect(c.providerKeysDir).To(Equal("/secrets/providers"))
 		Expect(c.kekDir).To(Equal("/secrets/kek"))
+
+		Expect(c.toolServers()).To(Equal(map[string]string{
+			"github": "http://koinon-api-tools.koinon.svc:8081/mcp",
+			"koinon": "http://koinon-api-tools.koinon.svc:8081/mcp-koinon", // ask_user (TK3)
+		}))
 
 		f := c.flavors()[store.AgentFlavorOpencode]
 		Expect(f.Image).To(Equal("ghcr.io/stateracloud/flavor-opencode:0.1.0"))
