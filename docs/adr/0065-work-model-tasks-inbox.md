@@ -126,6 +126,18 @@ with the same `taskId` answers an `input-required` task (§6.3).
 13c. **Ephemeral agents** (#146 A8): an agent or template can be marked ephemeral. Each task gets a
     fresh sandbox without a home volume, deleted when the task ends; memory lives in task notes and
     the [0033](0033-file-based-memory.md) stores. The default stays persistent.
+    **Amendment (EP1, 2026-10-27):** the flag is `ephemeral` in a template's `spec` and in the agent
+    version's config (no migration), set at agent creation from the template and overridable there.
+    The predicate is `agentconfig.IsEphemeral`; checkpoints (HC1) and the archive tier call it and
+    skip ephemeral agents. The agent keeps its one `agent_sandboxes` row, which points at the
+    sandbox of one task, `execution.TaskSandboxName` (`kt-` and 16 hex characters of a hash of org,
+    agent and task). The reconciler picks the task from the run that holds the agent, else the run
+    claimed next, else a parked run (`GetEphemeralFocusTask`); when it changes, or when no run needs
+    a sandbox, it deletes the previous sandbox, and with it OpenShell's workspace volume, and moves
+    the row once the sandbox is gone. A running run is never cut off. agentd waits until the row
+    names its task's sandbox. A task between runs (for example input-required with no parked run)
+    has no sandbox; its next run gets a fresh one. An ephemeral agent is not pre-woken, since no
+    sandbox exists before its task does.
 13d. **Failure classes** (#146 A1): a failed run carries a `failure_class` (`transient`,
     `throttled`, `context_overflow`, `budget`, `policy`, `fatal`) that drives retries and inbox
     messages; `context_overflow` shrinks the largest input once, then asks the user

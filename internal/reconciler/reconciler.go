@@ -853,6 +853,12 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 		network[npmRule] = rule
 	}
 
+	// An ephemeral agent's sandbox belongs to a task (ephemeral.go); the row moves between them.
+	if done, err := r.ephemeralTurn(ctx, w, ws); err != nil || done {
+		return err
+	}
+	names = w.names()
+
 	spec, hash := r.sandboxSpec(w.org.ID, w.agent.ID, names, flavor, providers, network)
 	act, err := r.q.GetAgentRunActivity(ctx, store.GetAgentRunActivityParams{OrgID: w.org.ID, AgentID: w.agent.ID})
 	if err != nil {

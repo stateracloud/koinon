@@ -318,6 +318,9 @@ type Template struct {
 	RunLimits    *RunLimits `protobuf:"bytes,12,opt,name=run_limits,json=runLimits,proto3" json:"run_limits,omitempty"`
 	// Spend limit as a decimal string, for example "10.00".
 	SpendLimitUsd string `protobuf:"bytes,13,opt,name=spend_limit_usd,json=spendLimitUsd,proto3" json:"spend_limit_usd,omitempty"`
+	// Agents made from the template are ephemeral by default: each task gets a fresh sandbox
+	// without a home, deleted when the task ends (ADR 0065 decision 13c).
+	Ephemeral     bool `protobuf:"varint,14,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -443,6 +446,13 @@ func (x *Template) GetSpendLimitUsd() string {
 	return ""
 }
 
+func (x *Template) GetEphemeral() bool {
+	if x != nil {
+		return x.Ephemeral
+	}
+	return false
+}
+
 // ListTemplatesRequest is empty.
 type ListTemplatesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -544,7 +554,7 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\tRunLimits\x120\n" +
 	"\x14max_duration_seconds\x18\x01 \x01(\x03R\x12maxDurationSeconds\x12\x1d\n" +
 	"\n" +
-	"max_tokens\x18\x02 \x01(\x03R\tmaxTokens\"\xa3\x04\n" +
+	"max_tokens\x18\x02 \x01(\x03R\tmaxTokens\"\xc1\x04\n" +
 	"\bTemplate\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04slug\x18\x02 \x01(\tR\x04slug\x12!\n" +
@@ -560,7 +570,8 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\x06grants\x18\v \x03(\v2\x1f.koinon.template.v1alpha1.GrantR\x06grants\x12B\n" +
 	"\n" +
 	"run_limits\x18\f \x01(\v2#.koinon.template.v1alpha1.RunLimitsR\trunLimits\x12&\n" +
-	"\x0fspend_limit_usd\x18\r \x01(\tR\rspendLimitUsd\"\x16\n" +
+	"\x0fspend_limit_usd\x18\r \x01(\tR\rspendLimitUsd\x12\x1c\n" +
+	"\tephemeral\x18\x0e \x01(\bR\tephemeral\"\x16\n" +
 	"\x14ListTemplatesRequest\"Y\n" +
 	"\x15ListTemplatesResponse\x12@\n" +
 	"\ttemplates\x18\x01 \x03(\v2\".koinon.template.v1alpha1.TemplateR\ttemplates*_\n" +

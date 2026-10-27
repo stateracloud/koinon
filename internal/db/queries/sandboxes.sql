@@ -105,6 +105,42 @@ WHERE org_id = @org_id AND agent_id = @agent_id
   AND (state IN ('queued', 'starting', 'running', 'parked')
        OR finished_at > now() - interval '1 day');
 
+-- name: GetEphemeralFocusTask :one
+-- The task an ephemeral agent's sandbox belongs to (ADR 0065 decision 13c): the task of the run
+-- that holds the agent (starting or running), else of the run that would be claimed next (the
+-- claim's own order: interactive before scheduled, then FIFO), else of a parked run. No row: no
+-- run needs a sandbox, so the task's sandbox is deleted.
+SELECT r.task_id
+FROM runs r
+WHERE r.org_id = @org_id AND r.agent_id = @agent_id
+  AND r.state IN ('queued', 'starting', 'running', 'parked')
+  AND (r.state <> 'queued' OR (r.ready_at IS NOT NULL AND run_claimable(r.org_id, r.id)))
+ORDER BY CASE
+             WHEN r.state IN ('starting', 'running') THEN 0
+             WHEN r.ready_at IS NOT NULL AND run_claimable(r.org_id, r.id) THEN 1
+             ELSE 2
+         END,
+         (r.origin = 'scheduled'), r.ready_at NULLS LAST, r.id
+LIMIT 1;
+
+-- name: SetAgentSandboxName :one
+-- Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
+-- new name yet, so the row starts over as pending. The previous sandbox is gone by now (the
+-- reconciler waits for its deletion first). The unhealthy mark belonged to that sandbox.
+UPDATE agent_sandboxes
+SET sandbox_name = @sandbox_name,
+    state = 'pending',
+    phase = '',
+    message = '',
+    spec_hash = '',
+    started_at = NULL,
+    stopped_at = NULL,
+    unhealthy_at = NULL,
+    unhealthy_reason = NULL,
+    unhealthy_generation = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id
+RETURNING *;
+
 -- name: WakeAgentSandbox :one
 -- The pre-wake signal (LT1, B5): a task was created, a person is typing, or a cron is about to
 -- fire. It counts as activity, so an idle sandbox stays up and a stopped one starts. No row: the

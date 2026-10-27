@@ -85,6 +85,8 @@ Checked 2026-10-21:
 - **Mem0:** Apache-2.0. https://github.com/mem0ai/mem0
 - **Letta MemFS:** git-backed markdown in Letta Code; not on Docker servers. https://docs.letta.com/letta-code/memfs
 
+- **Amendment (2026-10-27, EP1):** an ephemeral agent ([0065](0065-work-model-tasks-inbox.md) decision 13c) has no home; its memory is the task's notes and these stores, which are mounted into each task's fresh sandbox.
+
 ## Links
 
 - [0019 Personal agents and teams](0019-personal-agents-and-teams.md), [0032 Agent home](0032-agent-home-checkpoints.md)

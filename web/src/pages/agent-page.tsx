@@ -98,6 +98,8 @@ export function AgentPage() {
           <dd>{flavorLabel(a.flavor)}</dd>
           <dt className="text-muted-foreground">Model</dt>
           <dd>{a.model || 'default'}</dd>
+          <dt className="text-muted-foreground">Sandbox</dt>
+          <dd>{a.ephemeral ? 'Ephemeral: fresh sandbox per task, no home' : 'Persistent home'}</dd>
           <dt className="text-muted-foreground">Version</dt>
           <dd>
             {a.latestVersion}
