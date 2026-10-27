@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"io"
 	"strings"
 	"sync"
@@ -127,8 +128,7 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 		return
 	}
 	for _, org := range orgs {
-		// TODO(EP1): skip ephemeral agents (checkpoint.Ephemeral is a stub until EP1 lands);
-		// RequestHourlyHomeCheckpoints and restoreHome do not check it yet.
+		// Ephemeral agents are skipped by the query (the active version's ephemeral flag).
 		if _, err := p.q.RequestHourlyHomeCheckpoints(ctx, store.RequestHourlyHomeCheckpointsParams{
 			OrgID: org, IntervalSeconds: int32(c.Interval.Seconds()), //nolint:gosec // bounded by configuration
 		}); err != nil && ctx.Err() == nil {
@@ -292,6 +292,11 @@ func (r *runner) restoreHome(ctx context.Context, sb store.AgentSandbox) error {
 		return nil
 	}
 	org, agent := r.run.OrgID, r.run.AgentID
+	if agentconfig.IsEphemeral(r.vcfg) {
+		// An ephemeral agent's task sandbox starts empty: nothing carries over between tasks (ADR 0065
+		// 13c), and the newest checkpoint of the agent may belong to another task.
+		return r.q.ClearSandboxRestore(ctx, store.ClearSandboxRestoreParams{OrgID: org, AgentID: agent})
+	}
 	// One restore can take Timeout for each try of each checkpoint; the claim lasts as long as the
 	// run is willing to wait for it, so a second run never takes it over while the first extracts.
 	budget := c.Timeout * time.Duration(c.RestoreTries*(1+c.RestoreFallbacks)+1)
