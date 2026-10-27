@@ -11,6 +11,8 @@
 //	answered a person chose a choice, accepted the draft or wrote text (Answer)
 //	dismissed a person dismissed it; its safe default is the answer (Dismiss)
 //	expired  nobody answered in time; its safe default is the answer (Expire, called by TK4)
+//	canceled the run ended (canceled, failed, finished) while it was asked or open; the sweep
+//	         (CancelOfFinishedRuns) closes it, and the inbox hides it meanwhile
 //
 // Every resolution is one transaction under the run's row lock: the question, the audit event, the
 // task event and the run's park (ResolveRun) change together, so an answer resumes the run exactly
@@ -32,6 +34,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/audit"
@@ -44,6 +47,7 @@ const (
 	KindAnswered  = "question.answered"
 	KindDismissed = "question.dismissed"
 	KindExpired   = "question.expired"
+	KindCanceled  = "question.canceled"
 )
 
 // Limits on a question's text.
@@ -244,8 +248,13 @@ func resolve(ctx context.Context, q *store.Queries, org, id pgtype.UUID, by pgty
 		return store.Question{}, err
 	}
 	// The run's lock orders this against agentd's turn end and against approval decisions.
-	if _, err := q.LockRun(ctx, store.LockRunParams{OrgID: org, ID: cur.RunID}); err != nil {
+	run, err := q.LockRun(ctx, store.LockRunParams{OrgID: org, ID: cur.RunID})
+	if err != nil {
 		return store.Question{}, err
+	}
+	// A question outlives no run: the sweep cancels it, and nothing can resolve it meanwhile.
+	if run.State == store.RunStateSucceeded || run.State == store.RunStateFailed || run.State == store.RunStateCanceled {
+		return cur, ErrNotOpen
 	}
 	cur, err = q.LockQuestion(ctx, store.LockQuestionParams{OrgID: org, ID: id})
 	if err != nil {
@@ -323,4 +332,54 @@ func Dismiss(ctx context.Context, q *store.Queries, org, id, by pgtype.UUID) (st
 // sweep, in its own transaction per question). No person is the actor.
 func Expire(ctx context.Context, q *store.Queries, org, id pgtype.UUID) (store.Question, error) {
 	return resolve(ctx, q, org, id, pgtype.UUID{}, store.QuestionStateExpired, func(r store.Question) (Answer, error) { return defaultOf(r) })
+}
+
+// CancelOfFinishedRuns cancels the asked and open questions of every run that has ended, with a
+// question.canceled task event each, and returns how many it canceled. A question outlives no run:
+// cancel, run caps, a ledger budget cancel and archiving an agent all end a parked run without
+// touching its questions, so the sweeper calls this (like the approvals sweep's cancelPending).
+func CancelOfFinishedRuns(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+	q := store.New(pool)
+	orgs, err := q.ListOrgsWithQuestionsOfFinishedRuns(ctx)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	var errs []error
+	for _, org := range orgs {
+		runs, err := q.ListQuestionRunsOfFinishedRuns(ctx, org)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		for _, run := range runs {
+			n := 0
+			err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+				tq := store.New(tx)
+				if _, err := tq.LockRun(ctx, store.LockRunParams{OrgID: org, ID: run}); err != nil {
+					return err
+				}
+				rows, err := tq.CancelOpenQuestionsForRun(ctx, store.CancelOpenQuestionsForRunParams{OrgID: org, RunID: run})
+				if err != nil {
+					return err
+				}
+				for _, row := range rows {
+					if _, err := tq.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+						OrgID: org, TaskID: row.TaskID, RunID: row.RunID, Kind: KindCanceled, ActorKind: store.TaskActorKindSystem,
+						Payload: mustJSON(map[string]any{"question_id": row.ID.String(), "reason": "the run ended before an answer"}),
+					}); err != nil {
+						return err
+					}
+				}
+				n = len(rows)
+				return nil
+			})
+			if err != nil {
+				errs = append(errs, fmt.Errorf("cancel questions of run %s: %w", run, err))
+				continue
+			}
+			total += n
+		}
+	}
+	return total, errors.Join(errs...)
 }

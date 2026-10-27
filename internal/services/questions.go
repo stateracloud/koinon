@@ -25,6 +25,7 @@ var questionStateToProto = map[store.QuestionState]questionv1alpha1.QuestionStat
 	store.QuestionStateAnswered:  questionv1alpha1.QuestionState_QUESTION_STATE_ANSWERED,
 	store.QuestionStateDismissed: questionv1alpha1.QuestionState_QUESTION_STATE_DISMISSED,
 	store.QuestionStateExpired:   questionv1alpha1.QuestionState_QUESTION_STATE_EXPIRED,
+	store.QuestionStateCanceled:  questionv1alpha1.QuestionState_QUESTION_STATE_CANCELED,
 }
 
 var answerKindToProto = map[store.QuestionAnswerKind]questionv1alpha1.AnswerKind{
@@ -34,7 +35,7 @@ var answerKindToProto = map[store.QuestionAnswerKind]questionv1alpha1.AnswerKind
 	store.QuestionAnswerKindDefault: questionv1alpha1.AnswerKind_ANSWER_KIND_DEFAULT,
 }
 
-func questionProto(row store.Question, viewer pgtype.UUID) *questionv1alpha1.Question {
+func questionProto(row store.Question, c caller) *questionv1alpha1.Question {
 	return &questionv1alpha1.Question{
 		Id: idString(row.ID), OrgId: idString(row.OrgID), TaskId: idString(row.TaskID), RunId: idString(row.RunID),
 		AgentId: idString(row.AgentID), AskedTo: idString(row.AskedTo), Question: row.Question,
@@ -43,7 +44,8 @@ func questionProto(row store.Question, viewer pgtype.UUID) *questionv1alpha1.Que
 		AnswerKind: answerKindToProto[row.AnswerKind.QuestionAnswerKind], AnsweredBy: idString(row.AnsweredBy),
 		ExpiresAt: tsProto(row.ExpiresAt), OpenedAt: tsProto(row.OpenedAt), ResolvedAt: tsProto(row.ResolvedAt),
 		CreatedAt: tsProto(row.CreatedAt),
-		CanAnswer: row.State == store.QuestionStateOpen && row.AskedTo == viewer,
+		// Answering needs the member role, like the rpc.
+		CanAnswer: row.State == store.QuestionStateOpen && row.AskedTo == c.actor() && c.p.HasRole(c.org, store.OrgRoleMember),
 	}
 }
 
@@ -75,7 +77,7 @@ func (s *Server) ListQuestions(ctx context.Context, req *questionv1alpha1.ListQu
 		if r.AskedTo != c.actor() || r.State == store.QuestionStateAsked {
 			continue
 		}
-		res.Questions = append(res.Questions, questionProto(r, c.actor()))
+		res.Questions = append(res.Questions, questionProto(r, c))
 	}
 	return res, nil
 }
@@ -91,6 +93,15 @@ func (s *Server) resolveQuestion(ctx context.Context, c caller, id pgtype.UUID,
 		if out, err = do(q); err != nil {
 			return nil, err
 		}
+		// Wake the sandbox only when this resolution made the run claimable; otherwise other
+		// questions or approvals still hold it (or it is no longer parked) and a wake is noise.
+		run, err := q.GetRun(ctx, store.GetRunParams{OrgID: c.org, ID: out.RunID})
+		if err != nil {
+			return nil, err
+		}
+		if run.State != store.RunStateParked || !run.ReadyAt.Valid {
+			return nil, nil
+		}
 		task, err := q.GetTask(ctx, store.GetTaskParams{OrgID: c.org, ID: out.TaskID})
 		if err != nil {
 			return nil, err
@@ -102,7 +113,7 @@ func (s *Server) resolveQuestion(ctx context.Context, c caller, id pgtype.UUID,
 	case err == nil:
 		return out, nil
 	case errors.Is(err, questions.ErrNotOpen):
-		return out, connect.NewError(connect.CodeAborted, "the question is no longer open: it was answered, dismissed or expired")
+		return out, connect.NewError(connect.CodeAborted, "the question is no longer open: it was answered, dismissed, expired or canceled")
 	case errors.Is(err, questions.ErrNotAskedTo):
 		return out, connect.NewError(connect.CodePermissionDenied, "this question is addressed to someone else")
 	case errors.Is(err, questions.ErrInvalid):
@@ -138,7 +149,7 @@ func (s *Server) AnswerQuestion(ctx context.Context, req *questionv1alpha1.Answe
 	if err != nil {
 		return nil, err
 	}
-	return &questionv1alpha1.AnswerQuestionResponse{Question: questionProto(row, c.actor())}, nil
+	return &questionv1alpha1.AnswerQuestionResponse{Question: questionProto(row, c)}, nil
 }
 
 // DismissQuestion implements QuestionService.
@@ -157,7 +168,7 @@ func (s *Server) DismissQuestion(ctx context.Context, req *questionv1alpha1.Dism
 	if err != nil {
 		return nil, err
 	}
-	return &questionv1alpha1.DismissQuestionResponse{Question: questionProto(row, c.actor())}, nil
+	return &questionv1alpha1.DismissQuestionResponse{Question: questionProto(row, c)}, nil
 }
 
 // NotifyQuestions sends the notification of every opened question that has none yet, through the

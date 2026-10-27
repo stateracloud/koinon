@@ -42,6 +42,8 @@ enum QuestionState {
   QUESTION_STATE_DISMISSED = 4;
   // Nobody answered in time; the default was applied.
   QUESTION_STATE_EXPIRED = 5;
+  // The run ended (canceled, failed or finished) before anyone answered; nothing was applied.
+  QUESTION_STATE_CANCELED = 6;
 }
 
 // AnswerKind is how an answer was given.

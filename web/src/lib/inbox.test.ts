@@ -41,6 +41,13 @@ describe('buildInbox', () => {
     expect(items).toEqual([])
   })
 
+  it('shows no task-input item for a task waiting on someone else\'s question', () => {
+    const t = task('t-1', 'Deploy', TaskState.INPUT_REQUIRED)
+    t.waitingOnUserId = 'u-2'
+    t.waitingOnName = 'Sam'
+    expect(buildInbox({ tasks: [t], approvals: [], agentNames: names, userId: 'u-1' })).toEqual([])
+  })
+
   it('is empty when nothing waits', () => {
     expect(buildInbox({ tasks: [task('t-1', 'x', TaskState.WORKING)], approvals: [], agentNames: names, userId: 'u-1' })).toEqual([])
   })

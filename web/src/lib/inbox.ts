@@ -94,6 +94,8 @@ export function buildInbox({ tasks, approvals, questions = [], agentNames, userI
   for (const t of tasks) {
     if (t.state !== TaskState.INPUT_REQUIRED || covered.has(t.id)) continue
     if (t.createdBy?.userId !== userId) continue
+    // Waiting on someone else's question: the creator cannot act, so it is not their item.
+    if (t.waitingOnUserId && t.waitingOnUserId !== userId) continue
     items.push({ kind: 'task-input', key: `task-input:${t.id}`, taskId: t.id, taskTitle: t.title, agentName: agentNames.get(t.agentId), at: ms(t.updatedAt) })
   }
   return items.sort((a, b) => b.at - a.at)

@@ -357,5 +357,19 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   creates and stops nothing; an answer after 16 minutes starts the stopped sandbox without recreating
   it, and agentd resumes through `session/load` (`internal/reconciler/latency_test.go`,
   `internal/agentd/askuser_test.go`).
-- **Known gap (kept conservative).** A question still `asked` when its run ends without a normal turn
-  end (cancel, failure) stays invisible; TK4's sweep should cancel such questions with their run.
+- **Questions end with their run (2026-10-27).** A question outlives no run. `question_state` has
+  `canceled`; the question sweeper (`questions.CancelOfFinishedRuns`, with the notification sweep)
+  cancels the asked and open questions of every succeeded, failed or canceled run and appends a
+  `question.canceled` task event. Until the sweep runs, `ListOpenQuestionsForUser` lists only the
+  questions of parked runs, and `resolve` refuses (ErrNotOpen) a question whose run has ended.
+- **Addressee role (2026-10-27).** `to` must hold the member role or higher: `ask_user` answers
+  "X cannot answer questions (viewer)" otherwise, and `can_answer` needs the member role, like
+  AnswerQuestion and DismissQuestion.
+- **Notification failures (2026-10-27).** `NotifyPending` logs each failing question, continues and
+  returns the failures joined. A failed delivery adds to `notify_failures`; at 8 the question counts
+  as notified (logged at error level) so a workflow that failed for good is not re-sent every sweep.
+- **Pre-wake only on resume (2026-10-27).** A resolution sends `wake.agent` only when the run is
+  parked and ready after it; other open questions or approvals keep it parked and need no wake.
+- **Waiting on someone else (2026-10-27).** `Task.waiting_on_user_id` and `waiting_on_name` (ListTasks,
+  GetTask) name the addressee of the task's open question; the inbox shows no `task-input` item to a
+  creator who is not that person.

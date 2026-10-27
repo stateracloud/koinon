@@ -103,6 +103,11 @@ message Task {
   // last turn (ADR 0051 amendment). Set by GetTask only.
   string agent_summary = 12;
   google.protobuf.Timestamp agent_summary_at = 13;
+  // Set by ListTasks and GetTask while an open question of the task waits on a person: who it is
+  // addressed to. The inbox uses it so that a task waiting on someone else's answer is not shown
+  // to its creator as theirs to act on.
+  string waiting_on_user_id = 14;
+  string waiting_on_name = 15;
 }
 
 // TaskEvent is one entry of the task timeline: a message, a state change or a run note such as

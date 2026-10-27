@@ -791,6 +791,7 @@ const (
 	QuestionStateAnswered  QuestionState = "answered"
 	QuestionStateDismissed QuestionState = "dismissed"
 	QuestionStateExpired   QuestionState = "expired"
+	QuestionStateCanceled  QuestionState = "canceled"
 )
 
 func (e *QuestionState) Scan(src interface{}) error {
@@ -1583,28 +1584,29 @@ type Provider struct {
 }
 
 type Question struct {
-	OrgID         pgtype.UUID
-	ID            pgtype.UUID
-	TaskID        pgtype.UUID
-	RunID         pgtype.UUID
-	AgentID       pgtype.UUID
-	AskedTo       pgtype.UUID
-	Question      string
-	Choices       []byte
-	Draft         pgtype.Text
-	DefaultAnswer string
-	State         QuestionState
-	Answer        pgtype.Text
-	AnswerKind    NullQuestionAnswerKind
-	AnsweredBy    pgtype.UUID
-	CallSha256    string
-	ExpiresAt     pgtype.Timestamptz
-	OpenedAt      pgtype.Timestamptz
-	NotifiedAt    pgtype.Timestamptz
-	ResolvedAt    pgtype.Timestamptz
-	DeliveredAt   pgtype.Timestamptz
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
+	OrgID          pgtype.UUID
+	ID             pgtype.UUID
+	TaskID         pgtype.UUID
+	RunID          pgtype.UUID
+	AgentID        pgtype.UUID
+	AskedTo        pgtype.UUID
+	Question       string
+	Choices        []byte
+	Draft          pgtype.Text
+	DefaultAnswer  string
+	State          QuestionState
+	Answer         pgtype.Text
+	AnswerKind     NullQuestionAnswerKind
+	AnsweredBy     pgtype.UUID
+	CallSha256     string
+	ExpiresAt      pgtype.Timestamptz
+	OpenedAt       pgtype.Timestamptz
+	NotifiedAt     pgtype.Timestamptz
+	NotifyFailures int32
+	ResolvedAt     pgtype.Timestamptz
+	DeliveredAt    pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
 }
 
 type Run struct {

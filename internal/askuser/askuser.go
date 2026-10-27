@@ -186,6 +186,9 @@ func (s *Server) addressee(ctx context.Context, c caller, to string) (pgtype.UUI
 	if err != nil {
 		return pgtype.UUID{}, "", s.lookupErr(err, "member")
 	}
+	if m.Role == store.OrgRoleViewer {
+		return pgtype.UUID{}, "", fmt.Errorf("%s cannot answer questions (viewer): name a member or admin", to)
+	}
 	return m.ID, to, nil
 }
 
