@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -63,6 +64,10 @@ type fileConfig struct {
 	GitHubTools struct {
 		URL string `yaml:"url"`
 	} `yaml:"githubTools"`
+	// KoinonTools is koinon-api's server for Koinon's own agent tools (ask_user, plan item TK3).
+	KoinonTools struct {
+		URL string `yaml:"url"`
+	} `yaml:"koinonTools"`
 	// MCPAsk is koinon-api's approval-gated proxy for org MCP servers' ask-tier tools (plan item MC1).
 	MCPAsk struct {
 		URL string `yaml:"url"`
@@ -111,6 +116,7 @@ type config struct {
 
 	githubToolsURL string
 	mcpAskURL      string
+	koinonToolsURL string
 	githubAPIURL   string
 }
 
@@ -155,6 +161,7 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")
 	fs.StringVar(&c.mcpAskURL, "mcp-ask-url", "", "base URL of koinon-api's approval-gated MCP proxy as agentgateway reaches it; empty offers no ask-tier tools of org MCP servers")
+	fs.StringVar(&c.koinonToolsURL, "koinon-tools-url", "", "URL of Koinon's own agent tools (ask_user) MCP server as agentgateway reaches it; empty offers no ask_user")
 	fs.StringVar(&c.githubToolsURL, "github-tools-url", "", "URL of the GitHub tools MCP server as agentgateway reaches it; empty serves no GitHub tools")
 
 	if err := cli.BindEnv(fs, getenv); err != nil {
@@ -225,6 +232,7 @@ func (c *config) fill(fc fileConfig) error {
 	}
 	orDefault(&c.githubToolsURL, fc.GitHubTools.URL)
 	orDefault(&c.mcpAskURL, fc.MCPAsk.URL)
+	orDefault(&c.koinonToolsURL, fc.KoinonTools.URL)
 	for _, d := range []struct {
 		dst *time.Duration
 		src string
@@ -292,12 +300,19 @@ func (c *config) gatewayEndpoint() (reconciler.Endpoint, error) {
 	return reconciler.Endpoint{Host: u.Hostname(), Port: uint32(p)}, nil
 }
 
-// toolServers maps connector type IDs to their MCP tool servers.
+// toolServers maps connector type IDs (and gateway.KoinonTarget, Koinon's own tools) to their MCP tool servers.
 func (c *config) toolServers() map[string]string {
-	if c.githubToolsURL == "" {
+	out := map[string]string{}
+	if c.githubToolsURL != "" {
+		out[providers.GitHub] = c.githubToolsURL
+	}
+	if c.koinonToolsURL != "" {
+		out[gateway.KoinonTarget] = c.koinonToolsURL
+	}
+	if len(out) == 0 {
 		return nil
 	}
-	return map[string]string{providers.GitHub: c.githubToolsURL}
+	return out
 }
 
 // flavors combines the configured images with each flavor's binaries.

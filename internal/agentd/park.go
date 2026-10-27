@@ -2,7 +2,8 @@
 
 package agentd
 
-// Parking on ask-tier approvals (plan item P1; ADRs 0030, 0042, 0049).
+// Parking on ask-tier approvals (plan item P1; ADRs 0030, 0042, 0049) and on ask_user questions
+// (plan item TK3; ADR 0065).
 //
 // An ask-tier tool call is recorded by the tool server, which answers "approval requested"
 // at once; the harness ends its turn. agentd then decides, under the run's row lock, whether
@@ -11,6 +12,12 @@ package agentd
 // Waiting on you, and the worker lets the harness go. Koinon's approval service resolves the
 // park once every request is decided and executed; a worker then claims the run, loads the
 // session and sends the outcomes as the next prompt.
+//
+// A question the agent asked with ask_user parks the run the same way (reason input_required): the
+// turn's end opens the run's asked questions, so they appear in their addressees' inboxes, in the
+// same transaction that parks the run and moves the task to input-required. An answer, a dismissal
+// or an expiry resolves the park (package questions) and the outcome is the next prompt, with the
+// safe default named when it was applied.
 
 import (
 	"context"
@@ -24,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/questions"
 )
 
 // kindParked is the run and task event of a run parking on approvals.
@@ -42,8 +50,21 @@ func (r *runner) outcomes(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	r.delivered = r.delivered[:0]
+	qs, err := r.q.ListUndeliveredQuestionsForRun(ctx, store.ListUndeliveredQuestionsForRunParams{
+		OrgID: r.run.OrgID, RunID: r.run.ID,
+	})
+	if err != nil {
+		return "", err
+	}
+	r.delivered, r.deliveredQ = r.delivered[:0], r.deliveredQ[:0]
 	var b strings.Builder
+	for _, row := range qs {
+		if row.State == store.QuestionStateAsked || row.State == store.QuestionStateOpen {
+			continue
+		}
+		r.deliveredQ = append(r.deliveredQ, row.ID)
+		fmt.Fprintf(&b, "\n- ask_user (question id=%s): %q: %s", row.ID.String(), row.Question, questionOutcomeText(row))
+	}
 	for _, a := range reqs {
 		if a.Status.Open() {
 			continue
@@ -57,6 +78,19 @@ func (r *runner) outcomes(ctx context.Context) (string, error) {
 	b.WriteString("\nThese outcomes are final: do not call the tools again for them. Continue the task from here, " +
 		"and tell the user what happened.")
 	return b.String(), nil
+}
+
+// questionOutcomeText describes one resolved question to the agent. A default that was applied
+// because the question was dismissed or expired is said so (ADR 0065 decision 10a).
+func questionOutcomeText(row store.Question) string {
+	switch row.State {
+	case store.QuestionStateDismissed:
+		return fmt.Sprintf("the person dismissed the question, so your default was applied: %q. Treat that as the answer.", row.Answer.String)
+	case store.QuestionStateExpired:
+		return fmt.Sprintf("nobody answered in time, so your default was applied: %q. Treat that as the answer.", row.Answer.String)
+	default:
+		return fmt.Sprintf("the person answered: %q", row.Answer.String)
+	}
 }
 
 // outcomeText describes one decided request to the agent.
@@ -102,6 +136,13 @@ func (r *runner) endTurn(ctx context.Context) error {
 				return err
 			}
 		}
+		if len(r.deliveredQ) > 0 {
+			if _, err := q.MarkQuestionsDelivered(ctx, store.MarkQuestionsDeliveredParams{
+				OrgID: r.run.OrgID, Ids: r.deliveredQ,
+			}); err != nil {
+				return err
+			}
+		}
 		run, err := q.LockRun(ctx, store.LockRunParams{OrgID: r.run.OrgID, ID: r.run.ID})
 		if err != nil {
 			return err
@@ -115,12 +156,30 @@ func (r *runner) endTurn(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if len(reqs) == 0 {
+		qs, err := q.ListUndeliveredQuestionsForRun(ctx, store.ListUndeliveredQuestionsForRunParams{
+			OrgID: r.run.OrgID, RunID: r.run.ID,
+		})
+		if err != nil {
+			return err
+		}
+		if len(reqs) == 0 && len(qs) == 0 {
 			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "")
 		}
 		parked = true
 		ids := make([]string, 0, len(reqs))
 		var expires pgtype.Timestamptz
+		// Questions the agent asked this turn become visible now, in this transaction.
+		asked := false
+		for _, row := range qs {
+			switch row.State {
+			case store.QuestionStateAsked, store.QuestionStateOpen:
+				asked = true
+				if !expires.Valid || row.ExpiresAt.Time.Before(expires.Time) {
+					expires = row.ExpiresAt
+				}
+			}
+		}
+		waiting = asked
 		for _, a := range reqs {
 			ids = append(ids, a.ID.String())
 			if a.Status == store.ApprovalStatusPending {
@@ -139,7 +198,15 @@ func (r *runner) endTurn(ctx context.Context) error {
 		if err := r.postReply(ctx, q); err != nil {
 			return err
 		}
-		payload, _ := json.Marshal(map[string]any{"reason": string(store.RunParkReasonApproval), "approvals": ids})
+		reason := store.RunParkReasonApproval
+		if asked {
+			reason = store.RunParkReasonInputRequired
+		}
+		qids := make([]string, 0, len(qs))
+		for _, row := range qs {
+			qids = append(qids, row.ID.String())
+		}
+		payload, _ := json.Marshal(map[string]any{"reason": string(reason), "approvals": ids, "questions": qids})
 		if _, err := q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
 			OrgID: r.run.OrgID, RunID: r.run.ID, Epoch: r.run.Epoch, Kind: kindParked, Payload: payload, SourceSeq: src,
 		}); err != nil {
@@ -147,9 +214,14 @@ func (r *runner) endTurn(ctx context.Context) error {
 		}
 		if _, err := q.ParkRun(ctx, store.ParkRunParams{
 			OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch,
-			ParkReason: store.RunParkReasonApproval, ParkExpiresAt: expires,
+			ParkReason: reason, ParkExpiresAt: expires,
 		}); err != nil {
 			return err
+		}
+		if asked {
+			if _, err := questions.OpenForRun(ctx, q, r.run.OrgID, r.run.ID, r.run.TaskID); err != nil {
+				return err
+			}
 		}
 		if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 			OrgID: r.run.OrgID, TaskID: r.run.TaskID, RunID: r.run.ID,
@@ -172,7 +244,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 				return nil // approved, being executed: the executor resolves the park
 			}
 		}
-		// Every request was decided while the turn ran: resume at once.
+		// Every request and question was decided while the turn ran: resume at once.
 		_, err = q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: r.run.OrgID, ID: r.run.ID})
 		return err
 	})
