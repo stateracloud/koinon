@@ -26,7 +26,7 @@ const (
 	DefaultQueueWait   = 5 * time.Minute
 
 	// DefaultMaxConcurrentRuns is the cap on an org's owned runs. The same number is in
-	// run_claimable (migration 00025); the two must change together.
+	// run_claimable (migration 00023); the two must change together.
 	DefaultMaxConcurrentRuns = 20
 	// DefaultTriggerConcurrency and DefaultTriggerRatePerMinute are an org's share of the DBOS queue
 	// for trigger, webhook and task-creation work (DB2, ADR 0066).
@@ -99,7 +99,7 @@ type Override struct {
 	MaxConcurrentRuns, TriggerConcurrency, TriggerRatePerMinute *int
 }
 
-// Set replaces the org's overrides. The database bounds each value (see migrations 00022 and 00025).
+// Set replaces the org's overrides. The database bounds each value (see migrations 00022 and 00023).
 func Set(ctx context.Context, q *store.Queries, org pgtype.UUID, o Override) error {
 	_, err := q.UpsertOrgSettings(ctx, store.UpsertOrgSettingsParams{
 		OrgID:              org,
