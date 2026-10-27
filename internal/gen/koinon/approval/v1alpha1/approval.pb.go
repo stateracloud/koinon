@@ -559,7 +559,14 @@ type Approval struct {
 	FirstApprover string `protobuf:"bytes,27,opt,name=first_approver,json=firstApprover,proto3" json:"first_approver,omitempty"`
 	// system is true for a request Koinon made itself rather than an agent's tool call: the run
 	// neither waits for it nor is told its outcome (saved work from a stuck sandbox).
-	System        bool `protobuf:"varint,30,opt,name=system,proto3" json:"system,omitempty"`
+	System bool `protobuf:"varint,30,opt,name=system,proto3" json:"system,omitempty"`
+	// ci_paths are the paths whose changes run CI on the connection's host: the connector's CI
+	// paths plus the connection's configured directories. A directory ends with a slash. Only set
+	// by GetApproval, for a request on a code host.
+	CiPaths []string `protobuf:"bytes,31,rep,name=ci_paths,json=ciPaths,proto3" json:"ci_paths,omitempty"`
+	// ci_fold_case is whether the host's file system ignores case, so ci_paths match without
+	// regard to case.
+	CiFoldCase    bool `protobuf:"varint,32,opt,name=ci_fold_case,json=ciFoldCase,proto3" json:"ci_fold_case,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -815,6 +822,20 @@ func (x *Approval) GetFirstApprover() string {
 func (x *Approval) GetSystem() bool {
 	if x != nil {
 		return x.System
+	}
+	return false
+}
+
+func (x *Approval) GetCiPaths() []string {
+	if x != nil {
+		return x.CiPaths
+	}
+	return nil
+}
+
+func (x *Approval) GetCiFoldCase() bool {
+	if x != nil {
+		return x.CiFoldCase
 	}
 	return false
 }
@@ -1799,7 +1820,8 @@ const file_koinon_approval_v1alpha1_approval_proto_rawDesc = "" +
 	"\x05files\x18\x05 \x03(\v2$.koinon.approval.v1alpha1.FileChangeR\x05files\"D\n" +
 	"\vCommentCall\x12!\n" +
 	"\fissue_number\x18\x01 \x01(\x03R\vissueNumber\x12\x12\n" +
-	"\x04body\x18\x02 \x01(\tR\x04body\"\xf8\t\n" +
+	"\x04body\x18\x02 \x01(\tR\x04body\"\xb5\n" +
+	"\n" +
 	"\bApproval\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x1b\n" +
@@ -1841,7 +1863,10 @@ const file_koinon_approval_v1alpha1_approval_proto_rawDesc = "" +
 	"can_decide\x18\x19 \x01(\bR\tcanDecide\x12-\n" +
 	"\x12approvals_required\x18\x1a \x01(\x05R\x11approvalsRequired\x12%\n" +
 	"\x0efirst_approver\x18\x1b \x01(\tR\rfirstApprover\x12\x16\n" +
-	"\x06system\x18\x1e \x01(\bR\x06systemB\x06\n" +
+	"\x06system\x18\x1e \x01(\bR\x06system\x12\x19\n" +
+	"\bci_paths\x18\x1f \x03(\tR\aciPaths\x12 \n" +
+	"\fci_fold_case\x18  \x01(\bR\n" +
+	"ciFoldCaseB\x06\n" +
 	"\x04call\"\xec\x01\n" +
 	"\aMcpCall\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x1f\n" +

@@ -27,6 +27,10 @@ type Site struct {
 	// CABundle is PEM certificates that sign the host's TLS certificate, besides the system
 	// roots.
 	CABundle string `json:"caBundle,omitempty"`
+	// CIDirs are directories, besides the provider's CI paths, that run CI on this connection's
+	// host (a Gitea server's WORKFLOW_DIRS); the workflow guard refuses them (ADR 0062). Stored
+	// cleaned, relative to the repository root.
+	CIDirs []string `json:"ciDirs,omitempty"`
 }
 
 // SiteOf decodes the site of a connection's config.
@@ -112,6 +116,7 @@ func CapabilitiesOf(t *connectors.Type) (Capabilities, error) {
 		ExactModes:          c.ExactModes,
 		Writes:              c.Writes,
 		CIPaths:             append([]string(nil), t.Spec.CIPaths...),
+		CIPathsFoldCase:     t.Spec.CIPathsFoldCase,
 	}
 	if l := t.Spec.Auth.TokenLifetime; l != "" {
 		d, err := time.ParseDuration(l)

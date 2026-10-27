@@ -97,7 +97,7 @@ Checked against the vendored protos and the policy schema reference at tag v0.1.
   sandbox's system roots plus the bundle); `/etc/gitconfig` includes the file. OpenShell's proxy
   must itself trust a custom CA to reach the host; Koinon does not configure that.
 - **Capabilities and CI paths are data.** `spec.capabilities` (display name, credential class,
-  narrowing, repository limit, CI denial, exact modes), `auth.tokenLifetime` and `spec.ciPaths`
+  narrowing, repository limit, CI denial, exact modes), `auth.tokenLifetime` and `spec.ciPaths` (and `spec.ciPathsFoldCase`)
   describe the provider; `codehost.CapabilitiesOf` reads them.
 - **Profile changes.** Changing the bound repositories updates the profile in place; OpenShell
   revokes placeholders whose endpoint boundary changed, so a running harness needs a new

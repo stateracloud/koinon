@@ -65,7 +65,16 @@ func (s *Service) execute(ctx context.Context, row store.ApprovalRequest) (map[s
 		if err != nil {
 			return nil, err
 		}
-		return s.createPullRequest(ctx, p, acc, repo, *args, row.ID.String(), requested, approved)
+		// Defence in depth: the tool server applied the guard when it recorded the call, but the
+		// connection's CI directories may have changed since, and the arguments are re-read here.
+		guard, err := codehost.GuardOf(p.Capabilities(), conn.Config)
+		if err != nil {
+			return nil, permanentError{err}
+		}
+		if err := githubtools.ValidatePullRequest(*args, guard); err != nil {
+			return nil, permanentError{err}
+		}
+		return s.createPullRequest(ctx, p, acc, repo, *args, guard, row.ID.String(), requested, approved)
 	case *githubtools.CommentArgs:
 		return s.comment(ctx, acc, repo, *args, row.ID.String())
 	default:
@@ -202,7 +211,7 @@ func hasTrailer(message, approvalID string) bool {
 // createPullRequest creates the branch, one commit with exactly the approved files on top
 // of the base, and the pull request. What an earlier attempt of the same approval created
 // is found first and reused.
-func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, acc codehost.Access, repo codehost.Repo, args githubtools.PullRequestArgs,
+func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, acc codehost.Access, repo codehost.Repo, args githubtools.PullRequestArgs, guard codehost.Guard,
 	approvalID, requestedBy, approvedBy string,
 ) (map[string]any, error) {
 	base := args.Base
@@ -218,7 +227,7 @@ func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, ac
 		return nil, err
 	}
 	if head == "" {
-		if head, err = s.commit(ctx, acc, repo, args, base, CommitMessage(args, approvalID, requestedBy, approvedBy)); err != nil {
+		if head, err = s.commit(ctx, acc, repo, args, guard, base, CommitMessage(args, approvalID, requestedBy, approvedBy)); err != nil {
 			return nil, err
 		}
 		err = acc.CreateBranch(ctx, repo, args.Branch, head)
@@ -283,7 +292,7 @@ func (s *Service) existingHead(ctx context.Context, acc codehost.Access, repo co
 }
 
 // commit writes the commit with exactly the approved files on top of base, and returns its SHA.
-func (s *Service) commit(ctx context.Context, acc codehost.Access, repo codehost.Repo, args githubtools.PullRequestArgs, base, message string) (string, error) {
+func (s *Service) commit(ctx context.Context, acc codehost.Access, repo codehost.Repo, args githubtools.PullRequestArgs, guard codehost.Guard, base, message string) (string, error) {
 	baseSHA, found, err := acc.Branch(ctx, repo, base)
 	if err != nil {
 		return "", err
@@ -302,6 +311,10 @@ func (s *Service) commit(ctx context.Context, acc codehost.Access, repo codehost
 			w.Content = []byte(f.Content)
 		}
 		files = append(files, w)
+	}
+	// The files as written: paths, modes and symbolic-link targets are checked once more.
+	if err := guard.CheckFiles(files); err != nil {
+		return "", permanentError{err}
 	}
 	return acc.WriteCommit(ctx, repo, codehost.CommitRequest{Base: baseSHA, Message: message, Files: files})
 }

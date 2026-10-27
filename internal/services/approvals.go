@@ -11,7 +11,9 @@ import (
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/db/store"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	"github.com/stateracloud/koinon/internal/githubtools"
@@ -121,7 +123,39 @@ func (s *Server) GetApproval(ctx context.Context, req *approvalv1alpha1.GetAppro
 	out := approvalProto(row, c.p.HasRole(c.org, store.OrgRoleAdmin), true)
 	s.enrichMCP(ctx, out, row)
 	s.enrichSavedWork(ctx, out, row)
+	s.enrichCI(ctx, out, row)
 	return &approvalv1alpha1.GetApprovalResponse{Approval: out}, nil
+}
+
+// enrichCI fills the paths whose changes run CI on the request's code host: the connector's CI
+// paths and the directories configured on the connection the run's agent version uses, so the
+// card warns about the same paths the workflow guard refuses. Without a connection it falls back
+// to the connector's own paths.
+func (s *Server) enrichCI(ctx context.Context, out *approvalv1alpha1.Approval, row store.ApprovalRequest) {
+	p, ok := s.hosts.Get(row.Connector)
+	if !ok {
+		return
+	}
+	var config []byte
+	if run, err := s.q.GetRun(ctx, store.GetRunParams{OrgID: row.OrgID, ID: row.RunID}); err == nil {
+		if v, err := s.q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: row.OrgID, ID: run.AgentVersionID}); err == nil {
+			if cfg, err := agentconfig.Parse(v.Config); err == nil {
+				if b, ok := cfg.Binding(row.Connector); ok {
+					var id pgtype.UUID
+					if id.Scan(b.ConnectionID) == nil && id.Valid {
+						if c, err := s.q.GetConnection(ctx, store.GetConnectionParams{OrgID: row.OrgID, ID: id}); err == nil {
+							config = c.Config
+						}
+					}
+				}
+			}
+		}
+	}
+	g, err := codehost.GuardOf(p.Capabilities(), config)
+	if err != nil {
+		g, _ = codehost.NewGuard(p.Capabilities(), nil)
+	}
+	out.CiPaths, out.CiFoldCase = g.Paths(), g.FoldCase()
 }
 
 // enrichMCP fills the MCP call of an approval: what the request was bound to and what the tool is
