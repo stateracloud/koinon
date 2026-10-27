@@ -44,6 +44,11 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		UnhealthyAt:     tsProto(a.UnhealthyAt),
 		UnhealthyReason: a.UnhealthyReason.String,
 	}
+	if sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: a.OrgID, AgentID: a.ID}); err == nil {
+		out.SandboxArchivedAt = tsProto(sb.ArchivedAt)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
 	if a.TemplateID.Valid {
 		slug, ok := slugs[a.TemplateID]
 		if !ok {

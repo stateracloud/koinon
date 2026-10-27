@@ -90,7 +90,18 @@ SET state = @state::sandbox_state,
     unhealthy_generation = CASE WHEN nullif(@home_generation::text, '') IS NOT NULL
                                  AND nullif(@home_generation::text, '') IS DISTINCT FROM unhealthy_generation
                                 THEN NULL ELSE unhealthy_generation END,
+    -- An observed sandbox other than one being deleted ends the archive (plan item AR1).
+    archived_at = CASE WHEN @state::sandbox_state IN ('starting', 'ready', 'stopping', 'stopped', 'error')
+                       THEN NULL ELSE archived_at END,
     observed_at = now()
+WHERE org_id = @org_id AND agent_id = @agent_id
+RETURNING *;
+
+-- name: MarkSandboxArchived :one
+-- The sandbox and its volume were deleted for the archive tier; the home is in the checkpoint
+-- that restore_checkpoint_id names.
+UPDATE agent_sandboxes
+SET archived_at = now()
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
 
