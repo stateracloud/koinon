@@ -450,3 +450,12 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   the fresh-session handoff (`handoff.build` adds the park note itself).
 - **Typed IDs** were not introduced at TK1; they stay `pgtype.UUID` from sqlc. A wrapper for task and run
   IDs touches every sqlc call and was left out of this item.
+
+- 2026-10-27 (DOC2, E1 on tasks): the docs site gained guides for tasks and the inbox, `ask_user`
+  with its reminder and expiry, schedule and direct-message triggers, scoped approvals, Gitea, GHES and
+  home checkpoints. The quickstart's e2e driver (`test/e2e`) moved from `TicketService` to
+  `TaskService` and keeps its step labels except the words "Ticket" and "ticket", now "Task" and
+  "task"; the real-cluster Playwright spec is `web/e2e-real/task-stream.spec.ts` (renamed, same flow:
+  it already drove the inbox and `/tasks/{id}`). Approval requests still carry the field `ticket_id`
+  (the task's ID) in `ApprovalService`, so the driver sets `TicketId` there. Judgement call: the
+  archive tier (AR1) is documented from ADR 0032 and says so, since the item is not in this base.

@@ -23,8 +23,8 @@ import (
 	authv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1"
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
+	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
-	ticketv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
 )
 
@@ -168,7 +168,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		org      string
 		conn     *connectionv1alpha1.Connection
 		agent    *agentv1alpha1.Agent
-		ticket   *ticketv1alpha1.Ticket
+		task     *taskv1alpha1.Task
 		run      *runv1alpha1.Run
 		w        *watcher
 		lastSeq  int64
@@ -317,14 +317,14 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("3. Agent from template, activated")
 	})
 
-	It("4. creates a ticket, streams the run and parks on an approval", func(ctx SpecContext) {
+	It("4. creates a task, streams the run and parks on an approval", func(ctx SpecContext) {
 		t.begin()
-		res, err := c.tickets.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{
+		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: agent.GetId(), Title: "Add hello.md",
 			Message: "Please add a hello.md to " + repository + " that says hello from koinon.",
 		})
 		Expect(err).NotTo(HaveOccurred())
-		ticket, run = res.GetTicket(), res.GetRun()
+		task, run = res.GetTask(), res.GetRun()
 		Expect(run.GetId()).NotTo(BeEmpty())
 
 		w = watchRun(context.WithoutCancel(ctx), c, org, run.GetId(), 0)
@@ -334,7 +334,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(run.GetParkReason()).To(Equal(runv1alpha1.ParkReason_PARK_REASON_APPROVAL))
 		Expect(kinds).To(ContainElement("acp.tool_call"), "the run streamed the agent's tool call")
 
-		list, err := c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: ticket.GetId()})
+		list, err := c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: task.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list.GetApprovals()).To(HaveLen(1))
 		// The list is a summary; the approval card reads the call itself.
@@ -371,7 +371,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		repo := gh.repo(ctx, repoName)
 		Expect(repo.Pulls).To(BeEmpty())
 		Expect(repo.Refs).NotTo(HaveKey(prBranch))
-		t.end("4. Ticket → run streamed → approval pending")
+		t.end("4. Task → run streamed → approval pending")
 	})
 
 	It("5. approves, and Koinon opens exactly one branch, commit and pull request", func(ctx SpecContext) {
@@ -401,16 +401,16 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("5. Approve → branch, commit, PR on fake GitHub")
 	})
 
-	It("6. resumes the run, which posts the pull request URL on the ticket", func(ctx SpecContext) {
+	It("6. resumes the run, which posts the pull request URL on the task", func(ctx SpecContext) {
 		t.begin()
 		run = w.until(ctx, c, org, run.GetId(), 5*time.Minute, &lastSeq, &kinds, func(r *runv1alpha1.Run) bool {
 			return r.GetState() == runv1alpha1.RunState_RUN_STATE_SUCCEEDED
 		})
-		got, err := c.tickets.GetTicket(ctx, &ticketv1alpha1.GetTicketRequest{OrgId: org, TicketId: ticket.GetId()})
+		got, err := c.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: task.GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		var replies []string
 		for _, ev := range got.GetEvents() {
-			if ev.GetKind() == "message" && ev.GetActorKind() == ticketv1alpha1.ActorKind_ACTOR_KIND_AGENT {
+			if ev.GetKind() == "message" && ev.GetActorKind() == taskv1alpha1.ActorKind_ACTOR_KIND_AGENT {
 				text, _ := ev.GetPayload().AsMap()["text"].(string)
 				replies = append(replies, text)
 			}
@@ -422,25 +422,25 @@ var _ = Describe("the quickstart", Ordered, func() {
 		repo := gh.repo(ctx, repoName)
 		Expect(repo.Calls).To(HaveKeyWithValue("POST pulls", 1))
 		Expect(repo.Pulls).To(HaveLen(1))
-		t.end("6. Run resumes → PR URL on the ticket")
+		t.end("6. Run resumes → PR URL on the task")
 	})
 
-	It("6a. the agent's end-of-turn note is on the ticket, not in its timeline as a reply", func(ctx SpecContext) {
+	It("6a. the agent's end-of-turn note is on the task, not in its timeline as a reply", func(ctx SpecContext) {
 		t.begin()
 		// The note is written after each turn (the run parked once, then finished: two turns), so
 		// it is there by the time the run has succeeded; the last one wins.
-		var got *ticketv1alpha1.GetTicketResponse
+		var got *taskv1alpha1.GetTaskResponse
 		Eventually(func(g Gomega) {
 			var err error
-			got, err = c.tickets.GetTicket(ctx, &ticketv1alpha1.GetTicketRequest{OrgId: org, TicketId: ticket.GetId()})
+			got, err = c.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: task.GetId()})
 			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(got.GetTicket().GetAgentSummary()).To(HavePrefix("Notes: the task asks for a hello.md"))
+			g.Expect(got.GetTask().GetAgentSummary()).To(HavePrefix("Notes: the task asks for a hello.md"))
 		}, 30*time.Second, time.Second).Should(Succeed())
-		Expect(got.GetTicket().GetAgentSummaryAt()).NotTo(BeNil())
+		Expect(got.GetTask().GetAgentSummaryAt()).NotTo(BeNil())
 		for _, ev := range got.GetEvents() {
 			if ev.GetKind() == "message" {
 				text, _ := ev.GetPayload().AsMap()["text"].(string)
-				Expect(text).NotTo(HavePrefix("Notes:"), "the note is not a reply on the ticket")
+				Expect(text).NotTo(HavePrefix("Notes:"), "the note is not a reply on the task")
 			}
 		}
 		By("the note's model call went through the gateway and was counted with the run")
@@ -449,7 +449,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(r.GetRun().GetCost().GetRequests()).To(BeNumerically(">=", 4), "title, two turns and at least one note")
 		}, 60*time.Second, time.Second).Should(Succeed())
-		t.end("6a. Agent's notes on the ticket")
+		t.end("6a. Agent's notes on the task")
 	})
 
 	It("6a2. the saved-work upload Service exists and answers; the tools port does not serve it", func(ctx SpecContext) {
@@ -483,7 +483,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.begin()
 		Expect(mcpServerID).NotTo(BeEmpty(), "step 6b adds the server")
 		fake := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMCP_URL"), "/")
-		res, err := c.tickets.CreateTicket(ctx, &ticketv1alpha1.CreateTicketRequest{
+		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: agent.GetId(), Title: "Tracker write",
 			Message: "tracker write: please call the tracker's write tool.",
 		})
@@ -496,7 +496,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		})
 		Expect(parked.GetParkReason()).To(Equal(runv1alpha1.ParkReason_PARK_REASON_APPROVAL))
 
-		list, err := c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: res.GetTicket().GetId()})
+		list, err := c.approvals.ListApprovals(ctx, &approvalv1alpha1.ListApprovalsRequest{OrgId: org, TicketId: res.GetTask().GetId()})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list.GetApprovals()).To(HaveLen(1))
 		got, err := c.approvals.GetApproval(ctx, &approvalv1alpha1.GetApprovalRequest{OrgId: org, ApprovalId: list.GetApprovals()[0].GetId()})

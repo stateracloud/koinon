@@ -29,7 +29,7 @@ template is not touched.
 
 At 80% and at 100% of a limit, org owners and admins get a notice. A banner shows the unread notices of
 the current month or day on every page, and the 100% notice replaces the 80% one. **Notifications** on the
-Budgets page lists them; **Mark as read** clears one. When a run stops at a limit, the ticket's timeline
+Budgets page lists them; **Mark as read** clears one. When a run stops at a limit, the task's timeline
 says so, with the limit and the amount.
 
 ## Platform ceiling
