@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -28,6 +27,36 @@ type fakeHome struct {
 	files map[string]string
 	// failRead makes the backup's tar fail with exit code 2.
 	failRead bool
+	// dests and names are what the uploads extracted: their destination directories and the entry
+	// names of the archives.
+	dests, names []string
+}
+
+// upload answers the upload channel's `cat | tar xf - -C dest`.
+func (h *fakeHome) upload(_ context.Context, dest string, archive io.Reader, stderr io.Writer) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.files == nil {
+		h.files = map[string]string{}
+	}
+	h.dests = append(h.dests, dest)
+	tr := tar.NewReader(archive)
+	for {
+		hd, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return 0
+		}
+		if err != nil {
+			_, _ = io.WriteString(stderr, "tar: "+err.Error())
+			return 2
+		}
+		h.names = append(h.names, hd.Name)
+		if hd.Typeflag != tar.TypeReg {
+			continue
+		}
+		b, _ := io.ReadAll(tr)
+		h.files[hd.Name] = string(b)
+	}
 }
 
 func (h *fakeHome) set(files map[string]string) {
@@ -46,8 +75,8 @@ func (h *fakeHome) get() map[string]string {
 	return out
 }
 
-// tar answers `tar -C /sandbox ... -cf - .` (the backup) and `tar -C /sandbox ... -xf -` (the
-// restore).
+// tar answers `tar -C /sandbox ... -cf - .` (the backup). The restore does not run tar over exec:
+// it goes through the upload channel, which upload answers.
 func (h *fakeHome) tar(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -65,22 +94,6 @@ func (h *fakeHome) tar(args []string, stdin io.Reader, stdout, stderr io.Writer)
 		}
 		_ = tw.Close()
 		return 0
-	case slices.Contains(args, "-xf"):
-		if h.files == nil {
-			h.files = map[string]string{}
-		}
-		tr := tar.NewReader(stdin)
-		for {
-			hd, err := tr.Next()
-			if err != nil {
-				return 0
-			}
-			if hd.Typeflag != tar.TypeReg {
-				continue
-			}
-			b, _ := io.ReadAll(tr)
-			h.files[strings.TrimPrefix(hd.Name, "./")] = string(b)
-		}
 	}
 	_, _ = io.WriteString(stderr, "tar: unexpected arguments")
 	return 2
@@ -169,8 +182,11 @@ var _ = Describe("home checkpoints", func() {
 			"notes/today.md":                   "remember the milk",
 			".local/share/opencode/ses_1.db":   "session bytes",
 			"work/app/node_modules/x/index.js": "excluded in the sandbox's tar, not in this fake",
+			"lost+found/orphan":                "the volume's fsck directory",
+			"work/lost+found/mine":             "a directory of the user's",
 		}}
 		e.files.tar = home.tar
+		e.gw.HandleUpload(home.upload)
 		writer = &checkpoint.Writer{Storage: checkpoint.Dir(GinkgoT().TempDir()), Scratch: GinkgoT().TempDir()}
 	})
 
@@ -231,6 +247,18 @@ var _ = Describe("home checkpoints", func() {
 		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Expect(home.get()).To(HaveKeyWithValue("notes/today.md", "remember the milk"))
 		Expect(home.get()).To(HaveKey(".local/share/opencode/ses_1.db"))
+		By("the home went through the upload channel, into /sandbox, as an archive that tar can extract as the sandbox user")
+		Expect(e.gw.UploadStats().Uploads).To(Equal(1))
+		Expect(e.gw.UploadStats().Violations).To(BeZero())
+		Expect(home.dests).To(Equal([]string{checkpoint.HomeDir}))
+		Expect(home.names).NotTo(BeEmpty())
+		for _, n := range home.names {
+			Expect(n).NotTo(Or(Equal("."), Equal("./"), HavePrefix("./"), HavePrefix("/")), "no root entry for tar to chmod")
+			Expect(checkpoint.Excluded(n)).To(BeFalse(), n)
+		}
+		Expect(home.get()).NotTo(HaveKey("lost+found/orphan"))
+		Expect(home.get()).To(HaveKeyWithValue("work/lost+found/mine", "a directory of the user's"))
+		Expect(e.gw.ActiveSSHSessions()).To(BeZero(), "the session token is revoked")
 		prompts, loads, _, _ := e.harness.snapshot()
 		Expect(loads).To(Equal([]string{"ses_1"}), "session/load, not a reset")
 		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\nfirst", "second"}))
@@ -331,5 +359,30 @@ var _ = Describe("home checkpoints", func() {
 		Expect(prompts).To(Equal(prompts0), "the harness never saw a prompt")
 		Expect(getRun(ctx, r2).OutcomeReason.String).To(ContainSubstring("restoring the home failed"))
 		Expect(restoreOf(ctx).Valid).To(BeTrue(), "the restore is still owed")
+	})
+
+	It("fails the run with the OpenShell version it needs when the sandbox's supervisor has no upload channel", func(ctx SpecContext) {
+		t := e.task(ctx, "first")
+		stop := e.pool("agentd-a")
+		r1 := e.enqueue(ctx, t)
+		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		stop()
+		id := request(ctx, store.CheckpointReasonRecreate)
+		stopW := e.pool("agentd-w", cps(ctx))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		stopW()
+		reconcilerRecreates(ctx, id)
+
+		e.gw.DisableUploadSubsystem()
+		e.message(ctx, t, "second")
+		r2 := e.enqueue(ctx, t)
+		e.pool("agentd-b", cps(ctx, func(c *agentd.Checkpoints) { c.RestoreTries = 3 }))
+		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		reason := getRun(ctx, r2).OutcomeReason.String
+		Expect(reason).To(ContainSubstring("does not support openshell-upload-v1"))
+		Expect(reason).To(ContainSubstring("OpenShell v0.1.4 or later"))
+		Expect(e.gw.Calls("CreateSshSession")).To(Equal(1), "no retry and no older checkpoint: they would fail the same way")
+		Expect(restoreOf(ctx).Valid).To(BeTrue(), "the restore is still owed")
+		Expect(e.gw.ActiveSSHSessions()).To(BeZero())
 	})
 })
