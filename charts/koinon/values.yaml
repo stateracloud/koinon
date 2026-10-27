@@ -286,7 +286,10 @@ secrets:
 # Home checkpoints (plan item HC1, ADR 0032, practice B3). Off by default. When on, koinon-agentd saves
 # each agent's home (sessions, notes, scratch work; caches and node_modules excluded) to an
 # S3-compatible bucket with kopia: hourly while the sandbox runs, before an idle stop and before a
-# recreation, and restores it into a recreated sandbox before the harness starts. A sandbox is
+# recreation, and restores it into a recreated sandbox before the harness starts. The backup reads
+# the home as tar over exec; the restore goes through OpenShell's flow-controlled upload channel
+# (the openshell-upload-v1 SSH subsystem), which needs OpenShell v0.1.4 or later (ADR 0032, issue
+# 169). A sandbox is
 # recreated only after its latest backup completed; a failed backup blocks the recreation and marks
 # the agent unhealthy with the reason. One repository per agent at orgs/<org>/homes/<agent>/; its
 # random password is sealed with the secret store's KEK, which only koinon-api holds: koinon-agentd
