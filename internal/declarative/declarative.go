@@ -323,7 +323,7 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 		tq := store.New(tx)
 		after := map[string]any{
 			"connector": d.Connector, "displayName": d.DisplayName, "appId": d.AppID,
-			"installationId": d.InstallationID, "keyFingerprint": d.Fingerprint, "source": "secret",
+			"installationId": d.InstallationID, "baseUrl": d.Site.BaseURL, "keyFingerprint": d.Fingerprint, "source": "secret",
 		}
 		if cur == nil {
 			id, err := newConnID()

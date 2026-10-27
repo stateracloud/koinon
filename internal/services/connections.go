@@ -97,6 +97,7 @@ func (s *Server) connectionProto(c store.Connection) *connectionv1alpha1.Connect
 		if d, err := p.Describe(c.Config); err == nil {
 			out.Settings = &connectionv1alpha1.Connection_Github{Github: &connectionv1alpha1.GitHubConnection{
 				AppId: d.AppID, InstallationId: d.InstallationID, KeyFingerprint: c.SecretFingerprint,
+				BaseUrl: d.Site.BaseURL, CaBundle: d.Site.CABundle,
 			}}
 		}
 	}
@@ -132,6 +133,7 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 	case req.GetInstallationId() <= 0:
 		return nil, connect.NewError(connect.CodeInvalidArgument, "installation_id must be the installation's numeric ID")
 	}
+	baseURL, caBundle := strings.TrimSpace(req.GetBaseUrl()), strings.TrimSpace(req.GetCaBundle())
 	// Take the key out of the request, so nothing that prints the request
 	// later (protobuf-go ignores debug_redact) can show it.
 	pemKey := []byte(req.GetPrivateKey())
@@ -153,12 +155,30 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 		return nil, s.dbError(errors.New("github connector type is not embedded"), "connector type")
 	}
 
+	loc, err := t.Locate(baseURL)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
+	}
+	if loc.Default {
+		baseURL = "" // github.com is the default; nothing to store
+	} else {
+		baseURL = loc.BaseURL()
+	}
+	if caBundle != "" {
+		if _, err := codehost.CertPool(caBundle); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "ca_bundle: "+err.Error())
+		}
+	}
+
 	id, err := uuid.NewV7()
 	if err != nil {
 		return nil, s.dbError(err, "connection")
 	}
 	connID := pgtype.UUID{Bytes: id, Valid: true}
-	config, err := json.Marshal(connections.GitHubConfig{AppID: req.GetAppId(), InstallationID: req.GetInstallationId()})
+	config, err := json.Marshal(connections.GitHubConfig{
+		AppID: req.GetAppId(), InstallationID: req.GetInstallationId(),
+		Site: codehost.Site{BaseURL: baseURL, CABundle: caBundle},
+	})
 	if err != nil {
 		return nil, s.dbError(err, "connection")
 	}
@@ -182,6 +202,7 @@ func (s *Server) CreateGitHubConnection(ctx context.Context, req *connectionv1al
 			After: map[string]any{
 				"connector": t.Metadata.ID, "displayName": name, "appId": req.GetAppId(),
 				"installationId": req.GetInstallationId(), "keyFingerprint": key.Fingerprint(), "source": "ui",
+				"baseUrl": baseURL, "caBundle": caBundle != "",
 			},
 		})
 	})

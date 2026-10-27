@@ -199,11 +199,14 @@ type CheckResult struct {
 type Description struct {
 	AppID          int64
 	InstallationID int64
+	// Site is the connection's host when it is not the connector's default.
+	Site Site
 }
 
 // Capabilities says what a provider's credential and write API can and cannot narrow, so risk
 // tiers, approvals and the UI can compensate (ADR 0062, 0063). The fields are a starting point
-// (ADR 0062 open questions); CH2 moves the descriptor into connector.yaml.
+// (ADR 0062 open questions). The descriptor is data: connector.yaml's spec.capabilities,
+// spec.ciPaths and auth.tokenLifetime, read by CapabilitiesOf.
 type Capabilities struct {
 	// DisplayName is how messages name the provider.
 	DisplayName string
@@ -234,8 +237,8 @@ type Provider interface {
 	Capabilities() Capabilities
 	// ParseRepo parses and validates a repository name as bound to an agent.
 	ParseRepo(full string) (Repo, error)
-	// BranchURL is the page of a branch on the host.
-	BranchURL(r Repo, branch string) string
+	// BranchURL is the page of a branch on the connection's host.
+	BranchURL(conn Connection, r Repo, branch string) string
 	// MetadataScope is the least scope that lists and names repositories, for connection checks
 	// and for validating bindings. Empty repositories means every repository the connection
 	// can access.

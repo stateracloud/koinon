@@ -49,7 +49,7 @@ COPY --chmod=0644 etc/koinon/opencode/opencode.jsonc /etc/koinon/opencode/openco
 # "common"): it prints the OpenShell placeholder and stores nothing.
 COPY --from=common --chmod=0755 koinon-git-credential /usr/local/bin/koinon-git-credential
 COPY --from=common --chmod=0644 etc/koinon/git/config /etc/koinon/git/config
-RUN printf '[include]\n\tpath = /etc/koinon/git/config\n' >> /etc/gitconfig
+RUN printf '[include]\n\tpath = /etc/koinon/git/config\n\tpath = /sandbox/.koinon/git/config\n' >> /etc/gitconfig
 # OpenCode loads AGENTS.md from its global config directory into the system prompt. Koinon's
 # instructions are per run, so koinon-agentd writes them into the home and this link points there
 # (2.0.24 ignores the "instructions" config key, see README.md).

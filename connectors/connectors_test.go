@@ -157,6 +157,68 @@ var _ = Describe("Embedded connector types", func() {
 			Expect(got[1].Allow).To(ContainElements(allow("GET", "/repos/acme/gadgets/**"), allow("GET", "/repos/acme/widgets")))
 		})
 
+		It("renders the rules at a connection's own host: git at the host, the API under /api/v3", func() {
+			t := githubType()
+			loc, err := t.Locate("https://ghes.example.test")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(loc.Default).To(BeFalse())
+			Expect(loc.BaseURL()).To(Equal("https://ghes.example.test"))
+			Expect(loc.APIBaseURL()).To(Equal("https://ghes.example.test/api/v3"))
+			got, err := t.NetworkAt(loc, templates.PresetStandard, []string{"repo.read"}, []string{"acme/widgets"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(HaveLen(1), "web and API share the host")
+			h := got[0]
+			Expect(h.Host).To(Equal("ghes.example.test"))
+			Expect(h.Port).To(Equal(443))
+			Expect(h.Allow).To(Equal([]connectors.HTTPRule{
+				allow("GET", "/acme/widgets.git/info/refs", "service", "git-upload-pack"),
+				allow("GET", "/acme/widgets/info/refs", "service", "git-upload-pack"),
+				allow("POST", "/acme/widgets.git/git-upload-pack"),
+				allow("POST", "/acme/widgets/git-upload-pack"),
+				allow("GET", "/api/v3/repos/acme/widgets"),
+				allow("GET", "/api/v3/repos/acme/widgets/**"),
+			}))
+			Expect(h.Deny).To(ContainElements(
+				allow("GET", "/**/git-receive-pack"),
+				allow("GET", "/**/info/refs", "service", "git-receive-pack"),
+				allow("POST", "/api/v3/**"), allow("DELETE", "/api/v3/**"),
+			))
+			// Nothing names github.com any more.
+			for _, r := range append(append([]connectors.HTTPRule{}, h.Allow...), h.Deny...) {
+				Expect(r.Path).NotTo(ContainSubstring("github"))
+			}
+		})
+
+		It("keeps a port, and the default location when the base URL is github.com's", func() {
+			t := githubType()
+			loc, err := t.Locate("https://GHES.example.test:8443/")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(loc.Web).To(Equal(connectors.HostPort{Host: "ghes.example.test", Port: 8443}))
+			Expect(loc.BaseURL()).To(Equal("https://ghes.example.test:8443"))
+			got, err := t.NetworkAt(loc, templates.PresetStandard, []string{"repo.read"}, []string{"acme/widgets"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got[0].Port).To(Equal(8443))
+
+			for _, same := range []string{"", "https://github.com", "https://github.com/"} {
+				loc, err := t.Locate(same)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(loc.Default).To(BeTrue())
+				def, err := t.NetworkAt(loc, templates.PresetStandard, []string{"repo.read"}, []string{"acme/widgets"})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(def).To(Equal(mustNetwork(t)))
+			}
+		})
+
+		It("refuses base URLs that are not a bare https host", func() {
+			for _, bad := range []string{
+				"http://ghes.example.test", "https://ghes.example.test/sub", "https://u:p@ghes.example.test",
+				"https://ghes.example.test?x=1", "ghes.example.test", "https://", "https://ghes.example.test:99999", "https://-bad-",
+			} {
+				_, err := githubType().Locate(bad)
+				Expect(err).To(HaveOccurred(), bad)
+			}
+		})
+
 		It("gives nothing without repo.read or without targets", func() {
 			t := githubType()
 			Expect(t.Network(templates.PresetStandard, []string{"pull_request.create"}, []string{"acme/widgets"})).To(BeEmpty())
@@ -208,6 +270,25 @@ var _ = Describe("Embedded connector types", func() {
 	})
 })
 
+func mustNetwork(t *connectors.Type) []connectors.HostAccess {
+	got, err := t.Network(templates.PresetStandard, []string{"repo.read"}, []string{"acme/widgets"})
+	Expect(err).NotTo(HaveOccurred())
+	return got
+}
+
+var _ = Describe("the code-host data of the GitHub type", func() {
+	It("carries the capability descriptor, the CI paths and the default site", func() {
+		t := githubType()
+		Expect(t.Spec.Capabilities).To(Equal(&connectors.Capabilities{
+			DisplayName: "GitHub", CredentialClass: "app-installation", NarrowsRepositories: true, NarrowsPermissions: true,
+			MaxRepositories: 500, CanDenyCI: true, ExactModes: true,
+		}))
+		Expect(t.Spec.Auth.TokenLifetime).To(Equal("1h"))
+		Expect(t.Spec.CIPaths).To(Equal([]string{".github/workflows/"}))
+		Expect(t.Spec.Site).To(Equal(&connectors.Site{BaseURL: "https://github.com", APIURL: "https://api.github.com", APIPath: "/api/v3"}))
+	})
+})
+
 var _ = DescribeTable("Parse rejects",
 	func(from, to, want string) {
 		doc := githubYAML()
@@ -228,6 +309,12 @@ var _ = DescribeTable("Parse rejects",
 		"forbidden"),
 	Entry("a deny rule naming a target", "          paths: ['/**/git-receive-pack']", "          paths: ['/{owner}/x']",
 		"deny rules cannot use"),
+	Entry("a site host outside spec.hosts", "    baseURL: https://github.com", "    baseURL: https://elsewhere.example.test", "not in spec.hosts"),
+	Entry("a site that is not https", "    apiURL: https://api.github.com", "    apiURL: http://api.github.com", "schema"),
+	Entry("an unknown credential class", "credentialClass: app-installation", "credentialClass: magic", "schema"),
+	Entry("a CI path that climbs out", "    - .github/workflows/", "    - ../x/", "ciPaths"),
+	Entry("a CI path that is absolute", "    - .github/workflows/", "    - /etc/", "schema"),
+	Entry("an unknown capability", "    canDenyCI: true", "    canDenyCI: true\n    canFly: true", "schema"),
 	Entry("a step naming an unknown field", "fields: [installationId]", "fields: [nope]", "unknown field"),
 	Entry("an unknown property", "  hosts:\n", "  extra: 1\n  hosts:\n", "schema"),
 	Entry("a wrong apiVersion", "apiVersion: "+connectors.APIVersion, "apiVersion: "+project.ConnectorsGroup+"/v1", "schema"),

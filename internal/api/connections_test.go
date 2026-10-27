@@ -4,8 +4,11 @@ package api_test
 
 import (
 	"bytes"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 
@@ -169,6 +172,43 @@ var _ = Describe("ConnectionService", func() {
 		secrets, err := kube.CoreV1().Secrets("koinon").List(ctx, metav1.ListOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(secrets.Items).To(BeEmpty())
+	})
+
+	It("stores a base URL and CA bundle with the connection and returns them", func(ctx SpecContext) {
+		tlsServer := httptest.NewTLSServer(http.NotFoundHandler()) // a certificate to use as the CA
+		DeferCleanup(tlsServer.Close)
+		ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsServer.Certificate().Raw}))
+		res, err := owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+			OrgId: org, DisplayName: "ghes", AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM),
+			BaseUrl: " https://GHES.example.test:8443/ ", CaBundle: ca,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetConnection().GetGithub().GetBaseUrl()).To(Equal("https://ghes.example.test:8443"))
+		Expect(res.GetConnection().GetGithub().GetCaBundle()).To(Equal(strings.TrimSpace(ca)))
+		got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: res.GetConnection().GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetConnection().GetGithub().GetBaseUrl()).To(Equal("https://ghes.example.test:8443"))
+
+		// github.com is the default and is not stored.
+		res, err = owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+			OrgId: org, AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM), BaseUrl: "https://github.com",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetConnection().GetGithub().GetBaseUrl()).To(BeEmpty())
+	})
+
+	It("rejects a base URL that is not a bare https host and a CA bundle that is not certificates", func(ctx SpecContext) {
+		for _, req := range []*connectionv1alpha1.CreateGitHubConnectionRequest{
+			{BaseUrl: "http://ghes.example.test"},
+			{BaseUrl: "https://ghes.example.test/enterprise"},
+			{CaBundle: "not pem"},
+			{CaBundle: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("not-a-real-key")}))},
+		} {
+			req.OrgId, req.AppId, req.InstallationId, req.PrivateKey = org, gh.AppID, gh.InstallationID, string(gh.PEM)
+			_, err := owner.conns.CreateGitHubConnection(ctx, req)
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "%v", req)
+		}
+		Expect(count(ctx, e, `SELECT count(*) FROM connections`)).To(BeZero())
 	})
 
 	It("reports failing checks at the step that caused them", func(ctx SpecContext) {
