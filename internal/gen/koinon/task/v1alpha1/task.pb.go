@@ -1261,7 +1261,9 @@ func (x *SendDirectMessageRequest) GetMessageId() string {
 type SendDirectMessageResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Task  *Task                  `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
-	// The message as it entered the timeline. Unset when this call was a replay of an earlier one.
+	// The message as it entered the timeline. A replay of an earlier call returns no event when
+	// the API runs the delivery inline; with the durable queue it attaches to the finished
+	// delivery and returns the original event and created flag.
 	Event *TaskEvent `protobuf:"bytes,2,opt,name=event,proto3" json:"event,omitempty"`
 	// True when this call created the task.
 	Created bool `protobuf:"varint,3,opt,name=created,proto3" json:"created,omitempty"`

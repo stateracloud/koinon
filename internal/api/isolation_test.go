@@ -170,6 +170,13 @@ var isolationCases = map[string]isolationCase{
 			})
 		},
 	},
+	taskv1alpha1connect.TaskServiceSendDirectMessageProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.tasks.SendDirectMessage(ctx, &taskv1alpha1.SendDirectMessageRequest{
+				OrgId: org, AgentId: f.agent.GetId(), TaskId: f.ticket.GetId(), Text: "intruder", MessageId: "00000000-0000-4000-8000-000000000001",
+			})
+		},
+	},
 	taskv1alpha1connect.TaskServiceCancelTaskProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.tasks.CancelTask(ctx, &taskv1alpha1.CancelTaskRequest{OrgId: org, TaskId: f.ticket.GetId()})
@@ -594,6 +601,7 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM tasks WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM tasks WHERE org_id = $1 AND state = 'submitted'`, org),
 		count(ctx, e, `SELECT count(*) FROM task_events WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM dedupe_records WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM runs WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM runs WHERE org_id = $1 AND state = 'queued'`, org),
 		count(ctx, e, `SELECT count(*) FROM run_events WHERE org_id = $1`, org),

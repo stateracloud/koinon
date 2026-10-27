@@ -46,7 +46,7 @@ type dmOutput struct {
 	Seq         int64
 	Created     bool
 	Reopened    bool
-	ErrCode     int
+	ErrCode     uint32
 	ErrMsg      string
 }
 
@@ -98,7 +98,7 @@ func (d *DirectMessageQueue) workflow(c dbos.Context, in dmInput) (dmOutput, err
 		}
 		var ce *connect.Error
 		if errors.As(err, &ce) {
-			return dmOutput{ErrCode: int(ce.Code()), ErrMsg: ce.Message()}, nil
+			return dmOutput{ErrCode: uint32(ce.Code()), ErrMsg: ce.Message()}, nil
 		}
 		if err != nil {
 			return dmOutput{}, err

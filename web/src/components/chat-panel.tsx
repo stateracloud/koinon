@@ -70,7 +70,8 @@ function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: strin
   // A reply in a direct-message thread goes through the agent's direct-message trigger; the
   // thread's task resumes, or is reopened when it was completed.
   const thread = isReplyThread(task)
-  const takes = agent ? takesDirectMessages(agent) : false
+  // undefined while the agents are still loading: neither the notice nor the composer shows.
+  const takes = agent ? takesDirectMessages(agent) : undefined
   const runs = (query.data?.runs ?? []).map((r) => watches[r.id]?.run ?? r)
   const active = runs.filter((r) => !runFinished(r.state))
   return (
@@ -95,17 +96,17 @@ function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: strin
           <Timeline items={items} renderApproval={(id) => <ApprovalView approvalId={id} showPermalink />} />
         </>
       )}
-      {canEdit && thread && !takes && (
+      {canEdit && thread && takes === false && (
         <p role="status" className="text-muted-foreground text-sm">
           {noDirectMessagesText(agentName ?? 'This agent')}
         </p>
       )}
-      {canEdit && thread && takes && state === TaskState.COMPLETED && (
+      {canEdit && thread && takes === true && state === TaskState.COMPLETED && (
         <p role="status" className="text-muted-foreground text-sm">
           This thread is complete. A reply reopens it as a follow-up.
         </p>
       )}
-      {canEdit && (!thread || takes) && !(task.directMessageThread && !thread) && (
+      {canEdit && (!thread || takes === true) && !(task.directMessageThread && !thread) && (
         <Composer
           idPrefix="chat-composer"
           pending={thread ? direct.pending : append.isPending}
