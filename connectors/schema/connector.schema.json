@@ -153,7 +153,8 @@
         "narrowsPermissions": { "type": "boolean" },
         "maxRepositories": { "description": "Repositories one credential can be narrowed to; 0 when it cannot narrow.", "type": "integer", "minimum": 0, "maximum": 100000 },
         "canDenyCI": { "description": "Whether the credential can refuse changes to CI files.", "type": "boolean" },
-        "exactModes": { "description": "Whether the provider's API writes exact git file modes.", "type": "boolean" }
+        "exactModes": { "description": "Whether the provider's API writes exact git file modes.", "type": "boolean" },
+        "writes": { "description": "How commits reach the host: through its API (the default) or by git push from koinon-api.", "enum": ["api", "push"] }
       }
     },
     "host": {

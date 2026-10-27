@@ -4,6 +4,8 @@ package gitpush_test
 
 import (
 	"context"
+	"encoding/pem"
+	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/codehost/gitpush"
 	"github.com/stateracloud/koinon/internal/testing/fakegitea"
@@ -209,5 +212,49 @@ var _ = Describe("the push writer", func() {
 		_, err := a.WriteCommit(ctx, repo, codehost.CommitRequest{Base: base, Message: msg, Files: files})
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).NotTo(ContainSubstring("koinon_test_wrong-token"))
+	})
+})
+
+var _ = Describe("a host with a private CA", func() {
+	It("is fetched from and pushed to when the connection's CA bundle is trusted, and only then", func() {
+		ctx := context.Background()
+		f := fakegitea.NewUnstarted()
+		DeferCleanup(f.Close)
+		f.Server = httptest.NewTLSServer(f.Handler)
+		f.AddToken(token, "koinon-bot")
+		f.AddRepo("app")
+		base := f.Snapshot("app").Branches["main"]
+		repo := codehost.Repo{Owner: "acme", Name: "app"}
+		ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: f.Server.Certificate().Raw}))
+		remote := func(codehost.Repo) string { return f.URL() + "/acme/app.git" }
+		files := []codehost.FileWrite{{Path: "a.md", Mode: "100644", Content: []byte("a\n")}}
+
+		untrusting := gitpush.New(reads{tok: token}, gitpush.Options{RemoteURL: remote})
+		_, err := untrusting.WriteCommit(ctx, repo, codehost.CommitRequest{Base: base, Message: "m\n", Files: files})
+		Expect(err).To(HaveOccurred(), "the global client trusts only the system roots")
+
+		trusting := gitpush.New(reads{tok: token}, gitpush.Options{RemoteURL: remote, CABundle: []byte(ca)})
+		sha, err := trusting.WriteCommit(ctx, repo, codehost.CommitRequest{Base: base, Message: "m\n", Files: files})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(trusting.CreateBranch(ctx, repo, "koinon/tls", sha)).To(Succeed())
+		Expect(f.Snapshot("app").Branches).To(HaveKeyWithValue("koinon/tls", sha))
+	})
+})
+
+var _ = Describe("ForSite", func() {
+	It("builds the remote URL from the connection's base URL and carries its CA bundle", func() {
+		t, ok := connectors.Get(connectors.GitHubID)
+		Expect(ok).To(BeTrue())
+		o, err := gitpush.ForSite(t, codehost.Site{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(o.RemoteURL(codehost.Repo{Owner: "acme", Name: "app"})).To(Equal("https://github.com/acme/app.git"))
+		Expect(o.CABundle).To(BeEmpty())
+
+		o, err = gitpush.ForSite(t, codehost.Site{BaseURL: "https://ghes.example.test:8443"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(o.RemoteURL(codehost.Repo{Owner: "acme", Name: "app"})).To(Equal("https://ghes.example.test:8443/acme/app.git"))
+
+		_, err = gitpush.ForSite(t, codehost.Site{CABundle: "not pem"})
+		Expect(err).To(HaveOccurred())
 	})
 })
