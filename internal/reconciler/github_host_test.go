@@ -96,6 +96,49 @@ func (fixedTokens) ReadToken(_ context.Context, _ store.Connection, scope codeho
 }
 
 var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server connection", func() {
+	It("renders nothing for a connection whose host is a private address", func(ctx SpecContext) {
+		osg := fakegateway.New()
+		cc, err := osg.Start()
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
+		org, user := newOrg(ctx)
+		id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		envelope, err := connections.SealFields(ring, org, id, map[string][]byte{connections.GitHubPrivateKeyField: []byte("unused")})
+		Expect(err).NotTo(HaveOccurred())
+		config, err := json.Marshal(map[string]any{"appId": 1, "installationId": 2, "baseUrl": "https://10.0.0.1"})
+		Expect(err).NotTo(HaveOccurred())
+		conn, err := q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+			OrgID: org, ID: id, Connector: "github", DisplayName: "internal", Config: config,
+			SecretEnvelope: envelope, Source: store.ConfigSourceUi, CreatedBy: user,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		raw, err := agentconfig.Config{
+			Instructions: "help",
+			Grants:       []templates.Grant{{Connector: "github", Scopes: []string{"repo.read"}, Preset: templates.PresetStandard}},
+			Bindings:     []agentconfig.Binding{{Connector: "github", ConnectionID: uuidOf(conn.ID), Targets: []string{"acme/widgets"}}},
+		}.Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		agent, err := q.CreateAgent(ctx, store.CreateAgentParams{OrgID: org, DisplayName: "Internal helper", Flavor: store.AgentFlavorOpencode, CreatedBy: user})
+		Expect(err).NotTo(HaveOccurred())
+		version, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent.ID, Config: raw, CreatedBy: user})
+		Expect(err).NotTo(HaveOccurred())
+		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user})
+		Expect(err).NotTo(HaveOccurred())
+		r, err := reconciler.New(pool, openshell.New(cc), &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
+			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+			Flavors: map[store.AgentFlavor]reconciler.Flavor{
+				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
+			},
+			GitHub: fixedTokens{}, URLPolicy: testPolicy,
+			Logger: slog.New(slog.NewTextHandler(&syncBuffer{}, nil)),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_ = r.ReconcileAll(ctx)
+		n := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+		Expect(osg.Profile(execution.WorkspaceName(org.Bytes), n.GitHubProfile)).To(BeNil(), "no egress to a private host")
+		Expect(osg.Calls("CreateSandbox")).To(BeZero())
+	})
+
 	It("reads the host from the connection and renders only it, in the profile and the policy", func(ctx SpecContext) {
 		osg := fakegateway.New()
 		cc, err := osg.Start()
@@ -132,7 +175,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 			Flavors: map[store.AgentFlavor]reconciler.Flavor{
 				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
 			},
-			GitHub: fixedTokens{},
+			GitHub: fixedTokens{}, URLPolicy: testPolicy,
 			Logger: slog.New(slog.NewTextHandler(&syncBuffer{}, nil)),
 		})
 		Expect(err).NotTo(HaveOccurred())

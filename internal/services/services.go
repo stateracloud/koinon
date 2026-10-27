@@ -98,6 +98,10 @@ type Options struct {
 	// Notifier delivers the notifications that follow a commit (ADR 0066, practice B2). Nil means
 	// an inline one: best effort, no retry. koinon-api passes a DBOS-backed one with --durable.
 	Notifier *durable.Notifier
+	// URLPolicy decides which hosts a connection's base URL may name (the platform's egress
+	// policy, as for providers and MCP servers). The zero policy still denies private and internal
+	// addresses.
+	URLPolicy catalog.URLPolicy
 }
 
 // Server implements the four services.
@@ -118,6 +122,7 @@ type Server struct {
 	mcp       *mcpservers.Service
 	typing    typingGate
 	notifier  *durable.Notifier
+	urlPolicy catalog.URLPolicy
 }
 
 // New returns a Server backed by pool.
@@ -139,8 +144,8 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		RegisterNotifications(opts.Notifier, pool)
 	}
 	return &Server{
-		notifier: opts.Notifier,
-		pool:     pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
+		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
+		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger),
 	}
