@@ -79,9 +79,13 @@ func (r *runner) saveWork(ctx context.Context, workspace, sandbox string) saveRe
 	if cwd == "" {
 		cwd = r.p.cfg.SessionCwd
 	}
+	host, err := r.codeHost(sctx)
+	if err != nil {
+		return lost("reading the code host of the agent's connection failed: %v", err)
+	}
 	started := time.Now()
 	out, code, stderr, err := r.sandboxExecLimit(sctx, workspace, sandbox,
-		[]string{"/bin/sh", "-c", saveworkScript, "savework", cwd, strconv.Itoa(savedwork.MaxBytes)},
+		[]string{"/bin/sh", "-c", saveworkScript, "savework", cwd, strconv.Itoa(savedwork.MaxBytes), host.origin()},
 		nil, r.p.cfg.SaveTimeout, savedwork.MaxBytes+(8<<20))
 	switch {
 	case sctx.Err() != nil || (err != nil && time.Since(started) >= r.p.cfg.SaveTimeout):

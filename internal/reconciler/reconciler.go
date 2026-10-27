@@ -836,7 +836,11 @@ func (r *Reconciler) reconcileActive(ctx context.Context, w *work, workspaces ma
 	}
 
 	// The GitHub read grant: its provider record before the sandbox that attaches it.
-	read, hasRead, err := GitHubReadAccess(w.cfg)
+	baseURL, err := r.baseURLOf(ctx, w)
+	if err != nil {
+		return err
+	}
+	read, hasRead, err := GitHubReadAccessAt(w.cfg, baseURL)
 	if err != nil {
 		return err
 	}

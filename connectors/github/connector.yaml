@@ -30,6 +30,28 @@ spec:
       port: 443
     - host: api.github.com
       port: 443
+  # Where the connector lives by default, and how a connection on another host (GitHub Enterprise
+  # Server, ADR 0062) maps onto it: the web host is the connection's base URL, and the REST API is
+  # served from the same host under apiPath. Network rules name the default hosts above; a
+  # connection renders them at its own host.
+  site:
+    baseURL: https://github.com
+    apiURL: https://api.github.com
+    apiPath: /api/v3
+  # What the provider's credential and write API can and cannot narrow (ADR 0062, 0063), so risk
+  # tiers, approvals and the UI can compensate. The token lifetime is auth.tokenLifetime.
+  capabilities:
+    displayName: GitHub
+    credentialClass: app-installation
+    narrowsRepositories: true
+    narrowsPermissions: true
+    # GitHub's limit on repositories per installation token.
+    maxRepositories: 500
+    canDenyCI: true
+    exactModes: true
+  # Path prefixes whose changes run CI. The workflow guard refuses them (plan item CH4).
+  ciPaths:
+    - .github/workflows/
   targets:
     kind: repository
     pattern: '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$'
