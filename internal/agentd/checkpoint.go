@@ -16,8 +16,9 @@ package agentd
 // the recreation.
 //
 // Restore runs in the first run that finds a recreated sandbox (restoreHome): it streams the
-// newest checkpoint back in over exec before the harness starts, trying older ones when a restore
-// fails.
+// newest checkpoint back in through OpenShell's flow-controlled upload channel before the harness
+// starts, trying older ones when a restore fails. The backup reads the home as a tar stream over
+// exec; the restore cannot write one over exec (see restoreOne).
 
 import (
 	"context"
@@ -364,6 +365,11 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			if errors.Is(err, execution.ErrUnsupported) {
+				// The sandbox's supervisor cannot take an upload: another try or an older
+				// checkpoint would fail the same way.
+				return &failure{reason: "restoring the home: " + truncateText(err.Error(), 600), class: classTransient}
+			}
 			r.log.Warn("restoring the home failed", "checkpoint", cp.ID.String(), "try", try, "err", err)
 			errs = append(errs, fmt.Errorf("checkpoint %s: %w", cp.ID, err))
 			if try < c.RestoreTries && !sleep(ctx, time.Second<<try) {
@@ -374,7 +380,10 @@ func (r *runner) restoreFromCheckpoints(ctx context.Context, sb store.AgentSandb
 	return &failure{reason: "restoring the home failed: " + truncateText(errors.Join(errs...).Error(), 600), class: classTransient}
 }
 
-// restoreOne streams one checkpoint into the sandbox's home.
+// restoreOne streams one checkpoint into the sandbox's home through the execution layer's upload
+// channel. Exec stdin is not used: it has no flow control, and the supervisor kills a command
+// whose unread stdin passes 4 MiB (ADR 0032, 2026-10-27, issue 169). The archive is shaped by
+// checkpoint.WriteTar for the upload's fixed `tar xf - -C /sandbox`.
 func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo checkpoint.Repository, cp store.HomeCheckpoint) error {
 	c := r.p.cfg.Checkpoints
 	// The restore stages the snapshot on the scratch disk: only so many at once.
@@ -386,28 +395,31 @@ func (r *runner) restoreOne(ctx context.Context, sb store.AgentSandbox, repo che
 	}
 	actx, cancel := context.WithTimeout(ctx, c.Timeout)
 	defer cancel()
-	var stderr tail
-	proc, err := r.p.backend.Exec(actx, sb.Workspace, sb.SandboxName, execution.ExecRequest{
-		Command: tarCommand("-C", checkpoint.HomeDir, "--no-same-owner", "-xf", "-"),
-		Stderr:  &stderr, Timeout: c.Timeout,
-	})
-	if err != nil {
-		return err
+
+	// The writer produces the tar and the upload consumes it. If the upload ends first, closing the
+	// read side stops the writer; if the writer fails, the upload reads its error and leaves the
+	// archive unterminated, so the sandbox's tar never sees a complete one.
+	pr, pw := io.Pipe()
+	restored := make(chan error, 1)
+	go func() {
+		err := c.Store.Restore(actx, repo.Prefix, repo.Password, cp.SnapshotID.String, pw)
+		_ = pw.CloseWithError(err) // nil closes with io.EOF
+		restored <- err
+	}()
+	uerr := r.p.backend.Upload(actx, sb.Workspace, sb.SandboxName, checkpoint.HomeDir, pr)
+	if uerr == nil {
+		// The upload read an end-of-file, so the writer is done.
+		return <-restored
 	}
-	defer func() { _ = proc.Close() }()
-	go func() { _, _ = io.Copy(io.Discard, proc.Stdout()) }()
-	rerr := c.Store.Restore(actx, repo.Prefix, repo.Password, cp.SnapshotID.String, proc.Stdin())
-	werr := proc.Stdin().Close()
-	code, err := proc.Wait()
-	switch {
-	case rerr != nil:
-		return rerr
-	case err != nil:
-		return err
-	case werr != nil:
-		return werr
-	case code != 0:
-		return fmt.Errorf("tar in the sandbox exited with %d: %s", code, strings.TrimSpace(stderr.String()))
+	// The upload failed first (an old supervisor, a host key mismatch, an expired token, a
+	// connection limit): stop the writer instead of waiting for it. kopia stages the whole
+	// snapshot before it writes the first byte.
+	_ = pr.CloseWithError(uerr)
+	cancel()
+	if rerr := <-restored; rerr != nil && !errors.Is(rerr, uerr) {
+		r.log.Debug("the home writer ended after the upload failed", "err", rerr)
 	}
-	return nil
+	// If the writer failed first, the upload read its error and uerr wraps it; otherwise the
+	// writer's error is only the cancellation we caused.
+	return uerr
 }

@@ -343,6 +343,18 @@ func (d *dockerBackend) settled() bool {
 	return d.inflight == 0 && len(d.last) > 0 && d.last[len(d.last)-1] == "sweep"
 }
 
+// Upload runs the extract command of OpenShell's upload channel (`mkdir -p -- DEST && cat | tar
+// xf - -C DEST`); Docker has no exec stdin cap, so this stand-in needs no flow control.
+func (d *dockerBackend) Upload(ctx context.Context, _, _, destDir string, archive io.Reader) error {
+	c := exec.CommandContext(ctx, "docker", "exec", "--interactive", d.sb.name, "/bin/sh", "-c", //nolint:gosec // test-controlled arguments
+		`mkdir -p -- "$1" && cat | tar xf - -C "$1"`, "upload", destDir)
+	c.Stdin = archive
+	if out, err := c.CombinedOutput(); err != nil {
+		return fmt.Errorf("upload: %w: %s", err, out)
+	}
+	return nil
+}
+
 func (d *dockerBackend) Exec(ctx context.Context, _, _ string, req execution.ExecRequest) (execution.Process, error) {
 	d.mu.Lock()
 	d.inflight++
