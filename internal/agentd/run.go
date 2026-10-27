@@ -107,6 +107,9 @@ type runner struct {
 	// handling a stuck sandbox (stuck.go).
 	vcfg agentconfig.Config
 	home pgtype.Text
+	// sandboxID is the OpenShell ID of the sandbox the run uses (the home generation is the
+	// home's lineage and outlives sandboxes restored from checkpoints).
+	sandboxID string
 
 	// sum is the summary prompt in progress (summary.go), nil otherwise.
 	sumMu sync.Mutex
@@ -367,6 +370,7 @@ func (r *runner) execute(ctx context.Context) error {
 	var ended []string
 	for attempt := 0; ; attempt++ {
 		r.home = sb.HomeGeneration
+		r.sandboxID = sb.SandboxID.String
 		main, ended, err = r.sweep(fctx, sb.Workspace, sb.SandboxName)
 		var sv *survivorsError
 		if !errors.As(err, &sv) {
@@ -400,6 +404,11 @@ func (r *runner) execute(ctx context.Context) error {
 		if err := r.record(fctx, "run.sandbox_swept", map[string]any{"pids": ended, "main": main}); err != nil {
 			return r.dbErr(ctx, "record the sweep", err)
 		}
+	}
+	// A sandbox the reconciler recreated from a home checkpoint gets the home back before the
+	// harness starts (checkpoint.go), so the task's session is there for session/load.
+	if err := r.restoreHome(fctx, sb); err != nil {
+		return r.execErr(ctx, "restore the home", err)
 	}
 	// The harness keeps its sessions in the sandbox's home volume, which OpenShell deletes with
 	// the sandbox. The task's session is loaded only in the home it was created in; after a

@@ -22,10 +22,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
 type config struct {
@@ -36,6 +39,16 @@ type config struct {
 	savedWorkKeyFile string
 	metricsAddr      string
 	pool             agentd.Config
+
+	// Home checkpoints (plan item HC1). koinon-agentd is the writer: it holds the S3 credentials
+	// (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) and opens the repositories' passwords with the
+	// key-encryption keys in kekDir.
+	checkpoints          bool
+	kekDir               string
+	checkpointScratch    string
+	checkpointInterval   time.Duration
+	s3Endpoint, s3Region string
+	s3Bucket             string
 }
 
 func parseFlags(args []string) (config, error) {
@@ -61,6 +74,13 @@ func parseFlags(args []string) (config, error) {
 	fs.DurationVar(&c.pool.SandboxTimeout, "sandbox-timeout", 5*time.Minute, "how long a run waits for its sandbox")
 	fs.DurationVar(&c.pool.CancelGrace, "cancel-grace", 10*time.Second, "how long a harness gets to end a cancelled turn")
 	fs.IntVar(&c.pool.MaxTakeovers, "max-takeovers", 5, "fail a run taken over more often than this")
+	fs.BoolVar(&c.checkpoints, "checkpoints", false, "save each agent's home to S3 (kopia) hourly, before stops and recreations, and restore it into recreated sandboxes")
+	fs.StringVar(&c.kekDir, "kek-dir", "", "directory with the key-encryption keys, to open the checkpoint repositories' passwords (needed with --checkpoints)")
+	fs.StringVar(&c.checkpointScratch, "checkpoints-scratch-dir", "/var/lib/koinon/checkpoints", "scratch space for staging a home (about the size of the largest home)")
+	fs.DurationVar(&c.checkpointInterval, "checkpoints-interval", time.Hour, "time between a sandbox's periodic checkpoints")
+	fs.StringVar(&c.s3Endpoint, "checkpoints-s3-endpoint", "", "S3 endpoint of the checkpoint bucket, host:port or an http(s) URL")
+	fs.StringVar(&c.s3Region, "checkpoints-s3-region", "", "S3 region")
+	fs.StringVar(&c.s3Bucket, "checkpoints-s3-bucket", "", "S3 bucket of the checkpoints (credentials: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)")
 	fs.StringVar(&c.pool.SessionCwd, "session-cwd", "/sandbox/work", "harness session directory in the sandbox")
 
 	if err := cli.BindEnv(fs, nil); err != nil {
@@ -89,6 +109,8 @@ func parseFlags(args []string) (config, error) {
 		return c, errors.New("--openshell-address is required")
 	case c.pool.GatewayURL == "":
 		return c, errors.New("--gateway-url is required")
+	case c.checkpoints && c.kekDir == "":
+		return c, errors.New("--kek-dir is required with --checkpoints")
 	}
 	return c, nil
 }
@@ -126,6 +148,13 @@ func run() error {
 	if cfg.savedWorkKeyFile != "" {
 		cfg.pool.SavedWorkKey = func() ([]byte, error) { return os.ReadFile(cfg.savedWorkKeyFile) } //nolint:gosec // an operator-set path
 	}
+	if cfg.checkpoints {
+		cp, err := checkpointsFrom(cfg, store.New(db))
+		if err != nil {
+			return err
+		}
+		cfg.pool.Checkpoints = cp
+	}
 	reg := metrics.NewRegistry()
 	cfg.pool.Metrics = agentd.NewMetrics(reg)
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, slog.Default()); err != nil {
@@ -139,4 +168,33 @@ func run() error {
 	err = pool.Run(ctx)
 	slog.Info("stopping koinon-agentd")
 	return err
+}
+
+// checkpointsFrom builds the home checkpoint writer: the S3 bucket, the scratch space and the
+// key-encryption keys that open the repositories' passwords.
+func checkpointsFrom(cfg config, q *store.Queries) (*agentd.Checkpoints, error) {
+	s3 := checkpoint.S3{
+		Endpoint: cfg.s3Endpoint, Region: cfg.s3Region, Bucket: cfg.s3Bucket,
+		AccessKeyID: os.Getenv("AWS_ACCESS_KEY_ID"), SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+	}
+	if err := s3.Validate(); err != nil {
+		return nil, fmt.Errorf("checkpoint storage: %w", err)
+	}
+	if err := os.MkdirAll(cfg.checkpointScratch, 0o700); err != nil {
+		return nil, fmt.Errorf("checkpoint scratch directory: %w", err)
+	}
+	// kopia keeps a few files under the user's cache directory; the root file system is read-only.
+	if err := os.Setenv("XDG_CACHE_HOME", cfg.checkpointScratch); err != nil {
+		return nil, err
+	}
+	keys, err := secretstore.LoadDir(cfg.kekDir)
+	if err != nil {
+		return nil, fmt.Errorf("key-encryption keys: %w", err)
+	}
+	go keys.WatchDir(context.Background(), cfg.kekDir, time.Minute, slog.Default())
+	return &agentd.Checkpoints{
+		Store:        &checkpoint.Writer{Storage: s3, Scratch: cfg.checkpointScratch},
+		Repositories: checkpoint.Passwords{Q: q, Keys: keys},
+		Interval:     cfg.checkpointInterval,
+	}, nil
 }

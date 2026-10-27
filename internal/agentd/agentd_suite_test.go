@@ -114,6 +114,8 @@ type files struct {
 	procinfoRuns int
 	savework     func(dir string) (string, int)
 	saveworkRuns int
+	// tar answers the home checkpoint's tar execs (checkpoint_test.go); nil: no tar.
+	tar func(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 }
 
 func (f *files) link(path string) (string, bool) {
@@ -182,6 +184,9 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		out, code := fn(args[3])
 		_, _ = io.WriteString(stdout, out)
 		return code
+	}
+	if len(args) >= 4 && args[0] == "-c" && args[2] == "tar" && f.tar != nil {
+		return f.tar(args[3:], stdin, stdout, stderr)
 	}
 	if len(args) < 4 || args[0] != "-c" {
 		_, _ = fmt.Fprintf(stderr, "unexpected sh %q", args)
