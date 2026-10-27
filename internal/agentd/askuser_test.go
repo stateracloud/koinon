@@ -133,13 +133,14 @@ var _ = Describe("ask_user", func() {
 	)
 
 	// asked runs the task to its park on the question.
-	asked := func(ctx SpecContext) {
+	asked := func(ctx SpecContext) (stop func()) {
 		a = newAskEnv(ctx)
 		t = a.task(ctx, markQuestion+": deploy the app")
 		r = a.enqueue(ctx, t)
-		a.pool("agentd-a")
+		stop = a.pool("agentd-a")
 		Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		return stop
 	}
 
 	It("parks the run with reason input_required, opens the question and moves the task, together", func(ctx SpecContext) {
@@ -257,11 +258,13 @@ var _ = Describe("ask_user", func() {
 	})
 
 	It("sets the reminder and the expiry from the defaults, or from the agent's version (TK4)", func(ctx SpecContext) {
-		asked(ctx)
+		// Pools claim runs across every org, so the first pool stops before the second org exists.
+		stop := asked(ctx)
 		row := a.question(ctx, qid)
 		Expect(row.RemindAt.Time).To(BeTemporally("~", row.CreatedAt.Time.Add(questions.DefaultReminder), time.Minute))
 		Expect(row.ExpiresAt.Time).To(BeTemporally("~", row.CreatedAt.Time.Add(questions.DefaultTTL), time.Minute))
 
+		stop()
 		a = newAskEnv(ctx)
 		_, err := db.Exec(ctx, `UPDATE agent_versions SET config = config || '{"questions":{"reminderAfter":"2h0m0s","expireAfter":"48h0m0s"}}'::jsonb WHERE org_id = $1`, a.org)
 		Expect(err).NotTo(HaveOccurred())
