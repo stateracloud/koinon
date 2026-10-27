@@ -1365,6 +1365,7 @@ type ApprovalScope struct {
 	ExpiresAt        pgtype.Timestamptz
 	CreatedBy        pgtype.UUID
 	SourceApprovalID pgtype.UUID
+	CallBinding      []byte
 	RevokedAt        pgtype.Timestamptz
 	RevokedBy        pgtype.UUID
 	CreatedAt        pgtype.Timestamptz

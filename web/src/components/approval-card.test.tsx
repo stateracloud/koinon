@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { localDate } from '@/lib/approvals'
 import { create, type MessageInitShape } from '@bufbuild/protobuf'
 import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { timestampDate } from '@bufbuild/protobuf/wkt'
@@ -431,13 +432,14 @@ describe('ApprovalCard', () => {
       await userEvent.selectOptions(screen.getByLabelText('How far does this approval reach?'), 'agent')
       const until = screen.getByLabelText('Until (end of day)')
       await userEvent.clear(until)
-      await userEvent.type(until, '2099-03-04')
+      const want = new Date(Date.now() + 30 * 24 * 3600 * 1000)
+      await userEvent.type(until, localDate(want))
       expect(screen.getByText(/always ask again/)).toBeInTheDocument()
       await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
       await waitFor(() => expect(approves).toHaveLength(1))
       expect(approves[0].scope).toBe(ScopeKind.AGENT)
       const sent = timestampDate(approves[0].scopeUntil!)
-      expect([sent.getFullYear(), sent.getMonth(), sent.getDate()]).toEqual([2099, 2, 4])
+      expect([sent.getFullYear(), sent.getMonth(), sent.getDate()]).toEqual([want.getFullYear(), want.getMonth(), want.getDate()])
     })
 
     it('approves for this task', async () => {
@@ -450,6 +452,19 @@ describe('ApprovalCard', () => {
       expect(approves[0].scope).toBe(ScopeKind.TASK)
     })
 
+    it('does not accept a date beyond the server limit, and offers a min and max', async () => {
+      setup({ mcp: true })
+      await screen.findByTestId('approval-card')
+      await userEvent.selectOptions(screen.getByLabelText('How far does this approval reach?'), 'agent')
+      const until = screen.getByLabelText('Until (end of day)')
+      expect(until).toHaveAttribute('min')
+      expect(until).toHaveAttribute('max')
+      await userEvent.clear(until)
+      await userEvent.type(until, localDate(new Date(Date.now() + 365 * 24 * 3600 * 1000)))
+      expect(screen.getByText('Choose a date from tomorrow to a year ahead.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled()
+    })
+
     it('does not accept an agent scope without a future date', async () => {
       const { approves } = setup({ mcp: true })
       await screen.findByTestId('approval-card')
@@ -457,7 +472,7 @@ describe('ApprovalCard', () => {
       const until = screen.getByLabelText('Until (end of day)')
       await userEvent.clear(until)
       await userEvent.type(until, '2001-01-01')
-      expect(screen.getByText('Choose a date in the future.')).toBeInTheDocument()
+      expect(screen.getByText('Choose a date from tomorrow to a year ahead.')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled()
       expect(approves).toHaveLength(0)
     })

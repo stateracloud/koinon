@@ -141,3 +141,11 @@ Plan item AP1 builds the scopes above (migration `00031_approval_scopes.sql`):
 - https://agentclientprotocol.com/protocol/session-setup
 - ADR 0008, ADR 0029, ADR 0030, ADR 0036, ADR 0040, ADR 0045
 - Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the safe default choice and approval scopes (`rap-protocol/src/lib.rs:152-163`; `sandbox-core/src/server.rs:864-945`). Research notes: `infinity-code-ideas.md`.
+
+Amendment (2026-10-27, AP1 review): an MCP scope is pinned to the server, URL and tool version the
+approver saw (the source approval's `call_binding`, copied to `approval_scopes.call_binding`); a call
+matches only while all three are unchanged, so a republished tool or a new server URL parks again
+(ADR 0057). Coverage by risk type is decided explicitly for `create_pull_request` and
+`comment_on_issue`; an unknown risk type is never covered. Replaying an approval with a wider scope
+returns `ErrNotPending` instead of silently creating none. The agent scope's date picker allows
+tomorrow to 364 days ahead, and the task option reads "for this task (at most 30 days)".

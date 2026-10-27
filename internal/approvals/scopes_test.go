@@ -207,6 +207,17 @@ var _ = Describe("Scoped approvals", func() {
 		Expect(err).To(MatchError(approvals.ErrScopeNotFound))
 	})
 
+	It("refuses to widen a request that was already approved, instead of silently creating no scope", func(ctx SpecContext) {
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, cleanPR("koinon/lcm-replay"))
+		_, err := f.svc.ApproveScoped(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "", approvals.Scope{})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = f.svc.ApproveScoped(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "", approvals.Scope{Kind: approvals.ScopeAgent, Until: time.Now().Add(24 * time.Hour)})
+		Expect(err).To(MatchError(approvals.ErrNotPending))
+		scopes, err := f.svc.ListScopes(ctx, f.org, f.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(scopes).To(BeEmpty())
+	})
+
 	It("refuses scopes without a usable date and unknown kinds", func(ctx SpecContext) {
 		req := f.call(ctx, githubtools.ToolCreatePullRequest, cleanPR("koinon/lcm-week-1"))
 		for _, sc := range []approvals.Scope{

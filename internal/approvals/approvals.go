@@ -240,6 +240,10 @@ func (s *Service) ApproveScoped(ctx context.Context, org, id, approver pgtype.UU
 		}
 		switch cur.Status {
 		case store.ApprovalStatusApproved, store.ApprovalStatusExecuted, store.ApprovalStatusFailed:
+			if scope.Kind != ScopeOnce {
+				// A replay cannot widen the approval: the admin would believe a standing approval exists.
+				return ErrNotPending
+			}
 			row = cur // a replay: the same decision again
 			return nil
 		case store.ApprovalStatusPending:
