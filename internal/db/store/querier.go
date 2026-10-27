@@ -12,7 +12,9 @@ import (
 
 type Querier interface {
 	AcknowledgeMCPToolReview(ctx context.Context, arg AcknowledgeMCPToolReviewParams) (McpTool, error)
-	// draft -> active with the given version (ADR 0020). No row: not a draft.
+	// draft -> active with the given version (ADR 0020), or an active agent moving to a newer version
+	// (a trigger-only proposal, ADR 0066). No row: archived, or the agent already runs this version
+	// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
 	// Adds reported token usage to an unfinished run. The caller cancels the run
@@ -204,6 +206,8 @@ type Querier interface {
 	GetActiveUser(ctx context.Context, id pgtype.UUID) (User, error)
 	GetAgent(ctx context.Context, arg GetAgentParams) (Agent, error)
 	GetAgentBudget(ctx context.Context, arg GetAgentBudgetParams) (GetAgentBudgetRow, error)
+	// Locks the agent row for the rest of the transaction (serialises read-check-write on versions).
+	GetAgentForUpdate(ctx context.Context, arg GetAgentForUpdateParams) (Agent, error)
 	GetAgentMCPServer(ctx context.Context, arg GetAgentMCPServerParams) (AgentMcpServer, error)
 	// What the idle timeout and start-on-demand need (ADR 0049): whether a run
 	// holds the agent, whether one can be claimed now (queued, or parked with its
@@ -320,6 +324,11 @@ type Querier interface {
 	InsertUploadNonce(ctx context.Context, arg InsertUploadNonceParams) (int64, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
 	ListAPITokens(ctx context.Context, orgID pgtype.UUID) ([]ApiToken, error)
+	// The active version of each active agent, for the triggers they define (ADR 0066). A draft
+	// agent, an archived one and a proposed version are not included.
+	ListActiveAgentVersions(ctx context.Context, orgID pgtype.UUID) ([]ListActiveAgentVersionsRow, error)
+	// ListActiveAgentVersions across every live org, for the scheduler (ADR 0066).
+	ListActiveAgentVersionsAllOrgs(ctx context.Context) ([]ListActiveAgentVersionsAllOrgsRow, error)
 	// The config of each agent's active version, for the template default of its daily limit.
 	ListActiveVersionConfigs(ctx context.Context, orgID pgtype.UUID) ([]ListActiveVersionConfigsRow, error)
 	ListAgentBudgets(ctx context.Context, orgID pgtype.UUID) ([]ListAgentBudgetsRow, error)

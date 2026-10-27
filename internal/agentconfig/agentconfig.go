@@ -38,6 +38,9 @@ type Config struct {
 	// says where. Set from CreateAgentFromTemplate's grants (plan item C2).
 	Bindings []Binding        `json:"bindings,omitempty"`
 	Limits   templates.Limits `json:"limits"`
+	// Triggers start work on the agent (ADR 0066). They take effect when the version that holds
+	// them is the agent's active version; a proposed version's triggers fire nothing.
+	Triggers []templates.Trigger `json:"triggers,omitempty"`
 	// Harness holds the template's harness settings: harness.pluginInstalls makes agentd
 	// pass --plugin-installs to OpenCode and the reconciler open the npm registry.
 	Harness templates.Harness `json:"harness,omitzero"`
@@ -83,6 +86,7 @@ func FromTemplate(t *templates.Template, contentHash string) Config {
 		Model:        t.Spec.Model.Name,
 		Grants:       t.Spec.Grants,
 		Limits:       t.Spec.Limits,
+		Triggers:     t.Spec.Triggers,
 		Harness:      t.Spec.Harness,
 	}
 }

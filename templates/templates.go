@@ -112,6 +112,8 @@ type Spec struct {
 	Instructions string  `json:"instructions"`
 	Grants       []Grant `json:"grants"`
 	Limits       Limits  `json:"limits"`
+	// Triggers start work on the agent: a schedule or a direct message in v0.1 (ADR 0066).
+	Triggers []Trigger `json:"triggers,omitempty"`
 }
 
 // Harness holds harness settings beyond the flavor choice. The zero value turns every
@@ -326,6 +328,9 @@ func (t *Template) check() error {
 	}
 	if t.Spec.Limits.SpendUSD <= 0 {
 		return errors.New("limits.spendUSD must be greater than zero")
+	}
+	if err := ValidateTriggers(t.Spec.Triggers); err != nil {
+		return fmt.Errorf("spec.%w", err)
 	}
 	seen := map[string]bool{}
 	for i, g := range t.Spec.Grants {
