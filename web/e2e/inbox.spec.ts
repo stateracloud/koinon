@@ -25,7 +25,7 @@ test('the inbox is home: approve inline, chat with an agent, and see the board b
     { id: 't-2', orgId: org, title: 'Write release notes', state: 'TASK_STATE_WORKING', agentId: 'a-2', updatedAt: new Date((at - 30) * 1000).toISOString() },
     { id: 't-3', orgId: org, title: 'Triage new issues', state: 'TASK_STATE_SUBMITTED', agentId: 'a-2', updatedAt: new Date((at - 20) * 1000).toISOString() },
     { id: 't-4', orgId: org, title: 'Rename the repo', state: 'TASK_STATE_COMPLETED', agentId: 'a-1', updatedAt: new Date((at - 900) * 1000).toISOString() },
-    { id: 't-5', orgId: org, title: 'Which branch should releases come from?', state: 'TASK_STATE_INPUT_REQUIRED', agentId: 'a-2', updatedAt: new Date((at - 120) * 1000).toISOString() },
+    { id: 't-5', orgId: org, title: 'Which branch should releases come from?', state: 'TASK_STATE_INPUT_REQUIRED', agentId: 'a-2', createdBy: { userId: 'u-1' }, updatedAt: new Date((at - 120) * 1000).toISOString() },
     { id: 't-6', orgId: org, title: 'Nightly dependency check', state: 'TASK_STATE_FAILED', agentId: 'a-2', updatedAt: new Date((at - 3000) * 1000).toISOString() },
     { id: 't-7', orgId: org, title: 'Old experiment', state: 'TASK_STATE_CANCELED', agentId: 'a-1', updatedAt: new Date((at - 6000) * 1000).toISOString() },
   ]
