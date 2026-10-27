@@ -327,7 +327,7 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   `the person dismissed the question, so your default was applied: "..."` / `nobody answered in
   time, so your default was applied: "..."` (decision 10a: the agent is told). Delivery is marked in
   the turn-end transaction (`questions.delivered_at`), like approvals.
-- **State and API.** Migration `00027_questions.sql`: `questions` (`asked`, `open`, `answered`,
+- **State and API.** Migration `00026_questions.sql`: `questions` (`asked`, `open`, `answered`,
   `dismissed`, `expired`; `answer_kind` choice, draft, text or default; `expires_at` 7 days after the
   ask; `call_sha256` makes the same question in one run one question). `QuestionService`
   (`ListQuestions`: the caller's open questions, or with `task_id` the caller's questions of a task;
@@ -377,7 +377,7 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   - **Settings.** `spec.questions` in a template and `questions` in an agent version's config hold
     `reminderAfter` (default 24h) and `expireAfter` (default 7 days), as Go durations between 1m and
     720h, the reminder before the expiry. `ask_user` reads the agent's active version when the
-    question is asked and stores `remind_at` and `expires_at` on the question (migration 00030), so a
+    question is asked and stores `remind_at` and `expires_at` on the question (migration 00027), so a
     later version does not move the deadlines of questions already open. A reminder that would not
     come before the expiry is dropped. Changing the settings of one agent without a new template
     version is a new agent version; the agent editor does not expose them yet.
