@@ -10,7 +10,7 @@ import App from '@/App'
 import { ApprovalSchema, Decision, Status as ApprovalStatus } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AgentSchema, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { MembershipSchema, OrgRole, UserSchema, WhoAmIResponseSchema } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { TaskSchema, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { CreatorKind, CreatorSchema, TaskSchema, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 
 export const orgId = 'org-1'
 
@@ -27,7 +27,7 @@ export function agent(id: string, name: string, status = AgentStatus.ACTIVE) {
 }
 
 export function task(id: string, title: string, state: TaskState, agentId = 'a-1') {
-  return create(TaskSchema, { id, orgId, title, state, agentId, createdAt: timestampFromMs(Date.now()), updatedAt: timestampFromMs(Date.now()) })
+  return create(TaskSchema, { id, orgId, title, state, agentId, createdBy: create(CreatorSchema, { kind: CreatorKind.USER, userId: 'u-1' }), createdAt: timestampFromMs(Date.now()), updatedAt: timestampFromMs(Date.now()) })
 }
 
 /** approval is a pending create_pull_request request of task taskId that the viewer may decide. */
