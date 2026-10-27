@@ -172,7 +172,7 @@ var _ = Describe("WatchRun", func() {
 				}
 			}
 			w.cancel()
-			for range w.items { //nolint:revive // drain what was already read; it is discarded like a lost connection's buffer
+			for range w.items {
 			}
 			if ended {
 				Expect(<-w.done).To(Succeed())
@@ -190,7 +190,7 @@ var _ = Describe("WatchRun", func() {
 
 	It("rejects a negative after_seq", func(ctx SpecContext) {
 		w := watch(ctx, f.owner, f.org, f.run.GetId(), -1)
-		for range w.items { //nolint:revive // wait for the end
+		for range w.items {
 		}
 		Expect(codeOf(<-w.done)).To(Equal(connect.CodeInvalidArgument))
 	})

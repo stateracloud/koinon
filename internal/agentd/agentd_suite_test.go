@@ -385,6 +385,11 @@ func (e *env) enqueue(ctx context.Context, t store.Task) store.Run {
 // pool starts a pool on the env's gateway and stops it when the spec ends. The returned
 // function stops it early, like a killed pod when the pool keeps its leases.
 func (e *env) pool(name string, mutate ...func(*agentd.Config)) (stop func()) {
+	return e.poolOn(db, name, mutate...)
+}
+
+// poolOn is pool on its own connection pool, like a separate agentd process on the same Postgres.
+func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Config)) (stop func()) {
 	cfg := agentd.Config{
 		OwnerID:        name,
 		Workers:        2,
@@ -401,7 +406,7 @@ func (e *env) pool(name string, mutate ...func(*agentd.Config)) (stop func()) {
 	for _, m := range mutate {
 		m(&cfg)
 	}
-	p, err := agentd.New(db, e.backend, cfg)
+	p, err := agentd.New(conns, e.backend, cfg)
 	Expect(err).NotTo(HaveOccurred())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

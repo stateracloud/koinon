@@ -418,3 +418,25 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   expiry in the tool result instead of a fixed 7 days. When `cancel_task` and `ask_user` run in
   one turn, `endTurn` cancels the asked questions and finishes the run instead of parking it. The chat
   shows "waiting on ..." instead of the composer while the task is `input_required`.
+
+## Amendment (2026-10-27, plan item QA1): restart tests and hygiene
+
+- **Restart tests.** `internal/agentd/restart_test.go` runs two process sets on one Postgres, each a
+  tool server plus an agentd pool on its own connection pool, with one fake gateway. The set that
+  drove the turn is killed after the run parks (approval; `ask_user`); the other set decides, resumes
+  and finishes it: two prompts, epoch 2, one executed pull request, one answered question. Killing a
+  set mid-turn is left to the lease-takeover specs; a mid-turn crash re-runs the turn by design.
+- **`nolintlint`** is on with `require-explanation`, `require-specific` and `allow-unused: false`.
+  Unused directives (gosec is off in tests; several gosec findings no longer fire) were removed rather
+  than kept.
+- **`internal/safego`**: `Go(ctx, log, name, fn)` and `Do(log, name, fn)` recover a panic and log it with
+  the stack. Used for the listeners and shutdown goroutines in `cmd/*`, the reconciler's pass and probe
+  goroutines, and agentd (one worker iteration at a time, so a panic in a run does not kill the worker;
+  the run's lease expires and `MaxTakeovers` bounds repeats).
+- **Clock, IDs and golden prompts.** The park expiry uses `Config.Now`. The outcome text is the pure
+  `renderOutcomes(questions, requests)`: no clock and no generated IDs, IDs are row inputs. Golden files
+  in `internal/agentd/testdata/*.golden` (`go test ./internal/agentd -update`) cover answered, dismissed
+  and expired questions (with the no-answer instruction), every approval outcome, the park and
+  interrupted resumes, the retry note and the fresh-session handoff.
+- **Typed IDs** were not introduced at TK1; they stay `pgtype.UUID` from sqlc. A wrapper for task and run
+  IDs touches every sqlc call and was left out of this item.

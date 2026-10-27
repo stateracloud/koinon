@@ -56,7 +56,15 @@ func (r *runner) outcomes(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	r.delivered, r.deliveredQ = r.delivered[:0], r.deliveredQ[:0]
+	text, deliveredQ, delivered := renderOutcomes(qs, reqs)
+	r.delivered, r.deliveredQ = delivered, deliveredQ
+	return text, nil
+}
+
+// renderOutcomes is the pure part of outcomes: the prompt text for the resolved questions and
+// decided requests, and the IDs of the ones it covers. It reads no clock and makes no IDs, so its
+// output is a function of the rows (golden files in testdata).
+func renderOutcomes(qs []store.Question, reqs []store.ApprovalRequest) (text string, deliveredQ, delivered []pgtype.UUID) {
 	var b strings.Builder
 	noAnswer := false
 	for _, row := range qs {
@@ -64,25 +72,25 @@ func (r *runner) outcomes(ctx context.Context) (string, error) {
 			continue
 		}
 		noAnswer = noAnswer || row.State == store.QuestionStateExpired
-		r.deliveredQ = append(r.deliveredQ, row.ID)
+		deliveredQ = append(deliveredQ, row.ID)
 		fmt.Fprintf(&b, "\n- ask_user (question id=%s): %q: %s", row.ID.String(), row.Question, questionOutcomeText(row))
 	}
 	for _, a := range reqs {
 		if a.Status.Open() {
 			continue
 		}
-		r.delivered = append(r.delivered, a.ID)
+		delivered = append(delivered, a.ID)
 		fmt.Fprintf(&b, "\n- %s (approval id=%s, %s): %s", a.Tool, a.ID.String(), a.Target, outcomeText(a))
 	}
 	if b.Len() == 0 {
-		return "", nil
+		return "", deliveredQ, delivered
 	}
 	b.WriteString("\nThese outcomes are final: do not call the tools again for them. Continue the task from here, " +
 		"and tell the user what happened.")
 	if noAnswer {
 		b.WriteString(noAnswerNote)
 	}
-	return b.String(), nil
+	return b.String(), deliveredQ, delivered
 }
 
 // noAnswerNote is the system instruction of the "no answer" run (ADR 0065 decision 10, plan item
@@ -217,7 +225,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 		}
 		if !expires.Valid {
 			// Nothing waits for a human; the park is resolved below or by the executor.
-			expires = pgtype.Timestamptz{Time: time.Now().Add(7 * 24 * time.Hour), Valid: true}
+			expires = pgtype.Timestamptz{Time: r.p.cfg.Now().Add(7 * 24 * time.Hour), Valid: true}
 		}
 		// What the agent said before it parked goes on the task now, before the park note
 		// (and before run.parked, after which reply starts afresh).

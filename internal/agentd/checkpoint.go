@@ -131,11 +131,11 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 	for _, org := range orgs {
 		// Ephemeral agents are skipped by the query (the active version's ephemeral flag).
 		if _, err := p.q.RequestHourlyHomeCheckpoints(ctx, store.RequestHourlyHomeCheckpointsParams{
-			OrgID: org, IntervalSeconds: int32(c.Interval.Seconds()), //nolint:gosec // bounded by configuration
+			OrgID: org, IntervalSeconds: int32(c.Interval.Seconds()),
 		}); err != nil && ctx.Err() == nil {
 			p.log.Warn("checkpoints: requesting hourly checkpoints failed", "err", err)
 		}
-		wait := int32(c.SandboxWait.Seconds()) //nolint:gosec // bounded by configuration
+		wait := int32(c.SandboxWait.Seconds())
 		if _, err := p.q.FailStaleHomeCheckpoints(ctx, store.FailStaleHomeCheckpointsParams{
 			OrgID: org, WaitSeconds: wait, Error: pgtype.Text{String: fmt.Sprintf("the sandbox was not ready to be read within %s", c.SandboxWait), Valid: true},
 		}); err != nil && ctx.Err() == nil {
@@ -149,7 +149,7 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 			default:
 				return // all writers busy
 			}
-			cp, err := p.q.ClaimHomeCheckpoint(ctx, store.ClaimHomeCheckpointParams{OrgID: org, LeaseSeconds: int32(c.Lease.Seconds())}) //nolint:gosec // bounded by configuration
+			cp, err := p.q.ClaimHomeCheckpoint(ctx, store.ClaimHomeCheckpointParams{OrgID: org, LeaseSeconds: int32(c.Lease.Seconds())})
 			if err != nil {
 				<-slots
 				if !errors.Is(err, pgx.ErrNoRows) && ctx.Err() == nil {
@@ -196,7 +196,7 @@ func (p *Pool) takeCheckpoint(ctx context.Context, cp store.HomeCheckpoint) {
 	delay := c.Retry << (cp.Attempts - 1)
 	log.Warn("home checkpoint attempt failed; trying again", "err", msg, "in", delay)
 	if _, err := p.q.ReleaseHomeCheckpoint(ctx, store.ReleaseHomeCheckpointParams{
-		OrgID: cp.OrgID, ID: cp.ID, Error: pgtype.Text{String: msg, Valid: true}, DelaySeconds: int32(delay.Seconds()), //nolint:gosec // bounded by configuration
+		OrgID: cp.OrgID, ID: cp.ID, Error: pgtype.Text{String: msg, Valid: true}, DelaySeconds: int32(delay.Seconds()),
 	}); err != nil {
 		log.Warn("releasing a checkpoint failed", "err", err)
 	}
@@ -303,7 +303,7 @@ func (r *runner) restoreHome(ctx context.Context, sb store.AgentSandbox) error {
 	budget := c.Timeout * time.Duration(c.RestoreTries*(1+c.RestoreFallbacks)+1)
 	deadline := r.p.cfg.Now().Add(budget)
 	for {
-		_, err := r.q.ClaimSandboxRestore(ctx, store.ClaimSandboxRestoreParams{OrgID: org, AgentID: agent, LeaseSeconds: int32(budget.Seconds())}) //nolint:gosec // bounded by configuration
+		_, err := r.q.ClaimSandboxRestore(ctx, store.ClaimSandboxRestoreParams{OrgID: org, AgentID: agent, LeaseSeconds: int32(budget.Seconds())})
 		if err == nil {
 			break
 		}

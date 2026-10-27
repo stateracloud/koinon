@@ -200,7 +200,7 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 
 func (r *runner) fence(k fence) {
 	r.fenceOnce.Do(func() {
-		r.fenceKind.Store(int32(k)) //nolint:gosec // fence is an int32
+		r.fenceKind.Store(int32(k))
 		close(r.fenced)
 	})
 }
@@ -264,7 +264,7 @@ func (r *runner) heartbeat(ctx context.Context) {
 }
 
 func (p *Pool) leaseSeconds() int32 {
-	return int32(p.cfg.Lease.Seconds()) //nolint:gosec // bounded by configuration
+	return int32(p.cfg.Lease.Seconds())
 }
 
 // stopped returns errFenced or errShutdown when either applies.
