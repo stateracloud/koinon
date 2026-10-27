@@ -107,8 +107,8 @@ type AgentServiceClient interface {
 	GetAgent(context.Context, *v1alpha1.GetAgentRequest) (*v1alpha1.GetAgentResponse, error)
 	// ListAgents returns the org's agents, oldest first. Viewers and above.
 	ListAgents(context.Context, *v1alpha1.ListAgentsRequest) (*v1alpha1.ListAgentsResponse, error)
-	// ActivateAgent activates a draft and so approves the grants its version
-	// proposes. Admins and owners only.
+	// ActivateAgent activates a draft, or moves an active agent to its newer proposed version
+	// (ADR 0066), and so approves the grants that version proposes. Admins and owners only.
 	ActivateAgent(context.Context, *v1alpha1.ActivateAgentRequest) (*v1alpha1.ActivateAgentResponse, error)
 	// SetAgentTriggers proposes a new version with the given triggers (everything else carried over
 	// from the latest version). The triggers fire nothing until ActivateAgent activates that
@@ -139,8 +139,8 @@ type AgentServiceHandler interface {
 	GetAgent(context.Context, *v1alpha1.GetAgentRequest) (*v1alpha1.GetAgentResponse, error)
 	// ListAgents returns the org's agents, oldest first. Viewers and above.
 	ListAgents(context.Context, *v1alpha1.ListAgentsRequest) (*v1alpha1.ListAgentsResponse, error)
-	// ActivateAgent activates a draft and so approves the grants its version
-	// proposes. Admins and owners only.
+	// ActivateAgent activates a draft, or moves an active agent to its newer proposed version
+	// (ADR 0066), and so approves the grants that version proposes. Admins and owners only.
 	ActivateAgent(context.Context, *v1alpha1.ActivateAgentRequest) (*v1alpha1.ActivateAgentResponse, error)
 	// SetAgentTriggers proposes a new version with the given triggers (everything else carried over
 	// from the latest version). The triggers fire nothing until ActivateAgent activates that

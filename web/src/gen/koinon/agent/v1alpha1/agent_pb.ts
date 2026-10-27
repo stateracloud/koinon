@@ -624,8 +624,8 @@ export const AgentService: GenService<{
     output: typeof ListAgentsResponseSchema;
   },
   /**
-   * ActivateAgent activates a draft and so approves the grants its version
-   * proposes. Admins and owners only.
+   * ActivateAgent activates a draft, or moves an active agent to its newer proposed version
+   * (ADR 0066), and so approves the grants that version proposes. Admins and owners only.
    *
    * @generated from rpc koinon.agent.v1alpha1.AgentService.ActivateAgent
    */

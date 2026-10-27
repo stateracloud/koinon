@@ -15,7 +15,10 @@ const activateAgent = `-- name: ActivateAgent :one
 UPDATE agents
 SET status = 'active', active_version_id = $1,
     activated_by = $2, activated_at = now()
-WHERE org_id = $3 AND id = $4 AND status IN ('draft', 'active')
+WHERE agents.org_id = $3 AND agents.id = $4
+  AND (agents.status = 'draft' OR (agents.status = 'active' AND agents.active_version_id IS DISTINCT FROM $1
+    AND (SELECT nv.version FROM agent_versions nv WHERE nv.org_id = $3 AND nv.id = $1)
+      > (SELECT av.version FROM agent_versions av WHERE av.org_id = agents.org_id AND av.id = agents.active_version_id)))
 RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at
 `
 
@@ -27,7 +30,8 @@ type ActivateAgentParams struct {
 }
 
 // draft -> active with the given version (ADR 0020), or an active agent moving to a newer version
-// (a trigger-only proposal, ADR 0066). No row: archived.
+// (a trigger-only proposal, ADR 0066). No row: archived, or the agent already runs this version
+// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 func (q *Queries) ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, activateAgent,
 		arg.VersionID,
@@ -202,6 +206,44 @@ type GetAgentParams struct {
 
 func (q *Queries) GetAgent(ctx context.Context, arg GetAgentParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, getAgent, arg.OrgID, arg.ID)
+	var i Agent
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.DisplayName,
+		&i.Status,
+		&i.Flavor,
+		&i.TemplateID,
+		&i.ActiveVersionID,
+		&i.LatestVersion,
+		&i.Epoch,
+		&i.CreatedBy,
+		&i.ActivatedBy,
+		&i.ActivatedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
+	)
+	return i, err
+}
+
+const getAgentForUpdate = `-- name: GetAgentForUpdate :one
+SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at FROM agents
+WHERE org_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetAgentForUpdateParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// Locks the agent row for the rest of the transaction (serialises read-check-write on versions).
+func (q *Queries) GetAgentForUpdate(ctx context.Context, arg GetAgentForUpdateParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, getAgentForUpdate, arg.OrgID, arg.ID)
 	var i Agent
 	err := row.Scan(
 		&i.OrgID,
