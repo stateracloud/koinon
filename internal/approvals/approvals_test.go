@@ -134,9 +134,14 @@ var _ = Describe("Service", func() {
 		_, err := pool.Exec(ctx, `UPDATE connections SET config = config - 'caBundle' WHERE org_id = $1`, f.org)
 		Expect(err).NotTo(HaveOccurred())
 		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		f.park(ctx)
 		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(row.Status).NotTo(Equal(store.ApprovalStatusExecuted))
+		// A TLS failure is a network error: the request stays approved for the sweeper's
+		// retry, so the reason is in the log, not in the row.
+		Expect(row.Status).To(Equal(store.ApprovalStatusApproved))
+		Expect(f.logs.String()).To(ContainSubstring("certificate"))
 		Expect(f.gh.Mints()).To(BeZero())
 		Expect(f.gh.Snapshot("widgets").Pulls).To(BeEmpty())
 	})
