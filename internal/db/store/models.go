@@ -137,6 +137,48 @@ func (ns NullApprovalDecision) Value() (driver.Value, error) {
 	return string(ns.ApprovalDecision), nil
 }
 
+type ApprovalScopeKind string
+
+const (
+	ApprovalScopeKindTask  ApprovalScopeKind = "task"
+	ApprovalScopeKindAgent ApprovalScopeKind = "agent"
+)
+
+func (e *ApprovalScopeKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ApprovalScopeKind(s)
+	case string:
+		*e = ApprovalScopeKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ApprovalScopeKind: %T", src)
+	}
+	return nil
+}
+
+type NullApprovalScopeKind struct {
+	ApprovalScopeKind ApprovalScopeKind
+	Valid             bool // Valid is true if ApprovalScopeKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullApprovalScopeKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.ApprovalScopeKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ApprovalScopeKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullApprovalScopeKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ApprovalScopeKind), nil
+}
+
 type ApprovalStatus string
 
 const (
@@ -1308,6 +1350,25 @@ type ApprovalRequest struct {
 	FirstApprover       pgtype.UUID
 	CallBinding         []byte
 	System              bool
+	ScopeID             pgtype.UUID
+}
+
+type ApprovalScope struct {
+	OrgID            pgtype.UUID
+	ID               pgtype.UUID
+	AgentID          pgtype.UUID
+	Connector        string
+	Tool             string
+	Target           string
+	Kind             ApprovalScopeKind
+	TaskID           pgtype.UUID
+	ExpiresAt        pgtype.Timestamptz
+	CreatedBy        pgtype.UUID
+	SourceApprovalID pgtype.UUID
+	CallBinding      []byte
+	RevokedAt        pgtype.Timestamptz
+	RevokedBy        pgtype.UUID
+	CreatedAt        pgtype.Timestamptz
 }
 
 type AuditChainHead struct {

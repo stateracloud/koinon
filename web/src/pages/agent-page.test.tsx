@@ -7,12 +7,28 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AgentSchema, AgentService, AgentStatus, type ActivateAgentRequest, type ResumeAgentRequest } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { ApprovalScopeSchema, ApprovalService, ScopeKind, type RevokeApprovalScopeRequest } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { orgId, renderApp, whoAmI } from '@/test-utils'
 
-function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; resumeFails?: boolean; restarting?: number } = {}) {
+function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; resumeFails?: boolean; restarting?: number; scopes?: boolean } = {}) {
   const resumes: ResumeAgentRequest[] = []
+  const revokes: RevokeApprovalScopeRequest[] = []
+  let scopes = opts.scopes
+    ? [
+        create(ApprovalScopeSchema, {
+          id: 'sc-1',
+          orgId,
+          agentId: 'a-1',
+          connector: 'github',
+          tool: 'create_pull_request',
+          target: 'github:acme/widgets',
+          kind: ScopeKind.AGENT,
+          expiresAt: timestampFromMs(new Date(2099, 2, 4, 12).getTime()),
+        }),
+      ]
+    : []
   const activates: ActivateAgentRequest[] = []
   let unhealthyAt = opts.unhealthy ? timestampFromMs(Date.now() - 60_000) : undefined
   let status = opts.draft ? AgentStatus.DRAFT : AgentStatus.ACTIVE
@@ -30,6 +46,15 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ConnectionService, { listConnections: () => ({ connections: [] }) })
+    service(ApprovalService, {
+      listApprovalScopes: () => ({ scopes }),
+      revokeApprovalScope: (req) => {
+        revokes.push(req)
+        const gone = scopes.find((x) => x.id === req.scopeId)
+        scopes = scopes.filter((x) => x.id !== req.scopeId)
+        return { scope: gone }
+      },
+    })
     service(AgentService, {
       getAgent: () => ({ agent: current() }),
       resumeAgent: (req) => {
@@ -46,7 +71,7 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
     })
   })
   renderApp(transport, '/agents/a-1')
-  return { resumes, activates }
+  return { resumes, activates, revokes }
 }
 
 describe('AgentPage unhealthy', () => {
@@ -115,5 +140,26 @@ describe('AgentPage activation', () => {
     await userEvent.click(await screen.findByLabelText(label))
     await userEvent.click(screen.getByRole('button', { name: 'Activate' }))
     expect(await screen.findByRole('status')).toHaveTextContent('1 open task will start a fresh session at their next run.')
+  })
+})
+
+describe('AgentPage standing approvals', () => {
+  it('lists the agent\'s active scopes and lets an admin revoke one', async () => {
+    const { revokes } = setup({ scopes: true })
+    const section = await screen.findByRole('region', { name: 'Standing approvals' })
+    const row = await within(section).findByTestId('approval-scope')
+    expect(row).toHaveTextContent('create_pull_request on acme/widgets')
+    expect(row).toHaveTextContent('For this agent, until')
+    await userEvent.click(within(row).getByRole('button', { name: 'Revoke create_pull_request on acme/widgets' }))
+    await waitFor(() => expect(revokes).toHaveLength(1))
+    expect(revokes[0]).toMatchObject({ scopeId: 'sc-1' })
+    expect(await within(section).findByText(/Every call that needs approval asks first/)).toBeInTheDocument()
+  })
+
+  it('shows scopes to a member without a revoke button', async () => {
+    setup({ scopes: true, role: OrgRole.MEMBER })
+    const section = await screen.findByRole('region', { name: 'Standing approvals' })
+    await within(section).findByTestId('approval-scope')
+    expect(within(section).queryByRole('button', { name: /Revoke/ })).not.toBeInTheDocument()
   })
 })

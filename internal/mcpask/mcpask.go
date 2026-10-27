@@ -38,6 +38,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/stateracloud/koinon/internal/approvalscope"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
@@ -261,6 +262,16 @@ func (s *Server) callTool(serverName, tool string) mcp.ToolHandler {
 	}
 }
 
+// scopeBindingMatches is true when the scope was granted for this server, URL and tool version.
+// A scope without a binding does not cover an MCP call.
+func scopeBindingMatches(scoped, current []byte) bool {
+	var a, b mcpservers.CallBinding
+	if json.Unmarshal(scoped, &a) != nil || json.Unmarshal(current, &b) != nil {
+		return false
+	}
+	return a == b && a.ContentHash != "" && a.URLHash != ""
+}
+
 func hash(canonical []byte) string {
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:])
@@ -300,6 +311,22 @@ func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonica
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		var err error
+		// A scoped approval of this agent (or task) for exactly this server and tool lets the call
+		// run without parking. A tool that needs two approvers is never covered: the second
+		// person cannot be waived.
+		var scope store.ApprovalScope
+		if !t.RequiresTwoApprovers {
+			sc, ok, err := approvalscope.Match(ctx, q, params.OrgID, params.AgentID, params.TaskID, ConnectorID, tool, params.Target, s.now())
+			if err != nil {
+				return err
+			}
+			// The scope is pinned to the version the approver saw: once the server republishes the
+			// tool or its URL changes, the call parks again (ADR 0057).
+			if ok && scopeBindingMatches(sc.CallBinding, binding) {
+				scope = sc
+				params.Decision, params.Status, params.ScopeID = store.ApprovalDecisionAllow, store.ApprovalStatusApproved, sc.ID
+			}
+		}
 		row, err = q.CreateApprovalRequest(ctx, params)
 		if errors.Is(err, pgx.ErrNoRows) {
 			created = false
@@ -311,10 +338,16 @@ func (s *Server) record(ctx context.Context, c caller, t store.McpTool, canonica
 		if err != nil {
 			return err
 		}
-		payload, err := json.Marshal(map[string]any{
+		pm := map[string]any{
 			"approval_id": row.ID.String(), "tool": tool, "target": row.Target, "args_sha256": row.ArgsSha256,
 			"decision": string(row.Decision), "risk": map[string]any{}, "approvals_required": row.ApprovalsRequired,
-		})
+		}
+		if scope.ID.Valid {
+			for k, v := range approvalscope.Payload(scope) {
+				pm[k] = v
+			}
+		}
+		payload, err := json.Marshal(pm)
 		if err != nil {
 			return err
 		}

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/connectors/github"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
@@ -116,6 +117,59 @@ var _ = Describe("ApprovalService", func() {
 		_, err = f.owner.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{OrgId: f.org, ApprovalId: id, ArgsSha256: req.ArgsSha256})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 		Expect(approveStatus(ctx, f.owner, f.org, id, req.ArgsSha256)).To(Equal(http.StatusBadRequest))
+	})
+
+	It("approves with a scope that is listed, audited and revocable by admins only", func(ctx SpecContext) {
+		member := e.userIn(ctx, f.org, store.OrgRoleMember)
+		admin := e.userIn(ctx, f.org, store.OrgRoleAdmin)
+		id := req.ID.String()
+
+		By("an agent scope needs a future end date")
+		_, err := admin.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{
+			OrgId: f.org, ApprovalId: id, ArgsSha256: req.ArgsSha256, Scope: approvalv1alpha1.ScopeKind_SCOPE_KIND_AGENT,
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		_, err = member.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{
+			OrgId: f.org, ApprovalId: id, ArgsSha256: req.ArgsSha256, Scope: approvalv1alpha1.ScopeKind_SCOPE_KIND_TASK,
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied), "a scope wider than once needs an admin")
+
+		By("an admin approves for this agent for a week")
+		_, err = admin.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{
+			OrgId: f.org, ApprovalId: id, ArgsSha256: req.ArgsSha256, Scope: approvalv1alpha1.ScopeKind_SCOPE_KIND_AGENT,
+			ScopeUntil: timestamppb.New(time.Now().Add(7 * 24 * time.Hour)),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		list, err := member.approvals.ListApprovalScopes(ctx, &approvalv1alpha1.ListApprovalScopesRequest{OrgId: f.org, AgentId: f.agent.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list.GetScopes()).To(HaveLen(1))
+		sc := list.GetScopes()[0]
+		Expect(sc.GetKind()).To(Equal(approvalv1alpha1.ScopeKind_SCOPE_KIND_AGENT))
+		Expect(sc.GetTool()).To(Equal(githubtools.ToolCommentOnIssue))
+		Expect(sc.GetTarget()).To(Equal("github:acme/widgets"))
+		Expect(sc.GetSourceApprovalId()).To(Equal(id))
+
+		By("only an admin revokes it")
+		_, err = member.approvals.RevokeApprovalScope(ctx, &approvalv1alpha1.RevokeApprovalScopeRequest{OrgId: f.org, ScopeId: sc.GetId()})
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		revoked, err := admin.approvals.RevokeApprovalScope(ctx, &approvalv1alpha1.RevokeApprovalScopeRequest{OrgId: f.org, ScopeId: sc.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(revoked.GetScope().GetRevokedAt()).NotTo(BeNil())
+		list, err = member.approvals.ListApprovalScopes(ctx, &approvalv1alpha1.ListApprovalScopesRequest{OrgId: f.org, AgentId: f.agent.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list.GetScopes()).To(BeEmpty())
+
+		By("both changes are in the audit log")
+		var actions []string
+		rows, err := e.pool.Query(ctx, `SELECT action FROM audit_events WHERE org_id = $1 AND action LIKE 'approval_scope.%' ORDER BY chain_seq`, uuid(f.org))
+		Expect(err).NotTo(HaveOccurred())
+		defer rows.Close()
+		for rows.Next() {
+			var a string
+			Expect(rows.Scan(&a)).To(Succeed())
+			actions = append(actions, a)
+		}
+		Expect(actions).To(Equal([]string{"approval_scope.create", "approval_scope.revoke"}))
 	})
 
 	It("has no diff for a comment", func(ctx SpecContext) {
