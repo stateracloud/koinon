@@ -56,13 +56,13 @@ is not recreated either, and its volume is kept.
 
 Saved: the whole home, including repository checkouts, because uncommitted work in a checkout is the
 scratch work worth keeping. Excluded: package-manager, build and harness caches such as `node_modules`,
-`.cache`, `.npm`, `.pnpm-store`, `.cargo/registry` and `go/pkg/mod`. Ephemeral agents (one fresh sandbox
+`.cache`, `.npm`, `.pnpm-store`, `.cargo/registry` and `go/pkg/mod`, and the home's top-level `tmp` (see [exclude.go](https://github.com/stateracloud/koinon/blob/main/internal/checkpoint/exclude.go) for the full list). Ephemeral agents (one fresh sandbox
 per task, no home volume) have no home to save and are skipped.
 
 No secrets are in a home: credentials stay in OpenShell provider records, agentgateway and the secret
 store, never in the sandbox. Each agent has its own kopia repository at `orgs/<org>/homes/<agent>/` in
 the bucket, compressed with zstd. Its random password is sealed by the org's key; only `koinon-api` can
-open it, and `koinon-agentd` asks for it per checkpoint. Retention keeps the latest 24 snapshots, one a
+open it, and `koinon-agentd` asks for it per checkpoint. Retention keeps the latest 24 snapshots, one an hour for 24 hours, one a
 day for 14 days and one a week for 8 weeks. There is no off-site copy in v0.1.
 
 ## Restore

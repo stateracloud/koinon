@@ -32,7 +32,7 @@ The answer reaches the agent as part of its next prompt: `the person answered: "
 question was dismissed or timed out, that the default was applied and what it is. The agent is always
 told.
 
-An answer within 15 minutes of the park finds the sandbox still running. A later one starts the stopped
+An answer within the org's park-warm time (15 minutes by default) finds the sandbox still running. A later one starts the stopped
 sandbox, and the agent continues the same session. Questions of a run end with the run.
 
 ## Reminders and expiry
