@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/services"
 )
 
 // markQuestion makes the fake harness call ask_user through Koinon's tool server.
@@ -399,6 +400,51 @@ var _ = Describe("ask_user", func() {
 		inbox, err := q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: a.org, UserID: a.user})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(inbox).To(HaveLen(1), "only the valid question exists")
+	})
+
+	It("asks the person in a chat thread when 'to' is left out", func(ctx SpecContext) {
+		a = newAskEnv(ctx)
+		a.args = map[string]any{"question": "Post it?", "default": "no"}
+		var err error
+		t, err = q.CreateTask(ctx, store.CreateTaskParams{
+			OrgID: a.org, Title: uniq("chat"), AgentID: a.agent.ID, CreatedByKind: store.TaskCreatorKindTrigger,
+			CreatedByTriggerID: services.DirectMessageTriggerID(a.agent.ID),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		a.message(ctx, t, markQuestion)
+		r = a.enqueue(ctx, t)
+		a.pool("agentd-a")
+		Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
+		Expect(a.question(ctx, qid).AskedTo).To(Equal(a.user))
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+	})
+
+	It("finishes the run and cancels the question when the agent cancels the task in the same turn", func(ctx SpecContext) {
+		a = newAskEnv(ctx)
+		a.harness.mu.Lock()
+		a.harness.onPrompt = func(ctx context.Context, text string) (string, bool) {
+			if !strings.Contains(text, markQuestion) {
+				return "", false
+			}
+			_, id := a.call(ctx, a.args)
+			a.ids <- id
+			out, _ := a.callTool(ctx, askuser.ToolCancelTask, map[string]any{"reason": "cannot go on"})
+			return "Asked and canceled. " + out, true
+		}
+		a.harness.mu.Unlock()
+		t = a.task(ctx, markQuestion)
+		r = a.enqueue(ctx, t)
+		a.pool("agentd-a")
+		Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
+		Eventually(func() store.RunState { return getRun(ctx, r).State }).WithTimeout(10 * time.Second).
+			ShouldNot(Or(Equal(store.RunStateQueued), Equal(store.RunStateStarting), Equal(store.RunStateRunning)))
+		Expect(getRun(ctx, r).State).NotTo(Equal(store.RunStateParked))
+		Expect(a.question(ctx, qid).State).To(Equal(store.QuestionStateCanceled))
+		got, _ := q.GetTask(ctx, store.GetTaskParams{OrgID: a.org, ID: t.ID})
+		Expect(got.State).To(Equal(store.TaskStateCanceled))
+		inbox, err := q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: a.org, UserID: a.user})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(inbox).To(BeEmpty())
 	})
 
 	It("refuses an answer from someone else", func(ctx SpecContext) {

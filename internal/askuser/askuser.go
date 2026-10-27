@@ -40,6 +40,7 @@ import (
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/services"
 )
 
 // Target is the gateway target (and tool server key) of this server.
@@ -90,7 +91,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 			"'to' is the email or user ID of a member of the org; leave it out to ask the person who created the task. " +
 			"'choices' lists answers the person can pick (at most 10); 'draft' is text you propose (a reply to post, a " +
 			"title) that they can accept or edit. 'default' is required: the safe answer Koinon uses if the question is " +
-			"dismissed or nobody answers within 7 days; if you give choices it must be one of them. Choose a default that " +
+			"dismissed or nobody answers by the expiry in the result; if you give choices it must be one of them. Choose a default that " +
 			"is safe to act on without a person (for example 'do not post', 'skip'). You are told when the default " +
 			"was applied. Do not ask twice, and do not work around the pause.",
 	}, s.askUser)
@@ -218,6 +219,16 @@ func (s *Server) addressee(ctx context.Context, c caller, to string) (pgtype.UUI
 		task, err := s.q.GetTask(ctx, store.GetTaskParams{OrgID: c.org.ID, ID: c.run.TaskID})
 		if err != nil {
 			return pgtype.UUID{}, "", s.lookupErr(err, "task")
+		}
+		if task.CreatedByKind == store.TaskCreatorKindTrigger && task.CreatedByTriggerID == services.DirectMessageTriggerID(task.AgentID) {
+			// A chat thread: the person on the other end is whoever wrote the latest message.
+			who, err := s.q.LatestUserMessageActor(ctx, store.LatestUserMessageActorParams{OrgID: c.org.ID, TaskID: task.ID})
+			if err == nil && who.Valid {
+				return who, "the person in this chat", nil
+			}
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return pgtype.UUID{}, "", s.lookupErr(err, "task")
+			}
 		}
 		if task.CreatedByKind != store.TaskCreatorKindUser || !task.CreatedByUserID.Valid {
 			return pgtype.UUID{}, "", errors.New("this task was not created by a person, so 'to' is required: name an org member by email or user ID")

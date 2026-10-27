@@ -72,6 +72,10 @@ function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: strin
   const thread = isReplyThread(task)
   // undefined while the agents are still loading: neither the notice nor the composer shows.
   const takes = agent ? takesDirectMessages(agent) : undefined
+  // A task parked on a question or an approval does not run again until that is decided, so a reply
+  // would wait unseen: ask for the decision first.
+  const parked = state === TaskState.INPUT_REQUIRED
+  const waitingOn = query.data?.task?.waitingOnName ?? task.waitingOnName
   const runs = (query.data?.runs ?? []).map((r) => watches[r.id]?.run ?? r)
   const active = runs.filter((r) => !runFinished(r.state))
   return (
@@ -106,7 +110,14 @@ function Conversation({ orgId, task, agentName, agent, canEdit }: { orgId: strin
           This thread is complete. A reply reopens it as a follow-up.
         </p>
       )}
-      {canEdit && (!thread || takes === true) && !(task.directMessageThread && !thread) && (
+      {canEdit && parked && (
+        <p role="status" className="text-muted-foreground text-sm">
+          {waitingOn
+            ? `Waiting on ${waitingOn}'s answer to a question in the inbox. A reply here does not answer it.`
+            : 'Waiting on an approval above. Decide it before replying.'}
+        </p>
+      )}
+      {canEdit && !parked && (!thread || takes === true) && !(task.directMessageThread && !thread) && (
         <Composer
           idPrefix="chat-composer"
           pending={thread ? direct.pending : append.isPending}

@@ -411,3 +411,10 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
     again. The template picker (`TemplateService`) does not show `spec.questions` yet; the reminder
     and expiry are set in the template file only, like the agent editor, and a UI for them is a
     follow-up.
+- 2026-10-27 (wave-3 integration): an approval's expiry never cancels a run parked with reason
+  `input_required`: `cancelExpiredRun` resolves the park instead, so the run resumes with "approval
+  expired" once its questions are answered or expire. `ask_user` without `to` in a direct-message
+  thread asks the author of the thread's latest user message. The `ask_user` text points to the
+  expiry in the tool result instead of a fixed 7 days. When `cancel_task` and `ask_user` run in
+  one turn, `endTurn` cancels the asked questions and finishes the run instead of parking it. The chat
+  shows "waiting on ..." instead of the composer while the task is `input_required`.

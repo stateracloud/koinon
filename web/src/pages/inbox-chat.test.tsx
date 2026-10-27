@@ -21,6 +21,7 @@ function transport(opts: Opts = {}) {
   const tasks = [
     dmThread('t-open', 'What changed today?', TaskState.WORKING),
     dmThread('t-done', 'Summarise the incident', TaskState.COMPLETED),
+    dmThread('t-parked', 'Waiting for your pick', TaskState.INPUT_REQUIRED),
     dmThread('t-cancel', 'Dropped thread', TaskState.CANCELED),
     task('t-plain', 'Plain task of the chat agent', TaskState.WORKING, 'a-1'),
     dmThread('t-nodm', 'Thread of an agent that stopped taking messages', TaskState.WORKING, 'a-2'),
@@ -124,6 +125,15 @@ describe('Inbox chat direct messages', () => {
     await userEvent.click(within(list).getByRole('button', { name: /Thread of an agent that stopped/ }))
     const chat = await screen.findByRole('region', { name: /Conversation: Thread of an agent/ })
     expect(within(chat).getByText(/Quiet bot does not take direct messages/)).toBeInTheDocument()
+    expect(within(chat).queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('asks for the pending decision instead of offering a reply while the task is parked', async () => {
+    renderApp(transport(), '/')
+    const list = await screen.findByRole('list', { name: 'Conversations' })
+    await userEvent.click(within(list).getByRole('button', { name: /Waiting for your pick/ }))
+    const chat = await screen.findByRole('region', { name: 'Conversation: Waiting for your pick' })
+    expect(within(chat).getByText(/Waiting on an approval/)).toBeInTheDocument()
     expect(within(chat).queryByRole('textbox')).not.toBeInTheDocument()
   })
 
