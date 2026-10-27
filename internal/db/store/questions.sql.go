@@ -15,7 +15,7 @@ const cancelOpenQuestionsForRun = `-- name: CancelOpenQuestionsForRun :many
 UPDATE questions
 SET state = 'canceled', resolved_at = now()
 WHERE org_id = $1 AND run_id = $2 AND state IN ('asked', 'open')
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
 `
 
 type CancelOpenQuestionsForRunParams struct {
@@ -57,6 +57,9 @@ func (q *Queries) CancelOpenQuestionsForRun(ctx context.Context, arg CancelOpenQ
 			&i.DeliveredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RemindAt,
+			&i.RemindedAt,
+			&i.RemindFailures,
 		); err != nil {
 			return nil, err
 		}
@@ -88,11 +91,11 @@ func (q *Queries) CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQue
 
 const createQuestion = `-- name: CreateQuestion :one
 INSERT INTO questions (org_id, task_id, run_id, agent_id, asked_to, question, choices, draft,
-                       default_answer, call_sha256, expires_at)
+                       default_answer, call_sha256, expires_at, remind_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10, $11)
+        $9, $10, $11, $12)
 ON CONFLICT (org_id, run_id, call_sha256) DO NOTHING
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
 `
 
 type CreateQuestionParams struct {
@@ -107,6 +110,7 @@ type CreateQuestionParams struct {
 	DefaultAnswer string
 	CallSha256    string
 	ExpiresAt     pgtype.Timestamptz
+	RemindAt      pgtype.Timestamptz
 }
 
 // Records a question as 'asked'. No row for the same call in the same run: use
@@ -124,6 +128,7 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 		arg.DefaultAnswer,
 		arg.CallSha256,
 		arg.ExpiresAt,
+		arg.RemindAt,
 	)
 	var i Question
 	err := row.Scan(
@@ -150,6 +155,9 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 		&i.DeliveredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RemindAt,
+		&i.RemindedAt,
+		&i.RemindFailures,
 	)
 	return i, err
 }
@@ -196,7 +204,7 @@ func (q *Queries) FindOrgMemberByIdent(ctx context.Context, arg FindOrgMemberByI
 }
 
 const getQuestion = `-- name: GetQuestion :one
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
 WHERE org_id = $1 AND id = $2
 `
 
@@ -232,12 +240,15 @@ func (q *Queries) GetQuestion(ctx context.Context, arg GetQuestionParams) (Quest
 		&i.DeliveredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RemindAt,
+		&i.RemindedAt,
+		&i.RemindFailures,
 	)
 	return i, err
 }
 
 const getQuestionByCall = `-- name: GetQuestionByCall :one
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
 WHERE org_id = $1 AND run_id = $2 AND call_sha256 = $3
 `
 
@@ -274,6 +285,9 @@ func (q *Queries) GetQuestionByCall(ctx context.Context, arg GetQuestionByCallPa
 		&i.DeliveredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RemindAt,
+		&i.RemindedAt,
+		&i.RemindFailures,
 	)
 	return i, err
 }
@@ -301,7 +315,7 @@ func (q *Queries) IsOrgMember(ctx context.Context, arg IsOrgMemberParams) (bool,
 }
 
 const listDueQuestions = `-- name: ListDueQuestions :many
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
 WHERE org_id = $1 AND state = 'open' AND expires_at <= $2
 ORDER BY expires_at, id
 LIMIT $3
@@ -313,7 +327,7 @@ type ListDueQuestionsParams struct {
 	MaxRows int32
 }
 
-// Open questions past their expiry (TK4 applies the default to them).
+// Open questions past their expiry (the expiry sweep applies the default to them).
 func (q *Queries) ListDueQuestions(ctx context.Context, arg ListDueQuestionsParams) ([]Question, error) {
 	rows, err := q.db.Query(ctx, listDueQuestions, arg.OrgID, arg.Now, arg.MaxRows)
 	if err != nil {
@@ -347,6 +361,9 @@ func (q *Queries) ListDueQuestions(ctx context.Context, arg ListDueQuestionsPara
 			&i.DeliveredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RemindAt,
+			&i.RemindedAt,
+			&i.RemindFailures,
 		); err != nil {
 			return nil, err
 		}
@@ -359,7 +376,7 @@ func (q *Queries) ListDueQuestions(ctx context.Context, arg ListDueQuestionsPara
 }
 
 const listOpenQuestionsForUser = `-- name: ListOpenQuestionsForUser :many
-SELECT qn.org_id, qn.id, qn.task_id, qn.run_id, qn.agent_id, qn.asked_to, qn.question, qn.choices, qn.draft, qn.default_answer, qn.state, qn.answer, qn.answer_kind, qn.answered_by, qn.call_sha256, qn.expires_at, qn.opened_at, qn.notified_at, qn.notify_failures, qn.resolved_at, qn.delivered_at, qn.created_at, qn.updated_at FROM questions qn
+SELECT qn.org_id, qn.id, qn.task_id, qn.run_id, qn.agent_id, qn.asked_to, qn.question, qn.choices, qn.draft, qn.default_answer, qn.state, qn.answer, qn.answer_kind, qn.answered_by, qn.call_sha256, qn.expires_at, qn.opened_at, qn.notified_at, qn.notify_failures, qn.resolved_at, qn.delivered_at, qn.created_at, qn.updated_at, qn.remind_at, qn.reminded_at, qn.remind_failures FROM questions qn
 JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
 WHERE qn.org_id = $1 AND qn.asked_to = $2 AND qn.state = 'open' AND r.state = 'parked'
 ORDER BY qn.opened_at DESC, qn.id DESC
@@ -406,10 +423,39 @@ func (q *Queries) ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQues
 			&i.DeliveredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RemindAt,
+			&i.RemindedAt,
+			&i.RemindFailures,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgsWithDueQuestions = `-- name: ListOrgsWithDueQuestions :many
+SELECT DISTINCT org_id FROM questions
+WHERE state = 'open' AND (expires_at <= $1 OR (remind_at <= $1 AND reminded_at IS NULL))
+`
+
+// Orgs with an open question past its expiry at @now or a reminder due at @now.
+func (q *Queries) ListOrgsWithDueQuestions(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgsWithDueQuestions, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var org_id pgtype.UUID
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -540,7 +586,7 @@ func (q *Queries) ListQuestionRunsOfFinishedRuns(ctx context.Context, orgID pgty
 }
 
 const listQuestionsForTask = `-- name: ListQuestionsForTask :many
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
 WHERE org_id = $1 AND task_id = $2
 ORDER BY created_at, id
 `
@@ -583,6 +629,9 @@ func (q *Queries) ListQuestionsForTask(ctx context.Context, arg ListQuestionsFor
 			&i.DeliveredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RemindAt,
+			&i.RemindedAt,
+			&i.RemindFailures,
 		); err != nil {
 			return nil, err
 		}
@@ -595,7 +644,7 @@ func (q *Queries) ListQuestionsForTask(ctx context.Context, arg ListQuestionsFor
 }
 
 const listQuestionsToNotify = `-- name: ListQuestionsToNotify :many
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
 WHERE org_id = $1 AND state IN ('open', 'answered', 'dismissed', 'expired') AND notified_at IS NULL
 ORDER BY opened_at, id
 LIMIT $2
@@ -640,6 +689,70 @@ func (q *Queries) ListQuestionsToNotify(ctx context.Context, arg ListQuestionsTo
 			&i.DeliveredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RemindAt,
+			&i.RemindedAt,
+			&i.RemindFailures,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQuestionsToRemind = `-- name: ListQuestionsToRemind :many
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
+WHERE org_id = $1 AND state = 'open' AND remind_at <= $2 AND reminded_at IS NULL
+ORDER BY remind_at, id
+LIMIT $3
+`
+
+type ListQuestionsToRemindParams struct {
+	OrgID   pgtype.UUID
+	Now     pgtype.Timestamptz
+	MaxRows int32
+}
+
+// Open questions whose reminder is due at @now and has not gone out, oldest reminder first.
+func (q *Queries) ListQuestionsToRemind(ctx context.Context, arg ListQuestionsToRemindParams) ([]Question, error) {
+	rows, err := q.db.Query(ctx, listQuestionsToRemind, arg.OrgID, arg.Now, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Question
+	for rows.Next() {
+		var i Question
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.TaskID,
+			&i.RunID,
+			&i.AgentID,
+			&i.AskedTo,
+			&i.Question,
+			&i.Choices,
+			&i.Draft,
+			&i.DefaultAnswer,
+			&i.State,
+			&i.Answer,
+			&i.AnswerKind,
+			&i.AnsweredBy,
+			&i.CallSha256,
+			&i.ExpiresAt,
+			&i.OpenedAt,
+			&i.NotifiedAt,
+			&i.NotifyFailures,
+			&i.ResolvedAt,
+			&i.DeliveredAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.RemindAt,
+			&i.RemindedAt,
+			&i.RemindFailures,
 		); err != nil {
 			return nil, err
 		}
@@ -652,7 +765,7 @@ func (q *Queries) ListQuestionsToNotify(ctx context.Context, arg ListQuestionsTo
 }
 
 const listUndeliveredQuestionsForRun = `-- name: ListUndeliveredQuestionsForRun :many
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
 WHERE org_id = $1 AND run_id = $2 AND delivered_at IS NULL AND state <> 'canceled'
 ORDER BY created_at, id
 `
@@ -696,6 +809,9 @@ func (q *Queries) ListUndeliveredQuestionsForRun(ctx context.Context, arg ListUn
 			&i.DeliveredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RemindAt,
+			&i.RemindedAt,
+			&i.RemindFailures,
 		); err != nil {
 			return nil, err
 		}
@@ -708,7 +824,7 @@ func (q *Queries) ListUndeliveredQuestionsForRun(ctx context.Context, arg ListUn
 }
 
 const lockQuestion = `-- name: LockQuestion :one
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -745,6 +861,9 @@ func (q *Queries) LockQuestion(ctx context.Context, arg LockQuestionParams) (Que
 		&i.DeliveredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RemindAt,
+		&i.RemindedAt,
+		&i.RemindFailures,
 	)
 	return i, err
 }
@@ -761,6 +880,24 @@ type MarkQuestionNotifiedParams struct {
 
 func (q *Queries) MarkQuestionNotified(ctx context.Context, arg MarkQuestionNotifiedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markQuestionNotified, arg.OrgID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markQuestionReminded = `-- name: MarkQuestionReminded :execrows
+UPDATE questions SET reminded_at = now()
+WHERE org_id = $1 AND id = $2 AND reminded_at IS NULL
+`
+
+type MarkQuestionRemindedParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+func (q *Queries) MarkQuestionReminded(ctx context.Context, arg MarkQuestionRemindedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markQuestionReminded, arg.OrgID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -792,7 +929,7 @@ const openAskedQuestionsForRun = `-- name: OpenAskedQuestionsForRun :many
 UPDATE questions
 SET state = 'open', opened_at = now()
 WHERE org_id = $1 AND run_id = $2 AND state = 'asked'
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
 `
 
 type OpenAskedQuestionsForRunParams struct {
@@ -835,6 +972,9 @@ func (q *Queries) OpenAskedQuestionsForRun(ctx context.Context, arg OpenAskedQue
 			&i.DeliveredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RemindAt,
+			&i.RemindedAt,
+			&i.RemindFailures,
 		); err != nil {
 			return nil, err
 		}
@@ -851,7 +991,7 @@ UPDATE questions
 SET notify_failures = notify_failures + 1,
     notified_at = CASE WHEN notify_failures + 1 >= $1::int THEN now() ELSE notified_at END
 WHERE org_id = $2 AND id = $3 AND notified_at IS NULL
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
 `
 
 type RecordQuestionNotifyFailureParams struct {
@@ -889,6 +1029,58 @@ func (q *Queries) RecordQuestionNotifyFailure(ctx context.Context, arg RecordQue
 		&i.DeliveredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RemindAt,
+		&i.RemindedAt,
+		&i.RemindFailures,
+	)
+	return i, err
+}
+
+const recordQuestionRemindFailure = `-- name: RecordQuestionRemindFailure :one
+UPDATE questions
+SET remind_failures = remind_failures + 1,
+    reminded_at = CASE WHEN remind_failures + 1 >= $1::int THEN now() ELSE reminded_at END
+WHERE org_id = $2 AND id = $3 AND reminded_at IS NULL
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
+`
+
+type RecordQuestionRemindFailureParams struct {
+	GiveUp int32
+	OrgID  pgtype.UUID
+	ID     pgtype.UUID
+}
+
+// One failed delivery of the reminder. At @give_up failures the question counts as reminded.
+func (q *Queries) RecordQuestionRemindFailure(ctx context.Context, arg RecordQuestionRemindFailureParams) (Question, error) {
+	row := q.db.QueryRow(ctx, recordQuestionRemindFailure, arg.GiveUp, arg.OrgID, arg.ID)
+	var i Question
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.TaskID,
+		&i.RunID,
+		&i.AgentID,
+		&i.AskedTo,
+		&i.Question,
+		&i.Choices,
+		&i.Draft,
+		&i.DefaultAnswer,
+		&i.State,
+		&i.Answer,
+		&i.AnswerKind,
+		&i.AnsweredBy,
+		&i.CallSha256,
+		&i.ExpiresAt,
+		&i.OpenedAt,
+		&i.NotifiedAt,
+		&i.NotifyFailures,
+		&i.ResolvedAt,
+		&i.DeliveredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RemindAt,
+		&i.RemindedAt,
+		&i.RemindFailures,
 	)
 	return i, err
 }
@@ -901,7 +1093,7 @@ SET state = $1::question_state,
     answered_by = $4,
     resolved_at = now()
 WHERE org_id = $5 AND id = $6 AND state = 'open'
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
 `
 
 type ResolveQuestionParams struct {
@@ -948,6 +1140,9 @@ func (q *Queries) ResolveQuestion(ctx context.Context, arg ResolveQuestionParams
 		&i.DeliveredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RemindAt,
+		&i.RemindedAt,
+		&i.RemindFailures,
 	)
 	return i, err
 }

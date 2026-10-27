@@ -40,6 +40,7 @@ func notification(row store.Question) durable.Notification {
 // RegisterNotifications registers the handler of the question notification on n. Call it before the
 // DBOS runtime launches, so a workflow recovered at start finds it.
 func RegisterNotifications(n *durable.Notifier, pool *pgxpool.Pool) {
+	registerReminder(n, pool)
 	n.Handle(NotifyAsked, func(ctx context.Context, note durable.Notification) error {
 		err := deliver(ctx, pool, note)
 		if err == nil {
@@ -130,13 +131,18 @@ func NotifyPending(ctx context.Context, pool *pgxpool.Pool, send durable.Sender)
 	return sent, errors.Join(errs...)
 }
 
-// Sweeper calls NotifyPending every interval until ctx ends.
+// Sweeper calls NotifyPending, RunTimers and CancelOfFinishedRuns every interval until ctx ends.
 func Sweeper(ctx context.Context, pool *pgxpool.Pool, send durable.Sender, interval time.Duration, log *slog.Logger) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		if _, err := NotifyPending(ctx, pool, send); err != nil && ctx.Err() == nil {
 			log.Error("question notification sweep failed", "err", err)
+		}
+		if res, err := RunTimers(ctx, pool, send, time.Now()); err != nil && ctx.Err() == nil {
+			log.Error("question reminder and expiry sweep failed", "err", err)
+		} else if res != (SweepResult{}) {
+			log.Info("question timers", "reminders_sent", res.Sent, "expired", res.Expired)
 		}
 		if _, err := CancelOfFinishedRuns(ctx, pool); err != nil && ctx.Err() == nil {
 			log.Error("canceling the questions of finished runs failed", "err", err)

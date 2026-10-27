@@ -20,6 +20,11 @@ needs `opencode` among the allowed flavors. `repo-helper` sets it to `false` exp
 sandbox with no persistent home, deleted when the task ends (ADR 0065 decision 13c). Off when
 omitted. Whoever creates the agent can change it.
 
+`spec.questions` (optional) sets `reminderAfter` (default `24h`) and `expireAfter` (default `168h`, 7
+days) for the questions the agent asks with `ask_user` (ADR 0065 decision 10): the person asked
+gets an in-app reminder, and at expiry the question's safe default applies and the agent gets one
+"no answer" run. Each is between 1m and 720h, and the reminder must come before the expiry.
+
 Bump `metadata.version` whenever you change a template's content. Scopes are checked against the
 connector type when templates are synced to the database, not by the schema.
 

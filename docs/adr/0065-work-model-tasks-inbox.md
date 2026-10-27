@@ -373,3 +373,41 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
 - **Waiting on someone else (2026-10-27).** `Task.waiting_on_user_id` and `waiting_on_name` (ListTasks,
   GetTask) name the addressee of the task's open question; the inbox shows no `task-input` item to a
   creator who is not that person.
+- **Reminders and expiry (TK4, 2026-10-27).** Decision 10 is built as follows.
+  - **Settings.** `spec.questions` in a template and `questions` in an agent version's config hold
+    `reminderAfter` (default 24h) and `expireAfter` (default 7 days), as Go durations between 1m and
+    720h, the reminder before the expiry. `ask_user` reads the agent's active version when the
+    question is asked and stores `remind_at` and `expires_at` on the question (migration 00030), so a
+    later version does not move the deadlines of questions already open. A reminder that would not
+    come before the expiry is dropped. Changing the settings of one agent without a new template
+    version is a new agent version; the agent editor does not expose them yet.
+  - **Timers are a sweep, not a DBOS sleep per question.** The deadlines are columns, and the
+    question sweeper in koinon-api (`questions.Sweeper`, every sweep interval) runs `RunTimers`; that
+    works the same with and without `api.durable.enabled`, and after a restart or on a second
+    replica the next sweep finds the same due questions. Cost: a reminder or expiry is late by up to
+    one sweep interval.
+  - **Once.** The reminder is the notification `question.reminder:<id>` (one DBOS workflow with
+    durable on; the handler writes the in-app notification, dedupe key `question-reminder:<id>`, then
+    sets `reminded_at`; eight failures abandon it, like `question.asked`). The expiry is the state
+    change open to expired under the run's row lock (`questions.Expire`), so a repeated sweep, a
+    second replica or a late answer finds it made (`ErrNotOpen`). No dedupe record is needed.
+  - **The reminder** is an in-app notification for the person asked (kind `question.reminder`, with
+    a message naming the question, the expiry and the default). The question stays in the inbox.
+    Chat reminders join with the chat connectors (v0.2).
+  - **The "no answer" run** is the resume of the parked run: expiry applies the safe default and
+    resolves the park, and the next prompt carries the outcome plus a system instruction (`[Koinon
+    system] This is a short "no answer" run ...`): carry on with the default, cancel the task with
+    `cancel_task`, or ask someone else with `ask_user`. No second run is created; the run is not
+    given a smaller cap.
+  - **Amendment 2026-10-27 (TK4 review).** Canceling is a tool, not a convention: Koinon's tool
+    server has a second tool, `cancel_task(reason)` (target `koinon`, offered to every agent like
+    `ask_user`), which closes the caller's task as canceled in one transaction, with the reason in
+    the `status.changed` event on the task timeline, and cancels its queued runs. Called on an
+    already ended task it changes nothing. The system instruction no longer says the agent "will not
+    be reminded again": a question it asks someone else gets its own reminder and its own no-answer
+    run. A tool-server `Reminder` override is applied only when it is before the expiry, like the
+    expiry override. `SweepResult.Sent` counts reminders handed to the sender: with durable on, a
+    resend of the same workflow ID until the handler sets `reminded_at` is a no-op but is counted
+    again. The template picker (`TemplateService`) does not show `spec.questions` yet; the reminder
+    and expiry are set in the template file only, like the agent editor, and a UI for them is a
+    follow-up.

@@ -188,6 +188,10 @@ const KoinonTarget = "koinon"
 // ToolAskUser is the name of the ask_user tool on KoinonTarget.
 const ToolAskUser = "ask_user"
 
+// ToolCancelTask is the name of the cancel_task tool on KoinonTarget: the agent closes its own task
+// as canceled (ADR 0065 decision 10, plan item TK4).
+const ToolCancelTask = "cancel_task"
+
 // Key is the gateway-side record of an API key: its ID, owner and hash. It
 // holds no key material and is safe to persist and to render into config.
 type Key struct {

@@ -439,7 +439,7 @@ type Querier interface {
 	ListCurrentTemplates(ctx context.Context) ([]Template, error)
 	// Every default list version this installation has run, newest first.
 	ListDefaultPriceLists(ctx context.Context) ([]DefaultPriceList, error)
-	// Open questions past their expiry (TK4 applies the default to them).
+	// Open questions past their expiry (the expiry sweep applies the default to them).
 	ListDueQuestions(ctx context.Context, arg ListDueQuestionsParams) ([]Question, error)
 	// The effective role per org honours the org's identity mode (ADR 0004):
 	// platform counts manual rows, idp counts IdP rows plus the manual owner,
@@ -482,6 +482,8 @@ type Querier interface {
 	// (TestQueriesAreOrgScoped).
 	// The reconciler walks orgs one at a time, so every later query is org-scoped.
 	ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcileRow, error)
+	// Orgs with an open question past its expiry at @now or a reminder due at @now.
+	ListOrgsWithDueQuestions(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error)
 	// Orgs with a question whose run ended (the sweeper then queries per org).
 	ListOrgsWithQuestionsOfFinishedRuns(ctx context.Context) ([]pgtype.UUID, error)
 	// Orgs that have at least one opened question to notify about (the sweeper then queries per org).
@@ -509,6 +511,8 @@ type Querier interface {
 	ListQuestionsForTask(ctx context.Context, arg ListQuestionsForTaskParams) ([]Question, error)
 	// Opened questions whose notification has not gone out, oldest first.
 	ListQuestionsToNotify(ctx context.Context, arg ListQuestionsToNotifyParams) ([]Question, error)
+	// Open questions whose reminder is due at @now and has not gone out, oldest reminder first.
+	ListQuestionsToRemind(ctx context.Context, arg ListQuestionsToRemindParams) ([]Question, error)
 	// The agent's latest replies on the task, newest first.
 	ListRecentAgentReplies(ctx context.Context, arg ListRecentAgentRepliesParams) ([]TaskEvent, error)
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
@@ -573,6 +577,7 @@ type Querier interface {
 	// The declaring Secret was deleted: keep the row, stop serving it.
 	MarkProviderRemoved(ctx context.Context, arg MarkProviderRemovedParams) error
 	MarkQuestionNotified(ctx context.Context, arg MarkQuestionNotifiedParams) (int64, error)
+	MarkQuestionReminded(ctx context.Context, arg MarkQuestionRemindedParams) (int64, error)
 	// Records that the outcomes were sent to the agent.
 	MarkQuestionsDelivered(ctx context.Context, arg MarkQuestionsDeliveredParams) (int64, error)
 	// starting -> running once the harness session is ready.
@@ -612,6 +617,8 @@ type Querier interface {
 	// One failed delivery of the notification. At @give_up failures the question counts as notified
 	// (notified_at is set), so the sweep stops re-sending it; the caller logs that it gave up.
 	RecordQuestionNotifyFailure(ctx context.Context, arg RecordQuestionNotifyFailureParams) (Question, error)
+	// One failed delivery of the reminder. At @give_up failures the question counts as reminded.
+	RecordQuestionRemindFailure(ctx context.Context, arg RecordQuestionRemindFailureParams) (Question, error)
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
 	ReenableUIMCPServers(ctx context.Context, orgID pgtype.UUID) error
 	// Re-enable UI models whose provider is enabled and that no declared model shadows.

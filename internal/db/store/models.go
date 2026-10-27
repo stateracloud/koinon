@@ -1607,6 +1607,9 @@ type Question struct {
 	DeliveredAt    pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+	RemindAt       pgtype.Timestamptz
+	RemindedAt     pgtype.Timestamptz
+	RemindFailures int32
 }
 
 type Run struct {
