@@ -101,7 +101,7 @@ kubectl -n koinon port-forward svc/koinon-api 8080:8080
 ```
 
 The browser steps below are run by the Playwright spec
-[`web/e2e-real/ticket-stream.spec.ts`](https://github.com/stateracloud/koinon/blob/main/web/e2e-real/ticket-stream.spec.ts)
+[`web/e2e-real/task-stream.spec.ts`](https://github.com/stateracloud/koinon/blob/main/web/e2e-real/task-stream.spec.ts)
 against a real install. The spec's steps are numbered like these steps. The label names in bold are
 the spec's own. A check in CI fails when a bold label here is not in the spec.
 
@@ -214,6 +214,15 @@ Koinon creates the branch, the commit and the pull request through the GitHub AP
 run resumes. The agent posts the pull request URL on the task and the run ends as `succeeded`.
 Open the pull request on GitHub. The **Run costs** section of the task shows the tokens and the
 spend of the run.
+
+## Where next
+
+- [Tasks and the inbox](/guides/tasks-and-inbox/), and how agents ask you questions
+  ([Questions from agents](/guides/ask-user/));
+- start work without a person: [Triggers](/guides/triggers/);
+- stop approving the same action again and again: [Scoped approvals](/guides/scoped-approvals/);
+- use your own code host: [GitHub Enterprise Server](/guides/ghes/) or [Gitea](/guides/gitea/);
+- keep agents' homes across restarts: [Home checkpoints](/guides/home-checkpoints/).
 
 ## Changing in v0.1
 
