@@ -19,7 +19,7 @@
 #   4. SUITE=go (default): the Go driver in test/e2e drives the quickstart steps through the API
 #      and prints the wall clock of each step and the total from `helm install`.
 #      SUITE=web: Playwright (web/e2e-real, issue #50) drives the same install through the
-#      browser: login, GitHub connection, agent, ticket, streamed reply, approval, terminal run.
+#      browser: login, GitHub connection, agent, task, streamed reply, approval, terminal run.
 #      The two suites each need a fresh install (the bootstrap password is one-time), so run one
 #      per cluster.
 #
