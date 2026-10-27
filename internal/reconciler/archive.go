@@ -62,7 +62,7 @@ func (r *Reconciler) archive(ctx context.Context, w *work, ws string, sb executi
 		// Otherwise the sandbox holds nothing newer than the checkpoint it was restored from.
 		cp, err := r.q.LatestHomeCheckpointOfSandbox(ctx, store.LatestHomeCheckpointOfSandboxParams{OrgID: w.org.ID, AgentID: w.agent.ID, SandboxID: sb.ID})
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && !fresh(cp, since) {
-			r.log.Info("not archiving a stopped sandbox: its latest home backup is not complete", w.logAttrs()...)
+			r.log.Debug("not archiving a stopped sandbox: its latest home backup is not complete", w.logAttrs()...)
 			return false, nil
 		}
 		if err != nil {

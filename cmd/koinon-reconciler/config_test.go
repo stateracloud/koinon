@@ -126,6 +126,31 @@ openshell:
 		Expect(err).To(MatchError(ContainSubstring("--gateway-name is required in kubernetes mode")))
 	})
 
+	It("reads archiveAfter: a negative file value turns the tier off, a flag overrides it, empty leaves the default to the reconciler", func() {
+		base := map[string]string{"DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k"}
+		write := func(archiveAfter string) map[string]string {
+			path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+			cfg := "gateway:\n  mode: kubernetes\n  name: g\n  url: http://g:8080\n  port: 8080\n  providerKeysSecret: s\n  providerKeysDir: /d\nopenshell:\n  address: o:1\n"
+			if archiveAfter != "" {
+				cfg += "reconciler:\n  archiveAfter: " + archiveAfter + "\n"
+			}
+			Expect(os.WriteFile(path, []byte(cfg), 0o600)).To(Succeed())
+			env := map[string]string{"KOINON_CONFIG": path}
+			for k, v := range base {
+				env[k] = v
+			}
+			return env
+		}
+		parse := func(env map[string]string, args ...string) config {
+			c, err := parseConfig(args, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+			Expect(err).NotTo(HaveOccurred())
+			return c
+		}
+		Expect(parse(write("-1h")).archiveAfter).To(BeNumerically("<", 0))
+		Expect(parse(write("-1h"), "--archive-after=48h").archiveAfter).To(Equal(48 * time.Hour))
+		Expect(parse(write("")).archiveAfter).To(BeZero())
+	})
+
 	It("requires the database, namespace, OpenShell and gateway settings", func() {
 		_, err := parseConfig(nil, func(string) (string, bool) { return "", false })
 		Expect(err).To(HaveOccurred())

@@ -369,6 +369,65 @@ var _ = Describe("Reconciler home checkpoints", func() {
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
 		})
 
+		It("does not archive while a newer backup is still requested or running", func(ctx SpecContext) {
+			stopWith(ctx, true)
+			_, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{
+				OrgID: org, AgentID: agent.ID, Reason: store.CheckpointReasonHourly, SandboxID: sandboxID(), Generation: row(ctx).HomeGeneration.String,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE home_checkpoints SET status = 'running' WHERE org_id = $1 AND status = 'requested'`, org)
+			Expect(err).NotTo(HaveOccurred())
+			now = time.Now().Add(8 * 24 * time.Hour)
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+			Expect(row(ctx).ArchivedAt.Valid).To(BeFalse())
+			Expect(archivedActions(ctx)).To(Equal(0))
+		})
+
+		It("never archives an ephemeral agent: its sandbox belongs to a task", func(ctx SpecContext) {
+			eph := newAgentWithConfig(ctx, org, user, `{"instructions":"help","ephemeral":true}`)
+			pass(ctx)
+			now = time.Now().Add(30 * 24 * time.Hour)
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+			sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: org, AgentID: eph.ID})
+			if err == nil {
+				Expect(sb.ArchivedAt.Valid).To(BeFalse())
+			}
+			Expect(archivedActions(ctx)).To(Equal(0))
+		})
+
+		It("archives a sandbox with a parked run, and creates one with the same generation when the park becomes claimable", func(ctx SpecContext) {
+			lineage := row(ctx).HomeGeneration.String
+			queueRun(ctx, org, user, agent.ID)
+			run := claimRun(ctx, org)
+			_, err := q.ParkRun(ctx, store.ParkRunParams{OrgID: org, ID: run.ID, Epoch: run.Epoch, ParkReason: store.RunParkReasonApproval})
+			Expect(err).NotTo(HaveOccurred())
+			now = time.Now().Add(2 * time.Hour)
+			pass(ctx)
+			finish(ctx, true)
+			pass(ctx)
+			Expect(row(ctx).State).To(Equal(store.SandboxStateStopped))
+
+			now = time.Now().Add(8 * 24 * time.Hour)
+			creates := osg.Calls("CreateSandbox")
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(row(ctx).ArchivedAt.Valid).To(BeTrue())
+			pass(ctx)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(creates), "a park that is not claimable creates nothing")
+
+			_, err = q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: org, ID: run.ID})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(creates + 1))
+			got := row(ctx)
+			Expect(got.ArchivedAt.Valid).To(BeFalse())
+			Expect(got.HomeGeneration.String).To(Equal(lineage))
+		})
+
 		It("does not archive when the archive tier is off", func(ctx SpecContext) {
 			stopWith(ctx, true)
 			cfg.ArchiveAfter = -1

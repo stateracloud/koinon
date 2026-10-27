@@ -348,6 +348,37 @@ func (q *Queries) ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) 
 	return items, nil
 }
 
+const listArchivedAgentSandboxes = `-- name: ListArchivedAgentSandboxes :many
+SELECT agent_id, archived_at FROM agent_sandboxes
+WHERE org_id = $1 AND archived_at IS NOT NULL
+`
+
+type ListArchivedAgentSandboxesRow struct {
+	AgentID    pgtype.UUID
+	ArchivedAt pgtype.Timestamptz
+}
+
+// Which of an org's agents have their sandbox archived (plan item AR1), for one read of a list.
+func (q *Queries) ListArchivedAgentSandboxes(ctx context.Context, orgID pgtype.UUID) ([]ListArchivedAgentSandboxesRow, error) {
+	rows, err := q.db.Query(ctx, listArchivedAgentSandboxes, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListArchivedAgentSandboxesRow
+	for rows.Next() {
+		var i ListArchivedAgentSandboxesRow
+		if err := rows.Scan(&i.AgentID, &i.ArchivedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgsToReconcile = `-- name: ListOrgsToReconcile :many
 
 SELECT id, slug FROM orgs

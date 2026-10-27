@@ -432,6 +432,8 @@ type Querier interface {
 	// cleaned up yet.
 	ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) ([]Agent, error)
 	ListApprovalRequestsForTask(ctx context.Context, arg ListApprovalRequestsForTaskParams) ([]ApprovalRequest, error)
+	// Which of an org's agents have their sandbox archived (plan item AR1), for one read of a list.
+	ListArchivedAgentSandboxes(ctx context.Context, orgID pgtype.UUID) ([]ListArchivedAgentSandboxesRow, error)
 	// Every org that has a chain, for the verifier.
 	ListAuditChainOrgs(ctx context.Context) ([]pgtype.UUID, error)
 	// One page of an org's chain in chain order, with the fields the hash covers as text, so the

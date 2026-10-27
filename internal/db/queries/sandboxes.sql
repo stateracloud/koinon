@@ -38,6 +38,11 @@ ORDER BY a.created_at, a.id;
 SELECT * FROM agent_sandboxes
 WHERE org_id = @org_id AND agent_id = @agent_id;
 
+-- name: ListArchivedAgentSandboxes :many
+-- Which of an org's agents have their sandbox archived (plan item AR1), for one read of a list.
+SELECT agent_id, archived_at FROM agent_sandboxes
+WHERE org_id = @org_id AND archived_at IS NOT NULL;
+
 -- name: CreateAgentSandbox :one
 INSERT INTO agent_sandboxes (org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name)
 VALUES (@org_id, @agent_id, @workspace, @sandbox_name, @provider_name, @key_secret_name)
