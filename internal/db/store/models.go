@@ -739,6 +739,95 @@ func (ns NullPlatformAdminSource) Value() (driver.Value, error) {
 	return string(ns.PlatformAdminSource), nil
 }
 
+type QuestionAnswerKind string
+
+const (
+	QuestionAnswerKindChoice  QuestionAnswerKind = "choice"
+	QuestionAnswerKindDraft   QuestionAnswerKind = "draft"
+	QuestionAnswerKindText    QuestionAnswerKind = "text"
+	QuestionAnswerKindDefault QuestionAnswerKind = "default"
+)
+
+func (e *QuestionAnswerKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = QuestionAnswerKind(s)
+	case string:
+		*e = QuestionAnswerKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for QuestionAnswerKind: %T", src)
+	}
+	return nil
+}
+
+type NullQuestionAnswerKind struct {
+	QuestionAnswerKind QuestionAnswerKind
+	Valid              bool // Valid is true if QuestionAnswerKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullQuestionAnswerKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.QuestionAnswerKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.QuestionAnswerKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullQuestionAnswerKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.QuestionAnswerKind), nil
+}
+
+type QuestionState string
+
+const (
+	QuestionStateAsked     QuestionState = "asked"
+	QuestionStateOpen      QuestionState = "open"
+	QuestionStateAnswered  QuestionState = "answered"
+	QuestionStateDismissed QuestionState = "dismissed"
+	QuestionStateExpired   QuestionState = "expired"
+)
+
+func (e *QuestionState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = QuestionState(s)
+	case string:
+		*e = QuestionState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for QuestionState: %T", src)
+	}
+	return nil
+}
+
+type NullQuestionState struct {
+	QuestionState QuestionState
+	Valid         bool // Valid is true if QuestionState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullQuestionState) Scan(value interface{}) error {
+	if value == nil {
+		ns.QuestionState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.QuestionState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullQuestionState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.QuestionState), nil
+}
+
 type RunFailureClass string
 
 const (
@@ -1491,6 +1580,31 @@ type Provider struct {
 	CreatedBy       pgtype.UUID
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
+}
+
+type Question struct {
+	OrgID         pgtype.UUID
+	ID            pgtype.UUID
+	TaskID        pgtype.UUID
+	RunID         pgtype.UUID
+	AgentID       pgtype.UUID
+	AskedTo       pgtype.UUID
+	Question      string
+	Choices       []byte
+	Draft         pgtype.Text
+	DefaultAnswer string
+	State         QuestionState
+	Answer        pgtype.Text
+	AnswerKind    NullQuestionAnswerKind
+	AnsweredBy    pgtype.UUID
+	CallSha256    string
+	ExpiresAt     pgtype.Timestamptz
+	OpenedAt      pgtype.Timestamptz
+	NotifiedAt    pgtype.Timestamptz
+	ResolvedAt    pgtype.Timestamptz
+	DeliveredAt   pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
 }
 
 type Run struct {

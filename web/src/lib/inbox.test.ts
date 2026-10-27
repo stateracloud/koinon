@@ -3,7 +3,8 @@
 import { describe, expect, it } from 'vitest'
 import { TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { buildInbox } from '@/lib/inbox'
-import { approval, task } from '@/test-utils'
+import { QuestionState } from '@/gen/koinon/question/v1alpha1/question_pb'
+import { approval, question, task } from '@/test-utils'
 
 const names = new Map([['a-1', 'Repo helper']])
 
@@ -42,5 +43,28 @@ describe('buildInbox', () => {
 
   it('is empty when nothing waits', () => {
     expect(buildInbox({ tasks: [task('t-1', 'x', TaskState.WORKING)], approvals: [], agentNames: names, userId: 'u-1' })).toEqual([])
+  })
+
+  it('lists an open question and lets it explain its task', () => {
+    const items = buildInbox({
+      tasks: [task('t-1', 'Deploy the app', TaskState.INPUT_REQUIRED)],
+      approvals: [],
+      questions: [question('q-1', 't-1', { agentId: 'a-1' })],
+      agentNames: names,
+      userId: 'u-1',
+    })
+    expect(items.map((i) => i.key)).toEqual(['question:q-1'])
+    expect(items[0]).toMatchObject({ kind: 'question', taskTitle: 'Deploy the app', agentName: 'Repo helper' })
+  })
+
+  it('lists no question that is resolved or not the viewer\'s to answer', () => {
+    const items = buildInbox({
+      tasks: [task('t-1', 'Deploy the app', TaskState.WORKING)],
+      approvals: [],
+      questions: [question('q-1', 't-1', { state: QuestionState.ANSWERED }), question('q-2', 't-1', { canAnswer: false })],
+      agentNames: names,
+      userId: 'u-1',
+    })
+    expect(items).toEqual([])
   })
 })

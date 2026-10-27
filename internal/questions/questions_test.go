@@ -1,0 +1,247 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package questions_test
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/questions"
+)
+
+func tx(ctx context.Context, fn func(q *store.Queries) error) error {
+	return pgx.BeginFunc(ctx, pool, func(t pgx.Tx) error { return fn(store.New(t)) })
+}
+
+var _ = Describe("Ask.Validate", func() {
+	base := func() questions.Ask {
+		return questions.Ask{Question: "Post the reply?", Default: "do not post", Choices: []string{"post", "do not post"}}
+	}
+	It("accepts a question with choices and a default among them", func() {
+		a := base()
+		Expect(a.Validate()).To(Succeed())
+	})
+	It("requires a safe default (ADR 0065 decision 10a)", func() {
+		a := base()
+		a.Default = " "
+		Expect(a.Validate()).To(MatchError(ContainSubstring("default is required")))
+	})
+	It("requires the default to be one of the choices", func() {
+		a := base()
+		a.Default = "post it anyway"
+		Expect(a.Validate()).To(MatchError(ContainSubstring("one of the choices")))
+	})
+	It("takes any default with free text", func() {
+		a := questions.Ask{Question: "What should the title be?", Default: "keep the current title"}
+		Expect(a.Validate()).To(Succeed())
+	})
+	It("refuses empty, duplicate and too many choices, and long text", func() {
+		a := base()
+		a.Choices = []string{"a", "a"}
+		a.Default = "a"
+		Expect(a.Validate()).To(MatchError(ContainSubstring("listed twice")))
+		a = base()
+		a.Choices = make([]string, 11)
+		Expect(a.Validate()).To(MatchError(ContainSubstring("at most 10")))
+		a = base()
+		a.Question = strings.Repeat("x", questions.MaxQuestionBytes+1)
+		Expect(a.Validate()).To(MatchError(ContainSubstring("at most")))
+	})
+})
+
+var _ = Describe("a question", func() {
+	var (
+		w   world
+		ask questions.Ask
+	)
+	BeforeEach(func(ctx SpecContext) {
+		w = newWorld(ctx)
+		ask = questions.Ask{
+			Org: w.org, Task: w.task, Run: w.run.ID, Agent: w.agent, To: w.user,
+			Question: "Post the reply?", Draft: "Thanks, fixed in 1.2.", Choices: []string{"post", "do not post"}, Default: "do not post",
+		}
+	})
+	create := func(ctx context.Context, a questions.Ask) (row store.Question, created bool) {
+		GinkgoHelper()
+		Expect(tx(ctx, func(q *store.Queries) (err error) {
+			row, created, err = questions.Create(ctx, q, a)
+			return err
+		})).To(Succeed())
+		return row, created
+	}
+	open := func(ctx context.Context) {
+		GinkgoHelper()
+		Expect(tx(ctx, func(q *store.Queries) error {
+			_, err := questions.OpenForRun(ctx, q, w.org, w.run.ID, w.task)
+			return err
+		})).To(Succeed())
+	}
+
+	It("is the same question when asked twice in one run", func(ctx SpecContext) {
+		first, created := create(ctx, ask)
+		Expect(created).To(BeTrue())
+		again, created := create(ctx, ask)
+		Expect(created).To(BeFalse())
+		Expect(again.ID).To(Equal(first.ID))
+		ask.Question = "Post the reply now?"
+		other, created := create(ctx, ask)
+		Expect(created).To(BeTrue())
+		Expect(other.ID).NotTo(Equal(first.ID))
+	})
+
+	It("can only be addressed to a member of the org", func(ctx SpecContext) {
+		stranger := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
+		ask.To = stranger
+		err := tx(ctx, func(q *store.Queries) error { _, _, err := questions.Create(ctx, q, ask); return err })
+		Expect(err).To(MatchError(questions.ErrNotMember))
+	})
+
+	It("is not answerable until it is opened, and open questions show in the addressee's inbox only", func(ctx SpecContext) {
+		row, _ := create(ctx, ask)
+		err := tx(ctx, func(q *store.Queries) error {
+			_, err := questions.Respond(ctx, q, w.org, row.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+			return err
+		})
+		Expect(err).To(MatchError(questions.ErrNotOpen))
+		inbox, _ := q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: w.org, UserID: w.user})
+		Expect(inbox).To(BeEmpty())
+
+		open(ctx)
+		inbox, _ = q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: w.org, UserID: w.user})
+		Expect(inbox).To(HaveLen(1))
+		bob := w.member(ctx)
+		inbox, _ = q.ListOpenQuestionsForUser(ctx, store.ListOpenQuestionsForUserParams{OrgID: w.org, UserID: bob})
+		Expect(inbox).To(BeEmpty())
+		err = tx(ctx, func(q *store.Queries) error {
+			_, err := questions.Respond(ctx, q, w.org, row.ID, bob, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+			return err
+		})
+		Expect(err).To(MatchError(questions.ErrNotAskedTo))
+	})
+
+	DescribeTable("checks the answer against the question",
+		func(ctx SpecContext, ans questions.Answer, want string) {
+			row, _ := create(ctx, ask)
+			open(ctx)
+			err := tx(ctx, func(q *store.Queries) error {
+				_, err := questions.Respond(ctx, q, w.org, row.ID, w.user, ans)
+				return err
+			})
+			if want == "" {
+				Expect(err).NotTo(HaveOccurred())
+				return
+			}
+			Expect(err).To(MatchError(ContainSubstring(want)))
+			Expect(err).To(MatchError(questions.ErrInvalid))
+		},
+		Entry("a listed choice", questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"}, ""),
+		Entry("a choice that is not listed", questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "maybe"}, "not one of the choices"),
+		Entry("the draft as offered", questions.Answer{Kind: store.QuestionAnswerKindDraft}, ""),
+		Entry("the draft, edited", questions.Answer{Kind: store.QuestionAnswerKindDraft, Text: "Thanks!"}, ""),
+		Entry("free text", questions.Answer{Kind: store.QuestionAnswerKindText, Text: "post, but friendlier"}, ""),
+		Entry("empty text", questions.Answer{Kind: store.QuestionAnswerKindText, Text: "  "}, "empty"),
+		Entry("the default is not an answer a person gives", questions.Answer{Kind: store.QuestionAnswerKindDefault, Text: "x"}, "choice, the draft or text"),
+	)
+
+	It("resolves the park once, only when no approval or other question is open", func(ctx SpecContext) {
+		first, _ := create(ctx, ask)
+		ask.Question = "And the title?"
+		ask.Choices, ask.Draft, ask.Default = nil, "", "keep it"
+		second, _ := create(ctx, ask)
+		Expect(tx(ctx, func(q *store.Queries) error {
+			if _, err := questions.OpenForRun(ctx, q, w.org, w.run.ID, w.task); err != nil {
+				return err
+			}
+			_, err := q.ParkRun(ctx, store.ParkRunParams{
+				OrgID: w.org, ID: w.run.ID, Epoch: w.run.Epoch, ParkReason: store.RunParkReasonInputRequired,
+				ParkExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+			})
+			return err
+		})).To(Succeed())
+		ready := func() bool {
+			r, err := q.GetRun(ctx, store.GetRunParams{OrgID: w.org, ID: w.run.ID})
+			Expect(err).NotTo(HaveOccurred())
+			return r.ReadyAt.Valid
+		}
+
+		Expect(tx(ctx, func(q *store.Queries) error {
+			_, err := questions.Respond(ctx, q, w.org, first.ID, w.user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "post"})
+			return err
+		})).To(Succeed())
+		Expect(ready()).To(BeFalse(), "another question is still open")
+		Expect(tx(ctx, func(q *store.Queries) error {
+			_, err := questions.Dismiss(ctx, q, w.org, second.ID, w.user)
+			return err
+		})).To(Succeed())
+		Expect(ready()).To(BeTrue())
+
+		By("the dismissed question's answer is the default, and delivery is tracked")
+		got, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: w.org, ID: second.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.Answer.String).To(Equal("keep it"))
+		Expect(got.AnswerKind.QuestionAnswerKind).To(Equal(store.QuestionAnswerKindDefault))
+		Expect(got.AnsweredBy).To(Equal(w.user))
+		undelivered, err := q.ListUndeliveredQuestionsForRun(ctx, store.ListUndeliveredQuestionsForRunParams{OrgID: w.org, RunID: w.run.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(undelivered).To(HaveLen(2))
+	})
+
+	It("expires without an actor and keeps the default as the answer", func(ctx SpecContext) {
+		row, _ := create(ctx, ask)
+		open(ctx)
+		Expect(tx(ctx, func(q *store.Queries) error { _, err := questions.Expire(ctx, q, w.org, row.ID); return err })).To(Succeed())
+		got, _ := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: w.org, ID: row.ID})
+		Expect(got.State).To(Equal(store.QuestionStateExpired))
+		Expect(got.AnsweredBy.Valid).To(BeFalse())
+		Expect(got.Answer.String).To(Equal("do not post"))
+	})
+
+	It("lists the open questions past their expiry for TK4", func(ctx SpecContext) {
+		ask.ExpiresAt = time.Now().Add(-time.Minute)
+		row, _ := create(ctx, ask)
+		open(ctx)
+		due, err := q.ListDueQuestions(ctx, store.ListDueQuestionsParams{OrgID: w.org, Now: pgtype.Timestamptz{Time: time.Now(), Valid: true}, MaxRows: 10})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(due).To(HaveLen(1))
+		Expect(due[0].ID).To(Equal(row.ID))
+	})
+
+	It("notifies once, in the inbox's notification list, after it is opened", func(ctx SpecContext) {
+		row, _ := create(ctx, ask)
+		n := durable.NewNotifier(nil, nil)
+		questions.RegisterNotifications(n, pool)
+
+		notes := func() []store.Notification {
+			GinkgoHelper()
+			n, err := q.ListNotifications(ctx, store.ListNotificationsParams{OrgID: w.org, UserID: w.user, MaxRows: 10})
+			Expect(err).NotTo(HaveOccurred())
+			return n
+		}
+		_, err := questions.NotifyPending(ctx, pool, n)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(notes()).To(BeEmpty(), "an asked question is not announced")
+
+		open(ctx)
+		_, err = questions.NotifyPending(ctx, pool, n)
+		Expect(err).NotTo(HaveOccurred())
+		ns := notes()
+		Expect(ns).To(HaveLen(1))
+		Expect(ns[0].Kind).To(Equal(questions.NotificationKind))
+		Expect(ns[0].DedupeKey).To(Equal("question:" + row.ID.String()))
+
+		_, err = questions.NotifyPending(ctx, pool, n)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(notes()).To(HaveLen(1), "it is marked notified, so it is not sent again")
+		got, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: w.org, ID: row.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.NotifiedAt.Valid).To(BeTrue())
+	})
+})

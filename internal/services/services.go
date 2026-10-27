@@ -47,6 +47,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
@@ -156,6 +157,7 @@ func (s *Server) Register(server *connect.Server) {
 	agentv1alpha1connect.RegisterAgentServiceHandler(server, s)
 	ticketv1alpha1connect.RegisterTicketServiceHandler(server, s)
 	taskv1alpha1connect.RegisterTaskServiceHandler(server, taskAPI{s})
+	questionv1alpha1connect.RegisterQuestionServiceHandler(server, s)
 	runv1alpha1connect.RegisterRunServiceHandler(server, s)
 	templatev1alpha1connect.RegisterTemplateServiceHandler(server, s)
 	connectionv1alpha1connect.RegisterConnectionServiceHandler(server, s)

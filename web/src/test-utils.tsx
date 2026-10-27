@@ -10,6 +10,7 @@ import App from '@/App'
 import { ApprovalSchema, Decision, Status as ApprovalStatus } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AgentSchema, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { MembershipSchema, OrgRole, UserSchema, WhoAmIResponseSchema } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { QuestionSchema, QuestionState } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { CreatorKind, CreatorSchema, TaskSchema, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 
 export const orgId = 'org-1'
@@ -46,6 +47,30 @@ export function approval(id: string, taskId: string, init: { canDecide?: boolean
     status: ApprovalStatus.PENDING,
     canDecide: init.canDecide ?? true,
     approvalsRequired: 1,
+    createdAt: timestampFromMs(Date.now()),
+  })
+}
+
+/** question is an open ask_user question of task taskId, addressed to the viewer. */
+export function question(
+  id: string,
+  taskId: string,
+  init: { question?: string; choices?: string[]; draft?: string; defaultAnswer?: string; agentId?: string; canAnswer?: boolean; state?: QuestionState } = {},
+) {
+  return create(QuestionSchema, {
+    id,
+    orgId,
+    taskId,
+    runId: 'r-1',
+    agentId: init.agentId ?? 'a-1',
+    askedTo: 'u-1',
+    question: init.question ?? 'Which region should I deploy to?',
+    choices: init.choices ?? ['eu-west-1', 'us-east-1'],
+    draft: init.draft ?? '',
+    defaultAnswer: init.defaultAnswer ?? 'eu-west-1',
+    state: init.state ?? QuestionState.OPEN,
+    canAnswer: init.canAnswer ?? true,
+    openedAt: timestampFromMs(Date.now()),
     createdAt: timestampFromMs(Date.now()),
   })
 }

@@ -40,6 +40,8 @@ import (
 	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
+	questionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
@@ -142,6 +144,25 @@ var isolationCases = map[string]isolationCase{
 			return c.tickets.MoveTicket(ctx, &ticketv1alpha1.MoveTicketRequest{
 				OrgId: org, TicketId: f.ticket.GetId(), Status: ticketv1alpha1.TicketStatus_TICKET_STATUS_DONE,
 			})
+		},
+	},
+
+	questionv1alpha1connect.QuestionServiceListQuestionsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.questions.ListQuestions(ctx, &questionv1alpha1.ListQuestionsRequest{OrgId: org})
+		},
+	},
+	questionv1alpha1connect.QuestionServiceAnswerQuestionProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.questions.AnswerQuestion(ctx, &questionv1alpha1.AnswerQuestionRequest{
+				OrgId: org, QuestionId: f.question.ID.String(), Answer: &questionv1alpha1.AnswerQuestionRequest_Text{Text: "intruder"},
+			})
+		},
+	},
+	questionv1alpha1connect.QuestionServiceDismissQuestionProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.questions.DismissQuestion(ctx, &questionv1alpha1.DismissQuestionRequest{OrgId: org, QuestionId: f.question.ID.String()})
 		},
 	},
 
@@ -555,6 +576,7 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	Expect(err).NotTo(HaveOccurred())
 	f.connection = res.GetConnection().GetId()
 	f.approval = e.pendingApproval(ctx, f)
+	f.question = e.openQuestion(ctx, f)
 	tok, err := f.owner.tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{
 		OrgId: f.org, Name: "ci", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN,
 	})
