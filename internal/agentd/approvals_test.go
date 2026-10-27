@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
+	"github.com/stateracloud/koinon/internal/testing/fakegitea"
 )
 
 // markAsk makes the fake harness call create_pull_request through Koinon's tool server.
@@ -44,6 +45,7 @@ func (h headerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 type ghEnv struct {
 	*env
 	gh    *githubtest.Fake
+	gt    *fakegitea.Fake // a Gitea in place of gh (newGiteaEnv)
 	svc   *approvals.Service
 	tools *httptest.Server
 	slug  string

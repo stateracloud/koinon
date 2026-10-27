@@ -16,6 +16,11 @@ func userJSON(base, login string) map[string]any {
 }
 
 func (f *Fake) repoJSON(base string, rp *repo) map[string]any {
+	return f.repoJSONFor(base, rp, "write")
+}
+
+// repoJSONFor is repoJSON as seen by a login with the given permission on the repository.
+func (f *Fake) repoJSONFor(base string, rp *repo, permission string) map[string]any {
 	html := base + "/" + f.Owner + "/" + rp.name
 	return map[string]any{
 		"id": rp.id, "owner": userJSON(base, f.Owner), "name": rp.name, "full_name": f.Owner + "/" + rp.name,
@@ -26,7 +31,7 @@ func (f *Fake) repoJSON(base string, rp *repo) map[string]any {
 		"default_branch": rp.defaultBranch(), "archived": false, "internal": false,
 		"has_issues": true, "has_pull_requests": true, "has_code": true,
 		"created_at": ts(rp.created), "updated_at": ts(rp.created),
-		"permissions":         map[string]bool{"admin": false, "push": true, "pull": true},
+		"permissions":         map[string]bool{"admin": permission == "admin", "push": canWrite(permission), "pull": permission != ""},
 		"allow_merge_commits": true, "allow_rebase": true, "allow_squash_merge": true,
 		"default_merge_style": "merge",
 	}
@@ -42,10 +47,12 @@ func (rp *repo) openPulls() int {
 	return n
 }
 
-func (f *Fake) listRepos(w http.ResponseWriter, r *http.Request, _ string) error {
+func (f *Fake) listRepos(w http.ResponseWriter, r *http.Request, login string) error {
 	var all []map[string]any
 	for _, rp := range f.sortedRepos() {
-		all = append(all, f.repoJSON(baseURL(r), rp))
+		if perm := f.permission(login, rp.name); perm != "" {
+			all = append(all, f.repoJSONFor(baseURL(r), rp, perm))
+		}
 	}
 	writeJSON(w, http.StatusOK, orEmpty(paginate(w, r, all)))
 	return nil
@@ -58,8 +65,8 @@ func orEmpty[T any](s []T) []T {
 	return s
 }
 
-func (f *Fake) getRepo(w http.ResponseWriter, r *http.Request, rp *repo, _ string) error {
-	writeJSON(w, http.StatusOK, f.repoJSON(baseURL(r), rp))
+func (f *Fake) getRepo(w http.ResponseWriter, r *http.Request, rp *repo, login string) error {
+	writeJSON(w, http.StatusOK, f.repoJSONFor(baseURL(r), rp, f.permission(login, rp.name)))
 	return nil
 }
 
