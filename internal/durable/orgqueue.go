@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -49,9 +50,13 @@ type LimitsFunc func(ctx context.Context, org string) (OrgLimits, error)
 
 // OrgQueueConfig configures OrgWork.
 type OrgQueueConfig struct {
-	// Defaults fill every zero limit; zero values use the package defaults.
+	// Defaults fill every zero limit; zero values use the package defaults. An org whose limits
+	// equal Defaults stays on the main queue, so when Limits comes from org settings, set Defaults
+	// to the settings defaults (orgsettings.QueueDefaults).
 	Defaults OrgLimits
-	// RateWindow is the rate-limit window; zero is DefaultOrgRateWindow.
+	// RateWindow is the rate-limit window; zero is DefaultOrgRateWindow. It is part of a profile
+	// queue's name. The org settings store a rate per minute (orgsettings.QueueLimits), so
+	// production leaves this at one minute; a different window changes what that rate means.
 	RateWindow time.Duration
 	// Limits resolves an org's limits; nil gives every org the defaults.
 	Limits LimitsFunc
@@ -113,7 +118,7 @@ func (w *OrgWork) queueName(l OrgLimits) string {
 	if l == w.cfg.Defaults {
 		return OrgQueueName
 	}
-	return fmt.Sprintf("%s/c%d/r%d", OrgQueueName, l.Concurrency, l.RatePerWindow)
+	return fmt.Sprintf("%s/c%d/r%dp%d", OrgQueueName, l.Concurrency, l.RatePerWindow, int(w.cfg.RateWindow/time.Second))
 }
 
 func (w *OrgWork) ensureQueue(c dbos.Context, l OrgLimits) (string, error) {
@@ -157,6 +162,6 @@ func EnqueueForOrg[R, P any](ctx context.Context, w *OrgWork, org, workflowName 
 	if err != nil {
 		return nil, err
 	}
-	opts = append(opts, dbos.WithEnqueueQueuePartitionKey(org))
-	return dbos.Enqueue[R](dctx, name, workflowName, input, opts...)
+	all := append(slices.Clone(opts), dbos.WithEnqueueQueuePartitionKey(org))
+	return dbos.Enqueue[R](dctx, name, workflowName, input, all...)
 }

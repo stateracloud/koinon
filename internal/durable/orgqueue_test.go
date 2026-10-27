@@ -4,7 +4,9 @@ package durable_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -18,18 +20,23 @@ import (
 type itemLog struct {
 	mu      sync.Mutex
 	started map[string][]time.Time
+	ids     map[string]map[string]bool
 	done    map[string]int
 	active  map[string]int
 	peak    map[string]int
 }
 
 func newItemLog() *itemLog {
-	return &itemLog{started: map[string][]time.Time{}, done: map[string]int{}, active: map[string]int{}, peak: map[string]int{}}
+	return &itemLog{started: map[string][]time.Time{}, ids: map[string]map[string]bool{}, done: map[string]int{}, active: map[string]int{}, peak: map[string]int{}}
 }
 
-func (l *itemLog) begin(org string) {
+func (l *itemLog) begin(org, id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.ids[org] == nil {
+		l.ids[org] = map[string]bool{}
+	}
+	l.ids[org][id] = true
 	l.started[org] = append(l.started[org], time.Now())
 	l.active[org]++
 	l.peak[org] = max(l.peak[org], l.active[org])
@@ -48,6 +55,13 @@ func (l *itemLog) starts(org string) int {
 	return len(l.started[org])
 }
 
+// distinct counts different items that started, so a re-execution does not count twice.
+func (l *itemLog) distinct(org string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.ids[org])
+}
+
 func (l *itemLog) finished(org string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -60,12 +74,12 @@ func (l *itemLog) peakOf(org string) int {
 	return l.peak[org]
 }
 
-type item struct{ Org string }
+type item struct{ Org, ID string }
 
 func newOrgRuntime(dsn string, log *itemLog, work time.Duration, cfg durable.OrgQueueConfig) (*durable.Runtime, *durable.OrgWork) {
 	rt := durable.New(durable.Config{DatabaseURL: dsn, ApplicationVersion: "v1", ExecutorID: "koinon-api-test"})
 	run := func(_ dbos.Context, in item) (string, error) {
-		log.begin(in.Org)
+		log.begin(in.Org, in.ID)
 		defer log.end(in.Org)
 		time.Sleep(work)
 		return in.Org, nil
@@ -80,9 +94,11 @@ func newOrgRuntime(dsn string, log *itemLog, work time.Duration, cfg durable.Org
 	return rt, w
 }
 
+var itemSeq atomic.Int64
+
 func enqueueItem(ctx context.Context, w *durable.OrgWork, org string) dbos.WorkflowHandle[string] {
 	GinkgoHelper()
-	h, err := durable.EnqueueForOrg[string](ctx, w, org, "test.org-item", item{Org: org})
+	h, err := durable.EnqueueForOrg[string](ctx, w, org, "test.org-item", item{Org: org, ID: fmt.Sprintf("%s-%d", org, itemSeq.Add(1))})
 	Expect(err).NotTo(HaveOccurred())
 	return h
 }
@@ -158,6 +174,9 @@ var _ = Describe("per-org queue", func() {
 			enqueueItem(ctx, w, "org-r")
 		}
 		Eventually(func() int { return log.starts("org-r") }, 8*time.Second, 100*time.Millisecond).Should(Equal(3))
+		// Let the three running items finish: DBOS puts in-flight workflows back to ENQUEUED on
+		// shutdown, and the second runtime would run them again.
+		Eventually(func() int { return log.finished("org-r") }, 8*time.Second, 50*time.Millisecond).Should(Equal(3))
 
 		// Stop and restart against the same database, still inside the window.
 		Expect(first.Shutdown(5 * time.Second)).To(Succeed())
@@ -167,9 +186,10 @@ var _ = Describe("per-org queue", func() {
 
 		// The restart took place well inside the window: the rest must wait for it to end.
 		Expect(time.Since(window)).To(BeNumerically("<", 8*time.Second))
-		Consistently(func() int { return log.starts("org-r") }, 2*time.Second, 100*time.Millisecond).Should(Equal(3))
+		Consistently(func() int { return log.distinct("org-r") }, 2*time.Second, 100*time.Millisecond).Should(Equal(3))
 
-		Eventually(func() int { return log.starts("org-r") }, 30*time.Second, 200*time.Millisecond).Should(Equal(6))
+		Eventually(func() int { return log.distinct("org-r") }, 30*time.Second, 200*time.Millisecond).Should(Equal(6))
+		Expect(log.starts("org-r")).To(Equal(6), "no item ran twice")
 		Expect(time.Since(window)).To(BeNumerically(">=", 12*time.Second-time.Second), "the other three started only after the window moved on")
 	}, SpecTimeout(3*time.Minute))
 
