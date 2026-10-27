@@ -196,6 +196,24 @@ var _ = Describe("Scoped approvals", func() {
 		Expect(f.call(ctx, githubtools.ToolCreatePullRequest, cleanPR("koinon/lcm-part-3")).Status).To(Equal("pending"))
 	})
 
+	It("does not let a scope granted on one connection cover the same repository on another host", func(ctx SpecContext) {
+		first := f.call(ctx, githubtools.ToolCreatePullRequest, cleanPR("koinon/lcm-host-1"))
+		approveWith(ctx, first, approvals.Scope{Kind: approvals.ScopeAgent, Until: clock.Now().Add(24 * time.Hour)})
+		scopes, err := f.svc.ListScopes(ctx, f.org, f.agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(scopes[0].CallBinding)).To(ContainSubstring("connectionId"))
+
+		By("the same connection still covers it")
+		f.nextRun(ctx)
+		Expect(f.call(ctx, githubtools.ToolCreatePullRequest, cleanPR("koinon/lcm-host-2")).Status).To(Equal("approved"))
+
+		By("the connection now points at another host: the scope no longer applies")
+		_, err = pool.Exec(ctx, `UPDATE connections SET config = config || '{"baseUrl":"https://ghes.example.test"}'::jsonb WHERE org_id = $1`, f.org)
+		Expect(err).NotTo(HaveOccurred())
+		f.nextRun(ctx)
+		Expect(f.call(ctx, githubtools.ToolCreatePullRequest, cleanPR("koinon/lcm-host-3")).Status).To(Equal("pending"))
+	})
+
 	It("does not let a scope in one org or for one agent cover another", func(ctx SpecContext) {
 		first := f.call(ctx, githubtools.ToolCreatePullRequest, cleanPR("koinon/lcm-week-1"))
 		approveWith(ctx, first, approvals.Scope{Kind: approvals.ScopeAgent, Until: clock.Now().Add(24 * time.Hour)})

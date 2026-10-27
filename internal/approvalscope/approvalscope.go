@@ -31,11 +31,12 @@ const (
 	MaxTaskScope = 30 * 24 * time.Hour
 )
 
-// Match returns the active scope that covers the call, if there is one. q may be a transaction.
-func Match(ctx context.Context, q *store.Queries, org, agent, task pgtype.UUID, connector, tool, target string, now time.Time) (store.ApprovalScope, bool, error) {
+// Match returns the active scope that covers the call, if there is one. q may be a transaction. A
+// non-nil binding must equal the scope's call binding; nil leaves the binding to the caller.
+func Match(ctx context.Context, q *store.Queries, org, agent, task pgtype.UUID, connector, tool, target string, binding []byte, now time.Time) (store.ApprovalScope, bool, error) {
 	sc, err := q.FindActiveApprovalScope(ctx, store.FindActiveApprovalScopeParams{
 		OrgID: org, AgentID: agent, Connector: connector, Tool: tool, Target: target,
-		TaskID: task, Now: pgtype.Timestamptz{Time: now, Valid: true},
+		TaskID: task, CallBinding: binding, Now: pgtype.Timestamptz{Time: now, Valid: true},
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.ApprovalScope{}, false, nil
