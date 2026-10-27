@@ -31,8 +31,15 @@ type Repository struct {
 	Password string
 }
 
+// The table and column that hold the sealed repository passwords. The table is keyed by agent_id,
+// not id, which koinon-api keys (internal/keyscli) knows.
+const (
+	Table  = "home_repositories"
+	Column = "password_envelope"
+)
+
 func binding(org, agent pgtype.UUID) secretstore.Binding {
-	return secretstore.Binding{OrgID: org.String(), Table: "home_repositories", RowID: agent.String(), Column: "password_envelope"}
+	return secretstore.Binding{OrgID: org.String(), Table: Table, RowID: agent.String(), Column: Column}
 }
 
 // Get returns the agent's repository, creating its password on first use.
