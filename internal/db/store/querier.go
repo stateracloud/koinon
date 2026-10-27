@@ -576,10 +576,7 @@ type Querier interface {
 	// No row: the agent already has an open request (home_checkpoints_open); read it with
 	// GetOpenHomeCheckpoint.
 	RequestHomeCheckpoint(ctx context.Context, arg RequestHomeCheckpointParams) (HomeCheckpoint, error)
-	// TODO(EP1): ephemeral agents have no home that outlives a run and must not be checkpointed. The
-	// check lives only in the reconciler (checkpoint.Ephemeral, a stub until EP1); when EP1 lands, filter
-	// here too, for example with a join on the active version's ephemeral flag, and make agentd's
-	// restoreHome skip them.
+	// Ephemeral agents have no home that outlives a run and are not checkpointed (ADR 0065 13c).
 	// One request per agent whose sandbox is ready, has no restore pending (an empty home must not
 	// become the newest checkpoint) and has had no checkpoint requested for @interval_seconds.
 	RequestHourlyHomeCheckpoints(ctx context.Context, arg RequestHourlyHomeCheckpointsParams) ([]HomeCheckpoint, error)
@@ -616,7 +613,8 @@ type Querier interface {
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
 	// Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
 	// new name yet, so the row starts over as pending. The previous sandbox is gone by now (the
-	// reconciler waits for its deletion first). The unhealthy mark belonged to that sandbox.
+	// reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged
+	// to that sandbox: a task sandbox starts its own lineage and nothing carries over between tasks.
 	SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error)
 	// The first of two approvals: remembered, the request stays pending.
 	SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error)

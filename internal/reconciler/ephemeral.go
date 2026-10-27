@@ -68,6 +68,21 @@ func (r *Reconciler) ephemeralTurn(ctx context.Context, w *work, ws string, act 
 	if !gone {
 		// The previous task's sandbox, or one left with no task to serve: delete it with its volume.
 		if sb.Phase != execution.PhaseDeleting {
+			if cur == persistent {
+				// The agent became ephemeral: its persistent home is deleted only after a fresh
+				// checkpoint, as for any recreation (ADR 0032). The restore the gate records is
+				// cleared when the row moves to the task sandbox (SetAgentSandboxName): nothing
+				// carries over into a task sandbox, the checkpoint is kept for a later persistent version.
+				pw := *w
+				pw.cfg.Ephemeral = false
+				ok, note, err := r.homeGate(ctx, &pw, ws, sb, activitySince(w.sb, act))
+				if err != nil {
+					return false, err
+				}
+				if !ok {
+					return true, r.record(ctx, w, sb, w.sb.SpecHash, note)
+				}
+			}
 			if err := r.backend.DeleteSandbox(ctx, ws, cur); err != nil {
 				return false, err
 			}

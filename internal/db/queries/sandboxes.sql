@@ -146,7 +146,8 @@ LIMIT 1;
 -- name: SetAgentSandboxName :one
 -- Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
 -- new name yet, so the row starts over as pending. The previous sandbox is gone by now (the
--- reconciler waits for its deletion first). The unhealthy mark belonged to that sandbox.
+-- reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged
+-- to that sandbox: a task sandbox starts its own lineage and nothing carries over between tasks.
 UPDATE agent_sandboxes
 SET sandbox_name = @sandbox_name,
     state = 'pending',
@@ -157,7 +158,11 @@ SET sandbox_name = @sandbox_name,
     stopped_at = NULL,
     unhealthy_at = NULL,
     unhealthy_reason = NULL,
-    unhealthy_generation = NULL
+    unhealthy_generation = NULL,
+    restore_checkpoint_id = NULL,
+    restore_claimed_at = NULL,
+    sandbox_id = NULL,
+    home_generation = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id
 RETURNING *;
 

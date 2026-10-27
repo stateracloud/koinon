@@ -551,7 +551,11 @@ SET sandbox_name = $1,
     stopped_at = NULL,
     unhealthy_at = NULL,
     unhealthy_reason = NULL,
-    unhealthy_generation = NULL
+    unhealthy_generation = NULL,
+    restore_checkpoint_id = NULL,
+    restore_claimed_at = NULL,
+    sandbox_id = NULL,
+    home_generation = NULL
 WHERE org_id = $2 AND agent_id = $3
 RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at
 `
@@ -564,7 +568,8 @@ type SetAgentSandboxNameParams struct {
 
 // Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
 // new name yet, so the row starts over as pending. The previous sandbox is gone by now (the
-// reconciler waits for its deletion first). The unhealthy mark belonged to that sandbox.
+// reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged
+// to that sandbox: a task sandbox starts its own lineage and nothing carries over between tasks.
 func (q *Queries) SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error) {
 	row := q.db.QueryRow(ctx, setAgentSandboxName, arg.SandboxName, arg.OrgID, arg.AgentID)
 	var i AgentSandbox

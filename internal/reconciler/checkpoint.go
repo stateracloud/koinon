@@ -20,8 +20,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/audit"
-	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 )
@@ -31,7 +31,7 @@ const DefaultCheckpointStopWait = 5 * time.Minute
 
 // checkpointsOn reports whether the agent's home is checkpointed.
 func (r *Reconciler) checkpointsOn(w *work) bool {
-	return r.cfg.Checkpoints && !checkpoint.Ephemeral(w.agent)
+	return r.cfg.Checkpoints && !agentconfig.IsEphemeral(w.cfg)
 }
 
 // fresh reports whether a complete checkpoint was finished since the sandbox's last activity.

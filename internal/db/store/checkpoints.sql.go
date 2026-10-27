@@ -643,8 +643,10 @@ INSERT INTO home_checkpoints (org_id, agent_id, reason, sandbox_id, generation)
 SELECT s.org_id, s.agent_id, 'hourly', coalesce(s.sandbox_id, ''), coalesce(s.home_generation, '')
 FROM agent_sandboxes s
 JOIN agents a ON a.org_id = s.org_id AND a.id = s.agent_id
+LEFT JOIN agent_versions v ON v.org_id = a.org_id AND v.id = a.active_version_id
 WHERE s.org_id = $1 AND s.state = 'ready' AND s.unhealthy_at IS NULL
   AND s.restore_checkpoint_id IS NULL AND a.status = 'active'
+  AND (v.config->>'ephemeral')::boolean IS NOT TRUE
   AND NOT EXISTS (
       SELECT 1 FROM home_checkpoints c
       WHERE c.org_id = s.org_id AND c.agent_id = s.agent_id
@@ -659,10 +661,7 @@ type RequestHourlyHomeCheckpointsParams struct {
 	IntervalSeconds int32
 }
 
-// TODO(EP1): ephemeral agents have no home that outlives a run and must not be checkpointed. The
-// check lives only in the reconciler (checkpoint.Ephemeral, a stub until EP1); when EP1 lands, filter
-// here too, for example with a join on the active version's ephemeral flag, and make agentd's
-// restoreHome skip them.
+// Ephemeral agents have no home that outlives a run and are not checkpointed (ADR 0065 13c).
 // One request per agent whose sandbox is ready, has no restore pending (an empty home must not
 // become the newest checkpoint) and has had no checkpoint requested for @interval_seconds.
 func (q *Queries) RequestHourlyHomeCheckpoints(ctx context.Context, arg RequestHourlyHomeCheckpointsParams) ([]HomeCheckpoint, error) {
