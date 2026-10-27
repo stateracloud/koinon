@@ -20,6 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 )
 
@@ -185,6 +186,11 @@ var _ = Describe("home checkpoints", func() {
 	}
 	// reconcilerRecreates is what koinon-reconciler does once the backup is complete: it points the
 	// next sandbox's restore at the checkpoint, deletes the sandbox, and records the new one.
+	generationOfRow := func(ctx context.Context) string {
+		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		return sb.HomeGeneration.String
+	}
 	reconcilerRecreates := func(ctx context.Context, cp pgtype.UUID) {
 		_, err := q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: e.org, AgentID: e.agent.ID, CheckpointID: cp})
 		Expect(err).NotTo(HaveOccurred())
@@ -314,18 +320,39 @@ var _ = Describe("home checkpoints", func() {
 		e.pool("agentd-b", cps(ctx))
 		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
 
-		By("the reconciler archives it: restore pointed at the backup, sandbox and volume deleted")
+		By("the reconciler archives it: restore pointed at the backup, sandbox and volume deleted, row deleting/Archived")
 		_, err = q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: e.org, AgentID: e.agent.ID, CheckpointID: id})
 		Expect(err).NotTo(HaveOccurred())
-		e.recreateSandbox(ctx)
-		home.set(nil)
-		_, err = q.MarkSandboxArchived(ctx, store.MarkSandboxArchivedParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(e.backend.DeleteSandbox(ctx, e.workspace, e.sandbox)).To(Succeed())
+		home.set(nil) // OpenShell deleted the volume with the sandbox
+		_, err = q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
+			OrgID: e.org, AgentID: e.agent.ID, State: store.SandboxStateDeleting, Phase: "Archived",
+			Message: "archived, restores on next run", HomeGeneration: generationOfRow(ctx),
+		})
 		Expect(err).NotTo(HaveOccurred())
+		archived, err := q.MarkSandboxArchived(ctx, store.MarkSandboxArchivedParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(archived.State).To(Equal(store.SandboxStateDeleting))
+		Expect(archived.ArchivedAt.Valid).To(BeTrue())
 
-		By("the next run restores before the harness starts and reloads the session, not a reset")
+		By("the next run waits while no sandbox exists, restoring nothing yet")
 		e.message(ctx, t, "second")
 		r2 := e.enqueue(ctx, t)
+		e.pool("agentd-c")
+		Consistently(runState(ctx, r2)).WithTimeout(1500 * time.Millisecond).ShouldNot(Or(Equal(store.RunStateSucceeded), Equal(store.RunStateFailed)))
+
+		By("the reconciler creates the sandbox for the run and records it ready: the archive ends, the restore is still owed")
+		_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})
+		Expect(err).NotTo(HaveOccurred())
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
+		Expect(restoreOf(ctx).Valid).To(BeTrue(), "the restore is owed until the run does it")
+
+		By("the run restores before the harness starts and reloads the session, not a reset")
 		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Expect(restoreOf(ctx).Valid).To(BeFalse(), "the restore is done")
+		sbRow, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sbRow.ArchivedAt.Valid).To(BeFalse(), "archived_at is NULL once the sandbox is observed again")
 		Expect(home.get()).To(HaveKeyWithValue("notes/today.md", "remember the milk"))
 		_, loads, _, _ := e.harness.snapshot()
 		Expect(loads).To(Equal([]string{"ses_1"}), "session/load")

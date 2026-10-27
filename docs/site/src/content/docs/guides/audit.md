@@ -16,7 +16,7 @@ Events are written in the same transaction as the change, so a change without it
 | `agent.triggers.propose` | An admin proposes new triggers for an agent: who proposed them, and the triggers (with their instructions) before and after, as the old and new version. Nothing fires until the version is activated. |
 | `auth.login`, `auth.logout` | A user logs in (with the method, never a password or token) or ends a session. Failed logins are not recorded. |
 | `platform_admin.grant`, `platform_admin.revoke` | OIDC login grants or revokes platform admin from `oidc.platformAdminGroups` (actor `system`), in the user's personal org. |
-| `provider.*`, `model.*`, `price.*`, `budget.*`, `mcp_server.*`, `mcp_tool.*`, `connection.*`, `token.*`, `sandbox.recreate`, `admin_api.call` | Configuration changes, a recreated sandbox and every admin API call. |
+| `provider.*`, `model.*`, `price.*`, `budget.*`, `mcp_server.*`, `mcp_tool.*`, `connection.*`, `token.*`, `sandbox.recreate`, `sandbox.archive`, `admin_api.call` | Configuration changes, a recreated or archived sandbox and every admin API call. |
 
 Login and logout events sit in the user's personal org: every user has exactly one, and it is the only org
 that belongs to the event.
