@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { FileStatus, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type McpCall, type SavedWorkCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { approvalStatusLabel, approveLabel, targetRepo, toolChanged, toolVersion } from '@/lib/approvals'
+import { ciPathsHit } from '@/lib/ci-paths'
 import { formatBytes, riskFlagsFor, riskItems, type RiskItem } from '@/lib/risk'
 import { cn } from '@/lib/utils'
 
@@ -97,7 +98,7 @@ export function ApprovalCard({
 
       {pr && <RiskSummary items={items} />}
 
-      {saved && <SavedWork call={saved} />}
+      {saved && <SavedWork call={saved} ciPaths={a.ciPaths} ciFoldCase={a.ciFoldCase} />}
 
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">Tool</dt>
@@ -188,7 +189,12 @@ const savedStatusText: Record<string, string> = { A: 'Added', M: 'Modified', D: 
  * go, and until when they are kept. The files are not shown (there is no diff): approving pushes them to a new
  * branch, never the default branch.
  */
-function SavedWork({ call: w }: { call: SavedWorkCall }) {
+function SavedWork({ call: w, ciPaths, ciFoldCase }: { call: SavedWorkCall; ciPaths: readonly string[]; ciFoldCase: boolean }) {
+  const ciHit = ciPathsHit(
+    w.files.map((f) => f.path),
+    ciPaths,
+    ciFoldCase,
+  )
   const added = w.files.reduce((n, f) => n + f.added, 0)
   const deleted = w.files.reduce((n, f) => n + f.deleted, 0)
   const expires = w.expiresAt ? timestampDate(w.expiresAt) : undefined
@@ -197,9 +203,9 @@ function SavedWork({ call: w }: { call: SavedWorkCall }) {
       <p role="note" className="bg-muted/30 rounded-md border p-3">
         Koinon saved this uncommitted work from a sandbox that had to be recreated. Nothing is pushed until you approve. It goes to a new branch, never the default branch.
       </p>
-      {w.files.some((f) => f.path.startsWith('.github/')) && (
+      {ciHit.length > 0 && (
         <p role="note" className="rounded-md border border-amber-600 p-3" data-testid="workflow-warning">
-          This work changes files under .github/. GitHub may refuse the push of workflow files with this connection. A pushed branch can also start existing
+          This work changes files under {ciHit.join(', ')}, where this code host runs CI. The host may refuse the push of workflow files with this connection. A pushed branch can also start existing
           workflows that run on push, and those can use the repository&apos;s secrets, so read these files before you approve.
         </p>
       )}

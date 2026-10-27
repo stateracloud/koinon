@@ -177,6 +177,13 @@ message Approval {
   // system is true for a request Koinon made itself rather than an agent's tool call: the run
   // neither waits for it nor is told its outcome (saved work from a stuck sandbox).
   bool system = 30;
+  // ci_paths are the paths whose changes run CI on the connection's host: the connector's CI
+  // paths plus the connection's configured directories. A directory ends with a slash. Only set
+  // by GetApproval, for a request on a code host.
+  repeated string ci_paths = 31;
+  // ci_fold_case is whether the host's file system ignores case, so ci_paths match without
+  // regard to case.
+  bool ci_fold_case = 32;
 }
 
 // McpCall describes a call to a remote MCP server (ADR 0057). The call is bound to the server, its URL

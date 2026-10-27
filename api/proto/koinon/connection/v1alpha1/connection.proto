@@ -125,6 +125,10 @@ message GitHubConnection {
   // PEM certificates trusted for that host besides the system roots. Public;
   // empty when the host's certificate chains to the system roots.
   string ca_bundle = 5;
+  // Directories, relative to the repository root, that run CI on this host besides the
+  // connector's own CI paths (a Gitea server's WORKFLOW_DIRS). create_pull_request refuses
+  // changes to them.
+  repeated string ci_dirs = 6;
 }
 
 // Connection is a configured connector instance.
@@ -169,6 +173,9 @@ message CreateGitHubConnectionRequest {
   // PEM certificates that sign the host's TLS certificate, when the system
   // roots do not. Used for Koinon's API calls and for git in sandboxes.
   string ca_bundle = 8;
+  // Directories that run CI on this host besides the connector's own CI paths, relative to the
+  // repository root. Optional; at most 20.
+  repeated string ci_dirs = 9;
 }
 
 // CreateGitHubConnectionResponse holds the new connection and, when asked

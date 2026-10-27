@@ -62,6 +62,7 @@ const (
 	KeyPrivateKey     = "privateKey"
 	KeyBaseURL        = "baseUrl"  // optional: a GitHub Enterprise Server host
 	KeyCABundle       = "caBundle" // optional: the public CA bundle of that host
+	KeyCIDirs         = "ciDirs"   // optional: directories that run CI on the host, one per line or comma-separated
 )
 
 // maxValue bounds one Secret value; a Kubernetes Secret is at most 1 MiB in all.
@@ -215,6 +216,13 @@ func ParseConnection(sec *corev1.Secret, version string) (DeclaredConnection, er
 				d.Site.CABundle = bundle
 			}
 		}
+	}
+	if v := get(KeyCIDirs); v != "" {
+		dirs, err := codehost.CleanCIDirs(strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' }))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", KeyCIDirs, err))
+		}
+		d.Site.CIDirs = dirs
 	}
 	d.PrivateKeyPEM = sec.Data[KeyPrivateKey]
 	key, err := github.ParsePrivateKey(d.PrivateKeyPEM)

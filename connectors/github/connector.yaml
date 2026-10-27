@@ -52,6 +52,8 @@ spec:
   # Path prefixes whose changes run CI. The workflow guard refuses them (plan item CH4).
   ciPaths:
     - .github/workflows/
+  # A checkout on a case-insensitive file system would merge .GitHub/Workflows into it.
+  ciPathsFoldCase: true
   targets:
     kind: repository
     pattern: '^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$'

@@ -235,3 +235,22 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   (github.com). No other place uses them. The new-connection form takes the optional base URL and
   CA bundle, validated as the API does, and the connection page shows them. The GitHub fake serves
   in GHES mode (`githubtest.NewGHES`; `koinon-fakegithub -api-prefix /api/v3 -tls -ca-file`).
+
+- Amendment 2026-10-27 (CH4, workflow guard from provider data): `codehost.Guard`
+  (`internal/codehost/guard.go`) replaces the fixed `.github/workflows/` rule. It is built from
+  `spec.ciPaths` plus the connection's `ciDirs` (additive list in the connection config JSON, next
+  to `baseUrl`; `ci_dirs` on `GitHubConnection` and `CreateGitHubConnectionRequest`, the `ciDirs`
+  key of a declarative connection Secret, a field on the connection page; at most 20, cleaned,
+  relative, no `..`). An entry guards itself and everything under it. Matching is exact unless
+  the connector data sets `spec.ciPathsFoldCase: true` (GitHub does, which keeps the earlier
+  case-insensitive rule; the Gitea data will not). Paths are cleaned (`./`, `..`, backslashes)
+  before matching. A commit has no rename, so a move is a delete plus a write and both sides are
+  checked. `Guard.CheckFiles` also refuses a symbolic link (mode 120000) whose target is a guarded
+  path or a directory that holds one, or is absolute or outside the repository; the pull request
+  arguments cannot express a link today, so this covers a future writer. The tool server applies
+  the guard when it records `create_pull_request`, the executor again before it writes (the
+  connection's directories may have changed since). Saved work (a Koinon-made request after a
+  stuck sandbox) is not refused, as before: the approval card warns. `Approval.ci_paths` and
+  `ci_fold_case` (additive, set by `GetApproval`) give the card the same paths; it no longer
+  hard-codes `.github/`. The Gitea paths are connector data for CH5 (there is no Gitea connector
+  yet); the guard test uses them directly.

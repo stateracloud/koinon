@@ -223,6 +223,25 @@ func (a agentHeader) RoundTrip(r *http.Request) (*http.Response, error) {
 	return a.base.RoundTrip(r)
 }
 
+// callRefused makes a tool call the server refuses and returns the reason.
+func (f *fixture) callRefused(ctx context.Context, tool string, args any) string {
+	GinkgoHelper()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-agent", Version: "0.0.1"}, nil)
+	s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:             f.tools.URL,
+		HTTPClient:           &http.Client{Transport: agentHeader{agent: f.agentHeader, base: http.DefaultTransport}},
+		DisableStandaloneSSE: true,
+		MaxRetries:           -1,
+	}, nil)
+	Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = s.Close() }()
+	res, err := s.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(res.IsError).To(BeTrue())
+	b, _ := json.Marshal(res.Content)
+	return string(b)
+}
+
 // call makes a tool call as the agent, through the tool server, and returns its result.
 func (f *fixture) call(ctx context.Context, tool string, args any) githubtools.Result {
 	GinkgoHelper()
