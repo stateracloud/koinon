@@ -36,6 +36,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -59,8 +60,13 @@ const (
 	MaxChoiceBytes   = 200
 )
 
-// DefaultTTL is how long a question waits before it expires (ADR 0065 decision 10: 7 days).
-const DefaultTTL = 7 * 24 * time.Hour
+// DefaultTTL is how long a question waits before it expires (ADR 0065 decision 10: 7 days), and
+// DefaultReminder how long before the person is reminded (24 hours). Agents and templates set their
+// own (agentconfig.Config.QuestionTimers).
+const (
+	DefaultTTL      = agentconfig.DefaultQuestionExpiry
+	DefaultReminder = agentconfig.DefaultQuestionReminder
+)
 
 // Errors.
 var (
@@ -89,6 +95,9 @@ type Ask struct {
 	Default string
 	// ExpiresAt defaults to DefaultTTL from now.
 	ExpiresAt time.Time
+	// RemindAt is when the person gets a reminder (ADR 0065 decision 10); zero means none. It must
+	// come before ExpiresAt.
+	RemindAt time.Time
 }
 
 // Validate checks the question's content.
@@ -124,6 +133,9 @@ func (a *Ask) Validate() error {
 	if len(a.Choices) > 0 && !slices.Contains(a.Choices, a.Default) {
 		return invalid("default must be one of the choices when choices are given")
 	}
+	if !a.RemindAt.IsZero() && !a.ExpiresAt.IsZero() && !a.RemindAt.Before(a.ExpiresAt) {
+		return invalid("the reminder must come before the expiry")
+	}
 	return nil
 }
 
@@ -157,6 +169,7 @@ func Create(ctx context.Context, q *store.Queries, a Ask) (store.Question, bool,
 		Question: a.Question, Choices: choices, Draft: pgtype.Text{String: a.Draft, Valid: a.Draft != ""},
 		DefaultAnswer: a.Default, CallSha256: a.callHash(),
 		ExpiresAt: pgtype.Timestamptz{Time: a.ExpiresAt, Valid: true},
+		RemindAt:  pgtype.Timestamptz{Time: a.RemindAt, Valid: !a.RemindAt.IsZero()},
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		row, err = q.GetQuestionByCall(ctx, store.GetQuestionByCallParams{OrgID: a.Org, RunID: a.Run, CallSha256: a.callHash()})

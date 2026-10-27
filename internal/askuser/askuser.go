@@ -32,6 +32,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
@@ -50,19 +51,20 @@ const ToolAskUser = gateway.ToolAskUser
 // Options configures a Server.
 type Options struct {
 	Logger *slog.Logger
-	// TTL is how long a question waits before it expires; defaults to questions.DefaultTTL.
-	TTL time.Duration
-	Now func() time.Time
+	// TTL and Reminder override, when positive, the agent's question timers (the active version's
+	// questions settings, 7 days and 24 hours by default; ADR 0065 decision 10). For tests.
+	TTL, Reminder time.Duration
+	Now           func() time.Time
 }
 
 // Server is the ask_user MCP server.
 type Server struct {
-	pool *pgxpool.Pool
-	q    *store.Queries
-	log  *slog.Logger
-	ttl  time.Duration
-	now  func() time.Time
-	mcp  *mcp.Server
+	pool          *pgxpool.Pool
+	q             *store.Queries
+	log           *slog.Logger
+	ttl, reminder time.Duration
+	now           func() time.Time
+	mcp           *mcp.Server
 }
 
 // New returns a Server recording questions in pool.
@@ -70,13 +72,10 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	if opts.TTL <= 0 {
-		opts.TTL = questions.DefaultTTL
-	}
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.TTL, now: opts.Now}
+	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.TTL, reminder: opts.Reminder, now: opts.Now}
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: project.Name + "-agent-tools", Version: project.Version}, nil)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolAskUser,
@@ -166,6 +165,40 @@ func (s *Server) lookupErr(err error, what string) error {
 	return errors.New("internal error; try again later")
 }
 
+// timers returns the reminder and the expiry of the agent's questions: the active version's
+// settings, or the overrides in Options.
+func (s *Server) timers(ctx context.Context, a store.Agent) (reminder, ttl time.Duration, err error) {
+	var cfg agentconfig.Config
+	if a.ActiveVersionID.Valid {
+		v, err := s.q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: a.OrgID, ID: a.ActiveVersionID})
+		if err != nil {
+			return 0, 0, s.lookupErr(err, "agent version")
+		}
+		if cfg, err = agentconfig.Parse(v.Config); err != nil {
+			s.log.Error("ask_user: read the agent's config", "agent", a.ID.String(), "err", err)
+			return 0, 0, errors.New("internal error; try again later")
+		}
+	}
+	reminder, ttl = cfg.QuestionTimers()
+	if s.ttl > 0 {
+		ttl = s.ttl
+		if reminder >= ttl {
+			reminder = 0
+		}
+	}
+	if s.reminder > 0 {
+		reminder = s.reminder
+	}
+	return reminder, ttl, nil
+}
+
+func remindAt(now time.Time, after time.Duration) time.Time {
+	if after <= 0 {
+		return time.Time{}
+	}
+	return now.Add(after)
+}
+
 // addressee resolves "to": a member named by email or ID, or the task's creator.
 func (s *Server) addressee(ctx context.Context, c caller, to string) (pgtype.UUID, string, error) {
 	to = strings.TrimSpace(to)
@@ -201,6 +234,10 @@ func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args)
 	if err != nil {
 		return nil, Result{}, err
 	}
+	remind, ttl, err := s.timers(ctx, c.agent)
+	if err != nil {
+		return nil, Result{}, err
+	}
 	var row store.Question
 	var created bool
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -208,7 +245,7 @@ func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args)
 		row, created, err = questions.Create(ctx, store.New(tx), questions.Ask{
 			Org: c.org.ID, Task: c.run.TaskID, Run: c.run.ID, Agent: c.agent.ID, To: to,
 			Question: in.Question, Choices: in.Choices, Draft: in.Draft, Default: in.Default,
-			ExpiresAt: s.now().Add(s.ttl),
+			ExpiresAt: s.now().Add(ttl), RemindAt: remindAt(s.now(), remind),
 		})
 		return err
 	})

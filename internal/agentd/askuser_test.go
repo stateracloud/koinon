@@ -21,6 +21,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/askuser"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/questions"
 )
 
@@ -194,6 +195,7 @@ var _ = Describe("ask_user", func() {
 		Expect(prompts).To(HaveLen(2))
 		Expect(prompts[1]).To(HavePrefix("[Koinon] Your run was paused while a human decided"))
 		Expect(prompts[1]).To(ContainSubstring(`the person answered: "us-east-1"`))
+		Expect(prompts[1]).NotTo(ContainSubstring("no answer"))
 		Expect(prompts[1]).NotTo(ContainSubstring("default was applied"))
 		Expect(loads).To(Equal([]string{"ses_1"}))
 		Expect(a.question(ctx, qid).DeliveredAt.Valid).To(BeTrue())
@@ -241,6 +243,52 @@ var _ = Describe("ask_user", func() {
 		prompts, _, _, _ := a.harness.snapshot()
 		Expect(prompts[1]).To(ContainSubstring(`nobody answered in time, so your default was applied: "eu-west-1"`))
 		Expect(a.question(ctx, qid).State).To(Equal(store.QuestionStateExpired))
+	})
+
+	It("sets the reminder and the expiry from the defaults, or from the agent's version (TK4)", func(ctx SpecContext) {
+		asked(ctx)
+		row := a.question(ctx, qid)
+		Expect(row.RemindAt.Time).To(BeTemporally("~", row.CreatedAt.Time.Add(questions.DefaultReminder), time.Minute))
+		Expect(row.ExpiresAt.Time).To(BeTemporally("~", row.CreatedAt.Time.Add(questions.DefaultTTL), time.Minute))
+
+		a = newAskEnv(ctx)
+		_, err := db.Exec(ctx, `UPDATE agent_versions SET config = config || '{"questions":{"reminderAfter":"2h0m0s","expireAfter":"48h0m0s"}}'::jsonb WHERE org_id = $1`, a.org)
+		Expect(err).NotTo(HaveOccurred())
+		t = a.task(ctx, markQuestion+": deploy the app")
+		r = a.enqueue(ctx, t)
+		a.pool("agentd-a")
+		Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
+		row = a.question(ctx, qid)
+		Expect(row.RemindAt.Time).To(BeTemporally("~", row.CreatedAt.Time.Add(2*time.Hour), time.Minute))
+		Expect(row.ExpiresAt.Time).To(BeTemporally("~", row.CreatedAt.Time.Add(48*time.Hour), time.Minute))
+	})
+
+	It("gives one short no-answer run after the sweep expires the question, once across a restart (TK4)", func(ctx SpecContext) {
+		asked(ctx)
+		notifier := durable.NewNotifier(nil, nil)
+		questions.RegisterNotifications(notifier, db)
+		week := time.Now().Add(questions.DefaultTTL + time.Minute)
+
+		res, err := questions.RunOrgTimers(ctx, db, notifier, a.org, week)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res).To(Equal(questions.SweepResult{Expired: 1}))
+		// koinon-api restarts and sweeps again, as does a second replica.
+		for range 2 {
+			fresh := durable.NewNotifier(nil, nil)
+			questions.RegisterNotifications(fresh, a.serve())
+			res, err = questions.RunOrgTimers(ctx, db, fresh, a.org, week.Add(time.Hour))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(questions.SweepResult{}))
+		}
+
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		prompts, _, _, _ := a.harness.snapshot()
+		Expect(prompts).To(HaveLen(2), "the one no-answer run, not more")
+		Expect(prompts[1]).To(ContainSubstring(`nobody answered in time, so your default was applied: "eu-west-1"`))
+		Expect(prompts[1]).To(ContainSubstring("short \"no answer\" run"))
+		Expect(prompts[1]).To(ContainSubstring("cancel the task"))
+		Expect(prompts[1]).To(ContainSubstring("ask someone else"))
+		Expect(kindsOf(taskEvents(ctx, a.env, t))).To(ContainElement(questions.KindExpired))
 	})
 
 	It("resumes exactly once when koinon-api is killed between the park and the answer (B8)", func(ctx SpecContext) {
