@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/savedwork"
@@ -61,6 +62,17 @@ var Columns = []Column{
 	{Table: savedwork.Table, Column: savedwork.Column},
 	// Remote MCP server credentials (ADR 0057).
 	{Table: mcpservers.ServersTable, Column: mcpservers.CredentialColumn},
+	// Agent home repository passwords (ADR 0032); keyed by agent_id, see rowKey.
+	{Table: checkpoint.Table, Column: checkpoint.Column},
+}
+
+// rowKey is the column that names a row in the binding's RowID: id, except where the table is
+// keyed by the agent (one row per agent).
+func (c Column) rowKey() string {
+	if c.Table == checkpoint.Table {
+		return "agent_id"
+	}
+	return "id"
 }
 
 // KeySet is the KEK Secret's content.
@@ -321,7 +333,7 @@ type rowRef struct{ org, id string }
 
 func (t *Tool) rowIDs(ctx context.Context, c Column) ([]rowRef, error) {
 	rows, err := t.Pool.Query(ctx, fmt.Sprintf( //nolint:gosec // names come from Columns
-		`SELECT org_id::text, id::text FROM %s WHERE %s IS NOT NULL ORDER BY org_id, id`, c.Table, c.Column))
+		`SELECT org_id::text, %[3]s::text FROM %[1]s WHERE %[2]s IS NOT NULL ORDER BY org_id, %[3]s`, c.Table, c.Column, c.rowKey()))
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +354,7 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 	err := pgx.BeginFunc(ctx, t.Pool, func(tx pgx.Tx) error {
 		var raw []byte
 		err := tx.QueryRow(ctx, fmt.Sprintf( //nolint:gosec // names come from Columns
-			`SELECT %[2]s FROM %[1]s WHERE org_id = $1 AND id = $2 FOR UPDATE`, c.Table, c.Column), r.org, r.id).Scan(&raw)
+			`SELECT %[2]s FROM %[1]s WHERE org_id = $1 AND %[3]s = $2 FOR UPDATE`, c.Table, c.Column, c.rowKey()), r.org, r.id).Scan(&raw)
 		if errors.Is(err, pgx.ErrNoRows) || raw == nil {
 			return nil // deleted meanwhile
 		}
@@ -365,7 +377,7 @@ func (t *Tool) one(ctx context.Context, c Column, r rowRef, ring *secretstore.Ke
 			return err
 		}
 		if _, err := tx.Exec(ctx, fmt.Sprintf( //nolint:gosec // names come from Columns
-			`UPDATE %[1]s SET %[2]s = $3 WHERE org_id = $1 AND id = $2`, c.Table, c.Column), r.org, r.id, nb); err != nil {
+			`UPDATE %[1]s SET %[2]s = $3 WHERE org_id = $1 AND %[3]s = $2`, c.Table, c.Column, c.rowKey()), r.org, r.id, nb); err != nil {
 			return err
 		}
 		changed = true

@@ -127,7 +127,7 @@ func (s *Service) executeSavedWork(ctx context.Context, p codehost.Provider, row
 		}
 	}
 	return map[string]any{
-		"url": p.BranchURL(repo, args.Branch), "branch": args.Branch, "base": args.Base,
+		"url": p.BranchURL(conn, repo, args.Branch), "branch": args.Branch, "base": args.Base,
 		"commit": head, "repo": args.Repo, "files": len(work.Manifest.Files),
 	}, nil
 }

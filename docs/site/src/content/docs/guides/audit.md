@@ -12,7 +12,8 @@ Events are written in the same transaction as the change, so a change without it
 | Action | When |
 | --- | --- |
 | `approval.approve`, `approval.first_approve`, `approval.deny`, `approval.expire` | An approver decides a request (`first_approve` is the first of two approvers); Koinon expires one nobody decided in 7 days (actor `system`). |
-| `agent.create`, `agent.archive`, `agent.activate`, `agent.resume` | An agent is created, archived, activated or resumed. |
+| `agent.create`, `agent.archive`, `agent.activate`, `agent.resume` | An agent is created, archived, activated or resumed. `agent.activate` records the activated version and its `triggers` in both before and after, so moving an active agent to a newer version shows what changed. |
+| `agent.triggers.propose` | An admin proposes new triggers for an agent: who proposed them, and the triggers (with their instructions) before and after, as the old and new version. Nothing fires until the version is activated. |
 | `auth.login`, `auth.logout` | A user logs in (with the method, never a password or token) or ends a session. Failed logins are not recorded. |
 | `platform_admin.grant`, `platform_admin.revoke` | OIDC login grants or revokes platform admin from `oidc.platformAdminGroups` (actor `system`), in the user's personal org. |
 | `provider.*`, `model.*`, `price.*`, `budget.*`, `mcp_server.*`, `mcp_tool.*`, `connection.*`, `token.*`, `sandbox.recreate`, `admin_api.call` | Configuration changes, a recreated sandbox and every admin API call. |

@@ -370,6 +370,24 @@
         }
       }
     },
+    "checkpoints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "s3": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {"type": "string"},
+            "bucket": {"type": "string"},
+            "pathStyle": {"type": "boolean"}
+          }
+        },
+        "interval": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "scratchSize": {"type": "string"}
+      }
+    },
     "flavors": {
       "description": "Flavor images (ADR 0035). Agents of a flavor without an image are reported as reconcile errors.",
       "type": "object",

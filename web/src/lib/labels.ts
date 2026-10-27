@@ -6,36 +6,54 @@ import { Status as ApprovalStatus } from '@/gen/koinon/approval/v1alpha1/approva
 import { ConnectionStatus } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { Flavor, Preset } from '@/gen/koinon/template/v1alpha1/template_pb'
-import { TicketStatus } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
+import { TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 
 // Every enum the UI names, in one place. The Record types make a new enum value a type error
 // until it has a label.
 
-/** The board columns, left to right (ADR 0049). */
-export const boardColumns = [
-  { status: TicketStatus.TODO, title: 'To do' },
-  { status: TicketStatus.IN_PROGRESS, title: 'In progress' },
-  { status: TicketStatus.WAITING_ON_YOU, title: 'Waiting on you' },
-  { status: TicketStatus.DONE, title: 'Done' },
+/** The board's groups, left to right: the task states of ADR 0065. */
+export const boardStates = [
+  { state: TaskState.SUBMITTED, title: 'Submitted' },
+  { state: TaskState.WORKING, title: 'Working' },
+  { state: TaskState.INPUT_REQUIRED, title: 'Input required' },
+  { state: TaskState.COMPLETED, title: 'Completed' },
+  { state: TaskState.CANCELED, title: 'Canceled' },
+  { state: TaskState.FAILED, title: 'Failed' },
 ] as const
 
-export function statusLabel(s: TicketStatus): string {
-  return boardColumns.find((c) => c.status === s)?.title ?? 'Unknown'
+export function stateLabel(s: TaskState): string {
+  return boardStates.find((c) => c.state === s)?.title ?? 'Unknown'
 }
 
-/** ticketStatusFromName maps the database names in event payloads ("in_progress"). */
-export function ticketStatusFromName(name: string | undefined): TicketStatus {
+/** isEnded: completed, canceled and failed tasks take no more work. */
+export function isEnded(s: TaskState): boolean {
+  return s === TaskState.COMPLETED || s === TaskState.CANCELED || s === TaskState.FAILED
+}
+
+/**
+ * taskStateFromName maps the database names in event payloads ("input_required"). Events written
+ * before the move from tickets name the old board columns, which map as the migration did.
+ */
+export function taskStateFromName(name: string | undefined): TaskState {
   switch (name) {
+    case 'submitted':
     case 'todo':
-      return TicketStatus.TODO
+      return TaskState.SUBMITTED
+    case 'working':
     case 'in_progress':
-      return TicketStatus.IN_PROGRESS
+      return TaskState.WORKING
+    case 'input_required':
     case 'waiting_on_you':
-      return TicketStatus.WAITING_ON_YOU
+      return TaskState.INPUT_REQUIRED
+    case 'completed':
     case 'done':
-      return TicketStatus.DONE
+      return TaskState.COMPLETED
+    case 'canceled':
+      return TaskState.CANCELED
+    case 'failed':
+      return TaskState.FAILED
     default:
-      return TicketStatus.UNSPECIFIED
+      return TaskState.UNSPECIFIED
   }
 }
 

@@ -55,6 +55,7 @@ type fileConfig struct {
 		SandboxJobs    int    `yaml:"sandboxJobs"`
 		ResyncInterval string `yaml:"resyncInterval"`
 		HomeRetention  string `yaml:"homeRetention"`
+		Checkpoints    bool   `yaml:"checkpoints"`
 	} `yaml:"reconciler"`
 	Flavors map[string]struct {
 		Image string `yaml:"image"`
@@ -105,6 +106,7 @@ type config struct {
 	sandboxJobs    int
 	resyncInterval time.Duration
 	homeRetention  string
+	checkpoints    bool
 	flavorImages   map[string]string
 
 	githubToolsURL string
@@ -149,6 +151,7 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.DurationVar(&c.parkWarm, "park-warm", 0, "keep a sandbox up this long after its run parked on a2a or input_required (default 15m)")
 	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")
 	fs.DurationVar(&c.resyncInterval, "resync-interval", 0, "time between passes without a wake-up (default 30s)")
+	fs.BoolVar(&c.checkpoints, "checkpoints", false, "stop, recreate and restore sandboxes around home checkpoints (koinon-agentd writes them; ADR 0032)")
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")
 	fs.StringVar(&c.mcpAskURL, "mcp-ask-url", "", "base URL of koinon-api's approval-gated MCP proxy as agentgateway reaches it; empty offers no ask-tier tools of org MCP servers")
@@ -216,6 +219,7 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.providerKeysDir, fc.Gateway.ProviderKeysDir)
 	orDefault(&c.accessLogOTLP, fc.Gateway.AccessLogOTLP)
 	orDefault(&c.homeRetention, fc.Reconciler.HomeRetention)
+	orDefault(&c.checkpoints, fc.Reconciler.Checkpoints)
 	if c.sandboxJobs == 0 {
 		c.sandboxJobs = fc.Reconciler.SandboxJobs
 	}

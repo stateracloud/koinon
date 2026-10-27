@@ -46,6 +46,14 @@
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/host" }
         },
+        "site": { "$ref": "#/$defs/site" },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "ciPaths": {
+          "description": "Path prefixes (relative to the repository root, with a trailing slash for a directory) whose changes run CI; the workflow guard refuses them.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9._][A-Za-z0-9._/-]*$", "maxLength": 200 }
+        },
         "targets": {
           "description": "What a grant is narrowed to (for GitHub: repositories).",
           "type": "object",
@@ -120,6 +128,33 @@
           "type": "string",
           "pattern": "^[1-9][0-9]*(h|m|s)$"
         }
+      }
+    },
+    "site": {
+      "description": "The default location of a code host and how a connection on another host maps onto it (ADR 0062). Both URLs are https and name hosts in spec.hosts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseURL", "apiURL"],
+      "properties": {
+        "baseURL": { "description": "The web and git host.", "type": "string", "pattern": "^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$" },
+        "apiURL": { "description": "The REST API of the default host.", "type": "string", "pattern": "^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$" },
+        "apiPath": { "description": "Where the REST API is served on a connection's own host; empty when it is not served there.", "type": "string", "pattern": "^/[A-Za-z0-9._/-]*$" }
+      }
+    },
+    "capabilities": {
+      "description": "The capability descriptor of a code host (ADR 0062, 0063).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayName", "credentialClass"],
+      "properties": {
+        "displayName": { "description": "How messages name the provider.", "type": "string", "minLength": 1, "maxLength": 100 },
+        "credentialClass": { "enum": ["app-installation", "static-token"] },
+        "narrowsRepositories": { "type": "boolean" },
+        "narrowsPermissions": { "type": "boolean" },
+        "maxRepositories": { "description": "Repositories one credential can be narrowed to; 0 when it cannot narrow.", "type": "integer", "minimum": 0, "maximum": 100000 },
+        "canDenyCI": { "description": "Whether the credential can refuse changes to CI files.", "type": "boolean" },
+        "exactModes": { "description": "Whether the provider's API writes exact git file modes.", "type": "boolean" },
+        "writes": { "description": "How commits reach the host: through its API (the default) or by git push from koinon-api.", "enum": ["api", "push"] }
       }
     },
     "host": {

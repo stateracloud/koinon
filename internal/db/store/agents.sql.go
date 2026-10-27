@@ -15,7 +15,10 @@ const activateAgent = `-- name: ActivateAgent :one
 UPDATE agents
 SET status = 'active', active_version_id = $1,
     activated_by = $2, activated_at = now()
-WHERE org_id = $3 AND id = $4 AND status = 'draft'
+WHERE agents.org_id = $3 AND agents.id = $4
+  AND (agents.status = 'draft' OR (agents.status = 'active' AND agents.active_version_id IS DISTINCT FROM $1
+    AND (SELECT nv.version FROM agent_versions nv WHERE nv.org_id = $3 AND nv.id = $1)
+      > (SELECT av.version FROM agent_versions av WHERE av.org_id = agents.org_id AND av.id = agents.active_version_id)))
 RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at
 `
 
@@ -26,7 +29,9 @@ type ActivateAgentParams struct {
 	ID          pgtype.UUID
 }
 
-// draft -> active with the given version (ADR 0020). No row: not a draft.
+// draft -> active with the given version (ADR 0020), or an active agent moving to a newer version
+// (a trigger-only proposal, ADR 0066). No row: archived, or the agent already runs this version
+// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 func (q *Queries) ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, activateAgent,
 		arg.VersionID,
@@ -225,6 +230,44 @@ func (q *Queries) GetAgent(ctx context.Context, arg GetAgentParams) (Agent, erro
 	return i, err
 }
 
+const getAgentForUpdate = `-- name: GetAgentForUpdate :one
+SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at FROM agents
+WHERE org_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetAgentForUpdateParams struct {
+	OrgID pgtype.UUID
+	ID    pgtype.UUID
+}
+
+// Locks the agent row for the rest of the transaction (serialises read-check-write on versions).
+func (q *Queries) GetAgentForUpdate(ctx context.Context, arg GetAgentForUpdateParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, getAgentForUpdate, arg.OrgID, arg.ID)
+	var i Agent
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.DisplayName,
+		&i.Status,
+		&i.Flavor,
+		&i.TemplateID,
+		&i.ActiveVersionID,
+		&i.LatestVersion,
+		&i.Epoch,
+		&i.CreatedBy,
+		&i.ActivatedBy,
+		&i.ActivatedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
+	)
+	return i, err
+}
+
 const getAgentVersion = `-- name: GetAgentVersion :one
 SELECT org_id, id, agent_id, version, config, created_by, created_at FROM agent_versions
 WHERE org_id = $1 AND id = $2
@@ -248,6 +291,90 @@ func (q *Queries) GetAgentVersion(ctx context.Context, arg GetAgentVersionParams
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listActiveAgentVersions = `-- name: ListActiveAgentVersions :many
+SELECT a.org_id, a.id AS agent_id, v.version, v.config
+FROM agents a
+JOIN agent_versions v ON v.org_id = a.org_id AND v.id = a.active_version_id
+WHERE a.org_id = $1 AND a.status = 'active'
+ORDER BY a.created_at, a.id
+`
+
+type ListActiveAgentVersionsRow struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+	Version int32
+	Config  []byte
+}
+
+// The active version of each active agent, for the triggers they define (ADR 0066). A draft
+// agent, an archived one and a proposed version are not included.
+func (q *Queries) ListActiveAgentVersions(ctx context.Context, orgID pgtype.UUID) ([]ListActiveAgentVersionsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveAgentVersions, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveAgentVersionsRow
+	for rows.Next() {
+		var i ListActiveAgentVersionsRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.AgentID,
+			&i.Version,
+			&i.Config,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveAgentVersionsAllOrgs = `-- name: ListActiveAgentVersionsAllOrgs :many
+SELECT a.org_id, a.id AS agent_id, v.version, v.config
+FROM agents a
+JOIN agent_versions v ON v.org_id = a.org_id AND v.id = a.active_version_id
+JOIN orgs o ON o.id = a.org_id AND o.deleted_at IS NULL
+WHERE a.status = 'active'
+ORDER BY a.org_id, a.created_at, a.id
+`
+
+type ListActiveAgentVersionsAllOrgsRow struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+	Version int32
+	Config  []byte
+}
+
+// ListActiveAgentVersions across every live org, for the scheduler (ADR 0066).
+func (q *Queries) ListActiveAgentVersionsAllOrgs(ctx context.Context) ([]ListActiveAgentVersionsAllOrgsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveAgentVersionsAllOrgs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveAgentVersionsAllOrgsRow
+	for rows.Next() {
+		var i ListActiveAgentVersionsAllOrgsRow
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.AgentID,
+			&i.Version,
+			&i.Config,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAgentVersions = `-- name: ListAgentVersions :many

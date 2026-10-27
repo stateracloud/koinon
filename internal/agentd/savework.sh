@@ -3,11 +3,12 @@
 # savework reads the uncommitted work of the git repositories in a workspace so that
 # koinon-agentd can keep it when the sandbox has to be recreated (savework.go, ADR 0054).
 #
-#   sh -c SCRIPT savework DIR MAXBYTES
+#   sh -c SCRIPT savework DIR MAXBYTES [HOST]
 #
-# It looks in DIR and up to two levels below it. For each repository whose origin is a GitHub
-# repository it takes the newest commit GitHub has (the first commit of the current history
-# that no remote branch contains, or HEAD when there is none) as the base, and lists what the
+# It looks in DIR and up to two levels below it. For each repository whose origin is a repository
+# on HOST (the connection's host, github.com when omitted) it takes the newest commit the host
+# has (the first commit of the current history that no remote branch contains, or HEAD when there
+# is none) as the base, and lists what the
 # working tree changes against it: modified, added and untracked-but-not-ignored, and deleted
 # files. It uses a temporary index, so the repository's own index, branches and working tree are
 # not touched (git does write the new file contents as objects). Symbolic links, submodules and
@@ -26,6 +27,7 @@ export GIT_OPTIONAL_LOCKS=0
 export GIT_TERMINAL_PROMPT=0
 dir=$1
 max=$2
+host=${3:-github.com}
 tmp=$(mktemp -d 2>/dev/null) || { echo "savework: cannot create a temporary directory" >&2; exit 2; }
 trap 'rm -rf "$tmp"' EXIT
 command -v git >/dev/null 2>&1 || { echo "savework: git is not installed in this sandbox" >&2; exit 2; }
@@ -42,10 +44,10 @@ total=0
 while IFS= read -r r; do
   url=$(git -C "$r" remote get-url origin 2>/dev/null) || { echo "S $r: no origin remote" >>"$tmp/skipped"; continue; }
   case $url in
-    https://github.com/*) slug=${url#https://github.com/} ;;
-    git@github.com:*) slug=${url#git@github.com:} ;;
-    ssh://git@github.com/*) slug=${url#ssh://git@github.com/} ;;
-    *) echo "S $r: origin is not a GitHub repository" >>"$tmp/skipped"; continue ;;
+    "https://$host/"*) slug=${url#"https://$host/"} ;;
+    "git@$host:"*) slug=${url#"git@$host:"} ;;
+    "ssh://git@$host/"*) slug=${url#"ssh://git@$host/"} ;;
+    *) echo "S $r: origin is not a repository on $host" >>"$tmp/skipped"; continue ;;
   esac
   slug=${slug%/}
   slug=${slug%.git}

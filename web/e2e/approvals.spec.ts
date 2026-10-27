@@ -54,14 +54,14 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   const approved: Record<string, unknown>[] = []
   let agent: Record<string, unknown> | undefined
   const events: Record<string, unknown>[] = []
-  let ticketStatus = 'TICKET_STATUS_TODO'
+  let taskState = 'TASK_STATE_SUBMITTED'
   let approvalStatus = 'STATUS_PENDING'
   let runState = 'RUN_STATE_PARKED'
 
   const addEvent = (kind: string, payload: Record<string, unknown>, actorKind = 'ACTOR_KIND_SYSTEM') =>
     events.push({ seq: String(events.length + 1), kind, actorKind, payload, createdAt: now(), runId: kind === 'message' ? '' : 'r-1' })
   const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:acme/widgets', args_sha256: sha }
-  const ticket = () => ({ id: 't-1', orgId: org, title: 'Fix the README typo', status: ticketStatus, agentId: 'a-1' })
+  const task = () => ({ id: 't-1', orgId: org, title: 'Fix the README typo', state: taskState, agentId: 'a-1' })
   const run = () => ({ id: 'r-1', orgId: org, ticketId: 't-1', agentId: 'a-1', state: runState })
   const approval = () => ({
     id: 'ap-1',
@@ -146,18 +146,18 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
         agent = { ...agent, status: 'AGENT_STATUS_ACTIVE', activeVersion: 1, approvedGrants: agent?.proposedGrants }
         return { agent }
       },
-      'koinon.ticket.v1alpha1.TicketService/CreateTicket': (req) => {
+      'koinon.task.v1alpha1.TaskService/CreateTask': (req) => {
         expect(req).toMatchObject({ agentId: 'a-1', title: 'Fix the README typo' })
-        addEvent('ticket.created', { title: req.title })
+        addEvent('task.created', { title: req.title })
         addEvent('run.queued', {})
         // The agent asks for a pull request and its run parks (P1).
         addEvent('approval.requested', { ...base, decision: 'ask' }, 'ACTOR_KIND_AGENT')
         addEvent('run.parked', { reason: 'approval', approvals: ['ap-1'] })
-        ticketStatus = 'TICKET_STATUS_WAITING_ON_YOU'
-        return { ticket: ticket(), run: run() }
+        taskState = 'TASK_STATE_INPUT_REQUIRED'
+        return { task: task(), run: run() }
       },
-      'koinon.ticket.v1alpha1.TicketService/ListTickets': () => ({ tickets: events.length ? [ticket()] : [] }),
-      'koinon.ticket.v1alpha1.TicketService/GetTicket': () => ({ ticket: ticket(), events, runs: [run()] }),
+      'koinon.task.v1alpha1.TaskService/ListTasks': () => ({ tasks: events.length ? [task()] : [] }),
+      'koinon.task.v1alpha1.TaskService/GetTask': () => ({ task: task(), events, runs: [run()] }),
       'koinon.approval.v1alpha1.ApprovalService/ListApprovals': () => ({ approvals: approvalStatus === 'STATUS_PENDING' && events.length ? [approval()] : [] }),
       'koinon.approval.v1alpha1.ApprovalService/GetApproval': () => ({ approval: approval() }),
       'koinon.approval.v1alpha1.ApprovalService/GetApprovalDiff': () => ({
@@ -177,7 +177,7 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
         approvalStatus = 'STATUS_EXECUTED'
         addEvent('approval.approved', { ...base, note: req.note }, 'ACTOR_KIND_USER')
         addEvent('approval.executed', { ...base, result: { url: 'https://github.com/acme/widgets/pull/7' } })
-        ticketStatus = 'TICKET_STATUS_IN_PROGRESS'
+        taskState = 'TASK_STATE_WORKING'
         runState = 'RUN_STATE_SUCCEEDED'
         return { approval: approval() }
       },
@@ -218,11 +218,12 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   await page.getByRole('button', { name: 'Activate' }).click()
   await expect(page.getByText('Activated.')).toBeVisible()
 
-  // 3. Hand it a ticket; it asks for approval.
-  await page.getByRole('link', { name: 'Create a ticket for it on the board' }).click()
+  // 3. Hand it a task; it asks for approval.
+  await page.getByRole('link', { name: 'Hand it a task from the inbox' }).click()
   await page.getByLabel('Title').fill('Fix the README typo')
-  await page.getByRole('button', { name: 'Create ticket' }).click()
-  await expect(page).toHaveURL(/\/tickets\/t-1$/)
+  await page.getByRole('button', { name: 'Create task' }).click()
+  await page.getByRole('link', { name: 'Open task' }).click()
+  await expect(page).toHaveURL(/\/tasks\/t-1$/)
   const card = page.getByTestId('approval-card')
   await expect(card.getByRole('region', { name: 'Push and run risk' })).toContainText('Dependency manifests (1)')
   const files = card.getByRole('region', { name: 'Files' })
@@ -231,9 +232,9 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   await files.getByText('package.json').click()
   await expect(files.getByRole('note')).toContainText('GitHub answered 502')
 
-  // 4. Waiting on you lists it; approve from the standalone view.
-  await page.getByRole('link', { name: '← Board' }).click()
-  const waiting = page.getByRole('region', { name: /^Waiting on you/ })
+  // 4. The inbox lists it; approve from the standalone view.
+  await page.getByRole('link', { name: '← Inbox' }).click()
+  const waiting = page.getByRole('list', { name: 'Waiting on you' })
   await waiting.getByRole('link', { name: 'Review create_pull_request on acme/widgets' }).click()
   await expect(page.getByRole('heading', { name: 'Approval request' })).toBeVisible()
   await page.getByLabel('Note (optional)').fill('ship it')
@@ -241,8 +242,8 @@ test('connect GitHub, create and activate an agent, then approve its pull reques
   await expect(page.getByRole('link', { name: 'https://github.com/acme/widgets/pull/7' })).toBeVisible()
   expect(approved).toEqual([{ orgId: org, approvalId: 'ap-1', argsSha256: sha, note: 'ship it' }])
 
-  // 5. The result is on the ticket's timeline.
-  await page.getByRole('link', { name: 'Open the ticket' }).click()
+  // 5. The result is on the task's timeline.
+  await page.getByRole('link', { name: 'Open the task' }).click()
   const timeline = page.getByRole('list', { name: 'Timeline' })
   await expect(timeline.getByText('Approved create_pull_request on acme/widgets: ship it')).toBeVisible()
   await expect(timeline.getByText('Done: create_pull_request on acme/widgets')).toBeVisible()

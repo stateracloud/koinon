@@ -46,7 +46,7 @@ are in [0046](0046-adr-conventions.md).
 | [0029](0029-run-level-resume.md) | Resume | Accepted, amended by 0051 |
 | [0030](0030-run-state-machine.md) | Run state | Accepted, amended by 0065, 0066 |
 | [0031](0031-artifacts-in-object-storage.md) | Artifacts | Accepted |
-| [0032](0032-agent-home-checkpoints.md) | Agent home | Accepted, amended by 0065 (checkpoints in v0.1, archive tier) |
+| [0032](0032-agent-home-checkpoints.md) | Agent home | Accepted, amended by 0065 (checkpoints in v0.1, archive tier) and HC1 (kopia, exec-stream runner, hourly points) |
 | [0033](0033-file-based-memory.md) | Memory | Accepted |
 | [0034](0034-project-identity.md) | Identity (repo, module, domain) | Accepted, amended 2026-10-26 |
 | [0035](0035-v01-flavors.md) | v0.1 flavors | Accepted, amended by 0059 |

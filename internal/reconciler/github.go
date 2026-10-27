@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/connectors"
@@ -101,6 +102,13 @@ type GitHubRead struct {
 // no allowed scope with network rules, or no repositories are bound: then nothing is rendered
 // and the sandbox cannot reach GitHub at all.
 func GitHubReadAccess(cfg agentconfig.Config) (read GitHubRead, ok bool, err error) {
+	return GitHubReadAccessAt(cfg, "")
+}
+
+// GitHubReadAccessAt is GitHubReadAccess for a connection whose host has the given base URL (the
+// connection's baseUrl; empty is the connector's default host). The network rules are rendered
+// at that host (ADR 0062), so nothing else is reachable.
+func GitHubReadAccessAt(cfg agentconfig.Config, baseURL string) (read GitHubRead, ok bool, err error) {
 	connector, g, found := providers.Default().Grant(cfg)
 	if !found {
 		return GitHubRead{}, false, nil
@@ -119,7 +127,11 @@ func GitHubReadAccess(cfg agentconfig.Config) (read GitHubRead, ok bool, err err
 	if len(scopes) == 0 || !bound || len(b.Targets) == 0 {
 		return GitHubRead{}, false, nil
 	}
-	hosts, err := ct.Network(g.Preset, scopes, b.Targets)
+	loc, err := ct.Locate(baseURL)
+	if err != nil {
+		return GitHubRead{}, false, fmt.Errorf("github grant: %w", err)
+	}
+	hosts, err := ct.NetworkAt(loc, g.Preset, scopes, b.Targets)
 	if err != nil {
 		return GitHubRead{}, false, fmt.Errorf("github grant: %w", err)
 	}
@@ -170,6 +182,37 @@ func GitHubProfile(id string, read GitHubRead, binaries []string) execution.Prov
 // GitHubRule is the sandbox policy entry for read: the same endpoints as the profile.
 func GitHubRule(read GitHubRead, binaries []string) execution.NetworkRule {
 	return execution.NetworkRule{Endpoints: slices.Clone(read.Endpoints), Binaries: slices.Clone(binaries)}
+}
+
+// baseURLOf returns the base URL of the host of the agent's code-host connection, empty for the
+// default host or an agent with no code-host binding.
+func (r *Reconciler) baseURLOf(ctx context.Context, w *work) (string, error) {
+	connector, b, ok := providers.Default().Binding(w.cfg)
+	if !ok || b.ConnectionID == "" {
+		return "", nil
+	}
+	var id pgtype.UUID
+	if err := id.Scan(b.ConnectionID); err != nil || !id.Valid {
+		return "", fmt.Errorf("github grant: bad connection ID %q", b.ConnectionID)
+	}
+	conn, err := r.q.GetConnection(ctx, store.GetConnectionParams{OrgID: w.org.ID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil // ensureGitHub reports a missing connection when the grant needs one
+	}
+	if err != nil {
+		return "", fmt.Errorf("github grant: read %s connection %s: %w", connector, b.ConnectionID, err)
+	}
+	site, err := codehost.SiteOf(conn.Config)
+	if err != nil {
+		return "", fmt.Errorf("github grant: connection %s: %w", b.ConnectionID, err)
+	}
+	if site.BaseURL != "" {
+		// Checked again at render with a fresh lookup, as for provider URLs.
+		if err := r.cfg.URLPolicy.CheckStrict(ctx, site.BaseURL); err != nil {
+			return "", fmt.Errorf("github grant: connection %s: %w", b.ConnectionID, err)
+		}
+	}
+	return site.BaseURL, nil
 }
 
 // githubBinaries are the executables that may reach GitHub: git and the flavor's binaries.

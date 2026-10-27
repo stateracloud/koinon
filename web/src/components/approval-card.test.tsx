@@ -369,7 +369,7 @@ describe('ApprovalCard', () => {
   it('offers the second approval to someone other than the first approver', async () => {
     setup({ mcp: true, mcpInit: { approvalsRequired: 2, firstApprover: 'u-other' } })
     const card = await screen.findByTestId('approval-card')
-    expect(within(card).getByText(/First approval given; a second person \(not the first approver, not the ticket's creator\) must approve\./)).toBeInTheDocument()
+    expect(within(card).getByText(/First approval given; a second person \(not the first approver, not the task's creator\) must approve\./)).toBeInTheDocument()
     expect(within(card).getByRole('button', { name: 'Give second approval' })).toBeEnabled()
   })
 

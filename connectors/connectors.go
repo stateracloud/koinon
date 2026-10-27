@@ -25,7 +25,9 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"go.yaml.in/yaml/v3"
@@ -99,8 +101,14 @@ type Metadata struct {
 
 // Spec is the connector type's content.
 type Spec struct {
-	Auth       Auth                        `json:"auth"`
-	Hosts      []Host                      `json:"hosts"`
+	Auth  Auth   `json:"auth"`
+	Hosts []Host `json:"hosts"`
+	Site  *Site  `json:"site,omitempty"`
+	// Capabilities is the code-host capability descriptor (ADR 0062); nil for a connector that
+	// is not a code host.
+	Capabilities *Capabilities `json:"capabilities,omitempty"`
+	// CIPaths are the path prefixes whose changes run CI.
+	CIPaths    []string                    `json:"ciPaths,omitempty"`
 	Targets    Targets                     `json:"targets"`
 	Scopes     []Scope                     `json:"scopes"`
 	Presets    map[templates.Preset]Preset `json:"presets"`
@@ -119,6 +127,28 @@ type Auth struct {
 type Host struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`
+}
+
+// Site is the default location of a code host (ADR 0062).
+type Site struct {
+	BaseURL string `json:"baseURL"`
+	APIURL  string `json:"apiURL"`
+	// APIPath is where the REST API is served on a connection's own host.
+	APIPath string `json:"apiPath,omitempty"`
+}
+
+// Capabilities is a code host's capability descriptor (ADR 0062, 0063).
+type Capabilities struct {
+	DisplayName         string `json:"displayName"`
+	CredentialClass     string `json:"credentialClass"`
+	NarrowsRepositories bool   `json:"narrowsRepositories,omitempty"`
+	NarrowsPermissions  bool   `json:"narrowsPermissions,omitempty"`
+	MaxRepositories     int    `json:"maxRepositories,omitempty"`
+	CanDenyCI           bool   `json:"canDenyCI,omitempty"`
+	ExactModes          bool   `json:"exactModes,omitempty"`
+	// Writes is how commits reach the host: "api" (the default) or "push" (git push from
+	// koinon-api, ADR 0062).
+	Writes string `json:"writes,omitempty"`
 }
 
 // Targets describes what grants are narrowed to.
@@ -369,6 +399,27 @@ func (t *Type) check() error {
 	hosts := map[string]bool{}
 	for _, h := range t.Spec.Hosts {
 		hosts[h.Host] = true
+	}
+	if st := t.Spec.Site; st != nil {
+		for _, raw := range []string{st.BaseURL, st.APIURL} {
+			hp, err := parseHostPort(raw)
+			if err != nil {
+				return fmt.Errorf("site: %w", err)
+			}
+			if !slices.ContainsFunc(t.Spec.Hosts, func(h Host) bool { return h.Host == hp.Host && h.Port == hp.Port }) {
+				return fmt.Errorf("site: %s is not in spec.hosts", raw)
+			}
+		}
+	}
+	for _, p := range t.Spec.CIPaths {
+		if strings.Contains(p, "..") || strings.Contains(p, "//") {
+			return fmt.Errorf("ciPaths: %q is not a clean relative path", p)
+		}
+	}
+	if t.Spec.Auth.TokenLifetime != "" {
+		if _, err := time.ParseDuration(t.Spec.Auth.TokenLifetime); err != nil {
+			return fmt.Errorf("auth.tokenLifetime: %w", err)
+		}
 	}
 	seen := map[string]bool{}
 	for i, s := range t.Spec.Scopes {

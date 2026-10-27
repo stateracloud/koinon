@@ -161,6 +161,15 @@ var _ = Describe("Parse", func() {
 		Expect(t.Spec.Harness).To(Equal(templates.Harness{}))
 	})
 
+	It("is persistent unless the template says ephemeral", func() {
+		t, err := templates.Parse(valid)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.Spec.Ephemeral).To(BeFalse())
+		t, err = templates.Parse([]byte(strings.Replace(string(valid), "  model:\n", "  ephemeral: true\n  model:\n", 1)))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.Spec.Ephemeral).To(BeTrue())
+	})
+
 	It("accepts plugin installs on an OpenCode template", func() {
 		t, err := templates.Parse([]byte(strings.Replace(string(valid),
 			"  model:\n", "  harness:\n    pluginInstalls: true\n  model:\n", 1)))
