@@ -167,6 +167,26 @@ Checked 2026-10-26 (research notes `gitea-overlap.md`, `forge-and-trackers.md`):
   (https://docs.github.com/en/enterprise-server@latest/rest/using-the-rest-api/getting-started-with-the-rest-api).
   Unverified: GHES 3.22 support for API version `2026-03-10`.
 
+## Amendments
+
+- 2026-10-27 (CH2): the capability descriptor is data. `connector.yaml` carries
+  `spec.capabilities` (display name, credential class, repository and permission narrowing,
+  `maxRepositories`, `canDenyCI`, `exactModes`), `spec.ciPaths` and `spec.site` (default web and
+  API URLs, and `apiPath` where a connection's own host serves the REST API); the token lifetime
+  stays `auth.tokenLifetime`. `codehost.CapabilitiesOf` builds `Capabilities` from them.
+- 2026-10-27 (CH2): a connection's `baseUrl` and `caBundle` live in `connections.config`
+  (non-secret JSON, no migration); the CA bundle is public. A base URL is an `https` host with an
+  optional port and no path. On another host the REST API is the same host under
+  `spec.site.apiPath`, so GHES stays the GitHub type with a base URL (answers the open question
+  for CH3; a path prefix such as a Gitea sub-path is not supported yet). `Provider.BranchURL`
+  takes the connection.
+- 2026-10-27 (CH2): network rules are rendered at the connection's host (`Type.NetworkAt`).
+  koinon-agentd writes `/sandbox/.koinon/git/config` (credential helper scoped to the host,
+  `http.sslCAInfo`) and `/sandbox/.koinon/git/ca.pem` (system roots plus the bundle, so the
+  OpenShell proxy certificate keeps verifying) before every harness start; `/etc/gitconfig`
+  includes the file after the image's own. `koinon-git-credential` takes `--host`; `savework.sh`
+  takes the host.
+
 ## Links
 
 - Issue [#144](https://github.com/stateracloud/koinon/issues/144); home-lab test

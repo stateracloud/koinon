@@ -426,6 +426,9 @@ func (r *runner) execute(ctx context.Context) error {
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}
+	if err := r.writeGitConfig(fctx, workspace, sandbox); err != nil {
+		return r.execErr(ctx, "write the git configuration", err)
+	}
 
 	var stderr tail
 	proc, err := r.p.backend.Exec(ctx, workspace, sandbox, execution.ExecRequest{
