@@ -1,7 +1,7 @@
 # 0032. Agent home on a PVC, checkpointed incrementally to object storage
 
 - Status: Accepted
-- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points)
+- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); #169 (restore through the upload channel)
 - Date: 2026-10-21
 - Decision: [design.md#32](../design.md)
 
@@ -145,7 +145,8 @@ restore 7.2 s on a 186 MB home.
     API pods. The stream comes from a sandbox, so it is untrusted: it is extracted through an
     `os.Root` (no path, symbolic link included, leaves the scratch directory), with absolute
     names, links to other files, devices and anything over 4 GiB or 2 million entries refused.
-    Restore streams a tar back in over exec before the harness starts.
+    Restore streams a tar back in before the harness starts (over exec here; amended 2026-10-27,
+    #169: through OpenShell's upload channel, see the last amendment).
   - *Fallback (not built in this item):* after stop, for a stuck or crashed sandbox where exec is
     impossible, the reconciler would mount the stopped volume in a pinned pod that streams the tar
     to agentd's writer without S3 credentials, under a narrow admission exemption for exactly that
@@ -220,3 +221,57 @@ backed up by the recreate gate before its home is deleted; that checkpoint is ke
 into a task sandbox, and serves a later persistent version. Moving the row to a task's sandbox
 clears any pending restore and the sandbox lineage, so nothing carries over between tasks (ADR 0065
 13c).
+
+## Amendment (2026-10-27, #169): the restore goes through OpenShell's upload channel
+
+**Decision (Andre, 2026-10-27, issue #169).** The restore no longer pipes tar into `tar -x` over
+exec. koinon-agentd uploads it through OpenShell's flow-controlled `openshell-upload-v1` SSH
+subsystem (NVIDIA/OpenShell#4448, in v0.1.4 and later). The backup stays tar over exec.
+
+- **Why exec cannot restore.** The supervisor keeps at most 4 MiB of stdin that the command has not
+  read (`MAX_PENDING_INPUT`, OpenShell #3846, v0.1.3 and later) and kills the exec with exit status
+  74 and no stderr when a write would pass it. Exec stdin has no consumption signal, and an SSH
+  client cannot slow down, since russh grants receive credit before the application reads the data
+  (OpenShell #4430). A home of more than a few MiB therefore failed to restore. The 4 MiB cap is
+  why Koinon cannot fix this by chunking or pacing the exec stream.
+- **Why the backup is unaffected.** It reads stdout, which has SSH flow control.
+- **How agentd reaches the channel, with no CLI and no secret in the sandbox.**
+  1. `CreateSshSession` returns a short-lived token bound to the sandbox, the sandbox's
+     `host_key_fingerprint` and an expiry.
+  2. `ForwardTcp` opens the relay with a first frame `TcpForwardInit{sandbox, workspace, target:
+     ssh, authorization_token}`; data frames then carry SSH. The gateway checks the token (not
+     revoked, this sandbox, not expired) and allows 3 connections per token and 20 per sandbox.
+  3. agentd speaks SSH over the relay with `golang.org/x/crypto/ssh`. The supervisor accepts any
+     client that reaches it, so agentd authenticates the sandbox instead: it refuses a host key
+     whose OpenSSH `SHA256:` fingerprint differs from the one the gateway returned, and a gateway
+     that returns none.
+  4. It requests the subsystem without a PTY and sends the plan line
+     (`{"destination_directory":"/sandbox","expected_destination":null}`), waits for the first
+     total (zero), then sends the tar in chunks, never more than 1 MiB (`WINDOW_BYTES`) past the
+     last total the supervisor reported. The supervisor reports every 256 KiB, as a big-endian
+     `u64` on stdout. After EOF the final total must equal the bytes sent, and the exit status is
+     the result: 0 is success, anything else fails the restore with the code and the extractor's
+     stderr tail.
+  5. `RevokeSshSession` runs on every path. The token stays in agentd: it is not put into the
+     sandbox, a log or an error.
+- **Koinon shapes the archive.** Upstream's extract command is fixed
+  (`mkdir -p -- DEST && cat | tar xf - -C DEST`, as the sandbox user). `checkpoint.WriteTar`
+  therefore writes no root entry (tar would try to chmod `/sandbox`), skips every path
+  `checkpoint.Excluded` names (so a checkpoint made before the list grew restores cleanly), and
+  writes no owners.
+- **`lost+found`** (top level only) joins the excluded paths: it is the volume filesystem's root
+  directory, which the sandbox user cannot extract into. The backup's `TarExcludeArgs` leaves it
+  out too. `work/lost+found` stays a user's directory.
+- **Old OpenShell.** A supervisor without the subsystem answers the request with a failure; the
+  restore then fails at once, without retries or older checkpoints, with "this sandbox supervisor
+  does not support openshell-upload-v1; OpenShell v0.1.4 or later is needed". Expired tokens and
+  connection limits are reported as such. The restore gate is unchanged otherwise: a failed
+  restore fails the run, the restore stays owed, retries and fallback to older checkpoints stand.
+- **Caveats.** Upstream calls the protocol internal, but the subsystem name is versioned. Extraction
+  is not atomic, which is acceptable because the harness does not start unless the restore
+  succeeded. Throughput is bounded by 1 MiB per round trip and has to be measured on the home
+  lab. The Go SDK has no upload transport (it returns `ErrTransportNotAvailable`), which is why
+  agentd carries the client.
+- **Tests.** The fake OpenShell gateway serves the subsystem as upstream does (window enforcement
+  with exit 74, acknowledgments, plan parsing) and caps exec stdin at 4 MiB, so the old failure
+  reproduces in a test.
