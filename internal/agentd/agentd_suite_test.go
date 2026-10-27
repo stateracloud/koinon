@@ -171,7 +171,7 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		}
 		return 0
 	}
-	if len(args) == 5 && args[0] == "-c" && args[1] == agentd.SaveworkScript {
+	if len(args) == 6 && args[0] == "-c" && args[1] == agentd.SaveworkScript {
 		f.mu.Lock()
 		f.saveworkRuns++
 		fn := f.savework
@@ -188,6 +188,18 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		return 2
 	}
 	in, _ := io.ReadAll(stdin)
+	if strings.Contains(args[1], "koinon-gitconfig") || strings.Contains(args[1], "koinon-gitca") {
+		// The rendered git configuration and CA file (gitconfig.go); the file is kept by path.
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		switch {
+		case strings.Contains(args[1], "mktemp"):
+			f.data[args[4]] = in
+		case len(args) == 5:
+			delete(f.data, args[4])
+		}
+		return 0
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch script := args[1]; {

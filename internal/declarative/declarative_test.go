@@ -4,7 +4,11 @@ package declarative_test
 
 import (
 	"context"
+	"encoding/json"
+	"encoding/pem"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -17,6 +21,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -415,6 +420,45 @@ var _ = Describe("Importer", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(app.AppID).To(Equal(int64(12)))
 			Expect(app.InstallationID).To(Equal(int64(34)))
+		})
+
+		It("imports a GitHub Enterprise Server connection with its base URL and CA bundle", func(ctx SpecContext) {
+			tlsServer := httptest.NewTLSServer(http.NotFoundHandler()) // a certificate to use as the CA
+			DeferCleanup(tlsServer.Close)
+			ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsServer.Certificate().Raw}))
+			d := conn()
+			d["baseUrl"], d["caBundle"] = " https://GHES.example.test:8443/ ", ca
+			put(ctx, "gh", declarative.TypeConnection, slug, d)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, _ := store.New(pool).ListConnections(ctx, org)
+			Expect(rows).To(HaveLen(1))
+			site, err := codehost.SiteOf(rows[0].Config)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(site.BaseURL).To(Equal("https://ghes.example.test:8443"))
+			Expect(site.CABundle).To(Equal(strings.TrimSpace(ca)))
+			var cfg connections.GitHubConfig
+			Expect(json.Unmarshal(rows[0].Config, &cfg)).To(Succeed())
+			Expect(cfg.AppID).To(BeEquivalentTo(12))
+			Expect(cfg.InstallationID).To(BeEquivalentTo(34))
+
+			By("re-applying a changed Secret keeps the host")
+			d["name"] = "acme GHES"
+			put(ctx, "gh", declarative.TypeConnection, slug, d)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, _ = store.New(pool).ListConnections(ctx, org)
+			site, _ = codehost.SiteOf(rows[0].Config)
+			Expect(site.BaseURL).To(Equal("https://ghes.example.test:8443"))
+		})
+
+		It("ignores a connection Secret with a bad base URL or CA bundle", func(ctx SpecContext) {
+			for k, v := range map[string]string{"baseUrl": "http://ghes.example.test", "caBundle": "not pem"} {
+				d := conn()
+				d[k] = v
+				put(ctx, "gh", declarative.TypeConnection, slug, d)
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				Expect(rows).To(BeEmpty(), k)
+			}
 		})
 
 		It("ignores a connection Secret with a bad key without quoting it", func(ctx SpecContext) {

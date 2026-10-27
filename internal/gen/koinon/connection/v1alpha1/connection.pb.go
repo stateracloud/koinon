@@ -462,8 +462,14 @@ type GitHubConnection struct {
 	// SHA-256 fingerprint of the private key's public half, as GitHub shows it
 	// under the App's private keys.
 	KeyFingerprint string `protobuf:"bytes,3,opt,name=key_fingerprint,json=keyFingerprint,proto3" json:"key_fingerprint,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The host's web base URL when it is not github.com (GitHub Enterprise
+	// Server), https://host[:port]; empty for github.com.
+	BaseUrl string `protobuf:"bytes,4,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	// PEM certificates trusted for that host besides the system roots. Public;
+	// empty when the host's certificate chains to the system roots.
+	CaBundle      string `protobuf:"bytes,5,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GitHubConnection) Reset() {
@@ -513,6 +519,20 @@ func (x *GitHubConnection) GetInstallationId() int64 {
 func (x *GitHubConnection) GetKeyFingerprint() string {
 	if x != nil {
 		return x.KeyFingerprint
+	}
+	return ""
+}
+
+func (x *GitHubConnection) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *GitHubConnection) GetCaBundle() string {
+	if x != nil {
+		return x.CaBundle
 	}
 	return ""
 }
@@ -689,7 +709,13 @@ type CreateGitHubConnectionRequest struct {
 	// envelope in Postgres (ADR 0056), never returned or logged.
 	PrivateKey string `protobuf:"bytes,5,opt,name=private_key,json=privateKey,proto3" json:"private_key,omitempty"`
 	// Run TestConnection right after creating it.
-	Test          bool `protobuf:"varint,6,opt,name=test,proto3" json:"test,omitempty"`
+	Test bool `protobuf:"varint,6,opt,name=test,proto3" json:"test,omitempty"`
+	// Web base URL of a GitHub Enterprise Server host, https://host[:port]. Empty
+	// is github.com. The REST API is reached at /api/v3 on the same host.
+	BaseUrl string `protobuf:"bytes,7,opt,name=base_url,json=baseUrl,proto3" json:"base_url,omitempty"`
+	// PEM certificates that sign the host's TLS certificate, when the system
+	// roots do not. Used for Koinon's API calls and for git in sandboxes.
+	CaBundle      string `protobuf:"bytes,8,opt,name=ca_bundle,json=caBundle,proto3" json:"ca_bundle,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -764,6 +790,20 @@ func (x *CreateGitHubConnectionRequest) GetTest() bool {
 		return x.Test
 	}
 	return false
+}
+
+func (x *CreateGitHubConnectionRequest) GetBaseUrl() string {
+	if x != nil {
+		return x.BaseUrl
+	}
+	return ""
+}
+
+func (x *CreateGitHubConnectionRequest) GetCaBundle() string {
+	if x != nil {
+		return x.CaBundle
+	}
+	return ""
 }
 
 // CreateGitHubConnectionResponse holds the new connection and, when asked
@@ -1524,11 +1564,13 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x05check\x18\x01 \x01(\tR\x05check\x12\x12\n" +
 	"\x04step\x18\x02 \x01(\tR\x04step\x12\x0e\n" +
 	"\x02ok\x18\x03 \x01(\bR\x02ok\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\"{\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"\xb3\x01\n" +
 	"\x10GitHubConnection\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\x03R\x05appId\x12'\n" +
 	"\x0finstallation_id\x18\x02 \x01(\x03R\x0einstallationId\x12'\n" +
-	"\x0fkey_fingerprint\x18\x03 \x01(\tR\x0ekeyFingerprint\"\xaf\x04\n" +
+	"\x0fkey_fingerprint\x18\x03 \x01(\tR\x0ekeyFingerprint\x12\x19\n" +
+	"\bbase_url\x18\x04 \x01(\tR\abaseUrl\x12\x1b\n" +
+	"\tca_bundle\x18\x05 \x01(\tR\bcaBundle\"\xaf\x04\n" +
 	"\n" +
 	"Connection\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
@@ -1546,7 +1588,7 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x06github\x18\n" +
 	" \x01(\v2,.koinon.connection.v1alpha1.GitHubConnectionH\x00R\x06githubB\n" +
 	"\n" +
-	"\bsettings\"\xd3\x01\n" +
+	"\bsettings\"\x8b\x02\n" +
 	"\x1dCreateGitHubConnectionRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x15\n" +
@@ -1554,7 +1596,9 @@ const file_koinon_connection_v1alpha1_connection_proto_rawDesc = "" +
 	"\x0finstallation_id\x18\x04 \x01(\x03R\x0einstallationId\x12$\n" +
 	"\vprivate_key\x18\x05 \x01(\tB\x03\x80\x01\x01R\n" +
 	"privateKey\x12\x12\n" +
-	"\x04test\x18\x06 \x01(\bR\x04test\"\xab\x01\n" +
+	"\x04test\x18\x06 \x01(\bR\x04test\x12\x19\n" +
+	"\bbase_url\x18\a \x01(\tR\abaseUrl\x12\x1b\n" +
+	"\tca_bundle\x18\b \x01(\tR\bcaBundle\"\xab\x01\n" +
 	"\x1eCreateGitHubConnectionResponse\x12F\n" +
 	"\n" +
 	"connection\x18\x01 \x01(\v2&.koinon.connection.v1alpha1.ConnectionR\n" +

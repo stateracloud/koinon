@@ -35,6 +35,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -72,6 +73,9 @@ const DefaultRefreshMargin = 10 * time.Minute
 var ErrRepositoryMismatch = errors.New("github: repositories do not match the request")
 
 // MaxRepositories is GitHub's limit on repositories per installation token.
+//
+// The connector data (spec.capabilities.maxRepositories) is the source; this is the bound used
+// when a Client is built without it.
 const MaxRepositories = codehost.DefaultMaxRepositories
 
 const redacted = "[redacted]"
@@ -163,8 +167,11 @@ type Client struct {
 	now     func() time.Time
 	margin  time.Duration
 
-	mu    sync.Mutex
-	cache map[string]*cacheEntry
+	// mu guards cache. Clients derived with For share both, so a token is minted once per
+	// connection's host, App and narrowing however many derived clients ask.
+	mu      *sync.Mutex
+	cache   map[string]*cacheEntry
+	derived *sync.Map // base URL and CA bundle hash to *Client
 }
 
 // Options configures a Client.
@@ -178,6 +185,49 @@ type Options struct {
 	RefreshMargin time.Duration
 	// Now defaults to time.Now.
 	Now func() time.Time
+}
+
+// For returns a client for a connection's own host: apiBase is its REST API's base URL and
+// caBundle PEM certificates trusted besides the system roots for it. Both empty returns c. The
+// derived client shares c's token cache (keys include the base URL) and its settings, and is
+// itself cached, so connections reuse their transports.
+func (c *Client) For(apiBase, caBundle string) (*Client, error) {
+	apiBase = strings.TrimRight(apiBase, "/")
+	if (apiBase == "" || apiBase == c.baseURL) && strings.TrimSpace(caBundle) == "" {
+		return c, nil
+	}
+	if apiBase == "" {
+		apiBase = c.baseURL
+	}
+	sum := sha256.Sum256([]byte(caBundle))
+	key := apiBase + "|" + hex.EncodeToString(sum[:])
+	if d, ok := c.derived.Load(key); ok {
+		return d.(*Client), nil
+	}
+	hc := *c.http
+	if strings.TrimSpace(caBundle) != "" {
+		pool, err := codehost.CertPool(caBundle)
+		if err != nil {
+			return nil, fmt.Errorf("github: %w", err)
+		}
+		var tr *http.Transport
+		switch t := hc.Transport.(type) {
+		case nil:
+			tr = http.DefaultTransport.(*http.Transport).Clone()
+		case *http.Transport:
+			tr = t.Clone()
+		default:
+			return nil, errors.New("github: the HTTP client's transport cannot take a CA bundle")
+		}
+		if tr.TLSClientConfig == nil {
+			tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		tr.TLSClientConfig.RootCAs = pool
+		hc.Transport = tr
+	}
+	d := &Client{baseURL: apiBase, http: &hc, now: c.now, margin: c.margin, mu: c.mu, cache: c.cache, derived: c.derived}
+	got, _ := c.derived.LoadOrStore(key, d)
+	return got.(*Client), nil
 }
 
 // NewClient returns a Client.
@@ -196,7 +246,7 @@ func NewClient(o Options) *Client {
 	}
 	return &Client{
 		baseURL: strings.TrimRight(o.BaseURL, "/"), http: o.HTTPClient, now: o.Now,
-		margin: o.RefreshMargin, cache: map[string]*cacheEntry{},
+		margin: o.RefreshMargin, mu: new(sync.Mutex), cache: map[string]*cacheEntry{}, derived: new(sync.Map),
 	}
 }
 
@@ -306,9 +356,9 @@ type cacheEntry struct {
 // cacheKey covers everything that changes what a token may do or who minted
 // it, including the key's fingerprint, so a rotated key never serves tokens of
 // the old one.
-func cacheKey(app App, repos []string, perms map[string]string) string {
+func cacheKey(base string, app App, repos []string, perms map[string]string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d|%d|%s|", app.AppID, app.InstallationID, app.Key.Fingerprint())
+	fmt.Fprintf(&b, "%s|%d|%d|%s|", base, app.AppID, app.InstallationID, app.Key.Fingerprint())
 	b.WriteString(strings.Join(repos, ","))
 	b.WriteByte('|')
 	for _, k := range slices.Sorted(maps.Keys(perms)) {
@@ -330,7 +380,7 @@ func (c *Client) InstallationToken(ctx context.Context, app App, req TokenReques
 	if err != nil {
 		return Token{}, err
 	}
-	key := cacheKey(app, repos, perms)
+	key := cacheKey(c.baseURL, app, repos, perms)
 
 	c.mu.Lock()
 	e, ok := c.cache[key]
@@ -380,8 +430,8 @@ func normalise(req TokenRequest) (full, names []string, perms map[string]string,
 		}
 		perms[p] = level
 	}
-	if len(req.Repositories) > MaxRepositories {
-		return nil, nil, nil, fmt.Errorf("github: at most %d repositories per token", MaxRepositories)
+	if limit := maxRepositories(); len(req.Repositories) > limit {
+		return nil, nil, nil, fmt.Errorf("github: at most %d repositories per token", limit)
 	}
 	seen := map[string]bool{}
 	for _, r := range req.Repositories {
