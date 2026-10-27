@@ -575,6 +575,24 @@ var _ = Describe("Importer", func() {
 				Expect(now.WriteTokenSetAt).To(BeTemporally("~", time.Now(), time.Minute), "a new write token is new")
 			})
 
+			It("refuses to change a declared connection's connector, leaving the row as it was", func(ctx SpecContext) {
+				put(ctx, "gt", declarative.TypeConnection, slug, giteaConn())
+				Expect(imp.Sync(ctx)).To(Succeed())
+				put(ctx, "gt", declarative.TypeConnection, slug, conn())
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				Expect(rows).To(HaveLen(1))
+				Expect(rows[0].Connector).To(Equal("gitea"))
+				cfg, err := gitea.ParseConfig(rows[0].Config)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cfg.BaseURL).To(Equal("https://git.example.test/gitea"))
+				var found bool
+				for _, e := range events(ctx) {
+					found = found || strings.Contains(e.Message, "cannot change from gitea to github")
+				}
+				Expect(found).To(BeTrue())
+			})
+
 			DescribeTable("is ignored, without quoting a token, when",
 				func(ctx SpecContext, mutate func(map[string]string)) {
 					d := giteaConn()

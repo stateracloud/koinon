@@ -200,3 +200,7 @@ Checked 2026-10-26 (research notes `gitea-overlap.md` §3, `forge-and-trackers.m
     token scope is not confirmed against a real server in this item; the escape suite's Gitea cases
     (`test/escape/gitea_read_test.go`) assert the OpenShell policy, which is independent of the server, and
     the home-lab test confirms the server side.
+- 2026-10-27 (CH5 review): the code-host MCP tool server is registered for every code-host connector, so a
+  Gitea grant gets its tools under the target `gitea` (`gitea_create_pull_request`). A declared connection's
+  connector cannot change by editing its Secret (delete it and declare a new one). The read-token check
+  probes a repository with issues enabled when there is one. Static tokens log their revision, not an expiry.

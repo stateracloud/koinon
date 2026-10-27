@@ -191,11 +191,18 @@ func checkReadToken(ctx context.Context, p pair) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The probe POSTs to /issues, which answers 404 when a repository has issues disabled, so
+	// prefer a repository that has them.
 	var target *apiRepo
 	for i := range repos {
 		if repos[i].Permissions != nil && repos[i].Permissions.Push {
-			target = &repos[i]
-			break
+			if repos[i].HasIssues {
+				target = &repos[i]
+				break
+			}
+			if target == nil {
+				target = &repos[i]
+			}
 		}
 	}
 	if target == nil {

@@ -319,7 +319,7 @@ func (s *Server) CreateGiteaConnection(ctx context.Context, req *connectionv1alp
 		s.log.Error("could not seal connection secret", "org", c.org.String(), "connection", connID.String(), "err", err)
 		return nil, connect.NewError(connect.CodeUnavailable, "could not store the tokens; try again")
 	}
-	fingerprint := cfg.ReadTokenFingerprint + "." + cfg.WriteTokenFp
+	fingerprint := cfg.ReadTokenFingerprint + "." + cfg.WriteTokenFingerprint
 	var row store.Connection
 	err = s.inTx(requestCtx(ctx), func(q *store.Queries) error {
 		var err error

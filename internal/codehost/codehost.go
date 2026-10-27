@@ -72,6 +72,9 @@ func (t Token) Value() string { return t.value }
 
 // String implements fmt.Stringer without revealing the token.
 func (t Token) String() string {
+	if t.ExpiresAt.IsZero() {
+		return fmt.Sprintf("code host token (revision %s, %d repositories)", t.Revision, len(t.Repositories))
+	}
 	return fmt.Sprintf("code host token (expires %s, %d repositories)", t.ExpiresAt.Format(time.RFC3339), len(t.Repositories))
 }
 
@@ -80,6 +83,9 @@ func (t Token) GoString() string { return t.String() }
 
 // LogValue implements slog.LogValuer without revealing the token.
 func (t Token) LogValue() slog.Value {
+	if t.ExpiresAt.IsZero() {
+		return slog.GroupValue(slog.String("revision", t.Revision), slog.Any("repositories", t.Repositories))
+	}
 	return slog.GroupValue(slog.Time("expires_at", t.ExpiresAt), slog.Any("repositories", t.Repositories))
 }
 
@@ -205,10 +211,8 @@ type Description struct {
 	InstallationID int64
 	// Site is the connection's host when it is not the connector's default.
 	Site Site
-	// Token-based providers (Gitea, ADR 0063): the bot's login, when each token was entered in
-	// Koinon (the provider does not expose its creation date), and a short fingerprint of the
-	// two tokens. The tokens themselves never leave the secret store.
-	BotLogin                        string
+	// Token-based providers (Gitea, ADR 0063): when each token was entered in Koinon (the
+	// provider does not expose its creation date). The tokens never leave the secret store.
 	ReadTokenSetAt, WriteTokenSetAt time.Time
 }
 

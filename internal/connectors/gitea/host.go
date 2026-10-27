@@ -35,10 +35,10 @@ const maxTokenLength = 256
 // is the time since it was entered in Koinon (ADR 0063 open question). The fingerprints are the
 // first bytes of a SHA-256 of each token, so that declaring the same token again keeps its age.
 type Config struct {
-	ReadTokenSetAt       time.Time `json:"readTokenSetAt"`
-	WriteTokenSetAt      time.Time `json:"writeTokenSetAt"`
-	ReadTokenFingerprint string    `json:"readTokenFingerprint,omitempty"`
-	WriteTokenFp         string    `json:"writeTokenFingerprint,omitempty"`
+	ReadTokenSetAt        time.Time `json:"readTokenSetAt"`
+	WriteTokenSetAt       time.Time `json:"writeTokenSetAt"`
+	ReadTokenFingerprint  string    `json:"readTokenFingerprint,omitempty"`
+	WriteTokenFingerprint string    `json:"writeTokenFingerprint,omitempty"`
 	// Site is the connection's server: its base URL (with an optional sub-path), CA bundle and
 	// extra CI directories.
 	codehost.Site
@@ -65,13 +65,13 @@ func Fingerprint(token []byte) string {
 func NewConfig(site codehost.Site, read, write []byte, prev *Config, now time.Time) Config {
 	c := Config{
 		Site: site, ReadTokenSetAt: now.UTC(), WriteTokenSetAt: now.UTC(),
-		ReadTokenFingerprint: Fingerprint(read), WriteTokenFp: Fingerprint(write),
+		ReadTokenFingerprint: Fingerprint(read), WriteTokenFingerprint: Fingerprint(write),
 	}
 	if prev != nil {
 		if prev.ReadTokenFingerprint == c.ReadTokenFingerprint && !prev.ReadTokenSetAt.IsZero() {
 			c.ReadTokenSetAt = prev.ReadTokenSetAt
 		}
-		if prev.WriteTokenFp == c.WriteTokenFp && !prev.WriteTokenSetAt.IsZero() {
+		if prev.WriteTokenFingerprint == c.WriteTokenFingerprint && !prev.WriteTokenSetAt.IsZero() {
 			c.WriteTokenSetAt = prev.WriteTokenSetAt
 		}
 	}
