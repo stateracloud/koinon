@@ -69,6 +69,7 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		}
 		if v.Version == a.LatestVersion {
 			out.ProposedGrants = agentGrantsProto(cfg)
+			out.ProposedTriggers = triggersProto(cfg.Triggers)
 			out.Instructions = cfg.Instructions
 			out.Model = cfg.Model
 			wall, tokens := cfg.RunCaps()
@@ -77,6 +78,7 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 		if v.ID == a.ActiveVersionID {
 			out.ActiveVersion = v.Version
 			out.ApprovedGrants = agentGrantsProto(cfg)
+			out.ApprovedTriggers = triggersProto(cfg.Triggers)
 		}
 	}
 	return out, nil
@@ -227,10 +229,7 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 		if err != nil {
 			return err
 		}
-		switch a.Status {
-		case store.AgentStatusActive:
-			return connect.NewError(connect.CodeFailedPrecondition, "agent is already active")
-		case store.AgentStatusArchived:
+		if a.Status == store.AgentStatusArchived {
 			return connect.NewError(connect.CodeFailedPrecondition, "agent is archived")
 		}
 		if req.GetVersion() != a.LatestVersion {
@@ -244,6 +243,21 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 		i := slices.IndexFunc(versions, func(v store.AgentVersion) bool { return v.Version == a.LatestVersion })
 		if i < 0 {
 			return connect.NewError(connect.CodeFailedPrecondition, "agent has no version to activate")
+		}
+		newCfg, err := agentconfig.Parse(versions[i].Config)
+		if err != nil {
+			return err
+		}
+		var oldCfg agentconfig.Config
+		if j := slices.IndexFunc(versions, func(v store.AgentVersion) bool { return v.ID == a.ActiveVersionID }); j >= 0 {
+			if oldCfg, err = agentconfig.Parse(versions[j].Config); err != nil {
+				return err
+			}
+		}
+		// An active agent can move to a newer, proposed version (SetAgentTriggers); it cannot be
+		// activated again with the version it already runs.
+		if a.Status == store.AgentStatusActive && versions[i].ID == a.ActiveVersionID {
+			return connect.NewError(connect.CodeFailedPrecondition, "agent is already active")
 		}
 		a, err = q.ActivateAgent(ctx, store.ActivateAgentParams{
 			OrgID: c.org, ID: a.ID, VersionID: versions[i].ID, ActivatedBy: c.actor(),
@@ -269,8 +283,10 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
 			Org: c.org, Actor: c.auditActor(), Action: "agent.activate", TargetKind: "agent", TargetID: a.ID.String(),
 			After: map[string]any{
-				"version": versions[i].Version, "applyToOpenTickets": req.GetApplyToOpenTickets(), "ticketsRestarting": restarting,
+				"version": versions[i].Version, "triggers": triggerAudit(newCfg.Triggers, false),
+				"applyToOpenTickets": req.GetApplyToOpenTickets(), "ticketsRestarting": restarting,
 			},
+			Before: map[string]any{"triggers": triggerAudit(oldCfg.Triggers, false)},
 		})
 	})
 	if err != nil {
@@ -280,6 +296,93 @@ func (s *Server) ActivateAgent(ctx context.Context, req *agentv1alpha1.ActivateA
 		"version", out.GetActiveVersion(), "by", c.actor().String(),
 		"apply_to_open_tickets", req.GetApplyToOpenTickets(), "tickets_restarting", restarting)
 	return &agentv1alpha1.ActivateAgentResponse{Agent: out, TicketsRestarting: int32(restarting)}, nil //nolint:gosec // a count of tickets
+}
+
+// triggerAudit renders triggers for an audit event; instruction text only when asked for.
+func triggerAudit(ts []templates.Trigger, withInstruction bool) []map[string]any {
+	out := make([]map[string]any, 0, len(ts))
+	for _, t := range ts {
+		m := map[string]any{"id": t.ID, "type": string(t.Type)}
+		if t.Filter.Cron != "" {
+			m["cron"], m["timezone"] = t.Filter.Cron, t.Filter.Timezone
+		}
+		if withInstruction {
+			m["instruction"] = t.Instruction
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// SetAgentTriggers implements AgentService: a new version with the given triggers and everything
+// else carried over from the latest one. The agent keeps running its active version; the new
+// triggers take effect when ActivateAgent activates the new version (ADR 0066).
+func (s *Server) SetAgentTriggers(ctx context.Context, req *agentv1alpha1.SetAgentTriggersRequest) (*agentv1alpha1.SetAgentTriggersResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	triggers, err := triggersFromProto(req.GetTriggers())
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
+	}
+	var out *agentv1alpha1.Agent
+	err = s.inTx(ctx, func(q *store.Queries) error {
+		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: id})
+		if err != nil {
+			return err
+		}
+		if a.Status == store.AgentStatusArchived {
+			return connect.NewError(connect.CodeFailedPrecondition, "agent is archived")
+		}
+		if req.GetBaseVersion() != a.LatestVersion {
+			return connect.NewError(connect.CodeFailedPrecondition,
+				"base_version does not match the agent's latest version; review it again")
+		}
+		versions, err := q.ListAgentVersions(ctx, store.ListAgentVersionsParams{OrgID: c.org, AgentID: a.ID})
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(versions, func(v store.AgentVersion) bool { return v.Version == a.LatestVersion })
+		if i < 0 {
+			return connect.NewError(connect.CodeFailedPrecondition, "agent has no version to base the change on")
+		}
+		cfg, err := agentconfig.Parse(versions[i].Config)
+		if err != nil {
+			return err
+		}
+		before := cfg.Triggers
+		cfg.Triggers = triggers
+		raw, err := cfg.Marshal()
+		if err != nil {
+			return err
+		}
+		v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{
+			OrgID: c.org, AgentID: a.ID, Config: raw, CreatedBy: c.actor(),
+		})
+		if err != nil {
+			return err
+		}
+		if a, err = q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: a.ID}); err != nil {
+			return err
+		}
+		if out, err = s.agentView(ctx, q, a, nil); err != nil {
+			return err
+		}
+		return audit.RecordErr(requestCtx(ctx), q, audit.Event{
+			Org: c.org, Actor: c.auditActor(), Action: "agent.triggers.propose", TargetKind: "agent", TargetID: a.ID.String(),
+			Before: map[string]any{"version": versions[i].Version, "triggers": triggerAudit(before, true)},
+			After:  map[string]any{"version": v.Version, "triggers": triggerAudit(triggers, true)},
+		})
+	})
+	if err != nil {
+		return nil, s.dbError(err, "agent")
+	}
+	return &agentv1alpha1.SetAgentTriggersResponse{Agent: out}, nil
 }
 
 // ResumeAgent implements AgentService: an admin or owner clears an agent's unhealthy state (ADR 0054).

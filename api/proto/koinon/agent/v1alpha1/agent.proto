@@ -30,6 +30,12 @@ service AgentService {
   // proposes. Admins and owners only.
   rpc ActivateAgent(ActivateAgentRequest) returns (ActivateAgentResponse);
 
+  // SetAgentTriggers proposes a new version with the given triggers (everything else carried over
+  // from the latest version). The triggers fire nothing until ActivateAgent activates that
+  // version; an active agent keeps running its active version meanwhile. Audited. Admins and
+  // owners only.
+  rpc SetAgentTriggers(SetAgentTriggersRequest) returns (SetAgentTriggersResponse);
+
   // ResumeAgent clears the unhealthy state of an agent whose sandbox got stuck again and again
   // (ADR 0054), so it takes runs again; its stuck sandbox is recreated. Audited. Admins and owners
   // only.
@@ -76,6 +82,10 @@ message Agent {
   // recreated again (ADR 0054). New runs are refused until ResumeAgent.
   google.protobuf.Timestamp unhealthy_at = 18;
   string unhealthy_reason = 19;
+  // Triggers the latest version proposes; they have no effect until it is activated.
+  repeated koinon.template.v1alpha1.Trigger proposed_triggers = 20;
+  // Triggers of the active version: the ones in effect.
+  repeated koinon.template.v1alpha1.Trigger approved_triggers = 21;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -171,5 +181,21 @@ message ArchiveAgentRequest {
 
 // ArchiveAgentResponse holds the archived agent.
 message ArchiveAgentResponse {
+  Agent agent = 1;
+}
+
+// SetAgentTriggersRequest replaces the triggers of the agent's latest version in a new version.
+message SetAgentTriggersRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // Must equal the agent's latest_version, so a concurrent edit is not overwritten; otherwise the
+  // call fails with FailedPrecondition.
+  int32 base_version = 3;
+  // The complete list; empty removes every trigger.
+  repeated koinon.template.v1alpha1.Trigger triggers = 4;
+}
+
+// SetAgentTriggersResponse holds the agent with its new proposed version.
+message SetAgentTriggersResponse {
   Agent agent = 1;
 }
