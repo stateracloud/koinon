@@ -317,7 +317,7 @@ func (s *Scheduler) createTask(ctx context.Context, in FireInput) (string, error
 	task, _, err := s.tasks.CreateTriggeredTask(ctx, services.TriggeredTask{
 		Org: org, Agent: agent, Trigger: trig,
 		Source: durable.SourceTrigger, Key: durable.TriggerFireKey(trig.String(), due),
-		Title:   fmt.Sprintf("Scheduled: %s, %s", in.Trigger, due.In(loc).Format("2006-01-02 15:04 MST")),
+		Title:   TaskTitle(in.Trigger, due, loc),
 		Message: tr.Instruction,
 		Origin:  store.RunOriginScheduled,
 	})
@@ -328,6 +328,12 @@ func (s *Scheduler) createTask(ctx context.Context, in FireInput) (string, error
 		return "", err
 	}
 	return task.ID.String(), nil
+}
+
+// TaskTitle is the title of the task a schedule trigger creates: the trigger's name and the due
+// time in the trigger's time zone.
+func TaskTitle(trigger string, due time.Time, loc *time.Location) string {
+	return fmt.Sprintf("Scheduled: %s, %s", trigger, due.In(loc).Format("2006-01-02 15:04 MST"))
 }
 
 func sameSchedule(t templates.Trigger, in FireInput) bool {

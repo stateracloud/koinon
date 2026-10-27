@@ -86,3 +86,19 @@ func TestDoReportsAPanicAndALoopGoesOn(t *testing.T) {
 		t.Fatalf("runs = %d", runs)
 	}
 }
+
+func TestGoOrStopCallsOnPanicOnlyWhenFnPanics(t *testing.T) {
+	stopped := make(chan struct{}, 2)
+	safego.GoOrStop(context.Background(), nil, "ok", func() { stopped <- struct{}{} }, func(context.Context) {})
+	select {
+	case <-stopped:
+		t.Fatal("onPanic ran without a panic")
+	case <-time.After(100 * time.Millisecond):
+	}
+	safego.GoOrStop(context.Background(), nil, "boom", func() { stopped <- struct{}{} }, func(context.Context) { panic("kaboom") })
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("onPanic did not run after a panic")
+	}
+}

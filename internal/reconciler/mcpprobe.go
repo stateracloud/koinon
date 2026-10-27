@@ -62,7 +62,7 @@ func (r *Reconciler) RunProber(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			r.ProbeAll(ctx)
+			safego.Do(r.log, "mcp-probe", func() { r.ProbeAll(ctx) })
 		}
 	}
 }

@@ -87,9 +87,11 @@ type env struct {
 	gw        *fakegateway.Gateway
 	backend   *openshell.Backend
 	harness   *harness
-	workspace string
-	sandbox   string
-	files     *files
+	// backendOverride, if set, is the backend the pools use (a wrapper of backend).
+	backendOverride agentd.Backend
+	workspace       string
+	sandbox         string
+	files           *files
 }
 
 // files emulates the sandbox's files that agentd writes and reads with /bin/sh: the
@@ -406,7 +408,11 @@ func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Co
 	for _, m := range mutate {
 		m(&cfg)
 	}
-	p, err := agentd.New(conns, e.backend, cfg)
+	var be agentd.Backend = e.backend
+	if e.backendOverride != nil {
+		be = e.backendOverride
+	}
+	p, err := agentd.New(conns, be, cfg)
 	Expect(err).NotTo(HaveOccurred())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

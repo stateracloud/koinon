@@ -36,6 +36,7 @@ import (
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // HomeStore is the checkpoint writer as agentd uses it (checkpoint.Writer).
@@ -112,7 +113,8 @@ func (p *Pool) checkpointLoop(ctx context.Context) {
 	defer wg.Wait()
 	slots := make(chan struct{}, c.Concurrency)
 	for ctx.Err() == nil {
-		p.checkpointTick(ctx, slots, &wg)
+		// One tick at a time, so a panic is logged and the hourly checkpoints go on.
+		safego.Do(p.log, "checkpoint-tick", func() { p.checkpointTick(ctx, slots, &wg) })
 		if !sleep(ctx, c.Poll) {
 			return
 		}
@@ -159,7 +161,8 @@ func (p *Pool) checkpointTick(ctx context.Context, slots chan struct{}, wg *sync
 			}
 			wg.Go(func() {
 				defer func() { <-slots }()
-				p.takeCheckpoint(ctx, cp)
+				// A panic is logged; the request's lease runs out and the request is taken over.
+				safego.Do(p.log, "take-checkpoint", func() { p.takeCheckpoint(ctx, cp) })
 			})
 		}
 	}
