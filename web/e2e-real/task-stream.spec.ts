@@ -2,7 +2,7 @@
 
 import { expect, test } from '@playwright/test'
 
-// W1 acceptance (issue #50): create a ticket and watch the run in the browser, against the real
+// W1 acceptance (issue #50): create a task and watch the run in the browser, against the real
 // koinon-api, reconciler, agentd, Postgres, OpenShell (runc on kind) and the fake model server.
 // The only doubles are the ones in test/e2e/kind/fakes.yaml: the fake model (script
 // test/fakemodel/scripts/repo-helper.yaml) and the fake GitHub App API.
@@ -15,7 +15,7 @@ const fakeModelURL = process.env.KOINON_E2E_FAKEMODEL_URL
 const repository = 'koinon-demo/hello'
 const title = 'Add hello.md'
 
-test('sign in, create an agent and a ticket, watch the reply stream, approve, run succeeds', async ({ page, request }) => {
+test('sign in, create an agent and a task, watch the reply stream, approve, run succeeds', async ({ page, request }) => {
   expect(fakeGitHub, 'KOINON_E2E_FAKEGITHUB_URL').toBeTruthy()
   expect(bootstrapPassword, 'KOINON_E2E_PASSWORD').toBeTruthy()
   expect(fakeModelURL, 'KOINON_E2E_FAKEMODEL_URL').toBeTruthy()
@@ -113,7 +113,7 @@ test('sign in, create an agent and a ticket, watch the reply stream, approve, ru
   await page.getByRole('button', { name: 'Activate' }).click()
   await expect(page.getByText('Activated.')).toBeVisible()
 
-  // 5. Ticket: the run starts in a sandbox and streams the agent's reply.
+  // 5. Task: the run starts in a sandbox and streams the agent's reply.
   await page.getByRole('link', { name: 'Hand it a task from the inbox' }).click()
   await page.getByLabel('Title').fill(title)
   await page.getByLabel('First message (optional)').fill(`Please add a hello.md to ${repository} that says hello from koinon.`)
