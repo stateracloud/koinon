@@ -151,6 +151,7 @@ func run() error {
 			RuntimeClassName:  cfg.runtimeClass,
 			IdleTimeout:       cfg.idleTimeout,
 			ParkWarm:          cfg.parkWarm,
+			ArchiveAfter:      cfg.archiveAfter,
 			SandboxJobs:       cfg.sandboxJobs,
 			ResyncInterval:    cfg.resyncInterval,
 			HomeRetention:     reconciler.Retention(cfg.homeRetention),

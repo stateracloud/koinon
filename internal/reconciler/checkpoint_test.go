@@ -294,4 +294,149 @@ var _ = Describe("Reconciler home checkpoints", func() {
 			Expect(err).To(HaveOccurred())
 		})
 	})
+
+	// The archive tier (plan item AR1, ADR 0032): a long-stopped sandbox with a complete backup is
+	// deleted with its volume; the next run gets a fresh sandbox that keeps the home generation.
+	Describe("the archive tier", func() {
+		stopWith := func(ctx context.Context, ok bool) {
+			GinkgoHelper()
+			now = time.Now().Add(11 * time.Minute)
+			pass(ctx)
+			finish(ctx, ok)
+			pass(ctx)
+			Expect(row(ctx).State).To(Equal(store.SandboxStateStopped))
+		}
+		archivedActions := func(ctx context.Context) int {
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'sandbox.archive'`, org).Scan(&n)).To(Succeed())
+			return n
+		}
+
+		It("archives after the stopped window, keeps the generation, and creates a sandbox only when a run wants one", func(ctx SpecContext) {
+			lineage := row(ctx).HomeGeneration.String
+			stopWith(ctx, true)
+
+			By("not before the window")
+			now = time.Now().Add(6 * 24 * time.Hour)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+
+			By("after it: the sandbox and volume go, the stop backup becomes the restore")
+			now = time.Now().Add(8 * 24 * time.Hour)
+			creates := osg.Calls("CreateSandbox")
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			got := row(ctx)
+			Expect(got.ArchivedAt.Valid).To(BeTrue())
+			Expect(got.RestoreCheckpointID.Valid).To(BeTrue())
+			Expect(got.Message).To(Equal("archived, restores on next run"))
+			Expect(archivedActions(ctx)).To(Equal(1))
+
+			By("nothing recreates it while no run wants it")
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(creates))
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(row(ctx).ArchivedAt.Valid).To(BeTrue())
+			Expect(archivedActions(ctx)).To(Equal(1))
+
+			By("a queued run creates a fresh sandbox that keeps the home generation and owes the restore")
+			queueRun(ctx, org, user, agent.ID)
+			pass(ctx)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(creates + 1))
+			got = row(ctx)
+			Expect(got.ArchivedAt.Valid).To(BeFalse())
+			Expect(got.RestoreCheckpointID.Valid).To(BeTrue())
+			Expect(got.HomeGeneration.String).To(Equal(lineage), "the same session is reloaded (ADR 0051)")
+		})
+
+		It("does not archive when the latest backup failed", func(ctx SpecContext) {
+			stopWith(ctx, false)
+			now = time.Now().Add(8 * 24 * time.Hour)
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+			Expect(row(ctx).ArchivedAt.Valid).To(BeFalse())
+			Expect(archivedActions(ctx)).To(Equal(0))
+		})
+
+		It("does not archive when the latest backup is older than the sandbox's last activity", func(ctx SpecContext) {
+			stopWith(ctx, true)
+			_, err := pool.Exec(ctx, `UPDATE home_checkpoints SET finished_at = now() - interval '30 days' WHERE org_id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+			now = time.Now().Add(8 * 24 * time.Hour)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+		})
+
+		It("does not archive while a newer backup is still requested or running", func(ctx SpecContext) {
+			stopWith(ctx, true)
+			_, err := q.RequestHomeCheckpoint(ctx, store.RequestHomeCheckpointParams{
+				OrgID: org, AgentID: agent.ID, Reason: store.CheckpointReasonHourly, SandboxID: sandboxID(), Generation: row(ctx).HomeGeneration.String,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE home_checkpoints SET status = 'running' WHERE org_id = $1 AND status = 'requested'`, org)
+			Expect(err).NotTo(HaveOccurred())
+			now = time.Now().Add(8 * 24 * time.Hour)
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+			Expect(row(ctx).ArchivedAt.Valid).To(BeFalse())
+			Expect(archivedActions(ctx)).To(Equal(0))
+		})
+
+		It("never archives an ephemeral agent: its sandbox belongs to a task", func(ctx SpecContext) {
+			eph := newAgentWithConfig(ctx, org, user, `{"instructions":"help","ephemeral":true}`)
+			pass(ctx)
+			now = time.Now().Add(30 * 24 * time.Hour)
+			pass(ctx)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+			sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: org, AgentID: eph.ID})
+			if err == nil {
+				Expect(sb.ArchivedAt.Valid).To(BeFalse())
+			}
+			Expect(archivedActions(ctx)).To(Equal(0))
+		})
+
+		It("archives a sandbox with a parked run, and creates one with the same generation when the park becomes claimable", func(ctx SpecContext) {
+			lineage := row(ctx).HomeGeneration.String
+			queueRun(ctx, org, user, agent.ID)
+			run := claimRun(ctx, org)
+			_, err := q.ParkRun(ctx, store.ParkRunParams{OrgID: org, ID: run.ID, Epoch: run.Epoch, ParkReason: store.RunParkReasonApproval})
+			Expect(err).NotTo(HaveOccurred())
+			now = time.Now().Add(2 * time.Hour)
+			pass(ctx)
+			finish(ctx, true)
+			pass(ctx)
+			Expect(row(ctx).State).To(Equal(store.SandboxStateStopped))
+
+			now = time.Now().Add(8 * 24 * time.Hour)
+			creates := osg.Calls("CreateSandbox")
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(1))
+			Expect(row(ctx).ArchivedAt.Valid).To(BeTrue())
+			pass(ctx)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(creates), "a park that is not claimable creates nothing")
+
+			_, err = q.ResolveRunPark(ctx, store.ResolveRunParkParams{OrgID: org, ID: run.ID})
+			Expect(err).NotTo(HaveOccurred())
+			pass(ctx)
+			Expect(osg.Calls("CreateSandbox")).To(Equal(creates + 1))
+			got := row(ctx)
+			Expect(got.ArchivedAt.Valid).To(BeFalse())
+			Expect(got.HomeGeneration.String).To(Equal(lineage))
+		})
+
+		It("does not archive when the archive tier is off", func(ctx SpecContext) {
+			stopWith(ctx, true)
+			cfg.ArchiveAfter = -1
+			var err error
+			r, err = reconciler.New(pool, backend, &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, cfg)
+			Expect(err).NotTo(HaveOccurred())
+			now = time.Now().Add(30 * 24 * time.Hour)
+			pass(ctx)
+			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
+		})
+	})
 })

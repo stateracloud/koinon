@@ -144,6 +144,7 @@
         "affinity": {"$ref": "#/definitions/map"},
         "idleTimeout": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
         "parkWarm": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
+        "archiveAfter": {"type": "string", "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
         "sandboxJobs": {"type": "integer", "minimum": 1},
         "resyncInterval": {"type": "string", "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+$"},
         "homeRetention": {"enum": ["delete", "retain"]}

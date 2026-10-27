@@ -45,6 +45,7 @@ data:
     reconciler:
       idleTimeout: {{ .Values.reconciler.idleTimeout }}
       parkWarm: {{ .Values.reconciler.parkWarm }}
+      archiveAfter: {{ .Values.reconciler.archiveAfter }}
       sandboxJobs: {{ .Values.reconciler.sandboxJobs }}
       resyncInterval: {{ .Values.reconciler.resyncInterval }}
       homeRetention: {{ .Values.reconciler.homeRetention }}

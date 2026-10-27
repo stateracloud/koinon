@@ -113,9 +113,12 @@ type Agent struct {
 	ApprovedTriggers []*v1alpha1.Trigger `protobuf:"bytes,21,rep,name=approved_triggers,json=approvedTriggers,proto3" json:"approved_triggers,omitempty"`
 	// The latest version is ephemeral: each task gets a fresh sandbox without a home, deleted when
 	// the task ends (ADR 0065 decision 13c).
-	Ephemeral     bool `protobuf:"varint,22,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Ephemeral bool `protobuf:"varint,22,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	// Set while the agent's sandbox and volume are archived (ADR 0032 amendment): the home is in
+	// its last checkpoint and the next run restores it into a fresh sandbox.
+	SandboxArchivedAt *timestamppb.Timestamp `protobuf:"bytes,23,opt,name=sandbox_archived_at,json=sandboxArchivedAt,proto3" json:"sandbox_archived_at,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Agent) Reset() {
@@ -300,6 +303,13 @@ func (x *Agent) GetEphemeral() bool {
 		return x.Ephemeral
 	}
 	return false
+}
+
+func (x *Agent) GetSandboxArchivedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.SandboxArchivedAt
+	}
+	return nil
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -1139,7 +1149,7 @@ var File_koinon_agent_v1alpha1_agent_proto protoreflect.FileDescriptor
 
 const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\n" +
-	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\xcc\b\n" +
+	"!koinon/agent/v1alpha1/agent.proto\x12\x15koinon.agent.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a'koinon/template/v1alpha1/template.proto\"\x98\t\n" +
 	"\x05Agent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12!\n" +
@@ -1167,7 +1177,8 @@ const file_koinon_agent_v1alpha1_agent_proto_rawDesc = "" +
 	"\x10unhealthy_reason\x18\x13 \x01(\tR\x0funhealthyReason\x12N\n" +
 	"\x11proposed_triggers\x18\x14 \x03(\v2!.koinon.template.v1alpha1.TriggerR\x10proposedTriggers\x12N\n" +
 	"\x11approved_triggers\x18\x15 \x03(\v2!.koinon.template.v1alpha1.TriggerR\x10approvedTriggers\x12\x1c\n" +
-	"\tephemeral\x18\x16 \x01(\bR\tephemeral\"\xa3\x02\n" +
+	"\tephemeral\x18\x16 \x01(\bR\tephemeral\x12J\n" +
+	"\x13sandbox_archived_at\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\x11sandboxArchivedAt\"\xa3\x02\n" +
 	"\x1eCreateAgentFromTemplateRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vtemplate_id\x18\x02 \x01(\tR\n" +
@@ -1283,35 +1294,36 @@ var file_koinon_agent_v1alpha1_agent_proto_depIdxs = []int32{
 	20, // 8: koinon.agent.v1alpha1.Agent.unhealthy_at:type_name -> google.protobuf.Timestamp
 	21, // 9: koinon.agent.v1alpha1.Agent.proposed_triggers:type_name -> koinon.template.v1alpha1.Trigger
 	21, // 10: koinon.agent.v1alpha1.Agent.approved_triggers:type_name -> koinon.template.v1alpha1.Trigger
-	17, // 11: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.flavor:type_name -> koinon.template.v1alpha1.Flavor
-	3,  // 12: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.grants:type_name -> koinon.agent.v1alpha1.GrantBinding
-	1,  // 13: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 14: koinon.agent.v1alpha1.GetAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 15: koinon.agent.v1alpha1.ListAgentsResponse.agents:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 16: koinon.agent.v1alpha1.ActivateAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 17: koinon.agent.v1alpha1.ResumeAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	1,  // 18: koinon.agent.v1alpha1.ArchiveAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	21, // 19: koinon.agent.v1alpha1.SetAgentTriggersRequest.triggers:type_name -> koinon.template.v1alpha1.Trigger
-	1,  // 20: koinon.agent.v1alpha1.SetAgentTriggersResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
-	2,  // 21: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:input_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
-	5,  // 22: koinon.agent.v1alpha1.AgentService.GetAgent:input_type -> koinon.agent.v1alpha1.GetAgentRequest
-	7,  // 23: koinon.agent.v1alpha1.AgentService.ListAgents:input_type -> koinon.agent.v1alpha1.ListAgentsRequest
-	9,  // 24: koinon.agent.v1alpha1.AgentService.ActivateAgent:input_type -> koinon.agent.v1alpha1.ActivateAgentRequest
-	15, // 25: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:input_type -> koinon.agent.v1alpha1.SetAgentTriggersRequest
-	11, // 26: koinon.agent.v1alpha1.AgentService.ResumeAgent:input_type -> koinon.agent.v1alpha1.ResumeAgentRequest
-	13, // 27: koinon.agent.v1alpha1.AgentService.ArchiveAgent:input_type -> koinon.agent.v1alpha1.ArchiveAgentRequest
-	4,  // 28: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:output_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
-	6,  // 29: koinon.agent.v1alpha1.AgentService.GetAgent:output_type -> koinon.agent.v1alpha1.GetAgentResponse
-	8,  // 30: koinon.agent.v1alpha1.AgentService.ListAgents:output_type -> koinon.agent.v1alpha1.ListAgentsResponse
-	10, // 31: koinon.agent.v1alpha1.AgentService.ActivateAgent:output_type -> koinon.agent.v1alpha1.ActivateAgentResponse
-	16, // 32: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:output_type -> koinon.agent.v1alpha1.SetAgentTriggersResponse
-	12, // 33: koinon.agent.v1alpha1.AgentService.ResumeAgent:output_type -> koinon.agent.v1alpha1.ResumeAgentResponse
-	14, // 34: koinon.agent.v1alpha1.AgentService.ArchiveAgent:output_type -> koinon.agent.v1alpha1.ArchiveAgentResponse
-	28, // [28:35] is the sub-list for method output_type
-	21, // [21:28] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	20, // 11: koinon.agent.v1alpha1.Agent.sandbox_archived_at:type_name -> google.protobuf.Timestamp
+	17, // 12: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.flavor:type_name -> koinon.template.v1alpha1.Flavor
+	3,  // 13: koinon.agent.v1alpha1.CreateAgentFromTemplateRequest.grants:type_name -> koinon.agent.v1alpha1.GrantBinding
+	1,  // 14: koinon.agent.v1alpha1.CreateAgentFromTemplateResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 15: koinon.agent.v1alpha1.GetAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 16: koinon.agent.v1alpha1.ListAgentsResponse.agents:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 17: koinon.agent.v1alpha1.ActivateAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 18: koinon.agent.v1alpha1.ResumeAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	1,  // 19: koinon.agent.v1alpha1.ArchiveAgentResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	21, // 20: koinon.agent.v1alpha1.SetAgentTriggersRequest.triggers:type_name -> koinon.template.v1alpha1.Trigger
+	1,  // 21: koinon.agent.v1alpha1.SetAgentTriggersResponse.agent:type_name -> koinon.agent.v1alpha1.Agent
+	2,  // 22: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:input_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateRequest
+	5,  // 23: koinon.agent.v1alpha1.AgentService.GetAgent:input_type -> koinon.agent.v1alpha1.GetAgentRequest
+	7,  // 24: koinon.agent.v1alpha1.AgentService.ListAgents:input_type -> koinon.agent.v1alpha1.ListAgentsRequest
+	9,  // 25: koinon.agent.v1alpha1.AgentService.ActivateAgent:input_type -> koinon.agent.v1alpha1.ActivateAgentRequest
+	15, // 26: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:input_type -> koinon.agent.v1alpha1.SetAgentTriggersRequest
+	11, // 27: koinon.agent.v1alpha1.AgentService.ResumeAgent:input_type -> koinon.agent.v1alpha1.ResumeAgentRequest
+	13, // 28: koinon.agent.v1alpha1.AgentService.ArchiveAgent:input_type -> koinon.agent.v1alpha1.ArchiveAgentRequest
+	4,  // 29: koinon.agent.v1alpha1.AgentService.CreateAgentFromTemplate:output_type -> koinon.agent.v1alpha1.CreateAgentFromTemplateResponse
+	6,  // 30: koinon.agent.v1alpha1.AgentService.GetAgent:output_type -> koinon.agent.v1alpha1.GetAgentResponse
+	8,  // 31: koinon.agent.v1alpha1.AgentService.ListAgents:output_type -> koinon.agent.v1alpha1.ListAgentsResponse
+	10, // 32: koinon.agent.v1alpha1.AgentService.ActivateAgent:output_type -> koinon.agent.v1alpha1.ActivateAgentResponse
+	16, // 33: koinon.agent.v1alpha1.AgentService.SetAgentTriggers:output_type -> koinon.agent.v1alpha1.SetAgentTriggersResponse
+	12, // 34: koinon.agent.v1alpha1.AgentService.ResumeAgent:output_type -> koinon.agent.v1alpha1.ResumeAgentResponse
+	14, // 35: koinon.agent.v1alpha1.AgentService.ArchiveAgent:output_type -> koinon.agent.v1alpha1.ArchiveAgentResponse
+	29, // [29:36] is the sub-list for method output_type
+	22, // [22:29] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_koinon_agent_v1alpha1_agent_proto_init() }

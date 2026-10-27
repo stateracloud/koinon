@@ -1,7 +1,7 @@
 # 0032. Agent home on a PVC, checkpointed incrementally to object storage
 
 - Status: Accepted
-- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); #169 (restore through the upload channel)
+- Amended by: [0065](0065-work-model-tasks-inbox.md) (checkpoints in v0.1; archive tier); HC1 (kopia, exec-stream runner, hourly points); #169 (restore through the upload channel); AR1 (archive tier built)
 - Date: 2026-10-21
 - Decision: [design.md#32](../design.md)
 
@@ -293,3 +293,32 @@ Measured on main e520d87 on the home lab (Kata sandboxes, Garage S3, OpenShell v
 The restored files' SHA-256 sums matched the originals. Before the fix, every restore failed with
 exit 74; a prototype that sent 3 MiB pieces over exec took 19.9 s and needed twice the disk space.
 A home at the 4 GiB stage limit would take about 5 minutes at these rates.
+
+## Amendment (2026-10-27, #146 A7, plan item AR1): the archive tier
+
+The archive tier above is built in the reconciler (`internal/reconciler/archive.go`).
+
+- **When.** A sandbox that has been stopped for `reconciler.archiveAfter` (default 168h = 7 days,
+  counted from the later of `stopped_at` and the sandbox's last activity) is deleted with its
+  volume. Needs `checkpoints.enabled`; a negative value turns the tier off. Conservative choice: the
+  window is one platform value (chart and `--archive-after`), not an org setting; a per-org
+  override can be added to `org_settings` later without changing the rules below.
+- **Gate (practice B3).** The sandbox's latest checkpoint must be complete and finished since its
+  last activity (`fresh`, the freshness rule of `homeGate`). A failed, requested, running or
+  older checkpoint means no archive. Unlike a recreation, the archive never starts the sandbox,
+  files a request or marks the agent unhealthy: it waits for the next stop backup. A sandbox that
+  still owes a restore (`restore_checkpoint_id`) holds nothing newer than that checkpoint and may
+  be archived.
+- **Never archived:** ephemeral agents (`checkpointsOn`, nothing to keep) and any sandbox with an
+  active or claimable run (it is not stopped then). Decision: a **parked** run does not prevent
+  the archive. The restore keeps the home generation ([0051](0051-session-home-generations.md)),
+  so when the park resolves the run is claimed, a sandbox is created, the home is restored and the
+  session is reloaded with `session/load`.
+- **Effect.** The checkpoint becomes the restore (`SetSandboxRestore`), the sandbox is deleted,
+  `agent_sandboxes.archived_at` is set (migration 00029), the row is held in state `deleting`
+  (phase `Archived`, message "archived, restores on next run"; agentd waits on that state rather
+  than failing the run) and `sandbox.archive` is audited. No sandbox is created while nothing
+  wants one. A queued run, a claimable park or a pre-wake signal creates a fresh sandbox, which
+  keeps the home generation; the first run restores the home (HC1, unchanged) and reloads the same
+  session. Any observed starting, ready, stopping, stopped or error sandbox clears `archived_at`.
+- **Shown** on the agent page ("archived, restores on next run", `Agent.sandbox_archived_at`).
