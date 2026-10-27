@@ -108,7 +108,7 @@ Checked 2026-10-21: OpenShell policy docs (`docs/how-it-works/policies/schema.md
 
 ## Amendment (2026-10-27, AP1): how scoped approvals work
 
-Plan item AP1 builds the scopes above (migration `00031_approval_scopes.sql`):
+Plan item AP1 builds the scopes above (migration `00028_approval_scopes.sql`):
 
 - **Who and what.** The approver of a request (an org admin or owner, as for every approval) may
   choose "this call only" (the default and the behaviour of this ADR), "this task", or "this agent
