@@ -96,6 +96,9 @@ type harness struct {
 	ignoreCancel, endOnCancel bool
 	// lateCancel makes a markWait turn honour session/cancel only this long after it arrived.
 	lateCancel time.Duration
+	// refuseAfterCancel makes a markWait turn, once cancelled, ask for an outside edit (which
+	// agentd refuses) before it ends cancelled.
+	refuseAfterCancel bool
 	// noChunk makes a markWait turn stream nothing before it waits.
 	noChunk bool
 	// promptsSeen counts the prompts that arrived (the summary does not count) and inFlight how
@@ -420,6 +423,28 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		late := p.h.lateCancel
 		p.h.mu.Unlock()
 		time.Sleep(late)
+		p.h.mu.Lock()
+		refuseAfter := p.h.refuseAfterCancel
+		p.h.mu.Unlock()
+		if refuseAfter {
+			tid, name, k := sdk.ToolCallId("refuse-after-cancel"), "write", sdk.ToolKindEdit
+			if err := p.say(context.WithoutCancel(ctx), id, sdk.StartToolCall(tid, name, sdk.WithStartKind(k))); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+			if _, err := p.agent().RequestPermission(context.WithoutCancel(ctx), sdk.RequestPermissionRequest{
+				SessionId: id,
+				ToolCall: sdk.ToolCallUpdate{
+					ToolCallId: tid, Title: &name, Kind: &k,
+					Locations: []sdk.ToolCallLocation{{Path: "/sandbox/.koinon/notes/external/report.md"}},
+				},
+				Options: []sdk.PermissionOption{
+					{OptionId: "allow", Name: "Allow", Kind: sdk.PermissionOptionKindAllowOnce},
+					{OptionId: "reject", Name: "Reject", Kind: sdk.PermissionOptionKindRejectOnce},
+				},
+			}); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+		}
 		if endOnCancel {
 			return end, nil
 		}

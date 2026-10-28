@@ -735,7 +735,10 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 	for {
 		select {
 		case res := <-done:
-			if cancelSent && res.err == nil && res.stop == acp.StopCancelled && len(r.takeRefusals()) == 0 {
+			if cancelSent && res.err == nil && res.stop == acp.StopCancelled {
+				if refs := r.takeRefusals(); len(refs) > 0 {
+					return &refused{refusals: refs}
+				}
 				// The harness honoured Koinon's own cancel late. No second prompt is sent; the run
 				// ends at the cap as it does without a notice, not as a failed turn.
 				r.log.Info("the harness ended the cancelled turn late; waiting for the cap")
@@ -765,6 +768,10 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 			res, ended := r.cancelTurn(ctx, conn, session, done)
 			switch {
 			case ended && (res.stop == acp.StopCancelled || res.err != nil):
+				// A refused tool call may be why the turn ended; the agent must still be told.
+				if refs := r.takeRefusals(); len(refs) > 0 {
+					return &refused{refusals: refs}
+				}
 				return errWrapUp
 			case ended:
 				// The turn ended on its own while the timer fired (for example end_turn after an
