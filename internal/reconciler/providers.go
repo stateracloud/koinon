@@ -11,6 +11,7 @@ import (
 	"maps"
 	"path"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -125,6 +126,8 @@ type servedProviders struct {
 	ids       []string
 	fileNames []string
 	files     map[string][]byte
+	// modelIDs maps each rendered model (gateway.ModelRef) to its ID, for gateway_served_models.
+	modelIDs map[string]pgtype.UUID
 }
 
 // loadProviders reads every org's enabled providers and models. A provider whose key cannot
@@ -132,7 +135,7 @@ type servedProviders struct {
 // broken entry does not stop the other orgs. A database error is returned as the second value
 // and aborts the pass.
 func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToReconcileRow) (servedProviders, []error, error) {
-	out := servedProviders{files: map[string][]byte{}}
+	out := servedProviders{files: map[string][]byte{}, modelIDs: map[string]pgtype.UUID{}}
 	fileOf := map[string]string{}
 	var errs []error
 	for _, org := range orgs {
@@ -190,6 +193,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 				return out, errs, fmt.Errorf("reconciler: price of model %s/%s: %w", org.Slug, row.ModelName, err)
 			}
 			p.Models = append(p.Models, m)
+			out.modelIDs[gateway.ModelRef(org.Slug, row.ModelName)] = row.ModelID
 		}
 		for _, id := range order {
 			out.providers = append(out.providers, *byID[id])

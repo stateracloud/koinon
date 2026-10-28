@@ -1431,6 +1431,15 @@ type DefaultPriceList struct {
 	LoadedAt pgtype.Timestamptz
 }
 
+type GatewayServedModel struct {
+	OrgID       pgtype.UUID
+	ModelID     pgtype.UUID
+	ProviderID  pgtype.UUID
+	KeyFile     pgtype.Text
+	ServedSince pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
 type HomeCheckpoint struct {
 	OrgID       pgtype.UUID
 	ID          pgtype.UUID

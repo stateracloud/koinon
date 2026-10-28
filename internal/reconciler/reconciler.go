@@ -477,6 +477,10 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	if !applyFailed {
 		r.keysLive(state)
 		r.recordApplied(served, state, rejections)
+		if err := r.recordServed(ctx, orgs, served, state, rejections); err != nil {
+			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
+			errs = append(errs, err)
+		}
 		r.recordAppliedMCP(mcpServed, probes)
 		if r.cfg.ProviderKeys != nil && len(provErrs) == 0 && len(mcpErrs) == 0 {
 			if err := r.cfg.ProviderKeys.Prune(ctx, keep); err != nil {
@@ -640,6 +644,67 @@ func (r *Reconciler) recordApplied(served servedProviders, state gateway.State, 
 		}
 	}
 	r.appliedFile = next
+}
+
+// recordServed writes, for every org, the models the applied state serves to gateway_served_models,
+// which koinon-agentd waits on before a run starts its harness (issue #174). A provider whose new key
+// file is still reaching the gateway pod and that has no previous file is not in state, so its models
+// are not recorded; one that keeps serving with its previous file stays recorded. An org whose model
+// objects the gateway rejected gets nothing new recorded (as in recordApplied), but models no longer
+// in state are removed. Only the leader reconciles, so only the leader writes.
+func (r *Reconciler) recordServed(ctx context.Context, orgs []store.ListOrgsToReconcileRow, served servedProviders, state gateway.State, rejections []gateway.Rejection) error {
+	rejected := map[string]bool{}
+	for _, x := range rejections {
+		if x.Kind == "AgentgatewayModel" {
+			rejected[x.Org] = true
+		}
+	}
+	type entries struct {
+		ids   []pgtype.UUID
+		files []string
+	}
+	byOrg := map[string]*entries{}
+	for _, p := range state.Providers {
+		e := byOrg[p.Org]
+		if e == nil {
+			e = &entries{}
+			byOrg[p.Org] = e
+		}
+		file := ""
+		if p.APIKeyFile != "" {
+			file = path.Base(p.APIKeyFile)
+		}
+		for _, m := range p.Models {
+			if m.Price == nil {
+				continue // not served (ADR 0041)
+			}
+			if id, ok := served.modelIDs[gateway.ModelRef(p.Org, m.Name)]; ok {
+				e.ids = append(e.ids, id)
+				e.files = append(e.files, file)
+			}
+		}
+	}
+	var errs []error
+	for _, org := range orgs {
+		// Never nil: pgx sends a nil slice as NULL, and "<> ALL (NULL)" would remove nothing.
+		e := entries{ids: []pgtype.UUID{}, files: []string{}}
+		if got := byOrg[org.Slug]; got != nil {
+			e.ids, e.files = append(e.ids, got.ids...), append(e.files, got.files...)
+		}
+		var err error
+		if rejected[org.Slug] {
+			err = r.q.PruneGatewayServedModels(ctx, store.PruneGatewayServedModelsParams{OrgID: org.ID, ModelIds: e.ids})
+		} else {
+			err = r.q.SyncGatewayServedModels(ctx, store.SyncGatewayServedModelsParams{OrgID: org.ID, ModelIds: e.ids, KeyFiles: e.files})
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			errs = append(errs, fmt.Errorf("reconciler: record the models the gateway serves for org %s: %w", org.Slug, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // keysSettling records the files written in this pass and returns the data keys that have not yet
