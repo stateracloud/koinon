@@ -19,6 +19,10 @@
 //	  models: |
 //	    - name: deepseek/deepseek-v4.1-flash
 //	      guard: true
+//	      format: openai          # optional: the model's wire format, within what the provider offers (ADR 0069)
+//
+// A provider of type anthropic may also set anthropicWorkspaceId (wrkspc_...), the workspace the
+// gateway names for an API key not scoped to one.
 //
 // A Secret that parses becomes a provider (with its models) or a connection with source
 // "secret": read-only through the UI and admin API, winning a name collision with a UI entry
@@ -64,6 +68,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/gitea"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/project"
@@ -321,7 +326,11 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 	if cur != nil && cur.DeclaredVersion.String == version && !cur.RemovedAt.Valid {
 		return nil
 	}
-	config, err := connectionConfig(d)
+	var prevConfig []byte
+	if cur != nil {
+		prevConfig = cur.Config
+	}
+	config, err := connectionConfig(d, prevConfig, time.Now())
 	if err != nil {
 		return err
 	}
@@ -330,14 +339,20 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 		tq := store.New(tx)
 		after := map[string]any{
 			"connector": d.Connector, "displayName": d.DisplayName, "appId": d.AppID,
-			"installationId": d.InstallationID, "baseUrl": d.Site.BaseURL, "keyFingerprint": d.Fingerprint, "source": "secret",
+			"installationId": d.InstallationID, "baseUrl": d.Site.BaseURL, "ciDirs": d.Site.CIDirs, "keyFingerprint": d.Fingerprint, "source": "secret",
+		}
+		if d.Connector == gitea.HostID {
+			after = map[string]any{
+				"connector": d.Connector, "displayName": d.DisplayName, "baseUrl": d.Site.BaseURL, "ciDirs": d.Site.CIDirs,
+				"fingerprints": d.Fingerprint, "source": "secret",
+			}
 		}
 		if cur == nil {
 			id, err := newConnID()
 			if err != nil {
 				return err
 			}
-			env, err := connections.SealFields(i.Sealer, org, id, map[string][]byte{connections.GitHubPrivateKeyField: d.PrivateKeyPEM})
+			env, err := connections.SealFields(i.Sealer, org, id, d.SecretFields())
 			if err != nil {
 				return err
 			}
@@ -350,7 +365,10 @@ func (i *Importer) applyConnection(ctx context.Context, org pgtype.UUID, sec *co
 			}
 			return audit.RecordErr(ctx, tq, audit.Event{Org: org, Actor: actor, Action: "connection.declare", TargetKind: "connection", TargetID: id.String(), After: after})
 		}
-		env, err := connections.SealFields(i.Sealer, org, cur.ID, map[string][]byte{connections.GitHubPrivateKeyField: d.PrivateKeyPEM})
+		if cur.Connector != d.Connector {
+			return &invalidError{fmt.Errorf("%s cannot change from %s to %s; delete the Secret and declare a new one", KeyConnector, cur.Connector, d.Connector)}
+		}
+		env, err := connections.SealFields(i.Sealer, org, cur.ID, d.SecretFields())
 		if err != nil {
 			return err
 		}

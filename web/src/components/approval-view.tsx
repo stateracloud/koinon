@@ -6,7 +6,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { ApprovalCard } from '@/components/approval-card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
+import { timestampFromDate } from '@bufbuild/protobuf/wkt'
+import { ApprovalService, ScopeKind } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { isApprover } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
@@ -69,7 +70,15 @@ export function ApprovalView({ approvalId, showPermalink }: { approvalId: string
       diffError={diff.error ? ConnectError.from(diff.error).rawMessage : undefined}
       onReload={() => void reload()}
       showPermalink={showPermalink}
-      onApprove={(note) => approve.mutate({ orgId, approvalId: a.id, argsSha256: a.argsSha256, note })}
+      onApprove={(note, scope) =>
+        approve.mutate({
+          orgId,
+          approvalId: a.id,
+          argsSha256: a.argsSha256,
+          note,
+          ...(scope?.kind === 'task' ? { scope: ScopeKind.TASK } : scope?.kind === 'agent' ? { scope: ScopeKind.AGENT, scopeUntil: timestampFromDate(scope.until) } : {}),
+        })
+      }
       onDeny={(note) => deny.mutate({ orgId, approvalId: a.id, note })}
     />
   )

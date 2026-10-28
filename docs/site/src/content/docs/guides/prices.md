@@ -5,7 +5,7 @@ description: How Koinon prices model requests, the default price list, and your 
 
 Koinon works out the cost of every model request itself, from the tokens the provider reports and the
 price that was valid at that time. That cost counts for [budgets](/guides/budgets/) and for the cost
-shown on runs and tickets. Org admins and owners manage prices on **Prices** under Settings in the
+shown on runs and tasks. Org admins and owners manage prices on **Prices** under Settings in the
 sidebar. Members do not see the page.
 
 A price is in US dollars per million tokens, for each kind of token: input, output, cache read, cache
@@ -35,7 +35,7 @@ A price that came from the rates of a model in an earlier release, and that matc
 ## Estimates and flags
 
 When a provider reports no usage, Koinon estimates it from the size of the request, marks the request
-as estimated and counts it toward budgets. The cost of a run or ticket says how many of its requests
+as estimated and counts it toward budgets. The cost of a run or task says how many of its requests
 were estimated. Estimates tend to run high.
 
 **Flagged requests** lists the prices behind requests that deserve a look, with a filter by period, reason and

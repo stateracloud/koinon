@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
@@ -52,6 +53,7 @@ type fileConfig struct {
 	Reconciler struct {
 		IdleTimeout    string `yaml:"idleTimeout"`
 		ParkWarm       string `yaml:"parkWarm"`
+		ArchiveAfter   string `yaml:"archiveAfter"`
 		SandboxJobs    int    `yaml:"sandboxJobs"`
 		ResyncInterval string `yaml:"resyncInterval"`
 		HomeRetention  string `yaml:"homeRetention"`
@@ -63,6 +65,10 @@ type fileConfig struct {
 	GitHubTools struct {
 		URL string `yaml:"url"`
 	} `yaml:"githubTools"`
+	// KoinonTools is koinon-api's server for Koinon's own agent tools (ask_user, plan item TK3).
+	KoinonTools struct {
+		URL string `yaml:"url"`
+	} `yaml:"koinonTools"`
 	// MCPAsk is koinon-api's approval-gated proxy for org MCP servers' ask-tier tools (plan item MC1).
 	MCPAsk struct {
 		URL string `yaml:"url"`
@@ -102,6 +108,7 @@ type config struct {
 	accessLogOTLP      string
 
 	idleTimeout    time.Duration
+	archiveAfter   time.Duration
 	parkWarm       time.Duration
 	sandboxJobs    int
 	resyncInterval time.Duration
@@ -111,6 +118,7 @@ type config struct {
 
 	githubToolsURL string
 	mcpAskURL      string
+	koinonToolsURL string
 	githubAPIURL   string
 }
 
@@ -147,6 +155,7 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.allowedHosts, "provider-allowed-hosts", "", "deprecated alias of --egress-allowed-hosts, kept for one release")
 	fs.DurationVar(&c.keySettle, "provider-key-settle", 0,
 		"how long to wait after writing a new provider key file before applying a gateway config that names it (default 90s in standalone mode: kubelet updates a mounted Secret within about a minute; 2s in kubernetes mode: the controller reads the Secret through the API)")
+	fs.DurationVar(&c.archiveAfter, "archive-after", 0, "archive a sandbox (delete it and its volume, home checkpointed) after this long stopped (default 168h; negative turns it off; needs checkpoints)")
 	fs.DurationVar(&c.idleTimeout, "idle-timeout", 0, "stop a sandbox after this long without an active run (default 10m)")
 	fs.DurationVar(&c.parkWarm, "park-warm", 0, "keep a sandbox up this long after its run parked on a2a or input_required (default 15m)")
 	fs.IntVar(&c.sandboxJobs, "sandbox-jobs", 0, "sandbox start/stop jobs that run at once (default 8)")
@@ -155,6 +164,7 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.homeRetention, "home-retention", "", "home volume on archive: delete or retain (default delete)")
 	fs.StringVar(&c.githubAPIURL, "github-api-url", "", "GitHub REST API base URL for minting installation tokens (default https://api.github.com)")
 	fs.StringVar(&c.mcpAskURL, "mcp-ask-url", "", "base URL of koinon-api's approval-gated MCP proxy as agentgateway reaches it; empty offers no ask-tier tools of org MCP servers")
+	fs.StringVar(&c.koinonToolsURL, "koinon-tools-url", "", "URL of Koinon's own agent tools (ask_user) MCP server as agentgateway reaches it; empty offers no ask_user")
 	fs.StringVar(&c.githubToolsURL, "github-tools-url", "", "URL of the GitHub tools MCP server as agentgateway reaches it; empty serves no GitHub tools")
 
 	if err := cli.BindEnv(fs, getenv); err != nil {
@@ -225,10 +235,11 @@ func (c *config) fill(fc fileConfig) error {
 	}
 	orDefault(&c.githubToolsURL, fc.GitHubTools.URL)
 	orDefault(&c.mcpAskURL, fc.MCPAsk.URL)
+	orDefault(&c.koinonToolsURL, fc.KoinonTools.URL)
 	for _, d := range []struct {
 		dst *time.Duration
 		src string
-	}{{&c.idleTimeout, fc.Reconciler.IdleTimeout}, {&c.parkWarm, fc.Reconciler.ParkWarm}, {&c.resyncInterval, fc.Reconciler.ResyncInterval}} {
+	}{{&c.idleTimeout, fc.Reconciler.IdleTimeout}, {&c.archiveAfter, fc.Reconciler.ArchiveAfter}, {&c.parkWarm, fc.Reconciler.ParkWarm}, {&c.resyncInterval, fc.Reconciler.ResyncInterval}} {
 		if *d.dst == 0 && d.src != "" {
 			v, err := time.ParseDuration(d.src)
 			if err != nil {
@@ -292,12 +303,23 @@ func (c *config) gatewayEndpoint() (reconciler.Endpoint, error) {
 	return reconciler.Endpoint{Host: u.Hostname(), Port: uint32(p)}, nil
 }
 
-// toolServers maps connector type IDs to their MCP tool servers.
+// toolServers maps connector type IDs (and gateway.KoinonTarget, Koinon's own tools) to their MCP tool servers.
 func (c *config) toolServers() map[string]string {
-	if c.githubToolsURL == "" {
+	out := map[string]string{}
+	if c.githubToolsURL != "" {
+		// One code-host tool server serves every code-host connector; it picks the connector
+		// from the grant (hosts.Grant).
+		for _, id := range providers.Default().IDs() {
+			out[id] = c.githubToolsURL
+		}
+	}
+	if c.koinonToolsURL != "" {
+		out[gateway.KoinonTarget] = c.koinonToolsURL
+	}
+	if len(out) == 0 {
 		return nil
 	}
-	return map[string]string{providers.GitHub: c.githubToolsURL}
+	return out
 }
 
 // flavors combines the configured images with each flavor's binaries.

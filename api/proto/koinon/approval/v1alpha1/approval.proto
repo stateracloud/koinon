@@ -55,6 +55,70 @@ service ApprovalService {
   // Deny denies a pending request; the run resumes with the denial and the
   // note. Admins and owners.
   rpc Deny(DenyRequest) returns (DenyResponse);
+
+  // ListApprovalScopes returns the scopes that are active now (not revoked, not expired) for one
+  // agent, oldest first: what the agent's page shows next to its grants. Viewers and above.
+  rpc ListApprovalScopes(ListApprovalScopesRequest) returns (ListApprovalScopesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // RevokeApprovalScope ends a scope at once; the agent's next matching call needs a new
+  // approval. Revoking a scope that is already revoked returns it as it is. Admins and owners.
+  rpc RevokeApprovalScope(RevokeApprovalScopeRequest) returns (RevokeApprovalScopeResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+// ScopeKind is how far an approval reaches (ADR 0042 amendment, ADR 0065 decision 10a).
+enum ScopeKind {
+  // SCOPE_KIND_UNSPECIFIED means once: this exact call, as before.
+  SCOPE_KIND_UNSPECIFIED = 0;
+  // SCOPE_KIND_ONCE is this exact call only.
+  SCOPE_KIND_ONCE = 1;
+  // SCOPE_KIND_TASK: later calls of this agent to the same connector, tool and target while
+  // working on the same task, until the scope expires.
+  SCOPE_KIND_TASK = 2;
+  // SCOPE_KIND_AGENT: later calls of this agent to the same connector, tool and target, in any
+  // task, until a date.
+  SCOPE_KIND_AGENT = 3;
+}
+
+// ApprovalScope is an approval that reaches beyond one call. Matching is exact on agent,
+// connector, tool and target; arguments are not part of it.
+message ApprovalScope {
+  string id = 1;
+  string org_id = 2;
+  string agent_id = 3;
+  string connector = 4;
+  string tool = 5;
+  string target = 6;
+  ScopeKind kind = 7;
+  // Set for a task scope.
+  string task_id = 8;
+  google.protobuf.Timestamp expires_at = 9;
+  string created_by = 10;
+  google.protobuf.Timestamp created_at = 11;
+  string source_approval_id = 12;
+  google.protobuf.Timestamp revoked_at = 13;
+  string revoked_by = 14;
+}
+
+message ListApprovalScopesRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+message ListApprovalScopesResponse {
+  repeated ApprovalScope scopes = 1;
+}
+
+message RevokeApprovalScopeRequest {
+  string org_id = 1;
+  string scope_id = 2;
+}
+
+message RevokeApprovalScopeResponse {
+  ApprovalScope scope = 1;
 }
 
 // Status is the ADR 0042 lifecycle: pending -> approved -> executed | failed,
@@ -177,6 +241,17 @@ message Approval {
   // system is true for a request Koinon made itself rather than an agent's tool call: the run
   // neither waits for it nor is told its outcome (saved work from a stuck sandbox).
   bool system = 30;
+  // ci_paths are the paths whose changes run CI on the connection's host: the connector's CI
+  // paths plus the connection's configured directories. A directory ends with a slash. Only set
+  // by GetApproval, for a request on a code host.
+  repeated string ci_paths = 31;
+  // ci_fold_case is whether the host's file system ignores case, so ci_paths match without
+  // regard to case.
+  bool ci_fold_case = 32;
+  // scope_id is the scope that let this call run without a decision; empty when a person (or the
+  // Trusted preset) decided it. scope_kind says which kind it was.
+  string scope_id = 33;
+  ScopeKind scope_kind = 34;
 }
 
 // McpCall describes a call to a remote MCP server (ADR 0057). The call is bound to the server, its URL
@@ -300,6 +375,14 @@ message ApproveRequest {
   string args_sha256 = 3;
   // Optional; shown on the ticket.
   string note = 4;
+  // scope widens the approval beyond this call: SCOPE_KIND_TASK or SCOPE_KIND_AGENT (unspecified
+  // and once are this call only). Needs an admin or owner (the same role as approving), and fails
+  // with INVALID_ARGUMENT for a request that needs two approvers or that Koinon made itself.
+  // Applies when the approval takes effect (the second approval of two is never scoped).
+  ScopeKind scope = 5;
+  // scope_until is when a wider scope ends. Required for SCOPE_KIND_AGENT (at most one year
+  // ahead); a task scope defaults to 30 days and may not be longer than that.
+  google.protobuf.Timestamp scope_until = 6;
 }
 
 // ApproveResponse holds the request after execution: executed with its

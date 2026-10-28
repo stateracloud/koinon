@@ -25,7 +25,8 @@ service RunService {
   // and in seq order. To resume after a dropped stream, call again with the
   // last seq received. The first message is a snapshot of the run; another
   // snapshot follows whenever its state changes. The stream ends after the
-  // run has finished and every event has been sent. Viewers and above.
+  // run has finished and every event has been sent. Heartbeat messages keep a quiet
+  // stream open. Viewers and above.
   rpc WatchRun(WatchRunRequest) returns (stream WatchRunResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -158,10 +159,16 @@ message WatchRunRequest {
   int64 after_seq = 3;
 }
 
-// WatchRunResponse carries either a run snapshot or one event.
+// WatchRunResponse carries a run snapshot, one event or a heartbeat.
 message WatchRunResponse {
   oneof item {
     Run run = 1;
     RunEvent event = 2;
+    // Sent every 30 seconds while the stream has sent nothing else, so a proxy or load
+    // balancer does not cut a quiet run's stream as idle. Clients ignore it.
+    Heartbeat heartbeat = 3;
   }
 }
+
+// Heartbeat is an empty keep-alive message.
+message Heartbeat {}

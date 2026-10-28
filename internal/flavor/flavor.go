@@ -7,6 +7,7 @@
 package flavor
 
 import (
+	"maps"
 	"slices"
 
 	"github.com/stateracloud/koinon/internal/gateway"
@@ -58,6 +59,14 @@ type Descriptor struct {
 	// reconciler opens the npm registry for its binaries.
 	PluginInstalls    bool
 	PluginInstallsArg string
+	// CacheArgs maps a prompt-cache marker format (prices.CacheMode.Marker: "anthropic",
+	// "alibaba") to the launch switch that makes the harness send those markers (ADR 0068). A
+	// format missing here cannot be cached on this flavor.
+	CacheArgs map[string]string
+	// SessionArg is the launch switch that takes the run ID, which the harness sends to
+	// OpenRouter as session_id so a run stays on one upstream and its cache stays warm. "" when
+	// the flavor cannot.
+	SessionArg string
 }
 
 var table = []Descriptor{
@@ -67,11 +76,15 @@ var table = []Descriptor{
 		EntryScript:  "/usr/local/bin/koinon-opencode",
 		ReadyCommand: "koinon:" + gateway.ReadyPromptExposed,
 		ModelPrefix:  "koinon/",
-		// The global config directory's AGENTS.md (flavors/opencode/Dockerfile).
-		InstructionLink:   "/etc/koinon/opencode/AGENTS.md",
+		// None: OpenCode 2.2.0 reads the instruction file through the "instructions" key of its
+		// read-only config (flavors/opencode/README.md, ADR 0052 amendment 2026-10-28).
 		DefaultBinaries:   []string{"/usr/local/bin/opencode"},
 		PluginInstalls:    true,
 		PluginInstallsArg: "--plugin-installs",
+		// The entry script turns each into compatibility.cacheFormat of the koinon provider
+		// (OpenCode 2.2.0, packages/schema/src/model-compatibility.ts).
+		CacheArgs:  map[string]string{"anthropic": "--cache-anthropic", "alibaba": "--cache-alibaba"},
+		SessionArg: "--session-id",
 	},
 }
 
@@ -87,6 +100,7 @@ func All() []Descriptor {
 // clone returns d with its own copy of the slices, so callers cannot change the table.
 func (d Descriptor) clone() Descriptor {
 	d.DefaultBinaries = slices.Clone(d.DefaultBinaries)
+	d.CacheArgs = maps.Clone(d.CacheArgs)
 	return d
 }
 

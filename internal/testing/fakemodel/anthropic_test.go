@@ -10,6 +10,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
 // Mirrors of the Messages API objects
@@ -117,6 +119,23 @@ var _ = Describe("Anthropic messages", func() {
 			Expect(m.Content).To(Equal([]anBlock{{Type: "text", Text: "It is sunny in Zürich today."}}))
 			Expect(m.Usage).To(Equal(anUsage{InputTokens: 50, CacheReadInputTokens: 100, OutputTokens: 8}))
 		})
+	})
+
+	It("reports cache writes as cache_creation_input_tokens and records the request headers", func(ctx SpecContext) {
+		srv, ts := start(fakemodel.Script{Model: "writer", Turns: []fakemodel.Turn{{
+			Text: "ok", Usage: fakemodel.Usage{InputTokens: 100, CachedInputTokens: 30, CacheWriteTokens: 50, OutputTokens: 4},
+		}}})
+		resp := post(ctx, ts.URL+"/v1/messages", map[string]any{
+			"model": "writer", "max_tokens": 8, "messages": []any{anUser("hi")},
+		}, "anthropic-version", "2023-06-01", "anthropic-workspace-id", "wrkspc_01Example")
+		var m anMessage
+		decode(resp, &m)
+		Expect(m.Usage).To(Equal(anUsage{InputTokens: 20, CacheCreationInputTokens: 50, CacheReadInputTokens: 30, OutputTokens: 4}))
+
+		reqs := srv.Requests()
+		Expect(reqs).To(HaveLen(1))
+		Expect(reqs[0].Header.Get("anthropic-version")).To(Equal("2023-06-01"))
+		Expect(reqs[0].Header.Get("anthropic-workspace-id")).To(Equal("wrkspc_01Example"))
 	})
 
 	Context("streaming", func() {

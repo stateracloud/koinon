@@ -89,6 +89,9 @@ message Agent {
   // The latest version is ephemeral: each task gets a fresh sandbox without a home, deleted when
   // the task ends (ADR 0065 decision 13c).
   bool ephemeral = 22;
+  // Set while the agent's sandbox and volume are archived (ADR 0032 amendment): the home is in
+  // its last checkpoint and the next run restores it into a fresh sandbox.
+  google.protobuf.Timestamp sandbox_archived_at = 23;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.

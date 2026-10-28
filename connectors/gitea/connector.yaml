@@ -1,0 +1,202 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The Gitea connector type of v0.1 (ADR 0062, 0063). One connection is one bot account on a Gitea
+# server, a collaborator on exactly the repositories agents may work on. The bot has two personal
+# access tokens: a READ token that reaches sandboxes only as an OpenShell placeholder, and a WRITE
+# token that only koinon-api holds (it pushes the approved branch and opens the pull request).
+apiVersion: connectors.koinon.dev/v1alpha1
+kind: ConnectorType
+metadata:
+  id: gitea
+  version: 0.1.0
+  displayName: Gitea
+  description: >-
+    Read repositories from the agent's sandbox and propose pull requests and issue comments, which
+    Koinon sends to your Gitea server after approval. Connects through a bot account with two
+    access tokens, one read-only and one for Koinon's own writes.
+spec:
+  auth:
+    # Gitea has no credential that is minted per use or narrowed per repository (ADR 0063).
+    type: static-token
+    # Koinon names these two permissions after Gitea's token scope categories. The read token
+    # carries read:repository and read:issue, the write token write:repository and write:issue.
+    permissions:
+      repository: write
+      issue: write
+    # A personal access token never expires on its own. Koinon shows its age and warns after 90
+    # days; it never blocks on age and never rotates the token (ADR 0063 decision 4).
+    tokenWarnAfter: 2160h
+  # Gitea has no default host. The host below is a placeholder on a reserved name; every connection
+  # names the URL of its own server, which may have a sub-path (https://host[:port][/path]).
+  hosts:
+    - host: gitea.invalid
+      port: 443
+  site:
+    selfHosted: true
+    baseURL: https://gitea.invalid
+    apiURL: https://gitea.invalid
+    apiPath: /api/v1
+  capabilities:
+    displayName: Gitea
+    credentialClass: static-token
+    # A Gitea token is not narrowed to repositories or permissions per use: it can do what the bot
+    # can, within its scope categories. The sandbox's network rules are the per-repository
+    # boundary (ADR 0063 decision 4).
+    narrowsRepositories: false
+    narrowsPermissions: false
+    maxRepositories: 0
+    canDenyCI: false
+    # koinon-api builds the commit and pushes it, so a new executable lands as 100755.
+    exactModes: true
+    writes: push
+  # Gitea Actions runs these by default (ADR 0062); a server's WORKFLOW_DIRS goes on the connection.
+  ciPaths:
+    - .gitea/workflows/
+    - .gitea/scoped_workflows/
+    - .github/workflows/
+  targets:
+    kind: repository
+    pattern: '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,39}/[A-Za-z0-9._-]{1,100}$'
+    description: A repository the bot is a collaborator on, as owner/name.
+  scopes:
+    - id: repo.read
+      tier: read
+      description: Clone and fetch the repository over HTTPS and read it through the REST API.
+      permissions:
+        repository: read
+        issue: read
+      # Rendered at the connection's host and sub-path into the sandbox's OpenShell policy and the
+      # provider profile that binds the read token. Paths are OpenShell globs and case-sensitive,
+      # so the agent must use the repository's name as bound. Allowed: git smart HTTP clone and
+      # fetch, and REST GET under /api/v1/repos/{owner}/{repo}. The rules are written for the root
+      # of the host; a sub-path is prefixed.
+      network:
+        - host: gitea.invalid
+          methods: [GET]
+          paths: ['/{owner}/{repo}.git/info/refs', '/{owner}/{repo}/info/refs']
+          query: {service: git-upload-pack}
+        - host: gitea.invalid
+          methods: [POST]
+          paths: ['/{owner}/{repo}.git/git-upload-pack', '/{owner}/{repo}/git-upload-pack']
+        - host: gitea.invalid
+          methods: [GET]
+          paths: ['/api/v1/repos/{owner}/{repo}', '/api/v1/repos/{owner}/{repo}/**']
+        # Defence in depth: push is refused however it is spelled, and nothing writes through the
+        # REST API (writes go through tools, ADR 0042). The read token also has no write scope.
+        - host: gitea.invalid
+          deny: true
+          methods: [GET]
+          paths: ['/**/info/refs']
+          query: {service: git-receive-pack}
+        - host: gitea.invalid
+          deny: true
+          methods: [GET, HEAD, POST, PUT, PATCH, DELETE]
+          paths: ['/**/git-receive-pack']
+        - host: gitea.invalid
+          deny: true
+          methods: [POST, PUT, PATCH, DELETE]
+          paths: ['/api/v1/**']
+    - id: pull_request.create
+      tier: reversible-write
+      description: >-
+        Propose a pull request (branch, commit and pull request). Koinon pushes the branch and opens
+        the pull request with its own token once the call is approved; the agent never pushes.
+      permissions:
+        repository: write
+      tools: [create_pull_request, get_approval_status]
+    - id: issue.comment
+      tier: reversible-write
+      description: Propose a comment on an issue or pull request, sent by Koinon once approved.
+      permissions:
+        issue: write
+      tools: [comment_on_issue, get_approval_status]
+  # ADR 0049: Read only = read; Standard = read, ask for reversible-write; Trusted = read and
+  # reversible-write allowed. All presets stay available on Gitea (ADR 0063 decision 4).
+  presets:
+    read-only:
+      read: allow
+      reversible-write: deny
+      external-or-irreversible: deny
+      forbidden: deny
+    standard:
+      read: allow
+      reversible-write: ask
+      external-or-irreversible: ask
+      forbidden: deny
+    trusted:
+      read: allow
+      reversible-write: allow
+      external-or-irreversible: ask
+      forbidden: deny
+  setupGuide:
+    fields:
+      - id: readToken
+        label: Read token
+        help: >-
+          The token with read scopes only. Agents' sandboxes use it through a placeholder; the
+          real value never enters a sandbox. It is stored encrypted and never shown again.
+        type: text
+        secret: true
+      - id: writeToken
+        label: Write token
+        help: >-
+          The token with write scopes. Only Koinon's API uses it, after you approve a change. It
+          is stored encrypted and never shown again.
+        type: text
+        secret: true
+    steps:
+      - id: create-bot
+        title: Create a bot account
+        body: |
+          Create a user on your Gitea server just for Koinon, for example `koinon-bot`. Give it an
+          address you control and a long random password, then **never use it to sign in**: Koinon
+          needs only its tokens. If your Gitea version has bot accounts (28 and later), create it
+          as one.
+
+          Enter the server's URL above, with its path if Gitea is served under one (for example
+          `https://git.example.com/gitea`). Koinon reaches the REST API under `/api/v1` on it, and
+          agents' sandboxes may reach it.
+
+          One bot belongs to one connection: it should be a collaborator on exactly the
+          repositories agents may work on, and nothing else.
+        check: gitea.server
+      - id: add-collaborator
+        title: Add the bot to your repositories
+        body: |
+          On each repository agents may work on, open **Settings, Collaborators** and add the bot
+          with **Write** permission. Do not make it an owner, an administrator or a member of an
+          organisation team that sees more than you intend: a Gitea token is not narrowed per
+          repository, so what the bot can see is what a token can reach.
+
+          Each agent is narrowed further to the repositories in its grant: its sandbox can reach
+          only those, even though the token itself could reach all the bot can.
+      - id: create-tokens
+        title: Create the two access tokens
+        body: |
+          Sign in as the bot once (or create the tokens for it as an administrator), open
+          **Settings, Applications** and create two tokens. Paste each below, then forget it.
+
+          - **Read token**, scopes `read:repository`, `read:issue`, `read:user`: it reaches sandboxes only as a placeholder and is sent only to your Gitea server, for the repositories an agent is bound to.
+          - **Write token**, scopes `write:repository`, `write:issue`, `read:user`: Koinon's API uses it to push a new branch and open the pull request after you approve, and to check the connection.
+
+          Gitea tokens do not expire. Koinon shows how old each is and warns after 90 days; it
+          never rotates them, so replace them yourself by creating a new connection or Secret.
+        links:
+          - label: Gitea docs, token scopes
+            url: https://docs.gitea.com/usage/access-token-scopes
+        fields: [readToken, writeToken]
+        check: gitea.tokens
+      - id: test-repositories
+        title: Check what the bot can see
+        body: |
+          Koinon lists the repositories the bot can see, the permission it has on each, and whether
+          it can push. Review the list: it should be exactly the repositories you added. Nothing
+          is written to Gitea.
+        check: gitea.repositories
+      - id: test-read-token
+        title: Check that the read token cannot write
+        body: |
+          Koinon tries a write with the read token that Gitea refuses before it reads the request,
+          so nothing is created. If Gitea accepts it, the token has a write scope and must be
+          replaced.
+        check: gitea.read-token

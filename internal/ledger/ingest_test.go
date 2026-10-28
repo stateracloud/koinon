@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -15,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
@@ -171,6 +173,45 @@ var _ = Describe("Ingester", func() {
 		Expect(payload).To(HaveKeyWithValue("failureClass", "budget"))
 	})
 
+	// RT1 on rc.5: two tasks of one agent created together, a daily limit, and the agent ended the
+	// day above it. The runs were not concurrent (one active run per agent is a unique index); the
+	// overshoot is the response in flight when the limit is reached. This holds that bound: the
+	// agent's other run is stopped with the budget reason, never starts on the spent budget, and
+	// only the in-flight response is recorded past the limit.
+	It("bounds an agent's overshoot to the response in flight, with two tasks queued together", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
+		first := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+		second, err := q.CreateRun(ctx, store.CreateRunParams{
+			OrgID: e.org, AgentID: e.agent.ID, TaskID: e.task(ctx).ID, MaxWallClockSeconds: 1800, MaxTokens: 100_000,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		claim := func() error {
+			_, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "agentd-2", LeaseSeconds: 60})
+			return err
+		}
+		Expect(claim()).To(MatchError(pgx.ErrNoRows), "one run per agent: the second task waits")
+
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.03", 1, 1), e.entry(time.Now(), "0.025", 1, 1)})
+		Expect(err).NotTo(HaveOccurred())
+		for _, id := range []pgtype.UUID{first.ID, second.ID} {
+			run := e.run(ctx, id)
+			Expect(run.State).To(Equal(store.RunStateCanceled))
+			Expect(run.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
+			Expect(run.OutcomeReason.String).To(HavePrefix("agent daily limit reached ($0.055 of $0.05"))
+		}
+		Expect(claim()).To(MatchError(pgx.ErrNoRows), "nothing starts on the spent budget")
+
+		By("the response that was in flight is still recorded, and is the whole overshoot")
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.02", 1, 1)})
+		Expect(err).NotTo(HaveOccurred())
+		l, err := ledger.AgentLimit(ctx, q, e.agent, time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(l.Amount).To(BeZero())
+		var spent string
+		Expect(db.QueryRow(ctx, `SELECT sum(cost_usd)::text FROM spend_entries WHERE org_id = $1`, e.org).Scan(&spent)).To(Succeed())
+		Expect(ledger.FormatUSD(spent)).To(Equal("0.075"), "limit $0.05 + the crossing request's $0.005 + the one in flight")
+	})
+
 	It("counts entries of unknown orgs and agents as unattributed", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
 		unknownAgent := e.entry(time.Now(), "0.01", 1, 1)
@@ -253,5 +294,36 @@ var _ = Describe("AgentLimit", func() {
 		l, err := ledger.AgentLimit(ctx, q, a, time.Now())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(l).To(BeNil())
+	})
+})
+
+var _ = Describe("InsertSpendEntry", func() {
+	BeforeEach(needDocker)
+
+	It("records an entry that holds nothing without the settlement fields set", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+		_, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
+			OrgID: e.org, AgentID: e.agent.ID, RequestID: uniq("req"), KeyID: "k-test", Model: "m",
+			CostUsd: "0.5", Priced: true, OccurredAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred(), "reserve_usd and response_id default to nothing held")
+		var reserve string
+		var provisional bool
+		Expect(db.QueryRow(ctx, `SELECT reserve_usd::text, provisional FROM spend_entries WHERE org_id = $1`, e.org).Scan(&reserve, &provisional)).To(Succeed())
+		Expect(ledger.FormatUSD(reserve)).To(Equal("0.00"))
+		Expect(provisional).To(BeFalse())
+	})
+})
+
+var _ = Describe("An Ingester without prices", func() {
+	It("is refused at startup instead of recording every request unpriced", func(ctx SpecContext) {
+		in := &ledger.Ingester{}
+		Expect(in.Validate()).To(MatchError(ContainSubstring("Prices is required")))
+		Expect(ledger.Serve(ctx, "127.0.0.1:0", in, nil)).To(MatchError(ContainSubstring("Prices is required")))
+		Expect((&ledger.Ingester{Prices: prices.NewResolver(priceList)}).Validate()).To(Succeed())
+		Expect((&ledger.Settler{}).Validate()).To(MatchError(ContainSubstring("Settler.Prices is required")))
+		_, err := (&ledger.Settler{}).SettleDue(context.Background())
+		Expect(err).To(MatchError(ContainSubstring("Settler.Prices is required")), "a pass refuses to run unwired")
+		Expect((&ledger.Settler{Prices: prices.NewResolver(priceList)}).Validate()).To(Succeed())
 	})
 })

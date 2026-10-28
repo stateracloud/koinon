@@ -117,6 +117,35 @@ type Spec struct {
 	Limits       Limits  `json:"limits"`
 	// Triggers start work on the agent: a schedule or a direct message in v0.1 (ADR 0066).
 	Triggers []Trigger `json:"triggers,omitempty"`
+	// Questions sets when a question an agent asked with ask_user gets its reminder and when it
+	// expires (ADR 0065 decision 10). Unset values take the defaults: 24h and 7d.
+	Questions QuestionTimers `json:"questions,omitzero"`
+}
+
+// QuestionTimers are the reminder and expiry of the questions an agent asks (ADR 0065 decision
+// 10), as Go durations from the moment the question is asked. A zero value takes the default.
+type QuestionTimers struct {
+	ReminderAfter Duration `json:"reminderAfter,omitzero"`
+	ExpireAfter   Duration `json:"expireAfter,omitzero"`
+}
+
+// Bounds of the question timers.
+const (
+	MinQuestionTimer = time.Minute
+	MaxQuestionTimer = 30 * 24 * time.Hour
+)
+
+// Validate checks the timers: each within bounds, and the reminder before the expiry.
+func (q QuestionTimers) Validate() error {
+	for name, d := range map[string]time.Duration{"reminderAfter": q.ReminderAfter.Duration, "expireAfter": q.ExpireAfter.Duration} {
+		if d != 0 && (d < MinQuestionTimer || d > MaxQuestionTimer) {
+			return fmt.Errorf("questions.%s %s must be between %s and %s", name, d, MinQuestionTimer, MaxQuestionTimer)
+		}
+	}
+	if r, e := q.ReminderAfter.Duration, q.ExpireAfter.Duration; r != 0 && e != 0 && r >= e {
+		return fmt.Errorf("questions.reminderAfter %s must be shorter than questions.expireAfter %s", r, e)
+	}
+	return nil
 }
 
 // Harness holds harness settings beyond the flavor choice. The zero value turns every
@@ -331,6 +360,9 @@ func (t *Template) check() error {
 	}
 	if t.Spec.Limits.SpendUSD <= 0 {
 		return errors.New("limits.spendUSD must be greater than zero")
+	}
+	if err := t.Spec.Questions.Validate(); err != nil {
+		return fmt.Errorf("spec.%w", err)
 	}
 	if err := ValidateTriggers(t.Spec.Triggers); err != nil {
 		return fmt.Errorf("spec.%w", err)

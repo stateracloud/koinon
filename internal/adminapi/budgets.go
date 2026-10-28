@@ -107,7 +107,15 @@ func (s *Server) SetPrice(ctx context.Context, req SetPriceRequestObject) (SetPr
 		st, er := s.problem(err)
 		return SetPricedefaultJSONResponse{Body: er, StatusCode: st}, nil
 	}
-	return SetPrice201JSONResponse(v), nil
+	var saved PriceSaved
+	if err := via(v, &saved); err != nil {
+		st, er := s.problem(err)
+		return SetPricedefaultJSONResponse{Body: er, StatusCode: st}, nil
+	}
+	if w := prices.EntryWarnings(in.Entry); len(w) > 0 {
+		saved.Warnings = &w
+	}
+	return SetPrice201JSONResponse(saved), nil
 }
 
 // RetirePrice implements StrictServerInterface.
@@ -210,6 +218,9 @@ func (s *Server) GetSpendReport(ctx context.Context, req GetSpendReportRequestOb
 		out.Models = append(out.Models, SpendLine{
 			Model: r.Model, Requests: r.Requests, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens,
 			ReportedUsd: ledgerUSD(r.ReportedUsd), EstimatedUsd: ledgerUSD(r.EstimatedUsd), EstimatedRequests: r.EstimatedRequests,
+			EstimatedOutputTokens: r.EstimatedOutputTokens, GatewayRequests: r.GatewayRequests,
+			GatewayUsd: ledgerUSD(r.GatewayUsd), GatewayComparedUsd: ledgerUSD(r.GatewayComparedUsd), FlaggedRequests: r.FlaggedRequests,
+			ProvisionalRequests: r.ProvisionalRequests, ReservedUsd: ledgerUSD(r.ReservedUsd),
 		})
 	}
 	return out, nil

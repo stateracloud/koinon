@@ -115,3 +115,50 @@ var _ = Describe("Ensure", func() {
 		Expect(a).NotTo(Equal(b))
 	})
 })
+
+var _ = Describe("Ensure with an AES key", func() {
+	spec := []ensuresecrets.Spec{{Name: "gw-session", Type: corev1.SecretTypeOpaque, Kind: ensuresecrets.KindAES256Key}}
+
+	It("creates a 64-hex-character key and no password, and never logs it", func(ctx SpecContext) {
+		var out bytes.Buffer
+		client := fake.NewClientset()
+		_, err := ensuresecrets.Ensure(ctx, client, "koinon", spec, &out)
+		Expect(err).NotTo(HaveOccurred())
+		got, err := client.CoreV1().Secrets("koinon").Get(ctx, "gw-session", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(got.Data["key"])).To(MatchRegexp(`^[0-9a-f]{64}$`))
+		Expect(got.Data).NotTo(HaveKey("password"))
+		Expect(out.String()).NotTo(ContainSubstring(string(got.Data["key"])))
+	})
+
+	It("keeps a valid key and rejects a malformed one without changing it", func(ctx SpecContext) {
+		good := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "gw-session", Namespace: "koinon"},
+			Data:       map[string][]byte{"key": []byte("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")},
+		}
+		client := fake.NewClientset(good)
+		var out bytes.Buffer
+		_, err := ensuresecrets.Ensure(ctx, client, "koinon", spec, &out)
+		Expect(err).NotTo(HaveOccurred())
+		got, _ := client.CoreV1().Secrets("koinon").Get(ctx, "gw-session", metav1.GetOptions{})
+		Expect(got).To(Equal(good))
+
+		bad := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "gw-session", Namespace: "koinon"},
+			Data:       map[string][]byte{"key": []byte("short")},
+		}
+		_, err = ensuresecrets.Ensure(ctx, fake.NewClientset(bad), "koinon", spec, &out)
+		Expect(err).To(MatchError(ContainSubstring("not 64 hex characters")))
+	})
+})
+
+var _ = Describe("Ensure with an unknown kind", func() {
+	It("fails instead of creating a password", func(ctx SpecContext) {
+		client := fake.NewClientset()
+		var out bytes.Buffer
+		_, err := ensuresecrets.Ensure(ctx, client, "koinon", []ensuresecrets.Spec{{Name: "x", Kind: "aes512-key"}}, &out)
+		Expect(err).To(MatchError(ContainSubstring("unknown kind")))
+		_, err = client.CoreV1().Secrets("koinon").Get(ctx, "x", metav1.GetOptions{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+})

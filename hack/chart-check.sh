@@ -294,8 +294,17 @@ secrets=$(kinds_named Secret | tr '\n' ' ')
 for want in koinon-db-migrate koinon-db-api koinon-db-reconciler koinon-db-agentd koinon-bootstrap-admin; do
 	has "the hook Job ensures $want" "$want" --show-only templates/ensure-secrets.yaml
 done
+# agentgateway v1.7 always encrypts MCP sessions: standalone mode gets SESSION_KEY from a generated
+# Secret (ensure-secrets), never from a template value; kubernetes mode has no standalone gateway.
+has "the hook ensures the gateway session key" 'aes256-key' --show-only templates/ensure-secrets.yaml
+has "the gateway reads SESSION_KEY from the generated Secret" 'name: SESSION_KEY' --show-only templates/gateway-standalone.yaml
+has "SESSION_KEY comes from the Secret's key" 'name: koinon-gateway-session-key$' --show-only templates/gateway-standalone.yaml
+lacks "the hook leaves the session key out in kubernetes mode" 'gateway-session-key' --set gateway.mode=kubernetes --show-only templates/ensure-secrets.yaml
+lacks "no SESSION_KEY in kubernetes mode" 'SESSION_KEY' --set gateway.mode=kubernetes
+has "an existing session key Secret is referenced" 'name: mine-session$' --set gateway.standalone.sessionKey.existingSecret=mine-session --show-only templates/gateway-standalone.yaml
+lacks "an existing session key Secret is not ensured" 'gateway-session-key' --set gateway.standalone.sessionKey.existingSecret=mine-session --show-only templates/ensure-secrets.yaml
 # (d) With every Secret supplied there is no hook Job, and the given names are referenced.
-own=(--set bootstrapAdmin.existingSecret=mine-admin
+own=(--set gateway.standalone.sessionKey.existingSecret=mine-session --set bootstrapAdmin.existingSecret=mine-admin
 	--set postgres.cnpg.existingSecrets.migrate=mine-migrate --set postgres.cnpg.existingSecrets.api=mine-api
 	--set postgres.cnpg.existingSecrets.reconciler=mine-reconciler --set postgres.cnpg.existingSecrets.agentd=mine-agentd)
 if render "${own[@]}" --show-only templates/ensure-secrets.yaml >/dev/null 2>&1; then
@@ -325,6 +334,7 @@ lacks "the hook leaves out a supplied role" 'koinon-db-api' --set postgres.cnpg.
 has "the hook still ensures the others" 'koinon-db-migrate' --set postgres.cnpg.existingSecrets.api=mine-api --show-only templates/ensure-secrets.yaml
 # External Postgres with a given admin Secret: no Job either.
 if render --set postgres.mode=external --set postgres.external.secretName=dsns --set bootstrapAdmin.existingSecret=mine-admin \
+	--set gateway.standalone.sessionKey.existingSecret=mine-session \
 	--show-only templates/ensure-secrets.yaml >/dev/null 2>&1; then
 	fail "the ensure-secrets hook renders in external mode with an existing admin Secret"
 fi
@@ -345,7 +355,7 @@ image_refs() {
 	render "$@" | grep -E -- '^ *(- )?(image|imageName): |--probe-image=|--supervisor-images=|c\.image in ' |
 		grep -Eo -- '([a-z0-9.-]+(:[0-9]+)?/)+[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+(@sha256:[a-f0-9]{64})?' | sort -u
 }
-agw=ghcr.io/agentgateway/agentgateway:v1.6.0@sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c
+agw=ghcr.io/agentgateway/agentgateway:v1.7.0@sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
 pg=ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie@sha256:f7e00138159bb45d70b624ba25e446924cb3ed1bf366d13e936c3f81b914064e
 # (a) nothing set: every reference is the upstream one, unchanged.
 want=$(printf '%s\n' "$agw" "$pg" ghcr.io/nvidia/openshell/supervisor:0.1.5 ghcr.io/stateracloud/flavor-opencode:0.0.0 \
@@ -418,7 +428,13 @@ has "the preflight may read OpenShell's gateway ConfigMap, by name" 'resourceNam
 
 # Latency defaults (plan item LT1): the reconciler's warm window and job bound reach its config.
 has "reconciler config carries the park warm window" 'parkWarm: 15m' --show-only templates/config.yaml
+# ask_user (plan item TK3): the reconciler offers the koinon target, served on the tools listener.
+has "reconciler config names the ask_user tool server" 'koinonTools:' --show-only templates/config.yaml
+has "the ask_user tool server is on the tools Service" 'svc:[0-9]+/mcp-koinon$' --show-only templates/config.yaml
 has "reconciler config carries the park warm window override" 'parkWarm: 30m' --set reconciler.parkWarm=30m --show-only templates/config.yaml
+has "reconciler config carries the archive window (AR1)" 'archiveAfter: 168h' --show-only templates/config.yaml
+has "reconciler config carries the archive window override" 'archiveAfter: 24h' --set reconciler.archiveAfter=24h --show-only templates/config.yaml
+has "reconciler config can turn the archive tier off" 'archiveAfter: -1h' --set reconciler.archiveAfter=-1h --show-only templates/config.yaml
 has "reconciler config carries the sandbox job bound" 'sandboxJobs: 8' --show-only templates/config.yaml
 # Flavor pre-pull (practice B6): off by default; needs a node selector; one init container per
 # flavor image through koinon.imageRef and the pull secrets; never in a sandbox namespace.

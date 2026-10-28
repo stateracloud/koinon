@@ -11,12 +11,21 @@ export const guardProviderType = 'openrouter'
 /** Provider types the form offers; any other agentgateway provider name can be typed in. */
 export const providerTypes = [
   { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'anthropic', label: 'Anthropic' },
   { value: 'ollama', label: 'Ollama' },
   { value: 'openai', label: 'OpenAI or any OpenAI-compatible API' },
 ] as const
 
 export function providerTypeLabel(type: string): string {
   return providerTypes.find((t) => t.value === type)?.label ?? type
+}
+
+/**
+ * formatLabelOf names a model's format with the label the server's format table gave its provider
+ * (ADR 0069); the table is the only place that knows the formats, so an unlisted one reads as its id.
+ */
+export function formatLabelOf(provider: Provider, format: string): string {
+  return provider.formats.find((f) => f.id === format)?.label ?? format
 }
 
 /** scopedModelName is the name the gateway serves a model under: "<org slug>/<model>" (ADR 0056). */

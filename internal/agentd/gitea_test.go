@@ -1,0 +1,158 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package agentd_test
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http/httptest"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"google.golang.org/protobuf/encoding/protojson"
+
+	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/gitea"
+	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
+	"github.com/stateracloud/koinon/internal/testing/fakegitea"
+)
+
+// Obviously fake tokens (AGENTS.md).
+const (
+	giteaReadToken  = "koinon_test_not-a-real-gitea-read-token"
+	giteaWriteToken = "koinon_test_not-a-real-gitea-write-token"
+)
+
+// newGiteaEnv is newGitHubEnv for a repo-helper agent on a fake Gitea (TLS, with a CA bundle on
+// the connection): a bot with a read-scoped and a write-scoped token, a collaborator on
+// acme/widgets only.
+func newGiteaEnv(ctx context.Context) *ghEnv {
+	g := &ghEnv{gt: fakegitea.NewTLS()}
+	DeferCleanup(g.gt.Close)
+	g.gt.Tokens = map[string]string{}
+	g.gt.AddScopedToken(giteaReadToken, "koinon-bot", "read")
+	g.gt.AddScopedToken(giteaWriteToken, "koinon-bot", "write")
+	g.gt.AddRepo("widgets")
+	g.gt.AddRepo("secrets")
+	g.gt.Collaborate("koinon-bot", "widgets", "write")
+	ring := secretstoretest.Keyring()
+	g.env = newEnvWith(ctx, store.AgentFlavorOpencode, func(e *env) string {
+		connID := uuid.New()
+		id := pgtype.UUID{Bytes: connID, Valid: true}
+		envelope, err := connections.SealFields(ring, e.org, id, map[string][]byte{
+			gitea.ReadTokenField: []byte(giteaReadToken), gitea.WriteTokenField: []byte(giteaWriteToken),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		cfg, _ := json.Marshal(gitea.NewConfig(codehost.Site{BaseURL: g.gt.URL(), CABundle: g.gt.CAPEM()},
+			[]byte(giteaReadToken), []byte(giteaWriteToken), nil, time.Now()))
+		_, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+			OrgID: e.org, ID: id, Connector: "gitea", DisplayName: "lab",
+			Config: cfg, SecretEnvelope: envelope, Source: store.ConfigSourceUi,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		return `{"instructions":"help","model":"` + model + `",` +
+			`"grants":[{"connector":"gitea","scopes":["repo.read","pull_request.create"],"preset":"standard"}],` +
+			`"bindings":[{"connector":"gitea","connectionId":"` + connID.String() + `","targets":["acme/widgets"]}]}`
+	})
+	Expect(db.QueryRow(ctx, `SELECT slug FROM orgs WHERE id = $1`, g.org).Scan(&g.slug)).To(Succeed())
+	log := slog.New(slog.NewTextHandler(GinkgoWriter, nil))
+	g.svc = approvals.New(db, approvals.Options{Keys: ring, Logger: log})
+	tools, err := githubtools.New(db, githubtools.Options{Logger: log})
+	Expect(err).NotTo(HaveOccurred())
+	g.tools = httptest.NewServer(tools.Handler())
+	DeferCleanup(g.tools.Close)
+	return g
+}
+
+// everythingInTheSandbox is all that was sent into the sandbox: every exec (command, arguments,
+// environment, working directory, stdin), every file written, the prompts and arguments of the
+// harness, and what OpenShell holds as the sandbox spec.
+func (g *ghEnv) everythingInTheSandbox() string {
+	var b strings.Builder
+	for _, x := range g.gw.Execs() {
+		raw, err := protojson.Marshal(x)
+		Expect(err).NotTo(HaveOccurred())
+		b.Write(raw)
+		b.WriteByte('\n')
+	}
+	g.files.mu.Lock()
+	for path, data := range g.files.data {
+		b.WriteString(path + "\n")
+		b.Write(data)
+		b.WriteByte('\n')
+	}
+	for path, target := range g.files.links {
+		b.WriteString(path + " -> " + target + "\n")
+	}
+	g.files.mu.Unlock()
+	prompts, loads, _, args := g.harness.snapshot()
+	b.WriteString(strings.Join(prompts, "\n") + strings.Join(loads, "\n"))
+	for _, a := range args {
+		b.WriteString(strings.Join(a, " ") + "\n")
+	}
+	raw, err := protojson.Marshal(g.gw.Sandbox(g.workspace, g.sandbox))
+	Expect(err).NotTo(HaveOccurred())
+	b.Write(raw)
+	return b.String()
+}
+
+var _ = Describe("A repo-helper agent on Gitea", func() {
+	It("opens a pull request after one approval, and no token ever reaches the sandbox", func(ctx SpecContext) {
+		g := newGiteaEnv(ctx)
+		ids := g.script()
+		t := g.task(ctx, markAsk+": fix the typo")
+		r := g.enqueue(ctx, t)
+		g.pool("agentd-a")
+
+		var id string
+		Eventually(ids).WithTimeout(15 * time.Second).Should(Receive(&id))
+		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateParked))
+		Expect(getRun(ctx, r).ParkReason.RunParkReason).To(Equal(store.RunParkReasonApproval))
+		Expect(g.gt.Snapshot("widgets").Pulls).To(BeEmpty(), "nothing reaches Gitea before the approval")
+		Expect(g.gt.Snapshot("widgets").Branches).To(HaveLen(1), "only main")
+
+		By("one approval, and Koinon pushes the branch and opens the pull request with the write token")
+		row, err := q.GetApprovalRequest(ctx, store.GetApprovalRequestParams{OrgID: g.org, ID: mustUUID(id)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Connector).To(Equal("gitea"))
+		decided, err := g.svc.Approve(ctx, g.org, row.ID, g.user, row.ArgsSha256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(decided.Status).To(Equal(store.ApprovalStatusExecuted), decided.Error.String)
+
+		snap := g.gt.Snapshot("widgets")
+		Expect(snap.Pulls).To(HaveLen(1))
+		Expect(snap.Pulls[0].Head).To(Equal("koinon/fix-typo"))
+		Expect(snap.Pulls[0].Base).To(Equal("main"))
+		Expect(snap.Branches).To(HaveKey("koinon/fix-typo"))
+		Expect(snap.Branches["main"]).NotTo(Equal(snap.Branches["koinon/fix-typo"]), "the default branch is untouched")
+		url := g.gt.URL() + "/acme/widgets/pulls/1"
+
+		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		prompts, _, _, _ := g.harness.snapshot()
+		Expect(prompts).To(HaveLen(2))
+		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + url))
+		Expect(g.gt.Snapshot("secrets").Calls).To(BeEmpty(), "no other repository was touched")
+
+		By("the instructions list the granted repository with the connection's clone URL")
+		written, _ := g.files.get(instructionsFile)
+		Expect(string(written)).To(ContainSubstring("`acme/widgets` on Gitea (connector `gitea`, host `127.0.0.1:"))
+		Expect(string(written)).To(ContainSubstring("`git clone " + g.gt.URL() + "/acme/widgets`"))
+
+		By("the sandbox received its Gitea host and CA, and no token")
+		all := g.everythingInTheSandbox()
+		Expect(all).To(ContainSubstring("koinon-git-credential --host 127.0.0.1:"), "the credential helper is configured for the connection's host")
+		Expect(all).To(ContainSubstring("BEGIN CERTIFICATE"), "the connection's CA bundle")
+		for _, tok := range []string{giteaReadToken, giteaWriteToken, "not-a-real-gitea"} {
+			Expect(all).NotTo(ContainSubstring(tok))
+		}
+	})
+})

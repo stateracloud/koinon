@@ -223,3 +223,25 @@ func (f *Fake) createComment(w http.ResponseWriter, r *http.Request, rp *repo, l
 	writeJSON(w, http.StatusCreated, f.commentJSON(baseURL(r), rp, c))
 	return nil
 }
+
+// createIssue answers POST issues. Only what the setup-guide check needs: a title is required
+// (422 otherwise, after the scope and permission checks), and an issue is created.
+func (f *Fake) createIssue(w http.ResponseWriter, r *http.Request, rp *repo, login string) error {
+	var body struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		return errf(http.StatusUnprocessableEntity, "invalid body: %v", err)
+	}
+	if body.Title == "" {
+		return errf(http.StatusUnprocessableEntity, "[Title]: Required")
+	}
+	i := &issue{index: rp.nextIndex, title: body.Title, body: body.Body, user: login, created: f.now()}
+	rp.nextIndex++
+	rp.issues[i.index] = i
+	rp.calls["POST issues"]++
+	html := baseURL(r) + "/" + f.Owner + "/" + rp.name + "/issues/" + strconv.FormatInt(i.index, 10)
+	writeJSON(w, http.StatusCreated, map[string]any{"id": i.index + 2000, "number": i.index, "title": i.title, "body": i.body, "state": "open", "html_url": html})
+	return nil
+}

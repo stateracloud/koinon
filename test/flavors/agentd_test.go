@@ -26,6 +26,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // koinon-agentd driving each real flavor image: Postgres in a container, the flavor in the
@@ -119,6 +121,7 @@ func describeAgentd(f flavor) bool {
 
 			backend = &dockerBackend{sb: sb}
 			p, err := agentd.New(db, backend, agentd.Config{
+				Prices:  prices.NewResolver(pricing.Embedded()),
 				OwnerID: "agentd-flavors", Workers: 1, Lease: 10 * time.Second, Poll: 100 * time.Millisecond,
 				GatewayURL: gw.url(""), Logger: newLogger(),
 			})
@@ -269,6 +272,21 @@ func describeAgentd(f flavor) bool {
 			if f.agentdVerdict == "allow" {
 				Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
 			}
+			// A refusal costs the agent a tool call, not the run: a harness that ends the turn on a
+			// rejection is prompted again with agentd's note (issue #186).
+			if f.agentdVerdict == "reject" {
+				Expect(r.State).To(Equal(store.RunStateSucceeded), r.OutcomeReason.String)
+				var refusals int
+				for _, e := range eventsOf(ctx, r) {
+					if e.Kind == "run.refusal" {
+						refusals++
+					}
+				}
+				if f.rejectEndsTurn {
+					Expect(refusals).To(Equal(1), "agentd continued the cancelled turn with its note")
+					Expect(gw.modelBodies()).To(ContainElement(ContainSubstring("is outside your session directory")))
+				}
+			}
 		}, SpecTimeout(4*time.Minute))
 	})
 }
@@ -343,6 +361,18 @@ func (d *dockerBackend) settled() bool {
 	return d.inflight == 0 && len(d.last) > 0 && d.last[len(d.last)-1] == "sweep"
 }
 
+// Upload runs the extract command of OpenShell's upload channel (`mkdir -p -- DEST && cat | tar
+// xf - -C DEST`); Docker has no exec stdin cap, so this stand-in needs no flow control.
+func (d *dockerBackend) Upload(ctx context.Context, _, _, destDir string, archive io.Reader) error {
+	c := exec.CommandContext(ctx, "docker", "exec", "--interactive", d.sb.name, "/bin/sh", "-c",
+		`mkdir -p -- "$1" && cat | tar xf - -C "$1"`, "upload", destDir)
+	c.Stdin = archive
+	if out, err := c.CombinedOutput(); err != nil {
+		return fmt.Errorf("upload: %w: %s", err, out)
+	}
+	return nil
+}
+
 func (d *dockerBackend) Exec(ctx context.Context, _, _ string, req execution.ExecRequest) (execution.Process, error) {
 	d.mu.Lock()
 	d.inflight++
@@ -360,7 +390,7 @@ func (d *dockerBackend) Exec(ctx context.Context, _, _ string, req execution.Exe
 	args = append(args, d.sb.name)
 	args = append(args, req.Command...)
 	cctx, cancel := context.WithCancel(ctx)
-	c := exec.CommandContext(cctx, "docker", args...) //nolint:gosec // test-controlled arguments
+	c := exec.CommandContext(cctx, "docker", args...)
 	stdin, err := c.StdinPipe()
 	if err != nil {
 		cancel()

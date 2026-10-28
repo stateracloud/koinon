@@ -3,13 +3,13 @@
 import { create } from '@bufbuild/protobuf'
 import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { describe, expect, it } from 'vitest'
-import { RunEventSchema, RunSchema, RunService, RunState, type RunEvent, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { HeartbeatSchema, RunEventSchema, RunSchema, RunService, RunState, type RunEvent, type WatchRunRequest } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { watchRun, type WatchStatus } from '@/lib/run-watch'
 
 const runMsg = (state: RunState) => create(RunSchema, { id: 'r', state })
 const ev = (seq: number) => create(RunEventSchema, { runId: 'r', seq: BigInt(seq), kind: 'acp.agent_message_chunk' })
 
-function drive(script: ((req: WatchRunRequest) => AsyncIterable<number | RunState | Error | 'succeeded' | 'running'>)[]) {
+function drive(script: ((req: WatchRunRequest) => AsyncIterable<number | RunState | Error | 'succeeded' | 'running' | 'heartbeat'>)[]) {
   const calls: WatchRunRequest[] = []
   const transport = createRouterTransport(({ service }) => {
     service(RunService, {
@@ -19,6 +19,10 @@ function drive(script: ((req: WatchRunRequest) => AsyncIterable<number | RunStat
         if (!step) throw new ConnectError('no more scripted calls', Code.Internal)
         for await (const x of step(req)) {
           if (x instanceof Error) throw x
+          if (x === 'heartbeat') {
+            yield { item: { case: 'heartbeat', value: create(HeartbeatSchema, {}) } }
+            continue
+          }
           if (x === 'succeeded' || x === 'running') {
             yield { item: { case: 'run', value: runMsg(x === 'succeeded' ? RunState.SUCCEEDED : RunState.RUNNING) } }
             continue
@@ -31,7 +35,7 @@ function drive(script: ((req: WatchRunRequest) => AsyncIterable<number | RunStat
   return { transport, calls }
 }
 
-async function* seq(...xs: (number | Error | 'succeeded' | 'running')[]) {
+async function* seq(...xs: (number | Error | 'succeeded' | 'running' | 'heartbeat')[]) {
   for (const x of xs) yield x
 }
 
@@ -115,6 +119,26 @@ describe('watchRun', () => {
       { onRun: () => {}, onEvent: () => {}, onStatus: () => {} },
     )
     expect(attempts).toEqual([1, 2, 3, 1, 2])
+  })
+
+  it('does not count a heartbeat as progress for the backoff', async () => {
+    const cut = new ConnectError('protocol error: missing EndStreamResponse', Code.InvalidArgument)
+    const { transport } = drive([
+      () => seq('running', 'heartbeat', 'heartbeat', cut),
+      () => seq('running', 'heartbeat', cut),
+      () => seq('succeeded'),
+    ])
+    const attempts: number[] = []
+    const got: RunEvent[] = []
+    await watchRun(
+      {
+        transport, orgId: 'o', runId: 'r', signal: new AbortController().signal, now: () => 0,
+        backoff: (n) => (attempts.push(n), 0), sleep: async () => {},
+      },
+      { onRun: () => {}, onEvent: (e) => got.push(e), onStatus: () => {} },
+    )
+    expect(attempts).toEqual([1, 2])
+    expect(got).toEqual([])
   })
 
   it('restarts the backoff after a stream that stayed up', async () => {

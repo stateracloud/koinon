@@ -57,6 +57,7 @@ import (
 	"github.com/stateracloud/koinon/internal/adminapi"
 	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/askuser"
 	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
@@ -79,11 +80,14 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/runwatch"
+	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/savedwork"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/internal/triggers/schedule"
+	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 	"github.com/stateracloud/koinon/web"
 )
@@ -397,18 +401,22 @@ func run() error {
 	}
 	purgeCtx, cancelPurge := context.WithCancel(ctx)
 	defer cancelPurge() // before pool.Close
-	go authSvc.RunPurger(purgeCtx, time.Hour, 7*24*time.Hour)
+	safego.GoOrStop(purgeCtx, slog.Default(), "auth-purger", stop, func(ctx context.Context) { authSvc.RunPurger(ctx, time.Hour, 7*24*time.Hour) })
 
 	// Templates embedded in the binary become rows, versioned by content hash.
 	embedded, err := templates.All()
 	if err != nil {
 		return fmt.Errorf("load templates: %w", err)
 	}
-	priceSvc := prices.New(pool, slog.Default())
+	priceSvc := prices.New(pool, slog.Default(), pricing.Embedded())
 	if err := priceSvc.SyncDefaults(ctx); err != nil {
 		return err
 	}
 	if _, err := priceSvc.CompleteMigrated(ctx); err != nil {
+		return err
+	}
+	// Every model no admin set the format of follows the format table (ADR 0069).
+	if _, err := catalog.New(pool, nil, slog.Default()).RederiveFormats(ctx); err != nil {
 		return err
 	}
 	if _, err := services.SyncTemplates(ctx, pool, embedded); err != nil {
@@ -419,11 +427,18 @@ func run() error {
 	bgCtx, cancelBg := context.WithCancel(ctx)
 	defer cancelBg() // before pool.Close
 	hub := runwatch.New(pool.Config().ConnConfig, slog.Default())
-	go hub.Run(bgCtx)
-	go scheduler.Sweeper(bgCtx, pool, cfg.sweepInterval, slog.Default())
+	safego.GoOrStop(bgCtx, slog.Default(), "runwatch-hub", stop, func(ctx context.Context) { hub.Run(ctx) })
+	safego.GoOrStop(bgCtx, slog.Default(), "scheduler-sweeper", stop, func(ctx context.Context) {
+		scheduler.Sweeper(ctx, pool, cfg.sweepInterval, slog.Default())
+	})
 	// Notifications that follow a commit (pre-wakes) are DBOS steps with --durable, and inline
 	// best effort without it (ADR 0066, practice B2).
 	var notifier *durable.Notifier
+	var sched *schedule.Scheduler
+	if !cfg.durable {
+		slog.Warn("schedule triggers do not fire: they run on the DBOS runtime (api.durable.enabled, --durable)")
+	}
+	var directMessages *services.DirectMessageQueue
 	if cfg.durable {
 		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
 		// missing schema fails the start instead of the API running without its timers.
@@ -438,12 +453,23 @@ func run() error {
 			return err
 		}
 		// The org-partitioned queue for trigger and task-creation work (DB2): each org's limits are
-		// its trigger_concurrency and trigger_rate_per_minute settings. The trigger paths (TR2, TR3)
-		// enqueue through it with durable.EnqueueForOrg; until they land it only registers the queue.
-		if _, err := durable.NewOrgWork(rt, durable.OrgQueueConfig{
+		// its trigger_concurrency and trigger_rate_per_minute settings. Schedule triggers (TR2) enqueue
+		// through it with durable.EnqueueForOrg; TR3 will follow.
+		orgWork, err := durable.NewOrgWork(rt, durable.OrgQueueConfig{
 			Defaults: orgsettings.QueueDefaults(),
 			Limits:   orgsettings.QueueLimits(store.New(pool), orgsettings.Defaults()),
-		}); err != nil {
+		})
+		if err != nil {
+			return err
+		}
+		// Schedule triggers (TR2): every replica ticks; the fire workflow and the dedupe key make a
+		// due time fire once. It starts below, once the services exist.
+		sched = schedule.New(schedule.Config{Logger: slog.Default()}, pool, orgWork)
+		if err := rt.Register(sched.Registrar()); err != nil {
+			return err
+		}
+		// Direct messages in the inbox chat (TR3) create their tasks on that queue.
+		if directMessages, err = services.RegisterDirectMessages(rt, orgWork); err != nil {
 			return err
 		}
 		if err := rt.Launch(bgCtx); err != nil {
@@ -481,12 +507,14 @@ func run() error {
 		if keyring, err = loadKeyring(ctx, kekStore); err != nil {
 			return err
 		}
-		go watchKeyring(bgCtx, keyring, kekStore, time.Minute)
+		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch", stop, func(ctx context.Context) { watchKeyring(ctx, keyring, kekStore, time.Minute) })
 	case cfg.kekDir != "":
 		if keyring, err = secretstore.LoadDir(cfg.kekDir); err != nil {
 			return err
 		}
-		go keyring.WatchDir(bgCtx, cfg.kekDir, time.Minute, slog.Default())
+		safego.GoOrStop(bgCtx, slog.Default(), "keyring-watch-dir", stop, func(ctx context.Context) {
+			keyring.WatchDir(ctx, cfg.kekDir, time.Minute, slog.Default())
+		})
 	default:
 		slog.Warn("no --kek-secret or --kek-dir: provider keys and connections cannot be stored")
 	}
@@ -518,7 +546,7 @@ func run() error {
 	}
 	approvalOpts.SavedWorkKeys = keyring // opens the work saved from stuck sandboxes (ADR 0054)
 	approvalSvc := approvals.New(pool, approvalOpts)
-	go approvalSvc.Sweeper(bgCtx, cfg.sweepInterval)
+	safego.GoOrStop(bgCtx, slog.Default(), "approval-sweeper", stop, func(ctx context.Context) { approvalSvc.Sweeper(ctx, cfg.sweepInterval) })
 	tokenSvc := tokens.New(pool, nil)
 	var catalogKeys catalog.Keys
 	if keyring != nil {
@@ -528,19 +556,26 @@ func run() error {
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, URLPolicy: urlPolicy,
+		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
+	// The notification of an opened question (the park that opens it commits in koinon-agentd).
+	safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
+	if sched != nil {
+		sched.Bind(svc)
+		safego.GoOrStop(bgCtx, slog.Default(), "schedule-triggers", stop, func(ctx context.Context) { sched.Run(ctx) })
+		slog.Info("schedule triggers started")
+	}
 	if kube != nil {
 		var sealer connections.Sealer
 		if keyring != nil {
 			sealer = keyring
 		}
 		imp := &declarative.Importer{Client: kube, Namespace: cfg.secretsNamespace, Pool: pool, Catalog: catalogSvc, MCP: mcpSvc, URLPolicy: urlPolicy, Sealer: sealer, Log: slog.Default()}
-		go imp.Run(bgCtx)
+		safego.GoOrStop(bgCtx, slog.Default(), "declarative-importer", stop, func(ctx context.Context) { imp.Run(ctx) })
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
 	}
-	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default()).WithMCP(mcpSvc)
+	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc)
 
 	reg := metrics.NewRegistry()
 	if err := metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default()); err != nil {
@@ -549,13 +584,13 @@ func run() error {
 	if cfg.otlpAddr != "" {
 		// The spend ledger's receiver (plan item L1). It runs on its own listener, outside
 		// the session-authenticated API handler.
-		go func() {
+		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
 			slog.Info("starting the spend ledger's OTLP receiver", "addr", cfg.otlpAddr)
-			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg)}, slog.Default()); err != nil {
+			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}
-		}()
+		})
 	}
 
 	handler, err := api.NewHandler(api.Options{
@@ -591,16 +626,18 @@ func run() error {
 		mux.Handle("/mcp", tools.Handler())
 		// The ask-tier tools of org MCP servers (plan item MC1), for agentgateway only like /mcp.
 		mux.Handle(mcpask.Path, mcpask.New(pool, mcpask.Options{}).Handler())
+		// ask_user (plan item TK3), the "koinon" target of the gateway.
+		mux.Handle(askuser.Path, askuser.New(pool, askuser.Options{}).Handler())
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		toolsSrv := &http.Server{Addr: cfg.toolsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, toolsSrv)
-		go func() {
+		safego.GoOrStop(ctx, slog.Default(), "tools-server", stop, func(context.Context) {
 			slog.Info("serving GitHub tools", "addr", cfg.toolsAddr)
 			if err := toolsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				toolsErr <- err
 				stop()
 			}
-		}()
+		})
 	}
 	// Saved work from a stuck sandbox (ADR 0054) arrives on its own listener, which only koinon-agentd
 	// may reach: koinon-agentd holds no KEK, so it posts the bundle here to be sealed. The tools
@@ -621,22 +658,22 @@ func run() error {
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		swSrv := &http.Server{Addr: cfg.savedWorkAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, swSrv)
-		go func() {
+		safego.GoOrStop(ctx, slog.Default(), "saved-work-server", stop, func(context.Context) {
 			slog.Info("serving saved-work uploads", "addr", cfg.savedWorkAddr)
 			if err := swSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				toolsErr <- err
 				stop()
 			}
-		}()
+		})
 	}
-	go func() {
+	safego.Go(ctx, slog.Default(), "shutdown", func(context.Context) {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for _, s := range servers {
 			_ = s.Shutdown(shutdownCtx)
 		}
-	}()
+	})
 
 	slog.Info("starting koinon-api", "version", project.Version, "addr", cfg.addr,
 		"oidc", cfg.oidcIssuer != "", "web_ui", web.Dist() != nil)
