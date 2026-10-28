@@ -49,10 +49,16 @@ type requestLog struct {
 	list []record
 }
 
+// maxRecords caps the log: the oldest entries are dropped.
+const maxRecords = 1000
+
 func (l *requestLog) add(r record) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.list = append(l.list, r)
+	if len(l.list) > maxRecords {
+		l.list = append([]record(nil), l.list[len(l.list)-maxRecords:]...)
+	}
 }
 
 func (l *requestLog) snapshot() []record {

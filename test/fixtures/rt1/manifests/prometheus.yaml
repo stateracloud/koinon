@@ -6,10 +6,10 @@
 #   3. Prometheus (listening on 127.0.0.1 only) serves them with 90 days of retention, no scraping,
 #   4. prometheus-mcp-server talks to it over localhost.
 # The data ends 3 h before the pod started, so restart the pod (kubectl rollout restart) the day a test
-# runs, or "yesterday" will not be the day before the test. Creating the blocks takes 3 to 4 minutes.
+# runs, or "yesterday" will not be the day before the test. Creating the blocks takes about 10 seconds.
 #
-# Memory at run time: prometheus request 48Mi / limit 144Mi (measured about 95 MiB), prometheus-mcp request 48Mi / limit 112Mi (measured about 75 MiB),
-# so the pod is capped at 256Mi. The init containers run first and one at a time (promtool limit 256Mi).
+# Memory at run time: prometheus request 48Mi / limit 128Mi (measured 31 MiB idle, 57 MiB under a 30-day range-query loop),
+# prometheus-mcp request 48Mi / limit 112Mi (measured about 78 MiB), so the pod is capped at 240Mi. The init containers run first and one at a time (promtool limit 256Mi).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -65,7 +65,9 @@ spec:
         - name: promtool
           image: zot.apps.lab.example.invalid/koinon/rt1-prometheus:v3.7.3
           command: ["/bin/promtool"]
-          args: ["tsdb", "create-blocks-from", "openmetrics", "/om/rt1.om", "/data"]
+          # 24 h blocks instead of the default 2 h: 40 blocks, not 360, so building takes seconds and Prometheus
+          # needs no compaction at start. (Hidden flag; accepted by the pinned v3.7.3.)
+          args: ["tsdb", "create-blocks-from", "openmetrics", "--max-block-duration=24h", "/om/rt1.om", "/data"]
           securityContext: *sc
           resources:
             requests: {cpu: 50m, memory: 32Mi}
@@ -85,7 +87,7 @@ spec:
           securityContext: *sc
           resources:
             requests: {cpu: 50m, memory: 48Mi}
-            limits: {cpu: 500m, memory: 144Mi}
+            limits: {cpu: 500m, memory: 128Mi}
           # The kubelet cannot reach a loopback listener, so the probes run inside the container.
           readinessProbe:
             exec: {command: [/bin/promtool, check, ready, --url=http://127.0.0.1:9090]}

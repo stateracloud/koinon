@@ -3,21 +3,10 @@
 # Web research: an unmodified SearXNG (AGPL-3.0, see ../README.md) and ihor-sokoliuk/mcp-searxng (MIT)
 # in front of it. The MCP server (:8080/mcp, static bearer token) is the only thing the gateway reaches;
 # SearXNG accepts connections from it alone. Both pods need internet egress, see networkpolicies.yaml.
+# Secret rt1-searxng-secrets (keys secret_key and mcp_token) is delivered by the operator, not by this
+# kustomization; see secrets.example.yaml and ../README.md.
 # Memory: searxng request 96Mi / limit 256Mi (about 87 MiB measured), mcp-searxng request 48Mi / limit
 # 128Mi (about 43 MiB measured).
-apiVersion: v1
-kind: Secret
-metadata:
-  name: rt1-searxng-secrets
-  labels:
-    app.kubernetes.io/part-of: koinon-rt1-fixtures
-type: Opaque
-stringData:
-  # PLACEHOLDERS. Real values are set out of band; never commit them. The MCP token is the one Koinon's
-  # MCP server credential carries, so agentgateway injects it as "Authorization: Bearer <token>".
-  secret_key: koinon_test_not-a-real-secret
-  mcp_token: koinon_test_not-a-real-token
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -127,12 +116,13 @@ spec:
             - {name: SEARXNG_URL, value: "http://rt1-searxng:8080"}
             - {name: MCP_HTTP_PORT, value: "8080"}
             - {name: MCP_HTTP_HOST, value: "0.0.0.0"}
-            # Static bearer token. Hardening requires allowed hosts and origins; the gateway connects by
-            # the Service name and sends no browser Origin.
+            # Static bearer token. Hardening requires allowed hosts and origins. A host matches exactly,
+            # port included, so every spelling of the Service name is listed with and without :8080.
+            # The gateway connects by the Service name and sends no browser Origin.
             - {name: MCP_HTTP_HARDEN, value: "true"}
             # Sessionless: agentgateway does not keep the MCP server's legacy sessions.
             - {name: MCP_HTTP_STATELESS, value: "true"}
-            - {name: MCP_HTTP_ALLOWED_HOSTS, value: "rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080,rt1-searxng-mcp.koinon-fixtures.svc:8080,rt1-searxng-mcp:8080"}
+            - {name: MCP_HTTP_ALLOWED_HOSTS, value: "rt1-searxng-mcp:8080,rt1-searxng-mcp,rt1-searxng-mcp.koinon-fixtures:8080,rt1-searxng-mcp.koinon-fixtures,rt1-searxng-mcp.koinon-fixtures.svc:8080,rt1-searxng-mcp.koinon-fixtures.svc,rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080,rt1-searxng-mcp.koinon-fixtures.svc.cluster.local"}
             - {name: MCP_HTTP_ALLOWED_ORIGINS, value: "http://rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080"}
             - name: MCP_HTTP_AUTH_TOKEN
               valueFrom:

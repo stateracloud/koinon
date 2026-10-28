@@ -13,7 +13,8 @@
 #
 # Usage: hack/rt1-fixtures-build.sh REGISTRY [TAG]     e.g. zot.apps.lab.example.invalid, TAG defaults to dev
 # DRY_RUN=1 prints the commands and pushes nothing. You must be logged in to the registry (docker login
-# or a DOCKER_CONFIG that has it). Prints each image's digest at the end, for kustomize.
+# or a DOCKER_CONFIG that has it). Prints a ready-to-paste kustomize images: block with digests at the end
+# (names use REGISTRY; the manifests expect zot.apps.lab.example.invalid).
 set -euo pipefail
 
 registry="${1:?usage: $0 REGISTRY [TAG]}"
@@ -37,16 +38,29 @@ for cmd in fakecicost:koinon-fakecicost promgen:koinon-rt1-promgen; do
   (cd "$root" && KO_DOCKER_REPO="$repo/$name" run ko build --bare --platform "$platform" --tags "$tag" "./cmd/${cmd##*:}")
 done
 
-run docker buildx build --platform "$platform" --push -t "$repo/rt1-motherduck:$tag" "$root/test/fixtures/rt1/motherduck"
-run docker buildx build --platform "$platform" --push -f "$root/test/fixtures/rt1/prometheus/Dockerfile.mcp" \
-  -t "$repo/rt1-prometheus-mcp:$tag" "$root/test/fixtures/rt1/prometheus"
+# docker image build for linux/amd64, pushed: with buildx when it exists, else docker build + docker push.
+image_build() { # image-name dockerfile context
+  local ref="$repo/$1:$tag"
+  if docker buildx version >/dev/null 2>&1; then
+    run docker buildx build --platform "$platform" --push -f "$2" -t "$ref" "$3"
+  else
+    run docker build --platform "$platform" -f "$2" -t "$ref" "$3"
+    run docker push "$ref"
+  fi
+}
+image_build rt1-motherduck "$root/test/fixtures/rt1/motherduck/Dockerfile" "$root/test/fixtures/rt1/motherduck"
+image_build rt1-prometheus-mcp "$root/test/fixtures/rt1/prometheus/Dockerfile.mcp" "$root/test/fixtures/rt1/prometheus"
 run crane copy "$prometheus" "$repo/rt1-prometheus:v3.7.3"
 run crane copy "$searxng" "$repo/rt1-searxng:$searxng_tag"
 run crane copy "$searxng_mcp" "$repo/rt1-searxng-mcp:$searxng_mcp_tag"
 
 if [ "${DRY_RUN:-}" != 1 ]; then
-  echo "digests:"
+  echo
+  echo "# Paste into test/fixtures/rt1/manifests/kustomization.yaml (replaces its images: list):"
+  echo "images:"
   for ref in rt1-fakecicost:$tag rt1-promgen:$tag rt1-motherduck:$tag rt1-prometheus-mcp:$tag rt1-prometheus:v3.7.3 rt1-searxng:$searxng_tag rt1-searxng-mcp:$searxng_mcp_tag; do
-    echo "  $repo/${ref%%:*}@$(crane digest "$repo/$ref")"
+    echo "  - name: $repo/${ref%%:*}"
+    echo "    newTag: \"${ref##*:}\""
+    echo "    digest: $(crane digest "$repo/$ref")"
   done
 fi

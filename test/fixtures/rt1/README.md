@@ -3,8 +3,9 @@
 Test fixtures for the v0.1 home-lab story test (RT1, `docs/plans/v0.1.md`). The stories need tools
 that agents reach only as remote MCP servers behind agentgateway. These fixtures stand in for three
 cost sources (the daily FinOps cost check) and for a company docs repository (the internal-research
-story). Everything is synthetic or openly licensed, runs in namespace `koinon-fixtures`, and needs
-no egress at run time.
+story) and for web research. Everything is synthetic or openly licensed and runs in namespace
+`koinon-fixtures`. The cost fixtures and the docs repo need no egress at run time; only the two
+web-research pods have internet egress (see Web research).
 
 | Fixture | Directory | What agents see | MCP endpoint (in cluster) |
 |---|---|---|---|
@@ -22,7 +23,7 @@ The write-up checks whether the agent found these. "Yesterday" is the UTC day be
 | Source | Anomaly | How it looks |
 |---|---|---|
 | Cloud bill | The cost of **Amazon Virtual Private Cloud** yesterday is exactly 3x its average of the previous 7 days (about 27 USD against 9 USD) | `SELECT CAST(ChargePeriodStart AS DATE) d, sum(BilledCost) FROM focus WHERE ServiceName = 'Amazon Virtual Private Cloud' GROUP BY 1 ORDER BY 1 DESC` |
-| CI cost | The **checkout-web** repository's CI cost about doubles yesterday, because a new matrix job fans out its `test` workflow (runs and minutes of `test` go up about 3x) | `ci_costs` with `group_by=repo`, or `group_by=workflow` for the cause |
+| CI cost | The **checkout-web** repository's CI cost about doubles yesterday, because a new matrix job fans out its `test` workflow (**checkout-web/test** costs about 10x its normal day, 17.6 USD against 1.8 USD, with 220 runs against 21; the repository's total is about 2x its own normal day, 32 USD against 16 USD; against the same weekday a week earlier it is 1.8x) | `ci_costs` with `group_by=repo`, or `group_by=workflow` for the cause |
 | Inference spend | The **support** team's spend on **claude-sonnet-4** doubles yesterday (cost and tokens) | `sum by (team, model) (increase(llm_cost_usd_total[1d]))` |
 
 All other series stay within about 10 to 20 percent of their normal day-to-day variation.
@@ -32,11 +33,14 @@ All other series stay within about 10 to 20 percent of their normal day-to-day v
 `mcp-server-motherduck` 1.1.0 (MIT) in HTTP mode, read-only, over DuckDB 1.5.6. The image downloads
 `focus_sample_10000.csv` from the FinOps Foundation's FOCUS-Sample-Data repository at build time
 (pinned by commit, checked by sha256) and bakes it into a DuckDB file (about 2 MB), so nothing
-large is committed and the pod needs no egress. At container start `startup.py` copies the file to
+large is committed and the pod needs no egress. The dates are shifted when the container starts, so **restart the pod on the day of a test** (`kubectl -n koinon-fixtures rollout restart deploy/rt1-motherduck`); otherwise "yesterday" is the day before the pod started. At container start `startup.py` copies the file to
 `/work`, shifts every date so the data ends yesterday (30 days: one table, `focus`, 10,000 rows, AWS,
 Microsoft and Oracle charges), multiplies costs by 100 so the figures look like a small company's bill,
-plants the anomaly, and serves the copy read-only. Python packages are pinned in `constraints.txt`
-and the base image by digest. The tool to use is `execute_query`.
+plants the anomaly, and serves the copy read-only. Python packages are hash-locked
+(`requirements.txt`, installed with `--require-hashes`) and the base image is pinned by digest. SQL runs
+with `enable_external_access=false` and a locked configuration, on a read-only database (the server is
+read-only unless started with `--read-write`; there is no flag to ask for it explicitly). The tool to use is
+`execute_query`.
 
 Run locally:
 
@@ -55,9 +59,9 @@ types. `GET /v1/costs?from=YYYY-MM-DD&to=YYYY-MM-DD[&group_by=repo|workflow|runn
 Both need `Authorization: Bearer <token>` (flag `-token` or `KOINON_FAKECICOST_TOKEN`; the server
 refuses to start without one) and answer 401 otherwise. `GET /_fake/requests` lists what arrived,
 including unauthorised attempts and tool arguments, so the test can show that agentgateway injected the
-header. `/healthz` needs no token. In the cluster the token comes from Secret `rt1-fakecicost-token`
-(a placeholder; set the real value out of band and register the same value as the MCP server's
-credential in Koinon).
+header. `/healthz` needs no token. In the cluster the token comes from Secret `rt1-fakecicost-token` (see Secrets below; register the same
+value as the MCP server's credential in Koinon). The request log keeps the last 1000 entries. Data runs up
+to and including today, and today is a full synthetic day, not a partial one.
 
 Run locally:
 
@@ -84,7 +88,7 @@ Caveats:
 - The data ends 3 hours before the pod starts (promtool cannot backfill the head block's range) and
   nothing adds to it. **Restart the pod on the day of a test** (`kubectl -n koinon-fixtures rollout
   restart deploy/rt1-prometheus`) so "yesterday" is the previous day, and do it after 03:00 UTC, or the
-  last hours of yesterday are missing. Building the blocks takes 3 to 4 minutes.
+  last hours of yesterday are missing. Building the blocks takes about 10 seconds (`--max-block-duration=24h`, 40 blocks).
 - The cost of `claude-sonnet-4` is a blended USD price per million tokens, not a real price list.
 
 Run locally (needs Docker):
@@ -147,12 +151,32 @@ real policy.
 
 ## Manifests (`manifests/`)
 
-`kubectl apply -k test/fixtures/rt1/manifests` creates namespace `koinon-fixtures`, the three
-Deployments and Services, and these NetworkPolicies: default deny ingress; ingress to the MCP ports
-only from Koinon's gateway pods in namespace `koinon` (both gateway modes' labels); egress DNS only.
+`kubectl apply -k test/fixtures/rt1/manifests` creates namespace `koinon-fixtures`, five
+Deployments and Services (motherduck, fakecicost, prometheus with its MCP sidecar, searxng, searxng-mcp), and
+these NetworkPolicies: default deny ingress; ingress to the MCP ports only from Koinon's gateway pods in
+namespace `koinon`; egress DNS only, except the two web-research pods (public internet, private ranges
+excluded). The gateway selectors assume Koinon is installed in namespace `koinon` with the chart's default
+names: in standalone mode the gateway pods carry `app.kubernetes.io/name=koinon` (no `nameOverride`) and
+`app.kubernetes.io/component=gateway`; in kubernetes mode any pod in `koinon` with the label
+`gateway.networking.k8s.io/gateway-name` matches. Change `networkpolicies.yaml` if yours differ.
 Every container has requests and limits, runs non-root with a read-only root file system, and no pod
-mounts a service account token. Image references are `zot.apps.lab.example.invalid/koinon/rt1-<name>:<tag>`
-placeholders; fill in digests at deploy (see `kustomization.yaml`).
+mounts a service account token. Image references are `zot.apps.lab.example.invalid/koinon/rt1-<name>:<tag>`; `kustomization.yaml` pins
+them by digest. The four built images carry `sha256:TODO-...` placeholders until the build script's output
+is pasted in; the three mirrored images already have their upstream digests.
+
+### Secrets
+
+The kustomization contains **no Secrets** (Argo CD self-heal would revert them). The operator delivers
+them, from OpenBao with ExternalSecrets, before the pods start. `manifests/secrets.example.yaml`
+(not listed in the kustomization) has obviously fake values for a local or kind cluster.
+
+| Secret | Key | Used by | Meaning |
+|---|---|---|---|
+| `rt1-fakecicost-token` | `token` | rt1-fakecicost | the bearer token it requires (`KOINON_FAKECICOST_TOKEN`) |
+| `rt1-searxng-secrets` | `secret_key` | rt1-searxng | SearXNG `server.secret_key` (`SEARXNG_SECRET`) |
+| `rt1-searxng-secrets` | `mcp_token` | rt1-searxng-mcp | the bearer token it requires (`MCP_HTTP_AUTH_TOKEN`) |
+
+The two tokens are the credentials registered for the MCP servers in Koinon.
 
 | Pod | Containers (memory limit) | Pod limit |
 |---|---|---|
@@ -160,19 +184,21 @@ placeholders; fill in digests at deploy (see `kustomization.yaml`).
 | rt1-fakecicost | fakecicost 64Mi | 64Mi |
 | rt1-searxng | searxng 256Mi (about 87 MiB measured) | 256Mi |
 | rt1-searxng-mcp | mcp-searxng 128Mi (about 43 MiB) | 128Mi |
-| rt1-prometheus | prometheus 144Mi (about 95 MiB), prometheus-mcp 112Mi (about 75 MiB); init: promgen 64Mi, promtool 256Mi | 256Mi at run time |
+| rt1-prometheus | prometheus 128Mi (31 MiB idle, 57 MiB under a 30-day query loop), prometheus-mcp 112Mi (about 78 MiB); init: promgen 64Mi, promtool 256Mi | 240Mi at run time |
 
 To let agents use them, the gateway must be allowed to reach the four hosts
-(`rt1-motherduck:8000`, `rt1-fakecicost:8080`, `rt1-prometheus:8080` and `rt1-searxng-mcp:8080`, each
-`<name>.koinon-fixtures.svc.cluster.local`): add them to the chart's
+(`rt1-motherduck.koinon-fixtures.svc.cluster.local:8000`, `rt1-fakecicost.koinon-fixtures.svc.cluster.local:8080`,
+`rt1-prometheus.koinon-fixtures.svc.cluster.local:8080` and
+`rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080`; the MCP path is `/mcp`): add them to the chart's
 `egress.allowedInternalHosts` and `networkPolicy.gatewayEgressTo` (ports 8000 and 8080 in
 `koinon-fixtures`), then register each as an MCP server (`docs/site/src/content/docs/guides/mcp-servers.md`).
 For fakecicost and rt1-searxng-mcp, give the server a bearer credential so agentgateway injects the header.
 
 ## Building images
 
-`hack/rt1-fixtures-build.sh REGISTRY [TAG]` builds four images for linux/amd64 (two with ko, two with buildx) and mirrors three (Prometheus and the two
-web-research images) by digest, then pushes them
+`hack/rt1-fixtures-build.sh REGISTRY [TAG]` builds four images for linux/amd64 (two with ko, two with docker buildx, or docker build and push when
+buildx is missing) and mirrors three (Prometheus and the two web-research images) by digest. Afterwards it
+prints a ready-to-paste `images:` block with the digests for `kustomization.yaml`
 (`DRY_RUN=1` prints the commands only). By hand:
 
 ```sh

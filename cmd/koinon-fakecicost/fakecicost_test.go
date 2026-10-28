@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -94,6 +95,15 @@ var _ = Describe("koinon-fakecicost", func() {
 				Expect(resp.StatusCode).To(Equal(http.StatusOK))
 			}
 		})
+	})
+
+	It("keeps only the last 1000 requests in the log", func() {
+		for i := 0; i < maxRecords+50; i++ {
+			s.recs.add(record{Path: strconv.Itoa(i)})
+		}
+		recs := s.recs.snapshot()
+		Expect(recs).To(HaveLen(maxRecords))
+		Expect(recs[0].Path).To(Equal("50"))
 	})
 
 	Describe("ranges", func() {

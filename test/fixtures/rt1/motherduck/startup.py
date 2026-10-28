@@ -70,6 +70,9 @@ os.execvp(
         "--host", "0.0.0.0",  # noqa: S104 - the pod's NetworkPolicy limits who can connect
         "--port", "8000",
         "--db-path", db,
+        # The server opens the file read-only by default (there is no flag for it; --read-write would change it).
+        # No file or network access from SQL, and the setting cannot be changed back.
+        "--init-sql", "SET enable_external_access=false; SET lock_configuration=true;",
         "--stateless-http",
     ],
 )

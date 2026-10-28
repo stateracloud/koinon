@@ -5,6 +5,8 @@
 # on :8000/mcp. The data is baked in at build time, so the pod needs no egress at run time. At start
 # startup.py shifts the dates so they end yesterday and plants the anomaly.
 #
+# Packages are hash-locked: requirements.txt is `uv pip compile requirements.in --universal --python-version 3.12
+# --generate-hashes -o requirements.txt`.
 # Build (from this directory): docker buildx build --platform linux/amd64 -t <registry>/koinon/rt1-motherduck:<tag> .
 # python:3.12-slim, re-pin with: docker buildx imagetools inspect python:3.12-slim
 ARG PYTHON=python:3.12-slim@sha256:12316debbfb86890f6b2d825820612741ba527ad5a44e3902759141d572bfe8f
@@ -13,9 +15,9 @@ FROM ${PYTHON} AS build
 # The FOCUS sample data, pinned by commit and checked by sha256 (focus_sample_10000.csv, 10,000 rows).
 ARG FOCUS_COMMIT=139a302bdaa2eb84a86becb82056488a5528a672
 ARG FOCUS_SHA256=0bf58b73123294c4476b648e647cad842935036f67dc4e9a2cc4a6d7497cc2e3
-COPY constraints.txt /tmp/constraints.txt
+COPY requirements.txt /tmp/requirements.txt
 RUN python -m venv /opt/venv \
- && /opt/venv/bin/pip install --no-cache-dir -c /tmp/constraints.txt mcp-server-motherduck==1.1.0 duckdb==1.5.6
+ && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt
 COPY build_base.py /tmp/build_base.py
 RUN mkdir -p /opt/focus \
  && /opt/venv/bin/python /tmp/build_base.py \

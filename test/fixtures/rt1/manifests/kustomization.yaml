@@ -12,29 +12,29 @@ resources:
   - fakecicost.yaml
   - prometheus.yaml
   - searxng.yaml
-# Digests are filled in at deploy time (the tags below are placeholders). For example:
-#   kustomize edit set image \
-#     zot.apps.lab.example.invalid/koinon/rt1-motherduck=zot.apps.lab.example.invalid/koinon/rt1-motherduck@sha256:<digest>
-# hack/rt1-fixtures-build.sh prints the digest of every image it pushes.
-# SearXNG's settings are plain configuration for the unmodified image.
-configMapGenerator:
-  - name: rt1-searxng-settings
-    files:
-      - settings.yml=searxng-settings.yml
-    options:
-      disableNameSuffixHash: true
+# Images are pinned by digest. The three mirrored upstream images (prometheus, searxng, mcp-searxng) keep
+# their upstream digests. The four built images carry a TODO placeholder until the build is pushed:
+# hack/rt1-fixtures-build.sh REGISTRY prints a ready-to-paste block with the real digests. The tag is
+# informational once a digest is set.
 images:
   - name: zot.apps.lab.example.invalid/koinon/rt1-motherduck
     newTag: dev
+    digest: sha256:TODO-fill-from-build-script-output
   - name: zot.apps.lab.example.invalid/koinon/rt1-fakecicost
     newTag: dev
+    digest: sha256:TODO-fill-from-build-script-output
   - name: zot.apps.lab.example.invalid/koinon/rt1-promgen
     newTag: dev
-  - name: zot.apps.lab.example.invalid/koinon/rt1-prometheus
-    newTag: v3.7.3
+    digest: sha256:TODO-fill-from-build-script-output
   - name: zot.apps.lab.example.invalid/koinon/rt1-prometheus-mcp
     newTag: dev
+    digest: sha256:TODO-fill-from-build-script-output
+  - name: zot.apps.lab.example.invalid/koinon/rt1-prometheus
+    newTag: v3.7.3
+    digest: sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
   - name: zot.apps.lab.example.invalid/koinon/rt1-searxng
     newTag: "2026.10.27"
+    digest: sha256:0f48ffe2152f388f5eaede27f96b610449cebfc890d0ad457304475a54ad7b6e
   - name: zot.apps.lab.example.invalid/koinon/rt1-searxng-mcp
     newTag: "2.9.0"
+    digest: sha256:8f1dd92a9e2875cb4e8df7036785ec4c088b7600cefb611de472a352a3dcba60
