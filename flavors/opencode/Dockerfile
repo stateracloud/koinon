@@ -33,11 +33,14 @@ RUN tar -xzf /tmp/opencode.tgz -C /tmp package/bin/opencode \
 # (release API, checked 2026-10-28), and the assets were also hashed locally; yq's value matches
 # the SHA-256 column of the release's `checksums` file. fd, ast-grep and DuckDB publish no
 # checksum file. Re-pinning means new URLs, new digests and the `--version` checks below.
+#   ripgrep 15.2.0    Unlicense OR MIT   static musl build (upstream .sha256 files agree)
 #   fd 10.5.0         MIT OR Apache-2.0  static musl build
 #   yq 4.54.1         MIT                mikefarah/yq, static Go build
 #   ast-grep 0.51.0   MIT                glibc build; `sg` is left out, it would shadow /usr/bin/sg
 #   DuckDB CLI 2.0.0  MIT                glibc build; reached through the koinon-duckdb wrapper
 FROM ${BASE} AS fetch-tools-amd64
+ADD --checksum=sha256:33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c \
+    https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz /tmp/rg.tgz
 ADD --checksum=sha256:761c72dc8e120d85b22292063be8a796e2eeb20eb3e4f38b8fa2343ccf3514a7 \
     https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-unknown-linux-musl.tar.gz /tmp/fd.tgz
 ADD --checksum=sha256:e68a456f90c577af3fe4960184b3a3cf5c461e0348407c10f107da3a5fec8972 \
@@ -48,6 +51,8 @@ ADD --checksum=sha256:c6507206baf7793c6013dbd82368469a45f20dc0e17a6f92f204602f65
     https://github.com/duckdb/duckdb/releases/download/v2.0.0/duckdb-cli-linux-amd64.tar.gz /tmp/duckdb.tgz
 
 FROM ${BASE} AS fetch-tools-arm64
+ADD --checksum=sha256:800b1e7206afe799dfb5a6901f23147cfaabe0e52210538100f61e86e1740915 \
+    https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-musl.tar.gz /tmp/rg.tgz
 ADD --checksum=sha256:d76c4317f7d5dba69f8a2a15856c90c777e7f0dd4e85f0de8c76de6992c374d4 \
     https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-aarch64-unknown-linux-musl.tar.gz /tmp/fd.tgz
 ADD --checksum=sha256:8c27f6e7476fb5acefb9352e3d30f6bc2dc93f1956eb92e8da727173fb7ec6d3 \
@@ -65,24 +70,22 @@ ADD --checksum=sha256:81471889c77b2161a3e4dcdb1b2e6ca382e485766132d92d5fe1d7497e
 ADD --checksum=sha256:075c33400ffcb0c586dd106a029d3e733e9da3693f8fcb9cebfc651c8a2f14e3 https://raw.githubusercontent.com/duckdb/duckdb/v2.0.0/LICENSE /duckdb
 
 FROM fetch-tools-${TARGETARCH} AS tools
-# unzip is only needed here, for ast-grep's archive; the archives are verified by ADD above.
-RUN apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends unzip \
- && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
-    mkdir -p /x/fd /x/yq /x/ast-grep /x/duckdb /out/bin /out/libexec /out/doc/fd; \
+    mkdir -p /x/rg /x/fd /x/yq /x/duckdb /out/bin /out/libexec /out/doc/fd /out/doc/rg; \
+    tar -xzf /tmp/rg.tgz -C /x/rg --strip-components=1; \
     tar -xzf /tmp/fd.tgz -C /x/fd --strip-components=1; \
     tar -xzf /tmp/yq.tgz -C /x/yq; \
-    unzip -q /tmp/ast-grep.zip -d /x/ast-grep; \
     tar -xzf /tmp/duckdb.tgz -C /x/duckdb; \
     install -m 0755 /x/fd/fd /out/bin/fd; \
     install -m 0644 /x/fd/LICENSE-MIT /x/fd/LICENSE-APACHE /out/doc/fd/; \
     install -m 0755 /x/yq/yq_linux_* /out/bin/yq; \
-    install -m 0755 /x/ast-grep/ast-grep /out/bin/ast-grep; \
+    install -m 0755 /x/rg/rg /out/bin/rg; \
+    install -m 0644 /x/rg/UNLICENSE /x/rg/LICENSE-MIT /x/rg/COPYING /out/doc/rg/; \
+    cp /tmp/ast-grep.zip /out/ast-grep.zip; \
     install -m 0755 /x/duckdb/duckdb /out/libexec/duckdb; \
     fd_v=$(/out/bin/fd --version); [ "$fd_v" = 'fd 10.5.0' ] || { echo "fd: $fd_v"; exit 1; }; \
     yq_v=$(/out/bin/yq --version); case $yq_v in *' version v4.54.1') ;; *) echo "yq: $yq_v"; exit 1 ;; esac; \
-    sg_v=$(/out/bin/ast-grep --version); [ "$sg_v" = 'ast-grep 0.51.0' ] || { echo "ast-grep: $sg_v"; exit 1; }; \
+    rg_v=$(/out/bin/rg --version | head -1); case $rg_v in 'ripgrep 15.2.0'*) ;; *) echo "rg: $rg_v"; exit 1 ;; esac; \
     /out/libexec/duckdb -c 'SELECT version()' | grep -q 'v2\.0\.0'
 
 # Every apt package comes from one Ubuntu snapshot (snapshot.ubuntu.com), so a build on any day
@@ -101,21 +104,19 @@ RUN apt-get update \
 FROM ${BASE}
 ARG UBUNTU_SNAPSHOT=20261027T000000Z
 COPY --from=ca-bootstrap /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-# git for the repository the agent works on, ripgrep so OpenCode does not download its own (it
-# uses rg from PATH when present), ca-certificates for TLS through the OpenShell proxy. The
+# git for the repository the agent works on, ca-certificates for TLS through the OpenShell proxy. The
 # data tools: jq, sqlite3, poppler-utils (pdftotext, pdfinfo; GPL, shipped unmodified from Ubuntu
 # like git and bash), file, tree, unzip, zstd and xz-utils; python3 is the standard library only
 # (python-is-python3 adds `python`). No pip: the packages that carry it (python3-pip,
 # python3-venv) are not installed and --no-install-recommends keeps it that way. Components:
-# everything is main except ripgrep and tree (universe). Versions are the snapshot's candidates.
+# everything is main except tree (universe). Versions are the snapshot's candidates.
 RUN rm -f /etc/apt/sources.list.d/ubuntu.sources \
  && printf 'Types: deb\nURIs: https://snapshot.ubuntu.com/ubuntu/%s/\nSuites: noble noble-updates noble-security\nComponents: main universe\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n' "$UBUNTU_SNAPSHOT" \
       > /etc/apt/sources.list.d/koinon-snapshot.sources \
  && apt-get update \
- && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --allow-downgrades \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates=20260816ubuntu0.24.04.1 \
       git=1:2.43.0-1ubuntu7.4 \
-      ripgrep=14.1.0-1 \
       jq=1.7.1-3ubuntu0.24.04.2 \
       sqlite3=3.45.1-1ubuntu2.8 \
       poppler-utils=24.02.0-1ubuntu9.11 \
@@ -139,6 +140,12 @@ COPY --from=tools /out/libexec/duckdb /usr/local/libexec/duckdb
 COPY --chmod=0755 koinon-duckdb /usr/local/bin/duckdb
 COPY --chmod=0644 etc/koinon/duckdb/init.sql /etc/koinon/duckdb/init.sql
 COPY --from=tools /out/doc/fd/ /usr/share/doc/koinon-tools/fd/
+COPY --from=tools /out/doc/rg/ /usr/share/doc/koinon-tools/ripgrep/
+COPY --from=tools /out/ast-grep.zip /tmp/ast-grep.zip
+# ast-grep ships as a zip; unzip is the snapshot's pinned one. Its exact version is checked below.
+RUN unzip -q -p /tmp/ast-grep.zip ast-grep > /usr/local/bin/ast-grep \
+ && chmod 0755 /usr/local/bin/ast-grep \
+ && rm /tmp/ast-grep.zip
 COPY --from=licenses /yq /usr/share/doc/koinon-tools/yq/LICENSE
 COPY --from=licenses /ast-grep /usr/share/doc/koinon-tools/ast-grep/LICENSE
 COPY --from=licenses /duckdb /usr/share/doc/koinon-tools/duckdb/LICENSE
@@ -152,8 +159,9 @@ RUN set -eux; \
     ! command -v uv ruff || exit 1; \
     python --version; \
     jq --version; sqlite3 --version; pdftotext -v; pdfinfo -v; file --version; tree --version; \
-    unzip -v | head -1; zstd --version; xz --version | head -1; rg --version | head -1; \
-    fd --version; yq --version; ast-grep --version; \
+    unzip -v | head -1; zstd --version; xz --version | head -1; \
+    fd --version; yq --version; \
+    rg --version | head -1 | grep -q '^ripgrep 15\.2\.0'; test "$(ast-grep --version)" = 'ast-grep 0.51.0'; \
     duckdb -c "SELECT version()"; \
     test "$(duckdb -noheader -list -c "SELECT current_setting('memory_limit')")" = '768.0 MiB'; \
     test "$(duckdb -noheader -list -c "SELECT current_setting('threads')")" = 2; \

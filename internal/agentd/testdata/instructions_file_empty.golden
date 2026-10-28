@@ -7,7 +7,7 @@ These are your instructions from Koinon for this run. Koinon writes this file be
 - Check size before reading: `wc -c FILE`, `ls -l`, `file FILE`. Read in ranges, not whole files.
 - Search with `rg` (use `-n`, `-c`, `-l`, `--max-count`), find files with `fd`, search code structure with `ast-grep --lang LANG -p PATTERN`. Limit output with `| head -50`.
 - JSON and JSONL: `jq`; YAML, XML, TOML and CSV: `yq` (`yq -p xml -o json f.xml | jq ...`). Select fields; do not `cat` a large file.
-- CSV, TSV, JSON and Parquet tables: `duckdb -c "DESCRIBE SELECT * FROM 'f.csv'"`, then `SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. Use `-json` or `-csv` for machine-readable output.
+- CSV, TSV, JSON and Parquet tables: `duckdb -c "DESCRIBE SELECT * FROM 'f.csv'"`, then `SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. For machine-readable output put the flag before `-c`: `duckdb -json -c "SELECT ..."` (or `-csv`).
 - SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.
 - PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a PDF with the read tool.
 - Git: `git diff --stat` before `git diff -- PATH`; `git log --oneline -n 20`.
