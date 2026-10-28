@@ -40,8 +40,8 @@ import (
 // ProviderKeyStore holds the gateway's provider key files.
 type ProviderKeyStore interface {
 	// Put adds or replaces files and keeps every other entry. It returns the names it wrote
-	// that were not there with the same content.
-	Put(ctx context.Context, files map[string][]byte) (written []string, err error)
+	// that were not there with the same content, and every name the store holds afterwards.
+	Put(ctx context.Context, files map[string][]byte) (written []string, present map[string]bool, err error)
 	// Prune removes every entry not in keep.
 	Prune(ctx context.Context, keep map[string]bool) error
 }
@@ -88,8 +88,9 @@ func (k KubeProviderKeys) update(ctx context.Context, edit func(data map[string]
 }
 
 // Put implements ProviderKeyStore.
-func (k KubeProviderKeys) Put(ctx context.Context, files map[string][]byte) ([]string, error) {
+func (k KubeProviderKeys) Put(ctx context.Context, files map[string][]byte) ([]string, map[string]bool, error) {
 	var written []string
+	present := map[string]bool{}
 	err := k.update(ctx, func(data map[string][]byte) bool {
 		written = written[:0]
 		for name, v := range files {
@@ -98,9 +99,13 @@ func (k KubeProviderKeys) Put(ctx context.Context, files map[string][]byte) ([]s
 				written = append(written, name)
 			}
 		}
+		clear(present)
+		for name := range data {
+			present[name] = true
+		}
 		return len(written) > 0
 	})
-	return written, err
+	return written, present, err
 }
 
 // Prune implements ProviderKeyStore.
@@ -124,6 +129,8 @@ type servedProviders struct {
 	// ids and fileNames are parallel to providers: the provider's ID and its key file's data key
 	// ("" for a keyless provider).
 	ids       []string
+	orgIDs    []pgtype.UUID
+	pids      []pgtype.UUID
 	fileNames []string
 	files     map[string][]byte
 	// modelIDs maps each rendered model (gateway.ModelRef) to its ID, for gateway_served_models.
@@ -137,6 +144,7 @@ type servedProviders struct {
 func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToReconcileRow) (servedProviders, []error, error) {
 	out := servedProviders{files: map[string][]byte{}, modelIDs: map[string]pgtype.UUID{}}
 	fileOf := map[string]string{}
+	pidOf := map[string]pgtype.UUID{}
 	var errs []error
 	for _, org := range orgs {
 		rows, err := r.q.ListServedCatalog(ctx, org.ID)
@@ -174,6 +182,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 					p.APIKeyFile = path.Join(r.cfg.ProviderKeyDir, name)
 				}
 				byID[id] = p
+				pidOf[id] = row.ProviderID
 				order = append(order, id)
 			}
 			m := gateway.Model{Name: row.ModelName, Guard: row.Guard}
@@ -198,6 +207,8 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 		for _, id := range order {
 			out.providers = append(out.providers, *byID[id])
 			out.ids = append(out.ids, id)
+			out.orgIDs = append(out.orgIDs, org.ID)
+			out.pids = append(out.pids, pidOf[id])
 			out.fileNames = append(out.fileNames, fileOf[id])
 		}
 	}

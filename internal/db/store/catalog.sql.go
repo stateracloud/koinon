@@ -211,6 +211,26 @@ func (q *Queries) EnableModel(ctx context.Context, arg EnableModelParams) error 
 	return err
 }
 
+const getGatewayServedKeyFile = `-- name: GetGatewayServedKeyFile :one
+SELECT key_file::text FROM gateway_served_models
+WHERE org_id = $1 AND provider_id = $2 AND key_file IS NOT NULL
+LIMIT 1
+`
+
+type GetGatewayServedKeyFileParams struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+}
+
+// koinon-reconciler, after a restart: the key file a provider was last applied with, so a key rotated
+// while it was down keeps being served with the previous file until the new one has arrived.
+func (q *Queries) GetGatewayServedKeyFile(ctx context.Context, arg GetGatewayServedKeyFileParams) (string, error) {
+	row := q.db.QueryRow(ctx, getGatewayServedKeyFile, arg.OrgID, arg.ProviderID)
+	var key_file string
+	err := row.Scan(&key_file)
+	return key_file, err
+}
+
 const getModel = `-- name: GetModel :one
 SELECT org_id, id, provider_id, name, guard, input_rate, output_rate, cache_read_rate, source, managed_by_secret, disabled_reason, created_by, created_at, updated_at FROM models
 WHERE org_id = $1 AND id = $2
@@ -244,14 +264,13 @@ func (q *Queries) GetModel(ctx context.Context, arg GetModelParams) (Model, erro
 }
 
 const getModelServing = `-- name: GetModelServing :one
-SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name,
+SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name, p.type AS provider_type,
        (s.model_id IS NOT NULL)::boolean AS served
 FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
 LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
 WHERE m.org_id = $1 AND m.name = $2
   AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL AND p.removed_at IS NULL
-ORDER BY (s.model_id IS NULL), m.source, m.id
 LIMIT 1
 `
 
@@ -264,11 +283,13 @@ type GetModelServingRow struct {
 	ModelID      pgtype.UUID
 	ProviderID   pgtype.UUID
 	ProviderName string
+	ProviderType string
 	Served       bool
 }
 
 // koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
-// provider and whether the gateway serves it (gateway_served_models).
+// provider and whether the gateway serves it (gateway_served_models). Enabled models have unique
+// names in an org (a declared one disables a UI one of the same name), so there is one at most.
 func (q *Queries) GetModelServing(ctx context.Context, arg GetModelServingParams) (GetModelServingRow, error) {
 	row := q.db.QueryRow(ctx, getModelServing, arg.OrgID, arg.Name)
 	var i GetModelServingRow
@@ -276,6 +297,7 @@ func (q *Queries) GetModelServing(ctx context.Context, arg GetModelServingParams
 		&i.ModelID,
 		&i.ProviderID,
 		&i.ProviderName,
+		&i.ProviderType,
 		&i.Served,
 	)
 	return i, err

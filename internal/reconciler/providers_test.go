@@ -273,7 +273,7 @@ var _ = Describe("Provider delivery", func() {
 			Expect(servedRows(ctx, org)).To(HaveKey("m"), "what the gateway serves is unknown, so nothing changes")
 		})
 
-		It("records nothing new for an org whose model objects the gateway rejected", func(ctx SpecContext) {
+		It("keeps the rows of an org whose model objects the gateway rejected, and records nothing new", func(ctx SpecContext) {
 			org, user := newOrg(ctx)
 			old := addProvider(ctx, org, user, "up", "", "old-model")
 			cleanup(ctx, org, old.ID)
@@ -296,6 +296,8 @@ var _ = Describe("Provider delivery", func() {
 			r     *reconciler.Reconciler
 			clock time.Time
 			t0    time.Time
+			// newR is a fresh reconciler, as after a restart or a change of leader: nothing in memory.
+			newR func() *reconciler.Reconciler
 		)
 		BeforeEach(func() {
 			t0 = time.Now()
@@ -304,13 +306,77 @@ var _ = Describe("Provider delivery", func() {
 			cc, err := osg.Start()
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() { _ = cc.Close(); osg.Stop() })
-			r, err = reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
-				Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
-				Keys:    ring, ProviderKeys: reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
-				ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, ProviderKeySettle: time.Minute,
-				Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return clock },
-			})
+			newR = func() *reconciler.Reconciler {
+				GinkgoHelper()
+				r, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+					Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
+					Keys:    ring, ProviderKeys: reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
+					ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, ProviderKeySettle: time.Minute,
+					Logger: slog.New(slog.DiscardHandler), Now: func() time.Time { return clock },
+				})
+				Expect(err).NotTo(HaveOccurred())
+				return r
+			}
+			r = newR()
+		})
+
+		It("keeps serving with the recorded previous file when the key was rotated while the reconciler was down", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			p := addProvider(ctx, org, user, "openrouter", "sk-old", "m")
+			cleanup(ctx, org, p.ID)
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			clock = t0.Add(2 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			slug := orgSlug(ctx, org)
+			old, ok := providerOf(mg.last(), slug)
+			Expect(ok).To(BeTrue())
+			Expect(servedRows(ctx, org)).To(HaveKeyWithValue("m", path.Base(old.APIKeyFile)))
+
+			// The reconciler is down while the key changes; a new process comes up.
+			next := "sk-new"
+			_, err := svc.UpdateProvider(ctx, org, audit.User(user), p.ID, catalog.ProviderPatch{APIKey: &next})
 			Expect(err).NotTo(HaveOccurred())
+			restarted := newR()
+			Expect(restarted.ReconcileAll(ctx)).To(Succeed())
+			during, ok := providerOf(mg.last(), slug)
+			Expect(ok).To(BeTrue(), "the provider is not dropped while its new key travels")
+			Expect(during.APIKeyFile).To(Equal(old.APIKeyFile))
+			Expect(servedRows(ctx, org)).To(HaveKeyWithValue("m", path.Base(old.APIKeyFile)), "runs do not wait")
+			sec, _ := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+			Expect(sec.Data).To(HaveLen(2), "the old file is kept")
+
+			clock = t0.Add(4 * time.Minute)
+			Expect(restarted.ReconcileAll(ctx)).To(Succeed())
+			after, _ := providerOf(mg.last(), slug)
+			Expect(after.APIKeyFile).NotTo(Equal(old.APIKeyFile))
+			Expect(servedRows(ctx, org)).To(HaveKeyWithValue("m", path.Base(after.APIKeyFile)))
+			sec, _ = kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+			Expect(sec.Data).To(HaveLen(1))
+		})
+
+		It("drops the provider after a restart when the recorded file is gone", func(ctx SpecContext) {
+			org, user := newOrg(ctx)
+			p := addProvider(ctx, org, user, "openrouter", "sk-old", "m")
+			cleanup(ctx, org, p.ID)
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			clock = t0.Add(2 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(Succeed())
+			Expect(servedRows(ctx, org)).To(HaveKey("m"))
+
+			next := "sk-new"
+			_, err := svc.UpdateProvider(ctx, org, audit.User(user), p.ID, catalog.ProviderPatch{APIKey: &next})
+			Expect(err).NotTo(HaveOccurred())
+			// Someone emptied the provider keys Secret meanwhile.
+			sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			sec.Data = nil
+			_, err = kube.CoreV1().Secrets(namespace).Update(ctx, sec, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(newR().ReconcileAll(ctx)).To(Succeed())
+			_, ok := providerOf(mg.last(), orgSlug(ctx, org))
+			Expect(ok).To(BeFalse(), "the gateway would refuse a config naming a missing file")
+			Expect(servedRows(ctx, org)).To(BeEmpty())
 		})
 
 		It("leaves that provider out but still applies the others", func(ctx SpecContext) {

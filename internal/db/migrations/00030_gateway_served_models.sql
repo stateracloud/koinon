@@ -24,3 +24,6 @@ CREATE TABLE gateway_served_models (
     FOREIGN KEY (org_id, model_id) REFERENCES models (org_id, id) ON DELETE CASCADE,
     FOREIGN KEY (org_id, provider_id) REFERENCES providers (org_id, id) ON DELETE CASCADE
 );
+
+-- The reconciler looks up a provider's key file after a restart.
+CREATE INDEX gateway_served_models_provider ON gateway_served_models (org_id, provider_id);
