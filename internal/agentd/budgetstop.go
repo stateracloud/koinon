@@ -33,11 +33,11 @@ func (r *runner) budgetStop(ctx context.Context, err error) error {
 		r.log.Warn("checking the budget after a gateway refusal failed", "err", berr)
 		return err
 	}
-	reached := st.Current(time.Now())
-	if len(reached) == 0 {
+	// The limit the ledger and the reconciler name (budget.Status.Pick): the widest one reached.
+	l, found := st.Pick(time.Now())
+	if !found {
 		return err
 	}
-	l := reached[0]
 	r.log.Info("the gateway refused the model request and a limit is reached; stopping the run on the budget", "limit", l.Name, "refusal", f.reason)
 	msg := l.StopMessage()
 	extra := l.StopDetail()
