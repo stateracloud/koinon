@@ -119,6 +119,8 @@ var _ = Describe("prices and budgets", func() {
 		Expect(lines[0]).To(HaveKeyWithValue("gatewayUsd", "0.70"))
 		Expect(lines[0]).To(HaveKeyWithValue("gatewayComparedUsd", "0.80"))
 		Expect(lines[0]).To(HaveKeyWithValue("flaggedRequests", BeNumerically("==", 2)))
+		Expect(lines[0]).To(HaveKeyWithValue("provisionalRequests", BeNumerically("==", 0)))
+		Expect(lines[0]).To(HaveKeyWithValue("reservedUsd", "0.00"))
 
 		var n int
 		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'budget.org_cap.set'`, e.org).Scan(&n)).To(Succeed())

@@ -333,6 +333,7 @@ func (b *builder) gatewayObjects() {
 		attr(gateway.LogFieldStatus, `response.code`),
 		attr(gateway.LogFieldMaxTokens, `llm.params.max_tokens`),
 		attr(gateway.LogFieldRequestBytes, `int(request.headers["content-length"])`),
+		attr(gateway.LogFieldResponseID, gateway.ResponseIDCEL),
 	}
 	access := map[string]any{"attributes": map[string]any{"add": attrs}}
 	if b.o.AccessLogOTLP != nil {

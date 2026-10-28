@@ -29,6 +29,7 @@ import (
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/pricing"
 )
@@ -40,6 +41,7 @@ const (
 	pricedModel   = "fake/ledger-model"
 	unpricedModel = "fake/unpriced-model"
 	slowModel     = "fake/slow-model"
+	cutModel      = "fake/cut-model"
 )
 
 func hostPort(s *httptest.Server) int {
@@ -60,6 +62,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		llmURL   string
 		ctr      *testcontainers.DockerContainer
 		slowPort int
+		cutPort  int
 	)
 
 	chat := func(ctx context.Context, material, model string) int {
@@ -114,7 +117,28 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		}))
 		DeferCleanup(slow.Close)
 		slowPort = hostPort(slow)
-		receiver := httptest.NewServer(ledger.Handler(ing, slog.New(slog.NewTextHandler(GinkgoWriter, nil))))
+		// An upstream that streams part of a reply and then waits for the client to give up.
+		cut := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("X-Generation-Id", "gen-cut-1") // as OpenRouter sends it
+			chunk := func(delta string) {
+				_, _ = fmt.Fprintf(w, "data: {\"id\":\"gen-cut-1\",\"object\":\"chat.completion.chunk\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":%s}]}\n\n", delta)
+				w.(http.Flusher).Flush()
+			}
+			for range 5 {
+				chunk(`{"content":"hello "}`)
+			}
+			chunk(`{"tool_calls":[{"index":0,"id":"c1","function":{"name":"grep","arguments":"{\"q\":1}"}}]}`)
+			select {
+			case <-r.Context().Done():
+			case <-time.After(10 * time.Second):
+			}
+		}))
+		DeferCleanup(cut.Close)
+		cutPort = hostPort(cut)
+		// The fake provider type gets a usage source, as OpenRouter has, so a cut stream is provisional.
+		settling := &ledger.Ingester{DB: db, Log: ing.Log, Prices: ing.Prices, Sources: providerusage.Registry{"fake": &fakeSource{}}}
+		receiver := httptest.NewServer(ledger.Handler(settling, slog.New(slog.NewTextHandler(GinkgoWriter, nil))))
 		DeferCleanup(receiver.Close)
 
 		key, err = gateway.NewKey(e.ref())
@@ -146,7 +170,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		ctr, err = testcontainers.Run(ctx, agentgatewayImage,
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
 			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
-			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver), slowPort),
+			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver), slowPort, cutPort),
 			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
 				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro")
 			}),
@@ -242,7 +266,8 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 
 	// agentgateway logs a request whose client left before the response headers with the model
 	// and the key but no status, no usage and no cost (verified against v1.7.0). The provider may
-	// have done the work, so the ledger charges it as an estimate, marked usage_missing.
+	// have read the prompt, so the ledger charges the input estimate, marked usage_missing; no
+	// output was streamed, so none is charged.
 	It("charges a request whose client disconnected before the headers, as an estimate", func(ctx SpecContext) {
 		d := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
 		d.model(ctx, "fake", slowModel)
@@ -285,6 +310,72 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		Expect(row.Estimated).To(BeTrue())
 		Expect(row.CostFlagged).To(BeTrue())
 		Expect(string(row.Estimate)).To(ContainSubstring(`"usage_missing": true`))
-		Expect(row.CostUsd).NotTo(HavePrefix("0.00"), "charged, not dropped")
+		Expect(ledger.FormatUSD(row.CostUsd)).To(Equal("0.0012"), "charged its input, not dropped")
+		Expect(row.OutputTokens).To(BeZero(), "nothing was streamed: no output, never max_tokens")
+	}, SpecTimeout(time.Minute))
+
+	// agentgateway v1.7.0 logs a cut chat-completion stream with the usage it saw, which is none
+	// (usage comes in the final chunk only), and logs the x-generation-id response header through
+	// koinon.response_id without recording the body (verified here against the real binary). The
+	// ledger charges the logged usage (here the input estimate), never max_tokens, and holds the
+	// max_tokens bound back from the key while the provider's figure is pending.
+	It("charges a stream cut short the usage the gateway logged, provisionally, with the provider's response ID", func(ctx SpecContext) {
+		c := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		c.model(ctx, "fake", cutModel)
+		_, err := prices.New(db, nil, priceList).SetOverride(ctx, c.org, audit.User(c.user), prices.OverrideInput{
+			Entry: pricing.Entry{
+				ID: "cut", Provider: "fake", Match: pricing.Match{Glob: cutModel}, Spec: pricing.Spec{Prices: pricing.Wire{Input: "50", Output: "50"}},
+				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 128000,
+			},
+			ValidFrom: time.Now().Add(-time.Hour),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		ckey, err := gateway.NewKey(c.ref())
+		Expect(err).NotTo(HaveOccurred())
+		state.Providers = append(state.Providers, gateway.Provider{
+			Org: c.ref().Org, Name: "cut", Type: "fake",
+			BaseURL: fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, cutPort),
+			Models:  []gateway.Model{{Name: cutModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "50", Output: "50"}}},
+		})
+		state.AddKey(ckey.Key)
+		_, err = driver.Apply(ctx, state)
+		Expect(err).NotTo(HaveOccurred())
+
+		short, cancel := context.WithCancel(ctx)
+		body := fmt.Sprintf(`{"model":%q,"stream":true,"max_tokens":32000,"messages":[{"role":"user","content":"hi"}]}`, cutModel)
+		req, err := http.NewRequestWithContext(short, http.MethodPost, llmURL+"/v1/chat/completions", bytes.NewBufferString(body))
+		Expect(err).NotTo(HaveOccurred())
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+ckey.Material)
+		resp, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		got := 0
+		buf := make([]byte, 4096)
+		for got < 6 {
+			n, err := resp.Body.Read(buf)
+			got += bytes.Count(buf[:n], []byte("data: "))
+			Expect(err).NotTo(HaveOccurred())
+		}
+		cancel() // the run is canceled mid-response
+		_ = resp.Body.Close()
+
+		var in, out int64
+		var responseID, reserve string
+		var provisional, estimated bool
+		Eventually(func() error {
+			return db.QueryRow(ctx, `SELECT input_tokens, output_tokens, coalesce(response_id, ''), reserve_usd::text, provisional, estimated
+				FROM spend_entries WHERE org_id = $1`, c.org).Scan(&in, &out, &responseID, &reserve, &provisional, &estimated)
+		}).WithTimeout(20 * time.Second).WithPolling(200 * time.Millisecond).Should(Succeed())
+		Expect(out).To(BeZero(), "no output usage was logged: none is charged, not 32000")
+		Expect(in).To(BeNumerically(">", 0), "the input is estimated from the request bytes")
+		Expect(estimated).To(BeTrue())
+		Expect(responseID).To(Equal("gen-cut-1"), "the response header, logged without the body")
+		Expect(provisional).To(BeTrue(), "its provider can report what it billed")
+		// 32000 output tokens at $50 per million is held back from the key, not charged.
+		Expect(ledger.FormatUSD(reserve)).To(Equal("1.60"))
+		var settlements int
+		Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_settlements WHERE org_id = $1`, c.org).Scan(&settlements)).To(Succeed())
+		Expect(settlements).To(Equal(1))
 	}, SpecTimeout(time.Minute))
 })

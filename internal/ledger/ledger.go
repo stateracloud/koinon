@@ -34,6 +34,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // Window is the agent spend-limit window: the UTC day (agentgateway aligns 24h budget windows
@@ -72,6 +73,17 @@ type Entry struct {
 	MaxTokens int64
 	// RequestBytes and ResponseBytes are -1 when not logged.
 	RequestBytes, ResponseBytes int64
+	// ResponseID is the provider's response ID from a response header (koinon.response_id: an
+	// OpenRouter generation ID); empty when the provider sent none.
+	ResponseID string
+	// Format is the wire format the model was served in (koinon.format: modelformat.OpenAI or
+	// modelformat.Anthropic); a record without the field is OpenAI, the only format served before
+	// it existed. Stream is koinon.stream: the response was streamed.
+	Format modelformat.Format
+	Stream bool
+	// Cut is set by the ingester: a streamed Anthropic-format response whose run was canceled at or
+	// before the record's time. Its logged usage is partial (message_start), not final.
+	Cut bool
 	// Time is when the gateway logged the request.
 	Time time.Time
 }

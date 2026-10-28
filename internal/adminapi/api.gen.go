@@ -697,7 +697,7 @@ type Source string
 
 // SpendLine defines model for SpendLine.
 type SpendLine struct {
-	// EstimatedOutputTokens Output tokens of the estimated requests: an aborted response is settled at its max_tokens, an upper bound, so this is usually where the ledger is above the provider's bill.
+	// EstimatedOutputTokens Output tokens of the estimated requests: for a response cut short, the output usage the gateway logged before the cut (none for a chat-completion stream).
 	EstimatedOutputTokens int64 `json:"estimatedOutputTokens"`
 	EstimatedRequests     int64 `json:"estimatedRequests"`
 
@@ -719,9 +719,15 @@ type SpendLine struct {
 	Model        string `json:"model"`
 	OutputTokens int64  `json:"outputTokens"`
 
+	// ProvisionalRequests Responses cut short whose provider figure is pending; their cost is the usage the gateway logged until the provider reports.
+	ProvisionalRequests int64 `json:"provisionalRequests"`
+
 	// ReportedUsd Cost of requests whose usage the provider reported.
 	ReportedUsd string `json:"reportedUsd"`
 	Requests    int64  `json:"requests"`
+
+	// ReservedUsd What the provisional requests hold back from the gateway keys' limits (their max_tokens bound minus the charge). Not a cost and not counted by budgets; released when they settle.
+	ReservedUsd string `json:"reservedUsd"`
 }
 
 // SpendReport defines model for SpendReport.

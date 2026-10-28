@@ -1806,6 +1806,33 @@ type SpendEntry struct {
 	CostFlagged      bool
 	RequestBytes     pgtype.Int8
 	ResponseBytes    pgtype.Int8
+	Provisional      bool
+	ReserveUsd       pgtype.Numeric
+	ResponseID       pgtype.Text
+}
+
+type SpendEntryRevision struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	EntryID   pgtype.UUID
+	Reason    string
+	Source    string
+	Before    []byte
+	After     []byte
+	RevisedAt pgtype.Timestamptz
+}
+
+type SpendSettlement struct {
+	OrgID         pgtype.UUID
+	EntryID       pgtype.UUID
+	ProviderID    pgtype.UUID
+	ProviderType  string
+	ResponseID    pgtype.Text
+	Attempts      int32
+	NextAttemptAt pgtype.Timestamptz
+	Deadline      pgtype.Timestamptz
+	LastError     pgtype.Text
+	CreatedAt     pgtype.Timestamptz
 }
 
 type Task struct {

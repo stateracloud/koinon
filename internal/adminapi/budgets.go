@@ -220,6 +220,7 @@ func (s *Server) GetSpendReport(ctx context.Context, req GetSpendReportRequestOb
 			ReportedUsd: ledgerUSD(r.ReportedUsd), EstimatedUsd: ledgerUSD(r.EstimatedUsd), EstimatedRequests: r.EstimatedRequests,
 			EstimatedOutputTokens: r.EstimatedOutputTokens, GatewayRequests: r.GatewayRequests,
 			GatewayUsd: ledgerUSD(r.GatewayUsd), GatewayComparedUsd: ledgerUSD(r.GatewayComparedUsd), FlaggedRequests: r.FlaggedRequests,
+			ProvisionalRequests: r.ProvisionalRequests, ReservedUsd: ledgerUSD(r.ReservedUsd),
 		})
 	}
 	return out, nil
