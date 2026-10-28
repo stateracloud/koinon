@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake CI-cost service: REST /v1/costs and MCP /mcp on :8080, both behind a bearer token.
+# Memory: a small Go binary, about 15 MiB; request 16Mi, limit 64Mi.
+# The bearer token comes from Secret rt1-fakecicost-token (key token), which the operator delivers
+# (ExternalSecret); it is not in this kustomization. See secrets.example.yaml and ../README.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rt1-fakecicost
+  labels: &labels
+    app.kubernetes.io/name: rt1-fakecicost
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-fakecicost
+  template:
+    metadata:
+      labels: *labels
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: fakecicost
+          # Placeholder tag: the digest is filled in at deploy (see kustomization.yaml).
+          image: zot.apps.lab.example.invalid/koinon/rt1-fakecicost:dev
+          args: ["-addr=:8080"]
+          env:
+            - name: KOINON_FAKECICOST_TOKEN
+              valueFrom:
+                secretKeyRef: {name: rt1-fakecicost-token, key: token}
+          ports:
+            - {name: http, containerPort: 8080}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rt1-fakecicost
+  labels:
+    app.kubernetes.io/name: rt1-fakecicost
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  selector:
+    app.kubernetes.io/name: rt1-fakecicost
+  ports:
+    - {name: http, port: 8080, targetPort: http}
