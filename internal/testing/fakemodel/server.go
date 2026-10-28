@@ -67,10 +67,27 @@ func New(scripts ...Script) (*Server, error) {
 	s.mux.HandleFunc("POST /v1/chat/completions", s.chatCompletions)
 	s.mux.HandleFunc("POST /v1/messages", s.messages)
 	s.mux.HandleFunc("GET /v1/models", s.models)
+	s.mux.HandleFunc("GET /_fake/requests", s.listRequests)
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	return s, nil
+}
+
+// listRequests answers GET /_fake/requests with the path and model of every request received, in
+// arrival order, so a test that reaches the binary over the network (e2e) can check which API a
+// harness used. Bodies and headers stay in-process ([Server.Requests]).
+func (s *Server) listRequests(w http.ResponseWriter, _ *http.Request) {
+	type item struct {
+		Path  string `json:"path"`
+		Model string `json:"model"`
+	}
+	out := []item{}
+	for _, r := range s.Requests() {
+		out = append(out, item{Path: r.Path, Model: r.Model})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 // Register adds or replaces the script for sc.Model and resets its fault counters. Re-registering

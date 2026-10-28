@@ -342,3 +342,8 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
   `authStyle bearer` credential names, and the gateway's key policy reads (OpenShell v0.1.5 rewrites the placeholder in any header, so
   the header is chosen for the key policy). The flavor spec asserts
   one `Authorization` value and no `x-api-key` on every Messages request.
+- **e2e (kind):** the quickstart driver declares a second, direct `anthropic` provider on the fake
+  model server (`test/e2e/kind/model-provider-anthropic.yaml`, script `claude-e2e.yaml`). A run on its
+  model posts only to `/v1/messages` (the fake server's `GET /_fake/requests`), and its ledger entries
+  show a cache write and then `cache_read_tokens > 0`, each priced at its own rate. The ledger's
+  `input_tokens` includes cache reads and writes.
