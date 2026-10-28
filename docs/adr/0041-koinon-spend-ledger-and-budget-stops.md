@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-21
 - Amends: ADR 0013 (model access)
-- Amended by: [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md)
+- Amended by: [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), 2026-10-28 (below)
 
 ## Context
 
@@ -68,6 +68,70 @@ not depend on one gateway's deployment mode.
 on each entry, the raw usage next to the gateway's cost, and tokenizer estimates (flagged, counted
 toward limits). The budget levels in v0.1 are an org monthly cap and per-agent daily limits; the
 80% warning and the 100% stop stay.
+
+## Amendment (2026-10-28, RT1 on rc.5)
+
+RT1 ran three agents on the home lab (Kubernetes-mode agentgateway, OpenRouter, Claude Haiku 5.5).
+The researcher had a daily limit of $2.75 and ended the day at $2.91; one of its runs failed with
+the gateway's 401 instead of the budget reason; and the ledger ended 3.7% above OpenRouter's
+`usage_daily` ($3.32 against $3.20). Andre decided to keep the bound of decision 6 and to keep
+rejecting pre-request reservation. What the data showed, and what changes:
+
+1. **One run per agent still holds; decision 6's bound is unchanged.** The two tasks of each pair
+   were created together, but their runs were serial: the second run started when the first ended
+   (07:58:33.30 and 07:58:33.32; 07:15:52 for the earlier pair). `runs_one_active_per_agent`, a
+   unique index on `(org_id, agent_id)` over `starting` and `running`, and `run_claimable` refuse a
+   second active run, and the per-org concurrency of ADR 0066 (DB2) is across agents. LT1 adds
+   priority, not concurrency per agent. So per-run keys or limits net of several active runs are
+   not needed; a design for concurrent runs of one agent would be a new decision.
+2. **What the overshoot is in money.** The run that reached $2.75 was canceled at $2.7639; the
+   $0.147 recorded after the cancel matches one response in flight _(inferred from the run totals;
+   the rows were not exported)_. That response was cut short by the cancel, so it carried no usage
+   and was settled as ADR 0056 (amendment 2026-10-24, decision 6.3) says: output at the request's
+   `max_tokens` (32,000) and, with the input estimated from request bytes above 100,000 tokens, at
+   the 5x tier: $0.08 of output alone. The
+   bound in responses held; in dollars, one response is up to `max_tokens` times the output rate at
+   the tier, plus its input. Operators size limits with that in mind.
+3. **Stop before the key goes (issue #188).** When a budget has nothing left, the runs of its
+   scope are canceled with `spend_limit` and the level before the key is blocked: the agent's open
+   runs for its daily limit, the org's for the monthly cap or the platform ceiling. Cancel, not
+   park (ADR 0030): it is the control plane's transition and needs no epoch, so the owner's later
+   report of a 401 or 429 matches no row and the run keeps the budget reason. The ledger already
+   cancels in the transaction that wakes the reconciler; now the reconciler also stops the runs of
+   every key it is about to push a limit of zero for, before it applies the gateway state. That
+   covers the other ways a budget runs out: an admin lowering a limit below the spend, an entry
+   with no run, a run queued or parked while the budget was spent. Queued and parked runs of the
+   scope are canceled too, as the org-wide limit already did (ADR 0056 decision 8): they would
+   start or resume on a key that has nothing left. A budget that could not be computed fails closed
+   but stops nothing, because it is not known to be spent. agentd separately reports a 401 or 429
+   from the gateway as a budget stop (rc.6). The data does not show why the key went at 07:58:32:
+   the ledger had the agent at about $2.36 of $2.40 then, and the next run spent 90 s on the same
+   key before the ledger stopped it at $2.4039. A pass that failed closed (Kubernetes mode fails
+   closed to zero at once) fits; the reconciler logs `agent budget not computed` or `keys out of
+   budget are revoked from the gateway` will tell next time.
+4. **The ledger above the provider's bill.** At the first snapshot the ledger and OpenRouter agreed
+   (+$1.3843 against +$1.3825, 78 requests, many in the >100k tier, no estimates), so the price list,
+   the tier and the cache rates are right. By the end the ledger had two estimated entries, one in
+   each budget-canceled run, worth $0.1708; without them it was $3.1489 against OpenRouter's
+   $3.2017, so the two cut-short requests really cost about $0.05 and were charged about $0.12
+   more. Retries and replays (unique request IDs), the title request (both sides count it), probe
+   keys (no model, and every entry was attributed to a run of a known agent) and rounding (pico-USD)
+   do not explain any of it. The upper bound of ADR 0056 stays: it is what keeps limits safe when a
+   response carries no usage. To make the gap visible without the raw rows, the spend report
+   (`GET /admin/v1/spend`) now shows per model the estimated output tokens, agentgateway's own cost
+   next to Koinon's over the requests it priced, and the flagged requests. Next time, read the rows
+   with:
+
+   ```sql
+   SELECT occurred_at, run_id, request_id, input_tokens, cache_read_tokens, output_tokens,
+          cost_usd, gateway_cost_usd, estimated, cost_flagged, request_bytes, estimate
+   FROM spend_entries
+   WHERE org_id = :org AND occurred_at >= :day_start AND (estimated OR cost_flagged)
+   ORDER BY occurred_at;
+   ```
+
+   Follow-up (not decided): settling a response that Koinon itself cut short at less than its
+   `max_tokens`, for example from the provider's own usage report when one exists.
 
 ## Open questions
 
