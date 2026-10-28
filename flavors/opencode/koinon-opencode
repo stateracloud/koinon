@@ -6,10 +6,14 @@
 #
 # Usage:
 #   koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs]
+#                   [--cache-anthropic | --cache-alibaba]
 #                   [-- OPENCODE_ACP_ARGS...]
 #
 # --plugin-installs is set by koinon-agentd when the agent's template turns
 # harness.pluginInstalls on; only then are the agent's own plugins loaded (see README.md).
+#
+# --cache-anthropic and --cache-alibaba are set by koinon-agentd for a model whose provider needs
+# explicit prompt-cache markers (ADR 0068); the config then sets compatibility.cacheFormat.
 #
 # koinon-agentd writes the run's instructions to /sandbox/.koinon/AGENTS.md before it starts
 # this script; without that file the script refuses to start (exit 64).
@@ -38,9 +42,12 @@ check() {
 
 # --plugin-installs is the one switch only this flavor takes.
 plugin_installs=''
+cache_format=''
 koinon_extra_arg() {
   case $1 in
     --plugin-installs) plugin_installs=1 ;;
+    --cache-anthropic) cache_format=anthropic ;;
+    --cache-alibaba) cache_format=alibaba ;;
     *) return 1 ;;
   esac
 }
@@ -85,6 +92,7 @@ export OPENCODE_DISABLE_FREE_MODELS=1
 # directory is read-only and holds none, project configuration is off and ~/.config/opencode is
 # no config directory here, so the only way in is this list: each directory under
 # ~/.config/opencode/plugins/, merged into the config as OPENCODE_CONFIG_CONTENT.
+config_content=''
 if [ -n "$plugin_installs" ]; then
   list=''
   for d in /sandbox/.config/opencode/plugins/*/; do
@@ -93,7 +101,16 @@ if [ -n "$plugin_installs" ]; then
     check plugin "$d"
     list="$list${list:+,}\"$d\""
   done
-  export OPENCODE_CONFIG_CONTENT="{\"plugins\":[$list]}"
+  config_content="\"plugins\":[$list]"
+fi
+# Prompt caching (ADR 0068): the koinon provider's models send Anthropic-style cache_control
+# markers. The key is compatibility.cacheFormat (packages/schema/src/model-compatibility.ts,
+# provider level in packages/schema/src/config/provider.ts).
+if [ -n "$cache_format" ]; then
+  config_content="$config_content${config_content:+,}\"providers\":{\"koinon\":{\"compatibility\":{\"cacheFormat\":\"$cache_format\"}}}"
+fi
+if [ -n "$config_content" ]; then
+  export OPENCODE_CONFIG_CONTENT="{$config_content}"
 fi
 
 # The agentgateway key under a name no built-in OpenCode provider reads: with OPENAI_API_KEY
