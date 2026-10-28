@@ -168,13 +168,20 @@ WHERE org_id = @org_id AND model_id <> ALL (@model_ids::uuid[]);
 
 -- name: GetModelServing :one
 -- koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
--- provider and whether the gateway serves it (gateway_served_models).
-SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name,
+-- provider and whether the gateway serves it (gateway_served_models). Enabled models have unique
+-- names in an org (a declared one disables a UI one of the same name), so there is one at most.
+SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name, p.type AS provider_type,
        (s.model_id IS NOT NULL)::boolean AS served
 FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
 LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
 WHERE m.org_id = @org_id AND m.name = @name
   AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL AND p.removed_at IS NULL
-ORDER BY (s.model_id IS NULL), m.source, m.id
+LIMIT 1;
+
+-- name: GetGatewayServedKeyFile :one
+-- koinon-reconciler, after a restart: the key file a provider was last applied with, so a key rotated
+-- while it was down keeps being served with the previous file until the new one has arrived.
+SELECT key_file::text FROM gateway_served_models
+WHERE org_id = @org_id AND provider_id = @provider_id AND key_file IS NOT NULL
 LIMIT 1;

@@ -287,6 +287,9 @@ type Querier interface {
 	// between runs) the task of the agent's latest finished run whose task is not in an end state.
 	// Only a task's end (completed, canceled, failed) deletes its sandbox. No row: no task needs one.
 	GetEphemeralFocusTask(ctx context.Context, arg GetEphemeralFocusTaskParams) (pgtype.UUID, error)
+	// koinon-reconciler, after a restart: the key file a provider was last applied with, so a key rotated
+	// while it was down keeps being served with the previous file until the new one has arrived.
+	GetGatewayServedKeyFile(ctx context.Context, arg GetGatewayServedKeyFileParams) (string, error)
 	GetHomeCheckpoint(ctx context.Context, arg GetHomeCheckpointParams) (HomeCheckpoint, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -304,7 +307,8 @@ type Querier interface {
 	// finding its price.
 	GetModelForPricing(ctx context.Context, arg GetModelForPricingParams) (GetModelForPricingRow, error)
 	// koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
-	// provider and whether the gateway serves it (gateway_served_models).
+	// provider and whether the gateway serves it (gateway_served_models). Enabled models have unique
+	// names in an org (a declared one disables a UI one of the same name), so there is one at most.
 	GetModelServing(ctx context.Context, arg GetModelServingParams) (GetModelServingRow, error)
 	GetOpenHomeCheckpoint(ctx context.Context, arg GetOpenHomeCheckpointParams) (HomeCheckpoint, error)
 	// SPDX-License-Identifier: Apache-2.0

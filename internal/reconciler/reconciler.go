@@ -31,6 +31,7 @@
 package reconciler
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -414,18 +415,19 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	// One provider's new key file still travelling to the gateway pod never holds back the others:
 	// that provider keeps serving with its previous file, or is left out until the file has arrived.
 	var written []string
+	var present map[string]bool
 	files := map[string][]byte{}
 	maps.Copy(files, served.files)
 	maps.Copy(files, mcpServed.files)
 	if len(files) > 0 {
 		var err error
-		if written, err = r.cfg.ProviderKeys.Put(ctx, files); err != nil {
+		if written, present, err = r.cfg.ProviderKeys.Put(ctx, files); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindProviderKeys).Inc()
 			return errors.Join(append(errs, fmt.Errorf("reconciler: deliver provider keys: %w", err))...)
 		}
 	}
 	settling := r.keysSettling(written, now)
-	keep := r.settleProviders(&state, served, settling)
+	keep := r.settleProviders(&state, served, settling, r.recordedFiles(ctx, served, settling, present))
 	maps.Copy(keep, r.settleMCP(&mcpServed, settling))
 	probes, err := r.applyMCP(ctx, &state, &mcpServed, items)
 	if err != nil {
@@ -588,10 +590,43 @@ func (r *Reconciler) keyNotLive(id string) bool {
 	return !r.appliedSinceStart || r.notLive[id]
 }
 
+// recordedFiles returns, for each provider whose key file is settling and that this process has not
+// applied, the key file gateway_served_models says it was last served with, when that file is still in
+// the provider keys Secret: a key rotated while the reconciler was down (or before a new leader took
+// over) keeps being served with the previous file instead of the provider being dropped. A failed
+// read only loses the fallback.
+func (r *Reconciler) recordedFiles(ctx context.Context, served servedProviders, settling, present map[string]bool) map[string]string {
+	out := map[string]string{}
+	if len(settling) == 0 {
+		return out
+	}
+	for i, id := range served.ids {
+		name := served.fileNames[i]
+		if name == "" || !settling[name] {
+			continue
+		}
+		r.mu.Lock()
+		applied := r.appliedFile[id]
+		r.mu.Unlock()
+		if applied != "" {
+			continue
+		}
+		file, err := r.q.GetGatewayServedKeyFile(ctx, store.GetGatewayServedKeyFileParams{OrgID: served.orgIDs[i], ProviderID: served.pids[i]})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			r.log.Warn("reading the key file a provider was last served with failed", "provider", id, "err", err)
+		case file != name && present[file]:
+			out[id] = file
+		}
+	}
+	return out
+}
+
 // settleProviders handles providers whose key file is still settling: with a previously applied
-// file the provider keeps using it, without one it is left out of state. It returns the data keys to
-// keep in the provider keys Secret.
-func (r *Reconciler) settleProviders(state *gateway.State, served servedProviders, settling map[string]bool) map[string]bool {
+// file (this process's, else the recorded one) the provider keeps using it, without one it is left
+// out of state. It returns the data keys to keep in the provider keys Secret.
+func (r *Reconciler) settleProviders(state *gateway.State, served servedProviders, settling map[string]bool, recorded map[string]string) map[string]bool {
 	keep := map[string]bool{}
 	for name := range served.files {
 		keep[name] = true
@@ -608,7 +643,7 @@ func (r *Reconciler) settleProviders(state *gateway.State, served servedProvider
 			out = append(out, p)
 			continue
 		}
-		if prev := r.appliedFile[served.ids[i]]; prev != "" {
+		if prev := cmp.Or(r.appliedFile[served.ids[i]], recorded[served.ids[i]]); prev != "" {
 			p.APIKeyFile = path.Join(r.cfg.ProviderKeyDir, prev)
 			keep[prev] = true
 			out = append(out, p)
