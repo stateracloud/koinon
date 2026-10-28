@@ -26,7 +26,8 @@ LIMIT 1;
 -- Records one request. Returns no row when the request id is already
 -- recorded, so a replayed export is not charged twice. cost_usd is Koinon's
 -- own computation from the raw usage and the dated price; gateway_cost_usd is
--- what agentgateway logged (NULL when it could not price the request).
+-- what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
+-- for every entry that is not provisional, so a caller that holds nothing passes nothing.
 INSERT INTO spend_entries (
     org_id, agent_id, run_id, task_id, request_id, key_id, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
@@ -38,7 +39,7 @@ INSERT INTO spend_entries (
     (sqlc.arg(cost_usd)::text)::numeric, (sqlc.narg(gateway_cost_usd)::text)::numeric,
     sqlc.narg(price_ref), @priced, @estimated, sqlc.narg(estimate)::jsonb, @cost_flagged,
     sqlc.narg(request_bytes), sqlc.narg(response_bytes), @occurred_at,
-    @provisional, (sqlc.arg(reserve_usd)::text)::numeric, sqlc.narg(response_id)
+    @provisional, coalesce((sqlc.narg(reserve_usd)::text)::numeric, 0), sqlc.narg(response_id)
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id;

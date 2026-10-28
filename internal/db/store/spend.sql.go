@@ -331,7 +331,7 @@ INSERT INTO spend_entries (
     ($13::text)::numeric, ($14::text)::numeric,
     $15, $16, $17, $18::jsonb, $19,
     $20, $21, $22,
-    $23, ($24::text)::numeric, $25
+    $23, coalesce(($24::text)::numeric, 0), $25
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id
@@ -361,14 +361,15 @@ type InsertSpendEntryParams struct {
 	ResponseBytes    pgtype.Int8
 	OccurredAt       pgtype.Timestamptz
 	Provisional      bool
-	ReserveUsd       string
+	ReserveUsd       pgtype.Text
 	ResponseID       pgtype.Text
 }
 
 // Records one request. Returns no row when the request id is already
 // recorded, so a replayed export is not charged twice. cost_usd is Koinon's
 // own computation from the raw usage and the dated price; gateway_cost_usd is
-// what agentgateway logged (NULL when it could not price the request).
+// what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
+// for every entry that is not provisional, so a caller that holds nothing passes nothing.
 func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, insertSpendEntry,
 		arg.OrgID,

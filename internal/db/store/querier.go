@@ -409,7 +409,8 @@ type Querier interface {
 	// Records one request. Returns no row when the request id is already
 	// recorded, so a replayed export is not charged twice. cost_usd is Koinon's
 	// own computation from the raw usage and the dated price; gateway_cost_usd is
-	// what agentgateway logged (NULL when it could not price the request).
+	// what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
+	// for every entry that is not provisional, so a caller that holds nothing passes nothing.
 	InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error)
 	InsertSpendEntryRevision(ctx context.Context, arg InsertSpendEntryRevisionParams) error
 	// Queues a provisional entry for the settler. Without a response ID it is a hold until the deadline.
