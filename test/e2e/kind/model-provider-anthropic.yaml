@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# A second declared provider for the e2e (ADR 0069): a direct Anthropic provider whose upstream is the
+# fake model server (test/fakemodel/scripts/claude-e2e.yaml), so its model runs in the Messages format
+# through the harness's koinon-anthropic entry, the gateway and the ledger. Its name sorts before
+# "fake", so once the e2e prices its model it is the org's first served model, which an agent whose
+# template says "default" uses (agentd: the org's first served model, providers by name).
+# test/e2e/run.sh applies it next to model-provider.yaml; it is no part of the quickstart.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fake-anthropic
+  namespace: koinon
+  labels:
+    koinon.dev/secret-type: model-provider
+    koinon.dev/org: default
+stringData:
+  name: anthropic-fake
+  provider: anthropic
+  url: http://fakemodel.koinon-e2e-fakes.svc:8080/v1
+  apiKey: e2e-dummy-key
+  models: |
+    - name: claude-e2e

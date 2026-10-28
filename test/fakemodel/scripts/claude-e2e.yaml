@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# A Claude-style model for the e2e path of ADR 0069: a direct anthropic provider, Messages in the
+# agent's harness (koinon-anthropic), prompt caching reported the way Anthropic does. The task's
+# message writes the prompt cache (cache_creation_input_tokens); agentd's end-of-turn note, the next
+# request of the same run, reads it (cache_read_input_tokens). Any other request, such as OpenCode's
+# title request, gets a short answer without cache use.
+model: claude-e2e
+turns:
+  - when:
+      userContains: "Your turn is over"
+    text: "Notes: the cache probe ran and its prompt was served from the cache."
+    usage:
+      inputTokens: 1700
+      cachedInputTokens: 1500
+      outputTokens: 12
+  - when:
+      userContains: "cache probe"
+    text: "The cache probe is done."
+    usage:
+      inputTokens: 1600
+      cacheWriteTokens: 1500
+      outputTokens: 10
+  - text: "Cache probe"
+    usage:
+      inputTokens: 100
+      outputTokens: 5

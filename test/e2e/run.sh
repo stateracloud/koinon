@@ -46,7 +46,8 @@ SKIP_BUILD=${SKIP_BUILD:-0}
 API_PORT=${API_PORT:-8080}
 GH_PORT=${GH_PORT:-18090}
 MCP_PORT=${MCP_PORT:-18091}
-for port in "$API_PORT" "$GH_PORT" "$MCP_PORT"; do
+MODEL_PORT=${MODEL_PORT:-18092}
+for port in "$API_PORT" "$GH_PORT" "$MCP_PORT" "$MODEL_PORT"; do
   if nc -z 127.0.0.1 "$port" 2>/dev/null; then echo "port $port is in use; run.sh port-forwards to it" >&2; exit 1; fi
 done
 
@@ -172,6 +173,8 @@ e1 namespace
 e1 client-cert
 if [[ $SUITE == go ]]; then
   e1 model-provider
+  # A second, direct Anthropic provider on the same fake server (ADR 0069): not part of the quickstart.
+  "${K[@]}" apply -f "$here/kind/model-provider-anthropic.yaml"
 fi
 done_step "Namespace, client certificate and model provider (quickstart blocks)"
 
@@ -187,7 +190,9 @@ pids+=($!)
 pids+=($!)
 "${K[@]}" -n "$FAKES" port-forward svc/fakemcp "$MCP_PORT:8080" >"$OUT/pf-fakemcp.log" 2>&1 &
 pids+=($!)
-for port in "$API_PORT" "$GH_PORT" "$MCP_PORT"; do
+"${K[@]}" -n "$FAKES" port-forward svc/fakemodel "$MODEL_PORT:8080" >"$OUT/pf-fakemodel.log" 2>&1 &
+pids+=($!)
+for port in "$API_PORT" "$GH_PORT" "$MCP_PORT" "$MODEL_PORT"; do
   for _ in $(seq 60); do nc -z 127.0.0.1 "$port" 2>/dev/null && break; sleep 0.5; done
   nc -z 127.0.0.1 "$port" || { echo "port-forward to $port did not come up" >&2; exit 1; }
 done
@@ -199,6 +204,7 @@ go)
   KOINON_E2E_API_URL="http://127.0.0.1:$API_PORT" \
   KOINON_E2E_FAKEGITHUB_URL="http://127.0.0.1:$GH_PORT" \
   KOINON_E2E_FAKEMCP_URL="http://127.0.0.1:$MCP_PORT" \
+  KOINON_E2E_FAKEMODEL_URL="http://127.0.0.1:$MODEL_PORT" \
   KOINON_E2E_KUBECTL="$OUT/bin/kubectl" \
   KOINON_E2E_PASSWORD="$password" \
   KOINON_E2E_T0="$T0" \
