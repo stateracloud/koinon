@@ -35,6 +35,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/api"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
@@ -62,6 +63,8 @@ type Options struct {
 	// questions settings, 7 days and 24 hours by default; ADR 0065 decision 10). For tests.
 	TTL, Reminder time.Duration
 	Now           func() time.Time
+	// Metrics counts the questions asked (nil: not counted).
+	Metrics *api.Metrics
 }
 
 // Server is the ask_user MCP server.
@@ -71,6 +74,7 @@ type Server struct {
 	log           *slog.Logger
 	ttl, reminder time.Duration
 	now           func() time.Time
+	metrics       *api.Metrics
 	mcp           *mcp.Server
 }
 
@@ -82,13 +86,14 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.TTL, reminder: opts.Reminder, now: opts.Now}
+	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.TTL, reminder: opts.Reminder, now: opts.Now, metrics: opts.Metrics}
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: project.Name + "-agent-tools", Version: project.Version}, nil)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolAskUser,
 		Description: "Ask a person a question and wait for the answer. Your run pauses when your turn ends and resumes " +
 			"with the answer as the next message, possibly much later (the sandbox may have been stopped meanwhile). " +
-			"'to' is the email or user ID of a member of the org; leave it out to ask the person who created the task. " +
+			"'to' is who to ask: an org member's email or user ID. Left out: the task's creator; in a chat, the person in the chat; " +
+			"for a task a trigger or an agent created, the trigger's notify target (by default the org's admins). " +
 			"'choices' lists answers the person can pick (at most 10); 'draft' is text you propose (a reply to post, a " +
 			"title) that they can accept or edit. 'default' is required: the safe answer Koinon uses if the question is " +
 			"dismissed or nobody answers by the expiry in the result; if you give choices it must be one of them. Choose a default that " +
@@ -112,7 +117,7 @@ func (s *Server) Handler() http.Handler {
 
 // Args are the tool's arguments.
 type Args struct {
-	To       string   `json:"to,omitempty" jsonschema:"email or user ID of an org member; omit to ask the task's creator"`
+	To       string   `json:"to,omitempty" jsonschema:"who to ask: an org member's email or user ID; omit for the task's creator, the person in the chat, or the trigger's notify target"`
 	Question string   `json:"question" jsonschema:"the question, in plain words"`
 	Draft    string   `json:"draft,omitempty" jsonschema:"text you propose, which the person can accept or edit"`
 	Choices  []string `json:"choices,omitempty" jsonschema:"answers to offer as buttons, at most 10"`
@@ -212,40 +217,108 @@ func remindAt(now time.Time, after time.Duration) time.Time {
 	return now.Add(after)
 }
 
-// addressee resolves "to": a member named by email or ID, or the task's creator.
-func (s *Server) addressee(ctx context.Context, c caller, to string) (pgtype.UUID, string, error) {
+// addressee resolves "to" (ADR 0065 amendment 2026-10-28):
+//
+//  1. a member named by email or ID (a named person is never replaced);
+//  2. in a chat thread, the person in the chat;
+//  3. a task a person created: its creator;
+//  4. otherwise the task's notify target, by default the org's admins.
+//
+// The person picked in steps 2 and 3 implicitly, and a notify person, fall back to step 4 or the
+// default when they can no longer answer. The fallback map says so (nil when there was none); it is
+// not stored: the question row records the effective target.
+func (s *Server) addressee(ctx context.Context, c caller, to string) (questions.Target, []pgtype.UUID, string, map[string]any, error) {
 	to = strings.TrimSpace(to)
-	if to == "" {
-		task, err := s.q.GetTask(ctx, store.GetTaskParams{OrgID: c.org.ID, ID: c.run.TaskID})
+	if to != "" {
+		m, err := s.q.FindOrgMemberByIdent(ctx, store.FindOrgMemberByIdentParams{OrgID: c.org.ID, Ident: to})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return questions.Target{}, nil, "", nil, fmt.Errorf("%q is not a member of this org: 'to' takes a member's email or user ID", to)
+		}
 		if err != nil {
-			return pgtype.UUID{}, "", s.lookupErr(err, "task")
+			return questions.Target{}, nil, "", nil, s.lookupErr(err, "member")
 		}
-		if task.CreatedByKind == store.TaskCreatorKindTrigger && task.CreatedByTriggerID == services.DirectMessageTriggerID(task.AgentID) {
-			// A chat thread: the person on the other end is whoever wrote the latest message.
-			who, err := s.q.LatestUserMessageActor(ctx, store.LatestUserMessageActorParams{OrgID: c.org.ID, TaskID: task.ID})
-			if err == nil && who.Valid {
-				return who, "the person in this chat", nil
-			}
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return pgtype.UUID{}, "", s.lookupErr(err, "task")
-			}
+		if m.Role == store.OrgRoleViewer {
+			return questions.Target{}, nil, "", nil, fmt.Errorf("%s cannot answer questions (viewer): name a member or admin", to)
 		}
-		if task.CreatedByKind != store.TaskCreatorKindUser || !task.CreatedByUserID.Valid {
-			return pgtype.UUID{}, "", errors.New("this task was not created by a person, so 'to' is required: name an org member by email or user ID")
-		}
-		return task.CreatedByUserID, "the task's creator", nil
+		return questions.Target{Kind: store.NotifyTargetKindUser, User: m.ID}, []pgtype.UUID{m.ID}, to, nil, nil
 	}
-	m, err := s.q.FindOrgMemberByIdent(ctx, store.FindOrgMemberByIdentParams{OrgID: c.org.ID, Ident: to})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return pgtype.UUID{}, "", fmt.Errorf("%q is not a member of this org: 'to' takes a member's email or user ID", to)
-	}
+	task, err := s.q.GetTask(ctx, store.GetTaskParams{OrgID: c.org.ID, ID: c.run.TaskID})
 	if err != nil {
-		return pgtype.UUID{}, "", s.lookupErr(err, "member")
+		return questions.Target{}, nil, "", nil, s.lookupErr(err, "task")
 	}
-	if m.Role == store.OrgRoleViewer {
-		return pgtype.UUID{}, "", fmt.Errorf("%s cannot answer questions (viewer): name a member or admin", to)
+	// implicit picks a person nobody named; when they can no longer answer, the notify target applies.
+	implicit := func(who pgtype.UUID, label, what string) (questions.Target, []pgtype.UUID, string, map[string]any, error) {
+		t := questions.Target{Kind: store.NotifyTargetKindUser, User: who}
+		ok, err := s.q.IsOrgMember(ctx, store.IsOrgMemberParams{OrgID: c.org.ID, UserID: who})
+		if err != nil {
+			return questions.Target{}, nil, "", nil, s.lookupErr(err, "member")
+		}
+		if ok {
+			return t, []pgtype.UUID{who}, label, nil, nil
+		}
+		t, rec, lbl, fb, err := s.notifyTarget(ctx, c, task)
+		if err != nil {
+			return questions.Target{}, nil, "", nil, err
+		}
+		reason := what + " is no longer a member who can answer"
+		if fb == nil {
+			fb = map[string]any{}
+		}
+		fb["requestedTarget"] = map[string]any{"kind": "user", "user": who.String()}
+		fb["fallbackReason"] = reason
+		return t, rec, lbl, fb, nil
 	}
-	return m.ID, to, nil
+	if task.CreatedByKind == store.TaskCreatorKindTrigger && task.CreatedByTriggerID == services.DirectMessageTriggerID(task.AgentID) {
+		// A chat thread: the person on the other end is whoever wrote the latest message.
+		who, err := s.q.LatestUserMessageActor(ctx, store.LatestUserMessageActorParams{OrgID: c.org.ID, TaskID: task.ID})
+		if err == nil && who.Valid {
+			return implicit(who, "the person in this chat", "the person in this chat")
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return questions.Target{}, nil, "", nil, s.lookupErr(err, "task")
+		}
+	}
+	if task.CreatedByKind == store.TaskCreatorKindUser && task.CreatedByUserID.Valid {
+		return implicit(task.CreatedByUserID, "the task's creator", "the task's creator")
+	}
+	return s.notifyTarget(ctx, c, task)
+}
+
+// notifyTarget is the task's notify target (copied from its trigger), or the org's default when it
+// has none. A notify person who can no longer answer is replaced by the default.
+func (s *Server) notifyTarget(ctx context.Context, c caller, task store.Task) (questions.Target, []pgtype.UUID, string, map[string]any, error) {
+	t := questions.DefaultTarget
+	if task.NotifyKind.Valid {
+		t = questions.Target{Kind: task.NotifyKind.NotifyTargetKind, User: task.NotifyUserID}
+		if task.NotifyRole.Valid {
+			t.Role = task.NotifyRole.OrgRole
+		}
+	}
+	var fallback map[string]any
+	rec, err := questions.Recipients(ctx, s.q, c.org.ID, t)
+	if err != nil {
+		return questions.Target{}, nil, "", nil, s.lookupErr(err, "recipients")
+	}
+	if t.Kind == store.NotifyTargetKindUser && len(rec) == 0 {
+		fallback = map[string]any{
+			"requestedTarget": map[string]any{"kind": "user", "user": t.User.String()},
+			"fallbackReason":  "the trigger's notify person is no longer a member who can answer",
+		}
+		t = questions.DefaultTarget
+		if rec, err = questions.Recipients(ctx, s.q, c.org.ID, t); err != nil {
+			return questions.Target{}, nil, "", nil, s.lookupErr(err, "recipients")
+		}
+	}
+	if len(rec) == 0 {
+		return questions.Target{}, nil, "", nil, errors.New("nobody in this org can answer questions: ask an admin to add a member")
+	}
+	name := ""
+	if t.Kind == store.NotifyTargetKindUser {
+		if name, err = s.q.GetUserDisplayName(ctx, t.User); err != nil {
+			return questions.Target{}, nil, "", nil, s.lookupErr(err, "member")
+		}
+	}
+	return t, rec, questions.Label(t, name), fallback, nil
 }
 
 func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args) (*mcp.CallToolResult, Result, error) {
@@ -253,7 +326,7 @@ func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args)
 	if err != nil {
 		return nil, Result{}, err
 	}
-	to, label, err := s.addressee(ctx, c, in.To)
+	target, recipients, label, fallback, err := s.addressee(ctx, c, in.To)
 	if err != nil {
 		return nil, Result{}, err
 	}
@@ -266,7 +339,7 @@ func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args)
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		row, created, err = questions.Create(ctx, store.New(tx), questions.Ask{
-			Org: c.org.ID, Task: c.run.TaskID, Run: c.run.ID, Agent: c.agent.ID, To: to,
+			Org: c.org.ID, Task: c.run.TaskID, Run: c.run.ID, Agent: c.agent.ID, Target: target, Recipients: recipients,
 			Question: in.Question, Choices: in.Choices, Draft: in.Draft, Default: in.Default,
 			ExpiresAt: s.now().Add(ttl), RemindAt: remindAt(s.now(), remind),
 		})
@@ -279,8 +352,17 @@ func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args)
 		s.log.Error("ask_user: record the question", "org", c.org.Slug, "agent", c.agent.ID.String(), "run", c.run.ID.String(), "err", err)
 		return nil, Result{}, errors.New("internal error recording the question; try again later")
 	}
-	s.log.Info("question asked", "org", c.org.Slug, "agent", c.agent.ID.String(), "run", c.run.ID.String(),
-		"task", c.run.TaskID.String(), "question", row.ID.String(), "new", created)
+	logArgs := []any{
+		"org", c.org.Slug, "agent", c.agent.ID.String(), "run", c.run.ID.String(),
+		"task", c.run.TaskID.String(), "question", row.ID.String(), "new", created, "target", string(target.Kind),
+	}
+	if fallback != nil {
+		logArgs = append(logArgs, "fallbackReason", fallback["fallbackReason"])
+	}
+	s.log.Info("question asked", logArgs...)
+	if created && s.metrics != nil {
+		s.metrics.QuestionsAsked.WithLabelValues(string(target.Kind)).Inc()
+	}
 	out := Result{
 		ID: row.ID.String(), Status: string(row.State), To: label, Default: row.DefaultAnswer,
 		ExpiresAt: row.ExpiresAt.Time.UTC().Format(time.RFC3339),
@@ -288,6 +370,9 @@ func (s *Server) askUser(ctx context.Context, req *mcp.CallToolRequest, in Args)
 	text := fmt.Sprintf("question recorded: id=%s to=%s. End your turn now: Koinon pauses your run until the answer arrives, "+
 		"and you get it as your next message. If the question is dismissed or not answered by %s, Koinon applies your default (%q) "+
 		"and tells you. Do not ask again and do not work around the pause.", out.ID, label, out.ExpiresAt, row.DefaultAnswer)
+	if fallback != nil {
+		text += fmt.Sprintf(" Note: %s; asked %s instead.", fallback["fallbackReason"], label)
+	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, out, nil
 }
 

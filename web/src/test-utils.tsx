@@ -10,8 +10,8 @@ import App from '@/App'
 import { ApprovalSchema, Decision, Status as ApprovalStatus } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AgentSchema, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { MembershipSchema, OrgRole, UserSchema, WhoAmIResponseSchema } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { QuestionSchema, QuestionState } from '@/gen/koinon/question/v1alpha1/question_pb'
-import { TriggerSchema, TriggerType } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { QuestionSchema, QuestionState, RecipientSchema } from '@/gen/koinon/question/v1alpha1/question_pb'
+import { NotifyTargetKind, NotifyTargetSchema, TriggerSchema, TriggerType } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { CreatorKind, CreatorSchema, TaskSchema, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 
 export const orgId = 'org-1'
@@ -24,8 +24,14 @@ export function whoAmI(opts: { passwordChangeRequired?: boolean; role?: OrgRole 
   })
 }
 
-export function agent(id: string, name: string, status = AgentStatus.ACTIVE) {
-  return create(AgentSchema, { id, orgId, displayName: name, status })
+export function agent(id: string, name: string, status = AgentStatus.ACTIVE, unhealthy?: { atMs: number; reason: string }) {
+  return create(AgentSchema, {
+    id,
+    orgId,
+    displayName: name,
+    status,
+    ...(unhealthy ? { unhealthyAt: timestampFromMs(unhealthy.atMs), unhealthyReason: unhealthy.reason } : {}),
+  })
 }
 
 export function task(id: string, title: string, state: TaskState, agentId = 'a-1') {
@@ -56,7 +62,19 @@ export function approval(id: string, taskId: string, init: { canDecide?: boolean
 export function question(
   id: string,
   taskId: string,
-  init: { question?: string; choices?: string[]; draft?: string; defaultAnswer?: string; agentId?: string; canAnswer?: boolean; state?: QuestionState } = {},
+  init: {
+    question?: string
+    choices?: string[]
+    draft?: string
+    defaultAnswer?: string
+    agentId?: string
+    canAnswer?: boolean
+    state?: QuestionState
+    targetLabel?: string
+    recipients?: number
+    waitingSinceMs?: number
+    openedAtMs?: number
+  } = {},
 ) {
   return create(QuestionSchema, {
     id,
@@ -64,14 +82,17 @@ export function question(
     taskId,
     runId: 'r-1',
     agentId: init.agentId ?? 'a-1',
-    askedTo: 'u-1',
+    target: create(NotifyTargetSchema, { kind: NotifyTargetKind.USER, userId: 'u-1' }),
+    targetLabel: init.targetLabel ?? 'Owner',
+    recipients: Array.from({ length: init.recipients ?? 1 }, (_, i) => create(RecipientSchema, { userId: `u-${i + 1}`, displayName: i === 0 ? 'Owner' : `Member ${i + 1}` })),
+    waitingSince: timestampFromMs(init.waitingSinceMs ?? Date.now()),
     question: init.question ?? 'Which region should I deploy to?',
     choices: init.choices ?? ['eu-west-1', 'us-east-1'],
     draft: init.draft ?? '',
     defaultAnswer: init.defaultAnswer ?? 'eu-west-1',
     state: init.state ?? QuestionState.OPEN,
     canAnswer: init.canAnswer ?? true,
-    openedAt: timestampFromMs(Date.now()),
+    openedAt: timestampFromMs(init.openedAtMs ?? Date.now()),
     createdAt: timestampFromMs(Date.now()),
   })
 }

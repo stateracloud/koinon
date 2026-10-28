@@ -92,3 +92,51 @@ test('an agent asks a question: answer it from the inbox with a choice, an edite
   await expect(page.getByText('Nothing is waiting on you.')).toBeVisible()
   expect(dismissals).toEqual([expect.objectContaining({ questionId: 'q-3' })])
 })
+
+test("a question to the org's admins shows who it waits on and who answered first", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const now = Date.now()
+  const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
+  const question = {
+    id: 'q-1',
+    orgId: org,
+    taskId: 't-1',
+    runId: 'r-1',
+    agentId: 'a-1',
+    question: 'Ship the report to finance?',
+    choices: ['Yes', 'No'],
+    defaultAnswer: 'No',
+    state: 'QUESTION_STATE_OPEN',
+    canAnswer: true,
+    openedAt: iso(-2 * 3_600_000),
+    waitingSince: iso(-2 * 3_600_000),
+    target: { kind: 'NOTIFY_TARGET_KIND_ROLE', role: 'ORG_ROLE_ADMIN' },
+    targetLabel: "the org's admins",
+    recipients: [
+      { userId: 'u-1', displayName: 'Admin', waitingSince: iso(-2 * 3_600_000) },
+      { userId: 'u-2', displayName: 'Ana Example', waitingSince: iso(-2 * 3_600_000) },
+    ],
+  }
+  await mockApi(page, {
+    unary: {
+      'koinon.auth.v1alpha1.AuthService/WhoAmI': () => ({
+        user: { id: 'u-1', email: 'admin@example.test', displayName: 'Admin' },
+        memberships: [{ orgId: org, orgSlug: 'default', orgDisplayName: 'Default', role: 'ORG_ROLE_ADMIN' }],
+      }),
+      'koinon.agent.v1alpha1.AgentService/ListAgents': () => ({ agents: [{ id: 'a-1', orgId: org, displayName: 'FinOps analyst', status: 'AGENT_STATUS_ACTIVE' }] }),
+      'koinon.task.v1alpha1.TaskService/ListTasks': () => ({
+        tasks: [{ id: 't-1', orgId: org, title: 'Daily cost report', state: 'TASK_STATE_INPUT_REQUIRED', agentId: 'a-1', createdBy: { kind: 'CREATOR_KIND_TRIGGER' }, updatedAt: iso(-60_000) }],
+      }),
+      'koinon.approval.v1alpha1.ApprovalService/ListApprovals': () => ({ approvals: [] }),
+      'koinon.question.v1alpha1.QuestionService/ListQuestions': () => ({ questions: [question] }),
+      'koinon.question.v1alpha1.QuestionService/AnswerQuestion': () => ({ error: { code: 'aborted', message: 'Ana Example already answered this question' } }),
+    },
+    stream: {},
+  })
+  await page.goto('/')
+  const row = page.getByRole('list', { name: 'Waiting on you' }).getByTestId('inbox-item')
+  await expect(row).toContainText("Asked to the org's admins (2 people")
+  await expect(row).toContainText('waiting 2 hours')
+  await row.getByRole('button', { name: 'Yes' }).click()
+  await expect(row.getByRole('alert')).toContainText('Ana Example already answered this question')
+})

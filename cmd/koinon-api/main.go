@@ -615,9 +615,10 @@ func run() error {
 		})
 	}
 
+	apiMetrics := api.NewMetrics(reg)
 	handler, err := api.NewHandler(api.Options{
 		Auth:           authSvc,
-		Metrics:        api.NewMetrics(reg),
+		Metrics:        apiMetrics,
 		TrustedOrigins: splitList(cfg.trustedOrigins),
 		Services:       []func(*connect.Server){svc.Register},
 		UI:             web.Dist(),
@@ -649,7 +650,7 @@ func run() error {
 		// The ask-tier tools of org MCP servers (plan item MC1), for agentgateway only like /mcp.
 		mux.Handle(mcpask.Path, mcpask.New(pool, mcpask.Options{}).Handler())
 		// ask_user (plan item TK3), the "koinon" target of the gateway.
-		mux.Handle(askuser.Path, askuser.New(pool, askuser.Options{}).Handler())
+		mux.Handle(askuser.Path, askuser.New(pool, askuser.Options{Metrics: apiMetrics}).Handler())
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		toolsSrv := &http.Server{Addr: cfg.toolsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 		servers = append(servers, toolsSrv)

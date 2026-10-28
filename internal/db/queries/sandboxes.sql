@@ -69,6 +69,7 @@ UPDATE agent_sandboxes
 SET state = @state::sandbox_state,
     phase = @phase,
     message = @message,
+    reason = @reason::text,
     spec_hash = @spec_hash,
     -- The home generation is the home's lineage (ADR 0051 amendment): the OpenShell ID of the
     -- first sandbox, kept by a sandbox that is restored from a checkpoint (restore_checkpoint_id,

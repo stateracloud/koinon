@@ -480,6 +480,30 @@ var _ = Describe("TicketService and run scheduling", func() {
 			Expect(member.getRun(ctx, org, rIn.GetId()).GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_RUNNING))
 		})
 
+		It("writes the agent's last reply into the note of a run it cancels at the cap", func(ctx SpecContext) {
+			t, r := member.createTicket(ctx, org, agent.GetId(), "slow with a reply")
+			run := ad.mustClaim(ctx, org)
+			Expect(run.ID.String()).To(Equal(r.GetId()))
+			_, err := ad.q.AppendRunEventOnce(ctx, store.AppendRunEventOnceParams{
+				OrgID: run.OrgID, RunID: run.ID, Epoch: run.Epoch, Kind: "acp.agent_message_chunk",
+				Payload: []byte(`{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"partial"}}`), SourceSeq: 1,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = e.pool.Exec(ctx, `UPDATE runs SET started_at = now() - interval '31 minutes' WHERE id = $1`, run.ID)
+			Expect(err).NotTo(HaveOccurred())
+
+			n, err := sweep(ctx, e)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(1))
+			ticket := member.getTicket(ctx, org, t.GetId())
+			last := ticket.GetEvents()[len(ticket.GetEvents())-1]
+			Expect(last.GetKind()).To(Equal("run.canceled"))
+			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "wall_clock_cap"))
+			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("summary", "partial"))
+			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("summarySource", "reply"))
+			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("message", "Stopped at the time limit of 30m."))
+		})
+
 		It("cancels a run when recorded usage reaches the token cap", func(ctx SpecContext) {
 			t, r := member.createTicket(ctx, org, agent.GetId(), "chatty")
 			run := ad.mustClaim(ctx, org)

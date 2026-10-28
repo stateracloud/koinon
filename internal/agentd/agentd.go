@@ -88,6 +88,12 @@ type Config struct {
 	// goes back to the queue instead of failing (ADR 0066), so a burst beyond the cluster's
 	// capacity waits.
 	SandboxTimeout time.Duration
+	// SandboxWaitCap is the total time a run waits for its sandbox, across requeues, for an org that
+	// has not set its own (ADR 0066 amendment 2026-10-28).
+	SandboxWaitCap time.Duration
+	// WrapUpNotice is how long before the run's time limit the agent is told to wrap up (ADR 0066
+	// amendment 2026-10-28).
+	WrapUpNotice time.Duration
 	// Now defaults to time.Now; tests move it forward to pass SandboxTimeout.
 	Now func() time.Time
 	// ModelServeTimeout bounds the wait, before a run starts its harness, for the gateway to serve
@@ -182,6 +188,8 @@ func (c *Config) defaults() error {
 	setDefault(&c.Heartbeat, c.Lease/3)
 	setDefault(&c.Poll, time.Second)
 	setDefault(&c.SandboxTimeout, orgsettings.DefaultQueueWait)
+	setDefault(&c.SandboxWaitCap, orgsettings.DefaultSandboxWaitCap)
+	setDefault(&c.WrapUpNotice, 5*time.Minute)
 	if c.Now == nil {
 		c.Now = time.Now
 	}

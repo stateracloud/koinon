@@ -93,9 +93,7 @@ func deliverReminder(ctx context.Context, pool *pgxpool.Pool, note durable.Notif
 			"message": fmt.Sprintf("Reminder: a question is still waiting for your answer: %s If nobody answers by %s, the default (%s) applies.",
 				clip(row.Question, 200), row.ExpiresAt.Time.UTC().Format("2006-01-02 15:04 UTC"), clip(row.DefaultAnswer, 100)),
 		})
-		if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
-			OrgID: org, UserID: row.AskedTo, Kind: ReminderNotificationKind, DedupeKey: "question-reminder:" + row.ID.String(), Payload: body,
-		}); err != nil {
+		if err := notifyRecipients(ctx, q, row, ReminderNotificationKind, "question-reminder:"+row.ID.String(), body); err != nil {
 			return err
 		}
 	}
@@ -177,4 +175,74 @@ func clip(s string, n int) string {
 		return s
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// RetargetOrphaned gives the open questions that nobody can answer any more to the org's admins and
+// owners, and returns how many questions it changed. A recipient counts only while they can answer
+// (not deleted, role member or higher); when the last one leaves the org or becomes a viewer, the
+// question would otherwise wait on nobody until it expires. The new recipients get the question.asked
+// notification, and their age starts then (ADR 0065 amendment 2026-10-28). An org with no admin or
+// owner gets no rows, and the question expires as before.
+func RetargetOrphaned(ctx context.Context, pool *pgxpool.Pool) (int, error) {
+	orgs, err := store.New(pool).ListOrgsWithOpenQuestions(ctx)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	var errs []error
+	for _, org := range orgs {
+		n := 0
+		err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			q := store.New(tx)
+			rows, err := q.AddDefaultRecipientsToOrphanedQuestions(ctx, org)
+			if err != nil {
+				return err
+			}
+			byQuestion := map[pgtype.UUID][]pgtype.UUID{}
+			var order []pgtype.UUID
+			for _, r := range rows {
+				if _, ok := byQuestion[r.QuestionID]; !ok {
+					order = append(order, r.QuestionID)
+				}
+				byQuestion[r.QuestionID] = append(byQuestion[r.QuestionID], r.UserID)
+			}
+			for _, id := range order {
+				qn, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: org, ID: id})
+				if err != nil {
+					return err
+				}
+				body, _ := json.Marshal(map[string]any{
+					"question_id": qn.ID.String(), "task_id": qn.TaskID.String(), "question": qn.Question,
+				})
+				for _, u := range byQuestion[id] {
+					if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
+						OrgID: org, UserID: u, Kind: NotificationKind, DedupeKey: "question:" + qn.ID.String(), Payload: body,
+					}); err != nil {
+						return err
+					}
+				}
+				ids := make([]string, 0, len(byQuestion[id]))
+				for _, u := range byQuestion[id] {
+					ids = append(ids, u.String())
+				}
+				if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+					OrgID: org, TaskID: qn.TaskID, RunID: qn.RunID, Kind: KindRetargeted, ActorKind: store.TaskActorKindSystem,
+					Payload: mustJSON(map[string]any{
+						"question_id": qn.ID.String(), "to_label": Label(DefaultTarget, ""), "recipients": ids,
+						"reason": "nobody it was addressed to can answer any more",
+					}),
+				}); err != nil {
+					return err
+				}
+			}
+			n = len(order)
+			return nil
+		})
+		if err != nil {
+			errs = append(errs, fmt.Errorf("retarget questions of org %s: %w", org, err))
+			continue
+		}
+		total += n
+	}
+	return total, errors.Join(errs...)
 }

@@ -189,6 +189,18 @@ func (g *Gateway) SetPhase(workspace, name string, phase openshellv1.SandboxPhas
 	}
 }
 
+// SetCondition sets a sandbox's first condition to status False with reason and message, to
+// simulate an image pull failure, an admission refusal or an unschedulable pod.
+func (g *Gateway) SetCondition(workspace, name, reason, message string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if sb := g.sandboxes[key{workspace, name}]; sb != nil {
+		sb.Status.Conditions = []*openshellv1.SandboxCondition{{
+			Type: "Ready", Status: "False", Reason: reason, Message: message,
+		}}
+	}
+}
+
 func clone[T proto.Message](m T) T {
 	if any(m) == nil {
 		return m

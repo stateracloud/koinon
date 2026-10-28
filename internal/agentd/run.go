@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/runreply"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -52,6 +53,15 @@ type failure struct {
 	gateway bool
 	// modelNotFound: the gateway answered 404 or model_not_found for the run's model.
 	modelNotFound bool
+	// sandbox is set when the sandbox never became ready within the org's cap (sandbox.go).
+	sandbox *sandboxUnavailable
+}
+
+// sandboxUnavailable is why and how long a sandbox never became ready.
+type sandboxUnavailable struct {
+	cause  execution.SandboxWaitCause
+	detail string
+	waited time.Duration
 }
 
 func (f *failure) Error() string { return f.reason }
@@ -69,6 +79,9 @@ type canceled struct {
 	class store.RunFailureClass
 	// extra is merged into the payload of the run's closing events.
 	extra map[string]any
+	// timeLimit: the run was stopped at its wall-clock cap; the closing events carry the note of
+	// runreply.TimeLimitNote.
+	timeLimit bool
 }
 
 func (c *canceled) Error() string { return c.reason }
@@ -105,6 +118,10 @@ type runner struct {
 	mu        sync.Mutex // serialises appends and srcSeq
 	srcSeq    int64
 	replaying atomic.Bool
+
+	// wrapUpSent: this owner sent (or found sent) the wrap-up notice. Only the run goroutine
+	// touches it.
+	wrapUpSent bool
 
 	toolsMu sync.Mutex
 	tools   map[string]chan struct{} // tool call IDs; closed once the tool call is recorded
@@ -695,39 +712,75 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 		done <- promptResult{stop, err}
 	}()
 	// Parked time does not count against the cap (ClaimNextRun adds it to parked_seconds).
-	capd := time.Duration(r.run.MaxWallClockSeconds)*time.Second + time.Duration(r.run.ParkedSeconds)*time.Second
-	deadline := time.Until(r.run.StartedAt.Time.Add(capd))
-	capTimer := time.NewTimer(max(deadline, 0))
+	end := r.capEnd()
+	capTimer := time.NewTimer(max(time.Until(end), 0))
 	defer capTimer.Stop()
+	// The wrap-up notice interrupts the turn WrapUpNotice before the cap. A turn that starts inside
+	// the window gets the notice prepended instead (turnWithRetry).
+	var notice <-chan time.Time
+	if r.wantsWrapUp() && time.Until(end) > r.p.cfg.WrapUpNotice {
+		t := time.NewTimer(time.Until(end.Add(-r.p.cfg.WrapUpNotice)))
+		defer t.Stop()
+		notice = t.C
+	}
 
-	select {
-	case res := <-done:
-		if res.err != nil {
-			return r.modelGone(ctx, r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)))
-		}
-		switch res.stop {
-		case acp.StopEndTurn:
-			return errEndTurn
-		case acp.StopCancelled:
-			if refs := r.takeRefusals(); len(refs) > 0 {
-				return &refused{refusals: refs}
+	for {
+		select {
+		case res := <-done:
+			return r.turnResult(ctx, conn, proc, stderr, res)
+		case <-r.fenced:
+			if fence(r.fenceKind.Load()) == fenceCanceled {
+				r.log.Info("run canceled; cancelling the turn")
+				r.cancelTurn(ctx, conn, session, done)
 			}
-			return &failure{reason: "the harness cancelled the turn"}
-		default:
-			return stopFailure(res.stop)
-		}
-	case <-r.fenced:
-		if fence(r.fenceKind.Load()) == fenceCanceled {
-			r.log.Info("run canceled; cancelling the turn")
+			return errFenced
+		case <-capTimer.C:
+			r.log.Info("wall-clock cap reached; cancelling the turn")
 			r.cancelTurn(ctx, conn, session, done)
+			return &canceled{
+				reason:    fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second),
+				timeLimit: true,
+			}
+		case <-notice:
+			notice = nil
+			r.log.Info("time limit near; interrupting the turn to ask the agent to wrap up")
+			res, ended := r.cancelTurn(ctx, conn, session, done)
+			switch {
+			case ended && (res.stop == acp.StopCancelled || res.err != nil):
+				return errWrapUp
+			case ended:
+				// The turn ended on its own while the timer fired (for example end_turn after an
+				// ask_user, where the run must park and must not get another prompt). Honour it; if a
+				// next turn starts inside the window, it gets the notice prepended.
+				return r.turnResult(ctx, conn, proc, stderr, res)
+			}
+			// The harness ignored session/cancel: a second session/prompt must not overlap the first.
+			// Arm no new notice; the run ends at the cap as it does without one.
+			if _, err := r.markWrapUp(ctx, time.Until(end)); err != nil {
+				return err
+			}
+			r.log.Warn("the harness did not end its turn for the wrap-up notice; no notice is sent")
+		case <-ctx.Done():
+			return errShutdown
 		}
-		return errFenced
-	case <-capTimer.C:
-		r.log.Info("wall-clock cap reached; cancelling the turn")
-		r.cancelTurn(ctx, conn, session, done)
-		return &canceled{reason: fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second)}
-	case <-ctx.Done():
-		return errShutdown
+	}
+}
+
+// turnResult acts on how the prompt of a turn ended.
+func (r *runner) turnResult(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, res promptResult) error {
+	if res.err != nil {
+		return r.modelGone(ctx, r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)))
+	}
+	switch res.stop {
+	case acp.StopEndTurn:
+		return errEndTurn
+	case acp.StopCancelled:
+		if refs := r.takeRefusals(); len(refs) > 0 {
+			return &refused{refusals: refs}
+		}
+		return &failure{reason: "the harness cancelled the turn"}
+	default:
+		return stopFailure(res.stop)
 	}
 }
 
@@ -738,8 +791,40 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
 	cfg := r.p.cfg
 	refusedTurns := 0
+	limit := time.Duration(r.run.MaxWallClockSeconds) * time.Second
 	for attempt := 0; ; attempt++ {
+		if r.wantsWrapUp() && time.Until(r.capEnd()) <= cfg.WrapUpNotice {
+			// The turn starts inside the window (a resume, a retry or a takeover), so it is not
+			// interrupted. The notice is recorded first and prepended only by the owner that
+			// recorded it, so two owners never both send it.
+			remaining := time.Until(r.capEnd())
+			recorded, merr := r.markWrapUp(fctx, remaining)
+			if merr != nil {
+				return merr
+			}
+			if recorded {
+				text = wrapUpNote(remaining, limit) + "\n\n" + text
+			}
+		}
 		err := r.turn(ctx, conn, proc, stderr, session, text)
+		if errors.Is(err, errWrapUp) {
+			// A cancel can arrive with the cancelled turn, as in the refusal branch below.
+			if stop := r.stopped(ctx); stop != nil {
+				return stop
+			}
+			remaining := time.Until(r.capEnd())
+			recorded, merr := r.markWrapUp(fctx, remaining)
+			if merr != nil {
+				return merr
+			}
+			if !recorded {
+				return errFenced // another owner holds the run
+			}
+			// Like a refusal, this is not a retry and does not reset refusedTurns.
+			text = wrapUpNote(remaining, limit)
+			attempt--
+			continue
+		}
 		var ref *refused
 		if !errors.As(err, &ref) {
 			// Only consecutive refused turns count: any other outcome is progress.
@@ -786,18 +871,22 @@ func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc e
 
 // cancelTurn sends session/cancel and gives the harness CancelGrace to end the turn, so it
 // can save its session. The stream is closed afterwards either way.
-func (r *runner) cancelTurn(ctx context.Context, conn *acp.Conn, session acp.SessionID, done <-chan promptResult) {
+// ended is false when the harness did not end its turn in time (or the cancel failed); res is
+// then empty.
+func (r *runner) cancelTurn(ctx context.Context, conn *acp.Conn, session acp.SessionID, done <-chan promptResult) (res promptResult, ended bool) {
 	if err := conn.Cancel(ctx, session); err != nil {
 		r.log.Warn("session/cancel failed", "err", err)
-		return
+		return promptResult{}, false
 	}
 	select {
 	case res := <-done:
 		r.log.Info("turn ended after cancel", "stop", res.stop, "err", res.err)
+		return res, true
 	case <-time.After(r.p.cfg.CancelGrace):
 		r.log.Warn("the harness did not end its turn after session/cancel")
 	case <-ctx.Done():
 	}
+	return promptResult{}, false
 }
 
 // execErr classifies an error of the execution backend.
@@ -1109,38 +1198,7 @@ func (r *runner) postReply(ctx context.Context, q *store.Queries) error {
 
 // reply is the agent's message text of the run since its last park, across every epoch.
 func (r *runner) reply(ctx context.Context, q *store.Queries) (string, error) {
-	var b strings.Builder
-	var after int64
-	for {
-		evs, err := q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{
-			OrgID: r.run.OrgID, RunID: r.run.ID, AfterSeq: after, MaxEvents: 500,
-		})
-		if err != nil {
-			return "", err
-		}
-		for _, e := range evs {
-			after = e.Seq
-			if e.Kind == kindParked {
-				// Posted when the run parked.
-				b.Reset()
-				continue
-			}
-			if e.Kind != "acp.agent_message_chunk" {
-				continue
-			}
-			var u struct {
-				Content struct {
-					Text string `json:"text"`
-				} `json:"content"`
-			}
-			if json.Unmarshal(e.Payload, &u) == nil {
-				b.WriteString(u.Content.Text)
-			}
-		}
-		if len(evs) < 500 {
-			return strings.TrimSpace(b.String()), nil
-		}
-	}
+	return runreply.Reply(ctx, q, r.run.OrgID, r.run.ID)
 }
 
 // conclude acts on how execute ended.
@@ -1157,13 +1215,32 @@ func (r *runner) conclude(ctx context.Context, err error) {
 		} else if rerr != nil {
 			r.log.Warn("requeueing the run failed; its lease expires and a worker takes it over", "reason", rq.reason, "err", rerr)
 		}
+	case errors.As(err, &f) && f.sandbox != nil:
+		if ferr := r.failSandboxUnavailable(ctx, f); ferr != nil {
+			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
+		}
 	case errors.As(err, &f):
 		if ferr := r.finish(ctx, store.RunStateFailed, f.reason, cmp.Or(f.class, classFatal)); ferr != nil {
 			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
 		}
 	case errors.As(err, &c):
-		if ferr := r.finishWith(ctx, store.RunStateCanceled, c.reason, c.class, c.extra); ferr != nil {
+		extra := c.extra
+		if c.timeLimit {
+			// The note of a run stopped at its time limit: what the agent last said (or its notes),
+			// the same payload the api's sweep writes. A failure to read it leaves the summary out.
+			note, nerr := runreply.TimeLimitNote(ctx, r.q, r.run)
+			if nerr != nil {
+				r.log.Warn("reading the agent's last reply for the time-limit note failed", "err", nerr)
+			}
+			for k, v := range c.extra {
+				note[k] = v
+			}
+			extra = note
+		}
+		if ferr := r.finishWith(ctx, store.RunStateCanceled, c.reason, c.class, extra); ferr != nil {
 			r.log.Warn("canceling the run failed", "reason", c.reason, "err", ferr)
+		} else if c.timeLimit {
+			r.p.cfg.Metrics.TimeLimitStops.Inc()
 		}
 	case errors.Is(err, errFenced):
 		switch fence(r.fenceKind.Load()) {

@@ -168,6 +168,12 @@ var isolationCases = map[string]isolationCase{
 			return c.questions.ListQuestions(ctx, &questionv1alpha1.ListQuestionsRequest{OrgId: org})
 		},
 	},
+	questionv1alpha1connect.QuestionServiceListAskableMembersProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.questions.ListAskableMembers(ctx, &questionv1alpha1.ListAskableMembersRequest{OrgId: org})
+		},
+	},
 	questionv1alpha1connect.QuestionServiceAnswerQuestionProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.questions.AnswerQuestion(ctx, &questionv1alpha1.AnswerQuestionRequest{

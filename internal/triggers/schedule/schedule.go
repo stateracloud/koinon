@@ -308,8 +308,10 @@ func (s *Scheduler) createTask(ctx context.Context, in FireInput) (string, error
 		Source: durable.SourceTrigger, Key: durable.TriggerFireKey(trig.String(), due),
 		Title:   triggers.ScheduleTaskTitle(in.Trigger, due, loc),
 		Message: tr.Instruction,
-		Origin:  store.RunOriginScheduled,
-		Fire:    triggers.FireScheduled,
+		// The target is the one of the version in effect at the fire, like the instruction.
+		Notify: tr.Notify,
+		Origin: store.RunOriginScheduled,
+		Fire:   triggers.FireScheduled,
 	})
 	if errors.Is(err, services.ErrAgentInactive) {
 		return "", nil // permanent: the agent was paused or archived since

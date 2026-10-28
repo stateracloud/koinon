@@ -115,11 +115,15 @@ message Task {
   // Set by ListTasks and GetTask while an open question of the task waits on a person: who it is
   // addressed to. The inbox uses it so that a task waiting on someone else's answer is not shown
   // to its creator as theirs to act on.
-  string waiting_on_user_id = 14;
+  reserved 14;
+  reserved "waiting_on_user_id";
+  // The target label of the oldest open question.
   string waiting_on_name = 15;
   // True when a direct message to the agent started the task: replies in its inbox-chat thread
   // go to SendDirectMessage with this task_id (plan item TR3).
   bool direct_message_thread = 16;
+  // Everyone the task's open questions wait on.
+  repeated string waiting_on_user_ids = 17;
 }
 
 // TaskEvent is one entry of the task timeline: a message, a state change or a run note such as

@@ -23,7 +23,7 @@ spec:
   grants: []
   triggers:
     # UTC keeps the template neutral. On the agent's Edit triggers page change the time and zone, and
-    # replace "none" after Ask with an org member's email or user ID.
+    # choose who is asked (by default the org's admins).
     - id: daily-cost-report
       type: schedule
       filter:
@@ -31,8 +31,10 @@ spec:
         timezone: UTC
       instruction: >-
         Write yesterday's cost report now, following your instructions. Yesterday is the previous
-        full calendar day in UTC. Ask: none.
-        (Admins: on Edit triggers, replace "none" with an org member's email or user ID.)
+        full calendar day in UTC.
+      notify:
+        kind: role
+        role: admin
   limits:
     run:
       maxDuration: 20m
@@ -79,9 +81,8 @@ spec:
       instructions.
     - If a source is down, returns nothing, or the numbers cannot be compared (a dimension changed,
       a currency is unclear), use `ask_user` with a specific question and a safe default, such as
-      reporting without that source. `Ask:` in the task is the email or user ID to pass as `to`; if
-      it is `none` or missing, do not call `ask_user`: report without the unclear source and say so.
-      Otherwise do not ask; deliver the report.
+      reporting without that source. Call `ask_user` without `to`: Koinon asks the trigger's notify
+      target (by default the org's admins). Otherwise do not ask; deliver the report.
     - If you have no cost tools at all, say so in the reply and stop. Tell the reader to allow the
       cost MCP servers on the agent's page.
     - Never state a number you did not read from a tool. Say "not available" instead.

@@ -58,6 +58,7 @@ var crossOrgQueries = map[string]string{
 	"catalog.sql:ListModelsToRederiveFormat":            "startup: finds the models whose format follows the table, in every org, to re-derive them (ADR 0069)",
 	"prices.sql:ListPendingMigratedPrices":              "startup: finds the prices migration 00014 made from model rates, in every org, to complete them",
 	"questions.sql:ListOrgsWithQuestionsToNotify":       "the question notifier: finds every org that has an opened question not yet announced",
+	"questions.sql:ListOrgsWithOpenQuestions":           "the question sweep: finds every org that has an open question, to retarget the orphaned ones",
 	"questions.sql:ListOrgsWithDueQuestions":            "the question timers: finds every org that has an open question with a reminder or an expiry due",
 	"questions.sql:ListOrgsWithQuestionsOfFinishedRuns": "the question sweep: finds every org that has a question whose run ended",
 	"spend.sql:ListOrgsWithDueSettlements":              "the spend settler: finds every org with a provisional entry due for an attempt",

@@ -367,6 +367,16 @@ func (t *Template) check() error {
 	if err := ValidateTriggers(t.Spec.Triggers); err != nil {
 		return fmt.Errorf("spec.%w", err)
 	}
+	for i, tr := range t.Spec.Triggers {
+		// A person and a channel both belong to one org. From v0.2 a template reaches the org's
+		// channel through the default, so templates never take a channel, now or later.
+		switch {
+		case tr.Notify != nil && tr.Notify.Kind == NotifyUser:
+			return fmt.Errorf("spec.triggers[%d]: notify: a template cannot name a person; use a role and pick the person on the agent's Edit triggers page", i)
+		case tr.Notify != nil && tr.Notify.Kind == NotifyChannel:
+			return fmt.Errorf("spec.triggers[%d]: notify: a template cannot name a chat channel; leave notify out to use the org's notify channel", i)
+		}
+	}
 	seen := map[string]bool{}
 	for i, g := range t.Spec.Grants {
 		if seen[g.Connector] {
