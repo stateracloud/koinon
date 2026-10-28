@@ -164,7 +164,7 @@ test('owner sets the cap and a limit, reads notices, and the banner follows them
   await cap.getByRole('button', { name: 'Save cap' }).click()
   await expect.poll(() => seen.cap).toMatchObject({ orgId: org, monthlyCapUsd: '250' })
 
-  await page.getByRole('button', { name: 'Change daily limit of Repo helper' }).click()
+  await page.getByRole('button', { name: 'Change limit of Repo helper' }).click()
   await page.getByLabel('Daily limit for Repo helper, in US dollars').fill('7.5')
   await page.getByRole('button', { name: 'Save limit for Repo helper' }).click()
   await expect.poll(() => seen.limit).toMatchObject({ agentId: 'a-1', dailyLimitUsd: '7.5' })
@@ -183,7 +183,7 @@ test('a platform admin sets the ceiling in the platform area; an org admin canno
   await expect(page.getByRole('heading', { name: 'Platform budget ceilings' })).toBeVisible()
   await expectAccessible(page)
   await expect(page.getByRole('heading', { name: 'Acme' })).toBeVisible()
-  await page.getByRole('button', { name: 'Set ceiling of Acme' }).click()
+  await page.getByRole('button', { name: 'Set a ceiling of Acme' }).click()
   await page.getByLabel('Ceiling for Acme, in US dollars').fill('1000')
   await expectAccessible(page)
   await page.getByRole('button', { name: 'Save ceiling for Acme' }).click()

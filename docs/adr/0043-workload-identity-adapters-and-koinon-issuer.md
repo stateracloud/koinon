@@ -1,7 +1,7 @@
 # 0043. Workload identity adapters and a Koinon OIDC issuer
 
 - Status: Accepted
-- Amended by: [0063](0063-forge-credential-classes.md)
+- Amended by: [0063](0063-forge-credential-classes.md), [0073](0073-agent-passport.md)
 - Date: 2026-10-21
 - Amends: ADR 0006 (identity layers); replaces the "Pod Identity" wording in `docs/design.md`
   ("Execution layer details")
@@ -120,6 +120,21 @@ long-lived keys in provider records". Code hosts that cannot mint a short-lived 
 in v0.1) may use static tokens if Koinon holds them, they reach sandboxes only through OpenShell
 placeholders, and their age is shown. Koinon warns on age; it never blocks and never rotates them.
 Everything else still goes through adapters as decided above.
+
+## Amendment (2026-10-28): the issuer is built for the agent passport
+
+[0073](0073-agent-passport.md) builds this ADR's issuer before the cloud adapters, to sign the agent
+passport.
+
+- **One issuer per install.** `iss` is the install's public URL, and the org is a claim.
+- **Where the JWKS lives.** This answers the open question on the JWKS location. koinon-api serves
+  `/.well-known/openid-configuration` and `/.well-known/jwks.json` behind the Ingress. Publishing both
+  to a public bucket is an optional operator mirror, needed for AWS and Entra federation when the
+  install is not reachable from the internet.
+- **Keys.** Signing is ES256 by default and RS256 for receivers that need it, with a `kid`. Keys live
+  in Vault or OpenBao, or in the secret store as the fallback. A new key is published at least 24 hours
+  before it signs anything, and every rotation is audited.
+- **Adapters.** When the adapters land, they take their subject tokens from this same issuer.
 
 ## Links
 
