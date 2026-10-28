@@ -22,6 +22,7 @@ func providerProto(p catalog.Provider) *providerv1alpha1.Provider {
 	return &providerv1alpha1.Provider{
 		Id: p.ID, Name: p.Name, Type: p.Type, Url: p.URL, HasKey: p.HasKey, Source: p.Source,
 		ManagedBySecret: p.ManagedBySecret, DisabledReason: p.DisabledReason, Removed: p.Removed,
+		AnthropicWorkspaceId: p.AnthropicWorkspaceID, Formats: p.Formats,
 		CreatedAt: timestamppb.New(p.CreatedAt), UpdatedAt: timestamppb.New(p.UpdatedAt),
 	}
 }
@@ -29,6 +30,7 @@ func providerProto(p catalog.Provider) *providerv1alpha1.Provider {
 func modelProto(m catalog.Model) *providerv1alpha1.Model {
 	return &providerv1alpha1.Model{
 		Id: m.ID, ProviderId: m.ProviderID, Name: m.Name, Guard: m.Guard, Source: m.Source,
+		Format: m.Format, FormatOverridden: m.FormatOverridden,
 		ManagedBySecret: m.ManagedBySecret, DisabledReason: m.DisabledReason,
 		CreatedAt: timestamppb.New(m.CreatedAt), UpdatedAt: timestamppb.New(m.UpdatedAt),
 	}
@@ -97,6 +99,7 @@ func (s *Server) CreateProvider(ctx context.Context, req *providerv1alpha1.Creat
 	}
 	p, err := s.catalog.CreateProvider(requestCtx(ctx), c.org, c.auditActor(), c.actor(), catalog.ProviderInput{
 		Name: req.GetName(), Type: req.GetType(), URL: req.GetUrl(), APIKey: req.GetApiKey(),
+		AnthropicWorkspaceID: req.GetAnthropicWorkspaceId(),
 	})
 	if err != nil {
 		return nil, s.catalogError(err)
@@ -111,7 +114,7 @@ func (s *Server) UpdateProvider(ctx context.Context, req *providerv1alpha1.Updat
 		return nil, err
 	}
 	p, err := s.catalog.UpdateProvider(requestCtx(ctx), c.org, c.auditActor(), req.GetProviderId(), catalog.ProviderPatch{
-		Type: req.Type, URL: req.Url, APIKey: req.ApiKey,
+		Type: req.Type, URL: req.Url, APIKey: req.ApiKey, AnthropicWorkspaceID: req.AnthropicWorkspaceId,
 	})
 	if err != nil {
 		return nil, s.catalogError(err)
@@ -155,7 +158,7 @@ func (s *Server) CreateModel(ctx context.Context, req *providerv1alpha1.CreateMo
 		return nil, err
 	}
 	m, err := s.catalog.CreateModel(requestCtx(ctx), c.org, c.auditActor(), c.actor(), catalog.ModelInput{
-		ProviderID: req.GetProviderId(), Name: req.GetName(), Guard: req.GetGuard(), Rates: ratesFromProto(req.GetRates()), //nolint:staticcheck // deprecated field, refused by the catalog
+		ProviderID: req.GetProviderId(), Name: req.GetName(), Guard: req.GetGuard(), Format: req.GetFormat(), Rates: ratesFromProto(req.GetRates()), //nolint:staticcheck // deprecated field, refused by the catalog
 	})
 	if err != nil {
 		return nil, s.catalogError(err)
@@ -174,7 +177,7 @@ func (s *Server) UpdateModel(ctx context.Context, req *providerv1alpha1.UpdateMo
 		return nil, err
 	}
 	m, err := s.catalog.UpdateModel(requestCtx(ctx), c.org, c.auditActor(), req.GetModelId(), catalog.ModelPatch{
-		Guard: req.Guard, Rates: ratesFromProto(req.GetRates()), ClearRates: req.GetClearRates(), //nolint:staticcheck // deprecated fields, refused by the catalog
+		Guard: req.Guard, Format: req.Format, Rates: ratesFromProto(req.GetRates()), ClearRates: req.GetClearRates(), //nolint:staticcheck // deprecated fields, refused by the catalog
 	})
 	if err != nil {
 		return nil, s.catalogError(err)
@@ -192,4 +195,17 @@ func (s *Server) DeleteModel(ctx context.Context, req *providerv1alpha1.DeleteMo
 		return nil, s.catalogError(err)
 	}
 	return &providerv1alpha1.DeleteModelResponse{}, nil
+}
+
+// ModelFormats implements ProviderService. Admins and owners.
+func (s *Server) ModelFormats(ctx context.Context, req *providerv1alpha1.ModelFormatsRequest) (*providerv1alpha1.ModelFormatsResponse, error) {
+	c, err := s.providerCaller(ctx, req.GetOrgId())
+	if err != nil {
+		return nil, err
+	}
+	offered, def, err := s.catalog.ModelFormats(ctx, c.org, req.GetProviderId(), req.GetName())
+	if err != nil {
+		return nil, s.catalogError(err)
+	}
+	return &providerv1alpha1.ModelFormatsResponse{Offered: offered, DefaultFormat: def}, nil
 }

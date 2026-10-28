@@ -79,6 +79,12 @@ const (
 	McpToolTierUpdateTierNever McpToolTierUpdateTier = "never"
 )
 
+// Defines values for ModelFormat.
+const (
+	Anthropic ModelFormat = "anthropic"
+	Openai    ModelFormat = "openai"
+)
+
 // Defines values for PriceChangeKind.
 const (
 	Added   PriceChangeKind = "added"
@@ -352,6 +358,13 @@ type Model struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	DisabledReason *string   `json:"disabledReason,omitempty"`
 
+	// Format A model's wire format (ADR 0069): `openai` is chat completions, `anthropic` is the Messages API.
+	// The value set grows with the formats Koinon supports.
+	Format ModelFormat `json:"format"`
+
+	// FormatOverridden Whether an admin set the format. Otherwise it follows the default and is re-derived when the default changes.
+	FormatOverridden bool `json:"formatOverridden"`
+
 	// Guard The routing guard (ADR 0048), for OpenRouter providers.
 	Guard           bool               `json:"guard"`
 	Id              openapi_types.UUID `json:"id"`
@@ -373,6 +386,8 @@ type Model struct {
 
 // ModelCreate defines model for ModelCreate.
 type ModelCreate struct {
+	// Format A `ModelFormat` within what the provider offers. Omit for the default.
+	Format     *string            `json:"format,omitempty"`
 	Guard      *bool              `json:"guard,omitempty"`
 	Name       string             `json:"name"`
 	ProviderId openapi_types.UUID `json:"providerId"`
@@ -387,6 +402,13 @@ type ModelCreate struct {
 type ModelCreated struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	DisabledReason *string   `json:"disabledReason,omitempty"`
+
+	// Format A model's wire format (ADR 0069): `openai` is chat completions, `anthropic` is the Messages API.
+	// The value set grows with the formats Koinon supports.
+	Format ModelFormat `json:"format"`
+
+	// FormatOverridden Whether an admin set the format. Otherwise it follows the default and is re-derived when the default changes.
+	FormatOverridden bool `json:"formatOverridden"`
 
 	// Guard The routing guard (ADR 0048), for OpenRouter providers.
 	Guard           bool               `json:"guard"`
@@ -410,6 +432,10 @@ type ModelCreated struct {
 	Warnings *[]string `json:"warnings,omitempty"`
 }
 
+// ModelFormat A model's wire format (ADR 0069): `openai` is chat completions, `anthropic` is the Messages API.
+// The value set grows with the formats Koinon supports.
+type ModelFormat string
+
 // ModelList defines model for ModelList.
 type ModelList struct {
 	Models []Model `json:"models"`
@@ -420,7 +446,10 @@ type ModelUpdate struct {
 	// ClearRates Deprecated; setting it answers 400.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	ClearRates *bool `json:"clearRates,omitempty"`
-	Guard      *bool `json:"guard,omitempty"`
+
+	// Format Overrides the format with a `ModelFormat` within what the provider offers. An empty string goes back to the default.
+	Format *string `json:"format,omitempty"`
+	Guard  *bool   `json:"guard,omitempty"`
 
 	// Rates Deprecated and never returned. Setting it on a request answers 400: add a price with
 	// `POST /admin/v1/prices` instead.
@@ -600,10 +629,15 @@ type PriceVersion struct {
 
 // Provider defines model for Provider.
 type Provider struct {
-	CreatedAt time.Time `json:"createdAt"`
+	// AnthropicWorkspaceId The Anthropic workspace the gateway names for this provider's models. Only for type `anthropic`; unset when not given.
+	AnthropicWorkspaceId *string   `json:"anthropicWorkspaceId,omitempty"`
+	CreatedAt            time.Time `json:"createdAt"`
 
 	// DisabledReason Set while a declared provider of the same name shadows this one; it is not served.
 	DisabledReason *string `json:"disabledReason,omitempty"`
+
+	// Formats The model formats the provider's type offers, preferred first (ADR 0069).
+	Formats []ModelFormat `json:"formats"`
 
 	// HasKey Whether an API key is stored. The key itself is never returned.
 	HasKey bool               `json:"hasKey"`
@@ -624,6 +658,9 @@ type Provider struct {
 
 // ProviderCreate defines model for ProviderCreate.
 type ProviderCreate struct {
+	// AnthropicWorkspaceId Only for type `anthropic`.
+	AnthropicWorkspaceId *string `json:"anthropicWorkspaceId,omitempty"`
+
 	// ApiKey Omit for keyless upstreams such as Ollama.
 	ApiKey *string `json:"apiKey,omitempty"`
 	Name   string  `json:"name"`
@@ -638,6 +675,9 @@ type ProviderList struct {
 
 // ProviderUpdate defines model for ProviderUpdate.
 type ProviderUpdate struct {
+	// AnthropicWorkspaceId Replaces the workspace ID; an empty string removes it. Only for type `anthropic`.
+	AnthropicWorkspaceId *string `json:"anthropicWorkspaceId,omitempty"`
+
 	// ApiKey Replaces the key; an empty string removes it.
 	ApiKey *string `json:"apiKey,omitempty"`
 	Type   *string `json:"type,omitempty"`

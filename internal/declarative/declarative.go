@@ -19,6 +19,10 @@
 //	  models: |
 //	    - name: deepseek/deepseek-v4.1-flash
 //	      guard: true
+//	      format: openai          # optional: the model's wire format, within what the provider offers (ADR 0069)
+//
+// A provider of type anthropic may also set anthropicWorkspaceId (wrkspc_...), the workspace the
+// gateway names for an API key not scoped to one.
 //
 // A Secret that parses becomes a provider (with its models) or a connection with source
 // "secret": read-only through the UI and admin API, winning a name collision with a UI entry

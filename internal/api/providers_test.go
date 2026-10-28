@@ -146,6 +146,79 @@ var _ = Describe("ProviderService", func() {
 		Expect(leaked).To(BeZero())
 	})
 
+	It("sets, defaults, overrides and validates a model's format (ADR 0069)", func(ctx SpecContext) {
+		or, err := create(ctx, owner, "openrouter", "openrouter", "https://openrouter.ai/api/v1", "k")
+		Expect(err).NotTo(HaveOccurred())
+		oa, err := create(ctx, owner, "openai", "openai", "https://api.openai.com/v1", "k")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(or.GetProvider().GetFormats()).To(Equal([]string{"openai", "anthropic"}))
+		Expect(oa.GetProvider().GetFormats()).To(Equal([]string{"openai"}))
+		orID, oaID := or.GetProvider().GetId(), oa.GetProvider().GetId()
+
+		// The default follows the table; OpenRouter anthropic/* stays on openai until the flip.
+		m, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: orID, Name: "anthropic/claude-haiku-5.5"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(m.GetModel().GetFormat()).To(Equal("openai"))
+		Expect(m.GetModel().GetFormatOverridden()).To(BeFalse())
+
+		fm, err := owner.providers.ModelFormats(ctx, &providerv1alpha1.ModelFormatsRequest{OrgId: org, ProviderId: orID, Name: "claude-haiku"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fm.GetOffered()).To(Equal([]string{"openai", "anthropic"}))
+		Expect(fm.GetDefaultFormat()).To(Equal("anthropic"))
+
+		// An override within what the provider offers is stored and marked.
+		upd, err := owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), Format: new("anthropic")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(upd.GetModel().GetFormat()).To(Equal("anthropic"))
+		Expect(upd.GetModel().GetFormatOverridden()).To(BeTrue())
+		// An empty format goes back to the default.
+		upd, err = owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), Format: new("")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(upd.GetModel().GetFormat()).To(Equal("openai"))
+		Expect(upd.GetModel().GetFormatOverridden()).To(BeFalse())
+
+		// Not offered, and unknown, are refused.
+		_, err = owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: oaID, Name: "gpt", Format: "anthropic"})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(err).To(MatchError(ContainSubstring("does not offer")))
+		_, err = owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: orID, Name: "gem", Format: "gemini"})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(err).To(MatchError(ContainSubstring("unknown model format")))
+	})
+
+	It("takes an Anthropic provider's workspace ID, for that type only", func(ctx SpecContext) {
+		_, err := owner.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{
+			OrgId: org, Name: "oa", Type: "openai", Url: "https://api.openai.com/v1", AnthropicWorkspaceId: "wrkspc_01Abc",
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		_, err = owner.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{
+			OrgId: org, Name: "bad", Type: "anthropic", Url: "https://api.anthropic.com/v1", AnthropicWorkspaceId: "workspace-1",
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		res, err := owner.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{
+			OrgId: org, Name: "anthropic", Type: "anthropic", Url: "https://api.anthropic.com/v1", AnthropicWorkspaceId: "wrkspc_01Abc",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetProvider().GetAnthropicWorkspaceId()).To(Equal("wrkspc_01Abc"))
+		Expect(res.GetProvider().GetFormats()).To(Equal([]string{"anthropic"}))
+		m, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: res.GetProvider().GetId(), Name: "claude-haiku-4-5"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(m.GetModel().GetFormat()).To(Equal("anthropic"))
+		// Changing the type away needs the workspace ID gone first.
+		_, err = owner.providers.UpdateProvider(ctx, &providerv1alpha1.UpdateProviderRequest{OrgId: org, ProviderId: res.GetProvider().GetId(), Type: new("openai")})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		upd, err := owner.providers.UpdateProvider(ctx, &providerv1alpha1.UpdateProviderRequest{OrgId: org, ProviderId: res.GetProvider().GetId(), AnthropicWorkspaceId: new("")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(upd.GetProvider().GetAnthropicWorkspaceId()).To(BeEmpty())
+		// With it gone the type may change, and the model follows the new type's default.
+		upd, err = owner.providers.UpdateProvider(ctx, &providerv1alpha1.UpdateProviderRequest{OrgId: org, ProviderId: res.GetProvider().GetId(), Type: new("openai")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(upd.GetProvider().GetFormats()).To(Equal([]string{"openai"}))
+		list, err := owner.providers.ListModels(ctx, &providerv1alpha1.ListModelsRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list.GetModels()[0].GetFormat()).To(Equal("openai"))
+	})
+
 	It("refuses upstream addresses the policy denies, and says why", func(ctx SpecContext) {
 		for _, u := range []string{
 			"http://127.0.0.1:11434/v1", "http://169.254.169.254/latest", "http://10.0.0.5/v1", "http://localhost/v1",

@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file koinon/provider/v1alpha1/provider.proto.
  */
 export const file_koinon_provider_v1alpha1_provider: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vcHJvdmlkZXIvdjFhbHBoYTEvcHJvdmlkZXIucHJvdG8SGGtvaW5vbi5wcm92aWRlci52MWFscGhhMSKFAgoIUHJvdmlkZXISCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIMCgR0eXBlGAMgASgJEgsKA3VybBgEIAEoCRIPCgdoYXNfa2V5GAUgASgIEg4KBnNvdXJjZRgGIAEoCRIZChFtYW5hZ2VkX2J5X3NlY3JldBgHIAEoCRIXCg9kaXNhYmxlZF9yZWFzb24YCCABKAkSDwoHcmVtb3ZlZBgJIAEoCBIuCgpjcmVhdGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCI6CgVSYXRlcxINCgVpbnB1dBgBIAEoCRIOCgZvdXRwdXQYAiABKAkSEgoKY2FjaGVfcmVhZBgDIAEoCSKdAgoFTW9kZWwSCgoCaWQYASABKAkSEwoLcHJvdmlkZXJfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRINCgVndWFyZBgEIAEoCBIyCgVyYXRlcxgFIAEoCzIfLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5SYXRlc0ICGAESDgoGc291cmNlGAYgASgJEhkKEW1hbmFnZWRfYnlfc2VjcmV0GAcgASgJEhcKD2Rpc2FibGVkX3JlYXNvbhgIIAEoCRIuCgpjcmVhdGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCImChRMaXN0UHJvdmlkZXJzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkiTgoVTGlzdFByb3ZpZGVyc1Jlc3BvbnNlEjUKCXByb3ZpZGVycxgBIAMoCzIiLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5Qcm92aWRlciJmChVDcmVhdGVQcm92aWRlclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEdHlwZRgDIAEoCRILCgN1cmwYBCABKAkSFAoHYXBpX2tleRgFIAEoCUIDgAEBIk4KFkNyZWF0ZVByb3ZpZGVyUmVzcG9uc2USNAoIcHJvdmlkZXIYASABKAsyIi5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuUHJvdmlkZXIimQEKFVVwZGF0ZVByb3ZpZGVyUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLcHJvdmlkZXJfaWQYAiABKAkSEQoEdHlwZRgDIAEoCUgAiAEBEhAKA3VybBgEIAEoCUgBiAEBEhkKB2FwaV9rZXkYBSABKAlCA4ABAUgCiAEBQgcKBV90eXBlQgYKBF91cmxCCgoIX2FwaV9rZXkiTgoWVXBkYXRlUHJvdmlkZXJSZXNwb25zZRI0Cghwcm92aWRlchgBIAEoCzIiLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5Qcm92aWRlciI8ChVEZWxldGVQcm92aWRlclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC3Byb3ZpZGVyX2lkGAIgASgJIhgKFkRlbGV0ZVByb3ZpZGVyUmVzcG9uc2UiIwoRTGlzdE1vZGVsc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIkUKEkxpc3RNb2RlbHNSZXNwb25zZRIvCgZtb2RlbHMYASADKAsyHy5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuTW9kZWwiigEKEkNyZWF0ZU1vZGVsUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLcHJvdmlkZXJfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRINCgVndWFyZBgEIAEoCBIyCgVyYXRlcxgFIAEoCzIfLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5SYXRlc0ICGAEiVwoTQ3JlYXRlTW9kZWxSZXNwb25zZRIuCgVtb2RlbBgBIAEoCzIfLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5Nb2RlbBIQCgh3YXJuaW5ncxgCIAMoCSKhAQoSVXBkYXRlTW9kZWxSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghtb2RlbF9pZBgCIAEoCRISCgVndWFyZBgDIAEoCEgAiAEBEjIKBXJhdGVzGAQgASgLMh8ua29pbm9uLnByb3ZpZGVyLnYxYWxwaGExLlJhdGVzQgIYARIXCgtjbGVhcl9yYXRlcxgFIAEoCEICGAFCCAoGX2d1YXJkIkUKE1VwZGF0ZU1vZGVsUmVzcG9uc2USLgoFbW9kZWwYASABKAsyHy5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuTW9kZWwiNgoSRGVsZXRlTW9kZWxSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghtb2RlbF9pZBgCIAEoCSIVChNEZWxldGVNb2RlbFJlc3BvbnNlMpkHCg9Qcm92aWRlclNlcnZpY2USdQoNTGlzdFByb3ZpZGVycxIuLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5MaXN0UHJvdmlkZXJzUmVxdWVzdBovLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5MaXN0UHJvdmlkZXJzUmVzcG9uc2UiA5ACARJzCg5DcmVhdGVQcm92aWRlchIvLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5DcmVhdGVQcm92aWRlclJlcXVlc3QaMC5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuQ3JlYXRlUHJvdmlkZXJSZXNwb25zZRJzCg5VcGRhdGVQcm92aWRlchIvLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5VcGRhdGVQcm92aWRlclJlcXVlc3QaMC5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuVXBkYXRlUHJvdmlkZXJSZXNwb25zZRJzCg5EZWxldGVQcm92aWRlchIvLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5EZWxldGVQcm92aWRlclJlcXVlc3QaMC5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuRGVsZXRlUHJvdmlkZXJSZXNwb25zZRJsCgpMaXN0TW9kZWxzEisua29pbm9uLnByb3ZpZGVyLnYxYWxwaGExLkxpc3RNb2RlbHNSZXF1ZXN0Giwua29pbm9uLnByb3ZpZGVyLnYxYWxwaGExLkxpc3RNb2RlbHNSZXNwb25zZSIDkAIBEmoKC0NyZWF0ZU1vZGVsEiwua29pbm9uLnByb3ZpZGVyLnYxYWxwaGExLkNyZWF0ZU1vZGVsUmVxdWVzdBotLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5DcmVhdGVNb2RlbFJlc3BvbnNlEmoKC1VwZGF0ZU1vZGVsEiwua29pbm9uLnByb3ZpZGVyLnYxYWxwaGExLlVwZGF0ZU1vZGVsUmVxdWVzdBotLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5VcGRhdGVNb2RlbFJlc3BvbnNlEmoKC0RlbGV0ZU1vZGVsEiwua29pbm9uLnByb3ZpZGVyLnYxYWxwaGExLkRlbGV0ZU1vZGVsUmVxdWVzdBotLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5EZWxldGVNb2RlbFJlc3BvbnNlQldaVWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL3Byb3ZpZGVyL3YxYWxwaGExO3Byb3ZpZGVydjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("Cidrb2lub24vcHJvdmlkZXIvdjFhbHBoYTEvcHJvdmlkZXIucHJvdG8SGGtvaW5vbi5wcm92aWRlci52MWFscGhhMSK2AgoIUHJvdmlkZXISCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIMCgR0eXBlGAMgASgJEgsKA3VybBgEIAEoCRIPCgdoYXNfa2V5GAUgASgIEg4KBnNvdXJjZRgGIAEoCRIZChFtYW5hZ2VkX2J5X3NlY3JldBgHIAEoCRIXCg9kaXNhYmxlZF9yZWFzb24YCCABKAkSDwoHcmVtb3ZlZBgJIAEoCBIuCgpjcmVhdGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIeChZhbnRocm9waWNfd29ya3NwYWNlX2lkGAwgASgJEg8KB2Zvcm1hdHMYDSADKAkiOgoFUmF0ZXMSDQoFaW5wdXQYASABKAkSDgoGb3V0cHV0GAIgASgJEhIKCmNhY2hlX3JlYWQYAyABKAkiyAIKBU1vZGVsEgoKAmlkGAEgASgJEhMKC3Byb3ZpZGVyX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSDQoFZ3VhcmQYBCABKAgSMgoFcmF0ZXMYBSABKAsyHy5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuUmF0ZXNCAhgBEg4KBnNvdXJjZRgGIAEoCRIZChFtYW5hZ2VkX2J5X3NlY3JldBgHIAEoCRIXCg9kaXNhYmxlZF9yZWFzb24YCCABKAkSLgoKY3JlYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdXBkYXRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGZm9ybWF0GAsgASgJEhkKEWZvcm1hdF9vdmVycmlkZGVuGAwgASgIIiYKFExpc3RQcm92aWRlcnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCSJOChVMaXN0UHJvdmlkZXJzUmVzcG9uc2USNQoJcHJvdmlkZXJzGAEgAygLMiIua29pbm9uLnByb3ZpZGVyLnYxYWxwaGExLlByb3ZpZGVyIoYBChVDcmVhdGVQcm92aWRlclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEdHlwZRgDIAEoCRILCgN1cmwYBCABKAkSFAoHYXBpX2tleRgFIAEoCUIDgAEBEh4KFmFudGhyb3BpY193b3Jrc3BhY2VfaWQYBiABKAkiTgoWQ3JlYXRlUHJvdmlkZXJSZXNwb25zZRI0Cghwcm92aWRlchgBIAEoCzIiLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5Qcm92aWRlciLZAQoVVXBkYXRlUHJvdmlkZXJSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgtwcm92aWRlcl9pZBgCIAEoCRIRCgR0eXBlGAMgASgJSACIAQESEAoDdXJsGAQgASgJSAGIAQESGQoHYXBpX2tleRgFIAEoCUIDgAEBSAKIAQESIwoWYW50aHJvcGljX3dvcmtzcGFjZV9pZBgGIAEoCUgDiAEBQgcKBV90eXBlQgYKBF91cmxCCgoIX2FwaV9rZXlCGQoXX2FudGhyb3BpY193b3Jrc3BhY2VfaWQiTgoWVXBkYXRlUHJvdmlkZXJSZXNwb25zZRI0Cghwcm92aWRlchgBIAEoCzIiLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5Qcm92aWRlciI8ChVEZWxldGVQcm92aWRlclJlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC3Byb3ZpZGVyX2lkGAIgASgJIhgKFkRlbGV0ZVByb3ZpZGVyUmVzcG9uc2UiIwoRTGlzdE1vZGVsc1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJIkUKEkxpc3RNb2RlbHNSZXNwb25zZRIvCgZtb2RlbHMYASADKAsyHy5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuTW9kZWwimgEKEkNyZWF0ZU1vZGVsUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLcHJvdmlkZXJfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRINCgVndWFyZBgEIAEoCBIyCgVyYXRlcxgFIAEoCzIfLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5SYXRlc0ICGAESDgoGZm9ybWF0GAYgASgJIlcKE0NyZWF0ZU1vZGVsUmVzcG9uc2USLgoFbW9kZWwYASABKAsyHy5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuTW9kZWwSEAoId2FybmluZ3MYAiADKAkiwQEKElVwZGF0ZU1vZGVsUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEAoIbW9kZWxfaWQYAiABKAkSEgoFZ3VhcmQYAyABKAhIAIgBARIyCgVyYXRlcxgEIAEoCzIfLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5SYXRlc0ICGAESFwoLY2xlYXJfcmF0ZXMYBSABKAhCAhgBEhMKBmZvcm1hdBgGIAEoCUgBiAEBQggKBl9ndWFyZEIJCgdfZm9ybWF0IkUKE1VwZGF0ZU1vZGVsUmVzcG9uc2USLgoFbW9kZWwYASABKAsyHy5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuTW9kZWwiNgoSRGVsZXRlTW9kZWxSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIQCghtb2RlbF9pZBgCIAEoCSIVChNEZWxldGVNb2RlbFJlc3BvbnNlIkgKE01vZGVsRm9ybWF0c1JlcXVlc3QSDgoGb3JnX2lkGAEgASgJEhMKC3Byb3ZpZGVyX2lkGAIgASgJEgwKBG5hbWUYAyABKAkiPwoUTW9kZWxGb3JtYXRzUmVzcG9uc2USDwoHb2ZmZXJlZBgBIAMoCRIWCg5kZWZhdWx0X2Zvcm1hdBgCIAEoCTKNCAoPUHJvdmlkZXJTZXJ2aWNlEnUKDUxpc3RQcm92aWRlcnMSLi5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuTGlzdFByb3ZpZGVyc1JlcXVlc3QaLy5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuTGlzdFByb3ZpZGVyc1Jlc3BvbnNlIgOQAgEScwoOQ3JlYXRlUHJvdmlkZXISLy5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuQ3JlYXRlUHJvdmlkZXJSZXF1ZXN0GjAua29pbm9uLnByb3ZpZGVyLnYxYWxwaGExLkNyZWF0ZVByb3ZpZGVyUmVzcG9uc2UScwoOVXBkYXRlUHJvdmlkZXISLy5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuVXBkYXRlUHJvdmlkZXJSZXF1ZXN0GjAua29pbm9uLnByb3ZpZGVyLnYxYWxwaGExLlVwZGF0ZVByb3ZpZGVyUmVzcG9uc2UScwoORGVsZXRlUHJvdmlkZXISLy5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuRGVsZXRlUHJvdmlkZXJSZXF1ZXN0GjAua29pbm9uLnByb3ZpZGVyLnYxYWxwaGExLkRlbGV0ZVByb3ZpZGVyUmVzcG9uc2USbAoKTGlzdE1vZGVscxIrLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5MaXN0TW9kZWxzUmVxdWVzdBosLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5MaXN0TW9kZWxzUmVzcG9uc2UiA5ACARJqCgtDcmVhdGVNb2RlbBIsLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5DcmVhdGVNb2RlbFJlcXVlc3QaLS5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuQ3JlYXRlTW9kZWxSZXNwb25zZRJqCgtVcGRhdGVNb2RlbBIsLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5VcGRhdGVNb2RlbFJlcXVlc3QaLS5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuVXBkYXRlTW9kZWxSZXNwb25zZRJqCgtEZWxldGVNb2RlbBIsLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5EZWxldGVNb2RlbFJlcXVlc3QaLS5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuRGVsZXRlTW9kZWxSZXNwb25zZRJyCgxNb2RlbEZvcm1hdHMSLS5rb2lub24ucHJvdmlkZXIudjFhbHBoYTEuTW9kZWxGb3JtYXRzUmVxdWVzdBouLmtvaW5vbi5wcm92aWRlci52MWFscGhhMS5Nb2RlbEZvcm1hdHNSZXNwb25zZSIDkAIBQldaVWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL3Byb3ZpZGVyL3YxYWxwaGExO3Byb3ZpZGVydjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * Provider is an upstream model API of the org. It never holds the key.
@@ -87,6 +87,21 @@ export type Provider = Message<"koinon.provider.v1alpha1.Provider"> & {
    * @generated from field: google.protobuf.Timestamp updated_at = 11;
    */
   updatedAt?: Timestamp | undefined;
+
+  /**
+   * anthropic_workspace_id is the Anthropic workspace the gateway names for the provider's models,
+   * for an API key not scoped to a workspace. Empty when unset. An identifier, not a credential.
+   *
+   * @generated from field: string anthropic_workspace_id = 12;
+   */
+  anthropicWorkspaceId: string;
+
+  /**
+   * formats are the model formats the provider's type offers, preferred first (ADR 0069).
+   *
+   * @generated from field: repeated string formats = 13;
+   */
+  formats: string[];
 };
 
 /**
@@ -186,6 +201,22 @@ export type Model = Message<"koinon.provider.v1alpha1.Model"> & {
    * @generated from field: google.protobuf.Timestamp updated_at = 10;
    */
   updatedAt?: Timestamp | undefined;
+
+  /**
+   * format is the model's wire format: "openai" (chat completions) or "anthropic" (Messages)
+   * (ADR 0069).
+   *
+   * @generated from field: string format = 11;
+   */
+  format: string;
+
+  /**
+   * format_overridden is set when an admin chose the format; otherwise it follows the default and
+   * is re-derived when the default changes.
+   *
+   * @generated from field: bool format_overridden = 12;
+   */
+  formatOverridden: boolean;
 };
 
 /**
@@ -259,6 +290,13 @@ export type CreateProviderRequest = Message<"koinon.provider.v1alpha1.CreateProv
    * @generated from field: string api_key = 5;
    */
   apiKey: string;
+
+  /**
+   * anthropic_workspace_id is allowed for type "anthropic" only: wrkspc_ followed by letters and digits.
+   *
+   * @generated from field: string anthropic_workspace_id = 6;
+   */
+  anthropicWorkspaceId: string;
 };
 
 /**
@@ -317,6 +355,13 @@ export type UpdateProviderRequest = Message<"koinon.provider.v1alpha1.UpdateProv
    * @generated from field: optional string api_key = 5;
    */
   apiKey?: string | undefined;
+
+  /**
+   * anthropic_workspace_id replaces the workspace ID; set to "" it removes it.
+   *
+   * @generated from field: optional string anthropic_workspace_id = 6;
+   */
+  anthropicWorkspaceId?: string | undefined;
 };
 
 /**
@@ -444,6 +489,14 @@ export type CreateModelRequest = Message<"koinon.provider.v1alpha1.CreateModelRe
    * @deprecated
    */
   rates?: Rates | undefined;
+
+  /**
+   * format is the model's wire format, within what the provider offers. Empty means the default
+   * (ADR 0069); a value marks the model as overridden.
+   *
+   * @generated from field: string format = 6;
+   */
+  format: string;
 };
 
 /**
@@ -510,6 +563,14 @@ export type UpdateModelRequest = Message<"koinon.provider.v1alpha1.UpdateModelRe
    * @deprecated
    */
   clearRates: boolean;
+
+  /**
+   * format overrides the model's wire format, within what the provider offers; set to "" it goes
+   * back to the default and is no longer overridden.
+   *
+   * @generated from field: optional string format = 6;
+   */
+  format?: string | undefined;
 };
 
 /**
@@ -570,6 +631,61 @@ export type DeleteModelResponse = Message<"koinon.provider.v1alpha1.DeleteModelR
  */
 export const DeleteModelResponseSchema: GenMessage<DeleteModelResponse> = /*@__PURE__*/
   messageDesc(file_koinon_provider_v1alpha1_provider, 18);
+
+/**
+ * @generated from message koinon.provider.v1alpha1.ModelFormatsRequest
+ */
+export type ModelFormatsRequest = Message<"koinon.provider.v1alpha1.ModelFormatsRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+
+  /**
+   * @generated from field: string provider_id = 2;
+   */
+  providerId: string;
+
+  /**
+   * name is the model name; the default depends on its family.
+   *
+   * @generated from field: string name = 3;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message koinon.provider.v1alpha1.ModelFormatsRequest.
+ * Use `create(ModelFormatsRequestSchema)` to create a new message.
+ */
+export const ModelFormatsRequestSchema: GenMessage<ModelFormatsRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_provider_v1alpha1_provider, 19);
+
+/**
+ * @generated from message koinon.provider.v1alpha1.ModelFormatsResponse
+ */
+export type ModelFormatsResponse = Message<"koinon.provider.v1alpha1.ModelFormatsResponse"> & {
+  /**
+   * offered are the formats the provider offers, preferred first.
+   *
+   * @generated from field: repeated string offered = 1;
+   */
+  offered: string[];
+
+  /**
+   * default_format is the format the model gets unless overridden.
+   *
+   * @generated from field: string default_format = 2;
+   */
+  defaultFormat: string;
+};
+
+/**
+ * Describes the message koinon.provider.v1alpha1.ModelFormatsResponse.
+ * Use `create(ModelFormatsResponseSchema)` to create a new message.
+ */
+export const ModelFormatsResponseSchema: GenMessage<ModelFormatsResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_provider_v1alpha1_provider, 20);
 
 /**
  * ProviderService manages an org's model providers and models (ADR 0056) for the UI. It is the
@@ -649,6 +765,17 @@ export const ProviderService: GenService<{
     methodKind: "unary";
     input: typeof DeleteModelRequestSchema;
     output: typeof DeleteModelResponseSchema;
+  },
+  /**
+   * ModelFormats says which formats a model may use on a provider and which one it gets by default
+   * (ADR 0069), so the model form offers exactly what the server will accept.
+   *
+   * @generated from rpc koinon.provider.v1alpha1.ProviderService.ModelFormats
+   */
+  modelFormats: {
+    methodKind: "unary";
+    input: typeof ModelFormatsRequestSchema;
+    output: typeof ModelFormatsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_provider_v1alpha1_provider, 0);
