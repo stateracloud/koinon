@@ -121,6 +121,39 @@ var _ = Describe("WatchRun", func() {
 		Expect(last.GetRun().GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_CANCELED))
 	})
 
+	It("sends the final state and closes when the run finishes, found by the backstop poll", func(ctx SpecContext) {
+		// A short poll: the finish writes no event, so only the backstop poll can see it.
+		quick := newEnvOn(ctx, e, envOptions{watchPoll: 50 * time.Millisecond})
+		w := watch(ctx, f.owner.on(quick), f.org, f.run.GetId(), 0)
+		Expect(w.nextEvent(5 * time.Second).GetKind()).To(Equal("run.queued"))
+		ad.finish(ctx, run)
+		var last *runv1alpha1.WatchRunResponse
+		for msg := range w.items {
+			if msg.GetRun() != nil {
+				last = msg
+			}
+		}
+		Expect(<-w.done).To(Succeed(), "the stream closes after the final state")
+		Expect(last.GetRun().GetState().String()).To(Or(Equal("RUN_STATE_SUCCEEDED"), Equal("RUN_STATE_FAILED")))
+	})
+
+	It("sends a heartbeat on a quiet run, and none while events flow", func(ctx SpecContext) {
+		quiet := newEnvOn(ctx, e, envOptions{watchPoll: time.Hour, watchHeartbeat: 100 * time.Millisecond})
+		w := watch(ctx, f.owner.on(quiet), f.org, f.run.GetId(), 0)
+		beats := 0
+		timeout := time.After(5 * time.Second)
+		for beats < 2 {
+			select {
+			case msg := <-w.items:
+				if msg.GetHeartbeat() != nil {
+					beats++
+				}
+			case <-timeout:
+				Fail("no two heartbeats within 5s")
+			}
+		}
+	})
+
 	It("wakes streams on every API replica when another process writes", func(ctx SpecContext) {
 		replica := newEnvOn(ctx, e, envOptions{watchPoll: time.Hour})
 		w1 := watch(ctx, f.owner, f.org, f.run.GetId(), 1)
