@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -140,6 +141,14 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				if hasReqBytes && reqBytes >= 0 {
 					e.RequestBytes = reqBytes
 				}
+				if id := stringValue(attrs[gateway.LogFieldResponseID]); len(id) <= 256 {
+					e.ResponseID = id
+				}
+				e.Format = modelformat.OpenAI
+				if f := stringValue(attrs[gateway.LogFieldFormat]); f != "" {
+					e.Format = modelformat.Format(f)
+				}
+				e.Stream = boolValue(attrs[gateway.LogFieldStream])
 				org, name, ok := strings.Cut(agent, "/")
 				e.Agent = gateway.AgentRef{Org: org, Name: name}
 				switch {
@@ -173,6 +182,17 @@ func recordTime(t, observed uint64) time.Time {
 		}
 	}
 	return time.Now().UTC()
+}
+
+// boolValue reads a boolean attribute, or the strings "true" and "false" (CEL may log either).
+func boolValue(v *commonpb.AnyValue) bool {
+	switch x := v.GetValue().(type) {
+	case *commonpb.AnyValue_BoolValue:
+		return x.BoolValue
+	case *commonpb.AnyValue_StringValue:
+		return x.StringValue == "true"
+	}
+	return false
 }
 
 func stringValue(v *commonpb.AnyValue) string {

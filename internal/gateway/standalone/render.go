@@ -457,7 +457,9 @@ func build(s gateway.State, o Options) document {
 			gateway.LogFieldStatus:       `response.code`,
 			gateway.LogFieldMaxTokens:    `llm.params.max_tokens`,
 			gateway.LogFieldRequestBytes: `int(request.headers["content-length"])`,
-			MarkerField:                  `""`,
+			// The provider's response ID, to settle a stream cut short (ADR 0056, amendment 2026-10-28).
+			gateway.LogFieldResponseID: gateway.ResponseIDCEL,
+			MarkerField:                `""`,
 		}}},
 		Gateways: map[string]listener{"default": {Port: o.Port}},
 	}

@@ -62,7 +62,9 @@ func Stop(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, l budge
 // every other way a key runs out: an admin lowering a limit below the spend, an entry recorded
 // without a run, a run queued or parked while the agent's budget was spent.
 //
-// The limit stopped at and named is [budget.Status.Pick]'s. It returns the runs it canceled; an agent with budget left, or no limit, stops nothing.
+// The budget is the charges only: a key whose pushed limit is zero only because of reserves for
+// pending provider figures (ADR 0056, amendment 2026-10-28) stops nothing. The limit stopped at
+// and named is [budget.Status.Pick]'s. It returns the runs it canceled; an agent with budget left, or no limit, stops nothing.
 func StopSpent(ctx context.Context, db scheduler.DB, agent store.Agent, now time.Time) (int, error) {
 	n := 0
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {

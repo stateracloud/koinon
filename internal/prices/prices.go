@@ -37,6 +37,9 @@ const (
 // Model is the model a request asked for.
 type Model struct {
 	ID, Name, ProviderType string
+	// ProviderID is the provider that serves the model, at ProviderURL.
+	ProviderID  pgtype.UUID
+	ProviderURL string
 }
 
 // Resolution is the price found for a model at a time.
@@ -73,7 +76,7 @@ func Lookup(ctx context.Context, q *store.Queries, org pgtype.UUID, name string)
 	} else if err != nil {
 		return Model{}, err
 	}
-	return Model{ID: row.ID.String(), Name: row.Name, ProviderType: row.ProviderType}, nil
+	return Model{ID: row.ID.String(), Name: row.Name, ProviderType: row.ProviderType, ProviderID: row.ProviderID, ProviderURL: row.ProviderUrl}, nil
 }
 
 // BadPriceError means a stored price cannot be used (a rate that does not parse, an override

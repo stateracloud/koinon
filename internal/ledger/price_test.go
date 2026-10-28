@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -27,12 +28,25 @@ const (
 )
 
 // model serves name on a provider of the given type for the env's org.
-func (e *env) model(ctx SpecContext, typ, name string) {
+func (e *env) model(ctx SpecContext, typ, name string) pgtype.UUID {
+	return e.modelAt(ctx, typ, name, "https://example.com/v1")
+}
+
+// modelAt is model with the provider at url; it returns the provider's ID.
+func (e *env) modelAt(ctx SpecContext, typ, name, url string) pgtype.UUID {
 	var pid pgtype.UUID
-	Expect(db.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, $2, $3, 'https://example.com/v1') RETURNING id`,
-		e.org, uniq("prov"), typ).Scan(&pid)).To(Succeed())
+	Expect(db.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, $2, $3, $4) RETURNING id`,
+		e.org, uniq("prov"), typ, url).Scan(&pid)).To(Succeed())
 	_, err := db.Exec(ctx, `INSERT INTO models (org_id, provider_id, name) VALUES ($1, $2, $3)`, e.org, pid, name)
 	Expect(err).NotTo(HaveOccurred())
+	return pid
+}
+
+// provisional counts the env's provisional entries.
+func (e *env) provisional(ctx SpecContext) int {
+	var n int
+	Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE org_id = $1 AND provisional`, e.org).Scan(&n)).To(Succeed())
+	return n
 }
 
 func (e *env) usage(t time.Time, model string, in, out, cacheRead int64, gwCost string) ledger.Entry {
@@ -163,8 +177,8 @@ var _ = Describe("Cost truth", func() {
 		s := e.lastEntry(ctx)
 		Expect(s.Estimated).To(BeTrue())
 		Expect(s.InputTokens).To(Equal(int64(1_000_000)))
-		Expect(s.OutputTokens).To(Equal(int64(1000)), "an admitted response without usage settles at max_tokens")
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.202"))
+		Expect(s.OutputTokens).To(BeZero(), "nothing was streamed: no output is charged, never max_tokens")
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.20"))
 		var est map[string]any
 		Expect(json.Unmarshal(s.Estimate, &est)).To(Succeed())
 		Expect(est).To(HaveKey("estimate"))
@@ -175,7 +189,7 @@ var _ = Describe("Cost truth", func() {
 		Expect(rep).To(HaveLen(1))
 		Expect(rep[0].EstimatedRequests).To(Equal(int64(1)))
 		Expect(ledger.FormatUSD(rep[0].ReportedUsd)).To(Equal("0.00"))
-		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.202"))
+		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.20"))
 	})
 
 	It("raises, never lowers, the estimate with the learned p90", func(ctx SpecContext) {
@@ -231,7 +245,7 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(good.lastEntry(ctx).CostFlagged).To(BeTrue())
 	})
 
-	It("caps a settled output, so an absurd max_tokens blocks neither ingest nor the budgets of anyone else", func(ctx SpecContext) {
+	It("caps the bound of an absurd max_tokens, which blocks neither ingest nor the budgets of anyone else", func(ctx SpecContext) {
 		abuser := newEnv(ctx, uniq("org"), "", "10.00", 1<<62)
 		other := newEnv(ctx, uniq("org"), "", "10.00", 1<<62)
 		abuser.model(ctx, "openrouter", frontier)
@@ -252,10 +266,11 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(s.CostFlagged).To(BeTrue(), "a 2xx without usage is flagged")
 		Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
 		Expect(string(s.Estimate)).To(ContainSubstring(`"max_output_capped": true`))
-		// 128000 output tokens at $50 per million, five times, is $32; nothing near overflow.
+		// Nothing was streamed and the provider cannot settle it: only the input estimate is charged,
+		// never the max_tokens bound.
 		var sum string
-		Expect(db.QueryRow(ctx, `SELECT sum(cost_usd)::text FROM spend_entries WHERE org_id = $1`, abuser.org).Scan(&sum)).To(Succeed())
-		Expect(sum).To(HavePrefix("32.0"))
+		Expect(db.QueryRow(ctx, `SELECT sum(cost_usd + reserve_usd)::text FROM spend_entries WHERE org_id = $1`, abuser.org).Scan(&sum)).To(Succeed())
+		Expect(sum).To(HavePrefix("0.0"))
 
 		// The budgets of both orgs still compute.
 		_, err = ledger.AgentLimit(ctx, q, abuser.agent, time.Now())
@@ -292,28 +307,55 @@ var _ = Describe("An unusable stored price", func() {
 		x.RequestID, x.Status = uniq("req"), 502
 		_, err = ing.Ingest(ctx, []ledger.Entry{x})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(e.lastEntry(ctx).OutputTokens).To(Equal(int64(4000)), "a 5xx settles output at max_tokens")
+		Expect(e.lastEntry(ctx).OutputTokens).To(BeZero(), "a 5xx is charged what it streamed, nothing here")
 	})
 
-	It("settles an aborted response without usage at max_tokens, or at the entry's max_output when it is not logged", func(ctx SpecContext) {
+	It("charges an aborted response the usage the gateway logged and holds max_tokens back from the key while the provider's figure is pending", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
 		e.model(ctx, "openrouter", flash)
-		x := func(max int64) ledger.Entry {
+		x := func(max int64, responseID string) ledger.Entry {
 			return ledger.Entry{
 				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 200, MaxTokens: max,
-				InputKnown: true, InputTokens: 1000, RequestBytes: 3000, ResponseBytes: -1, Time: time.Now(),
+				InputKnown: true, InputTokens: 1000, RequestBytes: 3000, ResponseBytes: -1, ResponseID: responseID, Time: time.Now(),
 			}
 		}
-		_, err := ing.Ingest(ctx, []ledger.Entry{x(2000)})
+		By("a provider that cannot report its own usage: the logged usage is final")
+		_, err := ing.Ingest(ctx, []ledger.Entry{x(2000, "")})
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
 		Expect(s.Estimated).To(BeTrue())
-		// 1000 reported input at 0.20 + 2000 output at 2, per million.
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.0042"))
-		_, err = ing.Ingest(ctx, []ledger.Entry{x(0)})
+		Expect(s.OutputTokens).To(BeZero(), "no output was logged: none is charged, never max_tokens")
+		// 1000 reported input at 0.20 per million.
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.0002"))
+		Expect(e.provisional(ctx)).To(BeZero())
+
+		By("a provider that can: provisional, with the bound held back from the key, not in budgets or reports")
+		settling := &ledger.Ingester{DB: db, Log: ing.Log, Prices: ing.Prices, Sources: providerusage.Registry{"openrouter": &fakeSource{}}}
+		_, err = settling.Ingest(ctx, []ledger.Entry{x(2000, "gen-1")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(e.provisional(ctx)).To(Equal(1))
+		var reserve string
+		Expect(db.QueryRow(ctx, `SELECT reserve_usd::text FROM spend_entries WHERE org_id = $1 AND provisional`, e.org).Scan(&reserve)).To(Succeed())
+		// The bound: 1000 input + 2000 output is 0.0042; the charge 0.0002 is not held twice.
+		Expect(ledger.FormatUSD(reserve)).To(Equal("0.004"))
+		l, err := ledger.AgentLimit(ctx, q, e.agent, time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(l.Amount).To(BeNumerically("~", 100-0.0002-0.0042, 1e-9), "the key's limit holds the reserve back")
+		v, _, err := budget.New(db).GetAgent(ctx, e.org, e.agent.ID, money.MustParse("100.00"), time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(v.SpentToday).To(Equal(money.MustParse("0.0004")), "the budget counts the charges only")
+		rep, err := q.SpendReport(ctx, store.SpendReportParams{OrgID: e.org, Since: pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.0004"), "reports count the charges only")
+		Expect(ledger.FormatUSD(rep[0].ReservedUsd)).To(Equal("0.004"))
+		Expect(rep[0].ProvisionalRequests).To(Equal(int64(1)))
+
+		By("without max_tokens the entry's max_output is the bound, flagged")
+		_, err = ing.Ingest(ctx, []ledger.Entry{x(0, "")})
 		Expect(err).NotTo(HaveOccurred())
 		s = e.lastEntry(ctx)
 		Expect(string(s.Estimate)).To(ContainSubstring(`"max_output_fallback": true`))
+		Expect(s.OutputTokens).To(BeZero())
 	})
 })
 

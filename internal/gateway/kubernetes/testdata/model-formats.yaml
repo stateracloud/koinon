@@ -1,4 +1,4 @@
-# Revision a42cfde074ff2b5e
+# Revision 94319e0aca516c77
 apiVersion: v1
 data:
   catalog.json: '{"providers":{"acme.anthropic":{"models":{"claude-haiku-4-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}}}},"acme.openrouter":{"models":{"open/model":{"rates":{"input":"1","output":"2"}}}}}}'
@@ -25,7 +25,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  koinon-reload-probe: '{"keyHash":"sha256:24f73722c5435e0758dce5b5b716e559a2e6eb0a18c4ec01bd634b0a92ae21e9","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+  koinon-reload-probe: '{"keyHash":"sha256:848c70e546ca36aa75ce19b65b1825965bbb56cc9b36a34628bad35bb1921855","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -239,6 +239,8 @@ spec:
             name: koinon.max_tokens
           - expression: int(request.headers["content-length"])
             name: koinon.req_bytes
+          - expression: coalesce(response.headers["x-generation-id"])
+            name: koinon.response_id
       otlp:
         protocol: HTTP
         url: http://koinon-api.koinon.svc:4318

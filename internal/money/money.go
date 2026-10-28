@@ -66,6 +66,21 @@ func MustParse(s string) USD {
 	return u
 }
 
+// FromRat converts an exact non-negative amount in USD to pico-USD, rounding half up at the
+// twelfth fraction digit (a provider's own cost, a gateway's decimal). It fails on a negative
+// amount or one that does not fit.
+func FromRat(r *big.Rat) (USD, error) {
+	if r.Sign() < 0 {
+		return 0, fmt.Errorf("money: negative amount %s", r.FloatString(12))
+	}
+	x := new(big.Rat).Mul(r, big.NewRat(PerUSD, 1))
+	n := new(big.Int).Quo(new(big.Int).Add(new(big.Int).Mul(x.Num(), big.NewInt(2)), x.Denom()), new(big.Int).Mul(x.Denom(), big.NewInt(2)))
+	if !n.IsInt64() {
+		return 0, ErrOverflow
+	}
+	return USD(n.Int64()), nil
+}
+
 // FromCents converts cents (the unit of template limits) to USD.
 func FromCents(c int64) USD { return USD(c) * (PerUSD / 100) }
 
