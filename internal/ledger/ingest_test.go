@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -169,6 +170,45 @@ var _ = Describe("Ingester", func() {
 		Expect(payload).To(HaveKeyWithValue("spend_limit_usd", "0.05"))
 		Expect(payload).To(HaveKeyWithValue("limit", "agent_daily"))
 		Expect(payload).To(HaveKeyWithValue("failureClass", "budget"))
+	})
+
+	// RT1 on rc.5: two tasks of one agent created together, a daily limit, and the agent ended the
+	// day above it. The runs were not concurrent (one active run per agent is a unique index); the
+	// overshoot is the response in flight when the limit is reached. This holds that bound: the
+	// agent's other run is stopped with the budget reason, never starts on the spent budget, and
+	// only the in-flight response is recorded past the limit.
+	It("bounds an agent's overshoot to the response in flight, with two tasks queued together", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
+		first := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+		second, err := q.CreateRun(ctx, store.CreateRunParams{
+			OrgID: e.org, AgentID: e.agent.ID, TaskID: e.task(ctx).ID, MaxWallClockSeconds: 1800, MaxTokens: 100_000,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		claim := func() error {
+			_, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "agentd-2", LeaseSeconds: 60})
+			return err
+		}
+		Expect(claim()).To(MatchError(pgx.ErrNoRows), "one run per agent: the second task waits")
+
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.03", 1, 1), e.entry(time.Now(), "0.025", 1, 1)})
+		Expect(err).NotTo(HaveOccurred())
+		for _, id := range []pgtype.UUID{first.ID, second.ID} {
+			run := e.run(ctx, id)
+			Expect(run.State).To(Equal(store.RunStateCanceled))
+			Expect(run.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
+			Expect(run.OutcomeReason.String).To(HavePrefix("agent daily limit reached ($0.055 of $0.05"))
+		}
+		Expect(claim()).To(MatchError(pgx.ErrNoRows), "nothing starts on the spent budget")
+
+		By("the response that was in flight is still recorded, and is the whole overshoot")
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.02", 1, 1)})
+		Expect(err).NotTo(HaveOccurred())
+		l, err := ledger.AgentLimit(ctx, q, e.agent, time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(l.Amount).To(BeZero())
+		var spent string
+		Expect(db.QueryRow(ctx, `SELECT sum(cost_usd)::text FROM spend_entries WHERE org_id = $1`, e.org).Scan(&spent)).To(Succeed())
+		Expect(ledger.FormatUSD(spent)).To(Equal("0.075"), "limit $0.05 + the crossing request's $0.005 + the one in flight")
 	})
 
 	It("counts entries of unknown orgs and agents as unattributed", func(ctx SpecContext) {
