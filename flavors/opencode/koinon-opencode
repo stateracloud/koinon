@@ -63,10 +63,12 @@ koinon_extra_arg() {
 koinon_parse_args "$@"
 shift "$koinon_shift"
 
-# The provider entry for the model's format: one row per format, as in internal/flavor.
+# The provider entry for the model's format: one row per format. This case and ModelEntries in
+# internal/flavor/flavor.go are the two places to add a row; test/flavors checks that they agree.
 case $model_format in
   openai) entry=koinon ;;
   anthropic) entry=koinon-anthropic ;;
+  *) koinon_die "no provider entry for --model-format '$model_format'" ;;
 esac
 if [ -n "$cache_format" ] && [ "$model_format" != openai ]; then
   koinon_die "--cache-$cache_format applies to the openai model format only"

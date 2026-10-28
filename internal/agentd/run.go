@@ -1304,7 +1304,7 @@ func (r *runner) modelFacts(ctx context.Context, name string) (modelFacts, error
 	} else if err != nil {
 		return modelFacts{}, err
 	}
-	f := modelFacts{ProviderType: m.ProviderType, Format: modelformat.Format(m.Format), Cache: prices.CacheNone}
+	f := modelFacts{ProviderType: m.ProviderType, Format: m.Format, Cache: prices.CacheNone}
 	res, err := r.p.cfg.Prices.Resolve(ctx, r.q, r.run.OrgID, m, time.Now())
 	if err != nil {
 		return f, nil

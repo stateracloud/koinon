@@ -45,7 +45,9 @@ type Descriptor struct {
 	// (session/set_config_option), and the entry script picks the same entry from its
 	// FormatArg. OpenCode names models <provider>/<model>. Empty when the flavor takes its model
 	// from the launch command alone. A format with no row cannot run on the flavor; a new format
-	// is one row here, one in the harness configuration and one in the gateway's table.
+	// is one row here, one in the flavor's entry script (the case on --model-format in
+	// flavors/<flavor>/koinon-<flavor>, with its provider in the configuration) and one in the
+	// gateway's table. test/flavors checks that the script and this table agree.
 	ModelEntries map[modelformat.Format]string
 	// FormatArg is the launch switch that takes the model's format, so the entry script uses the
 	// matching entry. "" when the flavor has one entry only.

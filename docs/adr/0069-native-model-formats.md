@@ -330,8 +330,15 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
   nothing. A flavor spec fails if OpenCode's set changes.
 - **Resume across the switch:** a session created under `koinon/` loads under `koinon-anthropic/` and
   the other way round, with its history (a tool-call turn included) in the next request and the next
-  request in the new format. No new session is needed. Real Anthropic's validation of replayed
-  tool-call IDs is unverified (the specs use the fake model server).
+  request in the new format. No new session is needed. OpenCode rewrites every character outside
+  `[a-zA-Z0-9_-]` in a tool-call ID to `_` when it builds a Messages request
+  (`scrubToolCallID`, `anthropic-messages.ts`), which Anthropic's ID pattern needs. A spec resumes a
+  session whose tool call is `functions.write:0` and sees `functions_write_0`.
+- **The OpenRouter flip** deletes the two pin rows in `internal/modelformat/modelformat.go`
+  (`anthropic/` and `claude-` for OpenRouter); the startup re-derivation moves every model that is
+  not overridden. Nothing else changes: a flipped model becomes `CacheNative` through
+  `CacheModeFor`.
 - **Sandbox auth:** both entries send `Authorization: Bearer <placeholder>`, the header the profile's
-  `authStyle bearer` credential names, and the gateway's key policy reads. The flavor spec asserts
+  `authStyle bearer` credential names, and the gateway's key policy reads (OpenShell v0.1.5 rewrites the placeholder in any header, so
+  the header is chosen for the key policy). The flavor spec asserts
   one `Authorization` value and no `x-api-key` on every Messages request.
