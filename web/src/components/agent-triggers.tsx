@@ -99,7 +99,7 @@ export function AgentTriggers({ agent, canEdit }: { agent: Agent; canEdit: boole
                   <Button
                     variant="outline"
                     size="sm"
-                    aria-label={`Run ${t.id} now`}
+                    aria-label={`Run now: ${t.id}`}
                     disabled={run.isPending}
                     onClick={() => {
                       setStarted(undefined)

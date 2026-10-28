@@ -128,7 +128,7 @@ for (const vp of viewports) {
       await expect(section).toContainText('Next run: vendor/a-model, set on this agent.')
       expect(seen.setModel).toEqual([expect.objectContaining({ agentId, model: 'vendor/a-model' })])
 
-      await page.getByRole('button', { name: 'Run daily-check now' }).click()
+      await page.getByRole('button', { name: 'Run now: daily-check' }).click()
       await expect(page.getByRole('link', { name: 'Open the task' })).toHaveAttribute('href', '/tasks/t-9')
       expect(seen.runs).toEqual([expect.objectContaining({ agentId, triggerId: 'daily-check' })])
       await expectNoHorizontalScroll(page)
