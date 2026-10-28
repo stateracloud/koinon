@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Standard networking.k8s.io/v1 policies only. None of the three MCP servers authenticates the
+# caller (fakecicost wants a bearer token but is not a security boundary), so only Koinon's gateway
+# may connect, and nothing may leave the namespace except DNS lookups.
+#
+# The gateway pods, as charts/koinon renders them in namespace "koinon":
+#   gateway.mode=standalone: app.kubernetes.io/name=koinon, app.kubernetes.io/component=gateway
+#   gateway.mode=kubernetes: gateway.networking.k8s.io/gateway-name (set by the controller)
+# Both peers are listed; the one that does not exist matches nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# Egress: DNS only. The motherduck data is baked into its image and the Prometheus history is built
+# in an init container, so no pod needs anything else.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-dns-only
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-to-motherduck
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-motherduck
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 8000}
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: koinon
+              app.kubernetes.io/component: gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon
+          podSelector:
+            matchExpressions:
+              - {key: gateway.networking.k8s.io/gateway-name, operator: Exists}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-to-fakecicost
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-fakecicost
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 8080}
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: koinon
+              app.kubernetes.io/component: gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon
+          podSelector:
+            matchExpressions:
+              - {key: gateway.networking.k8s.io/gateway-name, operator: Exists}
+---
+# Port 8080 is the MCP server. Prometheus itself listens on 127.0.0.1:9090 inside the pod and is not
+# reachable from outside it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-to-prometheus-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-prometheus
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 8080}
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: koinon
+              app.kubernetes.io/component: gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon
+          podSelector:
+            matchExpressions:
+              - {key: gateway.networking.k8s.io/gateway-name, operator: Exists}
