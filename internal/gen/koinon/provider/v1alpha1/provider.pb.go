@@ -1488,10 +1488,10 @@ type ProviderTypeInfoResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// formats are the model formats the type offers, preferred first.
 	Formats []*ModelFormat `protobuf:"bytes,1,rep,name=formats,proto3" json:"formats,omitempty"`
-	// workspace_id is set when the type takes an Anthropic workspace ID.
-	WorkspaceId   bool `protobuf:"varint,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// takes_workspace_id is set when the type takes an Anthropic workspace ID.
+	TakesWorkspaceId bool `protobuf:"varint,2,opt,name=takes_workspace_id,json=takesWorkspaceId,proto3" json:"takes_workspace_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ProviderTypeInfoResponse) Reset() {
@@ -1531,9 +1531,9 @@ func (x *ProviderTypeInfoResponse) GetFormats() []*ModelFormat {
 	return nil
 }
 
-func (x *ProviderTypeInfoResponse) GetWorkspaceId() bool {
+func (x *ProviderTypeInfoResponse) GetTakesWorkspaceId() bool {
 	if x != nil {
-		return x.WorkspaceId
+		return x.TakesWorkspaceId
 	}
 	return false
 }
@@ -1658,10 +1658,10 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\x0edefault_format\x18\x01 \x01(\tR\rdefaultFormat\"D\n" +
 	"\x17ProviderTypeInfoRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
-	"\x04type\x18\x02 \x01(\tR\x04type\"~\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\"\x89\x01\n" +
 	"\x18ProviderTypeInfoResponse\x12?\n" +
-	"\aformats\x18\x01 \x03(\v2%.koinon.provider.v1alpha1.ModelFormatR\aformats\x12!\n" +
-	"\fworkspace_id\x18\x02 \x01(\bR\vworkspaceId2\x8d\t\n" +
+	"\aformats\x18\x01 \x03(\v2%.koinon.provider.v1alpha1.ModelFormatR\aformats\x12,\n" +
+	"\x12takes_workspace_id\x18\x02 \x01(\bR\x10takesWorkspaceId2\x8d\t\n" +
 	"\x0fProviderService\x12u\n" +
 	"\rListProviders\x12..koinon.provider.v1alpha1.ListProvidersRequest\x1a/.koinon.provider.v1alpha1.ListProvidersResponse\"\x03\x90\x02\x01\x12s\n" +
 	"\x0eCreateProvider\x12/.koinon.provider.v1alpha1.CreateProviderRequest\x1a0.koinon.provider.v1alpha1.CreateProviderResponse\x12s\n" +
