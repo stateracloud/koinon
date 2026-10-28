@@ -345,7 +345,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Model"
+                $ref: "#/components/schemas/ModelCreated"
         default:
           $ref: "#/components/responses/Error"
   /models/{modelId}:
@@ -474,7 +474,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PriceVersion"
+                $ref: "#/components/schemas/PriceSaved"
         default:
           $ref: "#/components/responses/Error"
   /prices/{name}:
@@ -958,10 +958,16 @@ components:
         disabledReason: {type: string}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
-        warnings:
-          type: array
-          items: {type: string}
-          description: Set when the model is created. For example, its price has a cache_read price but its provider format has no prompt-cache mode, so it runs uncached (ADR 0068).
+    ModelCreated:
+      description: The model just created, with the warnings of the save.
+      allOf:
+        - $ref: "#/components/schemas/Model"
+        - type: object
+          properties:
+            warnings:
+              type: array
+              items: {type: string}
+              description: Only on this response. For example, the model's price has a cache_read price but its provider format cannot cache, so it runs uncached (ADR 0068).
     ModelList:
       type: object
       required: [models]
@@ -1112,10 +1118,16 @@ components:
         retiredAt: {type: string, format: date-time}
         createdBy: {type: string}
         createdAt: {type: string, format: date-time}
-        warnings:
-          type: array
-          items: {type: string}
-          description: Set when the price is saved. For example, a cache_read price whose provider format has no prompt-cache mode runs uncached (ADR 0068).
+    PriceSaved:
+      description: The price version just saved, with the warnings of the save.
+      allOf:
+        - $ref: "#/components/schemas/PriceVersion"
+        - type: object
+          properties:
+            warnings:
+              type: array
+              items: {type: string}
+              description: Only on this response. For example, a cache_read price whose provider format cannot cache runs uncached (ADR 0068).
     PriceList:
       type: object
       required: [prices]
