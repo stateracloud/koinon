@@ -400,12 +400,12 @@ func (r *runner) execute(ctx context.Context) error {
 		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
 	}
 	r.model, r.modelSource = model, source
-	r.log.Info("the run's model", "model", model, "source", string(source))
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
 	facts, err := r.modelFacts(fctx, model)
 	if err != nil {
 		return r.dbErr(ctx, "look up the model", err)
 	}
+	r.log.Info("the run's model", "model", model, "source", string(source), "format", string(facts.Format))
 	ptype, format := facts.ProviderType, facts.Format
 	marker, unknown := cacheMarker(facts.Cache)
 	if unknown {
