@@ -1250,6 +1250,7 @@ type Agent struct {
 	UnhealthyAt     pgtype.Timestamptz
 	UnhealthyReason pgtype.Text
 	ResumedAt       pgtype.Timestamptz
+	Model           pgtype.Text
 }
 
 type AgentBudget struct {
@@ -1657,6 +1658,17 @@ type Provider struct {
 	AnthropicWorkspaceID pgtype.Text
 }
 
+type ProviderEchoCheck struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+	Model      string
+	Unchanged  bool
+	Sent       string
+	Received   string
+	CheckedAt  pgtype.Timestamptz
+	CheckedBy  pgtype.UUID
+}
+
 type Question struct {
 	OrgID          pgtype.UUID
 	ID             pgtype.UUID
@@ -1809,6 +1821,7 @@ type SpendEntry struct {
 	Provisional      bool
 	ReserveUsd       pgtype.Numeric
 	ResponseID       pgtype.Text
+	Principal        string
 }
 
 type SpendEntryRevision struct {

@@ -43,7 +43,7 @@ func (s *Server) budgetError(err error) error {
 
 func orgBudgetProto(v budget.OrgView) *budgetv1alpha1.OrgBudget {
 	out := &budgetv1alpha1.OrgBudget{
-		SpentThisMonthUsd: v.SpentThisMonth.String(), EstimatedThisMonthUsd: v.EstimatedThisMonth.String(), MonthStart: timestamppb.New(v.MonthStart),
+		SpentThisMonthUsd: v.SpentThisMonth.String(), EstimatedThisMonthUsd: v.EstimatedThisMonth.String(), SystemChecksThisMonthUsd: v.SystemChecksThisMonth.String(), MonthStart: timestamppb.New(v.MonthStart),
 	}
 	if v.MonthlyCap != nil {
 		out.MonthlyCapUsd = v.MonthlyCap.String()

@@ -15,7 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/triggers/schedule"
+	"github.com/stateracloud/koinon/internal/triggers"
 )
 
 // update rewrites the golden files: go test ./internal/agentd -update.
@@ -101,7 +101,7 @@ var _ = Describe("Prompt shapes (golden)", func() {
 		loc, err := time.LoadLocation("Europe/Tallinn")
 		Expect(err).NotTo(HaveOccurred())
 		due := time.Date(2026, 10, 27, 6, 0, 0, 0, time.UTC)
-		golden("prompt_scheduled_task", agentd.AssemblePrompt(agentd.PromptNew, schedule.TaskTitle("morning-triage", due, loc), "[Koinon] MCP notice.",
+		golden("prompt_scheduled_task", agentd.AssemblePrompt(agentd.PromptNew, triggers.ScheduleTaskTitle("morning-triage", due, loc), "[Koinon] MCP notice.",
 			[]string{"Triage the new issues and summarise them for the team."}, ""))
 	})
 	It("a reset session with the outcomes after the messages", func() {

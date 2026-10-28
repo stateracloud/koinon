@@ -28,6 +28,7 @@ security:
   - bearerAuth: []
 tags:
   - name: providers
+  - name: agents
   - name: models
   - name: mcp
   - name: tokens
@@ -110,6 +111,36 @@ paths:
       responses:
         "204":
           description: Deleted.
+        default:
+          $ref: "#/components/responses/Error"
+  /providers/{providerId}/echo-check:
+    parameters:
+      - $ref: "#/components/parameters/providerId"
+    post:
+      tags: [providers]
+      operationId: checkProviderEcho
+      summary: Check whether the provider changes the text it is sent.
+      description: |
+        Sends one tiny chat request through the gateway to the given model of the provider, asking
+        it to repeat a fixed line (a name, an address-like string and a Kubernetes namespace)
+        exactly, and compares the reply with the line. A provider-side setting that masks personal
+        data, such as OpenRouter's, changes the line, and masking corrupts agent work: names, paths
+        and namespaces in prompts and tool calls are no longer the ones the agent meant. The request
+        is metered like any request. It runs only when called; nothing schedules it. The latest
+        result is kept on the provider (`echoCheck`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EchoCheckRequest"
+      responses:
+        "200":
+          description: The result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EchoCheck"
         default:
           $ref: "#/components/responses/Error"
   /mcp-servers:
@@ -638,6 +669,80 @@ paths:
                 $ref: "#/components/schemas/AgentBudget"
         default:
           $ref: "#/components/responses/Error"
+  /agents/{agentId}/model:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [agents]
+      operationId: getAgentModel
+      summary: The model an agent's next run uses, and where that choice comes from.
+      responses:
+        "200":
+          description: The agent's model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModel"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [agents]
+      operationId: setAgentModel
+      summary: Set an agent's model, or clear it with `default`.
+      description: |
+        A setting of the agent, not a new version: it applies to the next run. The model must be
+        one the org serves and has a price for. The change is audited with the old and new value.
+        Precedence: this setting, then the active version's model, then the org default. If the
+        model later stops being served or priced, the agent's runs fail with a reason that says so,
+        until the setting is changed; they never fall back to another model.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentModelUpdate"
+      responses:
+        "200":
+          description: The agent's model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModel"
+        default:
+          $ref: "#/components/responses/Error"
+  /agents/{agentId}/triggers/{triggerId}/run:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: triggerId
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$'}
+    post:
+      tags: [agents]
+      operationId: runAgentTrigger
+      summary: Fire a schedule trigger now ("run now").
+      description: |
+        Fires one schedule trigger of the agent's active version immediately, through the same path
+        the scheduler uses: a task created by the trigger, with the trigger's instruction and a
+        queued run. The agent's status, health, concurrency limit and budgets apply as they do to
+        a scheduled fire. The task's events record `fire: manual`, so reports can tell the two
+        apart. Answers 409 when the agent cannot take a run (not active, or unhealthy) and 404 when
+        the active version has no such schedule trigger.
+      responses:
+        "202":
+          description: The task that was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerRun"
+        default:
+          $ref: "#/components/responses/Error"
   /audit:
     get:
       tags: [audit]
@@ -779,8 +884,81 @@ components:
         disabledReason:
           type: string
           description: Set while a declared provider of the same name shadows this one; it is not served.
+        echoCheck: {$ref: "#/components/schemas/EchoCheck"}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    EchoCheckRequest:
+      type: object
+      required: [model]
+      properties:
+        model:
+          type: string
+          description: A model of the provider that the org serves and has a price for.
+    EchoCheck:
+      type: object
+      required: [model, unchanged, sent, received, diff, checkedAt]
+      description: The latest echo check of a provider.
+      properties:
+        model: {type: string}
+        unchanged:
+          type: boolean
+          description: True when the reply was the line, character for character.
+        sent: {type: string, description: The line the model was asked to repeat.}
+        received: {type: string, description: The model's reply.}
+        diff:
+          type: array
+          description: The difference between the line and the reply, in order.
+          items:
+            type: object
+            required: [op, text]
+            properties:
+              op:
+                type: string
+                enum: [equal, deleted, inserted]
+                description: "`deleted` is in the line but not in the reply, `inserted` the other way."
+              text: {type: string}
+        checkedAt: {type: string, format: date-time}
+    AgentModel:
+      type: object
+      required: [setting, effective, source, available]
+      properties:
+        setting:
+          type: string
+          description: The agent's own setting; `default` when it has none.
+        versionModel:
+          type: string
+          description: The active version's model; unset when it names none.
+        effective:
+          type: string
+          description: The model the next run uses; empty when `source` is `none`.
+        source:
+          type: string
+          enum: [agent, version, org_default, none]
+          description: Where `effective` comes from, in order of precedence.
+        problem:
+          type: string
+          description: Set when the agent's setting is no longer served or priced; runs fail until it is changed.
+        available:
+          type: array
+          description: The models the org serves and has a price for.
+          items:
+            type: object
+            required: [name, provider]
+            properties:
+              name: {type: string}
+              provider: {type: string}
+    AgentModelUpdate:
+      type: object
+      required: [model]
+      properties:
+        model:
+          type: string
+          description: "`default`, or a model the org serves and has a price for."
+    TriggerRun:
+      type: object
+      required: [taskId]
+      properties:
+        taskId: {type: string, format: uuid}
     ModelFormat:
       type: string
       example: anthropic
@@ -1239,12 +1417,23 @@ components:
         reservedUsd: {type: string, description: "What the provisional requests hold back from the gateway keys' limits (their max_tokens bound minus the charge). Not a cost and not counted by budgets; released when they settle."}
     SpendReport:
       type: object
-      required: [since, models]
+      required: [since, models, systemChecks]
       properties:
         since: {type: string, format: date-time}
         models:
           type: array
+          description: Spend of agents, per model.
           items: {$ref: "#/components/schemas/SpendLine"}
+        systemChecks:
+          type: object
+          description: |
+            Requests Koinon made itself, such as the provider echo check, which belong to no agent.
+            They are billed like any request and count toward the org's monthly cap and the platform
+            ceiling, but not toward any agent's limit.
+          required: [requests, costUsd]
+          properties:
+            requests: {type: integer, format: int64}
+            costUsd: {type: string}
     AuditEvent:
       type: object
       required: [id, actorKind, actorId, action, targetKind, targetId, summary, requestId, createdAt, chainSeq, prevHash, hash]

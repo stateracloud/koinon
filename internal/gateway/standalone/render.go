@@ -493,7 +493,7 @@ func build(s gateway.State, o Options) document {
 	// the reload probe key (stamp fills in its hash).
 	doc.LLM = &llmSection{
 		Policies: llmPolicies{
-			APIKey:        keyPolicy(keys, s.Limits, allowed),
+			APIKey:        keyPolicy(keys, s, allowed),
 			Authorization: authorization{Rules: []string{admitRule()}},
 			Transformations: transformations{Request: headerTransform{Set: map[string]string{
 				gateway.OrgHeader: `default(apiKey.org, "")`,
@@ -579,7 +579,7 @@ func build(s gateway.State, o Options) document {
 			FailureMode: "failOpen",
 			PrefixMode:  "always",
 			Policies: mcpPolicies{
-				APIKey:           keyPolicy(keys, nil, nil),
+				APIKey:           keyPolicy(keys, gateway.State{}, nil),
 				MCPAuthorization: mcpAuthorization{Rules: toolRules(s.Tools)},
 				// Targets learn which agent calls from this header (gateway.AgentHeader);
 				// set overwrites whatever the client sent.
@@ -634,7 +634,8 @@ func probeKey(withBudget bool) apiKey {
 	return k
 }
 
-func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit, allowed map[string][]string) apiKeyPolicy {
+func keyPolicy(keys []gateway.Key, s gateway.State, allowed map[string][]string) apiKeyPolicy {
+	limits := s.Limits
 	p := apiKeyPolicy{
 		Mode:     "strict",
 		Location: keyLocation{Header: headerLocation{Name: "authorization", Prefix: "Bearer "}},
@@ -644,11 +645,9 @@ func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit, al
 		ak := apiKey{KeyHash: k.Hash, Metadata: keyMetadata{Name: k.ID, Agent: k.Agent.String(), Org: k.Agent.Org}}
 		if allowed != nil {
 			// An org without served models gets the empty list: it can request nothing. Koinon's own
-			// MCP keys (the prober's and the executor's) request no model.
-			names := append([]string{}, allowed[k.Agent.Org]...)
-			if gateway.IsInternalAgent(k.Agent) {
-				names = []string{}
-			}
+			// MCP keys (the prober's and the executor's) request no model; a system key requests the
+			// models State.Models names, and a key with an entry there only those.
+			names := s.AllowedModels(k.Agent, allowed[k.Agent.Org])
 			ak.AllowedModels = &names
 		}
 		if l, ok := limits[k.Agent]; ok {

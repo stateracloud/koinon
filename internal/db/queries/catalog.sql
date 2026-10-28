@@ -202,3 +202,17 @@ LIMIT 1;
 SELECT key_file::text FROM gateway_served_models
 WHERE org_id = @org_id AND provider_id = @provider_id AND key_file IS NOT NULL
 LIMIT 1;
+
+-- name: UpsertProviderEchoCheck :one
+-- The latest echo check of a provider replaces the one before it.
+INSERT INTO provider_echo_checks (org_id, provider_id, model, unchanged, sent, received, checked_by)
+VALUES (@org_id, @provider_id, @model, @unchanged, @sent, @received, sqlc.narg(checked_by))
+ON CONFLICT (org_id, provider_id) DO UPDATE
+SET model = EXCLUDED.model, unchanged = EXCLUDED.unchanged, sent = EXCLUDED.sent,
+    received = EXCLUDED.received, checked_at = now(), checked_by = EXCLUDED.checked_by
+RETURNING *;
+
+-- name: ListProviderEchoChecks :many
+SELECT * FROM provider_echo_checks
+WHERE org_id = @org_id
+ORDER BY provider_id;

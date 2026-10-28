@@ -98,3 +98,10 @@ SELECT a.org_id, a.id AS agent_id, a.activated_at
 FROM agents a
 JOIN orgs o ON o.id = a.org_id AND o.deleted_at IS NULL
 WHERE a.status = 'active';
+
+-- name: SetAgentModel :one
+-- An agent's model setting (NULL: use the version's model, then the org default). Not a new version.
+UPDATE agents
+SET model = sqlc.narg(model)
+WHERE org_id = @org_id AND id = @id AND status <> 'archived'
+RETURNING *;

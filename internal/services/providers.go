@@ -7,11 +7,13 @@ import (
 	"errors"
 
 	connect "connectrpc.com/connect/v2"
+	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
+	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
@@ -85,9 +87,23 @@ func (s *Server) ListProviders(ctx context.Context, req *providerv1alpha1.ListPr
 	if err != nil {
 		return nil, s.catalogError(err)
 	}
+	rows, err := s.q.ListProviderEchoChecks(ctx, c.org)
+	if err != nil {
+		return nil, s.dbError(err, "provider")
+	}
+	checks := map[pgtype.UUID]modelcheck.Result{}
+	for _, r := range rows {
+		checks[r.ProviderID] = modelcheck.FromRow(r)
+	}
 	res := &providerv1alpha1.ListProvidersResponse{}
 	for _, p := range list {
-		res.Providers = append(res.Providers, providerProto(p))
+		pp := providerProto(p)
+		if id, err := parseID("provider_id", p.ID); err == nil {
+			if r, ok := checks[id]; ok {
+				pp.EchoCheck = echoProto(r)
+			}
+		}
+		res.Providers = append(res.Providers, pp)
 	}
 	return res, nil
 }
@@ -196,6 +212,59 @@ func (s *Server) DeleteModel(ctx context.Context, req *providerv1alpha1.DeleteMo
 		return nil, s.catalogError(err)
 	}
 	return &providerv1alpha1.DeleteModelResponse{}, nil
+}
+
+// CheckProviderEcho implements ProviderService. Admins and owners.
+func (s *Server) CheckProviderEcho(ctx context.Context, req *providerv1alpha1.CheckProviderEchoRequest) (*providerv1alpha1.CheckProviderEchoResponse, error) {
+	c, err := s.providerCaller(ctx, req.GetOrgId())
+	if err != nil {
+		return nil, err
+	}
+	if s.modelCheck == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, "the echo check is not configured")
+	}
+	pid, err := parseID("provider_id", req.GetProviderId())
+	if err != nil {
+		return nil, err
+	}
+	r, err := s.modelCheck.Check(requestCtx(ctx), c.org, pid, req.GetModel(), c.auditActor(), c.actor())
+	if err != nil {
+		return nil, s.echoError(err)
+	}
+	return &providerv1alpha1.CheckProviderEchoResponse{EchoCheck: echoProto(r)}, nil
+}
+
+func (s *Server) echoError(err error) error {
+	var inv *modelcheck.InvalidError
+	var un *modelcheck.UnavailableError
+	var busy *modelcheck.BusyError
+	switch {
+	case errors.As(err, &busy):
+		return connect.NewError(connect.CodeFailedPrecondition, busy.Error())
+	case errors.As(err, &inv):
+		return connect.NewError(connect.CodeInvalidArgument, inv.Msg)
+	case errors.As(err, &un):
+		return connect.NewError(connect.CodeUnavailable, un.Msg)
+	case errors.Is(err, modelcheck.ErrNotFound):
+		return connect.NewError(connect.CodeNotFound, "provider not found")
+	}
+	return s.dbError(err, "provider")
+}
+
+var echoOps = map[modelcheck.Op]providerv1alpha1.EchoDiffSegment_Op{
+	modelcheck.Equal:    providerv1alpha1.EchoDiffSegment_OP_EQUAL,
+	modelcheck.Deleted:  providerv1alpha1.EchoDiffSegment_OP_DELETED,
+	modelcheck.Inserted: providerv1alpha1.EchoDiffSegment_OP_INSERTED,
+}
+
+func echoProto(r modelcheck.Result) *providerv1alpha1.EchoCheck {
+	out := &providerv1alpha1.EchoCheck{
+		Model: r.Model, Unchanged: r.Unchanged, Sent: r.Sent, Received: r.Received, CheckedAt: timestamppb.New(r.CheckedAt),
+	}
+	for _, d := range r.Diff {
+		out.Diff = append(out.Diff, &providerv1alpha1.EchoDiffSegment{Op: echoOps[d.Op], Text: d.Text})
+	}
+	return out
 }
 
 // ModelFormats implements ProviderService. Admins and owners.

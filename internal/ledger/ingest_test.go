@@ -142,6 +142,68 @@ var _ = Describe("Ingester", func() {
 		Expect(e.run(ctx, r.ID).OutcomeReason.String).To(Or(HavePrefix("agent daily limit"), HavePrefix("org monthly cap")))
 	})
 
+	Describe("the org's system key (the provider echo check)", func() {
+		sysEntry := func(e *env, t time.Time, cost string) ledger.Entry {
+			x := e.entry(t, cost, 1, 1)
+			x.Agent = gateway.AgentRef{Org: e.slug, Name: gateway.ModelCheckAgentName}
+			x.KeyID = "k-system"
+			return x
+		}
+
+		It("records the request with the principal system, no agent and no run, and counts it against the org", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+			e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+			res, err := ing.Ingest(ctx, []ledger.Entry{sysEntry(e, time.Now(), "0.03")})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Recorded).To(Equal(1))
+			var principal string
+			var agentNull, runNull bool
+			Expect(db.QueryRow(ctx, `SELECT principal, agent_id IS NULL, run_id IS NULL FROM spend_entries WHERE org_id = $1`, e.org).Scan(&principal, &agentNull, &runNull)).To(Succeed())
+			Expect(principal).To(Equal("system"))
+			Expect(agentNull && runNull).To(BeTrue())
+
+			agentSpent, err := q.GetAgentSpendSince(ctx, store.GetAgentSpendSinceParams{OrgID: e.org, AgentID: e.agent.ID, Since: pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ledger.FormatUSD(agentSpent)).To(Equal("0.00"), "not the agent's spend")
+			orgSpent, err := q.GetOrgSpendSince(ctx, store.GetOrgSpendSinceParams{OrgID: e.org, Since: pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ledger.FormatUSD(orgSpent)).To(Equal("0.03"), "the org's")
+		})
+
+		It("stops the org's runs when it reaches the org cap, and wakes the reconciler", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+			_, err := db.Exec(ctx, `INSERT INTO org_budgets (org_id, monthly_cap, updated_by) VALUES ($1, 0.05, 'test')`, e.org)
+			Expect(err).NotTo(HaveOccurred())
+			r := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+			_, err = ing.Ingest(ctx, []ledger.Entry{sysEntry(e, time.Now(), "0.04")})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, r.ID).State).NotTo(Equal(store.RunStateCanceled))
+			_, err = ing.Ingest(ctx, []ledger.Entry{sysEntry(e, time.Now(), "0.02")})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, r.ID).State).To(Equal(store.RunStateCanceled))
+			Expect(e.run(ctx, r.ID).OutcomeReason.String).To(HavePrefix("org monthly cap"))
+		})
+
+		It("does not stop runs for the key's own daily budget, but the next limit pushed is zero", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+			r := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+			_, err := ing.Ingest(ctx, []ledger.Entry{sysEntry(e, time.Now(), "0.11")})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, r.ID).State).NotTo(Equal(store.RunStateCanceled))
+			l, err := ledger.SystemLimit(ctx, q, e.org, time.Now())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(l.Amount).To(BeZero())
+			Expect(l.Unit).To(Equal(gateway.USD))
+		})
+
+		It("leaves an entry of an org that does not exist unattributed", func(ctx SpecContext) {
+			x := ledger.Entry{RequestID: uniq("req"), KeyID: "k", Agent: gateway.AgentRef{Org: "no-such-org", Name: gateway.ModelCheckAgentName}, Model: "m", InputTokens: 1, OutputTokens: 1, CostUSD: "0.01", Time: time.Now()}
+			res, err := ing.Ingest(ctx, []ledger.Entry{x})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Unattributed).To(Equal(1))
+		})
+	})
+
 	It("cancels the run with a task event when the agent's spend reaches its limit", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
 		t := e.task(ctx)
@@ -303,7 +365,8 @@ var _ = Describe("InsertSpendEntry", func() {
 	It("records an entry that holds nothing without the settlement fields set", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
 		_, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
-			OrgID: e.org, AgentID: e.agent.ID, RequestID: uniq("req"), KeyID: "k-test", Model: "m",
+			Principal: "agent",
+			OrgID:     e.org, AgentID: e.agent.ID, RequestID: uniq("req"), KeyID: "k-test", Model: "m",
 			CostUsd: "0.5", Priced: true, OccurredAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		})
 		Expect(err).NotTo(HaveOccurred(), "reserve_usd and response_id default to nothing held")

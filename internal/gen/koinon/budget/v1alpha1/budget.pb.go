@@ -34,8 +34,11 @@ type OrgBudget struct {
 	MonthStart         *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=month_start,json=monthStart,proto3" json:"month_start,omitempty"`
 	// estimated_this_month_usd is the part of the spend that came from estimated usage.
 	EstimatedThisMonthUsd string `protobuf:"bytes,5,opt,name=estimated_this_month_usd,json=estimatedThisMonthUsd,proto3" json:"estimated_this_month_usd,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// system_checks_this_month_usd is the part of the spend that came from Koinon's own requests
+	// (the provider echo check), which belong to no agent. It counts toward the cap.
+	SystemChecksThisMonthUsd string `protobuf:"bytes,6,opt,name=system_checks_this_month_usd,json=systemChecksThisMonthUsd,proto3" json:"system_checks_this_month_usd,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *OrgBudget) Reset() {
@@ -99,6 +102,13 @@ func (x *OrgBudget) GetMonthStart() *timestamppb.Timestamp {
 func (x *OrgBudget) GetEstimatedThisMonthUsd() string {
 	if x != nil {
 		return x.EstimatedThisMonthUsd
+	}
+	return ""
+}
+
+func (x *OrgBudget) GetSystemChecksThisMonthUsd() string {
+	if x != nil {
+		return x.SystemChecksThisMonthUsd
 	}
 	return ""
 }
@@ -1250,14 +1260,15 @@ var File_koinon_budget_v1alpha1_budget_proto protoreflect.FileDescriptor
 
 const file_koinon_budget_v1alpha1_budget_proto_rawDesc = "" +
 	"\n" +
-	"#koinon/budget/v1alpha1/budget.proto\x12\x16koinon.budget.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8c\x02\n" +
+	"#koinon/budget/v1alpha1/budget.proto\x12\x16koinon.budget.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xcc\x02\n" +
 	"\tOrgBudget\x12&\n" +
 	"\x0fmonthly_cap_usd\x18\x01 \x01(\tR\rmonthlyCapUsd\x120\n" +
 	"\x14platform_ceiling_usd\x18\x02 \x01(\tR\x12platformCeilingUsd\x12/\n" +
 	"\x14spent_this_month_usd\x18\x03 \x01(\tR\x11spentThisMonthUsd\x12;\n" +
 	"\vmonth_start\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"monthStart\x127\n" +
-	"\x18estimated_this_month_usd\x18\x05 \x01(\tR\x15estimatedThisMonthUsd\"\x17\n" +
+	"\x18estimated_this_month_usd\x18\x05 \x01(\tR\x15estimatedThisMonthUsd\x12>\n" +
+	"\x1csystem_checks_this_month_usd\x18\x06 \x01(\tR\x18systemChecksThisMonthUsd\"\x17\n" +
 	"\x15ListOrgBudgetsRequest\"\xea\x01\n" +
 	"\x10OrgBudgetSummary\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +

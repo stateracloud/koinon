@@ -469,6 +469,32 @@ replaces decision 6.3 for responses cut short.
   watch, which RBAC cannot limit by label); losing the KEK Secret loses every stored secret, so it
   must be backed up.
 
+## Amendment (2026-10-28, rc.6): the per-org system key and its budget
+
+Koinon makes a few model requests of its own, the provider echo check first (ADR 0072). They do
+not borrow an agent's key.
+
+1. **One key per org**, the agent name `model-check` (`gateway.ModelCheckAgentName`;
+   `IsSystemAgent`). It is not a row in `agents`. koinon-reconciler issues it for each org that
+   serves a priced model, like the MCP executor key, and keeps it in the Secret
+   `mcpservers.ModelCheckSecretName(org)`, which koinon-api reads with the executor-key reader
+   (`KubeExecKeys` with a secret name). An org without a priced model has none, and a key whose
+   org stops serving models is revoked by omission.
+2. **Models.** `IsInternalAgent` still means "requests no model" (the MCP prober and executor). A
+   system key requests only the models in its `State.Models` entry, which the reconciler fills with
+   the org's served, priced models; without an entry it requests none. `State.Models` also narrows
+   any other key. Standalone renders it as the key's `allowedModels`; the Kubernetes driver puts
+   `restricted` and `models` in the key's metadata and each model's authorization requires
+   `!default(apiKey.restricted, false) || "<model>" in default(apiKey.models, [])`.
+3. **Budget.** The key's limit is the smaller of its daily budget ($0.10, `budget.SystemDailyLimit`)
+   and the org's remaining monthly cap and platform ceiling, net of recorded spend, with the same
+   generation naming as an agent's (ADR 0050).
+4. **No rotation, small blast radius.** Like the MCP executor key, the model-check key is not
+   rotated: it lives until the org serves no priced model or the Secret is deleted (the next pass
+   issues a new one). If it leaks, it can request only that org's served, priced models and spend
+   at most $0.10 a day (less when the org's caps are lower), and it opens no MCP tool. Its spend is recorded with the `system` principal
+   (ADR 0041 amendment) and counts against the org budget.
+
 ## Open questions
 
 - How often the default price list is refreshed (a monthly review is the intent; the process is in

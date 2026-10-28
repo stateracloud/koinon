@@ -16,3 +16,14 @@ tilt_modules/
 docs/site/node_modules/
 docs/site/dist/
 docs/site/.astro/
+
+# Binaries built into the repo root with go build ./cmd/<name>
+/koinon-api
+/koinon-agentd
+/koinon-reconciler
+/koinon-fakemodel
+/koinon-fakegithub
+/koinon-fakegitea
+/koinon-fakemcp
+/koinon-fakecicost
+/koinon-rt1-promgen

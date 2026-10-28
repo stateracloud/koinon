@@ -142,23 +142,38 @@ func ExecSecretName(org pgtype.UUID) string {
 	return "koinon-mcp-exec-" + hex.EncodeToString(sum[:8])
 }
 
+// ModelCheckSecretName is the Secret that holds an org's model-check key (the provider echo check,
+// gateway.ModelCheckAgentName): the reconciler writes it and koinon-api reads it. The key requests
+// only the org's served, priced models.
+func ModelCheckSecretName(org pgtype.UUID) string {
+	sum := sha256.Sum256([]byte("model-check\x00" + org.String()))
+	return "koinon-model-check-" + hex.EncodeToString(sum[:8])
+}
+
 // ExecKeyDataKey is the Secret's data key (the reconciler's key Secrets use it too).
 const ExecKeyDataKey = "api_key"
 
-// KubeExecKeys reads executor keys from Secrets in one namespace.
+// KubeExecKeys reads an org's gateway key from a Secret in one namespace: the executor key, or with
+// SecretName set another per-org system key (ModelCheckSecretName).
 type KubeExecKeys struct {
 	Client    kubernetes.Interface
 	Namespace string
+	// SecretName names the org's Secret; nil is ExecSecretName.
+	SecretName func(org pgtype.UUID) string
 }
 
-// Key returns the org's executor key.
+// Key returns the org's key.
 func (k KubeExecKeys) Key(ctx context.Context, org pgtype.UUID) (string, error) {
-	s, err := k.Client.CoreV1().Secrets(k.Namespace).Get(ctx, ExecSecretName(org), metav1.GetOptions{})
+	name := ExecSecretName
+	if k.SecretName != nil {
+		name = k.SecretName
+	}
+	s, err := k.Client.CoreV1().Secrets(k.Namespace).Get(ctx, name(org), metav1.GetOptions{})
 	if err != nil {
-		return "", fmt.Errorf("read the org's executor key: %w", err)
+		return "", fmt.Errorf("read the org's key from the Secret %s: %w", name(org), err)
 	}
 	if len(s.Data[ExecKeyDataKey]) == 0 {
-		return "", errors.New("the org's executor key is empty")
+		return "", fmt.Errorf("the Secret %s holds no key", name(org))
 	}
 	return string(s.Data[ExecKeyDataKey]), nil
 }
