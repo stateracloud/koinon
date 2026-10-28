@@ -192,5 +192,5 @@ The failure class `sandbox_unavailable` joins the list of #146 A1: the run's san
 within the org's cap (ADR 0066 amendment 2026-10-28). It is never retried. Two columns record the
 timers the amendment adds: `runs.sandbox_wait_started_at` (when the current wait for the sandbox
 began; kept across requeues, cleared when any run of the agent finds the sandbox ready or the agent is
-resumed) and `runs.wrap_up_notice_at` (when the agent was told its time limit is near). There are no new
+resumed) and `runs.wrap_up_notice_at` (set when the wrap-up notice is no longer armed: it was sent, or it was suppressed because the harness ignored the cancel; the `run.wrap_up_notice` event is the record that the agent was told). There are no new
 states or transitions.
