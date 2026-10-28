@@ -609,11 +609,14 @@ var _ = Describe("the quickstart", Ordered, func() {
 			}
 			g.Expect(reads).To(BeNumerically(">=", 1), "a ledger entry with cache_read_tokens > 0: %v", rows)
 		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
-		var wrote bool
-		for _, r := range rows {
+		writeIdx, readIdx := -1, -1
+		for i, r := range rows {
 			Expect(r.Model).To(Equal("claude-e2e"))
-			if r.CacheWrite > 0 {
-				wrote = true
+			if r.CacheWrite > 0 && writeIdx < 0 {
+				writeIdx = i
+			}
+			if r.CacheRead > 0 && readIdx < 0 {
+				readIdx = i
 			}
 			// The ledger's input_tokens includes the cache reads and writes (the gateway normalises
 			// Anthropic's input_tokens that way); each part is priced at its own rate.
@@ -622,7 +625,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 				new(big.Rat).Add(rate(price["cacheWrite"], r.CacheWrite), rate(price["output"], r.Output)))
 			Expect(r.Cost.Cmp(want)).To(Equal(0), "entry %+v costs %s, want %s", r, r.Cost.FloatString(9), want.FloatString(9))
 		}
-		Expect(wrote).To(BeTrue(), "the first request wrote the cache: %v", rows)
+		Expect(writeIdx).To(BeNumerically(">=", 0), "a request wrote the cache: %v", rows)
+		Expect(writeIdx).To(BeNumerically("<", readIdx), "the cache write comes before the first cache read: %v", rows)
 		t.end("6d. Direct Anthropic model: Messages through the gateway, cache read priced")
 	})
 
