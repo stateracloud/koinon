@@ -2,7 +2,8 @@
 #
 # Standard networking.k8s.io/v1 policies only. None of the three MCP servers authenticates the
 # caller (fakecicost wants a bearer token but is not a security boundary), so only Koinon's gateway
-# may connect, and nothing may leave the namespace except DNS lookups.
+# may connect, and nothing may leave the namespace except DNS lookups and, for the two web-research
+# pods only, public internet (see the end of this file).
 #
 # The gateway pods, as charts/koinon renders them in namespace "koinon":
 #   gateway.mode=standalone: app.kubernetes.io/name=koinon, app.kubernetes.io/component=gateway
@@ -119,3 +120,94 @@ spec:
           podSelector:
             matchExpressions:
               - {key: gateway.networking.k8s.io/gateway-name, operator: Exists}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-to-searxng-mcp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-searxng-mcp
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 8080}
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: koinon
+              app.kubernetes.io/component: gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon
+          podSelector:
+            matchExpressions:
+              - {key: gateway.networking.k8s.io/gateway-name, operator: Exists}
+---
+# SearXNG has no authentication: only the MCP server may query it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: searxng-mcp-to-searxng
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-searxng
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 8080}
+      from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: rt1-searxng-mcp
+---
+# Internet egress for the two web-research pods (SearXNG queries search engines; web_url_read fetches
+# pages), but not to private ranges, so neither can be pointed at the cluster, the LAN or a metadata
+# service. Standard ipBlock only; IPv4. DNS is allowed by egress-dns-only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: searxng-internet-egress
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [rt1-searxng, rt1-searxng-mcp]
+  policyTypes: [Egress]
+  egress:
+    - ports:
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 80}
+      to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: searxng-mcp-to-searxng-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-searxng-mcp
+  policyTypes: [Egress]
+  egress:
+    - ports:
+        - {protocol: TCP, port: 8080}
+      to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: rt1-searxng
