@@ -37,10 +37,12 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 func main() {
@@ -143,6 +145,7 @@ func run() error {
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
 			Gateway:           endpoint,
+			Prices:            prices.NewResolver(pricing.Embedded()),
 			Keys:              keyring,
 			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
 			ProviderKeyDir:    cfg.providerKeysDir,

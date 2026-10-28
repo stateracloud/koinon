@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/triggers/schedule"
+	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -32,7 +33,7 @@ type replica struct {
 func startReplica(ctx context.Context, start time.Time) *replica {
 	GinkgoHelper()
 	r := startUnbound(ctx, start)
-	r.sched.Bind(services.New(pool, services.Options{}))
+	r.sched.Bind(services.New(pool, services.Options{Prices: pricing.Embedded()}))
 	return r
 }
 
@@ -278,7 +279,7 @@ var _ = Describe("schedule triggers", func() {
 		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: v.ID})
 		Expect(err).NotTo(HaveOccurred())
 
-		r.sched.Bind(services.New(pool, services.Options{}))
+		r.sched.Bind(services.New(pool, services.Options{Prices: pricing.Embedded()}))
 		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(1))
 	}, SpecTimeout(time.Minute))
 

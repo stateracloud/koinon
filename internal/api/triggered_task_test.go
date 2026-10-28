@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/services"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 var _ = Describe("CreateTriggeredTask (dedupe, plan item DB3)", func() {
@@ -27,7 +28,7 @@ var _ = Describe("CreateTriggeredTask (dedupe, plan item DB3)", func() {
 		notifier := durable.NewNotifier(nil, nil)
 		var wakes atomic.Int32
 		notifier.Handle(services.NotifyWakeAgent, func(_ context.Context, _ durable.Notification) error { wakes.Add(1); return nil })
-		svc := services.New(e.pool, services.Options{Hub: e.hub, Notifier: notifier})
+		svc := services.New(e.pool, services.Options{Prices: pricing.Embedded(), Hub: e.hub, Notifier: notifier})
 
 		in := services.TriggeredTask{
 			Org: orgID, Agent: agentID, Trigger: pgtype.UUID{Bytes: [16]byte{9}, Valid: true},

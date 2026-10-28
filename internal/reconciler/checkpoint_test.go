@@ -17,7 +17,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // The reconciler's side of home checkpoints (plan item HC1): it asks koinon-agentd for them,
@@ -85,6 +87,7 @@ var _ = Describe("Reconciler home checkpoints", func() {
 		backend = openshell.New(conn)
 		now = time.Now()
 		cfg = reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},

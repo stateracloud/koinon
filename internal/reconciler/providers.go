@@ -190,7 +190,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 			// A model with no price is not served.
 			pm := prices.Model{ID: row.ModelID.String(), Name: row.ModelName, ProviderType: row.ProviderType}
 			var badPrice *prices.BadPriceError
-			switch res, err := prices.Resolve(ctx, r.q, org.ID, pm, r.cfg.Now()); {
+			switch res, err := r.cfg.Prices.Resolve(ctx, r.q, org.ID, pm, r.cfg.Now()); {
 			case err == nil:
 				gp := res.Price.Gateway()
 				m.Price = &gp

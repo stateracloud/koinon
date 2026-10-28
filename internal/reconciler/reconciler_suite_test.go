@@ -269,7 +269,7 @@ func addProvider(ctx context.Context, org, user pgtype.UUID, name, key, model st
 		ProviderID: p.ID, Name: model,
 	})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = prices.New(pool, nil).SetOverride(ctx, org, actor, prices.OverrideInput{
+	_, err = prices.New(pool, nil, pricing.Embedded()).SetOverride(ctx, org, actor, prices.OverrideInput{
 		Entry: pricing.Entry{
 			ID: "price-" + strings.NewReplacer("/", "-", "_", "-").Replace(strings.ToLower(model)), Provider: "openai", Match: pricing.Match{Glob: model},
 			Spec:      pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2"}},

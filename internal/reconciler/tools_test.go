@@ -15,7 +15,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -75,6 +77,7 @@ var _ = Describe("Reconciler with the GitHub tool server", func() {
 		DeferCleanup(func() { _ = conn.Close(); osg.Stop() })
 		mg := &fakeModelGateway{}
 		cfg := reconciler.Config{
+			Prices:      prices.NewResolver(pricing.Embedded()),
 			Gateway:     reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			ToolServers: map[string]string{"github": toolsURL},
 			Flavors: map[store.AgentFlavor]reconciler.Flavor{
