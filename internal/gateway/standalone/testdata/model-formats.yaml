@@ -29,7 +29,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"372f089c02446d34"'
+      koinon.config: '"a5976cfef3607b6a"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -61,7 +61,7 @@ llm:
           allowedModels:
             - claude-haiku-4-5
             - open/model
-        - keyHash: sha256:eae8a25da1c41d40fc87860df89b0ca93de6354d4bea62a499602cb09d0caa3d
+        - keyHash: sha256:7be98e4834debb31cb93a3e0cd115369049c056cf36aaa1b6864b87c27da6ee3
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -96,7 +96,7 @@ llm:
         remove:
           - anthropic-beta
       transformation:
-        tools: 'has(llmRequest.tools) ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : null'
+        tools: 'has(llmRequest.tools) ? (request.path == "/v1/messages" ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : llmRequest.tools) : null'
     - id: acme/open/model
       name: open/model
       matches:

@@ -1,4 +1,4 @@
-# Revision 30f00e1ffb194782
+# Revision a42cfde074ff2b5e
 apiVersion: v1
 data:
   catalog.json: '{"providers":{"acme.anthropic":{"models":{"claude-haiku-4-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}}}},"acme.openrouter":{"models":{"open/model":{"rates":{"input":"1","output":"2"}}}}}}'
@@ -25,7 +25,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  koinon-reload-probe: '{"keyHash":"sha256:ad9c760c70db8dbe644c6bedc9229fefef86affcde9c04894cba86f9ea81b7dc","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+  koinon-reload-probe: '{"keyHash":"sha256:24f73722c5435e0758dce5b5b716e559a2e6eb0a18c4ec01bd634b0a92ae21e9","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -168,7 +168,7 @@ spec:
           - name: anthropic-workspace-id
             value: wrkspc_01ExampleExample
     transformations:
-      - expression: 'has(llmRequest.tools) ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : null'
+      - expression: 'has(llmRequest.tools) ? (request.path == "/v1/messages" ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : llmRequest.tools) : null'
         field: tools
   provider: Custom
 ---
