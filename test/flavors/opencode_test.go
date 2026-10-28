@@ -24,6 +24,11 @@ var opencode = flavor{
 	writeFile: func(path, content string) fakemodel.ToolCall {
 		return fakemodel.ToolCall{Name: "write", Arguments: map[string]any{"path": path, "content": content}}
 	},
+	// jq, yq, fd, ast-grep, duckdb, sqlite3, poppler, python3 and friends (flavors/opencode/README.md).
+	dataTools: true,
+	// Measured 2026-10-28 with the data tools: arm64 650,916 KiB (429,148 before them), amd64
+	// 632,836 KiB (409,084 before); plus about 10% (flavors/opencode/README.md, "Tools in the image").
+	sizeBudget: map[string]int64{"arm64": 716_000, "amd64": 696_000},
 	// OpenCode names MCP tools <server>_<tool>; the server is "koinon" in its config.
 	mcpToolName: "koinon_" + mcpTool,
 	// OpenCode also advertises session/resume; Koinon does not rely on it.

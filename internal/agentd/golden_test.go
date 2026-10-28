@@ -120,4 +120,10 @@ var _ = Describe("Prompt shapes (golden)", func() {
 		golden("handoff", agentd.BuildHandoff("Fix the typo", "[Koinon] MCP notice.", "Notes from the last turn.",
 			[]string{"First reply.", "Second reply."}, []string{"Please fix the typo.", "Also the footer."}, out))
 	})
+	It("the instruction file of an agent version", func() {
+		golden("instructions_file", agentd.InstructionsFile("You help with the task."))
+	})
+	It("the instruction file of an agent version without instructions", func() {
+		golden("instructions_file_empty", agentd.InstructionsFile(" \n"))
+	})
 })
