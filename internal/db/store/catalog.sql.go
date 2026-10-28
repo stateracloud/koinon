@@ -243,6 +243,44 @@ func (q *Queries) GetModel(ctx context.Context, arg GetModelParams) (Model, erro
 	return i, err
 }
 
+const getModelServing = `-- name: GetModelServing :one
+SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name,
+       (s.model_id IS NOT NULL)::boolean AS served
+FROM models m
+JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
+LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
+WHERE m.org_id = $1 AND m.name = $2
+  AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL AND p.removed_at IS NULL
+ORDER BY (s.model_id IS NULL), m.source, m.id
+LIMIT 1
+`
+
+type GetModelServingParams struct {
+	OrgID pgtype.UUID
+	Name  string
+}
+
+type GetModelServingRow struct {
+	ModelID      pgtype.UUID
+	ProviderID   pgtype.UUID
+	ProviderName string
+	Served       bool
+}
+
+// koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
+// provider and whether the gateway serves it (gateway_served_models).
+func (q *Queries) GetModelServing(ctx context.Context, arg GetModelServingParams) (GetModelServingRow, error) {
+	row := q.db.QueryRow(ctx, getModelServing, arg.OrgID, arg.Name)
+	var i GetModelServingRow
+	err := row.Scan(
+		&i.ModelID,
+		&i.ProviderID,
+		&i.ProviderName,
+		&i.Served,
+	)
+	return i, err
+}
+
 const getProvider = `-- name: GetProvider :one
 SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at FROM providers
 WHERE org_id = $1 AND id = $2
@@ -467,6 +505,23 @@ func (q *Queries) MarkProviderRemoved(ctx context.Context, arg MarkProviderRemov
 	return err
 }
 
+const pruneGatewayServedModels = `-- name: PruneGatewayServedModels :exec
+DELETE FROM gateway_served_models
+WHERE org_id = $1 AND model_id <> ALL ($2::uuid[])
+`
+
+type PruneGatewayServedModelsParams struct {
+	OrgID    pgtype.UUID
+	ModelIds []pgtype.UUID
+}
+
+// The same for an org whose model objects the gateway rejected: nothing new is recorded, rows of
+// models the state no longer serves are removed.
+func (q *Queries) PruneGatewayServedModels(ctx context.Context, arg PruneGatewayServedModelsParams) error {
+	_, err := q.db.Exec(ctx, pruneGatewayServedModels, arg.OrgID, arg.ModelIds)
+	return err
+}
+
 const reenableUIModels = `-- name: ReenableUIModels :exec
 UPDATE models m
 SET disabled_reason = NULL
@@ -563,6 +618,35 @@ type ShadowUIProvidersParams struct {
 // A declared provider of this name now exists: disable the UI ones.
 func (q *Queries) ShadowUIProviders(ctx context.Context, arg ShadowUIProvidersParams) error {
 	_, err := q.db.Exec(ctx, shadowUIProviders, arg.Reason, arg.OrgID, arg.Name)
+	return err
+}
+
+const syncGatewayServedModels = `-- name: SyncGatewayServedModels :exec
+WITH gone AS (
+    DELETE FROM gateway_served_models g
+    WHERE g.org_id = $3 AND g.model_id <> ALL ($1::uuid[])
+)
+INSERT INTO gateway_served_models (org_id, model_id, provider_id, key_file)
+SELECT m.org_id, m.id, m.provider_id, NULLIF(w.key_file, '')
+FROM (SELECT unnest($1::uuid[]) AS model_id, unnest($2::text[]) AS key_file) w
+JOIN models m ON m.org_id = $3 AND m.id = w.model_id
+ON CONFLICT (org_id, model_id) DO UPDATE
+SET provider_id = EXCLUDED.provider_id, key_file = EXCLUDED.key_file, updated_at = now()
+WHERE gateway_served_models.provider_id <> EXCLUDED.provider_id
+   OR gateway_served_models.key_file IS DISTINCT FROM EXCLUDED.key_file
+`
+
+type SyncGatewayServedModelsParams struct {
+	ModelIds []pgtype.UUID
+	KeyFiles []string
+	OrgID    pgtype.UUID
+}
+
+// koinon-reconciler, after an applied gateway state: the org's models that state serves, with
+// the provider and key file each is served with. Rows of models it does not serve are removed; a
+// row whose key file is unchanged is left alone, so served_since stays.
+func (q *Queries) SyncGatewayServedModels(ctx context.Context, arg SyncGatewayServedModelsParams) error {
+	_, err := q.db.Exec(ctx, syncGatewayServedModels, arg.ModelIds, arg.KeyFiles, arg.OrgID)
 	return err
 }
 

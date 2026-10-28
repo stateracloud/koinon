@@ -142,3 +142,39 @@ UPDATE models
 SET disabled_reason = NULL
 WHERE org_id = @org_id AND id = @id;
 
+
+-- name: SyncGatewayServedModels :exec
+-- koinon-reconciler, after an applied gateway state: the org's models that state serves, with
+-- the provider and key file each is served with. Rows of models it does not serve are removed; a
+-- row whose key file is unchanged is left alone, so served_since stays.
+WITH gone AS (
+    DELETE FROM gateway_served_models g
+    WHERE g.org_id = @org_id AND g.model_id <> ALL (@model_ids::uuid[])
+)
+INSERT INTO gateway_served_models (org_id, model_id, provider_id, key_file)
+SELECT m.org_id, m.id, m.provider_id, NULLIF(w.key_file, '')
+FROM (SELECT unnest(@model_ids::uuid[]) AS model_id, unnest(@key_files::text[]) AS key_file) w
+JOIN models m ON m.org_id = @org_id AND m.id = w.model_id
+ON CONFLICT (org_id, model_id) DO UPDATE
+SET provider_id = EXCLUDED.provider_id, key_file = EXCLUDED.key_file, updated_at = now()
+WHERE gateway_served_models.provider_id <> EXCLUDED.provider_id
+   OR gateway_served_models.key_file IS DISTINCT FROM EXCLUDED.key_file;
+
+-- name: PruneGatewayServedModels :exec
+-- The same for an org whose model objects the gateway rejected: nothing new is recorded, rows of
+-- models the state no longer serves are removed.
+DELETE FROM gateway_served_models
+WHERE org_id = @org_id AND model_id <> ALL (@model_ids::uuid[]);
+
+-- name: GetModelServing :one
+-- koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
+-- provider and whether the gateway serves it (gateway_served_models).
+SELECT m.id AS model_id, p.id AS provider_id, p.name AS provider_name,
+       (s.model_id IS NOT NULL)::boolean AS served
+FROM models m
+JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
+LEFT JOIN gateway_served_models s ON s.org_id = m.org_id AND s.model_id = m.id
+WHERE m.org_id = @org_id AND m.name = @name
+  AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL AND p.removed_at IS NULL
+ORDER BY (s.model_id IS NULL), m.source, m.id
+LIMIT 1;
