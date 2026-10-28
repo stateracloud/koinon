@@ -237,7 +237,10 @@ func (s *Server) CheckProviderEcho(ctx context.Context, req *providerv1alpha1.Ch
 func (s *Server) echoError(err error) error {
 	var inv *modelcheck.InvalidError
 	var un *modelcheck.UnavailableError
+	var busy *modelcheck.BusyError
 	switch {
+	case errors.As(err, &busy):
+		return connect.NewError(connect.CodeFailedPrecondition, busy.Error())
 	case errors.As(err, &inv):
 		return connect.NewError(connect.CodeInvalidArgument, inv.Msg)
 	case errors.As(err, &un):

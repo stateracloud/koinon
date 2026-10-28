@@ -48,7 +48,7 @@ var _ = Describe("metrics", func() {
 		}
 		post()
 
-		Expect(testutil.ToFloat64(m.Ingested)).To(Equal(2.0))
+		Expect(testutil.ToFloat64(m.Ingested.WithLabelValues("agent"))).To(Equal(2.0))
 		Expect(testutil.ToFloat64(m.Rejected.WithLabelValues("missing_key"))).To(Equal(1.0))
 		Expect(testutil.ToFloat64(m.Rejected.WithLabelValues("unattributed"))).To(Equal(1.0))
 		Expect(testutil.ToFloat64(m.Rejected.WithLabelValues("invalid_agent"))).To(Equal(0.0))
@@ -58,6 +58,6 @@ var _ = Describe("metrics", func() {
 
 		By("a replay records nothing new and adds no lag observation")
 		post()
-		Expect(testutil.ToFloat64(m.Ingested)).To(Equal(2.0))
+		Expect(testutil.ToFloat64(m.Ingested.WithLabelValues("agent"))).To(Equal(2.0))
 	})
 })

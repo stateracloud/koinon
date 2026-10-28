@@ -373,7 +373,7 @@ func (b *builder) keys(s gateway.State) []string {
 			revoked = append(revoked, k.ID)
 			continue
 		}
-		byOrg[k.Agent.Org][k.ID] = keyEntry(k)
+		byOrg[k.Agent.Org][k.ID] = keyEntry(k, s)
 	}
 	slices.Sort(revoked)
 	for org, data := range byOrg {
@@ -384,14 +384,18 @@ func (b *builder) keys(s gateway.State) []string {
 
 // keyEntry is the JSON agentgateway reads from a key ConfigMap: the hash and the metadata CEL sees
 // as apiKey.*.
-func keyEntry(k gateway.Key) string {
-	raw, _ := json.Marshal(map[string]any{
-		"keyHash": k.Hash,
-		"metadata": map[string]any{
-			"name": k.ID, "agent": k.Agent.String(), "org": k.Agent.Org,
-			"internal": gateway.IsInternalAgent(k.Agent),
-		},
-	})
+func keyEntry(k gateway.Key, s gateway.State) string {
+	meta := map[string]any{
+		"name": k.ID, "agent": k.Agent.String(), "org": k.Agent.Org,
+		"internal": gateway.IsInternalAgent(k.Agent),
+	}
+	// A key with a model list of its own carries it, and the models' authorization checks it. Other
+	// keys carry nothing extra, so their entries (and the gateway's revision) do not change.
+	if s.Restricted(k.Agent) {
+		meta["restricted"] = true
+		meta["models"] = s.AllowedModels(k.Agent, s.ServedModels(k.Agent.Org))
+	}
+	raw, _ := json.Marshal(map[string]any{"keyHash": k.Hash, "metadata": meta})
 	return string(raw)
 }
 
@@ -418,7 +422,10 @@ func (b *builder) models(s gateway.State) {
 			override := p.Org + "." + p.Type
 			// State.Validate accepted the format, so it has a rendering.
 			rd, _ := gateway.RenderingOf(m)
-			admit := "apiKey.org == " + strconv.Quote(p.Org) + " && !apiKey.internal"
+			// A key with a model list of its own (State.Models) must name the model; other keys need
+			// nothing more.
+			admit := "apiKey.org == " + strconv.Quote(p.Org) + " && !apiKey.internal && " +
+				"(!default(apiKey.restricted, false) || " + strconv.Quote(m.Name) + " in default(apiKey.models, []))"
 			for _, f := range rd.Reject {
 				admit += " && !has(llmRequest." + f + ")"
 			}

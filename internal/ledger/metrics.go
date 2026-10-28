@@ -21,7 +21,8 @@ var rejectReasons = []string{rejectInvalidAgent, rejectInvalidReq, rejectMissing
 
 // Metrics are the spend ledger's Prometheus metrics, served by koinon-api.
 type Metrics struct {
-	Ingested  prometheus.Counter
+	// Ingested counts new entries by principal ("agent" or "system": a fixed label set).
+	Ingested  *prometheus.CounterVec
 	Rejected  *prometheus.CounterVec
 	IngestLag prometheus.Histogram
 }
@@ -29,9 +30,9 @@ type Metrics struct {
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
-		Ingested: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "koinon_api_ledger_records_ingested_total", Help: "Access-log records recorded as new spend entries (replays are not counted).",
-		}),
+		Ingested: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_api_ledger_records_ingested_total", Help: "Access-log records recorded as new spend entries, by principal (replays are not counted).",
+		}, []string{"principal"}),
 		Rejected: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_api_ledger_records_rejected_total", Help: "Access-log records that looked charged but could not be attributed or were malformed, by reason.",
 		}, []string{"reason"}),
@@ -40,6 +41,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 300, 900, 3600},
 		}),
 	}
+	m.Ingested.WithLabelValues(PrincipalAgent)
+	m.Ingested.WithLabelValues(PrincipalSystem)
 	for _, r := range rejectReasons {
 		m.Rejected.WithLabelValues(r)
 	}

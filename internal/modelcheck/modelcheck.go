@@ -56,6 +56,11 @@ type UnavailableError struct{ Msg string }
 
 func (e *UnavailableError) Error() string { return e.Msg }
 
+// BusyError means a check of the org is already running.
+type BusyError struct{}
+
+func (*BusyError) Error() string { return "a check is already running; try again when it has finished" }
+
 // Op is the kind of a diff segment.
 type Op string
 
@@ -204,15 +209,25 @@ func (s *Service) Check(ctx context.Context, org, provider pgtype.UUID, model st
 	if s.chat == nil {
 		return Result{}, &UnavailableError{Msg: "the echo check is not configured: koinon-api has no gateway to send it through"}
 	}
-	cctx, cancel := context.WithTimeout(ctx, s.Timeout)
-	defer cancel()
-	reply, err := s.chat.Complete(cctx, org, model, Prompt)
-	if err != nil {
-		return Result{}, &UnavailableError{Msg: "the model did not answer the check: " + err.Error()}
-	}
-	unchanged, diff := Compare(Line, reply)
-	res := Result{ProviderID: p.ID, Model: model, Unchanged: unchanged, Sent: Line, Received: reply, Diff: diff}
+	// One check in flight per org (ADR 0041 amendment): the lock is held, in the transaction that
+	// stores the result, for as long as the request takes.
+	var res Result
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var got bool
+		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('modelcheck:' || $1::text, 0))`, org.String()).Scan(&got); err != nil {
+			return err
+		}
+		if !got {
+			return &BusyError{}
+		}
+		cctx, cancel := context.WithTimeout(ctx, s.Timeout)
+		defer cancel()
+		reply, err := s.chat.Complete(cctx, org, model, Prompt)
+		if err != nil {
+			return &UnavailableError{Msg: "the model did not answer the check: " + err.Error()}
+		}
+		unchanged, diff := Compare(Line, reply)
+		res = Result{ProviderID: p.ID, Model: model, Unchanged: unchanged, Sent: Line, Received: reply, Diff: diff}
 		tq := store.New(tx)
 		row, err := tq.UpsertProviderEchoCheck(ctx, store.UpsertProviderEchoCheckParams{
 			OrgID: org, ProviderID: p.ID, Model: model, Unchanged: unchanged, Sent: Line, Received: reply,

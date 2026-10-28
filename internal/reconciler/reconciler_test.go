@@ -204,9 +204,9 @@ var _ = Describe("Reconciler", func() {
 			Expect(secret.Labels).To(HaveKeyWithValue(reconciler.LabelManagedBy, reconciler.ManagedByValue))
 			Expect(secret.Labels).To(HaveKey(reconciler.LabelAgent))
 			state := mg.last()
-			Expect(state.Keys).To(ConsistOf(gateway.Key{
+			Expect(agentKeys(state)).To(ConsistOf(gateway.Key{
 				ID: row.GatewayKeyID.String, Hash: row.GatewayKeyHash.String,
-				Agent: gateway.AgentRef{Org: state.Keys[0].Agent.Org, Name: state.Keys[0].Agent.Name},
+				Agent: gateway.AgentRef{Org: agentKeys(state)[0].Agent.Org, Name: agentKeys(state)[0].Agent.Name},
 			}))
 			Expect(state.Providers).To(HaveLen(1))
 			Expect(state.Providers[0].Models).To(HaveLen(1))
@@ -277,7 +277,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(osg.Calls("DeleteSandbox")).To(Equal(0))
 			Expect(osg.Calls("StopSandbox")).To(Equal(0))
 			Expect(osg.Policies(row.Workspace, names.Sandbox)).To(HaveLen(1))
-			Expect(mg.issuedCount()).To(Equal(1))
+			Expect(mg.issuedCount()).To(Equal(2), "the agent's key and the org's model-check key, each once")
 			Expect(sandboxRow(ctx, agent.ID).GatewayKeyID).To(Equal(row.GatewayKeyID))
 		})
 
@@ -315,8 +315,8 @@ var _ = Describe("Reconciler", func() {
 			newKey := material(ctx, rotated)
 			Expect(rotated.GatewayKeyHash.String).To(Equal(gateway.HashKey(newKey)))
 			Expect(osg.Provider(ws, names.Provider).GetCredentials()).To(HaveKeyWithValue("OPENAI_API_KEY", newKey))
-			Expect(mg.last().Keys).To(HaveLen(1))
-			Expect(mg.last().Keys[0].ID).To(Equal(rotated.GatewayKeyID.String))
+			Expect(agentKeys(mg.last())).To(HaveLen(1))
+			Expect(agentKeys(mg.last())[0].ID).To(Equal(rotated.GatewayKeyID.String))
 			Expect(osg.Calls("CreateSandbox")).To(Equal(1))
 
 			By("a deleted sandbox is recreated")
@@ -642,7 +642,7 @@ var _ = Describe("Reconciler", func() {
 			pass(ctx, r)
 			Expect(osg.Sandbox(row.Workspace, names.Sandbox).GetStatus().GetPhase()).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
 			Expect(osg.Provider(row.Workspace, names.Provider)).NotTo(BeNil())
-			Expect(mg.last().Keys).To(HaveLen(1), "the key survives for re-activation")
+			Expect(agentKeys(mg.last())).To(HaveLen(1), "the key survives for re-activation")
 		})
 
 		It("cleans up everything on archive", func(ctx SpecContext) {
@@ -655,7 +655,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(osg.Provider(row.Workspace, names.Provider)).To(BeNil())
 			_, err = kube.CoreV1().Secrets(namespace).Get(ctx, row.KeySecretName, metav1.GetOptions{})
 			Expect(err).To(HaveOccurred())
-			Expect(mg.last().Keys).To(BeEmpty(), "the key is revoked")
+			Expect(agentKeys(mg.last())).To(BeEmpty(), "the key is revoked")
 			done := sandboxRow(ctx, agent.ID)
 			Expect(done.State).To(Equal(store.SandboxStateDeleted))
 			Expect(done.GatewayKeyID.Valid).To(BeFalse())
@@ -676,7 +676,7 @@ var _ = Describe("Reconciler", func() {
 
 			Expect(osg.Sandbox(row.Workspace, names.Sandbox).GetStatus().GetPhase()).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED))
 			Expect(osg.Provider(row.Workspace, names.Provider)).To(BeNil())
-			Expect(mg.last().Keys).To(BeEmpty())
+			Expect(agentKeys(mg.last())).To(BeEmpty())
 			Expect(sandboxRow(ctx, agent.ID).State).To(Equal(store.SandboxStateRetained))
 		})
 	})
@@ -686,7 +686,7 @@ var _ = Describe("Reconciler", func() {
 		r := newReconciler()
 		pass(ctx, r)
 		row := sandboxRow(ctx, agent.ID)
-		ref := mg.last().Keys[0].Agent
+		ref := agentKeys(mg.last())[0].Agent
 		full := mg.last().Limits[ref]
 		Expect(full.Unit).To(Equal(gateway.USD))
 		Expect(full.Amount).To(BeNumerically("==", 10))
@@ -705,7 +705,7 @@ var _ = Describe("Reconciler", func() {
 		By("a rotated key gets the remainder, not the full limit")
 		Expect(kube.CoreV1().Secrets(namespace).Delete(ctx, row.KeySecretName, metav1.DeleteOptions{})).To(Succeed())
 		pass(ctx, r)
-		Expect(mg.last().Keys[0].ID).NotTo(Equal(row.GatewayKeyID.String))
+		Expect(agentKeys(mg.last())[0].ID).NotTo(Equal(row.GatewayKeyID.String))
 		Expect(mg.last().Limits[ref]).To(Equal(net))
 	})
 
@@ -747,7 +747,7 @@ var _ = Describe("Reconciler", func() {
 		r, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg2)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
-		ref := mg.last().Keys[0].Agent
+		ref := agentKeys(mg.last())[0].Agent
 		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10))
 
 		failing = true
@@ -773,7 +773,7 @@ var _ = Describe("Reconciler", func() {
 		r, err := reconciler.New(pool, backend, mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, cfg2)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
-		ref := mg.last().Keys[0].Agent
+		ref := agentKeys(mg.last())[0].Agent
 		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10))
 
 		failing = true
@@ -854,7 +854,7 @@ var _ = Describe("Reconciler", func() {
 		row3, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: org2, AgentID: a3.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(row3.Workspace).To(Equal(execution.WorkspaceName(org2.Bytes)))
-		Expect(mg.last().Keys).To(HaveLen(3))
+		Expect(agentKeys(mg.last())).To(HaveLen(3))
 	})
 
 	It("does not touch OpenShell when the gateway rejects the state", func(ctx SpecContext) {
@@ -981,3 +981,15 @@ var _ = Describe("Reconciler", func() {
 		}).WithTimeout(5 * time.Second).Should(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
 	})
 })
+
+// agentKeys are the state's keys of agents: the system keys of the orgs (the model-check key of an
+// org that serves a priced model) are not part of what these specs are about.
+func agentKeys(st gateway.State) []gateway.Key {
+	var out []gateway.Key
+	for _, k := range st.Keys {
+		if !gateway.IsSystemAgent(k.Agent) {
+			out = append(out, k)
+		}
+	}
+	return out
+}

@@ -23,18 +23,19 @@ ORDER BY started_at DESC, id DESC
 LIMIT 1;
 
 -- name: InsertSpendEntry :one
--- Records one request. Returns no row when the request id is already
+-- Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
+-- (principal 'system', no agent and no run: the provider echo check). Returns no row when the request id is already
 -- recorded, so a replayed export is not charged twice. cost_usd is Koinon's
 -- own computation from the raw usage and the dated price; gateway_cost_usd is
 -- what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
 -- for every entry that is not provisional, so a caller that holds nothing passes nothing.
 INSERT INTO spend_entries (
-    org_id, agent_id, run_id, task_id, request_id, key_id, model,
+    org_id, agent_id, principal, run_id, task_id, request_id, key_id, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id
 ) VALUES (
-    @org_id, @agent_id, sqlc.narg(run_id), sqlc.narg(task_id), @request_id, @key_id, @model,
+    @org_id, sqlc.narg(agent_id), @principal, sqlc.narg(run_id), sqlc.narg(task_id), @request_id, @key_id, @model,
     @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens, @reasoning_tokens,
     (sqlc.arg(cost_usd)::text)::numeric, (sqlc.narg(gateway_cost_usd)::text)::numeric,
     sqlc.narg(price_ref), @priced, @estimated, sqlc.narg(estimate)::jsonb, @cost_flagged,
@@ -50,6 +51,20 @@ RETURNING id;
 SELECT coalesce(sum(cost_usd), 0)::text AS cost_usd
 FROM spend_entries
 WHERE org_id = @org_id AND agent_id = @agent_id AND occurred_at >= @since;
+
+-- name: GetSystemSpendSince :one
+-- An org's recorded USD spend of its system key since @since, for the key's daily budget.
+SELECT coalesce(sum(cost_usd), 0)::text AS cost_usd
+FROM spend_entries
+WHERE org_id = @org_id AND principal = 'system' AND occurred_at >= @since;
+
+-- name: SpendSystemSince :one
+-- The system checks of an org since @since: requests and cost. They count against the org's
+-- monthly cap and the platform ceiling.
+SELECT count(*)::bigint AS requests,
+       coalesce(sum(cost_usd), 0)::text AS cost_usd
+FROM spend_entries
+WHERE org_id = @org_id AND principal = 'system' AND occurred_at >= @since;
 
 -- name: SumRunCosts :many
 -- Totals per run, for the runs in @run_ids that have spend.
@@ -124,7 +139,8 @@ GROUP BY price_ref, model
 ORDER BY max(occurred_at) DESC;
 
 -- name: SpendReport :many
--- Spend per model since @since, with estimated usage kept apart.
+-- Spend of agents per model since @since, with estimated usage kept apart. System checks are
+-- reported by SpendSystemSince.
 SELECT model,
        count(*)::bigint AS requests,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
@@ -144,7 +160,7 @@ SELECT model,
        count(*) FILTER (WHERE provisional)::bigint AS provisional_requests,
        coalesce(sum(reserve_usd), 0)::text AS reserved_usd
 FROM spend_entries
-WHERE org_id = @org_id AND occurred_at >= @since
+WHERE org_id = @org_id AND principal = 'agent' AND occurred_at >= @since
 GROUP BY model
 ORDER BY model;
 

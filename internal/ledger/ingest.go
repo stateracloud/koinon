@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -95,7 +96,7 @@ func (in *Ingester) Ingest(ctx context.Context, entries []Entry) (Result, error)
 		case recorded:
 			res.Recorded++
 			if in.Metrics != nil {
-				in.Metrics.Ingested.Inc()
+				in.Metrics.Ingested.WithLabelValues(principalOf(e)).Inc()
 				in.Metrics.IngestLag.Observe(max(in.now().Sub(e.Time), 0).Seconds())
 			}
 		default:
@@ -105,6 +106,13 @@ func (in *Ingester) Ingest(ctx context.Context, entries []Entry) (Result, error)
 	return res, nil
 }
 
+func principalOf(e Entry) string {
+	if gateway.IsSystemAgent(e.Agent) {
+		return PrincipalSystem
+	}
+	return PrincipalAgent
+}
+
 func (in *Ingester) log() *slog.Logger {
 	if in.Log != nil {
 		return in.Log
@@ -112,7 +120,16 @@ func (in *Ingester) log() *slog.Logger {
 	return slog.Default()
 }
 
+// Principals of a spend entry (spend_entries.principal), as the fixed label of the ledger's metrics.
+const (
+	PrincipalAgent  = "agent"
+	PrincipalSystem = "system"
+)
+
 func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
+	if gateway.IsSystemAgent(e.Agent) {
+		return in.ingestSystem(ctx, e)
+	}
 	var agentID pgtype.UUID
 	if err := agentID.Scan(e.Agent.Name); err != nil {
 		return false, errUnattributed
@@ -172,7 +189,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 		}
 		responseID := pgtype.Text{String: e.ResponseID, Valid: e.ResponseID != ""}
 		entryID, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
-			OrgID: org.ID, AgentID: agent.ID, RunID: run.ID, TaskID: run.TaskID,
+			OrgID: org.ID, AgentID: agent.ID, Principal: PrincipalAgent, RunID: run.ID, TaskID: run.TaskID,
 			RequestID: e.RequestID, KeyID: e.KeyID, Model: e.Model,
 			InputTokens: pr.inTokens, OutputTokens: pr.outTokens,
 			CacheReadTokens: pr.cacheRead, CacheWriteTokens: pr.cacheWrite, ReasoningTokens: pr.reasoning,
@@ -217,6 +234,72 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			}
 		}
 		return in.enforce(ctx, q, org.ID, agent.ID, run, e, pr.cost)
+	})
+	return recorded, err
+}
+
+// ingestSystem records a request of an org's system key: the principal is system, there is no
+// agent and no run. The spend counts toward the org's monthly cap and the platform ceiling; the
+// key's own daily budget bounds it, and the reconciler, woken when a level is crossed, takes the key
+// out of the gateway at zero. A spent org-wide limit stops the org's runs, as any entry that reaches
+// it does.
+func (in *Ingester) ingestSystem(ctx context.Context, e Entry) (bool, error) {
+	var recorded bool
+	err := pgx.BeginFunc(ctx, in.DB, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		org, err := q.GetOrgBySlug(ctx, e.Agent.Org)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errUnattributed
+		} else if err != nil {
+			return err
+		}
+		pr, err := in.price(ctx, q, org.ID, e)
+		if err != nil {
+			return err
+		}
+		if _, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
+			OrgID: org.ID, Principal: PrincipalSystem,
+			RequestID: e.RequestID, KeyID: e.KeyID, Model: e.Model,
+			InputTokens: pr.inTokens, OutputTokens: pr.outTokens,
+			CacheReadTokens: pr.cacheRead, CacheWriteTokens: pr.cacheWrite, ReasoningTokens: pr.reasoning,
+			CostUsd: pr.cost.Numeric(), GatewayCostUsd: pr.gatewayCost, PriceRef: pr.ref,
+			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
+			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: pgtype.Timestamptz{Time: e.Time, Valid: true},
+		}); errors.Is(err, pgx.ErrNoRows) {
+			return nil // already recorded
+		} else if err != nil {
+			return fmt.Errorf("insert spend entry: %w", err)
+		}
+		recorded = true
+		st, err := budget.ComputeSystem(ctx, q, org.ID, e.Time)
+		if err != nil {
+			return err
+		}
+		// People are told about the org's limits, not about the key's own daily budget.
+		orgOnly := budget.Status{Org: org.ID}
+		for _, l := range st.Levels {
+			if l.Name != budget.SystemDaily {
+				orgOnly.Levels = append(orgOnly.Levels, l)
+			}
+		}
+		if err := budget.Alert(ctx, q, in.Notifier, orgOnly, pr.cost); err != nil {
+			return err
+		}
+		crossed := false
+		for _, r := range st.Current(in.now()) {
+			if r.Spent-pr.cost < r.Limit {
+				crossed = true
+			}
+		}
+		if crossed {
+			if err := q.NotifyReconciler(ctx, org.ID); err != nil {
+				return fmt.Errorf("wake the reconciler: %w", err)
+			}
+		}
+		if l, found := orgOnly.Pick(in.now()); found {
+			_, err = Stop(ctx, q, org.ID, pgtype.UUID{}, l)
+		}
+		return err
 	})
 	return recorded, err
 }

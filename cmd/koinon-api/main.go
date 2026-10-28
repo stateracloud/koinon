@@ -559,13 +559,13 @@ func run() error {
 	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy)
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
-	// The provider echo check sends one request through the gateway with the org's check key, which
-	// the reconciler keeps in a Secret (package modelcheck). Without a gateway URL or Kubernetes
+	// The provider echo check sends one request through the gateway with the org's model-check key,
+	// which the reconciler keeps in a Secret (mcpservers.ModelCheckSecretName). Without a gateway URL or Kubernetes
 	// access the check answers that it is not configured.
 	var echo *modelcheck.Service
 	if cfg.gatewayURL != "" && kube != nil {
 		echo = modelcheck.New(pool, modelcheck.GatewayChat{
-			URL: cfg.gatewayURL, Keys: modelcheck.KubeKeys{Client: kube, Namespace: cfg.secretsNamespace},
+			URL: cfg.gatewayURL, Keys: mcpservers.KubeExecKeys{Client: kube, Namespace: cfg.secretsNamespace, SecretName: mcpservers.ModelCheckSecretName},
 			HTTP: &http.Client{Timeout: 90 * time.Second},
 		}, prices.NewResolver(pricing.Embedded()))
 	} else {

@@ -3,7 +3,7 @@
 -- Every agent's recorded USD spend since @since, for the budgets list.
 SELECT agent_id, coalesce(sum(cost_usd), 0)::text AS cost_usd
 FROM spend_entries
-WHERE org_id = @org_id AND occurred_at >= @since
+WHERE org_id = @org_id AND principal = 'agent' AND occurred_at >= @since
 GROUP BY agent_id;
 
 -- name: ListActiveVersionConfigs :many

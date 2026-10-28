@@ -43,7 +43,14 @@ const (
 	AgentDaily      = "agent_daily"
 	OrgMonthly      = "org_monthly"
 	PlatformCeiling = "platform_ceiling"
+	// SystemDaily is the daily budget of an org's system key (the provider echo check), a level
+	// of ComputeSystem only.
+	SystemDaily = "system_daily"
 )
+
+// SystemDailyLimit is the daily budget of an org's system key: a check costs a fraction of a
+// cent, and this bounds a runaway caller. Its spend counts toward the org's monthly cap.
+var SystemDailyLimit = money.FromCents(10)
 
 // Thresholds are the fractions of a limit at which people are told.
 const (
@@ -125,7 +132,7 @@ func (s Status) Current(now time.Time) []Level {
 	var out []Level
 	for _, l := range s.Reached() {
 		current := MonthStart(now)
-		if l.Name == AgentDaily {
+		if l.Name == AgentDaily || l.Name == SystemDaily {
 			current = DayStart(now)
 		}
 		if l.WindowStart.Equal(current) {
@@ -142,7 +149,7 @@ func (s Status) Current(now time.Time) []Level {
 // agent run again. ok is false when none is reached. Every stop path reports the limit Pick
 // returns: the ledger and the reconciler here; agentd adopts it (rc.6, PR 2).
 func (s Status) Pick(now time.Time) (Level, bool) {
-	rank := map[string]int{PlatformCeiling: 0, OrgMonthly: 1, AgentDaily: 2}
+	rank := map[string]int{PlatformCeiling: 0, OrgMonthly: 1, AgentDaily: 2, SystemDaily: 3}
 	var pick Level
 	found := false
 	for _, l := range s.Current(now) {
@@ -160,6 +167,8 @@ func (l Level) Title() string {
 		return "org monthly cap"
 	case PlatformCeiling:
 		return "platform ceiling"
+	case SystemDaily:
+		return "system checks daily limit"
 	}
 	return "agent daily limit"
 }
@@ -252,27 +261,57 @@ func Compute(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, fall
 		}
 		st.Levels = append(st.Levels, Level{AgentDaily, limit, sp, since})
 	}
+	levels, err := orgLevels(ctx, q, org, now)
+	st.Levels = append(st.Levels, levels...)
+	return st, err
+}
+
+// orgLevels are the org's monthly cap and the platform ceiling with the org's spend this month.
+// Every principal's spend counts, system checks included.
+func orgLevels(ctx context.Context, q *store.Queries, org pgtype.UUID, now time.Time) ([]Level, error) {
 	o, err := GetOrg(ctx, q, org)
 	if err != nil {
-		return st, err
+		return nil, err
 	}
 	if o.MonthlyCap == nil && o.PlatformCeiling == nil {
-		return st, nil
+		return nil, nil
 	}
 	since := MonthStart(now)
-	sp, err := spent(since, func() (string, error) {
-		return q.GetOrgSpendSince(ctx, store.GetOrgSpendSinceParams{OrgID: org, Since: pgtype.Timestamptz{Time: since, Valid: true}})
-	})
+	s, err := q.GetOrgSpendSince(ctx, store.GetOrgSpendSinceParams{OrgID: org, Since: pgtype.Timestamptz{Time: since, Valid: true}})
+	if err != nil {
+		return nil, err
+	}
+	sp, err := money.ParseNumeric(s)
+	if err != nil {
+		return nil, err
+	}
+	var out []Level
+	if o.MonthlyCap != nil {
+		out = append(out, Level{OrgMonthly, *o.MonthlyCap, sp, since})
+	}
+	if o.PlatformCeiling != nil {
+		out = append(out, Level{PlatformCeiling, *o.PlatformCeiling, sp, since})
+	}
+	return out, nil
+}
+
+// ComputeSystem reads the limits of an org's system key and the spend in their windows at now:
+// its own daily budget (SystemDailyLimit) and the org-wide levels, which its spend counts toward.
+func ComputeSystem(ctx context.Context, q *store.Queries, org pgtype.UUID, now time.Time) (Status, error) {
+	st := Status{Org: org}
+	since := DayStart(now)
+	s, err := q.GetSystemSpendSince(ctx, store.GetSystemSpendSinceParams{OrgID: org, Since: pgtype.Timestamptz{Time: since, Valid: true}})
 	if err != nil {
 		return st, err
 	}
-	if o.MonthlyCap != nil {
-		st.Levels = append(st.Levels, Level{OrgMonthly, *o.MonthlyCap, sp, since})
+	sp, err := money.ParseNumeric(s)
+	if err != nil {
+		return st, err
 	}
-	if o.PlatformCeiling != nil {
-		st.Levels = append(st.Levels, Level{PlatformCeiling, *o.PlatformCeiling, sp, since})
-	}
-	return st, nil
+	st.Levels = append(st.Levels, Level{SystemDaily, SystemDailyLimit, sp, since})
+	levels, err := orgLevels(ctx, q, org, now)
+	st.Levels = append(st.Levels, levels...)
+	return st, err
 }
 
 // Notice is an alert about a limit.
@@ -415,7 +454,9 @@ type OrgView struct {
 	SpentThisMonth money.USD
 	// EstimatedThisMonth is the part of it that came from estimated usage.
 	EstimatedThisMonth money.USD
-	MonthStart         time.Time
+	// SystemChecksThisMonth is the part of it that came from the org's system key.
+	SystemChecksThisMonth money.USD
+	MonthStart            time.Time
 }
 
 // GetOrg returns the org's budget and its spend this month.
@@ -439,7 +480,15 @@ func (s *Service) GetOrg(ctx context.Context, org pgtype.UUID, now time.Time) (O
 		return OrgView{}, err
 	}
 	estimated, err := money.ParseNumeric(es)
-	return OrgView{MonthlyCap: o.MonthlyCap, PlatformCeiling: o.PlatformCeiling, SpentThisMonth: spent, EstimatedThisMonth: estimated, MonthStart: since}, err
+	if err != nil {
+		return OrgView{}, err
+	}
+	sys, err := q.SpendSystemSince(ctx, store.SpendSystemSinceParams{OrgID: org, Since: pgtype.Timestamptz{Time: since, Valid: true}})
+	if err != nil {
+		return OrgView{}, err
+	}
+	systemChecks, err := money.ParseNumeric(sys.CostUsd)
+	return OrgView{MonthlyCap: o.MonthlyCap, PlatformCeiling: o.PlatformCeiling, SpentThisMonth: spent, EstimatedThisMonth: estimated, SystemChecksThisMonth: systemChecks, MonthStart: since}, err
 }
 
 // SetOrgCap sets the org's monthly cap, or clears it with nil. It cannot exceed the platform ceiling.

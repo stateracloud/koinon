@@ -1821,6 +1821,7 @@ type SpendEntry struct {
 	Provisional      bool
 	ReserveUsd       pgtype.Numeric
 	ResponseID       pgtype.Text
+	Principal        string
 }
 
 type SpendEntryRevision struct {
