@@ -197,11 +197,16 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      <div className="flex justify-end gap-2">
+      <div className="flex items-center justify-end gap-2">
+        {!typeKnown && !errors.type && (
+          <p id="provider-type-pending" role="status" className="text-muted-foreground mr-auto text-xs">
+            Checking what this provider type takes…
+          </p>
+        )}
         <Button type="button" variant="outline" onClick={onDone} disabled={pending}>
           Cancel
         </Button>
-        <Button type="submit" disabled={pending || !typeKnown}>
+        <Button type="submit" disabled={pending || !typeKnown} aria-describedby={typeKnown ? undefined : 'provider-type-pending'}>
           {editing ? 'Save provider' : 'Add provider'}
         </Button>
       </div>

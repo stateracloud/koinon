@@ -82,7 +82,21 @@ test('owner adds a provider and a model; the pages pass axe in each state', asyn
   await expect(page.getByText('Managed by Secret ollama-secret')).toBeVisible()
   await expectAccessible(page)
 
+  // Hold ProviderTypeInfo so the form's waiting state is scanned for certain, not by timing.
+  let releaseTypeInfo!: () => void
+  const typeInfoHeld = new Promise<void>((r) => (releaseTypeInfo = r))
+  await page.route(/ProviderService\/ProviderTypeInfo$/, async (route) => {
+    await typeInfoHeld
+    await route.fallback()
+  })
   await page.getByRole('button', { name: 'Add provider' }).click()
+  const save = page.getByRole('form', { name: 'Add provider' }).getByRole('button', { name: 'Add provider' })
+  await expect(save).toBeDisabled()
+  await expect(page.getByText('Checking what this provider type takes…')).toBeVisible()
+  await expectAccessible(page)
+  releaseTypeInfo()
+  await expect(save).toBeEnabled()
+  await expect(page.getByText('Checking what this provider type takes…')).toHaveCount(0)
   await expectAccessible(page)
   await page.getByLabel('Name', { exact: true }).fill('ollama-lab')
   await page.getByLabel('Provider type').selectOption('ollama')
