@@ -187,7 +187,7 @@ var _ = Describe("schedule triggers", func() {
 		r.tick(ctx, start.Add(time.Second))
 		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(1))
 
-		svc := services.New(pool, services.Options{})
+		svc := services.New(pool, services.Options{Prices: pricing.Embedded()})
 		manual, err := svc.RunScheduleTrigger(ctx, triggers.RunNow{Org: org, Agent: agent.ID, Trigger: "hourly", Actor: audit.System()})
 		Expect(err).NotTo(HaveOccurred())
 

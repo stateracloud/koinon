@@ -16,7 +16,7 @@ namespaces come back altered), with nothing in Koinon able to say so.
 
 ### The agent's model is a mutable setting
 
-1. `agents.model` (migration 00032) holds the setting; NULL is "default". It is not part of an agent
+1. `agents.model` (migration 00033) holds the setting; NULL is "default". It is not part of an agent
    version: an admin changes it with `AgentService.SetAgentModel` or `PUT /admin/v1/agents/{id}/model`
    and it applies to the next run. Every change writes `agent.model.set` with the old and new value
    in the same transaction; setting the value it already has writes nothing.
@@ -45,8 +45,12 @@ namespaces come back altered), with nothing in Koinon able to say so.
    (scheduled fires carry `fire: scheduled`), the title reads "Run now: ...", and the dedupe source
    is `trigger_manual`, so a manual fire never counts as the scheduled fire of the same second.
    The fire is audited (`agent.trigger.run_now`) in the transaction that creates the task.
-7. It needs no DBOS: the task is created in the caller's transaction, so it works with
-   `api.durable.enabled` off. Only schedule triggers run now.
+7. **Queue.** With `api.durable.enabled` the fire is enqueued with `EnqueueForOrg` on the org's
+   partition of the org queue (`koinon.org-work`, workflow `koinon.trigger-run-now`), as direct
+   messages are (`RunNowQueue`, like `DirectMessageQueue`), so the org's `trigger_concurrency` and
+   `trigger_rate_per_minute` bound manual fires as they bound scheduled ones. The workflow ID names
+   the org, trigger and second, so a retry within the second is the same fire. With durable off the
+   fire is inline in the caller's transaction and needs no DBOS. Only schedule triggers run now.
 
 ### The provider echo check
 
@@ -58,9 +62,7 @@ namespaces come back altered), with nothing in Koinon able to say so.
    result per provider is kept (`provider_echo_checks`) and shown with its time on the Providers page.
 9. It runs only when an admin asks. Nothing schedules it and CI never runs it against a real model:
    tests use the fake model server.
-10. **Delivery gap.** The request needs a gateway key of the org that may request its models.
-    koinon-api reads it from the Secret `modelcheck.KeySecretName(org)`; without the Secret, or
-    without `--gateway-url`, the check answers that it cannot reach the model. Issuing that key
-    (an internal agent that may request models) is koinon-reconciler's, and the spend ledger
-    attributes spend by agent ID, so the check's cost is metered as unattributed until the ledger
-    learns that key. Both are follow-ups outside the API and web work.
+10. **The key and the metering** are koinon-reconciler's and the ledger's: the org's `model-check`
+    system key and its budget are ADR 0056's amendment of 2026-10-28, and spend by principal is
+    ADR 0041's. koinon-api needs `--gateway-url` (the chart sets `KOINON_GATEWAY_URL`) and
+    Kubernetes access to read the key's Secret.

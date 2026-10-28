@@ -443,6 +443,7 @@ func run() error {
 		slog.Warn("schedule triggers do not fire: they run on the DBOS runtime (api.durable.enabled, --durable)")
 	}
 	var directMessages *services.DirectMessageQueue
+	var runNow *services.RunNowQueue
 	if cfg.durable {
 		// The tables come from the migration Job (ADR 0060): DBOS only verifies them here, so a
 		// missing schema fails the start instead of the API running without its timers.
@@ -474,6 +475,10 @@ func run() error {
 		}
 		// Direct messages in the inbox chat (TR3) create their tasks on that queue.
 		if directMessages, err = services.RegisterDirectMessages(rt, orgWork); err != nil {
+			return err
+		}
+		// "Run now" for schedule triggers fires on the same queue, so the org's limits bound it.
+		if runNow, err = services.RegisterRunNow(rt, orgWork); err != nil {
 			return err
 		}
 		if err := rt.Launch(bgCtx); err != nil {
@@ -573,7 +578,7 @@ func run() error {
 	}
 	svc := services.New(pool, services.Options{
 		ModelCheck: echo,
-		Hub:        hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
+		Hub:        hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, RunNow: runNow, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
 	safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })

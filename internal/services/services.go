@@ -113,6 +113,9 @@ type Options struct {
 	// DirectMessages delivers direct messages through the org-partitioned DBOS queue (TR3). Nil
 	// means inline, in one transaction. koinon-api passes one with --durable.
 	DirectMessages *DirectMessageQueue
+	// RunNow fires schedule triggers by hand through the org queue (api.durable.enabled). Nil means
+	// inline.
+	RunNow *RunNowQueue
 	// ModelCheck runs the provider echo check (rc.6). Nil means CheckProviderEcho answers
 	// UNIMPLEMENTED.
 	ModelCheck *modelcheck.Service
@@ -147,6 +150,7 @@ type Server struct {
 	// agentModels changes agents' model settings; modelCheck runs the provider echo check.
 	agentModels *agentmodel.Service
 	modelCheck  *modelcheck.Service
+	runNow      *RunNowQueue
 }
 
 // New returns a Server backed by pool.
@@ -176,10 +180,13 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
-		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck,
+		agentModels: agentmodel.New(pool, prices.NewResolver(opts.Prices)), modelCheck: opts.ModelCheck, runNow: opts.RunNow,
 	}
 	if s.dm != nil {
 		s.dm.bind(s)
+	}
+	if s.runNow != nil {
+		s.runNow.bind(s)
 	}
 	return s
 }

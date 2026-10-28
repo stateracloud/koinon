@@ -201,6 +201,17 @@ func Describe(ctx context.Context, rv prices.Resolver, q *store.Queries, a store
 		}
 		return v, nil
 	}
+	if v.Source == SourceVersion {
+		// A template's model the org does not serve (or cannot price) would meet the gateway's 404
+		// at the first request: say so here, where a person can pick another.
+		var u *UnusableError
+		switch err := Check(ctx, rv, q, a.OrgID, v.Effective, at); {
+		case errors.As(err, &u):
+			v.Problem = "The agent's version names a model the gateway will not serve (" + u.Error() + "); pick a model below."
+		case err != nil:
+			return View{}, err
+		}
+	}
 	if v.Source == SourceNone && len(v.Available) > 0 {
 		v.Effective, v.Source = v.Available[0].Name, SourceOrgDefault
 	}

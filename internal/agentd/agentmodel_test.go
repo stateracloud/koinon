@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	sdk "github.com/coder/acp-go-sdk"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -112,5 +113,33 @@ var _ = Describe("The agent's model setting", func() {
 		second := e.enqueue(ctx, e.task(ctx, "again"))
 		Eventually(runState(ctx, second)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/" + model}))
+	})
+
+	It("gives the same reason when the model is removed after the start check and the gateway answers 404", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		serveModel(ctx, e, "fake/agent-pick", true)
+		setModel(ctx, e, "fake/agent-pick")
+		e.harness.modelFault = func(ctx context.Context, _ string) error {
+			_, err := db.Exec(ctx, `DELETE FROM models WHERE org_id = $1 AND name = 'fake/agent-pick'`, e.org)
+			Expect(err).NotTo(HaveOccurred())
+			return &sdk.RequestError{Code: -32603, Message: "model not found", Data: map[string]any{"statusCode": 404}}
+		}
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(Equal(`the agent's model "fake/agent-pick" is not served in this org; pick another on the agent page`))
+	})
+
+	It("leaves a 404 alone when the model still checks out", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		serveModel(ctx, e, "fake/agent-pick", true)
+		setModel(ctx, e, "fake/agent-pick")
+		e.harness.modelFault = func(context.Context, string) error {
+			return &sdk.RequestError{Code: -32603, Message: "not found", Data: map[string]any{"statusCode": 404}}
+		}
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("session/prompt"))
 	})
 })

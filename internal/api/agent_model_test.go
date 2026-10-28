@@ -140,6 +140,19 @@ var _ = Describe("the agent's model setting", func() {
 		Expect(v.GetProblem()).To(Equal(`the agent's model "vendor/a-model" is not served in this org; pick another on the agent page`))
 	})
 
+	It("flags a version's model the org does not serve, so the page can show it", func(ctx SpecContext) {
+		serveModel(ctx, e, org, "vendor/a-model", true)
+		_, err := e.pool.Exec(ctx, `UPDATE agent_versions SET config = jsonb_set(config, '{model}', '"vendor/ghost"') WHERE agent_id = $1`, agent.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		v := get(ctx)
+		Expect(v.GetSource()).To(Equal(agentv1alpha1.ModelSource_MODEL_SOURCE_VERSION))
+		Expect(v.GetEffective()).To(Equal("vendor/ghost"))
+		Expect(v.GetProblem()).To(And(ContainSubstring(`"vendor/ghost" is not served in this org`), ContainSubstring("pick a model below")))
+		res, err := set(ctx, owner, "vendor/a-model")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetModel().GetProblem()).To(BeEmpty(), "an agent's own pick replaces it")
+	})
+
 	It("is for admins and owners, and an agent of another org is not found", func(ctx SpecContext) {
 		member := e.userIn(ctx, org, store.OrgRoleMember)
 		_, err := set(ctx, member, "default")
