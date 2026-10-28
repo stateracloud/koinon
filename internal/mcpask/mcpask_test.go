@@ -329,6 +329,66 @@ var _ = Describe("the ask-tier proxy", func() {
 		Expect(gw.count()).To(BeZero())
 	})
 
+	Describe("scoped approvals", func() {
+		sid := func() pgtype.UUID { return uuidOf(server.ID) }
+		scoped := func(ctx SpecContext) store.ApprovalScope {
+			GinkgoHelper()
+			row := request(ctx, map[string]any{"title": "first"})
+			_, err := exec().ApproveScoped(ctx, org, row.ID, user, row.ArgsSha256, "", approvals.Scope{Kind: approvals.ScopeAgent, Until: time.Now().Add(7 * 24 * time.Hour)})
+			Expect(err).NotTo(HaveOccurred())
+			scopes, err := q.ListActiveApprovalScopesForAgent(ctx, store.ListActiveApprovalScopesForAgentParams{OrgID: org, AgentID: agent.ID, Now: pgtype.Timestamptz{Time: time.Now(), Valid: true}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(scopes).To(HaveLen(1))
+			Expect(scopes[0].CallBinding).NotTo(BeEmpty(), "pinned to the version that was approved")
+			return scopes[0]
+		}
+
+		It("lets the next call of the same server and tool run, and names the scope on the timeline", func(ctx SpecContext) {
+			sc := scoped(ctx)
+			next := request(ctx, map[string]any{"title": "second"})
+			Expect(next.Status).To(Equal(store.ApprovalStatusApproved))
+			Expect(next.ScopeID).To(Equal(sc.ID))
+			var found bool
+			events, err := q.ListTaskEvents(ctx, store.ListTaskEventsParams{OrgID: org, TaskID: run.TaskID, AfterSeq: 0, MaxEvents: 100})
+			Expect(err).NotTo(HaveOccurred())
+			for _, ev := range events {
+				var p map[string]any
+				if ev.Kind == approvals.KindRequested && json.Unmarshal(ev.Payload, &p) == nil && p["scope_id"] == sc.ID.String() {
+					Expect(p).To(HaveKeyWithValue("scope_kind", "agent"))
+					found = true
+				}
+			}
+			Expect(found).To(BeTrue(), "the requested event carries the scope")
+		})
+
+		It("parks the call again once the server republishes the tool or its URL changes", func(ctx SpecContext) {
+			scoped(ctx)
+			Expect(request(ctx, map[string]any{"title": "same version"}).Status).To(Equal(store.ApprovalStatusApproved))
+
+			_, err := svc.SyncTools(ctx, org, sid(), []mcpservers.ListedTool{{Name: "create_issue", Description: "Create an issue. Now also deletes things.", InputSchema: json.RawMessage(`{"type":"object"}`)}})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.SetTier(ctx, org, audit.System(), server.ID, "create_issue", "ask") // an admin put it back to ask without reviewing
+			Expect(err).NotTo(HaveOccurred())
+			Expect(request(ctx, map[string]any{"title": "after change"}).Status).To(Equal(store.ApprovalStatusPending))
+
+			By("the URL changing parks it too")
+			u := "https://mcp2.example.com/mcp"
+			_, err = svc.Update(ctx, org, audit.System(), server.ID, mcpservers.Patch{URL: &u})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(request(ctx, map[string]any{"title": "after url"}).Status).To(Equal(store.ApprovalStatusPending))
+		})
+
+		It("never covers a tool that needs two approvers", func(ctx SpecContext) {
+			scoped(ctx)
+			_, err := svc.SetTwoApprovers(ctx, org, audit.System(), server.ID, "create_issue", true)
+			Expect(err).NotTo(HaveOccurred())
+			next := request(ctx, map[string]any{"title": "two"})
+			Expect(next.Status).To(Equal(store.ApprovalStatusPending))
+			Expect(next.ScopeID.Valid).To(BeFalse())
+			Expect(next.ApprovalsRequired).To(BeEquivalentTo(2))
+		})
+	})
+
 	Describe("two approvers", func() {
 		var second, third pgtype.UUID
 		BeforeEach(func(ctx SpecContext) {

@@ -3,7 +3,7 @@ title: Koinon documentation
 description: Install Koinon, connect GitHub and run your first agent.
 ---
 
-Koinon runs AI agents in sandboxes on your Kubernetes cluster. You give an agent a ticket. The
+Koinon runs AI agents in sandboxes on your Kubernetes cluster. You give an agent a task. The
 agent works in its sandbox and asks you before it changes anything outside it.
 
 Koinon is pre-alpha. These pages describe what `main` does today. Where a v0.1 change is decided but

@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 var _ = Describe("Render", func() {
@@ -139,10 +140,54 @@ var _ = Describe("Render", func() {
 			}
 		})
 
+		It("renders a model in its format (ADR 0069)", func() {
+			f := fixtures()[len(fixtures())-1]
+			Expect(f.name).To(Equal("model-formats"))
+			out, _, err := standalone.Render(f.state, f.options)
+			Expect(err).NotTo(HaveOccurred())
+			var d struct {
+				LLM struct {
+					Models []struct {
+						ID       string
+						Provider struct {
+							Custom struct {
+								ProviderOverride string `yaml:"providerOverride"`
+								Formats          []struct{ Type string }
+							}
+						}
+						RequestHeaders struct {
+							Set    map[string]string
+							Remove []string
+						} `yaml:"requestHeaders"`
+						Transformation map[string]string
+					}
+				}
+			}
+			Expect(yaml.Unmarshal(out, &d)).To(Succeed())
+			formats := map[string]string{}
+			for _, m := range d.LLM.Models {
+				formats[m.ID] = m.Provider.Custom.Formats[0].Type
+				if m.ID == "acme/claude-haiku-4-5" {
+					Expect(m.Transformation).To(And(HaveLen(1), HaveKey("tools")),
+						"no stream_options; the agent's server tools are dropped")
+					Expect(m.RequestHeaders.Remove).To(Equal([]string{"anthropic-beta"}))
+					Expect(m.RequestHeaders.Set).To(Equal(map[string]string{
+						"anthropic-version": "2023-06-01", "anthropic-workspace-id": "wrkspc_01ExampleExample",
+					}))
+					Expect(m.Provider.Custom.ProviderOverride).To(Equal("acme.anthropic"))
+					continue
+				}
+				Expect(m.Transformation).To(HaveKey("stream_options"), m.ID)
+				Expect(m.RequestHeaders.Set).To(BeEmpty(), m.ID)
+			}
+			Expect(formats).To(HaveKeyWithValue("acme/claude-haiku-4-5", "messages"))
+			Expect(formats).To(HaveKeyWithValue("acme/open/model", "completions"))
+		})
+
 		It("rejects the same model served twice in one org", func() {
 			s := gateway.State{Providers: []gateway.Provider{
-				{Org: "acme", Name: "a", Type: "x", BaseURL: "http://a/v1", Models: []gateway.Model{{Name: "m", Price: &gateway.Price{}}}},
-				{Org: "acme", Name: "b", Type: "x", BaseURL: "http://b/v1", Models: []gateway.Model{{Name: "m", Price: &gateway.Price{}}}},
+				{Org: "acme", Name: "a", Type: "x", BaseURL: "http://a/v1", Models: []gateway.Model{{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{}}}},
+				{Org: "acme", Name: "b", Type: "x", BaseURL: "http://b/v1", Models: []gateway.Model{{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{}}}},
 			}}
 			_, _, err := standalone.Render(s, standalone.Options{})
 			Expect(err).To(MatchError(ContainSubstring("served twice")))
@@ -180,7 +225,7 @@ var _ = Describe("Render", func() {
 		Expect(string(out)).NotTo(ContainSubstring("unpriced/model"))
 
 		onlyUnpriced := gateway.State{Providers: []gateway.Provider{{
-			Org: "acme", Name: "x", Type: "x", BaseURL: "http://x/v1", Models: []gateway.Model{{Name: "free"}},
+			Org: "acme", Name: "x", Type: "x", BaseURL: "http://x/v1", Models: []gateway.Model{{Name: "free", Format: modelformat.OpenAI}},
 		}}}
 		out, _, err = standalone.Render(onlyUnpriced, standalone.Options{})
 		Expect(err).NotTo(HaveOccurred())
@@ -243,7 +288,7 @@ var _ = Describe("Render", func() {
 				Expect(p).To(HaveLen(1))
 				Expect(p[0].KeyHash).To(Equal(gateway.HashKey(standalone.ReloadProbeKey(rev))))
 				Expect(p[0].Metadata.Agent).To(BeEmpty())
-				Expect(d.LLM.Policies.Authorization.Rules).To(Equal([]string{`apiKey.name != "koinon-reload-probe"`}))
+				Expect(d.LLM.Policies.Authorization.Rules).To(Equal([]string{`apiKey.name != "koinon-reload-probe" && !has(llmRequest.mcp_servers)`}), "the probe is refused and so is mcp_servers")
 				if d.MCP != nil {
 					Expect(probes(d.MCP.Policies.APIKey.Keys)).To(BeEmpty())
 				}
@@ -272,6 +317,28 @@ var _ = Describe("Render", func() {
 			Expect(probes(b.LLM.Policies.APIKey.Keys)[0].KeyHash).NotTo(Equal(probes(a.LLM.Policies.APIKey.Keys)[0].KeyHash))
 			Expect(standalone.ReloadProbeKey(revA)).NotTo(Equal(standalone.ReloadProbeKey(revB)))
 		})
+	})
+
+	It("gives a lone org target a placeholder that cannot collide with a server name", func() {
+		s := gateway.State{MCP: []gateway.MCPTarget{{Name: "koinon-placeholder", Org: "koinon", URL: "http://k.example.com/mcp"}}}
+		body, _, err := standalone.Render(s, standalone.Options{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring("name: koinon.placeholder"))
+		Expect(strings.Count(string(body), "name: koinon-placeholder")).To(Equal(1))
+	})
+
+	It("renders a limit with a window, and one without", func() {
+		s := gateway.State{}
+		s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour})
+		o := standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}
+		a, _, err := standalone.Render(s, o)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(a)).To(ContainSubstring("rolling: 24h"))
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1})
+		b, _, err := standalone.Render(s, o)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(strings.Count(string(b), "rolling:")).To(Equal(1), "only the reload probe keeps a window")
 	})
 
 	It("names the budget after the limit's generation", func() {

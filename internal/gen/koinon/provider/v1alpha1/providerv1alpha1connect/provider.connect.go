@@ -49,6 +49,12 @@ const (
 	// ProviderServiceDeleteModelProcedure is the procedure name of the ProviderService's DeleteModel
 	// RPC.
 	ProviderServiceDeleteModelProcedure = "/koinon.provider.v1alpha1.ProviderService/DeleteModel"
+	// ProviderServiceModelFormatsProcedure is the procedure name of the ProviderService's ModelFormats
+	// RPC.
+	ProviderServiceModelFormatsProcedure = "/koinon.provider.v1alpha1.ProviderService/ModelFormats"
+	// ProviderServiceProviderTypeInfoProcedure is the procedure name of the ProviderService's
+	// ProviderTypeInfo RPC.
+	ProviderServiceProviderTypeInfoProcedure = "/koinon.provider.v1alpha1.ProviderService/ProviderTypeInfo"
 )
 
 var (
@@ -110,6 +116,22 @@ var (
 			Procedure:  ProviderServiceDeleteModelProcedure,
 		}
 	})
+	providerServiceModelFormatsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_provider_v1alpha1_provider_proto.Services().ByName("ProviderService").Methods().ByName("ModelFormats"),
+			Procedure:        ProviderServiceModelFormatsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	providerServiceProviderTypeInfoSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_provider_v1alpha1_provider_proto.Services().ByName("ProviderService").Methods().ByName("ProviderTypeInfo"),
+			Procedure:        ProviderServiceProviderTypeInfoProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
 )
 
 // ProviderServiceClient is a client for the koinon.provider.v1alpha1.ProviderService service.
@@ -124,6 +146,12 @@ type ProviderServiceClient interface {
 	CreateModel(context.Context, *v1alpha1.CreateModelRequest) (*v1alpha1.CreateModelResponse, error)
 	UpdateModel(context.Context, *v1alpha1.UpdateModelRequest) (*v1alpha1.UpdateModelResponse, error)
 	DeleteModel(context.Context, *v1alpha1.DeleteModelRequest) (*v1alpha1.DeleteModelResponse, error)
+	// ModelFormats says which formats a model may use on a provider and which one it gets by default
+	// (ADR 0069), so the model form offers exactly what the server will accept.
+	ModelFormats(context.Context, *v1alpha1.ModelFormatsRequest) (*v1alpha1.ModelFormatsResponse, error)
+	// ProviderTypeInfo says what a provider type offers before any provider of that type exists, so the
+	// provider form shows only the fields the server will accept.
+	ProviderTypeInfo(context.Context, *v1alpha1.ProviderTypeInfoRequest) (*v1alpha1.ProviderTypeInfoResponse, error)
 }
 
 // NewProviderServiceClient constructs a client for the koinon.provider.v1alpha1.ProviderService
@@ -145,6 +173,12 @@ type ProviderServiceHandler interface {
 	CreateModel(context.Context, *v1alpha1.CreateModelRequest) (*v1alpha1.CreateModelResponse, error)
 	UpdateModel(context.Context, *v1alpha1.UpdateModelRequest) (*v1alpha1.UpdateModelResponse, error)
 	DeleteModel(context.Context, *v1alpha1.DeleteModelRequest) (*v1alpha1.DeleteModelResponse, error)
+	// ModelFormats says which formats a model may use on a provider and which one it gets by default
+	// (ADR 0069), so the model form offers exactly what the server will accept.
+	ModelFormats(context.Context, *v1alpha1.ModelFormatsRequest) (*v1alpha1.ModelFormatsResponse, error)
+	// ProviderTypeInfo says what a provider type offers before any provider of that type exists, so the
+	// provider form shows only the fields the server will accept.
+	ProviderTypeInfo(context.Context, *v1alpha1.ProviderTypeInfoRequest) (*v1alpha1.ProviderTypeInfoResponse, error)
 }
 
 // RegisterProviderServiceHandler registers svc as the koinon.provider.v1alpha1.ProviderService
@@ -160,6 +194,8 @@ func RegisterProviderServiceHandler(server *connect.Server, svc ProviderServiceH
 		connect.Method{Spec: providerServiceCreateModelSpec(), Handler: adapter.createModel},
 		connect.Method{Spec: providerServiceUpdateModelSpec(), Handler: adapter.updateModel},
 		connect.Method{Spec: providerServiceDeleteModelSpec(), Handler: adapter.deleteModel},
+		connect.Method{Spec: providerServiceModelFormatsSpec(), Handler: adapter.modelFormats},
+		connect.Method{Spec: providerServiceProviderTypeInfoSpec(), Handler: adapter.providerTypeInfo},
 	)
 }
 
@@ -196,6 +232,14 @@ func (UnimplementedProviderServiceHandler) UpdateModel(context.Context, *v1alpha
 
 func (UnimplementedProviderServiceHandler) DeleteModel(context.Context, *v1alpha1.DeleteModelRequest) (*v1alpha1.DeleteModelResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.provider.v1alpha1.ProviderService.DeleteModel is not implemented")
+}
+
+func (UnimplementedProviderServiceHandler) ModelFormats(context.Context, *v1alpha1.ModelFormatsRequest) (*v1alpha1.ModelFormatsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.provider.v1alpha1.ProviderService.ModelFormats is not implemented")
+}
+
+func (UnimplementedProviderServiceHandler) ProviderTypeInfo(context.Context, *v1alpha1.ProviderTypeInfoRequest) (*v1alpha1.ProviderTypeInfoResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.provider.v1alpha1.ProviderService.ProviderTypeInfo is not implemented")
 }
 
 type providerServiceClient struct {
@@ -261,6 +305,22 @@ func (c *providerServiceClient) UpdateModel(ctx context.Context, req *v1alpha1.U
 func (c *providerServiceClient) DeleteModel(ctx context.Context, req *v1alpha1.DeleteModelRequest) (*v1alpha1.DeleteModelResponse, error) {
 	var res v1alpha1.DeleteModelResponse
 	if err := c.client.CallUnary(ctx, providerServiceDeleteModelSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *providerServiceClient) ModelFormats(ctx context.Context, req *v1alpha1.ModelFormatsRequest) (*v1alpha1.ModelFormatsResponse, error) {
+	var res v1alpha1.ModelFormatsResponse
+	if err := c.client.CallUnary(ctx, providerServiceModelFormatsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *providerServiceClient) ProviderTypeInfo(ctx context.Context, req *v1alpha1.ProviderTypeInfoRequest) (*v1alpha1.ProviderTypeInfoResponse, error) {
+	var res v1alpha1.ProviderTypeInfoResponse
+	if err := c.client.CallUnary(ctx, providerServiceProviderTypeInfoSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -358,6 +418,30 @@ func (h providerServiceHandler) deleteModel(ctx context.Context, _ connect.Spec,
 		return err
 	}
 	res, err := h.svc.DeleteModel(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h providerServiceHandler) modelFormats(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ModelFormatsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ModelFormats(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h providerServiceHandler) providerTypeInfo(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ProviderTypeInfoRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ProviderTypeInfo(ctx, &req)
 	if err != nil {
 		return err
 	}

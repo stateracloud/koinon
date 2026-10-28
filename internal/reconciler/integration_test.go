@@ -17,7 +17,9 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // The integration test reconciles one agent against a real OpenShell gateway, only when
@@ -61,6 +63,7 @@ var _ = Describe("against an OpenShell gateway", Label("integration"), func() {
 		r, err := reconciler.New(pool, backend, &fakeModelGateway{},
 			reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace},
 			reconciler.Config{
+				Prices:  prices.NewResolver(pricing.Embedded()),
 				Gateway: reconciler.Endpoint{Host: host, Port: 8080},
 				Flavors: map[store.AgentFlavor]reconciler.Flavor{
 					store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},

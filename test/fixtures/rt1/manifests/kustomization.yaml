@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# RT1 fixtures: three remote MCP servers in namespace koinon-fixtures. See ../README.md.
+#   kubectl apply -k test/fixtures/rt1/manifests
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: koinon-fixtures
+resources:
+  - namespace.yaml
+  - networkpolicies.yaml
+  - motherduck.yaml
+  - fakecicost.yaml
+  - prometheus.yaml
+  - searxng.yaml
+# SearXNG's settings file, mounted by the searxng Deployment.
+configMapGenerator:
+  - name: rt1-searxng-settings
+    files:
+      - settings.yml=searxng-settings.yml
+# Images are pinned by digest. The three mirrored upstream images (prometheus, searxng, mcp-searxng) keep
+# their upstream digests. The four built images were built from bfaab19 for linux/amd64 and pushed with
+# hack/rt1-fixtures-build.sh, which prints this block after a rebuild. The tag is informational.
+images:
+  - name: zot.apps.lab.example.invalid/koinon/rt1-motherduck
+    newTag: "rt1-bfaab19"
+    digest: sha256:ae71e987442c42e9d90281e489d563f737a8aed14f0ad8416e1b337018b50d38
+  - name: zot.apps.lab.example.invalid/koinon/rt1-fakecicost
+    newTag: "rt1-bfaab19"
+    digest: sha256:015d90c0ad5cf3e337c4a6654b41a88758857a5e64b2d4928e060858c14a3d79
+  - name: zot.apps.lab.example.invalid/koinon/rt1-promgen
+    newTag: "rt1-bfaab19"
+    digest: sha256:d14b0e6e71ac5227dd415f0d06bcc52bd43abc0e5a5e954cee3c9a6afe6f2c02
+  - name: zot.apps.lab.example.invalid/koinon/rt1-prometheus-mcp
+    newTag: "rt1-bfaab19"
+    digest: sha256:fb2355b39fcecaeb38a03e2d0e73a45f8c13a1a4e11c7e862d232b50ad48e939
+  - name: zot.apps.lab.example.invalid/koinon/rt1-prometheus
+    newTag: v3.7.3
+    digest: sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
+  - name: zot.apps.lab.example.invalid/koinon/rt1-searxng
+    newTag: "2026.10.27"
+    digest: sha256:0f48ffe2152f388f5eaede27f96b610449cebfc890d0ad457304475a54ad7b6e
+  - name: zot.apps.lab.example.invalid/koinon/rt1-searxng-mcp
+    newTag: "2.9.0"
+    digest: sha256:8f1dd92a9e2875cb4e8df7036785ec4c088b7600cefb611de472a352a3dcba60

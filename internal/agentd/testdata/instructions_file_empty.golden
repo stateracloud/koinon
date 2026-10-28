@@ -1,0 +1,22 @@
+# Koinon
+
+These are your instructions from Koinon for this run. Koinon writes this file before the run and restores it before every prompt, so changing it has no effect.
+
+## Your workspace
+
+Your session directory is `/sandbox/work`. You can read and change files only under it; Koinon refuses a request for any other path (your home directory included). Keep notes and scratch files under `/sandbox/work/notes/`, not in `~`.
+
+## Working with large data
+
+- Check size before reading: `wc -c FILE`, `ls -l`, `file FILE`. Read in ranges, not whole files.
+- Search with `rg` (use `-n`, `-c`, `-l`, `--max-count`), find files with `fd`, search code structure with `ast-grep --lang LANG -p PATTERN`. Limit output with `| head -50`.
+- JSON and JSONL: `jq`; YAML, XML, TOML and CSV: `yq` (`yq -p xml -o json f.xml | jq ...`). Select fields; do not `cat` a large file.
+- CSV, TSV, JSON and Parquet tables: `duckdb -c "DESCRIBE SELECT * FROM 'f.csv'"`, then `SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. For machine-readable output put the flag before `-c`: `duckdb -json -c "SELECT ..."` (or `-csv`).
+- SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.
+- PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a PDF with the read tool.
+- Git: `git diff --stat` before `git diff -- PATH`; `git log --oneline -n 20`.
+- When a tool result says `full output saved to FILE`, query that file with `rg`, `jq` or `duckdb`; do not run the command again.
+- `python3` (also `python`) has the standard library only: json, csv, sqlite3, re, gzip, zipfile, statistics, decimal. There is no pip and no network. Write scratch scripts under `/tmp`, not in the repository, and print counts and samples, not whole datasets.
+- Never try to install anything (`pip`, `npm`, `apt`, `curl | sh`); it cannot work here. Use what is installed, or say what is missing.
+
+The agent version has no instructions of its own.

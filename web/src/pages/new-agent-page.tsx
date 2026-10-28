@@ -12,7 +12,7 @@ import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { TemplateService } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { isApprover } from '@/lib/approvals'
-import { setupGuide } from '@/lib/connector'
+import { codeHostInfo, setupGuide } from '@/lib/connector'
 import { useOrg } from '@/lib/org-context'
 
 /** NewAgentPage creates a draft agent from a template (ADR 0020). Members and above. */
@@ -26,6 +26,11 @@ export function NewAgentPage() {
   const types = useQuery(ConnectionService.method.listConnectorTypes, {})
   const patterns = useMemo(
     () => new Map((types.data?.connectorTypes ?? []).flatMap((t) => (setupGuide(t).targetPattern ? [[t.id, setupGuide(t).targetPattern!] as const] : []))),
+    [types.data],
+  )
+
+  const codeHosts = useMemo(
+    () => new Map((types.data?.connectorTypes ?? []).flatMap((t) => { const h = codeHostInfo(t); return h ? [[t.id, h] as const] : [] })),
     [types.data],
   )
 
@@ -64,6 +69,7 @@ export function NewAgentPage() {
             templates={templates.data.templates}
             connections={connections.data.connections}
             targetPatterns={patterns}
+            codeHosts={codeHosts}
             canConnect={isApprover(org.role)}
             canListRepos={isApprover(org.role)}
             pending={create.isPending}

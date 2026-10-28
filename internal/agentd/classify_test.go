@@ -38,6 +38,19 @@ var _ = Describe("Error classification", func() {
 		Entry("unknown errors are fatal", errors.New("nope"), "fatal"),
 	)
 
+	DescribeTable("errors that may be the gateway refusing a spent budget's key",
+		func(err error, gateway bool) { Expect(agentd.ClassifyGateway(err)).To(Equal(gateway)) },
+		Entry("a structured 401", rpc("Authentication required", map[string]any{"statusCode": 401}), true),
+		Entry("OpenCode's 401 without a status",
+			rpc("Authentication required: provider authentication required", nil), true),
+		Entry("a structured 429", rpc("slow down", map[string]any{"status": 429}), true),
+		Entry("a 429 in the text", errors.New("429 Too Many Requests"), true),
+		Entry("a provider's rate limit phrase", errors.New("rate limit exceeded"), true),
+		Entry("a 403", rpc("denied", map[string]any{"statusCode": 403}), false),
+		Entry("a 503", rpc("boom", map[string]any{"statusCode": 503}), false),
+		Entry("an unknown error", errors.New("nope"), false),
+	)
+
 	DescribeTable("ACP stop reasons",
 		func(stop acp.StopReason, want string) { Expect(agentd.StopClass(stop)).To(Equal(want)) },
 		Entry("refusal is policy", acp.StopRefusal, "policy"),

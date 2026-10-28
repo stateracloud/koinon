@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, type ChangePasswordRequest } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import { TicketService } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
+import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { renderApp, whoAmI } from '@/test-utils'
 
 function json(body: unknown, status = 200) {
@@ -49,18 +49,18 @@ describe('authentication', () => {
         },
       })
       service(AgentService, { listAgents: () => ({ agents: [] }) })
-      service(TicketService, { listTickets: () => ({ tickets: [] }) })
+      service(TaskService, { listTasks: () => ({ tasks: [] }) })
     })
 
-    const { history } = renderApp(transport, '/tickets/t-9')
+    const { history } = renderApp(transport, '/tasks/t-9')
     expect(await screen.findByRole('heading', { name: 'Sign in to Koinon' })).toBeInTheDocument()
     expect(history.location.pathname).toBe('/login')
     const sso = await screen.findByRole('link', { name: 'Sign in with SSO' })
-    expect(sso).toHaveAttribute('href', '/auth/oidc/start?return_to=%2Ftickets%2Ft-9')
+    expect(sso).toHaveAttribute('href', '/auth/oidc/start?return_to=%2Ftasks%2Ft-9')
 
     await userEvent.type(screen.getByLabelText('Password'), 'hunter2hunter2')
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }))
-    await waitFor(() => expect(history.location.pathname).toBe('/tickets/t-9'))
+    await waitFor(() => expect(history.location.pathname).toBe('/tasks/t-9'))
     expect(calls.find((c) => c.url === '/auth/login')?.init?.method).toBe('POST')
   })
 
@@ -80,7 +80,7 @@ describe('authentication', () => {
     expect(screen.queryByRole('link', { name: 'Sign in with SSO' })).not.toBeInTheDocument()
   })
 
-  it('forces the bootstrap password change before the board', async () => {
+  it('forces the bootstrap password change before the inbox', async () => {
     stubFetch({ password: true, oidc: false })
     let required = true
     const changes: ChangePasswordRequest[] = []
@@ -94,11 +94,11 @@ describe('authentication', () => {
         },
       })
       service(AgentService, { listAgents: () => ({ agents: [] }) })
-      service(TicketService, { listTickets: () => ({ tickets: [] }) })
+      service(TaskService, { listTasks: () => ({ tasks: [] }) })
     })
     renderApp(transport, '/')
     expect(await screen.findByRole('heading', { name: 'Choose a new password' })).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: /^To do/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Inbox' })).not.toBeInTheDocument()
 
     await userEvent.type(screen.getByLabelText('Current password'), 'bootstrap-pw')
     await userEvent.type(screen.getByLabelText('New password'), 'short')
@@ -113,7 +113,7 @@ describe('authentication', () => {
     await userEvent.type(screen.getByLabelText('Repeat new password'), 'a-much-longer-password')
     await userEvent.click(screen.getByRole('button', { name: 'Change password' }))
 
-    expect(await screen.findByRole('region', { name: /^To do/ })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeInTheDocument()
     expect(changes[0]).toMatchObject({ currentPassword: 'bootstrap-pw', newPassword: 'a-much-longer-password' })
   })
 
@@ -128,7 +128,7 @@ describe('authentication', () => {
         },
       })
       service(AgentService, { listAgents: () => ({ agents: [] }) })
-      service(TicketService, { listTickets: () => ({ tickets: [] }) })
+      service(TaskService, { listTasks: () => ({ tasks: [] }) })
     })
     const { history } = renderApp(transport, '/')
     await userEvent.click(await screen.findByRole('button', { name: 'Log out' }))

@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"    //nolint:staticcheck // see above
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // Env is one driver under test.
@@ -41,9 +42,6 @@ type Env struct {
 	// GatewayBudgets is true when the gateway itself blocks a key over its limit with 429 (standalone
 	// mode). In Kubernetes mode the ledger revokes the key instead, which that driver's own suite tests.
 	GatewayBudgets bool
-	// OrgTargetsNotContacted is true when an org's MCP server is not contacted at all for another
-	// org's key (standalone: a per-target condition). Without it only tool calls are denied.
-	OrgTargetsNotContacted bool
 }
 
 // Gateway is a started gateway under test.
@@ -68,6 +66,7 @@ var (
 // Register adds the G1 specs for env to the current Ginkgo tree.
 func Register(env Env) {
 	llmSpec(env)
+	anthropicSpec(env)
 	mcpServersSpec(env)
 	loneTargetSpec(env)
 }
@@ -164,27 +163,27 @@ func llmSpec(env Env) {
 						Org: "acme", Name: "upstream", Type: "fake", BaseURL: hostURL(port(upstream)),
 						// $50 per 1M tokens: 20 tokens cost $0.001 per request.
 						Models: []gateway.Model{
-							{Name: testModel, Price: &gateway.Price{Input: "50", Output: "50"}},
-							{Name: "acme-only", Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: testModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "50", Output: "50"}},
+							{Name: "acme-only", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}},
 							// A plain name that is spelled like globex's gateway-wide id.
-							{Name: "globex/" + testModel, Price: &gateway.Price{Input: "1", Output: "1"}},
-							{Name: "unpriced"},
+							{Name: "globex/" + testModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: "unpriced", Format: modelformat.OpenAI},
 						},
 					},
 					{
 						Org: "acme", Name: "redirecting", Type: "fake", BaseURL: hostURL(port(redirector)),
-						Models: []gateway.Model{{Name: "redirect-model", Price: &gateway.Price{Input: "1", Output: "1"}}},
+						Models: []gateway.Model{{Name: "redirect-model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}},
 					},
 					{
 						Org: "globex", Name: "upstream", Type: "fake", BaseURL: hostURL(port(ups["globex"].Server)),
 						APIKeyFile: env.KeyFile("globex_key"),
-						Models:     []gateway.Model{{Name: testModel, Price: &gateway.Price{Input: "1", Output: "1"}}},
+						Models:     []gateway.Model{{Name: testModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}},
 					},
 					{
 						Org: "globex", Name: "guarded", Type: "openrouter", BaseURL: hostURL(port(ups["guarded"].Server)),
 						Models: []gateway.Model{
-							{Name: "guarded-model", Guard: true, Price: &gateway.Price{Input: "1", Output: "1"}},
-							{Name: "open-model", Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: "guarded-model", Format: modelformat.OpenAI, Guard: true, Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: "open-model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}},
 						},
 					},
 				},
@@ -347,6 +346,43 @@ func llmSpec(env Env) {
 				Expect(upstreamOptions()).To(BeNil(), "not streamed: no stream_options goes upstream")
 				send(`{"model":"open-model",` + msgs + `}`)
 				Expect(upstreamOptions()).To(BeNil())
+			})
+
+			It("passes cache_control markers through to the upstream unchanged (ADR 0068)", func(ctx SpecContext) {
+				marker := map[string]any{"type": "ephemeral"}
+				block := func(text string) map[string]any {
+					return map[string]any{"type": "text", "text": text, "cache_control": marker}
+				}
+				sent := map[string]any{
+					"model": "open-model", "session_id": "01234567-run",
+					"messages": []any{
+						map[string]any{"role": "system", "content": []any{block("You are a helpful agent.")}},
+						map[string]any{"role": "user", "content": []any{block("first question")}},
+						map[string]any{"role": "assistant", "content": "answer"},
+						map[string]any{"role": "user", "content": []any{block("second question")}},
+					},
+					"tools": []any{map[string]any{
+						"type": "function", "cache_control": marker,
+						"function": map[string]any{"name": "lookup", "parameters": map[string]any{"type": "object"}},
+					}},
+				}
+				raw, err := json.Marshal(sent)
+				Expect(err).NotTo(HaveOccurred())
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions", bytes.NewReader(raw))
+				Expect(err).NotTo(HaveOccurred())
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+keyG.Material)
+				resp, err := http.DefaultClient.Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				b, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				Expect(resp.StatusCode).To(Equal(http.StatusOK), string(b))
+
+				var got map[string]any
+				Expect(json.Unmarshal([]byte(ups["guarded"].lastBody()), &got)).To(Succeed())
+				Expect(got["messages"]).To(Equal(sent["messages"]), "the content blocks and their cache_control reach the upstream as sent")
+				Expect(got).To(HaveKeyWithValue("session_id", "01234567-run"), "OpenRouter's sticky-routing field reaches the upstream")
+				Expect(got["tools"]).To(Equal(sent["tools"]), "the tool's cache_control reaches the upstream as sent")
 			})
 
 			It("sends the provider's key file content as the upstream credential", func(ctx SpecContext) {
@@ -584,14 +620,10 @@ func mcpServersSpec(env Env) {
 					Expect(res.IsError).To(BeTrue(), tool)
 				}
 			}
-			if env.OrgTargetsNotContacted {
-				// The globex server was not even contacted for the other org's key.
-				Expect(globexLog.values("X-Api-Key")).To(HaveLen(before))
-			} else {
-				// Kubernetes mode has no per-target condition (ADR 0058): the server may see the other
-				// org's initialize and list, with its owner's credential, but no tool call.
-				Expect(globexLog.values("Mcp-Method")).NotTo(ContainElement("tools/call"), "no call reached the server; saw %d requests", len(globexLog.values("Mcp-Method"))-callsBefore)
-			}
+			// The globex server was not even contacted for the other org's key (a per-target
+			// condition in both modes since agentgateway v1.7, ADR 0058).
+			Expect(globexLog.values("X-Api-Key")).To(HaveLen(before))
+			Expect(globexLog.values("Mcp-Method")).NotTo(ContainElement("tools/call"), "no call reached the server; saw %d requests", len(globexLog.values("Mcp-Method"))-callsBefore)
 		})
 
 		It("injects the credential header at the gateway and does not let the agent set it", func(ctx SpecContext) {
@@ -730,9 +762,7 @@ func loneTargetSpec(env Env) {
 			res, err := s.ListTools(ctx, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.Tools).To(BeEmpty())
-			if env.OrgTargetsNotContacted {
-				Expect(log.values("Mcp-Method")).To(HaveLen(before), "the server was not contacted for the other org's key")
-			}
+			Expect(log.values("Mcp-Method")).To(HaveLen(before), "the server was not contacted for the other org's key")
 			_, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-only_read_item"})
 			if err == nil {
 				Expect(log.values("Mcp-Method")).NotTo(ContainElement("tools/call"))

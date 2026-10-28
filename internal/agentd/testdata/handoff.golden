@@ -1,0 +1,24 @@
+Task: Fix the typo
+
+[Koinon] Your session on this task was restarted because your instructions changed. You do not remember the earlier turns; this is what Koinon kept of them. Follow your current instructions.
+
+[Koinon] MCP notice.
+
+Your notes from your last turn:
+Notes from the last turn.
+
+Your last replies on the task, oldest first:
+---
+First reply.
+---
+Second reply.
+
+Messages from the people on the task, oldest first; the last one is the one to act on:
+---
+Please fix the typo.
+---
+Also the footer.
+
+[Koinon] Your run was paused while a human decided on your approval requests, and has now resumed. The outcomes:
+- create_pull_request (approval id=00000000-0000-0000-0000-00000000000a, acme/widgets): denied by the approver, who wrote: no
+These outcomes are final: do not call the tools again for them. Continue the task from here, and tell the user what happened.

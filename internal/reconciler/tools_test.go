@@ -15,7 +15,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -41,6 +43,32 @@ var _ = Describe("ToolGrants", func() {
 	})
 })
 
+var _ = Describe("ToolGrants for a Gitea grant", func() {
+	It("offers the code-host tools when the tool server is registered for gitea", func() {
+		cfg := agentconfig.Config{Grants: []templates.Grant{{Connector: "gitea", Scopes: []string{"repo.read", "pull_request.create", "issue.comment"}, Preset: templates.PresetStandard}}}
+		Expect(reconciler.ToolGrants(cfg, map[string]string{"gitea": toolsURL})).To(Equal(
+			[]gateway.ToolGrant{{Target: "gitea", Tools: []string{"comment_on_issue", "create_pull_request", "get_approval_status"}}}))
+	})
+})
+
+var _ = Describe("ToolGrants for Koinon's own tools", func() {
+	It("offers ask_user and cancel_task to every agent when the koinon tool server is configured, grant or not", func() {
+		servers := map[string]string{gateway.KoinonTarget: "http://koinon-api-tools.koinon.svc:8081/mcp-koinon"}
+		ask := gateway.ToolGrant{Target: "koinon", Tools: []string{"ask_user", "cancel_task"}}
+		Expect(reconciler.ToolGrants(agentconfig.Config{}, servers)).To(Equal([]gateway.ToolGrant{ask}))
+
+		both := map[string]string{"github": toolsURL, gateway.KoinonTarget: servers[gateway.KoinonTarget]}
+		cfg := agentconfig.Config{Grants: []templates.Grant{{Connector: "github", Scopes: []string{"repo.read", "pull_request.create"}, Preset: templates.PresetStandard}}}
+		Expect(reconciler.ToolGrants(cfg, both)).To(Equal([]gateway.ToolGrant{
+			ask,
+			{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}},
+		}))
+	})
+	It("offers nothing without the server", func() {
+		Expect(reconciler.ToolGrants(agentconfig.Config{}, map[string]string{"github": toolsURL})).To(BeEmpty())
+	})
+})
+
 var _ = Describe("Reconciler with the GitHub tool server", func() {
 	It("routes the tool server and allows each active agent its granted tools", func(ctx SpecContext) {
 		osg := fakegateway.New()
@@ -49,6 +77,7 @@ var _ = Describe("Reconciler with the GitHub tool server", func() {
 		DeferCleanup(func() { _ = conn.Close(); osg.Stop() })
 		mg := &fakeModelGateway{}
 		cfg := reconciler.Config{
+			Prices:      prices.NewResolver(pricing.Embedded()),
 			Gateway:     reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			ToolServers: map[string]string{"github": toolsURL},
 			Flavors: map[store.AgentFlavor]reconciler.Flavor{
@@ -84,7 +113,8 @@ var _ = Describe("Reconciler with the GitHub tool server", func() {
 		for _, rule := range osg.Profile(ws, "koinon-agentgateway-opencode").GetEndpoints()[0].GetRules() {
 			paths = append(paths, rule.GetAllow().GetMethod()+" "+rule.GetAllow().GetPath())
 		}
-		Expect(paths).To(ContainElements("POST /v1/chat/completions", "POST /mcp", "GET /mcp", "DELETE /mcp"))
+		Expect(paths).To(ConsistOf("POST /v1/chat/completions", "POST /v1/messages", "POST /mcp", "GET /mcp", "DELETE /mcp"),
+			"both model routes and the MCP routes, and nothing else (/v1/messages/count_tokens stays closed)")
 	})
 })
 

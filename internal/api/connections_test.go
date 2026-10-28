@@ -4,10 +4,15 @@ package api_test
 
 import (
 	"bytes"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectproto"
@@ -26,6 +31,7 @@ import (
 	connectionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1"
 	"github.com/stateracloud/koinon/internal/secretstore"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
+	"github.com/stateracloud/koinon/internal/testing/fakegitea"
 )
 
 // lockedBuffer collects logs from several goroutines.
@@ -94,8 +100,10 @@ var _ = Describe("ConnectionService", func() {
 	It("lists the GitHub connector type with its setup guide", func(ctx SpecContext) {
 		res, err := owner.conns.ListConnectorTypes(ctx, &connectionv1alpha1.ListConnectorTypesRequest{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.GetConnectorTypes()).To(HaveLen(1))
-		gh := res.GetConnectorTypes()[0]
+		Expect(res.GetConnectorTypes()).To(HaveLen(2))
+		Expect(res.GetConnectorTypes()[0].GetId()).To(Equal("gitea"))
+		Expect(res.GetConnectorTypes()[0].GetAuthType()).To(Equal("static-token"))
+		gh := res.GetConnectorTypes()[1]
 		Expect(gh.GetId()).To(Equal("github"))
 		Expect(gh.GetAuthType()).To(Equal("app-credential"))
 		Expect(gh.GetScopes()).To(ContainElement(SatisfyAll(
@@ -169,6 +177,65 @@ var _ = Describe("ConnectionService", func() {
 		secrets, err := kube.CoreV1().Secrets("koinon").List(ctx, metav1.ListOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(secrets.Items).To(BeEmpty())
+	})
+
+	It("stores a base URL and CA bundle with the connection and returns them", func(ctx SpecContext) {
+		tlsServer := httptest.NewTLSServer(http.NotFoundHandler()) // a certificate to use as the CA
+		DeferCleanup(tlsServer.Close)
+		ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsServer.Certificate().Raw}))
+		res, err := owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+			OrgId: org, DisplayName: "ghes", AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM),
+			BaseUrl: " https://GHES.example.test:8443/ ", CaBundle: ca,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetConnection().GetGithub().GetBaseUrl()).To(Equal("https://ghes.example.test:8443"))
+		Expect(res.GetConnection().GetGithub().GetCaBundle()).To(Equal(strings.TrimSpace(ca)))
+		got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: res.GetConnection().GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetConnection().GetGithub().GetBaseUrl()).To(Equal("https://ghes.example.test:8443"))
+
+		// github.com is the default and is not stored.
+		res, err = owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+			OrgId: org, AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM), BaseUrl: "https://github.com",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetConnection().GetGithub().GetBaseUrl()).To(BeEmpty())
+	})
+
+	It("stores the connection's CI directories cleaned and returns them", func(ctx SpecContext) {
+		res, err := owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+			OrgId: org, AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM),
+			CiDirs: []string{"./ci//pipelines/", " build/ci ", "ci/pipelines", ""},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetConnection().GetGithub().GetCiDirs()).To(Equal([]string{"ci/pipelines", "build/ci"}))
+		got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: res.GetConnection().GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetConnection().GetGithub().GetCiDirs()).To(Equal([]string{"ci/pipelines", "build/ci"}))
+
+		for _, bad := range [][]string{{"/abs"}, {"../up"}, {"."}, {"a\\b"}, make([]string, 21)} {
+			_, err := owner.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
+				OrgId: org, AppId: gh.AppID, InstallationId: gh.InstallationID, PrivateKey: string(gh.PEM), CiDirs: bad,
+			})
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "%v", bad)
+		}
+	})
+
+	It("rejects a base URL that is not a bare https host and a CA bundle that is not certificates", func(ctx SpecContext) {
+		for _, req := range []*connectionv1alpha1.CreateGitHubConnectionRequest{
+			{BaseUrl: "http://ghes.example.test"},
+			{BaseUrl: "https://ghes.example.test/enterprise"},
+			{BaseUrl: "https://10.0.0.1"},
+			{BaseUrl: "https://127.0.0.1:8443"},
+			{BaseUrl: "https://koinon-postgres"},
+			{CaBundle: "not pem"},
+			{CaBundle: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("not-a-real-key")}))},
+		} {
+			req.OrgId, req.AppId, req.InstallationId, req.PrivateKey = org, gh.AppID, gh.InstallationID, string(gh.PEM)
+			_, err := owner.conns.CreateGitHubConnection(ctx, req)
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument), "%v", req)
+		}
+		Expect(count(ctx, e, `SELECT count(*) FROM connections`)).To(BeZero())
 	})
 
 	It("reports failing checks at the step that caused them", func(ctx SpecContext) {
@@ -375,3 +442,146 @@ func mustJSON(m proto.Message) []byte {
 	Expect(err).NotTo(HaveOccurred())
 	return b
 }
+
+var _ = Describe("ConnectionService for Gitea", func() {
+	const (
+		readTok  = "koinon_test_not-a-real-read-token"
+		writeTok = "koinon_test_not-a-real-write-token"
+	)
+	var (
+		e     *env
+		gt    *fakegitea.Fake
+		ring  *secretstore.Keyring
+		logs  *lockedBuffer
+		org   string
+		owner *client
+	)
+
+	BeforeEach(func(ctx SpecContext) {
+		gt = fakegitea.NewTLS()
+		DeferCleanup(gt.Close)
+		gt.Tokens = map[string]string{}
+		gt.AddScopedToken(readTok, "koinon-bot", "read")
+		gt.AddScopedToken(writeTok, "koinon-bot", "write")
+		gt.AddRepo("app")
+		gt.AddRepo("secret")
+		gt.Collaborate("koinon-bot", "app", "write")
+		ring = secretstoretest.Keyring()
+		logs = &lockedBuffer{}
+		u, err := url.Parse(gt.URL())
+		Expect(err).NotTo(HaveOccurred())
+		e = newEnv(ctx, envOptions{keys: ring, logs: logs, allowedHosts: []string{u.Hostname()}})
+		org, owner = e.newTeamOrg(ctx)
+	})
+
+	create := func(ctx SpecContext, c *client, mutate func(*connectionv1alpha1.CreateGiteaConnectionRequest)) (*connectionv1alpha1.CreateGiteaConnectionResponse, error) {
+		req := &connectionv1alpha1.CreateGiteaConnectionRequest{
+			OrgId: org, DisplayName: "lab", BaseUrl: gt.URL(), CaBundle: gt.CAPEM(), ReadToken: readTok, WriteToken: writeTok, Test: true,
+		}
+		if mutate != nil {
+			mutate(req)
+		}
+		return c.conns.CreateGiteaConnection(ctx, req)
+	}
+
+	It("creates a connection, tests it and shows what the bot can see", func(ctx SpecContext) {
+		res, err := create(ctx, owner, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetConnection().GetConnector()).To(Equal("gitea"))
+		Expect(res.GetConnection().GetStatus()).To(Equal(connectionv1alpha1.ConnectionStatus_CONNECTION_STATUS_OK))
+		Expect(res.GetResults()).To(HaveLen(4))
+		for _, r := range res.GetResults() {
+			Expect(r.GetOk()).To(BeTrue(), "%s: %s", r.GetCheck(), r.GetMessage())
+		}
+		Expect(res.GetResults()[2].GetMessage()).To(ContainSubstring("acme/app (write)"))
+		Expect(res.GetResults()[2].GetMessage()).NotTo(ContainSubstring("secret"), "the bot is not a collaborator there")
+		g := res.GetConnection().GetGitea()
+		Expect(g.GetBaseUrl()).To(Equal(gt.URL()))
+		Expect(g.GetCaBundle()).To(Equal(strings.TrimSpace(gt.CAPEM())))
+		Expect(g.GetReadTokenSetAt().AsTime()).To(BeTemporally("~", time.Now(), time.Minute))
+		Expect(g.GetWriteTokenSetAt()).NotTo(BeNil())
+		Expect(g.GetTokenWarnAfterSeconds()).To(BeEquivalentTo(90 * 24 * 3600))
+		Expect(res.GetConnection().GetGithub()).To(BeNil())
+	})
+
+	It("stores the tokens only as an envelope, and never returns or logs them", func(ctx SpecContext) {
+		res, err := create(ctx, owner, nil)
+		Expect(err).NotTo(HaveOccurred())
+		id := res.GetConnection().GetId()
+		stored, err := store.New(e.pool).GetConnection(ctx, store.GetConnectionParams{OrgID: mustUUID(org), ID: mustUUID(id)})
+		Expect(err).NotTo(HaveOccurred())
+		fields, err := connections.OpenFields(ring, stored)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(fields["readToken"])).To(Equal(readTok))
+		Expect(string(fields["writeToken"])).To(Equal(writeTok))
+
+		got, err := owner.conns.GetConnection(ctx, &connectionv1alpha1.GetConnectionRequest{OrgId: org, ConnectionId: id})
+		Expect(err).NotTo(HaveOccurred())
+		list, err := owner.conns.ListConnections(ctx, &connectionv1alpha1.ListConnectionsRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		tested, err := owner.conns.TestConnection(ctx, &connectionv1alpha1.TestConnectionRequest{OrgId: org, ConnectionId: id})
+		Expect(err).NotTo(HaveOccurred())
+		var row, summary string
+		Expect(e.pool.QueryRow(ctx, `SELECT row_to_json(c)::text FROM connections c`).Scan(&row)).To(Succeed())
+		Expect(e.pool.QueryRow(ctx, `SELECT summary::text FROM audit_events WHERE org_id = $1 AND action = 'connection.create'`, org).Scan(&summary)).To(Succeed())
+		for _, s := range []string{string(mustJSON(res)), string(mustJSON(got)), string(mustJSON(list)), string(mustJSON(tested)), row, summary, logs.String()} {
+			Expect(s).NotTo(ContainSubstring("not-a-real"))
+		}
+		Expect(logs.String()).To(ContainSubstring("connection created"))
+	})
+
+	It("keeps a sub-path and cleaned CI directories", func(ctx SpecContext) {
+		res, err := create(ctx, owner, func(r *connectionv1alpha1.CreateGiteaConnectionRequest) {
+			r.BaseUrl = " " + gt.URL() + "/gitea/ "
+			r.CiDirs = []string{"./ci//pipelines/", "ci/pipelines"}
+			r.Test = false
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetConnection().GetGitea().GetBaseUrl()).To(Equal(gt.URL() + "/gitea"))
+		Expect(res.GetConnection().GetGitea().GetCiDirs()).To(Equal([]string{"ci/pipelines"}))
+		Expect(res.GetConnection().GetStatus()).To(Equal(connectionv1alpha1.ConnectionStatus_CONNECTION_STATUS_UNTESTED))
+	})
+
+	It("reports a read token that can write at its step", func(ctx SpecContext) {
+		gt.AddScopedToken(readTok, "koinon-bot", "write")
+		res, err := create(ctx, owner, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetConnection().GetStatus()).To(Equal(connectionv1alpha1.ConnectionStatus_CONNECTION_STATUS_FAILING))
+		Expect(res.GetResults()[3]).To(SatisfyAll(HaveField("Check", "gitea.read-token"), HaveField("Step", "test-read-token"), HaveField("Ok", false)))
+	})
+
+	DescribeTable("rejects, without quoting a token and writing nothing,",
+		func(ctx SpecContext, mutate func(*connectionv1alpha1.CreateGiteaConnectionRequest)) {
+			_, err := create(ctx, owner, func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.Test = false; mutate(r) })
+			Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+			Expect(err.Error()).NotTo(ContainSubstring("not-a-real"))
+			Expect(logs.String()).NotTo(ContainSubstring("not-a-real"))
+			Expect(count(ctx, e, `SELECT count(*) FROM connections`)).To(BeZero())
+		},
+		Entry("no base URL", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "" }),
+		Entry("http", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "http://git.example.test" }),
+		Entry("a glob in the path", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "https://git.example.test/*" }),
+		Entry("an internal host", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.BaseUrl = "https://10.0.0.1/gitea" }),
+		Entry("a bad CA bundle", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.CaBundle = "not pem" }),
+		Entry("a missing read token", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.ReadToken = "" }),
+		Entry("the same token twice", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.WriteToken = r.ReadToken }),
+		Entry("a token with a space", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.WriteToken = "koinon_test not-a-real" }),
+		Entry("an unsafe CI directory", func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.CiDirs = []string{"../up"} }),
+	)
+
+	It("needs an admin", func(ctx SpecContext) {
+		member := e.userIn(ctx, org, store.OrgRoleMember)
+		_, err := create(ctx, member, nil)
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+	})
+
+	It("lists the repositories the bot can see, for choosing what to bind", func(ctx SpecContext) {
+		res, err := create(ctx, owner, func(r *connectionv1alpha1.CreateGiteaConnectionRequest) { r.Test = false })
+		Expect(err).NotTo(HaveOccurred())
+		repos, err := owner.conns.ListInstallationRepos(ctx, &connectionv1alpha1.ListInstallationReposRequest{OrgId: org, ConnectionId: res.GetConnection().GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(repos.GetTotalCount()).To(BeEquivalentTo(1))
+		Expect(repos.GetRepos()).To(HaveLen(1))
+		Expect(repos.GetRepos()[0].GetFullName()).To(Equal("acme/app"))
+	})
+})

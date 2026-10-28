@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // How a driven run ends, besides success (nil).
@@ -45,6 +46,8 @@ type failure struct {
 	class store.RunFailureClass
 	// retryAfter is the provider's Retry-After of a throttled request.
 	retryAfter time.Duration
+	// gateway: the gateway answered the harness's model request with 401 or 429 (classify.go).
+	gateway bool
 }
 
 func (f *failure) Error() string { return f.reason }
@@ -54,8 +57,15 @@ type requeued struct{ reason string }
 
 func (q *requeued) Error() string { return q.reason }
 
-// canceled cancels the run as its owner, for example at the wall-clock cap.
-type canceled struct{ reason string }
+// canceled cancels the run as its owner, for example at the wall-clock cap, or on a spent
+// budget (budgetstop.go).
+type canceled struct {
+	reason string
+	// class is the failure class recorded with the cancel; empty for none.
+	class store.RunFailureClass
+	// extra is merged into the payload of the run's closing events.
+	extra map[string]any
+}
 
 func (c *canceled) Error() string { return c.reason }
 
@@ -98,6 +108,12 @@ type runner struct {
 	// delivered are the approval requests whose outcomes this turn's prompt carries; they are
 	// marked delivered when the turn ends.
 	delivered []pgtype.UUID
+	// deliveredQ are the resolved questions whose outcomes this turn's prompt carries.
+	deliveredQ []pgtype.UUID
+
+	// refusals are the permission requests agentd rejected in the turn in progress (refusal.go).
+	refMu    sync.Mutex
+	refusals []refusal
 
 	// cwd is the session directory, set before the harness starts; permission requests for
 	// paths outside it are rejected.
@@ -107,6 +123,9 @@ type runner struct {
 	// handling a stuck sandbox (stuck.go).
 	vcfg agentconfig.Config
 	home pgtype.Text
+	// sandboxID is the OpenShell ID of the sandbox the run uses (the home generation is the
+	// home's lineage and outlives sandboxes restored from checkpoints).
+	sandboxID string
 
 	// sum is the summary prompt in progress (summary.go), nil otherwise.
 	sumMu sync.Mutex
@@ -187,7 +206,12 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	hctx, stop := context.WithCancel(ctx)
 	var hb sync.WaitGroup
 	hb.Go(func() { r.heartbeat(hctx) })
-	err := r.execute(ctx)
+	// A panic in the run becomes a failure: the heartbeat stops and the run concludes as failed on
+	// its own path, instead of keeping a live lease no other worker would ever take over.
+	var err error
+	if safego.Do(r.log, "run", func() { err = r.execute(ctx) }) {
+		err = &failure{reason: "internal error: the run panicked"}
+	}
 	stop()
 	hb.Wait()
 	r.conclude(ctx, err)
@@ -195,7 +219,7 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 
 func (r *runner) fence(k fence) {
 	r.fenceOnce.Do(func() {
-		r.fenceKind.Store(int32(k)) //nolint:gosec // fence is an int32
+		r.fenceKind.Store(int32(k))
 		close(r.fenced)
 	})
 }
@@ -259,7 +283,7 @@ func (r *runner) heartbeat(ctx context.Context) {
 }
 
 func (p *Pool) leaseSeconds() int32 {
-	return int32(p.cfg.Lease.Seconds()) //nolint:gosec // bounded by configuration
+	return int32(p.cfg.Lease.Seconds())
 }
 
 // stopped returns errFenced or errShutdown when either applies.
@@ -340,7 +364,7 @@ func (r *runner) execute(ctx context.Context) error {
 		for _, m := range served {
 			// Only a priced model is served (the gateway answers 404 for the rest).
 			pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType}
-			if _, err := prices.Resolve(fctx, r.q, r.run.OrgID, pm, time.Now()); err == nil {
+			if _, err := r.p.cfg.Prices.Resolve(fctx, r.q, r.run.OrgID, pm, time.Now()); err == nil {
 				model = m.ModelName
 				break
 			}
@@ -350,12 +374,29 @@ func (r *runner) execute(ctx context.Context) error {
 		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
 	}
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
-	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp"})
+	mode, ptype := r.cacheMode(fctx, model)
+	marker, unknown := cacheMarker(mode)
+	if unknown {
+		r.log.Warn("the model has a cache price but its provider format cannot be cached by Koinon; it runs without prompt caching", "model", model)
+	}
+	// OpenRouter keeps a session on one upstream, so the run's cache stays warm. Only the run ID
+	// is sent, and only to OpenRouter.
+	sessionID := ""
+	if ptype == "openrouter" {
+		sessionID = r.run.ID.String()
+	}
+	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", CacheMarker: marker, SessionID: sessionID})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
 	cmd = append(cmd, harnessArgs(agent.Flavor, vc)...)
 	r.vcfg = vc
+	// The gateway may not serve the model yet: a new provider's key file is still reaching the
+	// gateway pod (issue #174). The reconciler starts the sandbox meanwhile, because this run is
+	// demand for it, so the two waits overlap.
+	if err := r.waitModel(fctx, model); err != nil {
+		return r.execErr(ctx, "wait for the model", err)
+	}
 	sb, err := r.waitSandbox(fctx)
 	if err != nil {
 		return r.execErr(ctx, "sandbox", err)
@@ -367,6 +408,7 @@ func (r *runner) execute(ctx context.Context) error {
 	var ended []string
 	for attempt := 0; ; attempt++ {
 		r.home = sb.HomeGeneration
+		r.sandboxID = sb.SandboxID.String
 		main, ended, err = r.sweep(fctx, sb.Workspace, sb.SandboxName)
 		var sv *survivorsError
 		if !errors.As(err, &sv) {
@@ -395,11 +437,22 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	workspace, sandbox := sb.Workspace, sb.SandboxName
 	log := r.log.With("sandbox", sandbox)
+	if unknown {
+		// Visible on the task timeline: the run is costlier than the price list suggests.
+		if err := r.record(fctx, "run.uncached", map[string]any{"model": model, "reason": prices.UncachedReason(ptype, model)}); err != nil {
+			return r.dbErr(ctx, "record the uncached run", err)
+		}
+	}
 	if len(ended) > 0 {
 		log.Warn("ended processes left in the sandbox", "pids", ended, "main", main)
 		if err := r.record(fctx, "run.sandbox_swept", map[string]any{"pids": ended, "main": main}); err != nil {
 			return r.dbErr(ctx, "record the sweep", err)
 		}
+	}
+	// A sandbox the reconciler recreated from a home checkpoint gets the home back before the
+	// harness starts (checkpoint.go), so the task's session is there for session/load.
+	if err := r.restoreHome(fctx, sb); err != nil {
+		return r.execErr(ctx, "restore the home", err)
 	}
 	// The harness keeps its sessions in the sandbox's home volume, which OpenShell deletes with
 	// the sandbox. The task's session is loaded only in the home it was created in; after a
@@ -422,9 +475,16 @@ func (r *runner) execute(ctx context.Context) error {
 	r.cwd = cwd
 	// The run's own version decides the instructions, so a version bump applies at the next
 	// run without recreating the sandbox.
-	instructions := instructionsFile(vc.Instructions)
+	repos, err := r.repositories(fctx)
+	if err != nil {
+		return r.execErr(ctx, "read the code host of the agent's repositories", err)
+	}
+	instructions := instructionsFile(vc.Instructions, cwd, repos)
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
+	}
+	if err := r.writeGitConfig(fctx, workspace, sandbox); err != nil {
+		return r.execErr(ctx, "write the git configuration", err)
 	}
 
 	var stderr tail
@@ -597,6 +657,7 @@ type promptResult struct {
 // pool to stop.
 func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
 	done := make(chan promptResult, 1)
+	r.takeRefusals()
 	go func() {
 		stop, err := conn.Prompt(ctx, session, text)
 		done <- promptResult{stop, err}
@@ -610,12 +671,15 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 	select {
 	case res := <-done:
 		if res.err != nil {
-			return r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)
+			return r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err))
 		}
 		switch res.stop {
 		case acp.StopEndTurn:
 			return errEndTurn
 		case acp.StopCancelled:
+			if refs := r.takeRefusals(); len(refs) > 0 {
+				return &refused{refusals: refs}
+			}
 			return &failure{reason: "the harness cancelled the turn"}
 		default:
 			return stopFailure(res.stop)
@@ -641,8 +705,32 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 // is fenced or stops.
 func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
 	cfg := r.p.cfg
+	refusedTurns := 0
 	for attempt := 0; ; attempt++ {
 		err := r.turn(ctx, conn, proc, stderr, session, text)
+		var ref *refused
+		if !errors.As(err, &ref) {
+			// Only consecutive refused turns count: any other outcome is progress.
+			refusedTurns = 0
+		} else {
+			// The harness ended the turn because agentd refused a request: tell the agent what
+			// was refused and let it go on. This is not a retry of a failed model request.
+			// A cancel (a person's, the budget's) can reach the worker after the harness ended
+			// the turn as cancelled; it must not be answered with another prompt.
+			if stop := r.stopped(ctx); stop != nil {
+				return stop
+			}
+			if refusedTurns >= cfg.MaxRefusedTurns {
+				return &failure{reason: fmt.Sprintf("%s (the agent kept asking after %d refusals)", ref.Error(), refusedTurns), class: classPolicy}
+			}
+			refusedTurns++
+			attempt--
+			if rerr := r.record(fctx, "run.refusal", map[string]any{"refusals": ref.refusals, "count": refusedTurns, "cwd": r.cwd}); rerr != nil {
+				return r.dbErr(ctx, "record the refusal", rerr)
+			}
+			text = refusalNote(ref.refusals, r.cwd)
+			continue
+		}
 		var f *failure
 		if !errors.As(err, &f) || !f.retryable() {
 			return err
@@ -776,7 +864,6 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	if err != nil {
 		return "", 0, err
 	}
-	var parts []string
 	outcomes, err := r.outcomes(ctx)
 	if err != nil {
 		return "", 0, err
@@ -790,43 +877,79 @@ func (r *runner) prompt(ctx context.Context, task store.Task, loaded, reset, res
 	if restart {
 		return r.handoffPrompt(ctx, task, outcomes, notice)
 	}
-	switch {
-	case reset:
-		parts = append(parts, "Task: "+task.Title)
-		if notice != "" {
-			parts = append(parts, notice)
-		}
-	// A claimed parked run is starting with its prompt already recorded: it resumes after
-	// its approvals were decided. A takeover keeps the state it had.
-	case resumed && r.run.State == store.RunStateStarting:
-		parts = append(parts, parkResumeNote+outcomes)
-	case resumed:
-		parts = append(parts, resumeNote+outcomes)
-	case !loaded:
-		parts = append(parts, "Task: "+task.Title)
-		if notice != "" {
-			parts = append(parts, notice)
-		}
-	}
+	var texts []string
 	through := after
 	for _, m := range msgs {
 		var body struct {
 			Text string `json:"text"`
 		}
 		if json.Unmarshal(m.Payload, &body) == nil && strings.TrimSpace(body.Text) != "" {
-			parts = append(parts, body.Text)
+			texts = append(texts, body.Text)
 		}
 		through = m.Seq
 	}
-	if reset && outcomes != "" {
-		parts = append(parts, parkResumeNote+outcomes)
+	mode := promptNew
+	switch {
+	case reset:
+		mode = promptReset
+	// A claimed parked run is starting with its prompt already recorded: it resumes after
+	// its approvals were decided. A takeover keeps the state it had.
+	case resumed && r.run.State == store.RunStateStarting:
+		mode = promptParkResume
+	case resumed:
+		mode = promptTakeover
+	case loaded:
+		mode = promptContinue
 	}
 	// A reset reads from the start; the seq it covers never goes back.
 	through = max(through, r.run.PromptThroughSeq.Int64)
+	return assemblePrompt(mode, task.Title, notice, texts, outcomes), through, nil
+}
+
+// promptMode says which of the turn's prompt shapes assemblePrompt builds.
+type promptMode int
+
+const (
+	// promptNew is the first prompt of a session that has not loaded the task yet.
+	promptNew promptMode = iota
+	// promptContinue is a follow-up message in a session that knows the task.
+	promptContinue
+	// promptTakeover resumes a run another worker lost.
+	promptTakeover
+	// promptParkResume resumes a parked run after its approvals and questions were decided.
+	promptParkResume
+	// promptReset is a new session that replaces one the sandbox home lost.
+	promptReset
+)
+
+// assemblePrompt joins the parts of a turn's prompt: the task header and MCP notice (new and
+// reset sessions), the resume note with the outcomes, the task messages, and for a reset the
+// outcomes after the messages. With nothing to say it falls back to a nudge.
+func assemblePrompt(mode promptMode, title, notice string, msgs []string, outcomes string) string {
+	var parts []string
+	header := func() {
+		parts = append(parts, "Task: "+title)
+		if notice != "" {
+			parts = append(parts, notice)
+		}
+	}
+	switch mode {
+	case promptReset, promptNew:
+		header()
+	case promptParkResume:
+		parts = append(parts, parkResumeNote+outcomes)
+	case promptTakeover:
+		parts = append(parts, resumeNote+outcomes)
+	case promptContinue:
+	}
+	parts = append(parts, msgs...)
+	if mode == promptReset && outcomes != "" {
+		parts = append(parts, parkResumeNote+outcomes)
+	}
 	if len(parts) == 0 {
 		parts = append(parts, "Continue with the task.")
 	}
-	return strings.Join(parts, "\n\n"), through, nil
+	return strings.Join(parts, "\n\n")
 }
 
 // record appends a run event under the next source seq, retrying transient failures. The
@@ -880,12 +1003,18 @@ func (r *runner) recordRaw(ctx context.Context, kind string, payload []byte) err
 // finish ends the run as its owner, with a closing run event and a task event, in one
 // transaction. On success the task event is the agent's reply.
 func (r *runner) finish(ctx context.Context, outcome store.RunState, reason string, class store.RunFailureClass) error {
+	return r.finishWith(ctx, outcome, reason, class, nil)
+}
+
+// finishWith is finish with more fields in the closing events' payload; extra does not override
+// the reason and the failure class.
+func (r *runner) finishWith(ctx context.Context, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.srcSeq++
 	src := r.srcSeq
 	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
-		return r.finishIn(ctx, r.q.WithTx(tx), src, outcome, reason, class)
+		return r.finishIn(ctx, r.q.WithTx(tx), src, outcome, reason, class, extra)
 	})
 	if err != nil {
 		return r.dbErr(ctx, "finish the run", err)
@@ -896,8 +1025,14 @@ func (r *runner) finish(ctx context.Context, outcome store.RunState, reason stri
 }
 
 // finishIn ends the run in the caller's transaction.
-func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outcome store.RunState, reason string, class store.RunFailureClass) error {
-	body := map[string]string{"reason": reason}
+func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
+	body := map[string]any{}
+	for k, v := range extra {
+		body[k] = v
+	}
+	if _, ok := body["reason"]; !ok {
+		body["reason"] = reason
+	}
 	if class != "" {
 		body["failureClass"] = string(class)
 	}
@@ -995,7 +1130,7 @@ func (r *runner) conclude(ctx context.Context, err error) {
 			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
 		}
 	case errors.As(err, &c):
-		if ferr := r.finish(ctx, store.RunStateCanceled, c.reason, ""); ferr != nil {
+		if ferr := r.finishWith(ctx, store.RunStateCanceled, c.reason, c.class, c.extra); ferr != nil {
 			r.log.Warn("canceling the run failed", "reason", c.reason, "err", ferr)
 		}
 	case errors.Is(err, errFenced):
@@ -1082,6 +1217,9 @@ func (h handler) RequestPermission(ctx context.Context, req acp.PermissionReques
 	if h.r.replaying.Load() {
 		return acp.Decision{}, nil
 	}
+	if d.Verdict == Reject {
+		h.r.noteRefusal(req, d)
+	}
 	select {
 	case <-h.r.toolSeen(string(req.ToolCall.ToolCallId)):
 	case <-time.After(toolCallWait):
@@ -1113,4 +1251,18 @@ func updateKind(update []byte) string {
 		return "unknown"
 	}
 	return b.String()
+}
+
+// cacheMode is the prompt-cache mode of the model the run uses (ADR 0068). A model without a
+// price runs as before: the gateway refuses it anyway.
+func (r *runner) cacheMode(ctx context.Context, name string) (mode prices.CacheMode, providerType string) {
+	m, err := prices.Lookup(ctx, r.q, r.run.OrgID, name)
+	if err != nil {
+		return prices.CacheNone, ""
+	}
+	res, err := r.p.cfg.Prices.Resolve(ctx, r.q, r.run.OrgID, m, time.Now())
+	if err != nil {
+		return prices.CacheNone, ""
+	}
+	return prices.CacheModeFor(m.ProviderType, m.Name, res.Price), m.ProviderType
 }

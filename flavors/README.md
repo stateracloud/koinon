@@ -19,7 +19,10 @@ flavor-<name>` passes it): `koinon-git-credential`, git's credential helper for
 `https://github.com`, configured in the read-only `/etc/koinon/git/config` and included from
 `/etc/gitconfig`. It prints the GitHub provider's OpenShell placeholder from `$GITHUB_TOKEN`,
 which OpenShell swaps for the installation token on the wire, and stores nothing
-(`connectors/README.md`).
+(`connectors/README.md`). For a connection on another host (GitHub Enterprise Server),
+koinon-agentd renders the same sections for that host, and `http.sslCAInfo` for its CA bundle,
+into `/sandbox/.koinon/git/config` before every run, which `/etc/gitconfig` also includes; the
+helper then takes `--host HOST[:PORT]`.
 
 The entry scripts source `common/koinon-entry-lib.sh` (installed as
 `/usr/local/lib/koinon/koinon-entry-lib.sh`): `koinon_die` (exit 64), argument parsing, URL
@@ -27,13 +30,13 @@ checks, the instruction-file check and the `KOINON_*` exports. Each script
 keeps what differs: its value check, PATH, the harness's variables, home clean-up and the exec.
 
 `internal/flavor` holds one descriptor per flavor (entry script, ready command, instruction
-link, default binaries, plugin option); `internal/agentd` and the reconciler read it. `test/flavors` checks each flavor with
+link (empty for OpenCode), default binaries, plugin option); `internal/agentd` and the reconciler read it. `test/flavors` checks each flavor with
 the same specs and per-flavor expectations (`make test-flavors`; `make flavor-<name>` builds
 one image). Today the suite runs against OpenCode only.
 
 | | OpenCode |
 | --- | --- |
-| Harness | OpenCode 2.0.24 |
+| Harness | OpenCode 2.2.0 |
 | `session/resume` advertised | yes |
 | Asks permission for | paths outside the session directory |
 | Unknown session on load | `session not found` |
@@ -41,12 +44,23 @@ one image). Today the suite runs against OpenCode only.
 | MCP tool names | `koinon_<target>_<tool>`, for example `koinon_github_create_pull_request` |
 | Config | read-only, used in place |
 | Tool switches | read-only config |
-| Run instructions (`/sandbox/.koinon/AGENTS.md`, written by agentd) | system prompt, through the global `AGENTS.md` link in the read-only image |
+| Run instructions (`/sandbox/.koinon/AGENTS.md`, written by agentd) | system prompt, through the `instructions` key of the read-only config (OpenCode) |
 
 Instruction delivery is the same for every flavor: agentd writes the file before the harness
 starts, the entry script refuses to start (exit 64) when it is missing, empty or a symbolic
-link, and before every prompt agentd checks the file's hash and the flavor's link
-(`internal/agentd`, `instructionLink`) and restores either (event `run.instructions_restored`).
+link, and before every prompt agentd checks the file's hash and restores it (event
+`run.instructions_restored`). OpenCode needs no link: its config names the file. For a flavor
+whose descriptor sets `InstructionLink`, agentd also checks that link
+(`internal/agentd`, `instructionLink`) and restores it.
+
+The OpenCode image also ships data tools for large inputs: jq, yq, fd, ast-grep, DuckDB (behind
+a wrapper that limits its memory and turns extension downloads off), sqlite3, poppler-utils
+(`pdftotext`, `pdfinfo`), file, tree, unzip, zstd, xz-utils and a standard-library-only
+`python3`, with no pip and no formatter. Versions, licences (poppler is GPL, shipped unmodified
+from Ubuntu, like git and bash), pins and the size cost are in
+[`opencode/README.md`](opencode/README.md#tools-in-the-image); koinon-agentd's instruction file
+tells the agent how to use them. The contract suite runs each tool without a network
+(`test/flavors/tools_test.go`) and fails when an image outgrows its size budget.
 
 Before agentd starts a harness, it ends every process the sandbox user runs except PID 1 and
 the sandbox's main process (`internal/agentd/sweep.sh`), so a run starts with nothing left of an

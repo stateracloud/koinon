@@ -1,0 +1,129 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package koinon.question.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1;questionv1alpha1";
+
+// QuestionService is what an agent asks a person with the ask_user tool (ADR 0065 decisions 8 and
+// 10a). A question is addressed to one member of the org; only that member sees it in the inbox
+// and only that member can answer or dismiss it. Every request names the org it acts in; IDs from
+// another org are not found.
+service QuestionService {
+  // ListQuestions returns the open questions addressed to the caller, newest first, or with a
+  // task_id every question of that task (any state) that is visible to the caller. Viewers and
+  // above.
+  rpc ListQuestions(ListQuestionsRequest) returns (ListQuestionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // AnswerQuestion answers an open question addressed to the caller and resumes the run. The
+  // answer is a choice, the draft (as offered or edited) or free text. A question that is no
+  // longer open is refused (Aborted), so an answer never resumes a run twice. Members and above.
+  rpc AnswerQuestion(AnswerQuestionRequest) returns (AnswerQuestionResponse);
+
+  // DismissQuestion dismisses an open question addressed to the caller: its safe default becomes
+  // the answer and the agent is told. Members and above.
+  rpc DismissQuestion(DismissQuestionRequest) returns (DismissQuestionResponse);
+}
+
+// QuestionState is where a question stands.
+enum QuestionState {
+  QUESTION_STATE_UNSPECIFIED = 0;
+  // The agent has asked; its turn has not ended, so nobody sees it yet.
+  QUESTION_STATE_ASKED = 1;
+  // Waiting for the person.
+  QUESTION_STATE_OPEN = 2;
+  QUESTION_STATE_ANSWERED = 3;
+  // Dismissed by the person; the default was applied.
+  QUESTION_STATE_DISMISSED = 4;
+  // Nobody answered in time; the default was applied.
+  QUESTION_STATE_EXPIRED = 5;
+  // The run ended (canceled, failed or finished) before anyone answered; nothing was applied.
+  QUESTION_STATE_CANCELED = 6;
+}
+
+// AnswerKind is how an answer was given.
+enum AnswerKind {
+  ANSWER_KIND_UNSPECIFIED = 0;
+  // One of the question's choices.
+  ANSWER_KIND_CHOICE = 1;
+  // The draft, accepted as offered or edited.
+  ANSWER_KIND_DRAFT = 2;
+  // Free text.
+  ANSWER_KIND_TEXT = 3;
+  // The safe default, applied by a dismissal or an expiry.
+  ANSWER_KIND_DEFAULT = 4;
+}
+
+// Question is one question of an agent to a person.
+message Question {
+  string id = 1;
+  string org_id = 2;
+  string task_id = 3;
+  string run_id = 4;
+  string agent_id = 5;
+  // The member the question is addressed to.
+  string asked_to = 6;
+  string question = 7;
+  // Answers offered as buttons; empty means free text only.
+  repeated string choices = 8;
+  // Text the agent proposes; empty when none.
+  string draft = 9;
+  // The safe default, applied when the question is dismissed or expires.
+  string default_answer = 10;
+  QuestionState state = 11;
+  string answer = 12;
+  AnswerKind answer_kind = 13;
+  string answered_by = 14;
+  google.protobuf.Timestamp expires_at = 15;
+  google.protobuf.Timestamp opened_at = 16;
+  google.protobuf.Timestamp resolved_at = 17;
+  google.protobuf.Timestamp created_at = 18;
+  // Whether the caller can answer or dismiss it now.
+  bool can_answer = 19;
+}
+
+// ListQuestionsRequest names the org and optionally a task.
+message ListQuestionsRequest {
+  string org_id = 1;
+  // Empty lists the caller's open questions in the org.
+  string task_id = 2;
+}
+
+// ListQuestionsResponse lists questions.
+message ListQuestionsResponse {
+  repeated Question questions = 1;
+}
+
+// AnswerQuestionRequest carries exactly one of choice, accept_draft or text.
+message AnswerQuestionRequest {
+  string org_id = 1;
+  string question_id = 2;
+  oneof answer {
+    // One of the question's choices, verbatim.
+    string choice = 3;
+    // The draft, possibly edited by the person: send the text to use. An empty text means the draft as offered.
+    string draft = 4;
+    string text = 5;
+  }
+}
+
+// AnswerQuestionResponse holds the resolved question.
+message AnswerQuestionResponse {
+  Question question = 1;
+}
+
+// DismissQuestionRequest names the question.
+message DismissQuestionRequest {
+  string org_id = 1;
+  string question_id = 2;
+}
+
+// DismissQuestionResponse holds the resolved question.
+message DismissQuestionResponse {
+  Question question = 1;
+}

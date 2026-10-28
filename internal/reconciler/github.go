@@ -3,12 +3,14 @@
 package reconciler
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/connectors"
@@ -87,6 +89,8 @@ func (g GitHubApps) ReadToken(ctx context.Context, conn store.Connection, scope 
 
 // GitHubRead is what an agent's GitHub grant renders into its sandbox.
 type GitHubRead struct {
+	// Provider is how messages and the provider profile name the code host: "GitHub", "Gitea".
+	Provider string
 	// ConnectionID is the bound connection.
 	ConnectionID string
 	// Repositories are the bound repositories, owner/name.
@@ -101,6 +105,13 @@ type GitHubRead struct {
 // no allowed scope with network rules, or no repositories are bound: then nothing is rendered
 // and the sandbox cannot reach GitHub at all.
 func GitHubReadAccess(cfg agentconfig.Config) (read GitHubRead, ok bool, err error) {
+	return GitHubReadAccessAt(cfg, "")
+}
+
+// GitHubReadAccessAt is GitHubReadAccess for a connection whose host has the given base URL (the
+// connection's baseUrl; empty is the connector's default host). The network rules are rendered
+// at that host (ADR 0062), so nothing else is reachable.
+func GitHubReadAccessAt(cfg agentconfig.Config, baseURL string) (read GitHubRead, ok bool, err error) {
 	connector, g, found := providers.Default().Grant(cfg)
 	if !found {
 		return GitHubRead{}, false, nil
@@ -119,7 +130,11 @@ func GitHubReadAccess(cfg agentconfig.Config) (read GitHubRead, ok bool, err err
 	if len(scopes) == 0 || !bound || len(b.Targets) == 0 {
 		return GitHubRead{}, false, nil
 	}
-	hosts, err := ct.Network(g.Preset, scopes, b.Targets)
+	loc, err := ct.Locate(baseURL)
+	if err != nil {
+		return GitHubRead{}, false, fmt.Errorf("github grant: %w", err)
+	}
+	hosts, err := ct.NetworkAt(loc, g.Preset, scopes, b.Targets)
 	if err != nil {
 		return GitHubRead{}, false, fmt.Errorf("github grant: %w", err)
 	}
@@ -129,7 +144,11 @@ func GitHubReadAccess(cfg agentconfig.Config) (read GitHubRead, ok bool, err err
 			return GitHubRead{}, false, fmt.Errorf("github grant: scope with network rules asks for %s=%s; tokens in the sandbox are read-only", p, level)
 		}
 	}
-	read = GitHubRead{ConnectionID: b.ConnectionID, Repositories: slices.Clone(b.Targets), Permissions: perms}
+	name := connector
+	if c, err := codehost.CapabilitiesOf(ct); err == nil && c.DisplayName != "" {
+		name = c.DisplayName
+	}
+	read = GitHubRead{Provider: name, ConnectionID: b.ConnectionID, Repositories: slices.Clone(b.Targets), Permissions: perms}
 	for _, h := range hosts {
 		read.Endpoints = append(read.Endpoints, execution.Endpoint{
 			Host: h.Host, Port: uint32(h.Port), //nolint:gosec // ports are schema-bounded
@@ -150,10 +169,11 @@ func l7Rules(in []connectors.HTTPRule) []execution.L7Rule {
 // GitHubProfile is the per-agent profile of the GitHub provider record: the token, and the
 // endpoints and binaries it may be used with.
 func GitHubProfile(id string, read GitHubRead, binaries []string) execution.ProviderProfile {
+	name := cmp.Or(read.Provider, "GitHub")
 	return execution.ProviderProfile{
 		ID:          id,
-		DisplayName: "GitHub (read)",
-		Description: "Read-only installation token of one agent, rendered by koinon-reconciler",
+		DisplayName: name + " (read)",
+		Description: "Read-only " + name + " credential of one agent, rendered by koinon-reconciler",
 		Category:    execution.CategorySourceControl,
 		Credentials: []execution.ProfileCredential{{
 			Name:       githubCredential,
@@ -170,6 +190,37 @@ func GitHubProfile(id string, read GitHubRead, binaries []string) execution.Prov
 // GitHubRule is the sandbox policy entry for read: the same endpoints as the profile.
 func GitHubRule(read GitHubRead, binaries []string) execution.NetworkRule {
 	return execution.NetworkRule{Endpoints: slices.Clone(read.Endpoints), Binaries: slices.Clone(binaries)}
+}
+
+// baseURLOf returns the base URL of the host of the agent's code-host connection, empty for the
+// default host or an agent with no code-host binding.
+func (r *Reconciler) baseURLOf(ctx context.Context, w *work) (string, error) {
+	connector, b, ok := providers.Default().Binding(w.cfg)
+	if !ok || b.ConnectionID == "" {
+		return "", nil
+	}
+	var id pgtype.UUID
+	if err := id.Scan(b.ConnectionID); err != nil || !id.Valid {
+		return "", fmt.Errorf("github grant: bad connection ID %q", b.ConnectionID)
+	}
+	conn, err := r.q.GetConnection(ctx, store.GetConnectionParams{OrgID: w.org.ID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil // ensureGitHub reports a missing connection when the grant needs one
+	}
+	if err != nil {
+		return "", fmt.Errorf("github grant: read %s connection %s: %w", connector, b.ConnectionID, err)
+	}
+	site, err := codehost.SiteOf(conn.Config)
+	if err != nil {
+		return "", fmt.Errorf("github grant: connection %s: %w", b.ConnectionID, err)
+	}
+	if site.BaseURL != "" {
+		// Checked again at render with a fresh lookup, as for provider URLs.
+		if err := r.cfg.URLPolicy.CheckStrict(ctx, site.BaseURL); err != nil {
+			return "", fmt.Errorf("github grant: connection %s: %w", b.ConnectionID, err)
+		}
+	}
+	return site.BaseURL, nil
 }
 
 // githubBinaries are the executables that may reach GitHub: git and the flavor's binaries.
@@ -206,6 +257,10 @@ func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names
 	// into the existing record (OpenShell merges credentials; the stable placeholder keeps
 	// resolving), so running processes switch to it without a restart.
 	rev := "github-token-expires-" + tok.ExpiresAt.UTC().Format(time.RFC3339)
+	if tok.Revision != "" {
+		// A static token (Gitea) does not expire: its revision changes when the token does.
+		rev = "github-token-" + tok.Revision
+	}
 	value := tok.Value()
 	creds := make(map[string]string, len(GitHubTokenEnvVars))
 	for _, env := range GitHubTokenEnvVars {
@@ -221,7 +276,11 @@ func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names
 		return err
 	}
 	if r.noteGitHubRevision(names.GitHubProvider, rev) {
-		r.log.Info("pushed GitHub installation token", append(w.logAttrs(), "token", tok)...)
+		what := "installation token"
+		if tok.Revision != "" {
+			what = "read token"
+		}
+		r.log.Info("pushed "+cmp.Or(read.Provider, "GitHub")+" "+what, append(w.logAttrs(), "token", tok)...)
 	}
 	return nil
 }

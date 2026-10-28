@@ -15,7 +15,7 @@ const clearAgentSandboxKey = `-- name: ClearAgentSandboxKey :one
 UPDATE agent_sandboxes
 SET gateway_key_id = NULL, gateway_key_hash = NULL
 WHERE org_id = $1 AND agent_id = $2
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at
 `
 
 type ClearAgentSandboxKeyParams struct {
@@ -49,6 +49,10 @@ func (q *Queries) ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandbo
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
 		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -87,7 +91,7 @@ func (q *Queries) CountAgentSandboxesByState(ctx context.Context) ([]CountAgentS
 const createAgentSandbox = `-- name: CreateAgentSandbox :one
 INSERT INTO agent_sandboxes (org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at
 `
 
 type CreateAgentSandboxParams struct {
@@ -132,6 +136,10 @@ func (q *Queries) CreateAgentSandbox(ctx context.Context, arg CreateAgentSandbox
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
 		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -187,7 +195,7 @@ func (q *Queries) GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivi
 }
 
 const getAgentSandbox = `-- name: GetAgentSandbox :one
-SELECT org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at FROM agent_sandboxes
+SELECT org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at FROM agent_sandboxes
 WHERE org_id = $1 AND agent_id = $2
 `
 
@@ -222,8 +230,53 @@ func (q *Queries) GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
 		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
 	)
 	return i, err
+}
+
+const getEphemeralFocusTask = `-- name: GetEphemeralFocusTask :one
+SELECT r.task_id
+FROM runs r
+WHERE r.org_id = $1 AND r.agent_id = $2
+  AND (
+      (r.state IN ('queued', 'starting', 'running', 'parked')
+       AND (r.state <> 'queued' OR (r.ready_at IS NOT NULL AND run_claimable(r.org_id, r.id))))
+      OR (r.state NOT IN ('queued', 'starting', 'running', 'parked')
+          AND EXISTS (SELECT 1 FROM tasks t
+                      WHERE t.org_id = r.org_id AND t.id = r.task_id
+                        AND t.state NOT IN ('completed', 'canceled', 'failed')))
+  )
+ORDER BY CASE
+             WHEN r.state IN ('starting', 'running') THEN 0
+             WHEN r.state = 'queued' AND r.ready_at IS NOT NULL AND run_claimable(r.org_id, r.id) THEN 1
+             WHEN r.state IN ('queued', 'parked') THEN 2
+             ELSE 3
+         END,
+         CASE WHEN r.state IN ('queued', 'starting', 'running', 'parked') THEN 0 ELSE 1 END,
+         (r.origin = 'scheduled'), r.ready_at NULLS LAST,
+         coalesce(r.finished_at, r.created_at) DESC, r.id
+LIMIT 1
+`
+
+type GetEphemeralFocusTaskParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// The task an ephemeral agent's sandbox belongs to (ADR 0065 decision 13c): the task of the run
+// that holds the agent (starting or running), else of the run that would be claimed next (the
+// claim's own order: interactive before scheduled, then FIFO), else of a parked run, else (a task
+// between runs) the task of the agent's latest finished run whose task is not in an end state.
+// Only a task's end (completed, canceled, failed) deletes its sandbox. No row: no task needs one.
+func (q *Queries) GetEphemeralFocusTask(ctx context.Context, arg GetEphemeralFocusTaskParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getEphemeralFocusTask, arg.OrgID, arg.AgentID)
+	var task_id pgtype.UUID
+	err := row.Scan(&task_id)
+	return task_id, err
 }
 
 const getOrgWorkspace = `-- name: GetOrgWorkspace :one
@@ -295,6 +348,37 @@ func (q *Queries) ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) 
 	return items, nil
 }
 
+const listArchivedAgentSandboxes = `-- name: ListArchivedAgentSandboxes :many
+SELECT agent_id, archived_at FROM agent_sandboxes
+WHERE org_id = $1 AND archived_at IS NOT NULL
+`
+
+type ListArchivedAgentSandboxesRow struct {
+	AgentID    pgtype.UUID
+	ArchivedAt pgtype.Timestamptz
+}
+
+// Which of an org's agents have their sandbox archived (plan item AR1), for one read of a list.
+func (q *Queries) ListArchivedAgentSandboxes(ctx context.Context, orgID pgtype.UUID) ([]ListArchivedAgentSandboxesRow, error) {
+	rows, err := q.db.Query(ctx, listArchivedAgentSandboxes, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListArchivedAgentSandboxesRow
+	for rows.Next() {
+		var i ListArchivedAgentSandboxesRow
+		if err := rows.Scan(&i.AgentID, &i.ArchivedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrgsToReconcile = `-- name: ListOrgsToReconcile :many
 
 SELECT id, slug FROM orgs
@@ -335,6 +419,54 @@ func (q *Queries) ListOrgsToReconcile(ctx context.Context) ([]ListOrgsToReconcil
 	return items, nil
 }
 
+const markSandboxArchived = `-- name: MarkSandboxArchived :one
+UPDATE agent_sandboxes
+SET archived_at = now()
+WHERE org_id = $1 AND agent_id = $2
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at
+`
+
+type MarkSandboxArchivedParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+}
+
+// The sandbox and its volume were deleted for the archive tier; the home is in the checkpoint
+// that restore_checkpoint_id names.
+func (q *Queries) MarkSandboxArchived(ctx context.Context, arg MarkSandboxArchivedParams) (AgentSandbox, error) {
+	row := q.db.QueryRow(ctx, markSandboxArchived, arg.OrgID, arg.AgentID)
+	var i AgentSandbox
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.Workspace,
+		&i.SandboxName,
+		&i.ProviderName,
+		&i.KeySecretName,
+		&i.GatewayKeyID,
+		&i.GatewayKeyHash,
+		&i.State,
+		&i.Phase,
+		&i.Message,
+		&i.SpecHash,
+		&i.StartedAt,
+		&i.StoppedAt,
+		&i.ObservedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HomeGeneration,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.UnhealthyGeneration,
+		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
+	)
+	return i, err
+}
+
 const notifyReconciler = `-- name: NotifyReconciler :exec
 SELECT pg_notify('koinon_reconcile', CAST($1::uuid AS text))
 `
@@ -353,7 +485,17 @@ SET state = $1::sandbox_state,
     phase = $2,
     message = $3,
     spec_hash = $4,
-    home_generation = coalesce(nullif($5::text, ''), agent_sandboxes.home_generation),
+    -- The home generation is the home's lineage (ADR 0051 amendment): the OpenShell ID of the
+    -- first sandbox, kept by a sandbox that is restored from a checkpoint (restore_checkpoint_id,
+    -- set when the old one was deleted). @home_generation is the observed sandbox's ID.
+    home_generation = CASE
+        WHEN nullif($5::text, '') IS NULL THEN agent_sandboxes.home_generation
+        WHEN nullif(agent_sandboxes.home_generation, '') IS NULL THEN $5::text
+        WHEN $5::text = coalesce(agent_sandboxes.sandbox_id, agent_sandboxes.home_generation)
+            THEN agent_sandboxes.home_generation
+        WHEN agent_sandboxes.restore_checkpoint_id IS NOT NULL THEN agent_sandboxes.home_generation
+        ELSE $5::text END,
+    sandbox_id = coalesce(nullif($5::text, ''), agent_sandboxes.sandbox_id),
     started_at = CASE WHEN $1::sandbox_state = 'ready' AND agent_sandboxes.state <> 'ready'
                       THEN now() ELSE agent_sandboxes.started_at END,
     stopped_at = CASE WHEN $1::sandbox_state = 'stopped' AND agent_sandboxes.state <> 'stopped'
@@ -368,9 +510,12 @@ SET state = $1::sandbox_state,
     unhealthy_generation = CASE WHEN nullif($5::text, '') IS NOT NULL
                                  AND nullif($5::text, '') IS DISTINCT FROM unhealthy_generation
                                 THEN NULL ELSE unhealthy_generation END,
+    -- An observed sandbox other than one being deleted ends the archive (plan item AR1).
+    archived_at = CASE WHEN $1::sandbox_state IN ('starting', 'ready', 'stopping', 'stopped', 'error')
+                       THEN NULL ELSE archived_at END,
     observed_at = now()
 WHERE org_id = $6 AND agent_id = $7
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at
 `
 
 type RecordAgentSandboxParams struct {
@@ -420,6 +565,10 @@ func (q *Queries) RecordAgentSandbox(ctx context.Context, arg RecordAgentSandbox
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
 		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -428,7 +577,7 @@ const setAgentSandboxKey = `-- name: SetAgentSandboxKey :one
 UPDATE agent_sandboxes
 SET gateway_key_id = $1, gateway_key_hash = $2
 WHERE org_id = $3 AND agent_id = $4
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at
 `
 
 type SetAgentSandboxKeyParams struct {
@@ -470,6 +619,74 @@ func (q *Queries) SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKey
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
 		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
+	)
+	return i, err
+}
+
+const setAgentSandboxName = `-- name: SetAgentSandboxName :one
+UPDATE agent_sandboxes
+SET sandbox_name = $1,
+    state = 'pending',
+    phase = '',
+    message = '',
+    spec_hash = '',
+    started_at = NULL,
+    stopped_at = NULL,
+    unhealthy_at = NULL,
+    unhealthy_reason = NULL,
+    unhealthy_generation = NULL,
+    restore_checkpoint_id = NULL,
+    restore_claimed_at = NULL,
+    sandbox_id = NULL,
+    home_generation = NULL
+WHERE org_id = $2 AND agent_id = $3
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at
+`
+
+type SetAgentSandboxNameParams struct {
+	SandboxName string
+	OrgID       pgtype.UUID
+	AgentID     pgtype.UUID
+}
+
+// Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the
+// new name yet, so the row starts over as pending. The previous sandbox is gone by now (the
+// reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged
+// to that sandbox: a task sandbox starts its own lineage and nothing carries over between tasks.
+func (q *Queries) SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error) {
+	row := q.db.QueryRow(ctx, setAgentSandboxName, arg.SandboxName, arg.OrgID, arg.AgentID)
+	var i AgentSandbox
+	err := row.Scan(
+		&i.OrgID,
+		&i.AgentID,
+		&i.Workspace,
+		&i.SandboxName,
+		&i.ProviderName,
+		&i.KeySecretName,
+		&i.GatewayKeyID,
+		&i.GatewayKeyHash,
+		&i.State,
+		&i.Phase,
+		&i.Message,
+		&i.SpecHash,
+		&i.StartedAt,
+		&i.StoppedAt,
+		&i.ObservedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HomeGeneration,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.UnhealthyGeneration,
+		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
 	)
 	return i, err
 }

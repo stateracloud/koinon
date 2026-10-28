@@ -1,76 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link } from '@tanstack/react-router'
-import { Button } from '@/components/ui/button'
-import { TicketStatus, type Ticket } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
-import { boardColumns } from '@/lib/labels'
-
-/** A pending approval in Waiting on you. */
-export type PendingApproval = { id: string; label: string; ticketId: string; ticketTitle?: string }
+import type { Task } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { boardStates } from '@/lib/labels'
 
 export type BoardProps = {
-  tickets: readonly Ticket[]
+  tasks: readonly Task[]
   agentNames: ReadonlyMap<string, string>
-  onMoveToDone?: (ticket: Ticket) => void
-  /** Tickets with a move in flight. */
-  moving?: ReadonlySet<string>
-  canEdit?: boolean
-  /** Pending approvals the viewer may decide (admins and owners), shown in Waiting on you. */
-  approvals?: readonly PendingApproval[]
 }
 
-/** Board shows the org's tickets in the four columns of ADR 0049. */
-export function Board({ tickets, agentNames, onMoveToDone, moving, canEdit = true, approvals = [] }: BoardProps) {
+/**
+ * Board lists the org's tasks by state (ADR 0065). It is a read-only secondary view: nobody moves
+ * tasks along by hand, the agent's work and the person's answers do.
+ */
+export function Board({ tasks, agentNames }: BoardProps) {
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {boardColumns.map((col) => {
-        const items = tickets.filter((t) => t.status === col.status)
-        const headingId = `column-${col.status}`
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {boardStates.map((col) => {
+        const items = tasks.filter((t) => t.state === col.state)
+        const headingId = `column-${col.state}`
         return (
-          <section key={col.status} aria-labelledby={headingId} className="bg-muted/40 flex flex-col rounded-lg border p-3">
+          <section key={col.state} aria-labelledby={headingId} className="bg-muted/40 flex flex-col rounded-lg border p-3">
             <h2 id={headingId} className="mb-3 flex items-center justify-between text-sm font-semibold">
               {col.title}
-              <span className="text-muted-foreground font-normal" aria-label={`${items.length} tickets`}>
+              <span className="text-muted-foreground font-normal" aria-label={`${items.length} tasks`}>
                 {items.length}
               </span>
             </h2>
-            {col.status === TicketStatus.WAITING_ON_YOU && approvals.length > 0 && (
-              <section aria-label="Approvals waiting on you" className="mb-3">
-                <h3 className="text-muted-foreground mb-2 text-xs font-medium uppercase">Approvals</h3>
-                <ul className="grid gap-2">
-                  {approvals.map((a) => (
-                    <li key={a.id} className="bg-card rounded-md border border-amber-500/60 p-3 shadow-xs">
-                      <Link to="/approvals/$approvalId" params={{ approvalId: a.id }} className="font-medium hover:underline">
-                        Review {a.label}
-                      </Link>
-                      {a.ticketTitle && <p className="text-muted-foreground mt-1 text-xs">{a.ticketTitle}</p>}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
             {items.length === 0 ? (
               <p className="text-muted-foreground text-sm">Nothing here.</p>
             ) : (
               <ul className="grid gap-2">
                 {items.map((t) => (
                   <li key={t.id} className="bg-card rounded-md border p-3 shadow-xs">
-                    <Link to="/tickets/$ticketId" params={{ ticketId: t.id }} className="font-medium hover:underline">
+                    <Link to="/tasks/$taskId" params={{ taskId: t.id }} className="font-medium hover:underline">
                       {t.title}
                     </Link>
                     <p className="text-muted-foreground mt-1 text-xs">{agentNames.get(t.agentId) ?? 'Unknown agent'}</p>
-                    {canEdit && onMoveToDone && t.status !== TicketStatus.DONE && (
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="mt-2"
-                        disabled={moving?.has(t.id)}
-                        onClick={() => onMoveToDone(t)}
-                        aria-label={`Move "${t.title}" to Done`}
-                      >
-                        Move to Done
-                      </Button>
-                    )}
                   </li>
                 ))}
               </ul>

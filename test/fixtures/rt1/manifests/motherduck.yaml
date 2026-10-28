@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Cloud-bill SQL over the FOCUS 1.0 sample (DuckDB, read-only), as an MCP server on :8000/mcp.
+# Memory: measured about 75 MiB idle; request 96Mi, limit 192Mi.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rt1-motherduck
+  labels: &labels
+    app.kubernetes.io/name: rt1-motherduck
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-motherduck
+  template:
+    metadata:
+      labels: *labels
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: motherduck
+          # Placeholder tag: the digest is filled in at deploy (see kustomization.yaml).
+          image: zot.apps.lab.example.invalid/koinon/rt1-motherduck:dev
+          ports:
+            - {name: mcp, containerPort: 8000}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 192Mi}
+          # The first start copies and shifts the database, which takes a few seconds.
+          startupProbe:
+            tcpSocket: {port: mcp}
+            periodSeconds: 3
+            failureThreshold: 40
+          readinessProbe:
+            tcpSocket: {port: mcp}
+            periodSeconds: 10
+          volumeMounts:
+            - {name: work, mountPath: /work}
+      volumes:
+        - name: work
+          emptyDir: {sizeLimit: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rt1-motherduck
+  labels:
+    app.kubernetes.io/name: rt1-motherduck
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  selector:
+    app.kubernetes.io/name: rt1-motherduck
+  ports:
+    - {name: mcp, port: 8000, targetPort: mcp}

@@ -7,10 +7,13 @@ import { useId, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
-import { FileStatus, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type McpCall, type SavedWorkCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
-import { approvalStatusLabel, approveLabel, targetRepo, toolChanged, toolVersion } from '@/lib/approvals'
+import { FileStatus, ScopeKind, Status, type Approval, type FileChange, type FileDiff, type GetApprovalDiffResponse, type McpCall, type SavedWorkCall } from '@/gen/koinon/approval/v1alpha1/approval_pb'
+import { approvalStatusLabel, approveLabel, defaultScopeEnd, endOfLocalDay, localDate, targetRepo, toolChanged, toolVersion, type ScopeChoice } from '@/lib/approvals'
+import { ciPathsHit } from '@/lib/ci-paths'
 import { formatBytes, riskFlagsFor, riskItems, type RiskItem } from '@/lib/risk'
 import { cn } from '@/lib/utils'
 
@@ -18,7 +21,8 @@ export type ApprovalCardProps = {
   approval: Approval
   /** Whether the viewer may decide: an org admin or owner, and the API agrees. */
   canDecide: boolean
-  onApprove?: (note: string) => void
+  /** The scope is only passed when it is wider than once. */
+  onApprove?: (note: string, scope?: ScopeChoice) => void
   onDeny?: (note: string) => void
   pending?: boolean
   error?: string
@@ -97,7 +101,7 @@ export function ApprovalCard({
 
       {pr && <RiskSummary items={items} />}
 
-      {saved && <SavedWork call={saved} />}
+      {saved && <SavedWork call={saved} ciPaths={a.ciPaths} ciFoldCase={a.ciFoldCase} />}
 
       <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">Tool</dt>
@@ -138,7 +142,7 @@ export function ApprovalCard({
       {two && (
         <section aria-label="Approvers" className="rounded-md border p-3 text-sm">
           <p className="font-medium">Needs two approvers</p>
-          {isPending && a.firstApprover && <p className="text-muted-foreground">First approval given; a second person (not the first approver, not the ticket&apos;s creator) must approve.</p>}
+          {isPending && a.firstApprover && <p className="text-muted-foreground">First approval given; a second person (not the first approver, not the task&apos;s creator) must approve.</p>}
         </section>
       )}
 
@@ -148,12 +152,27 @@ export function ApprovalCard({
 
       {pr && <FileList files={pr.files} items={items} diff={diff} diffPending={diffPending} diffError={diffError} />}
 
+      {a.scopeId && (
+        <p role="note" className="bg-muted/30 rounded-md border p-2 text-sm" data-testid="scope-note">
+          Ran without a new decision: allowed by a scope you or another admin granted ({a.scopeKind === ScopeKind.TASK ? 'this task' : 'this agent'}).
+        </p>
+      )}
+
       <Outcome approval={a} resultUrl={resultUrl} />
 
       {isPending &&
         !savedClosed &&
         (canDecide ? (
-          <DecisionForm onApprove={onApprove} onDeny={onDeny} pending={pending} sha={a.argsSha256} approveText={approveLabel(a.approvalsRequired, a.firstApprover)} blocked={blocked} />
+          <DecisionForm
+            onApprove={onApprove}
+            onDeny={onDeny}
+            pending={pending}
+            sha={a.argsSha256}
+            approveText={approveLabel(a.approvalsRequired, a.firstApprover)}
+            blocked={blocked}
+            canScope={!two && !a.system && !saved}
+            agentTool={`${a.tool} on ${saved?.repository || targetRepo(a.target)}`}
+          />
         ) : (
           <p className="text-muted-foreground text-sm">Only org admins and owners can approve or deny this request.</p>
         ))}
@@ -188,7 +207,12 @@ const savedStatusText: Record<string, string> = { A: 'Added', M: 'Modified', D: 
  * go, and until when they are kept. The files are not shown (there is no diff): approving pushes them to a new
  * branch, never the default branch.
  */
-function SavedWork({ call: w }: { call: SavedWorkCall }) {
+function SavedWork({ call: w, ciPaths, ciFoldCase }: { call: SavedWorkCall; ciPaths: readonly string[]; ciFoldCase: boolean }) {
+  const ciHit = ciPathsHit(
+    w.files.map((f) => f.path),
+    ciPaths,
+    ciFoldCase,
+  )
   const added = w.files.reduce((n, f) => n + f.added, 0)
   const deleted = w.files.reduce((n, f) => n + f.deleted, 0)
   const expires = w.expiresAt ? timestampDate(w.expiresAt) : undefined
@@ -197,9 +221,9 @@ function SavedWork({ call: w }: { call: SavedWorkCall }) {
       <p role="note" className="bg-muted/30 rounded-md border p-3">
         Koinon saved this uncommitted work from a sandbox that had to be recreated. Nothing is pushed until you approve. It goes to a new branch, never the default branch.
       </p>
-      {w.files.some((f) => f.path.startsWith('.github/')) && (
+      {ciHit.length > 0 && (
         <p role="note" className="rounded-md border border-amber-600 p-3" data-testid="workflow-warning">
-          This work changes files under .github/. GitHub may refuse the push of workflow files with this connection. A pushed branch can also start existing
+          This work changes files under {ciHit.join(', ')}, where this code host runs CI. The host may refuse the push of workflow files with this connection. A pushed branch can also start existing
           workflows that run on push, and those can use the repository&apos;s secrets, so read these files before you approve.
         </p>
       )}
@@ -544,6 +568,8 @@ function Outcome({ approval: a, resultUrl }: { approval: Approval; resultUrl?: s
   )
 }
 
+const DAY = 24 * 3600 * 1000
+
 function DecisionForm({
   onApprove,
   onDeny,
@@ -551,21 +577,66 @@ function DecisionForm({
   sha,
   approveText,
   blocked,
+  canScope,
+  agentTool,
 }: {
-  onApprove?: (note: string) => void
+  onApprove?: (note: string, scope?: ScopeChoice) => void
   onDeny?: (note: string) => void
   pending?: boolean
   sha: string
   approveText: string
   blocked?: string
+  /** Whether a scope wider than once can be offered (not for two approvers or Koinon's own requests). */
+  canScope?: boolean
+  agentTool?: string
 }) {
   const noteId = useId()
   const blockedId = useId()
+  const scopeId = useId()
+  const untilId = useId()
   const [note, setNote] = useState('')
+  const [scope, setScope] = useState<'once' | 'task' | 'agent'>('once')
+  const [until, setUntil] = useState(() => defaultScopeEnd())
+  // The form lives for one decision; the clock it checks the date against is read when it opens.
+  const [openedAt] = useState(() => Date.now())
+  const end = endOfLocalDay(until)
+  const minDate = localDate(new Date(openedAt + DAY))
+  // 364 days keeps 23:59:59 of the last day inside the server's 365-day limit in every time zone.
+  const maxDate = localDate(new Date(openedAt + 364 * DAY))
+  const badDate = scope === 'agent' && (!end || until < minDate || until > maxDate)
+  const approve = () => {
+    const n = note.trim()
+    if (scope === 'once' || !canScope) onApprove?.(n)
+    else if (scope === 'task') onApprove?.(n, { kind: 'task' })
+    else if (end) onApprove?.(n, { kind: 'agent', until: end })
+  }
   return (
     <div className="grid gap-2 border-t pt-3">
       <Label htmlFor={noteId}>Note (optional)</Label>
-      <Textarea id={noteId} rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Shown on the ticket; on denial the agent reads it." />
+      <Textarea id={noteId} rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Shown on the task; on denial the agent reads it." />
+      {canScope && (
+        <div className="grid gap-2" data-testid="scope-choice">
+          <Label htmlFor={scopeId}>How far does this approval reach?</Label>
+          <NativeSelect id={scopeId} value={scope} onChange={(e) => setScope(e.target.value as 'once' | 'task' | 'agent')}>
+            <option value="once">Only this call</option>
+            <option value="task">This task: later {agentTool ?? 'calls like this'}, for this task (at most 30 days)</option>
+            <option value="agent">This agent: later {agentTool ?? 'calls like this'}, until a date</option>
+          </NativeSelect>
+          {scope === 'agent' && (
+            <div className="grid gap-1">
+              <Label htmlFor={untilId}>Until (end of day)</Label>
+              <Input id={untilId} type="date" min={minDate} max={maxDate} value={until} onChange={(e) => setUntil(e.target.value)} aria-invalid={badDate} className="max-w-48" />
+              {badDate && <p className="text-destructive text-sm">Choose a date from tomorrow to a year ahead.</p>}
+            </div>
+          )}
+          {scope !== 'once' && (
+            <p role="note" className="text-muted-foreground text-xs">
+              Same tool, same repository or server, arguments may differ. It shows on the agent&apos;s page, is audited and can be revoked. Changes to CI files, scripts,
+              dependencies, binary or executable files always ask again.
+            </p>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-muted-foreground text-xs" title={sha}>
           Approves exactly this change (sha256 {sha.slice(0, 12)}…)
@@ -573,7 +644,7 @@ function DecisionForm({
         <Button variant="outline" className="ml-auto" disabled={pending} onClick={() => onDeny?.(note.trim())}>
           Deny
         </Button>
-        <Button disabled={pending || !!blocked} aria-describedby={blocked ? blockedId : undefined} onClick={() => onApprove?.(note.trim())}>
+        <Button disabled={pending || !!blocked || badDate} aria-describedby={blocked ? blockedId : undefined} onClick={approve}>
           {approveText}
         </Button>
       </div>

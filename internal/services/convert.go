@@ -141,6 +141,9 @@ func taskProto(t store.Task) *taskv1alpha1.Task {
 		CreatedAt:    tsProto(t.CreatedAt),
 		UpdatedAt:    tsProto(t.UpdatedAt),
 		FinishedAt:   tsProto(t.FinishedAt),
+		// Triggers and agents create tasks too; a direct message's thread is the one the agent's
+		// direct-message creator ID marks (TR3).
+		DirectMessageThread: t.CreatedByKind == store.TaskCreatorKindTrigger && t.CreatedByTriggerID == DirectMessageTriggerID(t.AgentID),
 	}
 }
 
@@ -225,4 +228,44 @@ func runEventProto(e store.RunEvent) *runv1alpha1.RunEvent {
 		Payload:   payloadProto(e.Payload),
 		CreatedAt: tsProto(e.CreatedAt),
 	}
+}
+
+var triggerTypeToProto = map[templates.TriggerType]templatev1alpha1.TriggerType{
+	templates.TriggerSchedule:      templatev1alpha1.TriggerType_TRIGGER_TYPE_SCHEDULE,
+	templates.TriggerDirectMessage: templatev1alpha1.TriggerType_TRIGGER_TYPE_DIRECT_MESSAGE,
+	templates.TriggerCodeHostEvent: templatev1alpha1.TriggerType_TRIGGER_TYPE_CODE_HOST_EVENT,
+	templates.TriggerChannelEvent:  templatev1alpha1.TriggerType_TRIGGER_TYPE_CHANNEL_EVENT,
+}
+
+func triggersProto(ts []templates.Trigger) []*templatev1alpha1.Trigger {
+	out := make([]*templatev1alpha1.Trigger, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, &templatev1alpha1.Trigger{
+			Id: t.ID, Type: triggerTypeToProto[t.Type], Cron: t.Filter.Cron, Timezone: t.Filter.Timezone,
+			Instruction: t.Instruction,
+		})
+	}
+	return out
+}
+
+// triggersFromProto converts and validates a request's triggers.
+func triggersFromProto(ps []*templatev1alpha1.Trigger) ([]templates.Trigger, error) {
+	out := make([]templates.Trigger, 0, len(ps))
+	for _, p := range ps {
+		var typ templates.TriggerType
+		for k, v := range triggerTypeToProto {
+			if v == p.GetType() {
+				typ = k
+			}
+		}
+		out = append(out, templates.Trigger{
+			ID: p.GetId(), Type: typ,
+			Filter:      templates.TriggerFilter{Cron: p.GetCron(), Timezone: p.GetTimezone()},
+			Instruction: p.GetInstruction(),
+		})
+	}
+	if err := templates.ValidateTriggers(out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

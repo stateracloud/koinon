@@ -345,7 +345,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Model"
+                $ref: "#/components/schemas/ModelCreated"
         default:
           $ref: "#/components/responses/Error"
   /models/{modelId}:
@@ -474,7 +474,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PriceVersion"
+                $ref: "#/components/schemas/PriceSaved"
         default:
           $ref: "#/components/responses/Error"
   /prices/{name}:
@@ -752,7 +752,7 @@ components:
       description: '`secret` entries are declared by a Kubernetes Secret and read-only here.'
     Provider:
       type: object
-      required: [id, name, type, url, hasKey, source, createdAt, updatedAt]
+      required: [id, name, type, url, hasKey, formats, source, createdAt, updatedAt]
       properties:
         id: {type: string, format: uuid}
         name: {type: string, example: openrouter}
@@ -764,6 +764,14 @@ components:
         hasKey:
           type: boolean
           description: Whether an API key is stored. The key itself is never returned.
+        anthropicWorkspaceId:
+          type: string
+          example: wrkspc_01AbCdEf
+          description: The Anthropic workspace the gateway names for this provider's models. Only for type `anthropic`; unset when not given.
+        formats:
+          type: array
+          items: {$ref: "#/components/schemas/ModelFormat"}
+          description: The model formats the provider's type offers, preferred first (ADR 0069).
         source: {$ref: "#/components/schemas/Source"}
         managedBySecret:
           type: string
@@ -773,6 +781,13 @@ components:
           description: Set while a declared provider of the same name shadows this one; it is not served.
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    ModelFormat:
+      type: string
+      example: anthropic
+      description: |
+        A model's wire format (ADR 0069). The set is open and grows with the formats Koinon supports;
+        today `openai` is chat completions and `anthropic` is the Messages API. A provider's `formats`
+        lists the values it accepts.
     ProviderList:
       type: object
       required: [providers]
@@ -794,6 +809,10 @@ components:
         apiKey:
           type: string
           description: Omit for keyless upstreams such as Ollama.
+        anthropicWorkspaceId:
+          type: string
+          pattern: '^wrkspc_[A-Za-z0-9]+$'
+          description: Only for type `anthropic`.
     ProviderUpdate:
       type: object
       properties:
@@ -802,6 +821,9 @@ components:
         apiKey:
           type: string
           description: Replaces the key; an empty string removes it.
+        anthropicWorkspaceId:
+          type: string
+          description: Replaces the workspace ID; an empty string removes it. Only for type `anthropic`.
     McpServer:
       type: object
       required: [id, name, url, transport, hasCredential, source, health, createdAt, updatedAt]
@@ -942,7 +964,7 @@ components:
         cacheRead: {type: string, example: "0.03"}
     Model:
       type: object
-      required: [id, providerId, name, guard, source, createdAt, updatedAt]
+      required: [id, providerId, name, guard, format, formatOverridden, source, createdAt, updatedAt]
       properties:
         id: {type: string, format: uuid}
         providerId: {type: string, format: uuid}
@@ -953,11 +975,25 @@ components:
           type: boolean
           description: The routing guard (ADR 0048), for OpenRouter providers.
         rates: {$ref: "#/components/schemas/Rates", deprecated: true}
+        format: {$ref: "#/components/schemas/ModelFormat"}
+        formatOverridden:
+          type: boolean
+          description: Whether an admin set the format. Otherwise it follows the default and is re-derived when the default changes.
         source: {$ref: "#/components/schemas/Source"}
         managedBySecret: {type: string}
         disabledReason: {type: string}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    ModelCreated:
+      description: The model just created, with the warnings of the save.
+      allOf:
+        - $ref: "#/components/schemas/Model"
+        - type: object
+          properties:
+            warnings:
+              type: array
+              items: {type: string}
+              description: Only on this response. For example, the model's price has a cache_read price but its provider format cannot cache, so it runs uncached (ADR 0068).
     ModelList:
       type: object
       required: [models]
@@ -972,11 +1008,17 @@ components:
         providerId: {type: string, format: uuid}
         name: {type: string}
         guard: {type: boolean}
+        format:
+          type: string
+          description: A `ModelFormat` within what the provider offers. Omit for the default.
         rates: {$ref: "#/components/schemas/Rates", deprecated: true}
     ModelUpdate:
       type: object
       properties:
         guard: {type: boolean}
+        format:
+          type: string
+          description: Overrides the format with a `ModelFormat` within what the provider offers. An empty string goes back to the default.
         rates: {$ref: "#/components/schemas/Rates", deprecated: true}
         clearRates:
           type: boolean
@@ -1108,6 +1150,16 @@ components:
         retiredAt: {type: string, format: date-time}
         createdBy: {type: string}
         createdAt: {type: string, format: date-time}
+    PriceSaved:
+      description: The price version just saved, with the warnings of the save.
+      allOf:
+        - $ref: "#/components/schemas/PriceVersion"
+        - type: object
+          properties:
+            warnings:
+              type: array
+              items: {type: string}
+              description: Only on this response. For example, a cache_read price whose provider format cannot cache runs uncached (ADR 0068).
     PriceList:
       type: object
       required: [prices]
@@ -1166,7 +1218,7 @@ components:
           items: {$ref: "#/components/schemas/FlaggedPrice"}
     SpendLine:
       type: object
-      required: [model, requests, inputTokens, outputTokens, reportedUsd, estimatedUsd, estimatedRequests]
+      required: [model, requests, inputTokens, outputTokens, reportedUsd, estimatedUsd, estimatedRequests, estimatedOutputTokens, gatewayRequests, gatewayUsd, gatewayComparedUsd, flaggedRequests, provisionalRequests, reservedUsd]
       properties:
         model: {type: string}
         requests: {type: integer, format: int64}
@@ -1175,6 +1227,16 @@ components:
         reportedUsd: {type: string, description: "Cost of requests whose usage the provider reported."}
         estimatedUsd: {type: string, description: "Cost of requests whose usage was estimated. Counts toward limits."}
         estimatedRequests: {type: integer, format: int64}
+        estimatedOutputTokens:
+          type: integer
+          format: int64
+          description: "Output tokens of the estimated requests: for a response cut short, the output usage the gateway logged before the cut (none for a chat-completion stream)."
+        gatewayRequests: {type: integer, format: int64, description: "Requests agentgateway priced itself."}
+        gatewayUsd: {type: string, description: "agentgateway's own cost of those requests."}
+        gatewayComparedUsd: {type: string, description: "Koinon's cost of the same requests, to compare with gatewayUsd."}
+        flaggedRequests: {type: integer, format: int64, description: "Requests flagged for review (cost differs from the gateway's by more than 1%, usage missing, or an unusable price)."}
+        provisionalRequests: {type: integer, format: int64, description: "Responses cut short whose provider figure is pending; their cost is the usage the gateway logged until the provider reports."}
+        reservedUsd: {type: string, description: "What the provisional requests hold back from the gateway keys' limits (their max_tokens bound minus the charge). Not a cost and not counted by budgets; released when they settle."}
     SpendReport:
       type: object
       required: [since, models]

@@ -6,12 +6,12 @@ import { mockApi, type Stream } from './mock-api.ts'
 const org = 'org-1'
 const now = () => new Date().toISOString()
 
-test('sign in, create a ticket and watch the run stream, across a dropped connection', async ({ page }) => {
+test('sign in, create a task and watch the run stream, across a dropped connection', async ({ page }) => {
   let signedIn = false
-  let status = 'TICKET_STATUS_TODO'
+  let state = 'TASK_STATE_SUBMITTED'
   const events: Record<string, unknown>[] = []
   const watchCalls: string[] = []
-  const ticket = () => ({ id: 't-1', orgId: org, title: 'Say hello', status, agentId: 'a-1', lastEventSeq: String(events.length) })
+  const task = () => ({ id: 't-1', orgId: org, title: 'Say hello', state, agentId: 'a-1', lastEventSeq: String(events.length) })
   const run = (state: string) => ({ id: 'r-1', orgId: org, ticketId: 't-1', agentId: 'a-1', state })
   const chunk = (seq: number, text: string) => ({
     event: {
@@ -48,23 +48,24 @@ test('sign in, create a ticket and watch the run stream, across a dropped connec
           { id: 'a-2', orgId: org, displayName: 'Draft bot', status: 'AGENT_STATUS_DRAFT' },
         ],
       }),
-      'koinon.ticket.v1alpha1.TicketService/ListTickets': () => ({ tickets: events.length ? [ticket()] : [] }),
-      'koinon.ticket.v1alpha1.TicketService/CreateTicket': (req) => {
+      'koinon.approval.v1alpha1.ApprovalService/ListApprovals': () => ({ approvals: [] }),
+      'koinon.task.v1alpha1.TaskService/ListTasks': () => ({ tasks: events.length ? [task()] : [] }),
+      'koinon.task.v1alpha1.TaskService/CreateTask': (req) => {
         expect(req).toMatchObject({ orgId: org, agentId: 'a-1', title: 'Say hello', message: 'Please say hello' })
-        addEvent('ticket.created', { title: 'Say hello' }, 'ACTOR_KIND_SYSTEM')
+        addEvent('task.created', { title: 'Say hello' }, 'ACTOR_KIND_SYSTEM')
         addEvent('message', { text: 'Please say hello' })
         addEvent('run.queued', {}, 'ACTOR_KIND_SYSTEM')
-        status = 'TICKET_STATUS_IN_PROGRESS'
-        return { ticket: ticket(), run: run('RUN_STATE_QUEUED') }
+        state = 'TASK_STATE_WORKING'
+        return { task: task(), run: run('RUN_STATE_QUEUED') }
       },
-      'koinon.ticket.v1alpha1.TicketService/GetTicket': () => ({ ticket: ticket(), events, runs: [run('RUN_STATE_RUNNING')] }),
-      'koinon.ticket.v1alpha1.TicketService/AppendMessage': (req) => {
+      'koinon.task.v1alpha1.TaskService/GetTask': () => ({ task: task(), events, runs: [run('RUN_STATE_RUNNING')] }),
+      'koinon.task.v1alpha1.TaskService/AppendMessage': (req) => {
         addEvent('message', { text: req.text })
         return { event: events.at(-1)! }
       },
-      'koinon.ticket.v1alpha1.TicketService/MoveTicket': (req) => {
-        status = String(req.status)
-        return { ticket: ticket() }
+      'koinon.task.v1alpha1.TaskService/CancelTask': () => {
+        state = 'TASK_STATE_CANCELED'
+        return { task: task() }
       },
     },
     stream: {
@@ -91,28 +92,39 @@ test('sign in, create a ticket and watch the run stream, across a dropped connec
   await page.getByLabel('Password').fill('correct-horse-battery')
   await page.getByRole('button', { name: 'Sign in' }).click()
 
-  for (const col of ['To do', 'In progress', 'Waiting on you', 'Done']) {
-    await expect(page.getByRole('heading', { level: 2, name: new RegExp(`^${col}`) })).toBeVisible()
-  }
+  // The inbox is the home screen; chat with agents sits next to it.
+  await expect(page.getByRole('heading', { level: 1, name: 'Inbox' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: /^Waiting on you/ })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: 'Chat with agents' })).toBeVisible()
   await page.getByLabel('Title').fill('Say hello')
   await page.getByLabel('First message (optional)').fill('Please say hello')
-  await page.getByRole('button', { name: 'Create ticket' }).click()
+  await page.getByRole('button', { name: 'Create task' }).click()
 
-  await expect(page).toHaveURL(/\/tickets\/t-1$/)
+  // The new conversation opens next to the inbox and streams the run, across the dropped connection.
+  const chat = page.getByRole('region', { name: 'Conversation: Say hello' })
+  await expect(chat).toBeVisible()
+  const chatTimeline = chat.getByRole('list', { name: 'Timeline' })
+  await expect(chatTimeline.getByText('Please say hello')).toBeVisible()
+  await expect(chatTimeline.getByText('Hello from the fake model', { exact: true })).toBeVisible()
+  expect(watchCalls).toEqual(['0', '2'])
+
+  await page.getByRole('link', { name: 'Open task' }).click()
+  await expect(page).toHaveURL(/\/tasks\/t-1$/)
   await expect(page.getByRole('heading', { name: 'Say hello' })).toBeVisible()
   const timeline = page.getByRole('list', { name: 'Timeline' })
   await expect(timeline.getByText('Please say hello')).toBeVisible()
-  await expect(timeline.getByText('Hello from the fake model', { exact: true })).toBeVisible()
-  expect(watchCalls).toEqual(['0', '2'])
 
   await page.getByRole('textbox', { name: 'Message' }).fill('Thanks!')
   await page.getByRole('button', { name: 'Send' }).click()
   await expect(timeline.getByText('Thanks!')).toBeVisible()
 
-  await page.getByRole('link', { name: '← Board' }).click()
-  const inProgress = page.getByRole('region', { name: /^In progress/ })
-  await expect(inProgress.getByRole('link', { name: 'Say hello' })).toBeVisible()
-  await page.getByRole('button', { name: 'Move "Say hello" to Done' }).click()
-  await expect(page.getByRole('region', { name: /^Done/ }).getByRole('link', { name: 'Say hello' })).toBeVisible()
-  expect(status).toBe('TICKET_STATUS_DONE')
+  // The board is a secondary view by state.
+  await page.getByRole('link', { name: '← Inbox' }).click()
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Board' }).click()
+  const working = page.getByRole('region', { name: /^Working/ })
+  await expect(working.getByRole('link', { name: 'Say hello' })).toBeVisible()
+  await working.getByRole('link', { name: 'Say hello' }).click()
+  await page.getByRole('button', { name: 'Cancel task' }).click()
+  await expect(page.getByText('Canceled', { exact: true })).toBeVisible()
+  expect(state).toBe('TASK_STATE_CANCELED')
 })

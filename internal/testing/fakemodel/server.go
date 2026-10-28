@@ -28,6 +28,8 @@ type Request struct {
 	Model string
 	// Body is the raw request body.
 	Body []byte
+	// Header is a copy of the request headers, for asserting what a gateway sent upstream.
+	Header http.Header
 }
 
 // Server serves scripted model responses. The zero value is not usable; call [New].
@@ -245,10 +247,10 @@ func (s *Server) readBody(w http.ResponseWriter, r *http.Request, v any) ([]byte
 }
 
 // plan records the request, applies Faults.Unavailable and selects the turn.
-func (s *Server) plan(path, model string, body []byte, conv conversation) (reply, error) {
+func (s *Server) plan(path string, header http.Header, model string, body []byte, conv conversation) (reply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.requests = append(s.requests, Request{Path: path, Model: model, Body: body})
+	s.requests = append(s.requests, Request{Path: path, Model: model, Body: body, Header: header.Clone()})
 	e, ok := s.scripts[model]
 	if !ok {
 		return reply{}, &apiError{kind: errNotFound, message: fmt.Sprintf("The model `%s` does not exist or you do not have access to it.", model)}
