@@ -39,6 +39,26 @@ func (r *runner) wantsWrapUp() bool {
 	return n > 0 && time.Duration(r.run.MaxWallClockSeconds)*time.Second > n && !r.run.WrapUpNoticeAt.Valid && !r.wrapUpSent
 }
 
+// markNotice sets runs.wrap_up_notice_at and r.wrapUpSent; n is the rows changed.
+func (r *runner) markNotice(ctx context.Context) (int64, error) {
+	n, err := r.q.MarkRunWrapUpNotice(ctx, store.MarkRunWrapUpNoticeParams{
+		OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch,
+	})
+	if err != nil {
+		return 0, r.dbErr(ctx, "record the wrap-up notice", err)
+	}
+	r.wrapUpSent = true
+	return n, nil
+}
+
+// suppressWrapUp arms no notice for the rest of the run without having sent one: it sets
+// wrap_up_notice_at but records no run.wrap_up_notice event and counts no metric, because the
+// event and the metric mean that the agent was told.
+func (r *runner) suppressWrapUp(ctx context.Context) error {
+	_, err := r.markNotice(ctx)
+	return err
+}
+
 // wrapUpNote is the prompt text.
 func wrapUpNote(remaining, limit time.Duration) string {
 	mins := max(int(remaining.Round(time.Minute)/time.Minute), 1)
@@ -56,15 +76,9 @@ func wrapUpNote(remaining, limit time.Duration) string {
 // r.wrapUpSent. No row (another owner sent it, or the run is no longer running) sets wrapUpSent,
 // records nothing and returns false.
 func (r *runner) markWrapUp(ctx context.Context, remaining time.Duration) (bool, error) {
-	n, err := r.q.MarkRunWrapUpNotice(ctx, store.MarkRunWrapUpNoticeParams{
-		OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch,
-	})
-	if err != nil {
-		return false, r.dbErr(ctx, "record the wrap-up notice", err)
-	}
-	r.wrapUpSent = true
-	if n == 0 {
-		return false, nil
+	n, err := r.markNotice(ctx)
+	if err != nil || n == 0 {
+		return false, err
 	}
 	if err := r.record(ctx, kindWrapUpNotice, map[string]any{
 		"remainingSeconds": int64(max(remaining, 0).Seconds()), "maxWallClockSeconds": r.run.MaxWallClockSeconds,
