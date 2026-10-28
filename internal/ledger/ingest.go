@@ -139,12 +139,17 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		// A streamed Anthropic-format response logs message_start's usage, which looks complete. It
-		// is cut when the run it is attributed to was canceled at or before the record's time;
+		// A streamed Anthropic-format response logs message_start's usage, which looks complete, and
 		// agentgateway v1.7.0 has no stream-end signal (ADR 0056, amendment 2026-10-28). Only the
 		// attributed run counts: a later run's response is not cut by an earlier run's cancel.
-		if e.Format == modelformat.Anthropic && e.Stream && e.OutputKnown && run.ID.Valid {
-			e.Cut = run.State == store.RunStateCanceled && run.FinishedAt.Valid && !run.FinishedAt.Time.After(e.Time)
+		// Either signal makes it cut: a proxy error logged with the output (an upstream that cut
+		// the stream), or the attributed run's cancel (a client hang-up logs no error).
+		if e.OutputKnown && e.Error != "" {
+			e.Cut = true
+		}
+		if e.Format == modelformat.Anthropic && e.Stream && e.OutputKnown && run.ID.Valid &&
+			run.State == store.RunStateCanceled && run.FinishedAt.Valid && !run.FinishedAt.Time.After(e.Time) {
+			e.Cut = true
 		}
 		pr, err := in.price(ctx, q, org.ID, e)
 		if err != nil {

@@ -81,8 +81,12 @@ type Entry struct {
 	// it existed. Stream is koinon.stream: the response was streamed.
 	Format modelformat.Format
 	Stream bool
-	// Cut is set by the ingester: a streamed Anthropic-format response whose run was canceled at or
-	// before the record's time. Its logged usage is partial (message_start), not final.
+	// Error is koinon.error, why the proxy failed the request ("Upstream" for a stream the upstream
+	// cut); empty when the field is absent or the request did not fail.
+	Error string
+	// Cut is set by the ingester: a response with logged output usage that was cut anyway, because
+	// the proxy logged an error for it, or it is a streamed Anthropic-format response whose run was
+	// canceled at or before the record's time. Its logged usage is partial, not final.
 	Cut bool
 	// Time is when the gateway logged the request.
 	Time time.Time

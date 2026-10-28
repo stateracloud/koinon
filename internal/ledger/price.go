@@ -120,7 +120,9 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		if err != nil {
 			return p, err
 		}
-		x := estimate.Input{Aborted: !e.OutputKnown, MaxTokens: e.MaxTokens, Rejected: !e.InputKnown && !e.OutputKnown && e.Status >= 400 && e.Status < 500}
+		// Unknown output is the cut signal of a completions stream; a logged proxy error covers a
+		// Messages stream, whose message_start already logged output.
+		x := estimate.Input{Aborted: !e.OutputKnown || e.Error != "", MaxTokens: e.MaxTokens, Rejected: !e.InputKnown && !e.OutputKnown && e.Status >= 400 && e.Status < 500}
 		if e.RequestBytes > 0 {
 			x.RequestBytes = e.RequestBytes
 		}
