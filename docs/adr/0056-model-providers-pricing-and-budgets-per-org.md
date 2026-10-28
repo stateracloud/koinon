@@ -305,6 +305,43 @@ removes the layer that PV1 left on the model.
    toward limits and tend to run high. The 100% stop shows on the ticket timeline as "stopped at a spend
    limit", from the `run.canceled` event the ledger already writes.
 
+## Amendment (2026-10-28, issue #174): a run waits until the gateway serves its model
+
+A new provider is left out of the gateway state until its key file has reached the gateway pod
+(`ProviderKeySettle`, decision 3), which took about 90 s in the kind e2e. agentd checked only the
+catalog, so a run could start its harness first and fail on a 403 that opencode reports as
+"provider authentication required".
+
+1. **The reconciler records what it applied.** After an Apply that succeeded (or that was rejected
+   for some objects only, Kubernetes mode), the reconciler writes, per org, the models that state
+   serves to `gateway_served_models` (`internal/db/migrations/00030_gateway_served_models.sql`):
+   `(org_id, model_id)`, the provider and the key file in use. Models not in the state lose their
+   row: a deleted, disabled or removed provider or model, a model without a price, a refused URL, a
+   key that cannot be opened, or a new provider whose key is still settling. A rotated key keeps the
+   row, with the previous file, because the provider keeps serving with it. A failed Apply changes
+   nothing; an org with a rejected model object gets nothing new recorded and only loses rows of
+   models no longer in the state. Only the leader reconciles, so only the leader writes. The rows
+   cascade with their model and provider. In Kubernetes mode a row is written once Apply has been
+   accepted (the objects applied and judged by the controller), which may be shortly before
+   the proxy serves the route; standalone mode's Apply returns after the hot reload. A reconciler with
+   nothing in memory (a restart, a new leader) that finds a provider's new key file still settling
+   serves it with the file the row records, if that file is still in the Secret, so a key rotated
+   while it was down does not drop the provider.
+2. **Bounds.** `--model-serve-timeout` must comfortably exceed `--provider-key-settle` plus one
+   apply; they belong to different processes, so this is documented, not checked. A model without a
+   usable price is never served, so its run fails at once with a reason that says so.
+3. **agentd waits on it.** After choosing the run's model and before `waitSandbox`, a run whose model
+   is in the org's catalog but has no row waits (poll with backoff to 5 s, NOTIFY the reconciler every
+   `ReconcileNudge`). It records `run.waiting_for_model` once (`{model, provider, reason}`), which the
+   task timeline shows as "waiting for the model provider *name* to reach the gateway". The run stays
+   `starting`; the run state machine of [0030](0030-run-state-machine.md) does not change. The
+   reconciler starts the sandbox meanwhile, since the claimed run is demand for it, so the two waits
+   overlap. After `--model-serve-timeout` (default 5 min, several times the 90 s settle) the run fails
+   with a reason that names the model and the provider. A model not in the catalog (a platform
+   default) is not waited for.
+4. **Rejected:** treating a first 403 or 404 as transient (it hides a real credential fault behind
+   retries) and holding sandbox creation in the reconciler (the run would still show nothing).
+
 ## Alternatives considered
 
 - **One upstream in Helm values** (ADR 0049) _(reconstructed)_. No per-org control.
