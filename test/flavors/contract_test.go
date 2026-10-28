@@ -72,6 +72,15 @@ type flavor struct {
 	// projectMarker into the model's context, and it may loosen permissions, which the
 	// permission specs then catch. Empty skips the check.
 	projectConfig map[string]string
+	// dataTools is whether the image ships the data tools of ADR 0052's amendment of 2026-10-28
+	// (tools_test.go).
+	dataTools bool
+	// sizeBudget is the most the image may weigh, in KiB per architecture, as `du -sxk /` inside
+	// the container reports it: what it measured when the budget was last set, plus about 10%. A
+	// tool or package bump that grows the image is then a visible decision, not a surprise. `docker
+	// image inspect` is no measure: its size is compressed or layer-summed depending on the image
+	// store. Empty skips the check.
+	sizeBudget map[string]int64
 	// plant prepares sb for a background job of the agent's that would change a later run from
 	// the home, and returns the shell command the job repeats. Nil repeats nothing.
 	plant func(ctx context.Context, sb *sandbox) string
