@@ -15,8 +15,10 @@ import (
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
@@ -33,6 +35,10 @@ type Ingester struct {
 	Metrics *Metrics
 	// Prices finds the prices of requests; required (prices.NewResolver).
 	Prices prices.Resolver
+	// Sources are the providers that can report their own usage of a response later; nil is
+	// providerusage.Default. A response cut short of such a provider is recorded provisional and
+	// settled by the Settler; of any other provider the logged usage is final.
+	Sources providerusage.Registry
 }
 
 // Validate reports a wiring mistake: an Ingester without prices would record every request unpriced.
@@ -41,6 +47,13 @@ func (in *Ingester) Validate() error {
 		return errors.New("ledger: Prices is required (prices.NewResolver)")
 	}
 	return nil
+}
+
+func (in *Ingester) sources() providerusage.Registry {
+	if in.Sources != nil {
+		return in.Sources
+	}
+	return providerusage.Default(nil)
 }
 
 func (in *Ingester) now() time.Time {
@@ -126,11 +139,39 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		// A streamed Anthropic-format response logs message_start's usage, which looks complete, and
+		// agentgateway v1.7.0 has no stream-end signal (ADR 0056, amendment 2026-10-28). Only the
+		// attributed run counts: a later run's response is not cut by an earlier run's cancel.
+		// Either signal makes it cut: a proxy error logged with the output (an upstream that cut
+		// the stream), or the attributed run's cancel (a client hang-up logs no error).
+		if e.OutputKnown && e.Error != "" {
+			e.Cut = true
+		}
+		if e.Format == modelformat.Anthropic && e.Stream && e.OutputKnown && run.ID.Valid &&
+			run.State == store.RunStateCanceled && run.FinishedAt.Valid && !run.FinishedAt.Time.After(e.Time) {
+			e.Cut = true
+		}
 		pr, err := in.price(ctx, q, org.ID, e)
 		if err != nil {
 			return err
 		}
-		if _, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
+		// A response cut short is settled later when its provider can say what it billed (a
+		// settlement with its response ID); a cut Anthropic stream whose provider cannot is held (a
+		// settlement without one) until the deadline. Meanwhile the request's max_tokens bound is
+		// held back from the gateway key. Any other entry is final at once.
+		provisional, settleID := false, pgtype.Text{}
+		if pr.aborted && pr.model.ProviderID.Valid {
+			if _, ok := in.sources().For(pr.model.ProviderType, pr.model.ProviderURL, e.ResponseID); ok {
+				provisional, settleID = true, pgtype.Text{String: e.ResponseID, Valid: true}
+			} else if e.Cut {
+				provisional = true
+			}
+		}
+		if !provisional {
+			pr.reserve = 0
+		}
+		responseID := pgtype.Text{String: e.ResponseID, Valid: e.ResponseID != ""}
+		entryID, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
 			OrgID: org.ID, AgentID: agent.ID, RunID: run.ID, TaskID: run.TaskID,
 			RequestID: e.RequestID, KeyID: e.KeyID, Model: e.Model,
 			InputTokens: pr.inTokens, OutputTokens: pr.outTokens,
@@ -138,17 +179,41 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			CostUsd: pr.cost.Numeric(), GatewayCostUsd: pr.gatewayCost, PriceRef: pr.ref,
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
 			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: at,
-		}); errors.Is(err, pgx.ErrNoRows) {
+			Provisional: provisional, ReserveUsd: pgtype.Text{String: pr.reserve.Numeric(), Valid: pr.reserve > 0}, ResponseID: responseID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded
 		} else if err != nil {
 			return fmt.Errorf("insert spend entry: %w", err)
 		}
 		recorded = true
+		if provisional {
+			deadline := e.Time.Add(SettleWindow)
+			next := in.now().Add(settleBackoff(0))
+			if !settleID.Valid {
+				next = deadline // a hold: nothing to ask, the reserve goes at the deadline
+			}
+			if err := q.InsertSpendSettlement(ctx, store.InsertSpendSettlementParams{
+				OrgID: org.ID, EntryID: entryID, ProviderID: pr.model.ProviderID, ProviderType: pr.model.ProviderType,
+				ResponseID:    settleID,
+				NextAttemptAt: pgtype.Timestamptz{Time: next, Valid: true},
+				Deadline:      pgtype.Timestamptz{Time: deadline, Valid: true},
+			}); err != nil {
+				return fmt.Errorf("queue settlement: %w", err)
+			}
+		}
 		if run.ID.Valid {
 			// The token cap (plan item A4). RecordTokenUsage nests a savepoint. Estimated
 			// tokens count like reported ones.
 			if _, err := scheduler.RecordTokenUsage(ctx, tx, org.ID, run.ID, pr.inTokens+pr.outTokens); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("record token usage: %w", err)
+			}
+		}
+		// Budgets, alerts and stops count the charge only; the reserve gates the gateway key, so
+		// the reconciler is woken to push the key's smaller limit.
+		if provisional && pr.reserve > 0 {
+			if err := q.NotifyReconciler(ctx, org.ID); err != nil {
+				return fmt.Errorf("wake the reconciler: %w", err)
 			}
 		}
 		return in.enforce(ctx, q, org.ID, agent.ID, run, e, pr.cost)

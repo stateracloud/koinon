@@ -35,6 +35,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -141,11 +142,13 @@ func run() error {
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
 		return err
 	}
+	// One price list for the reconciler and the settler.
+	priceResolver := prices.NewResolver(pricing.Embedded())
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
 			Gateway:           endpoint,
-			Prices:            prices.NewResolver(pricing.Embedded()),
+			Prices:            priceResolver,
 			Keys:              keyring,
 			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
 			ProviderKeyDir:    cfg.providerKeysDir,
@@ -174,6 +177,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Responses cut short are settled with their provider's own usage (ADR 0056, amendment
+	// 2026-10-28). It runs on every replica: a settlement is claimed with SKIP LOCKED.
+	settler := &ledger.Settler{DB: pool, Keys: keyring, Prices: priceResolver, Log: log}
+	if err := settler.Validate(); err != nil {
+		return err
+	}
+	safego.Go(ctx, log, "spend-settler", settler.Run)
 	err = r.Run(ctx)
 	log.Info("stopping koinon-reconciler")
 	return err

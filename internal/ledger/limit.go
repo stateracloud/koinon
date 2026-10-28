@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -44,12 +46,46 @@ func AgentLimit(ctx context.Context, q *store.Queries, agent store.Agent, now ti
 	if err != nil || !ok {
 		return nil, err
 	}
+	if st, err = withReserves(ctx, q, st); err != nil {
+		return nil, err
+	}
 	net, _, ok := st.Net()
 	if !ok {
 		return nil, nil
 	}
 	l := gateway.USDLimit(net, budget.DayWindow, st.Generation(now))
 	return &l, nil
+}
+
+// withReserves adds to each level what provisional entries in its window hold back (ADR 0056,
+// amendment 2026-10-28): the gateway key must not hand out the max_tokens bound of a response whose
+// provider figure is pending. Only the pushed limit uses it; budgets, alerts and stops count the
+// charges alone. The counter generation then digests the reserves too, so a reserve that is
+// released starts a fresh gateway counter.
+func withReserves(ctx context.Context, q *store.Queries, st budget.Status) (budget.Status, error) {
+	out := st
+	out.Levels = append([]budget.Level(nil), st.Levels...)
+	for i, l := range out.Levels {
+		since := pgtype.Timestamptz{Time: l.WindowStart, Valid: true}
+		var s string
+		var err error
+		if l.Name == budget.AgentDaily {
+			s, err = q.GetAgentReserveSince(ctx, store.GetAgentReserveSinceParams{OrgID: st.Org, AgentID: st.Agent, Since: since})
+		} else {
+			s, err = q.GetOrgReserveSince(ctx, store.GetOrgReserveSinceParams{OrgID: st.Org, Since: since})
+		}
+		if err != nil {
+			return st, fmt.Errorf("read reserves: %w", err)
+		}
+		r, err := money.ParseNumeric(s)
+		if err != nil {
+			return st, err
+		}
+		if out.Levels[i].Spent, err = l.Spent.Add(r); err != nil {
+			out.Levels[i].Spent = money.MaxLimit // saturate, as sums read from the database do
+		}
+	}
+	return out, nil
 }
 
 // agentStatus is the agent's limits and spend at now (package budget). ok is false for an agent

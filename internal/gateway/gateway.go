@@ -656,9 +656,32 @@ const (
 	// A response that was cut mid-stream is logged with its 200 status and the reason here.
 	LogFieldError = "koinon.error"
 	// LogFieldRequestBytes is the request's Content-Length: the byte count the estimate and its
-	// calibration use. Response bytes are not exposed by agentgateway's CEL context.
+	// calibration use.
 	LogFieldRequestBytes = "koinon.req_bytes"
+	// LogFieldResponseID is the provider's response ID from a response header (an OpenRouter
+	// generation ID, x-generation-id), so the ledger can ask the provider later what it billed for a
+	// response cut short (ADR 0056, amendment 2026-10-28). See ResponseIDCEL.
+	LogFieldResponseID = "koinon.response_id"
+)
 
+// ResponseIDHeaders are the response headers that carry a provider's response ID, in the order
+// tried. OpenRouter returns x-generation-id on every endpoint; the ID is what its generation
+// endpoint takes (package providerusage).
+var ResponseIDHeaders = []string{"x-generation-id"}
+
+// ResponseIDCEL is the CEL of LogFieldResponseID: the first of ResponseIDHeaders the response
+// carries. It reads a header only, so the gateway records no body for it (a body variable in a
+// log expression would make agentgateway record the whole response as it streams). A response
+// without such a header leaves the field out (a failed expression is left out of the record).
+var ResponseIDCEL = func() string {
+	parts := make([]string, len(ResponseIDHeaders))
+	for i, h := range ResponseIDHeaders {
+		parts[i] = fmt.Sprintf("response.headers[%q]", h)
+	}
+	return "coalesce(" + strings.Join(parts, ", ") + ")"
+}()
+
+const (
 	// ReloadProbeKeyName is the LogFieldKey of the key a driver puts in each
 	// config to detect its reload (standalone.ReloadProbeKey). Its requests
 	// never reach a model; the spend ledger drops them.

@@ -86,12 +86,15 @@ rejecting pre-request reservation. What the data showed, and what changes:
    not needed; a design for concurrent runs of one agent would be a new decision.
 2. **What the overshoot is in money.** The run that reached $2.75 was canceled at $2.7639; the
    $0.147 recorded after the cancel matches one response in flight _(inferred from the run totals;
-   the rows were not exported)_. That response was cut short by the cancel, so it carried no usage
-   and was settled as ADR 0056 (amendment 2026-10-24, decision 6.3) says: output at the request's
-   `max_tokens` (32,000) and, with the input estimated from request bytes above 100,000 tokens, at
-   the 5x tier: $0.08 of output alone. The
-   bound in responses held; in dollars, one response is up to `max_tokens` times the output rate at
-   the tier, plus its input. Operators size limits with that in mind.
+   the rows were not exported)_. In rc.5 that response, cut short by the cancel, was settled at its
+   `max_tokens` (32,000 output tokens at the 5x tier: $0.08 of output alone). From rc.6 it is
+   charged the usage agentgateway logged before the cut (for a chat-completion stream, the input
+   estimate and no output) and, when its provider can report its own figure (OpenRouter), replaced
+   by that figure ([0056](0056-model-providers-pricing-and-budgets-per-org.md), amendment
+   2026-10-28). Until the figure arrives, the response's `max_tokens` bound is held back from the
+   agent's gateway key limit only; budgets, notices and stops count the charge. So the bound in
+   responses holds, the ledger converges on what the provider billed for that response, and the
+   gateway key cannot hand out more than its `max_tokens` bound while the figure is pending.
 3. **Stop before the key goes (issue #188).** When a budget has nothing left, the runs of its
    scope are canceled with `spend_limit` and the level before the key is blocked: the agent's open
    runs for its daily limit, the org's for the monthly cap or the platform ceiling. Cancel, not
@@ -121,23 +124,25 @@ rejecting pre-request reservation. What the data showed, and what changes:
    $3.2017, so the two cut-short requests really cost about $0.05 and were charged about $0.12
    more. Retries and replays (unique request IDs), the title request (both sides count it), probe
    keys (no model, and every entry was attributed to a run of a known agent) and rounding (pico-USD)
-   do not explain any of it. The upper bound of ADR 0056 stays: it is what keeps limits safe when a
-   response carries no usage. To make the gap visible without the raw rows, the spend report
+   do not explain any of it. To make the gap visible without the raw rows, the spend report
    (`GET /admin/v1/spend`) now shows per model the estimated output tokens, agentgateway's own cost
    next to Koinon's over the requests it priced, and the flagged requests. Next time, read the rows
    with:
 
    ```sql
    SELECT occurred_at, run_id, request_id, input_tokens, cache_read_tokens, output_tokens,
-          cost_usd, gateway_cost_usd, estimated, cost_flagged, request_bytes, estimate
+          cost_usd, reserve_usd, provisional, gateway_cost_usd, estimated, cost_flagged,
+          request_bytes, response_bytes, response_id, estimate
    FROM spend_entries
-   WHERE org_id = :org AND occurred_at >= :day_start AND (estimated OR cost_flagged)
+   WHERE org_id = :org AND occurred_at >= :day_start AND (estimated OR cost_flagged OR provisional)
    ORDER BY occurred_at;
    ```
 
-   Follow-up (open): billing a response that Koinon itself cut short by its real usage and
-   reconciling it with the provider's own figure. Andre decided the direction (2026-10-28); how to
-   measure what a cut stream delivered waits on research into gateways other than agentgateway.
+   and `spend_entry_revisions` for the entries a provider's figure replaced.
+
+   The follow-up is decided: a response cut short is billed by the usage the gateway logged and
+   reconciled with the provider's own figure where the provider publishes one
+   ([0056](0056-model-providers-pricing-and-budgets-per-org.md), amendment 2026-10-28).
 
 ## Open questions
 
