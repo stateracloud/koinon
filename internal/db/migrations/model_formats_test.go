@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"io/fs"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/stateracloud/koinon/internal/db/migrations"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 var _ = Describe("the model formats migration (ADR 0069)", func() {
@@ -72,6 +74,19 @@ var _ = Describe("the model formats migration (ADR 0069)", func() {
 			"anthropic/claude-haiku-5.5": "openai:false",
 			"gpt-5":                      "openai:false",
 		}))
+
+		By("the CHECK lists exactly the formats the table knows")
+		var def string
+		Expect(old.QueryRowContext(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'models_format_check'`).Scan(&def)).To(Succeed())
+		var inCheck []string
+		for _, m := range regexp.MustCompile(`'([^']+)'`).FindAllStringSubmatch(def, -1) {
+			inCheck = append(inCheck, m[1])
+		}
+		var known []string
+		for _, f := range modelformat.All() {
+			known = append(known, string(f))
+		}
+		Expect(inCheck).To(ConsistOf(known))
 
 		By("the CHECKs refuse an unknown format and a workspace ID on another type")
 		_, err = old.ExecContext(ctx, `UPDATE models SET format = 'gemini'`)

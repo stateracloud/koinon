@@ -63,7 +63,6 @@ stringData:
   models: |
     - name: deepseek/deepseek-v4.1-flash
       guard: true
-      format: openai
 ```
 
 - `koinon.dev/org` is the org's slug. The bootstrap install has the org `default`.

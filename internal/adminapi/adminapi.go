@@ -250,17 +250,14 @@ func toProvider(p catalog.Provider) Provider {
 	if p.AnthropicWorkspaceID != "" {
 		out.AnthropicWorkspaceId = &p.AnthropicWorkspaceID
 	}
-	out.Formats = []ModelFormat{}
-	for _, f := range p.Formats {
-		out.Formats = append(out.Formats, ModelFormat(f))
-	}
+	out.Formats = append([]ModelFormat{}, p.Formats...)
 	return out
 }
 
 func toModel(m catalog.Model) Model {
 	out := Model{
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt, Guard: m.Guard, Name: m.Name, Source: Source(m.Source),
-		Format: ModelFormat(m.Format), FormatOverridden: m.FormatOverridden,
+		Format: m.Format, FormatOverridden: m.FormatOverridden,
 		Id: openapi_types.UUID(pgUUID(m.ID).Bytes), ProviderId: openapi_types.UUID(pgUUID(m.ProviderID).Bytes),
 	}
 	if m.ManagedBySecret != "" {

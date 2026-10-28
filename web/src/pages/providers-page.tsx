@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { ProviderService, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { useProviderActions } from '@/hooks/use-catalog-actions'
 import { useOrg } from '@/lib/org-context'
-import { availabilityMinutes, savedNotice, savedRecently, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName, formatLabel, workspaceProviderType } from '@/lib/providers'
+import { availabilityMinutes, savedNotice, savedRecently, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName, formatLabelOf } from '@/lib/providers'
 
 /** ProvidersPage is where org admins and owners manage the org's model providers and models (ADR 0056). */
 export function ProvidersPage() {
@@ -169,7 +169,7 @@ function ProviderCard({
         <dd className="break-all">{p.url}</dd>
         <dt className="text-muted-foreground">API key</dt>
         <dd>{p.hasKey ? 'Stored encrypted; it cannot be shown' : 'None'}</dd>
-        {p.type === workspaceProviderType && p.anthropicWorkspaceId && (
+        {p.anthropicWorkspaceId && (
           <>
             <dt className="text-muted-foreground">Workspace ID</dt>
             <dd className="break-all">{p.anthropicWorkspaceId}</dd>
@@ -295,7 +295,7 @@ function ModelRow({
         <code className="text-sm font-medium">{scopedModelName(orgSlug, m.name)}</code>
         {m.format && (
           <Badge variant="outline" title={m.formatOverridden ? 'Set for this model' : 'The default for this model'}>
-            {formatLabel(m.format)}
+            {formatLabelOf(provider, m.format)}
             {m.formatOverridden ? ' (set)' : ''}
           </Badge>
         )}

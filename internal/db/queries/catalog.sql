@@ -67,12 +67,13 @@ WHERE org_id = @org_id AND id = @id
 RETURNING *;
 
 -- name: ListModelsToRederiveFormat :many
--- Every model no admin set the format of, in every org, with its provider's type (startup:
+-- Every model no admin set the format of, in every live org, with its provider's type (startup:
 -- catalog.RederiveFormats applies internal/modelformat to them).
 SELECT m.org_id, m.id, m.name, m.format, p.type AS provider_type
 FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
-WHERE NOT m.format_overridden
+JOIN orgs o ON o.id = m.org_id
+WHERE NOT m.format_overridden AND o.deleted_at IS NULL
 ORDER BY m.org_id, m.id;
 
 -- name: SetDerivedModelFormat :execrows

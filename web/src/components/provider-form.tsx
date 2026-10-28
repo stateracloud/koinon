@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ConnectError } from '@connectrpc/connect'
+import { useQuery } from '@connectrpc/connect-query'
 import { useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
-import type { Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import { ProviderService, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import type { ProviderChange, ProviderCreate } from '@/hooks/use-catalog-actions'
-import { providerTypes, workspaceIdPattern, workspaceProviderType } from '@/lib/providers'
+import { useOrg } from '@/lib/org-context'
+import { providerTypes } from '@/lib/providers'
 
 const other = '__other'
 const namePattern = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/
@@ -49,8 +51,11 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
     name: namePattern.test(name) ? undefined : 'Name must be lowercase letters, digits and dashes, such as openrouter.',
     type: /^[a-z][a-z0-9-]{0,62}$/.test(type) ? undefined : 'Type must be a provider name such as openai, openrouter or ollama.',
     url: /^https?:\/\/\S+$/.test(url.trim()) ? undefined : 'URL must start with http:// or https://.',
-    workspaceId: type !== workspaceProviderType || !workspaceId.trim() || workspaceIdPattern.test(workspaceId.trim()) ? undefined : 'Workspace ID must be wrkspc_ followed by letters and digits.',
   }
+  // Whether the type takes a workspace ID is the server's rule; its refusal of a malformed ID is shown as is.
+  const { org } = useOrg()
+  const typeInfo = useQuery(ProviderService.method.providerTypeInfo, { orgId: org.orgId, type }, { enabled: !errors.type })
+  const takesWorkspaceId = !!typeInfo.data?.workspaceId
   const invalid = Object.values(errors).some(Boolean)
 
   function pickType(v: string) {
@@ -75,11 +80,11 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
         if (key) change.apiKey = key
         else if (removeKey) change.apiKey = ''
         // The ID exists for Anthropic providers only: leaving the type clears it.
-        const ws = type === workspaceProviderType ? workspaceId.trim() : ''
+        const ws = takesWorkspaceId ? workspaceId.trim() : ''
         if (ws !== provider.anthropicWorkspaceId) change.anthropicWorkspaceId = ws
         await onUpdate(provider.id, change)
       } else {
-        await onCreate({ name, type, url: url.trim(), apiKey: key, anthropicWorkspaceId: type === workspaceProviderType ? workspaceId.trim() : '' })
+        await onCreate({ name, type, url: url.trim(), apiKey: key, anthropicWorkspaceId: takesWorkspaceId ? workspaceId.trim() : '' })
       }
       onSaved?.(provider?.name ?? name)
       onDone()
@@ -170,18 +175,16 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
           </label>
         )}
       </div>
-      {type === workspaceProviderType && (
+      {takesWorkspaceId && (
         <div className="grid gap-1.5">
           <Label htmlFor="provider-workspace">Anthropic workspace ID</Label>
-          <Input id="provider-workspace" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} placeholder="wrkspc_…" autoComplete="off" spellCheck={false} aria-invalid={!!err('workspaceId')} aria-describedby={err('workspaceId') ? 'provider-workspace-help provider-workspace-error' : 'provider-workspace-help'} />
+          <Input id="provider-workspace" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} placeholder="wrkspc_…" autoComplete="off" spellCheck={false} aria-describedby="provider-workspace-help" />
           <p id="provider-workspace-help" className="text-muted-foreground text-xs">
             Optional. Needed when the API key is not scoped to a workspace; Koinon sends it with every request to this provider. It identifies the workspace and is not a secret.
           </p>
-          {err('workspaceId') && (
-            <p id="provider-workspace-error" className="text-destructive text-xs">
-              {err('workspaceId')}
-            </p>
-          )}
+          <p id="provider-workspace-hint" className="text-muted-foreground text-xs">
+            It looks like wrkspc_ followed by letters and digits.
+          </p>
         </div>
       )}
       {error && (
