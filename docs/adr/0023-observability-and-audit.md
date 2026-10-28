@@ -1,6 +1,6 @@
 # 0023. Optional observability, hash-chained audit on by default
 
-- Status: Accepted; amended 2026-10-26 (below)
+- Status: Accepted; amended 2026-10-26 and 2026-10-28 (below); run traces by [0074](0074-run-traces-trace-router.md)
 - Date: 2026-10-21
 - Decision: [design.md#23](../design.md)
 
@@ -129,8 +129,28 @@ label rule and what is deferred; the metric list is in the docs site, guide "Met
   without the CRD fails the render), and `metrics.allowFrom` for the NetworkPolicies. The default is
   an empty list, which admits nobody: the scraper's location is not known, and admitting the whole
   namespace would admit unrelated pods. This matches `networkPolicy.metricsFrom` for agentgateway.
-- **Deferred.** Run traces and the org-level OTLP endpoint; metrics on the admin API (`/admin/v1`,
+- **Deferred.** Run traces and the org-level OTLP endpoint (now [0074](0074-run-traces-trace-router.md)); metrics on the admin API (`/admin/v1`,
   not a Connect service), queue depth, and agentgateway's metrics; alerting rules and dashboards.
+
+## Amendment (2026-10-28): run traces
+
+[0074](0074-run-traces-trace-router.md) decides how run traces are built. The decision above holds:
+traces go only to endpoints an org admin or platform admin supplies, an org endpoint receives only
+that org's traces, and nothing is exported by default.
+
+- **The route.** agentd emits the run's spans, and agentgateway sends its model-call spans only to
+  Koinon. A trace router in koinon-api attributes each span by run key, sets the ledger's cost,
+  applies the org's content level and exports to each destination. The gateway never exports to a
+  third party.
+- **Content.** Each org has a level: `none` (the default), `redacted` or `full` (org owner only,
+  audited). The platform sets the highest level an org may pick. The platform endpoint gets every org
+  at `none` unless the org opts in.
+- **Shape.** One trace per turn, with the run and task as the session. No span stays open across a
+  park.
+- **Metrics.** The router's metrics follow the label rule of the metrics amendment.
+
+The metrics amendment's "Deferred: run traces and the org-level OTLP endpoint" now points to 0074,
+which ships after v0.1.0.
 
 ## Open questions
 
