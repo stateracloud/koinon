@@ -69,12 +69,18 @@ type Keys interface {
 // without a wake-up, as a backstop for missed notifications.
 const DefaultWatchPollInterval = 5 * time.Second
 
+// DefaultWatchHeartbeatInterval is how often a WatchRun stream that has sent nothing else sends
+// a heartbeat, so proxies and load balancers keep a quiet run's stream open (issue #141).
+const DefaultWatchHeartbeatInterval = 30 * time.Second
+
 // Options configures a Server.
 type Options struct {
 	// Hub wakes WatchRun streams. Required.
 	Hub *runwatch.Hub
 	// WatchPollInterval defaults to DefaultWatchPollInterval.
 	WatchPollInterval time.Duration
+	// WatchHeartbeatInterval defaults to DefaultWatchHeartbeatInterval.
+	WatchHeartbeatInterval time.Duration
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Keys seals and opens connections' secret fields (the secret store). Nil means Koinon
@@ -114,7 +120,9 @@ type Server struct {
 	q    *store.Queries
 	hub  *runwatch.Hub
 	poll time.Duration
-	log  *slog.Logger
+	// heartbeat is the idle interval after which WatchRun sends a heartbeat.
+	heartbeat time.Duration
+	log       *slog.Logger
 
 	keys      Keys
 	tokens    *tokens.Service
@@ -135,6 +143,9 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.WatchPollInterval <= 0 {
 		opts.WatchPollInterval = DefaultWatchPollInterval
 	}
+	if opts.WatchHeartbeatInterval <= 0 {
+		opts.WatchHeartbeatInterval = DefaultWatchHeartbeatInterval
+	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -151,7 +162,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 	s := &Server{
 		dm:       opts.DirectMessages,
 		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
-		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
+		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
 		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger),
 	}

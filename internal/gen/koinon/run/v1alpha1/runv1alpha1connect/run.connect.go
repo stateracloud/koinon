@@ -71,7 +71,8 @@ type RunServiceClient interface {
 	// and in seq order. To resume after a dropped stream, call again with the
 	// last seq received. The first message is a snapshot of the run; another
 	// snapshot follows whenever its state changes. The stream ends after the
-	// run has finished and every event has been sent. Viewers and above.
+	// run has finished and every event has been sent. Heartbeat messages keep a quiet
+	// stream open. Viewers and above.
 	WatchRun(context.Context, *v1alpha1.WatchRunRequest) (RunServiceWatchRunClientStream, error)
 }
 
@@ -112,7 +113,8 @@ type RunServiceHandler interface {
 	// and in seq order. To resume after a dropped stream, call again with the
 	// last seq received. The first message is a snapshot of the run; another
 	// snapshot follows whenever its state changes. The stream ends after the
-	// run has finished and every event has been sent. Viewers and above.
+	// run has finished and every event has been sent. Heartbeat messages keep a quiet
+	// stream open. Viewers and above.
 	WatchRun(context.Context, *v1alpha1.WatchRunRequest, RunServiceWatchRunServerStream) error
 }
 

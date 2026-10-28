@@ -12,6 +12,17 @@ import (
 )
 
 var _ = Describe("prices and budgets", func() {
+	It("warns about a cache_read price whose provider format has no cache mode (ADR 0068)", func(ctx SpecContext) {
+		e := newEnv(ctx)
+		body := map[string]any{
+			"name": "gemini", "provider": "openrouter", "match": map[string]any{"glob": "google/*"},
+			"prices": map[string]any{"input": "1", "output": "2", "cacheRead": "0.1"}, "maxOutput": 4096,
+		}
+		st, raw := e.call(ctx, e.token, http.MethodPost, "/prices", body)
+		Expect(st).To(Equal(http.StatusCreated), string(raw))
+		Expect(decode[map[string]any](raw)["warnings"]).To(ConsistOf(ContainSubstring("without caching")))
+	})
+
 	It("versions org prices, shows the default list and its changes", func(ctx SpecContext) {
 		e := newEnv(ctx)
 		body := map[string]any{
@@ -23,6 +34,7 @@ var _ = Describe("prices and budgets", func() {
 		Expect(st).To(Equal(http.StatusCreated), string(raw))
 		first := decode[map[string]any](raw)
 		Expect(first["name"]).To(Equal("contract"))
+		Expect(first).NotTo(HaveKey("warnings"), "deepseek caches by itself")
 
 		// A bad price is refused with a reason.
 		bad := map[string]any{"name": "x", "provider": "openrouter", "match": map[string]any{"glob": "a", "regex": "b"}, "prices": map[string]any{"input": "1", "output": "1"}}

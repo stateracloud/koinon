@@ -303,6 +303,18 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 		Expect(env).To(ContainSubstring("OPENCODE_DISABLE_PROJECT_CONFIG=1\n"), "a repository still cannot configure the harness")
 	})
 
+	It("sets the cache format of the koinon provider with --cache-anthropic, next to the plugins", func(ctx SpecContext) {
+		Expect(entryEnv(ctx, "--cache-anthropic")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"compatibility":{"cacheFormat":"anthropic"}}}}` + "\n"))
+		Expect(entryEnv(ctx, "--plugin-installs", "--cache-alibaba")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"plugins":["/sandbox/.config/opencode/plugins/one"],"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
+	})
+
+	It("sends the run ID as the body field session_id with --session-id", func(ctx SpecContext) {
+		Expect(entryEnv(ctx, "--session-id", "01234567-run")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"body":{"session_id":"01234567-run"}}}}` + "\n"))
+	})
+
 	It("keeps the model key from OpenCode's built-in providers", func(ctx SpecContext) {
 		env := entryEnv(ctx)
 		Expect(env).NotTo(ContainSubstring("OPENAI_API_KEY="))

@@ -349,6 +349,43 @@ func llmSpec(env Env) {
 				Expect(upstreamOptions()).To(BeNil())
 			})
 
+			It("passes cache_control markers through to the upstream unchanged (ADR 0068)", func(ctx SpecContext) {
+				marker := map[string]any{"type": "ephemeral"}
+				block := func(text string) map[string]any {
+					return map[string]any{"type": "text", "text": text, "cache_control": marker}
+				}
+				sent := map[string]any{
+					"model": "open-model", "session_id": "01234567-run",
+					"messages": []any{
+						map[string]any{"role": "system", "content": []any{block("You are a helpful agent.")}},
+						map[string]any{"role": "user", "content": []any{block("first question")}},
+						map[string]any{"role": "assistant", "content": "answer"},
+						map[string]any{"role": "user", "content": []any{block("second question")}},
+					},
+					"tools": []any{map[string]any{
+						"type": "function", "cache_control": marker,
+						"function": map[string]any{"name": "lookup", "parameters": map[string]any{"type": "object"}},
+					}},
+				}
+				raw, err := json.Marshal(sent)
+				Expect(err).NotTo(HaveOccurred())
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/chat/completions", bytes.NewReader(raw))
+				Expect(err).NotTo(HaveOccurred())
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+keyG.Material)
+				resp, err := http.DefaultClient.Do(req)
+				Expect(err).NotTo(HaveOccurred())
+				b, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				Expect(resp.StatusCode).To(Equal(http.StatusOK), string(b))
+
+				var got map[string]any
+				Expect(json.Unmarshal([]byte(ups["guarded"].lastBody()), &got)).To(Succeed())
+				Expect(got["messages"]).To(Equal(sent["messages"]), "the content blocks and their cache_control reach the upstream as sent")
+				Expect(got).To(HaveKeyWithValue("session_id", "01234567-run"), "OpenRouter's sticky-routing field reaches the upstream")
+				Expect(got["tools"]).To(Equal(sent["tools"]), "the tool's cache_control reaches the upstream as sent")
+			})
+
 			It("sends the provider's key file content as the upstream credential", func(ctx SpecContext) {
 				// The fake upstream does not check credentials; the config names the file and
 				// agentgateway accepted it (--validate-only and the reload would fail on a missing file).

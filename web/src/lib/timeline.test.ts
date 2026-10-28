@@ -77,6 +77,13 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it('shows an uncached run as a note', () => {
+    const items = buildTimeline([], { [run]: [runEvent(1, 'run.uncached', { model: 'google/gemini-x', reason: 'no cache mode for the provider format' })] })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456 runs without prompt caching (model google/gemini-x): no cache mode for the provider format',
+    ])
+  })
+
   it('shows a park and its approval task events', () => {
     const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
     const items = buildTimeline(

@@ -361,7 +361,18 @@ func (r *runner) execute(ctx context.Context) error {
 		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
 	}
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
-	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp"})
+	mode, ptype := r.cacheMode(fctx, model)
+	marker, unknown := cacheMarker(mode)
+	if unknown {
+		r.log.Warn("the model has a cache price but its provider format cannot be cached by Koinon; it runs without prompt caching", "model", model)
+	}
+	// OpenRouter keeps a session on one upstream, so the run's cache stays warm. Only the run ID
+	// is sent, and only to OpenRouter.
+	sessionID := ""
+	if ptype == "openrouter" {
+		sessionID = r.run.ID.String()
+	}
+	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", CacheMarker: marker, SessionID: sessionID})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
@@ -413,6 +424,12 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	workspace, sandbox := sb.Workspace, sb.SandboxName
 	log := r.log.With("sandbox", sandbox)
+	if unknown {
+		// Visible on the task timeline: the run is costlier than the price list suggests.
+		if err := r.record(fctx, "run.uncached", map[string]any{"model": model, "reason": prices.UncachedReason(ptype, model)}); err != nil {
+			return r.dbErr(ctx, "record the uncached run", err)
+		}
+	}
 	if len(ended) > 0 {
 		log.Warn("ended processes left in the sandbox", "pids", ended, "main", main)
 		if err := r.record(fctx, "run.sandbox_swept", map[string]any{"pids": ended, "main": main}); err != nil {
@@ -1174,4 +1191,18 @@ func updateKind(update []byte) string {
 		return "unknown"
 	}
 	return b.String()
+}
+
+// cacheMode is the prompt-cache mode of the model the run uses (ADR 0068). A model without a
+// price runs as before: the gateway refuses it anyway.
+func (r *runner) cacheMode(ctx context.Context, name string) (mode prices.CacheMode, providerType string) {
+	m, err := prices.Lookup(ctx, r.q, r.run.OrgID, name)
+	if err != nil {
+		return prices.CacheNone, ""
+	}
+	res, err := prices.Resolve(ctx, r.q, r.run.OrgID, m, time.Now())
+	if err != nil {
+		return prices.CacheNone, ""
+	}
+	return prices.CacheModeFor(m.ProviderType, m.Name, res.Price), m.ProviderType
 }
