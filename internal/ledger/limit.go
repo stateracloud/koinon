@@ -38,20 +38,9 @@ import (
 //
 // It returns nil for an agent without an active version and no limit at all.
 func AgentLimit(ctx context.Context, q *store.Queries, agent store.Agent, now time.Time) (*gateway.Limit, error) {
-	if !agent.ActiveVersionID.Valid {
-		return nil, nil
-	}
-	v, err := q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: agent.OrgID, ID: agent.ActiveVersionID})
-	if err != nil {
-		return nil, fmt.Errorf("read agent version: %w", err)
-	}
-	cfg, err := agentconfig.Parse(v.Config)
-	if err != nil {
+	st, ok, err := agentStatus(ctx, q, agent, now)
+	if err != nil || !ok {
 		return nil, err
-	}
-	st, err := budget.Compute(ctx, q, agent.OrgID, agent.ID, money.FromCents(cfg.Limits.SpendUSD.Cents()), now)
-	if err != nil {
-		return nil, fmt.Errorf("read budgets: %w", err)
 	}
 	net, _, ok := st.Net()
 	if !ok {
@@ -59,6 +48,27 @@ func AgentLimit(ctx context.Context, q *store.Queries, agent store.Agent, now ti
 	}
 	l := gateway.USDLimit(net, budget.DayWindow, st.Generation(now))
 	return &l, nil
+}
+
+// agentStatus is the agent's limits and spend at now (package budget). ok is false for an agent
+// without an active version.
+func agentStatus(ctx context.Context, q *store.Queries, agent store.Agent, now time.Time) (budget.Status, bool, error) {
+	if !agent.ActiveVersionID.Valid {
+		return budget.Status{}, false, nil
+	}
+	v, err := q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: agent.OrgID, ID: agent.ActiveVersionID})
+	if err != nil {
+		return budget.Status{}, false, fmt.Errorf("read agent version: %w", err)
+	}
+	cfg, err := agentconfig.Parse(v.Config)
+	if err != nil {
+		return budget.Status{}, false, err
+	}
+	st, err := budget.Compute(ctx, q, agent.OrgID, agent.ID, money.FromCents(cfg.Limits.SpendUSD.Cents()), now)
+	if err != nil {
+		return budget.Status{}, false, fmt.Errorf("read budgets: %w", err)
+	}
+	return st, true, nil
 }
 
 // FormatUSD trims a Postgres numeric's trailing zeros, keeping at least two

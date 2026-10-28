@@ -410,6 +410,18 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		}
 		r.rememberLimit(w.key.Agent, l)
 		state.SetLimit(w.key.Agent, l)
+		// A budget with nothing left stops the agent's runs (or the org's) with the budget reason
+		// before the Apply below blocks or revokes the key, so a run in flight records the budget
+		// stop and not the gateway's 401 or 429 (issue #188). A limit that could not be computed
+		// fails closed above but stops nothing: it is not known to be spent.
+		if l != nil && l.Amount <= 0 {
+			if n, err := ledger.StopSpent(ctx, r.pool, w.agent, now); err != nil {
+				r.m.PassErrors.WithLabelValues(errKindSpendLimit).Inc()
+				errs = append(errs, fmt.Errorf("stop the runs of spent agent %s: %w", execution.UUIDString(w.agent.ID.Bytes), err))
+			} else if n > 0 {
+				r.log.Info("budget spent: runs stopped before the key is blocked", append(w.logAttrs(), "runs", n)...)
+			}
+		}
 	}
 	// Provider key files first, then the config that names them; files no provider uses go last.
 	// One provider's new key file still travelling to the gateway pod never holds back the others:

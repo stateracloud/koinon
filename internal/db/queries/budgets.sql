@@ -76,3 +76,8 @@ WHERE org_id = @org_id AND user_id = @user_id AND id = @id;
 -- Runs that can still be canceled, when an org-wide limit is reached.
 SELECT * FROM runs
 WHERE org_id = @org_id AND state IN ('queued', 'starting', 'running', 'parked');
+
+-- name: ListOpenRunsOfAgent :many
+-- Runs that can still be canceled, when the agent's daily limit is reached.
+SELECT * FROM runs
+WHERE org_id = @org_id AND agent_id = @agent_id AND state IN ('queued', 'starting', 'running', 'parked');

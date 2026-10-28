@@ -489,6 +489,8 @@ type Querier interface {
 	// Only those whose run is still parked: a question outlives no run (the sweep closes it, this
 	// hides it meanwhile).
 	ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQuestionsForUserParams) ([]Question, error)
+	// Runs that can still be canceled, when the agent's daily limit is reached.
+	ListOpenRunsOfAgent(ctx context.Context, arg ListOpenRunsOfAgentParams) ([]Run, error)
 	// Runs that can still be canceled, when an org-wide limit is reached.
 	ListOpenRunsOfOrg(ctx context.Context, orgID pgtype.UUID) ([]Run, error)
 	// The users who are told about an org's budget: owners and admins.
