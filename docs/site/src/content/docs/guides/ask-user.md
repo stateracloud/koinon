@@ -10,9 +10,12 @@ has without a grant: asking costs nothing and only waits for a person.
 
 `ask_user(to, question, draft, choices, default)`:
 
-- `to` is a member of the org (email or user ID). Left out, it is the person who created the task. A
-  task created by a trigger or by another agent has no creator to ask, so the agent must name `to`.
-  The person needs the member role or higher.
+- `to` is a member of the org (email or user ID); the person needs the member role or higher. Left out,
+  Koinon picks who is asked in this order: in a chat, the person in the chat; for a task a person
+  created, its creator; otherwise the trigger's notify target ([Triggers](/guides/triggers/)), which is
+  the org's admins unless the trigger says otherwise. A person picked that way who can no longer answer
+  (they left the org, or became a viewer) is replaced by the trigger's target or the admins, and the
+  tool's answer tells the agent so. A person the agent named is never replaced: the agent gets an error.
 - `question` is the text; `draft` is an optional proposed answer; `choices` is an optional list.
 - `default` is required: the safe answer Koinon uses when the question is dismissed or nobody answers
   in time. With choices it must be one of them.
@@ -23,10 +26,18 @@ in one step: no question is visible before the park, and no run parks without it
 
 ## Answering
 
-In the inbox ([Tasks and the inbox](/guides/tasks-and-inbox/)) the addressee picks a choice, uses or
-edits the draft, writes free text, or dismisses the question. Only the addressee can answer; an admin
-cannot answer for someone else. A second answer to the same question is refused, so an answer resumes
-the run exactly once.
+A question can be asked of several people, for example the org's admins. Each of them is a recipient
+and sees it in the inbox, labelled with who it was asked to and for how long it has waited on them.
+In the inbox ([Tasks and the inbox](/guides/tasks-and-inbox/)) a recipient picks a choice, uses or
+edits the draft, writes free text, or dismisses the question. Only recipients can answer; an admin who
+is not one cannot answer for someone else. The first answer wins: anyone who answers after that is told
+"<name> already answered this question", and the task's timeline shows who answered. A dismissal is an
+answer, so the default applies for everyone. An answer resumes the run exactly once.
+
+The age shown in the inbox counts from when the question started waiting on that person. A reminder does
+not reset it. A person counts as a recipient only while they can answer: if everyone a question was asked
+to leaves the org or becomes a viewer, Koinon adds the org's admins and owners, and their age starts
+then.
 
 The answer reaches the agent as part of its next prompt: `the person answered: "..."`, or, when the
 question was dismissed or timed out, that the default was applied and what it is. The agent is always
