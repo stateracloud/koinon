@@ -36,7 +36,8 @@ koinon_extra_arg() { return 1; }
 
 # koinon_parse_args "$@": reads --model-base-url, --model and --mcp-url into base_url, model and
 # mcp_url (and the optional --session-id into session_id and --model-format into model_format,
-# openai or anthropic, default openai: the model's wire format, ADR 0069), checks them, and sets koinon_shift to the number of arguments consumed (a trailing
+# default openai: the model's wire format, ADR 0069; the entry script maps it to a provider entry
+# and refuses a format it has none for), checks them, and sets koinon_shift to the number of arguments consumed (a trailing
 # -- included). The caller then runs `shift "$koinon_shift"`, which leaves the arguments for the
 # harness.
 koinon_parse_args() {
@@ -62,10 +63,7 @@ koinon_parse_args() {
   koinon_check_url --model-base-url "$base_url"
   check --model "$model"
   koinon_check_url --mcp-url "$mcp_url"
-  case $model_format in
-    openai | anthropic) ;;
-    *) koinon_die "--model-format must be openai or anthropic: '$model_format'" ;;
-  esac
+  check --model-format "$model_format"
   if [ -n "$session_id" ]; then
     check --session-id "$session_id"
     [ ${#session_id} -le 256 ] || koinon_die "--session-id is longer than 256 characters"

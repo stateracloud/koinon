@@ -135,8 +135,9 @@ var _ = Describe("koinon-opencode with --model-format anthropic", func() {
 			Expect(string(r.Body)).NotTo(ContainSubstring("stream_options"))
 			// The OpenRouter sticky-routing overlay goes on this entry as well.
 			Expect(string(r.Body)).To(ContainSubstring(`"session_id":"01234567-run"`))
-			// The token is a bearer token, and only that: no x-api-key, which OpenShell would not rewrite
-			// and the gateway's key policy does not read.
+			// The token is a bearer token, and only that. OpenShell v0.1.5 rewrites its placeholder in any
+			// header (crates/openshell-core/src/secrets.rs); Authorization is chosen because the gateway's
+			// key policy reads it, and the Anthropic provider's default x-api-key is not used.
 			Expect(r.Header.Values("Authorization")).To(Equal([]string{"Bearer " + fakeKey}))
 			Expect(r.Header.Values("X-Api-Key")).To(BeEmpty())
 			Expect(r.Header.Get("anthropic-version")).NotTo(BeEmpty())
@@ -181,8 +182,16 @@ var _ = Describe("koinon-opencode with --model-format anthropic", func() {
 	// format changed (an admin override, or the OpenRouter flip). The session keeps its history; the
 	// next request is in the new format.
 	DescribeTable("keeps a session's history when its entry changes",
-		func(ctx SpecContext, from, to modelformat.Format, fromPath, toPath string) {
-			gw := newGateway(contractScript(opencode))
+		func(ctx SpecContext, from, to modelformat.Format, fromPath, toPath, callID string) {
+			script := contractScript(opencode)
+			if callID != "" {
+				for _, t := range script.Turns {
+					for i := range t.ToolCalls {
+						t.ToolCalls[i].ID = callID
+					}
+				}
+			}
+			gw := newGateway(script)
 			sb := newOpencodeSandbox(ctx, instructionsMarker+"\n")
 
 			h1, session := harnessIn(ctx, sb, gw, from, "")
@@ -210,8 +219,14 @@ var _ = Describe("koinon-opencode with --model-format anthropic", func() {
 			// The model sees the earlier turns, tool call and result included.
 			last := string(after[len(after)-1].Body)
 			Expect(last).To(And(ContainSubstring("KOINON-WRITE"), ContainSubstring(wroteReply), ContainSubstring(recallPrompt), ContainSubstring("notes.txt")))
+			if callID != "" && to == modelformat.Anthropic {
+				// Anthropic accepts [a-zA-Z0-9_-] in a tool_use id; OpenCode rewrites the rest.
+				Expect(last).To(ContainSubstring(`"id":"functions_write_0"`))
+				Expect(last).NotTo(ContainSubstring("functions.write:0"))
+			}
 		},
-		Entry("koinon to koinon-anthropic", SpecTimeout(5*time.Minute), modelformat.OpenAI, modelformat.Anthropic, "/v1/chat/completions", "/v1/messages"),
-		Entry("koinon-anthropic to koinon", SpecTimeout(5*time.Minute), modelformat.Anthropic, modelformat.OpenAI, "/v1/messages", "/v1/chat/completions"),
+		Entry("koinon to koinon-anthropic", SpecTimeout(5*time.Minute), modelformat.OpenAI, modelformat.Anthropic, "/v1/chat/completions", "/v1/messages", ""),
+		Entry("koinon to koinon-anthropic with a tool-call ID outside Anthropic's pattern", SpecTimeout(5*time.Minute), modelformat.OpenAI, modelformat.Anthropic, "/v1/chat/completions", "/v1/messages", "functions.write:0"),
+		Entry("koinon-anthropic to koinon", SpecTimeout(5*time.Minute), modelformat.Anthropic, modelformat.OpenAI, "/v1/messages", "/v1/chat/completions", ""),
 	)
 })

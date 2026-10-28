@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/estimate"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -40,9 +41,9 @@ type Model struct {
 	// ProviderID is the provider that serves the model, at ProviderURL.
 	ProviderID  pgtype.UUID
 	ProviderURL string
-	// Format is the model's wire format (models.format; internal/modelformat). Pricing ignores it;
-	// the cache mode depends on it.
-	Format string
+	// Format is the model's wire format (models.format). Pricing ignores it; the cache mode
+	// depends on it.
+	Format modelformat.Format
 }
 
 // Resolution is the price found for a model at a time.
@@ -79,7 +80,7 @@ func Lookup(ctx context.Context, q *store.Queries, org pgtype.UUID, name string)
 	} else if err != nil {
 		return Model{}, err
 	}
-	return Model{ID: row.ID.String(), Name: row.Name, ProviderType: row.ProviderType, ProviderID: row.ProviderID, ProviderURL: row.ProviderUrl, Format: row.Format}, nil
+	return Model{ID: row.ID.String(), Name: row.Name, ProviderType: row.ProviderType, ProviderID: row.ProviderID, ProviderURL: row.ProviderUrl, Format: modelformat.Format(row.Format)}, nil
 }
 
 // BadPriceError means a stored price cannot be used (a rate that does not parse, an override

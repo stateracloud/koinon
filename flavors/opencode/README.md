@@ -153,7 +153,7 @@ A new session reports a model OpenCode picked from its own catalog (for example
 (`aisdk:@ai-sdk/anthropic`, Messages, `authToken`). Both send the agent's key as
 `Authorization: Bearer <placeholder>`, the header the sandbox's gateway profile names
 (`internal/reconciler`, `GatewayProfile`: `authStyle bearer`, `authorization`), so OpenShell
-rewrites the placeholder the same way and the gateway's key policy reads the same header. Never set
+rewrites the placeholder (it does so in any header) and the gateway's key policy reads the same header. Never set
 `apiKey` and `authToken` together (`packages/ai/src/providers/anthropic.ts` refuses it), and the
 Anthropic provider's default `x-api-key` is not used. `--model-format anthropic` also sets the
 config's default model to `koinon-anthropic/<model>` through `OPENCODE_CONFIG_CONTENT`.
@@ -168,8 +168,9 @@ gateway removes `anthropic-beta` (ADR 0069 amendment) and nothing needs pinning.
 A session saved under one entry loads under the other (measured with OpenCode 2.2.0, both
 directions, `test/flavors/anthropic_test.go`): the replayed history is complete, a turn with a tool
 call included, the model receives it on the next request, and that request is in the new entry's
-format. agentd therefore needs no new session when a task's model changes format. The spec uses the
-fake model; Anthropic's own validation of replayed tool-call IDs is unverified.
+format. agentd therefore needs no new session when a task's model changes format. OpenCode rewrites
+characters outside `[a-zA-Z0-9_-]` in a tool-call ID to `_` for Messages (`scrubToolCallID`), so a
+session whose call was `functions.write:0` replays as `functions_write_0`; the spec checks it.
 
 ## Phone-home, updates, telemetry and plugins
 
