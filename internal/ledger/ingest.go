@@ -179,7 +179,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			CostUsd: pr.cost.Numeric(), GatewayCostUsd: pr.gatewayCost, PriceRef: pr.ref,
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
 			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: at,
-			Provisional: provisional, ReserveUsd: pr.reserve.Numeric(), ResponseID: responseID,
+			Provisional: provisional, ReserveUsd: pgtype.Text{String: pr.reserve.Numeric(), Valid: pr.reserve > 0}, ResponseID: responseID,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded

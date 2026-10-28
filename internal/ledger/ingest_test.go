@@ -297,6 +297,24 @@ var _ = Describe("AgentLimit", func() {
 	})
 })
 
+var _ = Describe("InsertSpendEntry", func() {
+	BeforeEach(needDocker)
+
+	It("records an entry that holds nothing without the settlement fields set", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+		_, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
+			OrgID: e.org, AgentID: e.agent.ID, RequestID: uniq("req"), KeyID: "k-test", Model: "m",
+			CostUsd: "0.5", Priced: true, OccurredAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred(), "reserve_usd and response_id default to nothing held")
+		var reserve string
+		var provisional bool
+		Expect(db.QueryRow(ctx, `SELECT reserve_usd::text, provisional FROM spend_entries WHERE org_id = $1`, e.org).Scan(&reserve, &provisional)).To(Succeed())
+		Expect(ledger.FormatUSD(reserve)).To(Equal("0.00"))
+		Expect(provisional).To(BeFalse())
+	})
+})
+
 var _ = Describe("An Ingester without prices", func() {
 	It("is refused at startup instead of recording every request unpriced", func(ctx SpecContext) {
 		in := &ledger.Ingester{}
