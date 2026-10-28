@@ -153,7 +153,8 @@ var _ = Describe("Reconciler latency defaults", func() {
 			qq := store.New(tx)
 			var err error
 			row, _, err = questions.Create(ctx, qq, questions.Ask{
-				Org: org, Task: queued.TaskID, Run: run.ID, Agent: agent.ID, To: user,
+				Org: org, Task: queued.TaskID, Run: run.ID, Agent: agent.ID,
+				Target: questions.Target{Kind: store.NotifyTargetKindUser, User: user}, Recipients: []pgtype.UUID{user},
 				Question: "Which region?", Choices: []string{"eu", "us"}, Default: "eu",
 			})
 			if err != nil {

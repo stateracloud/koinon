@@ -35,6 +35,9 @@ const (
 	// QuestionServiceDismissQuestionProcedure is the procedure name of the QuestionService's
 	// DismissQuestion RPC.
 	QuestionServiceDismissQuestionProcedure = "/koinon.question.v1alpha1.QuestionService/DismissQuestion"
+	// QuestionServiceListAskableMembersProcedure is the procedure name of the QuestionService's
+	// ListAskableMembers RPC.
+	QuestionServiceListAskableMembersProcedure = "/koinon.question.v1alpha1.QuestionService/ListAskableMembers"
 )
 
 var (
@@ -60,6 +63,14 @@ var (
 			Procedure:  QuestionServiceDismissQuestionProcedure,
 		}
 	})
+	questionServiceListAskableMembersSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_question_v1alpha1_question_proto.Services().ByName("QuestionService").Methods().ByName("ListAskableMembers"),
+			Procedure:        QuestionServiceListAskableMembersProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
 )
 
 // QuestionServiceClient is a client for the koinon.question.v1alpha1.QuestionService service.
@@ -75,6 +86,9 @@ type QuestionServiceClient interface {
 	// DismissQuestion dismisses an open question addressed to the caller: its safe default becomes
 	// the answer and the agent is told. Members and above.
 	DismissQuestion(context.Context, *v1alpha1.DismissQuestionRequest) (*v1alpha1.DismissQuestionResponse, error)
+	// ListAskableMembers lists the org's members who can answer questions (member role or higher), for
+	// picking a trigger's notify target. Members and above.
+	ListAskableMembers(context.Context, *v1alpha1.ListAskableMembersRequest) (*v1alpha1.ListAskableMembersResponse, error)
 }
 
 // NewQuestionServiceClient constructs a client for the koinon.question.v1alpha1.QuestionService
@@ -97,6 +111,9 @@ type QuestionServiceHandler interface {
 	// DismissQuestion dismisses an open question addressed to the caller: its safe default becomes
 	// the answer and the agent is told. Members and above.
 	DismissQuestion(context.Context, *v1alpha1.DismissQuestionRequest) (*v1alpha1.DismissQuestionResponse, error)
+	// ListAskableMembers lists the org's members who can answer questions (member role or higher), for
+	// picking a trigger's notify target. Members and above.
+	ListAskableMembers(context.Context, *v1alpha1.ListAskableMembersRequest) (*v1alpha1.ListAskableMembersResponse, error)
 }
 
 // RegisterQuestionServiceHandler registers svc as the koinon.question.v1alpha1.QuestionService
@@ -107,6 +124,7 @@ func RegisterQuestionServiceHandler(server *connect.Server, svc QuestionServiceH
 		connect.Method{Spec: questionServiceListQuestionsSpec(), Handler: adapter.listQuestions},
 		connect.Method{Spec: questionServiceAnswerQuestionSpec(), Handler: adapter.answerQuestion},
 		connect.Method{Spec: questionServiceDismissQuestionSpec(), Handler: adapter.dismissQuestion},
+		connect.Method{Spec: questionServiceListAskableMembersSpec(), Handler: adapter.listAskableMembers},
 	)
 }
 
@@ -123,6 +141,10 @@ func (UnimplementedQuestionServiceHandler) AnswerQuestion(context.Context, *v1al
 
 func (UnimplementedQuestionServiceHandler) DismissQuestion(context.Context, *v1alpha1.DismissQuestionRequest) (*v1alpha1.DismissQuestionResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.question.v1alpha1.QuestionService.DismissQuestion is not implemented")
+}
+
+func (UnimplementedQuestionServiceHandler) ListAskableMembers(context.Context, *v1alpha1.ListAskableMembersRequest) (*v1alpha1.ListAskableMembersResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.question.v1alpha1.QuestionService.ListAskableMembers is not implemented")
 }
 
 type questionServiceClient struct {
@@ -148,6 +170,14 @@ func (c *questionServiceClient) AnswerQuestion(ctx context.Context, req *v1alpha
 func (c *questionServiceClient) DismissQuestion(ctx context.Context, req *v1alpha1.DismissQuestionRequest) (*v1alpha1.DismissQuestionResponse, error) {
 	var res v1alpha1.DismissQuestionResponse
 	if err := c.client.CallUnary(ctx, questionServiceDismissQuestionSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *questionServiceClient) ListAskableMembers(ctx context.Context, req *v1alpha1.ListAskableMembersRequest) (*v1alpha1.ListAskableMembersResponse, error) {
+	var res v1alpha1.ListAskableMembersResponse
+	if err := c.client.CallUnary(ctx, questionServiceListAskableMembersSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -185,6 +215,18 @@ func (h questionServiceHandler) dismissQuestion(ctx context.Context, _ connect.S
 		return err
 	}
 	res, err := h.svc.DismissQuestion(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h questionServiceHandler) listAskableMembers(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.ListAskableMembersRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ListAskableMembers(ctx, &req)
 	if err != nil {
 		return err
 	}

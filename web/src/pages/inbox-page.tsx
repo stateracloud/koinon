@@ -68,7 +68,8 @@ export function InboxPage() {
     } catch (e) {
       const err = ConnectError.from(e)
       // Approve sends the hash the list showed; Aborted means the request changed since.
-      if (err.code === Code.Aborted && item.kind === 'question') fail(id, 'This question was already answered, dismissed or expired.')
+      // The server names who answered first ("Ana already answered this question").
+      if (err.code === Code.Aborted && item.kind === 'question') fail(id, err.rawMessage || 'This question was already answered, dismissed or expired.')
       else fail(id, err.code === Code.Aborted ? 'This request changed. Open it to review the new version.' : err.rawMessage)
     } finally {
       track(id, false)

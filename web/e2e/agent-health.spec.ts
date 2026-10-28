@@ -217,6 +217,21 @@ for (const vp of viewports) {
       await expectAccessible(page)
     })
 
+    test('an unhealthy agent is an inbox item for admins', async ({ page }) => {
+      const { handlers } = api()
+      handlers.unary['koinon.approval.v1alpha1.ApprovalService/ListApprovals'] = () => ({ approvals: [] })
+      handlers.unary['koinon.question.v1alpha1.QuestionService/ListQuestions'] = () => ({ questions: [] })
+      await mockApi(page, handlers)
+      await page.goto('/')
+      const item = page.getByRole('list', { name: 'Waiting on you' }).getByTestId('inbox-item')
+      await expect(item).toContainText('Repo helper is unhealthy and takes no runs.')
+      await expect(item).toContainText('its sandbox was recreated three times in a row')
+      await expectNoHorizontalScroll(page)
+      await expectAccessible(page)
+      await item.getByRole('link', { name: 'Open the agent' }).click()
+      await expect(page).toHaveURL(/\/agents\/a-1$/)
+    })
+
     test('agent page: a member sees the notice without Resume', async ({ page }) => {
       const { handlers } = api('ORG_ROLE_MEMBER')
       await mockApi(page, handlers)

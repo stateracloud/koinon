@@ -5,6 +5,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -332,6 +333,9 @@ func triggerAudit(ts []templates.Trigger, withInstruction bool) []map[string]any
 		if withInstruction {
 			m["instruction"] = t.Instruction
 		}
+		if t.Notify != nil {
+			m["notify"] = t.Notify
+		}
 		out = append(out, m)
 	}
 	return out
@@ -355,6 +359,20 @@ func (s *Server) SetAgentTriggers(ctx context.Context, req *agentv1alpha1.SetAge
 	}
 	var out *agentv1alpha1.Agent
 	err = s.inTx(ctx, func(q *store.Queries) error {
+		// A person who is asked must be a member who can answer (member or higher).
+		for i, t := range triggers {
+			if t.Notify == nil || t.Notify.Kind != templates.NotifyUser {
+				continue
+			}
+			m, err := q.FindOrgMemberByIdent(ctx, store.FindOrgMemberByIdentParams{OrgID: c.org, Ident: t.Notify.User})
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && m.Role == store.OrgRoleViewer) {
+				return connect.NewError(connect.CodeInvalidArgument,
+					fmt.Sprintf("triggers[%d]: notify: %s is not a member who can answer questions", i, t.Notify.User))
+			}
+			if err != nil {
+				return err
+			}
+		}
 		// The row lock makes the base_version check and the new version one step: a concurrent
 		// proposal waits, then fails the check against the version this one created.
 		a, err := q.GetAgentForUpdate(ctx, store.GetAgentForUpdateParams{OrgID: c.org, ID: id})
@@ -433,6 +451,11 @@ func (s *Server) ResumeAgent(ctx context.Context, req *agentv1alpha1.ResumeAgent
 			return connect.NewError(connect.CodeFailedPrecondition, "agent is not unhealthy")
 		}
 		if err != nil {
+			return err
+		}
+		// Every queued run of the agent starts a fresh sandbox wait: without this a resumed agent's
+		// runs would hit the sandbox wait cap again at once (ADR 0066 amendment 2026-10-28).
+		if _, err := q.ClearSandboxWaitForAgent(ctx, store.ClearSandboxWaitForAgentParams{OrgID: c.org, AgentID: id}); err != nil {
 			return err
 		}
 		// The sandbox that kept getting stuck is recreated; the reconciler is woken below.

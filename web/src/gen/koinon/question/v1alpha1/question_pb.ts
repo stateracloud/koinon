@@ -9,13 +9,17 @@ import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobu
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { OrgRole } from "../../auth/v1alpha1/auth_pb";
+import { file_koinon_auth_v1alpha1_auth } from "../../auth/v1alpha1/auth_pb";
+import type { NotifyTarget } from "../../template/v1alpha1/template_pb";
+import { file_koinon_template_v1alpha1_template } from "../../template/v1alpha1/template_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file koinon/question/v1alpha1/question.proto.
  */
 export const file_koinon_question_v1alpha1_question: GenFile = /*@__PURE__*/
-  fileDesc("Cidrb2lub24vcXVlc3Rpb24vdjFhbHBoYTEvcXVlc3Rpb24ucHJvdG8SGGtvaW5vbi5xdWVzdGlvbi52MWFscGhhMSKhBAoIUXVlc3Rpb24SCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSDgoGcnVuX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhAKCGFza2VkX3RvGAYgASgJEhAKCHF1ZXN0aW9uGAcgASgJEg8KB2Nob2ljZXMYCCADKAkSDQoFZHJhZnQYCSABKAkSFgoOZGVmYXVsdF9hbnN3ZXIYCiABKAkSNgoFc3RhdGUYCyABKA4yJy5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuUXVlc3Rpb25TdGF0ZRIOCgZhbnN3ZXIYDCABKAkSOQoLYW5zd2VyX2tpbmQYDSABKA4yJC5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuQW5zd2VyS2luZBITCgthbnN3ZXJlZF9ieRgOIAEoCRIuCgpleHBpcmVzX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBItCglvcGVuZWRfYXQYECABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC3Jlc29sdmVkX2F0GBEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpjcmVhdGVkX2F0GBIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpjYW5fYW5zd2VyGBMgASgIIjcKFExpc3RRdWVzdGlvbnNSZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRIPCgd0YXNrX2lkGAIgASgJIk4KFUxpc3RRdWVzdGlvbnNSZXNwb25zZRI1CglxdWVzdGlvbnMYASADKAsyIi5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuUXVlc3Rpb24ieQoVQW5zd2VyUXVlc3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgtxdWVzdGlvbl9pZBgCIAEoCRIQCgZjaG9pY2UYAyABKAlIABIPCgVkcmFmdBgEIAEoCUgAEg4KBHRleHQYBSABKAlIAEIICgZhbnN3ZXIiTgoWQW5zd2VyUXVlc3Rpb25SZXNwb25zZRI0CghxdWVzdGlvbhgBIAEoCzIiLmtvaW5vbi5xdWVzdGlvbi52MWFscGhhMS5RdWVzdGlvbiI9ChZEaXNtaXNzUXVlc3Rpb25SZXF1ZXN0Eg4KBm9yZ19pZBgBIAEoCRITCgtxdWVzdGlvbl9pZBgCIAEoCSJPChdEaXNtaXNzUXVlc3Rpb25SZXNwb25zZRI0CghxdWVzdGlvbhgBIAEoCzIiLmtvaW5vbi5xdWVzdGlvbi52MWFscGhhMS5RdWVzdGlvbirWAQoNUXVlc3Rpb25TdGF0ZRIeChpRVUVTVElPTl9TVEFURV9VTlNQRUNJRklFRBAAEhgKFFFVRVNUSU9OX1NUQVRFX0FTS0VEEAESFwoTUVVFU1RJT05fU1RBVEVfT1BFThACEhsKF1FVRVNUSU9OX1NUQVRFX0FOU1dFUkVEEAMSHAoYUVVFU1RJT05fU1RBVEVfRElTTUlTU0VEEAQSGgoWUVVFU1RJT05fU1RBVEVfRVhQSVJFRBAFEhsKF1FVRVNUSU9OX1NUQVRFX0NBTkNFTEVEEAYqhwEKCkFuc3dlcktpbmQSGwoXQU5TV0VSX0tJTkRfVU5TUEVDSUZJRUQQABIWChJBTlNXRVJfS0lORF9DSE9JQ0UQARIVChFBTlNXRVJfS0lORF9EUkFGVBACEhQKEEFOU1dFUl9LSU5EX1RFWFQQAxIXChNBTlNXRVJfS0lORF9ERUZBVUxUEAQy9QIKD1F1ZXN0aW9uU2VydmljZRJ1Cg1MaXN0UXVlc3Rpb25zEi4ua29pbm9uLnF1ZXN0aW9uLnYxYWxwaGExLkxpc3RRdWVzdGlvbnNSZXF1ZXN0Gi8ua29pbm9uLnF1ZXN0aW9uLnYxYWxwaGExLkxpc3RRdWVzdGlvbnNSZXNwb25zZSIDkAIBEnMKDkFuc3dlclF1ZXN0aW9uEi8ua29pbm9uLnF1ZXN0aW9uLnYxYWxwaGExLkFuc3dlclF1ZXN0aW9uUmVxdWVzdBowLmtvaW5vbi5xdWVzdGlvbi52MWFscGhhMS5BbnN3ZXJRdWVzdGlvblJlc3BvbnNlEnYKD0Rpc21pc3NRdWVzdGlvbhIwLmtvaW5vbi5xdWVzdGlvbi52MWFscGhhMS5EaXNtaXNzUXVlc3Rpb25SZXF1ZXN0GjEua29pbm9uLnF1ZXN0aW9uLnYxYWxwaGExLkRpc21pc3NRdWVzdGlvblJlc3BvbnNlQldaVWdpdGh1Yi5jb20vc3RhdGVyYWNsb3VkL2tvaW5vbi9pbnRlcm5hbC9nZW4va29pbm9uL3F1ZXN0aW9uL3YxYWxwaGExO3F1ZXN0aW9udjFhbHBoYTFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("Cidrb2lub24vcXVlc3Rpb24vdjFhbHBoYTEvcXVlc3Rpb24ucHJvdG8SGGtvaW5vbi5xdWVzdGlvbi52MWFscGhhMSLzBQoIUXVlc3Rpb24SCgoCaWQYASABKAkSDgoGb3JnX2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSDgoGcnVuX2lkGAQgASgJEhAKCGFnZW50X2lkGAUgASgJEhAKCHF1ZXN0aW9uGAcgASgJEg8KB2Nob2ljZXMYCCADKAkSDQoFZHJhZnQYCSABKAkSFgoOZGVmYXVsdF9hbnN3ZXIYCiABKAkSNgoFc3RhdGUYCyABKA4yJy5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuUXVlc3Rpb25TdGF0ZRIOCgZhbnN3ZXIYDCABKAkSOQoLYW5zd2VyX2tpbmQYDSABKA4yJC5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuQW5zd2VyS2luZBITCgthbnN3ZXJlZF9ieRgOIAEoCRIuCgpleHBpcmVzX2F0GA8gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBItCglvcGVuZWRfYXQYECABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC3Jlc29sdmVkX2F0GBEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpjcmVhdGVkX2F0GBIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpjYW5fYW5zd2VyGBMgASgIEjYKBnRhcmdldBgUIAEoCzImLmtvaW5vbi50ZW1wbGF0ZS52MWFscGhhMS5Ob3RpZnlUYXJnZXQSFAoMdGFyZ2V0X2xhYmVsGBUgASgJEjcKCnJlY2lwaWVudHMYFiADKAsyIy5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuUmVjaXBpZW50EjEKDXdhaXRpbmdfc2luY2UYFyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhgKEGFuc3dlcmVkX2J5X25hbWUYGCABKAlKBAgGEAdSCGFza2VkX3RvImUKCVJlY2lwaWVudBIPCgd1c2VyX2lkGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIxCg13YWl0aW5nX3NpbmNlGAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCI3ChRMaXN0UXVlc3Rpb25zUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSDwoHdGFza19pZBgCIAEoCSJOChVMaXN0UXVlc3Rpb25zUmVzcG9uc2USNQoJcXVlc3Rpb25zGAEgAygLMiIua29pbm9uLnF1ZXN0aW9uLnYxYWxwaGExLlF1ZXN0aW9uInkKFUFuc3dlclF1ZXN0aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLcXVlc3Rpb25faWQYAiABKAkSEAoGY2hvaWNlGAMgASgJSAASDwoFZHJhZnQYBCABKAlIABIOCgR0ZXh0GAUgASgJSABCCAoGYW5zd2VyIk4KFkFuc3dlclF1ZXN0aW9uUmVzcG9uc2USNAoIcXVlc3Rpb24YASABKAsyIi5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuUXVlc3Rpb24iPQoWRGlzbWlzc1F1ZXN0aW9uUmVxdWVzdBIOCgZvcmdfaWQYASABKAkSEwoLcXVlc3Rpb25faWQYAiABKAkiTwoXRGlzbWlzc1F1ZXN0aW9uUmVzcG9uc2USNAoIcXVlc3Rpb24YASABKAsyIi5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuUXVlc3Rpb24iKwoZTGlzdEFza2FibGVNZW1iZXJzUmVxdWVzdBIOCgZvcmdfaWQYASABKAkicgoNQXNrYWJsZU1lbWJlchIPCgd1c2VyX2lkGAEgASgJEg0KBWVtYWlsGAIgASgJEhQKDGRpc3BsYXlfbmFtZRgDIAEoCRIrCgRyb2xlGAQgASgOMh0ua29pbm9uLmF1dGgudjFhbHBoYTEuT3JnUm9sZSJWChpMaXN0QXNrYWJsZU1lbWJlcnNSZXNwb25zZRI4CgdtZW1iZXJzGAEgAygLMicua29pbm9uLnF1ZXN0aW9uLnYxYWxwaGExLkFza2FibGVNZW1iZXIq1gEKDVF1ZXN0aW9uU3RhdGUSHgoaUVVFU1RJT05fU1RBVEVfVU5TUEVDSUZJRUQQABIYChRRVUVTVElPTl9TVEFURV9BU0tFRBABEhcKE1FVRVNUSU9OX1NUQVRFX09QRU4QAhIbChdRVUVTVElPTl9TVEFURV9BTlNXRVJFRBADEhwKGFFVRVNUSU9OX1NUQVRFX0RJU01JU1NFRBAEEhoKFlFVRVNUSU9OX1NUQVRFX0VYUElSRUQQBRIbChdRVUVTVElPTl9TVEFURV9DQU5DRUxFRBAGKocBCgpBbnN3ZXJLaW5kEhsKF0FOU1dFUl9LSU5EX1VOU1BFQ0lGSUVEEAASFgoSQU5TV0VSX0tJTkRfQ0hPSUNFEAESFQoRQU5TV0VSX0tJTkRfRFJBRlQQAhIUChBBTlNXRVJfS0lORF9URVhUEAMSFwoTQU5TV0VSX0tJTkRfREVGQVVMVBAEMvwDCg9RdWVzdGlvblNlcnZpY2USdQoNTGlzdFF1ZXN0aW9ucxIuLmtvaW5vbi5xdWVzdGlvbi52MWFscGhhMS5MaXN0UXVlc3Rpb25zUmVxdWVzdBovLmtvaW5vbi5xdWVzdGlvbi52MWFscGhhMS5MaXN0UXVlc3Rpb25zUmVzcG9uc2UiA5ACARJzCg5BbnN3ZXJRdWVzdGlvbhIvLmtvaW5vbi5xdWVzdGlvbi52MWFscGhhMS5BbnN3ZXJRdWVzdGlvblJlcXVlc3QaMC5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuQW5zd2VyUXVlc3Rpb25SZXNwb25zZRJ2Cg9EaXNtaXNzUXVlc3Rpb24SMC5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuRGlzbWlzc1F1ZXN0aW9uUmVxdWVzdBoxLmtvaW5vbi5xdWVzdGlvbi52MWFscGhhMS5EaXNtaXNzUXVlc3Rpb25SZXNwb25zZRKEAQoSTGlzdEFza2FibGVNZW1iZXJzEjMua29pbm9uLnF1ZXN0aW9uLnYxYWxwaGExLkxpc3RBc2thYmxlTWVtYmVyc1JlcXVlc3QaNC5rb2lub24ucXVlc3Rpb24udjFhbHBoYTEuTGlzdEFza2FibGVNZW1iZXJzUmVzcG9uc2UiA5ACAUJXWlVnaXRodWIuY29tL3N0YXRlcmFjbG91ZC9rb2lub24vaW50ZXJuYWwvZ2VuL2tvaW5vbi9xdWVzdGlvbi92MWFscGhhMTtxdWVzdGlvbnYxYWxwaGExYgZwcm90bzM", [file_google_protobuf_timestamp, file_koinon_auth_v1alpha1_auth, file_koinon_template_v1alpha1_template]);
 
 /**
  * Question is one question of an agent to a person.
@@ -47,13 +51,6 @@ export type Question = Message<"koinon.question.v1alpha1.Question"> & {
    * @generated from field: string agent_id = 5;
    */
   agentId: string;
-
-  /**
-   * The member the question is addressed to.
-   *
-   * @generated from field: string asked_to = 6;
-   */
-  askedTo: string;
 
   /**
    * @generated from field: string question = 7;
@@ -127,6 +124,42 @@ export type Question = Message<"koinon.question.v1alpha1.Question"> & {
    * @generated from field: bool can_answer = 19;
    */
   canAnswer: boolean;
+
+  /**
+   * Who the question was addressed to, as resolved when it was asked.
+   *
+   * @generated from field: koinon.template.v1alpha1.NotifyTarget target = 20;
+   */
+  target?: NotifyTarget | undefined;
+
+  /**
+   * The target in plain words: a person's name, "the org's admins", "the org's owners", "the org's members".
+   *
+   * @generated from field: string target_label = 21;
+   */
+  targetLabel: string;
+
+  /**
+   * Everyone it waits on. The first answer wins.
+   *
+   * @generated from field: repeated koinon.question.v1alpha1.Recipient recipients = 22;
+   */
+  recipients: Recipient[];
+
+  /**
+   * When it started waiting on the caller (unset when the caller is not a recipient). The inbox ages
+   * items from this; a reminder does not change it.
+   *
+   * @generated from field: google.protobuf.Timestamp waiting_since = 23;
+   */
+  waitingSince?: Timestamp | undefined;
+
+  /**
+   * The display name of answered_by.
+   *
+   * @generated from field: string answered_by_name = 24;
+   */
+  answeredByName: string;
 };
 
 /**
@@ -135,6 +168,35 @@ export type Question = Message<"koinon.question.v1alpha1.Question"> & {
  */
 export const QuestionSchema: GenMessage<Question> = /*@__PURE__*/
   messageDesc(file_koinon_question_v1alpha1_question, 0);
+
+/**
+ * Recipient is one person a question waits on.
+ *
+ * @generated from message koinon.question.v1alpha1.Recipient
+ */
+export type Recipient = Message<"koinon.question.v1alpha1.Recipient"> & {
+  /**
+   * @generated from field: string user_id = 1;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: string display_name = 2;
+   */
+  displayName: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp waiting_since = 3;
+   */
+  waitingSince?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message koinon.question.v1alpha1.Recipient.
+ * Use `create(RecipientSchema)` to create a new message.
+ */
+export const RecipientSchema: GenMessage<Recipient> = /*@__PURE__*/
+  messageDesc(file_koinon_question_v1alpha1_question, 1);
 
 /**
  * ListQuestionsRequest names the org and optionally a task.
@@ -160,7 +222,7 @@ export type ListQuestionsRequest = Message<"koinon.question.v1alpha1.ListQuestio
  * Use `create(ListQuestionsRequestSchema)` to create a new message.
  */
 export const ListQuestionsRequestSchema: GenMessage<ListQuestionsRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_question_v1alpha1_question, 1);
+  messageDesc(file_koinon_question_v1alpha1_question, 2);
 
 /**
  * ListQuestionsResponse lists questions.
@@ -179,7 +241,7 @@ export type ListQuestionsResponse = Message<"koinon.question.v1alpha1.ListQuesti
  * Use `create(ListQuestionsResponseSchema)` to create a new message.
  */
 export const ListQuestionsResponseSchema: GenMessage<ListQuestionsResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_question_v1alpha1_question, 2);
+  messageDesc(file_koinon_question_v1alpha1_question, 3);
 
 /**
  * AnswerQuestionRequest carries exactly one of choice, accept_draft or text.
@@ -230,7 +292,7 @@ export type AnswerQuestionRequest = Message<"koinon.question.v1alpha1.AnswerQues
  * Use `create(AnswerQuestionRequestSchema)` to create a new message.
  */
 export const AnswerQuestionRequestSchema: GenMessage<AnswerQuestionRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_question_v1alpha1_question, 3);
+  messageDesc(file_koinon_question_v1alpha1_question, 4);
 
 /**
  * AnswerQuestionResponse holds the resolved question.
@@ -249,7 +311,7 @@ export type AnswerQuestionResponse = Message<"koinon.question.v1alpha1.AnswerQue
  * Use `create(AnswerQuestionResponseSchema)` to create a new message.
  */
 export const AnswerQuestionResponseSchema: GenMessage<AnswerQuestionResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_question_v1alpha1_question, 4);
+  messageDesc(file_koinon_question_v1alpha1_question, 5);
 
 /**
  * DismissQuestionRequest names the question.
@@ -273,7 +335,7 @@ export type DismissQuestionRequest = Message<"koinon.question.v1alpha1.DismissQu
  * Use `create(DismissQuestionRequestSchema)` to create a new message.
  */
 export const DismissQuestionRequestSchema: GenMessage<DismissQuestionRequest> = /*@__PURE__*/
-  messageDesc(file_koinon_question_v1alpha1_question, 5);
+  messageDesc(file_koinon_question_v1alpha1_question, 6);
 
 /**
  * DismissQuestionResponse holds the resolved question.
@@ -292,7 +354,79 @@ export type DismissQuestionResponse = Message<"koinon.question.v1alpha1.DismissQ
  * Use `create(DismissQuestionResponseSchema)` to create a new message.
  */
 export const DismissQuestionResponseSchema: GenMessage<DismissQuestionResponse> = /*@__PURE__*/
-  messageDesc(file_koinon_question_v1alpha1_question, 6);
+  messageDesc(file_koinon_question_v1alpha1_question, 7);
+
+/**
+ * ListAskableMembersRequest names the org.
+ *
+ * @generated from message koinon.question.v1alpha1.ListAskableMembersRequest
+ */
+export type ListAskableMembersRequest = Message<"koinon.question.v1alpha1.ListAskableMembersRequest"> & {
+  /**
+   * @generated from field: string org_id = 1;
+   */
+  orgId: string;
+};
+
+/**
+ * Describes the message koinon.question.v1alpha1.ListAskableMembersRequest.
+ * Use `create(ListAskableMembersRequestSchema)` to create a new message.
+ */
+export const ListAskableMembersRequestSchema: GenMessage<ListAskableMembersRequest> = /*@__PURE__*/
+  messageDesc(file_koinon_question_v1alpha1_question, 8);
+
+/**
+ * AskableMember is a member who can answer questions.
+ *
+ * @generated from message koinon.question.v1alpha1.AskableMember
+ */
+export type AskableMember = Message<"koinon.question.v1alpha1.AskableMember"> & {
+  /**
+   * @generated from field: string user_id = 1;
+   */
+  userId: string;
+
+  /**
+   * @generated from field: string email = 2;
+   */
+  email: string;
+
+  /**
+   * @generated from field: string display_name = 3;
+   */
+  displayName: string;
+
+  /**
+   * @generated from field: koinon.auth.v1alpha1.OrgRole role = 4;
+   */
+  role: OrgRole;
+};
+
+/**
+ * Describes the message koinon.question.v1alpha1.AskableMember.
+ * Use `create(AskableMemberSchema)` to create a new message.
+ */
+export const AskableMemberSchema: GenMessage<AskableMember> = /*@__PURE__*/
+  messageDesc(file_koinon_question_v1alpha1_question, 9);
+
+/**
+ * ListAskableMembersResponse lists them.
+ *
+ * @generated from message koinon.question.v1alpha1.ListAskableMembersResponse
+ */
+export type ListAskableMembersResponse = Message<"koinon.question.v1alpha1.ListAskableMembersResponse"> & {
+  /**
+   * @generated from field: repeated koinon.question.v1alpha1.AskableMember members = 1;
+   */
+  members: AskableMember[];
+};
+
+/**
+ * Describes the message koinon.question.v1alpha1.ListAskableMembersResponse.
+ * Use `create(ListAskableMembersResponseSchema)` to create a new message.
+ */
+export const ListAskableMembersResponseSchema: GenMessage<ListAskableMembersResponse> = /*@__PURE__*/
+  messageDesc(file_koinon_question_v1alpha1_question, 10);
 
 /**
  * QuestionState is where a question stands.
@@ -400,9 +534,9 @@ export const AnswerKindSchema: GenEnum<AnswerKind> = /*@__PURE__*/
 
 /**
  * QuestionService is what an agent asks a person with the ask_user tool (ADR 0065 decisions 8 and
- * 10a). A question is addressed to one member of the org; only that member sees it in the inbox
- * and only that member can answer or dismiss it. Every request names the org it acts in; IDs from
- * another org are not found.
+ * 10a). A question is addressed to a target, a person or a role, resolved to its recipients when it
+ * is asked. Every recipient sees it in the inbox and can answer or dismiss it. The first answer
+ * wins. Every request names the org it acts in; IDs from another org are not found.
  *
  * @generated from service koinon.question.v1alpha1.QuestionService
  */
@@ -441,6 +575,17 @@ export const QuestionService: GenService<{
     methodKind: "unary";
     input: typeof DismissQuestionRequestSchema;
     output: typeof DismissQuestionResponseSchema;
+  },
+  /**
+   * ListAskableMembers lists the org's members who can answer questions (member role or higher), for
+   * picking a trigger's notify target. Members and above.
+   *
+   * @generated from rpc koinon.question.v1alpha1.QuestionService.ListAskableMembers
+   */
+  listAskableMembers: {
+    methodKind: "unary";
+    input: typeof ListAskableMembersRequestSchema;
+    output: typeof ListAskableMembersResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_koinon_question_v1alpha1_question, 0);

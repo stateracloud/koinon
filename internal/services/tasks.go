@@ -21,6 +21,7 @@ import (
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/wake"
 )
@@ -355,14 +356,34 @@ func (s *Server) setWaitingOn(ctx context.Context, c caller, tasks []*taskv1alph
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := s.q.ListQuestionAddresseesForTasks(ctx, store.ListQuestionAddresseesForTasksParams{OrgID: c.org, TaskIds: ids})
+	rows, err := s.q.ListQuestionWaitersForTasks(ctx, store.ListQuestionWaitersForTasksParams{OrgID: c.org, TaskIds: ids})
 	if err != nil {
 		return err
 	}
+	// Rows come oldest first: the union of the recipients is the task's waiting_on_user_ids, and
+	// the label of the oldest question is waiting_on_name.
+	seen := map[string]map[string]bool{}
 	for _, r := range rows {
-		if t := byID[idString(r.TaskID)]; t != nil && t.WaitingOnUserId == "" {
-			t.WaitingOnUserId, t.WaitingOnName = idString(r.AskedTo), r.DisplayName
+		t := byID[idString(r.TaskID)]
+		if t == nil {
+			continue
 		}
+		if t.WaitingOnName == "" {
+			t.WaitingOnName = questions.Label(
+				questions.Target{Kind: r.TargetKind, Role: r.TargetRole.OrgRole}, r.TargetUserName.String)
+		}
+		if seen[t.GetId()] == nil {
+			seen[t.GetId()] = map[string]bool{}
+		}
+		for _, u := range r.RecipientIds {
+			if id := idString(u); !seen[t.GetId()][id] {
+				seen[t.GetId()][id] = true
+				t.WaitingOnUserIds = append(t.WaitingOnUserIds, id)
+			}
+		}
+	}
+	for _, t := range byID {
+		slices.Sort(t.WaitingOnUserIds)
 	}
 	return nil
 }

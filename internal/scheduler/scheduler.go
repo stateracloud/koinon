@@ -26,6 +26,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/runreply"
 )
 
 // Event kinds written by the scheduler, on both the run and the task.
@@ -284,11 +285,15 @@ func SweepWallClock(ctx context.Context, db DB) (int, error) {
 				return err
 			}
 			for _, r := range runs {
-				capd := time.Duration(r.MaxWallClockSeconds) * time.Second
-				msg := fmt.Sprintf("wall-clock cap exceeded (%s)", capd)
-				if _, err := RecordCancel(ctx, q, r, ReasonWallClockCap, msg, System, map[string]any{
-					"max_wall_clock_seconds": r.MaxWallClockSeconds,
-				}); err != nil {
+				// The same note agentd writes when it stops the run at its time limit: the agent's
+				// text since its last park, or the task's notes. A failure to read it leaves the
+				// summary out; the cancel must not wait on it.
+				note, nerr := runreply.TimeLimitNote(ctx, q, r)
+				if nerr != nil {
+					slog.Warn("reading the agent's last reply for the time-limit note failed", "run", r.ID.String(), "err", nerr)
+				}
+				msg, _ := note["message"].(string)
+				if _, err := RecordCancel(ctx, q, r, ReasonWallClockCap, msg, System, note); err != nil {
 					return err
 				}
 			}

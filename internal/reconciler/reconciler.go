@@ -1309,7 +1309,7 @@ func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, 
 	if note != "" {
 		msg = note
 	}
-	return r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, hash, sb.ID)
+	return r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, sb.Reason, hash, sb.ID)
 }
 
 // recordState stores a state without an observed sandbox; the recorded home generation is kept.
@@ -1318,13 +1318,13 @@ func (r *Reconciler) recordState(ctx context.Context, w *work, state store.Sandb
 	if len(hash) > 0 {
 		h = hash[0]
 	}
-	return r.recordRow(ctx, w, state, phase, msg, h, "")
+	return r.recordRow(ctx, w, state, phase, msg, "", h, "")
 }
 
-func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, hash, generation string) error {
+func (r *Reconciler) recordRow(ctx context.Context, w *work, state store.SandboxState, phase, msg, reason, hash, generation string) error {
 	sb, err := r.q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
 		OrgID: w.org.ID, AgentID: w.agent.ID,
-		State: state, Phase: phase, Message: msg, SpecHash: hash, HomeGeneration: generation,
+		State: state, Phase: phase, Message: msg, Reason: reason, SpecHash: hash, HomeGeneration: generation,
 	})
 	if err != nil {
 		return fmt.Errorf("record sandbox state: %w", err)
@@ -1338,7 +1338,8 @@ func (r *Reconciler) recordMessage(ctx context.Context, w *work, err error) {
 	if w.sb.SandboxName == "" {
 		return
 	}
-	_ = r.recordState(ctx, w, w.sb.State, w.sb.Phase, err.Error())
+	// The message is for operators; the reason of the latest condition stays as observed.
+	_ = r.recordRow(ctx, w, w.sb.State, w.sb.Phase, err.Error(), w.sb.Reason, w.sb.SpecHash, "")
 }
 
 // rememberLimit records the budget pushed for agent.

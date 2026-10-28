@@ -29,6 +29,8 @@ const (
 	classBudget          = store.RunFailureClassBudget
 	classPolicy          = store.RunFailureClassPolicy
 	classFatal           = store.RunFailureClassFatal
+	// classSandboxUnavailable: the sandbox never became ready within the org's cap; not retried.
+	classSandboxUnavailable = store.RunFailureClassSandboxUnavailable
 )
 
 // classified is what a harness's error says about itself.

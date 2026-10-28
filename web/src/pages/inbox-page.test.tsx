@@ -198,14 +198,24 @@ describe('Board', () => {
 })
 
 describe('Inbox questions (ask_user)', () => {
-  type QOpts = { choices?: string[]; draft?: string; answers?: AnswerQuestionRequest[]; dismissals?: DismissQuestionRequest[]; answerError?: ConnectError }
+  type QOpts = { choices?: string[]; draft?: string; admins?: boolean; unhealthy?: boolean; answers?: AnswerQuestionRequest[]; dismissals?: DismissQuestionRequest[]; answerError?: ConnectError }
 
   function qTransport(opts: QOpts = {}) {
-    let open = [question('q-1', 't-1', { question: 'Which region should I deploy to?', choices: opts.choices, draft: opts.draft })]
+    let open = [
+      question('q-1', 't-1', {
+        question: 'Which region should I deploy to?',
+        choices: opts.choices,
+        draft: opts.draft,
+        ...(opts.admins ? { targetLabel: "the org's admins", recipients: 2, waitingSinceMs: Date.now() - 3 * 3_600_000 } : {}),
+      }),
+    ]
     const tasks = [task('t-1', 'Deploy the app', TaskState.INPUT_REQUIRED), task('t-2', 'Write notes', TaskState.WORKING)]
     return createRouterTransport(({ service }) => {
       service(AuthService, { whoAmI: () => whoAmI() })
-      service(AgentService, { listAgents: () => ({ agents: [agent('a-1', 'Repo helper')] }) })
+      service(AgentService, {
+        listAgents: () => ({ agents: [opts.unhealthy ? agent('a-1', 'Repo helper', AgentStatus.ACTIVE, { atMs: Date.now() - 60_000, reason: 'its sandbox never became ready' }) : agent('a-1', 'Repo helper')] }),
+        getAgent: () => ({ agent: agent('a-1', 'Repo helper') }),
+      })
       service(TaskService, { listTasks: () => ({ tasks }), getTask: (req) => ({ task: tasks.find((t) => t.id === req.taskId), events: [], runs: [] }) })
       service(ApprovalService, { listApprovals: () => ({ approvals: [] }) })
       service(QuestionService, {
@@ -276,8 +286,27 @@ describe('Inbox questions (ask_user)', () => {
   })
 
   it('says so when the question was already resolved elsewhere', async () => {
-    renderApp(qTransport({ answerError: new ConnectError('gone', Code.Aborted) }), '/')
+    renderApp(qTransport({ answerError: new ConnectError('', Code.Aborted) }), '/')
     await userEvent.click(await screen.findByRole('button', { name: 'eu-west-1' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('already answered, dismissed or expired')
+  })
+
+  it('shows who answered first when the server says so', async () => {
+    renderApp(qTransport({ answerError: new ConnectError('Ana already answered this question', Code.Aborted) }), '/')
+    await userEvent.click(await screen.findByRole('button', { name: 'eu-west-1' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Ana already answered this question')
+  })
+
+  it('shows who the question waits on and for how long', async () => {
+    renderApp(qTransport({ admins: true }), '/')
+    expect(await screen.findByText("Asked to the org's admins (2 people; the first answer counts) · waiting 3 hours")).toBeInTheDocument()
+  })
+
+  it('gives an admin an item for an unhealthy agent', async () => {
+    renderApp(qTransport({ unhealthy: true }), '/')
+    const link = await screen.findByRole('link', { name: 'Open the agent' })
+    expect(link).toHaveAttribute('href', '/agents/a-1')
+    expect(screen.getByText(/is unhealthy and takes no runs/)).toBeInTheDocument()
+    expect(screen.getByText('its sandbox never became ready')).toBeInTheDocument()
   })
 })

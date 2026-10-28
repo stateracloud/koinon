@@ -333,8 +333,14 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 // recordSandbox writes the sandbox state as koinon-reconciler would, with the sandbox's
 // OpenShell ID as its home generation.
 func (e *env) recordSandbox(ctx context.Context, state store.SandboxState, message string) {
+	e.recordSandboxWith(ctx, state, "", message)
+}
+
+// recordSandboxWith is recordSandbox with the reason of the condition that is not true, as the
+// reconciler records it (ErrImagePull, Unschedulable).
+func (e *env) recordSandboxWith(ctx context.Context, state store.SandboxState, reason, message string) {
 	_, err := q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
-		OrgID: e.org, AgentID: e.agent.ID, State: state, Phase: "", Message: message,
+		OrgID: e.org, AgentID: e.agent.ID, State: state, Phase: "", Message: message, Reason: reason,
 		HomeGeneration: e.gw.Sandbox(e.workspace, e.sandbox).GetMetadata().GetId(),
 	})
 	Expect(err).NotTo(HaveOccurred())

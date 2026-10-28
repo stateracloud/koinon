@@ -8,6 +8,7 @@ import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { QuestionService } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { buildInbox } from '@/lib/inbox'
 import { useOrg } from '@/lib/org-context'
 
@@ -23,7 +24,7 @@ export function useInbox() {
   const { org } = useOrg()
   const orgId = org.orgId
   const tasks = useQuery(TaskService.method.listTasks, { orgId }, { refetchInterval: inboxPollMs })
-  const agents = useQuery(AgentService.method.listAgents, { orgId })
+  const agents = useQuery(AgentService.method.listAgents, { orgId }, { refetchInterval: inboxPollMs })
   // Every role may list approvals (the proto says viewers and above); canDecide says who may decide.
   const approvals = useQuery(ApprovalService.method.listApprovals, { orgId }, { refetchInterval: inboxPollMs })
   // The viewer's open ask_user questions. A server without QuestionService (an older API) has none.
@@ -34,8 +35,17 @@ export function useInbox() {
 
   const agentNames = useMemo(() => new Map((agents.data?.agents ?? []).map((a) => [a.id, a.displayName])), [agents.data])
   const items = useMemo(
-    () => buildInbox({ tasks: tasks.data?.tasks ?? [], approvals: approvals.data?.approvals ?? [], questions: questions.data?.questions ?? [], agentNames, userId }),
-    [tasks.data, approvals.data, questions.data, agentNames, userId],
+    () =>
+      buildInbox({
+        tasks: tasks.data?.tasks ?? [],
+        approvals: approvals.data?.approvals ?? [],
+        questions: questions.data?.questions ?? [],
+        agents: agents.data?.agents ?? [],
+        isAdmin: org.role >= OrgRole.ADMIN,
+        agentNames,
+        userId,
+      }),
+    [tasks.data, approvals.data, questions.data, agents.data, org.role, agentNames, userId],
   )
   return {
     items,
