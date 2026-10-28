@@ -146,7 +146,7 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, err)
 		return
 	}
-	rep, err := s.plan(r.URL.Path, req.Model, body, req.conversation())
+	rep, err := s.plan(r.URL.Path, r.Header, req.Model, body, req.conversation())
 	if err != nil {
 		writeOpenAIError(w, err)
 		return
