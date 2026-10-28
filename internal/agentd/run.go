@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/safego"
 )
@@ -401,8 +402,12 @@ func (r *runner) execute(ctx context.Context) error {
 	r.model, r.modelSource = model, source
 	r.log.Info("the run's model", "model", model, "source", string(source))
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
-	mode, ptype := r.cacheMode(fctx, model)
-	marker, unknown := cacheMarker(mode)
+	facts, err := r.modelFacts(fctx, model)
+	if err != nil {
+		return r.dbErr(ctx, "look up the model", err)
+	}
+	ptype, format := facts.ProviderType, facts.Format
+	marker, unknown := cacheMarker(facts.Cache)
 	if unknown {
 		r.log.Warn("the model has a cache price but its provider format cannot be cached by Koinon; it runs without prompt caching", "model", model)
 	}
@@ -412,7 +417,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if ptype == "openrouter" {
 		sessionID = r.run.ID.String()
 	}
-	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", CacheMarker: marker, SessionID: sessionID})
+	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker, SessionID: sessionID})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
@@ -581,7 +586,7 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	// The harness may report a model of its own choosing; agentd selects the agent's model
 	// and never relies on what the session reports.
-	if value := modelOption(agent.Flavor, model); value != "" {
+	if value := modelOption(agent.Flavor, format, model); value != "" {
 		if err := conn.SetModel(fctx, session, value); err != nil {
 			return harnessErr("select the model "+value, err)
 		}
@@ -1280,16 +1285,30 @@ func updateKind(update []byte) string {
 	return b.String()
 }
 
-// cacheMode is the prompt-cache mode of the model the run uses (ADR 0068). A model without a
-// price runs as before: the gateway refuses it anyway.
-func (r *runner) cacheMode(ctx context.Context, name string) (mode prices.CacheMode, providerType string) {
+// modelFacts is what the run needs to know about the model it uses.
+type modelFacts struct {
+	ProviderType string
+	// Format is the model's wire format; the harness uses the provider entry for it (ADR 0069).
+	Format modelformat.Format
+	// Cache is the model's prompt-cache mode (ADR 0068, 0069).
+	Cache prices.CacheMode
+}
+
+// modelFacts looks the model up by its plain name. A model that is not there (or has no price) runs
+// as before, with chat completions and no cache: the gateway refuses it anyway. Only a database
+// error is returned.
+func (r *runner) modelFacts(ctx context.Context, name string) (modelFacts, error) {
 	m, err := prices.Lookup(ctx, r.q, r.run.OrgID, name)
-	if err != nil {
-		return prices.CacheNone, ""
+	if errors.Is(err, prices.ErrUnpriced) {
+		return modelFacts{Format: modelformat.OpenAI, Cache: prices.CacheNone}, nil
+	} else if err != nil {
+		return modelFacts{}, err
 	}
+	f := modelFacts{ProviderType: m.ProviderType, Format: modelformat.Format(m.Format), Cache: prices.CacheNone}
 	res, err := r.p.cfg.Prices.Resolve(ctx, r.q, r.run.OrgID, m, time.Now())
 	if err != nil {
-		return prices.CacheNone, ""
+		return f, nil
 	}
-	return prices.CacheModeFor(m.ProviderType, m.Name, res.Price), m.ProviderType
+	f.Cache = prices.CacheModeFor(m.ProviderType, m.Name, f.Format, res.Price)
+	return f, nil
 }

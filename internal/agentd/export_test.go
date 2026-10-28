@@ -15,6 +15,9 @@ type Endpoints = endpoints
 
 var LaunchCommand = launchCommand
 
+// ModelOption exposes the model value agentd selects for the session.
+var ModelOption = modelOption
+
 // ClassifyError and StopClass expose the failure classification to the external test package.
 func ClassifyError(err error) (class string, retryAfter time.Duration) {
 	c := classifyPromptError(err)

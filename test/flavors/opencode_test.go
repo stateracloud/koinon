@@ -325,6 +325,15 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"body":{"session_id":"01234567-run"}}}}` + "\n"))
 	})
 
+	It("puts the overlay on the entry of --model-format, and makes it the default model", func(ctx SpecContext) {
+		Expect(entryEnv(ctx, "--model-format", "anthropic", "--session-id", "01234567-run")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{"body":{"session_id":"01234567-run"}}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "anthropic")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1"}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "openai", "--cache-alibaba")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
+	})
+
 	It("keeps the model key from OpenCode's built-in providers", func(ctx SpecContext) {
 		env := entryEnv(ctx)
 		Expect(env).NotTo(ContainSubstring("OPENAI_API_KEY="))
