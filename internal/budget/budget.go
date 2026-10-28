@@ -118,34 +118,63 @@ func (s Status) Reached() []Level {
 	return out
 }
 
-// CurrentWindow is the start of the window level counts at now: the UTC day for an agent's daily
-// limit, the calendar month (UTC) for the org's cap and the platform ceiling.
-func CurrentWindow(level string, now time.Time) time.Time {
-	if level == AgentDaily {
-		return DayStart(now)
+// Current lists the levels at or over their limit in the window that is current at now. A
+// limit cancels runs only in its current window: a late entry from last month reaching last
+// month's cap must not stop this month's runs.
+func (s Status) Current(now time.Time) []Level {
+	var out []Level
+	for _, l := range s.Reached() {
+		current := MonthStart(now)
+		if l.Name == AgentDaily {
+			current = DayStart(now)
+		}
+		if l.WindowStart.Equal(current) {
+			out = append(out, l)
+		}
 	}
-	return MonthStart(now)
+	return out
 }
 
 // Pick is the one limit a stop names when several are reached: of the levels reached in their
-// current window at now (a late entry of last month reaching last month's cap stops nothing), the
-// broadest scope first, platform ceiling, then org monthly cap, then agent daily limit, because
-// the broadest one decides which runs stop (an org-wide limit stops every run of the org) and
-// raising only a narrower limit would not let the agent run again. ok is false when none is
-// reached. Every stop path (the ledger, the reconciler, agentd) reports the limit Pick returns.
+// current window at now ([Status.Current]), the broadest scope first, platform ceiling, then org
+// monthly cap, then agent daily limit, because the broadest one decides which runs stop (an
+// org-wide limit stops every run of the org) and raising only a narrower limit would not let the
+// agent run again. ok is false when none is reached. Every stop path reports the limit Pick
+// returns: the ledger and the reconciler here; agentd adopts it (rc.6, PR 2).
 func (s Status) Pick(now time.Time) (Level, bool) {
 	rank := map[string]int{PlatformCeiling: 0, OrgMonthly: 1, AgentDaily: 2}
 	var pick Level
 	found := false
-	for _, l := range s.Reached() {
-		if !l.WindowStart.Equal(CurrentWindow(l.Name, now)) {
-			continue
-		}
+	for _, l := range s.Current(now) {
 		if !found || rank[l.Name] < rank[pick.Name] {
 			pick, found = l, true
 		}
 	}
 	return pick, found
+}
+
+// Title names the level for a person.
+func (l Level) Title() string {
+	switch l.Name {
+	case OrgMonthly:
+		return "org monthly cap"
+	case PlatformCeiling:
+		return "platform ceiling"
+	}
+	return "agent daily limit"
+}
+
+// StopMessage is why a run is stopped by the level, as the run's outcome reason.
+func (l Level) StopMessage() string {
+	return fmt.Sprintf("%s reached ($%s of $%s since %s)", l.Title(), l.Spent, l.Limit, l.WindowStart.Format("2006-01-02 15:04 MST"))
+}
+
+// StopDetail is the level's part of the payload of a run canceled by a limit.
+func (l Level) StopDetail() map[string]any {
+	return map[string]any{
+		"limit": l.Name, "spend_limit_usd": l.Limit.String(), "spent_usd": l.Spent.String(),
+		"window_start": l.WindowStart.Format("2006-01-02T15:04:05Z"),
+	}
 }
 
 // Org describes a limit set on an org.

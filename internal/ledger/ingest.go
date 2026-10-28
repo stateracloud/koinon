@@ -183,8 +183,8 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 		return nil
 	}
 	crossed := false
-	for _, r := range st.Reached() {
-		if r.WindowStart.Equal(budget.CurrentWindow(r.Name, in.now())) && r.Spent-delta < r.Limit {
+	for _, r := range st.Current(in.now()) {
+		if r.Spent-delta < r.Limit {
 			crossed = true
 		}
 	}
@@ -199,16 +199,6 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 	}
 	_, err = Stop(ctx, q, org, agent, l)
 	return err
-}
-
-func limitTitle(level string) string {
-	switch level {
-	case budget.OrgMonthly:
-		return "org monthly cap"
-	case budget.PlatformCeiling:
-		return "platform ceiling"
-	}
-	return "agent daily limit"
 }
 
 // templateLimit is the spendUSD of the agent's active version, for an agent without a run.
