@@ -25,7 +25,7 @@ the remaining workarounds are in ADR 0052 (amendment 2026-10-28). The bundled ru
 | Project configuration | Off (`OPENCODE_DISABLE_PROJECT_CONFIG=1`): a repository's `opencode.json(c)`, `.opencode/`, `.claude/`, `.agents/` and its top-level `AGENTS.md` have no effect |
 | State | `/sandbox/.local/share/opencode` (sessions in `opencode.db`), `/sandbox/.local/state/opencode` |
 | Home exclude paths | `/sandbox/.cache/opencode`, `/sandbox/.local/share/opencode/log` |
-| Permission requests | It asks over ACP for paths outside the session directory (permission `external_directory`, set explicitly in the config, see [Permissions](#permissions); OpenCode's own output, temporary and config directories are exempt), `.env` reads and repeated identical tool calls (`doom_loop`); everything else is allowed inside the sandbox. A read outside the workspace arrives with tool kind `read` and the path in `locations`; koinon-agentd refuses requests for paths outside the workspace in every preset |
+| Permission requests | It asks over ACP for paths outside the session directory (permission `external_directory`, set explicitly in the config, see [Permissions](#permissions); OpenCode's own output, temporary and config directories are exempt), `.env` reads; everything else is allowed inside the sandbox. A read outside the workspace arrives with tool kind `read` and the path in `locations`; koinon-agentd refuses requests for paths outside the workspace in every preset |
 
 ## How per-agent values reach the config
 
@@ -103,11 +103,16 @@ global config directory (`packages/core/src/agent.ts:60-63`). **2.2.0 removed al
 showed a `read` of `/etc/passwd` completing with no permission request. OpenCode's documentation
 (`packages/web/src/content/docs/permissions.mdx:177`) still says it defaults to `ask`. The config
 therefore restores the rule (`permissions`, last matching rule wins,
-`packages/core/src/permission.ts:78`) and the four exemptions. It repeats them under
-`agents.explore.permissions` because the built-in explore subagent allows every external directory
-(`packages/core/src/plugin/agent.ts:92`); the config plugin runs after it (`plugin/internal.ts:224`
-before `:257`), so its rules come last. The contract suite's permission specs fail without this
+`packages/core/src/permission.ts:78`) and the four exemptions. The explore subagent allows every external directory
+(`packages/core/src/plugin/agent.ts:92`), but the config plugin runs after it
+(`plugin/internal.ts:224` before `:257`) and appends the top-level `permissions` to every existing
+agent, explore included (`packages/core/src/config/plugin/agent.ts:83-91`), so they come last
+there too. The config repeats them under `agents.explore.permissions` as defence in depth only. The contract suite's permission specs fail without this
 block.
+
+OpenCode's permission gate is not a security boundary: rules saved by an "always" answer live in
+the agent-writable `opencode.db` and can turn `ask` into `allow`, and the shell is unrestricted.
+OpenShell and Kata are the boundary. koinon-agentd answers each request once and saves nothing.
 
 ## MCP readiness
 
@@ -147,7 +152,9 @@ A new session reports a model OpenCode picked from its own catalog (for example
 
 Plugin negations (`-id`, `-prefix.*`) are parsed in `packages/core/src/config/plugin/source.ts`
 and matched in `packages/core/src/plugin/supervisor.ts`. The entry script also unsets every
-variable that would move OpenCode's config, database or server credentials (`OPENCODE_CONFIG*`,
+`OPENCODE_*` variable and `TMPDIR` before its own exports (OpenCode's temporary directory follows
+`os.tmpdir()`, and the config exempts `/tmp/opencode/*`), so nothing can move OpenCode's config,
+database, binaries or server credentials (for example `OPENCODE_CONFIG*`,
 `OPENCODE_DB`, `OPENCODE_PASSWORD`, `OPENCODE_SERVER_PASSWORD`, …; `packages/cli/src/env.ts`,
 `packages/cli/src/server-process.ts`, `packages/cli/src/database-path.ts`).
 

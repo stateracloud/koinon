@@ -178,8 +178,11 @@ What changed for #54:
   "Global config directory").
 - **Environment variables and `plugins`.** Re-checked against the 2.2.0 source: the unset list
   stays; the new provider plugins (`databricks`, `neon`, `openai-context-caps`) fall under
-  `-opencode.provider.*`; the set of source files that make network calls is unchanged from
-  2.0.24. Added: `OPENCODE_DISABLE_CLAUDE_CODE=1`, `OPENCODE_DISABLE_FREE_MODELS=1`, and unsetting
+  `-opencode.provider.*`; 2.2.0 adds three network-capable source files, none of which can run in
+  Koinon's configuration: `core/src/usage-limits.ts` (OpenCode Console budgets; needs a Console
+  credential, which the sandbox never has), `core/src/config/plugin/instruction.ts` (fetches URL
+  entries of `instructions`; ours is a path) and `core/src/plugin/websearch/tinyfish.ts` (turned
+  off by `-opencode.websearch.*`). Added: `OPENCODE_DISABLE_CLAUDE_CODE=1`, `OPENCODE_DISABLE_FREE_MODELS=1`, and unsetting
   `OPENCODE_API_KEY` and `OPENCODE_REPO_CLONE_GITHUB_BASE_URL`.
 - **Permissions (sandbox posture).** 2.2.0 dropped OpenCode's default `external_directory: ask`
   and the exemptions for its own directories, and the explore subagent allows every external

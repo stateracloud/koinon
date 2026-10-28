@@ -18,8 +18,8 @@
   // outside the session directory; its docs still say it does), so a read or edit outside it ran
   // without a question. Ask again, except for the places OpenCode itself writes to, which 2.0.24
   // exempted: truncated tool and shell output in the data directory, its temporary directory and
-  // this config directory. Later rules win. The explore subagent allows every external
-  // directory in its own rules, so it gets the same rules after them.
+  // this config directory. Later rules win. The top-level rules are appended to every agent,
+  // explore included, after its own; the explore block below repeats them as defence in depth.
   "permissions": [
     { "action": "external_directory", "resource": "*", "effect": "ask" },
     { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/shell/*/*", "effect": "allow" },
