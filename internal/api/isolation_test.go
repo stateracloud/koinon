@@ -453,6 +453,17 @@ var isolationCases = map[string]isolationCase{
 			return c.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: f.model, Guard: new(false)})
 		},
 	},
+	providerv1alpha1connect.ProviderServiceModelFormatsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.ModelFormats(ctx, &providerv1alpha1.ModelFormatsRequest{OrgId: org, ProviderId: f.provider, Name: "intruder"})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceProviderTypeInfoProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "anthropic"})
+		},
+	},
 	providerv1alpha1connect.ProviderServiceDeleteModelProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.providers.DeleteModel(ctx, &providerv1alpha1.DeleteModelRequest{OrgId: org, ModelId: f.model})

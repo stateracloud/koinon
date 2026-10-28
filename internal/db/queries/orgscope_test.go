@@ -55,6 +55,7 @@ var crossOrgQueries = map[string]string{
 	"api_tokens.sql:GetAPITokenByPrefix":                "admin API: authenticates a bearer token, which names its org only after it is looked up",
 	"connections.sql:ListConnectionsToMigrate":          "startup: moves every org's connection secrets from Kubernetes Secrets into the store",
 	"budget.sql:ListOrgBudgetSummaries":                 "platform admins: lists every org with its cap, ceiling and spend",
+	"catalog.sql:ListModelsToRederiveFormat":            "startup: finds the models whose format follows the table, in every org, to re-derive them (ADR 0069)",
 	"prices.sql:ListPendingMigratedPrices":              "startup: finds the prices migration 00014 made from model rates, in every org, to complete them",
 	"questions.sql:ListOrgsWithQuestionsToNotify":       "the question notifier: finds every org that has an opened question not yet announced",
 	"questions.sql:ListOrgsWithDueQuestions":            "the question timers: finds every org that has an open question with a reminder or an expiry due",

@@ -247,12 +247,17 @@ func toProvider(p catalog.Provider) Provider {
 	if p.DisabledReason != "" {
 		out.DisabledReason = &p.DisabledReason
 	}
+	if p.AnthropicWorkspaceID != "" {
+		out.AnthropicWorkspaceId = &p.AnthropicWorkspaceID
+	}
+	out.Formats = append([]ModelFormat{}, p.Formats...)
 	return out
 }
 
 func toModel(m catalog.Model) Model {
 	out := Model{
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt, Guard: m.Guard, Name: m.Name, Source: Source(m.Source),
+		Format: m.Format, FormatOverridden: m.FormatOverridden,
 		Id: openapi_types.UUID(pgUUID(m.ID).Bytes), ProviderId: openapi_types.UUID(pgUUID(m.ProviderID).Bytes),
 	}
 	if m.ManagedBySecret != "" {
@@ -303,6 +308,9 @@ func (s *Server) CreateProvider(ctx context.Context, req CreateProviderRequestOb
 	if req.Body.ApiKey != nil {
 		in.APIKey = *req.Body.ApiKey
 	}
+	if req.Body.AnthropicWorkspaceId != nil {
+		in.AnthropicWorkspaceID = *req.Body.AnthropicWorkspaceId
+	}
 	got, err := s.catalog.CreateProvider(ctx, p.Org, actor, pgtype.UUID{}, in)
 	if err != nil {
 		st, e := s.problem(err)
@@ -326,7 +334,7 @@ func (s *Server) GetProvider(ctx context.Context, req GetProviderRequestObject) 
 func (s *Server) UpdateProvider(ctx context.Context, req UpdateProviderRequestObject) (UpdateProviderResponseObject, error) {
 	p, actor := s.actor(ctx)
 	got, err := s.catalog.UpdateProvider(ctx, p.Org, actor, uid(req.ProviderId),
-		catalog.ProviderPatch{Type: req.Body.Type, URL: req.Body.Url, APIKey: req.Body.ApiKey})
+		catalog.ProviderPatch{Type: req.Body.Type, URL: req.Body.Url, APIKey: req.Body.ApiKey, AnthropicWorkspaceID: req.Body.AnthropicWorkspaceId})
 	if err != nil {
 		st, e := s.problem(err)
 		return UpdateProviderdefaultJSONResponse{Body: e, StatusCode: st}, nil
@@ -366,6 +374,9 @@ func (s *Server) CreateModel(ctx context.Context, req CreateModelRequestObject) 
 	if req.Body.Guard != nil {
 		in.Guard = *req.Body.Guard
 	}
+	if req.Body.Format != nil {
+		in.Format = *req.Body.Format
+	}
 	got, err := s.catalog.CreateModel(ctx, p.Org, actor, pgtype.UUID{}, in)
 	if err != nil {
 		st, e := s.problem(err)
@@ -396,7 +407,7 @@ func (s *Server) GetModel(ctx context.Context, req GetModelRequestObject) (GetMo
 // UpdateModel implements StrictServerInterface.
 func (s *Server) UpdateModel(ctx context.Context, req UpdateModelRequestObject) (UpdateModelResponseObject, error) {
 	p, actor := s.actor(ctx)
-	patch := catalog.ModelPatch{Guard: req.Body.Guard, Rates: fromRates(req.Body.Rates)}
+	patch := catalog.ModelPatch{Guard: req.Body.Guard, Format: req.Body.Format, Rates: fromRates(req.Body.Rates)}
 	patch.ClearRates = req.Body.ClearRates != nil && *req.Body.ClearRates
 	got, err := s.catalog.UpdateModel(ctx, p.Org, actor, uid(req.ModelId), patch)
 	if err != nil {

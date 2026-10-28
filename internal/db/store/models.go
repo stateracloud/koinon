@@ -1530,13 +1530,15 @@ type Model struct {
 	// Deprecated and unread since migration 00014. Dropped later.
 	OutputRate pgtype.Text
 	// Deprecated and unread since migration 00014. Dropped later.
-	CacheReadRate   pgtype.Text
-	Source          ConfigSource
-	ManagedBySecret pgtype.Text
-	DisabledReason  pgtype.Text
-	CreatedBy       pgtype.UUID
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
+	CacheReadRate    pgtype.Text
+	Source           ConfigSource
+	ManagedBySecret  pgtype.Text
+	DisabledReason   pgtype.Text
+	CreatedBy        pgtype.UUID
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	Format           string
+	FormatOverridden bool
 }
 
 type Notification struct {
@@ -1638,20 +1640,21 @@ type PriceOverride struct {
 }
 
 type Provider struct {
-	OrgID           pgtype.UUID
-	ID              pgtype.UUID
-	Name            string
-	Type            string
-	Url             string
-	ApiKey          []byte
-	Source          ConfigSource
-	ManagedBySecret pgtype.Text
-	DeclaredVersion pgtype.Text
-	RemovedAt       pgtype.Timestamptz
-	DisabledReason  pgtype.Text
-	CreatedBy       pgtype.UUID
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
+	OrgID                pgtype.UUID
+	ID                   pgtype.UUID
+	Name                 string
+	Type                 string
+	Url                  string
+	ApiKey               []byte
+	Source               ConfigSource
+	ManagedBySecret      pgtype.Text
+	DeclaredVersion      pgtype.Text
+	RemovedAt            pgtype.Timestamptz
+	DisabledReason       pgtype.Text
+	CreatedBy            pgtype.UUID
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	AnthropicWorkspaceID pgtype.Text
 }
 
 type Question struct {
