@@ -33,7 +33,7 @@ const gpt = create(PriceEntrySchema, {
 })
 const bad = create(PriceEntrySchema, { id: 'bad-link', provider: '*', match: { glob: 'x' }, validFrom: '2026-10-01', rates: { input: '1', output: '1' }, sourceUrl: 'javascript:alert(1)' })
 
-function setup(role = OrgRole.OWNER) {
+function setup(role = OrgRole.OWNER, warnings: string[] = []) {
   const calls = { sets: [] as SetPriceRequest[], retires: [] as RetirePriceRequest[], listed: 0, flaggedSince: [] as bigint[] }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role }) })
@@ -59,7 +59,7 @@ function setup(role = OrgRole.OWNER) {
       },
       setPrice: (req) => {
         calls.sets.push(req)
-        return { price: mine }
+        return { price: mine, warnings }
       },
       retirePrice: (req) => {
         calls.retires.push(req)
@@ -159,5 +159,21 @@ describe('Prices page', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Only org admins and owners can manage prices.')
     expect(calls.listed).toBe(0)
     expect(screen.queryByRole('link', { name: 'Prices' })).not.toBeInTheDocument()
+  })
+
+  it('shows the warnings of a saved price', async () => {
+    const warning = 'Price gemini: the model has a cache_read price but Koinon has no way to turn on prompt caching'
+    setup(OrgRole.OWNER, [warning])
+    await userEvent.click(await screen.findByRole('button', { name: 'Add price' }))
+    const form = screen.getByRole('form', { name: 'Add a price' })
+    await userEvent.type(within(form).getByLabelText('Name'), 'gemini')
+    await userEvent.clear(within(form).getByLabelText('Provider type'))
+    await userEvent.type(within(form).getByLabelText('Provider type'), 'openrouter')
+    await userEvent.type(within(form).getByLabelText('Model pattern'), 'google/*')
+    await userEvent.type(within(form).getByLabelText('Input'), '2')
+    await userEvent.type(within(form).getByLabelText('Output'), '8')
+    await userEvent.type(within(form).getByLabelText('Largest output (tokens)'), '32000')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add price' }))
+    expect(await within(await screen.findByRole('status', { name: 'Warnings' })).findByText(warning)).toBeInTheDocument()
   })
 })

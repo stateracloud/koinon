@@ -29,6 +29,21 @@ var _ = Describe("ProviderService", func() {
 		return c.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{OrgId: org, Name: name, Type: typ, Url: url, ApiKey: key})
 	}
 
+	It("warns when a new model has a cache_read price but no prompt-cache mode (ADR 0068)", func(ctx SpecContext) {
+		prov, err := create(ctx, owner, "warned", "openrouter", "https://openrouter.ai/api/v1", "")
+		Expect(err).NotTo(HaveOccurred())
+		pid := prov.GetProvider().GetId()
+		_, err = e.pool.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by)
+			VALUES ($1, 'gem', '{"provider":"openrouter","match":{"glob":"google/*"},"validFrom":"2020-01-01","prices":{"input":"1","output":"2","cacheRead":"0.1"},"tokenizer":"bytes","ratio":"3.0","maxOutput":10}', now() - interval '1 hour', 'test')`, org)
+		Expect(err).NotTo(HaveOccurred())
+		mod, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "google/gemini-x"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(mod.GetWarnings()).To(ConsistOf(And(ContainSubstring("google/gemini-x"), ContainSubstring("without caching"))))
+		other, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "anthropic/claude-haiku-5.5"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(other.GetWarnings()).To(BeEmpty())
+	})
+
 	It("is for admins and owners only, on all eight RPCs", func(ctx SpecContext) {
 		prov, err := create(ctx, owner, "existing", "openrouter", "https://openrouter.ai/api/v1", "")
 		Expect(err).NotTo(HaveOccurred())

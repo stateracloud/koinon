@@ -369,6 +369,9 @@ type Model struct {
 	// Source `secret` entries are declared by a Kubernetes Secret and read-only here.
 	Source    Source    `json:"source"`
 	UpdatedAt time.Time `json:"updatedAt"`
+
+	// Warnings Set when the model is created. For example, its price has a cache_read price but its provider format has no prompt-cache mode, so it runs uncached (ADR 0068).
+	Warnings *[]string `json:"warnings,omitempty"`
 }
 
 // ModelCreate defines model for ModelCreate.
@@ -544,6 +547,9 @@ type PriceVersion struct {
 	Tiers     *[]PriceTier `json:"tiers,omitempty"`
 	Tokenizer *string      `json:"tokenizer,omitempty"`
 	ValidFrom time.Time    `json:"validFrom"`
+
+	// Warnings Set when the price is saved. For example, a cache_read price whose provider format has no prompt-cache mode runs uncached (ADR 0068).
+	Warnings *[]string `json:"warnings,omitempty"`
 }
 
 // Provider defines model for Provider.

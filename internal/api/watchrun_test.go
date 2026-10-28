@@ -138,18 +138,46 @@ var _ = Describe("WatchRun", func() {
 	})
 
 	It("sends a heartbeat on a quiet run, and none while events flow", func(ctx SpecContext) {
-		quiet := newEnvOn(ctx, e, envOptions{watchPoll: time.Hour, watchHeartbeat: 100 * time.Millisecond})
+		quiet := newEnvOn(ctx, e, envOptions{watchPoll: time.Hour, watchHeartbeat: 500 * time.Millisecond})
 		w := watch(ctx, f.owner.on(quiet), f.org, f.run.GetId(), 0)
-		beats := 0
+		Eventually(func() int { return quiet.hub.Subscribers() }).Should(BeNumerically(">=", 1))
+
+		// An event every 100 ms keeps resetting the 500 ms idle timer: 1.5 s without a heartbeat.
+		var beats, events int
+		count := func() {
+			for {
+				select {
+				case msg := <-w.items:
+					if msg.GetHeartbeat() != nil {
+						beats++
+					}
+					if msg.GetEvent() != nil {
+						events++
+					}
+				default:
+					return
+				}
+			}
+		}
+		for i := 2; i < 17; i++ {
+			ad.event(ctx, run, i)
+			time.Sleep(100 * time.Millisecond)
+			count()
+		}
+		Expect(events).To(BeNumerically(">", 0))
+		Expect(beats).To(BeZero(), "no heartbeat while events flow")
+
+		// Quiet now: the heartbeat arrives, and again after the next idle interval.
+		got := 0
 		timeout := time.After(5 * time.Second)
-		for beats < 2 {
+		for got < 2 {
 			select {
 			case msg := <-w.items:
 				if msg.GetHeartbeat() != nil {
-					beats++
+					got++
 				}
 			case <-timeout:
-				Fail("no two heartbeats within 5s")
+				Fail("no two heartbeats within 5s of going quiet")
 			}
 		}
 	})

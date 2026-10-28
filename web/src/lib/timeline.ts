@@ -189,6 +189,12 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
       const reason = str(p.reason)
       return { key, at, type: 'note', text: `Run ${shortId(runId)} is waiting for a sandbox${reason ? ` (${reason})` : ''}`, runId }
     }
+    case 'run.uncached': {
+      // agentd: the model has a cache_read price but Koinon has no prompt-cache mode for its
+      // provider format, so the run costs the uncached price (ADR 0068). {model, reason}.
+      const model = str(p.model)
+      return { key, at, type: 'note', text: `Run ${shortId(runId)} runs without prompt caching${model ? ` (model ${model})` : ''}: ${str(p.reason) ?? 'no cache mode for the provider format'}`, runId }
+    }
     case 'run.waiting_for_model': {
       // agentd waits before it starts the harness until the gateway serves the run's model: a new
       // provider's key is still reaching the gateway (#174). {model, provider, reason}.

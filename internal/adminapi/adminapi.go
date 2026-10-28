@@ -371,7 +371,11 @@ func (s *Server) CreateModel(ctx context.Context, req CreateModelRequestObject) 
 		st, e := s.problem(err)
 		return CreateModeldefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
-	return CreateModel201JSONResponse(toModel(got)), nil
+	out := toModel(got)
+	if w := s.prices.ModelWarnings(ctx, p.Org, pgUUID(got.ProviderID), got.Name); len(w) > 0 {
+		out.Warnings = &w
+	}
+	return CreateModel201JSONResponse(out), nil
 }
 
 // GetModel implements StrictServerInterface.
