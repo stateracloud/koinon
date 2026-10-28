@@ -12,7 +12,9 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"49b578d91b10beca"'
+      koinon.config: '"007e78e83c3f31aa"'
+      koinon.error: proxy.error.reason
+      koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -21,6 +23,7 @@ frontendPolicies:
       koinon.req_bytes: int(request.headers["content-length"])
       koinon.request: uuid()
       koinon.status: response.code
+      koinon.stream: llm.streaming
 gateways:
   default:
     port: 4000
@@ -39,13 +42,13 @@ llm:
             agent: acme/triage
             org: acme
           allowedModels: []
-        - keyHash: sha256:ed0a46d16aef325ef51bf326414c25e5046031325fa24b07f5520c44d6107cac
+        - keyHash: sha256:5961dc0f863ad7d6f903ea7195ab67d3600fcb9416c28de63b2773c7efa43dc8
           metadata:
             name: koinon-reload-probe
             agent: ""
     authorization:
       rules:
-        - apiKey.name != "koinon-reload-probe"
+        - apiKey.name != "koinon-reload-probe" && !has(llmRequest.mcp_servers)
     transformations:
       request:
         set:

@@ -34,14 +34,14 @@ func fixtures() []fixture {
 				Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
 				APIKeyFile: "/secrets/upstream/api_key",
 				Models: []gateway.Model{
-					{Name: "deepseek/deepseek-v4.1-flash", Guard: true, Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006"}},
-					{Name: "open/model", Price: &gateway.Price{Input: "1", Output: "2"}},
-					{Name: "unpriced/model"},
+					{Name: "deepseek/deepseek-v4.1-flash", Format: modelformat.OpenAI, Guard: true, Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006"}},
+					{Name: "open/model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "2"}},
+					{Name: "unpriced/model", Format: modelformat.OpenAI},
 				},
 			},
 			{
 				Org: "globex", Name: "local", Type: "ollama", BaseURL: "http://ollama.globex.internal:11434/v1",
-				Models: []gateway.Model{{Name: "deepseek/deepseek-v4.1-flash", Price: &gateway.Price{Input: "0", Output: "0"}}},
+				Models: []gateway.Model{{Name: "deepseek/deepseek-v4.1-flash", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0", Output: "0"}}},
 			},
 		},
 		MCP: []gateway.MCPTarget{
@@ -62,7 +62,7 @@ func fixtures() []fixture {
 	modelsOnly := gateway.State{Providers: []gateway.Provider{{
 		Org: "acme", Name: "ollama", Type: "ollama",
 		BaseURL: "http://ollama.example.internal:11434/v1",
-		Models:  []gateway.Model{{Name: "qwen3.5:4b", Price: &gateway.Price{Input: "0", Output: "0"}}},
+		Models:  []gateway.Model{{Name: "qwen3.5:4b", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0", Output: "0"}}},
 	}}}
 	modelsOnly.AddKey(fixedKey("k-cccccccccccc", agentA, "test-c"))
 

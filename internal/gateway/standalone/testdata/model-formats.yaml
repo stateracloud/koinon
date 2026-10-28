@@ -29,7 +29,9 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"2085141a610fc910"'
+      koinon.config: '"372f089c02446d34"'
+      koinon.error: proxy.error.reason
+      koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -38,6 +40,7 @@ frontendPolicies:
       koinon.req_bytes: int(request.headers["content-length"])
       koinon.request: uuid()
       koinon.status: response.code
+      koinon.stream: llm.streaming
 gateways:
   default:
     port: 4000
@@ -58,13 +61,13 @@ llm:
           allowedModels:
             - claude-haiku-4-5
             - open/model
-        - keyHash: sha256:39531da2653d6dff1f9e557516878198573be69fdf4728446dfae77027b5575f
+        - keyHash: sha256:eae8a25da1c41d40fc87860df89b0ca93de6354d4bea62a499602cb09d0caa3d
           metadata:
             name: koinon-reload-probe
             agent: ""
     authorization:
       rules:
-        - apiKey.name != "koinon-reload-probe"
+        - apiKey.name != "koinon-reload-probe" && !has(llmRequest.mcp_servers)
     transformations:
       request:
         set:
@@ -90,6 +93,10 @@ llm:
         set:
           anthropic-version: "2023-06-01"
           anthropic-workspace-id: wrkspc_01ExampleExample
+        remove:
+          - anthropic-beta
+      transformation:
+        tools: 'has(llmRequest.tools) ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : null'
     - id: acme/open/model
       name: open/model
       matches:

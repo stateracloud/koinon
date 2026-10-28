@@ -1,4 +1,4 @@
-# Revision c9a78550a2de9ac9
+# Revision 30f00e1ffb194782
 apiVersion: v1
 data:
   catalog.json: '{"providers":{"acme.anthropic":{"models":{"claude-haiku-4-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}}}},"acme.openrouter":{"models":{"open/model":{"rates":{"input":"1","output":"2"}}}}}}'
@@ -25,7 +25,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  koinon-reload-probe: '{"keyHash":"sha256:47451e7cc79c9ae046759edbdc76f634ca6ced6dc42708dfc041a53f238a9c49","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+  koinon-reload-probe: '{"keyHash":"sha256:ad9c760c70db8dbe644c6bedc9229fefef86affcde9c04894cba86f9ea81b7dc","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -157,14 +157,19 @@ spec:
       action: Require
       policy:
         matchExpressions:
-          - apiKey.org == "acme" && !apiKey.internal
+          - apiKey.org == "acme" && !apiKey.internal && !has(llmRequest.mcp_servers)
     headers:
       request:
+        remove:
+          - anthropic-beta
         set:
           - name: anthropic-version
             value: "2023-06-01"
           - name: anthropic-workspace-id
             value: wrkspc_01ExampleExample
+    transformations:
+      - expression: 'has(llmRequest.tools) ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : null'
+        field: tools
   provider: Custom
 ---
 apiVersion: agentgateway.dev/v1alpha1
@@ -222,6 +227,12 @@ spec:
             name: koinon.cache_write
           - expression: llm.reasoningTokens
             name: koinon.reasoning
+          - expression: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
+            name: koinon.format
+          - expression: llm.streaming
+            name: koinon.stream
+          - expression: proxy.error.reason
+            name: koinon.error
           - expression: response.code
             name: koinon.status
           - expression: llm.params.max_tokens

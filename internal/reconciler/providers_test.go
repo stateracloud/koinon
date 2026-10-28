@@ -193,7 +193,7 @@ var _ = Describe("Provider delivery", func() {
 		cleanup(ctx, org, other.ID)
 		_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: direct.ID, Name: "claude-haiku-test"})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = prices.New(pool, nil).SetOverride(ctx, org, actor, prices.OverrideInput{
+		_, err = prices.New(pool, nil, pricing.Embedded()).SetOverride(ctx, org, actor, prices.OverrideInput{
 			Entry: pricing.Entry{
 				ID: "price-claude-haiku-test", Provider: "anthropic", Match: pricing.Match{Glob: "claude-haiku-test"},
 				Spec:      pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2"}},

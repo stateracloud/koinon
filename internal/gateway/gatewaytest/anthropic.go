@@ -105,6 +105,7 @@ func anthropicSpec(env Env) {
 				fakemodel.Script{Model: "claude-test", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 				fakemodel.Script{Model: "claude-nows", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 				fakemodel.Script{Model: "gpt-test", Turns: []fakemodel.Turn{{Text: "ok", Usage: fakemodel.Usage{InputTokens: 10, OutputTokens: 10}}}},
+				fakemodel.Script{Model: "claude-cut", Faults: fakemodel.Faults{Truncate: true}, Turns: []fakemodel.Turn{{Text: "a long answer that is cut", Usage: usage}}},
 				fakemodel.Script{Model: "globex-model", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -121,7 +122,10 @@ func anthropicSpec(env Env) {
 				{
 					Org: "acme", Name: "claude", Type: "anthropic", BaseURL: url, APIKeyFile: env.KeyFile("provider_key"),
 					AnthropicWorkspaceID: workspace,
-					Models:               []gateway.Model{{Name: "claude-test", Format: modelformat.Anthropic, Price: price}},
+					Models: []gateway.Model{
+						{Name: "claude-test", Format: modelformat.Anthropic, Price: price},
+						{Name: "claude-cut", Format: modelformat.Anthropic, Price: price},
+					},
 				},
 				{
 					Org: "acme", Name: "claude-unscoped", Type: "anthropic", BaseURL: url, APIKeyFile: env.KeyFile("provider_key"),
@@ -133,7 +137,7 @@ func anthropicSpec(env Env) {
 				},
 				{
 					Org: "globex", Name: "other", Type: "openai", BaseURL: url,
-					Models: []gateway.Model{{Name: "globex-model", Price: price}},
+					Models: []gateway.Model{{Name: "globex-model", Format: modelformat.OpenAI, Price: price}},
 				},
 			}}
 			state.AddKey(keyC.Key)
@@ -198,6 +202,66 @@ func anthropicSpec(env Env) {
 			Expect(up.Header).NotTo(HaveKey("Anthropic-Workspace-Id"))
 		})
 
+		It("drops the headers and body fields that let an agent reach beyond its org or the sandbox", func(ctx SpecContext) {
+			// An agent is untrusted. anthropic-workspace-id would pick the workspace an unscoped key acts
+			// in; anthropic-beta enables the MCP connector (Anthropic calls the URL itself, past the
+			// sandbox's egress rules), code execution, web fetch and long context.
+			attack := func(model string) fakemodel.Request {
+				GinkgoHelper()
+				body := msgBody(model, false)
+				body["tools"] = []any{
+					map[string]any{"name": "lookup", "description": "kept", "input_schema": map[string]any{"type": "object"}},
+					map[string]any{"type": "custom", "name": "also_kept", "input_schema": map[string]any{"type": "object"}},
+					map[string]any{"type": "web_search_20250305", "name": "web_search"},
+					map[string]any{"type": "web_fetch_20250910", "name": "web_fetch"},
+					map[string]any{"type": "code_execution_20250522", "name": "code_execution"},
+					map[string]any{"type": "mcp_toolset", "mcp_server_name": "evil"},
+				}
+				code, out := post(ctx, "/v1/messages", keyC.Material, body,
+					"anthropic-version", clientDate, "anthropic-workspace-id", "wrkspc_Attacker", "anthropic-beta", "mcp-client-2025-04-04")
+				Expect(code).To(Equal(http.StatusOK), out)
+				return lastUpstream(model)
+			}
+			toolNames := func(up fakemodel.Request) []string {
+				GinkgoHelper()
+				var got struct {
+					Tools []struct{ Name string } `json:"tools"`
+				}
+				Expect(json.Unmarshal(up.Body, &got)).To(Succeed())
+				var names []string
+				for _, t := range got.Tools {
+					names = append(names, t.Name)
+				}
+				return names
+			}
+
+			By("a request naming mcp_servers is refused before it reaches the upstream")
+			before := len(upstrm.Requests())
+			body := msgBody("claude-test", false)
+			body["mcp_servers"] = []any{map[string]any{"type": "url", "url": "https://attacker.example/mcp", "name": "evil"}}
+			code, out := post(ctx, "/v1/messages", keyC.Material, body, "anthropic-beta", "mcp-client-2025-04-04")
+			Expect(code).To(Equal(http.StatusForbidden), out)
+			Expect(upstrm.Requests()).To(HaveLen(before))
+
+			up := attack("claude-test")
+			Expect(up.Header.Values("anthropic-workspace-id")).To(Equal([]string{workspace}), "the provider's workspace, not the agent's")
+			Expect(up.Header).NotTo(HaveKey("Anthropic-Beta"))
+			Expect(toolNames(up)).To(Equal([]string{"lookup", "also_kept"}), "only the tools the harness runs itself")
+
+			up = attack("claude-nows")
+			Expect(up.Header).NotTo(HaveKey("Anthropic-Workspace-Id"), "a provider without a workspace sends none, whatever the agent asks")
+			Expect(up.Header).NotTo(HaveKey("Anthropic-Beta"))
+			Expect(toolNames(up)).To(Equal([]string{"lookup", "also_kept"}))
+
+			By("a request with no tools stays without tools")
+			body = msgBody("claude-test", false)
+			delete(body, "tools")
+			code, out = post(ctx, "/v1/messages", keyC.Material, body, "anthropic-version", clientDate)
+			Expect(code).To(Equal(http.StatusOK), out)
+			Expect(string(lastUpstream("claude-test").Body)).NotTo(ContainSubstring(`"tools"`))
+			Expect(string(lastUpstream("claude-test").Body)).NotTo(ContainSubstring("mcp_servers"), "no field is added to a plain request")
+		})
+
 		It("adds no stream_options to a streamed Messages request", func(ctx SpecContext) {
 			code, body := messages(ctx, keyC.Material, "claude-test", true)
 			Expect(code).To(Equal(http.StatusOK), body)
@@ -220,8 +284,8 @@ func anthropicSpec(env Env) {
 		It("keeps another org's key off the model", func(ctx SpecContext) {
 			before := len(upstrm.Requests())
 			code, body := messages(ctx, keyG.Material, "claude-test", false)
-			// Standalone refuses with 403 (the key's allowedModels), Kubernetes mode with 404 (no model
-			// object matches the org); the spec for chat completions accepts both.
+			// Both modes refuse with 403 today (allowedModels in standalone, the org authorization rule
+			// in Kubernetes mode); like the chat-completions specs, accept a 404 too.
 			Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), body)
 			Expect(upstrm.Requests()).To(HaveLen(before))
 		})
@@ -240,6 +304,39 @@ func anthropicSpec(env Env) {
 			})
 		}
 
+		It("logs a Messages stream that was cut: its format, that it streamed, and why it ended", func(ctx SpecContext) {
+			Expect(logs).NotTo(BeNil(), "the driver must expose the gateway's log")
+			// The upstream drops the connection after half of the events. The client's read fails or
+			// ends early; what matters is the record.
+			before := len(accessLog(logs(ctx), keyC.ID))
+			raw, err := json.Marshal(msgBody("claude-cut", true))
+			Expect(err).NotTo(HaveOccurred())
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmURL+"/v1/messages", bytes.NewReader(raw))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+keyC.Material)
+			if resp, err := http.DefaultClient.Do(req); err == nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+			}
+
+			var recs []map[string]any
+			Eventually(func() int {
+				recs = accessLog(logs(ctx), keyC.ID)
+				return len(recs)
+			}, 30*time.Second, time.Second).Should(BeNumerically(">", before))
+			rec := recs[len(recs)-1]
+			// The gateway answered 200 before the cut, so the status says nothing; what tells the ledger is
+			// the error reason, set only when the proxy failed the response, with the usage of
+			// message_start alone (the final output count of 10 never arrived).
+			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldFormat, "anthropic"))
+			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldStream, true))
+			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldStatus, float64(200)))
+			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldError, "Upstream"))
+			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldOutput, float64(1)))
+			Expect(rec).To(HaveKeyWithValue(gateway.LogFieldInput, float64(100)))
+		})
+
 		It("logs the cache tokens, with the input including both", func(ctx SpecContext) {
 			Expect(logs).NotTo(BeNil(), "the driver must expose the gateway's log")
 			code, body := messages(ctx, keyC.Material, "claude-test", true)
@@ -256,9 +353,10 @@ func anthropicSpec(env Env) {
 			Eventually(func() []map[string]any { return accessLog(logs(ctx), keyC.ID) }, 30*time.Second, time.Second).
 				Should(ContainElement(HaveKeyWithValue(gateway.LogFieldInput, want[gateway.LogFieldInput])))
 			for _, rec := range accessLog(logs(ctx), keyC.ID) {
-				if rec[gateway.LogFieldInput] != want[gateway.LogFieldInput] {
-					continue
+				if rec[gateway.LogFieldInput] != want[gateway.LogFieldInput] || rec[gateway.LogFieldError] != nil {
+					continue // not the usage of a finished response
 				}
+				Expect(rec).To(HaveKeyWithValue(gateway.LogFieldFormat, "anthropic"))
 				for k, v := range want {
 					Expect(rec).To(HaveKeyWithValue(k, v), k)
 				}
@@ -291,6 +389,8 @@ func accessLog(log, keyID string) []map[string]any {
 			for _, m := range logfmtField.FindAllStringSubmatch(line, -1) {
 				if n, err := strconv.ParseFloat(m[2], 64); err == nil {
 					rec[m[1]] = n
+				} else if b, err := strconv.ParseBool(m[2]); err == nil {
+					rec[m[1]] = b
 				} else {
 					rec[m[1]] = strings.Trim(m[2], `"`)
 				}

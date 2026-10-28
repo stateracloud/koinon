@@ -285,6 +285,29 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
 - A key of another org is refused with 403 in both modes (`allowedModels` in standalone,
   the org authorization rule on the Kubernetes proxy); the specs accept 403 or 404, as the chat-completions
   specs do.
-- Not tested: a client that sends its own `anthropic-workspace-id` to a model whose provider has
-  none probably reaches the upstream with it, since only a `set` replaces a header. The key is the
-  org's own, so this stays inside the org; removing the header would be a `Rendering` change.
+- **Threat: an agent is untrusted, and the Messages API reaches beyond the gateway.** A client's
+  `anthropic-workspace-id` would pick the workspace an unscoped key acts in, possibly another
+  tenant's. `anthropic-beta` enables the MCP connector (Anthropic itself calls the agent's URL, which
+  bypasses the sandbox's egress rules), code execution, web fetch and long context. `mcp_servers` and
+  the server tools use those features. **Controls**, all in the rendering table: the gateway removes
+  `anthropic-beta` and, for a provider without a workspace ID, `anthropic-workspace-id`
+  (`requestHeaders.remove` / `policies.headers.request.remove`), and sets the version and the
+  provider's workspace. It filters `tools` to those without a type or of type `custom`, so every
+  server tool, present or future, is dropped. It refuses a request that has `mcp_servers` with 403,
+  because dropping an untyped field is not possible: a `null` transformation would add
+  `"mcp_servers":null` to every request. The refusal is a CEL condition in the authorization rule
+  (`!has(llmRequest.mcp_servers)`). If OpenCode ever needs a beta flag, PR 3 captures what it sends and
+  pins only that with `set` from the table. The gatewaytest spec sends the attack in both drivers.
+- The sandbox profile's routes come from the same table (`Rendering.Path`), so a new format needs no
+  profile edit.
+- **Cut streams.** A Messages response cut mid-stream is logged with status 200, because the status was
+  sent before the cut. The access log carries what lets the ledger tell: `koinon.format` (from the
+  request path, `anthropic` or `openai`), `koinon.stream` (`llm.streaming`) and `koinon.error`
+  (`proxy.error.reason`, set only when the proxy failed the response; `Upstream` for a dropped upstream
+  connection). A cut stream's record has the usage of `message_start` alone (the spec pins
+  `koinon.out` 1 against 10 for the finished response). The ledger side (settling a streamed
+  anthropic-format record as cut when its run was canceled at or before the log time) is in the spend
+  settlement work, not here.
+- An empty `Model.Format` is an error in `State.Validate`; the reconciler always fills it.
+- The workspace-ID rule (`modelformat.WorkspaceIDPattern`, `MaxWorkspaceIDLength`, `ValidWorkspaceID`)
+  has one home, used by the catalog and the gateway; a test compares it with the migration's CHECK.
