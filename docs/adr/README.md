@@ -89,3 +89,4 @@ are in [0046](0046-adr-conventions.md).
 | [0072](0072-agent-model-run-now-echo-check.md) | The agent's model setting, "run now" for schedules, and the provider echo check | Accepted |
 | [0073](0073-agent-passport.md) | Agent passport: a verifiable identity for every agent call | Accepted (delivery after v0.1.0) |
 | [0074](0074-run-traces-trace-router.md) | Run traces: a Koinon trace router to each org's OTLP backend | Accepted (delivery after v0.1.0) |
+| [0075](0075-isolation-tiers.md) | Isolation tiers: vm, hardened and dev | Accepted (pending qualification on Bottlerocket) |
