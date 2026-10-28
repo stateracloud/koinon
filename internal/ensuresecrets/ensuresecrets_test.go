@@ -151,3 +151,14 @@ var _ = Describe("Ensure with an AES key", func() {
 		Expect(err).To(MatchError(ContainSubstring("not 64 hex characters")))
 	})
 })
+
+var _ = Describe("Ensure with an unknown kind", func() {
+	It("fails instead of creating a password", func(ctx SpecContext) {
+		client := fake.NewClientset()
+		var out bytes.Buffer
+		_, err := ensuresecrets.Ensure(ctx, client, "koinon", []ensuresecrets.Spec{{Name: "x", Kind: "aes512-key"}}, &out)
+		Expect(err).To(MatchError(ContainSubstring("unknown kind")))
+		_, err = client.CoreV1().Secrets("koinon").Get(ctx, "x", metav1.GetOptions{})
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+})

@@ -265,9 +265,9 @@ type Limit struct {
 	// Window is the accounting window. agentgateway aligns windows to the Unix
 	// epoch (24h starts at midnight UTC). Zero means no window: since agentgateway
 	// v1.7 the counter then accumulates for the lifetime of its name and never
-	// resets, so only a new Generation starts a fresh one. The ledger uses this:
-	// its Generation already carries the UTC day, and a gateway-side reset would
-	// grant an amount the ledger did not compute.
+	// resets, so only a new Generation starts a fresh one. Koinon does not use
+	// that yet: agentgateway deletes only expired windowed counters at startup,
+	// so every unwindowed generation would stay in its table (and in memory) forever.
 	Window time.Duration
 	// Generation names the gateway's spend counter for this limit. agentgateway
 	// keys budget usage by key and budget name, so a new Generation starts a
@@ -278,11 +278,10 @@ type Limit struct {
 	Generation string
 }
 
-// USDLimit returns a never-resetting USD limit of amount for the counter named by generation. It is
-// the edge where Koinon's exact money type (package money) becomes the number agentgateway's
-// budget config takes.
-func USDLimit(amount money.USD, generation string) Limit {
-	return Limit{Unit: USD, Amount: amount.Float64(), Generation: generation}
+// USDLimit returns a USD limit of amount per window. It is the edge where Koinon's exact
+// money type (package money) becomes the number agentgateway's budget config takes.
+func USDLimit(amount money.USD, window time.Duration, generation string) Limit {
+	return Limit{Unit: USD, Amount: amount.Float64(), Window: window, Generation: generation}
 }
 
 // Provider is one OpenAI-compatible upstream of an org (ADR 0056, plan item PV1). Drivers

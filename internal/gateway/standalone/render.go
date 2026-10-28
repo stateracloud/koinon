@@ -83,7 +83,7 @@ const (
 	probeRule = `apiKey.name != "` + gateway.ReloadProbeKeyName + `"`
 
 	// placeholderTarget is added next to a lone org target (see build).
-	placeholderTarget = "koinon-placeholder"
+	placeholderTarget = "koinon.placeholder"
 
 	header = "# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.\n" +
 		"# Keys appear only as hashes; key material lives in Kubernetes Secrets.\n"

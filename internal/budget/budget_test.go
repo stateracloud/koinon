@@ -63,7 +63,7 @@ func TestGenerationChangesWithAnySpendButNotWithTime(t *testing.T) {
 	if a.Generation(now) == a.Generation(now.Add(24*time.Hour)) {
 		t.Fatal("a new day is a new counter")
 	}
-	l := gateway.USDLimit(money.MustParse("7.5"), a.Generation(now))
+	l := gateway.USDLimit(money.MustParse("7.5"), budget.DayWindow, a.Generation(now))
 	var s gateway.State
 	s.SetLimit(gateway.AgentRef{Org: "acme", Name: "a"}, &l)
 	if err := s.Validate(); err != nil {
