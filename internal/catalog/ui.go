@@ -397,8 +397,9 @@ func parseID(s string) (pgtype.UUID, error) {
 	return id, nil
 }
 
-// OpenKey decrypts a provider's API key, or returns "" for a keyless provider. Only the
-// reconciler calls it, to deliver keys to the gateway.
+// OpenKey decrypts a provider's API key, or returns "" for a keyless provider. Only
+// koinon-reconciler calls it: to deliver keys to the gateway, and for the spend settler to ask a
+// provider what it billed for a response (package ledger).
 func OpenKey(keys Opener, org, id pgtype.UUID, envelope []byte) (string, error) {
 	if len(envelope) == 0 {
 		return "", nil
