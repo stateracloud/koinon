@@ -40,9 +40,14 @@ type Provider struct {
 	// disabled_reason says why the provider is not served, empty when it is.
 	DisabledReason string `protobuf:"bytes,8,opt,name=disabled_reason,json=disabledReason,proto3" json:"disabled_reason,omitempty"`
 	// removed is set when the declaring Secret was deleted.
-	Removed       bool                   `protobuf:"varint,9,opt,name=removed,proto3" json:"removed,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Removed   bool                   `protobuf:"varint,9,opt,name=removed,proto3" json:"removed,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// anthropic_workspace_id is the Anthropic workspace the gateway names for the provider's models,
+	// for an API key not scoped to a workspace. Empty when unset. An identifier, not a credential.
+	AnthropicWorkspaceId string `protobuf:"bytes,12,opt,name=anthropic_workspace_id,json=anthropicWorkspaceId,proto3" json:"anthropic_workspace_id,omitempty"`
+	// formats are the model formats the provider's type offers, preferred first (ADR 0069).
+	Formats       []string `protobuf:"bytes,13,rep,name=formats,proto3" json:"formats,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -154,6 +159,20 @@ func (x *Provider) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Provider) GetAnthropicWorkspaceId() string {
+	if x != nil {
+		return x.AnthropicWorkspaceId
+	}
+	return ""
+}
+
+func (x *Provider) GetFormats() []string {
+	if x != nil {
+		return x.Formats
+	}
+	return nil
+}
+
 // Rates are deprecated: per-model rates were folded into org prices (PriceService, ADR 0056). The
 // message stays for wire compatibility; the server never fills it and refuses requests that set it.
 type Rates struct {
@@ -233,8 +252,14 @@ type Model struct {
 	DisabledReason  string                 `protobuf:"bytes,8,opt,name=disabled_reason,json=disabledReason,proto3" json:"disabled_reason,omitempty"`
 	CreatedAt       *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt       *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// format is the model's wire format: "openai" (chat completions) or "anthropic" (Messages)
+	// (ADR 0069).
+	Format string `protobuf:"bytes,11,opt,name=format,proto3" json:"format,omitempty"`
+	// format_overridden is set when an admin chose the format; otherwise it follows the default and
+	// is re-derived when the default changes.
+	FormatOverridden bool `protobuf:"varint,12,opt,name=format_overridden,json=formatOverridden,proto3" json:"format_overridden,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Model) Reset() {
@@ -338,6 +363,20 @@ func (x *Model) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Model) GetFormat() string {
+	if x != nil {
+		return x.Format
+	}
+	return ""
+}
+
+func (x *Model) GetFormatOverridden() bool {
+	if x != nil {
+		return x.FormatOverridden
+	}
+	return false
+}
+
 type ListProvidersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
@@ -433,9 +472,11 @@ type CreateProviderRequest struct {
 	Type  string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
 	Url   string                 `protobuf:"bytes,4,opt,name=url,proto3" json:"url,omitempty"`
 	// api_key is empty for keyless upstreams such as Ollama.
-	ApiKey        string `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ApiKey string `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
+	// anthropic_workspace_id is allowed for type "anthropic" only: wrkspc_ followed by letters and digits.
+	AnthropicWorkspaceId string `protobuf:"bytes,6,opt,name=anthropic_workspace_id,json=anthropicWorkspaceId,proto3" json:"anthropic_workspace_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *CreateProviderRequest) Reset() {
@@ -503,6 +544,13 @@ func (x *CreateProviderRequest) GetApiKey() string {
 	return ""
 }
 
+func (x *CreateProviderRequest) GetAnthropicWorkspaceId() string {
+	if x != nil {
+		return x.AnthropicWorkspaceId
+	}
+	return ""
+}
+
 type CreateProviderResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Provider      *Provider              `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
@@ -555,9 +603,11 @@ type UpdateProviderRequest struct {
 	Type *string `protobuf:"bytes,3,opt,name=type,proto3,oneof" json:"type,omitempty"`
 	Url  *string `protobuf:"bytes,4,opt,name=url,proto3,oneof" json:"url,omitempty"`
 	// api_key replaces the key; set to "" it removes the key.
-	ApiKey        *string `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3,oneof" json:"api_key,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ApiKey *string `protobuf:"bytes,5,opt,name=api_key,json=apiKey,proto3,oneof" json:"api_key,omitempty"`
+	// anthropic_workspace_id replaces the workspace ID; set to "" it removes it.
+	AnthropicWorkspaceId *string `protobuf:"bytes,6,opt,name=anthropic_workspace_id,json=anthropicWorkspaceId,proto3,oneof" json:"anthropic_workspace_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *UpdateProviderRequest) Reset() {
@@ -621,6 +671,13 @@ func (x *UpdateProviderRequest) GetUrl() string {
 func (x *UpdateProviderRequest) GetApiKey() string {
 	if x != nil && x.ApiKey != nil {
 		return *x.ApiKey
+	}
+	return ""
+}
+
+func (x *UpdateProviderRequest) GetAnthropicWorkspaceId() string {
+	if x != nil && x.AnthropicWorkspaceId != nil {
+		return *x.AnthropicWorkspaceId
 	}
 	return ""
 }
@@ -855,7 +912,10 @@ type CreateModelRequest struct {
 	// PriceService.SetPrice instead.
 	//
 	// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
-	Rates         *Rates `protobuf:"bytes,5,opt,name=rates,proto3" json:"rates,omitempty"`
+	Rates *Rates `protobuf:"bytes,5,opt,name=rates,proto3" json:"rates,omitempty"`
+	// format is the model's wire format, within what the provider offers. Empty means the default
+	// (ADR 0069); a value marks the model as overridden.
+	Format        string `protobuf:"bytes,6,opt,name=format,proto3" json:"format,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -926,6 +986,13 @@ func (x *CreateModelRequest) GetRates() *Rates {
 	return nil
 }
 
+func (x *CreateModelRequest) GetFormat() string {
+	if x != nil {
+		return x.Format
+	}
+	return ""
+}
+
 type CreateModelResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Model *Model                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
@@ -990,7 +1057,10 @@ type UpdateModelRequest struct {
 	// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
 	Rates *Rates `protobuf:"bytes,4,opt,name=rates,proto3" json:"rates,omitempty"`
 	// Deprecated: Marked as deprecated in koinon/provider/v1alpha1/provider.proto.
-	ClearRates    bool `protobuf:"varint,5,opt,name=clear_rates,json=clearRates,proto3" json:"clear_rates,omitempty"`
+	ClearRates bool `protobuf:"varint,5,opt,name=clear_rates,json=clearRates,proto3" json:"clear_rates,omitempty"`
+	// format overrides the model's wire format, within what the provider offers; set to "" it goes
+	// back to the default and is no longer overridden.
+	Format        *string `protobuf:"bytes,6,opt,name=format,proto3,oneof" json:"format,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1060,6 +1130,13 @@ func (x *UpdateModelRequest) GetClearRates() bool {
 		return x.ClearRates
 	}
 	return false
+}
+
+func (x *UpdateModelRequest) GetFormat() string {
+	if x != nil && x.Format != nil {
+		return *x.Format
+	}
+	return ""
 }
 
 type UpdateModelResponse struct {
@@ -1194,11 +1271,126 @@ func (*DeleteModelResponse) Descriptor() ([]byte, []int) {
 	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{18}
 }
 
+type ModelFormatsRequest struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	OrgId      string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	ProviderId string                 `protobuf:"bytes,2,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	// name is the model name; the default depends on its family.
+	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelFormatsRequest) Reset() {
+	*x = ModelFormatsRequest{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelFormatsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelFormatsRequest) ProtoMessage() {}
+
+func (x *ModelFormatsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelFormatsRequest.ProtoReflect.Descriptor instead.
+func (*ModelFormatsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ModelFormatsRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *ModelFormatsRequest) GetProviderId() string {
+	if x != nil {
+		return x.ProviderId
+	}
+	return ""
+}
+
+func (x *ModelFormatsRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type ModelFormatsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// offered are the formats the provider offers, preferred first.
+	Offered []string `protobuf:"bytes,1,rep,name=offered,proto3" json:"offered,omitempty"`
+	// default_format is the format the model gets unless overridden.
+	DefaultFormat string `protobuf:"bytes,2,opt,name=default_format,json=defaultFormat,proto3" json:"default_format,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ModelFormatsResponse) Reset() {
+	*x = ModelFormatsResponse{}
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelFormatsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelFormatsResponse) ProtoMessage() {}
+
+func (x *ModelFormatsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_provider_v1alpha1_provider_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelFormatsResponse.ProtoReflect.Descriptor instead.
+func (*ModelFormatsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ModelFormatsResponse) GetOffered() []string {
+	if x != nil {
+		return x.Offered
+	}
+	return nil
+}
+
+func (x *ModelFormatsResponse) GetDefaultFormat() string {
+	if x != nil {
+		return x.DefaultFormat
+	}
+	return ""
+}
+
 var File_koinon_provider_v1alpha1_provider_proto protoreflect.FileDescriptor
 
 const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\n" +
-	"'koinon/provider/v1alpha1/provider.proto\x12\x18koinon.provider.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xea\x02\n" +
+	"'koinon/provider/v1alpha1/provider.proto\x12\x18koinon.provider.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xba\x03\n" +
 	"\bProvider\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -1213,12 +1405,14 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"created_at\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"T\n" +
+	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x124\n" +
+	"\x16anthropic_workspace_id\x18\f \x01(\tR\x14anthropicWorkspaceId\x12\x18\n" +
+	"\aformats\x18\r \x03(\tR\aformats\"T\n" +
 	"\x05Rates\x12\x14\n" +
 	"\x05input\x18\x01 \x01(\tR\x05input\x12\x16\n" +
 	"\x06output\x18\x02 \x01(\tR\x06output\x12\x1d\n" +
 	"\n" +
-	"cache_read\x18\x03 \x01(\tR\tcacheRead\"\x80\x03\n" +
+	"cache_read\x18\x03 \x01(\tR\tcacheRead\"\xc5\x03\n" +
 	"\x05Model\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vprovider_id\x18\x02 \x01(\tR\n" +
@@ -1233,30 +1427,35 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"created_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
 	"updated_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"-\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x16\n" +
+	"\x06format\x18\v \x01(\tR\x06format\x12+\n" +
+	"\x11format_overridden\x18\f \x01(\bR\x10formatOverridden\"-\n" +
 	"\x14ListProvidersRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"Y\n" +
 	"\x15ListProvidersResponse\x12@\n" +
-	"\tproviders\x18\x01 \x03(\v2\".koinon.provider.v1alpha1.ProviderR\tproviders\"\x86\x01\n" +
+	"\tproviders\x18\x01 \x03(\v2\".koinon.provider.v1alpha1.ProviderR\tproviders\"\xbc\x01\n" +
 	"\x15CreateProviderRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x03 \x01(\tR\x04type\x12\x10\n" +
 	"\x03url\x18\x04 \x01(\tR\x03url\x12\x1c\n" +
-	"\aapi_key\x18\x05 \x01(\tB\x03\x80\x01\x01R\x06apiKey\"X\n" +
+	"\aapi_key\x18\x05 \x01(\tB\x03\x80\x01\x01R\x06apiKey\x124\n" +
+	"\x16anthropic_workspace_id\x18\x06 \x01(\tR\x14anthropicWorkspaceId\"X\n" +
 	"\x16CreateProviderResponse\x12>\n" +
-	"\bprovider\x18\x01 \x01(\v2\".koinon.provider.v1alpha1.ProviderR\bprovider\"\xbf\x01\n" +
+	"\bprovider\x18\x01 \x01(\v2\".koinon.provider.v1alpha1.ProviderR\bprovider\"\x95\x02\n" +
 	"\x15UpdateProviderRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vprovider_id\x18\x02 \x01(\tR\n" +
 	"providerId\x12\x17\n" +
 	"\x04type\x18\x03 \x01(\tH\x00R\x04type\x88\x01\x01\x12\x15\n" +
 	"\x03url\x18\x04 \x01(\tH\x01R\x03url\x88\x01\x01\x12!\n" +
-	"\aapi_key\x18\x05 \x01(\tB\x03\x80\x01\x01H\x02R\x06apiKey\x88\x01\x01B\a\n" +
+	"\aapi_key\x18\x05 \x01(\tB\x03\x80\x01\x01H\x02R\x06apiKey\x88\x01\x01\x129\n" +
+	"\x16anthropic_workspace_id\x18\x06 \x01(\tH\x03R\x14anthropicWorkspaceId\x88\x01\x01B\a\n" +
 	"\x05_typeB\x06\n" +
 	"\x04_urlB\n" +
 	"\n" +
-	"\b_api_key\"X\n" +
+	"\b_api_keyB\x19\n" +
+	"\x17_anthropic_workspace_id\"X\n" +
 	"\x16UpdateProviderResponse\x12>\n" +
 	"\bprovider\x18\x01 \x01(\v2\".koinon.provider.v1alpha1.ProviderR\bprovider\"O\n" +
 	"\x15DeleteProviderRequest\x12\x15\n" +
@@ -1267,31 +1466,42 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"\x11ListModelsRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\"M\n" +
 	"\x12ListModelsResponse\x127\n" +
-	"\x06models\x18\x01 \x03(\v2\x1f.koinon.provider.v1alpha1.ModelR\x06models\"\xb1\x01\n" +
+	"\x06models\x18\x01 \x03(\v2\x1f.koinon.provider.v1alpha1.ModelR\x06models\"\xc9\x01\n" +
 	"\x12CreateModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
 	"\vprovider_id\x18\x02 \x01(\tR\n" +
 	"providerId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
 	"\x05guard\x18\x04 \x01(\bR\x05guard\x129\n" +
-	"\x05rates\x18\x05 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\"h\n" +
+	"\x05rates\x18\x05 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\x12\x16\n" +
+	"\x06format\x18\x06 \x01(\tR\x06format\"h\n" +
 	"\x13CreateModelResponse\x125\n" +
 	"\x05model\x18\x01 \x01(\v2\x1f.koinon.provider.v1alpha1.ModelR\x05model\x12\x1a\n" +
-	"\bwarnings\x18\x02 \x03(\tR\bwarnings\"\xcb\x01\n" +
+	"\bwarnings\x18\x02 \x03(\tR\bwarnings\"\xf3\x01\n" +
 	"\x12UpdateModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\x12\x19\n" +
 	"\x05guard\x18\x03 \x01(\bH\x00R\x05guard\x88\x01\x01\x129\n" +
 	"\x05rates\x18\x04 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\x12#\n" +
 	"\vclear_rates\x18\x05 \x01(\bB\x02\x18\x01R\n" +
-	"clearRatesB\b\n" +
-	"\x06_guard\"L\n" +
+	"clearRates\x12\x1b\n" +
+	"\x06format\x18\x06 \x01(\tH\x01R\x06format\x88\x01\x01B\b\n" +
+	"\x06_guardB\t\n" +
+	"\a_format\"L\n" +
 	"\x13UpdateModelResponse\x125\n" +
 	"\x05model\x18\x01 \x01(\v2\x1f.koinon.provider.v1alpha1.ModelR\x05model\"F\n" +
 	"\x12DeleteModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\"\x15\n" +
-	"\x13DeleteModelResponse2\x99\a\n" +
+	"\x13DeleteModelResponse\"a\n" +
+	"\x13ModelFormatsRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x1f\n" +
+	"\vprovider_id\x18\x02 \x01(\tR\n" +
+	"providerId\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"W\n" +
+	"\x14ModelFormatsResponse\x12\x18\n" +
+	"\aoffered\x18\x01 \x03(\tR\aoffered\x12%\n" +
+	"\x0edefault_format\x18\x02 \x01(\tR\rdefaultFormat2\x8d\b\n" +
 	"\x0fProviderService\x12u\n" +
 	"\rListProviders\x12..koinon.provider.v1alpha1.ListProvidersRequest\x1a/.koinon.provider.v1alpha1.ListProvidersResponse\"\x03\x90\x02\x01\x12s\n" +
 	"\x0eCreateProvider\x12/.koinon.provider.v1alpha1.CreateProviderRequest\x1a0.koinon.provider.v1alpha1.CreateProviderResponse\x12s\n" +
@@ -1301,7 +1511,8 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"ListModels\x12+.koinon.provider.v1alpha1.ListModelsRequest\x1a,.koinon.provider.v1alpha1.ListModelsResponse\"\x03\x90\x02\x01\x12j\n" +
 	"\vCreateModel\x12,.koinon.provider.v1alpha1.CreateModelRequest\x1a-.koinon.provider.v1alpha1.CreateModelResponse\x12j\n" +
 	"\vUpdateModel\x12,.koinon.provider.v1alpha1.UpdateModelRequest\x1a-.koinon.provider.v1alpha1.UpdateModelResponse\x12j\n" +
-	"\vDeleteModel\x12,.koinon.provider.v1alpha1.DeleteModelRequest\x1a-.koinon.provider.v1alpha1.DeleteModelResponseBWZUgithub.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1;providerv1alpha1b\x06proto3"
+	"\vDeleteModel\x12,.koinon.provider.v1alpha1.DeleteModelRequest\x1a-.koinon.provider.v1alpha1.DeleteModelResponse\x12r\n" +
+	"\fModelFormats\x12-.koinon.provider.v1alpha1.ModelFormatsRequest\x1a..koinon.provider.v1alpha1.ModelFormatsResponse\"\x03\x90\x02\x01BWZUgithub.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1;providerv1alpha1b\x06proto3"
 
 var (
 	file_koinon_provider_v1alpha1_provider_proto_rawDescOnce sync.Once
@@ -1315,7 +1526,7 @@ func file_koinon_provider_v1alpha1_provider_proto_rawDescGZIP() []byte {
 	return file_koinon_provider_v1alpha1_provider_proto_rawDescData
 }
 
-var file_koinon_provider_v1alpha1_provider_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_koinon_provider_v1alpha1_provider_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_koinon_provider_v1alpha1_provider_proto_goTypes = []any{
 	(*Provider)(nil),               // 0: koinon.provider.v1alpha1.Provider
 	(*Rates)(nil),                  // 1: koinon.provider.v1alpha1.Rates
@@ -1336,14 +1547,16 @@ var file_koinon_provider_v1alpha1_provider_proto_goTypes = []any{
 	(*UpdateModelResponse)(nil),    // 16: koinon.provider.v1alpha1.UpdateModelResponse
 	(*DeleteModelRequest)(nil),     // 17: koinon.provider.v1alpha1.DeleteModelRequest
 	(*DeleteModelResponse)(nil),    // 18: koinon.provider.v1alpha1.DeleteModelResponse
-	(*timestamppb.Timestamp)(nil),  // 19: google.protobuf.Timestamp
+	(*ModelFormatsRequest)(nil),    // 19: koinon.provider.v1alpha1.ModelFormatsRequest
+	(*ModelFormatsResponse)(nil),   // 20: koinon.provider.v1alpha1.ModelFormatsResponse
+	(*timestamppb.Timestamp)(nil),  // 21: google.protobuf.Timestamp
 }
 var file_koinon_provider_v1alpha1_provider_proto_depIdxs = []int32{
-	19, // 0: koinon.provider.v1alpha1.Provider.created_at:type_name -> google.protobuf.Timestamp
-	19, // 1: koinon.provider.v1alpha1.Provider.updated_at:type_name -> google.protobuf.Timestamp
+	21, // 0: koinon.provider.v1alpha1.Provider.created_at:type_name -> google.protobuf.Timestamp
+	21, // 1: koinon.provider.v1alpha1.Provider.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 2: koinon.provider.v1alpha1.Model.rates:type_name -> koinon.provider.v1alpha1.Rates
-	19, // 3: koinon.provider.v1alpha1.Model.created_at:type_name -> google.protobuf.Timestamp
-	19, // 4: koinon.provider.v1alpha1.Model.updated_at:type_name -> google.protobuf.Timestamp
+	21, // 3: koinon.provider.v1alpha1.Model.created_at:type_name -> google.protobuf.Timestamp
+	21, // 4: koinon.provider.v1alpha1.Model.updated_at:type_name -> google.protobuf.Timestamp
 	0,  // 5: koinon.provider.v1alpha1.ListProvidersResponse.providers:type_name -> koinon.provider.v1alpha1.Provider
 	0,  // 6: koinon.provider.v1alpha1.CreateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
 	0,  // 7: koinon.provider.v1alpha1.UpdateProviderResponse.provider:type_name -> koinon.provider.v1alpha1.Provider
@@ -1360,16 +1573,18 @@ var file_koinon_provider_v1alpha1_provider_proto_depIdxs = []int32{
 	13, // 18: koinon.provider.v1alpha1.ProviderService.CreateModel:input_type -> koinon.provider.v1alpha1.CreateModelRequest
 	15, // 19: koinon.provider.v1alpha1.ProviderService.UpdateModel:input_type -> koinon.provider.v1alpha1.UpdateModelRequest
 	17, // 20: koinon.provider.v1alpha1.ProviderService.DeleteModel:input_type -> koinon.provider.v1alpha1.DeleteModelRequest
-	4,  // 21: koinon.provider.v1alpha1.ProviderService.ListProviders:output_type -> koinon.provider.v1alpha1.ListProvidersResponse
-	6,  // 22: koinon.provider.v1alpha1.ProviderService.CreateProvider:output_type -> koinon.provider.v1alpha1.CreateProviderResponse
-	8,  // 23: koinon.provider.v1alpha1.ProviderService.UpdateProvider:output_type -> koinon.provider.v1alpha1.UpdateProviderResponse
-	10, // 24: koinon.provider.v1alpha1.ProviderService.DeleteProvider:output_type -> koinon.provider.v1alpha1.DeleteProviderResponse
-	12, // 25: koinon.provider.v1alpha1.ProviderService.ListModels:output_type -> koinon.provider.v1alpha1.ListModelsResponse
-	14, // 26: koinon.provider.v1alpha1.ProviderService.CreateModel:output_type -> koinon.provider.v1alpha1.CreateModelResponse
-	16, // 27: koinon.provider.v1alpha1.ProviderService.UpdateModel:output_type -> koinon.provider.v1alpha1.UpdateModelResponse
-	18, // 28: koinon.provider.v1alpha1.ProviderService.DeleteModel:output_type -> koinon.provider.v1alpha1.DeleteModelResponse
-	21, // [21:29] is the sub-list for method output_type
-	13, // [13:21] is the sub-list for method input_type
+	19, // 21: koinon.provider.v1alpha1.ProviderService.ModelFormats:input_type -> koinon.provider.v1alpha1.ModelFormatsRequest
+	4,  // 22: koinon.provider.v1alpha1.ProviderService.ListProviders:output_type -> koinon.provider.v1alpha1.ListProvidersResponse
+	6,  // 23: koinon.provider.v1alpha1.ProviderService.CreateProvider:output_type -> koinon.provider.v1alpha1.CreateProviderResponse
+	8,  // 24: koinon.provider.v1alpha1.ProviderService.UpdateProvider:output_type -> koinon.provider.v1alpha1.UpdateProviderResponse
+	10, // 25: koinon.provider.v1alpha1.ProviderService.DeleteProvider:output_type -> koinon.provider.v1alpha1.DeleteProviderResponse
+	12, // 26: koinon.provider.v1alpha1.ProviderService.ListModels:output_type -> koinon.provider.v1alpha1.ListModelsResponse
+	14, // 27: koinon.provider.v1alpha1.ProviderService.CreateModel:output_type -> koinon.provider.v1alpha1.CreateModelResponse
+	16, // 28: koinon.provider.v1alpha1.ProviderService.UpdateModel:output_type -> koinon.provider.v1alpha1.UpdateModelResponse
+	18, // 29: koinon.provider.v1alpha1.ProviderService.DeleteModel:output_type -> koinon.provider.v1alpha1.DeleteModelResponse
+	20, // 30: koinon.provider.v1alpha1.ProviderService.ModelFormats:output_type -> koinon.provider.v1alpha1.ModelFormatsResponse
+	22, // [22:31] is the sub-list for method output_type
+	13, // [13:22] is the sub-list for method input_type
 	13, // [13:13] is the sub-list for extension type_name
 	13, // [13:13] is the sub-list for extension extendee
 	0,  // [0:13] is the sub-list for field type_name
@@ -1388,7 +1603,7 @@ func file_koinon_provider_v1alpha1_provider_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_provider_v1alpha1_provider_proto_rawDesc), len(file_koinon_provider_v1alpha1_provider_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

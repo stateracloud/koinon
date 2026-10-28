@@ -484,6 +484,9 @@ type Querier interface {
 	ListMCPTools(ctx context.Context, orgID pgtype.UUID) ([]McpTool, error)
 	ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfServerParams) ([]McpTool, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
+	// Every model no admin set the format of, in every org, with its provider's type (startup:
+	// catalog.RederiveFormats applies internal/modelformat to them).
+	ListModelsToRederiveFormat(ctx context.Context) ([]ListModelsToRederiveFormatRow, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
 	// The inbox: open questions asked to the user, newest first.
 	// Only those whose run is still parked: a question outlives no run (the sweep closes it, this
@@ -720,6 +723,9 @@ type Querier interface {
 	SetConnectionEnvelope(ctx context.Context, arg SetConnectionEnvelopeParams) (Connection, error)
 	// Names what a claimed key produced, in the same transaction as the claim.
 	SetDedupeEffect(ctx context.Context, arg SetDedupeEffectParams) error
+	// Changes the format of a model that is still not overridden, so a save that raced the startup
+	// re-derivation wins.
+	SetDerivedModelFormat(ctx context.Context, arg SetDerivedModelFormatParams) (int64, error)
 	SetLocalPassword(ctx context.Context, arg SetLocalPasswordParams) error
 	SetLocalUsername(ctx context.Context, arg SetLocalUsernameParams) error
 	SetMCPToolTier(ctx context.Context, arg SetMCPToolTierParams) (McpTool, error)

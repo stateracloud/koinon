@@ -414,6 +414,10 @@ func run() error {
 	if _, err := priceSvc.CompleteMigrated(ctx); err != nil {
 		return err
 	}
+	// Every model no admin set the format of follows the format table (ADR 0069).
+	if _, err := catalog.New(pool, nil, slog.Default()).RederiveFormats(ctx); err != nil {
+		return err
+	}
 	if _, err := services.SyncTemplates(ctx, pool, embedded); err != nil {
 		return err
 	}
