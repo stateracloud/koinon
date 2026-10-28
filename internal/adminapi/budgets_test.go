@@ -8,6 +8,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/prices"
 )
 
@@ -96,6 +97,27 @@ var _ = Describe("prices and budgets", func() {
 
 		st, raw = e.call(ctx, e.token, http.MethodGet, "/spend", nil)
 		Expect(st).To(Equal(http.StatusOK), string(raw))
+
+		By("the spend report puts the gateway's cost and the estimated output next to Koinon's cost")
+		agent, err := store.New(pool).CreateAgent(ctx, store.CreateAgentParams{OrgID: e.org, DisplayName: "a", Flavor: store.AgentFlavorOpencode, CreatedBy: e.user})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model,
+			input_tokens, output_tokens, cost_usd, gateway_cost_usd, priced, estimated, cost_flagged, occurred_at) VALUES
+			($1, $2, 'r1', 'k', 'm', 100, 10, 0.50, 0.50, true, false, false, now()),
+			($1, $2, 'r2', 'k', 'm', 100, 10, 0.30, 0.20, true, false, true, now()),
+			($1, $2, 'r3', 'k', 'm', 100, 32000, 0.08, NULL, true, true, true, now())`, e.org, agent.ID)
+		Expect(err).NotTo(HaveOccurred())
+		st, raw = e.call(ctx, e.token, http.MethodGet, "/spend", nil)
+		Expect(st).To(Equal(http.StatusOK), string(raw))
+		lines := decode[struct{ Models []map[string]any }](raw).Models
+		Expect(lines).To(HaveLen(1))
+		Expect(lines[0]).To(HaveKeyWithValue("reportedUsd", "0.80"))
+		Expect(lines[0]).To(HaveKeyWithValue("estimatedUsd", "0.08"))
+		Expect(lines[0]).To(HaveKeyWithValue("estimatedOutputTokens", BeNumerically("==", 32000)))
+		Expect(lines[0]).To(HaveKeyWithValue("gatewayRequests", BeNumerically("==", 2)))
+		Expect(lines[0]).To(HaveKeyWithValue("gatewayUsd", "0.70"))
+		Expect(lines[0]).To(HaveKeyWithValue("gatewayComparedUsd", "0.80"))
+		Expect(lines[0]).To(HaveKeyWithValue("flaggedRequests", BeNumerically("==", 2)))
 
 		var n int
 		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'budget.org_cap.set'`, e.org).Scan(&n)).To(Succeed())

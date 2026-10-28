@@ -660,10 +660,24 @@ type Source string
 
 // SpendLine defines model for SpendLine.
 type SpendLine struct {
-	EstimatedRequests int64 `json:"estimatedRequests"`
+	// EstimatedOutputTokens Output tokens of the estimated requests: an aborted response is settled at its max_tokens, an upper bound, so this is usually where the ledger is above the provider's bill.
+	EstimatedOutputTokens int64 `json:"estimatedOutputTokens"`
+	EstimatedRequests     int64 `json:"estimatedRequests"`
 
 	// EstimatedUsd Cost of requests whose usage was estimated. Counts toward limits.
 	EstimatedUsd string `json:"estimatedUsd"`
+
+	// FlaggedRequests Requests flagged for review (cost differs from the gateway's by more than 1%, usage missing, or an unusable price).
+	FlaggedRequests int64 `json:"flaggedRequests"`
+
+	// GatewayComparedUsd Koinon's cost of the same requests, to compare with gatewayUsd.
+	GatewayComparedUsd string `json:"gatewayComparedUsd"`
+
+	// GatewayRequests Requests agentgateway priced itself.
+	GatewayRequests int64 `json:"gatewayRequests"`
+
+	// GatewayUsd agentgateway's own cost of those requests.
+	GatewayUsd   string `json:"gatewayUsd"`
 	InputTokens  int64  `json:"inputTokens"`
 	Model        string `json:"model"`
 	OutputTokens int64  `json:"outputTokens"`

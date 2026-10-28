@@ -218,6 +218,8 @@ func (s *Server) GetSpendReport(ctx context.Context, req GetSpendReportRequestOb
 		out.Models = append(out.Models, SpendLine{
 			Model: r.Model, Requests: r.Requests, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens,
 			ReportedUsd: ledgerUSD(r.ReportedUsd), EstimatedUsd: ledgerUSD(r.EstimatedUsd), EstimatedRequests: r.EstimatedRequests,
+			EstimatedOutputTokens: r.EstimatedOutputTokens, GatewayRequests: r.GatewayRequests,
+			GatewayUsd: ledgerUSD(r.GatewayUsd), GatewayComparedUsd: ledgerUSD(r.GatewayComparedUsd), FlaggedRequests: r.FlaggedRequests,
 		})
 	}
 	return out, nil

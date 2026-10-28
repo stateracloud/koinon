@@ -146,9 +146,10 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 }
 
 // enforce checks the agent's daily limit, the org's monthly cap and the platform ceiling with
-// the entry just recorded, alerts at 80% and 100%, and cancels at the first limit reached: the
-// entry's run for the agent's limit, every open run of the org for an org-wide one.
-// agentgateway blocks the key's next request anyway; the cancel tells the task which limit.
+// the entry just recorded, alerts at 80% and 100%, and cancels at the first limit reached ([Stop]):
+// every open run of the agent for its limit, every open run of the org for an org-wide one.
+// agentgateway blocks the key's next request anyway; the cancel tells the task which limit, and
+// it commits before the reconciler it wakes can take the key out.
 func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, run store.FindRunAtRow, e Entry, delta money.USD) error {
 	var fallback money.USD
 	if run.AgentVersionID.Valid {
@@ -173,28 +174,19 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 	if err := budget.Alert(ctx, q, in.Notifier, st, delta); err != nil {
 		return err
 	}
-	// A limit cancels runs only in its current window: a late entry from last month reaching
-	// last month's cap must not cancel this month's runs.
-	// A level this entry has just crossed (spent before it was below the limit) wins over one that
-	// was already spent, so a late entry that crosses the org cap of an agent whose daily limit is
-	// long spent still cancels the org's runs and wakes the reconciler.
-	var l budget.Level
-	found, crossed := false, false
-	for _, r := range st.Reached() {
-		current := budget.MonthStart(in.now())
-		if r.Name == budget.AgentDaily {
-			current = budget.DayStart(in.now())
-		}
-		if !r.WindowStart.Equal(current) {
-			continue
-		}
-		crossing := r.Spent-delta < r.Limit
-		if !found || (crossing && !crossed) {
-			l, found, crossed = r, true, crossing
-		}
-	}
+	// The limit named is budget.Status.Pick's (the broadest reached in its current window: a late
+	// entry from last month reaching last month's cap cancels nothing). The reconciler is woken when
+	// this entry crossed any current level, so a late entry that crosses the org cap of an agent
+	// whose daily limit is long spent still wakes it.
+	l, found := st.Pick(in.now())
 	if !found {
 		return nil
+	}
+	crossed := false
+	for _, r := range st.Current(in.now()) {
+		if r.Spent-delta < r.Limit {
+			crossed = true
+		}
 	}
 	// The entry that reaches a limit wakes the reconciler, which recomputes every key's limit net of
 	// the spend and pushes it. Standalone agentgateway then blocks the key itself; in Kubernetes mode
@@ -205,49 +197,8 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 			return fmt.Errorf("wake the reconciler: %w", err)
 		}
 	}
-	msg := fmt.Sprintf("%s reached ($%s of $%s since %s)", limitTitle(l.Name), l.Spent, l.Limit, l.WindowStart.Format("2006-01-02 15:04 MST"))
-	extra := map[string]any{
-		"limit": l.Name, "spend_limit_usd": l.Limit.String(), "spent_usd": l.Spent.String(), "window_start": l.WindowStart.Format("2006-01-02T15:04:05Z"),
-	}
-	runs := []store.Run{}
-	if l.Name == budget.AgentDaily {
-		if !run.ID.Valid {
-			return nil
-		}
-		r := store.Run{OrgID: org, ID: run.ID}
-		runs = append(runs, r)
-	} else {
-		open, err := q.ListOpenRunsOfOrg(ctx, org)
-		if err != nil {
-			return err
-		}
-		runs = open
-	}
-	for _, r := range runs {
-		c, err := q.CancelRun(ctx, store.CancelRunParams{
-			OrgID: org, ID: r.ID, OutcomeReason: msg,
-			FailureClass: store.NullRunFailureClass{RunFailureClass: store.RunFailureClassBudget, Valid: true},
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue // already finished
-		} else if err != nil {
-			return err
-		}
-		if _, err := scheduler.RecordCancel(ctx, q, c, scheduler.ReasonSpendLimit, msg, scheduler.System, extra); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func limitTitle(level string) string {
-	switch level {
-	case budget.OrgMonthly:
-		return "org monthly cap"
-	case budget.PlatformCeiling:
-		return "platform ceiling"
-	}
-	return "agent daily limit"
+	_, err = Stop(ctx, q, org, agent, l)
+	return err
 }
 
 // templateLimit is the spendUSD of the agent's active version, for an agent without a run.

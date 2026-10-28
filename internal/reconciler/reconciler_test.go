@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -775,6 +776,54 @@ var _ = Describe("Reconciler", func() {
 		failing = true
 		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
 		Expect(mg.last().Limits[ref].Amount).To(BeZero(), "a positive last limit would not bind: the key is revoked")
+	})
+
+	It("stops a spent agent's runs with the budget reason before the key is revoked (#188)", func(ctx SpecContext) {
+		agent := newAgentWithConfig(ctx, org, user, `{"instructions":"help","limits":{"spendUSD":"1.00"}}`)
+		mg.ledgerBudgets = true
+		r := newReconciler()
+		pass(ctx, r)
+		row := sandboxRow(ctx, agent.ID)
+		first := queueRun(ctx, org, user, agent.ID)
+		running := claimRun(ctx, org)
+		Expect(running.ID).To(Equal(first.ID))
+		queued := queueRun(ctx, org, user, agent.ID)
+
+		// The limit runs out without an entry that reaches it in the ledger (an admin lowered it
+		// below the spend, or the spend has no run), so only the reconciler sees it.
+		_, err := pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model,
+			input_tokens, output_tokens, cost_usd, priced, occurred_at)
+			VALUES ($1, $2, $3, $4, 'm', 1, 1, 1.25, true, now())`, org, agent.ID, uniq("req"), row.GatewayKeyID.String)
+		Expect(err).NotTo(HaveOccurred())
+
+		var atRevoke []store.RunState
+		mg.onApply = func(s gateway.State) {
+			for ref, l := range s.Limits {
+				if ref.Name == agent.ID.String() && l.Amount <= 0 {
+					for _, id := range []pgtype.UUID{running.ID, queued.ID} {
+						got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: id})
+						Expect(err).NotTo(HaveOccurred())
+						atRevoke = append(atRevoke, got.State)
+					}
+				}
+			}
+		}
+		pass(ctx, r)
+		Expect(atRevoke).To(Equal([]store.RunState{store.RunStateCanceled, store.RunStateCanceled}),
+			"both runs are stopped when the gateway is told to revoke the key")
+		for _, id := range []pgtype.UUID{running.ID, queued.ID} {
+			got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: id})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
+			Expect(got.OutcomeReason.String).To(HavePrefix("agent daily limit reached ($1.25 of $1.00"))
+		}
+
+		By("the owner's late report of the gateway's 401 changes nothing")
+		_, err = q.FinishRun(ctx, store.FinishRunParams{
+			Outcome: store.RunStateFailed, OutcomeReason: pgtype.Text{String: "provider authentication required", Valid: true},
+			OrgID: org, ID: running.ID, Epoch: running.Epoch,
+		})
+		Expect(err).To(MatchError(pgx.ErrNoRows))
 	})
 
 	It("joins several rejections of one org into one message", func(ctx SpecContext) {
