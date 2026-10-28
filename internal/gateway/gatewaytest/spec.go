@@ -41,9 +41,6 @@ type Env struct {
 	// GatewayBudgets is true when the gateway itself blocks a key over its limit with 429 (standalone
 	// mode). In Kubernetes mode the ledger revokes the key instead, which that driver's own suite tests.
 	GatewayBudgets bool
-	// OrgTargetsNotContacted is true when an org's MCP server is not contacted at all for another
-	// org's key (standalone: a per-target condition). Without it only tool calls are denied.
-	OrgTargetsNotContacted bool
 }
 
 // Gateway is a started gateway under test.
@@ -196,7 +193,7 @@ func llmSpec(env Env) {
 			state.AddKey(keyA.Key)
 			state.AddKey(keyB.Key)
 			state.AddKey(keyG.Key)
-			state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 0.0015, Window: 24 * time.Hour})
+			state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 0.0015})
 			state.GrantTools(agentA, gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}})
 
 			gw, err := env.Start(ctx, []int{port(upstream), port(tools), port(ups["globex"].Server), port(ups["guarded"].Server), port(ups["private"].Server), port(redirector)},
@@ -621,14 +618,10 @@ func mcpServersSpec(env Env) {
 					Expect(res.IsError).To(BeTrue(), tool)
 				}
 			}
-			if env.OrgTargetsNotContacted {
-				// The globex server was not even contacted for the other org's key.
-				Expect(globexLog.values("X-Api-Key")).To(HaveLen(before))
-			} else {
-				// Kubernetes mode has no per-target condition (ADR 0058): the server may see the other
-				// org's initialize and list, with its owner's credential, but no tool call.
-				Expect(globexLog.values("Mcp-Method")).NotTo(ContainElement("tools/call"), "no call reached the server; saw %d requests", len(globexLog.values("Mcp-Method"))-callsBefore)
-			}
+			// The globex server was not even contacted for the other org's key (a per-target
+			// condition in both modes since agentgateway v1.7, ADR 0058).
+			Expect(globexLog.values("X-Api-Key")).To(HaveLen(before))
+			Expect(globexLog.values("Mcp-Method")).NotTo(ContainElement("tools/call"), "no call reached the server; saw %d requests", len(globexLog.values("Mcp-Method"))-callsBefore)
 		})
 
 		It("injects the credential header at the gateway and does not let the agent set it", func(ctx SpecContext) {
@@ -767,9 +760,7 @@ func loneTargetSpec(env Env) {
 			res, err := s.ListTools(ctx, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.Tools).To(BeEmpty())
-			if env.OrgTargetsNotContacted {
-				Expect(log.values("Mcp-Method")).To(HaveLen(before), "the server was not contacted for the other org's key")
-			}
+			Expect(log.values("Mcp-Method")).To(HaveLen(before), "the server was not contacted for the other org's key")
 			_, err = s.CallTool(ctx, &mcp.CallToolParams{Name: "acme-only_read_item"})
 			if err == nil {
 				Expect(log.values("Mcp-Method")).NotTo(ContainElement("tools/call"))

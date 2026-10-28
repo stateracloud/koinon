@@ -25,12 +25,14 @@ import (
 // amount is the remainder, never below zero. A remainder must not be charged against a total
 // that already holds the same spend, so the budget name carries a generation derived from the
 // day and a digest of the recorded spends: every new net amount starts a fresh counter in the
-// gateway, which then counts only spend the ledger has not seen yet.
+// gateway, which then counts only spend the ledger has not seen yet. The budget has no window
+// (agentgateway v1.7 never resets such a counter), so the gateway never grants an amount on its
+// own at midnight: a new day is a new counter only once the ledger has pushed one.
 //
 // Spend the gateway charged but the ledger has not recorded when the amount is computed (the
 // OTLP export lag, about a second) is in neither and can be overspent once more; the bound of
-// ADR 0041 grows by that lag. The window is 24 hours even when the monthly cap binds: the
-// amount is recomputed every pass, and a new UTC day starts a new counter.
+// ADR 0041 grows by that lag. The amount is recomputed every pass, and a new UTC day starts a
+// new counter, also when the monthly cap binds.
 //
 // Every key of an org is pushed the same org remaining, so while ingest is stalled N agents can
 // spend N times it before the gateway stops them; the ledger cancels the org's runs once it records
@@ -46,7 +48,7 @@ func AgentLimit(ctx context.Context, q *store.Queries, agent store.Agent, now ti
 	if !ok {
 		return nil, nil
 	}
-	l := gateway.USDLimit(net, budget.DayWindow, st.Generation(now))
+	l := gateway.USDLimit(net, st.Generation(now))
 	return &l, nil
 }
 

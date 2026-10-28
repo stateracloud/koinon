@@ -158,3 +158,24 @@ pod waits until the reconciler's next pass (at most the resync, 30 s by default)
 - ADRs [0040](0040-agentgateway-model-and-mcp-gateway.md), [0049](0049-v01-scope-decisions.md),
   [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0057](0057-mcp-servers.md)
 - Research: [agentgateway Kubernetes CRDs](../research/agentgateway-k8s-crds.md)
+
+## Amendment (2026-10-28): MCP isolation in Kubernetes mode is closed (agentgateway v1.7.0)
+
+agentgateway v1.7.0 adds MCP conditional targets to the Kubernetes CRDs
+(`AgentgatewayBackend.spec.mcp.targets[].condition`, a CEL expression evaluated per request; the
+CRD refuses a condition on a lone target unless it uses a selector). The "MCP isolation, stated
+plainly" gap above is closed:
+
+- the driver renders `apiKey.org == "<org>"` on every org-owned static target, the same expression
+  standalone mode uses; platform servers have no condition and stay visible to every key;
+- an org with a lone MCP server and no platform server would break the CRD rule, so the driver adds
+  the never-contacted partner `koinon-placeholder` (condition `false`), as standalone mode does;
+- the tool rules still drop grants that name another org's server. They are a second layer now, not
+  the only one;
+- another org's `initialize`, `ping` and list requests no longer reach the server, so the
+  "differences from standalone mode" no longer include MCP isolation.
+
+The shared gateway spec (`internal/gateway/gatewaytest`) now sets `OrgTargetsNotContacted` for both
+modes, and `hack/g2-kind.sh` runs it against controller v1.7.0 on kind. The standalone fix in the
+same release (conditions are evaluated on each request, not only when a session starts) hardens
+standalone mode.

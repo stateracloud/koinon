@@ -160,3 +160,25 @@ fails closed by default; its API is marked "still evolving".
 - https://agentgateway.dev/docs/kubernetes/main/llm/cost-controls/budget-limits/
 - https://github.com/NVIDIA/OpenShell/blob/main/docs/extensibility/supervisor-middleware/index.mdx
 - ADR 0009, ADR 0010, ADR 0011, ADR 0012, ADR 0013, ADR 0030, ADR 0040
+
+## Amendment (2026-10-28): agent budgets have no window (agentgateway v1.7.0)
+
+agentgateway v1.7.0 lets a per-key budget omit `window`: its usage then accumulates for the lifetime
+of the budget name and never resets. Koinon had been emulating exactly that with a 24-hour window
+plus a generation in the budget name. The generation (the UTC day plus a digest of the recorded
+spends, `budget.Status.Generation`) already starts a fresh counter whenever the net amount or the day
+changes, so the window was redundant, and it let the gateway reset a counter at midnight by itself and
+regrant a net amount the ledger had not recomputed.
+
+Decision: the ledger pushes the agent budget without a window (`gateway.Limit.Window` zero is "never
+resets"; `ledger.AgentLimit`, the fail-closed limits). The Generation design is unchanged and is now
+the only thing that starts a counter over. Consequences:
+
+- a new UTC day is a fresh counter only after the reconciler has pushed it, so the gateway never
+  grants budget the ledger did not compute; an exhausted key stays blocked until that push;
+- the reload-probe key and tests that name a window keep it (windows remain supported);
+- org monthly and platform caps are still enforced by the ledger (net remainders pushed per key), so
+  the open question on their window semantics is answered: the ledger owns windows, the gateway
+  counts spend since the last push.
+
+Counters are still never deleted (agentgateway has no API for it); ADR 0056 notes the cost.

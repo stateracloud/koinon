@@ -160,7 +160,7 @@ preflight:
   agentSandbox:
     namespace: agent-sandbox-system
     controller: agent-sandbox-controller
-  # Where agentgateway's controller runs (gateway.mode=kubernetes); its image tag must be v1.6.x. The
+  # Where agentgateway's controller runs (gateway.mode=kubernetes); its image tag must be v1.7.x. The
   # proxy's NetworkPolicy also admits egress to this namespace, where the proxy fetches its xDS
   # configuration.
   agentgateway:
@@ -225,7 +225,7 @@ postgres:
 gateway:
   # The gateway modes are decided in ADR 0049 and ADR 0058.
   # standalone: the chart installs agentgateway, configured by the reconciler.
-  # kubernetes: use an existing agentgateway controller (v1.6.x, with its CRDs, and a GatewayClass).
+  # kubernetes: use an existing agentgateway controller (v1.7.x, with its CRDs, and a GatewayClass).
   # The chart renders no gateway; the reconciler creates Koinon's own Gateway, AgentgatewayModels,
   # AgentgatewayPolicies, AgentgatewayBackend, HTTPRoute and key ConfigMaps in this namespace and never
   # touches other gateways (plan item G2). There is no fallback to standalone: the install preflight
@@ -235,10 +235,16 @@ gateway:
   standalone:
     image:
       repository: ghcr.io/agentgateway/agentgateway
-      tag: v1.6.0
-      digest: sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c
+      tag: v1.7.0
+      digest: sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
     # LLM and MCP listener.
     port: 8080
+    # The key that encrypts MCP session IDs (agentgateway v1.7 always encrypts them; SESSION_KEY).
+    # By default the ensure-secrets hook Job generates the Secret koinon-gateway-session-key (key
+    # "key": 64 hex characters, `openssl rand -hex 32`) and never changes it. existingSecret names
+    # your own Secret with that key instead.
+    sessionKey:
+      existingSecret: ""
     # SQLite budget store; one replica only.
     persistence:
       size: 1Gi

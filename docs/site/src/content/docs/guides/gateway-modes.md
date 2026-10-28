@@ -16,7 +16,7 @@ changes how the gateway runs, not what Koinon does
 
 ## Standalone
 
-The chart installs agentgateway v1.6.0, pinned by digest, as one replica with a small PVC for its
+The chart installs agentgateway v1.7.0, pinned by digest, as one replica with a small PVC for its
 budget database (SQLite). Koinon writes its whole configuration: the models, the keys of each agent
 with their limits, and the tool routes. Use this mode when the cluster has no agentgateway.
 
@@ -35,13 +35,13 @@ Run one replica only. The budget database is not shared.
 For clusters that already run the agentgateway controller. Koinon creates its own `Gateway` and the
 objects around it in its namespace and never touches the gateways of others.
 
-You install, before Koinon, agentgateway **v1.6.x** with its CRDs and Gateway API v1.4 or newer. The
+You install, before Koinon, agentgateway **v1.7.x** with its CRDs and Gateway API v1.4 or newer. The
 tested install is:
 
 ```sh
 kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.0/standard-install.yaml
-helm upgrade -i agentgateway-crds oci://cr.agentgateway.dev/charts/agentgateway-crds --version v1.6.0 -n agentgateway-system --create-namespace
-helm upgrade -i agentgateway oci://cr.agentgateway.dev/charts/agentgateway --version v1.6.0 -n agentgateway-system
+helm upgrade -i agentgateway-crds oci://cr.agentgateway.dev/charts/agentgateway-crds --version v1.7.0 -n agentgateway-system --create-namespace
+helm upgrade -i agentgateway oci://cr.agentgateway.dev/charts/agentgateway --version v1.7.0 -n agentgateway-system
 ```
 
 ```yaml chart-values
@@ -52,7 +52,7 @@ gateway:
 ```
 
 The mode is explicit and there is no fallback. The install preflight fails, with the fix, when the
-`GatewayClass`, the four `agentgateway.dev/v1alpha1` CRDs or a v1.6.x controller are missing. If the
+`GatewayClass`, the four `agentgateway.dev/v1alpha1` CRDs or a v1.7.x controller are missing. If the
 controller does not run in `agentgateway-system` as `agentgateway`, set `preflight.agentgateway.namespace`
 and `.controller`.
 
@@ -84,11 +84,6 @@ Every org keeps its plain model names; the gateway picks the org's own model fro
   runs a pass). At ten requests a second of $0.001 that was four requests past the limit on kind, without
   the database time. Standalone mode stops a key after at most one response. A proxy restart cannot reset
   spend: the ledger holds it, and a revoked key stays out of the key list.
-- **MCP servers are less isolated between orgs.** Standalone mode does not contact an org's MCP server
-  for another org's agents at all. Here a call to a tool the agent has no grant for is denied, and an
-  agent lists only its granted tools, but another org's session setup (`initialize`, `ping`) can reach the
-  server, which then sees it with its owner's credential. If an MCP server must never see another org's
-  traffic, use standalone mode.
 - **A rejected object does not stop the others.** If the controller or the API server refuses one org's
   model or keys, that org's agents show the reason in their status and in the reconciler's log, and every
   other org is served. A refused object that is not an org's (the Gateway itself, the MCP backend) fails

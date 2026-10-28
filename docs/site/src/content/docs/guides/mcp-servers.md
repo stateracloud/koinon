@@ -137,4 +137,4 @@ policy on, in `networkPolicy.gatewayEgressTo`. Public servers need neither.
   resource metadata URL) and refuses it with a message. v0.2.
 
 See [ADR 0057](https://github.com/stateracloud/koinon/blob/main/docs/adr/0057-mcp-servers.md) for the
-decisions and what agentgateway v1.6.0 does.
+decisions and what agentgateway v1.7.0 does.

@@ -309,6 +309,11 @@
               }
             },
             "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "sessionKey": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"existingSecret": {"type": "string"}}
+            },
             "persistence": {
               "type": "object",
               "additionalProperties": false,
