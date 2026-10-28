@@ -53,6 +53,15 @@ link, and before every prompt agentd checks the file's hash and restores it (eve
 whose descriptor sets `InstructionLink`, agentd also checks that link
 (`internal/agentd`, `instructionLink`) and restores it.
 
+The OpenCode image also ships data tools for large inputs: jq, yq, fd, ast-grep, DuckDB (behind
+a wrapper that limits its memory and turns extension downloads off), sqlite3, poppler-utils
+(`pdftotext`, `pdfinfo`), file, tree, unzip, zstd, xz-utils and a standard-library-only
+`python3`, with no pip and no formatter. Versions, licences (poppler is GPL, shipped unmodified
+from Ubuntu, like git and bash), pins and the size cost are in
+[`opencode/README.md`](opencode/README.md#tools-in-the-image); koinon-agentd's instruction file
+tells the agent how to use them. The contract suite runs each tool without a network
+(`test/flavors/tools_test.go`) and fails when an image outgrows its size budget.
+
 Before agentd starts a harness, it ends every process the sandbox user runs except PID 1 and
 the sandbox's main process (`internal/agentd/sweep.sh`), so a run starts with nothing left of an
 earlier one: no harness daemon, no background job of the agent's that could change the home
