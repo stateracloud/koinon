@@ -310,6 +310,11 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 			`OPENCODE_CONFIG_CONTENT={"plugins":["/sandbox/.config/opencode/plugins/one"],"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
 	})
 
+	It("sends the run ID as the body field session_id with --session-id", func(ctx SpecContext) {
+		Expect(entryEnv(ctx, "--session-id", "01234567-run")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"body":{"session_id":"01234567-run"}}}}` + "\n"))
+	})
+
 	It("keeps the model key from OpenCode's built-in providers", func(ctx SpecContext) {
 		env := entryEnv(ctx)
 		Expect(env).NotTo(ContainSubstring("OPENAI_API_KEY="))

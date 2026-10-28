@@ -47,6 +47,17 @@ var _ = Describe("Runs without prompt caching", func() {
 		Expect(string(got[0].Payload)).To(And(ContainSubstring(model), ContainSubstring("provider format")))
 	})
 
+	It("records run.uncached with the Anthropic reason for direct anthropic", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		setup(ctx, e, "anthropic")
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		got := uncached(ctx, r)
+		Expect(got).To(HaveLen(1))
+		Expect(string(got[0].Payload)).To(ContainSubstring("does not cache; use OpenRouter"))
+	})
+
 	It("records nothing for a provider that caches by itself", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		setup(ctx, e, "openai")

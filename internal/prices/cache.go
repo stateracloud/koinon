@@ -27,6 +27,9 @@ const (
 	CacheAnthropic CacheMode = "anthropic"
 	// CacheAlibaba: the request needs Alibaba (Qwen) cache_control breakpoints.
 	CacheAlibaba CacheMode = "alibaba"
+	// CacheUnsupported: the provider format cannot cache at all today. cacheUnsupported holds the
+	// reason; the model runs uncached and the save-time warning and run.uncached say why.
+	CacheUnsupported CacheMode = "unsupported"
 	// CacheUnknown: the model has a cache_read price but its provider format is not mapped here.
 	// Add its mode to cacheModeOf before listing the model with cache prices.
 	CacheUnknown CacheMode = "unknown"
@@ -38,6 +41,12 @@ func (m CacheMode) Marker() string {
 		return string(m)
 	}
 	return ""
+}
+
+// cacheUnsupported is the reason, by provider type, why a format maps to CacheUnsupported.
+// Every provider type that cacheModeOf maps to CacheUnsupported needs an entry.
+var cacheUnsupported = map[string]string{
+	"anthropic": "Anthropic's OpenAI-compatible endpoint does not cache; use OpenRouter until the native Anthropic route lands",
 }
 
 // CacheModeFor is the cache mode of a resolved model: CacheNone without a cache_read price,
@@ -54,7 +63,9 @@ func CacheModeFor(providerType, model string, p pricing.Price) CacheMode {
 func cacheModeOf(providerType, model string) CacheMode {
 	switch providerType {
 	case "anthropic":
-		return CacheAnthropic
+		// Anthropic's OpenAI-compatible endpoint does not cache. A native Messages route will
+		// flip this to CacheAnthropic.
+		return CacheUnsupported
 	case "openai", "deepseek":
 		return CacheAuto
 	case "openrouter":
@@ -74,6 +85,9 @@ func cacheModeOf(providerType, model string) CacheMode {
 // UncachedReason is the text recorded and shown when a model with a cache price runs without
 // prompt caching because its provider format has no cache mode.
 func UncachedReason(providerType, model string) string {
+	if r, ok := cacheUnsupported[providerType]; ok && cacheModeOf(providerType, model) == CacheUnsupported {
+		return r
+	}
 	return "the model has a cache_read price but Koinon has no way to turn on prompt caching for " +
 		"provider format \"" + providerType + "\" and model \"" + model + "\"; it runs without caching (ADR 0068)"
 }
@@ -89,7 +103,7 @@ func EntryWarnings(e pricing.Entry) []string {
 		name = e.Match.Regex
 	}
 	// A glob such as "google/*" names a vendor; probe with its literal prefix.
-	if cacheModeOf(e.Provider, strings.TrimRight(name, "*?")) != CacheUnknown {
+	if !isUncached(cacheModeOf(e.Provider, strings.TrimRight(name, "*?"))) {
 		return nil
 	}
 	return []string{"Price " + e.ID + ": " + UncachedReason(e.Provider, name)}
@@ -106,8 +120,17 @@ func (s *Service) ModelWarnings(ctx context.Context, org pgtype.UUID, providerID
 	if err != nil {
 		return nil
 	}
-	if CacheModeFor(prov.Type, name, res.Price) != CacheUnknown {
+	if !isUncached(CacheModeFor(prov.Type, name, res.Price)) {
 		return nil
 	}
 	return []string{"Model " + name + ": " + UncachedReason(prov.Type, name)}
 }
+
+// isUncached is true for the modes in which a model with a cache price still runs uncached.
+func isUncached(m CacheMode) bool { return m == CacheUnknown || m == CacheUnsupported }
+
+// Uncached reports whether a model with a cache price runs without caching (see Marker).
+func (m CacheMode) Uncached() bool { return isUncached(m) }
+
+// CacheUnsupportedReason returns the reason a provider type maps to CacheUnsupported, or "".
+func CacheUnsupportedReason(providerType string) string { return cacheUnsupported[providerType] }

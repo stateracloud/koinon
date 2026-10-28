@@ -44,6 +44,12 @@ var _ = Describe("prompt caching of the default price list", func() {
 			})
 			Expect(err).NotTo(HaveOccurred(), r.Entry.ID)
 			switch mode {
+			case prices.CacheUnsupported:
+				// Allowed only with an explicit reason in the mapping (it is what the warning and
+				// run.uncached show).
+				Expect(prices.CacheUnsupportedReason(r.Entry.Provider)).NotTo(BeEmpty(),
+					"%s maps to CacheUnsupported without a reason: add one to cacheUnsupported in internal/prices/cache.go", r.Entry.ID)
+				Expect(cmd).NotTo(ContainElement(HavePrefix("--cache-")), "%s cannot cache", r.Entry.ID)
 			case prices.CacheAuto:
 				Expect(cmd).NotTo(ContainElement(HavePrefix("--cache-")), "%s caches by itself", r.Entry.ID)
 			default:
@@ -57,7 +63,7 @@ var _ = Describe("prompt caching of the default price list", func() {
 			p := pricingWithCacheRead()
 			Expect(prices.CacheModeFor(provider, model, p)).To(Equal(want))
 		},
-		Entry("anthropic", "anthropic", "claude-haiku-5-5", prices.CacheAnthropic),
+		Entry("direct anthropic: its OpenAI-compatible endpoint does not cache", "anthropic", "claude-haiku-5-5", prices.CacheUnsupported),
 		Entry("openrouter anthropic", "openrouter", "anthropic/claude-haiku-5.5", prices.CacheAnthropic),
 		Entry("openrouter qwen", "openrouter", "qwen/qwen4", prices.CacheAlibaba),
 		Entry("openai", "openai", "gpt-6-luna", prices.CacheAuto),
@@ -68,6 +74,24 @@ var _ = Describe("prompt caching of the default price list", func() {
 
 	It("leaves a model without a cache_read price alone", func() {
 		Expect(prices.CacheModeFor("anthropic", "claude-haiku-5-5", pricing.Price{})).To(Equal(prices.CacheNone))
+	})
+
+	It("explains why direct Anthropic is uncached", func() {
+		Expect(prices.UncachedReason("anthropic", "claude-haiku-5-5")).To(Equal(
+			"Anthropic's OpenAI-compatible endpoint does not cache; use OpenRouter until the native Anthropic route lands"))
+		Expect(prices.CacheUnsupported.Uncached()).To(BeTrue())
+		Expect(prices.CacheUnsupported.Marker()).To(BeEmpty())
+	})
+
+	It("passes the run ID as --session-id, and nothing without one", func() {
+		e := agentd.Endpoints{ModelBaseURL: "http://gw.test/v1", Model: "m", MCPURL: "http://gw.test/mcp", SessionID: "run-1"}
+		cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, e)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cmd[len(cmd)-2:]).To(Equal([]string{"--session-id", "run-1"}))
+		e.SessionID = ""
+		cmd, err = agentd.LaunchCommand(store.AgentFlavorOpencode, e)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cmd).NotTo(ContainElement("--session-id"))
 	})
 
 	It("refuses a marker the flavor has no switch for", func() {
