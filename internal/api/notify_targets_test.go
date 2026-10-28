@@ -122,10 +122,12 @@ var _ = Describe("notify targets", func() {
 	})
 
 	Describe("ListAskableMembers", func() {
-		It("lists members, admins and owners, and not viewers", func(ctx SpecContext) {
+		It("lists members, admins and owners to admins, and to no one below", func(ctx SpecContext) {
 			viewer := e.userIn(ctx, f.org, store.OrgRoleViewer)
 			member := e.userIn(ctx, f.org, store.OrgRoleMember)
-			res, err := member.questions.ListAskableMembers(ctx, &questionv1alpha1.ListAskableMembersRequest{OrgId: f.org})
+			_, err := member.questions.ListAskableMembers(ctx, &questionv1alpha1.ListAskableMembersRequest{OrgId: f.org})
+			Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied), "the directory is for admins")
+			res, err := admin.questions.ListAskableMembers(ctx, &questionv1alpha1.ListAskableMembersRequest{OrgId: f.org})
 			Expect(err).NotTo(HaveOccurred())
 			var ids []string
 			for _, m := range res.GetMembers() {

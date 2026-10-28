@@ -578,7 +578,7 @@ export const QuestionService: GenService<{
   },
   /**
    * ListAskableMembers lists the org's members who can answer questions (member role or higher), for
-   * picking a trigger's notify target. Members and above.
+   * picking a trigger's notify target. Admins and above.
    *
    * @generated from rpc koinon.question.v1alpha1.QuestionService.ListAskableMembers
    */
