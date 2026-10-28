@@ -35,10 +35,7 @@ func Stop(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, l budge
 	if err != nil {
 		return 0, fmt.Errorf("list open runs: %w", err)
 	}
-	msg := fmt.Sprintf("%s reached ($%s of $%s since %s)", limitTitle(l.Name), l.Spent, l.Limit, l.WindowStart.Format("2006-01-02 15:04 MST"))
-	extra := map[string]any{
-		"limit": l.Name, "spend_limit_usd": l.Limit.String(), "spent_usd": l.Spent.String(), "window_start": l.WindowStart.Format("2006-01-02T15:04:05Z"),
-	}
+	msg, extra := l.StopMessage(), l.StopDetail()
 	n := 0
 	for _, r := range runs {
 		c, err := q.CancelRun(ctx, store.CancelRunParams{

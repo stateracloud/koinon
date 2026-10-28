@@ -112,3 +112,18 @@ func TestPickNamesTheBroadestLimitReachedInItsCurrentWindow(t *testing.T) {
 		t.Error("yesterday's limit: nothing picked")
 	}
 }
+
+func TestStopMessageAndDetailNameTheLevel(t *testing.T) {
+	l := lv(budget.OrgMonthly, "3.50", "3.6")
+	l.WindowStart = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	if got := l.StopMessage(); got != "org monthly cap reached ($3.60 of $3.50 since 2026-10-01 00:00 UTC)" {
+		t.Fatal(got)
+	}
+	d := l.StopDetail()
+	if d["limit"] != budget.OrgMonthly || d["spend_limit_usd"] != "3.50" || d["spent_usd"] != "3.60" || d["window_start"] != "2026-10-01T00:00:00Z" {
+		t.Fatalf("%v", d)
+	}
+	if (budget.Level{Name: budget.AgentDaily}).Title() != "agent daily limit" || (budget.Level{Name: budget.PlatformCeiling}).Title() != "platform ceiling" {
+		t.Fatal("titles")
+	}
+}

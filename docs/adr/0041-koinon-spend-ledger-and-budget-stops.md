@@ -103,12 +103,17 @@ rejecting pre-request reservation. What the data showed, and what changes:
    with no run, a run queued or parked while the budget was spent. Queued and parked runs of the
    scope are canceled too, as the org-wide limit already did (ADR 0056 decision 8): they would
    start or resume on a key that has nothing left. A budget that could not be computed fails closed
-   but stops nothing, because it is not known to be spent. agentd separately reports a 401 or 429
-   from the gateway as a budget stop (rc.6). The data does not show why the key went at 07:58:32:
-   the ledger had the agent at about $2.36 of $2.40 then, and the next run spent 90 s on the same
-   key before the ledger stopped it at $2.4039. A pass that failed closed (Kubernetes mode fails
-   closed to zero at once) fits; the reconciler logs `agent budget not computed` or `keys out of
-   budget are revoked from the gateway` will tell next time.
+   but stops nothing, because it is not known to be spent. When several limits are reached, a
+   stop names the one `budget.Status.Pick` returns: of the limits reached in their current window
+   (`Status.Current`), the broadest scope first (platform ceiling, then org monthly cap, then agent
+   daily limit), because it decides which runs stop and raising a narrower limit alone would not
+   let the agent run again. The ledger and the reconciler use it, with the stop message and detail
+   of `budget.Level`; agentd adopts the same helpers in rc.6's agentd change. agentd separately
+   reports a 401 or 429 from the gateway as a budget stop (rc.6). The data does not show why the
+   key went at 07:58:32: the ledger had the agent at about $2.36 of $2.40 then, and the next run
+   spent 90 s on the same key before the ledger stopped it at $2.4039. A pass that failed closed
+   (Kubernetes mode fails closed to zero at once) fits; the reconciler logs `agent budget not
+   computed` or `keys out of budget are revoked from the gateway` will tell next time.
 4. **The ledger above the provider's bill.** At the first snapshot the ledger and OpenRouter agreed
    (+$1.3843 against +$1.3825, 78 requests, many in the >100k tier, no estimates), so the price list,
    the tier and the cache rates are right. By the end the ledger had two estimated entries, one in
@@ -130,8 +135,9 @@ rejecting pre-request reservation. What the data showed, and what changes:
    ORDER BY occurred_at;
    ```
 
-   Follow-up (not decided): settling a response that Koinon itself cut short at less than its
-   `max_tokens`, for example from the provider's own usage report when one exists.
+   Follow-up (open): billing a response that Koinon itself cut short by its real usage and
+   reconciling it with the provider's own figure. Andre decided the direction (2026-10-28); how to
+   measure what a cut stream delivered waits on research into gateways other than agentgateway.
 
 ## Open questions
 
