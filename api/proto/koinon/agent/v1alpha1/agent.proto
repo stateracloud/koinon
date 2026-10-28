@@ -41,6 +41,22 @@ service AgentService {
   // only.
   rpc ResumeAgent(ResumeAgentRequest) returns (ResumeAgentResponse);
 
+  // GetAgentModel says which model the agent's next run uses and where that choice comes from, and
+  // lists the models an admin may pick. Admins and owners only.
+  rpc GetAgentModel(GetAgentModelRequest) returns (GetAgentModelResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // SetAgentModel sets the agent's model, or clears it with "default". It is a setting of the
+  // agent, not a new version: it applies to the agent's next run. The model must be one the org
+  // serves and has a price for. Audited, with the old and the new value. Admins and owners only.
+  rpc SetAgentModel(SetAgentModelRequest) returns (SetAgentModelResponse);
+
+  // RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
+  // at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
+  // Admins and owners only.
+  rpc RunAgentTrigger(RunAgentTriggerRequest) returns (RunAgentTriggerResponse);
+
   // ArchiveAgent archives a draft or active agent and cancels its unfinished
   // runs. Admins and owners only.
   rpc ArchiveAgent(ArchiveAgentRequest) returns (ArchiveAgentResponse);
@@ -92,6 +108,9 @@ message Agent {
   // Set while the agent's sandbox and volume are archived (ADR 0032 amendment): the home is in
   // its last checkpoint and the next run restores it into a fresh sandbox.
   google.protobuf.Timestamp sandbox_archived_at = 23;
+  // The agent's own model setting (SetAgentModel); empty when it follows the version and the org
+  // default. When set it wins over `model`, which is the latest version's.
+  string model_setting = 24;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -206,4 +225,70 @@ message SetAgentTriggersRequest {
 // SetAgentTriggersResponse holds the agent with its new proposed version.
 message SetAgentTriggersResponse {
   Agent agent = 1;
+}
+
+// ModelSource says where an agent's effective model comes from, in order of precedence.
+enum ModelSource {
+  MODEL_SOURCE_UNSPECIFIED = 0;
+  // The agent's own setting (SetAgentModel).
+  MODEL_SOURCE_AGENT = 1;
+  // The model of the agent's active version (a template's spec.model).
+  MODEL_SOURCE_VERSION = 2;
+  // The org default: the first model the org serves and has a price for.
+  MODEL_SOURCE_ORG_DEFAULT = 3;
+  // Nothing: the org serves no priced model, so a run would fail.
+  MODEL_SOURCE_NONE = 4;
+}
+
+// GetAgentModelRequest names an agent.
+message GetAgentModelRequest {
+  string org_id = 1;
+  string agent_id = 2;
+}
+
+// ServedModel is a model the org serves and has a price for.
+message ServedModel {
+  string name = 1;
+  string provider = 2;
+}
+
+// GetAgentModelResponse is the agent's model setting and what it resolves to.
+message GetAgentModelResponse {
+  // The agent's setting; empty for default.
+  string setting = 1;
+  // The active version's model; empty when the version names none ("default" in a template).
+  string version_model = 2;
+  // The model the next run uses; empty with MODEL_SOURCE_NONE.
+  string effective = 3;
+  ModelSource source = 4;
+  // Set when the agent's setting is no longer served or priced: runs fail until it is changed.
+  string problem = 5;
+  // Models the org serves and has a price for, by provider and name: the picker's choices.
+  repeated ServedModel available = 6;
+}
+
+// SetAgentModelRequest sets the agent's model.
+message SetAgentModelRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // "default" (or empty) clears the setting; otherwise a model the org serves and has a price for.
+  string model = 3;
+}
+
+// SetAgentModelResponse holds the result, as GetAgentModel would return it.
+message SetAgentModelResponse {
+  GetAgentModelResponse model = 1;
+}
+
+// RunAgentTriggerRequest names the trigger to fire.
+message RunAgentTriggerRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // The trigger's ID in the agent's active version. It must be a schedule trigger.
+  string trigger_id = 3;
+}
+
+// RunAgentTriggerResponse names the task the fire created.
+message RunAgentTriggerResponse {
+  string task_id = 1;
 }

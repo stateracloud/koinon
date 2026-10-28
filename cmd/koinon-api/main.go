@@ -76,6 +76,7 @@ import (
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
@@ -141,7 +142,9 @@ type config struct {
 	// egressAllowedHosts and its deprecated alias providerAllowedHosts are joined: internal hosts that
 	// providers and MCP servers may name.
 	// gatewayMCPURL is agentgateway's MCP endpoint as koinon-api reaches it, for approved MCP calls.
-	gatewayMCPURL        string
+	gatewayMCPURL string
+	// gatewayURL is agentgateway's LLM listener, for the provider echo check.
+	gatewayURL           string
 	egressAllowedHosts   string
 	providerAllowedHosts string
 }
@@ -213,6 +216,7 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.githubAPIURL, "github-api-url", github.DefaultBaseURL, "GitHub REST API base URL")
 	fs.StringVar(&c.kekSecret, "kek-secret", "",
 		"Secret with the key-encryption keys, read through the Kubernetes API; takes precedence over --kek-dir")
+	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener as koinon-api reaches it (for example http://koinon-gateway.koinon.svc:8080), for the provider echo check; empty disables the check")
 	fs.StringVar(&c.gatewayMCPURL, "gateway-mcp-url", "", "agentgateway's MCP endpoint, for the calls humans approved on remote MCP servers; empty disables them")
 	fs.StringVar(&c.egressAllowedHosts, "egress-allowed-hosts", "",
 		"comma-separated hosts (optionally host:port) that providers and MCP servers may name although they are internal "+
@@ -555,8 +559,21 @@ func run() error {
 	catalogSvc := catalog.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy)
 	// A server that asks each user to sign in is refused when it is added (v0.2 brings per-user OAuth).
 	mcpSvc := mcpservers.New(pool, catalogKeys, slog.Default()).WithURLPolicy(urlPolicy).WithPreflight(mcpservers.OAuthPreflight(urlPolicy))
+	// The provider echo check sends one request through the gateway with the org's check key, which
+	// the reconciler keeps in a Secret (package modelcheck). Without a gateway URL or Kubernetes
+	// access the check answers that it is not configured.
+	var echo *modelcheck.Service
+	if cfg.gatewayURL != "" && kube != nil {
+		echo = modelcheck.New(pool, modelcheck.GatewayChat{
+			URL: cfg.gatewayURL, Keys: modelcheck.KubeKeys{Client: kube, Namespace: cfg.secretsNamespace},
+			HTTP: &http.Client{Timeout: 90 * time.Second},
+		}, prices.NewResolver(pricing.Embedded()))
+	} else {
+		echo = modelcheck.New(pool, nil, prices.NewResolver(pricing.Embedded()))
+	}
 	svc := services.New(pool, services.Options{
-		Hub: hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
+		ModelCheck: echo,
+		Hub:        hub, WatchPollInterval: cfg.watchPoll, Keys: keys, Tokens: tokenSvc, Hosts: hosts, Approvals: approvalSvc, Catalog: catalogSvc, MCP: mcpSvc, Notifier: notifier, DirectMessages: directMessages, URLPolicy: urlPolicy, Prices: pricing.Embedded(),
 	})
 	// The notification of an opened question (the park that opens it commits in koinon-agentd).
 	safego.GoOrStop(bgCtx, slog.Default(), "question-sweeper", stop, func(ctx context.Context) { svc.QuestionSweeper(ctx, cfg.sweepInterval) })
@@ -575,7 +592,7 @@ func run() error {
 	} else {
 		slog.Warn("no Kubernetes access: declarative Secrets are not imported")
 	}
-	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc)
+	adminSvc := adminapi.New(pool, catalogSvc, tokenSvc, slog.Default(), pricing.Embedded()).WithMCP(mcpSvc).WithTriggers(svc).WithModelCheck(echo)
 
 	reg := metrics.NewRegistry()
 	if err := metrics.Serve(bgCtx, cfg.metricsAddr, reg, slog.Default()); err != nil {
