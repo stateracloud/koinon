@@ -237,6 +237,9 @@ env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:4
 has "preflight checks the agentgateway controller" '--agentgateway-controller=agentgateway$' "${k8s[@]}" --show-only templates/preflight.yaml
 has "preflight may read the agentgateway CRDs" 'agentgatewaymodels.agentgateway.dev$' "${k8s[@]}" --show-only templates/preflight.yaml
 env_is KOINON_GATEWAY_MCP_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080/mcp"'
+# koinon-api reaches the gateway's LLM listener for the provider echo check, on the same host and port.
+env_is KOINON_GATEWAY_URL '"http://koinon-gateway.koinon.svc.cluster.local:8080"'
+env_is KOINON_GATEWAY_URL '"http://koinon-gateway.koinon.svc.cluster.local:4000"' "${k8s[@]}"
 has "gateway.kubernetes.port is used" 'url: http://koinon-gateway.koinon.svc.cluster.local:4001$' "${k8s[@]}" --set gateway.kubernetes.port=4001 --show-only templates/config.yaml
 # Metrics (issue #106, ADR 0023): every component has a "metrics" container port and a Service of its
 # own; the ServiceMonitors are off by default and need the CRD; the NetworkPolicies admit the port only

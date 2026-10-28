@@ -21,6 +21,14 @@ const (
 	BearerAuthScopes = "bearerAuth.Scopes"
 )
 
+// Defines values for AgentModelSource.
+const (
+	AgentModelSourceAgent      AgentModelSource = "agent"
+	AgentModelSourceNone       AgentModelSource = "none"
+	AgentModelSourceOrgDefault AgentModelSource = "org_default"
+	AgentModelSourceVersion    AgentModelSource = "version"
+)
+
 // Defines values for AuditEventActorKind.
 const (
 	AuditEventActorKindAgent  AuditEventActorKind = "agent"
@@ -28,6 +36,13 @@ const (
 	AuditEventActorKindSystem AuditEventActorKind = "system"
 	AuditEventActorKindToken  AuditEventActorKind = "token"
 	AuditEventActorKindUser   AuditEventActorKind = "user"
+)
+
+// Defines values for EchoCheckDiffOp.
+const (
+	Deleted  EchoCheckDiffOp = "deleted"
+	Equal    EchoCheckDiffOp = "equal"
+	Inserted EchoCheckDiffOp = "inserted"
 )
 
 // Defines values for ErrorCode.
@@ -144,6 +159,39 @@ type AgentMcpServers struct {
 	} `json:"servers"`
 }
 
+// AgentModel defines model for AgentModel.
+type AgentModel struct {
+	// Available The models the org serves and has a price for.
+	Available []struct {
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+	} `json:"available"`
+
+	// Effective The model the next run uses; empty when `source` is `none`.
+	Effective string `json:"effective"`
+
+	// Problem Set when the agent's setting is no longer served or priced; runs fail until it is changed.
+	Problem *string `json:"problem,omitempty"`
+
+	// Setting The agent's own setting; `default` when it has none.
+	Setting string `json:"setting"`
+
+	// Source Where `effective` comes from, in order of precedence.
+	Source AgentModelSource `json:"source"`
+
+	// VersionModel The active version's model; unset when it names none.
+	VersionModel *string `json:"versionModel,omitempty"`
+}
+
+// AgentModelSource Where `effective` comes from, in order of precedence.
+type AgentModelSource string
+
+// AgentModelUpdate defines model for AgentModelUpdate.
+type AgentModelUpdate struct {
+	// Model `default`, or a model the org serves and has a price for.
+	Model string `json:"model"`
+}
+
 // AuditEvent defines model for AuditEvent.
 type AuditEvent struct {
 	// Action <area>.<verb>, for example approval.approve.
@@ -192,6 +240,37 @@ type DefaultPrices struct {
 	Entries          []PriceEntry `json:"entries"`
 	PreviousVersions []string     `json:"previousVersions"`
 	Version          string       `json:"version"`
+}
+
+// EchoCheck The latest echo check of a provider.
+type EchoCheck struct {
+	CheckedAt time.Time `json:"checkedAt"`
+
+	// Diff The difference between the line and the reply, in order.
+	Diff []struct {
+		// Op `deleted` is in the line but not in the reply, `inserted` the other way.
+		Op   EchoCheckDiffOp `json:"op"`
+		Text string          `json:"text"`
+	} `json:"diff"`
+	Model string `json:"model"`
+
+	// Received The model's reply.
+	Received string `json:"received"`
+
+	// Sent The line the model was asked to repeat.
+	Sent string `json:"sent"`
+
+	// Unchanged True when the reply was the line, character for character.
+	Unchanged bool `json:"unchanged"`
+}
+
+// EchoCheckDiffOp `deleted` is in the line but not in the reply, `inserted` the other way.
+type EchoCheckDiffOp string
+
+// EchoCheckRequest defines model for EchoCheckRequest.
+type EchoCheckRequest struct {
+	// Model A model of the provider that the org serves and has a price for.
+	Model string `json:"model"`
 }
 
 // Error defines model for Error.
@@ -633,6 +712,9 @@ type Provider struct {
 	// DisabledReason Set while a declared provider of the same name shadows this one; it is not served.
 	DisabledReason *string `json:"disabledReason,omitempty"`
 
+	// EchoCheck The latest echo check of a provider.
+	EchoCheck *EchoCheck `json:"echoCheck,omitempty"`
+
 	// Formats The model formats the provider's type offers, preferred first (ADR 0069).
 	Formats []ModelFormat `json:"formats"`
 
@@ -770,6 +852,11 @@ type TokenList struct {
 	Tokens []Token `json:"tokens"`
 }
 
+// TriggerRun defines model for TriggerRun.
+type TriggerRun struct {
+	TaskId openapi_types.UUID `json:"taskId"`
+}
+
 // ModelId defines model for modelId.
 type ModelId = openapi_types.UUID
 
@@ -832,6 +919,9 @@ type SetAgentBudgetJSONRequestBody = AgentBudgetUpdate
 // SetAgentMcpServersJSONRequestBody defines body for SetAgentMcpServers for application/json ContentType.
 type SetAgentMcpServersJSONRequestBody = AgentMcpServers
 
+// SetAgentModelJSONRequestBody defines body for SetAgentModel for application/json ContentType.
+type SetAgentModelJSONRequestBody = AgentModelUpdate
+
 // SetBudgetJSONRequestBody defines body for SetBudget for application/json ContentType.
 type SetBudgetJSONRequestBody = OrgBudgetUpdate
 
@@ -862,6 +952,9 @@ type CreateProviderJSONRequestBody = ProviderCreate
 // UpdateProviderJSONRequestBody defines body for UpdateProvider for application/json ContentType.
 type UpdateProviderJSONRequestBody = ProviderUpdate
 
+// CheckProviderEchoJSONRequestBody defines body for CheckProviderEcho for application/json ContentType.
+type CheckProviderEchoJSONRequestBody = EchoCheckRequest
+
 // CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
 type CreateTokenJSONRequestBody = TokenCreate
 
@@ -881,6 +974,15 @@ type ServerInterface interface {
 	// whole server.
 	// (PUT /agents/{agentId}/mcp-servers)
 	SetAgentMcpServers(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// The model an agent's next run uses, and where that choice comes from.
+	// (GET /agents/{agentId}/model)
+	GetAgentModel(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// Set an agent's model, or clear it with `default`.
+	// (PUT /agents/{agentId}/model)
+	SetAgentModel(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// Fire a schedule trigger now ("run now").
+	// (POST /agents/{agentId}/triggers/{triggerId}/run)
+	RunAgentTrigger(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID, triggerId string)
 	// Read the org's audit log, newest first.
 	// (GET /audit)
 	ListAuditEvents(w http.ResponseWriter, r *http.Request, params ListAuditEventsParams)
@@ -968,6 +1070,9 @@ type ServerInterface interface {
 	// Change a provider's type, URL or key. Declared providers answer 409.
 	// (PATCH /providers/{providerId})
 	UpdateProvider(w http.ResponseWriter, r *http.Request, providerId ProviderId)
+	// Check whether the provider changes the text it is sent.
+	// (POST /providers/{providerId}/echo-check)
+	CheckProviderEcho(w http.ResponseWriter, r *http.Request, providerId ProviderId)
 	// Spend per model, with estimated usage shown apart from reported usage.
 	// (GET /spend)
 	GetSpendReport(w http.ResponseWriter, r *http.Request, params GetSpendReportParams)
@@ -1106,6 +1211,108 @@ func (siw *ServerInterfaceWrapper) SetAgentMcpServers(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetAgentMcpServers(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgentModel operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentModel(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "agentId" -------------
+	var agentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agentId", r.PathValue("agentId"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agentId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentModel(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentModel operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentModel(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "agentId" -------------
+	var agentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agentId", r.PathValue("agentId"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agentId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentModel(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunAgentTrigger operation middleware
+func (siw *ServerInterfaceWrapper) RunAgentTrigger(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "agentId" -------------
+	var agentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agentId", r.PathValue("agentId"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agentId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "triggerId" -------------
+	var triggerId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "triggerId", r.PathValue("triggerId"), &triggerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "triggerId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunAgentTrigger(w, r, agentId, triggerId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1951,6 +2158,37 @@ func (siw *ServerInterfaceWrapper) UpdateProvider(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// CheckProviderEcho operation middleware
+func (siw *ServerInterfaceWrapper) CheckProviderEcho(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "providerId" -------------
+	var providerId ProviderId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "providerId", r.PathValue("providerId"), &providerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "providerId", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckProviderEcho(w, r, providerId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSpendReport operation middleware
 func (siw *ServerInterfaceWrapper) GetSpendReport(w http.ResponseWriter, r *http.Request) {
 
@@ -2179,6 +2417,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("PUT "+options.BaseURL+"/agents/{agentId}/budget", wrapper.SetAgentBudget)
 	m.HandleFunc("GET "+options.BaseURL+"/agents/{agentId}/mcp-servers", wrapper.GetAgentMcpServers)
 	m.HandleFunc("PUT "+options.BaseURL+"/agents/{agentId}/mcp-servers", wrapper.SetAgentMcpServers)
+	m.HandleFunc("GET "+options.BaseURL+"/agents/{agentId}/model", wrapper.GetAgentModel)
+	m.HandleFunc("PUT "+options.BaseURL+"/agents/{agentId}/model", wrapper.SetAgentModel)
+	m.HandleFunc("POST "+options.BaseURL+"/agents/{agentId}/triggers/{triggerId}/run", wrapper.RunAgentTrigger)
 	m.HandleFunc("GET "+options.BaseURL+"/audit", wrapper.ListAuditEvents)
 	m.HandleFunc("GET "+options.BaseURL+"/budget", wrapper.GetBudget)
 	m.HandleFunc("PUT "+options.BaseURL+"/budget", wrapper.SetBudget)
@@ -2207,6 +2448,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc("DELETE "+options.BaseURL+"/providers/{providerId}", wrapper.DeleteProvider)
 	m.HandleFunc("GET "+options.BaseURL+"/providers/{providerId}", wrapper.GetProvider)
 	m.HandleFunc("PATCH "+options.BaseURL+"/providers/{providerId}", wrapper.UpdateProvider)
+	m.HandleFunc("POST "+options.BaseURL+"/providers/{providerId}/echo-check", wrapper.CheckProviderEcho)
 	m.HandleFunc("GET "+options.BaseURL+"/spend", wrapper.GetSpendReport)
 	m.HandleFunc("GET "+options.BaseURL+"/tokens", wrapper.ListTokens)
 	m.HandleFunc("POST "+options.BaseURL+"/tokens", wrapper.CreateToken)
@@ -2329,6 +2571,95 @@ type SetAgentMcpServersdefaultJSONResponse struct {
 }
 
 func (response SetAgentMcpServersdefaultJSONResponse) VisitSetAgentMcpServersResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type GetAgentModelRequestObject struct {
+	AgentId openapi_types.UUID `json:"agentId"`
+}
+
+type GetAgentModelResponseObject interface {
+	VisitGetAgentModelResponse(w http.ResponseWriter) error
+}
+
+type GetAgentModel200JSONResponse AgentModel
+
+func (response GetAgentModel200JSONResponse) VisitGetAgentModelResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgentModeldefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response GetAgentModeldefaultJSONResponse) VisitGetAgentModelResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type SetAgentModelRequestObject struct {
+	AgentId openapi_types.UUID `json:"agentId"`
+	Body    *SetAgentModelJSONRequestBody
+}
+
+type SetAgentModelResponseObject interface {
+	VisitSetAgentModelResponse(w http.ResponseWriter) error
+}
+
+type SetAgentModel200JSONResponse AgentModel
+
+func (response SetAgentModel200JSONResponse) VisitSetAgentModelResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type SetAgentModeldefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetAgentModeldefaultJSONResponse) VisitSetAgentModelResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
+type RunAgentTriggerRequestObject struct {
+	AgentId   openapi_types.UUID `json:"agentId"`
+	TriggerId string             `json:"triggerId"`
+}
+
+type RunAgentTriggerResponseObject interface {
+	VisitRunAgentTriggerResponse(w http.ResponseWriter) error
+}
+
+type RunAgentTrigger202JSONResponse TriggerRun
+
+func (response RunAgentTrigger202JSONResponse) VisitRunAgentTriggerResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type RunAgentTriggerdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response RunAgentTriggerdefaultJSONResponse) VisitRunAgentTriggerResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(response.StatusCode)
 
@@ -3145,6 +3476,36 @@ func (response UpdateProviderdefaultJSONResponse) VisitUpdateProviderResponse(w 
 	return json.NewEncoder(w).Encode(response.Body)
 }
 
+type CheckProviderEchoRequestObject struct {
+	ProviderId ProviderId `json:"providerId"`
+	Body       *CheckProviderEchoJSONRequestBody
+}
+
+type CheckProviderEchoResponseObject interface {
+	VisitCheckProviderEchoResponse(w http.ResponseWriter) error
+}
+
+type CheckProviderEcho200JSONResponse EchoCheck
+
+func (response CheckProviderEcho200JSONResponse) VisitCheckProviderEchoResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CheckProviderEchodefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response CheckProviderEchodefaultJSONResponse) VisitCheckProviderEchoResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+
+	return json.NewEncoder(w).Encode(response.Body)
+}
+
 type GetSpendReportRequestObject struct {
 	Params GetSpendReportParams
 }
@@ -3275,6 +3636,15 @@ type StrictServerInterface interface {
 	// whole server.
 	// (PUT /agents/{agentId}/mcp-servers)
 	SetAgentMcpServers(ctx context.Context, request SetAgentMcpServersRequestObject) (SetAgentMcpServersResponseObject, error)
+	// The model an agent's next run uses, and where that choice comes from.
+	// (GET /agents/{agentId}/model)
+	GetAgentModel(ctx context.Context, request GetAgentModelRequestObject) (GetAgentModelResponseObject, error)
+	// Set an agent's model, or clear it with `default`.
+	// (PUT /agents/{agentId}/model)
+	SetAgentModel(ctx context.Context, request SetAgentModelRequestObject) (SetAgentModelResponseObject, error)
+	// Fire a schedule trigger now ("run now").
+	// (POST /agents/{agentId}/triggers/{triggerId}/run)
+	RunAgentTrigger(ctx context.Context, request RunAgentTriggerRequestObject) (RunAgentTriggerResponseObject, error)
 	// Read the org's audit log, newest first.
 	// (GET /audit)
 	ListAuditEvents(ctx context.Context, request ListAuditEventsRequestObject) (ListAuditEventsResponseObject, error)
@@ -3362,6 +3732,9 @@ type StrictServerInterface interface {
 	// Change a provider's type, URL or key. Declared providers answer 409.
 	// (PATCH /providers/{providerId})
 	UpdateProvider(ctx context.Context, request UpdateProviderRequestObject) (UpdateProviderResponseObject, error)
+	// Check whether the provider changes the text it is sent.
+	// (POST /providers/{providerId}/echo-check)
+	CheckProviderEcho(ctx context.Context, request CheckProviderEchoRequestObject) (CheckProviderEchoResponseObject, error)
 	// Spend per model, with estimated usage shown apart from reported usage.
 	// (GET /spend)
 	GetSpendReport(ctx context.Context, request GetSpendReportRequestObject) (GetSpendReportResponseObject, error)
@@ -3516,6 +3889,92 @@ func (sh *strictHandler) SetAgentMcpServers(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetAgentMcpServersResponseObject); ok {
 		if err := validResponse.VisitSetAgentMcpServersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgentModel operation middleware
+func (sh *strictHandler) GetAgentModel(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	var request GetAgentModelRequestObject
+
+	request.AgentId = agentId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgentModel(ctx, request.(GetAgentModelRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgentModel")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgentModelResponseObject); ok {
+		if err := validResponse.VisitGetAgentModelResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetAgentModel operation middleware
+func (sh *strictHandler) SetAgentModel(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	var request SetAgentModelRequestObject
+
+	request.AgentId = agentId
+
+	var body SetAgentModelJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetAgentModel(ctx, request.(SetAgentModelRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetAgentModel")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetAgentModelResponseObject); ok {
+		if err := validResponse.VisitSetAgentModelResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RunAgentTrigger operation middleware
+func (sh *strictHandler) RunAgentTrigger(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID, triggerId string) {
+	var request RunAgentTriggerRequestObject
+
+	request.AgentId = agentId
+	request.TriggerId = triggerId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RunAgentTrigger(ctx, request.(RunAgentTriggerRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RunAgentTrigger")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RunAgentTriggerResponseObject); ok {
+		if err := validResponse.VisitRunAgentTriggerResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -4295,6 +4754,39 @@ func (sh *strictHandler) UpdateProvider(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateProviderResponseObject); ok {
 		if err := validResponse.VisitUpdateProviderResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CheckProviderEcho operation middleware
+func (sh *strictHandler) CheckProviderEcho(w http.ResponseWriter, r *http.Request, providerId ProviderId) {
+	var request CheckProviderEchoRequestObject
+
+	request.ProviderId = providerId
+
+	var body CheckProviderEchoJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CheckProviderEcho(ctx, request.(CheckProviderEchoRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CheckProviderEcho")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CheckProviderEchoResponseObject); ok {
+		if err := validResponse.VisitCheckProviderEchoResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

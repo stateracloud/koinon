@@ -435,6 +435,41 @@ func (q *Queries) ListModelsToRederiveFormat(ctx context.Context) ([]ListModelsT
 	return items, nil
 }
 
+const listProviderEchoChecks = `-- name: ListProviderEchoChecks :many
+SELECT org_id, provider_id, model, unchanged, sent, received, checked_at, checked_by FROM provider_echo_checks
+WHERE org_id = $1
+ORDER BY provider_id
+`
+
+func (q *Queries) ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID) ([]ProviderEchoCheck, error) {
+	rows, err := q.db.Query(ctx, listProviderEchoChecks, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ProviderEchoCheck
+	for rows.Next() {
+		var i ProviderEchoCheck
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ProviderID,
+			&i.Model,
+			&i.Unchanged,
+			&i.Sent,
+			&i.Received,
+			&i.CheckedAt,
+			&i.CheckedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProviders = `-- name: ListProviders :many
 SELECT org_id, id, name, type, url, api_key, source, managed_by_secret, declared_version, removed_at, disabled_reason, created_by, created_at, updated_at, anthropic_workspace_id FROM providers
 WHERE org_id = $1
@@ -900,6 +935,50 @@ func (q *Queries) UpdateProvider(ctx context.Context, arg UpdateProviderParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AnthropicWorkspaceID,
+	)
+	return i, err
+}
+
+const upsertProviderEchoCheck = `-- name: UpsertProviderEchoCheck :one
+INSERT INTO provider_echo_checks (org_id, provider_id, model, unchanged, sent, received, checked_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (org_id, provider_id) DO UPDATE
+SET model = EXCLUDED.model, unchanged = EXCLUDED.unchanged, sent = EXCLUDED.sent,
+    received = EXCLUDED.received, checked_at = now(), checked_by = EXCLUDED.checked_by
+RETURNING org_id, provider_id, model, unchanged, sent, received, checked_at, checked_by
+`
+
+type UpsertProviderEchoCheckParams struct {
+	OrgID      pgtype.UUID
+	ProviderID pgtype.UUID
+	Model      string
+	Unchanged  bool
+	Sent       string
+	Received   string
+	CheckedBy  pgtype.UUID
+}
+
+// The latest echo check of a provider replaces the one before it.
+func (q *Queries) UpsertProviderEchoCheck(ctx context.Context, arg UpsertProviderEchoCheckParams) (ProviderEchoCheck, error) {
+	row := q.db.QueryRow(ctx, upsertProviderEchoCheck,
+		arg.OrgID,
+		arg.ProviderID,
+		arg.Model,
+		arg.Unchanged,
+		arg.Sent,
+		arg.Received,
+		arg.CheckedBy,
+	)
+	var i ProviderEchoCheck
+	err := row.Scan(
+		&i.OrgID,
+		&i.ProviderID,
+		&i.Model,
+		&i.Unchanged,
+		&i.Sent,
+		&i.Received,
+		&i.CheckedAt,
+		&i.CheckedBy,
 	)
 	return i, err
 }

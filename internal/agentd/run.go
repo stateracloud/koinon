@@ -20,6 +20,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/prices"
@@ -351,28 +352,31 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return &failure{reason: "the agent version's config is unreadable: " + err.Error()}
 	}
-	model := versionModel(vc)
-	if model == "" {
-		model = cfg.DefaultModel
+	// The agent's own setting wins over the version's model, which wins over the org default
+	// (internal/agentmodel). A set model that is no longer served or priced fails the run: falling
+	// back would run the agent on a model nobody chose.
+	model, source := agentmodel.Choose(agent.Model.String, versionModel(vc), cfg.DefaultModel)
+	if source == agentmodel.SourceAgent {
+		var unusable *agentmodel.UnusableError
+		switch err := agentmodel.Check(fctx, r.p.cfg.Prices, r.q, r.run.OrgID, model, time.Now()); {
+		case errors.As(err, &unusable):
+			return &failure{reason: unusable.RunReason()}
+		case err != nil:
+			return r.dbErr(ctx, "check the agent's model", err)
+		}
 	}
 	if model == "" {
 		// The org's first served model: providers by name, then models by name (PV1).
-		served, err := r.q.ListServedCatalog(fctx, r.run.OrgID)
-		if err != nil {
+		var err error
+		if model, err = agentmodel.OrgDefault(fctx, r.p.cfg.Prices, r.q, r.run.OrgID, time.Now()); err != nil {
 			return r.dbErr(ctx, "load the org's models", err)
 		}
-		for _, m := range served {
-			// Only a priced model is served (the gateway answers 404 for the rest).
-			pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType}
-			if _, err := r.p.cfg.Prices.Resolve(fctx, r.q, r.run.OrgID, pm, time.Now()); err == nil {
-				model = m.ModelName
-				break
-			}
-		}
+		source = agentmodel.SourceOrgDefault
 	}
 	if model == "" {
 		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
 	}
+	r.log.Info("the run's model", "model", model, "source", string(source))
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
 	mode, ptype := r.cacheMode(fctx, model)
 	marker, unknown := cacheMarker(mode)

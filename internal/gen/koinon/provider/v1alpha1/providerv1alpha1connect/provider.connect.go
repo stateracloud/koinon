@@ -52,6 +52,9 @@ const (
 	// ProviderServiceModelFormatsProcedure is the procedure name of the ProviderService's ModelFormats
 	// RPC.
 	ProviderServiceModelFormatsProcedure = "/koinon.provider.v1alpha1.ProviderService/ModelFormats"
+	// ProviderServiceCheckProviderEchoProcedure is the procedure name of the ProviderService's
+	// CheckProviderEcho RPC.
+	ProviderServiceCheckProviderEchoProcedure = "/koinon.provider.v1alpha1.ProviderService/CheckProviderEcho"
 	// ProviderServiceProviderTypeInfoProcedure is the procedure name of the ProviderService's
 	// ProviderTypeInfo RPC.
 	ProviderServiceProviderTypeInfoProcedure = "/koinon.provider.v1alpha1.ProviderService/ProviderTypeInfo"
@@ -124,6 +127,13 @@ var (
 			IdempotencyLevel: connect.IdempotencyNoSideEffects,
 		}
 	})
+	providerServiceCheckProviderEchoSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_provider_v1alpha1_provider_proto.Services().ByName("ProviderService").Methods().ByName("CheckProviderEcho"),
+			Procedure:  ProviderServiceCheckProviderEchoProcedure,
+		}
+	})
 	providerServiceProviderTypeInfoSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType:       connect.StreamTypeUnary,
@@ -149,6 +159,11 @@ type ProviderServiceClient interface {
 	// ModelFormats says which formats a model may use on a provider and which one it gets by default
 	// (ADR 0069), so the model form offers exactly what the server will accept.
 	ModelFormats(context.Context, *v1alpha1.ModelFormatsRequest) (*v1alpha1.ModelFormatsResponse, error)
+	// CheckProviderEcho runs the echo check on one model of the provider: one tiny chat request
+	// through the gateway asking the model to repeat a fixed line exactly, to catch masking of names
+	// and addresses on the provider's side. It is metered like any request, runs only when called
+	// and stores the result on the provider. Admins and owners only.
+	CheckProviderEcho(context.Context, *v1alpha1.CheckProviderEchoRequest) (*v1alpha1.CheckProviderEchoResponse, error)
 	// ProviderTypeInfo says what a provider type offers before any provider of that type exists, so the
 	// provider form shows only the fields the server will accept.
 	ProviderTypeInfo(context.Context, *v1alpha1.ProviderTypeInfoRequest) (*v1alpha1.ProviderTypeInfoResponse, error)
@@ -176,6 +191,11 @@ type ProviderServiceHandler interface {
 	// ModelFormats says which formats a model may use on a provider and which one it gets by default
 	// (ADR 0069), so the model form offers exactly what the server will accept.
 	ModelFormats(context.Context, *v1alpha1.ModelFormatsRequest) (*v1alpha1.ModelFormatsResponse, error)
+	// CheckProviderEcho runs the echo check on one model of the provider: one tiny chat request
+	// through the gateway asking the model to repeat a fixed line exactly, to catch masking of names
+	// and addresses on the provider's side. It is metered like any request, runs only when called
+	// and stores the result on the provider. Admins and owners only.
+	CheckProviderEcho(context.Context, *v1alpha1.CheckProviderEchoRequest) (*v1alpha1.CheckProviderEchoResponse, error)
 	// ProviderTypeInfo says what a provider type offers before any provider of that type exists, so the
 	// provider form shows only the fields the server will accept.
 	ProviderTypeInfo(context.Context, *v1alpha1.ProviderTypeInfoRequest) (*v1alpha1.ProviderTypeInfoResponse, error)
@@ -195,6 +215,7 @@ func RegisterProviderServiceHandler(server *connect.Server, svc ProviderServiceH
 		connect.Method{Spec: providerServiceUpdateModelSpec(), Handler: adapter.updateModel},
 		connect.Method{Spec: providerServiceDeleteModelSpec(), Handler: adapter.deleteModel},
 		connect.Method{Spec: providerServiceModelFormatsSpec(), Handler: adapter.modelFormats},
+		connect.Method{Spec: providerServiceCheckProviderEchoSpec(), Handler: adapter.checkProviderEcho},
 		connect.Method{Spec: providerServiceProviderTypeInfoSpec(), Handler: adapter.providerTypeInfo},
 	)
 }
@@ -236,6 +257,10 @@ func (UnimplementedProviderServiceHandler) DeleteModel(context.Context, *v1alpha
 
 func (UnimplementedProviderServiceHandler) ModelFormats(context.Context, *v1alpha1.ModelFormatsRequest) (*v1alpha1.ModelFormatsResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.provider.v1alpha1.ProviderService.ModelFormats is not implemented")
+}
+
+func (UnimplementedProviderServiceHandler) CheckProviderEcho(context.Context, *v1alpha1.CheckProviderEchoRequest) (*v1alpha1.CheckProviderEchoResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.provider.v1alpha1.ProviderService.CheckProviderEcho is not implemented")
 }
 
 func (UnimplementedProviderServiceHandler) ProviderTypeInfo(context.Context, *v1alpha1.ProviderTypeInfoRequest) (*v1alpha1.ProviderTypeInfoResponse, error) {
@@ -313,6 +338,14 @@ func (c *providerServiceClient) DeleteModel(ctx context.Context, req *v1alpha1.D
 func (c *providerServiceClient) ModelFormats(ctx context.Context, req *v1alpha1.ModelFormatsRequest) (*v1alpha1.ModelFormatsResponse, error) {
 	var res v1alpha1.ModelFormatsResponse
 	if err := c.client.CallUnary(ctx, providerServiceModelFormatsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *providerServiceClient) CheckProviderEcho(ctx context.Context, req *v1alpha1.CheckProviderEchoRequest) (*v1alpha1.CheckProviderEchoResponse, error) {
+	var res v1alpha1.CheckProviderEchoResponse
+	if err := c.client.CallUnary(ctx, providerServiceCheckProviderEchoSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -430,6 +463,18 @@ func (h providerServiceHandler) modelFormats(ctx context.Context, _ connect.Spec
 		return err
 	}
 	res, err := h.svc.ModelFormats(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h providerServiceHandler) checkProviderEcho(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.CheckProviderEchoRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.CheckProviderEcho(ctx, &req)
 	if err != nil {
 		return err
 	}

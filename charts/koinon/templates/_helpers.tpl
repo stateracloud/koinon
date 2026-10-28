@@ -311,6 +311,9 @@ Secrets are mounted as files (koinon.apiSecretVolumes), never put in the environ
 # Approved calls to remote MCP servers go through the gateway (ADR 0057): it holds the credentials.
 - name: KOINON_GATEWAY_MCP_URL
   value: {{ printf "http://%s:%s/mcp" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) | quote }}
+# The provider echo check (rc.6) sends one request through the gateway's LLM listener.
+- name: KOINON_GATEWAY_URL
+  value: {{ printf "http://%s:%s" (include "koinon.gatewayHost" .) (include "koinon.gatewayPort" .) | quote }}
 - name: KOINON_KEK_ACTIVE_PERIOD
   value: {{ .Values.secrets.kek.activePeriod | quote }}
 {{- with include "koinon.publicUrl" . }}
