@@ -590,7 +590,7 @@ type ModelCreate struct {
 	Rates *Rates `json:"rates,omitempty"`
 }
 
-// ModelCreated defines model for ModelCreated.
+// ModelCreated The model just created, with the warnings of the save.
 type ModelCreated struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	DisabledReason *string   `json:"disabledReason,omitempty"`
@@ -765,7 +765,7 @@ type PriceRates struct {
 	Reasoning  *string `json:"reasoning,omitempty"`
 }
 
-// PriceSaved defines model for PriceSaved.
+// PriceSaved The price version just saved, with the warnings of the save.
 type PriceSaved struct {
 	CreatedAt time.Time `json:"createdAt"`
 	CreatedBy string    `json:"createdBy"`
