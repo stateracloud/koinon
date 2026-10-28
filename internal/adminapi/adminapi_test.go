@@ -28,7 +28,10 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
+	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/tokens"
 	"github.com/stateracloud/koinon/pricing"
@@ -44,6 +47,8 @@ type env struct {
 	user    pgtype.UUID
 	token   string // an owner token
 	router  routers.Router
+	// chat answers the echo check in place of the gateway.
+	chat *fakeChat
 }
 
 func newEnv(ctx context.Context) *env {
@@ -60,7 +65,9 @@ func newEnv(ctx context.Context) *env {
 	e.catalog = catalog.New(pool, ring, nil)
 	e.mcp = mcpservers.New(pool, ring, nil).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"})
 	mux := http.NewServeMux()
-	adminapi.New(pool, e.catalog, e.tokens, slog.New(slog.NewTextHandler(GinkgoWriter, nil)), pricing.Embedded()).WithMCP(e.mcp).Mount(mux)
+	e.chat = &fakeChat{}
+	adminapi.New(pool, e.catalog, e.tokens, slog.New(slog.NewTextHandler(GinkgoWriter, nil)), pricing.Embedded()).WithMCP(e.mcp).
+		WithTriggers(services.New(pool, services.Options{Prices: pricing.Embedded()})).WithModelCheck(modelcheck.New(pool, e.chat, prices.NewResolver(pricing.Embedded()))).Mount(mux)
 	e.srv = httptest.NewServer(mux)
 	DeferCleanup(e.srv.Close)
 	e.org, e.user, _ = pgtest.NewOrg(ctx, pool)

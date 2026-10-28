@@ -144,6 +144,33 @@ rejecting pre-request reservation. What the data showed, and what changes:
    reconciled with the provider's own figure where the provider publishes one
    ([0056](0056-model-providers-pricing-and-budgets-per-org.md), amendment 2026-10-28).
 
+## Amendment (2026-10-28, rc.6): spend by principal
+
+Not every charged request belongs to an agent. The provider echo check (ADR 0072) is a request
+Koinon makes itself, through a system key of the org (`gateway.ModelCheckAgentName`, ADR 0056
+amendment of 2026-10-28). The ledger records it so that it is metered like any request:
+
+1. `spend_entries.principal` is `agent` or `system` (migration 00034). `agent_id` is null exactly
+   when the principal is `system`, enforced by a CHECK; the composite foreign key to
+   `(org_id, agent_id)` and the unique `(org_id, request_id)` stay. A system entry has no run and no
+   task.
+2. Ingest maps a record whose key's agent is the model-check name to the `system` principal. An org
+   that does not exist is unattributed as before. The entry is priced and flagged like an agent's.
+3. A system entry counts toward the org's monthly cap and the platform ceiling, so it can reach them
+   and stop the org's runs like any entry, and it alerts at 80% and 100%. It counts toward no
+   agent's daily limit. The key has a daily limit of its own (`budget.SystemDailyLimit`, $0.10),
+   enforced like an agent's: the reconciler pushes the smaller of it and the org's remaining caps,
+   net of recorded spend (`ledger.SystemLimit`), and a zero takes the key out in both gateway modes.
+   Reaching the key's own limit stops no runs.
+4. **Bound.** The provider echo check takes a per-org advisory lock around its request, so one
+   system request is in flight per org (a second check answers FailedPrecondition). The overshoot
+   past the key's budget is therefore at most one request, as for an agent's key (one in-flight
+   response per principal).
+5. Reports: the spend report (`GET /admin/v1/spend`) lists agents' spend per model and, apart, a
+   "System checks" row (`systemChecks`: requests and cost). The ledger metric
+   `koinon_api_ledger_records_ingested_total` has a fixed `principal` label (`agent`, `system`). The
+   Budgets page names the system checks within "Spent this month".
+
 ## Open questions
 
 - Ingestion transport: OTel (OTLP receiver in Koinon) or access-log scraping? Depends on the

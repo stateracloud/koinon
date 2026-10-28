@@ -195,12 +195,34 @@ func number(v any) (float64, bool) {
 	return 0, false
 }
 
+// modelNotFound reports whether a harness's error says the gateway does not serve the requested
+// model: HTTP 404 or the gateway's model_not_found.
+func modelNotFound(err error) bool {
+	text, status := err.Error(), 0
+	var re *sdk.RequestError
+	if errors.As(err, &re) {
+		text = re.Message
+		if re.Data != nil {
+			b, _ := json.Marshal(re.Data)
+			text += " " + string(b)
+			status, _ = structured(re.Data)
+		}
+	}
+	low := strings.ToLower(text)
+	if status == 0 {
+		if m := statusRe.FindStringSubmatch(low); m != nil {
+			status, _ = strconv.Atoi(m[1])
+		}
+	}
+	return status == 404 || strings.Contains(low, "model_not_found")
+}
+
 // classFailure turns an answered session/prompt error into the failure that ends (or retries)
 // the turn. Unknown errors keep the plain reason and are fatal.
 func classFailure(what string, err error) *failure {
 	c := classifyPromptError(err)
 	raw := what + ": " + err.Error()
-	f := &failure{reason: raw, class: c.class, retryAfter: c.retryAfter, gateway: c.gateway}
+	f := &failure{reason: raw, class: c.class, retryAfter: c.retryAfter, gateway: c.gateway, modelNotFound: modelNotFound(err)}
 	if c.message != "" {
 		f.reason = c.message + " (" + raw + ")"
 	}

@@ -69,6 +69,9 @@ func withReserves(ctx context.Context, q *store.Queries, st budget.Status) (budg
 		since := pgtype.Timestamptz{Time: l.WindowStart, Valid: true}
 		var s string
 		var err error
+		if l.Name == budget.SystemDaily {
+			continue // the system key holds nothing back: its entries are never provisional
+		}
 		if l.Name == budget.AgentDaily {
 			s, err = q.GetAgentReserveSince(ctx, store.GetAgentReserveSinceParams{OrgID: st.Org, AgentID: st.Agent, Since: since})
 		} else {
@@ -86,6 +89,25 @@ func withReserves(ctx context.Context, q *store.Queries, st budget.Status) (budg
 		}
 	}
 	return out, nil
+}
+
+// SystemLimit returns the budget to push for an org's system key at now: the smaller of its remaining
+// daily budget and the org's remaining monthly cap and platform ceiling, net of recorded spend and
+// generation-named like AgentLimit's, so the two enforce the same way in both gateway modes.
+func SystemLimit(ctx context.Context, q *store.Queries, org pgtype.UUID, now time.Time) (*gateway.Limit, error) {
+	st, err := budget.ComputeSystem(ctx, q, org, now)
+	if err != nil {
+		return nil, fmt.Errorf("read budgets: %w", err)
+	}
+	if st, err = withReserves(ctx, q, st); err != nil {
+		return nil, err
+	}
+	net, _, ok := st.Net()
+	if !ok {
+		return nil, nil
+	}
+	l := gateway.USDLimit(net, budget.DayWindow, st.Generation(now))
+	return &l, nil
 }
 
 // agentStatus is the agent's limits and spend at now (package budget). ok is false for an agent

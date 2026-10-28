@@ -122,6 +122,16 @@ var _ = Describe("prices and budgets", func() {
 		Expect(lines[0]).To(HaveKeyWithValue("provisionalRequests", BeNumerically("==", 0)))
 		Expect(lines[0]).To(HaveKeyWithValue("reservedUsd", "0.00"))
 
+		By("system checks are one row of their own, and are not in the models")
+		Expect(decode[map[string]any](raw)["systemChecks"]).To(Equal(map[string]any{"requests": float64(0), "costUsd": "0.00"}))
+		_, err = pool.Exec(ctx, `INSERT INTO spend_entries (org_id, principal, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)
+			VALUES ($1, 'system', 'sys-1', 'k', 'm', 100, 10, 0.02, true, now())`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		st, raw = e.call(ctx, e.token, http.MethodGet, "/spend", nil)
+		Expect(st).To(Equal(http.StatusOK), string(raw))
+		Expect(decode[map[string]any](raw)["systemChecks"]).To(Equal(map[string]any{"requests": float64(1), "costUsd": "0.02"}))
+		Expect(decode[struct{ Models []map[string]any }](raw).Models).To(HaveLen(1))
+
 		var n int
 		Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'budget.org_cap.set'`, e.org).Scan(&n)).To(Succeed())
 		Expect(n).To(Equal(1))

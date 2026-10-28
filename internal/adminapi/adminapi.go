@@ -27,20 +27,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	adminv1 "github.com/stateracloud/koinon/api/admin/v1"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/mcpservers"
+	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/internal/triggers"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -57,8 +61,13 @@ type Server struct {
 	tokens  *tokens.Service
 	prices  *prices.Service
 	budgets *budget.Service
-	log     *slog.Logger
-	limiter *limiter
+	// agentModels sets and describes agents' models; triggers fires a schedule trigger now;
+	// modelCheck runs the provider echo check.
+	agentModels *agentmodel.Service
+	triggers    TriggerRunner
+	modelCheck  *modelcheck.Service
+	log         *slog.Logger
+	limiter     *limiter
 }
 
 var _ StrictServerInterface = (*Server)(nil)
@@ -68,7 +77,7 @@ func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Lo
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log, src), budgets: budget.New(pool), log: log, limiter: newLimiter()}
+	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log, src), budgets: budget.New(pool), agentModels: agentmodel.New(pool, prices.NewResolver(src)), log: log, limiter: newLimiter()}
 }
 
 type principalKey struct{}
@@ -191,11 +200,15 @@ func writeError(w http.ResponseWriter, status int, code ErrorCode, msg string) {
 // problem maps a service-layer error.
 func (s *Server) problem(err error) (int, Error) {
 	var (
-		e   Error
-		inv *catalog.InvalidError
-		tin *tokens.InvalidError
-		pin *prices.InvalidError
-		bin *budget.InvalidError
+		e    Error
+		inv  *catalog.InvalidError
+		tin  *tokens.InvalidError
+		pin  *prices.InvalidError
+		bin  *budget.InvalidError
+		ain  *agentmodel.InvalidError
+		min  *modelcheck.InvalidError
+		mun  *modelcheck.UnavailableError
+		busy *modelcheck.BusyError
 	)
 	set := func(status int, code ErrorCode, msg string) (int, Error) {
 		e.Error.Code, e.Error.Message = code, msg
@@ -212,6 +225,20 @@ func (s *Server) problem(err error) (int, Error) {
 		return set(http.StatusBadRequest, InvalidRequest, bin.Msg)
 	case errors.Is(err, audit.ErrBadFilter):
 		return set(http.StatusBadRequest, InvalidRequest, err.Error())
+	case errors.As(err, &ain):
+		return set(http.StatusBadRequest, InvalidRequest, ain.Msg)
+	case errors.As(err, &min):
+		return set(http.StatusBadRequest, InvalidRequest, min.Msg)
+	case errors.As(err, &busy):
+		return set(http.StatusConflict, Conflict, busy.Error())
+	case errors.As(err, &mun):
+		return set(http.StatusServiceUnavailable, Internal, mun.Msg)
+	case errors.Is(err, agentmodel.ErrNotFound), errors.Is(err, modelcheck.ErrNotFound), errors.Is(err, pgx.ErrNoRows):
+		return set(http.StatusNotFound, NotFound, "not found")
+	case errors.Is(err, triggers.ErrTriggerNotFound):
+		return set(http.StatusNotFound, NotFound, err.Error())
+	case errors.Is(err, triggers.ErrCannotRun):
+		return set(http.StatusConflict, Conflict, err.Error())
 	case errors.Is(err, budget.ErrForbidden):
 		return set(http.StatusForbidden, PermissionDenied, err.Error())
 	case errors.Is(err, prices.ErrNotFound), errors.Is(err, budget.ErrNotFound):
@@ -295,9 +322,19 @@ func (s *Server) ListProviders(ctx context.Context, _ ListProvidersRequestObject
 		st, e := s.problem(err)
 		return ListProvidersdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
+	checks, err := s.echoChecks(ctx, p.Org)
+	if err != nil {
+		st, e := s.problem(err)
+		return ListProvidersdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
 	out := ListProviders200JSONResponse{Providers: []Provider{}}
 	for _, x := range list {
-		out.Providers = append(out.Providers, toProvider(x))
+		pv := toProvider(x)
+		if r, ok := checks[pgUUID(x.ID)]; ok {
+			e := toEchoCheck(r)
+			pv.EchoCheck = &e
+		}
+		out.Providers = append(out.Providers, pv)
 	}
 	return out, nil
 }
@@ -328,7 +365,15 @@ func (s *Server) GetProvider(ctx context.Context, req GetProviderRequestObject) 
 		st, e := s.problem(err)
 		return GetProviderdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
-	return GetProvider200JSONResponse(toProvider(got)), nil
+	pv := toProvider(got)
+	if checks, err := s.echoChecks(ctx, p.Org); err != nil {
+		st, e := s.problem(err)
+		return GetProviderdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	} else if r, ok := checks[pgUUID(got.ID)]; ok {
+		e := toEchoCheck(r)
+		pv.EchoCheck = &e
+	}
+	return GetProvider200JSONResponse(pv), nil
 }
 
 // UpdateProvider implements StrictServerInterface.

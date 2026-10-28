@@ -66,6 +66,9 @@ message OrgBudget {
   google.protobuf.Timestamp month_start = 4;
   // estimated_this_month_usd is the part of the spend that came from estimated usage.
   string estimated_this_month_usd = 5;
+  // system_checks_this_month_usd is the part of the spend that came from Koinon's own requests
+  // (the provider echo check), which belong to no agent. It counts toward the cap.
+  string system_checks_this_month_usd = 6;
 }
 
 message ListOrgBudgetsRequest {}

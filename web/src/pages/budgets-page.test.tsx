@@ -35,7 +35,7 @@ function setup(opts: { role?: OrgRole; platformAdmin?: boolean; ceiling?: string
       getOrgBudget: () => {
         calls.listed++
         return {
-          budget: create(OrgBudgetSchema, { monthlyCapUsd: '100.00', spentThisMonthUsd: '40.00', estimatedThisMonthUsd: '10.00', platformCeilingUsd: opts.ceiling ?? '', monthStart: timestampFromMs(monthStart.getTime()) }),
+          budget: create(OrgBudgetSchema, { monthlyCapUsd: '100.00', spentThisMonthUsd: '40.00', estimatedThisMonthUsd: '10.00', systemChecksThisMonthUsd: '0.30', platformCeilingUsd: opts.ceiling ?? '', monthStart: timestampFromMs(monthStart.getTime()) }),
         }
       },
       listAgentBudgets: () => ({
@@ -87,6 +87,7 @@ describe('Budgets page', () => {
     expect(within(cap).getByText(/\$500.00. Platform admins set it/)).toBeInTheDocument()
     expect(within(cap).queryByLabelText(/ceiling/i)).not.toBeInTheDocument()
     expect(within(cap).getByLabelText('Share of the monthly cap spent')).toHaveAttribute('value', '40')
+    expect(within(cap).getByText('System checks').nextElementSibling).toHaveTextContent('$0.30')
   })
 
   it('sets the cap, and refuses a bad amount before sending', async () => {

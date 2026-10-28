@@ -38,6 +38,12 @@ service ProviderService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // CheckProviderEcho runs the echo check on one model of the provider: one tiny chat request
+  // through the gateway asking the model to repeat a fixed line exactly, to catch masking of names
+  // and addresses on the provider's side. It is metered like any request, runs only when called
+  // and stores the result on the provider. Admins and owners only.
+  rpc CheckProviderEcho(CheckProviderEchoRequest) returns (CheckProviderEchoResponse);
+
   // ProviderTypeInfo says what a provider type offers before any provider of that type exists, so the
   // provider form shows only the fields the server will accept.
   rpc ProviderTypeInfo(ProviderTypeInfoRequest) returns (ProviderTypeInfoResponse) {
@@ -68,6 +74,50 @@ message Provider {
   string anthropic_workspace_id = 12;
   // formats are the model formats the provider's type offers, preferred first (ADR 0069).
   repeated ModelFormat formats = 13;
+  // echo_check is the latest echo check of the provider; unset when none ran.
+  EchoCheck echo_check = 14;
+}
+
+// EchoCheck is the result of an echo check (CheckProviderEcho).
+message EchoCheck {
+  // The model the check used.
+  string model = 1;
+  // True when the reply was the line, character for character.
+  bool unchanged = 2;
+  // The line sent and the reply received.
+  string sent = 3;
+  string received = 4;
+  // The difference between them, in order; every segment of an unchanged result is EQUAL.
+  repeated EchoDiffSegment diff = 5;
+  google.protobuf.Timestamp checked_at = 6;
+}
+
+// EchoDiffSegment is a run of characters in the sent line, the reply or both.
+message EchoDiffSegment {
+  enum Op {
+    OP_UNSPECIFIED = 0;
+    // In both.
+    OP_EQUAL = 1;
+    // In the line sent but not in the reply: the provider removed or replaced it.
+    OP_DELETED = 2;
+    // In the reply but not in the line sent.
+    OP_INSERTED = 3;
+  }
+  Op op = 1;
+  string text = 2;
+}
+
+// CheckProviderEchoRequest names the provider and one of its models.
+message CheckProviderEchoRequest {
+  string org_id = 1;
+  string provider_id = 2;
+  // A model of the provider that the org serves and has a price for.
+  string model = 3;
+}
+
+// CheckProviderEchoResponse holds the result.
+message CheckProviderEchoResponse {
+  EchoCheck echo_check = 1;
 }
 
 // ModelFormat is a model wire format as the server's format table names it: id is the stored value,

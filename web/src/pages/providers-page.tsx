@@ -6,6 +6,7 @@ import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { ConfirmAction } from '@/components/confirm-action'
 import { ModelForm } from '@/components/model-form'
+import { ProviderEchoCheck } from '@/components/provider-echo-check'
 import { ProviderForm } from '@/components/provider-form'
 import { RequireAdmin } from '@/components/require-admin'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -258,6 +259,7 @@ function ProviderCard({
           </ul>
         )}
       </div>
+      {!disabled && <ProviderEchoCheck provider={p} models={models} />}
     </section>
   )
 }

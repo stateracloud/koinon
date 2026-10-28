@@ -213,7 +213,13 @@ func (s *Server) GetSpendReport(ctx context.Context, req GetSpendReportRequestOb
 		st, e := s.problem(err)
 		return GetSpendReportdefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
+	sys, err := store.New(s.pool).SpendSystemSince(ctx, store.SpendSystemSinceParams{OrgID: p.Org, Since: pgtype.Timestamptz{Time: since, Valid: true}})
+	if err != nil {
+		st, e := s.problem(err)
+		return GetSpendReportdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
 	out := GetSpendReport200JSONResponse{Since: since, Models: []SpendLine{}}
+	out.SystemChecks.Requests, out.SystemChecks.CostUsd = sys.Requests, ledgerUSD(sys.CostUsd)
 	for _, r := range rows {
 		out.Models = append(out.Models, SpendLine{
 			Model: r.Model, Requests: r.Requests, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens,

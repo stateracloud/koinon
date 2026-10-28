@@ -108,6 +108,21 @@ var isolationCases = map[string]isolationCase{
 			return c.agents.ResumeAgent(ctx, &agentv1alpha1.ResumeAgentRequest{OrgId: org, AgentId: f.agent.GetId()})
 		},
 	},
+	agentv1alpha1connect.AgentServiceGetAgentModelProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.GetAgentModel(ctx, &agentv1alpha1.GetAgentModelRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	agentv1alpha1connect.AgentServiceSetAgentModelProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.SetAgentModel(ctx, &agentv1alpha1.SetAgentModelRequest{OrgId: org, AgentId: f.agent.GetId(), Model: "default"})
+		},
+	},
+	agentv1alpha1connect.AgentServiceRunAgentTriggerProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.RunAgentTrigger(ctx, &agentv1alpha1.RunAgentTriggerRequest{OrgId: org, AgentId: f.agent.GetId(), TriggerId: "daily-check"})
+		},
+	},
 	agentv1alpha1connect.AgentServiceArchiveAgentProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.ArchiveAgent(ctx, &agentv1alpha1.ArchiveAgentRequest{OrgId: org, AgentId: f.agent.GetId()})
@@ -428,6 +443,11 @@ var isolationCases = map[string]isolationCase{
 			return c.providers.UpdateProvider(ctx, &providerv1alpha1.UpdateProviderRequest{
 				OrgId: org, ProviderId: f.provider, Url: new("https://intruder.example.com/v1"),
 			})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceCheckProviderEchoProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.CheckProviderEcho(ctx, &providerv1alpha1.CheckProviderEchoRequest{OrgId: org, ProviderId: f.provider, Model: "any"})
 		},
 	},
 	providerv1alpha1connect.ProviderServiceDeleteProviderProcedure: {

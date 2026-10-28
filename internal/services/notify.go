@@ -15,6 +15,7 @@ import (
 	"github.com/stateracloud/koinon/internal/durable"
 	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/scheduler"
+	"github.com/stateracloud/koinon/internal/triggers"
 	"github.com/stateracloud/koinon/internal/wake"
 )
 
@@ -93,6 +94,25 @@ type TriggeredTask struct {
 	Message     string
 	// Origin is the run's origin; empty means scheduled, which interactive work outranks.
 	Origin store.RunOrigin
+	// Fire says how the trigger fired (triggers.FireScheduled, triggers.FireManual); it is recorded
+	// in the task's events. Empty means scheduled.
+	Fire string
+	// FiredBy is the user who fired the trigger by hand; recorded with a manual fire.
+	FiredBy pgtype.UUID
+	// OnCreate, when set, runs in the creating transaction once the task and its run exist, so a
+	// record of the fire (an audit event) commits with it or not at all. It is not called for a
+	// replay.
+	OnCreate func(ctx context.Context, q *store.Queries, task store.Task) error
+}
+
+// eventPayload adds to p what the events of a triggered task record about the fire: its source,
+// how it fired and, for a manual fire, who fired it.
+func (in TriggeredTask) eventPayload(fire string, p map[string]any) map[string]any {
+	p["source"], p["fire"] = in.Source, fire
+	if fire == triggers.FireManual && in.FiredBy.Valid {
+		p["firedBy"] = in.FiredBy.String()
+	}
+	return p
 }
 
 // CreateTriggeredTask creates a task for a trigger fire at most once per (org, Source, Key): the
@@ -103,6 +123,10 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 	origin := in.Origin
 	if origin == "" {
 		origin = store.RunOriginScheduled
+	}
+	fire := in.Fire
+	if fire == "" {
+		fire = triggers.FireScheduled
 	}
 	err = s.commit(ctx, func(q *store.Queries) ([]durable.Notification, error) {
 		var notes []durable.Notification
@@ -123,20 +147,25 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 			}
 			if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 				OrgID: in.Org, TaskID: t.ID, Kind: KindTaskCreated, ActorKind: store.TaskActorKindSystem,
-				Payload: jsonPayload(map[string]any{"title": in.Title, "source": in.Source}),
+				Payload: jsonPayload(in.eventPayload(fire, map[string]any{"title": in.Title})),
 			}); err != nil {
 				return "", pgtype.UUID{}, err
 			}
 			if in.Message != "" {
 				if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 					OrgID: in.Org, TaskID: t.ID, Kind: KindMessage, ActorKind: store.TaskActorKindSystem,
-					Payload: jsonPayload(map[string]any{"text": in.Message, "source": in.Source}),
+					Payload: jsonPayload(in.eventPayload(fire, map[string]any{"text": in.Message})),
 				}); err != nil {
 					return "", pgtype.UUID{}, err
 				}
 			}
 			if _, _, err := scheduler.EnqueueOrigin(ctx, q, t, origin); err != nil {
 				return "", pgtype.UUID{}, err
+			}
+			if in.OnCreate != nil {
+				if err := in.OnCreate(ctx, q, t); err != nil {
+					return "", pgtype.UUID{}, err
+				}
 			}
 			return "task", t.ID, nil
 		})
