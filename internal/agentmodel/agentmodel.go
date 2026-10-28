@@ -32,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 )
 
@@ -126,7 +127,7 @@ func Check(ctx context.Context, rv prices.Resolver, q *store.Queries, org pgtype
 		if m.ModelName != model {
 			continue
 		}
-		pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType}
+		pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType, Format: modelformat.Format(m.ModelFormat)}
 		_, err := rv.Resolve(ctx, q, org, pm, at)
 		var bad *prices.BadPriceError
 		switch {
@@ -151,7 +152,7 @@ func ListServed(ctx context.Context, rv prices.Resolver, q *store.Queries, org p
 	}
 	out := make([]Served, 0, len(rows))
 	for _, m := range rows {
-		pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType}
+		pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType, Format: modelformat.Format(m.ModelFormat)}
 		if _, err := rv.Resolve(ctx, q, org, pm, at); err == nil {
 			out = append(out, Served{Name: m.ModelName, Provider: m.ProviderName})
 		}

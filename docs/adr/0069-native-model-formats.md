@@ -84,6 +84,10 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
    - `models.format` holds the model's wire format: `openai` (chat completions) or `anthropic`
      (Messages). The value set is open: Gemini `generateContent`, Bedrock Converse or OpenAI
      Responses would each be a new value, a gateway renderer, a harness entry and tests.
+   - The harness's format is the format of the run's **effective model** (the agent's setting, then
+     the version's model, then the org default; ADR 0072), looked up by name, never of the
+     version's model alone. An agent set to a Messages model runs on the `koinon-anthropic` entry
+     even when its version names a chat-completions model, and the reverse.
    - One table in Go (`internal/modelformat`) holds the defaults, and it is the only place that knows
      them:
      - **Provider capabilities:** the formats each provider type offers. `anthropic` offers

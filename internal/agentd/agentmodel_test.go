@@ -12,6 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // The model of a run: the agent's own setting, then the version's model, then the org default
@@ -19,24 +20,28 @@ import (
 var _ = Describe("The agent's model setting", func() {
 	// serveModel adds a keyless provider with a model of the given name to the org, records it as
 	// served as koinon-reconciler would, and prices it unless unpriced.
-	serveModel := func(ctx context.Context, e *env, name string, priced bool) {
+	serveModelAs := func(ctx context.Context, e *env, name string, priced bool, providerType string, format modelformat.Format) {
 		GinkgoHelper()
 		var providerID, modelID pgtype.UUID
-		Expect(db.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, $2, 'openai', 'http://fakemodel.example.com/v1') RETURNING id`,
-			e.org, uniq("prov")).Scan(&providerID)).To(Succeed())
-		Expect(db.QueryRow(ctx, `INSERT INTO models (org_id, provider_id, name) VALUES ($1, $2, $3) RETURNING id`,
-			e.org, providerID, name).Scan(&modelID)).To(Succeed())
+		Expect(db.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, $2, $3, 'http://fakemodel.example.com/v1') RETURNING id`,
+			e.org, uniq("prov"), providerType).Scan(&providerID)).To(Succeed())
+		Expect(db.QueryRow(ctx, `INSERT INTO models (org_id, provider_id, name, format) VALUES ($1, $2, $3, $4) RETURNING id`,
+			e.org, providerID, name, string(format)).Scan(&modelID)).To(Succeed())
 		_, err := db.Exec(ctx, `INSERT INTO gateway_served_models (org_id, model_id, provider_id) VALUES ($1, $2, $3)`, e.org, modelID, providerID)
 		Expect(err).NotTo(HaveOccurred())
 		if !priced {
 			return
 		}
 		_, err = db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by)
-			VALUES ($1, $2, jsonb_build_object('provider', 'openai', 'match', jsonb_build_object('glob', $3::text),
+			VALUES ($1, $2, jsonb_build_object('provider', $4::text, 'match', jsonb_build_object('glob', $3::text),
 			'validFrom', '2020-01-01', 'prices', jsonb_build_object('input', '1', 'output', '2'),
 			'tokenizer', 'bytes', 'ratio', '3.0', 'maxOutput', 10), now() - interval '1 hour', 'test')`,
-			e.org, uniq("price"), name)
+			e.org, uniq("price"), name, providerType)
 		Expect(err).NotTo(HaveOccurred())
+	}
+	serveModel := func(ctx context.Context, e *env, name string, priced bool) {
+		GinkgoHelper()
+		serveModelAs(ctx, e, name, priced, "openai", modelformat.OpenAI)
 	}
 	setModel := func(ctx context.Context, e *env, name string) {
 		GinkgoHelper()
@@ -55,6 +60,33 @@ var _ = Describe("The agent's model setting", func() {
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/fake/agent-pick"}))
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(ConsistOf(ContainElements("--model", "fake/agent-pick")))
+	})
+
+	It("takes the wire format from the agent's model, not the version's", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		serveModel(ctx, e, model, true) // the version names a chat-completions model
+		serveModelAs(ctx, e, "claude-agent-pick", true, "anthropic", modelformat.Anthropic)
+		setModel(ctx, e, "claude-agent-pick")
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon-anthropic/claude-agent-pick"}))
+		_, _, _, args := e.harness.snapshot()
+		Expect(args).To(ConsistOf(ContainElements("--model", "claude-agent-pick", "--model-format", "anthropic")))
+	})
+
+	It("uses chat completions when the agent picks an openai-format model and the version names a Messages one", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		serveModelAs(ctx, e, model, true, "anthropic", modelformat.Anthropic) // the version's model
+		serveModel(ctx, e, "fake/agent-pick", true)
+		setModel(ctx, e, "fake/agent-pick")
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/fake/agent-pick"}))
+		_, _, _, args := e.harness.snapshot()
+		Expect(args).To(ConsistOf(ContainElements("--model", "fake/agent-pick", "--model-format", "openai")))
+		Expect(args[0]).NotTo(ContainElement("anthropic"))
 	})
 
 	It("runs the version's model when the agent has no setting", func(ctx SpecContext) {

@@ -553,13 +553,24 @@ var _ = Describe("the quickstart", Ordered, func() {
 
 	It("6d. a direct Anthropic model runs in the Messages format through OpenShell and the gateway, and its second request reads the cache", func(ctx SpecContext) {
 		t.begin()
-		// anthropic-fake sorts before fake, so the org's first served model, which this agent's template
-		// asks for ("default"), is claude-e2e once it has a price (a model without one is not served).
+		// The run's wire format comes from the agent's effective model (ADR 0072, 0069), so the agent
+		// is set to claude-e2e below; that does not depend on how the org's models sort.
 		// Prices in USD per million tokens, as Claude's list: a cache read costs a tenth of an input.
 		price := map[string]string{"input": "3.00", "output": "15.00", "cacheRead": "0.30", "cacheWrite": "3.75"}
 		code, body := admin(ctx, http.MethodPost, "/prices", `{"name":"fake-claude-e2e","provider":"anthropic","match":{"glob":"claude-e2e"},`+
 			`"prices":{"input":"3.00","output":"15.00","cacheRead":"0.30","cacheWrite":"3.75"},"maxOutput":4096}`)
 		Expect(code).To(Equal(http.StatusCreated), string(body))
+
+		// A model is settable once the org serves it, which the reconciler does after the price exists.
+		modelPath := "/agents/" + agent.GetId() + "/model"
+		DeferCleanup(func(ctx context.Context) {
+			code, body := admin(ctx, http.MethodPut, modelPath, `{"model":"default"}`)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+		})
+		Eventually(func(g Gomega) {
+			code, body := admin(ctx, http.MethodPut, modelPath, `{"model":"claude-e2e"}`)
+			g.Expect(code).To(Equal(http.StatusOK), string(body))
+		}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
 
 		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
 			OrgId: org, AgentId: agent.GetId(), Title: "Cache probe", Message: "Run the cache probe and say when it is done.",
