@@ -68,3 +68,9 @@ namespaces come back altered), with nothing in Koinon able to say so.
     system key and its budget are ADR 0056's amendment of 2026-10-28, and spend by principal is
     ADR 0041's. koinon-api needs `--gateway-url` (the chart sets `KOINON_GATEWAY_URL`) and
     Kubernetes access to read the key's Secret.
+
+## Amendment (2026-10-28, rc.6): run now uses the trigger's notify target
+
+Run now creates the task with the trigger's notify target (`Trigger.notify`, ADR 0066 amendment
+2026-10-28), like a scheduled fire. `firedBy` is recorded but is not a recipient, so a test fire behaves
+like the real one.
