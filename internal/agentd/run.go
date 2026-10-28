@@ -46,6 +46,8 @@ type failure struct {
 	class store.RunFailureClass
 	// retryAfter is the provider's Retry-After of a throttled request.
 	retryAfter time.Duration
+	// gateway: the gateway answered the harness's model request with 401 or 429 (classify.go).
+	gateway bool
 }
 
 func (f *failure) Error() string { return f.reason }
@@ -55,8 +57,15 @@ type requeued struct{ reason string }
 
 func (q *requeued) Error() string { return q.reason }
 
-// canceled cancels the run as its owner, for example at the wall-clock cap.
-type canceled struct{ reason string }
+// canceled cancels the run as its owner, for example at the wall-clock cap, or on a spent
+// budget (budgetstop.go).
+type canceled struct {
+	reason string
+	// class is the failure class recorded with the cancel; empty for none.
+	class store.RunFailureClass
+	// extra is merged into the payload of the run's closing events.
+	extra map[string]any
+}
 
 func (c *canceled) Error() string { return c.reason }
 
@@ -101,6 +110,10 @@ type runner struct {
 	delivered []pgtype.UUID
 	// deliveredQ are the resolved questions whose outcomes this turn's prompt carries.
 	deliveredQ []pgtype.UUID
+
+	// refusals are the permission requests agentd rejected in the turn in progress (refusal.go).
+	refMu    sync.Mutex
+	refusals []refusal
 
 	// cwd is the session directory, set before the harness starts; permission requests for
 	// paths outside it are rejected.
@@ -462,7 +475,11 @@ func (r *runner) execute(ctx context.Context) error {
 	r.cwd = cwd
 	// The run's own version decides the instructions, so a version bump applies at the next
 	// run without recreating the sandbox.
-	instructions := instructionsFile(vc.Instructions)
+	repos, err := r.repositories(fctx)
+	if err != nil {
+		return r.execErr(ctx, "read the code host of the agent's repositories", err)
+	}
+	instructions := instructionsFile(vc.Instructions, cwd, repos)
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}
@@ -640,6 +657,7 @@ type promptResult struct {
 // pool to stop.
 func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
 	done := make(chan promptResult, 1)
+	r.takeRefusals()
 	go func() {
 		stop, err := conn.Prompt(ctx, session, text)
 		done <- promptResult{stop, err}
@@ -653,12 +671,15 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 	select {
 	case res := <-done:
 		if res.err != nil {
-			return r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)
+			return r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err))
 		}
 		switch res.stop {
 		case acp.StopEndTurn:
 			return errEndTurn
 		case acp.StopCancelled:
+			if refs := r.takeRefusals(); len(refs) > 0 {
+				return &refused{refusals: refs}
+			}
 			return &failure{reason: "the harness cancelled the turn"}
 		default:
 			return stopFailure(res.stop)
@@ -684,8 +705,24 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 // is fenced or stops.
 func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
 	cfg := r.p.cfg
+	refusedTurns := 0
 	for attempt := 0; ; attempt++ {
 		err := r.turn(ctx, conn, proc, stderr, session, text)
+		var ref *refused
+		if errors.As(err, &ref) {
+			// The harness ended the turn because agentd refused a request: tell the agent what
+			// was refused and let it go on. This is not a retry of a failed model request.
+			if refusedTurns >= cfg.MaxRefusedTurns {
+				return &failure{reason: fmt.Sprintf("%s (the agent kept asking after %d refusals)", ref.Error(), refusedTurns), class: classPolicy}
+			}
+			refusedTurns++
+			attempt--
+			if rerr := r.record(fctx, "run.refusal", map[string]any{"refusals": ref.refusals, "count": refusedTurns, "cwd": r.cwd}); rerr != nil {
+				return r.dbErr(ctx, "record the refusal", rerr)
+			}
+			text = refusalNote(ref.refusals, r.cwd)
+			continue
+		}
 		var f *failure
 		if !errors.As(err, &f) || !f.retryable() {
 			return err
@@ -958,12 +995,18 @@ func (r *runner) recordRaw(ctx context.Context, kind string, payload []byte) err
 // finish ends the run as its owner, with a closing run event and a task event, in one
 // transaction. On success the task event is the agent's reply.
 func (r *runner) finish(ctx context.Context, outcome store.RunState, reason string, class store.RunFailureClass) error {
+	return r.finishWith(ctx, outcome, reason, class, nil)
+}
+
+// finishWith is finish with more fields in the closing events' payload; extra does not override
+// the reason and the failure class.
+func (r *runner) finishWith(ctx context.Context, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.srcSeq++
 	src := r.srcSeq
 	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
-		return r.finishIn(ctx, r.q.WithTx(tx), src, outcome, reason, class)
+		return r.finishIn(ctx, r.q.WithTx(tx), src, outcome, reason, class, extra)
 	})
 	if err != nil {
 		return r.dbErr(ctx, "finish the run", err)
@@ -974,8 +1017,14 @@ func (r *runner) finish(ctx context.Context, outcome store.RunState, reason stri
 }
 
 // finishIn ends the run in the caller's transaction.
-func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outcome store.RunState, reason string, class store.RunFailureClass) error {
-	body := map[string]string{"reason": reason}
+func (r *runner) finishIn(ctx context.Context, q *store.Queries, src int64, outcome store.RunState, reason string, class store.RunFailureClass, extra map[string]any) error {
+	body := map[string]any{}
+	for k, v := range extra {
+		body[k] = v
+	}
+	if _, ok := body["reason"]; !ok {
+		body["reason"] = reason
+	}
 	if class != "" {
 		body["failureClass"] = string(class)
 	}
@@ -1073,7 +1122,7 @@ func (r *runner) conclude(ctx context.Context, err error) {
 			r.log.Warn("failing the run failed", "reason", f.reason, "err", ferr)
 		}
 	case errors.As(err, &c):
-		if ferr := r.finish(ctx, store.RunStateCanceled, c.reason, ""); ferr != nil {
+		if ferr := r.finishWith(ctx, store.RunStateCanceled, c.reason, c.class, c.extra); ferr != nil {
 			r.log.Warn("canceling the run failed", "reason", c.reason, "err", ferr)
 		}
 	case errors.Is(err, errFenced):
@@ -1159,6 +1208,9 @@ func (h handler) RequestPermission(ctx context.Context, req acp.PermissionReques
 	d := h.r.p.cfg.Permissions.decide(req, h.r.cwd)
 	if h.r.replaying.Load() {
 		return acp.Decision{}, nil
+	}
+	if d.Verdict == Reject {
+		h.r.noteRefusal(req, d)
 	}
 	select {
 	case <-h.r.toolSeen(string(req.ToolCall.ToolCallId)):

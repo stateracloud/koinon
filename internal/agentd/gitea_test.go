@@ -142,6 +142,11 @@ var _ = Describe("A repo-helper agent on Gitea", func() {
 		Expect(prompts[1]).To(ContainSubstring("approved and executed by Koinon: " + url))
 		Expect(g.gt.Snapshot("secrets").Calls).To(BeEmpty(), "no other repository was touched")
 
+		By("the instructions list the granted repository with the connection's clone URL")
+		written, _ := g.files.get(instructionsFile)
+		Expect(string(written)).To(ContainSubstring("`acme/widgets` on Gitea (connector `gitea`, host `127.0.0.1:"))
+		Expect(string(written)).To(ContainSubstring("`git clone " + g.gt.URL() + "/acme/widgets`"))
+
 		By("the sandbox received its Gitea host and CA, and no token")
 		all := g.everythingInTheSandbox()
 		Expect(all).To(ContainSubstring("koinon-git-credential --host 127.0.0.1:"), "the credential helper is configured for the connection's host")

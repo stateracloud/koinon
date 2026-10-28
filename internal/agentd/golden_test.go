@@ -121,9 +121,26 @@ var _ = Describe("Prompt shapes (golden)", func() {
 			[]string{"First reply.", "Second reply."}, []string{"Please fix the typo.", "Also the footer."}, out))
 	})
 	It("the instruction file of an agent version", func() {
-		golden("instructions_file", agentd.InstructionsFile("You help with the task."))
+		golden("instructions_file", agentd.InstructionsFile("You help with the task.", "/sandbox/work"))
+	})
+	It("the instruction file of an agent with repositories on a Gitea host", func() {
+		golden("instructions_file_repositories", agentd.InstructionsFile("You help with the task.", "/sandbox/work",
+			agentd.Repository{
+				Name: "procoduck/homelab", Connector: "gitea", Provider: "Gitea", Host: "git.example.test:3000",
+				CloneURL: "https://git.example.test:3000/procoduck/homelab",
+			},
+			agentd.Repository{
+				Name: "procoduck/koinon-docs", Connector: "gitea", Provider: "Gitea", Host: "git.example.test:3000",
+				CloneURL: "https://git.example.test:3000/procoduck/koinon-docs",
+			}))
+	})
+	It("the note after the harness cancelled a turn on refused requests", func() {
+		golden("refusal_note", agentd.RefusalNote([]agentd.Refusal{
+			{Kind: "edit", Title: "write", Outside: "/sandbox/.koinon/notes/external/report.md"},
+			{Kind: "fetch", Title: "webfetch"},
+		}, "/sandbox/work"))
 	})
 	It("the instruction file of an agent version without instructions", func() {
-		golden("instructions_file_empty", agentd.InstructionsFile(" \n"))
+		golden("instructions_file_empty", agentd.InstructionsFile(" \n", "/sandbox/work"))
 	})
 })

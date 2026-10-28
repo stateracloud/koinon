@@ -110,6 +110,17 @@ agent, explore included (`packages/core/src/config/plugin/agent.ts:83-91`), so t
 there too. The config repeats them under `agents.explore.permissions` as defence in depth only. The contract suite's permission specs fail without this
 block.
 
+A rejected request ends the turn. ACP's permission response carries an option and no message, and
+OpenCode answers a plain reject with `Permission.DeclinedError`, which `assert` turns into a defect
+on purpose ("Deliberate defect tunnel", `packages/core/src/permission.ts:241-249`), so the step is
+interrupted and `session/prompt` returns `cancelled` (a decline with feedback, or a `deny` rule, are
+the only recoverable forms: `CorrectedError`, `BlockedError`; the ACP agent can send neither). A
+`deny` rule would cost the model one tool call, but the model would see only "Permission denied" and
+agentd would no longer see or record the request. koinon-agentd therefore keeps `ask`, and when the
+turn ends cancelled after it refused a request it prompts the session again with a note naming the
+refused action and the session directory (`internal/agentd/refusal.go`, run event `run.refusal`).
+The contract suite's `answers the harness's permission requests` spec covers it.
+
 OpenCode's permission gate is not a security boundary: rules saved by an "always" answer live in
 the agent-writable `opencode.db` and can turn `ask` into `allow`, and the shell is unrestricted.
 OpenShell and Kata are the boundary. koinon-agentd answers each request once and saves nothing.
