@@ -4,6 +4,7 @@ import { create } from '@bufbuild/protobuf'
 import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -43,12 +44,25 @@ function describe(t: Trigger): string {
 /**
  * AgentTriggers shows what starts work on an agent: the triggers in effect (the active version's) and,
  * for an admin or owner, an editor that proposes a new version. Triggers take effect only when that
- * version is activated (ADR 0066), which the page's Activate button does.
+ * version is activated (ADR 0066), which the page's Activate button does. An admin can also fire a
+ * schedule trigger of the active version at once ("Run now"); the task it creates is marked as a
+ * manual fire.
  */
 export function AgentTriggers({ agent, canEdit }: { agent: Agent; canEdit: boolean }) {
   const pending = agent.latestVersion !== agent.activeVersion
   const shown = pending ? agent.proposedTriggers : agent.approvedTriggers
   const [editing, setEditing] = useState(false)
+  const queryClient = useQueryClient()
+  const [started, setStarted] = useState<{ trigger: string; taskId: string }>()
+  const run = useMutation(AgentService.method.runAgentTrigger, {
+    onSuccess: async (res, req) => {
+      setStarted({ trigger: req.triggerId ?? '', taskId: res.taskId })
+      await queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: AgentService, cardinality: undefined }) })
+    },
+  })
+  // Run now fires the active version's schedule triggers; a proposed trigger does nothing yet.
+  const runnable = (t: Trigger) =>
+    canEdit && agent.status === AgentStatus.ACTIVE && t.type === TriggerType.SCHEDULE && agent.approvedTriggers.some((a) => a.id === t.id && a.type === TriggerType.SCHEDULE)
   return (
     <section aria-labelledby="agent-triggers" className="bg-card grid gap-3 rounded-lg border p-4 text-sm">
       <div className="flex items-center justify-between gap-2">
@@ -61,6 +75,11 @@ export function AgentTriggers({ agent, canEdit }: { agent: Agent; canEdit: boole
           </Button>
         )}
       </div>
+      {run.error && (
+        <Alert variant="destructive" role="alert">
+          <AlertDescription>Could not run the trigger: {ConnectError.from(run.error).rawMessage}</AlertDescription>
+        </Alert>
+      )}
       {pending && <p className="text-muted-foreground">These take effect when version {agent.latestVersion} is activated.</p>}
       {editing ? (
         <Editor agent={agent} initial={shown} onDone={() => setEditing(false)} />
@@ -75,6 +94,30 @@ export function AgentTriggers({ agent, canEdit }: { agent: Agent; canEdit: boole
               </p>
               <p className="text-muted-foreground">{describe(t)}</p>
               <p className="break-words whitespace-pre-wrap">{t.instruction}</p>
+              {runnable(t) && (
+                <div className="mt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Run ${t.id} now`}
+                    disabled={run.isPending}
+                    onClick={() => {
+                      setStarted(undefined)
+                      run.mutate({ orgId: agent.orgId, agentId: agent.id, triggerId: t.id })
+                    }}
+                  >
+                    Run now
+                  </Button>
+                </div>
+              )}
+              {started?.trigger === t.id && (
+                <p role="status" className="mt-1">
+                  Started a task from {t.id}.{' '}
+                  <Link to="/tasks/$taskId" params={{ taskId: started.taskId }} className="underline">
+                    Open the task
+                  </Link>
+                </p>
+              )}
             </li>
           ))}
         </ul>

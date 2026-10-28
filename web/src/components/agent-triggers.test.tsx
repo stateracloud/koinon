@@ -1,23 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from '@bufbuild/protobuf'
-import { createRouterTransport } from '@connectrpc/connect'
+import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { AgentSchema, AgentService, AgentStatus, type SetAgentTriggersRequest } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { AgentSchema, AgentService, AgentStatus, ModelSource, type RunAgentTriggerRequest, type SetAgentTriggersRequest } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { TriggerSchema, TriggerType } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { orgId, renderApp, whoAmI } from '@/test-utils'
 
-function setup(role: OrgRole) {
+function setup(role: OrgRole, opts: { failRun?: string; status?: AgentStatus } = {}) {
   const sets: SetAgentTriggersRequest[] = []
+  const runs: RunAgentTriggerRequest[] = []
   const agent = create(AgentSchema, {
     id: 'a-1',
     orgId,
     displayName: 'Repo helper',
-    status: AgentStatus.ACTIVE,
+    status: opts.status ?? AgentStatus.ACTIVE,
     latestVersion: 1,
     activeVersion: 1,
     approvedTriggers: [create(TriggerSchema, { id: 'daily', type: TriggerType.SCHEDULE, cron: '0 9 * * *', timezone: 'UTC', instruction: 'Check costs.' })],
@@ -27,6 +28,12 @@ function setup(role: OrgRole) {
     service(ConnectionService, { listConnections: () => ({ connections: [] }) })
     service(AgentService, {
       getAgent: () => ({ agent }),
+      getAgentModel: () => ({ effective: 'm', source: ModelSource.VERSION }),
+      runAgentTrigger: (req) => {
+        runs.push(req)
+        if (opts.failRun) throw new ConnectError(opts.failRun, Code.FailedPrecondition)
+        return { taskId: 'task-9' }
+      },
       setAgentTriggers: (req) => {
         sets.push(req)
         return { agent }
@@ -34,7 +41,7 @@ function setup(role: OrgRole) {
     })
   })
   renderApp(transport, '/agents/a-1')
-  return { sets }
+  return { sets, runs }
 }
 
 describe('AgentTriggers', () => {
@@ -59,5 +66,25 @@ describe('AgentTriggers', () => {
       ['daily', TriggerType.SCHEDULE],
       ['chat', TriggerType.DIRECT_MESSAGE],
     ])
+  })
+
+  it('lets an admin run a schedule trigger now and opens the task it made', async () => {
+    const { runs } = setup(OrgRole.ADMIN)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run daily now' }))
+    await waitFor(() => expect(runs).toHaveLength(1))
+    expect(runs[0]).toMatchObject({ agentId: 'a-1', triggerId: 'daily' })
+    expect(await screen.findByRole('link', { name: 'Open the task' })).toHaveAttribute('href', '/tasks/task-9')
+  })
+
+  it('has no Run now for a member, or for an agent that is not active', async () => {
+    setup(OrgRole.MEMBER)
+    expect(await screen.findByText('0 9 * * * (UTC)')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Run daily now/ })).not.toBeInTheDocument()
+  })
+
+  it('says why a run was refused', async () => {
+    setup(OrgRole.ADMIN, { failRun: 'the agent cannot take a run now: it is draft' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Run daily now' }))
+    expect(await screen.findByText(/Could not run the trigger: .*cannot take a run now/)).toBeInTheDocument()
   })
 })
