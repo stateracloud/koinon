@@ -36,7 +36,13 @@
     { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/shell/*/*", "effect": "allow" },
     { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/tool-output/*", "effect": "allow" },
     { "action": "external_directory", "resource": "/tmp/opencode/*", "effect": "allow" },
-    { "action": "external_directory", "resource": "/etc/koinon/opencode/*", "effect": "allow" }
+    { "action": "external_directory", "resource": "/etc/koinon/opencode/*", "effect": "allow" },
+    // Skills are denied unless a later rule allows one by ID (ADR 0071 delivers them); the last
+    // matching rule wins, so an agent block's rules can override this deny and must allow by ID only,
+    // never with "*". Skill.available
+    // drops denied skills from the prompt, and the skill tool asserts action "skill" before loading
+    // one (packages/core/src/skill.ts:33-34, packages/core/src/tool/plugin/skill.ts:50-55).
+    { "action": "skill", "resource": "*", "effect": "deny" }
   ],
   "agents": {
     "explore": {
@@ -49,11 +55,14 @@
       ]
     }
   },
-  // Built-in plugins Koinon turns off: skills from ~/.claude and ~/.agents, the provider plugins
-  // (the koinon provider is defined below; opencode.provider.opencode cannot be removed), web
-  // search, and logins for well-known integrations.
+  // Built-in plugins Koinon turns off: skills from ~/.claude and ~/.agents, the built-in skills
+  // "opencode" and "report" (opencode.skill registers both, packages/core/src/plugin/skill.ts;
+  // "report" tells the agent to file issues with the GitHub CLI), the provider plugins (the koinon
+  // provider is defined below; opencode.provider.opencode cannot be removed), web search, and
+  // logins for well-known integrations.
   "plugins": [
     "-opencode.config.compatibility",
+    "-opencode.skill",
     "-opencode.provider.*",
     "-opencode.websearch.*",
     "-opencode.tool.websearch",
