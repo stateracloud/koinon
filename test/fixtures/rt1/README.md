@@ -121,8 +121,10 @@ by digest.
 - **Limits.** Every agent's calls come from the gateway's single pod IP, so mcp-searxng's per-IP
   stateless in-flight limit (default 8) caps all agents together. The fixture sets
   `MCP_HTTP_STATELESS_MAX_IN_FLIGHT_PER_IP=16` and `MCP_HTTP_STATELESS_MAX_IN_FLIGHT=32` (the global
-  limit must stay above the per-IP one, or the server ignores the per-IP value), and
-  `URL_READ_MAX_CHARS=8000` so one `web_url_read` cannot return a whole page into the model's context.
+  limit must stay above the per-IP one, or the per-IP value is reduced to the global cap). The
+  separate, queue-less tool ceiling `MCP_TOOL_MAX_IN_FLIGHT` (default 16) is set to 32.
+  `URL_READ_MAX_CHARS=8000` is only the default page length when a call omits `maxLength`; an
+  explicit `maxLength` always wins.
 - **Licence.** SearXNG is AGPL-3.0. We run the upstream image unmodified as a separate service for
   testing; its code is not vendored, patched or bundled into any Koinon image, and `searxng-settings.yml`
   is configuration only. Keep it that way. Do not ship it as a Koinon component.

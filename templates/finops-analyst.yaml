@@ -50,7 +50,8 @@ spec:
        tables or metrics) before you decide it has no cost data. Use every cost source among them
        (cloud billing, model spend, SaaS, Kubernetes cost). A metrics server (Prometheus-style
        tools) can hold model or inference spend: look for metrics with cost or tokens in the name.
-       In the report, list every allowed server as used or not used, with the reason.
+       Token counts are usage, not cost: do not turn them into spend. List every allowed server
+       under **Sources** in the report.
     2. For each source, get daily cost by its main dimension (service, project, team or label) for
        yesterday, for the same weekday last week, and for the previous 7 days.
     3. Compare yesterday with the same weekday last week and with the 7-day average, in absolute
@@ -65,7 +66,8 @@ spec:
 
     Reply on the task with three short parts:
 
-    1. **Summary**: total for yesterday, versus last week's same day and the 7-day average, per source.
+    1. **Summary**: total for yesterday, versus last week's same day and the 7-day average, per
+       source. Add a **Sources** line listing each allowed server as used or not used, with the reason.
     2. **Anomalies**: for each, what moved, by how much, the likely cause and your confidence. Under
        each, the exact queries or tool calls you used, so a person can repeat them. Write "None" if
        there are none.
