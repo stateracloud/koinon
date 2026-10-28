@@ -84,3 +84,4 @@ are in [0046](0046-adr-conventions.md).
 | [0067](0067-concierge.md) | The concierge: a setup and management assistant in koinon-api | Accepted (delivery v0.3) |
 | [0068](0068-prompt-caching-always-on.md) | Prompt caching is always on for models that support it | Accepted |
 | [0069](0069-native-model-formats.md) | Models speak their family's native API format | Accepted |
+| [0070](0070-model-metadata.md) | Model metadata: a reviewed snapshot from models.dev and OpenRouter | Accepted (delivery after v0.1.0, UI milestone) |
