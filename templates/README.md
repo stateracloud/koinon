@@ -42,5 +42,5 @@ A template may have no grants (`grants: []`): `finops-analyst` works only throug
 allows on the agent's page, which are not template grants.
 A scheduled task has no creator, so an agent that uses `ask_user` from a trigger needs `to`. The
 templates' trigger instructions are forms the admin fills in on Edit triggers: `Ask: none` becomes
-`Ask: name@example.com` (the email passed as `to`; with `none` the agent does not call `ask_user`),
+`Ask: name@example.com` (an org member's email or user ID, passed as `to`; with `none` the agent does not call `ask_user`),
 and `lcm-upgrader` also has a `Repository:` line.

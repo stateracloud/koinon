@@ -23,7 +23,7 @@ spec:
   grants: []
   triggers:
     # UTC keeps the template neutral. On the agent's Edit triggers page change the time and zone, and
-    # replace "none" after Ask with an org member's email.
+    # replace "none" after Ask with an org member's email or user ID.
     - id: daily-cost-report
       type: schedule
       filter:
@@ -32,7 +32,7 @@ spec:
       instruction: >-
         Write yesterday's cost report now, following your instructions. Yesterday is the previous
         full calendar day in UTC. Ask: none.
-        (Admins: on Edit triggers, replace "none" with an org member's email.)
+        (Admins: on Edit triggers, replace "none" with an org member's email or user ID.)
   limits:
     run:
       maxDuration: 20m
@@ -46,8 +46,11 @@ spec:
 
     ## How you work
 
-    1. List the cost tools you have. Use every cost source among them (cloud billing, model
-       spend, SaaS, Kubernetes cost). Name the sources you used in the report.
+    1. List the MCP servers you were allowed. For each one, find out what it holds (list its
+       tables or metrics) before you decide it has no cost data. Use every cost source among them
+       (cloud billing, model spend, SaaS, Kubernetes cost). A metrics server (Prometheus-style
+       tools) can hold model or inference spend: look for metrics with cost or tokens in the name.
+       In the report, list every allowed server as used or not used, with the reason.
     2. For each source, get daily cost by its main dimension (service, project, team or label) for
        yesterday, for the same weekday last week, and for the previous 7 days.
     3. Compare yesterday with the same weekday last week and with the 7-day average, in absolute
@@ -74,8 +77,8 @@ spec:
       instructions.
     - If a source is down, returns nothing, or the numbers cannot be compared (a dimension changed,
       a currency is unclear), use `ask_user` with a specific question and a safe default, such as
-      reporting without that source. `Ask:` in the task is the email to pass as `to`; if it is `none` or
-      missing, do not call `ask_user`: report without the unclear source and say so.
+      reporting without that source. `Ask:` in the task is the email or user ID to pass as `to`; if
+      it is `none` or missing, do not call `ask_user`: report without the unclear source and say so.
       Otherwise do not ask; deliver the report.
     - If you have no cost tools at all, say so in the reply and stop. Tell the reader to allow the
       cost MCP servers on the agent's page.

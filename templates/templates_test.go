@@ -164,8 +164,17 @@ var _ = Describe("Embedded templates", func() {
 			Expect(t.Spec.Triggers).To(BeEmpty())
 			Expect(t.Spec.Limits.Run.MaxDuration.Duration).To(Equal(30 * time.Minute))
 			Expect(t.Spec.Limits.SpendUSD.String()).To(Equal("3.00"))
-			Expect(t.Spec.Instructions).To(ContainSubstring("~/notes/"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("/sandbox/work/notes/"))
 			Expect(t.Spec.Instructions).NotTo(ContainSubstring("create_pull_request"))
+			Expect(t.Spec.Limits.Run.MaxTokens).To(BeEquivalentTo(1000000))
+		})
+
+		It("keeps notes only under /sandbox/work, in every shipped template", func() {
+			all, err := templates.All()
+			Expect(err).NotTo(HaveOccurred())
+			for _, t := range all {
+				Expect(t.Spec.Instructions).NotTo(ContainSubstring("~/notes"), t.Metadata.ID)
+			}
 		})
 	})
 
