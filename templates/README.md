@@ -39,6 +39,8 @@ language. The triggers are copied into the agent's first version and fire only o
 owner activates a version that holds them.
 
 A template may have no grants (`grants: []`): `finops-analyst` works only through the MCP servers an admin
-allows on the agent's page, which are not template grants. A scheduled task has no creator, so an agent
-that uses `ask_user` from a trigger needs `to`; the templates tell admins to add `Ask name@example.com` to the
-trigger instruction.
+allows on the agent's page, which are not template grants.
+A scheduled task has no creator, so an agent that uses `ask_user` from a trigger needs `to`. The
+templates' trigger instructions are forms the admin fills in on Edit triggers: `Ask: none` becomes
+`Ask: name@example.com` (the email passed as `to`; with `none` the agent does not call `ask_user`),
+and `lcm-upgrader` also has a `Repository:` line.

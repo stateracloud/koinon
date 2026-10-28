@@ -84,8 +84,10 @@ a cited Markdown report; it keeps its notes in its home. **LCM upgrader** checks
 Monday at 07:00 UTC for outdated Helm charts, images, Argo CD apps and dependencies, then asks "Create
 the PR?" with up to three low-risk upgrades and opens a pull request only after a yes (you approve that
 pull request too). Both read release notes and the web only through MCP servers you allow for the agent
-([MCP servers](/guides/mcp-servers/)). A scheduled task has no creator, so add `Ask name@example.com` to the
-trigger's instruction ([Triggers](/guides/triggers/)) to have the question land in that person's inbox.
+([MCP servers](/guides/mcp-servers/)). A scheduled task has no creator, so the trigger's instruction is a form: on Edit triggers
+([Triggers](/guides/triggers/)) set the `Repository:` line (LCM upgrader) and replace `Ask: none` with
+`Ask: name@example.com`, the person whose inbox gets the question. With `none` the agent lists its
+proposal in its reply instead.
 
 ## Workflow files
 

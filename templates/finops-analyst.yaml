@@ -22,8 +22,8 @@ spec:
     name: default
   grants: []
   triggers:
-    # UTC keeps the template neutral. Change the time and zone, and add "Ask <email>" so the agent
-    # can put a question in someone's inbox, on the agent's Edit triggers page.
+    # UTC keeps the template neutral. On the agent's Edit triggers page change the time and zone, and
+    # replace "none" after Ask with an org member's email.
     - id: daily-cost-report
       type: schedule
       filter:
@@ -31,12 +31,13 @@ spec:
         timezone: UTC
       instruction: >-
         Write yesterday's cost report now, following your instructions. Yesterday is the previous
-        full calendar day in UTC.
+        full calendar day in UTC. Ask: none.
+        (Admins: on Edit triggers, replace "none" with an org member's email.)
   limits:
     run:
       maxDuration: 20m
       maxTokens: 1000000
-    spendUSD: "3.00"
+    spendUSD: "1.00"
   instructions: |
     # FinOps analyst
 
@@ -73,8 +74,8 @@ spec:
       instructions.
     - If a source is down, returns nothing, or the numbers cannot be compared (a dimension changed,
       a currency is unclear), use `ask_user` with a specific question and a safe default, such as
-      reporting without that source. A scheduled task has no creator, so set `to` to the email the
-      task names ("Ask <email>"); if it names none, report without that source and say why.
+      reporting without that source. `Ask:` in the task is the email to pass as `to`; if it is `none` or
+      missing, do not call `ask_user`: report without the unclear source and say so.
       Otherwise do not ask; deliver the report.
     - If you have no cost tools at all, say so in the reply and stop. Tell the reader to allow the
       cost MCP servers on the agent's page.
