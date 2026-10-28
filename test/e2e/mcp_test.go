@@ -196,7 +196,7 @@ func agentGatewayKey(ctx context.Context, kubectl, org, agentID string) string {
 	Expect(o.Scan(org)).To(Succeed())
 	Expect(a.Scan(agentID)).To(Succeed())
 	name := execution.AgentObjectNames(o.Bytes, a.Bytes).KeySecret
-	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "secret", name, "-o", "jsonpath={.data.api_key}").Output() //nolint:gosec // the e2e wrapper
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "secret", name, "-o", "jsonpath={.data.api_key}").Output()
 	Expect(err).NotTo(HaveOccurred())
 	raw, err := base64.StdEncoding.DecodeString(string(out))
 	Expect(err).NotTo(HaveOccurred())
@@ -210,7 +210,7 @@ func portForward(ctx context.Context, kubectl, target, port string) string {
 	Expect(err).NotTo(HaveOccurred())
 	_, p, _ := net.SplitHostPort(l.Addr().String())
 	Expect(l.Close()).To(Succeed())
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), kubectl, "-n", "koinon", "port-forward", target, p+":"+port) //nolint:gosec // the e2e wrapper
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), kubectl, "-n", "koinon", "port-forward", target, p+":"+port)
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	Expect(cmd.Start()).To(Succeed())
 	DeferCleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })

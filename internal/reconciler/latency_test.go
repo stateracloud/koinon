@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -19,8 +20,11 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/wake"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Latency defaults (plan item LT1, ADRs 0049, 0065, 0066): the warm window per park reason, the
@@ -58,6 +62,7 @@ var _ = Describe("Reconciler latency defaults", func() {
 		mg = &fakeModelGateway{}
 		now.Store(nil)
 		cfg = reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},
@@ -133,6 +138,73 @@ var _ = Describe("Reconciler latency defaults", func() {
 		advance(3 * time.Minute)
 		pass(ctx)
 		Expect(phase(approval.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED), "idle after the org's 2 minutes")
+	})
+
+	// askParked brings the agent to a Ready sandbox with a run parked on an ask_user question
+	// (TK3): the question is created, opened and the run parked as agentd does at the turn's end.
+	askParked := func(ctx context.Context) (store.Agent, store.Run, store.Question) {
+		GinkgoHelper()
+		agent := newAgent(ctx, org, user)
+		pass(ctx)
+		queued := queueRun(ctx, org, user, agent.ID)
+		run := claimRun(ctx, org)
+		var row store.Question
+		Expect(pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			qq := store.New(tx)
+			var err error
+			row, _, err = questions.Create(ctx, qq, questions.Ask{
+				Org: org, Task: queued.TaskID, Run: run.ID, Agent: agent.ID, To: user,
+				Question: "Which region?", Choices: []string{"eu", "us"}, Default: "eu",
+			})
+			if err != nil {
+				return err
+			}
+			if _, err := questions.OpenForRun(ctx, qq, org, run.ID, queued.TaskID); err != nil {
+				return err
+			}
+			_, err = qq.ParkRun(ctx, store.ParkRunParams{OrgID: org, ID: run.ID, Epoch: run.Epoch, ParkReason: store.RunParkReasonInputRequired})
+			return err
+		})).To(Succeed())
+		return agent, run, row
+	}
+	answer := func(ctx context.Context, row store.Question) {
+		GinkgoHelper()
+		Expect(pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			_, err := questions.Respond(ctx, store.New(tx), org, row.ID, user, questions.Answer{Kind: store.QuestionAnswerKindChoice, Text: "us"})
+			return err
+		})).To(Succeed())
+	}
+
+	It("resumes an ask_user question answered within the warm window without a sandbox start", func(ctx SpecContext) {
+		agent, run, row := askParked(ctx)
+		creates, stops := osg.Calls("CreateSandbox"), osg.Calls("StopSandbox")
+		advance(14 * time.Minute)
+		pass(ctx)
+		Expect(phase(agent.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY), "still running 14 minutes after the park")
+
+		answer(ctx, row)
+		now.Store(nil)
+		pass(ctx)
+		got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: run.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.ReadyAt.Valid).To(BeTrue(), "the run is claimable")
+		Expect(phase(agent.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY))
+		Expect(osg.Calls("CreateSandbox")).To(Equal(creates), "no sandbox was created for the answer")
+		Expect(osg.Calls("StopSandbox")).To(Equal(stops), "and none was stopped")
+	})
+
+	It("starts the stopped sandbox for an ask_user answer that comes after the warm window, without recreating it", func(ctx SpecContext) {
+		agent, _, row := askParked(ctx)
+		creates := osg.Calls("CreateSandbox")
+		advance(16 * time.Minute)
+		pass(ctx)
+		Expect(phase(agent.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_STOPPED), "stopped after the 15 minute window")
+
+		answer(ctx, row)
+		now.Store(nil)
+		pass(ctx)
+		Expect(phase(agent.ID)).To(Equal(openshellv1.SandboxPhase_SANDBOX_PHASE_READY), "the answer starts it for the resumed run")
+		Expect(osg.Calls("CreateSandbox")).To(Equal(creates), "the home volume stays: agentd resumes with session/load")
 	})
 
 	It("counts a pre-wake signal as activity, and starts a stopped sandbox for it", func(ctx SpecContext) {

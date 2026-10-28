@@ -10,10 +10,14 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/stateracloud/koinon/internal/approvals"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
+	"github.com/stateracloud/koinon/internal/questions"
 )
 
 // prArgs proposes text, a byte-exact edge case (no trailing newline, CRLF, tab, non-ASCII,
@@ -104,6 +108,46 @@ var _ = Describe("Service", func() {
 		_, err = f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "looks good")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.decisions(ctx)).To(HaveLen(1), "a replay is not a new decision")
+	})
+
+	It("opens the pull request on a GitHub Enterprise Server: the App flow and the Git Data API go to the connection's host, trusting its CA bundle", func(ctx SpecContext) {
+		f := newGHESFixture(ctx, "standard")
+		Expect(f.gh.URL()).To(HaveSuffix("/api/v3"))
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		Expect(req.Status).To(Equal("pending"))
+		f.park(ctx)
+
+		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "looks good")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).To(Equal(store.ApprovalStatusExecuted), row.Error.String)
+		Expect(result(row)).To(HaveKeyWithValue("branch", "koinon/fix-typo"))
+
+		By("the token was minted at the GHES, and the branch, commit and pull request are there")
+		Expect(f.gh.Mints()).To(Equal(1))
+		repo := f.gh.Snapshot("widgets")
+		Expect(repo.Calls).To(Equal(map[string]int{
+			"POST git/blobs": 2, "POST git/trees": 1, "POST git/commits": 1, "POST git/refs": 1, "POST pulls": 1,
+		}))
+		Expect(repo.Pulls).To(HaveLen(1))
+		Expect(f.gh.Files("widgets", "koinon/fix-typo")).To(HaveKey("docs/guide.md"))
+		Expect(f.logs.String()).NotTo(ContainSubstring("ghs_"))
+	})
+
+	It("fails a GitHub Enterprise Server call when its CA bundle is missing, without falling back to github.com", func(ctx SpecContext) {
+		f := newGHESFixture(ctx, "standard")
+		_, err := pool.Exec(ctx, `UPDATE connections SET config = config - 'caBundle' WHERE org_id = $1`, f.org)
+		Expect(err).NotTo(HaveOccurred())
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		f.park(ctx)
+		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).NotTo(Equal(store.ApprovalStatusExecuted))
+		// A TLS failure is a network error: the request stays approved for the sweeper's
+		// retry, so the reason is in the log, not in the row.
+		Expect(row.Status).To(Equal(store.ApprovalStatusApproved))
+		Expect(f.logs.String()).To(ContainSubstring("certificate"))
+		Expect(f.gh.Mints()).To(BeZero())
+		Expect(f.gh.Snapshot("widgets").Pulls).To(BeEmpty())
 	})
 
 	It("writes files marked executable as mode 100755 and every other file as 100644", func(ctx SpecContext) {
@@ -213,6 +257,30 @@ var _ = Describe("Service", func() {
 		Expect(f.gh.Mints()).To(BeZero(), "no token was even minted")
 		Expect(f.gh.Snapshot("widgets").Calls).To(BeEmpty())
 		Expect(kinds(f.taskEvents(ctx))).To(Equal([]string{approvals.KindRequested}))
+	})
+
+	It("refuses a directory configured on the connection when the call is made and again when it runs", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard")
+		pr := func(path string) map[string]any {
+			return map[string]any{"branch": "koinon/ci", "title": "CI", "files": []map[string]any{{"path": path, "content": "x"}}}
+		}
+		By("recorded while the directory is not configured")
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, pr("ci/pipelines/build.yml"))
+
+		By("an admin configures the directory on the connection")
+		_, err := pool.Exec(ctx, `UPDATE connections SET config = config || '{"ciDirs":["ci/pipelines"]}'::jsonb WHERE org_id = $1`, f.org)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("the new call is refused at the tool server")
+		Expect(f.callRefused(ctx, githubtools.ToolCreatePullRequest, pr("ci/pipelines/other.yml"))).To(ContainSubstring("under ci/pipelines"))
+		Expect(f.callRefused(ctx, githubtools.ToolCreatePullRequest, pr(".github/workflows/ci.yml"))).To(ContainSubstring("under .github/workflows/"))
+
+		By("the recorded call is refused when it is approved, and nothing is written")
+		row, err := f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(row.Status).To(Equal(store.ApprovalStatusFailed))
+		Expect(row.Error.String).To(ContainSubstring("under ci/pipelines"))
+		Expect(f.gh.Snapshot("widgets").Calls).NotTo(HaveKey("POST git/commits"))
 	})
 
 	It("fails a recorded call of an unknown tool permanently and mints no token", func(ctx SpecContext) {
@@ -358,6 +426,48 @@ var _ = Describe("Service", func() {
 		_, err = f.svc.Approve(ctx, f.org, mustID(req.ID), f.admin, req.ArgsSHA256, "")
 		Expect(err).To(MatchError(approvals.ErrNotPending))
 		Expect(f.gh.Mints()).To(BeZero())
+	})
+
+	It("does not cancel a run parked on an open question when its approval expires (ADR 0065 TK3)", func(ctx SpecContext) {
+		f := newFixture(ctx, "standard")
+		req := f.call(ctx, githubtools.ToolCreatePullRequest, prArgs())
+		_, err := q.ParkRun(ctx, store.ParkRunParams{
+			OrgID: f.org, ID: f.run.ID, Epoch: f.run.Epoch, ParkReason: store.RunParkReasonInputRequired,
+			ParkExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.SetTaskStateFrom(ctx, store.SetTaskStateFromParams{
+			OrgID: f.org, ID: f.task.ID, ToState: store.TaskStateInputRequired,
+			FromStates: []string{string(store.TaskStateSubmitted), string(store.TaskStateWorking)},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		qrow, _, err := questions.Create(ctx, q, questions.Ask{
+			Org: f.org, Task: f.task.ID, Run: f.run.ID, Agent: f.agent.ID, To: f.owner,
+			Question: "Which region?", Default: "eu-west-1", ExpiresAt: time.Now().Add(24 * time.Hour),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.OpenAskedQuestionsForRun(ctx, store.OpenAskedQuestionsForRunParams{OrgID: f.org, RunID: f.run.ID})
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = pool.Exec(ctx, `UPDATE approval_requests SET expires_at = now() - interval '1 minute' WHERE id = $1`, mustID(req.ID))
+		Expect(err).NotTo(HaveOccurred())
+		_, err = f.svc.Sweep(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(f.get(ctx, req.ID).Status).To(Equal(store.ApprovalStatusExpired))
+		Expect(f.getRun(ctx).State).To(Equal(store.RunStateParked), "the open question keeps the run parked")
+		Expect(f.getTask(ctx).State).To(Equal(store.TaskStateInputRequired))
+
+		By("answering the question resumes the run, which is not canceled")
+		Expect(pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			_, err := questions.Respond(ctx, store.New(tx), f.org, qrow.ID, f.owner, questions.Answer{Kind: store.QuestionAnswerKindText, Text: "us-east-1"})
+			if err != nil {
+				return err
+			}
+			return approvals.ResolveRun(ctx, store.New(tx), f.org, f.run.ID)
+		})).To(Succeed())
+		run := f.getRun(ctx)
+		Expect(run.State).To(Equal(store.RunStateParked))
+		Expect(run.ReadyAt.Valid).To(BeTrue(), "ready to be claimed")
 	})
 
 	It("cancels pending requests of a run that was canceled", func(ctx SpecContext) {

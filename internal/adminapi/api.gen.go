@@ -549,6 +549,14 @@ type Model struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	DisabledReason *string   `json:"disabledReason,omitempty"`
 
+	// Format A model's wire format (ADR 0069). The set is open and grows with the formats Koinon supports;
+	// today `openai` is chat completions and `anthropic` is the Messages API. A provider's `formats`
+	// lists the values it accepts.
+	Format ModelFormat `json:"format"`
+
+	// FormatOverridden Whether an admin set the format. Otherwise it follows the default and is re-derived when the default changes.
+	FormatOverridden bool `json:"formatOverridden"`
+
 	// Guard The routing guard (ADR 0048), for OpenRouter providers.
 	Guard           bool               `json:"guard"`
 	Id              openapi_types.UUID `json:"id"`
@@ -570,6 +578,8 @@ type Model struct {
 
 // ModelCreate defines model for ModelCreate.
 type ModelCreate struct {
+	// Format A `ModelFormat` within what the provider offers. Omit for the default.
+	Format     *string            `json:"format,omitempty"`
 	Guard      *bool              `json:"guard,omitempty"`
 	Name       string             `json:"name"`
 	ProviderId openapi_types.UUID `json:"providerId"`
@@ -579,6 +589,46 @@ type ModelCreate struct {
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	Rates *Rates `json:"rates,omitempty"`
 }
+
+// ModelCreated defines model for ModelCreated.
+type ModelCreated struct {
+	CreatedAt      time.Time `json:"createdAt"`
+	DisabledReason *string   `json:"disabledReason,omitempty"`
+
+	// Format A model's wire format (ADR 0069). The set is open and grows with the formats Koinon supports;
+	// today `openai` is chat completions and `anthropic` is the Messages API. A provider's `formats`
+	// lists the values it accepts.
+	Format ModelFormat `json:"format"`
+
+	// FormatOverridden Whether an admin set the format. Otherwise it follows the default and is re-derived when the default changes.
+	FormatOverridden bool `json:"formatOverridden"`
+
+	// Guard The routing guard (ADR 0048), for OpenRouter providers.
+	Guard           bool               `json:"guard"`
+	Id              openapi_types.UUID `json:"id"`
+	ManagedBySecret *string            `json:"managedBySecret,omitempty"`
+
+	// Name The name agents use. The gateway serves it per org as `<org slug>/<name>`.
+	Name       string             `json:"name"`
+	ProviderId openapi_types.UUID `json:"providerId"`
+
+	// Rates Deprecated and never returned. Setting it on a request answers 400: add a price with
+	// `POST /admin/v1/prices` instead.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Rates *Rates `json:"rates,omitempty"`
+
+	// Source `secret` entries are declared by a Kubernetes Secret and read-only here.
+	Source    Source    `json:"source"`
+	UpdatedAt time.Time `json:"updatedAt"`
+
+	// Warnings Only on this response. For example, the model's price has a cache_read price but its provider format cannot cache, so it runs uncached (ADR 0068).
+	Warnings *[]string `json:"warnings,omitempty"`
+}
+
+// ModelFormat A model's wire format (ADR 0069). The set is open and grows with the formats Koinon supports;
+// today `openai` is chat completions and `anthropic` is the Messages API. A provider's `formats`
+// lists the values it accepts.
+type ModelFormat = string
 
 // ModelList defines model for ModelList.
 type ModelList struct {
@@ -590,7 +640,10 @@ type ModelUpdate struct {
 	// ClearRates Deprecated; setting it answers 400.
 	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
 	ClearRates *bool `json:"clearRates,omitempty"`
-	Guard      *bool `json:"guard,omitempty"`
+
+	// Format Overrides the format with a `ModelFormat` within what the provider offers. An empty string goes back to the default.
+	Format *string `json:"format,omitempty"`
+	Guard  *bool   `json:"guard,omitempty"`
 
 	// Rates Deprecated and never returned. Setting it on a request answers 400: add a price with
 	// `POST /admin/v1/prices` instead.
@@ -712,6 +765,31 @@ type PriceRates struct {
 	Reasoning  *string `json:"reasoning,omitempty"`
 }
 
+// PriceSaved defines model for PriceSaved.
+type PriceSaved struct {
+	CreatedAt time.Time `json:"createdAt"`
+	CreatedBy string    `json:"createdBy"`
+
+	// Id The ledger cites it as org#<id>.
+	Id openapi_types.UUID `json:"id"`
+
+	// Match Exactly one of glob (`*` any characters, `?` one, case-insensitive) and regex (RE2, whole name).
+	Match PriceMatch `json:"match"`
+	Name  string     `json:"name"`
+
+	// Prices USD per million tokens as decimal strings with at most 6 fraction digits. A free model needs an explicit "0".
+	Prices    PriceRates   `json:"prices"`
+	Provider  string       `json:"provider"`
+	Ratio     *string      `json:"ratio,omitempty"`
+	RetiredAt *time.Time   `json:"retiredAt,omitempty"`
+	Tiers     *[]PriceTier `json:"tiers,omitempty"`
+	Tokenizer *string      `json:"tokenizer,omitempty"`
+	ValidFrom time.Time    `json:"validFrom"`
+
+	// Warnings Only on this response. For example, a cache_read price whose provider format cannot cache runs uncached (ADR 0068).
+	Warnings *[]string `json:"warnings,omitempty"`
+}
+
 // PriceTier defines model for PriceTier.
 type PriceTier struct {
 	// ContextOver The tier applies when the input side of a request (input, cache reads and writes) exceeds this many tokens; its rates replace the base rates they name.
@@ -745,10 +823,15 @@ type PriceVersion struct {
 
 // Provider defines model for Provider.
 type Provider struct {
-	CreatedAt time.Time `json:"createdAt"`
+	// AnthropicWorkspaceId The Anthropic workspace the gateway names for this provider's models. Only for type `anthropic`; unset when not given.
+	AnthropicWorkspaceId *string   `json:"anthropicWorkspaceId,omitempty"`
+	CreatedAt            time.Time `json:"createdAt"`
 
 	// DisabledReason Set while a declared provider of the same name shadows this one; it is not served.
 	DisabledReason *string `json:"disabledReason,omitempty"`
+
+	// Formats The model formats the provider's type offers, preferred first (ADR 0069).
+	Formats []ModelFormat `json:"formats"`
 
 	// HasKey Whether an API key is stored. The key itself is never returned.
 	HasKey bool               `json:"hasKey"`
@@ -769,6 +852,9 @@ type Provider struct {
 
 // ProviderCreate defines model for ProviderCreate.
 type ProviderCreate struct {
+	// AnthropicWorkspaceId Only for type `anthropic`.
+	AnthropicWorkspaceId *string `json:"anthropicWorkspaceId,omitempty"`
+
 	// ApiKey Omit for keyless upstreams such as Ollama.
 	ApiKey *string `json:"apiKey,omitempty"`
 	Name   string  `json:"name"`
@@ -783,6 +869,9 @@ type ProviderList struct {
 
 // ProviderUpdate defines model for ProviderUpdate.
 type ProviderUpdate struct {
+	// AnthropicWorkspaceId Replaces the workspace ID; an empty string removes it. Only for type `anthropic`.
+	AnthropicWorkspaceId *string `json:"anthropicWorkspaceId,omitempty"`
+
 	// ApiKey Replaces the key; an empty string removes it.
 	ApiKey *string `json:"apiKey,omitempty"`
 	Type   *string `json:"type,omitempty"`
@@ -807,17 +896,37 @@ type Source string
 
 // SpendLine defines model for SpendLine.
 type SpendLine struct {
-	EstimatedRequests int64 `json:"estimatedRequests"`
+	// EstimatedOutputTokens Output tokens of the estimated requests: for a response cut short, the output usage the gateway logged before the cut (none for a chat-completion stream).
+	EstimatedOutputTokens int64 `json:"estimatedOutputTokens"`
+	EstimatedRequests     int64 `json:"estimatedRequests"`
 
 	// EstimatedUsd Cost of requests whose usage was estimated. Counts toward limits.
 	EstimatedUsd string `json:"estimatedUsd"`
+
+	// FlaggedRequests Requests flagged for review (cost differs from the gateway's by more than 1%, usage missing, or an unusable price).
+	FlaggedRequests int64 `json:"flaggedRequests"`
+
+	// GatewayComparedUsd Koinon's cost of the same requests, to compare with gatewayUsd.
+	GatewayComparedUsd string `json:"gatewayComparedUsd"`
+
+	// GatewayRequests Requests agentgateway priced itself.
+	GatewayRequests int64 `json:"gatewayRequests"`
+
+	// GatewayUsd agentgateway's own cost of those requests.
+	GatewayUsd   string `json:"gatewayUsd"`
 	InputTokens  int64  `json:"inputTokens"`
 	Model        string `json:"model"`
 	OutputTokens int64  `json:"outputTokens"`
 
+	// ProvisionalRequests Responses cut short whose provider figure is pending; their cost is the usage the gateway logged until the provider reports.
+	ProvisionalRequests int64 `json:"provisionalRequests"`
+
 	// ReportedUsd Cost of requests whose usage the provider reported.
 	ReportedUsd string `json:"reportedUsd"`
 	Requests    int64  `json:"requests"`
+
+	// ReservedUsd What the provisional requests hold back from the gateway keys' limits (their max_tokens bound minus the charge). Not a cost and not counted by budgets; released when they settle.
+	ReservedUsd string `json:"reservedUsd"`
 }
 
 // SpendReport defines model for SpendReport.
@@ -2839,7 +2948,7 @@ type CreateModelResponseObject interface {
 	VisitCreateModelResponse(w http.ResponseWriter) error
 }
 
-type CreateModel201JSONResponse Model
+type CreateModel201JSONResponse ModelCreated
 
 func (response CreateModel201JSONResponse) VisitCreateModelResponse(w http.ResponseWriter) error {
 
@@ -3028,7 +3137,7 @@ type SetPriceResponseObject interface {
 	VisitSetPriceResponse(w http.ResponseWriter) error
 }
 
-type SetPrice201JSONResponse PriceVersion
+type SetPrice201JSONResponse PriceSaved
 
 func (response SetPrice201JSONResponse) VisitSetPriceResponse(w http.ResponseWriter) error {
 

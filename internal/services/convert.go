@@ -141,6 +141,9 @@ func taskProto(t store.Task) *taskv1alpha1.Task {
 		CreatedAt:    tsProto(t.CreatedAt),
 		UpdatedAt:    tsProto(t.UpdatedAt),
 		FinishedAt:   tsProto(t.FinishedAt),
+		// Triggers and agents create tasks too; a direct message's thread is the one the agent's
+		// direct-message creator ID marks (TR3).
+		DirectMessageThread: t.CreatedByKind == store.TaskCreatorKindTrigger && t.CreatedByTriggerID == DirectMessageTriggerID(t.AgentID),
 	}
 }
 

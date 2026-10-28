@@ -64,6 +64,26 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it('shows a wait for the model provider as a note', () => {
+    const items = buildTimeline([], {
+      [run]: [
+        runEvent(1, 'run.waiting_for_model', { model: 'deepseek/flash', provider: 'openrouter', reason: 'waiting for the model provider "openrouter" to reach the gateway' }),
+        runEvent(2, 'run.waiting_for_model', {}),
+      ],
+    })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456 is waiting for the model provider openrouter to reach the gateway (model deepseek/flash)',
+      'Run r-123456 is waiting for the model provider to reach the gateway',
+    ])
+  })
+
+  it('shows an uncached run as a note', () => {
+    const items = buildTimeline([], { [run]: [runEvent(1, 'run.uncached', { model: 'google/gemini-x', reason: 'no cache mode for the provider format' })] })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456 runs without prompt caching (model google/gemini-x): no cache mode for the provider format',
+    ])
+  })
+
   it('shows a park and its approval task events', () => {
     const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
     const items = buildTimeline(
@@ -100,6 +120,21 @@ describe('buildTimeline', () => {
     expect(items[0]).toMatchObject({ kind: 'approval.requested', ask: true })
     expect(items[9]).toMatchObject({ kind: 'approval.requested', ask: false })
     expect(items[3]).toMatchObject({ ask: false })
+  })
+
+  it('names the scope that allowed a call without a decision', () => {
+    const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
+    const items = buildTimeline(
+      [
+        taskEvent(1, 100, 'approval.approved', { ...base, scope_id: 'sc-1', scope_kind: 'agent', scope_expires_at: '2099-03-04T12:00:00Z' }, ActorKind.USER),
+        taskEvent(2, 200, 'approval.requested', { ...base, decision: 'allow', scope_id: 'sc-1', scope_kind: 'task', scope_expires_at: '2099-03-04T12:00:00Z' }, ActorKind.AGENT),
+      ],
+      {},
+    )
+    const texts = items.map((i) => ('text' in i ? i.text : ''))
+    expect(texts[0]).toMatch(/^Approved create_pull_request on Acme\/Widgets for this agent until /)
+    expect(texts[1]).toMatch(/^Running create_pull_request on Acme\/Widgets, allowed by a scope for this task until /)
+    expect(items[1]).toMatchObject({ ask: false })
   })
 
   it('shows a session reset as a note', () => {

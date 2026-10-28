@@ -6,6 +6,7 @@ import { createConnectQueryKey, useMutation, useQuery } from '@connectrpc/connec
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
 import { useState } from 'react'
+import { AgentApprovalScopes } from '@/components/agent-approval-scopes'
 import { AgentMcpServers } from '@/components/agent-mcp-servers'
 import { AgentTriggers } from '@/components/agent-triggers'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -100,7 +101,10 @@ export function AgentPage() {
           <dt className="text-muted-foreground">Model</dt>
           <dd>{a.model || 'default'}</dd>
           <dt className="text-muted-foreground">Sandbox</dt>
-          <dd>{a.ephemeral ? 'Ephemeral: fresh sandbox per task, no home' : 'Persistent home'}</dd>
+          <dd>
+            {a.ephemeral ? 'Ephemeral: fresh sandbox per task, no home' : 'Persistent home'}
+            {a.sandboxArchivedAt && ` (archived ${timestampDate(a.sandboxArchivedAt).toLocaleString()}, restores on next run)`}
+          </dd>
           <dt className="text-muted-foreground">Version</dt>
           <dd>
             {a.latestVersion}
@@ -119,6 +123,7 @@ export function AgentPage() {
         {grants.length === 0 ? <p className="text-muted-foreground">None.</p> : grants.map((g, i) => <GrantSummary key={i} grant={g} connectionName={connName} />)}
       </section>
       <AgentTriggers agent={a} canEdit={isApprover(org.role)} />
+      {!draft && <AgentApprovalScopes agentId={a.id} canRevoke={isApprover(org.role)} />}
       {isApprover(org.role) && <AgentMcpServers agentId={a.id} />}
       {(draft || pendingVersion) && a.status !== AgentStatus.ARCHIVED && (
         <section aria-label="Activation" className="grid gap-2">

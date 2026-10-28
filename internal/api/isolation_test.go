@@ -40,6 +40,8 @@ import (
 	_ "github.com/stateracloud/koinon/internal/gen/koinon/platform/v1alpha1" // registers its descriptor
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
+	questionv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1"
+	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
@@ -145,6 +147,25 @@ var isolationCases = map[string]isolationCase{
 		},
 	},
 
+	questionv1alpha1connect.QuestionServiceListQuestionsProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.questions.ListQuestions(ctx, &questionv1alpha1.ListQuestionsRequest{OrgId: org})
+		},
+	},
+	questionv1alpha1connect.QuestionServiceAnswerQuestionProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.questions.AnswerQuestion(ctx, &questionv1alpha1.AnswerQuestionRequest{
+				OrgId: org, QuestionId: f.question.ID.String(), Answer: &questionv1alpha1.AnswerQuestionRequest_Text{Text: "intruder"},
+			})
+		},
+	},
+	questionv1alpha1connect.QuestionServiceDismissQuestionProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.questions.DismissQuestion(ctx, &questionv1alpha1.DismissQuestionRequest{OrgId: org, QuestionId: f.question.ID.String()})
+		},
+	},
+
 	taskv1alpha1connect.TaskServiceCreateTaskProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
@@ -167,6 +188,13 @@ var isolationCases = map[string]isolationCase{
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.tasks.AppendMessage(ctx, &taskv1alpha1.AppendMessageRequest{
 				OrgId: org, TaskId: f.ticket.GetId(), Text: "intruder",
+			})
+		},
+	},
+	taskv1alpha1connect.TaskServiceSendDirectMessageProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.tasks.SendDirectMessage(ctx, &taskv1alpha1.SendDirectMessageRequest{
+				OrgId: org, AgentId: f.agent.GetId(), TaskId: f.ticket.GetId(), Text: "intruder", MessageId: "00000000-0000-4000-8000-000000000001",
 			})
 		},
 	},
@@ -197,6 +225,14 @@ var isolationCases = map[string]isolationCase{
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.conns.CreateGitHubConnection(ctx, &connectionv1alpha1.CreateGitHubConnectionRequest{
 				OrgId: org, AppId: 1, InstallationId: 2, PrivateKey: string(f.appKey),
+			})
+		},
+	},
+	connectionv1alpha1connect.ConnectionServiceCreateGiteaConnectionProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.conns.CreateGiteaConnection(ctx, &connectionv1alpha1.CreateGiteaConnectionRequest{
+				OrgId: org, BaseUrl: "https://git.example.test", ReadToken: "koinon_test_not-a-real-read-token", WriteToken: "koinon_test_not-a-real-write-token",
 			})
 		},
 	},
@@ -247,6 +283,16 @@ var isolationCases = map[string]isolationCase{
 			return c.approvals.Approve(ctx, &approvalv1alpha1.ApproveRequest{
 				OrgId: org, ApprovalId: f.approval.ID.String(), ArgsSha256: f.approval.ArgsSha256,
 			})
+		},
+	},
+	approvalv1alpha1connect.ApprovalServiceListApprovalScopesProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.approvals.ListApprovalScopes(ctx, &approvalv1alpha1.ListApprovalScopesRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	approvalv1alpha1connect.ApprovalServiceRevokeApprovalScopeProcedure: {
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.approvals.RevokeApprovalScope(ctx, &approvalv1alpha1.RevokeApprovalScopeRequest{OrgId: org, ScopeId: "0197a2f0-0000-7000-8000-000000000000"})
 		},
 	},
 	approvalv1alpha1connect.ApprovalServiceDenyProcedure: {
@@ -407,6 +453,17 @@ var isolationCases = map[string]isolationCase{
 			return c.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: f.model, Guard: new(false)})
 		},
 	},
+	providerv1alpha1connect.ProviderServiceModelFormatsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.providers.ModelFormats(ctx, &providerv1alpha1.ModelFormatsRequest{OrgId: org, ProviderId: f.provider, Name: "intruder"})
+		},
+	},
+	providerv1alpha1connect.ProviderServiceProviderTypeInfoProcedure: {
+		ownOrgOK: true,
+		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {
+			return c.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "anthropic"})
+		},
+	},
 	providerv1alpha1connect.ProviderServiceDeleteModelProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.providers.DeleteModel(ctx, &providerv1alpha1.DeleteModelRequest{OrgId: org, ModelId: f.model})
@@ -555,6 +612,7 @@ func (e *env) newIsolationFixture(ctx context.Context, appKey []byte) orgFixture
 	Expect(err).NotTo(HaveOccurred())
 	f.connection = res.GetConnection().GetId()
 	f.approval = e.pendingApproval(ctx, f)
+	f.question = e.openQuestion(ctx, f)
 	tok, err := f.owner.tokens.CreateToken(ctx, &tokenv1alpha1.CreateTokenRequest{
 		OrgId: f.org, Name: "ci", Role: authv1alpha1.OrgRole_ORG_ROLE_ADMIN,
 	})
@@ -594,6 +652,7 @@ func snapshot(ctx context.Context, e *env, f orgFixture) []int {
 		count(ctx, e, `SELECT count(*) FROM tasks WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM tasks WHERE org_id = $1 AND state = 'submitted'`, org),
 		count(ctx, e, `SELECT count(*) FROM task_events WHERE org_id = $1`, org),
+		count(ctx, e, `SELECT count(*) FROM dedupe_records WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM runs WHERE org_id = $1`, org),
 		count(ctx, e, `SELECT count(*) FROM runs WHERE org_id = $1 AND state = 'queued'`, org),
 		count(ctx, e, `SELECT count(*) FROM run_events WHERE org_id = $1`, org),

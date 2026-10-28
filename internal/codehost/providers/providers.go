@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/connectors/gitea"
 	"github.com/stateracloud/koinon/internal/connectors/github"
 )
 
@@ -17,10 +18,14 @@ import (
 // connection).
 const GitHub = github.HostID
 
+// Gitea is the connector type ID of the Gitea provider, for the few places whose wire contract
+// is Gitea-specific (the CreateGiteaConnection RPC and the declarative Gitea connection).
+const Gitea = gitea.HostID
+
 // New returns the registry of shipped providers. gh is the GitHub client, shared so connection
 // checks and approved calls use one token cache; nil is a client for api.github.com.
 func New(gh *github.Client) *codehost.Registry {
-	return codehost.NewRegistry(github.NewHost(gh))
+	return codehost.NewRegistry(github.NewHost(gh), gitea.NewHost(gitea.Options{}))
 }
 
 var (

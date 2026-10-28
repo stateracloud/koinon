@@ -12,7 +12,9 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"e56a3cbf64b7b880"'
+      koinon.config: '"eb99b5964c198e04"'
+      koinon.error: proxy.error.reason
+      koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -20,7 +22,9 @@ frontendPolicies:
       koinon.reasoning: llm.reasoningTokens
       koinon.req_bytes: int(request.headers["content-length"])
       koinon.request: uuid()
+      koinon.response_id: coalesce(response.headers["x-generation-id"])
       koinon.status: response.code
+      koinon.stream: llm.streaming
 gateways:
   default:
     port: 4000
@@ -45,13 +49,13 @@ llm:
             agent: globex/analyst
             org: globex
           allowedModels: []
-        - keyHash: sha256:967e658b280e1aa29e6b5480df3448fd8b63d77fac542e4887e92059fba57215
+        - keyHash: sha256:d5cd608f26bf6eab54ecd4387ded4d95c881342e7a6ede12778228653454f908
           metadata:
             name: koinon-reload-probe
             agent: ""
     authorization:
       rules:
-        - apiKey.name != "koinon-reload-probe"
+        - apiKey.name != "koinon-reload-probe" && !has(llmRequest.mcp_servers)
     transformations:
       request:
         set:

@@ -119,7 +119,7 @@ func (d FileDeliverer) Deliver(_ context.Context, config []byte, _ gateway.Revis
 		return err
 	}
 	// agentgateway may run as another user; the config holds no secrets.
-	if err := f.Chmod(0o644); err != nil { //nolint:gosec // see above
+	if err := f.Chmod(0o644); err != nil {
 		_ = f.Close()
 		return err
 	}

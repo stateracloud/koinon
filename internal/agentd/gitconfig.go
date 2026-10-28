@@ -48,8 +48,10 @@ rm -rf -- "$2"`
 
 // codeHost is the host of the run's code-host connection.
 type codeHost struct {
-	loc  connectors.Location
-	site codehost.Site
+	// connector is the connector type ID; empty for an agent without a code-host connection.
+	connector string
+	loc       connectors.Location
+	site      codehost.Site
 }
 
 // codeHost resolves the host of the agent's code-host binding. An agent with none, or whose
@@ -80,7 +82,7 @@ func (r *runner) codeHost(ctx context.Context) (codeHost, error) {
 	if err != nil {
 		return codeHost{}, fmt.Errorf("the %s connection: %w", connector, err)
 	}
-	return codeHost{loc: loc, site: site}, nil
+	return codeHost{connector: connector, loc: loc, site: site}, nil
 }
 
 // writeGitConfig renders the git configuration of the agent's code host into the sandbox. It is
@@ -117,11 +119,12 @@ func (r *runner) writeGitConfig(ctx context.Context, workspace, sandbox string) 
 	return nil
 }
 
-// origin is the host (and port, when not 443) that git remotes of the connection name; empty for
-// an agent without a code-host connection, which savework.sh reads as github.com.
+// origin is the host (and port, when not 443, and the sub-path of a Gitea served under one) that
+// git remotes of the connection name; empty for an agent without a code-host connection, which
+// savework.sh reads as github.com.
 func (h codeHost) origin() string {
 	if h.loc.Web.Host == "" {
 		return ""
 	}
-	return h.loc.Web.Authority()
+	return h.loc.Web.Authority() + h.loc.WebPath
 }

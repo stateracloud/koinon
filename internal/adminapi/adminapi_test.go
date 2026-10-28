@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 type env struct {
@@ -59,7 +60,7 @@ func newEnv(ctx context.Context) *env {
 	e.catalog = catalog.New(pool, ring, nil)
 	e.mcp = mcpservers.New(pool, ring, nil).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"})
 	mux := http.NewServeMux()
-	adminapi.New(pool, e.catalog, e.tokens, slog.New(slog.NewTextHandler(GinkgoWriter, nil))).WithMCP(e.mcp).Mount(mux)
+	adminapi.New(pool, e.catalog, e.tokens, slog.New(slog.NewTextHandler(GinkgoWriter, nil)), pricing.Embedded()).WithMCP(e.mcp).Mount(mux)
 	e.srv = httptest.NewServer(mux)
 	DeferCleanup(e.srv.Close)
 	e.org, e.user, _ = pgtest.NewOrg(ctx, pool)
@@ -127,13 +128,18 @@ type providerJSON struct {
 	Source          string `json:"source"`
 	ManagedBySecret string `json:"managedBySecret"`
 	DisabledReason  string `json:"disabledReason"`
+
+	AnthropicWorkspaceID string   `json:"anthropicWorkspaceId"`
+	Formats              []string `json:"formats"`
 }
 
 type modelJSON struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Guard  bool   `json:"guard"`
-	Source string `json:"source"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Guard            bool   `json:"guard"`
+	Source           string `json:"source"`
+	Format           string `json:"format"`
+	FormatOverridden bool   `json:"formatOverridden"`
 }
 
 type tokenJSON struct {
@@ -407,6 +413,36 @@ var _ = Describe("the admin API", func() {
 	})
 
 	Describe("providers and models", func() {
+		It("sets and validates a model's format and an Anthropic provider's workspace ID (ADR 0069)", func(ctx SpecContext) {
+			code, body := e.call(ctx, e.token, "POST", "/providers", map[string]any{
+				"name": "anthropic", "type": "anthropic", "url": "https://api.anthropic.com/v1", "anthropicWorkspaceId": "wrkspc_01Ab",
+			})
+			Expect(code).To(Equal(201), string(body))
+			p := decode[providerJSON](body)
+			Expect(p.AnthropicWorkspaceID).To(Equal("wrkspc_01Ab"))
+			Expect(p.Formats).To(Equal([]string{"anthropic"}))
+
+			code, body = e.call(ctx, e.token, "POST", "/models", map[string]any{"providerId": p.ID, "name": "claude-haiku-4-5"})
+			Expect(code).To(Equal(201), string(body))
+			m := decode[modelJSON](body)
+			Expect(m.Format).To(Equal("anthropic"))
+			Expect(m.FormatOverridden).To(BeFalse())
+
+			code, body = e.call(ctx, e.token, "POST", "/models", map[string]any{"providerId": p.ID, "name": "other", "format": "openai"})
+			Expect(code).To(Equal(400), string(body))
+			Expect(string(body)).To(ContainSubstring("does not offer"))
+			code, body = e.call(ctx, e.token, "PATCH", "/models/"+m.ID, map[string]any{"format": "anthropic"})
+			Expect(code).To(Equal(200), string(body))
+			Expect(decode[modelJSON](body).FormatOverridden).To(BeTrue())
+			code, body = e.call(ctx, e.token, "PATCH", "/models/"+m.ID, map[string]any{"format": ""})
+			Expect(code).To(Equal(200), string(body))
+			Expect(decode[modelJSON](body).FormatOverridden).To(BeFalse())
+			code, _ = e.call(ctx, e.token, "POST", "/providers", map[string]any{
+				"name": "oa", "type": "openai", "url": "https://api.openai.com/v1", "anthropicWorkspaceId": "wrkspc_01Ab",
+			})
+			Expect(code).To(Equal(400))
+		})
+
 		It("create, read, change and delete, never returning the key", func(ctx SpecContext) {
 			code, body := e.call(ctx, e.token, "POST", "/providers", map[string]any{
 				"name": "openrouter", "type": "openrouter", "url": "https://openrouter.ai/api/v1", "apiKey": "sk-or-secret",

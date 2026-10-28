@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
+	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/wake"
 )
@@ -44,6 +45,7 @@ func wakeNotification(effect string, task store.Task) []durable.Notification {
 // RegisterNotifications registers the handlers of the notifications that services sends. Call it
 // on a Notifier before the DBOS runtime launches, so workflows recovered at start find them.
 func RegisterNotifications(n *durable.Notifier, pool *pgxpool.Pool) {
+	questions.RegisterNotifications(n, pool)
 	n.Handle(NotifyWakeAgent, func(ctx context.Context, note durable.Notification) error {
 		var p wakePayload
 		if err := json.Unmarshal([]byte(note.Payload), &p); err != nil {
@@ -128,7 +130,7 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 			if in.Message != "" {
 				if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 					OrgID: in.Org, TaskID: t.ID, Kind: KindMessage, ActorKind: store.TaskActorKindSystem,
-					Payload: jsonPayload(map[string]any{"text": in.Message}),
+					Payload: jsonPayload(map[string]any{"text": in.Message, "source": in.Source}),
 				}); err != nil {
 					return "", pgtype.UUID{}, err
 				}

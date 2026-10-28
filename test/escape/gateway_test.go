@@ -17,6 +17,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
+	"github.com/stateracloud/koinon/internal/reconciler"
 )
 
 func envOr(key, def string) string {
@@ -133,4 +134,16 @@ func (g *gateway) curl(ctx context.Context, sandbox, method, url string) (string
 	code, body, _ := strings.Cut(out, "\n")
 	GinkgoWriter.Printf("%s %s -> %s (curl %d) %s %s\n", method, url, code, exit, body, stderr)
 	return code, body, exit
+}
+
+// curlGateway is curl with the gateway key's placeholder (reconciler.GatewayKeyEnvVar) in the
+// Authorization header, as the agent's harness sends it.
+func (g *gateway) curlGateway(ctx context.Context, sandbox, method, url string) (string, string) {
+	GinkgoHelper()
+	out, stderr, exit := g.sh(ctx, sandbox, fmt.Sprintf(
+		`curl -sS -m 20 -X %s -H "Authorization: Bearer $%s" -o /tmp/body -w '%%{http_code}' '%s'; rc=$?; echo; cat /tmp/body 2>/dev/null; rm -f /tmp/body; exit $rc`,
+		method, reconciler.GatewayKeyEnvVar, url))
+	code, body, _ := strings.Cut(out, "\n")
+	GinkgoWriter.Printf("%s %s -> %s (curl %d) %s %s\n", method, url, code, exit, body, stderr)
+	return code, body
 }

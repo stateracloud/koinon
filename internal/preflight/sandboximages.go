@@ -17,7 +17,7 @@ import (
 const gatewayConfigKey = "gateway.toml"
 
 const (
-	checkSandboxPulls    = "Sandbox image pull secrets" //nolint:gosec // a check name, not a credential
+	checkSandboxPulls    = "Sandbox image pull secrets"
 	checkSupervisorImage = "Sandbox supervisor image"
 	checkGatewayConfig   = "OpenShell gateway configuration"
 )

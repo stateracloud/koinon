@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { ProviderService, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { useProviderActions } from '@/hooks/use-catalog-actions'
 import { useOrg } from '@/lib/org-context'
-import { availabilityMinutes, savedNotice, savedRecently, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName } from '@/lib/providers'
+import { availabilityMinutes, savedNotice, savedRecently, modelsOf, providerDeletable, providerEditable, providerTypeLabel, scopedModelName, formatLabelOf } from '@/lib/providers'
 
 /** ProvidersPage is where org admins and owners manage the org's model providers and models (ADR 0056). */
 export function ProvidersPage() {
@@ -38,9 +38,11 @@ function ProvidersContent() {
   const [editing, setEditing] = useState<Editing>()
   const [notice, setNotice] = useState<string>()
   const [refused, setRefused] = useState<string>()
+  const [warnings, setWarnings] = useState<string[]>([])
   const done = () => setEditing(undefined)
-  const saved = () => {
+  const saved = (warns: string[] = []) => {
     setRefused(undefined)
+    setWarnings(warns)
     setNotice(savedNotice)
   }
 
@@ -59,7 +61,7 @@ function ProvidersContent() {
       <p className="text-muted-foreground text-sm">
         A provider is the model API your agents call, such as OpenRouter or Ollama. Koinon keeps its key encrypted and hands it only to the gateway; sandboxes never see it. Providers can also be declared with a Kubernetes Secret, which are read-only here. A new or changed API key reaches the gateway through Kubernetes, which takes about three minutes; an agent run that starts sooner can fail.
       </p>
-      {editing?.kind === 'new-provider' && <ProviderForm onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} onSaved={saved} />}
+      {editing?.kind === 'new-provider' && <ProviderForm onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} onSaved={() => saved()} />}
       {refused && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{refused}</AlertDescription>
@@ -69,6 +71,15 @@ function ProvidersContent() {
         <p role="status" className="text-sm">
           {notice}
         </p>
+      )}
+      {warnings.length > 0 && (
+        <Alert role="status" aria-label="Warnings">
+          <AlertDescription>
+            {warnings.map((w) => (
+              <p key={w}>{w}</p>
+            ))}
+          </AlertDescription>
+        </Alert>
       )}
       {failed && (
         <Alert variant="destructive" role="alert">
@@ -127,7 +138,7 @@ function ProviderCard({
   editing: Editing | undefined
   setEditing: (e: Editing | undefined) => void
   actions: Actions
-  onSaved: () => void
+  onSaved: (warnings?: string[]) => void
   onNotice: (m: string) => void
   onRefused: (m: string) => void
 }) {
@@ -158,6 +169,12 @@ function ProviderCard({
         <dd className="break-all">{p.url}</dd>
         <dt className="text-muted-foreground">API key</dt>
         <dd>{p.hasKey ? 'Stored encrypted; it cannot be shown' : 'None'}</dd>
+        {p.anthropicWorkspaceId && (
+          <>
+            <dt className="text-muted-foreground">Workspace ID</dt>
+            <dd className="break-all">{p.anthropicWorkspaceId}</dd>
+          </>
+        )}
       </dl>
       {disabled && (
         <Alert variant="destructive" role="note">
@@ -172,7 +189,7 @@ function ProviderCard({
         </p>
       )}
       {editing?.kind === 'provider' && editing.id === p.id ? (
-        <ProviderForm provider={p} onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} onSaved={onSaved} />
+        <ProviderForm provider={p} onCreate={actions.createProvider} onUpdate={actions.updateProvider} onDone={done} onSaved={() => onSaved()} />
       ) : (
         (editable || providerDeletable(p)) && (
           <div className="flex flex-wrap gap-2">
@@ -266,7 +283,7 @@ function ModelRow({
   done: () => void
   now: number
   actions: Actions
-  onSaved: () => void
+  onSaved: (warnings?: string[]) => void
   onNotice: (m: string) => void
   onRefused: (m: string) => void
 }) {
@@ -276,6 +293,12 @@ function ModelRow({
     <>
       <div className="flex flex-wrap items-center gap-2">
         <code className="text-sm font-medium">{scopedModelName(orgSlug, m.name)}</code>
+        {m.format && (
+          <Badge variant="outline" title={m.formatOverridden ? 'Set for this model' : 'The default for this model'}>
+            {formatLabelOf(provider, m.format)}
+            {m.formatOverridden ? ' (set)' : ''}
+          </Badge>
+        )}
         {m.guard && <Badge variant="secondary">Routing guard</Badge>}
         {m.disabledReason && <Badge variant="destructive">Disabled</Badge>}
         {!m.disabledReason && m.source === 'ui' && savedRecently(m.updatedAt, now) && (

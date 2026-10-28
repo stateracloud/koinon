@@ -25,7 +25,7 @@ func TestGitPush(t *testing.T) {
 	RunSpecs(t, "Git Push Writer Suite")
 }
 
-const token = "koinon_test_not-a-real-token" //nolint:gosec // a fake, obviously
+const token = "koinon_test_not-a-real-token"
 
 // reads is the provider side of the Access: only what the writer reads.
 type reads struct {

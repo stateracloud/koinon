@@ -3,6 +3,7 @@
 package reconciler
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -88,6 +89,8 @@ func (g GitHubApps) ReadToken(ctx context.Context, conn store.Connection, scope 
 
 // GitHubRead is what an agent's GitHub grant renders into its sandbox.
 type GitHubRead struct {
+	// Provider is how messages and the provider profile name the code host: "GitHub", "Gitea".
+	Provider string
 	// ConnectionID is the bound connection.
 	ConnectionID string
 	// Repositories are the bound repositories, owner/name.
@@ -141,7 +144,11 @@ func GitHubReadAccessAt(cfg agentconfig.Config, baseURL string) (read GitHubRead
 			return GitHubRead{}, false, fmt.Errorf("github grant: scope with network rules asks for %s=%s; tokens in the sandbox are read-only", p, level)
 		}
 	}
-	read = GitHubRead{ConnectionID: b.ConnectionID, Repositories: slices.Clone(b.Targets), Permissions: perms}
+	name := connector
+	if c, err := codehost.CapabilitiesOf(ct); err == nil && c.DisplayName != "" {
+		name = c.DisplayName
+	}
+	read = GitHubRead{Provider: name, ConnectionID: b.ConnectionID, Repositories: slices.Clone(b.Targets), Permissions: perms}
 	for _, h := range hosts {
 		read.Endpoints = append(read.Endpoints, execution.Endpoint{
 			Host: h.Host, Port: uint32(h.Port), //nolint:gosec // ports are schema-bounded
@@ -162,10 +169,11 @@ func l7Rules(in []connectors.HTTPRule) []execution.L7Rule {
 // GitHubProfile is the per-agent profile of the GitHub provider record: the token, and the
 // endpoints and binaries it may be used with.
 func GitHubProfile(id string, read GitHubRead, binaries []string) execution.ProviderProfile {
+	name := cmp.Or(read.Provider, "GitHub")
 	return execution.ProviderProfile{
 		ID:          id,
-		DisplayName: "GitHub (read)",
-		Description: "Read-only installation token of one agent, rendered by koinon-reconciler",
+		DisplayName: name + " (read)",
+		Description: "Read-only " + name + " credential of one agent, rendered by koinon-reconciler",
 		Category:    execution.CategorySourceControl,
 		Credentials: []execution.ProfileCredential{{
 			Name:       githubCredential,
@@ -249,6 +257,10 @@ func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names
 	// into the existing record (OpenShell merges credentials; the stable placeholder keeps
 	// resolving), so running processes switch to it without a restart.
 	rev := "github-token-expires-" + tok.ExpiresAt.UTC().Format(time.RFC3339)
+	if tok.Revision != "" {
+		// A static token (Gitea) does not expire: its revision changes when the token does.
+		rev = "github-token-" + tok.Revision
+	}
 	value := tok.Value()
 	creds := make(map[string]string, len(GitHubTokenEnvVars))
 	for _, env := range GitHubTokenEnvVars {
@@ -264,7 +276,11 @@ func (r *Reconciler) ensureGitHub(ctx context.Context, ws string, w *work, names
 		return err
 	}
 	if r.noteGitHubRevision(names.GitHubProvider, rev) {
-		r.log.Info("pushed GitHub installation token", append(w.logAttrs(), "token", tok)...)
+		what := "installation token"
+		if tok.Revision != "" {
+			what = "read token"
+		}
+		r.log.Info("pushed "+cmp.Or(read.Provider, "GitHub")+" "+what, append(w.logAttrs(), "token", tok)...)
 	}
 	return nil
 }

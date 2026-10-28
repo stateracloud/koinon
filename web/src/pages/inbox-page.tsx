@@ -6,13 +6,16 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ChatPanel } from '@/components/chat-panel'
 import { CreateTaskForm } from '@/components/create-task-form'
-import { Inbox } from '@/components/inbox'
+import { DirectMessageForm } from '@/components/direct-message-form'
+import { Inbox, type QuestionAnswer } from '@/components/inbox'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ApprovalService } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { QuestionService } from '@/gen/koinon/question/v1alpha1/question_pb'
 import { TaskService } from '@/gen/koinon/task/v1alpha1/task_pb'
+import { useDirectMessage } from '@/hooks/use-direct-message'
 import { useInbox } from '@/hooks/use-inbox'
-import type { ApprovalItem } from '@/lib/inbox'
+import type { ApprovalItem, QuestionItem } from '@/lib/inbox'
 import { useOrg } from '@/lib/org-context'
 
 /**
@@ -33,6 +36,7 @@ export function InboxPage() {
     Promise.all([
       queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: ApprovalService, cardinality: undefined }) }),
       queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: TaskService, cardinality: undefined }) }),
+      queryClient.invalidateQueries({ queryKey: createConnectQueryKey({ schema: QuestionService, cardinality: undefined }) }),
     ])
   const track = (id: string, on: boolean) =>
     setDeciding((s) => {
@@ -52,8 +56,11 @@ export function InboxPage() {
   const approve = useMutation(ApprovalService.method.approve)
   const deny = useMutation(ApprovalService.method.deny)
 
-  async function decide(item: ApprovalItem, run: () => Promise<unknown>) {
-    const id = item.approval.id
+  const answerQuestion = useMutation(QuestionService.method.answerQuestion)
+  const dismissQuestion = useMutation(QuestionService.method.dismissQuestion)
+
+  async function decide(item: ApprovalItem | QuestionItem, run: () => Promise<unknown>) {
+    const id = item.kind === 'approval' ? item.approval.id : item.question.id
     track(id, true)
     fail(id)
     try {
@@ -61,12 +68,17 @@ export function InboxPage() {
     } catch (e) {
       const err = ConnectError.from(e)
       // Approve sends the hash the list showed; Aborted means the request changed since.
-      fail(id, err.code === Code.Aborted ? 'This request changed. Open it to review the new version.' : err.rawMessage)
+      if (err.code === Code.Aborted && item.kind === 'question') fail(id, 'This question was already answered, dismissed or expired.')
+      else fail(id, err.code === Code.Aborted ? 'This request changed. Open it to review the new version.' : err.rawMessage)
     } finally {
       track(id, false)
       await refresh()
     }
   }
+
+  const newThread = useDirectMessage(orgId, (res) => {
+    if (res.task) setSelected(res.task.id)
+  })
 
   const createTask = useMutation(TaskService.method.createTask, {
     onSuccess: async (res) => {
@@ -100,6 +112,8 @@ export function InboxPage() {
               errors={errors}
               onApprove={(i) => void decide(i, () => approve.mutateAsync({ orgId, approvalId: i.approval.id, argsSha256: i.approval.argsSha256 }))}
               onDeny={(i) => void decide(i, () => deny.mutateAsync({ orgId, approvalId: i.approval.id }))}
+              onAnswer={(i, a) => void decide(i, () => answerQuestion.mutateAsync({ orgId, questionId: i.question.id, answer: answerOf(a) }))}
+              onDismiss={(i) => void decide(i, () => dismissQuestion.mutateAsync({ orgId, questionId: i.question.id }))}
             />
           )}
         </section>
@@ -114,9 +128,18 @@ export function InboxPage() {
               orgId={orgId}
               tasks={tasks.data?.tasks ?? []}
               agentNames={agentNames}
+              agents={agents.data?.agents}
               canEdit={canEdit}
               selectedId={selected}
               onSelect={setSelected}
+            />
+          )}
+          {canEdit && agents.data && (
+            <DirectMessageForm
+              agents={agents.data.agents}
+              pending={newThread.pending}
+              error={newThread.error}
+              onSend={(agentId, text) => newThread.send({ agentId, text })}
             />
           )}
           {canEdit && agents.data && (
@@ -133,4 +156,9 @@ export function InboxPage() {
       </div>
     </div>
   )
+}
+
+/** answerOf maps what the person gave to the request's oneof. */
+function answerOf(a: QuestionAnswer) {
+  return { case: a.kind, value: a.text } as const
 }

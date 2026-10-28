@@ -8,7 +8,7 @@ agentgateway holds the real key, forwards the request to your provider and count
 reads the cost from agentgateway's access log and keeps a ledger.
 
 Each org has its own **providers** (an OpenAI-compatible endpoint and, usually, a key) and **models**
-(a name and an optional routing guard). Provider keys are encrypted in Postgres
+(a name, an API format and an optional routing guard). Provider keys are encrypted in Postgres
 ([ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md));
 the encryption keys live in a Secret that only `koinon-api` and `koinon-reconciler` mount
 ([Secret keys](https://github.com/stateracloud/koinon/blob/main/docs/ops/secret-keys.md)).
@@ -26,14 +26,16 @@ There are two ways to add them, and the admin API is a third door to the UI's so
 
 Org admins and owners open **Providers** under Settings in the sidebar. Members do not see it.
 
-- **Add provider** takes a name, a provider type (OpenRouter, Ollama, an OpenAI-compatible API, or
+- **Add provider** takes a name, a provider type (OpenRouter, Anthropic, Ollama, an OpenAI-compatible API, or
   another agentgateway provider name), the URL and the API key. The key is write-only: Koinon stores
   it encrypted and never shows it again, not even its last characters. To change it, type a new one.
   To remove it, tick the box on the edit form.
 - If the URL is refused (a private, loopback or cluster-internal address), the form shows the reason.
   Ask a platform admin to allow the host ([Upstream hosts](#upstream-hosts)).
-- **Add model** on a provider takes the model name and, for OpenRouter providers only, the routing
-  guard. The page shows the name the gateway serves, `<org>/<model>`. A model has no price of its own:
+- For an Anthropic provider the form also takes an optional **workspace ID**
+  ([below](#anthropic)).
+- **Add model** on a provider takes the model name, its [API format](#api-formats) and, for OpenRouter
+  providers only, the routing guard. The page shows the name the gateway serves, `<org>/<model>`. A model has no price of its own:
   see [Prices](/guides/prices/).
 - A provider declared by a Secret shows "Managed by Secret <name>" and has no edit buttons. If its
   Secret was deleted it shows as removed, with the reason, and you may delete it.
@@ -66,8 +68,10 @@ stringData:
 - `koinon.dev/org` is the org's slug. The bootstrap install has the org `default`.
 - `name` is the provider's name, unique in the org. `provider` is agentgateway's `providerOverride`
   (`openai`, `openrouter`, `ollama` and so on). `url` is the OpenAI-compatible base URL. `apiKey` is
-  optional; leave it out for Ollama.
-- `models` is a YAML list. Each model has a `name` and an optional `guard`. Prices are not declared
+  optional; leave it out for Ollama. A provider of type `anthropic` also takes an optional
+  `anthropicWorkspaceId` ([Anthropic](#anthropic)).
+- `models` is a YAML list. Each model has a `name`, an optional `guard` and an optional `format`
+  ([API formats](#api-formats)). Prices are not declared
   here: Koinon prices a model from [its default price list or a price you add](/guides/prices/). **Upgrading:** an
   older Secret that still has `rates` stays valid, but Koinon ignores the rates and says so in a Warning Event
   on every sync. A model that only had `rates` is not served unless the default list prices it; add a price
@@ -87,7 +91,8 @@ stringData:
   Secret and a line in the `koinon-api` log say why. Run `kubectl -n koinon describe secret <name>`.
 - Every apply and removal is written to the audit log with the actor `secret <name>`.
 - The same labels and mechanism declare a GitHub connection: `koinon.dev/secret-type: connection`
-  with `name`, `connector: github`, `appId`, `installationId` and `privateKey`, plus optional `baseUrl` and `caBundle` for a GitHub Enterprise Server.
+  with `name`, `connector: github`, `appId`, `installationId` and `privateKey`, plus optional `baseUrl` and `caBundle` for a GitHub Enterprise Server, and optional `ciDirs`
+  (extra CI directories Koinon refuses changes under: one per line or comma-separated, at most 20, relative, no `..`).
 
 `apiKey` and the other values stay in the Secret's `stringData`, as in Argo CD. Turn on etcd encryption
 at rest, and generate the Secret with External Secrets Operator or Sealed Secrets instead of keeping it
@@ -104,6 +109,100 @@ on, in `networkPolicy.gatewayEgressTo`. The runbook has the details and limits. 
 **Trust boundary.** Write access to Koinon's namespace is platform-admin level. Anyone who can create
 a labelled Secret there can define providers and credentials for any org. Grant it as you would
 grant cluster administration.
+
+## API formats
+
+A model speaks one wire format, whichever provider serves it
+([ADR 0069](https://github.com/stateracloud/koinon/blob/main/docs/adr/0069-native-model-formats.md)):
+
+| Format | API | Used for |
+| --- | --- | --- |
+| `openai` | OpenAI chat completions | Most models and most providers. |
+| `anthropic` | Anthropic Messages | Claude, which caches prompts through this API. |
+
+The format belongs to the model because one provider can serve several families. OpenRouter serves
+Claude and other models, and each family wants its own API. What a provider offers:
+
+| Provider type | Formats it offers |
+| --- | --- |
+| `anthropic` | `anthropic` |
+| `openrouter` | `openai`, `anthropic` |
+| Every other type | `openai` |
+
+**The default.** Koinon prefers `anthropic` for `claude-*` and `anthropic/*` model names and `openai`
+for everything else. If the provider does not offer the preferred format, the model gets the first
+format the provider offers. For now OpenRouter's `anthropic/*` models default to `openai`; they move to
+`anthropic` once Koinon has checked that path against OpenRouter. The model form marks the default.
+
+**Overriding it.** Choose another format on the model form, in the admin API (`format` on `POST
+/admin/v1/models` and `PATCH /admin/v1/models/{id}`) or per model in a declared Secret. The format
+must be one the provider offers, or the save is refused. A model you set keeps its format when Koinon
+changes its defaults. Choosing the default again, or an empty `format` in the API, puts the model
+back on the default. The model list shows a model's format, and "(set)" when someone chose it.
+
+**Defaults follow the table.** At every start `koinon-api` applies the table to each model whose
+format nobody set, and records each change in the audit log with the actor `koinon-api`. Existing
+models of an Anthropic provider moved to `anthropic` when Koinon was upgraded.
+
+**Not yet used.** This release records and validates the format. The gateway and the agent harness
+still use chat completions for every model until the changes that follow in ADR 0069 land.
+
+## Anthropic
+
+Choose the **Anthropic** provider type for Claude through Anthropic's own API, with the URL
+`https://api.anthropic.com/v1` and an Anthropic API key. Its models use the `anthropic` format.
+
+Anthropic needs a **workspace ID** for an API key that is not scoped to one workspace. Set it on the
+provider (`anthropicWorkspaceId` in the admin API and in a declared Secret): `wrkspc_` followed by
+letters and digits, for Anthropic providers only. It identifies the workspace and is not a secret, so
+Koinon stores it in plain text and shows it.
+
+```yaml model-provider
+apiVersion: v1
+kind: Secret
+metadata:
+  name: anthropic
+  namespace: koinon
+  labels:
+    koinon.dev/secret-type: model-provider
+    koinon.dev/org: default
+stringData:
+  name: anthropic
+  provider: anthropic
+  url: https://api.anthropic.com/v1
+  apiKey: sk-ant-replace-me
+  anthropicWorkspaceId: wrkspc_replaceme
+  models: |
+    - name: claude-haiku-4-5
+```
+
+## When a new provider is served
+
+A new provider is not served the moment you save it. `koinon-reconciler` writes its key into the
+gateway's provider key Secret and waits for kubelet to update the gateway pod's copy (about 90 seconds in
+standalone mode, `--provider-key-settle`) before it applies a gateway config that names the key; a new
+model of a provider already served needs only that apply. Once agentgateway serves the model, the
+reconciler records it.
+
+A run whose model is not served yet waits before it starts the harness. The task's timeline shows
+"Run … is waiting for the model provider *name* to reach the gateway", and the run stays *starting*
+meanwhile; its sandbox starts in parallel. When the model is served, the run goes on by itself.
+
+A model without a usable price is never served, so its run fails at once and says so: add a price on
+the **Prices** page.
+
+If the model is still not served after five minutes (`koinon-agentd --model-serve-timeout`), the run
+fails with "the gateway did not serve the model … its provider … has not reached the gateway". That
+usually means the provider is not served at all: its key cannot be opened, its URL is refused, or
+the gateway rejected the config. The `koinon-reconciler` log says which (a
+rejected config also shows on the agent's status). Fix it and run the task again.
+
+Changing a served provider's key does not make runs wait: the gateway keeps using the previous key
+until the new one has arrived, also when the key changed while `koinon-reconciler` was down.
+
+Keep `--model-serve-timeout` well above the reconciler's `--provider-key-settle` plus one gateway
+apply (agentgateway's reload takes up to a minute). The two are flags of different components, so
+Koinon cannot check this for you; if you raise the settle time, raise the timeout too.
 
 ## OpenRouter, with the routing guard
 

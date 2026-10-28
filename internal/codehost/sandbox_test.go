@@ -73,7 +73,7 @@ var _ = Describe("CapabilitiesOf", func() {
 		Expect(c).To(Equal(codehost.Capabilities{
 			DisplayName: "GitHub", CredentialClass: "app-installation", TokenLifetime: time.Hour,
 			NarrowsRepositories: true, NarrowsPermissions: true, MaxRepositories: 500, CanDenyCI: true, ExactModes: true,
-			CIPaths: []string{".github/workflows/"},
+			CIPaths: []string{".github/workflows/"}, CIPathsFoldCase: true,
 		}))
 	})
 })

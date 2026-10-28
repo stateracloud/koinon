@@ -4,8 +4,9 @@ import { create, type MessageInitShape } from '@bufbuild/protobuf'
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
+import { ProviderSchema } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { TokenSchema } from '@/gen/koinon/token/v1alpha1/token_pb'
-import { createdByLabel, savedRecently, daysToSeconds, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
+import { createdByLabel, formatLabelOf, providerTypeLabel, savedRecently, daysToSeconds, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
 
 describe('forms', () => {
   it('names a model the way the gateway serves it', () => {
@@ -16,6 +17,17 @@ describe('forms', () => {
     expect(tokenDaysError('90')).toBeUndefined()
     for (const bad of ['0', '91', '1.5', '', 'x']) expect(tokenDaysError(bad)).toBeDefined()
     expect(daysToSeconds(30)).toBe(2592000n)
+  })
+})
+
+describe('model formats and Anthropic providers', () => {
+  const provider = create(ProviderSchema, { formats: [{ id: 'openai', label: 'OpenAI chat completions' }] })
+  it('names a format with the label the server gave, and an unlisted one as its id', () => {
+    expect(formatLabelOf(provider, 'openai')).toBe('OpenAI chat completions')
+    expect(formatLabelOf(provider, 'gemini')).toBe('gemini')
+  })
+  it('lists Anthropic as a provider type', () => {
+    expect(providerTypeLabel('anthropic')).toBe('Anthropic')
   })
 })
 

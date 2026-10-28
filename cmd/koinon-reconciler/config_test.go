@@ -36,6 +36,10 @@ reconciler:
   idleTimeout: 10m
   resyncInterval: 30s
   homeRetention: delete
+koinonTools:
+  url: http://koinon-api-tools.koinon.svc:8081/mcp-koinon
+githubTools:
+  url: http://koinon-api-tools.koinon.svc:8081/mcp
 flavors:
   opencode:
     image: ghcr.io/stateracloud/flavor-opencode:0.1.0
@@ -78,6 +82,12 @@ var _ = Describe("parseConfig", func() {
 		Expect(c.providerKeysDir).To(Equal("/secrets/providers"))
 		Expect(c.kekDir).To(Equal("/secrets/kek"))
 
+		Expect(c.toolServers()).To(Equal(map[string]string{
+			"github": "http://koinon-api-tools.koinon.svc:8081/mcp",
+			"gitea":  "http://koinon-api-tools.koinon.svc:8081/mcp",
+			"koinon": "http://koinon-api-tools.koinon.svc:8081/mcp-koinon", // ask_user (TK3)
+		}))
+
 		f := c.flavors()[store.AgentFlavorOpencode]
 		Expect(f.Image).To(Equal("ghcr.io/stateracloud/flavor-opencode:0.1.0"))
 		Expect(f.Binaries).To(HaveLen(1))
@@ -115,6 +125,31 @@ openshell:
 		env["KOINON_OPENSHELL_ADDRESS"], env["KOINON_PROVIDER_KEYS_SECRET"], env["KOINON_PROVIDER_KEYS_DIR"] = "o:1", "s", "/d"
 		_, err = parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 		Expect(err).To(MatchError(ContainSubstring("--gateway-name is required in kubernetes mode")))
+	})
+
+	It("reads archiveAfter: a negative file value turns the tier off, a flag overrides it, empty leaves the default to the reconciler", func() {
+		base := map[string]string{"DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k"}
+		write := func(archiveAfter string) map[string]string {
+			path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+			cfg := "gateway:\n  mode: kubernetes\n  name: g\n  url: http://g:8080\n  port: 8080\n  providerKeysSecret: s\n  providerKeysDir: /d\nopenshell:\n  address: o:1\n"
+			if archiveAfter != "" {
+				cfg += "reconciler:\n  archiveAfter: " + archiveAfter + "\n"
+			}
+			Expect(os.WriteFile(path, []byte(cfg), 0o600)).To(Succeed())
+			env := map[string]string{"KOINON_CONFIG": path}
+			for k, v := range base {
+				env[k] = v
+			}
+			return env
+		}
+		parse := func(env map[string]string, args ...string) config {
+			c, err := parseConfig(args, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+			Expect(err).NotTo(HaveOccurred())
+			return c
+		}
+		Expect(parse(write("-1h")).archiveAfter).To(BeNumerically("<", 0))
+		Expect(parse(write("-1h"), "--archive-after=48h").archiveAfter).To(Equal(48 * time.Hour))
+		Expect(parse(write("")).archiveAfter).To(BeZero())
 	})
 
 	It("requires the database, namespace, OpenShell and gateway settings", func() {

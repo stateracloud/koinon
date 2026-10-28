@@ -12,7 +12,7 @@ import { orgId, renderApp, whoAmI } from '@/test-utils'
 
 const sha = 'c'.repeat(64)
 
-function savedApproval(opts: { workflow?: boolean; canDecide?: boolean; savedStatus?: string; status?: Status } = {}) {
+function savedApproval(opts: { workflow?: boolean; extraPath?: string; ciPaths?: string[]; ciFoldCase?: boolean; canDecide?: boolean; savedStatus?: string; status?: Status } = {}) {
   return create(ApprovalSchema, {
     id: 'ap-1',
     orgId,
@@ -26,6 +26,8 @@ function savedApproval(opts: { workflow?: boolean; canDecide?: boolean; savedSta
     status: opts.status ?? Status.PENDING,
     canDecide: opts.canDecide ?? true,
     system: true,
+    ciPaths: opts.ciPaths ?? ['.github/workflows/'],
+    ciFoldCase: opts.ciFoldCase ?? false,
     call: {
       case: 'savedWork',
       value: create(SavedWorkCallSchema, {
@@ -37,7 +39,7 @@ function savedApproval(opts: { workflow?: boolean; canDecide?: boolean; savedSta
           create(SavedFileSchema, { path: 'docs/new.md', status: 'A', added: 5, deleted: 0, size: 90n }),
           create(SavedFileSchema, { path: 'old.txt', status: 'D', added: 0, deleted: 7, size: 0n }),
           create(SavedFileSchema, { path: 'logo.png', status: 'A', size: 2048n, binary: true }),
-          ...(opts.workflow ? [create(SavedFileSchema, { path: '.github/workflows/ci.yml', status: 'M', added: 1, size: 10n })] : []),
+          ...(opts.workflow ? [create(SavedFileSchema, { path: opts.extraPath ?? '.github/workflows/ci.yml', status: 'M', added: 1, size: 10n })] : []),
         ],
         sizeBytes: 2538n,
         skipped: ['node_modules/ (ignored directory)', 'big.bin (larger than 1 MiB)'],
@@ -112,10 +114,35 @@ describe('ApprovalCard for saved work', () => {
     expect(diffCalls()).toBe(0)
   })
 
-  it('warns about changes under .github/', async () => {
+  it('warns about changes under the provider CI paths the API returns', async () => {
     setup({ workflow: true })
     const card = await screen.findByTestId('approval-card')
-    expect(within(card).getByTestId('workflow-warning')).toHaveTextContent(/start existing workflows that run on push.*secrets/)
+    expect(within(card).getByTestId('workflow-warning')).toHaveTextContent(/under \.github\/workflows\/.*start existing workflows that run on push.*secrets/)
+  })
+
+  it('warns about a Gitea workflow directory and a directory configured on the connection, and names them', async () => {
+    setup({ workflow: true, extraPath: '.gitea/workflows/build.yaml', ciPaths: ['.gitea/workflows/', '.gitea/scoped_workflows/', 'ci/pipelines'] })
+    expect(within(await screen.findByTestId('approval-card')).getByTestId('workflow-warning')).toHaveTextContent('under .gitea/workflows/, where')
+  })
+
+  it('warns about a configured directory through ./ and .. segments', async () => {
+    setup({ workflow: true, extraPath: './src/../ci/pipelines/x.yml', ciPaths: ['.gitea/workflows/', 'ci/pipelines'] })
+    expect(within(await screen.findByTestId('approval-card')).getByTestId('workflow-warning')).toHaveTextContent('under ci/pipelines, where')
+  })
+
+  it('does not warn about .github/ when the host does not run it as CI', async () => {
+    setup({ workflow: true, ciPaths: ['.gitea/workflows/'] })
+    expect(within(await screen.findByTestId('approval-card')).queryByTestId('workflow-warning')).not.toBeInTheDocument()
+  })
+
+  it('matches case only when the host folds it', async () => {
+    setup({ workflow: true, extraPath: '.GitHub/Workflows/ci.yml' })
+    expect(within(await screen.findByTestId('approval-card')).queryByTestId('workflow-warning')).not.toBeInTheDocument()
+  })
+
+  it('matches case when the host folds it', async () => {
+    setup({ workflow: true, extraPath: '.GitHub/Workflows/ci.yml', ciFoldCase: true })
+    expect(within(await screen.findByTestId('approval-card')).getByTestId('workflow-warning')).toBeInTheDocument()
   })
 
   it('approves with the args_sha256 from GetApproval, and denies with a note', async () => {

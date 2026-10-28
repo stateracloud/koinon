@@ -31,7 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 )
 
-// The kind suite needs a cluster with the Gateway API CRDs and agentgateway v1.6.0 (hack/g2-kind.sh
+// The kind suite needs a cluster with the Gateway API CRDs and agentgateway v1.7.0 (hack/g2-kind.sh
 // creates one, runs this package and deletes it). KOINON_KIND_KUBECONFIG points at its kubeconfig;
 // without it the specs skip. KOINON_KIND_HOST is the address pods use to reach the test host.
 const (
@@ -183,7 +183,7 @@ func (g *kubeGateway) forward() (string, error) {
 	if g.pf != nil && g.pf.ProcessState == nil && g.pfa != "" {
 		return g.pfa, nil
 	}
-	cmd := exec.CommandContext(context.Background(), "kubectl", "--kubeconfig", g.c.cfgPath, "-n", g.ns, "port-forward", "--address", "127.0.0.1", "svc/"+gatewayName, ":4000") //nolint:gosec // test helper
+	cmd := exec.CommandContext(context.Background(), "kubectl", "--kubeconfig", g.c.cfgPath, "-n", g.ns, "port-forward", "--address", "127.0.0.1", "svc/"+gatewayName, ":4000")
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err

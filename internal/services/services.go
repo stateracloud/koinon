@@ -12,7 +12,7 @@
 //	viewer  Get*, List*, WatchRun
 //	member  CreateAgentFromTemplate, CreateTicket, AppendMessage, MoveTicket, CancelRun
 //	admin   AuditService.List (a platform admin may also read every org), ProviderService (every call), ActivateAgent (approves the version's grants), ArchiveAgent,
-//	        CreateGitHubConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
+//	        CreateGitHubConnection, CreateGiteaConnection, TestConnection, CreateToken, ListTokens, RevokeToken, Approve, Deny (ADR 0049:
 //	        approvers are admins and owners)
 //
 // A caller without any role in the org gets NotFound, so org IDs cannot be
@@ -47,6 +47,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
@@ -56,6 +57,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Keys is the secret store as the services use it.
@@ -68,14 +70,22 @@ type Keys interface {
 // without a wake-up, as a backstop for missed notifications.
 const DefaultWatchPollInterval = 5 * time.Second
 
+// DefaultWatchHeartbeatInterval is how often a WatchRun stream that has sent nothing else sends
+// a heartbeat, so proxies and load balancers keep a quiet run's stream open (issue #141).
+const DefaultWatchHeartbeatInterval = 30 * time.Second
+
 // Options configures a Server.
 type Options struct {
 	// Hub wakes WatchRun streams. Required.
 	Hub *runwatch.Hub
 	// WatchPollInterval defaults to DefaultWatchPollInterval.
 	WatchPollInterval time.Duration
+	// WatchHeartbeatInterval defaults to DefaultWatchHeartbeatInterval.
+	WatchHeartbeatInterval time.Duration
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
+	// Prices is the default price list; required (pricing.Embedded in production).
+	Prices pricing.ListSource
 	// Keys seals and opens connections' secret fields (the secret store). Nil means Koinon
 	// runs without key-encryption keys, and creating connections fails.
 	Keys Keys
@@ -98,6 +108,9 @@ type Options struct {
 	// Notifier delivers the notifications that follow a commit (ADR 0066, practice B2). Nil means
 	// an inline one: best effort, no retry. koinon-api passes a DBOS-backed one with --durable.
 	Notifier *durable.Notifier
+	// DirectMessages delivers direct messages through the org-partitioned DBOS queue (TR3). Nil
+	// means inline, in one transaction. koinon-api passes one with --durable.
+	DirectMessages *DirectMessageQueue
 	// URLPolicy decides which hosts a connection's base URL may name (the platform's egress
 	// policy, as for providers and MCP servers). The zero policy still denies private and internal
 	// addresses.
@@ -110,7 +123,9 @@ type Server struct {
 	q    *store.Queries
 	hub  *runwatch.Hub
 	poll time.Duration
-	log  *slog.Logger
+	// heartbeat is the idle interval after which WatchRun sends a heartbeat.
+	heartbeat time.Duration
+	log       *slog.Logger
 
 	keys      Keys
 	tokens    *tokens.Service
@@ -122,6 +137,7 @@ type Server struct {
 	mcp       *mcpservers.Service
 	typing    typingGate
 	notifier  *durable.Notifier
+	dm        *DirectMessageQueue
 	urlPolicy catalog.URLPolicy
 }
 
@@ -129,6 +145,9 @@ type Server struct {
 func New(pool *pgxpool.Pool, opts Options) *Server {
 	if opts.WatchPollInterval <= 0 {
 		opts.WatchPollInterval = DefaultWatchPollInterval
+	}
+	if opts.WatchHeartbeatInterval <= 0 {
+		opts.WatchHeartbeatInterval = DefaultWatchHeartbeatInterval
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -143,12 +162,17 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		opts.Notifier = durable.NewNotifier(nil, opts.Logger)
 		RegisterNotifications(opts.Notifier, pool)
 	}
-	return &Server{
+	s := &Server{
+		dm:       opts.DirectMessages,
 		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
-		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, log: opts.Logger,
+		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
-		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger),
+		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 	}
+	if s.dm != nil {
+		s.dm.bind(s)
+	}
+	return s
 }
 
 // Register registers every service on server.
@@ -156,6 +180,7 @@ func (s *Server) Register(server *connect.Server) {
 	agentv1alpha1connect.RegisterAgentServiceHandler(server, s)
 	ticketv1alpha1connect.RegisterTicketServiceHandler(server, s)
 	taskv1alpha1connect.RegisterTaskServiceHandler(server, taskAPI{s})
+	questionv1alpha1connect.RegisterQuestionServiceHandler(server, s)
 	runv1alpha1connect.RegisterRunServiceHandler(server, s)
 	templatev1alpha1connect.RegisterTemplateServiceHandler(server, s)
 	connectionv1alpha1connect.RegisterConnectionServiceHandler(server, s)

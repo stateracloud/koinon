@@ -87,6 +87,11 @@ reconciler:
   # A sandbox whose run parked on a2a or input_required stays up this long from the park (ADR 0066
   # decision 11); approval and budget parks use idleTimeout. Overridable per org.
   parkWarm: 15m
+  # Archive tier (plan item AR1, ADR 0032): a sandbox stopped this long, whose home's latest
+  # checkpoint is complete, is deleted with its volume; the next run restores the home and reloads
+  # the same session. Needs checkpoints.enabled. A negative value (-1h) turns it off. The same value
+  # for every org; per-org tuning is not built.
+  archiveAfter: 168h
   # Sandbox start/stop jobs that run at once, outside the gateway update (plan item LT1).
   sandboxJobs: 8
   # Time between full passes. Postgres NOTIFY wakes the reconciler earlier for new runs and
@@ -155,7 +160,7 @@ preflight:
   agentSandbox:
     namespace: agent-sandbox-system
     controller: agent-sandbox-controller
-  # Where agentgateway's controller runs (gateway.mode=kubernetes); its image tag must be v1.6.x. The
+  # Where agentgateway's controller runs (gateway.mode=kubernetes); its image tag must be v1.7.x. The
   # proxy's NetworkPolicy also admits egress to this namespace, where the proxy fetches its xDS
   # configuration.
   agentgateway:
@@ -220,7 +225,7 @@ postgres:
 gateway:
   # The gateway modes are decided in ADR 0049 and ADR 0058.
   # standalone: the chart installs agentgateway, configured by the reconciler.
-  # kubernetes: use an existing agentgateway controller (v1.6.x, with its CRDs, and a GatewayClass).
+  # kubernetes: use an existing agentgateway controller (v1.7.x, with its CRDs, and a GatewayClass).
   # The chart renders no gateway; the reconciler creates Koinon's own Gateway, AgentgatewayModels,
   # AgentgatewayPolicies, AgentgatewayBackend, HTTPRoute and key ConfigMaps in this namespace and never
   # touches other gateways (plan item G2). There is no fallback to standalone: the install preflight
@@ -230,10 +235,16 @@ gateway:
   standalone:
     image:
       repository: ghcr.io/agentgateway/agentgateway
-      tag: v1.6.0
-      digest: sha256:9d3e6044ddcdc0878b1787f77bd401252b95e22684203fb5e874c4c42d2ed90c
+      tag: v1.7.0
+      digest: sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
     # LLM and MCP listener.
     port: 8080
+    # The key that encrypts MCP session IDs (agentgateway v1.7 always encrypts them; SESSION_KEY).
+    # By default the ensure-secrets hook Job generates the Secret koinon-gateway-session-key (key
+    # "key": 64 hex characters, `openssl rand -hex 32`) and never changes it. existingSecret names
+    # your own Secret with that key instead.
+    sessionKey:
+      existingSecret: ""
     # SQLite budget store; one replica only.
     persistence:
       size: 1Gi
@@ -286,7 +297,10 @@ secrets:
 # Home checkpoints (plan item HC1, ADR 0032, practice B3). Off by default. When on, koinon-agentd saves
 # each agent's home (sessions, notes, scratch work; caches and node_modules excluded) to an
 # S3-compatible bucket with kopia: hourly while the sandbox runs, before an idle stop and before a
-# recreation, and restores it into a recreated sandbox before the harness starts. A sandbox is
+# recreation, and restores it into a recreated sandbox before the harness starts. The backup reads
+# the home as tar over exec; the restore goes through OpenShell's flow-controlled upload channel
+# (the openshell-upload-v1 SSH subsystem), which needs OpenShell v0.1.4 or later (ADR 0032, issue
+# 169). A sandbox is
 # recreated only after its latest backup completed; a failed backup blocks the recreation and marks
 # the agent unhealthy with the reason. One repository per agent at orgs/<org>/homes/<agent>/; its
 # random password is sealed with the secret store's KEK, which only koinon-api holds: koinon-agentd

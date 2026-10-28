@@ -30,10 +30,17 @@ func TestDefaultListIsValid(t *testing.T) {
 }
 
 func TestCostBucketsDoNotOverlap(t *testing.T) {
-	_, rs := pricing.Default()
-	r, ok := pricing.Select(rs, "anthropic", "claude-haiku-5-5", time.Now())
-	if !ok {
-		t.Fatal("haiku not found")
+	// An entry of its own, not the default list's: a price update must not change this test.
+	r, err := pricing.Entry{
+		ID: "test", Provider: "test", Match: pricing.Match{Glob: "test-model"}, ValidFrom: "2000-01-01",
+		Spec: pricing.Spec{
+			Prices: pricing.Wire{Input: "0.10", Output: "0.50", CacheRead: "0.01", CacheWrite: "0.125"},
+			Tiers:  []pricing.WireTier{{ContextOver: 100_000, Prices: pricing.Wire{Input: "0.50", Output: "2.5", CacheRead: "0.05", CacheWrite: "0.625"}}},
+		},
+		Tokenizer: "bytes", Ratio: "3.0", MaxOutput: 1000,
+	}.Resolve(true)
+	if err != nil {
+		t.Fatal(err)
 	}
 	// OpenAI convention: 1000 input tokens include 300 cache reads and 100 cache writes.
 	u := pricing.Split(1000, 300, 100, 50, 0)
@@ -169,5 +176,31 @@ func TestLaterExactGlobBeatsMigratedCaseSensitiveRegex(t *testing.T) {
 	got, ok := pricing.Select([]pricing.Resolved{migrated, mine}, "openrouter", "deepseek/flash", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))
 	if !ok || got.Entry.ID != "mine" {
 		t.Errorf("got %v %v, want the later exact glob", got.Entry.ID, ok)
+	}
+}
+
+func TestSources(t *testing.T) {
+	l, rs, err := pricing.ParseList([]byte(`version: "2000-01-01.1"
+entries:
+  - id: a
+    provider: x
+    match: {glob: a}
+    valid_from: 2000-01-01
+    prices: {input: "1", output: "2"}
+    tokenizer: bytes
+    ratio: "3.0"
+    max_output: 10
+    source: {url: "https://example.com", accessed: 2000-01-01}
+    note: test
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, gotRs := pricing.Static(l, rs).Current(); got.Version != "2000-01-01.1" || len(gotRs) != 1 {
+		t.Fatalf("static source: %s, %d entries", got.Version, len(gotRs))
+	}
+	def, _ := pricing.Default()
+	if got, _ := pricing.Embedded().Current(); got.Version != def.Version {
+		t.Fatalf("embedded source answers %s, the default list is %s", got.Version, def.Version)
 	}
 }

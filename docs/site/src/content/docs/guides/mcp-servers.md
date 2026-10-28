@@ -81,7 +81,7 @@ Every tool a server lists enters the **ask** tier. You decide, tool by tool, on 
 
 | Tier | What happens when an agent calls the tool |
 | --- | --- |
-| **Ask** (the default) | The call is recorded with its exact arguments as an approval card on the ticket, and the run pauses. After a human approves, Koinon calls the server itself and the run resumes with the result. |
+| **Ask** (the default) | The call is recorded with its exact arguments as an approval card on the task, and the run pauses. After a human approves, Koinon calls the server itself and the run resumes with the result. |
 | **Auto** | The agent calls the tool directly through the gateway. |
 | **Never** | No agent can call it. |
 
@@ -95,7 +95,7 @@ Every tool a server lists enters the **ask** tier. You decide, tool by tool, on 
   version of the tool it was made against: if the tool changes before a human approves, Koinon will not
   run it.
 - **Require two approvers** (per tool, off by default): the call needs two different admins or owners,
-  and neither may be the person who created the ticket. The first approval leaves the card pending.
+  and neither may be the person who created the task. The first approval leaves the card pending.
 - Tool names must be at most what model APIs accept. Agents see `<org>-<server>-ask_<tool>` behind the
   harness' prefix, so a long server name leaves less room; a tool that does not fit, or has characters such
   as `.`, shows "unavailable" and is not offered.
@@ -105,6 +105,10 @@ Every tool a server lists enters the **ask** tier. You decide, tool by tool, on 
 Then allow servers per agent. On the agent's page, **MCP servers** lists the org's servers. Tick the ones
 the agent may use, and, if you want, **limit to some tools**. Nothing is allowed by default. The change
 takes effect within about a minute, without a new agent version.
+
+The **FinOps analyst** template has no grants at all: it reads yesterday's costs every day at 07:00 UTC
+(change the time and zone in the agent's triggers) through the cost, billing or metrics servers you allow
+here, and replies with a three-part report. Allow those servers on the agent's page after you create it.
 
 ## Health
 
@@ -133,4 +137,4 @@ policy on, in `networkPolicy.gatewayEgressTo`. Public servers need neither.
   resource metadata URL) and refuses it with a message. v0.2.
 
 See [ADR 0057](https://github.com/stateracloud/koinon/blob/main/docs/adr/0057-mcp-servers.md) for the
-decisions and what agentgateway v1.6.0 does.
+decisions and what agentgateway v1.7.0 does.

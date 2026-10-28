@@ -6,10 +6,10 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"io"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +20,8 @@ import (
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 )
 
 // fakeHome is the sandbox's home as the fake tar sees it: paths under /sandbox and their bytes.
@@ -28,6 +30,36 @@ type fakeHome struct {
 	files map[string]string
 	// failRead makes the backup's tar fail with exit code 2.
 	failRead bool
+	// dests and names are what the uploads extracted: their destination directories and the entry
+	// names of the archives.
+	dests, names []string
+}
+
+// upload answers the upload channel's `cat | tar xf - -C dest`.
+func (h *fakeHome) upload(_ context.Context, dest string, archive io.Reader, stderr io.Writer) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.files == nil {
+		h.files = map[string]string{}
+	}
+	h.dests = append(h.dests, dest)
+	tr := tar.NewReader(archive)
+	for {
+		hd, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return 0
+		}
+		if err != nil {
+			_, _ = io.WriteString(stderr, "tar: "+err.Error())
+			return 2
+		}
+		h.names = append(h.names, hd.Name)
+		if hd.Typeflag != tar.TypeReg {
+			continue
+		}
+		b, _ := io.ReadAll(tr)
+		h.files[hd.Name] = string(b)
+	}
 }
 
 func (h *fakeHome) set(files map[string]string) {
@@ -46,8 +78,8 @@ func (h *fakeHome) get() map[string]string {
 	return out
 }
 
-// tar answers `tar -C /sandbox ... -cf - .` (the backup) and `tar -C /sandbox ... -xf -` (the
-// restore).
+// tar answers `tar -C /sandbox ... -cf - .` (the backup). The restore does not run tar over exec:
+// it goes through the upload channel, which upload answers.
 func (h *fakeHome) tar(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -65,22 +97,6 @@ func (h *fakeHome) tar(args []string, stdin io.Reader, stdout, stderr io.Writer)
 		}
 		_ = tw.Close()
 		return 0
-	case slices.Contains(args, "-xf"):
-		if h.files == nil {
-			h.files = map[string]string{}
-		}
-		tr := tar.NewReader(stdin)
-		for {
-			hd, err := tr.Next()
-			if err != nil {
-				return 0
-			}
-			if hd.Typeflag != tar.TypeReg {
-				continue
-			}
-			b, _ := io.ReadAll(tr)
-			h.files[strings.TrimPrefix(hd.Name, "./")] = string(b)
-		}
 	}
 	_, _ = io.WriteString(stderr, "tar: unexpected arguments")
 	return 2
@@ -113,10 +129,24 @@ func (f failingStore) Restore(ctx context.Context, prefix, pw, snap string, w io
 	return f.HomeStore.Restore(ctx, prefix, pw, snap, w)
 }
 
+// blockingStore is a checkpoint store whose restore stages for a long time, as kopia does before it
+// writes the first byte: it returns only when its context ends.
+type blockingStore struct {
+	agentd.HomeStore
+	stopped chan struct{}
+}
+
+func (b blockingStore) Restore(ctx context.Context, _, _, _ string, _ io.Writer) error {
+	<-ctx.Done()
+	close(b.stopped)
+	return ctx.Err()
+}
+
 var _ = Describe("home checkpoints", func() {
 	var (
 		e      *env
 		home   *fakeHome
+		big    string
 		writer *checkpoint.Writer
 	)
 	cps := func(ctx context.Context, extra ...func(*agentd.Checkpoints)) func(*agentd.Config) {
@@ -156,6 +186,11 @@ var _ = Describe("home checkpoints", func() {
 	}
 	// reconcilerRecreates is what koinon-reconciler does once the backup is complete: it points the
 	// next sandbox's restore at the checkpoint, deletes the sandbox, and records the new one.
+	generationOfRow := func(ctx context.Context) string {
+		sb, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		return sb.HomeGeneration.String
+	}
 	reconcilerRecreates := func(ctx context.Context, cp pgtype.UUID) {
 		_, err := q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: e.org, AgentID: e.agent.ID, CheckpointID: cp})
 		Expect(err).NotTo(HaveOccurred())
@@ -165,12 +200,20 @@ var _ = Describe("home checkpoints", func() {
 
 	BeforeEach(func(ctx SpecContext) {
 		e = newEnv(ctx, store.AgentFlavorOpencode)
+		// More than the supervisor's 4 MiB exec stdin cap, and incompressible.
+		raw := make([]byte, 5<<20+123)
+		_, _ = rand.Read(raw)
+		big = string(raw)
 		home = &fakeHome{files: map[string]string{
+			"big/random.bin":                   big,
 			"notes/today.md":                   "remember the milk",
 			".local/share/opencode/ses_1.db":   "session bytes",
 			"work/app/node_modules/x/index.js": "excluded in the sandbox's tar, not in this fake",
+			"lost+found/orphan":                "the volume's fsck directory",
+			"work/lost+found/mine":             "a directory of the user's",
 		}}
 		e.files.tar = home.tar
+		e.gw.HandleUpload(home.upload)
 		writer = &checkpoint.Writer{Storage: checkpoint.Dir(GinkgoT().TempDir()), Scratch: GinkgoT().TempDir()}
 	})
 
@@ -231,6 +274,21 @@ var _ = Describe("home checkpoints", func() {
 		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
 		Expect(home.get()).To(HaveKeyWithValue("notes/today.md", "remember the milk"))
 		Expect(home.get()).To(HaveKey(".local/share/opencode/ses_1.db"))
+		Expect(home.get()["big/random.bin"] == big).To(BeTrue(), "the 5 MiB file came back byte for byte")
+		By("the home went through the upload channel, into /sandbox, as an archive that tar can extract as the sandbox user")
+		Expect(e.gw.UploadStats().Uploads).To(Equal(1))
+		Expect(e.gw.UploadStats().Violations).To(BeZero())
+		Expect(e.gw.UploadStats().Bytes).To(BeNumerically(">", 5<<20))
+		Expect(e.gw.UploadStats().MaxOutstanding).To(BeNumerically("<=", fakegateway.UploadWindow))
+		Expect(home.dests).To(Equal([]string{checkpoint.HomeDir}))
+		Expect(home.names).NotTo(BeEmpty())
+		for _, n := range home.names {
+			Expect(n).NotTo(Or(Equal("."), Equal("./"), HavePrefix("./"), HavePrefix("/")), "no root entry for tar to chmod")
+			Expect(checkpoint.Excluded(n)).To(BeFalse(), n)
+		}
+		Expect(home.get()).NotTo(HaveKey("lost+found/orphan"))
+		Expect(home.get()).To(HaveKeyWithValue("work/lost+found/mine", "a directory of the user's"))
+		Expect(e.gw.ActiveSSHSessions()).To(BeZero(), "the session token is revoked")
 		prompts, loads, _, _ := e.harness.snapshot()
 		Expect(loads).To(Equal([]string{"ses_1"}), "session/load, not a reset")
 		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\nfirst", "second"}))
@@ -242,6 +300,64 @@ var _ = Describe("home checkpoints", func() {
 		Expect(kindsOf(taskEvents(ctx, e, t))).NotTo(ContainElement("run.session_reset"))
 		Expect(kinds(evs)).To(ContainElement("run.home_restored"))
 		Expect(restoreOf(ctx).Valid).To(BeFalse(), "the restore is done")
+		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.HarnessSessionGeneration.String).To(Equal(generation))
+	})
+
+	It("restores an archived agent's home on its next run and loads the same session (plan item AR1)", func(ctx SpecContext) {
+		t := e.task(ctx, "first")
+		r1 := e.enqueue(ctx, t)
+		stop := e.pool("agentd-a")
+		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		stop()
+		before, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
+		Expect(err).NotTo(HaveOccurred())
+		generation := before.HarnessSessionGeneration.String
+
+		By("the sandbox stops; its stop backup completes")
+		id := request(ctx, store.CheckpointReasonStop)
+		e.pool("agentd-b", cps(ctx))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+
+		By("the reconciler archives it: restore pointed at the backup, sandbox and volume deleted, row deleting/Archived")
+		_, err = q.SetSandboxRestore(ctx, store.SetSandboxRestoreParams{OrgID: e.org, AgentID: e.agent.ID, CheckpointID: id})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(e.backend.DeleteSandbox(ctx, e.workspace, e.sandbox)).To(Succeed())
+		home.set(nil) // OpenShell deleted the volume with the sandbox
+		_, err = q.RecordAgentSandbox(ctx, store.RecordAgentSandboxParams{
+			OrgID: e.org, AgentID: e.agent.ID, State: store.SandboxStateDeleting, Phase: "Archived",
+			Message: "archived, restores on next run", HomeGeneration: generationOfRow(ctx),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		archived, err := q.MarkSandboxArchived(ctx, store.MarkSandboxArchivedParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(archived.State).To(Equal(store.SandboxStateDeleting))
+		Expect(archived.ArchivedAt.Valid).To(BeTrue())
+
+		By("the next run waits while no sandbox exists, restoring nothing yet")
+		e.message(ctx, t, "second")
+		r2 := e.enqueue(ctx, t) // agentd-b takes it: a pool without Checkpoints would skip the restore
+		Consistently(runState(ctx, r2)).WithTimeout(1500 * time.Millisecond).ShouldNot(Or(Equal(store.RunStateSucceeded), Equal(store.RunStateFailed)))
+
+		By("the reconciler creates the sandbox for the run and records it ready: the archive ends, the restore is still owed")
+		_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: e.sandbox, Image: "koinon/flavor-opencode:dev"})
+		Expect(err).NotTo(HaveOccurred())
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
+		Expect(restoreOf(ctx).Valid).To(BeTrue(), "the restore is owed until the run does it")
+
+		By("the run restores before the harness starts and reloads the session, not a reset")
+		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateSucceeded))
+		Expect(restoreOf(ctx).Valid).To(BeFalse(), "the restore is done")
+		sbRow, err := q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: e.org, AgentID: e.agent.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sbRow.ArchivedAt.Valid).To(BeFalse(), "archived_at is NULL once the sandbox is observed again")
+		Expect(home.get()).To(HaveKeyWithValue("notes/today.md", "remember the milk"))
+		_, loads, _, _ := e.harness.snapshot()
+		Expect(loads).To(Equal([]string{"ses_1"}), "session/load")
+		evs := events(ctx, r2)
+		Expect(kinds(evs)[:2]).To(Equal([]string{"run.home_restored", "run.session"}))
+		Expect(kindsOf(taskEvents(ctx, e, t))).NotTo(ContainElement("run.session_reset"))
 		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: e.org, ID: t.ID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.HarnessSessionGeneration.String).To(Equal(generation))
@@ -331,5 +447,55 @@ var _ = Describe("home checkpoints", func() {
 		Expect(prompts).To(Equal(prompts0), "the harness never saw a prompt")
 		Expect(getRun(ctx, r2).OutcomeReason.String).To(ContainSubstring("restoring the home failed"))
 		Expect(restoreOf(ctx).Valid).To(BeTrue(), "the restore is still owed")
+	})
+
+	It("fails the run with the OpenShell version it needs when the sandbox's supervisor has no upload channel", func(ctx SpecContext) {
+		t := e.task(ctx, "first")
+		stop := e.pool("agentd-a")
+		r1 := e.enqueue(ctx, t)
+		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		stop()
+		id := request(ctx, store.CheckpointReasonRecreate)
+		stopW := e.pool("agentd-w", cps(ctx))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		stopW()
+		reconcilerRecreates(ctx, id)
+
+		e.gw.DisableUploadSubsystem()
+		e.message(ctx, t, "second")
+		r2 := e.enqueue(ctx, t)
+		e.pool("agentd-b", cps(ctx, func(c *agentd.Checkpoints) { c.RestoreTries = 3 }))
+		Eventually(runState(ctx, r2)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
+		reason := getRun(ctx, r2).OutcomeReason.String
+		Expect(reason).To(ContainSubstring("does not support openshell-upload-v1"))
+		Expect(reason).To(ContainSubstring("OpenShell v0.1.4 or later"))
+		Expect(e.gw.Calls("CreateSshSession")).To(Equal(1), "no retry and no older checkpoint: they would fail the same way")
+		Expect(restoreOf(ctx).Valid).To(BeTrue(), "the restore is still owed")
+		Expect(e.gw.ActiveSSHSessions()).To(BeZero())
+	})
+
+	It("stops staging the snapshot when the upload cannot start", func(ctx SpecContext) {
+		t := e.task(ctx, "first")
+		stop := e.pool("agentd-a")
+		r1 := e.enqueue(ctx, t)
+		Eventually(runState(ctx, r1)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		stop()
+		id := request(ctx, store.CheckpointReasonRecreate)
+		stopW := e.pool("agentd-w", cps(ctx))
+		Eventually(status(checkpointOf(ctx, id))).WithTimeout(20 * time.Second).Should(Equal(store.CheckpointStatusComplete))
+		stopW()
+		reconcilerRecreates(ctx, id)
+
+		e.gw.DisableUploadSubsystem()
+		e.message(ctx, t, "second")
+		r2 := e.enqueue(ctx, t)
+		stopped := make(chan struct{})
+		e.pool("agentd-b", cps(ctx, func(c *agentd.Checkpoints) {
+			c.Store = blockingStore{HomeStore: writer, stopped: stopped}
+			c.Timeout = 10 * time.Minute // far longer than the spec waits
+		}))
+		Eventually(runState(ctx, r2)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
+		Expect(getRun(ctx, r2).OutcomeReason.String).To(ContainSubstring("openshell-upload-v1"))
+		Eventually(stopped).WithTimeout(5*time.Second).Should(BeClosed(), "the writer was cancelled, not waited for")
 	})
 })

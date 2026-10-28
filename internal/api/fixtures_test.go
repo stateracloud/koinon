@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/mcpserver/v1alpha1/mcpserverv1alpha1connect"
 	providerv1alpha1connect "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1/providerv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/question/v1alpha1/questionv1alpha1connect"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
@@ -54,6 +55,7 @@ type client struct {
 	tokens    tokenv1alpha1connect.TokenServiceClient
 	providers providerv1alpha1connect.ProviderServiceClient
 	mcps      mcpserverv1alpha1connect.McpServerServiceClient
+	questions questionv1alpha1connect.QuestionServiceClient
 }
 
 func newClient(b *browser) *client {
@@ -70,6 +72,7 @@ func newClient(b *browser) *client {
 		tokens:    tokenv1alpha1connect.NewTokenServiceClient(cc),
 		providers: providerv1alpha1connect.NewProviderServiceClient(cc),
 		mcps:      mcpserverv1alpha1connect.NewMcpServerServiceClient(cc),
+		questions: questionv1alpha1connect.NewQuestionServiceClient(cc),
 	}
 }
 
@@ -256,6 +259,8 @@ type orgFixture struct {
 	appKey     []byte
 	// approval is a pending request of run; set by newIsolationFixture.
 	approval store.ApprovalRequest
+	// question is an open question of run to the owner; set by newIsolationFixture.
+	question store.Question
 	// token is an admin API token of the org; set by newIsolationFixture.
 	token string
 	// provider and model are a provider and a model of the org, for the isolation suite.
