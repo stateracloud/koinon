@@ -154,6 +154,7 @@ A new session reports a model OpenCode picked from its own catalog (for example
 | Model catalog refresh (`models.opencode.ai`) | `OPENCODE_DISABLE_MODELS_FETCH=1`; the bundled snapshot is used | `packages/cli/src/server-process.ts`, `packages/core/src/models-dev.ts` |
 | Project configuration from the session directory upward | `OPENCODE_DISABLE_PROJECT_CONFIG=1` | `packages/cli/src/server-process.ts`, `packages/core/src/config/discovery.ts` |
 | Skills from `~/.claude` and `~/.agents` | plugin `-opencode.config.compatibility` | `packages/core/src/config/plugin/compatibility.ts` |
+| Built-in skills `opencode` and `report` (`report` files issues with the GitHub CLI) | plugin `-opencode.skill`; the permission `skill` `*` deny (allow a skill by ID to deliver it) is a second layer | `packages/core/src/plugin/skill.ts`, `packages/core/src/skill.ts` |
 | Built-in provider plugins (Copilot, Bedrock, OpenRouter, …) | plugin `-opencode.provider.*`; `opencode.provider.opencode` is guarded and stays (see below) | `packages/core/src/plugin/provider/`, `packages/core/src/plugin/internal.ts` |
 | Web search | plugins `-opencode.websearch.*`, `-opencode.tool.websearch` | `packages/core/src/tool/plugin/websearch.ts` |
 | Logins for well-known integrations | plugin `-opencode.wellknown` | `packages/core/src/wellknown/plugin.ts` |
