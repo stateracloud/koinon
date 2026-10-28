@@ -110,6 +110,8 @@ export async function watchRun(opts: WatchOptions, h: WatchHandlers): Promise<bi
       const stream = client.watchRun({ orgId: opts.orgId, runId: opts.runId, afterSeq: after }, { signal: opts.signal })
       for await (const res of stream) {
         h.onStatus('live')
+        // A heartbeat keeps a quiet stream open; it is not progress, so it never resets the backoff.
+        if (res.item.case === 'heartbeat') continue
         if (res.item.case === 'run') {
           state = res.item.value.state
           h.onRun(res.item.value)
