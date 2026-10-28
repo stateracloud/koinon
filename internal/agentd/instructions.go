@@ -33,6 +33,34 @@ const instructionsPreamble = "# Koinon\n\n" +
 	"These are your instructions from Koinon for this run. Koinon writes this file before the " +
 	"run and restores it before every prompt, so changing it has no effect.\n\n"
 
+// TODO: the tool list below is specific to the OpenCode flavor's image. When a second flavor
+// lands it should move to the flavor descriptor (internal/flavor), not stay a package constant.
+// workingWithData is Koinon's guidance on the tools the flavor image ships (flavors/opencode/
+// README.md) and on how to read large inputs. It follows the preamble in every run, whatever the
+// agent version says. OpenCode cuts a tool result at 2,000 lines or 50 KiB and saves the full
+// output to a file; the section tells the agent to query that file rather than run the command
+// again. The image has no network, no pip and no package manager the agent may use.
+const workingWithData = "## Working with large data\n\n" +
+	"- Check size before reading: `wc -c FILE`, `ls -l`, `file FILE`. Read in ranges, not whole files.\n" +
+	"- Search with `rg` (use `-n`, `-c`, `-l`, `--max-count`), find files with `fd`, search code " +
+	"structure with `ast-grep --lang LANG -p PATTERN`. Limit output with `| head -50`.\n" +
+	"- JSON and JSONL: `jq`; YAML, XML, TOML and CSV: `yq` (`yq -p xml -o json f.xml | jq ...`). " +
+	"Select fields; do not `cat` a large file.\n" +
+	"- CSV, TSV, JSON and Parquet tables: `duckdb -c \"DESCRIBE SELECT * FROM 'f.csv'\"`, then " +
+	"`SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. For machine-readable output " +
+	"put the flag before `-c`: `duckdb -json -c \"SELECT ...\"` (or `-csv`).\n" +
+	"- SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.\n" +
+	"- PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a " +
+	"PDF with the read tool.\n" +
+	"- Git: `git diff --stat` before `git diff -- PATH`; `git log --oneline -n 20`.\n" +
+	"- When a tool result says `full output saved to FILE`, query that file with `rg`, `jq` or " +
+	"`duckdb`; do not run the command again.\n" +
+	"- `python3` (also `python`) has the standard library only: json, csv, sqlite3, re, gzip, " +
+	"zipfile, statistics, decimal. There is no pip and no network. Write scratch scripts under " +
+	"`/tmp`, not in the repository, and print counts and samples, not whole datasets.\n" +
+	"- Never try to install anything (`pip`, `npm`, `apt`, `curl | sh`); it cannot work here. " +
+	"Use what is installed, or say what is missing.\n\n"
+
 // writeScript replaces the file in one rename, so a harness never reads a half-written file;
 // umask 077 keeps it and its directory private to the sandbox user. $1 is the directory, $2
 // the file; the content arrives on stdin.
@@ -58,9 +86,9 @@ const linkScript = `t=$(readlink -- "$1") && [ "$t" = "$2" ] && exit 0; ` +
 // which the flavors' entry scripts require.
 func instructionsFile(instructions string) []byte {
 	if instructions = strings.TrimSpace(instructions); instructions == "" {
-		return []byte(instructionsPreamble + "The agent version has no instructions of its own.\n")
+		return []byte(instructionsPreamble + workingWithData + "The agent version has no instructions of its own.\n")
 	}
-	return []byte(instructionsPreamble + instructions + "\n")
+	return []byte(instructionsPreamble + workingWithData + instructions + "\n")
 }
 
 func sha256Hex(b []byte) string {
