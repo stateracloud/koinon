@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/pricing"
@@ -177,6 +178,48 @@ var _ = Describe("Provider delivery", func() {
 		Expect(pb.Models[0].Name).To(Equal("shared-name"))
 		Expect(pa.APIKeyFile).To(BeEmpty()) // keyless
 		Expect(st.Validate()).To(Succeed())
+	})
+
+	It("renders each model's format and its provider's workspace ID (ADR 0069)", func(ctx SpecContext) {
+		org, user := newOrg(ctx)
+		actor := audit.User(user)
+		const workspace = "wrkspc_01ExampleExample"
+		direct, err := svc.CreateProvider(ctx, org, actor, user, catalog.ProviderInput{
+			Name: "claude", Type: "anthropic", URL: "http://fakemodel.example.com:8080/v1", AnthropicWorkspaceID: workspace,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		cleanup(ctx, org, direct.ID)
+		other := addProvider(ctx, org, user, "up", "", "plain-model")
+		cleanup(ctx, org, other.ID)
+		_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: direct.ID, Name: "claude-haiku-test"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = prices.New(pool, nil).SetOverride(ctx, org, actor, prices.OverrideInput{
+			Entry: pricing.Entry{
+				ID: "price-claude-haiku-test", Provider: "anthropic", Match: pricing.Match{Glob: "claude-haiku-test"},
+				Spec:      pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2"}},
+				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
+			},
+			ValidFrom: time.Now().Add(-time.Hour),
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(r.ReconcileAll(ctx)).To(Succeed())
+
+		st := mg.last()
+		Expect(st.Validate()).To(Succeed())
+		formats := map[string]modelformat.Format{}
+		workspaces := map[string]string{}
+		for _, p := range st.Providers {
+			if p.Org != orgSlug(ctx, org) {
+				continue
+			}
+			workspaces[p.Name] = p.AnthropicWorkspaceID
+			for _, m := range p.Models {
+				formats[m.Name] = m.Format
+			}
+		}
+		Expect(formats).To(Equal(map[string]modelformat.Format{"claude-haiku-test": modelformat.Anthropic, "plain-model": modelformat.OpenAI}))
+		Expect(workspaces).To(Equal(map[string]string{"claude": workspace, "up": ""}))
 	})
 
 	It("checks the URL policy again at render and serves no provider that now names a denied host", func(ctx SpecContext) {

@@ -59,7 +59,13 @@ func (r *Reconciler) profile(flavor store.AgentFlavor, f Flavor) execution.Provi
 // the /mcp route allowed when tools is set. Exported for the escape suite, which attaches the
 // same profile to a sandbox on a real gateway.
 func GatewayProfile(flavor store.AgentFlavor, f Flavor, gw Endpoint, tools bool) execution.ProviderProfile {
-	allow := []execution.L7Rule{{Method: "POST", Path: "/v1/chat/completions"}}
+	// One route per model format (ADR 0069 decision 6): chat completions and Messages, the same host,
+	// credential and enforcement. The profile is per flavor, so adding a model changes nothing here.
+	// /v1/messages/count_tokens stays closed, and so does everything else.
+	allow := []execution.L7Rule{
+		{Method: "POST", Path: "/v1/chat/completions"},
+		{Method: "POST", Path: "/v1/messages"},
+	}
 	if tools {
 		// MCP Streamable HTTP on agentgateway's /mcp route (agentd passes <gateway>/mcp to
 		// the harness): POST for messages, GET for the server stream, DELETE to end the

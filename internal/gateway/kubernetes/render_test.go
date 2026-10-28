@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // update rewrites golden files: go test ./internal/gateway/kubernetes -args -update
@@ -68,6 +69,25 @@ func fullState() gateway.State {
 	return s
 }
 
+// formatsState is ADR 0069: one org with a model of each format, the Anthropic one on a
+// workspace-scoped provider.
+func formatsState() gateway.State {
+	s := gateway.State{Providers: []gateway.Provider{
+		{
+			Org: "acme", Name: "claude", Type: "anthropic", BaseURL: "https://api.anthropic.com/v1",
+			APIKeyFile: "/secrets/providers/acme-claude", AnthropicWorkspaceID: "wrkspc_01ExampleExample",
+			Models: []gateway.Model{{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}}},
+		},
+		{
+			Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
+			APIKeyFile: "/secrets/providers/acme-openrouter",
+			Models:     []gateway.Model{{Name: "open/model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "2"}}},
+		},
+	}}
+	s.AddKey(fixedKey("k-eeeeeeeeeeee", agentA, "test-e"))
+	return s
+}
+
 func opts() gwk8s.Options {
 	return gwk8s.Options{
 		Namespace: "koinon", ProviderKeysSecret: "koinon-gateway-providers",
@@ -87,17 +107,21 @@ func dump(r gwk8s.Rendered) []byte {
 }
 
 var _ = Describe("Render", func() {
-	It("matches the golden file", func() {
-		r, err := gwk8s.Render(fullState(), opts())
+	golden := func(s gateway.State, name string) {
+		GinkgoHelper()
+		r, err := gwk8s.Render(s, opts())
 		Expect(err).NotTo(HaveOccurred())
-		path := filepath.Join("testdata", "full.yaml")
+		path := filepath.Join("testdata", name+".yaml")
 		if *update {
 			Expect(os.WriteFile(path, dump(r), 0o644)).To(Succeed())
 		}
 		want, err := os.ReadFile(path)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(dump(r))).To(Equal(string(want)))
-	})
+	}
+
+	It("matches the golden file", func() { golden(fullState(), "full") })
+	It("matches the golden file for models in each format (ADR 0069)", func() { golden(formatsState(), "model-formats") })
 
 	It("is deterministic and independent of input order", func() {
 		a, err := gwk8s.Render(fullState(), opts())
@@ -137,6 +161,61 @@ var _ = Describe("Render", func() {
 		Expect(again.Revoked).To(BeEmpty())
 		Expect(find(again, "ConfigMap", "koinon-gateway-keys-acme").U.Object["data"]).To(HaveKey("k-bbbbbbbbbbbb"))
 		Expect(again.Revision).NotTo(Equal(r.Revision))
+	})
+
+	It("renders a model in its format: Messages with the Anthropic headers and no stream_options, completions with it (ADR 0069)", func() {
+		r, err := gwk8s.Render(formatsState(), opts())
+		Expect(err).NotTo(HaveOccurred())
+		spec := func(match string) map[string]any {
+			GinkgoHelper()
+			for _, o := range r.Objects {
+				if o.U.GetKind() != gwk8s.KindModel {
+					continue
+				}
+				sp, _ := o.U.Object["spec"].(map[string]any)
+				if sp["match"].(map[string]any)["model"] == match && o.Org == "acme" {
+					return sp
+				}
+			}
+			Fail("no model " + match)
+			return nil
+		}
+		claude := spec("claude-haiku-4-5")
+		Expect(claude["custom"]).To(HaveKeyWithValue("formats", []any{map[string]any{"type": "Messages"}}))
+		pol := claude["policies"].(map[string]any)
+		Expect(pol).NotTo(HaveKey("transformations"), "Messages streams carry usage; there is no stream_options")
+		Expect(pol["headers"]).To(Equal(map[string]any{"request": map[string]any{"set": []any{
+			map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
+			map[string]any{"name": "anthropic-workspace-id", "value": "wrkspc_01ExampleExample"},
+		}}}))
+
+		chat := spec("open/model")
+		Expect(chat["custom"]).To(HaveKeyWithValue("formats", []any{map[string]any{"type": "Completions"}}))
+		Expect(chat["policies"]).NotTo(HaveKey("headers"))
+		Expect(chat["policies"].(map[string]any)["transformations"]).To(ContainElement(
+			HaveKeyWithValue("field", "stream_options")))
+	})
+
+	It("omits the workspace header when the provider has no workspace ID", func() {
+		s := formatsState()
+		for i := range s.Providers {
+			s.Providers[i].AnthropicWorkspaceID = ""
+		}
+		r, err := gwk8s.Render(s, opts())
+		Expect(err).NotTo(HaveOccurred())
+		var found bool
+		for _, o := range r.Objects {
+			if o.U.GetKind() == gwk8s.KindModel {
+				sp, _ := o.U.Object["spec"].(map[string]any)
+				if sp["match"].(map[string]any)["model"] == "claude-haiku-4-5" && o.Org == "acme" {
+					found = true
+					Expect(sp["policies"].(map[string]any)["headers"]).To(Equal(map[string]any{"request": map[string]any{"set": []any{
+						map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
+					}}}))
+				}
+			}
+		}
+		Expect(found).To(BeTrue())
 	})
 
 	It("renders an empty key ConfigMap when an org's last key is revoked, so that the revocation is an update", func() {

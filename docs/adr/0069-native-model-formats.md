@@ -273,3 +273,18 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
   `cache_creation_1h_input_tokens`, which lifts the limit in the last consequence above. Koinon's
   price catalog has no 1-hour price yet (ADR 0070 plans `Cost.CacheWrite1h`), so nothing changes
   until it does; cache writes stay priced at the 5-minute rate.
+
+## Amendment (2026-10-28): what the gateway spec showed (PR 2)
+
+- The rendering table is `gateway.Rendering` in `internal/gateway/formats.go`. Both drivers read it,
+  and `gateway.Provider` gained `AnthropicWorkspaceID` (checked against `^wrkspc_[A-Za-z0-9]+$` in
+  `State.Validate`, since it becomes a header value).
+- agentgateway v1.7.0 re-serialises a Messages body: the values of `system`, `tools` and `messages`
+  arrive unchanged, `cache_control` included, but typed fields come first and unknown fields such as
+  `cache_control` last, so the bytes are not identical. The spec compares JSON values.
+- A key of another org is refused with 403 in both modes (`allowedModels` in standalone,
+  the org authorization rule on the Kubernetes proxy); the specs accept 403 or 404, as the chat-completions
+  specs do.
+- Not tested: a client that sends its own `anthropic-workspace-id` to a model whose provider has
+  none probably reaches the upstream with it, since only a `set` replaces a header. The key is the
+  org's own, so this stays inside the org; removing the header would be a `Rendering` change.

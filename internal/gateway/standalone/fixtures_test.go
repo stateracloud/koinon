@@ -7,6 +7,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 var (
@@ -84,6 +85,21 @@ func fixtures() []fixture {
 	)
 	mcpServers.GrantTools(agentG, gateway.ToolGrant{Target: "globex-search", Tools: []string{"query"}})
 
+	// ADR 0069: one org with a model of each format, the Anthropic one on a workspace-scoped provider.
+	formats := gateway.State{Providers: []gateway.Provider{
+		{
+			Org: "acme", Name: "claude", Type: "anthropic", BaseURL: "https://api.anthropic.com/v1",
+			APIKeyFile: "/secrets/upstream/api_key", AnthropicWorkspaceID: "wrkspc_01ExampleExample",
+			Models: []gateway.Model{{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}}},
+		},
+		{
+			Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
+			APIKeyFile: "/secrets/upstream/api_key",
+			Models:     []gateway.Model{{Name: "open/model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "2"}}},
+		},
+	}}
+	formats.AddKey(fixedKey("k-eeeeeeeeeeee", agentA, "test-e"))
+
 	return []fixture{
 		{name: "empty", state: gateway.State{}},
 		{name: "models-only", state: modelsOnly, options: standalone.Options{Port: 8080}},
@@ -93,5 +109,6 @@ func fixtures() []fixture {
 		}},
 		{name: "mcp-no-grants", state: mcpNoGrants},
 		{name: "mcp-servers", state: mcpServers},
+		{name: "model-formats", state: formats},
 	}
 }

@@ -139,6 +139,45 @@ var _ = Describe("Render", func() {
 			}
 		})
 
+		It("renders a model in its format (ADR 0069)", func() {
+			f := fixtures()[len(fixtures())-1]
+			Expect(f.name).To(Equal("model-formats"))
+			out, _, err := standalone.Render(f.state, f.options)
+			Expect(err).NotTo(HaveOccurred())
+			var d struct {
+				LLM struct {
+					Models []struct {
+						ID       string
+						Provider struct {
+							Custom struct {
+								ProviderOverride string `yaml:"providerOverride"`
+								Formats          []struct{ Type string }
+							}
+						}
+						RequestHeaders struct{ Set map[string]string } `yaml:"requestHeaders"`
+						Transformation map[string]string
+					}
+				}
+			}
+			Expect(yaml.Unmarshal(out, &d)).To(Succeed())
+			formats := map[string]string{}
+			for _, m := range d.LLM.Models {
+				formats[m.ID] = m.Provider.Custom.Formats[0].Type
+				if m.ID == "acme/claude-haiku-4-5" {
+					Expect(m.Transformation).To(BeEmpty(), "Messages streams carry usage; there is no stream_options")
+					Expect(m.RequestHeaders.Set).To(Equal(map[string]string{
+						"anthropic-version": "2023-06-01", "anthropic-workspace-id": "wrkspc_01ExampleExample",
+					}))
+					Expect(m.Provider.Custom.ProviderOverride).To(Equal("acme.anthropic"))
+					continue
+				}
+				Expect(m.Transformation).To(HaveKey("stream_options"), m.ID)
+				Expect(m.RequestHeaders.Set).To(BeEmpty(), m.ID)
+			}
+			Expect(formats).To(HaveKeyWithValue("acme/claude-haiku-4-5", "messages"))
+			Expect(formats).To(HaveKeyWithValue("acme/open/model", "completions"))
+		})
+
 		It("rejects the same model served twice in one org", func() {
 			s := gateway.State{Providers: []gateway.Provider{
 				{Org: "acme", Name: "a", Type: "x", BaseURL: "http://a/v1", Models: []gateway.Model{{Name: "m", Price: &gateway.Price{}}}},

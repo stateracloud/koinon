@@ -65,6 +65,7 @@ var (
 // Register adds the G1 specs for env to the current Ginkgo tree.
 func Register(env Env) {
 	llmSpec(env)
+	anthropicSpec(env)
 	mcpServersSpec(env)
 	loneTargetSpec(env)
 }
