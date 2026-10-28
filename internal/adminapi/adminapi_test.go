@@ -31,6 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/secretstore/secretstoretest"
 	"github.com/stateracloud/koinon/internal/testing/pgtest"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 type env struct {
@@ -59,7 +60,7 @@ func newEnv(ctx context.Context) *env {
 	e.catalog = catalog.New(pool, ring, nil)
 	e.mcp = mcpservers.New(pool, ring, nil).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"})
 	mux := http.NewServeMux()
-	adminapi.New(pool, e.catalog, e.tokens, slog.New(slog.NewTextHandler(GinkgoWriter, nil))).WithMCP(e.mcp).Mount(mux)
+	adminapi.New(pool, e.catalog, e.tokens, slog.New(slog.NewTextHandler(GinkgoWriter, nil)), pricing.Embedded()).WithMCP(e.mcp).Mount(mux)
 	e.srv = httptest.NewServer(mux)
 	DeferCleanup(e.srv.Close)
 	e.org, e.user, _ = pgtest.NewOrg(ctx, pool)

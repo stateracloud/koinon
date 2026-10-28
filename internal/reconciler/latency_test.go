@@ -20,9 +20,11 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/questions"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/internal/wake"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Latency defaults (plan item LT1, ADRs 0049, 0065, 0066): the warm window per park reason, the
@@ -60,6 +62,7 @@ var _ = Describe("Reconciler latency defaults", func() {
 		mg = &fakeModelGateway{}
 		now.Store(nil)
 		cfg = reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: fake.NewClientset(), Namespace: namespace, Name: "koinon-gateway-providers"},

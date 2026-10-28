@@ -27,7 +27,9 @@ import (
 	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 const (
@@ -110,6 +112,7 @@ var _ = Describe("Reconciler", func() {
 		logs = &syncBuffer{}
 		now.Store(nil)
 		cfg = reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: "koinon-gateway-providers"},

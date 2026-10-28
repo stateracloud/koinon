@@ -21,7 +21,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -125,6 +127,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		agent, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: version.ID, ActivatedBy: user})
 		Expect(err).NotTo(HaveOccurred())
 		r, err := reconciler.New(pool, openshell.New(cc), &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
+			Prices:  prices.NewResolver(pricing.Embedded()),
 			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Flavors: map[store.AgentFlavor]reconciler.Flavor{
 				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
@@ -171,6 +174,7 @@ var _ = Describe("The repo.read grant of a stored GitHub Enterprise Server conne
 		Expect(err).NotTo(HaveOccurred())
 
 		r, err := reconciler.New(pool, openshell.New(cc), &fakeModelGateway{}, reconciler.KubeSecrets{Client: fake.NewClientset(), Namespace: namespace}, reconciler.Config{
+			Prices:  prices.NewResolver(pricing.Embedded()),
 			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Flavors: map[store.AgentFlavor]reconciler.Flavor{
 				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},

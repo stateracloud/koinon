@@ -364,7 +364,7 @@ func (r *runner) execute(ctx context.Context) error {
 		for _, m := range served {
 			// Only a priced model is served (the gateway answers 404 for the rest).
 			pm := prices.Model{ID: m.ModelID.String(), Name: m.ModelName, ProviderType: m.ProviderType}
-			if _, err := prices.Resolve(fctx, r.q, r.run.OrgID, pm, time.Now()); err == nil {
+			if _, err := r.p.cfg.Prices.Resolve(fctx, r.q, r.run.OrgID, pm, time.Now()); err == nil {
 				model = m.ModelName
 				break
 			}
@@ -1260,7 +1260,7 @@ func (r *runner) cacheMode(ctx context.Context, name string) (mode prices.CacheM
 	if err != nil {
 		return prices.CacheNone, ""
 	}
-	res, err := prices.Resolve(ctx, r.q, r.run.OrgID, m, time.Now())
+	res, err := r.p.cfg.Prices.Resolve(ctx, r.q, r.run.OrgID, m, time.Now())
 	if err != nil {
 		return prices.CacheNone, ""
 	}

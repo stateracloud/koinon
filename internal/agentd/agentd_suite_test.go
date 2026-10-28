@@ -29,6 +29,8 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // postgresImage is the minimum supported Postgres version (ADR 0047).
@@ -382,6 +384,7 @@ func (e *env) pool(name string, mutate ...func(*agentd.Config)) (stop func()) {
 // poolOn is pool on its own connection pool, like a separate agentd process on the same Postgres.
 func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Config)) (stop func()) {
 	cfg := agentd.Config{
+		Prices:         prices.NewResolver(pricing.Embedded()),
 		OwnerID:        name,
 		Workers:        2,
 		Lease:          2 * time.Second,

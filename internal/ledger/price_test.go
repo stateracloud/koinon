@@ -19,7 +19,12 @@ import (
 	"github.com/stateracloud/koinon/pricing"
 )
 
-const deepseek = "deepseek/deepseek-v4.1-flash"
+// The models of testdata/prices.yaml, the default list these specs run against (see the suite).
+// Every money value below is computed from that file's prices, per million tokens.
+const (
+	flash    = "acme/flash"    // input 0.20, output 2, cache read 0.05
+	frontier = "acme/frontier" // input 10, output 50, cache read 0.25, cache write 12.5; max_output 128000
+)
 
 // model serves name on a provider of the given type for the env's org.
 func (e *env) model(ctx SpecContext, typ, name string) {
@@ -59,32 +64,33 @@ var _ = Describe("Cost truth", func() {
 
 	It("recomputes the cost from raw usage and the dated default price, in disjoint buckets", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
-		e.model(ctx, "openrouter", deepseek)
+		e.model(ctx, "openrouter", flash)
 		// 1M input of which 500k were cache reads, 1k output. The gateway agrees.
-		_, err := ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), deepseek, 1_000_000, 1000, 500_000, "0.0185")})
+		_, err := ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 1000, 500_000, "0.127")})
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
-		// 500k * 0.02 + 500k * 0.015 + 1k * 1.00, per million.
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.0185"))
+		// 500k * 0.20 + 500k * 0.05 + 1k * 2, per million.
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.127"))
 		Expect(s.CostFlagged).To(BeFalse())
 		Expect(s.Estimated).To(BeFalse())
-		list, _ := pricing.Default()
-		Expect(s.PriceRef).To(Equal(pricing.Ref(list.Version, "openrouter-deepseek-v4-1-flash")))
+		list, _ := priceList.Current()
+		Expect(list.Version).To(Equal("2000-01-01.1"), "the specs run against the fixture list")
+		Expect(s.PriceRef).To(Equal(pricing.Ref(list.Version, "acme-flash")))
 		Expect(s.CacheReadTokens).To(Equal(int64(500_000)))
 	})
 
 	It("charges its own cost and flags the entry when the gateway differs by more than 1%", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
-		e.model(ctx, "openrouter", deepseek)
+		e.model(ctx, "openrouter", flash)
 		_, err := ing.Ingest(ctx, []ledger.Entry{
-			e.usage(time.Now(), deepseek, 1_000_000, 0, 0, "0.0201"), // 0.02 vs 0.0201: 0.5%
-			e.usage(time.Now(), deepseek, 1_000_000, 0, 0, "0.03"),   // 50%
+			e.usage(time.Now(), flash, 1_000_000, 0, 0, "0.201"), // 0.20 vs 0.201: 0.5%
+			e.usage(time.Now(), flash, 1_000_000, 0, 0, "0.30"),  // 50%
 		})
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
 		Expect(s.CostFlagged).To(BeTrue())
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.02"))
-		Expect(ledger.FormatUSD(s.GatewayCostUsd)).To(Equal("0.03"))
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.20"))
+		Expect(ledger.FormatUSD(s.GatewayCostUsd)).To(Equal("0.30"))
 		flagged, err := q.ListFlaggedPrices(ctx, store.ListFlaggedPricesParams{OrgID: e.org, Since: pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(flagged).To(HaveLen(1))
@@ -95,27 +101,27 @@ var _ = Describe("Cost truth", func() {
 
 	It("lets an org override win and records its version", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
-		e.model(ctx, "openrouter", deepseek)
-		svc := prices.New(db, nil)
+		e.model(ctx, "openrouter", flash)
+		svc := prices.New(db, nil, priceList)
 		o, err := svc.SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
 			Entry: pricing.Entry{
-				ID: "ds-contract", Provider: "openrouter", Match: pricing.Match{Glob: "deepseek/*"},
+				ID: "ds-contract", Provider: "openrouter", Match: pricing.Match{Glob: "acme/*"},
 				Spec:      pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2"}},
 				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
 			},
 			ValidFrom: time.Now().Add(-time.Hour),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), deepseek, 1_000_000, 0, 0, "")})
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 0, 0, "")})
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
 		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("1.00"))
 		Expect(s.PriceRef).To(Equal("org#" + o.ID))
 
 		// Requests before the override's valid_from keep the default price.
-		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now().Add(-2*time.Hour), deepseek, 1_000_000, 0, 0, "")})
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now().Add(-2*time.Hour), flash, 1_000_000, 0, 0, "")})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("0.02"))
+		Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("0.20"))
 
 		var n int
 		Expect(db.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'price.set'`, e.org).Scan(&n)).To(Succeed())
@@ -124,17 +130,17 @@ var _ = Describe("Cost truth", func() {
 
 	It("bills a bucket an org price does not name at the rate it would have without the split", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
-		e.model(ctx, "openrouter", "anthropic/claude-sonnet-5.5")
-		_, err := prices.New(db, nil).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
+		e.model(ctx, "openrouter", frontier)
+		_, err := prices.New(db, nil, priceList).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
 			Entry: pricing.Entry{
-				ID: "sonnet-mine", Provider: "openrouter", Match: pricing.Match{Glob: "anthropic/claude-sonnet-5.5"},
+				ID: "sonnet-mine", Provider: "openrouter", Match: pricing.Match{Glob: frontier},
 				Spec:      pricing.Spec{Prices: pricing.Wire{Input: "2", Output: "10"}},
 				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
 			},
 			ValidFrom: time.Now().Add(-time.Hour),
 		})
 		Expect(err).NotTo(HaveOccurred())
-		u := e.usage(time.Now(), "anthropic/claude-sonnet-5.5", 1_000_000, 0, 0, "")
+		u := e.usage(time.Now(), frontier, 1_000_000, 0, 0, "")
 		u.CacheWriteTokens = 1_000_000
 		_, err = ing.Ingest(ctx, []ledger.Entry{u})
 		Expect(err).NotTo(HaveOccurred())
@@ -145,11 +151,11 @@ var _ = Describe("Cost truth", func() {
 
 	It("estimates missing usage, marks it and counts it toward the limit", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "0.01", 1<<40)
-		e.model(ctx, "openrouter", deepseek)
+		e.model(ctx, "openrouter", flash)
 		t := e.task(ctx)
 		r := e.startRun(ctx, t, 1<<40, time.Now().Add(-time.Minute))
 		x := ledger.Entry{
-			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: deepseek, Status: 200,
+			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 200,
 			MaxTokens: 1000, RequestBytes: 3_000_000, ResponseBytes: -1, Time: time.Now(), // 1M tokens at 3.0 bytes per token
 		}
 		_, err := ing.Ingest(ctx, []ledger.Entry{x})
@@ -158,7 +164,7 @@ var _ = Describe("Cost truth", func() {
 		Expect(s.Estimated).To(BeTrue())
 		Expect(s.InputTokens).To(Equal(int64(1_000_000)))
 		Expect(s.OutputTokens).To(Equal(int64(1000)), "an admitted response without usage settles at max_tokens")
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.021"))
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.202"))
 		var est map[string]any
 		Expect(json.Unmarshal(s.Estimate, &est)).To(Succeed())
 		Expect(est).To(HaveKey("estimate"))
@@ -169,22 +175,22 @@ var _ = Describe("Cost truth", func() {
 		Expect(rep).To(HaveLen(1))
 		Expect(rep[0].EstimatedRequests).To(Equal(int64(1)))
 		Expect(ledger.FormatUSD(rep[0].ReportedUsd)).To(Equal("0.00"))
-		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.021"))
+		Expect(ledger.FormatUSD(rep[0].EstimatedUsd)).To(Equal("0.202"))
 	})
 
 	It("raises, never lowers, the estimate with the learned p90", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
-		e.model(ctx, "openrouter", deepseek)
+		e.model(ctx, "openrouter", flash)
 		var batch []ledger.Entry
 		for i := 0; i < prices.MinCalibrationSamples; i++ {
-			u := e.usage(time.Now(), deepseek, 1000, 10, 0, "")
+			u := e.usage(time.Now(), flash, 1000, 10, 0, "")
 			u.RequestBytes = 1000 // 1 token per byte: far denser than the static 3.0 bytes per token
 			batch = append(batch, u)
 		}
 		_, err := ing.Ingest(ctx, batch)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = ing.Ingest(ctx, []ledger.Entry{{
-			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: deepseek, Status: 200,
+			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 200,
 			RequestBytes: 3000, ResponseBytes: -1, Time: time.Now(),
 		}})
 		Expect(err).NotTo(HaveOccurred())
@@ -198,15 +204,15 @@ var _ = Describe("An unusable stored price", func() {
 	It("records the request unpriced and flagged, and never stops the batch or other orgs", func(ctx SpecContext) {
 		bad := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
 		good := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
-		bad.model(ctx, "openrouter", deepseek)
-		good.model(ctx, "openrouter", deepseek)
+		bad.model(ctx, "openrouter", flash)
+		good.model(ctx, "openrouter", flash)
 		// A rate from before the stricter validation, and an override that no longer parses.
-		_, err := db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, 'old', '{"provider":"openrouter","match":{"glob":"deepseek/*"},"validFrom":"2020-01-01","prices":{"input":"1.1234567","output":"1"},"tokenizer":"bytes","ratio":"3.0","maxOutput":10}', now() - interval '1 hour', 'test')`, bad.org)
+		_, err := db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, 'old', '{"provider":"openrouter","match":{"glob":"acme/*"},"validFrom":"2020-01-01","prices":{"input":"1.1234567","output":"1"},"tokenizer":"bytes","ratio":"3.0","maxOutput":10}', now() - interval '1 hour', 'test')`, bad.org)
 		Expect(err).NotTo(HaveOccurred())
 
 		res, err := ing.Ingest(ctx, []ledger.Entry{
-			bad.usage(time.Now(), deepseek, 1000, 10, 0, "0.5"),
-			good.usage(time.Now(), deepseek, 1_000_000, 0, 0, ""),
+			bad.usage(time.Now(), flash, 1000, 10, 0, "0.5"),
+			good.usage(time.Now(), flash, 1_000_000, 0, 0, ""),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Recorded).To(Equal(2))
@@ -215,11 +221,11 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(b.PriceRef).To(BeEmpty())
 		Expect(string(b.Estimate)).To(ContainSubstring("price_error"))
 		Expect(ledger.FormatUSD(b.CostUsd)).To(Equal("0.50"), "the gateway's cost stands in")
-		Expect(ledger.FormatUSD(good.lastEntry(ctx).CostUsd)).To(Equal("0.02"))
+		Expect(ledger.FormatUSD(good.lastEntry(ctx).CostUsd)).To(Equal("0.20"))
 
 		_, err = db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by) VALUES ($1, 'broken', '{"id":"broken"}', now() - interval '1 hour', 'test')`, good.org)
 		Expect(err).NotTo(HaveOccurred())
-		res, err = ing.Ingest(ctx, []ledger.Entry{good.usage(time.Now(), deepseek, 1000, 10, 0, "")})
+		res, err = ing.Ingest(ctx, []ledger.Entry{good.usage(time.Now(), flash, 1000, 10, 0, "")})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Recorded).To(Equal(1))
 		Expect(good.lastEntry(ctx).CostFlagged).To(BeTrue())
@@ -228,16 +234,16 @@ var _ = Describe("An unusable stored price", func() {
 	It("caps a settled output, so an absurd max_tokens blocks neither ingest nor the budgets of anyone else", func(ctx SpecContext) {
 		abuser := newEnv(ctx, uniq("org"), "", "10.00", 1<<62)
 		other := newEnv(ctx, uniq("org"), "", "10.00", 1<<62)
-		abuser.model(ctx, "openrouter", "anthropic/claude-fable-5.1")
-		other.model(ctx, "openrouter", deepseek)
+		abuser.model(ctx, "openrouter", frontier)
+		other.model(ctx, "openrouter", flash)
 		var batch []ledger.Entry
 		for i := 0; i < 5; i++ {
 			batch = append(batch, ledger.Entry{
-				RequestID: uniq("req"), KeyID: "k-test", Agent: abuser.ref(), Model: "anthropic/claude-fable-5.1", Status: 200,
+				RequestID: uniq("req"), KeyID: "k-test", Agent: abuser.ref(), Model: frontier, Status: 200,
 				MaxTokens: 9_000_000_000_000, RequestBytes: 100, ResponseBytes: -1, Time: time.Now(),
 			})
 		}
-		batch = append(batch, other.usage(time.Now(), deepseek, 1_000_000, 0, 0, ""))
+		batch = append(batch, other.usage(time.Now(), flash, 1_000_000, 0, 0, ""))
 		res, err := ing.Ingest(ctx, batch)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Recorded).To(Equal(6))
@@ -256,7 +262,7 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(err).NotTo(HaveOccurred())
 		l, err := ledger.AgentLimit(ctx, q, other.agent, time.Now())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(l.Amount).To(BeNumerically("~", 9.98, 0.001))
+		Expect(l.Amount).To(BeNumerically("~", 9.80, 0.001))
 
 		// A sum beyond what a field could hold saturates instead of failing.
 		_, err = db.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)
@@ -269,9 +275,9 @@ var _ = Describe("An unusable stored price", func() {
 
 	It("charges an upstream 4xx without usage the input estimate only, flagged usage_missing", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
-		e.model(ctx, "openrouter", deepseek)
+		e.model(ctx, "openrouter", flash)
 		x := ledger.Entry{
-			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: deepseek, Status: 400,
+			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 400,
 			MaxTokens: 4000, RequestBytes: 3_000_000, ResponseBytes: -1, Time: time.Now(),
 		}
 		_, err := ing.Ingest(ctx, []ledger.Entry{x})
@@ -279,7 +285,7 @@ var _ = Describe("An unusable stored price", func() {
 		s := e.lastEntry(ctx)
 		Expect(s.InputTokens).To(Equal(int64(1_000_000)))
 		Expect(s.OutputTokens).To(BeZero())
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.02"))
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.20"))
 		Expect(s.CostFlagged).To(BeTrue())
 		Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
 
@@ -291,10 +297,10 @@ var _ = Describe("An unusable stored price", func() {
 
 	It("settles an aborted response without usage at max_tokens, or at the entry's max_output when it is not logged", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
-		e.model(ctx, "openrouter", deepseek)
+		e.model(ctx, "openrouter", flash)
 		x := func(max int64) ledger.Entry {
 			return ledger.Entry{
-				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: deepseek, Status: 200, MaxTokens: max,
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 200, MaxTokens: max,
 				InputKnown: true, InputTokens: 1000, RequestBytes: 3000, ResponseBytes: -1, Time: time.Now(),
 			}
 		}
@@ -302,8 +308,8 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
 		Expect(s.Estimated).To(BeTrue())
-		// 1000 reported input at 0.02 + 2000 output at 1.00, per million.
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.00202"))
+		// 1000 reported input at 0.20 + 2000 output at 2, per million.
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.0042"))
 		_, err = ing.Ingest(ctx, []ledger.Entry{x(0)})
 		Expect(err).NotTo(HaveOccurred())
 		s = e.lastEntry(ctx)
@@ -316,15 +322,15 @@ var _ = Describe("Budgets", func() {
 
 	It("cancels every open run of the org at its monthly cap, naming the limit, and alerts at 80% and 100%", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
-		e.model(ctx, "openrouter", deepseek)
+		e.model(ctx, "openrouter", flash)
 		svc := budget.New(db)
-		Expect(svc.SetOrgCap(ctx, e.org, audit.User(e.user), ptr(money.MustParse("0.10")))).To(Succeed())
+		Expect(svc.SetOrgCap(ctx, e.org, audit.User(e.user), ptr(money.MustParse("1.00")))).To(Succeed())
 		t := e.task(ctx)
 		r := e.startRun(ctx, t, 1<<40, time.Now().Add(-time.Minute))
 
-		// 0.02 per entry: 20%, 40%, 60%, 80%.
+		// 0.20 per entry: 20%, 40%, 60%, 80%.
 		for i := 0; i < 4; i++ {
-			_, err := ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), deepseek, 1_000_000, 0, 0, "")})
+			_, err := ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 0, 0, "")})
 			Expect(err).NotTo(HaveOccurred())
 		}
 		Expect(e.run(ctx, r.ID).State).To(Equal(store.RunStateRunning))
@@ -333,17 +339,17 @@ var _ = Describe("Budgets", func() {
 		Expect(ns).To(HaveLen(1))
 		Expect(ns[0].Kind).To(Equal(budget.KindWarning))
 
-		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), deepseek, 1_000_000, 0, 0, "")})
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 0, 0, "")})
 		Expect(err).NotTo(HaveOccurred())
 		run := e.run(ctx, r.ID)
 		Expect(run.State).To(Equal(store.RunStateCanceled))
-		Expect(run.OutcomeReason.String).To(HavePrefix("org monthly cap reached ($0.10 of $0.10"))
+		Expect(run.OutcomeReason.String).To(HavePrefix("org monthly cap reached ($1.00 of $1.00"))
 		ns, err = q.ListNotifications(ctx, store.ListNotificationsParams{OrgID: e.org, UserID: e.user, MaxRows: 10})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ns).To(HaveLen(2))
 
 		// More spend in the same window does not alert again.
-		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), deepseek, 1_000_000, 0, 0, "")})
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 0, 0, "")})
 		Expect(err).NotTo(HaveOccurred())
 		ns, _ = q.ListNotifications(ctx, store.ListNotificationsParams{OrgID: e.org, UserID: e.user, MaxRows: 10})
 		Expect(ns).To(HaveLen(2))
@@ -351,7 +357,7 @@ var _ = Describe("Budgets", func() {
 
 	It("pushes the smallest remaining amount of the agent, the org and the platform", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
-		e.model(ctx, "openrouter", deepseek)
+		e.model(ctx, "openrouter", flash)
 		svc := budget.New(db)
 		now := time.Now()
 		l, err := ledger.AgentLimit(ctx, q, e.agent, now)
@@ -377,7 +383,7 @@ var _ = Describe("Budgets", func() {
 		Expect(svc.SetPlatformCeiling(ctx, e.org, audit.User(e.user), e.user, ptr(money.MustParse("4")))).To(Succeed())
 		Expect(svc.SetOrgCap(ctx, e.org, audit.User(e.user), ptr(money.MustParse("5")))).NotTo(Succeed(), "the cap cannot exceed the ceiling")
 
-		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(now, deepseek, 50_000_000, 0, 0, "")}) // 1.00
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(now, flash, 5_000_000, 0, 0, "")}) // 1.00
 		Expect(err).NotTo(HaveOccurred())
 		l, _ = ledger.AgentLimit(ctx, q, e.agent, now)
 		Expect(l.Amount).To(BeNumerically("==", 2), "min(5-1, 3-1, 4-1)")
@@ -389,14 +395,14 @@ var _ = Describe("Budgets", func() {
 
 	It("tells platform admins when an org reaches its ceiling", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
-		e.model(ctx, "openrouter", deepseek)
+		e.model(ctx, "openrouter", flash)
 		_, err := db.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, e.user)
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func(ctx SpecContext) { _, _ = db.Exec(ctx, `DELETE FROM platform_admins WHERE user_id = $1`, e.user) })
-		Expect(budget.New(db).SetPlatformCeiling(ctx, e.org, audit.User(e.user), e.user, ptr(money.MustParse("0.02")))).To(Succeed())
+		Expect(budget.New(db).SetPlatformCeiling(ctx, e.org, audit.User(e.user), e.user, ptr(money.MustParse("0.20")))).To(Succeed())
 		t := e.task(ctx)
 		r := e.startRun(ctx, t, 1<<40, time.Now().Add(-time.Minute))
-		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), deepseek, 1_000_000, 0, 0, "")})
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 0, 0, "")})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(e.run(ctx, r.ID).OutcomeReason.String).To(HavePrefix("platform ceiling reached"))
 		var kinds []string
@@ -438,14 +444,14 @@ var _ = Describe("Prices migrated from model rates", func() {
 
 	It("takes what the model's rates never set from the matching default entry, once", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
-		migrated(ctx, e.org, "openrouter", "anthropic/claude-sonnet-5.5", `{"input":"2","output":"10"}`)
-		svc := prices.New(db, nil)
+		migrated(ctx, e.org, "openrouter", frontier, `{"input":"2","output":"10"}`)
+		svc := prices.New(db, nil, priceList)
 		n, err := svc.CompleteMigrated(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(n).To(BeNumerically(">=", 1))
 		got := read(ctx, e.org)
-		_, defs := pricing.Default()
-		d, ok := pricing.Select(defs, "openrouter", "anthropic/claude-sonnet-5.5", time.Now())
+		_, defs := priceList.Current()
+		d, ok := pricing.Select(defs, "openrouter", frontier, time.Now())
 		Expect(ok).To(BeTrue())
 		Expect(got.Prices.Input).To(Equal("2"), "the model's own rates stay")
 		Expect(got.Prices.Output).To(Equal("10"))
@@ -471,7 +477,7 @@ var _ = Describe("Prices migrated from model rates", func() {
 	It("keeps generic settings and asks for a review when no default entry matches", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
 		migrated(ctx, e.org, "openai", "acme/custom-model", `{"input":"1","output":"2"}`)
-		_, err := prices.New(db, nil).CompleteMigrated(ctx)
+		_, err := prices.New(db, nil, priceList).CompleteMigrated(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		got := read(ctx, e.org)
 		Expect(got.Tokenizer).To(Equal(pricing.TokenizerBytes))

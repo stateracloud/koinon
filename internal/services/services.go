@@ -57,6 +57,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runwatch"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Keys is the secret store as the services use it.
@@ -83,6 +84,8 @@ type Options struct {
 	WatchHeartbeatInterval time.Duration
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
+	// Prices is the default price list; required (pricing.Embedded in production).
+	Prices pricing.ListSource
 	// Keys seals and opens connections' secret fields (the secret store). Nil means Koinon
 	// runs without key-encryption keys, and creating connections fails.
 	Keys Keys
@@ -164,7 +167,7 @@ func New(pool *pgxpool.Pool, opts Options) *Server {
 		notifier: opts.Notifier, urlPolicy: opts.URLPolicy,
 		pool: pool, q: store.New(pool), hub: opts.Hub, poll: opts.WatchPollInterval, heartbeat: opts.WatchHeartbeatInterval, log: opts.Logger,
 		keys: opts.Keys, tokens: opts.Tokens, hosts: opts.Hosts, approvals: opts.Approvals, catalog: opts.Catalog, mcp: opts.MCP,
-		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger),
+		budgets: budget.New(pool), prices: prices.New(pool, opts.Logger, opts.Prices),
 	}
 	if s.dm != nil {
 		s.dm.bind(s)
