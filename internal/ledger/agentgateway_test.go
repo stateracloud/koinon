@@ -33,7 +33,7 @@ import (
 )
 
 // agentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
-const agentgatewayImage = "cr.agentgateway.dev/agentgateway:v1.6.0"
+const agentgatewayImage = "cr.agentgateway.dev/agentgateway:v1.7.0"
 
 const (
 	pricedModel   = "fake/ledger-model"
@@ -49,7 +49,7 @@ func hostPort(s *httptest.Server) int {
 
 // The whole path against a real agentgateway: requests through the gateway, its OTLP access-log
 // export into the in-process receiver, the ledger, and limits pushed back net of recorded spend.
-var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", Ordered, func() {
+var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", Ordered, func() {
 	var (
 		e        *env
 		run      store.Run
@@ -240,7 +240,7 @@ var _ = Describe("agentgateway v1.6.0 exporting its access log to the ledger", O
 	}, SpecTimeout(time.Minute))
 
 	// agentgateway logs a request whose client left before the response headers with the model
-	// and the key but no status, no usage and no cost (verified against v1.6.0). The provider may
+	// and the key but no status, no usage and no cost (verified against v1.7.0). The provider may
 	// have done the work, so the ledger charges it as an estimate, marked usage_missing.
 	It("charges a request whose client disconnected before the headers, as an estimate", func(ctx SpecContext) {
 		d := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)

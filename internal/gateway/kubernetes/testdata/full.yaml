@@ -1,4 +1,4 @@
-# Revision cf97083787d4c27e
+# Revision 2839f2929cf48a4e
 apiVersion: v1
 data:
   catalog.json: '{"providers":{"acme.openrouter":{"models":{"deepseek/deepseek-v4.1-flash":{"rates":{"cacheRead":"0.006","input":"0.30","output":"1.20"},"tiers":[{"contextOver":200000,"rates":{"input":"0.60"}}]}}},"globex.ollama":{"models":{"deepseek/deepseek-v4.1-flash":{"rates":{"input":"0","output":"0"}}}}}}'
@@ -38,7 +38,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  koinon-reload-probe: '{"keyHash":"sha256:3a18e1c2088cda9f80a5bc878d9cee278c1879898468bee9cedb0837d3f5d883","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+  koinon-reload-probe: '{"keyHash":"sha256:c303f488f9b7842b32cd3618dc39d13bce5de7a686086dd2f7860df3b5b43e01","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -107,7 +107,8 @@ spec:
     failureMode: FailOpen
     prefixMode: Always
     targets:
-      - name: acme-wiki
+      - condition: apiKey.org == "acme"
+        name: acme-wiki
         static:
           host: mcp.wiki.example.com
           path: /mcp
@@ -131,7 +132,8 @@ spec:
           path: /mcp
           port: 8080
           protocol: StreamableHTTP
-      - name: globex-search
+      - condition: apiKey.org == "globex"
+        name: globex-search
         static:
           host: search.example.org
           path: /sse

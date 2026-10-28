@@ -262,3 +262,14 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
 - **One OpenCode provider whose package and settings are rendered per run in
   `OPENCODE_CONFIG_CONTENT`.** That moves provider configuration out of the read-only image file, and
   merging a static `apiKey` with an `authToken` is a configuration error. Rejected.
+
+## Amendment (2026-10-28): agentgateway v1.7.0
+
+- v1.7.0 forwards the client's `anthropic-version` instead of replacing it. Koinon does not set the
+  header yet; when it does (decision 3), a `requestHeaders.set` pin must win. The spec in
+  `internal/gateway/standalone` shows it does on v1.7.0: a client sends `2099-01-01`; a model with
+  the set reaches the upstream with `2023-06-01`, and one without it with `2099-01-01`.
+- v1.7.0 also reads a separate 1-hour cache-write rate (`cacheWrite1h`) and
+  `cache_creation_1h_input_tokens`, which lifts the limit in the last consequence above. Koinon's
+  price catalog has no 1-hour price yet (ADR 0070 plans `Cost.CacheWrite1h`), so nothing changes
+  until it does; cache writes stay priced at the 5-minute rate.

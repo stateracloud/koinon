@@ -160,3 +160,18 @@ fails closed by default; its API is marked "still evolving".
 - https://agentgateway.dev/docs/kubernetes/main/llm/cost-controls/budget-limits/
 - https://github.com/NVIDIA/OpenShell/blob/main/docs/extensibility/supervisor-middleware/index.mdx
 - ADR 0009, ADR 0010, ADR 0011, ADR 0012, ADR 0013, ADR 0030, ADR 0040
+
+## Amendment (2026-10-28): agentgateway v1.7.0 budgets without a window, not used
+
+agentgateway v1.7.0 lets a per-key budget omit `window`: its usage then accumulates for the lifetime
+of the budget name and never resets. Koinon's 24-hour window plus a generation in the budget name
+(the UTC day plus a digest of the recorded spends, `budget.Status.Generation`) emulates that, and the
+window looks redundant. It is not: agentgateway deletes only expired windowed counters at startup
+(`http/budget/database.rs`), and every generation change adds a row. Without a window the table would
+grow forever and be loaded into memory at each start.
+
+Decision: the ledger keeps pushing the 24-hour window (`ledger.Window`). `gateway.Limit.Window == 0`
+(no window) is supported by the drivers for future use but not pushed. The known cost stays as
+before: at midnight a windowed counter resets before the reconciler pushes the new day's generation,
+so the gateway can regrant the previous net amount until the next pass, at most 30 seconds, the kind
+of overshoot this ADR accepts. Counters of past days are removed by agentgateway at its next start.

@@ -197,6 +197,40 @@ var _ = Describe("Render", func() {
 		}
 	})
 
+	It("hides an org's MCP server from other orgs' keys with a target condition (agentgateway v1.7)", func() {
+		targets := func(s gateway.State) []any {
+			GinkgoHelper()
+			r, err := gwk8s.Render(s, opts())
+			Expect(err).NotTo(HaveOccurred())
+			t, _, _ := nested(find(r, gwk8s.KindBackend, "koinon-gateway-mcp").U.Object, "spec", "mcp", "targets")
+			return t
+		}
+		byName := map[string]map[string]any{}
+		for _, t := range targets(fullState()) {
+			m := t.(map[string]any)
+			byName[m["name"].(string)] = m
+		}
+		Expect(byName["acme-wiki"]).To(HaveKeyWithValue("condition", `apiKey.org == "acme"`))
+		Expect(byName["globex-search"]).To(HaveKeyWithValue("condition", `apiKey.org == "globex"`))
+		Expect(byName["github"]).NotTo(HaveKey("condition"), "a platform server is for every key")
+
+		// The CRD refuses a condition on a lone target: it gets a never-true partner.
+		lone := gateway.State{MCP: []gateway.MCPTarget{{Name: "acme-only", Org: "acme", URL: "http://acme.example.com/mcp"}}}
+		got := targets(lone)
+		Expect(got).To(HaveLen(2))
+		Expect(got[1]).To(HaveKeyWithValue("name", "koinon.placeholder"))
+		Expect(got[1]).To(HaveKeyWithValue("condition", "false"))
+		// An org "koinon" with a server "placeholder" is named koinon-placeholder: no collision.
+		clash := targets(gateway.State{MCP: []gateway.MCPTarget{{Name: "koinon-placeholder", Org: "koinon", URL: "http://k.example.com/mcp"}}})
+		names := []string{}
+		for _, t := range clash {
+			names = append(names, t.(map[string]any)["name"].(string))
+		}
+		Expect(names).To(ConsistOf("koinon-placeholder", "koinon.placeholder"))
+		// A lone platform server needs no partner.
+		Expect(targets(gateway.State{MCP: []gateway.MCPTarget{{Name: "github", URL: "http://g.example.com/mcp"}}})).To(HaveLen(1))
+	})
+
 	It("refuses a provider key without a Secret to hold it", func() {
 		o := opts()
 		o.ProviderKeysSecret = ""

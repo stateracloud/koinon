@@ -687,7 +687,7 @@ var _ = Describe("Reconciler", func() {
 		full := mg.last().Limits[ref]
 		Expect(full.Unit).To(Equal(gateway.USD))
 		Expect(full.Amount).To(BeNumerically("==", 10))
-		Expect(full.Window).To(Equal(ledger.Window))
+		Expect(full.Window).To(Equal(ledger.Window), "windowed, so agentgateway can drop expired counters")
 
 		By("recorded spend lowers the pushed amount and starts a new gateway counter")
 		_, err := pool.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model,

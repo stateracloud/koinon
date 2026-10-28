@@ -168,7 +168,7 @@ func healthyCluster() *cluster {
 	return &cluster{
 		kube: []runtime.Object{
 			controller("registry.k8s.io/agent-sandbox/agent-sandbox-controller:v1.0.7"),
-			agentgatewayController("cr.agentgateway.dev/controller:v1.6.0"),
+			agentgatewayController("cr.agentgateway.dev/controller:v1.7.0"),
 			runtimeClass("kata", map[string]string{preflight.AttachableLabel: "true"}),
 			cnpgWebhook(),
 			webhookEndpoints(true),
@@ -388,13 +388,13 @@ var _ = Describe("Checker", func() {
 		Entry("agentgateway CRDs", func(c *cluster) { c.without("agentgatewaymodels.agentgateway.dev") },
 			"GatewayClass", "CRD agentgatewaymodels.agentgateway.dev not found", "agentgateway-crds"),
 		Entry("agentgateway CRD version", func(c *cluster) { c.with(crd("agentgatewaypolicies.agentgateway.dev", "v1beta1")) },
-			"GatewayClass", "serves [v1beta1], not v1alpha1", "v1.6.x"),
+			"GatewayClass", "serves [v1beta1], not v1alpha1", "v1.7.x"),
 		Entry("agentgateway controller", func(c *cluster) { c.setAgentgatewayController(nil) },
 			"GatewayClass", "controller Deployment agentgateway-system/agentgateway not found", "preflight.agentgateway.namespace"),
 		Entry("agentgateway release", func(c *cluster) {
-			c.setAgentgatewayController(agentgatewayController("cr.agentgateway.dev/controller:v1.7.0"))
+			c.setAgentgatewayController(agentgatewayController("cr.agentgateway.dev/controller:v1.6.0"))
 		},
-			"GatewayClass", "is not a tested release", "v1.6.x"),
+			"GatewayClass", "is not a tested release", "v1.7.x"),
 		Entry("RBAC", func(c *cluster) { c.forbid = "runtimeclasses" },
 			"RuntimeClass", "the preflight ServiceAccount may not read RuntimeClass kata", "ClusterRole"),
 	)

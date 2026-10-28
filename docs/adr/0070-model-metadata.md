@@ -413,3 +413,11 @@ API", and "Do not copy prices from aggregators". models.dev is an aggregator.
   experimental v2 format, and it does not reach `koinon-api`. Rejected.
 - **A `hack/` script for the sync.** It is simpler, but the online refresh and the offline import
   would then need a second parser for each source. Rejected.
+
+## Amendment (2026-10-28): the gateway can price 1-hour cache writes
+
+agentgateway v1.7.0 accepts a `cacheWrite1h` rate in the model catalog and counts
+`cache_creation_1h_input_tokens` separately. When `Cost.CacheWrite1h` lands, the drivers should render
+it next to `cacheWrite` (ADR 0069 keeps writes at the 5-minute rate until then), and the ledger should
+store the 1-hour write tokens as their own column so that the price version and the raw usage stay
+reproducible.
