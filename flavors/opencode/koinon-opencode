@@ -6,14 +6,22 @@
 #
 # Usage:
 #   koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs]
-#                   [--cache-anthropic | --cache-alibaba] [--session-id ID]
+#                   [--model-format openai|anthropic] [--cache-anthropic | --cache-alibaba]
+#                   [--session-id ID]
 #                   [-- OPENCODE_ACP_ARGS...]
 #
 # --plugin-installs is set by koinon-agentd when the agent's template turns
 # harness.pluginInstalls on; only then are the agent's own plugins loaded (see README.md).
 #
+# --model-format is the model's wire format (ADR 0069), openai (chat completions) by default.
+# It picks the provider entry of opencode.jsonc: koinon for openai, koinon-anthropic for anthropic
+# (Messages). koinon-agentd selects the same entry for the session's model, from the flavor
+# table in internal/flavor.
+#
 # --cache-anthropic and --cache-alibaba are set by koinon-agentd for a model whose provider needs
-# explicit prompt-cache markers (ADR 0068); the config then sets compatibility.cacheFormat.
+# explicit prompt-cache markers on chat completions (ADR 0068); the config then sets
+# compatibility.cacheFormat. They apply to the openai format only: an anthropic-format model
+# gets its markers from OpenCode itself.
 #
 # koinon-agentd writes the run's instructions to /sandbox/.koinon/AGENTS.md before it starts
 # this script; without that file the script refuses to start (exit 64).
@@ -54,6 +62,15 @@ koinon_extra_arg() {
 
 koinon_parse_args "$@"
 shift "$koinon_shift"
+
+# The provider entry for the model's format: one row per format, as in internal/flavor.
+case $model_format in
+  openai) entry=koinon ;;
+  anthropic) entry=koinon-anthropic ;;
+esac
+if [ -n "$cache_format" ] && [ "$model_format" != openai ]; then
+  koinon_die "--cache-$cache_format applies to the openai model format only"
+fi
 
 # Drop anything the caller's environment might carry that would change where OpenCode reads its
 # configuration, its database or its server credentials, or where it sends telemetry
@@ -103,12 +120,13 @@ if [ -n "$plugin_installs" ]; then
   done
   config_content="\"plugins\":[$list]"
 fi
-# Prompt caching (ADR 0068): the koinon provider's models send Anthropic-style cache_control
+# Prompt caching (ADR 0068): the openai entry's models send Anthropic-style cache_control
 # markers. The key is compatibility.cacheFormat (packages/schema/src/model-compatibility.ts,
 # provider level in packages/schema/src/config/provider.ts).
 # Sticky routing: the run ID goes to OpenRouter as the body field session_id, so the run stays on
 # one upstream and its cache stays warm. The provider-level body overlay is merged into every
-# request (packages/schema/src/config/provider.ts, core/src/config/plugin/provider.ts).
+# request of the entry in use, in either format (packages/schema/src/config/provider.ts,
+# core/src/config/plugin/provider.ts).
 provider=''
 if [ -n "$cache_format" ]; then
   provider="\"compatibility\":{\"cacheFormat\":\"$cache_format\"}"
@@ -117,7 +135,12 @@ if [ -n "$session_id" ]; then
   provider="$provider${provider:+,}\"body\":{\"session_id\":\"$session_id\"}"
 fi
 if [ -n "$provider" ]; then
-  config_content="$config_content${config_content:+,}\"providers\":{\"koinon\":{$provider}}"
+  config_content="$config_content${config_content:+,}\"providers\":{\"$entry\":{$provider}}"
+fi
+# The config file's default model is koinon/<model>; another entry names its own, so that a session
+# that does not select a model (koinon-agentd always does) still starts on the right provider.
+if [ "$entry" != koinon ]; then
+  config_content="\"model\":\"$entry/$model\"${config_content:+,}$config_content"
 fi
 if [ -n "$config_content" ]; then
   export OPENCODE_CONFIG_CONTENT="{$config_content}"

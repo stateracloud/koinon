@@ -35,16 +35,18 @@ koinon_check_url() {
 koinon_extra_arg() { return 1; }
 
 # koinon_parse_args "$@": reads --model-base-url, --model and --mcp-url into base_url, model and
-# mcp_url (and the optional --session-id into session_id), checks them, and sets koinon_shift to the number of arguments consumed (a trailing
+# mcp_url (and the optional --session-id into session_id and --model-format into model_format,
+# openai or anthropic, default openai: the model's wire format, ADR 0069), checks them, and sets koinon_shift to the number of arguments consumed (a trailing
 # -- included). The caller then runs `shift "$koinon_shift"`, which leaves the arguments for the
 # harness.
 koinon_parse_args() {
-  base_url='' model='' mcp_url='' session_id='' koinon_shift=0
+  base_url='' model='' mcp_url='' session_id='' model_format=openai koinon_shift=0
   while [ $# -gt 0 ]; do
     case $1 in
       --model-base-url) [ $# -ge 2 ] || koinon_die "$1 needs a value"; base_url=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --model) [ $# -ge 2 ] || koinon_die "$1 needs a value"; model=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --mcp-url) [ $# -ge 2 ] || koinon_die "$1 needs a value"; mcp_url=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
+      --model-format) [ $# -ge 2 ] || koinon_die "$1 needs a value"; model_format=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --session-id) [ $# -ge 2 ] || koinon_die "$1 needs a value"; session_id=$2; shift 2; koinon_shift=$((koinon_shift + 2)) ;;
       --) koinon_shift=$((koinon_shift + 1)); break ;;
       *)
@@ -60,6 +62,10 @@ koinon_parse_args() {
   koinon_check_url --model-base-url "$base_url"
   check --model "$model"
   koinon_check_url --mcp-url "$mcp_url"
+  case $model_format in
+    openai | anthropic) ;;
+    *) koinon_die "--model-format must be openai or anthropic: '$model_format'" ;;
+  esac
   if [ -n "$session_id" ]; then
     check --session-id "$session_id"
     [ ${#session_id} -le 256 ] || koinon_die "--session-id is longer than 256 characters"
