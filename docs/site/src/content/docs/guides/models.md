@@ -118,14 +118,21 @@ A run whose model is not served yet waits before it starts the harness. The task
 "Run … is waiting for the model provider *name* to reach the gateway", and the run stays *starting*
 meanwhile; its sandbox starts in parallel. When the model is served, the run goes on by itself.
 
+A model without a usable price is never served, so its run fails at once and says so: add a price on
+the **Prices** page.
+
 If the model is still not served after five minutes (`koinon-agentd --model-serve-timeout`), the run
 fails with "the gateway did not serve the model … its provider … has not reached the gateway". That
-usually means the provider is not served at all: its key cannot be opened, its URL is refused, the
-model has no price, or the gateway rejected the config. The `koinon-reconciler` log says which (a
+usually means the provider is not served at all: its key cannot be opened, its URL is refused, or
+the gateway rejected the config. The `koinon-reconciler` log says which (a
 rejected config also shows on the agent's status). Fix it and run the task again.
 
 Changing a served provider's key does not make runs wait: the gateway keeps using the previous key
-until the new one has arrived.
+until the new one has arrived, also when the key changed while `koinon-reconciler` was down.
+
+Keep `--model-serve-timeout` well above the reconciler's `--provider-key-settle` plus one gateway
+apply (agentgateway's reload takes up to a minute). The two are flags of different components, so
+Koinon cannot check this for you; if you raise the settle time, raise the timeout too.
 
 ## OpenRouter, with the routing guard
 

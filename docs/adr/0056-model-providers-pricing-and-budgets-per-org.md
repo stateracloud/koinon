@@ -321,8 +321,16 @@ catalog, so a run could start its harness first and fail on a 403 that opencode 
    row, with the previous file, because the provider keeps serving with it. A failed Apply changes
    nothing; an org with a rejected model object gets nothing new recorded and only loses rows of
    models no longer in the state. Only the leader reconciles, so only the leader writes. The rows
-   cascade with their model and provider.
-2. **agentd waits on it.** After choosing the run's model and before `waitSandbox`, a run whose model
+   cascade with their model and provider. In Kubernetes mode a row is written once Apply has been
+   accepted (the objects applied and judged by the controller), which may be shortly before
+   the proxy serves the route; standalone mode's Apply returns after the hot reload. A reconciler with
+   nothing in memory (a restart, a new leader) that finds a provider's new key file still settling
+   serves it with the file the row records, if that file is still in the Secret, so a key rotated
+   while it was down does not drop the provider.
+2. **Bounds.** `--model-serve-timeout` must comfortably exceed `--provider-key-settle` plus one
+   apply; they belong to different processes, so this is documented, not checked. A model without a
+   usable price is never served, so its run fails at once with a reason that says so.
+3. **agentd waits on it.** After choosing the run's model and before `waitSandbox`, a run whose model
    is in the org's catalog but has no row waits (poll with backoff to 5 s, NOTIFY the reconciler every
    `ReconcileNudge`). It records `run.waiting_for_model` once (`{model, provider, reason}`), which the
    task timeline shows as "waiting for the model provider *name* to reach the gateway". The run stays
@@ -331,7 +339,7 @@ catalog, so a run could start its harness first and fail on a 403 that opencode 
    overlap. After `--model-serve-timeout` (default 5 min, several times the 90 s settle) the run fails
    with a reason that names the model and the provider. A model not in the catalog (a platform
    default) is not waited for.
-3. **Rejected:** treating a first 403 or 404 as transient (it hides a real credential fault behind
+4. **Rejected:** treating a first 403 or 404 as transient (it hides a real credential fault behind
    retries) and holding sandbox creation in the reconciler (the run would still show nothing).
 
 ## Alternatives considered
