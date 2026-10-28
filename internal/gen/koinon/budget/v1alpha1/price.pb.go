@@ -758,8 +758,12 @@ func (x *SetPriceRequest) GetMaxOutput() int32 {
 }
 
 type SetPriceResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Price         *PriceVersion          `protobuf:"bytes,1,opt,name=price,proto3" json:"price,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Price *PriceVersion          `protobuf:"bytes,1,opt,name=price,proto3" json:"price,omitempty"`
+	// warnings are non-fatal notes about the saved entry, for example that a model with a
+	// cache_read price runs without prompt caching because Koinon has no cache mode for its
+	// provider format (ADR 0068).
+	Warnings      []string `protobuf:"bytes,2,rep,name=warnings,proto3" json:"warnings,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -797,6 +801,13 @@ func (*SetPriceResponse) Descriptor() ([]byte, []int) {
 func (x *SetPriceResponse) GetPrice() *PriceVersion {
 	if x != nil {
 		return x.Price
+	}
+	return nil
+}
+
+func (x *SetPriceResponse) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
 	}
 	return nil
 }
@@ -1498,9 +1509,10 @@ const file_koinon_budget_v1alpha1_price_proto_rawDesc = "" +
 	"\n" +
 	"valid_from\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tvalidFrom\x12\x1d\n" +
 	"\n" +
-	"max_output\x18\f \x01(\x05R\tmaxOutput\"N\n" +
+	"max_output\x18\f \x01(\x05R\tmaxOutput\"j\n" +
 	"\x10SetPriceResponse\x12:\n" +
-	"\x05price\x18\x01 \x01(\v2$.koinon.budget.v1alpha1.PriceVersionR\x05price\"?\n" +
+	"\x05price\x18\x01 \x01(\v2$.koinon.budget.v1alpha1.PriceVersionR\x05price\x12\x1a\n" +
+	"\bwarnings\x18\x02 \x03(\tR\bwarnings\"?\n" +
 	"\x12RetirePriceRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"\x15\n" +

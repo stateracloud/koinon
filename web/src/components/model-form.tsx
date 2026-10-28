@@ -22,7 +22,7 @@ export type ModelFormProps = {
   onUpdate: (id: string, input: ModelChange) => Promise<unknown>
   onDone: () => void
   /** Called after a save, to say when the model will be available. */
-  onSaved?: () => void
+  onSaved?: (warnings: string[]) => void
 }
 
 /**
@@ -51,9 +51,10 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
     setPending(true)
     setError(undefined)
     try {
+      let warnings: string[] = []
       if (model) await onUpdate(model.id, { guard: canGuard ? guard : undefined })
-      else await onCreate({ providerId: provider.id, name, guard: canGuard && guard })
-      onSaved?.()
+      else warnings = ((await onCreate({ providerId: provider.id, name, guard: canGuard && guard })) as { warnings?: string[] } | undefined)?.warnings ?? []
+      onSaved?.(warnings)
       onDone()
     } catch (e2) {
       setError(ConnectError.from(e2).rawMessage)

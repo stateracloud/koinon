@@ -3,8 +3,14 @@
 package prices
 
 import (
+	"context"
+	"slices"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -63,4 +69,45 @@ func cacheModeOf(providerType, model string) CacheMode {
 		}
 	}
 	return CacheUnknown
+}
+
+// UncachedReason is the text recorded and shown when a model with a cache price runs without
+// prompt caching because its provider format has no cache mode.
+func UncachedReason(providerType, model string) string {
+	return "the model has a cache_read price but Koinon has no way to turn on prompt caching for " +
+		"provider format \"" + providerType + "\" and model \"" + model + "\"; it runs without caching (ADR 0068)"
+}
+
+// EntryWarnings are the save-time warnings for a price entry: it has a cache_read price (in its
+// base rates or a tier) but the provider format it names is not mapped to a cache mode.
+func EntryWarnings(e pricing.Entry) []string {
+	if e.Prices.CacheRead == "" && !slices.ContainsFunc(e.Tiers, func(t pricing.WireTier) bool { return t.Prices.CacheRead != "" }) {
+		return nil
+	}
+	name := e.Match.Glob
+	if name == "" {
+		name = e.Match.Regex
+	}
+	// A glob such as "google/*" names a vendor; probe with its literal prefix.
+	if cacheModeOf(e.Provider, strings.TrimRight(name, "*?")) != CacheUnknown {
+		return nil
+	}
+	return []string{"Price " + e.ID + ": " + UncachedReason(e.Provider, name)}
+}
+
+// ModelWarnings are the save-time warnings for a model: its resolved price has a cache_read
+// price but its provider format is not mapped. A model without a price has none.
+func (s *Service) ModelWarnings(ctx context.Context, org pgtype.UUID, providerID pgtype.UUID, name string) []string {
+	prov, err := store.New(s.pool).GetProvider(ctx, store.GetProviderParams{OrgID: org, ID: providerID})
+	if err != nil {
+		return nil
+	}
+	res, err := Resolve(ctx, store.New(s.pool), org, Model{Name: name, ProviderType: prov.Type}, time.Now())
+	if err != nil {
+		return nil
+	}
+	if CacheModeFor(prov.Type, name, res.Price) != CacheUnknown {
+		return nil
+	}
+	return []string{"Model " + name + ": " + UncachedReason(prov.Type, name)}
 }

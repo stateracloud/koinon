@@ -107,6 +107,9 @@ func (s *Server) SetPrice(ctx context.Context, req SetPriceRequestObject) (SetPr
 		st, er := s.problem(err)
 		return SetPricedefaultJSONResponse{Body: er, StatusCode: st}, nil
 	}
+	if w := prices.EntryWarnings(in.Entry); len(w) > 0 {
+		v.Warnings = &w
+	}
 	return SetPrice201JSONResponse(v), nil
 }
 

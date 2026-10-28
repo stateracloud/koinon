@@ -160,7 +160,11 @@ func (s *Server) CreateModel(ctx context.Context, req *providerv1alpha1.CreateMo
 	if err != nil {
 		return nil, s.catalogError(err)
 	}
-	return &providerv1alpha1.CreateModelResponse{Model: modelProto(m)}, nil
+	var warnings []string
+	if pid, err := parseID("provider_id", req.GetProviderId()); err == nil {
+		warnings = s.prices.ModelWarnings(requestCtx(ctx), c.org, pid, m.Name)
+	}
+	return &providerv1alpha1.CreateModelResponse{Model: modelProto(m), Warnings: warnings}, nil
 }
 
 // UpdateModel implements ProviderService. Admins and owners.
