@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import type { Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import type { ProviderChange, ProviderCreate } from '@/hooks/use-catalog-actions'
-import { providerTypes } from '@/lib/providers'
+import { providerTypes, workspaceIdPattern, workspaceProviderType } from '@/lib/providers'
 
 const other = '__other'
 const namePattern = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/
@@ -38,6 +38,7 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
   const [url, setUrl] = useState(provider?.url ?? 'https://openrouter.ai/api/v1')
   const [urlEdited, setUrlEdited] = useState(editing)
   const [apiKey, setApiKey] = useState('')
+  const [workspaceId, setWorkspaceId] = useState(provider?.anthropicWorkspaceId ?? '')
   const [removeKey, setRemoveKey] = useState(false)
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
@@ -48,6 +49,7 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
     name: namePattern.test(name) ? undefined : 'Name must be lowercase letters, digits and dashes, such as openrouter.',
     type: /^[a-z][a-z0-9-]{0,62}$/.test(type) ? undefined : 'Type must be a provider name such as openai, openrouter or ollama.',
     url: /^https?:\/\/\S+$/.test(url.trim()) ? undefined : 'URL must start with http:// or https://.',
+    workspaceId: type !== workspaceProviderType || !workspaceId.trim() || workspaceIdPattern.test(workspaceId.trim()) ? undefined : 'Workspace ID must be wrkspc_ followed by letters and digits.',
   }
   const invalid = Object.values(errors).some(Boolean)
 
@@ -72,9 +74,12 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
         if (url.trim() !== provider.url) change.url = url.trim()
         if (key) change.apiKey = key
         else if (removeKey) change.apiKey = ''
+        // The ID exists for Anthropic providers only: leaving the type clears it.
+        const ws = type === workspaceProviderType ? workspaceId.trim() : ''
+        if (ws !== provider.anthropicWorkspaceId) change.anthropicWorkspaceId = ws
         await onUpdate(provider.id, change)
       } else {
-        await onCreate({ name, type, url: url.trim(), apiKey: key })
+        await onCreate({ name, type, url: url.trim(), apiKey: key, anthropicWorkspaceId: type === workspaceProviderType ? workspaceId.trim() : '' })
       }
       onSaved?.(provider?.name ?? name)
       onDone()
@@ -124,7 +129,7 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
         {typeChoice === other && (
           <div className="grid gap-1.5">
             <Label htmlFor="provider-type-name">Provider type name</Label>
-            <Input id="provider-type-name" value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="for example anthropic" autoComplete="off" aria-invalid={!!err('type')} aria-describedby={err('type') ? 'provider-type-error' : undefined} />
+            <Input id="provider-type-name" value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="for example groq" autoComplete="off" aria-invalid={!!err('type')} aria-describedby={err('type') ? 'provider-type-error' : undefined} />
           </div>
         )}
         {err('type') && (
@@ -140,7 +145,7 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
             setUrlEdited(true)
           }} autoComplete="off" aria-invalid={!!err('url')} aria-describedby={err('url') ? 'provider-url-help provider-url-error' : 'provider-url-help'} />
         <p id="provider-url-help" className="text-muted-foreground text-xs">
-          The base URL of the OpenAI-compatible API. Koinon refuses private, loopback and cluster-internal addresses unless a platform admin allows them.
+          The base URL of the provider&apos;s API, such as https://api.anthropic.com/v1 or an OpenAI-compatible API. Koinon refuses private, loopback and cluster-internal addresses unless a platform admin allows them.
         </p>
         {err('url') && (
           <p id="provider-url-error" className="text-destructive text-xs">
@@ -165,6 +170,20 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
           </label>
         )}
       </div>
+      {type === workspaceProviderType && (
+        <div className="grid gap-1.5">
+          <Label htmlFor="provider-workspace">Anthropic workspace ID</Label>
+          <Input id="provider-workspace" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} placeholder="wrkspc_…" autoComplete="off" spellCheck={false} aria-invalid={!!err('workspaceId')} aria-describedby={err('workspaceId') ? 'provider-workspace-help provider-workspace-error' : 'provider-workspace-help'} />
+          <p id="provider-workspace-help" className="text-muted-foreground text-xs">
+            Optional. Needed when the API key is not scoped to a workspace; Koinon sends it with every request to this provider. It identifies the workspace and is not a secret.
+          </p>
+          {err('workspaceId') && (
+            <p id="provider-workspace-error" className="text-destructive text-xs">
+              {err('workspaceId')}
+            </p>
+          )}
+        </div>
+      )}
       {error && (
         <Alert variant="destructive" role="alert">
           <AlertDescription>{error}</AlertDescription>
@@ -190,6 +209,8 @@ function defaultUrl(type: string): string {
       return 'http://ollama.example.internal:11434/v1'
     case 'openai':
       return 'https://api.openai.com/v1'
+    case 'anthropic':
+      return 'https://api.anthropic.com/v1'
     default:
       return ''
   }

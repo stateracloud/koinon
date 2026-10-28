@@ -11,12 +11,32 @@ export const guardProviderType = 'openrouter'
 /** Provider types the form offers; any other agentgateway provider name can be typed in. */
 export const providerTypes = [
   { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'anthropic', label: 'Anthropic' },
   { value: 'ollama', label: 'Ollama' },
   { value: 'openai', label: 'OpenAI or any OpenAI-compatible API' },
 ] as const
 
 export function providerTypeLabel(type: string): string {
   return providerTypes.find((t) => t.value === type)?.label ?? type
+}
+
+/** The provider type that takes an Anthropic workspace ID (ADR 0069). */
+export const workspaceProviderType = 'anthropic'
+
+/** An Anthropic workspace ID, as the server and database check it. */
+export const workspaceIdPattern = /^wrkspc_[A-Za-z0-9]+$/
+
+/**
+ * Model formats as people read them (ADR 0069). The server decides which formats exist and which one a
+ * model gets; this only names them, and an unknown format reads as itself.
+ */
+const formatLabels: Record<string, string> = {
+  openai: 'OpenAI chat completions',
+  anthropic: 'Anthropic Messages',
+}
+
+export function formatLabel(format: string): string {
+  return formatLabels[format] ?? format
 }
 
 /** scopedModelName is the name the gateway serves a model under: "<org slug>/<model>" (ADR 0056). */
