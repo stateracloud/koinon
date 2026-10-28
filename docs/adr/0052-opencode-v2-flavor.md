@@ -145,5 +145,56 @@ home-lab run described in Context. Source references are in `flavors/opencode/RE
 - [0035](0035-v01-flavors.md), [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository),
   [0049](0049-v01-scope-decisions.md) (on PR #16)
 - [flavors/opencode/README.md](../../flavors/opencode/README.md)
-- https://github.com/anomalyco/opencode/tree/v2.0.24
+- https://github.com/anomalyco/opencode/tree/v2.0.24 (original pin), https://github.com/anomalyco/opencode/tree/v2.2.0 (amendment 2026-10-28)
 - https://www.npmjs.com/package/@opencode/cli
+
+## Amendment 2026-10-28: re-pin to 2.2.0 (issue #54)
+
+Andre decided on 2026-10-28 to move the OpenCode flavor from `@opencode/cli` 2.0.24 to **2.2.0**
+(published 2026-10-27), **waiving the project's two-week minimum age for this update only**. The
+reasons: 2.2.0 bundles Bun 1.4.4 (verified in the x64 binary: `Bun v1.4.4 (38afee6c8) Linux x64`;
+the Bun release is from 2026-10-22), which fixes security issues in TLS, HTTP/1.1-3, WebSocket,
+`fetch` and Brotli ([bun.com/blog/bun-v1.4.4#security](https://bun.com/blog/bun-v1.4.4#security)),
+and 2.2.0 makes external-directory permission checks use the project's filesystem
+([anomalyco/opencode#59089](https://github.com/anomalyco/opencode/pull/59089)). The known GHSA
+advisories were all fixed in 1.x and never affected 2.0.24. The repository is now
+`github.com/anomalyco/opencode` (formerly `sst/opencode`).
+
+Pin: `@opencode/cli-linux-x64` and `-arm64` 2.2.0 from `registry.npmjs.org`, sha256 checked by
+`ADD --checksum` after comparing the tarballs with npm's `dist.integrity` (values in
+`flavors/opencode/Dockerfile`); OpenCode tag `v2.2.0`, commit
+`1097e2668b1e08ad63bdf0b1c4860b9bc01e420c`. Decision 1's "2.0.24 only" now reads 2.2.0.
+
+What changed for #54:
+
+- **Instructions.** The config's `instructions` key names `/sandbox/.koinon/AGENTS.md`; the
+  `AGENTS.md` link in the global config directory is gone. The descriptor's `InstructionLink` for
+  OpenCode is empty; agentd still restores the file's hash before every prompt. The link-restore
+  code and `LinkScript` stay in agentd for a flavor that needs a link; the integration specs that
+  exercised it through OpenCode were removed.
+- **`/etc/opencode`.** Not used. 2.2.0 reads it as a managed *system* directory, but the global
+  directory would then be `~/.config/opencode` in the agent's home, a writable configuration
+  source. `OPENCODE_CONFIG_DIR=/etc/koinon/opencode` stays (flavors/opencode/README.md,
+  "Global config directory").
+- **Environment variables and `plugins`.** Re-checked against the 2.2.0 source: the unset list
+  stays; the new provider plugins (`databricks`, `neon`, `openai-context-caps`) fall under
+  `-opencode.provider.*`; 2.2.0 adds three network-capable source files, none of which can run in
+  Koinon's configuration: `core/src/usage-limits.ts` (OpenCode Console budgets; needs a Console
+  credential, which the sandbox never has), `core/src/config/plugin/instruction.ts` (fetches URL
+  entries of `instructions`; ours is a path) and `core/src/plugin/websearch/tinyfish.ts` (turned
+  off by `-opencode.websearch.*`). Added: `OPENCODE_DISABLE_CLAUDE_CODE=1`, `OPENCODE_DISABLE_FREE_MODELS=1`, and unsetting
+  `OPENCODE_API_KEY` and `OPENCODE_REPO_CLONE_GITHUB_BASE_URL`.
+- **Permissions (sandbox posture).** 2.2.0 dropped OpenCode's default `external_directory: ask`
+  and the exemptions for its own directories, and the explore subagent allows every external
+  directory; without a change a `read` of `/etc/passwd` ran with no permission request. The
+  config now sets the rule and the exemptions explicitly, for all agents and for `explore`.
+- **ACP.** `session/load` is used as before (the contract suite's resume and unknown-session specs
+  pass unchanged: `session not found`); `session/resume` is still advertised and unused. The model
+  option is still `koinon/<model>`, selected with `session/set_config_option`. Permission requests
+  gained a `name` field on the tool call.
+
+Still tied to the pin: the one-second settle after the ready command, the plugin list built by the
+entry script, and the explicit model selection.
+
+Verification: `make flavor-opencode` and the flavor contract suite (`test/flavors`) against the
+2.2.0 image, as recorded in the pull request.

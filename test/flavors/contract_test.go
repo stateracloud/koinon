@@ -58,7 +58,7 @@ type flavor struct {
 	instructionsInSystem bool
 	// instructionLink is the path the harness reads the instructions from, a symbolic link to
 	// instructionsPath (internal/agentd, instructionLink). One in the home is put back on
-	// every start; one in the image cannot change.
+	// every start; one in the image cannot change. Empty when the harness's config names the file.
 	instructionLink string
 	// readyCommand is the command the harness announces once the Koinon MCP server's tools are
 	// registered (the server's readyPrompt as a command); koinon-agentd waits for it before the
@@ -81,7 +81,7 @@ type flavor struct {
 const projectMarker = "KOINON-PROJECT-CONFIG-MARKER"
 
 // readySettle is how long koinon-agentd waits after the ready command before the first prompt:
-// OpenCode 2.0.24 announces the command and registers the server's tools on separate paths, the
+// OpenCode 2.2.0 announces the command and registers the server's tools on separate paths, the
 // tools after a 100 ms debounce (packages/core/src/tool/mcp.ts), so the command can come first.
 const readySettle = time.Second
 

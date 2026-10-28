@@ -20,7 +20,7 @@ var _ = DescribeTable("InstructionLink",
 	func(f store.AgentFlavor, want string) {
 		Expect(agentd.InstructionLink(f)).To(Equal(want))
 	},
-	Entry("OpenCode: the global config directory's AGENTS.md", store.AgentFlavorOpencode, "/etc/koinon/opencode/AGENTS.md"),
+	Entry("OpenCode: none, its config's instructions key names the file", store.AgentFlavorOpencode, ""),
 )
 
 // The restore script runs in the sandbox's /bin/sh; here it runs in the host's against a

@@ -30,13 +30,13 @@ checks, the instruction-file check and the `KOINON_*` exports. Each script
 keeps what differs: its value check, PATH, the harness's variables, home clean-up and the exec.
 
 `internal/flavor` holds one descriptor per flavor (entry script, ready command, instruction
-link, default binaries, plugin option); `internal/agentd` and the reconciler read it. `test/flavors` checks each flavor with
+link (empty for OpenCode), default binaries, plugin option); `internal/agentd` and the reconciler read it. `test/flavors` checks each flavor with
 the same specs and per-flavor expectations (`make test-flavors`; `make flavor-<name>` builds
 one image). Today the suite runs against OpenCode only.
 
 | | OpenCode |
 | --- | --- |
-| Harness | OpenCode 2.0.24 |
+| Harness | OpenCode 2.2.0 |
 | `session/resume` advertised | yes |
 | Asks permission for | paths outside the session directory |
 | Unknown session on load | `session not found` |
@@ -44,12 +44,14 @@ one image). Today the suite runs against OpenCode only.
 | MCP tool names | `koinon_<target>_<tool>`, for example `koinon_github_create_pull_request` |
 | Config | read-only, used in place |
 | Tool switches | read-only config |
-| Run instructions (`/sandbox/.koinon/AGENTS.md`, written by agentd) | system prompt, through the global `AGENTS.md` link in the read-only image |
+| Run instructions (`/sandbox/.koinon/AGENTS.md`, written by agentd) | system prompt, through the `instructions` key of the read-only config (OpenCode) |
 
 Instruction delivery is the same for every flavor: agentd writes the file before the harness
 starts, the entry script refuses to start (exit 64) when it is missing, empty or a symbolic
-link, and before every prompt agentd checks the file's hash and the flavor's link
-(`internal/agentd`, `instructionLink`) and restores either (event `run.instructions_restored`).
+link, and before every prompt agentd checks the file's hash and restores it (event
+`run.instructions_restored`). OpenCode needs no link: its config names the file. For a flavor
+whose descriptor sets `InstructionLink`, agentd also checks that link
+(`internal/agentd`, `instructionLink`) and restores it.
 
 Before agentd starts a harness, it ends every process the sandbox user runs except PID 1 and
 the sandbox's main process (`internal/agentd/sweep.sh`), so a run starts with nothing left of an
