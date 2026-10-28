@@ -724,9 +724,30 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 		notice = t.C
 	}
 
+	// cancelSent: the wrap-up cancel went out and the harness ignored it for CancelGrace.
+	cancelSent := false
+	capCanceled := func() error {
+		return &canceled{
+			reason:    fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second),
+			timeLimit: true,
+		}
+	}
 	for {
 		select {
 		case res := <-done:
+			if cancelSent && res.err == nil && res.stop == acp.StopCancelled && len(r.takeRefusals()) == 0 {
+				// The harness honoured Koinon's own cancel late. No second prompt is sent; the run
+				// ends at the cap as it does without a notice, not as a failed turn.
+				r.log.Info("the harness ended the cancelled turn late; waiting for the cap")
+				select {
+				case <-capTimer.C:
+					return capCanceled()
+				case <-r.fenced:
+					return errFenced
+				case <-ctx.Done():
+					return errShutdown
+				}
+			}
 			return r.turnResult(ctx, conn, proc, stderr, res)
 		case <-r.fenced:
 			if fence(r.fenceKind.Load()) == fenceCanceled {
@@ -737,10 +758,7 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 		case <-capTimer.C:
 			r.log.Info("wall-clock cap reached; cancelling the turn")
 			r.cancelTurn(ctx, conn, session, done)
-			return &canceled{
-				reason:    fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second),
-				timeLimit: true,
-			}
+			return capCanceled()
 		case <-notice:
 			notice = nil
 			r.log.Info("time limit near; interrupting the turn to ask the agent to wrap up")
@@ -756,7 +774,8 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 			}
 			// The harness ignored session/cancel: a second session/prompt must not overlap the first.
 			// Arm no new notice; the run ends at the cap as it does without one.
-			if _, err := r.markWrapUp(ctx, time.Until(end)); err != nil {
+			cancelSent = true
+			if err := r.suppressWrapUp(ctx); err != nil {
 				return err
 			}
 			r.log.Warn("the harness did not end its turn for the wrap-up notice; no notice is sent")

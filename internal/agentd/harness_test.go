@@ -94,6 +94,8 @@ type harness struct {
 	// away); endOnCancel makes it answer a cancel with end_turn, as a turn that ended on its own at
 	// that moment does.
 	ignoreCancel, endOnCancel bool
+	// lateCancel makes a markWait turn honour session/cancel only this long after it arrived.
+	lateCancel time.Duration
 	// noChunk makes a markWait turn stream nothing before it waits.
 	noChunk bool
 	// promptsSeen counts the prompts that arrived (the summary does not count) and inFlight how
@@ -414,6 +416,10 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		case <-p.cancelCh():
 		case <-ctx.Done():
 		}
+		p.h.mu.Lock()
+		late := p.h.lateCancel
+		p.h.mu.Unlock()
+		time.Sleep(late)
 		if endOnCancel {
 			return end, nil
 		}

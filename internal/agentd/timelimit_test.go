@@ -141,6 +141,20 @@ var _ = Describe("the time limit", func() {
 		Expect(prompts).To(HaveLen(1))
 		Expect(e.harness.maxPromptsInFlight()).To(Equal(1))
 		Expect(getRun(ctx, r).WrapUpNoticeAt.Valid).To(BeTrue(), "no new notice is armed")
+		Expect(notices(ctx, r)).To(BeZero(), "no notice was sent, so none is recorded")
+		Expect(canceledPayload(ctx, e, t)).To(HaveKeyWithValue("reason", "wall_clock_cap"))
+	})
+
+	It("ends the run at the cap, not as failed, when the harness honours the cancel after the grace", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		e.harness.set(func(h *harness) { h.lateCancel = 800 * time.Millisecond })
+		t := e.task(ctx, markWait)
+		r := capped(ctx, e, t, 4)
+		e.pool("agentd-a", withNotice(2*time.Second, nil), func(c *agentd.Config) { c.CancelGrace = 300 * time.Millisecond })
+		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+		prompts, _, _, _ := e.harness.snapshot()
+		Expect(prompts).To(HaveLen(1))
+		Expect(notices(ctx, r)).To(BeZero())
 		Expect(canceledPayload(ctx, e, t)).To(HaveKeyWithValue("reason", "wall_clock_cap"))
 	})
 
