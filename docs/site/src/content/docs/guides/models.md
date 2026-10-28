@@ -144,8 +144,11 @@ back on the default. The model list shows a model's format, and "(set)" when som
 format nobody set, and records each change in the audit log with the actor `koinon-api`. Existing
 models of an Anthropic provider moved to `anthropic` when Koinon was upgraded.
 
-**Not yet used.** This release records and validates the format. The gateway and the agent harness
-still use chat completions for every model until the changes that follow in ADR 0069 land.
+**What a run does with it.** A run uses the harness entry for its effective model's format (the
+agent's model, else its version's, else the organisation default). An `anthropic` model is sent
+to `/v1/messages`, and OpenCode places the prompt-cache breakpoints itself, so direct Anthropic
+models cache. An `openai` model stays on chat completions with the ADR 0068 cache markers.
+OpenRouter `anthropic/*` models stay on `openai` until they are checked live.
 
 ## Anthropic
 

@@ -43,7 +43,7 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 		"--model", e.Model,
 		"--mcp-url", e.MCPURL,
 	}
-	if e.Format != "" {
+	if e.Format != "" && len(d.ModelEntries) > 0 {
 		if _, ok := d.ModelEntries[e.Format]; !ok {
 			return nil, fmt.Errorf("flavor %q has no provider entry for the %q model format; add a row to its ModelEntries", f, e.Format)
 		}
