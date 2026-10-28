@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,6 +26,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // postgresImage is the minimum supported Postgres version (ADR 0047).
@@ -34,6 +37,8 @@ var (
 	db  *pgxpool.Pool
 	q   *store.Queries
 	ing *ledger.Ingester
+	// priceList is the default list the specs run against.
+	priceList pricing.ListSource
 )
 
 func TestLedger(t *testing.T) {
@@ -58,6 +63,14 @@ func needDocker() {
 }
 
 var _ = BeforeSuite(func(ctx SpecContext) {
+	// The specs assert exact money values, so they price against their own fixed list, never the
+	// embedded default one that changes with every provider price update.
+	list, err := os.ReadFile("testdata/prices.yaml")
+	Expect(err).NotTo(HaveOccurred())
+	l, rs, err := pricing.ParseList(list)
+	Expect(err).NotTo(HaveOccurred())
+	priceList = pricing.Static(l, rs)
+
 	if err := dockerAvailable(ctx); err != nil {
 		GinkgoWriter.Println("Docker is not available; Postgres specs are skipped:", err)
 		return
@@ -78,7 +91,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	_, err = provider.Up(ctx)
 	Expect(err).NotTo(HaveOccurred())
 	q = store.New(db)
-	ing = &ledger.Ingester{DB: db, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ing = &ledger.Ingester{DB: db, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Prices: prices.NewResolver(priceList)}
 }, NodeTimeout(3*time.Minute))
 
 var seq atomic.Int64

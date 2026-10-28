@@ -50,6 +50,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -67,6 +68,9 @@ var _ Backend = execution.Backend(nil)
 
 // Config configures a [Pool]. Zero durations and counts take the defaults below.
 type Config struct {
+	// Prices finds the price of each model a run uses; required
+	// (prices.NewResolver).
+	Prices prices.Resolver
 	// OwnerID names this replica, for example the pod name. Workers own runs as
 	// "<OwnerID>/<n>".
 	OwnerID string
@@ -201,6 +205,9 @@ func (c *Config) defaults() error {
 	}
 	if c.Lease < time.Second {
 		return errors.New("agentd: Lease must be at least 1s")
+	}
+	if c.Prices.IsZero() {
+		return errors.New("agentd: Prices is required (prices.NewResolver)")
 	}
 	if c.Permissions == nil {
 		c.Permissions = DefaultPermissions()

@@ -26,6 +26,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/migrations"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // koinon-agentd driving each real flavor image: Postgres in a container, the flavor in the
@@ -119,6 +121,7 @@ func describeAgentd(f flavor) bool {
 
 			backend = &dockerBackend{sb: sb}
 			p, err := agentd.New(db, backend, agentd.Config{
+				Prices:  prices.NewResolver(pricing.Embedded()),
 				OwnerID: "agentd-flavors", Workers: 1, Lease: 10 * time.Second, Poll: 100 * time.Millisecond,
 				GatewayURL: gw.url(""), Logger: newLogger(),
 			})

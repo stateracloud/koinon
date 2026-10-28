@@ -23,6 +23,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/prices"
 )
 
 // fixture is one OTLP/HTTP export captured from agentgateway v1.6.0; see
@@ -187,7 +188,7 @@ var _ = Describe("Handler", func() {
 	var srv *httptest.Server
 
 	BeforeEach(func() {
-		h := ledger.Handler(&ledger.Ingester{DB: db}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		h := ledger.Handler(&ledger.Ingester{DB: db, Prices: prices.NewResolver(priceList)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		srv = httptest.NewServer(h)
 		DeferCleanup(srv.Close)
 	})

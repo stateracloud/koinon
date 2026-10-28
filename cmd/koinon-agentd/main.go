@@ -27,7 +27,9 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 type config struct {
@@ -155,6 +157,7 @@ func run() error {
 	}
 	reg := metrics.NewRegistry()
 	cfg.pool.Metrics = agentd.NewMetrics(reg)
+	cfg.pool.Prices = prices.NewResolver(pricing.Embedded())
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err
 	}

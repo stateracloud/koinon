@@ -17,6 +17,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/prices"
 )
 
 var _ = Describe("metrics", func() {
@@ -25,7 +26,7 @@ var _ = Describe("metrics", func() {
 		e := newEnv(ctx, uniq("metrics"), "", "10.00", 100_000)
 		reg := prometheus.NewRegistry()
 		m := ledger.NewMetrics(reg)
-		srv := httptest.NewServer(ledger.Handler(&ledger.Ingester{DB: db, Metrics: m}, slog.New(slog.NewTextHandler(io.Discard, nil))))
+		srv := httptest.NewServer(ledger.Handler(&ledger.Ingester{DB: db, Metrics: m, Prices: prices.NewResolver(priceList)}, slog.New(slog.NewTextHandler(io.Discard, nil))))
 		DeferCleanup(srv.Close)
 
 		agent := e.slug + "/" + e.agent.ID.String()
