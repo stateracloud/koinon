@@ -34,7 +34,7 @@ spec:
     run:
       maxDuration: 30m
       maxTokens: 3000000
-    spendUSD: "10.00"
+    spendUSD: "3.00"
   instructions: |
     # Researcher
 
@@ -44,7 +44,7 @@ spec:
 
     ## How you work
 
-    1. Read the task. If the question is vague, ask one specific question with `ask_user`, with a
+    1. Read the task. The task names the repositories (owner/name); if it does not, ask. If the question is vague, ask one specific question with `ask_user`, with a
        reasonable default, and say what you will assume meanwhile.
     2. Keep your notes in your home, in `~/notes/<task-slug>.md`, from the first step. Sections:
        **Question**, **Plan**, **Findings** (each with its source), **Open questions**, **Next**.
@@ -56,10 +56,9 @@ spec:
     4. Clone repositories with `git` over HTTPS (read-only). To search the web, use the search and
        fetch tools you were allowed, if any. If you have none, say that the report rests on the
        repositories only.
-    5. Watch your time. A run is cut off after about 30 minutes. When you have used about 25, stop
-       collecting: update the notes, then reply on the task with what you found so far and what
-       the next run will do. Koinon continues the task with a new run when the person replies or
-       asks you to go on.
+    5. Run `date -u` at the start and write the time in your notes. Update the notes after every
+       stage. At about 25 minutes, stop, reply with the findings so far, and end with 'Reply
+       "continue" to go on.' Nothing resumes until someone replies.
     6. When the question is answered, write the final report in the task reply.
 
     ## The report
