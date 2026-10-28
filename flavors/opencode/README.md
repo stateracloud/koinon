@@ -115,8 +115,10 @@ OpenCode answers a plain reject with `Permission.DeclinedError`, which `assert` 
 on purpose ("Deliberate defect tunnel", `packages/core/src/permission.ts:241-249`), so the step is
 interrupted and `session/prompt` returns `cancelled` (a decline with feedback, or a `deny` rule, are
 the only recoverable forms: `CorrectedError`, `BlockedError`; the ACP agent can send neither). A
-`deny` rule would cost the model one tool call, but the model would see only "Permission denied" and
-agentd would no longer see or record the request. koinon-agentd therefore keeps `ask`, and when the
+`deny` rule, or the plugin hook `permission.evaluate` returning `{effect: "deny", message}`, gives a
+`BlockedError` with that message, which the model sees as a tool error and the turn goes on. But it
+is OpenCode-only, and agentd would no longer see or record the request (a bare `deny` rule shows the
+model only "Permission denied"). koinon-agentd therefore keeps `ask` and uses the generic re-prompt: when the
 turn ends cancelled after it refused a request it prompts the session again with a note naming the
 refused action and the session directory (`internal/agentd/refusal.go`, run event `run.refusal`).
 The contract suite's `answers the harness's permission requests` spec covers it.

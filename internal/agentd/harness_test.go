@@ -79,6 +79,10 @@ type harness struct {
 	// refuseAll makes every prompt but the summary ask for an outside edit and end cancelled when
 	// it is rejected, so a run never gets past its refusals.
 	refuseAll bool
+	// refuseOn refuses the prompts with these 1-based positions (the summary prompt does not count).
+	refuseOn map[int]bool
+	// onRefuse runs when a refusing prompt is about to end cancelled.
+	onRefuse func()
 	// lingers: keep running after end-of-file on stdin, until the exec is closed.
 	lingers bool
 }
@@ -286,7 +290,8 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	}
 	onPrompt := p.h.onPrompt
 	modelFault := p.h.modelFault
-	refuseAll := p.h.refuseAll
+	refuseAll := p.h.refuseAll || p.h.refuseOn[len(p.h.prompts)]
+	onRefuse := p.h.onRefuse
 	p.h.mu.Unlock()
 	id := r.SessionId
 	end := sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}
@@ -327,6 +332,9 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		}
 		if res.Outcome.Selected != nil && res.Outcome.Selected.OptionId != "reject" {
 			return end, nil
+		}
+		if onRefuse != nil {
+			onRefuse()
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 

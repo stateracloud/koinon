@@ -709,9 +709,17 @@ func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc e
 	for attempt := 0; ; attempt++ {
 		err := r.turn(ctx, conn, proc, stderr, session, text)
 		var ref *refused
-		if errors.As(err, &ref) {
+		if !errors.As(err, &ref) {
+			// Only consecutive refused turns count: any other outcome is progress.
+			refusedTurns = 0
+		} else {
 			// The harness ended the turn because agentd refused a request: tell the agent what
 			// was refused and let it go on. This is not a retry of a failed model request.
+			// A cancel (a person's, the budget's) can reach the worker after the harness ended
+			// the turn as cancelled; it must not be answered with another prompt.
+			if stop := r.stopped(ctx); stop != nil {
+				return stop
+			}
 			if refusedTurns >= cfg.MaxRefusedTurns {
 				return &failure{reason: fmt.Sprintf("%s (the agent kept asking after %d refusals)", ref.Error(), refusedTurns), class: classPolicy}
 			}
