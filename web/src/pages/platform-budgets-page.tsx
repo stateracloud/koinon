@@ -103,7 +103,7 @@ function OrgRow({
         />
       ) : (
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" aria-label={`${o.platformCeilingUsd ? 'Change' : 'Set'} ceiling of ${o.orgName || o.orgSlug}`} onClick={() => setEditing(true)}>
+          <Button variant="outline" size="sm" aria-label={`${o.platformCeilingUsd ? 'Change' : 'Set a'} ceiling of ${o.orgName || o.orgSlug}`} onClick={() => setEditing(true)}>
             {o.platformCeilingUsd ? 'Change ceiling' : 'Set a ceiling'}
           </Button>
           {o.platformCeilingUsd && (

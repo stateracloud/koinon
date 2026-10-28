@@ -51,7 +51,7 @@ test('owner walks the Servers page: health, tiers, suggestions, reviews and addi
   // A read-only hint only suggests: nothing is sent until the admin clicks.
   await expect(docs.getByText(/Suggested read-only/)).toBeVisible()
   expect(seen.tier).toBeUndefined()
-  await docs.getByRole('button', { name: 'Set search to Auto' }).click()
+  await docs.getByRole('button', { name: 'Set to Auto: search' }).click()
   await expect.poll(() => seen.tier).toMatchObject({ serverId: 's-docs', tool: 'search', tier: 'TIER_AUTO' })
   await expect(docs.getByText('Reviewing keeps the tool in Ask; set it back to Auto yourself if you trust the new version.')).toBeVisible()
   await expect(docs.getByText(/unavailable: name too long for the gateway/)).toBeVisible()
@@ -61,9 +61,9 @@ test('owner walks the Servers page: health, tiers, suggestions, reviews and addi
   await expect.poll(() => seen.two).toMatchObject({ serverId: 's-docs', tool: 'edit', required: true })
   await expect(editRow.getByRole('checkbox', { name: 'Require two approvers' })).toBeChecked()
   await expectAccessible(page)
-  await docs.getByRole('button', { name: 'Mark edit reviewed' }).click()
+  await docs.getByRole('button', { name: 'Mark reviewed: edit' }).click()
   await expect.poll(() => seen.ack).toMatchObject({ serverId: 's-docs', tool: 'edit' })
-  await expect(docs.getByRole('button', { name: 'Mark edit reviewed' })).toHaveCount(0)
+  await expect(docs.getByRole('button', { name: 'Mark reviewed: edit' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Add server' }).click()
   const form = page.getByRole('form', { name: 'Add server' })
