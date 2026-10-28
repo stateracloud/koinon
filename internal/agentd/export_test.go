@@ -55,3 +55,7 @@ const (
 )
 
 func RetryNote(class string) string { return fmt.Sprintf(retryNote, class) }
+
+// InstructionsFile exposes the instruction file's content for a version's instructions to the
+// golden tests.
+func InstructionsFile(instructions string) string { return string(instructionsFile(instructions)) }

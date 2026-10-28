@@ -10,6 +10,12 @@
   "model": "koinon/{env:KOINON_MODEL}",
   "update": "disable",
   "share": "disabled",
+  // No formatters. The key is "formatter" (packages/schema/src/config.ts:70), a boolean or a record
+  // per formatter (packages/schema/src/config/formatter.ts:13). With none set no built-in is
+  // registered (packages/core/src/config/plugin/formatter.ts:30-31), and a boolean resets what
+  // earlier documents set (:64-67). The image holds no formatter (no uv, no ruff); this keeps it
+  // that way if one is added. Nothing may download one: `uv format` fetches Ruff.
+  "formatter": false,
   // Koinon's instructions for the run: koinon-agentd writes this file before every harness start
   // and restores it before every prompt. An absolute path only, never a URL (OpenCode fetches
   // those).

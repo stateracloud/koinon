@@ -198,3 +198,43 @@ entry script, and the explicit model selection.
 
 Verification: `make flavor-opencode` and the flavor contract suite (`test/flavors`) against the
 2.2.0 image, as recorded in the pull request.
+
+## Amendment 2026-10-28: data and scripting tools in the image
+
+procoduck decided on 2026-10-28 that the OpenCode image ships the v0.1 "core" data tools including
+DuckDB, and the smallest useful Python. The agent reads repositories, logs, CSV, JSON, Parquet,
+SQLite files and PDFs in a sandbox with 1-2 GiB and no network; OpenCode cuts a tool result at
+2,000 lines or 50 KiB, so tools that answer with counts, schemas and selected fields keep the
+context small. This is a change to the image, not to the harness contract of decisions 1-7.
+
+- **Tools.** From Ubuntu 24.04 (one `snapshot.ubuntu.com` snapshot, exact versions): `jq`,
+  `sqlite3`, `poppler-utils`, `file`, `tree`, `unzip`, `zstd`, `xz-utils`, `python3` and
+  `python-is-python3`. From release binaries pinned by sha256 per architecture: fd 10.5.0,
+  yq 4.54.1 (mikefarah), ast-grep 0.51.0 and the DuckDB CLI 2.0.0. Versions, licences and sizes
+  are in `flavors/opencode/README.md`.
+- **Python** is Ubuntu's `python3` (3.12, main, Canonical security maintenance): the whole
+  standard library, no pip, `ensurepip`, `venv` package or wheels. `python3-minimal` lacks `json`
+  and `sqlite3`; python-build-standalone is larger and has its own CVE tracking. The entry script
+  sets `PYTHONDONTWRITEBYTECODE=1`.
+- **DuckDB** runs behind a wrapper with `/etc/koinon/duckdb/init.sql`: `memory_limit` 768 MiB,
+  `threads` 2, spill directory `/tmp/duckdb`, extension autoinstall and autoload and community
+  extensions off. Not locked, so a query can change its own limits.
+- **No formatter.** `"formatter": false` is set explicitly; the image has no `uv` or `ruff`
+  (`uv format` downloads Ruff).
+- **Licences.** poppler-utils is GPL, shipped unmodified from Ubuntu, the same obligation as git,
+  bash and coreutils already in the image (corresponding source: Ubuntu's). AGPL tools (mupdf,
+  ripgrep-all) stay out.
+- **Instructions.** koinon-agentd puts a short "Working with large data" section after its
+  preamble in `/sandbox/.koinon/AGENTS.md` (`internal/agentd/instructions.go`).
+- **Guards.** The Dockerfile fails the build when the standard library the agent relies on is
+  incomplete, when pip is present, or when a tool or the DuckDB defaults do not work. The flavor
+  suite runs each tool as UID 10001 without a network and fails when an image exceeds its size
+  budget.
+- **Left out** (ADR 0015's v0.5 self-installed tools, or by licence): pip and wheels (pandas,
+  numpy), uv, language servers and formatters, pandoc, markitdown, miller, scc, lnav,
+  difftastic, mupdf, ripgrep-all.
+- **Cost.** The root file system grows by about 217 MiB on arm64 (419 to 636 MiB) and 219 MiB on
+  amd64 (400 to 618 MiB). Dropping DuckDB (72 MB) is the lean variant.
+
+Verification: `make flavor-opencode` and the flavor contract suite against the new image, as
+recorded in the pull request.

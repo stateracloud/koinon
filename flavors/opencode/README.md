@@ -144,7 +144,7 @@ A new session reports a model OpenCode picked from its own catalog (for example
 | Built-in provider plugins (Copilot, Bedrock, OpenRouter, …) | plugin `-opencode.provider.*`; `opencode.provider.opencode` is guarded and stays (see below) | `packages/core/src/plugin/provider/`, `packages/core/src/plugin/internal.ts` |
 | Web search | plugins `-opencode.websearch.*`, `-opencode.tool.websearch` | `packages/core/src/tool/plugin/websearch.ts` |
 | Logins for well-known integrations | plugin `-opencode.wellknown` | `packages/core/src/wellknown/plugin.ts` |
-| ripgrep download from GitHub | `ripgrep` installed; OpenCode uses `rg` from `PATH` | `packages/core/src/ripgrep/binary.ts` |
+| ripgrep download from GitHub | `rg` installed; OpenCode uses `rg` from `PATH` | `packages/core/src/ripgrep/binary.ts` |
 | Telemetry | OpenTelemetry export only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which the entry script unsets | `packages/util/src/observability/otlp.ts` |
 | Session sharing | `"share": "disabled"` (no sharing runtime in 2.0.24; the key is still in the 2.2.0 schema) | `packages/schema/src/config.ts:42` |
 | `.claude` roots | `OPENCODE_DISABLE_CLAUDE_CODE=1` (new in 2.1+; the compatibility plugin is off as well) | `packages/cli/src/server-process.ts:127-131` |
@@ -189,9 +189,80 @@ OpenCode with its full privileges (issue #84): a broken one can keep OpenCode fr
 ready, which agentd's readiness timeout bounds; the sandbox policy and agentgateway, not
 OpenCode, remain the boundary.
 
+## Tools in the image
+
+The agent works on repositories and data files and has no network (egress is the model and MCP
+endpoints only), so the image carries what it needs to look at large inputs cheaply, and nothing
+it could use to install more (ADR 0052, amendment 2026-10-28; what is left out is in ADR 0015's
+v0.5 self-installed tools). Koinon's instructions tell the agent how to use them (`internal/agentd`,
+`workingWithData`).
+
+| Tool | Version | Source | Licence |
+| --- | --- | --- | --- |
+| git, ca-certificates | 2.43.0 | Ubuntu main | GPL-2.0; MPL-2.0 and others |
+| ripgrep (`rg`) | 15.2.0 | GitHub release, static musl build (replaces Ubuntu's universe 14.1.0) | Unlicense or MIT |
+| jq | 1.7.1 | Ubuntu main | MIT |
+| sqlite3 | 3.45.1 | Ubuntu main | public domain |
+| poppler-utils (`pdftotext`, `pdfinfo`) | 24.02.0 | Ubuntu main | **GPL-2.0 or GPL-3.0** |
+| file, tree, unzip, zstd, xz-utils | 5.45, 2.1.1, 6.0, 1.5.5, 5.4.5 | Ubuntu (tree: universe) | file BSD-2-Clause, tree GPL-2.0+, unzip Info-ZIP, zstd BSD-3-Clause or GPL-2.0, xz public domain and GPL-2.0+ |
+| python3, python-is-python3 | CPython 3.12.3 | Ubuntu main | PSF-2.0 |
+| fd | 10.5.0 | GitHub release, static musl build | MIT or Apache-2.0 |
+| yq (mikefarah) | 4.54.1 | GitHub release | MIT |
+| ast-grep | 0.51.0 | GitHub release (`sg` is not installed: it would shadow `/usr/bin/sg`) | MIT |
+| DuckDB CLI | 2.0.0 | GitHub release | MIT |
+
+- **Pins.** The release binaries are fetched per architecture with `ADD --checksum=sha256:`; each
+  digest is the release asset's `digest` from the GitHub API, also hashed locally (yq's and ripgrep's match the
+  upstream `checksums` / `.sha256` files; fd, ast-grep and DuckDB publish none), and the build runs each tool's
+  `--version`. The licence texts of yq, ast-grep and DuckDB are fetched the same way into
+  `/usr/share/doc/koinon-tools/`; fd's and ripgrep's ship in their tarballs. The DuckDB and ast-grep
+  archives carry no bundled third-party notices; those live upstream (DuckDB: `third_party/` and
+  `LICENSE` in github.com/duckdb/duckdb at v2.0.0; ast-grep: the dependency licences of its
+  `Cargo.lock` in github.com/ast-grep/ast-grep at 0.51.0). Every apt package comes from one
+  `snapshot.ubuntu.com` snapshot (`UBUNTU_SNAPSHOT` in the Dockerfile) at an exact version, so a
+  rebuild gives the same packages; bump both on purpose to take security updates. The base has no
+  CA bundle, so a throwaway stage borrows one over HTTP for the snapshot's HTTPS (apt checks the
+  indexes against the Ubuntu archive keyring either way) and only that file is copied.
+- **GPL.** poppler-utils is GPL-licensed and shipped unmodified from Ubuntu, with git, bash and
+  coreutils: the same obligation. The source of the exact package versions is on
+  `snapshot.ubuntu.com` under the snapshot ID below (`apt source` against that snapshot).
+- **Snapshot freshness.** The snapshot is `20261027T000000Z` (`UBUNTU_SNAPSHOT` in the
+  Dockerfile). Security fixes for poppler, python3, git and the other packages reach the image only
+  when this ID and the pinned versions are bumped (`apt-cache policy` against the new snapshot).
+  Cadence: at least monthly, and on any Ubuntu security notice for poppler-utils, python3, git,
+  sqlite3 or their libraries. Automating it is a follow-up.
+- **python3** is the standard library only (json, csv, sqlite3, re, gzip, zipfile, statistics,
+  decimal, ...). No pip, `ensurepip`, `python3-venv`, uv or ruff; the build fails if pip appears.
+  The entry script sets `PYTHONDONTWRITEBYTECODE=1`, so an agent's imports leave no `__pycache__`
+  in a repository.
+- **DuckDB** is installed as `/usr/local/libexec/duckdb`; `/usr/local/bin/duckdb` is a wrapper
+  (`koinon-duckdb`) that passes `/etc/koinon/duckdb/init.sql` as `-cmd` and everything else
+  through (`-c`, `-json`, a database file, standard input). The defaults: `memory_limit`
+  768 MiB, `threads` 2, `temp_directory` `/tmp/duckdb` capped at `max_temp_directory_size` 1 GiB (it
+  spills there instead of exhausting a 1-2 GiB VM), extension autoinstall and autoload off (no network; the CSV, JSON and Parquet
+  readers are built in), community extensions off. The configuration is not locked: a query may
+  `SET` its own values. `-cmd` is used rather than `-init` because `-init` prints a coloured
+  "Loading resources" line to stderr on every start. `/tmp` is deliberately not under `/sandbox`
+  (the checkpointed home). What backs `/tmp` in a Kata sandbox, and whether 1 GiB fits, is to be
+  checked on the home lab (RT1).
+- **Formatters.** `"formatter": false` in the config (`packages/schema/src/config.ts:70`;
+  `packages/core/src/config/plugin/formatter.ts:30-31`) and no formatter binary in the image;
+  `uv format` would download Ruff.
+- **Size.** The root file system as `du -sxk /` inside the container reports it (`docker image
+  inspect` is no measure: its size is compressed or layer-summed depending on the image store),
+  before this change (commit `530bd1d`) and after: linux/arm64 429,148 KiB to 650,916 KiB (+217
+  MiB, 419 to 636 MiB); linux/amd64 409,084 KiB to 632,836 KiB (+219 MiB, 400 to 618 MiB). The
+  four release binaries are about 140 MB of it (DuckDB 72, ast-grep 52, yq 13, fd 3); the rest is
+  apt, mostly poppler's dependencies (cairo, freetype, NSS, fonts) and Python's standard library.
+  `test/flavors` fails when an image grows past its budget (`image size`, measured size plus about
+  10%: 716,000 KiB arm64, 696,000 KiB amd64; `sizeBudget` in `opencode_test.go`).
+- **Not here** (ADR 0015's v0.5 self-installed tools, or never): pip and wheels (pandas, numpy),
+  uv, language servers, formatters, pandoc, markitdown, miller, scc, lnav, difftastic, and
+  anything AGPL (mupdf, ripgrep-all).
+
 ## Notes
 
 - OpenCode is the glibc binary from npm (`@opencode/cli-linux-<arch>`), verified by sha256 at
   build time (`ADD --checksum`); the sha512 npm integrity values are in the Dockerfile.
-- Ubuntu packages (`ca-certificates`, `git`, `ripgrep`) follow the archive at build time; the base
-  image is pinned by digest.
+- Ubuntu packages come from a pinned snapshot at exact versions, the base image is pinned by
+  digest (see [Tools in the image](#tools-in-the-image)).

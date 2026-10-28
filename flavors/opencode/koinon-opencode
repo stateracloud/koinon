@@ -58,6 +58,9 @@ unset koinon_var TMPDIR \
   OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# The agent's python3 scripts must not leave __pycache__ directories in the repository it works
+# on (the image's standard library is precompiled and read-only).
+export PYTHONDONTWRITEBYTECODE=1
 # State lives in the sandbox home, which is the agent's volume (ADR 0048, 0049).
 koinon_export_base_env
 export XDG_DATA_HOME=/sandbox/.local/share
