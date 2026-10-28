@@ -1,0 +1,406 @@
+# 0070. Model metadata: a reviewed snapshot from models.dev and OpenRouter
+
+- Status: Accepted (Andre, 2026-10-28; built after v0.1.0, with the UI milestone)
+- Date: 2026-10-28
+- Relates to: [0052](0052-opencode-v2-flavor.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0068](0068-prompt-caching-always-on.md), [0069](0069-native-model-formats.md)
+
+## Context
+
+Koinon knows little about a model beyond its price. `pricing/default.yaml` holds prices, context
+tiers and `max_output` for 14 entries, each checked by hand against a provider page. ADR 0069's
+`internal/modelformat` table holds each provider type's formats and each family's preference.
+Nothing in Koinon holds a context window or an input limit: the catalog, the price schema and the
+model records have no such field. OpenCode therefore assumes `UNKNOWN_WINDOW = 200_000` for every
+Koinon model (OpenCode v2.2.0, `packages/core/src/session/compaction.ts:136`, `:286`). Koinon models
+are named `koinon/<org>/<model>`, so OpenCode's own catalog never matches them. The flavor also turns
+that catalog's download off (`OPENCODE_DISABLE_MODELS_FETCH=1`,
+`flavors/opencode/koinon-opencode:84`). Four planned features need more than Koinon has:
+
+- the ADR 0069 table, which should be checked against what providers actually serve;
+- the monthly price review (`.github/workflows/review-prices.yml`), which today lists each entry and
+  its source and leaves the comparison to a person;
+- model discovery on the Providers page in the UI milestone, which should list a provider's models
+  with their capabilities;
+- a per-model compaction threshold. The compaction research of 2026-10-28 (section A4) found "No
+  context window anywhere in Koinon".
+  So "the lower of the context window and `context_over`" cannot be computed today.
+
+Two public sources hold this data. Both were read on 2026-10-28.
+
+**models.dev** ([repository](https://github.com/anomalyco/models.dev), moved from `sst/models.dev`;
+[API](https://models.dev/api.json)):
+
+- **Licence.** MIT, "Copyright (c) 2025 models.dev" (`LICENSE`). The README says it is used
+  "internally in opencode".
+- **Size.** `api.json` is 5.95 MB, with 233 providers and 8,936 models (ETag
+  `"44788b20eb5340af3ca75ca882d01a17"`).
+- **Provider fields.** `npm` ("AI SDK Package name"), `env`, `doc`, and an optional `api`
+  ("OpenAI-compatible API endpoint"), which 208 providers have (README, API Reference). Anthropic is
+  `@ai-sdk/anthropic` with no `api`, OpenAI is `@ai-sdk/openai`, and OpenRouter is
+  `@openrouter/ai-sdk-provider` at `https://openrouter.ai/api/v1`. Across providers, 194 use
+  `@ai-sdk/openai-compatible` and 8 use `@ai-sdk/anthropic`.
+- **Model fields.** `limit.context` and `limit.output` on every model, and `limit.input` on 1,725.
+  Also `tool_call`, `reasoning`, `structured_output`, `attachment`, `modalities`, `release_date`,
+  `last_updated`, `status` (`alpha`, `beta`, `deprecated`) and `canonical_model_id`. `cost` holds
+  `input`, `output`, `cache_read` and `cache_write`, in USD per million tokens as JSON numbers.
+- **Fields the README does not document.**
+  - `cost.tiers`, a list of `{input, output, cache_read, cache_write, tier: {type: "context", size}}`
+    on 814 models. `context` is the only tier type.
+  - A legacy `cost.context_over_200k` on 632 models. On GPT-6 Astra it carries the 272,000-token tier
+    prices under that name.
+  - A per-model `provider` override (`npm`, `api`, `shape: completions|responses`) on 786 models.
+    For example, Azure serves 15 models through `@ai-sdk/anthropic`.
+- **How often it changes.** 500 commits between 2026-10-23 and 2026-10-28, 35 to 152 a day. 383 of
+  them are bot `chore(sync)` PRs that pull provider catalogs. One of them is "update OpenRouter
+  model catalog" (#11838, `1156d825`, the `dev` head at the time of the fetch). `api.json` names no
+  commit.
+- **How OpenCode v2.2.0 uses it.**
+  - It bundles `packages/core/src/models-dev/snapshot.txt` (8.2 MB) as "the boot-time floor for the
+    catalog". A script refreshes the file (`script/update-models-snapshot.ts`). The script refuses
+    a body with fewer than 100 providers (`script/models-snapshot.ts`, `MINIMUM_PROVIDERS`).
+  - It drops fields OpenCode never reads.
+  - It refetches `https://models.opencode.ai/experimental/v2.0/api.json` on a 5-minute TTL
+    (`src/models-dev.ts:497`, `:553`). `OPENCODE_MODELS_URL`, `OPENCODE_MODELS_PATH` and
+    `OPENCODE_DISABLE_MODELS_FETCH` change the source or turn the fetch off
+    (`packages/cli/src/server-process.ts:118-120`).
+  - The context window is `limit.input || limit.context` (`src/session/compaction.ts:1133-1141`).
+
+**OpenRouter** (`GET https://openrouter.ai/api/v1/models`, no key needed):
+
+- **Size.** 464 text-output models. That is the default filter; other modalities need
+  `output_modalities` ([Models](https://openrouter.ai/docs/guides/overview/models.md)).
+- **Pricing.** Prices are USD per token, as decimal strings:
+  - `prompt` and `completion` on every model;
+  - `input_cache_read` on 313 and `input_cache_write` on 98. `input_cache_write` is "the default
+    (5-minute) cache-write rate";
+  - `input_cache_write_1h` on 34, "Only present for providers that price an extended (1-hour) cache
+    TTL separately"
+    ([list models](https://openrouter.ai/docs/api/api-reference/models/get-models.md));
+  - `overrides`: 80 have `min_prompt_tokens`, which is a context tier, and 14 have time-of-day
+    windows (`utc_start`, `utc_end`, `utc_days`).
+- **Other fields.** `context_length`, `top_provider.max_completion_tokens`, `supported_parameters`,
+  `architecture.tokenizer` (`Claude`, `GPT`, `DeepSeek`, …) and
+  `reasoning: {mandatory, supported_efforts, default_effort}`.
+- **Per upstream** (`GET /api/v1/models/{author}/{slug}/endpoints`
+  ([list endpoints](https://openrouter.ai/docs/api/api-reference/endpoints/list-endpoints.md))):
+  each upstream has its own `pricing` (with `overrides` and `discount`), `context_length`,
+  `max_completion_tokens`, `max_prompt_tokens`, `quantization`, `supports_implicit_caching`,
+  `supported_parameters`, `uptime_last_5m`/`30m`/`1d` and `latency_last_30m`.
+  - Claude Haiku 5.5 has 10 upstream endpoints (Anthropic, Google, Azure, Amazon Bedrock and Claude
+    Platform on AWS). All are `supports_implicit_caching: false`, which agrees with ADR 0068:
+    Claude needs markers.
+  - DeepSeek V4.1 Flash has 41 upstreams. Their prompt prices run from $0.00157 to $0.60 per
+    million, their `max_completion_tokens` from 131,072 to 943,718, and their quantization is `fp4`,
+    `fp8`, `mxfp4` or `unknown`. The model-level price equals one of them (DeepInfra, `fp8`).
+- **Terms** ([Terms of Service](https://openrouter.ai/terms), last updated 2026-08-31).
+  - §7 forbids using "scripts, robots or any other means … to scrape or copy any information on the
+    Site or the Services".
+  - §12 makes "information, data" part of the "Materials": "Except as expressly authorized by
+    OpenRouter, you may not make use of the Materials".
+  - The OpenAPI document is MIT. Only the Datasets endpoints are licensed for reuse ("CC BY 4.0 …
+    reuse and republish it, including commercially, with attribution").
+  - So nothing grants a licence to redistribute the models data. Calling the documented API is
+    ordinary use. Shipping a copy of its output in Koinon's repository is not clearly covered.
+- **models.dev's copy of OpenRouter.** models.dev's `openrouter` provider is a bot sync of this
+  API. On 2026-10-28, 390 of the 464 IDs matched, none of the 390 had a different `context_length`,
+  and 8 had a different input price.
+
+**Where the sources and Koinon disagree today:**
+
+- **DeepSeek V4.1 Flash on OpenRouter.** `pricing/default.yaml` (read 2026-10-24) has input 0.02,
+  output 1, cache read 0.015 and `max_output` 943,718. The models API now gives 0.14, 0.42 and 0.0042,
+  with `top_provider.max_completion_tokens` 131,072. models.dev agrees with the models API.
+- **Anthropic and OpenAI entries agree** on every price and tier boundary (Haiku 5.5 at 100,000,
+  GPT-6 Astra and Luna at 272,000) and on `max_output` 128,000.
+- **Context windows.**
+  - Claude Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5 have 1,000,000 in both sources.
+  - GPT-6 Astra and Luna have 1,050,000 in both. models.dev also gives `limit.input` 922,000, which
+    OpenRouter does not have.
+  - So the research's assumed 200k window is wrong for every catalog model. The GPT-6 272k tier lies
+    inside the real input limit, not above it.
+- **Wire formats.**
+  - models.dev says nothing about OpenRouter's formats. Its OpenRouter package is the OpenRouter
+    SDK, and no OpenRouter model has a per-model package. ADR 0069 decides that OpenRouter Claude
+    speaks Messages.
+  - MiniMax (`api.minimax.io/anthropic/v1`) is `@ai-sdk/anthropic`. The ADR 0069 table would give a
+    `minimax` provider type only `openai`.
+  - `@ai-sdk/openai` models with `shape: responses` would need a format value Koinon does not have
+    yet.
+- **Ollama.** models.dev has no local `ollama` provider, only `ollama-cloud`. Local models stay
+  without metadata.
+
+Prices have a stricter rule than other facts. `docs/ops/prices.md` says to take prices "only from
+the provider's own pricing page … or, for a route through OpenRouter, from OpenRouter's models API",
+and "Do not copy prices from aggregators". models.dev is an aggregator.
+
+## Decision
+
+1. **Koinon ships a reviewed snapshot of model metadata, one file per source.** The files are
+   embedded in the binaries, as `pricing/default.yaml` is (`pricing/list.go:16`). No Koinon
+   component fetches metadata at run time by default, so offline and air-gapped installs get the
+   same data as connected ones. The snapshot changes only through a reviewed pull request, the way a
+   default price does (ADR 0056). Nothing changes Koinon's behaviour without a person reviewing it.
+
+2. **Format and location.** There is a top-level Go package `modelmeta/`, beside `pricing/`:
+   - `modelmeta/snapshot/models.dev.json` and `modelmeta/snapshot/openrouter.json`. Each is the
+     normalized form, not the raw response. Each starts with a header: `source`, `url`,
+     `fetched_at`, `commit`, `etag` and `sha256` of the raw body, `licence` and `attribution`.
+     - For models.dev, `commit` is the `dev` head, read before and after the fetch. The fetch is
+       retried when the head moved in between, because `api.json` names no commit.
+     - OpenRouter has no commit, so its header records the fetch time and the hash.
+     - Keys are sorted and every model is a separate object, so a sync diff reads model by model.
+   - `modelmeta/sources.yaml` maps each Koinon provider type to its source and source provider ID:
+     `anthropic` to models.dev `anthropic`, `openai` to models.dev `openai`, `deepseek` to models.dev
+     `deepseek`, `openrouter` to the OpenRouter file (and models.dev `openrouter` as its fallback).
+     A provider type that is not listed has no metadata. The snapshot holds only listed providers
+     and models whose output is text. OpenRouter per-upstream data is held only for the OpenRouter
+     models that `pricing/default.yaml` prices, plus any model `sources.yaml` names.
+   - `modelmeta/conflicts.yaml` lists accepted disagreements (decision 4).
+   - Only the fields of decision 5 are kept. Descriptions, benchmarks, logos and display prose are
+     dropped. So are the live fields `uptime_*` and `latency_*`: they would make every sync diff
+     noisy and mean nothing offline.
+
+3. **One sync command, run by CI as a pull request.**
+   - `koinon-api model-metadata fetch` fetches both sources, normalizes them and writes the snapshot
+     files. `koinon-api model-metadata diff` prints a review report of the changes against the
+     current snapshot.
+   - The command lives in `koinon-api`, not in `hack/`. The online refresh (decision 8) and the
+     offline import run the same fetch and normalization code, so there is one parser per source.
+   - **Normalization.**
+     - Prices become decimal strings in USD per million tokens, with at most six fraction digits, as
+       `pricing` requires. models.dev floats are rounded to that, and OpenRouter per-token strings
+       are scaled by 10^6 exactly.
+     - `cost.tiers` and OpenRouter `min_prompt_tokens` overrides become `context_over` tiers.
+       Time-of-day overrides are kept as a flag (`time_of_day_pricing: true`) and are never turned
+       into a tier.
+     - `context_over_200k` is ignored, because `tiers` replaces it.
+     - The command refuses a body below a floor of providers or models, as OpenCode's snapshot
+       script does.
+   - **CI.** A workflow `sync-model-metadata.yml` runs weekly and on `workflow_dispatch`.
+     - It runs the command and opens or updates one pull request on a bot branch. The diff report is
+       the pull request body.
+     - It makes unauthenticated `GET` requests to the two public endpoints only. It needs no
+       secrets beyond the workflow token, and it never calls a model.
+     - Weekly is enough: models.dev changes dozens of times a day, but the snapshot holds only the
+       listed providers.
+
+4. **How Koinon merges the sources: the hand-reviewed catalog wins, and conflicts are flagged.**
+   Each fact has one precedence order, highest first:
+
+   | Fact | Precedence |
+   | --- | --- |
+   | Prices, tiers | org price entry → `pricing/default.yaml`. The snapshot never prices a request. |
+   | Wire format | admin override → `internal/modelformat` table (ADR 0069). The snapshot only gives hints. |
+   | Output limit | org model limit → `max_output` in `pricing/default.yaml` → install overlay → snapshot of the serving source → models.dev by `canonical_model_id` |
+   | Context window, input limit | org model limit → install overlay → snapshot of the serving source → models.dev by `canonical_model_id` |
+   | Capabilities, modalities, dates, status | install overlay → snapshot of the serving source → models.dev by `canonical_model_id` |
+
+   - "Serving source" means OpenRouter for `openrouter` providers and models.dev for the others.
+   - A fact no layer has is unknown. Unknown means today's behaviour: nothing is rendered for it.
+   - **Conflicts.** A conflict is a layer that has a value which differs from a higher layer's
+     value for the same fact. Examples are a snapshot price against `pricing/default.yaml`, a
+     snapshot output limit against `max_output`, or a models.dev package that implies a format the
+     table does not give that provider type.
+     - The higher layer still wins, and the lookup returns the conflict with both values and sources.
+     - A conflict between the snapshot and Koinon's own files must be listed in `conflicts.yaml`,
+       with a reason and a date, or the package test fails. An entry that no longer conflicts also
+       fails, so the list only holds live disagreements.
+     - A sync pull request that brings a new conflict therefore cannot merge until someone fixes
+       the catalog, the table or the snapshot, or accepts the conflict.
+     - Disagreements between models.dev and OpenRouter on an OpenRouter model are listed in the
+       report but are not test failures. Both are third parties, and the serving source wins.
+
+5. **Schema: one Go package reads the snapshot.** `modelmeta` embeds the files and exposes
+   `Lookup(providerType, model string) (Model, []Conflict)`.
+   - `Model` holds:
+     - `Limits{Context, Input, Output}`;
+     - `Capabilities{Tools, Reasoning, StructuredOutput, Attachments}`;
+     - `Modalities{In, Out}`, `Released`, `Updated`, `Status` and `CanonicalID`;
+     - `SupportedParameters` and `Tokenizer`, from OpenRouter only;
+     - `Cost{Input, Output, CacheRead, CacheWrite, CacheWrite1h, Tiers, TimeOfDayPricing}`, as
+       `money.Rate`;
+     - `Endpoints[]{Provider, Quantization, Context, MaxOutput, ImplicitCaching, Cost}`, for
+       OpenRouter only;
+     - `FormatHint`.
+   - Every field records its source (`models.dev@<commit>`, `openrouter@<fetched_at>`,
+     `pricing@<version>`, `overlay`, `org`). The UI can then say where a number came from.
+   - `List(providerType)` returns a provider's models for discovery.
+   - `FormatHint` maps the SDK package of the model, or else of the provider:
+     - `@ai-sdk/anthropic` gives `anthropic`;
+     - `@ai-sdk/openai-compatible` and `@ai-sdk/openai` with `shape` `completions` or no `shape`
+       give `openai`;
+     - `@ai-sdk/openai` with `shape: responses` gives `openai-responses`, which is not yet a Koinon
+       value and is reported as such;
+     - every other package (Google, Bedrock, the OpenRouter SDK and the rest) gives no hint.
+   - `modelmeta` imports `pricing` and `modelformat` to compute conflicts. They never import it.
+
+6. **How each use consumes it.**
+   - **Format table.**
+     - `internal/modelformat` stays the only place that knows defaults (ADR 0069 decision 2).
+     - A test compares each listed provider type's offered formats and family preference with the
+       snapshot's hints and fails on an unlisted conflict.
+     - A provider type that models.dev serves through `@ai-sdk/anthropic` (MiniMax) then shows up
+       as a proposal to add `anthropic` to that type's offered formats. Someone adds it to the table
+       in a reviewed change, and only once the gateway renderer supports that provider.
+   - **Price review.**
+     - The sync report has a price section. It lists each `pricing/default.yaml` entry whose prices,
+       tier boundaries, cache prices or `max_output` differ from the snapshot. It also lists models
+       the source prices with time-of-day windows.
+     - For OpenRouter routes the models API is a primary source (`docs/ops/prices.md`). The command
+       may add the new `default.yaml` entry to the same pull request: same `id`, a later
+       `valid_from`, the source and date in `note`, and a bumped `version`.
+     - For direct providers it only flags the entry. A person checks the provider's page, because
+       models.dev is an aggregator.
+     - The monthly `review-prices` issue gains the snapshot's value and its date in each row.
+   - **Discovery** (UI milestone).
+     - The Providers page gets *Add models*. It lists `modelmeta.List(type)` with context, output,
+       tools, reasoning, structured output, modalities, release date and status, and it hides
+       deprecated models unless asked.
+     - Each row shows Koinon's price when one applies. Otherwise it shows "unpriced, add a price",
+       because the gateway answers 404 for an unpriced model (ADR 0056 W4). It shows the source's
+       price beside it for reference.
+     - Adding a model creates it with the default format. Nothing is priced from the snapshot.
+     - Provider types with no metadata (Ollama, custom) keep manual entry. Listing a provider's
+       live `/models` is a separate decision.
+   - **Context windows.**
+     - agentd resolves the run's `modelmeta` limits next to its price (`internal/agentd/run.go`,
+       where `prices.Resolve` already runs) and has them when it builds the harness command.
+     - The compaction threshold is a later decision. That decision can now use the lower of the
+       input limit and the first `context_over` tier. Until it is made, nothing is rendered and
+       OpenCode keeps its 200k assumption.
+
+7. **What an operator can override.**
+   - **Per org**, on the model form and in declared Secrets: the model's `limits` (`context`,
+     `input`, `output`), validated as positive integers with `output` ≤ `context`. Like
+     `models.format_overridden`, an overridden limit is kept through later snapshots. Prices are
+     overridden with org price entries as today, and formats as in ADR 0069.
+   - **Per install**: platform admins can accept a refresh or import proposal (decision 8). It
+     becomes an install overlay, one audited row per fact, with its source and fetch date. At
+     startup an overlay row that the shipped snapshot now agrees with is dropped and audited, so
+     overlays fade out after an upgrade.
+   - Operators never edit the embedded files. A different snapshot comes with a Koinon release or
+     through an accepted proposal.
+
+8. **Online refresh: optional, off by default, and it only proposes.**
+   - A platform setting (Helm `modelMetadata.refresh.enabled: false`, interval 24 hours) lets
+     `koinon-api` run the same fetch code on a schedule.
+   - It stores the diff against the effective metadata as proposals. Platform admins see them as
+     **Needs review** on a *Model metadata* page in the Platform area, and accept or dismiss them one
+     at a time or all together. Accepting writes overlay rows (decision 7) and is audited.
+   - Price differences are never accepted as prices. They appear on the Prices page as "source
+     differs" with a link to the price form, so an org admin can add an org price.
+   - Live upstream fields (`uptime_*`, `latency_*`) are fetched only in this mode. They are shown
+     with their time on the discovery page and are never stored as metadata.
+   - Air-gapped installs keep it off. `koinon-api model-metadata fetch --out <file>`, run anywhere
+     with internet access, writes a file that a platform admin can upload on the same page. It goes
+     through the same proposal flow.
+   - `koinon-api`'s egress is open today (`charts/koinon/templates/networkpolicy.yaml`, header). So
+     an install that must not call out relies on the setting being off, which is the default.
+
+9. **Licence and attribution.**
+   - **models.dev** is MIT. `third_party/models.dev/LICENSE` carries its notice. The snapshot
+     header repeats the copyright line and the licence name.
+   - **OpenRouter.** The snapshot holds only factual fields that Koinon reads: IDs, numbers,
+     parameter lists, the tokenizer name and quantization. The header attributes them to
+     OpenRouter with the API URL and the fetch date.
+     - Because the terms grant no redistribution licence (Context), Andre asks OpenRouter in
+       writing before Koinon is public. The question is whether shipping this subset is allowed.
+     - If they refuse, `openrouter.json` is removed. OpenRouter models then fall back to models.dev's
+       `openrouter` provider (MIT, synced from the same API). They lose the per-upstream data,
+       `supported_parameters`, `input_cache_write_1h` and the 74 models models.dev lacks. Only the
+       online refresh, which is an operator's own API use, would then get those.
+   - The discovery page and the *Model metadata* page show "Model data: models.dev (MIT) and
+     OpenRouter" with each snapshot's date.
+
+10. **Tests.** CI uses no paid model and no network.
+    - **`go test ./modelmeta`.**
+      - Both snapshots parse and have complete headers. Normalizing them again changes nothing, and
+        they are sorted.
+      - Every type in `sources.yaml` is present.
+      - Every `pricing/default.yaml` entry for a listed provider type is either found or listed as
+        missing on purpose.
+      - Conflicts against `pricing.Default()` and the `modelformat` table equal `conflicts.yaml`
+        exactly.
+      - Each precedence row of decision 4 has a table test, including org limits and overlays
+        winning and unknown staying unknown.
+    - **Fetch and normalize**, against `httptest` servers that serve trimmed real responses saved
+      on 2026-10-28:
+      - per-token to per-million conversion is exact, and models.dev floats round as specified;
+      - `tiers` and `min_prompt_tokens` become `context_over`, and time-of-day overrides become the
+        flag;
+      - `context_over_200k` is ignored;
+      - a truncated or error body is refused, and so is a moved `dev` head without a retry;
+      - live fields are dropped.
+    - **Online refresh** (`koinon-api`, testcontainers Postgres): with the setting off, no request
+      is made. With it on, a changed fixture creates proposals and changes no lookup until a
+      proposal is accepted. Accepting is audited. An accepted price difference creates no price.
+      An overlay that the snapshot later agrees with is dropped at startup.
+    - **Chart:** a `hack/chart-check.sh` assertion that the default values render the refresh off.
+    - **agentd:** a run's resolved model carries the snapshot limits, and an org limit overrides
+      them.
+
+11. **What it does not do.**
+    - It never fetches at run time by default, and it never changes prices, formats or limits
+      without review.
+    - The snapshot never prices a request or bills from a source price.
+    - It ships no raw responses and no descriptive prose, and it does not track uptime or latency
+      in the repository.
+    - It picks no upstream on OpenRouter. Routing stays with ADR 0068's `session_id` and the
+      routing guard.
+    - It does not set a compaction threshold. That needs its own decision; this ADR provides the
+      data for it.
+    - It does not cover non-text models.
+
+12. **Delivery: after v0.1.0, in the UI milestone, in four PRs** (rough agent-days):
+    1. `modelmeta`, both snapshots, `sources.yaml`, `conflicts.yaml`, the `model-metadata`
+       command, the workflow, the licence file and the package tests (about 2).
+    2. The price-review section, the `review-prices` column and the `modelformat` cross-check
+       (about 0.5).
+    3. Discovery: the API (`ProviderService.ListAvailableModels`), the *Add models* flow, org
+       model limits (migration, proto, form, declared Secret key) and agentd resolution (about 2.5).
+    4. The online refresh, offline import, overlay table, the *Model metadata* page and the chart
+       value (about 2).
+
+## Consequences
+
+- Koinon learns the context window and input limit of every catalog model. The first sync already
+  corrects one assumption: every priced model in `pricing/default.yaml` has a window of about 1M
+  tokens, not 200k.
+- The DeepSeek V4.1 Flash entry would be flagged on the first sync. The monthly review becomes a
+  check of a computed diff instead of a manual comparison of 14 entries.
+- The repository carries a few hundred kilobytes of generated JSON that changes weekly. Review stays
+  manageable only because the snapshot is limited to listed providers and fields. Adding a provider
+  type adds its models to every later diff.
+- A new conflict blocks the sync pull request until someone decides. That is intended: the snapshot
+  cannot drift away from the catalog without a recorded reason. It does mean someone has to look at
+  each weekly pull request.
+- On OpenRouter, the price a request is billed depends on the upstream that serves it. The 41
+  DeepSeek upstreams range over two orders of magnitude, and Koinon prices at the model-level list
+  price. The snapshot makes that gap visible but does not close it; closing it is a ledger
+  decision.
+- Two external projects become inputs to Koinon's review process. If models.dev changes its v1
+  `api.json` (OpenCode already reads its experimental v2), or OpenRouter changes its schema, the
+  fetch fails loudly in CI and the shipped snapshot keeps working.
+- _(inferred)_ Discovery makes adding a model quick. It also makes it easy to add a model that has
+  no price. The "unpriced, add a price" state keeps such a model from being served silently.
+- Pending: OpenRouter's written answer on redistribution (decision 9), before Koinon is public.
+
+## Alternatives
+
+- **Fetch at run time, as OpenCode does.** Always current, but air-gapped installs break and
+  behaviour changes without review. A changed limit would move compaction thresholds mid-week.
+  Rejected. The optional refresh keeps the upside without applying anything.
+- **Keep everything by hand in `pricing/default.yaml`.** It is one reviewed file, but discovery
+  needs hundreds of models with capabilities that nobody will keep by hand. The file stays the
+  authority for what it holds. Rejected as the only source.
+- **models.dev only.** MIT, broad, and it includes an OpenRouter copy. But it lacks per-upstream
+  data, `supported_parameters` and 1-hour cache prices, and it lags the API (8 input prices on
+  2026-10-28). It is the fallback if OpenRouter refuses redistribution. Rejected as the only source.
+- **OpenRouter only.** It has the richest data for OpenRouter routes, but it does not use direct
+  providers' model IDs (`claude-haiku-5-5`), so direct providers would have no data. Rejected.
+- **Store the raw responses.** That is 6.7 MB of churn per sync, plus descriptions and benchmarks
+  that Koinon does not use and has no clear licence to ship. Rejected.
+- **Reuse OpenCode's bundled snapshot.** It is 8.2 MB, tied to OpenCode's release cadence and its
+  experimental v2 format, and it does not reach `koinon-api`. Rejected.
+- **A `hack/` script for the sync.** It is simpler, but the online refresh and the offline import
+  would then need a second parser for each source. Rejected.
