@@ -302,7 +302,16 @@ SELECT model,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
        coalesce(sum(cost_usd) FILTER (WHERE NOT estimated), 0)::text AS reported_usd,
        coalesce(sum(cost_usd) FILTER (WHERE estimated), 0)::text AS estimated_usd,
-       count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
+       count(*) FILTER (WHERE estimated)::bigint AS estimated_requests,
+       -- Estimated output: an aborted response settled at its max_tokens (ADR 0056), the usual
+       -- reason the ledger is above the provider's bill.
+       coalesce(sum(output_tokens) FILTER (WHERE estimated), 0)::bigint AS estimated_output_tokens,
+       -- agentgateway's own cost next to Koinon's, over the requests it priced, so a pricing
+       -- difference shows without the raw rows.
+       count(*) FILTER (WHERE gateway_cost_usd IS NOT NULL)::bigint AS gateway_requests,
+       coalesce(sum(gateway_cost_usd), 0)::text AS gateway_usd,
+       coalesce(sum(cost_usd) FILTER (WHERE gateway_cost_usd IS NOT NULL), 0)::text AS gateway_compared_usd,
+       count(*) FILTER (WHERE cost_flagged)::bigint AS flagged_requests
 FROM spend_entries
 WHERE org_id = $1 AND occurred_at >= $2
 GROUP BY model
@@ -315,13 +324,18 @@ type SpendReportParams struct {
 }
 
 type SpendReportRow struct {
-	Model             string
-	Requests          int64
-	InputTokens       int64
-	OutputTokens      int64
-	ReportedUsd       string
-	EstimatedUsd      string
-	EstimatedRequests int64
+	Model                 string
+	Requests              int64
+	InputTokens           int64
+	OutputTokens          int64
+	ReportedUsd           string
+	EstimatedUsd          string
+	EstimatedRequests     int64
+	EstimatedOutputTokens int64
+	GatewayRequests       int64
+	GatewayUsd            string
+	GatewayComparedUsd    string
+	FlaggedRequests       int64
 }
 
 // Spend per model since @since, with estimated usage kept apart.
@@ -342,6 +356,11 @@ func (q *Queries) SpendReport(ctx context.Context, arg SpendReportParams) ([]Spe
 			&i.ReportedUsd,
 			&i.EstimatedUsd,
 			&i.EstimatedRequests,
+			&i.EstimatedOutputTokens,
+			&i.GatewayRequests,
+			&i.GatewayUsd,
+			&i.GatewayComparedUsd,
+			&i.FlaggedRequests,
 		); err != nil {
 			return nil, err
 		}
