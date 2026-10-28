@@ -2,19 +2,8 @@
 #
 # Fake CI-cost service: REST /v1/costs and MCP /mcp on :8080, both behind a bearer token.
 # Memory: a small Go binary, about 15 MiB; request 16Mi, limit 64Mi.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: rt1-fakecicost-token
-  labels:
-    app.kubernetes.io/part-of: koinon-rt1-fixtures
-type: Opaque
-stringData:
-  # PLACEHOLDER. The real value is set out of band (kubectl create secret ... --dry-run=client -o yaml |
-  # kubectl apply -f -) and the same value goes into the MCP server's credential in Koinon, so that
-  # agentgateway injects it as "Authorization: Bearer <token>". Never commit the real one.
-  token: koinon_test_not-a-real-token
----
+# The bearer token comes from Secret rt1-fakecicost-token (key token), which the operator delivers
+# (ExternalSecret); it is not in this kustomization. See secrets.example.yaml and ../README.md.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
