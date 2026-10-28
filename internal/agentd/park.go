@@ -182,7 +182,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 			if _, err := questions.CancelForRun(ctx, q, r.run.OrgID, r.run.ID, "the task was canceled"); err != nil {
 				return err
 			}
-			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "")
+			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "", nil)
 		}
 		reqs, err := q.ListUndeliveredApprovalRequestsForRun(ctx, store.ListUndeliveredApprovalRequestsForRunParams{
 			OrgID: r.run.OrgID, RunID: r.run.ID,
@@ -197,7 +197,7 @@ func (r *runner) endTurn(ctx context.Context) error {
 			return err
 		}
 		if len(reqs) == 0 && len(qs) == 0 {
-			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "")
+			return r.finishIn(ctx, q, src, store.RunStateSucceeded, "", "", nil)
 		}
 		parked = true
 		ids := make([]string, 0, len(reqs))

@@ -21,6 +21,9 @@ func ClassifyError(err error) (class string, retryAfter time.Duration) {
 	return string(c.class), c.retryAfter
 }
 
+// ClassifyGateway reports whether the error is a gateway refusal (401 or 429).
+func ClassifyGateway(err error) bool { return classifyPromptError(err).gateway }
+
 func StopClass(stop acp.StopReason) string { return string(stopFailure(stop).class) }
 
 // RenderOutcomes, BuildHandoff and the notes expose the prompt shapes to the golden tests.
@@ -58,4 +61,14 @@ func RetryNote(class string) string { return fmt.Sprintf(retryNote, class) }
 
 // InstructionsFile exposes the instruction file's content for a version's instructions to the
 // golden tests.
-func InstructionsFile(instructions string) string { return string(instructionsFile(instructions)) }
+func InstructionsFile(instructions, cwd string, repos ...Repository) string {
+	return string(instructionsFile(instructions, cwd, repos))
+}
+
+// Repository is a granted repository as the instruction file lists it.
+type Repository = repository
+
+// RefusalNote and Refusal expose the prompt that continues a turn after refused requests.
+type Refusal = refusal
+
+func RefusalNote(refs []Refusal, cwd string) string { return refusalNote(refs, cwd) }
