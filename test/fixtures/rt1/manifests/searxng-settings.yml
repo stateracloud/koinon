@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Configuration for the unmodified SearXNG image (AGPL-3.0; this file is only config). Mounted at
+# /etc/searxng/settings.yml. The secret key comes from the environment (SEARXNG_SECRET), never from here.
+use_default_settings:
+  engines:
+    keep_only:
+      - duckduckgo
+      - bing
+      - wikipedia
+      - github
+      - stackoverflow
+general:
+  instance_name: rt1-searxng
+  enable_metrics: false
+search:
+  formats: [html, json]
+  safe_search: 0
+server:
+  # Overridden by $SEARXNG_SECRET; this value is not used and is not a secret.
+  secret_key: "not-a-real-secret-set-by-env"
+  # Only the MCP server (in this namespace) can reach SearXNG, so there is nothing to rate limit.
+  limiter: false
+  image_proxy: false
+  public_instance: false
