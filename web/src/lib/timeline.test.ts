@@ -64,6 +64,19 @@ describe('buildTimeline', () => {
     ])
   })
 
+  it('shows a wait for the model provider as a note', () => {
+    const items = buildTimeline([], {
+      [run]: [
+        runEvent(1, 'run.waiting_for_model', { model: 'deepseek/flash', provider: 'openrouter', reason: 'waiting for the model provider "openrouter" to reach the gateway' }),
+        runEvent(2, 'run.waiting_for_model', {}),
+      ],
+    })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456 is waiting for the model provider openrouter to reach the gateway (model deepseek/flash)',
+      'Run r-123456 is waiting for the model provider to reach the gateway',
+    ])
+  })
+
   it('shows a park and its approval task events', () => {
     const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
     const items = buildTimeline(

@@ -22,6 +22,7 @@ type Metrics struct {
 	Finished    *prometheus.CounterVec
 	Takeovers   prometheus.Counter
 	SandboxWait prometheus.Histogram
+	ModelWait   prometheus.Histogram
 	Requeued    prometheus.Counter
 }
 
@@ -44,12 +45,16 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_agentd_sandbox_wait_duration_seconds", Help: "Time a run waited for its agent's sandbox to be ready, whatever the result.",
 			Buckets: []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
 		}),
+		ModelWait: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name: "koinon_agentd_model_wait_duration_seconds", Help: "Time a run waited, before starting its harness, for the gateway to serve its model; observed only for runs that waited, a timeout included.",
+			Buckets: []float64{1, 5, 10, 30, 60, 90, 120, 180, 300, 600},
+		}),
 	}
 	for _, o := range outcomes {
 		m.Finished.WithLabelValues(string(o))
 	}
 	if reg != nil {
-		reg.MustRegister(m.Claimed, m.Finished, m.Takeovers, m.SandboxWait, m.Requeued)
+		reg.MustRegister(m.Claimed, m.Finished, m.Takeovers, m.SandboxWait, m.ModelWait, m.Requeued)
 	}
 	return m
 }

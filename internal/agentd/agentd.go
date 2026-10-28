@@ -86,6 +86,11 @@ type Config struct {
 	SandboxTimeout time.Duration
 	// Now defaults to time.Now; tests move it forward to pass SandboxTimeout.
 	Now func() time.Time
+	// ModelServeTimeout bounds the wait, before a run starts its harness, for the gateway to serve
+	// the run's model (a new provider's key file is still reaching the gateway, issue #174). A run
+	// whose model is not served in time fails with a reason that names the provider. Default
+	// DefaultModelServeTimeout.
+	ModelServeTimeout time.Duration
 	// ReconcileNudge is how often a worker waiting for a sandbox NOTIFYs the reconciler.
 	// Default 5s.
 	ReconcileNudge time.Duration
@@ -174,6 +179,7 @@ func (c *Config) defaults() error {
 		c.Now = time.Now
 	}
 	setDefault(&c.ReconcileNudge, 5*time.Second)
+	setDefault(&c.ModelServeTimeout, DefaultModelServeTimeout)
 	setDefault(&c.CancelGrace, 10*time.Second)
 	setDefault(&c.ReadyTimeout, time.Minute)
 	setDefault(&c.ReadySettle, time.Second)

@@ -367,6 +367,12 @@ func (r *runner) execute(ctx context.Context) error {
 	}
 	cmd = append(cmd, harnessArgs(agent.Flavor, vc)...)
 	r.vcfg = vc
+	// The gateway may not serve the model yet: a new provider's key file is still reaching the
+	// gateway pod (issue #174). The reconciler starts the sandbox meanwhile, because this run is
+	// demand for it, so the two waits overlap.
+	if err := r.waitModel(fctx, model); err != nil {
+		return r.execErr(ctx, "wait for the model", err)
+	}
 	sb, err := r.waitSandbox(fctx)
 	if err != nil {
 		return r.execErr(ctx, "sandbox", err)
