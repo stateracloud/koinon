@@ -14,6 +14,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/ledger"
 )
 
 // A spent budget revokes the agent's key while the harness is mid-turn: the harness sees the
@@ -74,6 +75,41 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
 		Expect(payload(eventOf(events(ctx, r), "run.canceled")[0])).To(HaveKeyWithValue("limit", budget.OrgMonthly))
+	})
+
+	It("names the widest limit when several are reached, as the ledger does", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		spend(ctx, e, "1", "3")
+		_, err := q.SetOrgMonthlyCap(ctx, store.SetOrgMonthlyCapParams{OrgID: e.org, MonthlyCap: pgtype.Text{String: "3", Valid: true}, UpdatedBy: "test"})
+		Expect(err).NotTo(HaveOccurred())
+		e.harness.modelFault = func(context.Context, string) error { return unauthorized }
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+		Expect(payload(eventOf(events(ctx, r), "run.canceled")[0])).To(HaveKeyWithValue("limit", budget.OrgMonthly))
+	})
+
+	It("leaves the run to the control plane's cancel when that came first", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		spend(ctx, e, "2.40", "2.5")
+		// The reconciler stops the agent's runs before it revokes the key; the harness's 401 follows.
+		e.harness.modelFault = func(ctx context.Context, _ string) error {
+			st, err := budget.Compute(ctx, q, e.org, e.agent.ID, 0, time.Now())
+			Expect(err).NotTo(HaveOccurred())
+			l, ok := st.Pick(time.Now())
+			Expect(ok).To(BeTrue())
+			n, err := ledger.Stop(ctx, q, e.org, e.agent.ID, l)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(1))
+			return unauthorized
+		}
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+		Consistently(func() int { return len(eventOf(events(ctx, r), "run.canceled")) }, 500*time.Millisecond).Should(Equal(1))
+		got := getRun(ctx, r)
+		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
+		Expect(eventOf(events(ctx, r), "run.failed")).To(BeEmpty())
 	})
 
 	It("keeps an authentication error as a failure when no limit is reached", func(ctx SpecContext) {
