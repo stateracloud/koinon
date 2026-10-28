@@ -2,15 +2,17 @@
 
 package pricing
 
-// ListSource supplies the list of price entries that applies when an org has no entry of its own.
-// Code that prices requests takes a ListSource instead of calling Default, so a test can give it a
-// fixed list and a price update to default.yaml never changes what a test asserts.
+// ListSource supplies the org-independent list of price entries that applies when an org has no
+// entry of its own. Code that prices requests takes a ListSource instead of calling Default, so
+// a test can give it a fixed list and a price update to default.yaml never changes what a test
+// asserts.
 //
-// A ListSource is meant to be layered. A later source can wrap another one: org overrides first,
-// then a snapshot of model metadata, then the embedded default list. Each layer answers
-// Current from its own entries followed by those of the source it wraps; Select already prefers
-// the more specific and later entry, so a wrapper only has to concatenate. Nothing but the
-// embedded list exists today.
+// A ListSource can be layered, but only over org-independent lists: a future snapshot of model
+// metadata (ADR 0070) wrapping the embedded default list, say. Current takes no context, org or
+// time, so it cannot hold org overrides: those come from the database and can be retired. They
+// stay a separate step in prices.Resolver, which always tries them first, so an org override
+// beats every list entry, however specific, and the Resolution keeps its source label (org
+// override or default list). Nothing but the embedded list exists today.
 type ListSource interface {
 	// Current returns the list and its resolved entries. The result is read-only.
 	Current() (List, []Resolved)

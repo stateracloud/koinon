@@ -35,6 +35,14 @@ type Ingester struct {
 	Prices prices.Resolver
 }
 
+// Validate reports a wiring mistake: an Ingester without prices would record every request unpriced.
+func (in *Ingester) Validate() error {
+	if in.Prices.IsZero() {
+		return errors.New("ledger: Prices is required (prices.NewResolver)")
+	}
+	return nil
+}
+
 func (in *Ingester) now() time.Time {
 	if in.Now != nil {
 		return in.Now()

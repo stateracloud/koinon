@@ -307,6 +307,9 @@ func readBody(r *http.Request) ([]byte, error) {
 
 // Serve runs the OTLP receiver on addr until ctx ends.
 func Serve(ctx context.Context, addr string, in *Ingester, log *slog.Logger) error {
+	if err := in.Validate(); err != nil {
+		return err
+	}
 	srv := &http.Server{Addr: addr, Handler: Handler(in, log), ReadHeaderTimeout: 10 * time.Second}
 	safego.Go(ctx, log, "otlp-shutdown", func(context.Context) {
 		<-ctx.Done()
