@@ -216,17 +216,17 @@ describe('Servers page', () => {
     expect(search.getByText(/Suggested read-only/)).toBeInTheDocument()
     expect(search.getByRole('radio', { name: 'Ask' })).toBeChecked()
     expect(calls.tiers).toHaveLength(0)
-    await userEvent.click(search.getByRole('button', { name: 'Set search to Auto' }))
+    await userEvent.click(search.getByRole('button', { name: 'Set to Auto: search' }))
     await waitFor(() => expect(calls.tiers).toEqual([expect.objectContaining({ tool: 'search', tier: Tier.AUTO })]))
   })
 
   it('acknowledges a review without changing the tier', async () => {
     const calls = setup()
     const tl = within(await screen.findByRole('list', { name: 'Tools of docs' }))
-    await userEvent.click(tl.getByRole('button', { name: 'Mark edit reviewed' }))
+    await userEvent.click(tl.getByRole('button', { name: 'Mark reviewed: edit' }))
     await waitFor(() => expect(calls.acks).toEqual([expect.objectContaining({ serverId: 's-docs', tool: 'edit' })]))
     expect(calls.tiers).toHaveLength(0)
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Mark edit reviewed' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Mark reviewed: edit' })).not.toBeInTheDocument())
   })
 
   it('sets Require two approvers in the Ask tier and disables it elsewhere', async () => {

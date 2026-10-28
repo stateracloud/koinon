@@ -286,7 +286,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
       {suggestsAuto(t) && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span>Suggested read-only: the server marks this tool as read-only. That is its own claim, so the tier stays as it is until you choose.</span>
-          <Button variant="outline" size="sm" disabled={pending} aria-label={`Set ${t.name} to Auto`} onClick={() => void run(actions.setToolTier(server.id, t.name, Tier.AUTO))}>
+          <Button variant="outline" size="sm" disabled={pending} aria-label={`Set to Auto: ${t.name}`} onClick={() => void run(actions.setToolTier(server.id, t.name, Tier.AUTO))}>
             Set to Auto
           </Button>
         </div>
@@ -294,7 +294,7 @@ function ToolRow({ server, tool: t, actions, onRefused }: { server: Server; tool
       {t.reviewReason && (
         <div className="flex flex-wrap items-center gap-2 text-sm" role="note">
           <span>Review: {t.reviewReason}.</span>
-          <Button variant="outline" size="sm" disabled={pending} aria-label={`Mark ${t.name} reviewed`} onClick={() => void run(actions.acknowledgeReview(server.id, t.name))}>
+          <Button variant="outline" size="sm" disabled={pending} aria-label={`Mark reviewed: ${t.name}`} onClick={() => void run(actions.acknowledgeReview(server.id, t.name))}>
             Mark reviewed
           </Button>
           <p className="text-muted-foreground w-full text-xs">Reviewing keeps the tool in Ask; set it back to Auto yourself if you trust the new version.</p>
