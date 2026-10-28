@@ -2,9 +2,10 @@
 #
 # A second declared provider for the e2e (ADR 0069): a direct Anthropic provider whose upstream is the
 # fake model server (test/fakemodel/scripts/claude-e2e.yaml), so its model runs in the Messages format
-# through the harness's koinon-anthropic entry, the gateway and the ledger. Its name sorts before
-# "fake", so once the e2e prices its model it is the org's first served model, which an agent whose
-# template says "default" uses (agentd: the org's first served model, providers by name).
+# through the harness's koinon-anthropic entry, the gateway and the ledger. Step 6d sets the agent to
+# claude-e2e explicitly, so the provider's name plays no part in which model the run uses. Side effect:
+# once 6d prices claude-e2e it becomes the org default, because "anthropic-fake" sorts before "fake";
+# a step added after 6d that relies on the default model must set its model explicitly.
 # test/e2e/run.sh applies it next to model-provider.yaml; it is no part of the quickstart.
 apiVersion: v1
 kind: Secret
