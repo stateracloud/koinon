@@ -1,6 +1,6 @@
 # 0045. OpenShell hardening defaults
 
-- Status: Accepted; amended by [0048](0048-openshell-spike-results.md)
+- Status: Accepted; amended by [0048](0048-openshell-spike-results.md) and [0075](0075-isolation-tiers.md)
 - Date: 2026-10-21
 - Amends: none (implements ADR 0002, ADR 0006, ADR 0016 and "Execution layer details")
 - Verification: Pending: OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
@@ -66,3 +66,16 @@ Kubernetes admission `Rule.resources` subresource semantics; Talos Kata extensio
 - https://github.com/kubernetes/api/blob/master/admissionregistration/v1/types.go
 - https://github.com/siderolabs/extensions/blob/main/container-runtime/kata-containers/README.md
 - ADR 0002, ADR 0006, ADR 0016, ADR 0026
+
+## Amendment (2026-10-28): isolation tiers
+
+[0075](0075-isolation-tiers.md) makes Kata the golden path, not the only one. Every install has an
+isolation tier: `vm` (Kata, AKS Pod Sandboxing or GKE `microvm`; the default), `hardened` (runc with
+user namespaces, SELinux where present, a dedicated tainted sandbox pool and enforced NetworkPolicy)
+or `dev` (kind and CI only).
+
+- Decision 5: `default_runtime_class_name` follows the tier. The Kata runtime class stays required
+  for the `vm` tier.
+- Decision 6: the VAP's allowed runtime classes are the tier's.
+- Decisions 1 to 4 and 7, and the 0048 additions (`stable_placeholder`, Landlock `hard_requirement`,
+  telemetry off, requester-identity VAP rules, `io.katacontainers.*` denied), hold in every tier.
