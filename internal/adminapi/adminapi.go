@@ -371,7 +371,11 @@ func (s *Server) CreateModel(ctx context.Context, req CreateModelRequestObject) 
 		st, e := s.problem(err)
 		return CreateModeldefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
-	out := toModel(got)
+	var out ModelCreated
+	if err := via(toModel(got), &out); err != nil {
+		st, e := s.problem(err)
+		return CreateModeldefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
 	if w := s.prices.ModelWarnings(ctx, p.Org, pgUUID(got.ProviderID), got.Name); len(w) > 0 {
 		out.Warnings = &w
 	}

@@ -103,7 +103,7 @@ func EntryWarnings(e pricing.Entry) []string {
 		name = e.Match.Regex
 	}
 	// A glob such as "google/*" names a vendor; probe with its literal prefix.
-	if !isUncached(cacheModeOf(e.Provider, strings.TrimRight(name, "*?"))) {
+	if !isUncached(cacheModeOf(e.Provider, literalPrefix(name))) {
 		return nil
 	}
 	return []string{"Price " + e.ID + ": " + UncachedReason(e.Provider, name)}
@@ -134,3 +134,14 @@ func (m CacheMode) Uncached() bool { return isUncached(m) }
 
 // CacheUnsupportedReason returns the reason a provider type maps to CacheUnsupported, or "".
 func CacheUnsupportedReason(providerType string) string { return cacheUnsupported[providerType] }
+
+// literalPrefix is the part of a glob or regex pattern before its first wildcard or regex
+// metacharacter, without a leading "^": "google/*" gives "google/", "^anthropic/claude-.*" gives
+// "anthropic/claude-".
+func literalPrefix(pattern string) string {
+	pattern = strings.TrimPrefix(pattern, "^")
+	if i := strings.IndexAny(pattern, `*?.+()[]{}|\\$^`); i >= 0 {
+		return pattern[:i]
+	}
+	return pattern
+}

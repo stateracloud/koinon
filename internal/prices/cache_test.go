@@ -11,6 +11,18 @@ import (
 )
 
 func TestEntryWarnings(t *testing.T) {
+	regexEntry := func(provider, re string) pricing.Entry {
+		return pricing.Entry{
+			ID: "p", Provider: provider, Match: pricing.Match{Regex: re},
+			Spec: pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2", CacheRead: "0.1"}},
+		}
+	}
+	if w := prices.EntryWarnings(regexEntry("openrouter", "^anthropic/claude-.*")); len(w) != 0 {
+		t.Errorf("an anthropic regex warned: %v", w)
+	}
+	if w := prices.EntryWarnings(regexEntry("openrouter", "^google/.*")); len(w) != 1 {
+		t.Errorf("an unmapped vendor regex did not warn: %v", w)
+	}
 	entry := func(provider, glob, cacheRead string) pricing.Entry {
 		return pricing.Entry{
 			ID: "p", Provider: provider, Match: pricing.Match{Glob: glob},

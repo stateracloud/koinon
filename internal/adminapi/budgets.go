@@ -107,10 +107,15 @@ func (s *Server) SetPrice(ctx context.Context, req SetPriceRequestObject) (SetPr
 		st, er := s.problem(err)
 		return SetPricedefaultJSONResponse{Body: er, StatusCode: st}, nil
 	}
-	if w := prices.EntryWarnings(in.Entry); len(w) > 0 {
-		v.Warnings = &w
+	var saved PriceSaved
+	if err := via(v, &saved); err != nil {
+		st, er := s.problem(err)
+		return SetPricedefaultJSONResponse{Body: er, StatusCode: st}, nil
 	}
-	return SetPrice201JSONResponse(v), nil
+	if w := prices.EntryWarnings(in.Entry); len(w) > 0 {
+		saved.Warnings = &w
+	}
+	return SetPrice201JSONResponse(saved), nil
 }
 
 // RetirePrice implements StrictServerInterface.
