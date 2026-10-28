@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Web research: an unmodified SearXNG (AGPL-3.0, see ../README.md) and ihor-sokoliuk/mcp-searxng (MIT)
+# in front of it. The MCP server (:8080/mcp, static bearer token) is the only thing the gateway reaches;
+# SearXNG accepts connections from it alone. Both pods need internet egress, see networkpolicies.yaml.
+# Secret rt1-searxng-secrets (keys secret_key and mcp_token) is delivered by the operator, not by this
+# kustomization; see secrets.example.yaml and ../README.md.
+# Memory: searxng request 96Mi / limit 256Mi (about 87 MiB measured), mcp-searxng request 48Mi / limit
+# 128Mi (about 43 MiB measured).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rt1-searxng
+  labels:
+    app.kubernetes.io/name: rt1-searxng
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-searxng
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rt1-searxng
+        app.kubernetes.io/part-of: koinon-rt1-fixtures
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 977
+        runAsGroup: 977
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: searxng
+          # A mirror of docker.io/searxng/searxng@sha256:0f48ffe2152f388f5eaede27f96b610449cebfc890d0ad457304475a54ad7b6e
+          # (2026.10.27-b5ed73fcb), unmodified. The tag is a placeholder: the digest is filled in at deploy.
+          image: zot.apps.lab.example.invalid/koinon/rt1-searxng:2026.10.27
+          env:
+            - name: SEARXNG_SECRET
+              valueFrom:
+                secretKeyRef: {name: rt1-searxng-secrets, key: secret_key}
+          ports:
+            - {name: http, containerPort: 8080}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 3
+            failureThreshold: 40
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          volumeMounts:
+            - {name: settings, mountPath: /etc/searxng/settings.yml, subPath: settings.yml, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: cache, mountPath: /var/cache/searxng}
+      volumes:
+        - name: settings
+          configMap: {name: rt1-searxng-settings}
+        - name: tmp
+          emptyDir: {sizeLimit: 32Mi}
+        - name: cache
+          emptyDir: {sizeLimit: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rt1-searxng
+  labels:
+    app.kubernetes.io/name: rt1-searxng
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  selector:
+    app.kubernetes.io/name: rt1-searxng
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rt1-searxng-mcp
+  labels:
+    app.kubernetes.io/name: rt1-searxng-mcp
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-searxng-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rt1-searxng-mcp
+        app.kubernetes.io/part-of: koinon-rt1-fixtures
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: mcp-searxng
+          # A mirror of docker.io/isokoliuk/mcp-searxng@sha256:8f1dd92a9e2875cb4e8df7036785ec4c088b7600cefb611de472a352a3dcba60
+          # (2.9.0). The tag is a placeholder: the digest is filled in at deploy.
+          image: zot.apps.lab.example.invalid/koinon/rt1-searxng-mcp:2.9.0
+          env:
+            - {name: SEARXNG_URL, value: "http://rt1-searxng:8080"}
+            - {name: MCP_HTTP_PORT, value: "8080"}
+            - {name: MCP_HTTP_HOST, value: "0.0.0.0"}
+            # Static bearer token. Hardening requires allowed hosts and origins. A host matches exactly,
+            # port included, so every spelling of the Service name is listed with and without :8080.
+            # The gateway connects by the Service name and sends no browser Origin.
+            - {name: MCP_HTTP_HARDEN, value: "true"}
+            # Sessionless: agentgateway does not keep the MCP server's legacy sessions.
+            - {name: MCP_HTTP_STATELESS, value: "true"}
+            # Every agent's calls reach this pod from the gateway's single pod IP, so the per-IP in-flight
+            # limit (default 8) is effectively the global one. Raise it, and keep the global limit above
+            # it (a per-IP value above the global one is reduced to the global cap). The tool ceiling
+            # (MCP_TOOL_MAX_IN_FLIGHT, default 16, no queue) is separate. URL_READ_MAX_CHARS is only the
+            # default page length when a call omits maxLength; an explicit maxLength wins.
+            - {name: MCP_HTTP_STATELESS_MAX_IN_FLIGHT_PER_IP, value: "16"}
+            - {name: MCP_HTTP_STATELESS_MAX_IN_FLIGHT, value: "32"}
+            - {name: MCP_TOOL_MAX_IN_FLIGHT, value: "32"}
+            - {name: URL_READ_MAX_CHARS, value: "8000"}
+            - {name: MCP_HTTP_ALLOWED_HOSTS, value: "rt1-searxng-mcp:8080,rt1-searxng-mcp,rt1-searxng-mcp.koinon-fixtures:8080,rt1-searxng-mcp.koinon-fixtures,rt1-searxng-mcp.koinon-fixtures.svc:8080,rt1-searxng-mcp.koinon-fixtures.svc,rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080,rt1-searxng-mcp.koinon-fixtures.svc.cluster.local"}
+            - {name: MCP_HTTP_ALLOWED_ORIGINS, value: "http://rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080"}
+            - name: MCP_HTTP_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: rt1-searxng-secrets, key: mcp_token}
+          ports:
+            - {name: mcp, containerPort: 8080}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 20m, memory: 48Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          readinessProbe:
+            httpGet: {path: /health, port: mcp}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: mcp}
+            periodSeconds: 30
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rt1-searxng-mcp
+  labels:
+    app.kubernetes.io/name: rt1-searxng-mcp
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  selector:
+    app.kubernetes.io/name: rt1-searxng-mcp
+  ports:
+    - {name: mcp, port: 8080, targetPort: mcp}

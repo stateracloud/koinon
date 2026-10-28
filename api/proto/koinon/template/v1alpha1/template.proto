@@ -60,6 +60,31 @@ message RunLimits {
   int64 max_tokens = 2;
 }
 
+// TriggerType says what starts work on an agent (ADR 0066).
+enum TriggerType {
+  TRIGGER_TYPE_UNSPECIFIED = 0;
+  TRIGGER_TYPE_SCHEDULE = 1;
+  TRIGGER_TYPE_DIRECT_MESSAGE = 2;
+  // Reserved for v0.2; rejected until then.
+  TRIGGER_TYPE_CODE_HOST_EVENT = 3;
+  // Reserved for v0.2; rejected until then.
+  TRIGGER_TYPE_CHANNEL_EVENT = 4;
+}
+
+// Trigger is one way work starts on an agent, with the instruction it gets when the trigger fires.
+// It belongs to a version and takes effect when that version is activated.
+message Trigger {
+  // Names the trigger within the agent, a lowercase slug; stable across versions.
+  string id = 1;
+  TriggerType type = 2;
+  // Schedule only: a five-field cron expression (minute hour day-of-month month day-of-week).
+  string cron = 3;
+  // Schedule only: an IANA zone name, for example "Europe/Tallinn".
+  string timezone = 4;
+  // Text given to the agent when the trigger fires.
+  string instruction = 5;
+}
+
 // Template is one version of an agent template.
 message Template {
   // Identifies this exact content; agents are created from it.
@@ -81,6 +106,10 @@ message Template {
   RunLimits run_limits = 12;
   // Spend limit as a decimal string, for example "10.00".
   string spend_limit_usd = 13;
+  repeated Trigger triggers = 14;
+  // Agents made from the template are ephemeral by default: each task gets a fresh sandbox
+  // without a home, deleted when the task ends (ADR 0065 decision 13c).
+  bool ephemeral = 15;
 }
 
 // ListTemplatesRequest is empty.

@@ -51,6 +51,7 @@ import (
 
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/approvalscope"
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
@@ -128,7 +129,7 @@ func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
 			"the commit and the pull request exactly as given, and you get the result when the run resumes. " +
 			"A file marked executable is written as 100755; otherwise a new file is regular (100644) and a modified file keeps its mode. " +
 			"Symbolic links and submodules cannot be written. " +
-			"Refused: changes under .github/workflows/, more than 100 files or 1 MiB, unsafe paths.",
+			"Refused: changes to the code host's CI paths (for GitHub .github/workflows/, and any the connection lists), more than 100 files or 1 MiB, unsafe paths.",
 	}, s.createPullRequest)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolCommentOnIssue,
@@ -272,7 +273,11 @@ func (s *Server) authorise(c caller, tool string) (connectors.Decision, string, 
 }
 
 func (s *Server) createPullRequest(ctx context.Context, req *mcp.CallToolRequest, in PullRequestArgs) (*mcp.CallToolResult, Result, error) {
-	if err := ValidatePullRequest(in); err != nil {
+	guard, err := s.guardFor(ctx, req)
+	if err != nil {
+		return nil, Result{}, err
+	}
+	if err := ValidatePullRequest(in, guard); err != nil {
 		return nil, Result{}, err
 	}
 	canonical, err := canonicalPullRequest(in)
@@ -280,6 +285,46 @@ func (s *Server) createPullRequest(ctx context.Context, req *mcp.CallToolRequest
 		return nil, Result{}, err
 	}
 	return s.record(ctx, req, ToolCreatePullRequest, canonical, AssessRisk(in))
+}
+
+// guardFor builds the workflow guard of the connection the caller's grant uses: the provider's
+// CI paths plus the directories configured on the connection. A grant whose connection cannot be
+// read gets the provider's paths alone; the executor needs the connection and fails without it.
+func (s *Server) guardFor(ctx context.Context, req *mcp.CallToolRequest) (codehost.Guard, error) {
+	c, err := s.identify(ctx, req)
+	if err != nil {
+		return codehost.Guard{}, err
+	}
+	connector, _, ok := s.hosts.Grant(c.config)
+	if !ok {
+		return codehost.Guard{}, nil // record refuses a call without a grant
+	}
+	b, ok := c.config.Binding(connector)
+	if !ok {
+		return codehost.Guard{}, nil // record refuses a grant without a repository
+	}
+	p, ok := s.hosts.Get(connector)
+	if !ok {
+		return codehost.Guard{}, fmt.Errorf("no code host %q", connector)
+	}
+	var config []byte
+	var id pgtype.UUID
+	if id.Scan(b.ConnectionID) == nil && id.Valid {
+		row, err := s.q.GetConnection(ctx, store.GetConnectionParams{OrgID: c.org.ID, ID: id})
+		switch {
+		case err == nil:
+			config = row.Config
+		case !errors.Is(err, pgx.ErrNoRows):
+			s.log.Error("github tools: load the connection", append(c.attrs(), "err", err)...)
+			return codehost.Guard{}, errors.New("internal error; try again later")
+		}
+	}
+	g, err := codehost.GuardOf(p.Capabilities(), config)
+	if err != nil {
+		s.log.Error("github tools: build the workflow guard", append(c.attrs(), "err", err)...)
+		return codehost.Guard{}, errors.New("this agent's connection has invalid CI directories; ask an admin to fix the connection")
+	}
+	return g, nil
 }
 
 func (s *Server) commentOnIssue(ctx context.Context, req *mcp.CallToolRequest, in CommentArgs) (*mcp.CallToolResult, Result, error) {
@@ -300,6 +345,51 @@ func HashArgs(canonical []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// scopeable says whether a scoped approval may cover a call with this risk. Coverage is decided
+// per risk type: the empty risk is covered, a Risk only when it cannot push and run code, and any
+// other type (a pointer, a new risk type) is not covered until it is added here.
+func scopeable(risk any) bool {
+	switch r := risk.(type) {
+	case struct{}:
+		return true
+	case Risk:
+		return !r.PushAndRun()
+	default:
+		return false
+	}
+}
+
+// callBinding is what a code-host approval request is bound to: the connection the grant uses and
+// its base URL. A scope created from the request carries it, and covers only calls with the same
+// binding, so a scope granted on github.com does not cover the same owner/repo on a GHES
+// connection after the agent is rebound or the connection replaced (ADR 0065 AP1).
+func (s *Server) callBinding(ctx context.Context, c caller, connector string) ([]byte, error) {
+	b, ok := c.config.Binding(connector)
+	if !ok {
+		return nil, errors.New("this agent's GitHub grant has no repository yet; ask an admin to choose one")
+	}
+	bind := struct {
+		ConnectionID string `json:"connectionId"`
+		BaseURL      string `json:"baseUrl,omitempty"`
+	}{ConnectionID: b.ConnectionID}
+	var id pgtype.UUID
+	if id.Scan(b.ConnectionID) == nil && id.Valid {
+		row, err := s.q.GetConnection(ctx, store.GetConnectionParams{OrgID: c.org.ID, ID: id})
+		switch {
+		case err == nil:
+			site, err := codehost.SiteOf(row.Config)
+			if err != nil {
+				return nil, errors.New("this agent's connection has an invalid configuration; ask an admin to fix the connection")
+			}
+			bind.BaseURL = site.BaseURL
+		case !errors.Is(err, pgx.ErrNoRows):
+			s.log.Error("github tools: load the connection", append(c.attrs(), "err", err)...)
+			return nil, errors.New("internal error; try again later")
+		}
+	}
+	return json.Marshal(bind)
+}
+
 // record stores the call as an approval request, or returns the existing one
 // for the same call in the same run.
 func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool string, canonical []byte, risk any) (*mcp.CallToolResult, Result, error) {
@@ -315,8 +405,13 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 	if err != nil {
 		return nil, Result{}, err
 	}
+	binding, err := s.callBinding(ctx, c, connector)
+	if err != nil {
+		return nil, Result{}, err
+	}
 	params := store.CreateApprovalRequestParams{
-		OrgID: c.org.ID, TaskID: c.run.TaskID, RunID: c.run.ID, AgentID: c.agent.ID,
+		CallBinding: binding,
+		OrgID:       c.org.ID, TaskID: c.run.TaskID, RunID: c.run.ID, AgentID: c.agent.ID,
 		Connector: connector, Tool: tool, Target: connector + ":" + repo,
 		ArgsJson: string(canonical), ArgsSha256: HashArgs(canonical), Risk: riskJSON,
 		Decision: store.ApprovalDecisionAsk, Status: store.ApprovalStatusPending,
@@ -331,6 +426,22 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		var err error
+		// A scoped approval of this agent (or task) for exactly this connector, tool and target
+		// lets the call run without parking; the timeline records the scope. Calls that could
+		// push and run code are never covered.
+		var scope store.ApprovalScope
+		if params.Status == store.ApprovalStatusPending {
+			if scopeable(risk) {
+				sc, ok, err := approvalscope.Match(ctx, q, params.OrgID, params.AgentID, params.TaskID, connector, tool, params.Target, binding, s.now())
+				if err != nil {
+					return err
+				}
+				if ok {
+					scope = sc
+					params.Decision, params.Status, params.ScopeID = store.ApprovalDecisionAllow, store.ApprovalStatusApproved, sc.ID
+				}
+			}
+		}
 		row, err = q.CreateApprovalRequest(ctx, params)
 		if errors.Is(err, pgx.ErrNoRows) {
 			created = false
@@ -342,10 +453,16 @@ func (s *Server) record(ctx context.Context, req *mcp.CallToolRequest, tool stri
 		if err != nil {
 			return err
 		}
-		payload, err := json.Marshal(map[string]any{
+		pm := map[string]any{
 			"approval_id": row.ID.String(), "tool": tool, "target": row.Target, "args_sha256": row.ArgsSha256,
 			"decision": string(row.Decision), "risk": json.RawMessage(riskJSON),
-		})
+		}
+		if scope.ID.Valid {
+			for k, v := range approvalscope.Payload(scope) {
+				pm[k] = v
+			}
+		}
+		payload, err := json.Marshal(pm)
 		if err != nil {
 			return err
 		}

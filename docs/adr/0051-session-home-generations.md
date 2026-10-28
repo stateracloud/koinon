@@ -104,3 +104,12 @@ lineage, not the OpenShell sandbox ID of decision 1:
 Prior art (ideas only, no code; its servers are AGPL-3.0): Daytona v0.190.0 keeps a sandbox's
 identity when it restores it from a backup on another runner (`sandbox-start.action.ts:475-540`;
 research notes `daytona.md`).
+
+## Amendment (2026-10-27, HC1): how the lineage is recorded
+
+`agent_sandboxes.home_generation` is now the home's lineage and `agent_sandboxes.sandbox_id` the
+OpenShell ID of the sandbox last observed (RecordAgentSandbox). When the reconciler deletes a
+sandbox for a recreation after a complete home checkpoint it sets `restore_checkpoint_id`; the next
+sandbox keeps `home_generation`, and agentd restores the checkpoint before the harness starts, so
+`session/load` finds the session. A recreation without a checkpoint (checkpoints off, an ephemeral
+agent) records the new sandbox's ID as before. The stuck mark of ADR 0054 compares `sandbox_id`.

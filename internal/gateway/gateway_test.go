@@ -15,6 +15,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 func TestGateway(t *testing.T) {
@@ -77,6 +78,22 @@ var _ = Describe("State", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(strings.Count(err.Error(), "\n")).To(BeNumerically(">=", 1))
 		Expect(err.Error()).To(And(ContainSubstring("duplicate"), ContainSubstring(`unknown mcp target "nope"`)))
+	})
+
+	It("refuses an unknown model format and a malformed workspace ID, and and an unset one", func() {
+		provider := func(format modelformat.Format, workspace string) gateway.State {
+			return gateway.State{Providers: []gateway.Provider{{
+				Org: "acme", Name: "p", Type: "anthropic", BaseURL: "http://p/v1", AnthropicWorkspaceID: workspace,
+				Models: []gateway.Model{{Name: "m", Format: format}},
+			}}}
+		}
+		Expect(provider("", "").Validate()).To(MatchError(ContainSubstring("unset format")))
+		Expect(provider(modelformat.OpenAI, "").Validate()).To(Succeed())
+		Expect(provider(modelformat.Anthropic, "wrkspc_01AbC").Validate()).To(Succeed())
+		Expect(provider("gemini", "").Validate()).To(MatchError(ContainSubstring(`format "gemini"`)))
+		for _, bad := range []string{"wrkspc_", "ws_01", "wrkspc_01\r\nx-evil: 1", "wrkspc_01 "} {
+			Expect(provider(modelformat.Anthropic, bad).Validate()).To(MatchError(ContainSubstring("workspace id")), bad)
+		}
 	})
 
 	It("reserves the reload probe's key name", func() {

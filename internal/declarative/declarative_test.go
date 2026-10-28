@@ -4,8 +4,13 @@ package declarative_test
 
 import (
 	"context"
+	"encoding/json"
+	"encoding/pem"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
@@ -17,7 +22,10 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/catalog"
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/connections"
+	"github.com/stateracloud/koinon/internal/connectors/gitea"
 	"github.com/stateracloud/koinon/internal/connectors/github/githubtest"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/declarative"
@@ -415,6 +423,197 @@ var _ = Describe("Importer", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(app.AppID).To(Equal(int64(12)))
 			Expect(app.InstallationID).To(Equal(int64(34)))
+		})
+
+		It("imports a GitHub Enterprise Server connection with its base URL and CA bundle", func(ctx SpecContext) {
+			tlsServer := httptest.NewTLSServer(http.NotFoundHandler()) // a certificate to use as the CA
+			DeferCleanup(tlsServer.Close)
+			ca := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: tlsServer.Certificate().Raw}))
+			d := conn()
+			d["baseUrl"], d["caBundle"] = " https://GHES.example.test:8443/ ", ca
+			put(ctx, "gh", declarative.TypeConnection, slug, d)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, _ := store.New(pool).ListConnections(ctx, org)
+			Expect(rows).To(HaveLen(1))
+			site, err := codehost.SiteOf(rows[0].Config)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(site.BaseURL).To(Equal("https://ghes.example.test:8443"))
+			Expect(site.CABundle).To(Equal(strings.TrimSpace(ca)))
+			var cfg connections.GitHubConfig
+			Expect(json.Unmarshal(rows[0].Config, &cfg)).To(Succeed())
+			Expect(cfg.AppID).To(BeEquivalentTo(12))
+			Expect(cfg.InstallationID).To(BeEquivalentTo(34))
+
+			By("re-applying a changed Secret keeps the host")
+			d["name"] = "acme GHES"
+			put(ctx, "gh", declarative.TypeConnection, slug, d)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, _ = store.New(pool).ListConnections(ctx, org)
+			site, _ = codehost.SiteOf(rows[0].Config)
+			Expect(site.BaseURL).To(Equal("https://ghes.example.test:8443"))
+		})
+
+		It("imports a connection's CI directories, one per line or comma-separated", func(ctx SpecContext) {
+			d := conn()
+			d["ciDirs"] = "./ci/pipelines/\nbuild/ci, ci/pipelines"
+			put(ctx, "gh", declarative.TypeConnection, slug, d)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, _ := store.New(pool).ListConnections(ctx, org)
+			Expect(rows).To(HaveLen(1))
+			site, err := codehost.SiteOf(rows[0].Config)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(site.CIDirs).To(Equal([]string{"ci/pipelines", "build/ci"}))
+		})
+
+		It("updates the stored CI directories when the Secret's ciDirs changes", func(ctx SpecContext) {
+			d := conn()
+			d["ciDirs"] = "ci/pipelines"
+			put(ctx, "gh", declarative.TypeConnection, slug, d)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			d["ciDirs"] = "build/ci\ndeploy"
+			put(ctx, "gh", declarative.TypeConnection, slug, d)
+			Expect(imp.Sync(ctx)).To(Succeed())
+			rows, _ := store.New(pool).ListConnections(ctx, org)
+			Expect(rows).To(HaveLen(1))
+			site, err := codehost.SiteOf(rows[0].Config)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(site.CIDirs).To(Equal([]string{"build/ci", "deploy"}))
+		})
+
+		It("ignores a connection Secret with an unsafe CI directory", func(ctx SpecContext) {
+			for _, v := range []string{"../up", "/abs", "."} {
+				d := conn()
+				d["ciDirs"] = v
+				put(ctx, "gh", declarative.TypeConnection, slug, d)
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				Expect(rows).To(BeEmpty(), v)
+			}
+		})
+
+		It("ignores a connection Secret with a bad base URL or CA bundle", func(ctx SpecContext) {
+			for k, v := range map[string]string{"baseUrl": "http://ghes.example.test", "caBundle": "not pem"} {
+				d := conn()
+				d[k] = v
+				put(ctx, "gh", declarative.TypeConnection, slug, d)
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				Expect(rows).To(BeEmpty(), k)
+			}
+		})
+
+		It("ignores a connection Secret whose base URL is a private or internal host", func(ctx SpecContext) {
+			for _, v := range []string{"https://10.0.0.1", "https://127.0.0.1:8443", "https://koinon-postgres"} {
+				d := conn()
+				d["baseUrl"] = v
+				put(ctx, "gh", declarative.TypeConnection, slug, d)
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				Expect(rows).To(BeEmpty(), v)
+			}
+		})
+
+		Describe("a Gitea bot", func() {
+			giteaConn := func() map[string]string {
+				return map[string]string{
+					"name": "acme Gitea", "connector": "gitea", "baseUrl": " https://Git.example.test/gitea/ ",
+					"readToken": "koinon_test_not-a-real-read-token", "writeToken": "koinon_test_not-a-real-write-token",
+					"ciDirs": "ci/pipelines",
+				}
+			}
+
+			It("is imported with its sub-path, both tokens sealed and only fingerprints in the config", func(ctx SpecContext) {
+				ring := secretstoretest.Keyring()
+				imp.Sealer = ring
+				put(ctx, "gt", declarative.TypeConnection, slug, giteaConn())
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				Expect(rows).To(HaveLen(1))
+				c := rows[0]
+				Expect(c.Connector).To(Equal("gitea"))
+				Expect(c.Source).To(Equal(store.ConfigSourceSecret))
+				Expect(string(c.Config)).NotTo(ContainSubstring("not-a-real"))
+				Expect(string(c.SecretEnvelope)).NotTo(ContainSubstring("not-a-real"))
+				cfg, err := gitea.ParseConfig(c.Config)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cfg.BaseURL).To(Equal("https://git.example.test/gitea"))
+				Expect(cfg.CIDirs).To(Equal([]string{"ci/pipelines"}))
+				Expect(cfg.ReadTokenSetAt).To(BeTemporally("~", time.Now(), time.Minute))
+
+				loaded, err := connections.Load(ctx, ring, c)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(string(loaded.Fields["readToken"])).To(Equal("koinon_test_not-a-real-read-token"))
+				Expect(string(loaded.Fields["writeToken"])).To(Equal("koinon_test_not-a-real-write-token"))
+				Expect(providers.Default().MustGet("gitea").Validate(loaded)).To(Succeed())
+
+				ev := auditOf(ctx, "connection.declare")
+				Expect(ev).To(HaveLen(1))
+				Expect(string(ev[0].Summary)).To(ContainSubstring("fingerprints"))
+				Expect(string(ev[0].Summary)).NotTo(ContainSubstring("not-a-real"))
+			})
+
+			It("keeps a token's age when the same Secret is applied again with another name, and restarts it for a new token", func(ctx SpecContext) {
+				put(ctx, "gt", declarative.TypeConnection, slug, giteaConn())
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				first, _ := gitea.ParseConfig(rows[0].Config)
+				// Backdate the stored dates, as if the tokens were entered long ago.
+				old := first
+				old.ReadTokenSetAt, old.WriteTokenSetAt = time.Now().Add(-100*24*time.Hour), time.Now().Add(-100*24*time.Hour)
+				raw, _ := json.Marshal(old)
+				_, err := pool.Exec(ctx, `UPDATE connections SET config = $1 WHERE id = $2`, raw, rows[0].ID)
+				Expect(err).NotTo(HaveOccurred())
+
+				d := giteaConn()
+				d["name"] = "renamed"
+				d["writeToken"] = "koinon_test_not-a-real-write-token-2"
+				put(ctx, "gt", declarative.TypeConnection, slug, d)
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ = store.New(pool).ListConnections(ctx, org)
+				now, _ := gitea.ParseConfig(rows[0].Config)
+				Expect(now.ReadTokenSetAt).To(BeTemporally("~", old.ReadTokenSetAt, time.Second), "same read token keeps its age")
+				Expect(now.WriteTokenSetAt).To(BeTemporally("~", time.Now(), time.Minute), "a new write token is new")
+			})
+
+			It("refuses to change a declared connection's connector, leaving the row as it was", func(ctx SpecContext) {
+				put(ctx, "gt", declarative.TypeConnection, slug, giteaConn())
+				Expect(imp.Sync(ctx)).To(Succeed())
+				put(ctx, "gt", declarative.TypeConnection, slug, conn())
+				Expect(imp.Sync(ctx)).To(Succeed())
+				rows, _ := store.New(pool).ListConnections(ctx, org)
+				Expect(rows).To(HaveLen(1))
+				Expect(rows[0].Connector).To(Equal("gitea"))
+				cfg, err := gitea.ParseConfig(rows[0].Config)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(cfg.BaseURL).To(Equal("https://git.example.test/gitea"))
+				var found bool
+				for _, e := range events(ctx) {
+					found = found || strings.Contains(e.Message, "cannot change from gitea to github")
+				}
+				Expect(found).To(BeTrue())
+			})
+
+			DescribeTable("is ignored, without quoting a token, when",
+				func(ctx SpecContext, mutate func(map[string]string)) {
+					d := giteaConn()
+					mutate(d)
+					put(ctx, "gt", declarative.TypeConnection, slug, d)
+					Expect(imp.Sync(ctx)).To(Succeed())
+					rows, _ := store.New(pool).ListConnections(ctx, org)
+					Expect(rows).To(BeEmpty())
+					for _, e := range events(ctx) {
+						Expect(e.Message).NotTo(ContainSubstring("not-a-real"))
+					}
+					Expect(logs.String()).NotTo(ContainSubstring("not-a-real"))
+				},
+				Entry("there is no base URL", func(d map[string]string) { delete(d, "baseUrl") }),
+				Entry("the base URL is http", func(d map[string]string) { d["baseUrl"] = "http://git.example.test" }),
+				Entry("the base URL has a glob in its path", func(d map[string]string) { d["baseUrl"] = "https://git.example.test/*" }),
+				Entry("the base URL is an internal host", func(d map[string]string) { d["baseUrl"] = "https://10.0.0.1/gitea" }),
+				Entry("a token is missing", func(d map[string]string) { delete(d, "writeToken") }),
+				Entry("the tokens are the same", func(d map[string]string) { d["writeToken"] = d["readToken"] }),
+				Entry("a token has a space", func(d map[string]string) { d["readToken"] = "koinon_test not-a-real" }),
+			)
 		})
 
 		It("ignores a connection Secret with a bad key without quoting it", func(ctx SpecContext) {

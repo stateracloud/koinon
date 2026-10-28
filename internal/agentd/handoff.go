@@ -42,7 +42,7 @@ type handoff struct {
 	Summary  string   // the agent's latest note
 	Replies  []string // the agent's last replies, oldest first
 	Messages []string // the people's messages, oldest first
-	Outcomes string   // approval outcomes not yet sent (starts with parkResumeNote), if any
+	Outcomes string   // approval outcomes not yet sent (build puts parkResumeNote before them), if any
 }
 
 // build renders the handoff within handoffMaxBytes.
@@ -100,7 +100,7 @@ func (h handoff) render(summary string, replies, messages []string) string {
 		}
 	}
 	if h.Outcomes != "" {
-		b.WriteString("\n\n" + h.Outcomes)
+		b.WriteString("\n\n" + parkResumeNote + h.Outcomes)
 	}
 	return b.String()
 }
@@ -143,9 +143,6 @@ func (r *runner) handoffPrompt(ctx context.Context, task store.Task, outcomes, n
 		return "", 0, err
 	}
 	h := handoff{Title: task.Title, Notice: notice, Summary: strings.TrimSpace(task.AgentSummary.String), Outcomes: outcomes}
-	if outcomes != "" {
-		h.Outcomes = parkResumeNote + outcomes
-	}
 	through := r.run.PromptThroughSeq.Int64
 	for _, m := range msgs {
 		if t := messageText(m); t != "" {

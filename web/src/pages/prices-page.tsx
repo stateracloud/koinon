@@ -51,10 +51,12 @@ function PricesContent() {
   const [editing, setEditing] = useState<string>()
   const [notice, setNotice] = useState<string>()
   const [refused, setRefused] = useState<string>()
+  const [warnings, setWarnings] = useState<string[]>([])
   const prices = useQuery(PriceService.method.listPrices, { orgId })
   const groups = useMemo(() => groupPrices(prices.data?.prices ?? []), [prices.data])
-  const saved = (name: string) => {
+  const saved = (name: string, warns: string[]) => {
     setRefused(undefined)
+    setWarnings(warns)
     setNotice(`Saved ${name}. It applies to new requests from its start date.`)
   }
 
@@ -74,6 +76,15 @@ function PricesContent() {
         <p role="status" className="text-sm">
           {notice}
         </p>
+      )}
+      {warnings.length > 0 && (
+        <Alert role="status" aria-label="Warnings">
+          <AlertDescription>
+            {warnings.map((w) => (
+              <p key={w}>{w}</p>
+            ))}
+          </AlertDescription>
+        </Alert>
       )}
       {refused && (
         <Alert variant="destructive" role="alert">

@@ -82,11 +82,21 @@ LIMIT @max_events;
 
 -- name: ListTaskMessagesAfter :many
 -- The users' messages on the task after a timeline seq, in order: what
--- agentd sends the harness as a run's prompt.
+-- agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose
+-- payload carries its source) is part of it, so a scheduled run sees what it was scheduled to do.
 SELECT * FROM task_events
 WHERE org_id = @org_id AND task_id = @task_id AND seq > @after_seq
-  AND kind = 'message' AND actor_kind = 'user'
+  AND kind = 'message'
+  AND (actor_kind = 'user' OR (actor_kind = 'system' AND payload ->> 'source' IS NOT NULL))
 ORDER BY seq;
+
+-- name: LatestUserMessageActor :one
+-- The person who wrote the task's latest user message (the person on the other end of a chat thread).
+SELECT actor_user_id FROM task_events
+WHERE org_id = @org_id AND task_id = @task_id AND kind = 'message' AND actor_kind = 'user'
+  AND actor_user_id IS NOT NULL
+ORDER BY seq DESC
+LIMIT 1;
 
 -- name: SetTaskStateFrom :one
 -- Moves a task between two non-end states, only if it is in one of from_states: parking on a human

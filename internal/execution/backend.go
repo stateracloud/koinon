@@ -62,6 +62,16 @@ type Backend interface {
 	// streams (no echo, no CRLF), suitable for newline-delimited JSON-RPC such as ACP.
 	// Cancelling ctx, or calling Process.Close, closes the streams and ends the command.
 	Exec(ctx context.Context, workspace, sandbox string, req ExecRequest) (Process, error)
+
+	// Upload extracts the tar stream into destDir in a ready sandbox, creating destDir first,
+	// as the sandbox user. It uses the execution layer's flow-controlled upload channel, which
+	// Exec stdin is not: a large stdin stream can outrun the sandbox and be killed (ADR 0032,
+	// issue 169). The archive is extracted by a fixed command, so the caller shapes it: no "./"
+	// root entry, nothing that must not be extracted. Extraction is not atomic: after an error
+	// destDir may hold part of the archive. A failure of the stream reading tar aborts the
+	// upload without end-of-file and is returned in the error chain. An execution layer that
+	// does not support uploads fails with ErrUnsupported.
+	Upload(ctx context.Context, workspace, sandbox, destDir string, tar io.Reader) error
 }
 
 // Workspace is an OpenShell workspace.

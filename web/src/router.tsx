@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { QueryClient } from '@tanstack/react-query'
-import { createRootRouteWithContext, createRoute, createRouter, Outlet, type RouterHistory } from '@tanstack/react-router'
+import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect, type RouterHistory } from '@tanstack/react-router'
 import { AgentPage } from '@/pages/agent-page'
 import { AgentsPage } from '@/pages/agents-page'
 import { AppLayout } from '@/pages/app-layout'
 import { ApprovalPage } from '@/pages/approval-page'
 import { BoardPage } from '@/pages/board-page'
+import { InboxPage } from '@/pages/inbox-page'
 import { ConnectionPage } from '@/pages/connection-page'
 import { ConnectionsPage } from '@/pages/connections-page'
 import { BudgetsPage } from '@/pages/budgets-page'
@@ -16,9 +17,10 @@ import { ProvidersPage } from '@/pages/providers-page'
 import { ServersPage } from '@/pages/servers-page'
 import { TokensPage } from '@/pages/tokens-page'
 import { NewAgentPage } from '@/pages/new-agent-page'
+import { NewGiteaConnectionPage } from '@/pages/new-gitea-connection-page'
 import { NewGitHubConnectionPage } from '@/pages/new-github-connection-page'
 import { LoginPage } from '@/pages/login-page'
-import { TicketPage } from '@/pages/ticket-page'
+import { TaskPage } from '@/pages/task-page'
 
 export type RouterContext = { queryClient: QueryClient }
 
@@ -38,12 +40,23 @@ export const loginRoute = createRoute({
 // The pathless app route requires a session: AppLayout checks WhoAmI.
 const appRoute = createRoute({ getParentRoute: () => rootRoute, id: 'app', component: AppLayout })
 
-export const boardRoute = createRoute({ getParentRoute: () => appRoute, path: '/', component: BoardPage })
+export const inboxRoute = createRoute({ getParentRoute: () => appRoute, path: '/', component: InboxPage })
 
-export const ticketRoute = createRoute({
+export const boardRoute = createRoute({ getParentRoute: () => appRoute, path: '/board', component: BoardPage })
+
+export const taskRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/tasks/$taskId',
+  component: TaskPage,
+})
+
+// Tickets became tasks with the same ids (ADR 0065): old links keep working.
+export const ticketRedirectRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/tickets/$ticketId',
-  component: TicketPage,
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/tasks/$taskId', params: { taskId: params.ticketId }, replace: true })
+  },
 })
 
 export const approvalRoute = createRoute({ getParentRoute: () => appRoute, path: '/approvals/$approvalId', component: ApprovalPage })
@@ -58,6 +71,11 @@ export const newGitHubConnectionRoute = createRoute({
   path: '/connections/new/github',
   component: NewGitHubConnectionPage,
 })
+export const newGiteaConnectionRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/connections/new/gitea',
+  component: NewGiteaConnectionPage,
+})
 export const connectionRoute = createRoute({ getParentRoute: () => appRoute, path: '/connections/$connectionId', component: ConnectionPage })
 
 export const providersRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings/providers', component: ProvidersPage })
@@ -70,14 +88,17 @@ export const tokensRoute = createRoute({ getParentRoute: () => appRoute, path: '
 const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
+    inboxRoute,
     boardRoute,
-    ticketRoute,
+    taskRoute,
+    ticketRedirectRoute,
     approvalRoute,
     agentsRoute,
     newAgentRoute,
     agentRoute,
     connectionsRoute,
     newGitHubConnectionRoute,
+    newGiteaConnectionRoute,
     connectionRoute,
     providersRoute,
     serversRoute,

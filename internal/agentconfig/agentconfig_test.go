@@ -3,6 +3,8 @@
 package agentconfig_test
 
 import (
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -39,6 +41,35 @@ var _ = Describe("Harness settings", func() {
 	})
 })
 
+var _ = Describe("IsEphemeral", func() {
+	It("is off by default, including for a config stored before it existed", func() {
+		cfg, err := agentconfig.Parse([]byte(`{"instructions":"x"}`))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(agentconfig.IsEphemeral(cfg)).To(BeFalse())
+		raw, err := agentconfig.FromTemplate(&templates.Template{}, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).NotTo(ContainSubstring("ephemeral"))
+	})
+
+	It("follows the template and survives storage", func() {
+		t := &templates.Template{Spec: templates.Spec{Ephemeral: true}}
+		raw, err := agentconfig.FromTemplate(t, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(ContainSubstring(`"ephemeral":true`))
+		cfg, err := agentconfig.Parse(raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(agentconfig.IsEphemeral(cfg)).To(BeTrue())
+	})
+
+	It("is on for no shipped template", func() {
+		ts, err := templates.All()
+		Expect(err).NotTo(HaveOccurred())
+		for _, t := range ts {
+			Expect(agentconfig.IsEphemeral(agentconfig.FromTemplate(t, t.Hash))).To(BeFalse(), t.Metadata.ID)
+		}
+	})
+})
+
 var _ = Describe("Parse", func() {
 	It("reads back what FromTemplate writes, with the model as a plain string", func() {
 		t := &templates.Template{Spec: templates.Spec{Instructions: "help", Model: templates.Model{Name: "fake/model-1"}}}
@@ -58,5 +89,34 @@ var _ = Describe("Parse", func() {
 	It("rejects a model that is not a string", func() {
 		_, err := agentconfig.Parse([]byte(`{"model":{"name":"fake/model-1"}}`))
 		Expect(err).To(MatchError(ContainSubstring("decode agent config")))
+	})
+})
+
+var _ = Describe("QuestionTimers", func() {
+	It("defaults to a reminder after 24 hours and expiry after 7 days", func() {
+		r, e := agentconfig.Config{}.QuestionTimers()
+		Expect(r).To(Equal(24 * time.Hour))
+		Expect(e).To(Equal(7 * 24 * time.Hour))
+	})
+
+	It("follows the template, survives storage, and fills in what is unset", func() {
+		t := &templates.Template{Spec: templates.Spec{Questions: templates.QuestionTimers{
+			ReminderAfter: templates.Duration{Duration: 2 * time.Hour},
+		}}}
+		raw, err := agentconfig.FromTemplate(t, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(ContainSubstring(`"questions":{"reminderAfter":"2h0m0s"}`))
+		cfg, err := agentconfig.Parse(raw)
+		Expect(err).NotTo(HaveOccurred())
+		r, e := cfg.QuestionTimers()
+		Expect(r).To(Equal(2 * time.Hour))
+		Expect(e).To(Equal(7 * 24 * time.Hour))
+	})
+
+	It("drops a reminder that would not come before the expiry", func() {
+		cfg := agentconfig.Config{Questions: templates.QuestionTimers{ExpireAfter: templates.Duration{Duration: 6 * time.Hour}}}
+		r, e := cfg.QuestionTimers()
+		Expect(r).To(BeZero())
+		Expect(e).To(Equal(6 * time.Hour))
 	})
 })

@@ -37,5 +37,5 @@ export function costDetail(c: Cost): string {
   const tokens = `${c.inputTokens} input and ${c.outputTokens} output tokens`
   const base = c.priced ? `${requests}, ${tokens}` : `${requests}, ${tokens}; some requests had no price`
   if (c.estimatedRequests <= 0n) return base
-  return `${base}. ${estimateNote(c)}: the provider did not report their usage, so Koinon estimated it from the size of the request. Estimates count toward budgets and tend to run high.`
+  return `${base}. ${estimateNote(c)}: the provider did not report their usage, so Koinon estimated it from the size of the request, and replaces the estimate with the provider's own figure when the provider reports one. Estimates count toward budgets.`
 }

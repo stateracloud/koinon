@@ -34,6 +34,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -49,6 +50,8 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // Backend is the part of [execution.Backend] agentd uses. agentd only execs: sandbox state
@@ -56,12 +59,18 @@ import (
 // stops sandboxes.
 type Backend interface {
 	Exec(ctx context.Context, workspace, sandbox string, req execution.ExecRequest) (execution.Process, error)
+	// Upload extracts a tar stream into a directory of the sandbox through the execution layer's
+	// flow-controlled upload channel (the home restore, ADR 0032).
+	Upload(ctx context.Context, workspace, sandbox, destDir string, tar io.Reader) error
 }
 
 var _ Backend = execution.Backend(nil)
 
 // Config configures a [Pool]. Zero durations and counts take the defaults below.
 type Config struct {
+	// Prices finds the price of each model a run uses; required
+	// (prices.NewResolver).
+	Prices prices.Resolver
 	// OwnerID names this replica, for example the pod name. Workers own runs as
 	// "<OwnerID>/<n>".
 	OwnerID string
@@ -81,6 +90,11 @@ type Config struct {
 	SandboxTimeout time.Duration
 	// Now defaults to time.Now; tests move it forward to pass SandboxTimeout.
 	Now func() time.Time
+	// ModelServeTimeout bounds the wait, before a run starts its harness, for the gateway to serve
+	// the run's model (a new provider's key file is still reaching the gateway, issue #174). A run
+	// whose model is not served in time fails with a reason that names the provider. Default
+	// DefaultModelServeTimeout.
+	ModelServeTimeout time.Duration
 	// ReconcileNudge is how often a worker waiting for a sandbox NOTIFYs the reconciler.
 	// Default 5s.
 	ReconcileNudge time.Duration
@@ -115,6 +129,9 @@ type Config struct {
 	// ModelRetries is how often a turn is repeated after a transient or throttled model
 	// error (ADR 0030, failure classes) before the run fails. Default 3.
 	ModelRetries int
+	// MaxRefusedTurns is how often a run continues a turn the harness cancelled after agentd
+	// refused a permission request (refusal.go) before it fails. Default 5.
+	MaxRefusedTurns int
 	// RetryBackoff is the first wait before a transient retry; it doubles per retry up to a
 	// minute. Default 2s.
 	RetryBackoff time.Duration
@@ -137,6 +154,8 @@ type Config struct {
 	// stops, as if the process had been killed. By default they are released so another
 	// replica resumes at once. Tests set it to emulate a killed pod.
 	KeepLeaseOnShutdown bool
+	// Checkpoints turns on home checkpoints (checkpoint.go); nil leaves them off.
+	Checkpoints *Checkpoints
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pool's metrics; nil keeps them unexported.
@@ -167,11 +186,13 @@ func (c *Config) defaults() error {
 		c.Now = time.Now
 	}
 	setDefault(&c.ReconcileNudge, 5*time.Second)
+	setDefault(&c.ModelServeTimeout, DefaultModelServeTimeout)
 	setDefault(&c.CancelGrace, 10*time.Second)
 	setDefault(&c.ReadyTimeout, time.Minute)
 	setDefault(&c.ReadySettle, time.Second)
 	setDefault(&c.MaxTakeovers, 5)
 	setDefault(&c.ModelRetries, 3)
+	setDefault(&c.MaxRefusedTurns, 5)
 	setDefault(&c.RetryBackoff, 2*time.Second)
 	setDefault(&c.MaxRetryAfter, 5*time.Minute)
 	setDefault(&c.SummaryTimeout, defaultSummaryWait)
@@ -185,8 +206,17 @@ func (c *Config) defaults() error {
 	if c.Lease < time.Second {
 		return errors.New("agentd: Lease must be at least 1s")
 	}
+	if c.Prices.IsZero() {
+		return errors.New("agentd: Prices is required (prices.NewResolver)")
+	}
 	if c.Permissions == nil {
 		c.Permissions = DefaultPermissions()
+	}
+	if c.Checkpoints != nil {
+		if c.Checkpoints.Store == nil || c.Checkpoints.Repositories == nil {
+			return errors.New("agentd: Checkpoints needs a Store and Repositories")
+		}
+		c.Checkpoints.defaults()
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
@@ -230,6 +260,9 @@ func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 // Run drives runs until ctx ends, then waits for the workers to stop.
 func (p *Pool) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
+	if p.cfg.Checkpoints != nil {
+		wg.Go(func() { p.checkpointLoop(ctx) })
+	}
 	for i := range p.cfg.Workers {
 		wg.Go(func() { p.work(ctx, p.cfg.OwnerID+"/"+strconv.Itoa(i)) })
 	}
@@ -240,16 +273,24 @@ func (p *Pool) Run(ctx context.Context) error {
 func (p *Pool) work(ctx context.Context, owner string) {
 	log := p.log.With("owner", owner)
 	for ctx.Err() == nil {
-		run, ok, err := p.claim(ctx, owner)
-		if err != nil && ctx.Err() == nil {
-			log.Warn("claiming a run failed", "err", err)
+		// One iteration at a time, so a panic in a run is logged and the worker goes on: the run's
+		// lease expires and another worker takes it over (bounded by MaxTakeovers).
+		panicked := safego.Do(log, "agentd-worker", func() {
+			run, ok, err := p.claim(ctx, owner)
+			if err != nil && ctx.Err() == nil {
+				log.Warn("claiming a run failed", "err", err)
+			}
+			if !ok {
+				// Jitter keeps idle workers of all replicas from polling in step.
+				sleep(ctx, p.cfg.Poll/2+rand.N(p.cfg.Poll)) //nolint:gosec // jitter, not security
+				return
+			}
+			p.drive(ctx, run, log)
+		})
+		if panicked {
+			// Back off after a panic, so a bad row does not spin the worker and flood the log.
+			sleep(ctx, p.cfg.Poll)
 		}
-		if !ok {
-			// Jitter keeps idle workers of all replicas from polling in step.
-			sleep(ctx, p.cfg.Poll/2+rand.N(p.cfg.Poll)) //nolint:gosec // jitter, not security
-			continue
-		}
-		p.drive(ctx, run, log)
 	}
 }
 
@@ -265,7 +306,7 @@ func (p *Pool) claim(ctx context.Context, owner string) (store.Run, bool, error)
 	if len(orgs) > 0 {
 		off = rand.N(len(orgs)) //nolint:gosec // fairness, not security
 	}
-	lease := int32(p.cfg.Lease.Seconds()) //nolint:gosec // bounded by configuration
+	lease := int32(p.cfg.Lease.Seconds())
 	var firstErr error
 	for i := range orgs {
 		org := orgs[(off+i)%len(orgs)]

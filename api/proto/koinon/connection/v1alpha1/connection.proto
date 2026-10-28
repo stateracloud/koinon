@@ -24,6 +24,11 @@ service ConnectionService {
   // is stored encrypted and never returned. Admins and owners.
   rpc CreateGitHubConnection(CreateGitHubConnectionRequest) returns (CreateGitHubConnectionResponse);
 
+  // CreateGiteaConnection creates a Gitea connection: a bot account on a Gitea server with a read
+  // token and a write token (ADR 0063). Both tokens are stored encrypted and never returned.
+  // Admins and owners.
+  rpc CreateGiteaConnection(CreateGiteaConnectionRequest) returns (CreateGiteaConnectionResponse);
+
   // GetConnection returns one connection. Viewers and above.
   rpc GetConnection(GetConnectionRequest) returns (GetConnectionResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
@@ -119,6 +124,34 @@ message GitHubConnection {
   // SHA-256 fingerprint of the private key's public half, as GitHub shows it
   // under the App's private keys.
   string key_fingerprint = 3;
+  // The host's web base URL when it is not github.com (GitHub Enterprise
+  // Server), https://host[:port]; empty for github.com.
+  string base_url = 4;
+  // PEM certificates trusted for that host besides the system roots. Public;
+  // empty when the host's certificate chains to the system roots.
+  string ca_bundle = 5;
+  // Directories, relative to the repository root, that run CI on this host besides the
+  // connector's own CI paths (a Gitea server's WORKFLOW_DIRS). create_pull_request refuses
+  // changes to them.
+  repeated string ci_dirs = 6;
+}
+
+// GiteaConnection is the non-secret part of a Gitea connection (ADR 0063).
+message GiteaConnection {
+  // The server's web base URL, https://host[:port][/path]; the REST API is at /api/v1 under it.
+  string base_url = 1;
+  // PEM certificates trusted for that server besides the system roots. Public.
+  string ca_bundle = 2;
+  // Directories, relative to the repository root, that run CI on this server besides the
+  // connector's own CI paths (WORKFLOW_DIRS).
+  repeated string ci_dirs = 3;
+  // When each token was entered in Koinon. Gitea does not expose a token's creation date, so
+  // this is the age Koinon can show (ADR 0063).
+  google.protobuf.Timestamp read_token_set_at = 4;
+  google.protobuf.Timestamp write_token_set_at = 5;
+  // The age after which Koinon warns that a token is old, from the connector type. Nothing
+  // blocks on age and Koinon never rotates a token. Zero for no warning.
+  int64 token_warn_after_seconds = 6;
 }
 
 // Connection is a configured connector instance.
@@ -143,6 +176,7 @@ message Connection {
 
   oneof settings {
     GitHubConnection github = 10;
+    GiteaConnection gitea = 14;
   }
 }
 
@@ -157,11 +191,44 @@ message CreateGitHubConnectionRequest {
   string private_key = 5 [debug_redact = true];
   // Run TestConnection right after creating it.
   bool test = 6;
+  // Web base URL of a GitHub Enterprise Server host, https://host[:port]. Empty
+  // is github.com. The REST API is reached at /api/v3 on the same host.
+  string base_url = 7;
+  // PEM certificates that sign the host's TLS certificate, when the system
+  // roots do not. Used for Koinon's API calls and for git in sandboxes.
+  string ca_bundle = 8;
+  // Directories that run CI on this host besides the connector's own CI paths, relative to the
+  // repository root. Optional; at most 20.
+  repeated string ci_dirs = 9;
 }
 
 // CreateGitHubConnectionResponse holds the new connection and, when asked
 // for, the test results.
 message CreateGitHubConnectionResponse {
+  Connection connection = 1;
+  repeated CheckResult results = 2;
+}
+
+// CreateGiteaConnectionRequest carries the setup guide's fields.
+message CreateGiteaConnectionRequest {
+  string org_id = 1;
+  string display_name = 2;
+  // The server's web base URL, https://host[:port][/path]. Required.
+  string base_url = 3;
+  // Secure input (ADR 0021): the bot's read token and write token. Stored only as an envelope in
+  // Postgres (ADR 0056), never returned or logged.
+  string read_token = 4 [debug_redact = true];
+  string write_token = 5 [debug_redact = true];
+  // PEM certificates that sign the server's TLS certificate, when the system roots do not.
+  string ca_bundle = 6;
+  // Directories that run CI on this server besides the connector's own CI paths. At most 20.
+  repeated string ci_dirs = 7;
+  // Run TestConnection right after creating it.
+  bool test = 8;
+}
+
+// CreateGiteaConnectionResponse holds the new connection and, when asked for, the test results.
+message CreateGiteaConnectionResponse {
   Connection connection = 1;
   repeated CheckResult results = 2;
 }

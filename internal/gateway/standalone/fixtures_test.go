@@ -7,6 +7,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 var (
@@ -33,14 +34,14 @@ func fixtures() []fixture {
 				Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
 				APIKeyFile: "/secrets/upstream/api_key",
 				Models: []gateway.Model{
-					{Name: "deepseek/deepseek-v4.1-flash", Guard: true, Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006"}},
-					{Name: "open/model", Price: &gateway.Price{Input: "1", Output: "2"}},
-					{Name: "unpriced/model"},
+					{Name: "deepseek/deepseek-v4.1-flash", Format: modelformat.OpenAI, Guard: true, Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006"}},
+					{Name: "open/model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "2"}},
+					{Name: "unpriced/model", Format: modelformat.OpenAI},
 				},
 			},
 			{
 				Org: "globex", Name: "local", Type: "ollama", BaseURL: "http://ollama.globex.internal:11434/v1",
-				Models: []gateway.Model{{Name: "deepseek/deepseek-v4.1-flash", Price: &gateway.Price{Input: "0", Output: "0"}}},
+				Models: []gateway.Model{{Name: "deepseek/deepseek-v4.1-flash", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0", Output: "0"}}},
 			},
 		},
 		MCP: []gateway.MCPTarget{
@@ -51,7 +52,7 @@ func fixtures() []fixture {
 	full.AddKey(fixedKey("k-bbbbbbbbbbbb", agentB, "test-b"))
 	full.AddKey(fixedKey("k-gggggggggggg", agentG, "test-g"))
 	full.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
-	full.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 4.25, Window: 24 * time.Hour, Generation: "1792627200-750000000"})
+	full.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 4.25, Generation: "1792627200-750000000"})
 	full.SetLimit(agentB, &gateway.Limit{Unit: gateway.Tokens, Amount: 200000, Window: 30 * 24 * time.Hour})
 	full.GrantTools(agentA,
 		gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}},
@@ -61,7 +62,7 @@ func fixtures() []fixture {
 	modelsOnly := gateway.State{Providers: []gateway.Provider{{
 		Org: "acme", Name: "ollama", Type: "ollama",
 		BaseURL: "http://ollama.example.internal:11434/v1",
-		Models:  []gateway.Model{{Name: "qwen3.5:4b", Price: &gateway.Price{Input: "0", Output: "0"}}},
+		Models:  []gateway.Model{{Name: "qwen3.5:4b", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0", Output: "0"}}},
 	}}}
 	modelsOnly.AddKey(fixedKey("k-cccccccccccc", agentA, "test-c"))
 
@@ -84,6 +85,21 @@ func fixtures() []fixture {
 	)
 	mcpServers.GrantTools(agentG, gateway.ToolGrant{Target: "globex-search", Tools: []string{"query"}})
 
+	// ADR 0069: one org with a model of each format, the Anthropic one on a workspace-scoped provider.
+	formats := gateway.State{Providers: []gateway.Provider{
+		{
+			Org: "acme", Name: "claude", Type: "anthropic", BaseURL: "https://api.anthropic.com/v1",
+			APIKeyFile: "/secrets/upstream/api_key", AnthropicWorkspaceID: "wrkspc_01ExampleExample",
+			Models: []gateway.Model{{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}}},
+		},
+		{
+			Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
+			APIKeyFile: "/secrets/upstream/api_key",
+			Models:     []gateway.Model{{Name: "open/model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "2"}}},
+		},
+	}}
+	formats.AddKey(fixedKey("k-eeeeeeeeeeee", agentA, "test-e"))
+
 	return []fixture{
 		{name: "empty", state: gateway.State{}},
 		{name: "models-only", state: modelsOnly, options: standalone.Options{Port: 8080}},
@@ -93,5 +109,6 @@ func fixtures() []fixture {
 		}},
 		{name: "mcp-no-grants", state: mcpNoGrants},
 		{name: "mcp-servers", state: mcpServers},
+		{name: "model-formats", state: formats},
 	}
 }

@@ -38,25 +38,31 @@ func TestBytesRatioAndOverheads(t *testing.T) {
 	}
 }
 
-func TestAbortSettlesAtMaxTokensWhetherOrNotThinkingIsHidden(t *testing.T) {
+func TestAbortChargesNoUnreportedOutputAndReservesMaxTokens(t *testing.T) {
 	for _, hidden := range []bool{true, false} {
 		p := estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 2.3, HiddenThinking: hidden, MaxOutput: 128000}
-		r := estimate.Estimate(p, estimate.Input{RequestBytes: 230, ResponseBytes: 10, Aborted: true, MaxTokens: 8000})
-		if !r.Estimated || r.OutputTokens != 8000 || r.Method != "max_tokens" || r.ThinkingUnmeasured != hidden || r.MaxOutputFallback {
+		r := estimate.Estimate(p, estimate.Input{RequestBytes: 46, Aborted: true, MaxTokens: 8000})
+		if !r.Estimated || r.InputTokens != 20 || r.OutputTokens != 0 || r.ReserveOutputTokens != 8000 ||
+			r.Method != "partial" || r.ThinkingUnmeasured != hidden || r.MaxOutputFallback {
 			t.Fatalf("hidden=%v %+v", hidden, r)
 		}
 	}
-}
-
-func TestAbortWithoutMaxTokensUsesTheEntrysMaxOutputAndFlagsIt(t *testing.T) {
-	p := estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 2.3, MaxOutput: 128000}
-	r := estimate.Estimate(p, estimate.Input{RequestBytes: 230, Aborted: true})
-	if r.OutputTokens != 128000 || !r.MaxOutputFallback || r.Method != "max_output" || !r.Estimated {
+	// Input the gateway did log (partial usage) is used as reported.
+	r := estimate.Estimate(estimate.Params{Ratio: 2.3, MaxOutput: 128000}, estimate.Input{ReportedInput: ptr(1000), Aborted: true, MaxTokens: 8000})
+	if r.InputTokens != 1000 || !r.InputReported || r.OutputTokens != 0 || r.ReserveOutputTokens != 8000 {
 		t.Fatalf("%+v", r)
 	}
-	// A response that completed without usage is estimated from its bytes.
+}
+
+func TestAbortWithoutMaxTokensReservesTheEntrysMaxOutputAndFlagsIt(t *testing.T) {
+	p := estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 2.3, MaxOutput: 128000}
+	r := estimate.Estimate(p, estimate.Input{RequestBytes: 230, Aborted: true})
+	if r.OutputTokens != 0 || r.ReserveOutputTokens != 128000 || !r.MaxOutputFallback || r.Method != "partial" || !r.Estimated {
+		t.Fatalf("%+v", r)
+	}
+	// A response that completed without usage is estimated from its bytes and reserves nothing.
 	r = estimate.Estimate(p, estimate.Input{RequestBytes: 230, ResponseBytes: 229})
-	if r.OutputTokens != 100 || r.MaxOutputFallback {
+	if r.OutputTokens != 100 || r.ReserveOutputTokens != 0 || r.MaxOutputFallback {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -90,16 +96,16 @@ func TestTiktokenOfflineAndExact(t *testing.T) {
 func TestAbsurdMaxTokensIsCapped(t *testing.T) {
 	p := estimate.Params{Tokenizer: pricing.TokenizerBytes, Ratio: 3, MaxOutput: 128000}
 	r := estimate.Estimate(p, estimate.Input{Aborted: true, MaxTokens: 9_000_000_000_000})
-	if r.OutputTokens != 128000 || !r.MaxOutputCapped {
+	if r.ReserveOutputTokens != 128000 || !r.MaxOutputCapped {
 		t.Fatalf("%+v", r)
 	}
 	// Without a max_output the hard ceiling applies.
 	r = estimate.Estimate(estimate.Params{Ratio: 3}, estimate.Input{Aborted: true, MaxTokens: 9_000_000_000_000})
-	if r.OutputTokens != estimate.HardMaxOutput {
+	if r.ReserveOutputTokens != estimate.HardMaxOutput {
 		t.Fatalf("%+v", r)
 	}
 	r = estimate.Estimate(estimate.Params{Ratio: 3}, estimate.Input{RequestBytes: 1 << 60, Aborted: true, MaxTokens: 5})
-	if r.InputTokens != estimate.HardMaxInput || r.OutputTokens != 5 {
+	if r.InputTokens != estimate.HardMaxInput || r.OutputTokens != 0 || r.ReserveOutputTokens != 5 {
 		t.Fatalf("%+v", r)
 	}
 }

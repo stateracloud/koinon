@@ -21,8 +21,8 @@ import (
 	"github.com/stateracloud/koinon/internal/gen/koinon/auth/v1alpha1/authv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/connection/v1alpha1/connectionv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1/runv1alpha1connect"
+	"github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1/taskv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1/templatev1alpha1connect"
-	"github.com/stateracloud/koinon/internal/gen/koinon/ticket/v1alpha1/ticketv1alpha1connect"
 	"github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1/tokenv1alpha1connect"
 )
 
@@ -64,7 +64,7 @@ type client struct {
 	connections connectionv1alpha1connect.ConnectionServiceClient
 	templates   templatev1alpha1connect.TemplateServiceClient
 	agents      agentv1alpha1connect.AgentServiceClient
-	tickets     ticketv1alpha1connect.TicketServiceClient
+	tasks       taskv1alpha1connect.TaskServiceClient
 	runs        runv1alpha1connect.RunServiceClient
 	approvals   approvalv1alpha1connect.ApprovalServiceClient
 	tokens      tokenv1alpha1connect.TokenServiceClient
@@ -80,7 +80,7 @@ func newClient(base string) *client {
 		connections: connectionv1alpha1connect.NewConnectionServiceClient(c),
 		templates:   templatev1alpha1connect.NewTemplateServiceClient(c),
 		agents:      agentv1alpha1connect.NewAgentServiceClient(c),
-		tickets:     ticketv1alpha1connect.NewTicketServiceClient(c),
+		tasks:       taskv1alpha1connect.NewTaskServiceClient(c),
 		runs:        runv1alpha1connect.NewRunServiceClient(c),
 		approvals:   approvalv1alpha1connect.NewApprovalServiceClient(c),
 		tokens:      tokenv1alpha1connect.NewTokenServiceClient(c),

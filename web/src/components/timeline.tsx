@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from 'react'
-import { ActorKind } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
+import { ActorKind } from '@/gen/koinon/task/v1alpha1/task_pb'
 import type { TimelineItem } from '@/lib/timeline'
 import { cn } from '@/lib/utils'
 
@@ -26,7 +26,7 @@ export type TimelineProps = {
   renderApproval?: (approvalId: string) => ReactNode
 }
 
-/** Timeline renders a ticket's conversation and run activity in one list. */
+/** Timeline renders a task's conversation and run activity in one list. */
 export function Timeline({ items, renderApproval }: TimelineProps) {
   if (items.length === 0) return <p className="text-muted-foreground text-sm">No activity yet.</p>
   return (

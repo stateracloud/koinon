@@ -11,10 +11,14 @@
 //     Opus 4.7: 3.0, Opus 4.7 and later: 2.3, others 3.0), plus fixed overheads for tool
 //     definitions, images and PDF pages. Nobody ships an exact offline tokenizer for current
 //     Claude models, and the tokenizers that exist undercount them, so none is used for Claude.
-//  3. An aborted response without usage settles its output at the request's max_tokens, marked
-//     estimated, whether or not the model bills hidden thinking (visible text cannot measure
-//     thinking, and partial text would undercount). When max_tokens was not logged (OpenAI's
-//     max_completion_tokens), the price entry's max_output stands in and the entry is flagged
+//  3. An aborted response without usage (a stream cut short) is charged the usage the gateway
+//     logged before the cut and nothing more, never its max_tokens (ADR 0056, amendment
+//     2026-10-28): agentgateway 1.7 logs the usage it saw, which for an OpenAI chat-completion
+//     stream is none, so the input is estimated as in 2 and the output is zero. The request's
+//     max_tokens is the bound the gateway key holds back while the provider's own figure is
+//     pending ([Result.ReserveOutputTokens]): the provider may bill tokens it generated but did not
+//     stream, and hidden thinking. When max_tokens was not logged (OpenAI's
+//     max_completion_tokens), the price entry's max_output stands in and the result is flagged
 //     MaxOutputFallback.
 //  4. For OpenAI-family models, [CountTiktoken] counts text exactly with the offline encoding
 //     (BPE files compiled into the binary, github.com/pkoukk/tiktoken-go-loader, MIT; nothing is
@@ -81,18 +85,22 @@ type Result struct {
 	Estimated                     bool
 	InputReported, OutputReported bool
 	ThinkingUnmeasured            bool
-	// MaxOutputFallback is set when output was settled at the entry's max_output because the
-	// request's max_tokens was not logged.
+	// ReserveOutputTokens is, for an aborted response, the most output it can be billed for: the
+	// request's max_tokens, capped at the entry's max_output. It is what the gateway key holds back
+	// while the provider's own usage is pending; it is never the charge. Zero for any other response.
+	ReserveOutputTokens int64
+	// MaxOutputFallback is set when the reserve is the entry's max_output because the request's
+	// max_tokens was not logged.
 	MaxOutputFallback bool
 	// MaxOutputCapped is set when the request's max_tokens exceeded the entry's max_output.
 	MaxOutputCapped             bool
-	Method                      string // reported, bytes, max_tokens, max_output
+	Method                      string // reported, bytes, partial
 	RatioStatic, RatioEffective float64
 	LearnedP90TokensPerByte     float64
 	OverheadTokens              int64
 }
 
-// HardMaxOutput bounds what an aborted response can be settled at when neither the request's
+// HardMaxOutput bounds the reserve of an aborted response when neither the request's
 // max_tokens nor the entry's max_output limits it (1M tokens), and HardMaxInput bounds an input
 // estimated from bytes. A request that claims max_tokens of 9e12 must not record a huge entry.
 const (
@@ -162,6 +170,20 @@ func CountTiktoken(encodingName, text string) (int64, error) {
 	return int64(len(e.EncodeOrdinary(text))), nil
 }
 
+// ReserveOutput is the most output a response cut short can be billed for: the request's
+// maxTokens, capped at the entry's maxOutput (or HardMaxOutput when the entry has none). fallback
+// is set when maxTokens is unknown and the cap stands in; capped when maxTokens exceeded the cap.
+func ReserveOutput(maxOutput, maxTokens int64) (tokens int64, fallback, capped bool) {
+	bound := int64(HardMaxOutput)
+	if maxOutput > 0 {
+		bound = min(bound, maxOutput)
+	}
+	if maxTokens <= 0 {
+		return bound, true, false
+	}
+	return min(maxTokens, bound), false, maxTokens > bound
+}
+
 // Estimate fills in whatever in is missing.
 func Estimate(p Params, in Input) Result {
 	res := Result{RatioStatic: p.Ratio, RatioEffective: p.EffectiveRatio(), LearnedP90TokensPerByte: p.LearnedP90, Method: "reported"}
@@ -186,20 +208,13 @@ func Estimate(p Params, in Input) Result {
 	case in.Rejected:
 		res.Estimated, res.Method = true, "bytes"
 	case in.Aborted:
-		// Settle at the request's max_tokens, but never above the entry's max_output (or the hard
-		// ceiling when the entry has none): a lenient upstream answers a huge max_tokens with 2xx.
-		bound := int64(HardMaxOutput)
-		if p.MaxOutput > 0 {
-			bound = min(bound, p.MaxOutput)
-		}
-		res.Estimated, res.Method = true, "max_tokens"
-		res.OutputTokens = bound
-		if in.MaxTokens > 0 {
-			res.OutputTokens = min(in.MaxTokens, bound)
-			res.MaxOutputCapped = in.MaxTokens > bound
-		} else {
-			res.MaxOutputFallback, res.Method = true, "max_output"
-		}
+		// Charge what was reported. Reserve up to the request's max_tokens, but never above the
+		// entry's max_output (or the hard ceiling when the entry has none): a lenient upstream
+		// answers a huge max_tokens with 2xx.
+		res.Estimated, res.Method = true, "partial"
+		res.ReserveOutputTokens, res.MaxOutputFallback, res.MaxOutputCapped = ReserveOutput(p.MaxOutput, in.MaxTokens)
+		// No output was reported (ReportedOutput is nil here): none is charged.
+		res.OutputTokens = 0
 		res.ThinkingUnmeasured = p.HiddenThinking
 	default:
 		res.OutputTokens, res.Estimated = p.Tokens(in.ResponseBytes), true

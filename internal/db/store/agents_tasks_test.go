@@ -73,7 +73,9 @@ var _ = Describe("agents", func() {
 		Expect(a.ActiveVersionID).To(Equal(v2.ID))
 
 		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: a.ID, VersionID: v1.ID})
-		Expect(err).To(MatchError(pgx.ErrNoRows), "only drafts are activated")
+		Expect(err).To(MatchError(pgx.ErrNoRows), "an active agent only moves to a newer version")
+		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: a.ID, VersionID: v2.ID})
+		Expect(err).To(MatchError(pgx.ErrNoRows), "a duplicate activation of the running version gets no row")
 
 		a, err = q.ReturnAgentToDraft(ctx, store.ReturnAgentToDraftParams{OrgID: org, ID: a.ID})
 		Expect(err).NotTo(HaveOccurred())

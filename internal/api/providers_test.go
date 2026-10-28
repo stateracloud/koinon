@@ -24,10 +24,25 @@ var _ = Describe("ProviderService", func() {
 		org, owner = e.newTeamOrg(ctx)
 	})
 
-	rates := &providerv1alpha1.Rates{Input: "0.30", Output: "1.20"} //nolint:staticcheck // deprecated, only to test that it is refused
+	rates := &providerv1alpha1.Rates{Input: "0.30", Output: "1.20"}
 	create := func(ctx SpecContext, c *client, name, typ, url, key string) (*providerv1alpha1.CreateProviderResponse, error) {
 		return c.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{OrgId: org, Name: name, Type: typ, Url: url, ApiKey: key})
 	}
+
+	It("warns when a new model has a cache_read price but no prompt-cache mode (ADR 0068)", func(ctx SpecContext) {
+		prov, err := create(ctx, owner, "warned", "openrouter", "https://openrouter.ai/api/v1", "")
+		Expect(err).NotTo(HaveOccurred())
+		pid := prov.GetProvider().GetId()
+		_, err = e.pool.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by)
+			VALUES ($1, 'gem', '{"provider":"openrouter","match":{"glob":"google/*"},"validFrom":"2020-01-01","prices":{"input":"1","output":"2","cacheRead":"0.1"},"tokenizer":"bytes","ratio":"3.0","maxOutput":10}', now() - interval '1 hour', 'test')`, org)
+		Expect(err).NotTo(HaveOccurred())
+		mod, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "google/gemini-x"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(mod.GetWarnings()).To(ConsistOf(And(ContainSubstring("google/gemini-x"), ContainSubstring("without caching"))))
+		other, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: pid, Name: "anthropic/claude-haiku-5.5"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(other.GetWarnings()).To(BeEmpty())
+	})
 
 	It("is for admins and owners only, on all eight RPCs", func(ctx SpecContext) {
 		prov, err := create(ctx, owner, "existing", "openrouter", "https://openrouter.ai/api/v1", "")
@@ -129,6 +144,95 @@ var _ = Describe("ProviderService", func() {
 		var leaked int
 		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND summary::text LIKE '%sk-or-%'`, org).Scan(&leaked)).To(Succeed())
 		Expect(leaked).To(BeZero())
+	})
+
+	It("sets, defaults, overrides and validates a model's format (ADR 0069)", func(ctx SpecContext) {
+		or, err := create(ctx, owner, "openrouter", "openrouter", "https://openrouter.ai/api/v1", "k")
+		Expect(err).NotTo(HaveOccurred())
+		oa, err := create(ctx, owner, "openai", "openai", "https://api.openai.com/v1", "k")
+		Expect(err).NotTo(HaveOccurred())
+		ids := func(fs []*providerv1alpha1.ModelFormat) (out []string) {
+			for _, f := range fs {
+				Expect(f.GetLabel()).NotTo(BeEmpty())
+				out = append(out, f.GetId())
+			}
+			return out
+		}
+		Expect(ids(or.GetProvider().GetFormats())).To(Equal([]string{"openai", "anthropic"}))
+		Expect(ids(oa.GetProvider().GetFormats())).To(Equal([]string{"openai"}))
+		Expect(or.GetProvider().GetFormats()[1].GetLabel()).To(Equal("Anthropic Messages"))
+		orID, oaID := or.GetProvider().GetId(), oa.GetProvider().GetId()
+
+		// The default follows the table; OpenRouter anthropic/* stays on openai until the flip.
+		m, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: orID, Name: "anthropic/claude-haiku-5.5"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(m.GetModel().GetFormat()).To(Equal("openai"))
+		Expect(m.GetModel().GetFormatOverridden()).To(BeFalse())
+
+		fm, err := owner.providers.ModelFormats(ctx, &providerv1alpha1.ModelFormatsRequest{OrgId: org, ProviderId: orID, Name: "claude-haiku"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fm.GetDefaultFormat()).To(Equal("openai"), "OpenRouter claude-* is pinned to openai until the flip")
+		ti, err := owner.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "anthropic"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ti.GetTakesWorkspaceId()).To(BeTrue())
+		Expect(ti.GetFormats()).To(HaveLen(1))
+		ti, err = owner.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "openrouter"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ti.GetTakesWorkspaceId()).To(BeFalse())
+		Expect(ti.GetFormats()).To(HaveLen(2))
+
+		// An override within what the provider offers is stored and marked.
+		upd, err := owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), Format: new("anthropic")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(upd.GetModel().GetFormat()).To(Equal("anthropic"))
+		Expect(upd.GetModel().GetFormatOverridden()).To(BeTrue())
+		// An empty format goes back to the default.
+		upd, err = owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), Format: new("")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(upd.GetModel().GetFormat()).To(Equal("openai"))
+		Expect(upd.GetModel().GetFormatOverridden()).To(BeFalse())
+
+		// Not offered, and unknown, are refused.
+		_, err = owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: oaID, Name: "gpt", Format: "anthropic"})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(err).To(MatchError(ContainSubstring("does not offer")))
+		_, err = owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: orID, Name: "gem", Format: "gemini"})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(err).To(MatchError(ContainSubstring("unknown model format")))
+	})
+
+	It("takes an Anthropic provider's workspace ID, for that type only", func(ctx SpecContext) {
+		_, err := owner.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{
+			OrgId: org, Name: "oa", Type: "openai", Url: "https://api.openai.com/v1", AnthropicWorkspaceId: "wrkspc_01Abc",
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		_, err = owner.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{
+			OrgId: org, Name: "bad", Type: "anthropic", Url: "https://api.anthropic.com/v1", AnthropicWorkspaceId: "workspace-1",
+		})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		res, err := owner.providers.CreateProvider(ctx, &providerv1alpha1.CreateProviderRequest{
+			OrgId: org, Name: "anthropic", Type: "anthropic", Url: "https://api.anthropic.com/v1", AnthropicWorkspaceId: "wrkspc_01Abc",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetProvider().GetAnthropicWorkspaceId()).To(Equal("wrkspc_01Abc"))
+		Expect(res.GetProvider().GetFormats()).To(HaveLen(1))
+		m, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: res.GetProvider().GetId(), Name: "claude-haiku-4-5"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(m.GetModel().GetFormat()).To(Equal("anthropic"))
+		// Changing the type away needs the workspace ID gone first.
+		_, err = owner.providers.UpdateProvider(ctx, &providerv1alpha1.UpdateProviderRequest{OrgId: org, ProviderId: res.GetProvider().GetId(), Type: new("openai")})
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		upd, err := owner.providers.UpdateProvider(ctx, &providerv1alpha1.UpdateProviderRequest{OrgId: org, ProviderId: res.GetProvider().GetId(), AnthropicWorkspaceId: new("")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(upd.GetProvider().GetAnthropicWorkspaceId()).To(BeEmpty())
+		// With it gone the type may change, and the model follows the new type's default.
+		upd, err = owner.providers.UpdateProvider(ctx, &providerv1alpha1.UpdateProviderRequest{OrgId: org, ProviderId: res.GetProvider().GetId(), Type: new("openai")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(upd.GetProvider().GetFormats()).To(HaveLen(1))
+		Expect(upd.GetProvider().GetFormats()[0].GetId()).To(Equal("openai"))
+		list, err := owner.providers.ListModels(ctx, &providerv1alpha1.ListModelsRequest{OrgId: org})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(list.GetModels()[0].GetFormat()).To(Equal("openai"))
 	})
 
 	It("refuses upstream addresses the policy denies, and says why", func(ctx SpecContext) {

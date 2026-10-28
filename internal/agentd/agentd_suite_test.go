@@ -29,6 +29,8 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // postgresImage is the minimum supported Postgres version (ADR 0047).
@@ -74,8 +76,6 @@ const (
 	instructions = "You help with the task."
 	// instructionsFile is what agentd writes for instructions.
 	instructionsFile = "/sandbox/.koinon/AGENTS.md"
-	// opencodeLink is the flavor's link to the instruction file.
-	opencodeLink = "/etc/koinon/opencode/AGENTS.md"
 )
 
 // env is one org with an active agent, its sandbox in a fake OpenShell gateway whose exec
@@ -87,9 +87,11 @@ type env struct {
 	gw        *fakegateway.Gateway
 	backend   *openshell.Backend
 	harness   *harness
-	workspace string
-	sandbox   string
-	files     *files
+	// backendOverride, if set, is the backend the pools use (a wrapper of backend).
+	backendOverride agentd.Backend
+	workspace       string
+	sandbox         string
+	files           *files
 }
 
 // files emulates the sandbox's files that agentd writes and reads with /bin/sh: the
@@ -114,13 +116,8 @@ type files struct {
 	procinfoRuns int
 	savework     func(dir string) (string, int)
 	saveworkRuns int
-}
-
-func (f *files) link(path string) (string, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	t, ok := f.links[path]
-	return t, ok
+	// tar answers the home checkpoint's tar execs (checkpoint_test.go); nil: no tar.
+	tar func(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 }
 
 // sweepCount is how many times agentd ran the sweep script.
@@ -171,7 +168,7 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		}
 		return 0
 	}
-	if len(args) == 5 && args[0] == "-c" && args[1] == agentd.SaveworkScript {
+	if len(args) == 6 && args[0] == "-c" && args[1] == agentd.SaveworkScript {
 		f.mu.Lock()
 		f.saveworkRuns++
 		fn := f.savework
@@ -183,11 +180,26 @@ func (f *files) sh(_ context.Context, args []string, stdin io.Reader, stdout, st
 		_, _ = io.WriteString(stdout, out)
 		return code
 	}
+	if len(args) >= 4 && args[0] == "-c" && args[2] == "tar" && f.tar != nil {
+		return f.tar(args[3:], stdin, stdout, stderr)
+	}
 	if len(args) < 4 || args[0] != "-c" {
 		_, _ = fmt.Fprintf(stderr, "unexpected sh %q", args)
 		return 2
 	}
 	in, _ := io.ReadAll(stdin)
+	if strings.Contains(args[1], "koinon-gitconfig") || strings.Contains(args[1], "koinon-gitca") {
+		// The rendered git configuration and CA file (gitconfig.go); the file is kept by path.
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		switch {
+		case strings.Contains(args[1], "mktemp"):
+			f.data[args[4]] = in
+		case len(args) == 5:
+			delete(f.data, args[4])
+		}
+		return 0
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch script := args[1]; {
@@ -259,6 +271,14 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 			finished_at = now(), ready_at = NULL, lease_expires_at = NULL, heartbeat_at = NULL
 			WHERE org_id = $1 AND state NOT IN ('succeeded', 'failed', 'canceled')`, e.org)
 		Expect(err).NotTo(HaveOccurred())
+		// Pools claim across every org in the shared database and each spec has its own fake
+		// gateway: a sandbox row left ready, or a request left open, would be worked by a later
+		// spec's pool against a gateway that lacks the sandbox and starve that spec's own.
+		_, err = db.Exec(ctx, `UPDATE agent_sandboxes SET state = 'stopped' WHERE org_id = $1 AND state = 'ready'`, e.org)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `UPDATE home_checkpoints SET status = 'failed', error = 'spec ended', finished_at = now()
+			WHERE org_id = $1 AND status IN ('requested', 'running')`, e.org)
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	agent, err := q.CreateAgent(ctx, store.CreateAgentParams{
@@ -305,9 +325,7 @@ func newEnvWith(ctx context.Context, flavor store.AgentFlavor, configFor func(*e
 		e.gw.Handle(script, e.harness.command)
 	}
 	e.gw.Handle("/bin/mkdir", func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { return 0 })
-	e.files = &files{data: map[string][]byte{}, links: map[string]string{
-		opencodeLink: instructionsFile,
-	}}
+	e.files = &files{data: map[string][]byte{}, links: map[string]string{}}
 	e.gw.Handle("/bin/sh", e.files.sh)
 	return e
 }
@@ -360,7 +378,13 @@ func (e *env) enqueue(ctx context.Context, t store.Task) store.Run {
 // pool starts a pool on the env's gateway and stops it when the spec ends. The returned
 // function stops it early, like a killed pod when the pool keeps its leases.
 func (e *env) pool(name string, mutate ...func(*agentd.Config)) (stop func()) {
+	return e.poolOn(db, name, mutate...)
+}
+
+// poolOn is pool on its own connection pool, like a separate agentd process on the same Postgres.
+func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Config)) (stop func()) {
 	cfg := agentd.Config{
+		Prices:         prices.NewResolver(pricing.Embedded()),
 		OwnerID:        name,
 		Workers:        2,
 		Lease:          2 * time.Second,
@@ -376,7 +400,11 @@ func (e *env) pool(name string, mutate ...func(*agentd.Config)) (stop func()) {
 	for _, m := range mutate {
 		m(&cfg)
 	}
-	p, err := agentd.New(db, e.backend, cfg)
+	var be agentd.Backend = e.backend
+	if e.backendOverride != nil {
+		be = e.backendOverride
+	}
+	p, err := agentd.New(conns, be, cfg)
 	Expect(err).NotTo(HaveOccurred())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

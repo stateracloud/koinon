@@ -29,6 +29,10 @@ const (
 	// markOutside: ask permission for reads and an edit inside and outside the session
 	// directory, all with ordinary kinds, then report the answers.
 	markOutside = "OUTSIDE"
+	// markRefuse: ask permission for an edit outside the session directory; when it is rejected
+	// end the turn as cancelled, as OpenCode 2.2.0 does (a plain decline interrupts the step).
+	// The prompt that continues the turn carries agentd's note instead.
+	markRefuse = "REFUSE-PATH"
 	// resumeMarker is how the fake harness recognises agentd's resume note.
 	resumeMarker = "[Koinon]"
 	// summaryMarker opens agentd's end-of-turn summary prompt.
@@ -72,6 +76,13 @@ type harness struct {
 	models []string
 	// silent: announce no ready command; stubborn: keep its own model.
 	silent, stubborn bool
+	// refuseAll makes every prompt but the summary ask for an outside edit and end cancelled when
+	// it is rejected, so a run never gets past its refusals.
+	refuseAll bool
+	// refuseOn refuses the prompts with these 1-based positions (the summary prompt does not count).
+	refuseOn map[int]bool
+	// onRefuse runs when a refusing prompt is about to end cancelled.
+	onRefuse func()
 	// lingers: keep running after end-of-file on stdin, until the exec is closed.
 	lingers bool
 }
@@ -279,6 +290,8 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	}
 	onPrompt := p.h.onPrompt
 	modelFault := p.h.modelFault
+	refuseAll := p.h.refuseAll || p.h.refuseOn[len(p.h.prompts)]
+	onRefuse := p.h.onRefuse
 	p.h.mu.Unlock()
 	id := r.SessionId
 	end := sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}
@@ -298,6 +311,33 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	}
 
 	switch {
+	case strings.Contains(text, markRefuse) || refuseAll:
+		tid, name, k := sdk.ToolCallId("refuse-"+fmt.Sprint(len(text))), "write", sdk.ToolKindEdit
+		if err := p.say(ctx, id, sdk.StartToolCall(tid, name, sdk.WithStartKind(k))); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		res, err := p.agent().RequestPermission(ctx, sdk.RequestPermissionRequest{
+			SessionId: id,
+			ToolCall: sdk.ToolCallUpdate{
+				ToolCallId: tid, Title: &name, Kind: &k,
+				Locations: []sdk.ToolCallLocation{{Path: "/sandbox/.koinon/notes/external/report.md"}},
+			},
+			Options: []sdk.PermissionOption{
+				{OptionId: "allow", Name: "Allow", Kind: sdk.PermissionOptionKindAllowOnce},
+				{OptionId: "reject", Name: "Reject", Kind: sdk.PermissionOptionKindRejectOnce},
+			},
+		})
+		if err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		if res.Outcome.Selected != nil && res.Outcome.Selected.OptionId != "reject" {
+			return end, nil
+		}
+		if onRefuse != nil {
+			onRefuse()
+		}
+		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
+
 	case strings.Contains(text, resumeMarker):
 		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("resumed")); err != nil {
 			return sdk.PromptResponse{}, err

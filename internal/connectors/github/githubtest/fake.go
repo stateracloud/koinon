@@ -44,6 +44,9 @@ type Fake struct {
 	// truncated, as GitHub does for a very large repository.
 	TruncateTrees bool
 
+	// Prefix is the path the REST API is served under (NewGHES); empty for the API root.
+	Prefix string
+
 	// Server is the test server New starts; nil for NewUnstarted.
 	Server *httptest.Server
 	// Handler serves the fake's API.
@@ -79,6 +82,35 @@ func New() *Fake {
 	f.Server = httptest.NewServer(f.Handler)
 	return f
 }
+
+// GHESPrefix is where GitHub Enterprise Server serves its REST API on the web host.
+const GHESPrefix = "/api/v3"
+
+// NewGHES starts a fake that serves like a GitHub Enterprise Server: over TLS with a certificate
+// no system root signs (trust CAPEM), and the REST API under GHESPrefix. Point a connection's
+// baseUrl at WebURL and its caBundle at CAPEM. Close it with f.Server.Close.
+func NewGHES() *Fake {
+	f := NewUnstarted()
+	f.Prefix = GHESPrefix
+	mux := http.NewServeMux()
+	mux.Handle(GHESPrefix+"/", http.StripPrefix(GHESPrefix, f.Handler))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+	})
+	f.Server = httptest.NewTLSServer(mux)
+	return f
+}
+
+// CAPEM is the PEM certificate that signs a NewGHES fake's TLS certificate; empty for a plain one.
+func (f *Fake) CAPEM() string {
+	if f.Server == nil || f.Server.TLS == nil {
+		return ""
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: f.Server.Certificate().Raw}))
+}
+
+// WebURL is the base URL of the host: where a connection's baseUrl points.
+func (f *Fake) WebURL() string { return f.Server.URL }
 
 // NewUnstarted returns a fake with a fresh 2048-bit key whose Handler the caller serves, as
 // cmd/koinon-fakegithub does. Set the exported fields before serving requests.
@@ -119,8 +151,8 @@ func (f *Fake) canonical(name string) (string, bool) {
 	return f.Repositories[i], true
 }
 
-// URL is the fake's base URL.
-func (f *Fake) URL() string { return f.Server.URL }
+// URL is the REST API's base URL.
+func (f *Fake) URL() string { return f.Server.URL + f.Prefix }
 
 // Mints returns how many tokens the fake has minted.
 func (f *Fake) Mints() int {

@@ -9,11 +9,16 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 )
@@ -47,10 +52,6 @@ func expectOrdered(evs []store.RunEvent) {
 	}
 }
 
-// repoint and unlink are what an agent does to its instruction link.
-func repoint(links map[string]string, link string) { links[link] = "/sandbox/mine.md" }
-func unlink(links map[string]string, link string)  { delete(links, link) }
-
 func payload(e store.RunEvent) map[string]any {
 	var m map[string]any
 	Expect(json.Unmarshal(e.Payload, &m)).To(Succeed())
@@ -81,9 +82,10 @@ var _ = Describe("Pool", func() {
 		Expect(args).To(Equal([][]string{{
 			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp",
 		}}))
-		// The sweep, mkdir, the instruction file and its check, the harness, the instruction
-		// file's and link's checks before the prompt, then the sweep after the harness has ended.
-		Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(8))
+		// The sweep, mkdir, the instruction file and its check, the git configuration and the CA
+		// file's removal (no custom host), the harness, the instruction file's check
+		// before the prompt, then the sweep after the harness has ended.
+		Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(9))
 		execs := e.gw.Execs()
 		sweep := []string{"/bin/sh", "-c", agentd.SweepScript, "sweep"}
 		read := HaveExactElements("/bin/sh", "-c", ContainSubstring("exec cat"), "sh", instructionsFile)
@@ -91,13 +93,14 @@ var _ = Describe("Pool", func() {
 		Expect(execs[1].GetCommand()).To(Equal([]string{"/bin/mkdir", "-p", "/sandbox/work"}))
 		Expect(execs[2].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("mktemp"), "sh", "/sandbox/.koinon", instructionsFile))
 		Expect(execs[3].GetCommand()).To(read)
-		Expect(execs[4].GetCommand()[0]).To(Equal("/usr/local/bin/koinon-opencode"))
-		Expect(execs[4].GetWorkdir()).To(Equal("/sandbox/work"))
-		Expect(execs[4].GetTty()).To(BeFalse())
-		Expect(execs[4].GetEnvironment()).To(BeEmpty(), "agentd sends nothing secret, and no environment, into the sandbox")
-		Expect(execs[5].GetCommand()).To(read)
-		Expect(execs[6].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", opencodeLink, instructionsFile))
-		Expect(execs[7].GetCommand()).To(Equal(sweep))
+		Expect(execs[4].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("koinon-gitconfig"), "sh", "/sandbox/.koinon/git", "/sandbox/.koinon/git/config"))
+		Expect(execs[5].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("koinon-gitca"), "sh", "/sandbox/.koinon/git", "/sandbox/.koinon/git/ca.pem"))
+		Expect(execs[6].GetCommand()[0]).To(Equal("/usr/local/bin/koinon-opencode"))
+		Expect(execs[6].GetWorkdir()).To(Equal("/sandbox/work"))
+		Expect(execs[6].GetTty()).To(BeFalse())
+		Expect(execs[6].GetEnvironment()).To(BeEmpty(), "agentd sends nothing secret, and no environment, into the sandbox")
+		Expect(execs[7].GetCommand()).To(read)
+		Expect(execs[8].GetCommand()).To(Equal(sweep))
 		Expect(e.harness.selectedModels()).To(Equal([]string{"koinon/" + model}))
 		Expect(e.gw.Sandbox(e.workspace, e.sandbox).GetSpec().GetEnvironment()).To(BeEmpty())
 
@@ -138,6 +141,25 @@ var _ = Describe("Pool", func() {
 		Expect(tevs[1].Kind).To(Equal("message"))
 		Expect(tevs[1].ActorKind).To(Equal(store.TaskActorKindAgent))
 		Expect(string(tevs[1].Payload)).To(ContainSubstring("asking: edit=allow,fetch=reject"))
+	})
+
+	It("sends a trigger's instruction, a system message carrying its source, as the first prompt", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		t, err := q.CreateTask(ctx, store.CreateTaskParams{
+			OrgID: e.org, Title: uniq("Scheduled"), AgentID: e.agent.ID, CreatedByKind: store.TaskCreatorKindTrigger,
+			CreatedByTriggerID: pgtype.UUID{Bytes: [16]byte{7}, Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
+			OrgID: e.org, TaskID: t.ID, Kind: "message", ActorKind: store.TaskActorKindSystem,
+			Payload: []byte(`{"text":"summarise yesterday's issues","source":"schedule"}`),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		r := e.enqueue(ctx, t)
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		prompts, _, _, _ := e.harness.snapshot()
+		Expect(prompts).To(Equal([]string{"Task: " + t.Title + "\n\nsummarise yesterday's issues"}))
 	})
 
 	It("loads the task's session on its next run and sends only the new messages", func(ctx SpecContext) {
@@ -437,22 +459,22 @@ var _ = Describe("Pool", func() {
 	})
 
 	DescribeTable("runs each flavor's entry script with the agent's endpoints",
-		func(ctx SpecContext, flavor store.AgentFlavor, script, link string) {
+		func(ctx SpecContext, flavor store.AgentFlavor, script string) {
 			e := newEnv(ctx, flavor)
 			r := e.enqueue(ctx, e.task(ctx, "hello"))
 			e.pool("agentd-a")
 			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-			// The sweep, mkdir, the instruction file and its check, the harness, the file's and
-			// the flavor's link's checks before the prompt, then the sweep after the harness.
-			Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(8))
+			// The sweep, mkdir, the instruction file and its check, the git configuration and CA
+			// file, the harness, the file's check before the prompt, then
+			// the sweep after the harness.
+			Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(9))
 			execs := e.gw.Execs()
-			Expect(execs[4].GetCommand()).To(Equal([]string{
+			Expect(execs[6].GetCommand()).To(Equal([]string{
 				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp",
 			}))
-			Expect(execs[4].GetWorkdir()).To(Equal("/sandbox/work"))
-			Expect(execs[6].GetCommand()).To(HaveExactElements("/bin/sh", "-c", ContainSubstring("readlink"), "sh", link, instructionsFile))
+			Expect(execs[6].GetWorkdir()).To(Equal("/sandbox/work"))
 		},
-		Entry("opencode", store.AgentFlavorOpencode, "/usr/local/bin/koinon-opencode", opencodeLink),
+		Entry("opencode", store.AgentFlavorOpencode, "/usr/local/bin/koinon-opencode"),
 	)
 
 	It("writes the run's instructions before the harness starts and records their hash", func(ctx SpecContext) {
@@ -488,6 +510,37 @@ var _ = Describe("Pool", func() {
 		content, _ = e.files.get(instructionsFile)
 		Expect(string(content)).To(HaveSuffix("\n\nVersion two.\n"))
 		Expect(e.gw.Calls("CreateSandbox")).To(Equal(1), "only newEnv created the sandbox")
+	})
+
+	It("renders the git configuration of the connection's host into the sandbox before the harness starts", func(ctx SpecContext) {
+		const ca = "-----BEGIN CERTIFICATE-----\nMIIBkoinon-test-not-a-real-certificate\n-----END CERTIFICATE-----\n"
+		e := newEnvWith(ctx, store.AgentFlavorOpencode, func(e *env) string {
+			connID := uuid.New()
+			cfg, err := json.Marshal(connections.GitHubConfig{
+				AppID: 1, InstallationID: 2, Site: codehost.Site{BaseURL: "https://ghes.example.test", CABundle: ca},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = q.CreateConnectionWithEnvelope(ctx, store.CreateConnectionWithEnvelopeParams{
+				OrgID: e.org, ID: pgtype.UUID{Bytes: connID, Valid: true}, Connector: "github", DisplayName: "ghes",
+				Config: cfg, SecretEnvelope: []byte(`{}`), Source: store.ConfigSourceUi,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return `{"instructions":"help","model":"` + model + `",` +
+				`"grants":[{"connector":"github","scopes":["repo.read"],"preset":"standard"}],` +
+				`"bindings":[{"connector":"github","connectionId":"` + connID.String() + `","targets":["acme/widgets"]}]}`
+		})
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+		cfg, ok := e.files.get(codehost.SandboxGitConfig)
+		Expect(ok).To(BeTrue())
+		Expect(string(cfg)).To(ContainSubstring("[credential \"https://ghes.example.test\"]"))
+		Expect(string(cfg)).To(ContainSubstring("koinon-git-credential --host ghes.example.test"))
+		Expect(string(cfg)).To(ContainSubstring("sslCAInfo = " + codehost.SandboxGitCA))
+		Expect(string(cfg)).NotTo(ContainSubstring("github.com"))
+		bundle, ok := e.files.get(codehost.SandboxGitCA)
+		Expect(ok).To(BeTrue())
+		Expect(string(bundle)).To(Equal(ca))
 	})
 
 	It("ends what an earlier run left running before the harness starts, and records it", func(ctx SpecContext) {
@@ -625,52 +678,6 @@ var _ = Describe("Pool", func() {
 		Entry("deleted by the agent", func(d map[string][]byte) { delete(d, instructionsFile) }, "missing"),
 	)
 
-	DescribeTable("restores the flavor's instruction link before the prompt",
-		func(ctx SpecContext, flavor store.AgentFlavor, link string, tamper func(map[string]string, string), reason, found string) {
-			e := newEnv(ctx, flavor)
-			once := false
-			e.files.onLink = func(links map[string]string) {
-				if !once {
-					once = true
-					tamper(links, link)
-				}
-			}
-			r := e.enqueue(ctx, e.task(ctx, "hello"))
-			e.pool("agentd-a")
-			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
-
-			target, ok := e.files.link(link)
-			Expect(ok).To(BeTrue())
-			Expect(target).To(Equal(instructionsFile))
-			Expect(e.files.writes).To(Equal(1), "the file itself was intact")
-			evs := events(ctx, r)
-			Expect(kinds(evs)[:3]).To(Equal([]string{"run.session", "run.prompt", "run.instructions_restored"}))
-			Expect(payload(evs[2])).To(HaveKeyWithValue("path", link))
-			Expect(payload(evs[2])).To(HaveKeyWithValue("target", instructionsFile))
-			Expect(payload(evs[2])).To(HaveKeyWithValue("reason", reason))
-			if found == "" {
-				Expect(payload(evs[2])).NotTo(HaveKey("foundTarget"))
-			} else {
-				Expect(payload(evs[2])).To(HaveKeyWithValue("foundTarget", found))
-			}
-			Expect(payload(evs[2])["sha256"]).To(Equal(payload(evs[0])["instructions"].(map[string]any)["sha256"]))
-		},
-		Entry("OpenCode, repointed", store.AgentFlavorOpencode, opencodeLink, repoint, "changed", "/sandbox/mine.md"),
-		Entry("OpenCode, removed", store.AgentFlavorOpencode, opencodeLink, unlink, "missing", ""),
-	)
-
-	It("fails the run when the instruction link cannot be restored", func(ctx SpecContext) {
-		e := newEnv(ctx, store.AgentFlavorOpencode)
-		e.files.failLink = true
-		delete(e.files.links, opencodeLink)
-		r := e.enqueue(ctx, e.task(ctx, "hello"))
-		e.pool("agentd-a")
-		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
-		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("restore the instruction link " + opencodeLink))
-		prompts, _, _, _ := e.harness.snapshot()
-		Expect(prompts).To(BeEmpty(), "no prompt goes out without the link in place")
-	})
-
 	It("fails the run when the harness never announces Koinon's MCP tools", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.harness.set(func(h *harness) { h.silent = true })
@@ -725,6 +732,33 @@ var _ = Describe("Pool", func() {
 		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
 			"a recreation in progress does not fail the run")
 
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+	})
+
+	It("runs an ephemeral agent's task only in the task's own sandbox", func(ctx SpecContext) {
+		e := newEnvWith(ctx, store.AgentFlavorOpencode, func(*env) string {
+			return `{"model":"` + model + `","instructions":"` + instructions + `","ephemeral":true}`
+		})
+		task := e.task(ctx, "hello")
+		r := e.enqueue(ctx, task)
+		// The row still names a previous task's sandbox, which is ready: not this task's.
+		prev := execution.TaskSandboxName(e.org.Bytes, e.agent.ID.Bytes, [16]byte{1})
+		_, err := q.SetAgentSandboxName(ctx, store.SetAgentSandboxNameParams{OrgID: e.org, AgentID: e.agent.ID, SandboxName: prev})
+		Expect(err).NotTo(HaveOccurred())
+		e.recordSandbox(ctx, store.SandboxStateReady, "")
+		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
+		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		Consistently(runState(ctx, r)).WithTimeout(500*time.Millisecond).Should(Equal(store.RunStateStarting),
+			"never runs in another task's sandbox")
+
+		// The reconciler renders the task's sandbox and moves the row.
+		name := execution.TaskSandboxName(e.org.Bytes, e.agent.ID.Bytes, task.ID.Bytes)
+		_, err = e.backend.CreateSandbox(ctx, e.workspace, execution.SandboxSpec{Name: name, Image: "ghcr.io/stateracloud/flavor-opencode:test"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.SetAgentSandboxName(ctx, store.SetAgentSandboxNameParams{OrgID: e.org, AgentID: e.agent.ID, SandboxName: name})
+		Expect(err).NotTo(HaveOccurred())
+		e.sandbox = name
 		e.recordSandbox(ctx, store.SandboxStateReady, "")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
 	})
@@ -784,6 +818,9 @@ var _ = Describe("Pool", func() {
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a", func(c *agentd.Config) { c.ReconcileNudge = 100 * time.Millisecond })
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateStarting))
+		// Mark it once the run waits on the sandbox, not before execute loads the agent (that
+		// fails the run as unhealthy, a different path).
+		Consistently(runState(ctx, r)).WithTimeout(500 * time.Millisecond).Should(Equal(store.RunStateStarting))
 		_, err := q.MarkAgentUnhealthy(ctx, store.MarkAgentUnhealthyParams{OrgID: e.org, ID: e.agent.ID, Reason: "the sandbox kept failing"})
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))

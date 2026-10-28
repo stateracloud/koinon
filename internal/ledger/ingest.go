@@ -15,7 +15,10 @@ import (
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
@@ -30,6 +33,27 @@ type Ingester struct {
 	Now func() time.Time
 	// Metrics counts what Ingest and Handler do; nil counts nothing.
 	Metrics *Metrics
+	// Prices finds the prices of requests; required (prices.NewResolver).
+	Prices prices.Resolver
+	// Sources are the providers that can report their own usage of a response later; nil is
+	// providerusage.Default. A response cut short of such a provider is recorded provisional and
+	// settled by the Settler; of any other provider the logged usage is final.
+	Sources providerusage.Registry
+}
+
+// Validate reports a wiring mistake: an Ingester without prices would record every request unpriced.
+func (in *Ingester) Validate() error {
+	if in.Prices.IsZero() {
+		return errors.New("ledger: Prices is required (prices.NewResolver)")
+	}
+	return nil
+}
+
+func (in *Ingester) sources() providerusage.Registry {
+	if in.Sources != nil {
+		return in.Sources
+	}
+	return providerusage.Default(nil)
 }
 
 func (in *Ingester) now() time.Time {
@@ -115,11 +139,39 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		// A streamed Anthropic-format response logs message_start's usage, which looks complete, and
+		// agentgateway v1.7.0 has no stream-end signal (ADR 0056, amendment 2026-10-28). Only the
+		// attributed run counts: a later run's response is not cut by an earlier run's cancel.
+		// Either signal makes it cut: a proxy error logged with the output (an upstream that cut
+		// the stream), or the attributed run's cancel (a client hang-up logs no error).
+		if e.OutputKnown && e.Error != "" {
+			e.Cut = true
+		}
+		if e.Format == modelformat.Anthropic && e.Stream && e.OutputKnown && run.ID.Valid &&
+			run.State == store.RunStateCanceled && run.FinishedAt.Valid && !run.FinishedAt.Time.After(e.Time) {
+			e.Cut = true
+		}
 		pr, err := in.price(ctx, q, org.ID, e)
 		if err != nil {
 			return err
 		}
-		if _, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
+		// A response cut short is settled later when its provider can say what it billed (a
+		// settlement with its response ID); a cut Anthropic stream whose provider cannot is held (a
+		// settlement without one) until the deadline. Meanwhile the request's max_tokens bound is
+		// held back from the gateway key. Any other entry is final at once.
+		provisional, settleID := false, pgtype.Text{}
+		if pr.aborted && pr.model.ProviderID.Valid {
+			if _, ok := in.sources().For(pr.model.ProviderType, pr.model.ProviderURL, e.ResponseID); ok {
+				provisional, settleID = true, pgtype.Text{String: e.ResponseID, Valid: true}
+			} else if e.Cut {
+				provisional = true
+			}
+		}
+		if !provisional {
+			pr.reserve = 0
+		}
+		responseID := pgtype.Text{String: e.ResponseID, Valid: e.ResponseID != ""}
+		entryID, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
 			OrgID: org.ID, AgentID: agent.ID, RunID: run.ID, TaskID: run.TaskID,
 			RequestID: e.RequestID, KeyID: e.KeyID, Model: e.Model,
 			InputTokens: pr.inTokens, OutputTokens: pr.outTokens,
@@ -127,17 +179,41 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			CostUsd: pr.cost.Numeric(), GatewayCostUsd: pr.gatewayCost, PriceRef: pr.ref,
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
 			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: at,
-		}); errors.Is(err, pgx.ErrNoRows) {
+			Provisional: provisional, ReserveUsd: pgtype.Text{String: pr.reserve.Numeric(), Valid: pr.reserve > 0}, ResponseID: responseID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded
 		} else if err != nil {
 			return fmt.Errorf("insert spend entry: %w", err)
 		}
 		recorded = true
+		if provisional {
+			deadline := e.Time.Add(SettleWindow)
+			next := in.now().Add(settleBackoff(0))
+			if !settleID.Valid {
+				next = deadline // a hold: nothing to ask, the reserve goes at the deadline
+			}
+			if err := q.InsertSpendSettlement(ctx, store.InsertSpendSettlementParams{
+				OrgID: org.ID, EntryID: entryID, ProviderID: pr.model.ProviderID, ProviderType: pr.model.ProviderType,
+				ResponseID:    settleID,
+				NextAttemptAt: pgtype.Timestamptz{Time: next, Valid: true},
+				Deadline:      pgtype.Timestamptz{Time: deadline, Valid: true},
+			}); err != nil {
+				return fmt.Errorf("queue settlement: %w", err)
+			}
+		}
 		if run.ID.Valid {
 			// The token cap (plan item A4). RecordTokenUsage nests a savepoint. Estimated
 			// tokens count like reported ones.
 			if _, err := scheduler.RecordTokenUsage(ctx, tx, org.ID, run.ID, pr.inTokens+pr.outTokens); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("record token usage: %w", err)
+			}
+		}
+		// Budgets, alerts and stops count the charge only; the reserve gates the gateway key, so
+		// the reconciler is woken to push the key's smaller limit.
+		if provisional && pr.reserve > 0 {
+			if err := q.NotifyReconciler(ctx, org.ID); err != nil {
+				return fmt.Errorf("wake the reconciler: %w", err)
 			}
 		}
 		return in.enforce(ctx, q, org.ID, agent.ID, run, e, pr.cost)
@@ -146,9 +222,10 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 }
 
 // enforce checks the agent's daily limit, the org's monthly cap and the platform ceiling with
-// the entry just recorded, alerts at 80% and 100%, and cancels at the first limit reached: the
-// entry's run for the agent's limit, every open run of the org for an org-wide one.
-// agentgateway blocks the key's next request anyway; the cancel tells the task which limit.
+// the entry just recorded, alerts at 80% and 100%, and cancels at the first limit reached ([Stop]):
+// every open run of the agent for its limit, every open run of the org for an org-wide one.
+// agentgateway blocks the key's next request anyway; the cancel tells the task which limit, and
+// it commits before the reconciler it wakes can take the key out.
 func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, run store.FindRunAtRow, e Entry, delta money.USD) error {
 	var fallback money.USD
 	if run.AgentVersionID.Valid {
@@ -173,28 +250,19 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 	if err := budget.Alert(ctx, q, in.Notifier, st, delta); err != nil {
 		return err
 	}
-	// A limit cancels runs only in its current window: a late entry from last month reaching
-	// last month's cap must not cancel this month's runs.
-	// A level this entry has just crossed (spent before it was below the limit) wins over one that
-	// was already spent, so a late entry that crosses the org cap of an agent whose daily limit is
-	// long spent still cancels the org's runs and wakes the reconciler.
-	var l budget.Level
-	found, crossed := false, false
-	for _, r := range st.Reached() {
-		current := budget.MonthStart(in.now())
-		if r.Name == budget.AgentDaily {
-			current = budget.DayStart(in.now())
-		}
-		if !r.WindowStart.Equal(current) {
-			continue
-		}
-		crossing := r.Spent-delta < r.Limit
-		if !found || (crossing && !crossed) {
-			l, found, crossed = r, true, crossing
-		}
-	}
+	// The limit named is budget.Status.Pick's (the broadest reached in its current window: a late
+	// entry from last month reaching last month's cap cancels nothing). The reconciler is woken when
+	// this entry crossed any current level, so a late entry that crosses the org cap of an agent
+	// whose daily limit is long spent still wakes it.
+	l, found := st.Pick(in.now())
 	if !found {
 		return nil
+	}
+	crossed := false
+	for _, r := range st.Current(in.now()) {
+		if r.Spent-delta < r.Limit {
+			crossed = true
+		}
 	}
 	// The entry that reaches a limit wakes the reconciler, which recomputes every key's limit net of
 	// the spend and pushes it. Standalone agentgateway then blocks the key itself; in Kubernetes mode
@@ -205,49 +273,8 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 			return fmt.Errorf("wake the reconciler: %w", err)
 		}
 	}
-	msg := fmt.Sprintf("%s reached ($%s of $%s since %s)", limitTitle(l.Name), l.Spent, l.Limit, l.WindowStart.Format("2006-01-02 15:04 MST"))
-	extra := map[string]any{
-		"limit": l.Name, "spend_limit_usd": l.Limit.String(), "spent_usd": l.Spent.String(), "window_start": l.WindowStart.Format("2006-01-02T15:04:05Z"),
-	}
-	runs := []store.Run{}
-	if l.Name == budget.AgentDaily {
-		if !run.ID.Valid {
-			return nil
-		}
-		r := store.Run{OrgID: org, ID: run.ID}
-		runs = append(runs, r)
-	} else {
-		open, err := q.ListOpenRunsOfOrg(ctx, org)
-		if err != nil {
-			return err
-		}
-		runs = open
-	}
-	for _, r := range runs {
-		c, err := q.CancelRun(ctx, store.CancelRunParams{
-			OrgID: org, ID: r.ID, OutcomeReason: msg,
-			FailureClass: store.NullRunFailureClass{RunFailureClass: store.RunFailureClassBudget, Valid: true},
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue // already finished
-		} else if err != nil {
-			return err
-		}
-		if _, err := scheduler.RecordCancel(ctx, q, c, scheduler.ReasonSpendLimit, msg, scheduler.System, extra); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func limitTitle(level string) string {
-	switch level {
-	case budget.OrgMonthly:
-		return "org monthly cap"
-	case budget.PlatformCeiling:
-		return "platform ceiling"
-	}
-	return "agent daily limit"
+	_, err = Stop(ctx, q, org, agent, l)
+	return err
 }
 
 // templateLimit is the spendUSD of the agent's active version, for an agent without a run.

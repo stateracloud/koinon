@@ -43,10 +43,15 @@ func (r *Reconciler) activeConfig(ctx context.Context, a store.Agent) (agentconf
 
 // ToolGrants is an agent's MCP allowlist, which agentgateway enforces as CEL (ADR 0008, 0042):
 // for every approved grant whose connector type has a tool server, the tools its scopes expose
-// unless its preset denies them. Ask-tier tools are listed too: calling one records an approval
+// unless its preset denies them, and Koinon's own ask_user when that server is configured. Ask-tier tools are listed too: calling one records an approval
 // request instead of acting.
 func ToolGrants(cfg agentconfig.Config, servers map[string]string) []gateway.ToolGrant {
 	var out []gateway.ToolGrant
+	if _, ok := servers[gateway.KoinonTarget]; ok {
+		// Koinon's own tools need no grant: ask_user parks the run and puts a question in a person's
+		// inbox, and costs nothing; cancel_task closes the agent's own task as canceled (ADR 0065).
+		out = append(out, gateway.ToolGrant{Target: gateway.KoinonTarget, Tools: []string{gateway.ToolAskUser, gateway.ToolCancelTask}})
+	}
 	for _, g := range cfg.Grants {
 		if _, ok := servers[g.Connector]; !ok {
 			continue

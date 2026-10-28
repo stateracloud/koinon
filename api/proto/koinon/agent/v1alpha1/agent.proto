@@ -26,9 +26,15 @@ service AgentService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // ActivateAgent activates a draft and so approves the grants its version
-  // proposes. Admins and owners only.
+  // ActivateAgent activates a draft, or moves an active agent to its newer proposed version
+  // (ADR 0066), and so approves the grants that version proposes. Admins and owners only.
   rpc ActivateAgent(ActivateAgentRequest) returns (ActivateAgentResponse);
+
+  // SetAgentTriggers proposes a new version with the given triggers (everything else carried over
+  // from the latest version). The triggers fire nothing until ActivateAgent activates that
+  // version; an active agent keeps running its active version meanwhile. Audited. Admins and
+  // owners only.
+  rpc SetAgentTriggers(SetAgentTriggersRequest) returns (SetAgentTriggersResponse);
 
   // ResumeAgent clears the unhealthy state of an agent whose sandbox got stuck again and again
   // (ADR 0054), so it takes runs again; its stuck sandbox is recreated. Audited. Admins and owners
@@ -76,6 +82,16 @@ message Agent {
   // recreated again (ADR 0054). New runs are refused until ResumeAgent.
   google.protobuf.Timestamp unhealthy_at = 18;
   string unhealthy_reason = 19;
+  // Triggers the latest version proposes; they have no effect until it is activated.
+  repeated koinon.template.v1alpha1.Trigger proposed_triggers = 20;
+  // Triggers of the active version: the ones in effect.
+  repeated koinon.template.v1alpha1.Trigger approved_triggers = 21;
+  // The latest version is ephemeral: each task gets a fresh sandbox without a home, deleted when
+  // the task ends (ADR 0065 decision 13c).
+  bool ephemeral = 22;
+  // Set while the agent's sandbox and volume are archived (ADR 0032 amendment): the home is in
+  // its last checkpoint and the next run restores it into a fresh sandbox.
+  google.protobuf.Timestamp sandbox_archived_at = 23;
 }
 
 // CreateAgentFromTemplateRequest names the template and the user's choices.
@@ -91,6 +107,8 @@ message CreateAgentFromTemplateRequest {
   // needs one. Stored with the agent's version; ActivateAgent approves it with
   // the grant.
   repeated GrantBinding grants = 5;
+  // Overrides the template's ephemeral setting; unset keeps it.
+  optional bool ephemeral = 6;
 }
 
 // GrantBinding binds a template grant to one of the org's connections and
@@ -171,5 +189,21 @@ message ArchiveAgentRequest {
 
 // ArchiveAgentResponse holds the archived agent.
 message ArchiveAgentResponse {
+  Agent agent = 1;
+}
+
+// SetAgentTriggersRequest replaces the triggers of the agent's latest version in a new version.
+message SetAgentTriggersRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // Must equal the agent's latest_version, so a concurrent edit is not overwritten; otherwise the
+  // call fails with FailedPrecondition.
+  int32 base_version = 3;
+  // The complete list; empty removes every trigger.
+  repeated koinon.template.v1alpha1.Trigger triggers = 4;
+}
+
+// SetAgentTriggersResponse holds the agent with its new proposed version.
+message SetAgentTriggersResponse {
   Agent agent = 1;
 }

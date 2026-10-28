@@ -46,7 +46,7 @@ are in [0046](0046-adr-conventions.md).
 | [0029](0029-run-level-resume.md) | Resume | Accepted, amended by 0051 |
 | [0030](0030-run-state-machine.md) | Run state | Accepted, amended by 0065, 0066 |
 | [0031](0031-artifacts-in-object-storage.md) | Artifacts | Accepted |
-| [0032](0032-agent-home-checkpoints.md) | Agent home | Accepted, amended by 0065 (checkpoints in v0.1, archive tier) |
+| [0032](0032-agent-home-checkpoints.md) | Agent home | Accepted, amended by 0065 (checkpoints in v0.1, archive tier) and HC1 (kopia, exec-stream runner, hourly points) |
 | [0033](0033-file-based-memory.md) | Memory | Accepted |
 | [0034](0034-project-identity.md) | Identity (repo, module, domain) | Accepted, amended 2026-10-26 |
 | [0035](0035-v01-flavors.md) | v0.1 flavors | Accepted, amended by 0059 |
@@ -82,3 +82,7 @@ are in [0046](0046-adr-conventions.md).
 | [0065](0065-work-model-tasks-inbox.md) | Work model: A2A-shaped tasks, the inbox, and asking people and agents | Accepted |
 | [0066](0066-triggers-and-scheduling.md) | Triggers and scheduling: DBOS on Koinon's Postgres, triggers on the agent version | Accepted |
 | [0067](0067-concierge.md) | The concierge: a setup and management assistant in koinon-api | Accepted (delivery v0.3) |
+| [0068](0068-prompt-caching-always-on.md) | Prompt caching is always on for models that support it | Accepted |
+| [0069](0069-native-model-formats.md) | Models speak their family's native API format | Accepted |
+| [0070](0070-model-metadata.md) | Model metadata: a reviewed snapshot from models.dev and OpenRouter | Accepted (delivery after v0.1.0, UI milestone) |
+| [0071](0071-skill-library.md) | The skill library: pinned, scanned skills delivered by agentd | Accepted (delivery after v0.1.0, UI milestone) |

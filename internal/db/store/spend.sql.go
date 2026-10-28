@@ -11,9 +11,128 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimDueSettlements = `-- name: ClaimDueSettlements :many
+SELECT st.entry_id, st.provider_id, st.provider_type, st.response_id, st.attempts, st.deadline,
+       e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
+       e.reasoning_tokens, e.cost_usd::text AS cost_usd, e.reserve_usd::text AS reserve_usd, e.estimate,
+       coalesce(e.price_ref, '')::text AS price_ref
+FROM spend_settlements st
+JOIN spend_entries e ON e.org_id = st.org_id AND e.id = st.entry_id
+WHERE st.org_id = $1 AND e.org_id = $1 AND st.next_attempt_at <= $2
+ORDER BY st.next_attempt_at
+LIMIT $3
+FOR UPDATE OF st SKIP LOCKED
+`
+
+type ClaimDueSettlementsParams struct {
+	OrgID   pgtype.UUID
+	Now     pgtype.Timestamptz
+	MaxRows int32
+}
+
+type ClaimDueSettlementsRow struct {
+	EntryID          pgtype.UUID
+	ProviderID       pgtype.UUID
+	ProviderType     string
+	ResponseID       pgtype.Text
+	Attempts         int32
+	Deadline         pgtype.Timestamptz
+	RunID            pgtype.UUID
+	Model            string
+	OccurredAt       pgtype.Timestamptz
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	ReasoningTokens  int64
+	CostUsd          string
+	ReserveUsd       string
+	Estimate         []byte
+	PriceRef         string
+}
+
+// The org's provisional entries due for an attempt, locked for this settler; another settler skips
+// them. The row is the work item; the entry is read with it.
+func (q *Queries) ClaimDueSettlements(ctx context.Context, arg ClaimDueSettlementsParams) ([]ClaimDueSettlementsRow, error) {
+	rows, err := q.db.Query(ctx, claimDueSettlements, arg.OrgID, arg.Now, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClaimDueSettlementsRow
+	for rows.Next() {
+		var i ClaimDueSettlementsRow
+		if err := rows.Scan(
+			&i.EntryID,
+			&i.ProviderID,
+			&i.ProviderType,
+			&i.ResponseID,
+			&i.Attempts,
+			&i.Deadline,
+			&i.RunID,
+			&i.Model,
+			&i.OccurredAt,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.ReasoningTokens,
+			&i.CostUsd,
+			&i.ReserveUsd,
+			&i.Estimate,
+			&i.PriceRef,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const deferSpendSettlement = `-- name: DeferSpendSettlement :exec
+UPDATE spend_settlements
+SET attempts = attempts + 1, next_attempt_at = $1, last_error = $2
+WHERE org_id = $3 AND entry_id = $4
+`
+
+type DeferSpendSettlementParams struct {
+	NextAttemptAt pgtype.Timestamptz
+	LastError     pgtype.Text
+	OrgID         pgtype.UUID
+	EntryID       pgtype.UUID
+}
+
+// The provider had no figure yet (or failed): try again later.
+func (q *Queries) DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error {
+	_, err := q.db.Exec(ctx, deferSpendSettlement,
+		arg.NextAttemptAt,
+		arg.LastError,
+		arg.OrgID,
+		arg.EntryID,
+	)
+	return err
+}
+
+const deleteSpendSettlement = `-- name: DeleteSpendSettlement :exec
+DELETE FROM spend_settlements WHERE org_id = $1 AND entry_id = $2
+`
+
+type DeleteSpendSettlementParams struct {
+	OrgID   pgtype.UUID
+	EntryID pgtype.UUID
+}
+
+func (q *Queries) DeleteSpendSettlement(ctx context.Context, arg DeleteSpendSettlementParams) error {
+	_, err := q.db.Exec(ctx, deleteSpendSettlement, arg.OrgID, arg.EntryID)
+	return err
+}
+
 const findRunAt = `-- name: FindRunAt :one
 
-SELECT id, task_id, agent_version_id FROM runs
+SELECT id, task_id, agent_version_id, state, finished_at FROM runs
 WHERE org_id = $1 AND agent_id = $2
   AND started_at IS NOT NULL AND started_at <= $3::timestamptz
   AND (finished_at IS NULL
@@ -33,6 +152,8 @@ type FindRunAtRow struct {
 	ID             pgtype.UUID
 	TaskID         pgtype.UUID
 	AgentVersionID pgtype.UUID
+	State          RunState
+	FinishedAt     pgtype.Timestamptz
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -47,6 +168,8 @@ type FindRunAtRow struct {
 // run per agent is owned at a time (ADR 0009), so the latest start wins when a
 // parked run's window overlaps a later run. The grace covers a response that
 // completes just after its run was canceled (for example by the token cap).
+// state and finished_at tell whether that run was canceled by the record's time, which marks a
+// streamed response logged then as cut (ADR 0056, amendment 2026-10-28).
 func (q *Queries) FindRunAt(ctx context.Context, arg FindRunAtParams) (FindRunAtRow, error) {
 	row := q.db.QueryRow(ctx, findRunAt,
 		arg.OrgID,
@@ -55,8 +178,35 @@ func (q *Queries) FindRunAt(ctx context.Context, arg FindRunAtParams) (FindRunAt
 		arg.GraceSeconds,
 	)
 	var i FindRunAtRow
-	err := row.Scan(&i.ID, &i.TaskID, &i.AgentVersionID)
+	err := row.Scan(
+		&i.ID,
+		&i.TaskID,
+		&i.AgentVersionID,
+		&i.State,
+		&i.FinishedAt,
+	)
 	return i, err
+}
+
+const getAgentReserveSince = `-- name: GetAgentReserveSince :one
+SELECT coalesce(sum(reserve_usd), 0)::text AS reserve_usd
+FROM spend_entries
+WHERE org_id = $1 AND agent_id = $2 AND provisional AND occurred_at >= $3
+`
+
+type GetAgentReserveSinceParams struct {
+	OrgID   pgtype.UUID
+	AgentID pgtype.UUID
+	Since   pgtype.Timestamptz
+}
+
+// What provisional entries of an agent since @since hold back from its gateway key's limit (ADR
+// 0056, amendment 2026-10-28). Only the limit pushed to the gateway counts it.
+func (q *Queries) GetAgentReserveSince(ctx context.Context, arg GetAgentReserveSinceParams) (string, error) {
+	row := q.db.QueryRow(ctx, getAgentReserveSince, arg.OrgID, arg.AgentID, arg.Since)
+	var reserve_usd string
+	err := row.Scan(&reserve_usd)
+	return reserve_usd, err
 }
 
 const getAgentSpendSince = `-- name: GetAgentSpendSince :one
@@ -71,7 +221,8 @@ type GetAgentSpendSinceParams struct {
 	Since   pgtype.Timestamptz
 }
 
-// An agent's recorded USD spend since @since, for its spend limit.
+// An agent's recorded USD spend since @since, for its spend limit: the charges only. Reserves
+// gate the gateway key alone (GetAgentReserveSince).
 func (q *Queries) GetAgentSpendSince(ctx context.Context, arg GetAgentSpendSinceParams) (string, error) {
 	row := q.db.QueryRow(ctx, getAgentSpendSince, arg.OrgID, arg.AgentID, arg.Since)
 	var cost_usd string
@@ -129,6 +280,25 @@ func (q *Queries) GetOrgEstimatedSpendSince(ctx context.Context, arg GetOrgEstim
 	return cost_usd, err
 }
 
+const getOrgReserveSince = `-- name: GetOrgReserveSince :one
+SELECT coalesce(sum(reserve_usd), 0)::text AS reserve_usd
+FROM spend_entries
+WHERE org_id = $1 AND provisional AND occurred_at >= $2
+`
+
+type GetOrgReserveSinceParams struct {
+	OrgID pgtype.UUID
+	Since pgtype.Timestamptz
+}
+
+// What provisional entries of an org since @since hold back from every key's org-level limit.
+func (q *Queries) GetOrgReserveSince(ctx context.Context, arg GetOrgReserveSinceParams) (string, error) {
+	row := q.db.QueryRow(ctx, getOrgReserveSince, arg.OrgID, arg.Since)
+	var reserve_usd string
+	err := row.Scan(&reserve_usd)
+	return reserve_usd, err
+}
+
 const getOrgSpendSince = `-- name: GetOrgSpendSince :one
 SELECT coalesce(sum(cost_usd), 0)::text AS cost_usd
 FROM spend_entries
@@ -141,7 +311,7 @@ type GetOrgSpendSinceParams struct {
 }
 
 // An org's recorded USD spend since @since (the start of the calendar month in UTC), for its
-// monthly cap and the platform ceiling.
+// monthly cap and the platform ceiling: the charges only.
 func (q *Queries) GetOrgSpendSince(ctx context.Context, arg GetOrgSpendSinceParams) (string, error) {
 	row := q.db.QueryRow(ctx, getOrgSpendSince, arg.OrgID, arg.Since)
 	var cost_usd string
@@ -154,13 +324,14 @@ INSERT INTO spend_entries (
     org_id, agent_id, run_id, task_id, request_id, key_id, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
-    request_bytes, response_bytes, occurred_at
+    request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10, $11, $12,
     ($13::text)::numeric, ($14::text)::numeric,
     $15, $16, $17, $18::jsonb, $19,
-    $20, $21, $22
+    $20, $21, $22,
+    $23, coalesce(($24::text)::numeric, 0), $25
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id
@@ -189,12 +360,16 @@ type InsertSpendEntryParams struct {
 	RequestBytes     pgtype.Int8
 	ResponseBytes    pgtype.Int8
 	OccurredAt       pgtype.Timestamptz
+	Provisional      bool
+	ReserveUsd       pgtype.Text
+	ResponseID       pgtype.Text
 }
 
 // Records one request. Returns no row when the request id is already
 // recorded, so a replayed export is not charged twice. cost_usd is Koinon's
 // own computation from the raw usage and the dated price; gateway_cost_usd is
-// what agentgateway logged (NULL when it could not price the request).
+// what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
+// for every entry that is not provisional, so a caller that holds nothing passes nothing.
 func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, insertSpendEntry,
 		arg.OrgID,
@@ -219,10 +394,86 @@ func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryPara
 		arg.RequestBytes,
 		arg.ResponseBytes,
 		arg.OccurredAt,
+		arg.Provisional,
+		arg.ReserveUsd,
+		arg.ResponseID,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertSpendEntryRevision = `-- name: InsertSpendEntryRevision :exec
+INSERT INTO spend_entry_revisions (org_id, entry_id, reason, source, before, after)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertSpendEntryRevisionParams struct {
+	OrgID   pgtype.UUID
+	EntryID pgtype.UUID
+	Reason  string
+	Source  string
+	Before  []byte
+	After   []byte
+}
+
+func (q *Queries) InsertSpendEntryRevision(ctx context.Context, arg InsertSpendEntryRevisionParams) error {
+	_, err := q.db.Exec(ctx, insertSpendEntryRevision,
+		arg.OrgID,
+		arg.EntryID,
+		arg.Reason,
+		arg.Source,
+		arg.Before,
+		arg.After,
+	)
+	return err
+}
+
+const insertSpendSettlement = `-- name: InsertSpendSettlement :exec
+INSERT INTO spend_settlements (org_id, entry_id, provider_id, provider_type, response_id, next_attempt_at, deadline)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type InsertSpendSettlementParams struct {
+	OrgID         pgtype.UUID
+	EntryID       pgtype.UUID
+	ProviderID    pgtype.UUID
+	ProviderType  string
+	ResponseID    pgtype.Text
+	NextAttemptAt pgtype.Timestamptz
+	Deadline      pgtype.Timestamptz
+}
+
+// Queues a provisional entry for the settler. Without a response ID it is a hold until the deadline.
+func (q *Queries) InsertSpendSettlement(ctx context.Context, arg InsertSpendSettlementParams) error {
+	_, err := q.db.Exec(ctx, insertSpendSettlement,
+		arg.OrgID,
+		arg.EntryID,
+		arg.ProviderID,
+		arg.ProviderType,
+		arg.ResponseID,
+		arg.NextAttemptAt,
+		arg.Deadline,
+	)
+	return err
+}
+
+const leaseSpendSettlement = `-- name: LeaseSpendSettlement :exec
+UPDATE spend_settlements SET next_attempt_at = $1
+WHERE org_id = $2 AND entry_id = $3
+`
+
+type LeaseSpendSettlementParams struct {
+	Until   pgtype.Timestamptz
+	OrgID   pgtype.UUID
+	EntryID pgtype.UUID
+}
+
+// A claimed settlement is not due again until @until, so the provider is asked outside any
+// transaction and another settler does not ask it at the same time.
+func (q *Queries) LeaseSpendSettlement(ctx context.Context, arg LeaseSpendSettlementParams) error {
+	_, err := q.db.Exec(ctx, leaseSpendSettlement, arg.Until, arg.OrgID, arg.EntryID)
+	return err
 }
 
 const listFlaggedPrices = `-- name: ListFlaggedPrices :many
@@ -295,6 +546,124 @@ func (q *Queries) ListFlaggedPrices(ctx context.Context, arg ListFlaggedPricesPa
 	return items, nil
 }
 
+const listOrgsWithDueSettlements = `-- name: ListOrgsWithDueSettlements :many
+SELECT org_id FROM spend_settlements WHERE next_attempt_at <= $1
+GROUP BY org_id
+ORDER BY min(next_attempt_at), org_id
+`
+
+// The settler: every org with a provisional entry due for an attempt, the longest waiting first.
+func (q *Queries) ListOrgsWithDueSettlements(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgsWithDueSettlements, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var org_id pgtype.UUID
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSpendEntryRevisions = `-- name: ListSpendEntryRevisions :many
+SELECT org_id, id, entry_id, reason, source, before, after, revised_at FROM spend_entry_revisions
+WHERE org_id = $1 AND entry_id = $2
+ORDER BY revised_at, id
+`
+
+type ListSpendEntryRevisionsParams struct {
+	OrgID   pgtype.UUID
+	EntryID pgtype.UUID
+}
+
+func (q *Queries) ListSpendEntryRevisions(ctx context.Context, arg ListSpendEntryRevisionsParams) ([]SpendEntryRevision, error) {
+	rows, err := q.db.Query(ctx, listSpendEntryRevisions, arg.OrgID, arg.EntryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SpendEntryRevision
+	for rows.Next() {
+		var i SpendEntryRevision
+		if err := rows.Scan(
+			&i.OrgID,
+			&i.ID,
+			&i.EntryID,
+			&i.Reason,
+			&i.Source,
+			&i.Before,
+			&i.After,
+			&i.RevisedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const settleSpendEntry = `-- name: SettleSpendEntry :one
+UPDATE spend_entries
+SET input_tokens = $1, output_tokens = $2,
+    cache_read_tokens = $3, cache_write_tokens = $4,
+    reasoning_tokens = $5,
+    cost_usd = ($6::text)::numeric,
+    price_ref = coalesce($7, price_ref),
+    estimated = $8, estimate = $9::jsonb,
+    cost_flagged = cost_flagged OR $10,
+    provisional = false, reserve_usd = 0
+WHERE org_id = $11 AND id = $12 AND provisional
+RETURNING id
+`
+
+type SettleSpendEntryParams struct {
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	ReasoningTokens  int64
+	CostUsd          string
+	PriceRef         pgtype.Text
+	Estimated        bool
+	Estimate         []byte
+	CostFlagged      bool
+	OrgID            pgtype.UUID
+	ID               pgtype.UUID
+}
+
+// Makes a provisional entry final: with the provider's usage and cost, or (expired) as it is. The
+// reserve is released either way. No row: the entry was not provisional (settled already).
+func (q *Queries) SettleSpendEntry(ctx context.Context, arg SettleSpendEntryParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, settleSpendEntry,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.CacheReadTokens,
+		arg.CacheWriteTokens,
+		arg.ReasoningTokens,
+		arg.CostUsd,
+		arg.PriceRef,
+		arg.Estimated,
+		arg.Estimate,
+		arg.CostFlagged,
+		arg.OrgID,
+		arg.ID,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const spendReport = `-- name: SpendReport :many
 SELECT model,
        count(*)::bigint AS requests,
@@ -302,7 +671,18 @@ SELECT model,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
        coalesce(sum(cost_usd) FILTER (WHERE NOT estimated), 0)::text AS reported_usd,
        coalesce(sum(cost_usd) FILTER (WHERE estimated), 0)::text AS estimated_usd,
-       count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
+       count(*) FILTER (WHERE estimated)::bigint AS estimated_requests,
+       -- Estimated output: for a response cut short, the output usage the gateway logged.
+       coalesce(sum(output_tokens) FILTER (WHERE estimated), 0)::bigint AS estimated_output_tokens,
+       -- agentgateway's own cost next to Koinon's, over the requests it priced, so a pricing
+       -- difference shows without the raw rows.
+       count(*) FILTER (WHERE gateway_cost_usd IS NOT NULL)::bigint AS gateway_requests,
+       coalesce(sum(gateway_cost_usd), 0)::text AS gateway_usd,
+       coalesce(sum(cost_usd) FILTER (WHERE gateway_cost_usd IS NOT NULL), 0)::text AS gateway_compared_usd,
+       count(*) FILTER (WHERE cost_flagged)::bigint AS flagged_requests,
+       -- Responses cut short whose provider figure is pending, and what they hold back from the gateway keys.
+       count(*) FILTER (WHERE provisional)::bigint AS provisional_requests,
+       coalesce(sum(reserve_usd), 0)::text AS reserved_usd
 FROM spend_entries
 WHERE org_id = $1 AND occurred_at >= $2
 GROUP BY model
@@ -315,13 +695,20 @@ type SpendReportParams struct {
 }
 
 type SpendReportRow struct {
-	Model             string
-	Requests          int64
-	InputTokens       int64
-	OutputTokens      int64
-	ReportedUsd       string
-	EstimatedUsd      string
-	EstimatedRequests int64
+	Model                 string
+	Requests              int64
+	InputTokens           int64
+	OutputTokens          int64
+	ReportedUsd           string
+	EstimatedUsd          string
+	EstimatedRequests     int64
+	EstimatedOutputTokens int64
+	GatewayRequests       int64
+	GatewayUsd            string
+	GatewayComparedUsd    string
+	FlaggedRequests       int64
+	ProvisionalRequests   int64
+	ReservedUsd           string
 }
 
 // Spend per model since @since, with estimated usage kept apart.
@@ -342,6 +729,13 @@ func (q *Queries) SpendReport(ctx context.Context, arg SpendReportParams) ([]Spe
 			&i.ReportedUsd,
 			&i.EstimatedUsd,
 			&i.EstimatedRequests,
+			&i.EstimatedOutputTokens,
+			&i.GatewayRequests,
+			&i.GatewayUsd,
+			&i.GatewayComparedUsd,
+			&i.FlaggedRequests,
+			&i.ProvisionalRequests,
+			&i.ReservedUsd,
 		); err != nil {
 			return nil, err
 		}

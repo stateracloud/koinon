@@ -31,6 +31,10 @@ func (h *Host) Checks(ctx context.Context, conn codehost.Connection, t *connecto
 	if err != nil {
 		return []codehost.CheckResult{{Check: "secret", Step: "generate-key", Message: "Koinon could not read this connection's private key; create the connection again"}}
 	}
+	client, err := h.clientFor(conn)
+	if err != nil {
+		return []codehost.CheckResult{{Check: "host", Step: "create-app", Message: describe(err)}}
+	}
 	var out []codehost.CheckResult
 	failed := false
 	for _, step := range t.Spec.SetupGuide.Steps {
@@ -46,7 +50,7 @@ func (h *Host) Checks(ctx context.Context, conn codehost.Connection, t *connecto
 		case failed:
 			r.Message = "skipped: an earlier check failed"
 		default:
-			msg, err := fn(ctx, h.c, t, app)
+			msg, err := fn(ctx, client, t, app)
 			if err != nil {
 				r.Message = describe(err)
 				failed = true
