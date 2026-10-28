@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { localDate } from '@/lib/approvals'
 import { create, type MessageInitShape } from '@bufbuild/protobuf'
 import { Code, ConnectError, createRouterTransport } from '@connectrpc/connect'
+import { timestampDate } from '@bufbuild/protobuf/wkt'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
@@ -15,6 +17,7 @@ import {
   McpCallSchema,
   PullRequestCallSchema,
   RiskSchema,
+  ScopeKind,
   Status,
   type ApproveRequest,
   type DenyRequest,
@@ -369,7 +372,7 @@ describe('ApprovalCard', () => {
   it('offers the second approval to someone other than the first approver', async () => {
     setup({ mcp: true, mcpInit: { approvalsRequired: 2, firstApprover: 'u-other' } })
     const card = await screen.findByTestId('approval-card')
-    expect(within(card).getByText(/First approval given; a second person \(not the first approver, not the ticket's creator\) must approve\./)).toBeInTheDocument()
+    expect(within(card).getByText(/First approval given; a second person \(not the first approver, not the task's creator\) must approve\./)).toBeInTheDocument()
     expect(within(card).getByRole('button', { name: 'Give second approval' })).toBeEnabled()
   })
 
@@ -410,5 +413,80 @@ describe('ApprovalCard', () => {
     setup({ role: OrgRole.MEMBER, canDecide: true })
     const card = await screen.findByTestId('approval-card')
     expect(within(card).queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+  })
+
+  describe('scope choice', () => {
+    it('approves once by default, without a scope', async () => {
+      const { approves } = setup({ mcp: true })
+      await screen.findByTestId('approval-card')
+      expect(screen.getByLabelText('How far does this approval reach?')).toHaveValue('once')
+      await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
+      await waitFor(() => expect(approves).toHaveLength(1))
+      expect(approves[0].scope).toBe(ScopeKind.UNSPECIFIED)
+      expect(approves[0].scopeUntil).toBeUndefined()
+    })
+
+    it('approves for this agent until a date', async () => {
+      const { approves } = setup({ mcp: true })
+      await screen.findByTestId('approval-card')
+      await userEvent.selectOptions(screen.getByLabelText('How far does this approval reach?'), 'agent')
+      const until = screen.getByLabelText('Until (end of day)')
+      await userEvent.clear(until)
+      const want = new Date(Date.now() + 30 * 24 * 3600 * 1000)
+      await userEvent.type(until, localDate(want))
+      expect(screen.getByText(/always ask again/)).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
+      await waitFor(() => expect(approves).toHaveLength(1))
+      expect(approves[0].scope).toBe(ScopeKind.AGENT)
+      const sent = timestampDate(approves[0].scopeUntil!)
+      expect([sent.getFullYear(), sent.getMonth(), sent.getDate()]).toEqual([want.getFullYear(), want.getMonth(), want.getDate()])
+    })
+
+    it('approves for this task', async () => {
+      const { approves } = setup({ mcp: true })
+      await screen.findByTestId('approval-card')
+      await userEvent.selectOptions(screen.getByLabelText('How far does this approval reach?'), 'task')
+      expect(screen.queryByLabelText('Until (end of day)')).not.toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
+      await waitFor(() => expect(approves).toHaveLength(1))
+      expect(approves[0].scope).toBe(ScopeKind.TASK)
+    })
+
+    it('does not accept a date beyond the server limit, and offers a min and max', async () => {
+      setup({ mcp: true })
+      await screen.findByTestId('approval-card')
+      await userEvent.selectOptions(screen.getByLabelText('How far does this approval reach?'), 'agent')
+      const until = screen.getByLabelText('Until (end of day)')
+      expect(until).toHaveAttribute('min')
+      expect(until).toHaveAttribute('max')
+      await userEvent.clear(until)
+      await userEvent.type(until, localDate(new Date(Date.now() + 365 * 24 * 3600 * 1000)))
+      expect(screen.getByText('Choose a date from tomorrow to a year ahead.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled()
+    })
+
+    it('does not accept an agent scope without a future date', async () => {
+      const { approves } = setup({ mcp: true })
+      await screen.findByTestId('approval-card')
+      await userEvent.selectOptions(screen.getByLabelText('How far does this approval reach?'), 'agent')
+      const until = screen.getByLabelText('Until (end of day)')
+      await userEvent.clear(until)
+      await userEvent.type(until, '2001-01-01')
+      expect(screen.getByText('Choose a date from tomorrow to a year ahead.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled()
+      expect(approves).toHaveLength(0)
+    })
+
+    it('offers no scope to a viewer or for a request that needs two approvers', async () => {
+      setup({ role: OrgRole.MEMBER, canDecide: false })
+      await screen.findByTestId('approval-card')
+      expect(screen.queryByLabelText('How far does this approval reach?')).not.toBeInTheDocument()
+    })
+
+    it('offers no scope for two approvers', async () => {
+      setup({ mcp: true, mcpInit: { approvalsRequired: 2 } })
+      await screen.findByTestId('approval-card')
+      expect(screen.queryByLabelText('How far does this approval reach?')).not.toBeInTheDocument()
+    })
   })
 })

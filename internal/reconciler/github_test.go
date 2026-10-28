@@ -31,7 +31,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell/policycheck"
 	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -121,6 +123,7 @@ var _ = Describe("The repo.read grant in the sandbox", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		cfg = reconciler.Config{
+			Prices:  prices.NewResolver(pricing.Embedded()),
 			Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Flavors: map[store.AgentFlavor]reconciler.Flavor{
 				store.AgentFlavorOpencode: {Image: image, Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},

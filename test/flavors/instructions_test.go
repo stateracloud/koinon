@@ -54,7 +54,7 @@ func startSession(ctx context.Context, f flavor, sb *sandbox, cmd []string) (*ha
 const strayInstructions = "KOINON-STRAY-INSTRUCTIONS"
 
 // describeInstructions registers the instruction specs for one flavor: koinon-agentd's file
-// reaches the system prompt through the flavor's link, and without the file the entry script
+// reaches the system prompt through the flavor's link or config, and without the file the entry script
 // refuses to start.
 func describeInstructions(f flavor) bool {
 	return Describe(f.name+" instructions", func() {
@@ -74,7 +74,9 @@ func describeInstructions(f flavor) bool {
 			}
 			h, session := startSession(ctx, f, sb, f.command(gw.url("/v1"), contractModel, gw.url("/mcp")))
 			DeferCleanup(h.close)
-			Expect(sb.run(ctx, "readlink", f.instructionLink)).To(Equal(instructionsPath + "\n"))
+			if f.instructionLink != "" {
+				Expect(sb.run(ctx, "readlink", f.instructionLink)).To(Equal(instructionsPath + "\n"))
+			}
 
 			// The fake model answers helloPrompt only when the marker is in the system prompt.
 			_, err := h.conn.Prompt(ctx, session, helloPrompt)

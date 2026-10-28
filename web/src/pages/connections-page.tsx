@@ -22,9 +22,14 @@ export function ConnectionsPage() {
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-semibold">Connections</h1>
         {admin && (
-          <Button asChild size="sm" className="ml-auto">
-            <Link to="/connections/new/github">Connect GitHub</Link>
-          </Button>
+          <div className="ml-auto flex gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link to="/connections/new/gitea">Connect Gitea</Link>
+            </Button>
+            <Button asChild size="sm">
+              <Link to="/connections/new/github">Connect GitHub</Link>
+            </Button>
+          </div>
         )}
       </div>
       {list.isError && (
@@ -53,7 +58,7 @@ export function ConnectionsPage() {
         </ul>
       ) : (
         <p className="text-muted-foreground text-sm">
-          No connections yet. {admin ? 'Connect GitHub to let agents work on your repositories.' : 'An org admin or owner can connect GitHub.'}
+          No connections yet. {admin ? 'Connect GitHub or Gitea to let agents work on your repositories.' : 'An org admin or owner can connect GitHub or Gitea.'}
         </p>
       )}
     </div>

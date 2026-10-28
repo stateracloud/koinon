@@ -77,6 +77,20 @@
             }
           }
         },
+        "ephemeral": {
+          "description": "Agents made from this template are ephemeral: each task runs in a fresh sandbox with no persistent home, deleted when the task ends. Memory lives in task notes and the memory stores. Off by default (persistent).",
+          "type": "boolean",
+          "default": false
+        },
+        "questions": {
+          "description": "When the questions this agent asks with ask_user get their reminder and when they expire and apply their safe default (ADR 0065 decision 10). Durations from the moment of asking, as whole hours, minutes or seconds. Omitted values take the defaults: reminderAfter 24h, expireAfter 168h (7 days).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reminderAfter": { "type": "string", "pattern": "^[1-9][0-9]*(h|m|s)$" },
+            "expireAfter": { "type": "string", "pattern": "^[1-9][0-9]*(h|m|s)$" }
+          }
+        },
         "harness": {
           "description": "Harness settings beyond the flavor choice. Omitted means every setting is off.",
           "type": "object",
@@ -100,6 +114,12 @@
           "type": "array",
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/grant" }
+        },
+        "triggers": {
+          "description": "What starts work on the agent (ADR 0066): a schedule or a direct message in the inbox chat. Each has a filter typed by its type (no expression language) and an instruction given to the agent when it fires. They are part of the agent version and take effect when a version holding them is activated. code_host_event and channel_event are reserved for v0.2.",
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/trigger" }
         },
         "limits": {
           "type": "object",
@@ -136,6 +156,40 @@
     }
   },
   "$defs": {
+    "trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "instruction"],
+      "properties": {
+        "id": {
+          "description": "Names the trigger within the agent; stable across versions.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "maxLength": 63
+        },
+        "type": { "enum": ["schedule", "direct_message", "code_host_event", "channel_event"] },
+        "filter": {
+          "description": "Typed by the trigger type. schedule: cron (five fields) and an IANA timezone. direct_message: none.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cron": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "timezone": { "type": "string", "minLength": 1, "maxLength": 64 }
+          }
+        },
+        "instruction": {
+          "description": "Text given to the agent when the trigger fires.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "if": { "properties": { "type": { "const": "schedule" } } },
+      "then": {
+        "required": ["filter"],
+        "properties": { "filter": { "required": ["cron", "timezone"] } }
+      }
+    },
     "flavor": {
       "enum": ["opencode"]
     },

@@ -50,16 +50,23 @@ var (
 // queries that act for a user across all of their orgs, before any org is
 // chosen. The test fails if an entry is stale (missing, or no longer flagged).
 var crossOrgQueries = map[string]string{
-	"auth.sql:UpsertGroupMemberships":          "login: grants the user's IdP-group roles in every org mapped to those groups",
-	"auth.sql:DeleteStaleGroupMemberships":     "login: revokes the user's IdP-group roles in every org whose group they lost",
-	"api_tokens.sql:GetAPITokenByPrefix":       "admin API: authenticates a bearer token, which names its org only after it is looked up",
-	"connections.sql:ListConnectionsToMigrate": "startup: moves every org's connection secrets from Kubernetes Secrets into the store",
-	"budget.sql:ListOrgBudgetSummaries":        "platform admins: lists every org with its cap, ceiling and spend",
-	"prices.sql:ListPendingMigratedPrices":     "startup: finds the prices migration 00014 made from model rates, in every org, to complete them",
-	"audit.sql:ListAuditEventsAllOrgs":         "platform admins: reads the audit log across every org",
-	"audit.sql:ListAuditChainOrgs":             "the audit verifier: lists every org that has a chain",
-	"sandboxes.sql:CountAgentSandboxesByState": "reconciler metrics: counts sandboxes by state across every org; returns counts only, no row or ID",
-	"auth.sql:ListEffectiveMemberships":        "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
+	"auth.sql:UpsertGroupMemberships":                   "login: grants the user's IdP-group roles in every org mapped to those groups",
+	"auth.sql:DeleteStaleGroupMemberships":              "login: revokes the user's IdP-group roles in every org whose group they lost",
+	"api_tokens.sql:GetAPITokenByPrefix":                "admin API: authenticates a bearer token, which names its org only after it is looked up",
+	"connections.sql:ListConnectionsToMigrate":          "startup: moves every org's connection secrets from Kubernetes Secrets into the store",
+	"budget.sql:ListOrgBudgetSummaries":                 "platform admins: lists every org with its cap, ceiling and spend",
+	"catalog.sql:ListModelsToRederiveFormat":            "startup: finds the models whose format follows the table, in every org, to re-derive them (ADR 0069)",
+	"prices.sql:ListPendingMigratedPrices":              "startup: finds the prices migration 00014 made from model rates, in every org, to complete them",
+	"questions.sql:ListOrgsWithQuestionsToNotify":       "the question notifier: finds every org that has an opened question not yet announced",
+	"questions.sql:ListOrgsWithDueQuestions":            "the question timers: finds every org that has an open question with a reminder or an expiry due",
+	"questions.sql:ListOrgsWithQuestionsOfFinishedRuns": "the question sweep: finds every org that has a question whose run ended",
+	"spend.sql:ListOrgsWithDueSettlements":              "the spend settler: finds every org with a provisional entry due for an attempt",
+	"audit.sql:ListAuditEventsAllOrgs":                  "platform admins: reads the audit log across every org",
+	"audit.sql:ListAuditChainOrgs":                      "the audit verifier: lists every org that has a chain",
+	"sandboxes.sql:CountAgentSandboxesByState":          "reconciler metrics: counts sandboxes by state across every org; returns counts only, no row or ID",
+	"agents.sql:ListActiveAgentVersionsAllOrgs":         "the trigger scheduler: lists the active triggers of every live org's active agents; read-only",
+	"agents.sql:ListAgentActivationsAllOrgs":            "the schedule trigger: when each live org's active agent version was activated; read-only",
+	"auth.sql:ListEffectiveMemberships":                 "session: lists the orgs the user belongs to, to pick one; scoped by user_id",
 }
 
 var _ = Describe("org scoping", func() {

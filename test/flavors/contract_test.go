@@ -51,6 +51,10 @@ type flavor struct {
 	allow, reject []acp.PermissionOptionKind
 	// agentdVerdict is how koinon-agentd's default tier mapping answers permissionCall.
 	agentdVerdict string
+	// rejectEndsTurn is whether the harness ends the turn as cancelled when a permission request
+	// is rejected, instead of handing the model a tool error. koinon-agentd then continues the
+	// run with a note (internal/agentd/refusal.go).
+	rejectEndsTurn bool
 	// unknownSession is part of the error session/load returns for an unknown session ID.
 	unknownSession string
 	// instructionsInSystem is whether the harness puts the instruction file koinon-agentd
@@ -58,7 +62,7 @@ type flavor struct {
 	instructionsInSystem bool
 	// instructionLink is the path the harness reads the instructions from, a symbolic link to
 	// instructionsPath (internal/agentd, instructionLink). One in the home is put back on
-	// every start; one in the image cannot change.
+	// every start; one in the image cannot change. Empty when the harness's config names the file.
 	instructionLink string
 	// readyCommand is the command the harness announces once the Koinon MCP server's tools are
 	// registered (the server's readyPrompt as a command); koinon-agentd waits for it before the
@@ -72,6 +76,15 @@ type flavor struct {
 	// projectMarker into the model's context, and it may loosen permissions, which the
 	// permission specs then catch. Empty skips the check.
 	projectConfig map[string]string
+	// dataTools is whether the image ships the data tools of ADR 0052's amendment of 2026-10-28
+	// (tools_test.go).
+	dataTools bool
+	// sizeBudget is the most the image may weigh, in KiB per architecture, as `du -sxk /` inside
+	// the container reports it: what it measured when the budget was last set, plus about 10%. A
+	// tool or package bump that grows the image is then a visible decision, not a surprise. `docker
+	// image inspect` is no measure: its size is compressed or layer-summed depending on the image
+	// store. Empty skips the check.
+	sizeBudget map[string]int64
 	// plant prepares sb for a background job of the agent's that would change a later run from
 	// the home, and returns the shell command the job repeats. Nil repeats nothing.
 	plant func(ctx context.Context, sb *sandbox) string
@@ -81,7 +94,7 @@ type flavor struct {
 const projectMarker = "KOINON-PROJECT-CONFIG-MARKER"
 
 // readySettle is how long koinon-agentd waits after the ready command before the first prompt:
-// OpenCode 2.0.24 announces the command and registers the server's tools on separate paths, the
+// OpenCode 2.2.0 announces the command and registers the server's tools on separate paths, the
 // tools after a 100 ms debounce (packages/core/src/tool/mcp.ts), so the command can come first.
 const readySettle = time.Second
 
@@ -108,7 +121,7 @@ func (f flavor) tag() string {
 	if err != nil {
 		Fail("repository root: " + err.Error())
 	}
-	out, err := exec.CommandContext(context.Background(), filepath.Join(root, "hack", "flavor-tag.sh"), f.name).Output() //nolint:gosec // test-controlled
+	out, err := exec.CommandContext(context.Background(), filepath.Join(root, "hack", "flavor-tag.sh"), f.name).Output()
 	if err != nil {
 		Fail("hack/flavor-tag.sh " + f.name + ": " + err.Error())
 	}
@@ -244,7 +257,7 @@ func describeContract(f flavor) bool {
 				f.command("file:///etc/passwd", contractModel, gw.url("/mcp")),
 				f.command(gw.url("/v1"), contractModel, "")[:5],
 			} {
-				c := exec.CommandContext(ctx, "docker", append([]string{"exec", sb.name}, args...)...) //nolint:gosec // test-controlled
+				c := exec.CommandContext(ctx, "docker", append([]string{"exec", sb.name}, args...)...)
 				out, err := c.CombinedOutput()
 				var exit *exec.ExitError
 				Expect(errors.As(err, &exit)).To(BeTrue(), "%v: %s", args, out)
@@ -257,7 +270,7 @@ func describeContract(f flavor) bool {
 			// git asks its helpers as it would before a clone; without an answer it would
 			// prompt, which GIT_TERMINAL_PROMPT=0 turns into a failure.
 			credential := func(op, input string) (string, error) {
-				c := exec.CommandContext(ctx, "docker", "exec", "--interactive", "--env", "GIT_TERMINAL_PROMPT=0", //nolint:gosec // test-controlled
+				c := exec.CommandContext(ctx, "docker", "exec", "--interactive", "--env", "GIT_TERMINAL_PROMPT=0",
 					"--workdir", workdir, sb.name, "/usr/bin/git", "credential", op)
 				c.Stdin = strings.NewReader(input)
 				out, err := c.CombinedOutput()
@@ -280,7 +293,7 @@ func describeContract(f flavor) bool {
 				To(ContainSubstring("file:/etc/koinon/git/config\t/usr/local/bin/koinon-git-credential"))
 			Expect(sb.run(ctx, "stat", "-c", "%u %A", "/etc/koinon/git/config", "/usr/local/bin/koinon-git-credential")).
 				To(Equal("0 -rw-r--r--\n0 -rwxr-xr-x\n"))
-			grep := exec.CommandContext(ctx, "docker", "exec", sb.name, "grep", "-rlsF", fakeGitHubPlaceholder, "/sandbox", "/tmp", "/etc") //nolint:gosec // test-controlled
+			grep := exec.CommandContext(ctx, "docker", "exec", sb.name, "grep", "-rlsF", fakeGitHubPlaceholder, "/sandbox", "/tmp", "/etc")
 			found, err := grep.Output()
 			Expect(err).To(HaveOccurred(), "grep found the placeholder in %s", found)
 		})
@@ -455,7 +468,7 @@ func ensureImage(f flavor) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	img := f.image()
-	if exec.CommandContext(ctx, "docker", "image", "inspect", img).Run() == nil { //nolint:gosec // test-controlled
+	if exec.CommandContext(ctx, "docker", "image", "inspect", img).Run() == nil {
 		return
 	}
 	if os.Getenv("KOINON_FLAVOR_BUILD") != "1" {
@@ -464,7 +477,7 @@ func ensureImage(f flavor) {
 	}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	Expect(err).NotTo(HaveOccurred())
-	out, err := exec.CommandContext(ctx, "docker", "buildx", "build", "--load", "--tag", img, //nolint:gosec // test-controlled
+	out, err := exec.CommandContext(ctx, "docker", "buildx", "build", "--load", "--tag", img,
 		"--build-context", "common="+filepath.Join(root, "flavors", "common"),
 		filepath.Join(root, f.dockerfile)).CombinedOutput()
 	Expect(err).NotTo(HaveOccurred(), "build %s: %s", img, out)

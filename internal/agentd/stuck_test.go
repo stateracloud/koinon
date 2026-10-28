@@ -475,7 +475,40 @@ var _ = Describe("savework.sh", func() {
 		works, skipped, err := agentd.ParseSaveOutput(out)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(works).To(BeEmpty())
-		Expect(skipped).To(ContainElement(ContainSubstring("not a GitHub repository")))
+		Expect(skipped).To(ContainElement(ContainSubstring("not a repository on github.com")))
+	})
+
+	It("reads the repositories of the connection's host, and only those", func() {
+		if _, err := exec.LookPath("git"); err != nil {
+			Skip("git is not installed")
+		}
+		work := GinkgoT().TempDir()
+		for _, origin := range []string{"https://ghes.example.test:8443/acme/widgets.git", "git@ghes.example.test:acme/gadgets", "https://github.com/acme/other.git"} {
+			dir := filepath.Join(work, filepath.Base(strings.TrimSuffix(origin, ".git")))
+			Expect(os.MkdirAll(dir, 0o755)).To(Succeed())
+			git := func(args ...string) {
+				c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+				c.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+					"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.test", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.test")
+				out, err := c.CombinedOutput()
+				Expect(err).NotTo(HaveOccurred(), string(out))
+			}
+			git("init", "-q", "-b", "main", ".")
+			Expect(os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\n"), 0o600)).To(Succeed())
+			git("add", "-A")
+			git("commit", "-qm", "init")
+			git("remote", "add", "origin", origin)
+			git("update-ref", "refs/remotes/origin/main", "HEAD")
+			Expect(os.WriteFile(filepath.Join(dir, "a.txt"), []byte("two\n"), 0o600)).To(Succeed())
+		}
+		out, err := exec.Command("sh", "-c", agentd.SaveworkScript, "savework", work, "1000000", "ghes.example.test:8443").Output()
+		Expect(err).NotTo(HaveOccurred())
+		works, skipped, err := agentd.ParseSaveOutput(out)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(works).To(HaveLen(1))
+		Expect(works[0].Manifest.Repo).To(Equal("acme/widgets"))
+		Expect(skipped).To(HaveLen(2))
+		Expect(skipped).To(ContainElement(ContainSubstring("not a repository on ghes.example.test:8443")))
 	})
 
 	It("rejects output that ends inside a file", func() {

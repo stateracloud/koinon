@@ -475,7 +475,7 @@ func (s *Server) SetPrice(ctx context.Context, req *budgetv1alpha1.SetPriceReque
 	if err != nil {
 		return nil, s.budgetError(err)
 	}
-	return &budgetv1alpha1.SetPriceResponse{Price: versionProto(got)}, nil
+	return &budgetv1alpha1.SetPriceResponse{Price: versionProto(got), Warnings: prices.EntryWarnings(e)}, nil
 }
 
 // RetirePrice implements PriceService. Admins and owners.

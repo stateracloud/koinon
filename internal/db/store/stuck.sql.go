@@ -52,7 +52,7 @@ INSERT INTO approval_requests (org_id, task_id, run_id, agent_id, connector, too
 VALUES ($1, $2, $3, $4, $5, $6, $7,
         $8, $9, '{}', 'ask', 'pending', $10, true)
 ON CONFLICT (org_id, run_id, tool, target, args_sha256) DO NOTHING
-RETURNING org_id, id, task_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding, system
+RETURNING org_id, id, task_id, run_id, agent_id, connector, tool, target, args_json, args_sha256, risk, decision, status, decided_by, decided_at, decision_note, result, expires_at, created_at, updated_at, executions, execution_lease_until, executed_at, error, delivered_at, approvals_required, first_approver, call_binding, system, scope_id
 `
 
 type CreateSystemApprovalRequestParams struct {
@@ -113,6 +113,7 @@ func (q *Queries) CreateSystemApprovalRequest(ctx context.Context, arg CreateSys
 		&i.FirstApprover,
 		&i.CallBinding,
 		&i.System,
+		&i.ScopeID,
 	)
 	return i, err
 }
@@ -575,9 +576,9 @@ func (q *Queries) MarkAgentUnhealthy(ctx context.Context, arg MarkAgentUnhealthy
 const markSandboxUnhealthy = `-- name: MarkSandboxUnhealthy :one
 
 UPDATE agent_sandboxes
-SET unhealthy_at = now(), unhealthy_reason = $1::text, unhealthy_generation = coalesce(nullif($2::text, ''), home_generation, '')
+SET unhealthy_at = now(), unhealthy_reason = $1::text, unhealthy_generation = coalesce(nullif($2::text, ''), sandbox_id, home_generation, '')
 WHERE org_id = $3 AND agent_id = $4
-RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at
+RETURNING org_id, agent_id, workspace, sandbox_name, provider_name, key_secret_name, gateway_key_id, gateway_key_hash, state, phase, message, spec_hash, started_at, stopped_at, observed_at, created_at, updated_at, home_generation, unhealthy_at, unhealthy_reason, unhealthy_generation, woken_at, sandbox_id, restore_checkpoint_id, restore_claimed_at, archived_at
 `
 
 type MarkSandboxUnhealthyParams struct {
@@ -626,6 +627,10 @@ func (q *Queries) MarkSandboxUnhealthy(ctx context.Context, arg MarkSandboxUnhea
 		&i.UnhealthyReason,
 		&i.UnhealthyGeneration,
 		&i.WokenAt,
+		&i.SandboxID,
+		&i.RestoreCheckpointID,
+		&i.RestoreClaimedAt,
+		&i.ArchivedAt,
 	)
 	return i, err
 }

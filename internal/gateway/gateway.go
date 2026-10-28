@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 )
 
@@ -181,6 +182,17 @@ const ReadyPrompt = "koinon-ready"
 // the name of its target (prefixMode always), and Koinon's MCP server is the "github" target.
 const ReadyPromptExposed = "github_" + ReadyPrompt
 
+// KoinonTarget is the MCP target of Koinon's own agent tools (ask_user, plan item TK3), offered to
+// every active agent; the agent sees "koinon_ask_user". The tool server is koinon-api's.
+const KoinonTarget = "koinon"
+
+// ToolAskUser is the name of the ask_user tool on KoinonTarget.
+const ToolAskUser = "ask_user"
+
+// ToolCancelTask is the name of the cancel_task tool on KoinonTarget: the agent closes its own task
+// as canceled (ADR 0065 decision 10, plan item TK4).
+const ToolCancelTask = "cancel_task"
+
 // Key is the gateway-side record of an API key: its ID, owner and hash. It
 // holds no key material and is safe to persist and to render into config.
 type Key struct {
@@ -252,7 +264,11 @@ type Limit struct {
 	Unit   LimitUnit
 	Amount float64
 	// Window is the accounting window. agentgateway aligns windows to the Unix
-	// epoch (24h starts at midnight UTC).
+	// epoch (24h starts at midnight UTC). Zero means no window: since agentgateway
+	// v1.7 the counter then accumulates for the lifetime of its name and never
+	// resets, so only a new Generation starts a fresh one. Koinon does not use
+	// that yet: agentgateway deletes only expired windowed counters at startup,
+	// so every unwindowed generation would stay in its table (and in memory) forever.
 	Window time.Duration
 	// Generation names the gateway's spend counter for this limit. agentgateway
 	// keys budget usage by key and budget name, so a new Generation starts a
@@ -284,13 +300,20 @@ type Provider struct {
 	// APIKeyFile is the path, inside the gateway, of the mounted provider key.
 	// Empty means the upstream needs no key.
 	APIKeyFile string
-	Models     []Model
+	// AnthropicWorkspaceID, when set, is sent as the anthropic-workspace-id header on the requests of
+	// this provider's anthropic-format models (ADR 0069 decision 5). It is an identifier, not a
+	// credential.
+	AnthropicWorkspaceID string
+	Models               []Model
 }
 
 // Model is one model clients may request.
 type Model struct {
 	// Name is the plain name agents use; it is unique within the org.
 	Name string
+	// Format is the model's wire format (ADR 0069); the drivers render it through one table
+	// (Rendering). It is required.
+	Format modelformat.Format
 	// Guard turns on the routing guard (ADR 0048): the gateway forces GuardOverrides
 	// into every request body.
 	Guard bool
@@ -504,8 +527,8 @@ func (s State) Validate() error {
 		if l.Unit != USD && l.Unit != Tokens {
 			errs = append(errs, fmt.Errorf("limit for %s: unknown unit %q", a, l.Unit))
 		}
-		if l.Amount < 0 || l.Window <= 0 {
-			errs = append(errs, fmt.Errorf("limit for %s: amount must be >= 0 and window > 0", a))
+		if l.Amount < 0 || l.Window < 0 {
+			errs = append(errs, fmt.Errorf("limit for %s: amount and window must be >= 0", a))
 		}
 		if !generation.MatchString(l.Generation) {
 			errs = append(errs, fmt.Errorf("limit for %s: generation must be at most 64 of [a-z0-9-]", a))
@@ -533,7 +556,15 @@ func (s State) Validate() error {
 		if p.APIKeyFile != "" && !keyPath.MatchString(p.APIKeyFile) {
 			errs = append(errs, fmt.Errorf("provider %q: invalid key file path", ref))
 		}
+		if p.AnthropicWorkspaceID != "" && !modelformat.ValidWorkspaceID(p.AnthropicWorkspaceID) {
+			errs = append(errs, fmt.Errorf("provider %q: invalid anthropic workspace id", ref))
+		}
 		for _, m := range p.Models {
+			if !modelformat.Known(m.Format) {
+				errs = append(errs, fmt.Errorf("model %q of provider %q: unknown or unset format %q", m.Name, ref, m.Format))
+			} else if _, err := RenderingOf(m); err != nil {
+				errs = append(errs, fmt.Errorf("model %q of provider %q: %w", m.Name, ref, err))
+			}
 			if !modelName.MatchString(m.Name) {
 				errs = append(errs, fmt.Errorf("model %q of provider %q: invalid name", m.Name, ref))
 			}
@@ -615,10 +646,42 @@ const (
 	// LogFieldMaxTokens is the request's max_tokens, to settle an aborted request that bills
 	// hidden thinking.
 	LogFieldMaxTokens = "koinon.max_tokens" //nolint:gosec // attribute name, not a credential
+	// LogFieldFormat is the wire format of the request (a modelformat.Format value, "" for a path that
+	// is not a model route), read from the request path alone, so the log needs no body. The spend
+	// ledger tells a cut Messages stream by it (ADR 0069 amendment).
+	LogFieldFormat = "koinon.format"
+	// LogFieldStream is llm.streaming: whether the request streamed its response.
+	LogFieldStream = "koinon.stream"
+	// LogFieldError is proxy.error.reason: why the proxy failed the request, absent when it did not.
+	// A response that was cut mid-stream is logged with its 200 status and the reason here.
+	LogFieldError = "koinon.error"
 	// LogFieldRequestBytes is the request's Content-Length: the byte count the estimate and its
-	// calibration use. Response bytes are not exposed by agentgateway's CEL context.
+	// calibration use.
 	LogFieldRequestBytes = "koinon.req_bytes"
+	// LogFieldResponseID is the provider's response ID from a response header (an OpenRouter
+	// generation ID, x-generation-id), so the ledger can ask the provider later what it billed for a
+	// response cut short (ADR 0056, amendment 2026-10-28). See ResponseIDCEL.
+	LogFieldResponseID = "koinon.response_id"
+)
 
+// ResponseIDHeaders are the response headers that carry a provider's response ID, in the order
+// tried. OpenRouter returns x-generation-id on every endpoint; the ID is what its generation
+// endpoint takes (package providerusage).
+var ResponseIDHeaders = []string{"x-generation-id"}
+
+// ResponseIDCEL is the CEL of LogFieldResponseID: the first of ResponseIDHeaders the response
+// carries. It reads a header only, so the gateway records no body for it (a body variable in a
+// log expression would make agentgateway record the whole response as it streams). A response
+// without such a header leaves the field out (a failed expression is left out of the record).
+var ResponseIDCEL = func() string {
+	parts := make([]string, len(ResponseIDHeaders))
+	for i, h := range ResponseIDHeaders {
+		parts[i] = fmt.Sprintf("response.headers[%q]", h)
+	}
+	return "coalesce(" + strings.Join(parts, ", ") + ")"
+}()
+
+const (
 	// ReloadProbeKeyName is the LogFieldKey of the key a driver puts in each
 	// config to detect its reload (standalone.ReloadProbeKey). Its requests
 	// never reach a model; the spend ledger drops them.

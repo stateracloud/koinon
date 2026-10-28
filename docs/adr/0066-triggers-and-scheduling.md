@@ -182,6 +182,39 @@ file on 2026-10-26):
   only on the schema (SELECT/INSERT/UPDATE/DELETE, sequence USAGE/SELECT, function EXECUTE), as in
   the chart's CNPG bootstrap, not the SDK's `GRANT ALL`.
 
+## Amendment 2026-10-27 (DB3)
+
+- **Dedupe (B1).** Table `dedupe_records (org_id, source, key)` (migration 00024), written by
+  `durable.Once` in the same transaction as the effect. Sources: `webhook` (delivery ID), `slack`
+  (`event_id`), `trigger` (`durable.TriggerFireKey`: trigger ID plus the scheduled fire time in
+  Unix seconds, not the processing time), `question`, `child_task`. A concurrent duplicate waits on
+  the first transaction (`ON CONFLICT DO NOTHING`); if the effect fails the claim rolls back with
+  it, so the redelivery runs. The record names the effect (`task`, id), so a replay returns the
+  existing task. `services.CreateTriggeredTask` is the helper TR2 and TR3 call: record, task,
+  events and queued run in one transaction. Records are not swept yet (`DeleteDedupeRecordsBefore`
+  exists; the retention window is TR's decision). Approval and inbox effects have no source key
+  today: their natural key is the question ID, used when TK3 lands.
+- **Review fixes (DB3).** One `(source, key)` guards exactly one effect kind; `CreateTriggeredTask`
+  rejects a replay whose record names another kind or none. `Once` needs READ COMMITTED (the
+  default). The sweep index is `(org_id, created_at)`. `services.ErrAgentInactive` marks the
+  permanent inactive-agent failure (drop, do not retry). A task without an agent sends no pre-wake.
+- **Ordering (B2).** `durable.Commit` runs a transaction and sends the notifications it returns
+  only after the commit. A `durable.Notifier` sends them as a DBOS workflow `koinon.notify` whose
+  workflow ID is the notification ID (derived from the effect, e.g. `wake.agent:task-created:<task>`),
+  so a second send is the same workflow, and one step (8 retries, DBOS backoff) runs the handler:
+  a failure after the commit is retried and recovered after a restart, and the checkpointed step
+  does not run again once it succeeded. Handlers must still be idempotent. Without `--durable` the
+  Notifier is inline and best effort, as before.
+- **Audit.** `createTask` and `appendMessage` already woke after the commit, inline and
+  unretried; both now return a pre-wake notification from `commit`. `NotifyTyping` is not a state
+  change and stays a direct call. LT1's reconciler pre-wakes and the sandbox start already run
+  after the state write that causes them.
+- **Not covered.** A crash between the commit and the start of the notification workflow loses that
+  notification (the sandbox then starts when the queued run is claimed, which is the pre-LT1
+  behaviour). Closing it needs an outbox row written in the effect's transaction; not built, since
+  a lost pre-wake only costs latency. TK3's inbox notifications, where a loss is visible, should
+  use one.
+
 ## Open questions
 
 - ~~DBOS's system tables: a separate schema or a separate database in the same cluster, and which
@@ -194,14 +227,16 @@ file on 2026-10-26):
   ID (for example the pod name) or the durable runtime must stay at one replica. The other side:
   `ApplicationVersion` is the release version, so workflows left pending by the previous release
   (a long durable timer) are not recovered after an upgrade; decide how they are carried over.
-- Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.
+- ~~Where per-org concurrency is enforced for runs: DBOS queues, `run_claimable`, or both.~~ Answered by
+  the 2026-10-27 (DB2) amendment: `run_claimable`.
 - The burst window length, the pre-warm lead time and the jitter range.
 - The filter language for rules (CEL was ADR 0010's candidate) and whether a trigger has its own
   budget, as ADR 0010's subscriptions did.
 - Which process hosts the webhook listener, and how the chart exposes it.
 - Gitea's webhook signature scheme, and the polling interval per provider.
-- Whether the inbox chat's thread correlation ships in v0.1 with direct-message triggers, since #146
-  lists correlation under v0.2.
+- ~~Whether the inbox chat's thread correlation ships in v0.1 with direct-message triggers, since #146
+  lists correlation under v0.2.~~ Answered by the 2026-10-27 (TR3) amendment: it ships in v0.1 for the
+  inbox chat (#146, Andre, 2026-10-26); Slack and Teams stay in v0.2.
 - The DBOS management plane (Conductor) is an enterprise module (`go.dbos.dev/dbos-enterprise-go`);
   how operators inspect DBOS state without it.
 
@@ -267,3 +302,147 @@ Checked 2026-10-26 (`messaging-and-workflows.md` §2):
 - Research (session notes, 2026-10-26): `triggers-lifecycle.md`, `messaging-and-workflows.md`
 - Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the interruption rule (`system/thread.rs:240-291`, `system/defer.rs:1-17`) and the task-scoped watch (`event_processor.rs:1127-1305`). Research notes: `infinity-code-ideas.md`.
 - Prior art (ideas only, no code; its servers are AGPL-3.0): [daytonaio/daytona](https://github.com/daytonaio/daytona) v0.190.0, for warm pools of home-less sandboxes (`warm-pool.entity.ts:8-48`). Research notes: `daytona.md`.
+
+## Amendment (2026-10-27, plan item TR1): triggers on the agent version
+
+- **Shape.** `templates.Trigger` is `{id, type, filter, instruction}` in the template (`spec.triggers`, schema `$defs.trigger`) and in `agentconfig.Config.Triggers`; the agent proto carries `Trigger` (`cron` and `timezone` for the schedule filter). `id` is a lowercase slug, unique within the agent and stable across versions, so TR2 can key a schedule on `(agent, id)`. At most 16 triggers, instruction at most 4096 characters.
+- **Filters are typed per type, no expression language (#146).** `schedule`: a five-field cron expression (`robfig/cron/v3` standard parser; descriptors such as `@daily` and `TZ=`/`CRON_TZ=` prefixes are refused) and an IANA timezone, validated with `time.LoadLocation` (`Local` refused; `time/tzdata` is embedded so validation does not depend on the image). `direct_message`: no filter, at most one per agent. `code_host_event` and `channel_event` exist as enum values and are rejected until v0.2.
+- **Versioned, activated, audited.** The new RPC `AgentService.SetAgentTriggers(agent_id, base_version, triggers)` (admins and owners, because a trigger starts autonomous work) adds a version copying the latest config with the new triggers and audits `agent.triggers.propose` (before and after, with instructions). `base_version` must equal `latest_version`. Activation is the existing `ActivateAgent`; its audit event now also records the activated version's triggers and, in `before`, the previous version's.
+- **An active agent stays active while a trigger change is proposed.** `ReturnAgentToDraft` (grant changes) would stop the agent's runs for a change that adds no grant, so `SetAgentTriggers` does not use it. Instead `ActivateAgent` also accepts an active agent whose latest version is newer than its active one (the query allows `status IN ('draft','active')`; activating the version it already runs is still refused). Judgement call: the active version keeps running and its triggers stay in effect until the new version is activated.
+- **Read side.** `internal/triggers`: `ForOrg`, `All` (every live org; query `ListActiveAgentVersionsAllOrgs`, on the cross-org allowlist) and `ForAgent`, each optionally filtered by type. A trigger is in effect when it is in the active version of an `active` agent; draft, archived and proposed versions contribute none. They do not check `unhealthy_at`; TR2 and TR3 decide what to do for an unhealthy agent. `templates.Trigger.Next(t)` computes the next schedule firing in the trigger's zone. Nothing is scheduled or fired by TR1; trigger state such as last-fired belongs to TR2 (no migration).
+- **Concurrency (review fix).** `ActivateAgent`'s UPDATE only matches a draft, or an active agent whose active version differs from the one named, so a concurrent duplicate gets no row and `Aborted`. `SetAgentTriggers` locks the agent row (`GetAgentForUpdate`, `FOR UPDATE`) before checking `base_version`, so two proposals on the same base cannot both succeed.
+- **Web.** The agent page has a Triggers section (the active version's, or the proposed ones while a version is pending) and, for admins and owners, an editor that proposes a new version; the existing Activate button activates it.
+
+## Amendment (2026-10-27, plan item DB2): per-org concurrency and rate limits as built
+
+Settles the open question on where per-org concurrency is enforced (#146, Andre, 2026-10-26).
+
+- **Run concurrency lives in Postgres.** `run_claimable` (migration 00023) refuses a claim while the
+  org already has `max_concurrent_runs` runs in `starting` or `running`; parked runs do not count.
+  `ClaimNextRun` and the reconciler's `has_demand` share that function, so a queued run held back by
+  the cap keeps no sandbox up. Default 20 per org, tunable in `org_settings.max_concurrent_runs`
+  (1 to 10000). Claims by different agents of one org that overlap can overshoot the cap by the
+  number of racing claimers; the cap is a fairness bound, not a billing limit.
+- **DBOS limits trigger firings, webhook processing and task creation, not runs.** One queue,
+  `koinon.org-work`, is partitioned by org with `WithPartitionConcurrency` and
+  `WithPartitionRateLimiter` (DBOS Go 1.7), so a burst from one org waits in its own partition.
+  Defaults per org: 4 items at once and 60 starts per minute. `internal/durable` exposes
+  `NewOrgWork` and `EnqueueForOrg` for TR2, TR3 and later webhooks.
+- **Per-org tuning.** DBOS applies one partition limit to all partitions of a queue, so an org whose
+  `org_settings` (`trigger_concurrency`, `trigger_rate_per_minute`) differ from the defaults is
+  enqueued on a profile queue `koinon.org-work/c<N>/r<M>p<seconds>`, registered on first use and still
+  partitioned by org. DBOS stores queue configuration in its tables and its runners reload the queue
+  list, so every replica serves a profile queue. Changed settings apply to work enqueued afterwards.
+  Many distinct limit pairs mean many queues; operators should keep to a few tiers.
+- **Restarts.** DBOS counts workflow starts in Postgres, so a rate limit holds when the API restarts
+  inside the window (tested by stopping and relaunching the runtime against the same database).
+- **2026-10-27 (DB2 review):** `orgsettings.QueueLimits` reads the org's `trigger_concurrency` and
+  `trigger_rate_per_minute` for `OrgQueueConfig.Limits`, and `orgsettings.QueueDefaults` fills
+  `OrgQueueConfig.Defaults` so an org left at the defaults stays on the main queue. The settings are
+  per minute, so production keeps `RateWindow` at one minute; the window is also part of the profile
+  queue name. Renumbered at integration (wave 2) to migration 00023; it was planned as 00025 behind two other
+  migrations, because `hack/migrate-lint.sh` needs contiguous numbers.
+
+## Amendment 2026-10-27 (TR2): the schedule trigger as built
+
+- **No schedule state, no migration.** Every `koinon-api` replica with `api.durable.enabled` runs a
+  `schedule.Scheduler` (`internal/triggers/schedule`). Each tick (5 s) reads the schedule triggers in
+  effect (`triggers.All`) and the activation time of each agent's version, computes the due times
+  in the window since its last tick, and enqueues one DBOS workflow `koinon.trigger-fire` per due
+  time with `durable.EnqueueForOrg` (so the org's concurrency and rate limits apply). The workflow
+  ID and the DB3 dedupe key (`trigger` source, `durable.TriggerFireKey`) both name the trigger and the
+  scheduled due time (not the jittered start), so a due time fires once across replicas, overlapping
+  ticks, DBOS recovery and restarts. The fire creates the task with `services.CreateTriggeredTask`:
+  first message is the trigger's instruction, creator kind `trigger`, run origin `scheduled`
+  (the origin enum has `interactive` and `scheduled`; there is no `trigger` origin, so scheduled
+  runs use `scheduled`, which interactive work outranks). The trigger ID is a slug unique only within
+  its agent, so the creator ID and dedupe key use `schedule.TriggerUUID(agent, slug)`.
+- **Defaults (tunable in `schedule.Config`).** Pre-warm lead 2 minutes, jitter 0 to 30 s
+  (millisecond resolution), tick 5 s, catch-up window 1 hour. The burst window (60 s) stays with
+  TR3 and v0.2.
+- **Jitter and pre-warm.** A run starts `Jitter(agent, due)` after its due time: the first 8 bytes of
+  SHA-256 over the agent ID and the due time, modulo 30 000 ms. Many agents due in the same minute
+  therefore spread over 30 s, the same every time and on every replica. The sandbox is woken
+  (`wake.CronDue`, the LT1 pre-wake) `Lead` before that start, once per agent per due time.
+  Start times are accurate to the tick interval, because the tick enqueues the workflow when the
+  start has passed; a DBOS delay would not follow a test clock.
+- **Missed due times.** A replica that starts, and the first tick after it, looks back at most
+  `CatchUp` (1 hour) and fires only the latest due time whose start has passed, never a backlog; the
+  same coalescing applies after a stall. It never fires a due time at or before the activation of
+  the version that defines the trigger. A due time older than the window is skipped. A due time that
+  another replica already fired is a dedupe replay and creates nothing. Without stored state, "down
+  since" is not known, so the window is a bound rather than an exact rule.
+- **Changed or removed triggers.** The next tick reads the active version, so a new version
+  activated with a changed cron or without the trigger stops the old schedule at once; a fire
+  enqueued before that is dropped by the workflow when its trigger (ID and version) is no longer in
+  effect. An agent that is not active fires nothing (`ErrAgentInactive` drops the fire).
+- **Without `api.durable.enabled`** schedule triggers do not fire; `koinon-api` logs a warning once
+  at start. The simpler alternative (a timer without DBOS) has no cross-replica once-only guarantee
+  other than the dedupe key, and was not built.
+- **Review fixes (2026-10-27).** A fire goes ahead while the trigger in effect still has the same
+  cron, timezone and instruction as when the due time was enqueued; the version number is only
+  logged, so an unrelated new version no longer drops a pending run. The tick reads triggers with
+  `triggers.AllLenient`: an active version whose config does not parse, or a schedule that does not
+  parse, is logged and skipped, and one bad row no longer stops the cursor for every org. A schedule
+  is parsed once per trigger per tick, not once per due time.
+
+## Amendment (2026-10-27, plan item TR3): the direct-message trigger as built
+
+Settles the open question on thread correlation in v0.1 (#146, Andre, 2026-10-26, decision 2): inbox-chat
+thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0.2.
+
+- **The thread is the task.** No table and no migration. `TaskService.SendDirectMessage(agent_id,
+  task_id?, text, message_id)`, members and above. Without `task_id` it starts a thread; with it, it
+  replies in that thread.
+- **A direct-message trigger must be in effect.** The agent must be `active` and have a `direct_message`
+  trigger in its active version (`triggers.ForAgent`, TR1); a proposed trigger does not count. Otherwise
+  the API answers `FAILED_PRECONDITION` "this agent does not take direct messages". Replies need it too,
+  so removing the trigger stops the chat with that agent. The web chat says so next to the composer and
+  offers no text box. An unhealthy agent is refused by `scheduler.Enqueue` as for any task.
+- **New thread.** A task with `created_by_kind = trigger` (the "origin"), `created_by_trigger_id` the v5
+  UUID of the agent (`services.DirectMessageTriggerID`; triggers are slugs in the agent config and the
+  column is a uuid, and an agent has at most one direct-message trigger, so the ID is stable across
+  versions), a `task.created` event, and a `message` event written as the sender's own message
+  (`actor_kind = user`, because agentd's prompt carries only user messages). The message's `text`
+  is the trigger's instruction, a blank line and the person's text; `display` holds the person's text,
+  which the timeline shows. The title is the message's first line, at most 80 characters. The run is
+  queued with origin `interactive`: a person is waiting. Tasks have `direct_message_thread` in the API
+  so the web can tell these threads from other trigger-created tasks (schedules, TR2).
+- **Reply in an open thread.** The message (without the instruction) is appended and a run is queued
+  unless one is queued already, which will see it; the agent's sandbox is pre-woken after the commit
+  (LT1). Replies to a task that a direct message did not start are refused (use `AppendMessage`), as
+  are replies for another agent's thread.
+- **Reply to a completed thread: a follow-up reopens the same task.** `completed` moves to `submitted`
+  (`finished_at` cleared), a `status.changed` event records `reason: follow_up`, then the message and the
+  run follow as for an open task. The task keeps its timeline, runs, cost and harness session (a
+  recreated sandbox continues through the handoff, ADR 0051); an ephemeral agent gets a fresh sandbox,
+  as its home ended with the task. The follow-up is not a new task and has no parent link.
+  **Canceled and failed** threads take no reply (`FAILED_PRECONDITION`, "start a new thread"):
+  conservative, since a person ended or the system failed them. The chat lists open threads and
+  completed ones.
+- **Dedupe (DB3).** The client's `message_id` (a UUID, kept across retries by the web client until the
+  send succeeds) is the dedupe key, source `direct_message`. The record, task, events and run commit in
+  one transaction; a replay returns the first result without an `event` and has no second effect.
+- **Rate limits (DB2).** With `api.durable.enabled` the message is delivered by the workflow
+  `koinon.direct-message` on the org-partitioned queue (`durable.EnqueueForOrg`, workflow ID
+  `dm:<org>:<message_id>`), so one org's chat burst is limited by its own `trigger_concurrency` and
+  `trigger_rate_per_minute`. The request waits up to 30 s for its turn and then answers `UNAVAILABLE`;
+  sending again attaches to the same workflow. The API errors travel as workflow output, since an error
+  loses its code in Postgres. Without durable, the same delivery runs inline in one transaction.
+- **Authorisation.** Any member may start or reply in any thread of the org, as with `AppendMessage`;
+  the person's ID is on the message event (the task's creator is the trigger, because
+  `tasks_created_by_actor` allows a user only for `created_by_kind = user`).
+- **Not done here.** Interruption of a running turn (v0.2, decision 12), burst batching, and the
+  `ask_user` reply path of the same thread.
+
+
+- **2026-10-27 (TR3 review):** with the durable queue an API error is recorded as workflow output
+  under `dm:<org>:<message_id>` and replays for that ID. The web client therefore keeps a message ID
+  only after Unavailable and DeadlineExceeded (a possibly lost response) and takes a new one after any
+  other error. A durable replay returns the original event and created flag; an inline replay returns
+  no event. `SourceDirectMessage` lives with the other dedupe sources in `internal/durable`.
+- 2026-10-27 (wave-3 integration): a trigger's instruction is a system message whose payload carries
+  its `source`; `ListTaskMessagesAfter` returns user messages and these, so a scheduled run's first
+  prompt contains its instruction. A direct-message replay (`!First`) returns the recorded task only
+  when it belongs to the same agent (and the same thread when one is given); otherwise it is
+  `AlreadyExists`.

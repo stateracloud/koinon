@@ -18,6 +18,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/githubtools"
@@ -25,6 +26,13 @@ import (
 
 func file(p, content string) githubtools.FileChange {
 	return githubtools.FileChange{Path: p, Content: content}
+}
+
+// githubGuard is the workflow guard of a GitHub connection with no configured directories.
+func githubGuard() codehost.Guard {
+	g, err := codehost.NewGuard(codehost.Capabilities{CIPaths: []string{".github/workflows/"}, CIPathsFoldCase: true}, nil)
+	Expect(err).NotTo(HaveOccurred())
+	return g
 }
 
 func validPR() githubtools.PullRequestArgs {
@@ -46,7 +54,7 @@ var _ = DescribeTable("ValidatePullRequest",
 	func(mutate func(*githubtools.PullRequestArgs), want string) {
 		a := validPR()
 		mutate(&a)
-		err := githubtools.ValidatePullRequest(a)
+		err := githubtools.ValidatePullRequest(a, githubGuard())
 		if want == "" {
 			Expect(err).NotTo(HaveOccurred())
 			return
@@ -111,7 +119,7 @@ var _ = Describe("ValidatePullRequest", func() {
 		a.Branch = "main"
 		a.Files = append(a.Files, file(".github/workflows/x.yml", ""), file("../x", ""))
 		var ve *githubtools.ValidationError
-		Expect(errors.As(githubtools.ValidatePullRequest(a), &ve)).To(BeTrue())
+		Expect(errors.As(githubtools.ValidatePullRequest(a, githubGuard()), &ve)).To(BeTrue())
 		Expect(ve.Reasons).To(HaveLen(3))
 	})
 })
@@ -425,3 +433,18 @@ func validPRMap() map[string]any {
 		"files": []map[string]any{{"path": "README.md", "content": "# Widgets\n"}},
 	}
 }
+
+var _ = Describe("ValidatePullRequest with a connection's CI directories", func() {
+	It("refuses the connection's configured directory as well as the provider's", func() {
+		g, err := codehost.GuardOf(codehost.Capabilities{CIPaths: []string{".gitea/workflows/"}}, []byte(`{"ciDirs":["ci/pipelines"]}`))
+		Expect(err).NotTo(HaveOccurred())
+		for _, p := range []string{".gitea/workflows/ci.yml", "ci/pipelines/build.yml"} {
+			a := validPR()
+			a.Files = append(a.Files, file(p, "on: push"))
+			Expect(githubtools.ValidatePullRequest(a, g)).To(MatchError(ContainSubstring("Koinon never proposes CI changes")), p)
+		}
+		a := validPR()
+		a.Files = append(a.Files, file("ci/other.yml", "x"), file(".github/workflows/ok.yml", "x"))
+		Expect(githubtools.ValidatePullRequest(a, g)).To(Succeed())
+	})
+})

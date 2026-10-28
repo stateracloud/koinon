@@ -87,7 +87,8 @@ func (s *Server) CancelRun(ctx context.Context, req *runv1alpha1.CancelRunReques
 // interval. Events get their seq under the run's row lock, so they commit in
 // seq order and "seq > cursor" never skips one that commits later; each
 // event is sent once because the cursor only moves forward. The stream ends
-// once the run has finished and its last event has been sent.
+// once the run has finished and its last event has been sent. A stream that has sent nothing for
+// the heartbeat interval sends a heartbeat message (issue #141).
 func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest, stream runv1alpha1connect.RunServiceWatchRunServerStream) error {
 	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
 	if err != nil {
@@ -115,6 +116,19 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 
 	poll := time.NewTicker(s.poll)
 	defer poll.Stop()
+	// The heartbeat timer restarts with every message sent, so only a quiet stream gets one.
+	beat := time.NewTimer(s.heartbeat)
+	defer beat.Stop()
+	sent := func(resp *runv1alpha1.WatchRunResponse) error {
+		if !beat.Stop() {
+			select {
+			case <-beat.C:
+			default:
+			}
+		}
+		beat.Reset(s.heartbeat)
+		return stream.Send(resp)
+	}
 	for {
 		events, err := s.q.ListRunEventsAfter(ctx, store.ListRunEventsAfterParams{
 			OrgID: c.org, RunID: id, AfterSeq: cursor, MaxEvents: watchBatch,
@@ -123,7 +137,7 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 			return s.dbError(err, "run events")
 		}
 		for _, e := range events {
-			if err := stream.Send(&runv1alpha1.WatchRunResponse{
+			if err := sent(&runv1alpha1.WatchRunResponse{
 				Item: &runv1alpha1.WatchRunResponse_Event{Event: runEventProto(e)},
 			}); err != nil {
 				return err
@@ -141,7 +155,7 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 		}
 		if run.State != state {
 			state = run.State
-			if err := stream.Send(&runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Run{Run: runProto(run)}}); err != nil {
+			if err := sent(&runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Run{Run: runProto(run)}}); err != nil {
 				return err
 			}
 		}
@@ -156,6 +170,10 @@ func (s *Server) WatchRun(ctx context.Context, req *runv1alpha1.WatchRunRequest,
 			return nil
 		case <-sub.C:
 		case <-poll.C:
+		case <-beat.C:
+			if err := sent(&runv1alpha1.WatchRunResponse{Item: &runv1alpha1.WatchRunResponse_Heartbeat{Heartbeat: &runv1alpha1.Heartbeat{}}}); err != nil {
+				return err
+			}
 		}
 	}
 }

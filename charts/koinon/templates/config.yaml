@@ -45,11 +45,15 @@ data:
     reconciler:
       idleTimeout: {{ .Values.reconciler.idleTimeout }}
       parkWarm: {{ .Values.reconciler.parkWarm }}
+      archiveAfter: {{ .Values.reconciler.archiveAfter }}
       sandboxJobs: {{ .Values.reconciler.sandboxJobs }}
       resyncInterval: {{ .Values.reconciler.resyncInterval }}
       homeRetention: {{ .Values.reconciler.homeRetention }}
+      checkpoints: {{ .Values.checkpoints.enabled }}
     mcpAsk:
       url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp-ask
+    koinonTools:
+      url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp-koinon
     githubTools:
       url: http://{{ include "koinon.componentName" (list . "api-tools") }}.{{ .Release.Namespace }}.svc:{{ .Values.api.toolsPort }}/mcp
     flavors:

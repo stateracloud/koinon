@@ -18,10 +18,10 @@ WHERE org_id = @org_id AND agent_id = @agent_id AND state = 'running' AND NOT su
 -- GetApprovalRequestByCall).
 INSERT INTO approval_requests (org_id, task_id, run_id, agent_id, connector, tool, target,
                                args_json, args_sha256, risk, decision, status, expires_at,
-                               approvals_required, call_binding)
+                               approvals_required, call_binding, scope_id)
 VALUES (@org_id, @task_id, @run_id, @agent_id, @connector, @tool, @target,
         @args_json, @args_sha256, @risk, @decision, @status, @expires_at,
-        COALESCE(sqlc.narg(approvals_required)::smallint, 1), COALESCE(sqlc.narg(call_binding)::jsonb, '{}'))
+        COALESCE(sqlc.narg(approvals_required)::smallint, 1), COALESCE(sqlc.narg(call_binding)::jsonb, '{}'), sqlc.narg(scope_id))
 ON CONFLICT (org_id, run_id, tool, target, args_sha256) DO NOTHING
 RETURNING *;
 

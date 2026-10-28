@@ -43,7 +43,7 @@ func (s *Service) CompleteMigrated(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	_, defs := pricing.Default()
+	_, defs := s.src.Current()
 	n := 0
 	for _, r := range rows {
 		var e pricing.Entry

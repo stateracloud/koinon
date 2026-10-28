@@ -21,7 +21,8 @@ Set these repository permissions and leave everything else at "No access":
 | Metadata | Read-only (GitHub sets it) |
 | Pull requests | Read and write |
 
-Do not grant Workflows. Koinon refuses changes under `.github/workflows/`, and the connection test
+Do not grant Workflows. Koinon refuses changes under `.github/workflows/` and under any extra CI directories set on the
+connection, and the connection test
 fails if the App can change workflows. Choose "Only on this account" for where the App can be
 installed.
 
@@ -53,12 +54,8 @@ connection. Only org admins and owners can connect GitHub.
 
 ## GitHub Enterprise Server
 
-Point the chart at your server's REST API:
-
-```yaml chart-values
-github:
-  apiUrl: https://github.example.com/api/v3
-```
-
-The sandbox's network policy for GitHub names `github.com` and `api.github.com`. Enterprise Server
-hosts are not covered by the connector yet.
+Create the App on your server and connect it the same way, with the server's base URL (and its CA
+bundle when the certificate needs one) in the form's "GitHub Enterprise Server" section. Koinon then
+reaches the REST API at `/api/v3` on that host, and the sandbox network policy names that host instead
+of `github.com`. [GitHub Enterprise Server](/guides/ghes/) has the details. Gitea is a different
+connector: see [Gitea](/guides/gitea/).

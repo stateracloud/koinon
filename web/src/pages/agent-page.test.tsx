@@ -7,12 +7,28 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AgentSchema, AgentService, AgentStatus, type ActivateAgentRequest, type ResumeAgentRequest } from '@/gen/koinon/agent/v1alpha1/agent_pb'
+import { ApprovalScopeSchema, ApprovalService, ScopeKind, type RevokeApprovalScopeRequest } from '@/gen/koinon/approval/v1alpha1/approval_pb'
 import { AuthService, OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { orgId, renderApp, whoAmI } from '@/test-utils'
 
-function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; resumeFails?: boolean; restarting?: number } = {}) {
+function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; resumeFails?: boolean; restarting?: number; scopes?: boolean; archived?: boolean } = {}) {
   const resumes: ResumeAgentRequest[] = []
+  const revokes: RevokeApprovalScopeRequest[] = []
+  let scopes = opts.scopes
+    ? [
+        create(ApprovalScopeSchema, {
+          id: 'sc-1',
+          orgId,
+          agentId: 'a-1',
+          connector: 'github',
+          tool: 'create_pull_request',
+          target: 'github:acme/widgets',
+          kind: ScopeKind.AGENT,
+          expiresAt: timestampFromMs(new Date(2099, 2, 4, 12).getTime()),
+        }),
+      ]
+    : []
   const activates: ActivateAgentRequest[] = []
   let unhealthyAt = opts.unhealthy ? timestampFromMs(Date.now() - 60_000) : undefined
   let status = opts.draft ? AgentStatus.DRAFT : AgentStatus.ACTIVE
@@ -24,12 +40,22 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
       status,
       latestVersion: 2,
       activeVersion: opts.draft ? 1 : 2,
+      sandboxArchivedAt: opts.archived ? timestampFromMs(Date.now() - 60_000) : undefined,
       unhealthyAt,
       unhealthyReason: unhealthyAt ? 'its sandbox was recreated three times in a row' : '',
     })
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ConnectionService, { listConnections: () => ({ connections: [] }) })
+    service(ApprovalService, {
+      listApprovalScopes: () => ({ scopes }),
+      revokeApprovalScope: (req) => {
+        revokes.push(req)
+        const gone = scopes.find((x) => x.id === req.scopeId)
+        scopes = scopes.filter((x) => x.id !== req.scopeId)
+        return { scope: gone }
+      },
+    })
     service(AgentService, {
       getAgent: () => ({ agent: current() }),
       resumeAgent: (req) => {
@@ -46,7 +72,7 @@ function setup(opts: { role?: OrgRole; unhealthy?: boolean; draft?: boolean; res
     })
   })
   renderApp(transport, '/agents/a-1')
-  return { resumes, activates }
+  return { resumes, activates, revokes }
 }
 
 describe('AgentPage unhealthy', () => {
@@ -81,39 +107,74 @@ describe('AgentPage unhealthy', () => {
   })
 })
 
+describe('AgentPage archive', () => {
+  it('says an archived sandbox restores on the next run', async () => {
+    setup({ archived: true })
+    await screen.findByRole('heading', { name: 'Repo helper' })
+    expect(screen.getByText(/archived .*restores on next run/)).toBeInTheDocument()
+  })
+
+  it('says nothing about an archive otherwise', async () => {
+    setup()
+    await screen.findByRole('heading', { name: 'Repo helper' })
+    expect(screen.queryByText(/restores on next run/)).not.toBeInTheDocument()
+  })
+})
+
 describe('AgentPage activation', () => {
-  const label = 'Apply to open tickets now (starts fresh sessions with a handoff)'
+  const label = 'Apply to open tasks now (starts fresh sessions with a handoff)'
 
   it('has the checkbox off by default, with its help text, and sends false', async () => {
     const { activates } = setup({ draft: true })
     const box = await screen.findByLabelText(label)
     expect(box).not.toBeChecked()
-    expect(box).toHaveAccessibleDescription(/The next run on each open ticket starts a new session with the agent's last notes and replies/)
+    expect(box).toHaveAccessibleDescription(/The next run on each open task starts a new session with the agent's last notes and replies/)
     await userEvent.click(screen.getByRole('button', { name: 'Activate' }))
     await waitFor(() => expect(activates).toHaveLength(1))
     expect(activates[0]).toMatchObject({ agentId: 'a-1', version: 2, applyToOpenTickets: false })
   })
 
-  it('sends applyToOpenTickets when ticked and says how many tickets restart', async () => {
+  it('sends applyToOpenTickets when ticked and says how many tasks restart', async () => {
     const { activates } = setup({ draft: true, restarting: 3 })
     await userEvent.click(await screen.findByLabelText(label))
     await userEvent.click(screen.getByRole('button', { name: 'Activate' }))
     await waitFor(() => expect(activates).toHaveLength(1))
     expect(activates[0].applyToOpenTickets).toBe(true)
-    expect(await screen.findByRole('status')).toHaveTextContent('3 open tickets will start a fresh session at their next run.')
+    expect(await screen.findByRole('status')).toHaveTextContent('3 open tasks will start a fresh session at their next run.')
   })
 
-  it('says nothing about tickets when none restart', async () => {
+  it('says nothing about tasks when none restart', async () => {
     setup({ draft: true, restarting: 0 })
     await userEvent.click(await screen.findByRole('button', { name: 'Activate' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Activated.')
     expect(screen.queryByText(/will start a fresh session/)).not.toBeInTheDocument()
   })
 
-  it('uses the singular for one ticket', async () => {
+  it('uses the singular for one task', async () => {
     setup({ draft: true, restarting: 1 })
     await userEvent.click(await screen.findByLabelText(label))
     await userEvent.click(screen.getByRole('button', { name: 'Activate' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('1 open ticket will start a fresh session at their next run.')
+    expect(await screen.findByRole('status')).toHaveTextContent('1 open task will start a fresh session at their next run.')
+  })
+})
+
+describe('AgentPage standing approvals', () => {
+  it('lists the agent\'s active scopes and lets an admin revoke one', async () => {
+    const { revokes } = setup({ scopes: true })
+    const section = await screen.findByRole('region', { name: 'Standing approvals' })
+    const row = await within(section).findByTestId('approval-scope')
+    expect(row).toHaveTextContent('create_pull_request on acme/widgets')
+    expect(row).toHaveTextContent('For this agent, until')
+    await userEvent.click(within(row).getByRole('button', { name: 'Revoke create_pull_request on acme/widgets' }))
+    await waitFor(() => expect(revokes).toHaveLength(1))
+    expect(revokes[0]).toMatchObject({ scopeId: 'sc-1' })
+    expect(await within(section).findByText(/Every call that needs approval asks first/)).toBeInTheDocument()
+  })
+
+  it('shows scopes to a member without a revoke button', async () => {
+    setup({ scopes: true, role: OrgRole.MEMBER })
+    const section = await screen.findByRole('region', { name: 'Standing approvals' })
+    await within(section).findByTestId('approval-scope')
+    expect(within(section).queryByRole('button', { name: /Revoke/ })).not.toBeInTheDocument()
   })
 })

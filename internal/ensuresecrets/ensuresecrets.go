@@ -9,10 +9,12 @@ package ensuresecrets
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"regexp"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -26,8 +28,17 @@ const PasswordKey = "password"
 // UsernameKey is the data key that holds the login name.
 const UsernameKey = "username"
 
+// KeyKey is the data key that holds a generated AES-256 key (Spec.Kind KindAES256Key).
+const KeyKey = "key"
+
+// KindAES256Key is Spec.Kind of a Secret that holds a random 256-bit key as 64 hex characters under
+// KeyKey, the form agentgateway's SESSION_KEY takes, instead of a username and a password.
+const KindAES256Key = "aes256-key"
+
 // PasswordLength is the length of a generated password.
 const PasswordLength = 32
+
+var hexKey = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
@@ -37,8 +48,10 @@ type Spec struct {
 	// Type is the Secret type, for example kubernetes.io/basic-auth or Opaque.
 	Type corev1.SecretType `json:"type"`
 	// Username is written under the key "username".
-	Username string            `json:"username"`
-	Labels   map[string]string `json:"labels,omitempty"`
+	Username string `json:"username"`
+	// Kind is empty for a username and a password, or KindAES256Key for a hex key.
+	Kind   string            `json:"kind,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // Result is what Ensure did with one Secret.
@@ -60,8 +73,18 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		if sp.Name == "" {
 			return results, errors.New("a Secret spec has no name")
 		}
+		if sp.Kind != "" && sp.Kind != KindAES256Key {
+			return results, fmt.Errorf("the Secret spec %s has an unknown kind %q", sp.Name, sp.Kind)
+		}
 		existing, err := secrets.Get(ctx, sp.Name, metav1.GetOptions{})
 		switch {
+		case err == nil && sp.Kind == KindAES256Key:
+			if k := string(existing.Data[KeyKey]); !hexKey.MatchString(k) {
+				return results, fmt.Errorf("the Secret %s/%s exists but its %q key is not 64 hex characters; fix or delete it (it is not changed here)", namespace, sp.Name, KeyKey)
+			}
+			results = append(results, Result{Name: sp.Name})
+			_, _ = fmt.Fprintf(out, "secret %s: kept\n", sp.Name)
+			continue
 		case err == nil:
 			if len(existing.Data[PasswordKey]) == 0 && existing.StringData[PasswordKey] == "" {
 				return results, fmt.Errorf("the Secret %s/%s exists but has no %q key; fix or delete it (it is not changed here)", namespace, sp.Name, PasswordKey)
@@ -80,9 +103,20 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		case !apierrors.IsNotFound(err):
 			return results, fmt.Errorf("read the Secret %s/%s: %w", namespace, sp.Name, err)
 		}
-		password, err := NewPassword()
-		if err != nil {
-			return results, err
+		data := map[string][]byte{}
+		if sp.Kind == KindAES256Key {
+			b := make([]byte, 32)
+			if _, err := rand.Read(b); err != nil {
+				return results, fmt.Errorf("generate a key: %w", err)
+			}
+			data[KeyKey] = []byte(hex.EncodeToString(b))
+		} else {
+			password, err := NewPassword()
+			if err != nil {
+				return results, err
+			}
+			data[UsernameKey] = []byte(sp.Username)
+			data[PasswordKey] = []byte(password)
 		}
 		typ := sp.Type
 		if typ == "" {
@@ -91,10 +125,7 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		_, err = secrets.Create(ctx, &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: sp.Name, Namespace: namespace, Labels: sp.Labels},
 			Type:       typ,
-			Data: map[string][]byte{
-				UsernameKey: []byte(sp.Username),
-				PasswordKey: []byte(password),
-			},
+			Data:       data,
 		}, metav1.CreateOptions{FieldManager: "koinon-api"})
 		if err != nil && !apierrors.IsAlreadyExists(err) {
 			return results, fmt.Errorf("create the Secret %s/%s: %w", namespace, sp.Name, err)

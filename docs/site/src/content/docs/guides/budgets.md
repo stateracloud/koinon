@@ -23,13 +23,15 @@ every open run of the org stops. The platform ceiling is shown on the same page,
 
 A new agent starts with the spend limit of its template as its own daily limit. The list shows each agent's limit, its
 template default and what it spent today. **Change limit** sets another limit for that agent; the
-template is not touched.
+template is not touched. When an agent's limit is reached, every open run of that agent stops, including
+runs still queued or waiting on a person, and the task's timeline names the limit. Lowering a limit below
+what the agent already spent today stops its runs the same way.
 
 ## Notices
 
 At 80% and at 100% of a limit, org owners and admins get a notice. A banner shows the unread notices of
 the current month or day on every page, and the 100% notice replaces the 80% one. **Notifications** on the
-Budgets page lists them; **Mark as read** clears one. When a run stops at a limit, the ticket's timeline
+Budgets page lists them; **Mark as read** clears one. When a run stops at a limit, the task's timeline
 says so, with the limit and the amount.
 
 ## Platform ceiling
@@ -37,5 +39,22 @@ says so, with the limit and the amount.
 Platform admins set the ceiling under **Platform** in the sidebar. The page lists every org with its ceiling,
 cap and spend this month, and each ceiling is edited in place.
 
-Overshoot is bounded by the responses in flight when a limit is reached. The details are in
-[ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md).
+Overshoot is bounded by the responses in flight when a limit is reached: one per running agent, since an
+agent runs one task at a time. When several limits are reached at once, the stop names the broadest one
+(platform ceiling, then the org's cap, then the agent's limit).
+
+## Responses cut short
+
+Stopping a run cuts its response short, and a response cut short usually carries no usage. Koinon
+charges what the gateway saw, never the response's maximum output: usually an estimate of the prompt
+and no output. When the provider can say what it billed for that response (OpenRouter can), the charge
+is provisional: Koinon asks the provider for up to
+an hour and replaces the charge with the provider's figure, keeping the old and new figures in the
+entry's history. Until then the gateway holds back the most the response could cost (its maximum
+output) from the agent's key, so the agent cannot spend past a limit while the figure is pending; the
+hold is released when the figure arrives. The hold is not spend: what the Budgets page shows, the
+notices and the stops count the charges only. The spend report shows provisional requests and the
+amount held apart from the cost. With a provider that cannot report, that charge is final. The
+details are in
+[ADR 0041](https://github.com/stateracloud/koinon/blob/main/docs/adr/0041-koinon-spend-ledger-and-budget-stops.md)
+and [ADR 0056](https://github.com/stateracloud/koinon/blob/main/docs/adr/0056-model-providers-pricing-and-budgets-per-org.md).

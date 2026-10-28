@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/gitpush"
 	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/githubtools"
@@ -55,7 +56,7 @@ func (s *Service) execute(ctx context.Context, row store.ApprovalRequest) (map[s
 	if err != nil {
 		return nil, err
 	}
-	acc, err := p.Open(ctx, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: tool.Permissions})
+	acc, err := gitpush.Open(ctx, p, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: tool.Permissions})
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +66,16 @@ func (s *Service) execute(ctx context.Context, row store.ApprovalRequest) (map[s
 		if err != nil {
 			return nil, err
 		}
-		return s.createPullRequest(ctx, p, acc, repo, *args, row.ID.String(), requested, approved)
+		// Defence in depth: the tool server applied the guard when it recorded the call, but the
+		// connection's CI directories may have changed since, and the arguments are re-read here.
+		guard, err := codehost.GuardOf(p.Capabilities(), conn.Config)
+		if err != nil {
+			return nil, permanentError{err}
+		}
+		if err := githubtools.ValidatePullRequest(*args, guard); err != nil {
+			return nil, permanentError{err}
+		}
+		return s.createPullRequest(ctx, p, acc, repo, *args, guard, row.ID.String(), requested, approved)
 	case *githubtools.CommentArgs:
 		return s.comment(ctx, acc, repo, *args, row.ID.String())
 	default:
@@ -140,7 +150,18 @@ func (s *Service) people(ctx context.Context, row store.ApprovalRequest) (reques
 		}
 	}
 	approved = trustedApprover
-	if row.DecidedBy.Valid {
+	if row.ScopeID.Valid {
+		// A scoped approval: the trailer names the admin who granted the scope.
+		sc, err := s.q.GetApprovalScope(ctx, store.GetApprovalScopeParams{OrgID: row.OrgID, ID: row.ScopeID})
+		if err != nil {
+			return "", "", err
+		}
+		who, err := s.person(ctx, sc.CreatedBy)
+		if err != nil {
+			return "", "", err
+		}
+		approved = who + " (scoped approval)"
+	} else if row.DecidedBy.Valid {
 		if approved, err = s.person(ctx, row.DecidedBy); err != nil {
 			return "", "", err
 		}
@@ -202,7 +223,7 @@ func hasTrailer(message, approvalID string) bool {
 // createPullRequest creates the branch, one commit with exactly the approved files on top
 // of the base, and the pull request. What an earlier attempt of the same approval created
 // is found first and reused.
-func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, acc codehost.Access, repo codehost.Repo, args githubtools.PullRequestArgs,
+func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, acc codehost.Access, repo codehost.Repo, args githubtools.PullRequestArgs, guard codehost.Guard,
 	approvalID, requestedBy, approvedBy string,
 ) (map[string]any, error) {
 	base := args.Base
@@ -218,7 +239,7 @@ func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, ac
 		return nil, err
 	}
 	if head == "" {
-		if head, err = s.commit(ctx, acc, repo, args, base, CommitMessage(args, approvalID, requestedBy, approvedBy)); err != nil {
+		if head, err = s.commit(ctx, acc, repo, args, guard, base, CommitMessage(args, approvalID, requestedBy, approvedBy)); err != nil {
 			return nil, err
 		}
 		err = acc.CreateBranch(ctx, repo, args.Branch, head)
@@ -238,8 +259,9 @@ func (s *Service) createPullRequest(ctx context.Context, p codehost.Provider, ac
 	}
 	if !found {
 		pr, err = acc.CreatePullRequest(ctx, repo, codehost.PullRequestInput{Title: args.Title, Body: args.Body, Head: args.Branch, Base: base})
-		if codehost.IsStatus(err, 422) {
-			// "A pull request already exists": a concurrent attempt created it.
+		if codehost.IsStatus(err, 422, 409) {
+			// "A pull request already exists" (GitHub: 422, Gitea: 409): a concurrent attempt
+			// created it.
 			var again bool
 			if pr, again, err = s.findPullRequest(ctx, acc, repo, args.Branch); err == nil && !again {
 				err = permanent("%s refused the pull request from %s into %s", p.Capabilities().DisplayName, args.Branch, base)
@@ -283,7 +305,7 @@ func (s *Service) existingHead(ctx context.Context, acc codehost.Access, repo co
 }
 
 // commit writes the commit with exactly the approved files on top of base, and returns its SHA.
-func (s *Service) commit(ctx context.Context, acc codehost.Access, repo codehost.Repo, args githubtools.PullRequestArgs, base, message string) (string, error) {
+func (s *Service) commit(ctx context.Context, acc codehost.Access, repo codehost.Repo, args githubtools.PullRequestArgs, guard codehost.Guard, base, message string) (string, error) {
 	baseSHA, found, err := acc.Branch(ctx, repo, base)
 	if err != nil {
 		return "", err
@@ -302,6 +324,10 @@ func (s *Service) commit(ctx context.Context, acc codehost.Access, repo codehost
 			w.Content = []byte(f.Content)
 		}
 		files = append(files, w)
+	}
+	// The files as written: paths, modes and symbolic-link targets are checked once more.
+	if err := guard.CheckFiles(files); err != nil {
+		return "", permanentError{err}
 	}
 	return acc.WriteCommit(ctx, repo, codehost.CommitRequest{Base: baseSHA, Message: message, Files: files})
 }

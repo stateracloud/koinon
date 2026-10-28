@@ -12,9 +12,10 @@ import { SetupGuideSteps } from '@/components/setup-guide'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { TokenAge } from '@/components/token-age'
 import { BoundAgentsSchema, ConnectionService, ConnectionStatus } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { isApprover } from '@/lib/approvals'
-import { setupGuide } from '@/lib/connector'
+import { codeHostInfo, setupGuide } from '@/lib/connector'
 import { connectionStatusLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
@@ -29,7 +30,9 @@ export function ConnectionPage() {
   const get = useQuery(ConnectionService.method.getConnection, { orgId, connectionId })
   const types = useQuery(ConnectionService.method.listConnectorTypes, {})
   const c = get.data?.connection
-  const guide = useMemo(() => setupGuide(types.data?.connectorTypes.find((t) => t.id === c?.connector)), [types.data, c?.connector])
+  const type = types.data?.connectorTypes.find((t) => t.id === c?.connector)
+  const guide = useMemo(() => setupGuide(type), [type])
+  const host = codeHostInfo(type)
 
   const navigate = useNavigate()
   const remove = useMutation(ConnectionService.method.deleteConnection)
@@ -50,6 +53,7 @@ export function ConnectionPage() {
   const stepIds = new Set(guide.steps.map((s) => s.id))
   const loose = results.filter((r) => !stepIds.has(r.step))
   const gh = c.settings.case === 'github' ? c.settings.value : undefined
+  const gt = c.settings.case === 'gitea' ? c.settings.value : undefined
   const declared = c.source === 'secret' && !c.removed
 
   return (
@@ -79,10 +83,30 @@ export function ConnectionPage() {
           <dd>{gh.appId.toString()}</dd>
           <dt className="text-muted-foreground">Installation ID</dt>
           <dd>{gh.installationId.toString()}</dd>
+          {gh.baseUrl && (
+            <>
+              <dt className="text-muted-foreground">Base URL</dt>
+              <dd className="break-all">{gh.baseUrl}</dd>
+            </>
+          )}
+          {gh.caBundle && (
+            <>
+              <dt className="text-muted-foreground">CA bundle</dt>
+              <dd>
+                {gh.caBundle.match(/-----BEGIN CERTIFICATE-----/g)?.length ?? 0} certificate(s)
+                <details className="mt-1">
+                  <summary className="text-muted-foreground cursor-pointer text-xs">Show</summary>
+                  <pre className="mt-1 max-h-48 overflow-auto text-xs">{gh.caBundle}</pre>
+                </details>
+              </dd>
+            </>
+          )}
           <dt className="text-muted-foreground">Private key</dt>
           <dd>
             Stored encrypted{gh.keyFingerprint && <> · fingerprint <code className="text-xs">{gh.keyFingerprint}</code></>}
           </dd>
+          <dt className="text-muted-foreground">CI directories</dt>
+          <dd>{gh.ciDirs.length ? gh.ciDirs.join(', ') : "none besides the connector's"}</dd>
           {c.lastTestedAt && (
             <>
               <dt className="text-muted-foreground">Last tested</dt>
@@ -90,6 +114,49 @@ export function ConnectionPage() {
             </>
           )}
         </dl>
+      )}
+      {gt && (
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-muted-foreground">Server URL</dt>
+          <dd className="break-all">{gt.baseUrl}</dd>
+          {gt.caBundle && (
+            <>
+              <dt className="text-muted-foreground">CA bundle</dt>
+              <dd>
+                {gt.caBundle.match(/-----BEGIN CERTIFICATE-----/g)?.length ?? 0} certificate(s)
+                <details className="mt-1">
+                  <summary className="text-muted-foreground cursor-pointer text-xs">Show</summary>
+                  <pre className="mt-1 max-h-48 overflow-auto text-xs">{gt.caBundle}</pre>
+                </details>
+              </dd>
+            </>
+          )}
+          <dt className="text-muted-foreground">Read token</dt>
+          <dd>
+            Stored encrypted · <TokenAge setAt={gt.readTokenSetAt} warnAfterSeconds={Number(gt.tokenWarnAfterSeconds)} />
+          </dd>
+          <dt className="text-muted-foreground">Write token</dt>
+          <dd>
+            Stored encrypted · <TokenAge setAt={gt.writeTokenSetAt} warnAfterSeconds={Number(gt.tokenWarnAfterSeconds)} />
+          </dd>
+          <dt className="text-muted-foreground">CI directories</dt>
+          <dd>{gt.ciDirs.length ? gt.ciDirs.join(', ') : "none besides the connector's"}</dd>
+          {c.lastTestedAt && (
+            <>
+              <dt className="text-muted-foreground">Last tested</dt>
+              <dd>{timestampDate(c.lastTestedAt).toLocaleString()}</dd>
+            </>
+          )}
+        </dl>
+      )}
+      {host?.weakerCredential && (
+        <Alert role="note">
+          <AlertDescription>
+            {host.name} credentials are weaker than GitHub&apos;s: a bot token is not narrowed to repositories, does not expire, and {host.name} cannot refuse
+            it the right to change workflow files. Agents&apos; sandboxes can reach only the repositories they are bound to, and Koinon refuses workflow
+            changes itself. Koinon shows the tokens&apos; age and never rotates them: replace them in {host.name}, then in Koinon.
+          </AlertDescription>
+        </Alert>
       )}
       {test.error && (
         <Alert variant="destructive" role="alert">
@@ -115,7 +182,7 @@ export function ConnectionPage() {
           <ConfirmAction
             label="Delete"
             subject={`connection ${c.displayName}`}
-            consequence={`Delete ${c.displayName} and its stored private key? Agents can no longer use it.`}
+            consequence={`Delete ${c.displayName} and its stored ${gt ? 'tokens' : 'private key'}? Agents can no longer use it.`}
             confirmLabel="Delete connection"
             onConfirm={async () => {
               setRefusal(undefined)
@@ -149,7 +216,9 @@ export function ConnectionPage() {
           </AlertDescription>
         </Alert>
       )}
-      {gh && isApprover(org.role) && <InstallationRepos orgId={orgId} connectionId={connectionId} />}
+      {(gh || gt) && isApprover(org.role) && (
+        <InstallationRepos orgId={orgId} connectionId={connectionId} noun={gt ? 'the bot can see' : 'the installation can access'} />
+      )}
       <SetupGuideSteps steps={guide.steps} results={results} />
     </div>
   )

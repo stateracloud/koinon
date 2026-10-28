@@ -4,6 +4,10 @@ package github_test
 
 import (
 	"encoding/json"
+	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -31,11 +35,71 @@ var _ = Describe("Host", func() {
 	})
 
 	It("is the only provider of the default registry and describes its credential", func() {
-		Expect(providers.Default().IDs()).To(Equal([]string{"github"}))
+		Expect(providers.Default().IDs()).To(Equal([]string{"gitea", "github"}))
 		caps := host.Capabilities()
 		Expect(caps.DisplayName).To(Equal("GitHub"))
 		Expect(caps.NarrowsRepositories).To(BeTrue())
 		Expect(caps.CIPaths).To(ConsistOf(".github/workflows/"))
+		Expect(caps.CredentialClass).To(Equal("app-installation"))
+		Expect(caps.TokenLifetime).To(Equal(time.Hour))
+		Expect(caps.MaxRepositories).To(Equal(500))
+		Expect(caps.CanDenyCI).To(BeTrue())
+		Expect(caps.ExactModes).To(BeTrue())
+	})
+
+	Describe("on a host with its own CA", func() {
+		// A GitHub Enterprise Server stand-in: TLS with a certificate no system root signs,
+		// and the REST API under /api/v3 of the same host.
+		var (
+			srv  *httptest.Server
+			ca   string
+			ghes codehost.Provider
+		)
+		BeforeEach(func() {
+			srv = httptest.NewTLSServer(http.StripPrefix("/api/v3", fake.Handler))
+			DeferCleanup(srv.Close)
+			ca = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}))
+			ghes = github.NewHost(github.NewClient(github.Options{}))
+		})
+		connAt := func(site codehost.Site) codehost.Connection {
+			cfg, err := json.Marshal(github.Config{AppID: fake.AppID, InstallationID: fake.InstallationID, Site: site})
+			Expect(err).NotTo(HaveOccurred())
+			return codehost.Connection{ID: "c2", Connector: github.HostID, Config: cfg, Fields: map[string][]byte{github.PrivateKeyField: fake.PEM}}
+		}
+
+		It("calls the API at the connection's host, trusting its CA bundle", func(ctx SpecContext) {
+			conn := connAt(codehost.Site{BaseURL: srv.URL, CABundle: ca})
+			repo := codehost.Repo{Owner: "acme", Name: "widgets"}
+			acc, err := ghes.Open(ctx, conn, codehost.Scope{Repositories: []string{repo.String()}, Permissions: map[string]string{"contents": "read"}})
+			Expect(err).NotTo(HaveOccurred())
+			got, err := acc.Repository(ctx, repo)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.FullName).To(Equal("acme/widgets"))
+			Expect(fake.Mints()).To(Equal(1))
+			Expect(ghes.BranchURL(conn, repo, "feature")).To(Equal(srv.URL + "/acme/widgets/tree/feature"))
+
+			// The setup guide's checks run against the same host.
+			ct, _ := connectors.Get(github.HostID)
+			for _, r := range ghes.Checks(ctx, conn, ct) {
+				Expect(r.OK).To(BeTrue(), "%s: %s", r.Check, r.Message)
+			}
+		})
+
+		It("fails the TLS handshake without the CA bundle", func(ctx SpecContext) {
+			_, err := ghes.Open(ctx, connAt(codehost.Site{BaseURL: srv.URL}), ghes.MetadataScope(nil))
+			Expect(err).To(MatchError(ContainSubstring("certificate")))
+		})
+
+		It("rejects a CA bundle that holds a private key", func(ctx SpecContext) {
+			bad := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: []byte("not-a-real-key")}))
+			_, err := ghes.Open(ctx, connAt(codehost.Site{BaseURL: srv.URL, CABundle: bad}), ghes.MetadataScope(nil))
+			Expect(err).To(MatchError(ContainSubstring("only CERTIFICATE blocks")))
+		})
+
+		It("refuses a base URL that is not a bare https host", func(ctx SpecContext) {
+			_, err := ghes.Open(ctx, connAt(codehost.Site{BaseURL: "http://ghes.example.test"}), ghes.MetadataScope(nil))
+			Expect(err).To(MatchError(ContainSubstring("https")))
+		})
 	})
 
 	It("implements every check the GitHub setup guide names", func() {
@@ -88,7 +152,7 @@ var _ = Describe("Host", func() {
 		Expect(prs).To(HaveLen(1))
 		Expect(prs[0].Number).To(Equal(pr.Number))
 		Expect(prs[0].HeadRef).To(Equal("feature"))
-		Expect(host.BranchURL(repo, "feature")).To(Equal("https://github.com/acme/widgets/tree/feature"))
+		Expect(host.BranchURL(codehost.Connection{}, repo, "feature")).To(Equal("https://github.com/acme/widgets/tree/feature"))
 	})
 
 	It("reports an API status through codehost.Status", func(ctx SpecContext) {

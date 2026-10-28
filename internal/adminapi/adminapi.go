@@ -41,6 +41,7 @@ import (
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // BasePath is where the API is mounted.
@@ -63,11 +64,11 @@ type Server struct {
 var _ StrictServerInterface = (*Server)(nil)
 
 // New returns a Server.
-func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Logger) *Server {
+func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Logger, src pricing.ListSource) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log), budgets: budget.New(pool), log: log, limiter: newLimiter()}
+	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log, src), budgets: budget.New(pool), log: log, limiter: newLimiter()}
 }
 
 type principalKey struct{}
@@ -247,12 +248,17 @@ func toProvider(p catalog.Provider) Provider {
 	if p.DisabledReason != "" {
 		out.DisabledReason = &p.DisabledReason
 	}
+	if p.AnthropicWorkspaceID != "" {
+		out.AnthropicWorkspaceId = &p.AnthropicWorkspaceID
+	}
+	out.Formats = append([]ModelFormat{}, p.Formats...)
 	return out
 }
 
 func toModel(m catalog.Model) Model {
 	out := Model{
 		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt, Guard: m.Guard, Name: m.Name, Source: Source(m.Source),
+		Format: m.Format, FormatOverridden: m.FormatOverridden,
 		Id: openapi_types.UUID(pgUUID(m.ID).Bytes), ProviderId: openapi_types.UUID(pgUUID(m.ProviderID).Bytes),
 	}
 	if m.ManagedBySecret != "" {
@@ -303,6 +309,9 @@ func (s *Server) CreateProvider(ctx context.Context, req CreateProviderRequestOb
 	if req.Body.ApiKey != nil {
 		in.APIKey = *req.Body.ApiKey
 	}
+	if req.Body.AnthropicWorkspaceId != nil {
+		in.AnthropicWorkspaceID = *req.Body.AnthropicWorkspaceId
+	}
 	got, err := s.catalog.CreateProvider(ctx, p.Org, actor, pgtype.UUID{}, in)
 	if err != nil {
 		st, e := s.problem(err)
@@ -326,7 +335,7 @@ func (s *Server) GetProvider(ctx context.Context, req GetProviderRequestObject) 
 func (s *Server) UpdateProvider(ctx context.Context, req UpdateProviderRequestObject) (UpdateProviderResponseObject, error) {
 	p, actor := s.actor(ctx)
 	got, err := s.catalog.UpdateProvider(ctx, p.Org, actor, uid(req.ProviderId),
-		catalog.ProviderPatch{Type: req.Body.Type, URL: req.Body.Url, APIKey: req.Body.ApiKey})
+		catalog.ProviderPatch{Type: req.Body.Type, URL: req.Body.Url, APIKey: req.Body.ApiKey, AnthropicWorkspaceID: req.Body.AnthropicWorkspaceId})
 	if err != nil {
 		st, e := s.problem(err)
 		return UpdateProviderdefaultJSONResponse{Body: e, StatusCode: st}, nil
@@ -362,16 +371,27 @@ func (s *Server) ListModels(ctx context.Context, _ ListModelsRequestObject) (Lis
 // CreateModel implements StrictServerInterface.
 func (s *Server) CreateModel(ctx context.Context, req CreateModelRequestObject) (CreateModelResponseObject, error) {
 	p, actor := s.actor(ctx)
-	in := catalog.ModelInput{ProviderID: uid(req.Body.ProviderId), Name: req.Body.Name, Rates: fromRates(req.Body.Rates)} //nolint:staticcheck // deprecated field, refused by the catalog
+	in := catalog.ModelInput{ProviderID: uid(req.Body.ProviderId), Name: req.Body.Name, Rates: fromRates(req.Body.Rates)}
 	if req.Body.Guard != nil {
 		in.Guard = *req.Body.Guard
+	}
+	if req.Body.Format != nil {
+		in.Format = *req.Body.Format
 	}
 	got, err := s.catalog.CreateModel(ctx, p.Org, actor, pgtype.UUID{}, in)
 	if err != nil {
 		st, e := s.problem(err)
 		return CreateModeldefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
-	return CreateModel201JSONResponse(toModel(got)), nil
+	var out ModelCreated
+	if err := via(toModel(got), &out); err != nil {
+		st, e := s.problem(err)
+		return CreateModeldefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	if w := s.prices.ModelWarnings(ctx, p.Org, pgUUID(got.ProviderID), got.Name); len(w) > 0 {
+		out.Warnings = &w
+	}
+	return CreateModel201JSONResponse(out), nil
 }
 
 // GetModel implements StrictServerInterface.
@@ -388,8 +408,8 @@ func (s *Server) GetModel(ctx context.Context, req GetModelRequestObject) (GetMo
 // UpdateModel implements StrictServerInterface.
 func (s *Server) UpdateModel(ctx context.Context, req UpdateModelRequestObject) (UpdateModelResponseObject, error) {
 	p, actor := s.actor(ctx)
-	patch := catalog.ModelPatch{Guard: req.Body.Guard, Rates: fromRates(req.Body.Rates)} //nolint:staticcheck // deprecated field, refused by the catalog
-	patch.ClearRates = req.Body.ClearRates != nil && *req.Body.ClearRates                //nolint:staticcheck // deprecated, refused by the catalog
+	patch := catalog.ModelPatch{Guard: req.Body.Guard, Format: req.Body.Format, Rates: fromRates(req.Body.Rates)}
+	patch.ClearRates = req.Body.ClearRates != nil && *req.Body.ClearRates
 	got, err := s.catalog.UpdateModel(ctx, p.Org, actor, uid(req.ModelId), patch)
 	if err != nil {
 		st, e := s.problem(err)

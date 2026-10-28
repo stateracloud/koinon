@@ -1,7 +1,7 @@
 # connectors
 
 Connector types as data: auth, hosts, scopes, risk tiers and setup guides (ADR 0007, 0021).
-v0.1 ships `github/` (ADR 0036, 0049).
+v0.1 ships `github/` (ADR 0036, 0049) and `gitea/` (ADR 0062, 0063).
 
 - `<id>/connector.yaml`: one connector type per directory, named after `metadata.id`,
   `apiVersion: connectors.koinon.dev/v1alpha1`, `kind: ConnectorType`.
@@ -13,8 +13,13 @@ v0.1 ships `github/` (ADR 0036, 0049).
 
 ## Format
 
-- `spec.auth`: the auth type (`app-credential` for GitHub), the provider permissions the app must
+- `spec.auth`: the auth type (`app-credential` for GitHub, `static-token` for Gitea, whose
+  `tokenWarnAfter` is the age after which Koinon warns about a token), the provider permissions the app must
   have (and no more), the permissions it must not have, and the credential lifetime.
+- `spec.site.selfHosted: true` (Gitea): the connector has no host of its own. `hosts` and `site` hold
+  a placeholder on a reserved `.invalid` name, each connection names its base URL, which may carry a
+  sub-path (`https://host[:port][/path]`), and the network rules, written for the root of the host, are
+  rendered under that path. GitHub's base URL is a host and a port only.
 - `spec.hosts`: every host the connector talks to; scope network rules may only name these.
 - `spec.targets`: what grants are narrowed to (GitHub: `owner/name` repositories).
 - `spec.scopes`: each with a risk tier (ADR 0008), the provider permissions a credential for it is
@@ -88,6 +93,17 @@ Checked against the vendored protos and the policy schema reference at tag v0.1.
   `https://github.com` in the read-only `/etc/koinon/git/config` (included from
   `/etc/gitconfig`): it answers `x-access-token` and the placeholder from `$GITHUB_TOKEN`, git
   sends it as Basic auth and OpenShell substitutes the token on the wire. It stores nothing.
+- **Hosts per connection (ADR 0062).** A connection stores a `baseUrl` and an optional `caBundle`
+  in its non-secret config (both empty for github.com). The type's network rules name the default
+  hosts; `Type.Locate` and `Type.NetworkAt` render them at the connection's host, with the REST API
+  under `spec.site.apiPath` (`/api/v3` for GitHub Enterprise Server) on that host. koinon-agentd
+  renders `/sandbox/.koinon/git/config` before every run (the credential helper scoped to the
+  host, `http.sslCAInfo` for the CA bundle, which is public) and `/sandbox/.koinon/git/ca.pem` (the
+  sandbox's system roots plus the bundle); `/etc/gitconfig` includes the file. OpenShell's proxy
+  must itself trust a custom CA to reach the host; Koinon does not configure that.
+- **Capabilities and CI paths are data.** `spec.capabilities` (display name, credential class,
+  narrowing, repository limit, CI denial, exact modes), `auth.tokenLifetime` and `spec.ciPaths` (and `spec.ciPathsFoldCase`)
+  describe the provider; `codehost.CapabilitiesOf` reads them.
 - **Profile changes.** Changing the bound repositories updates the profile in place; OpenShell
   revokes placeholders whose endpoint boundary changed, so a running harness needs a new
   placeholder (a new session) after such a change.

@@ -11,7 +11,9 @@ import (
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/approvals"
+	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/db/store"
 	approvalv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/approval/v1alpha1"
 	"github.com/stateracloud/koinon/internal/githubtools"
@@ -50,7 +52,7 @@ func approvalProto(a store.ApprovalRequest, canDecide, detail bool) *approvalv1a
 		ExpiresAt: tsProto(a.ExpiresAt), CreatedAt: tsProto(a.CreatedAt), ExecutedAt: tsProto(a.ExecutedAt),
 		CanDecide:         canDecide && a.Status == store.ApprovalStatusPending,
 		ApprovalsRequired: int32(a.ApprovalsRequired), FirstApprover: idString(a.FirstApprover),
-		System: a.System,
+		System: a.System, ScopeId: idString(a.ScopeID),
 	}
 	if len(a.Result) > 0 {
 		out.Result = payloadProto(a.Result)
@@ -121,7 +123,44 @@ func (s *Server) GetApproval(ctx context.Context, req *approvalv1alpha1.GetAppro
 	out := approvalProto(row, c.p.HasRole(c.org, store.OrgRoleAdmin), true)
 	s.enrichMCP(ctx, out, row)
 	s.enrichSavedWork(ctx, out, row)
+	s.enrichCI(ctx, out, row)
+	if row.ScopeID.Valid {
+		if sc, err := s.q.GetApprovalScope(ctx, store.GetApprovalScopeParams{OrgID: c.org, ID: row.ScopeID}); err == nil {
+			out.ScopeKind = scopeKindToProto[sc.Kind]
+		}
+	}
 	return &approvalv1alpha1.GetApprovalResponse{Approval: out}, nil
+}
+
+// enrichCI fills the paths whose changes run CI on the request's code host: the connector's CI
+// paths and the directories configured on the connection the run's agent version uses, so the
+// card warns about the same paths the workflow guard refuses. Without a connection it falls back
+// to the connector's own paths.
+func (s *Server) enrichCI(ctx context.Context, out *approvalv1alpha1.Approval, row store.ApprovalRequest) {
+	p, ok := s.hosts.Get(row.Connector)
+	if !ok {
+		return
+	}
+	var config []byte
+	if run, err := s.q.GetRun(ctx, store.GetRunParams{OrgID: row.OrgID, ID: row.RunID}); err == nil {
+		if v, err := s.q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: row.OrgID, ID: run.AgentVersionID}); err == nil {
+			if cfg, err := agentconfig.Parse(v.Config); err == nil {
+				if b, ok := cfg.Binding(row.Connector); ok {
+					var id pgtype.UUID
+					if id.Scan(b.ConnectionID) == nil && id.Valid {
+						if c, err := s.q.GetConnection(ctx, store.GetConnectionParams{OrgID: row.OrgID, ID: id}); err == nil {
+							config = c.Config
+						}
+					}
+				}
+			}
+		}
+	}
+	g, err := codehost.GuardOf(p.Capabilities(), config)
+	if err != nil {
+		g, _ = codehost.NewGuard(p.Capabilities(), nil)
+	}
+	out.CiPaths, out.CiFoldCase = g.Paths(), g.FoldCase()
 }
 
 // enrichMCP fills the MCP call of an approval: what the request was bound to and what the tool is
@@ -251,6 +290,12 @@ func (s *Server) approvalError(err error) error {
 		return connect.NewError(connect.CodeAborted, err.Error())
 	case errors.Is(err, approvals.ErrSameApprover), errors.Is(err, approvals.ErrRequesterApproves):
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
+	case errors.Is(err, approvals.ErrScopeInvalid):
+		return connect.NewError(connect.CodeInvalidArgument, err.Error())
+	case errors.Is(err, approvals.ErrScopeNotAllowed):
+		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
+	case errors.Is(err, approvals.ErrScopeNotFound):
+		return connect.NewError(connect.CodeNotFound, err.Error())
 	case errors.Is(err, approvals.ErrNotPending):
 		return connect.NewError(connect.CodeFailedPrecondition, err.Error())
 	}
@@ -266,7 +311,21 @@ func (s *Server) Approve(ctx context.Context, req *approvalv1alpha1.ApproveReque
 	if req.GetArgsSha256() == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "args_sha256 is required: approve the hash you were shown")
 	}
-	row, err := s.approvals.Approve(ctx, c.org, id, c.actor(), req.GetArgsSha256(), note)
+	var scope approvals.Scope
+	switch req.GetScope() {
+	case approvalv1alpha1.ScopeKind_SCOPE_KIND_UNSPECIFIED, approvalv1alpha1.ScopeKind_SCOPE_KIND_ONCE:
+	case approvalv1alpha1.ScopeKind_SCOPE_KIND_TASK:
+		scope.Kind = approvals.ScopeTask
+	case approvalv1alpha1.ScopeKind_SCOPE_KIND_AGENT:
+		scope.Kind = approvals.ScopeAgent
+	default:
+		return nil, connect.NewError(connect.CodeInvalidArgument, "unknown approval scope")
+	}
+	if req.GetScopeUntil() != nil {
+		scope.Until = req.GetScopeUntil().AsTime()
+	}
+	// A scope wider than once needs an org admin; deciding at all already does (decision above).
+	row, err := s.approvals.ApproveScoped(ctx, c.org, id, c.actor(), req.GetArgsSha256(), note, scope)
 	if err != nil {
 		return nil, s.approvalError(err)
 	}
@@ -284,4 +343,68 @@ func (s *Server) Deny(ctx context.Context, req *approvalv1alpha1.DenyRequest) (*
 		return nil, s.approvalError(err)
 	}
 	return &approvalv1alpha1.DenyResponse{Approval: approvalProto(row, true, true)}, nil
+}
+
+var scopeKindToProto = map[store.ApprovalScopeKind]approvalv1alpha1.ScopeKind{
+	store.ApprovalScopeKindTask:  approvalv1alpha1.ScopeKind_SCOPE_KIND_TASK,
+	store.ApprovalScopeKindAgent: approvalv1alpha1.ScopeKind_SCOPE_KIND_AGENT,
+}
+
+func scopeProto(sc store.ApprovalScope) *approvalv1alpha1.ApprovalScope {
+	return &approvalv1alpha1.ApprovalScope{
+		Id: idString(sc.ID), OrgId: idString(sc.OrgID), AgentId: idString(sc.AgentID), Connector: sc.Connector,
+		Tool: sc.Tool, Target: sc.Target, Kind: scopeKindToProto[sc.Kind], TaskId: idString(sc.TaskID),
+		ExpiresAt: tsProto(sc.ExpiresAt), CreatedBy: idString(sc.CreatedBy), CreatedAt: tsProto(sc.CreatedAt),
+		SourceApprovalId: idString(sc.SourceApprovalID), RevokedAt: tsProto(sc.RevokedAt), RevokedBy: idString(sc.RevokedBy),
+	}
+}
+
+// ListApprovalScopes implements ApprovalService.
+func (s *Server) ListApprovalScopes(ctx context.Context, req *approvalv1alpha1.ListApprovalScopesRequest) (*approvalv1alpha1.ListApprovalScopesResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleViewer)
+	if err != nil {
+		return nil, err
+	}
+	agent, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.q.GetAgent(ctx, store.GetAgentParams{OrgID: c.org, ID: agent}); err != nil {
+		return nil, s.dbError(err, "agent")
+	}
+	if s.approvals == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, "approvals are not configured on this server")
+	}
+	rows, err := s.approvals.ListScopes(ctx, c.org, agent)
+	if err != nil {
+		return nil, s.dbError(err, "approval scopes")
+	}
+	res := &approvalv1alpha1.ListApprovalScopesResponse{}
+	for _, r := range rows {
+		res.Scopes = append(res.Scopes, scopeProto(r))
+	}
+	return res, nil
+}
+
+// RevokeApprovalScope implements ApprovalService.
+func (s *Server) RevokeApprovalScope(ctx context.Context, req *approvalv1alpha1.RevokeApprovalScopeRequest) (*approvalv1alpha1.RevokeApprovalScopeResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	if s.approvals == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, "approvals are not configured on this server")
+	}
+	id, err := parseID("scope_id", req.GetScopeId())
+	if err != nil {
+		return nil, err
+	}
+	if !c.actor().Valid {
+		return nil, connect.NewError(connect.CodePermissionDenied, "revoking a scope needs a signed-in user")
+	}
+	row, err := s.approvals.RevokeScope(ctx, c.org, id, c.actor())
+	if err != nil {
+		return nil, s.approvalError(err)
+	}
+	return &approvalv1alpha1.RevokeApprovalScopeResponse{Scope: scopeProto(row)}, nil
 }

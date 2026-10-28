@@ -22,6 +22,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // DefaultPort is the port every component serves /metrics on (each is its own pod).
@@ -56,16 +58,16 @@ func Serve(ctx context.Context, addr string, reg *prometheus.Registry, log *slog
 		Handler: Handler(reg), ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute,
 	}
-	go func() {
+	safego.Go(ctx, log, "metrics-shutdown", func(context.Context) {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(sctx)
-	}()
-	go func() {
+	})
+	safego.Go(ctx, log, "metrics-listener", func(context.Context) {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("metrics listener failed", "addr", addr, "err", err)
 		}
-	}()
+	})
 	return nil
 }

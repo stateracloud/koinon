@@ -18,3 +18,15 @@ var _ = Describe("UUIDString", func() {
 		Expect(execution.UUIDString([16]byte{})).To(Equal("00000000-0000-0000-0000-000000000000"))
 	})
 })
+
+var _ = Describe("TaskSandboxName", func() {
+	It("is stable per task, differs per task and agent, and fits OpenShell's name limit", func() {
+		org, agent := [16]byte{1}, [16]byte{2}
+		a, b := [16]byte{3}, [16]byte{4}
+		Expect(execution.TaskSandboxName(org, agent, a)).To(Equal(execution.TaskSandboxName(org, agent, a)))
+		Expect(execution.TaskSandboxName(org, agent, a)).NotTo(Equal(execution.TaskSandboxName(org, agent, b)))
+		Expect(execution.TaskSandboxName(org, agent, a)).NotTo(Equal(execution.TaskSandboxName(org, [16]byte{9}, a)))
+		Expect(execution.TaskSandboxName(org, agent, a)).NotTo(Equal(execution.AgentSandboxName(org, agent)))
+		Expect(execution.TaskSandboxName(org, agent, a)).To(HaveLen(execution.MaxSandboxName))
+	})
+})

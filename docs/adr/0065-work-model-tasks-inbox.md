@@ -126,6 +126,26 @@ with the same `taskId` answers an `input-required` task (§6.3).
 13c. **Ephemeral agents** (#146 A8): an agent or template can be marked ephemeral. Each task gets a
     fresh sandbox without a home volume, deleted when the task ends; memory lives in task notes and
     the [0033](0033-file-based-memory.md) stores. The default stays persistent.
+    **Amendment (EP1, 2026-10-27):** the flag is `ephemeral` in a template's `spec` and in the agent
+    version's config (no migration), set at agent creation from the template and overridable there.
+    The predicate is `agentconfig.IsEphemeral`; checkpoints (HC1) and the archive tier call it and
+    skip ephemeral agents. The agent keeps its one `agent_sandboxes` row, which points at the
+    sandbox of one task, `execution.TaskSandboxName` (`kt-` and 16 hex characters of a hash of org,
+    agent and task). The reconciler picks the task from the run that holds the agent, else the run
+    claimed next, else a parked run (`GetEphemeralFocusTask`); when it changes, or when no run needs
+    a sandbox, it deletes the previous sandbox, and with it OpenShell's workspace volume, and moves
+    the row once the sandbox is gone. A running run is never cut off. agentd waits until the row
+    names its task's sandbox. Only the task's end deletes the sandbox: a task
+    between runs (for example input-required with no parked run) keeps it, so a follow-up message
+    reuses the same home and files; the idle stop still applies. The reconciler falls back to the
+    latest run of a task that is not completed, canceled or failed. If another task's run needs the
+    agent's single row, the open task's sandbox is deleted (one sandbox per agent at a time). An ephemeral agent is not pre-woken, since no
+    sandbox exists before its task does.
+    **Amendment (EP1 review, 2026-10-27):** ephemeral is decided from the agent's active version (the
+    reconciler); agentd also accepts the agent's own sandbox name, so a run pinned to an ephemeral
+    version does not wait forever after a persistent version is activated. Deleting a task sandbox
+    is audited as `sandbox.delete` (no phase, so ADR 0054's recreation loop guard does not count it);
+    the event names the sandbox, whose name is a hash of org, agent and task, not the task ID.
 13d. **Failure classes** (#146 A1): a failed run carries a `failure_class` (`transient`,
     `throttled`, `context_overflow`, `budget`, `policy`, `fatal`) that drives retries and inbox
     messages; `context_overflow` shrinks the largest input once, then asks the user
@@ -243,3 +263,199 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   `messaging-and-workflows.md`
 - Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the interruption rule (`system/thread.rs:240-291`, `system/defer.rs`), the `ask_agent` guards (`tools/thread.rs:72-89`) and the failure classes. Research notes: `infinity-code-ideas.md`.
 - Prior art (ideas only, no code; its servers are AGPL-3.0): [daytonaio/daytona](https://github.com/daytonaio/daytona) v0.190.0, for the archive tier and checkpoint lineage. Research notes: `daytona.md`.
+
+## Amendment (2026-10-27, plan item TK2): the inbox as built
+
+- **Routes.** `/` is the inbox; `/board` is the board (secondary view); `/tasks/{id}` is a task. A
+  task keeps its ticket's id, so `/tickets/{id}` redirects to `/tasks/{id}` and old links work. The
+  web UI reads and writes only `TaskService` (`koinon.task.v1alpha1`); `TicketService` stays on the
+  server, deprecated.
+- **Inbox items.** An item is a `kind` in a union (`web/src/lib/inbox.ts`) with one renderer per
+  kind (`web/src/components/inbox.tsx`); a new kind (TK3's question, a reply to validate, a
+  report) is one more member and one more renderer. Today: `approval` (a pending approval the
+  viewer may decide, only for admins and owners as before) and `task-input` (a task in
+  input-required that no listed approval explains, for example a question the agent asked, and
+  that the viewer created). Newest first.
+- **Inline actions.** Approve and Deny sit on the item. Approve sends the `args_sha256` of the
+  listed approval, so a request that changed since the list was read is refused (Aborted) and the
+  item says to open it and review the new version; the full card (diff, risk, note, two-approver
+  state) stays on `/approvals/{id}` and in the task timeline.
+- **Chat.** Next to the inbox, a list of the open tasks (not completed, canceled or failed; the
+  eight most recently updated) is the list of conversations; the chosen one shows the task's
+  timeline and composer, the same components as the task page, and new tasks are started from a
+  form under it. Chat with the personal agent ([0055](0055-chat-as-its-own-object.md)) is not
+  separate yet: every conversation is a task.
+- **Board.** Six groups, one per task state, read-only. "Move to Done" is gone, because nobody moves
+  tasks by hand (decision 3); the task page has "Cancel task" (`CancelTask`) instead.
+- **Notifications.** The navigation shows a badge with the number of waiting items and the tab
+  title carries it, "(2) ...". There is no task stream yet, so the inbox, the board and the badge
+  share one poll of `ListTasks` and `ListApprovals` every 15 seconds (and on window focus). A
+  task event stream would replace the poll.
+- **Review fixes (2026-10-27).** `ListApprovals` is fetched for every role (the proto says viewers
+  and above). Every pending approval explains its task, so a member or viewer never sees an
+  approval-parked task as "needs your reply"; only `canDecide` approvals become items.
+  `task-input` items are limited to tasks the viewer created (`Task.created_by.user_id`), a
+  deliberate conservative choice until TK3 adds targeted asks; before this they listed every
+  input-required task in the org. The inbox and board show an `ListAgents` error too. The e2e spec
+  and the quickstart follow the inbox: Inbox heading, "Hand it a task from the inbox", "Create
+  task", "Open task", `/tasks/{id}`.
+
+## Amendment (2026-10-27, plan item TK3): `ask_user` as built
+
+- **The tool.** `ask_user(to?, question, draft?, choices?, default)` is on koinon-api's tools listener at
+  `/mcp-koinon` (package `askuser`), the gateway target `koinon`, so an agent sees `koinon_ask_user`.
+  The reconciler grants it to every active agent when `koinonTools.url` is set (chart `config.yaml`);
+  it needs no grant, since it costs nothing and only waits for a person. `to` names a member of the
+  org by email or user ID; left out it is the task's creator, and a task not created by a person
+  (trigger, agent) must name `to`. A role or a group is not accepted yet (open question above: kept
+  to the conservative reading). Only the addressee can answer or dismiss; admins cannot answer for
+  someone else (reassigning is TK4 or later).
+- **`default` is a required argument** (no documented fallback): free text, and when `choices` are
+  given it must be one of them. It is stored with the question and shown in the inbox next to
+  Dismiss.
+- **The tool answers at once** ("question recorded ... end your turn") and records the question
+  as `asked`, invisible. The park is agentd's turn-end transaction (ADR 0029, the approval pattern),
+  and in that one transaction it opens the run's asked questions (`open`, so they show in the inbox),
+  parks the run with reason `input_required`, moves the task to input-required and appends
+  `question.asked` and `run.parked`. Nothing is visible before the park and nothing is parked
+  without the item. A run with both pending approvals and a question parks as `input_required`
+  (the longer warm window); `approvals.ResolveRun` resolves a park of either reason only when no
+  approval request and no question of the run is open.
+- **The answer is the next prompt, not the tool result.** The tool result ended the turn before the
+  person could answer, and the resumed run is a new prompt on the loaded session (`session/load`).
+  agentd adds one line per resolved question to the resume prompt: `the person answered: "..."`, or
+  `the person dismissed the question, so your default was applied: "..."` / `nobody answered in
+  time, so your default was applied: "..."` (decision 10a: the agent is told). Delivery is marked in
+  the turn-end transaction (`questions.delivered_at`), like approvals.
+- **State and API.** Migration `00026_questions.sql`: `questions` (`asked`, `open`, `answered`,
+  `dismissed`, `expired`; `answer_kind` choice, draft, text or default; `expires_at` 7 days after the
+  ask; `call_sha256` makes the same question in one run one question). `QuestionService`
+  (`ListQuestions`: the caller's open questions, or with `task_id` the caller's questions of a task;
+  `AnswerQuestion`: a choice, the draft as offered or edited, or text; `DismissQuestion`). A second
+  answer to a resolved question is `Aborted`, so an answer resumes a run exactly once: it is a
+  state-guarded update under the run's row lock, in the transaction that calls `ResolveRunPark`.
+  Answer, dismissal and expiry are audited (`question.answer`, `question.dismiss`,
+  `question.expire`) and written to the task timeline.
+- **For TK4.** `questions.Expire(ctx, q, org, id)` applies the default as an expiry (no actor), and
+  `ListDueQuestions` finds open questions past `expires_at`; TK4 adds the 24-hour reminder column and
+  the sweep, and the "no answer" run of decision 10 (today the default is delivered in the resumed
+  run's prompt, which is that run). `park_expires_at` of a question park is the earliest open
+  `expires_at`, and the approvals sweeper cancels only parks with reason `approval`.
+- **Inbox.** The web inbox gets the item kind `question` (choices as buttons, the draft in a text area
+  with "Use draft" or "Use edited draft", free text, Dismiss with the default shown). A question
+  explains its task, so no `task-input` item repeats it. The page polls `ListQuestions` with the
+  tasks and approvals; a server without `QuestionService` (`Unimplemented`) counts as no questions.
+- **Notifications (B2).** The park commits in koinon-agentd, which has no DBOS runtime, so
+  koinon-api notifies from the committed state: a sweeper (`questions.Sweeper`, every sweep interval)
+  sends `question.asked:<id>` for each opened question with no `notified_at`, as a DBOS step with
+  `api.durable.enabled` and inline without it. The handler writes the in-app notification row
+  (`notifications`, dedupe key `question:<id>`) and sets `notified_at`; chat messages join it in
+  v0.2. A resolution sends the sandbox pre-wake (`wake.agent`) after its commit, so a late answer
+  does not wait for the reconciler's next pass.
+- **Warm window.** No new code: the reconciler already keeps a sandbox of a run parked with reason
+  `input_required` up for `parkWarm` (15 minutes). Tests: an answer 14 minutes after the park
+  creates and stops nothing; an answer after 16 minutes starts the stopped sandbox without recreating
+  it, and agentd resumes through `session/load` (`internal/reconciler/latency_test.go`,
+  `internal/agentd/askuser_test.go`).
+- **Questions end with their run (2026-10-27).** A question outlives no run. `question_state` has
+  `canceled`; the question sweeper (`questions.CancelOfFinishedRuns`, with the notification sweep)
+  cancels the asked and open questions of every succeeded, failed or canceled run and appends a
+  `question.canceled` task event. Until the sweep runs, `ListOpenQuestionsForUser` lists only the
+  questions of parked runs, and `resolve` refuses (ErrNotOpen) a question whose run has ended.
+- **Addressee role (2026-10-27).** `to` must hold the member role or higher: `ask_user` answers
+  "X cannot answer questions (viewer)" otherwise, and `can_answer` needs the member role, like
+  AnswerQuestion and DismissQuestion.
+- **Notification failures (2026-10-27).** `NotifyPending` logs each failing question, continues and
+  returns the failures joined. A failed delivery adds to `notify_failures`; at 8 the question counts
+  as notified (logged at error level) so a workflow that failed for good is not re-sent every sweep.
+- **Pre-wake only on resume (2026-10-27).** A resolution sends `wake.agent` only when the run is
+  parked and ready after it; other open questions or approvals keep it parked and need no wake.
+- **Waiting on someone else (2026-10-27).** `Task.waiting_on_user_id` and `waiting_on_name` (ListTasks,
+  GetTask) name the addressee of the task's open question; the inbox shows no `task-input` item to a
+  creator who is not that person.
+- **Reminders and expiry (TK4, 2026-10-27).** Decision 10 is built as follows.
+  - **Settings.** `spec.questions` in a template and `questions` in an agent version's config hold
+    `reminderAfter` (default 24h) and `expireAfter` (default 7 days), as Go durations between 1m and
+    720h, the reminder before the expiry. `ask_user` reads the agent's active version when the
+    question is asked and stores `remind_at` and `expires_at` on the question (migration 00027), so a
+    later version does not move the deadlines of questions already open. A reminder that would not
+    come before the expiry is dropped. Changing the settings of one agent without a new template
+    version is a new agent version; the agent editor does not expose them yet.
+  - **Timers are a sweep, not a DBOS sleep per question.** The deadlines are columns, and the
+    question sweeper in koinon-api (`questions.Sweeper`, every sweep interval) runs `RunTimers`; that
+    works the same with and without `api.durable.enabled`, and after a restart or on a second
+    replica the next sweep finds the same due questions. Cost: a reminder or expiry is late by up to
+    one sweep interval.
+  - **Once.** The reminder is the notification `question.reminder:<id>` (one DBOS workflow with
+    durable on; the handler writes the in-app notification, dedupe key `question-reminder:<id>`, then
+    sets `reminded_at`; eight failures abandon it, like `question.asked`). The expiry is the state
+    change open to expired under the run's row lock (`questions.Expire`), so a repeated sweep, a
+    second replica or a late answer finds it made (`ErrNotOpen`). No dedupe record is needed.
+  - **The reminder** is an in-app notification for the person asked (kind `question.reminder`, with
+    a message naming the question, the expiry and the default). The question stays in the inbox.
+    Chat reminders join with the chat connectors (v0.2).
+  - **The "no answer" run** is the resume of the parked run: expiry applies the safe default and
+    resolves the park, and the next prompt carries the outcome plus a system instruction (`[Koinon
+    system] This is a short "no answer" run ...`): carry on with the default, cancel the task with
+    `cancel_task`, or ask someone else with `ask_user`. No second run is created; the run is not
+    given a smaller cap.
+  - **Amendment 2026-10-27 (TK4 review).** Canceling is a tool, not a convention: Koinon's tool
+    server has a second tool, `cancel_task(reason)` (target `koinon`, offered to every agent like
+    `ask_user`), which closes the caller's task as canceled in one transaction, with the reason in
+    the `status.changed` event on the task timeline, and cancels its queued runs. Called on an
+    already ended task it changes nothing. The system instruction no longer says the agent "will not
+    be reminded again": a question it asks someone else gets its own reminder and its own no-answer
+    run. A tool-server `Reminder` override is applied only when it is before the expiry, like the
+    expiry override. `SweepResult.Sent` counts reminders handed to the sender: with durable on, a
+    resend of the same workflow ID until the handler sets `reminded_at` is a no-op but is counted
+    again. The template picker (`TemplateService`) does not show `spec.questions` yet; the reminder
+    and expiry are set in the template file only, like the agent editor, and a UI for them is a
+    follow-up.
+- 2026-10-27 (wave-3 integration): an approval's expiry never cancels a run parked with reason
+  `input_required`: `cancelExpiredRun` resolves the park instead, so the run resumes with "approval
+  expired" once its questions are answered or expire. `ask_user` without `to` in a direct-message
+  thread asks the author of the thread's latest user message. The `ask_user` text points to the
+  expiry in the tool result instead of a fixed 7 days. When `cancel_task` and `ask_user` run in
+  one turn, `endTurn` cancels the asked questions and finishes the run instead of parking it. The chat
+  shows "waiting on ..." instead of the composer while the task is `input_required`.
+
+## Amendment (2026-10-27, plan item QA1): restart tests and hygiene
+
+- **Restart tests.** `internal/agentd/restart_test.go` runs two process sets on one Postgres, each a
+  tool server plus an agentd pool on its own connection pool, with one fake gateway. The harness uses
+  the tool server of the set that owns each turn. Both sets stay alive through the decision, so both
+  pools race to claim the resume: one executed pull request or one answered question, two prompts,
+  epoch 2. A second variant blocks the harness inside the resume prompt, kills the set that claimed it
+  while its lease is held (`KeepLeaseOnShutdown`), and asserts that the survivor takes over after the
+  lease expires: epoch 3, one takeover, one executed pull request or answered question, and a final
+  prompt carrying the interruption note.
+- **`nolintlint`** is on with `require-explanation`, `require-specific` and `allow-unused: false`.
+  Unused directives (gosec is off in tests; several gosec findings no longer fire) were removed rather
+  than kept.
+- **`internal/safego`**: `Go`, `GoOrStop` and `Do` recover a panic and log it with the stack. `Go` is for
+  listeners and shutdown goroutines in `cmd/*` and the reconciler's prober; `GoOrStop` is for the loops
+  the process must not run without (sweepers, schedule triggers, the importer, the run hub, key
+  watchers, the OTLP, tools and saved-work listeners): a panic cancels the process context so the pod
+  restarts. `Do` wraps one iteration of a loop: a worker iteration, a checkpoint tick, one checkpoint
+  backup, one MCP probe round, one `reconcileAgent` (a panic there becomes an error of the pass, so it
+  is retried). In `drive`, a panic in `execute` becomes a failure (`internal error: the run panicked`):
+  the heartbeat is stopped and the run concludes as failed on its own path. Recovering without stopping
+  the heartbeat would have kept the lease alive forever; a spec with a panicking backend covers it.
+- **Clock, IDs and golden prompts.** The park expiry uses `Config.Now`. The outcome text is the pure
+  `renderOutcomes(questions, requests)`: no clock and no generated IDs, IDs are row inputs. Golden files
+  in `internal/agentd/testdata/*.golden` (`go test ./internal/agentd -update`) cover answered, dismissed
+  and expired questions (with the no-answer instruction), every approval outcome, and the prompt shapes
+  built by the pure `assemblePrompt` (new task, scheduled task with the title from `schedule.TaskTitle`,
+  follow-up, takeover and park resumes, reset with outcomes, the empty fallback), the retry note and
+  the fresh-session handoff (`handoff.build` adds the park note itself).
+- **Typed IDs** were not introduced at TK1; they stay `pgtype.UUID` from sqlc. A wrapper for task and run
+  IDs touches every sqlc call and was left out of this item.
+
+- 2026-10-27 (DOC2, E1 on tasks): the docs site gained guides for tasks and the inbox, `ask_user`
+  with its reminder and expiry, schedule and direct-message triggers, scoped approvals, Gitea, GHES and
+  home checkpoints. The quickstart's e2e driver (`test/e2e`) moved from `TicketService` to
+  `TaskService` and keeps its step labels except the words "Ticket" and "ticket", now "Task" and
+  "task"; the real-cluster Playwright spec is `web/e2e-real/task-stream.spec.ts` (renamed, same flow:
+  it already drove the inbox and `/tasks/{id}`). Approval requests still carry the field `ticket_id`
+  (the task's ID) in `ApprovalService`, so the driver sets `TicketId` there. AR1 landed in the
+  same wave, so the archive tier section of the home checkpoints guide describes the built behaviour.
