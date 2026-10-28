@@ -319,19 +319,38 @@ func (q *Queries) GetOrgSpendSince(ctx context.Context, arg GetOrgSpendSincePara
 	return cost_usd, err
 }
 
+const getSystemSpendSince = `-- name: GetSystemSpendSince :one
+SELECT coalesce(sum(cost_usd), 0)::text AS cost_usd
+FROM spend_entries
+WHERE org_id = $1 AND principal = 'system' AND occurred_at >= $2
+`
+
+type GetSystemSpendSinceParams struct {
+	OrgID pgtype.UUID
+	Since pgtype.Timestamptz
+}
+
+// An org's recorded USD spend of its system key since @since, for the key's daily budget.
+func (q *Queries) GetSystemSpendSince(ctx context.Context, arg GetSystemSpendSinceParams) (string, error) {
+	row := q.db.QueryRow(ctx, getSystemSpendSince, arg.OrgID, arg.Since)
+	var cost_usd string
+	err := row.Scan(&cost_usd)
+	return cost_usd, err
+}
+
 const insertSpendEntry = `-- name: InsertSpendEntry :one
 INSERT INTO spend_entries (
-    org_id, agent_id, run_id, task_id, request_id, key_id, model,
+    org_id, agent_id, principal, run_id, task_id, request_id, key_id, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10, $11, $12,
-    ($13::text)::numeric, ($14::text)::numeric,
-    $15, $16, $17, $18::jsonb, $19,
-    $20, $21, $22,
-    $23, coalesce(($24::text)::numeric, 0), $25
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    $9, $10, $11, $12, $13,
+    ($14::text)::numeric, ($15::text)::numeric,
+    $16, $17, $18, $19::jsonb, $20,
+    $21, $22, $23,
+    $24, coalesce(($25::text)::numeric, 0), $26
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id
@@ -340,6 +359,7 @@ RETURNING id
 type InsertSpendEntryParams struct {
 	OrgID            pgtype.UUID
 	AgentID          pgtype.UUID
+	Principal        string
 	RunID            pgtype.UUID
 	TaskID           pgtype.UUID
 	RequestID        string
@@ -365,7 +385,8 @@ type InsertSpendEntryParams struct {
 	ResponseID       pgtype.Text
 }
 
-// Records one request. Returns no row when the request id is already
+// Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
+// (principal 'system', no agent and no run: the provider echo check). Returns no row when the request id is already
 // recorded, so a replayed export is not charged twice. cost_usd is Koinon's
 // own computation from the raw usage and the dated price; gateway_cost_usd is
 // what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
@@ -374,6 +395,7 @@ func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryPara
 	row := q.db.QueryRow(ctx, insertSpendEntry,
 		arg.OrgID,
 		arg.AgentID,
+		arg.Principal,
 		arg.RunID,
 		arg.TaskID,
 		arg.RequestID,
@@ -684,7 +706,7 @@ SELECT model,
        count(*) FILTER (WHERE provisional)::bigint AS provisional_requests,
        coalesce(sum(reserve_usd), 0)::text AS reserved_usd
 FROM spend_entries
-WHERE org_id = $1 AND occurred_at >= $2
+WHERE org_id = $1 AND principal = 'agent' AND occurred_at >= $2
 GROUP BY model
 ORDER BY model
 `
@@ -711,7 +733,8 @@ type SpendReportRow struct {
 	ReservedUsd           string
 }
 
-// Spend per model since @since, with estimated usage kept apart.
+// Spend of agents per model since @since, with estimated usage kept apart. System checks are
+// reported by SpendSystemSince.
 func (q *Queries) SpendReport(ctx context.Context, arg SpendReportParams) ([]SpendReportRow, error) {
 	rows, err := q.db.Query(ctx, spendReport, arg.OrgID, arg.Since)
 	if err != nil {
@@ -745,6 +768,32 @@ func (q *Queries) SpendReport(ctx context.Context, arg SpendReportParams) ([]Spe
 		return nil, err
 	}
 	return items, nil
+}
+
+const spendSystemSince = `-- name: SpendSystemSince :one
+SELECT count(*)::bigint AS requests,
+       coalesce(sum(cost_usd), 0)::text AS cost_usd
+FROM spend_entries
+WHERE org_id = $1 AND principal = 'system' AND occurred_at >= $2
+`
+
+type SpendSystemSinceParams struct {
+	OrgID pgtype.UUID
+	Since pgtype.Timestamptz
+}
+
+type SpendSystemSinceRow struct {
+	Requests int64
+	CostUsd  string
+}
+
+// The system checks of an org since @since: requests and cost. They count against the org's
+// monthly cap and the platform ceiling.
+func (q *Queries) SpendSystemSince(ctx context.Context, arg SpendSystemSinceParams) (SpendSystemSinceRow, error) {
+	row := q.db.QueryRow(ctx, spendSystemSince, arg.OrgID, arg.Since)
+	var i SpendSystemSinceRow
+	err := row.Scan(&i.Requests, &i.CostUsd)
+	return i, err
 }
 
 const sumRunCosts = `-- name: SumRunCosts :many

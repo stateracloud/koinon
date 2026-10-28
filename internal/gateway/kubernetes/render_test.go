@@ -4,6 +4,7 @@ package kubernetes_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -186,7 +187,7 @@ var _ = Describe("Render", func() {
 		Expect(pol["transformations"]).To(ConsistOf(HaveKeyWithValue("field", "tools")),
 			"no stream_options; the agent's server tools are dropped")
 		Expect(pol["authorization"]).To(HaveKeyWithValue("policy", HaveKeyWithValue("matchExpressions", ConsistOf(
-			`apiKey.org == "acme" && !apiKey.internal && !has(llmRequest.mcp_servers)`))), "mcp_servers is refused")
+			`apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers)`))), "mcp_servers is refused")
 		Expect(pol["headers"]).To(Equal(map[string]any{"request": map[string]any{
 			"set": []any{
 				map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
@@ -223,6 +224,32 @@ var _ = Describe("Render", func() {
 			}
 		}
 		Expect(found).To(BeTrue())
+	})
+
+	It("gives the model-check key its own model list, and no other key one", func() {
+		check := gateway.AgentRef{Org: "acme", Name: gateway.ModelCheckAgentName}
+		s := fullState()
+		s.AddKey(fixedKey("k-cccccccccccc", check, "test-check"))
+		s.SetLimit(check, &gateway.Limit{Unit: gateway.USD, Amount: 0.10, Window: 24 * time.Hour, Generation: "d"})
+		s.RestrictModels(check, "deepseek/deepseek-v4.1-flash", "not-served/model")
+		r, err := gwk8s.Render(s, opts())
+		Expect(err).NotTo(HaveOccurred())
+		data := find(r, "ConfigMap", "koinon-gateway-keys-acme").U.Object["data"].(map[string]any)
+		var entry struct {
+			Metadata map[string]any `json:"metadata"`
+		}
+		Expect(json.Unmarshal([]byte(data["k-cccccccccccc"].(string)), &entry)).To(Succeed())
+		Expect(entry.Metadata).To(HaveKeyWithValue("restricted", true))
+		Expect(entry.Metadata["models"]).To(Equal([]any{"deepseek/deepseek-v4.1-flash"}), "only served, priced models of its org")
+		Expect(entry.Metadata).To(HaveKeyWithValue("internal", false), "it requests models, unlike the MCP agents")
+		Expect(data["k-aaaaaaaaaaaa"]).NotTo(ContainSubstring("restricted"))
+
+		By("without an entry it may request nothing")
+		s.RestrictModels(check)
+		r, err = gwk8s.Render(s, opts())
+		Expect(err).NotTo(HaveOccurred())
+		data = find(r, "ConfigMap", "koinon-gateway-keys-acme").U.Object["data"].(map[string]any)
+		Expect(data["k-cccccccccccc"]).To(ContainSubstring(`"models":[]`))
 	})
 
 	It("renders an empty key ConfigMap when an org's last key is revoked, so that the revocation is an update", func() {
@@ -279,7 +306,11 @@ var _ = Describe("Render", func() {
 		Expect(models).To(HaveLen(2))
 		for _, m := range models {
 			policy, _, _ := nested(m.U.Object, "spec", "policies", "authorization", "policy", "matchExpressions")
-			Expect(policy).To(ConsistOf(`apiKey.org == "` + m.Org + `" && !apiKey.internal`))
+			Expect(policy).To(HaveLen(1))
+			expr := policy[0].(string)
+			Expect(expr).To(HavePrefix(`apiKey.org == "` + m.Org + `" && !apiKey.internal && `))
+			// A key with a model list of its own must name the model; other keys need nothing.
+			Expect(expr).To(ContainSubstring(`!default(apiKey.restricted, false) || "deepseek/deepseek-v4.1-flash" in default(apiKey.models, [])`))
 		}
 	})
 

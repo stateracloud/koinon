@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 
 	connect "connectrpc.com/connect/v2"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -17,6 +18,24 @@ import (
 	"github.com/stateracloud/koinon/internal/modelcheck"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
+
+// blockingChat answers after release is closed, closing entered when its first call starts.
+type blockingChat struct {
+	release, entered chan struct{}
+	calls            atomic.Int32
+}
+
+func (b *blockingChat) Complete(ctx context.Context, _ pgtype.UUID, _, _ string) (string, error) {
+	if b.calls.Add(1) == 1 {
+		close(b.entered)
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	return modelcheck.Line, nil
+}
 
 type staticKey string
 
@@ -126,6 +145,30 @@ var _ = Describe("the provider echo check", func() {
 		_, err := check(ctx, owner, provider, "fake/not-scripted") // the fake answers 404 for an unknown model
 		Expect(codeOf(err)).To(Equal(connect.CodeUnavailable))
 		Expect(count(ctx, e, `SELECT count(*) FROM provider_echo_checks WHERE org_id = $1`, org)).To(BeZero())
+	})
+
+	It("runs one check per org at a time: a second while one is in flight is refused, with no second request", func(ctx SpecContext) {
+		provider := serveModel(ctx, e, org, "fake/slow", true)
+		release := make(chan struct{})
+		entered := make(chan struct{})
+		slow := &blockingChat{release: release, entered: entered}
+		blocked := newEnvOn(ctx, e, envOptions{modelChat: slow})
+		first := make(chan error, 1)
+		c := owner.on(blocked)
+		go func() {
+			defer GinkgoRecover()
+			_, err := check(ctx, c, provider, "fake/slow")
+			first <- err
+		}()
+		Eventually(entered).Should(BeClosed())
+		_, err := check(ctx, c, provider, "fake/slow")
+		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+		Expect(err.Error()).To(ContainSubstring("already running"))
+		close(release)
+		Eventually(first).Should(Receive(BeNil()))
+		Expect(slow.calls.Load()).To(Equal(int32(1)))
+		_, err = check(ctx, c, provider, "fake/slow")
+		Expect(err).NotTo(HaveOccurred(), "the lock is released")
 	})
 
 	It("is for admins and owners", func(ctx SpecContext) {

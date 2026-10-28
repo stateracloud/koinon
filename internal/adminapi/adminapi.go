@@ -200,14 +200,15 @@ func writeError(w http.ResponseWriter, status int, code ErrorCode, msg string) {
 // problem maps a service-layer error.
 func (s *Server) problem(err error) (int, Error) {
 	var (
-		e   Error
-		inv *catalog.InvalidError
-		tin *tokens.InvalidError
-		pin *prices.InvalidError
-		bin *budget.InvalidError
-		ain *agentmodel.InvalidError
-		min *modelcheck.InvalidError
-		mun *modelcheck.UnavailableError
+		e    Error
+		inv  *catalog.InvalidError
+		tin  *tokens.InvalidError
+		pin  *prices.InvalidError
+		bin  *budget.InvalidError
+		ain  *agentmodel.InvalidError
+		min  *modelcheck.InvalidError
+		mun  *modelcheck.UnavailableError
+		busy *modelcheck.BusyError
 	)
 	set := func(status int, code ErrorCode, msg string) (int, Error) {
 		e.Error.Code, e.Error.Message = code, msg
@@ -228,6 +229,8 @@ func (s *Server) problem(err error) (int, Error) {
 		return set(http.StatusBadRequest, InvalidRequest, ain.Msg)
 	case errors.As(err, &min):
 		return set(http.StatusBadRequest, InvalidRequest, min.Msg)
+	case errors.As(err, &busy):
+		return set(http.StatusConflict, Conflict, busy.Error())
 	case errors.As(err, &mun):
 		return set(http.StatusServiceUnavailable, Internal, mun.Msg)
 	case errors.Is(err, agentmodel.ErrNotFound), errors.Is(err, modelcheck.ErrNotFound), errors.Is(err, pgx.ErrNoRows):

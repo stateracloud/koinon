@@ -1417,12 +1417,23 @@ components:
         reservedUsd: {type: string, description: "What the provisional requests hold back from the gateway keys' limits (their max_tokens bound minus the charge). Not a cost and not counted by budgets; released when they settle."}
     SpendReport:
       type: object
-      required: [since, models]
+      required: [since, models, systemChecks]
       properties:
         since: {type: string, format: date-time}
         models:
           type: array
+          description: Spend of agents, per model.
           items: {$ref: "#/components/schemas/SpendLine"}
+        systemChecks:
+          type: object
+          description: |
+            Requests Koinon made itself, such as the provider echo check, which belong to no agent.
+            They are billed like any request and count toward the org's monthly cap and the platform
+            ceiling, but not toward any agent's limit.
+          required: [requests, costUsd]
+          properties:
+            requests: {type: integer, format: int64}
+            costUsd: {type: string}
     AuditEvent:
       type: object
       required: [id, actorKind, actorId, action, targetKind, targetId, summary, requestId, createdAt, chainSeq, prevHash, hash]

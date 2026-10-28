@@ -1,4 +1,4 @@
-# Revision 94319e0aca516c77
+# Revision ac75592fa7042980
 apiVersion: v1
 data:
   catalog.json: '{"providers":{"acme.anthropic":{"models":{"claude-haiku-4-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}}}},"acme.openrouter":{"models":{"open/model":{"rates":{"input":"1","output":"2"}}}}}}'
@@ -25,7 +25,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  koinon-reload-probe: '{"keyHash":"sha256:848c70e546ca36aa75ce19b65b1825965bbb56cc9b36a34628bad35bb1921855","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+  koinon-reload-probe: '{"keyHash":"sha256:84f8d162255fd6bf527f70f7f9b77ff08bfe938ada678f069bee0d47706dbbd1","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -116,7 +116,7 @@ spec:
       action: Require
       policy:
         matchExpressions:
-          - apiKey.org == "acme" && !apiKey.internal
+          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "open/model" in default(apiKey.models, []))
     transformations:
       - expression: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
         field: stream_options
@@ -157,7 +157,7 @@ spec:
       action: Require
       policy:
         matchExpressions:
-          - apiKey.org == "acme" && !apiKey.internal && !has(llmRequest.mcp_servers)
+          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers)
     headers:
       request:
         remove:

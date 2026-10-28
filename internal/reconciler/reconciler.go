@@ -452,6 +452,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 		r.m.PassErrors.WithLabelValues(errKindMCP).Inc()
 		return errors.Join(append(errs, err)...)
 	}
+	errs = append(errs, r.applyModelCheck(ctx, &state, orgs, now)...)
 	// Sandbox work is per-sandbox jobs, outside the sequential pass (plan item LT1, practice B4).
 	// An agent whose key the gateway already serves does not depend on the Apply below, which may
 	// wait for agentgateway's hot reload for about a minute: its sandbox starts and stops now,

@@ -81,6 +81,7 @@ func llmSpec(env Env) {
 			keyA   gateway.IssuedKey // limited agent
 			keyB   gateway.IssuedKey // unlimited agent, no tool grants
 			keyG   gateway.IssuedKey // an agent of the second org, globex
+			keyC   gateway.IssuedKey // globex's model-check system key, restricted to open-model
 			ups    map[string]*taggedUpstream
 			// redirector answers 307 to the "private" upstream; redirects counts what it was asked.
 			redirector *httptest.Server
@@ -155,6 +156,8 @@ func llmSpec(env Env) {
 			Expect(err).NotTo(HaveOccurred())
 			keyG, err = gateway.NewKey(agentG)
 			Expect(err).NotTo(HaveOccurred())
+			keyC, err = gateway.NewKey(gateway.AgentRef{Org: "globex", Name: gateway.ModelCheckAgentName})
+			Expect(err).NotTo(HaveOccurred())
 
 			hostURL := func(p int) string { return fmt.Sprintf("http://%s:%d/v1", env.Host, p) }
 			state = gateway.State{
@@ -195,6 +198,8 @@ func llmSpec(env Env) {
 			state.AddKey(keyA.Key)
 			state.AddKey(keyB.Key)
 			state.AddKey(keyG.Key)
+			state.AddKey(keyC.Key)
+			state.RestrictModels(keyC.Agent, "open-model")
 			state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 0.0015, Window: 24 * time.Hour})
 			state.GrantTools(agentA, gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}})
 
@@ -294,6 +299,19 @@ func llmSpec(env Env) {
 				defer func() { _ = resp.Body.Close() }()
 				b, _ := io.ReadAll(resp.Body)
 				Expect(string(b)).NotTo(ContainSubstring("globex"))
+			})
+
+			It("restricts a system key to its own models and leaves agent keys alone", func(ctx SpecContext) {
+				code, body := chatModel(ctx, keyC.Material, "open-model")
+				Expect(code).To(Equal(http.StatusOK), body)
+				for _, m := range []string{testModel, "guarded-model", "acme-only"} {
+					code, body = chatModel(ctx, keyC.Material, m)
+					Expect(code).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), m+": "+body)
+				}
+				for _, m := range []string{testModel, "guarded-model", "open-model"} {
+					code, body = chatModel(ctx, keyG.Material, m)
+					Expect(code).To(Equal(http.StatusOK), m+": "+body)
+				}
 			})
 
 			It("serves no unpriced model", func(ctx SpecContext) {

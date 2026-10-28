@@ -122,6 +122,45 @@ var _ = Describe("Render", func() {
 			Expect(byName[gateway.ReloadProbeKeyName].AllowedModels).To(BeNil())
 		})
 
+		It("limits the model-check key to the models State.Models names, and a restricted agent likewise", func() {
+			check := gateway.AgentRef{Org: "acme", Name: gateway.ModelCheckAgentName}
+			s := fixtures()[2].state
+			s.AddKey(fixedKey("k-cccccccccccc", check, "test-c"))
+			s.RestrictModels(check, "open/model", "unserved/model")
+			s.RestrictModels(gateway.AgentRef{Org: "acme", Name: "narrow"}, "open/model")
+			s.AddKey(fixedKey("k-dddddddddddd", gateway.AgentRef{Org: "acme", Name: "narrow"}, "test-d"))
+			out, _, err := standalone.Render(s, fixtures()[2].options)
+			Expect(err).NotTo(HaveOccurred())
+			var d struct {
+				LLM struct {
+					Policies struct {
+						APIKey struct {
+							Keys []apiKey `yaml:"keys"`
+						} `yaml:"apiKey"`
+					} `yaml:"policies"`
+				} `yaml:"llm"`
+			}
+			Expect(yaml.Unmarshal(out, &d)).To(Succeed())
+			byName := map[string]apiKey{}
+			for _, k := range d.LLM.Policies.APIKey.Keys {
+				byName[k.Metadata.Name] = k
+			}
+			Expect(*byName["k-cccccccccccc"].AllowedModels).To(Equal([]string{"open/model"}))
+			Expect(*byName["k-dddddddddddd"].AllowedModels).To(Equal([]string{"open/model"}))
+			Expect(*byName["k-aaaaaaaaaaaa"].AllowedModels).To(ContainElement("deepseek/deepseek-v4.1-flash"))
+
+			By("a model-check key without an entry may request nothing")
+			s.RestrictModels(check)
+			out, _, err = standalone.Render(s, fixtures()[2].options)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(yaml.Unmarshal(out, &d)).To(Succeed())
+			for _, k := range d.LLM.Policies.APIKey.Keys {
+				if k.Metadata.Name == "k-cccccccccccc" {
+					Expect(*k.AllowedModels).To(BeEmpty())
+				}
+			}
+		})
+
 		It("denies every model to a key of an org that serves none", func() {
 			s := gateway.State{Providers: fixtures()[2].state.Providers}
 			s.AddKey(fixedKey("k-hhhhhhhhhhhh", gateway.AgentRef{Org: "initech", Name: "x"}, "test-h"))

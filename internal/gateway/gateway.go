@@ -166,10 +166,22 @@ const (
 	MCPExecAgentName    = "mcp-exec"
 )
 
-// IsInternalAgent reports whether a is one of Koinon's own MCP agents.
+// IsInternalAgent reports whether a is one of Koinon's own MCP agents. Internal agents request no
+// model.
 func IsInternalAgent(a AgentRef) bool {
 	return a.Name == MCPExecAgentName || strings.HasPrefix(a.Name, MCPProbeAgentPrefix)
 }
+
+// ModelCheckAgentName names the org's system principal for the provider echo check (ADR 0056
+// amendment): one key per org that may request only the models in its State.Models entry, with a
+// small daily budget. It is not a row in the agents table; the spend ledger records its requests
+// with the principal "system" and no run.
+const ModelCheckAgentName = "model-check"
+
+// IsSystemAgent reports whether a is a system principal: a key of Koinon's own that requests
+// models (unlike the internal MCP agents) but belongs to no agent. Its models are exactly the ones
+// State.Models lists for it, none by default.
+func IsSystemAgent(a AgentRef) bool { return a.Name == ModelCheckAgentName }
 
 // ReadyPrompt is the MCP prompt Koinon's MCP server publishes to every agent.
 // A harness that turns MCP prompts into commands (OpenCode v2) announces it
@@ -407,6 +419,10 @@ type State struct {
 	MCP       []MCPTarget
 	// Tools are per-agent MCP allowlists. An agent without grants sees no tools.
 	Tools map[AgentRef][]ToolGrant
+	// Models narrows a key's models to the listed names, which must be served and priced for the
+	// key's org to count. An agent without an entry may request all of its org's models; a system
+	// agent (IsSystemAgent) without one may request none.
+	Models map[AgentRef][]string
 }
 
 // AddKey adds k to the State.
@@ -429,6 +445,62 @@ func (s *State) SetLimit(agent AgentRef, l *Limit) {
 		s.Limits = map[AgentRef]Limit{}
 	}
 	s.Limits[agent] = *l
+}
+
+// RestrictModels limits agent's keys to the named models; no names clears the entry.
+func (s *State) RestrictModels(agent AgentRef, names ...string) {
+	if s.Models == nil {
+		s.Models = map[AgentRef][]string{}
+	}
+	if len(names) == 0 {
+		delete(s.Models, agent)
+		return
+	}
+	s.Models[agent] = names
+}
+
+// AllowedModels returns the names agent's keys may request out of served, the plain names its org
+// serves: all of them, the State.Models entry's, or none for an internal agent and for a system
+// agent without an entry. The result is sorted.
+func (s State) AllowedModels(agent AgentRef, served []string) []string {
+	out := []string{}
+	if IsInternalAgent(agent) {
+		return out
+	}
+	narrow, ok := s.Models[agent]
+	if !ok && IsSystemAgent(agent) {
+		return out
+	}
+	for _, n := range served {
+		if !ok || slices.Contains(narrow, n) {
+			out = append(out, n)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// ServedModels returns the plain names of the priced models org serves in s, sorted.
+func (s State) ServedModels(org string) []string {
+	var out []string
+	for _, p := range s.Providers {
+		if p.Org != org {
+			continue
+		}
+		for _, m := range p.Models {
+			if m.Price != nil {
+				out = append(out, m.Name)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// Restricted reports whether agent's keys carry a model list of their own.
+func (s State) Restricted(agent AgentRef) bool {
+	_, ok := s.Models[agent]
+	return ok || IsSystemAgent(agent)
 }
 
 // GrantTools replaces agent's MCP allowlist.
@@ -598,6 +670,16 @@ func (s State) Validate() error {
 			errs = append(errs, fmt.Errorf("mcp target %q: invalid credential prefix", t.Name))
 		}
 		targets[t.Name] = true
+	}
+	for a, names := range s.Models {
+		if err := a.Validate(); err != nil {
+			errs = append(errs, err)
+		}
+		for _, n := range names {
+			if !modelName.MatchString(n) {
+				errs = append(errs, fmt.Errorf("models for %s: invalid name %q", a, n))
+			}
+		}
 	}
 	for a, grants := range s.Tools {
 		if err := a.Validate(); err != nil {

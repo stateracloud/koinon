@@ -67,7 +67,7 @@ func TestScrape(t *testing.T) {
 			ledger.NewMetrics(r)
 			api.NewMetrics(r).RPCRequests.WithLabelValues("/x.v1.S/M", "ok").Inc()
 		}, []string{
-			"koinon_api_ledger_records_ingested_total", "koinon_api_ledger_records_rejected_total{reason=\"unattributed\"}",
+			"koinon_api_ledger_records_ingested_total{principal=\"system\"}", "koinon_api_ledger_records_rejected_total{reason=\"unattributed\"}",
 			"koinon_api_ledger_ingest_lag_seconds_count", "koinon_api_rpc_requests_total{code=\"ok\",procedure=\"/x.v1.S/M\"}",
 		}},
 	}

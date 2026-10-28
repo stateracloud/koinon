@@ -367,6 +367,8 @@ type Querier interface {
 	// Everything but the sealed files.
 	GetSavedWorkManifest(ctx context.Context, arg GetSavedWorkManifestParams) (GetSavedWorkManifestRow, error)
 	GetServedMCPServerByName(ctx context.Context, arg GetServedMCPServerByNameParams) (McpServer, error)
+	// An org's recorded USD spend of its system key since @since, for the key's daily budget.
+	GetSystemSpendSince(ctx context.Context, arg GetSystemSpendSinceParams) (string, error)
 	GetTask(ctx context.Context, arg GetTaskParams) (Task, error)
 	// Like GetTask, and locks the row until the transaction ends, so a read-then-change of the state
 	// cannot interleave with another one.
@@ -406,7 +408,8 @@ type Querier interface {
 	InsertPriceOverride(ctx context.Context, arg InsertPriceOverrideParams) (PriceOverride, error)
 	InsertSandboxIncident(ctx context.Context, arg InsertSandboxIncidentParams) (SandboxIncident, error)
 	InsertSavedWork(ctx context.Context, arg InsertSavedWorkParams) (SavedWork, error)
-	// Records one request. Returns no row when the request id is already
+	// Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
+	// (principal 'system', no agent and no run: the provider echo check). Returns no row when the request id is already
 	// recorded, so a replayed export is not charged twice. cost_usd is Koinon's
 	// own computation from the raw usage and the dated price; gateway_cost_usd is
 	// what agentgateway logged (NULL when it could not price the request). reserve_usd is NULL (zero)
@@ -795,8 +798,12 @@ type Querier interface {
 	ShadowUIModels(ctx context.Context, arg ShadowUIModelsParams) error
 	// A declared provider of this name now exists: disable the UI ones.
 	ShadowUIProviders(ctx context.Context, arg ShadowUIProvidersParams) error
-	// Spend per model since @since, with estimated usage kept apart.
+	// Spend of agents per model since @since, with estimated usage kept apart. System checks are
+	// reported by SpendSystemSince.
 	SpendReport(ctx context.Context, arg SpendReportParams) ([]SpendReportRow, error)
+	// The system checks of an org since @since: requests and cost. They count against the org's
+	// monthly cap and the platform ceiling.
+	SpendSystemSince(ctx context.Context, arg SpendSystemSinceParams) (SpendSystemSinceRow, error)
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// Totals per task, for the tasks in @task_ids that have spend.

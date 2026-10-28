@@ -814,8 +814,17 @@ type SpendLine struct {
 
 // SpendReport defines model for SpendReport.
 type SpendReport struct {
+	// Models Spend of agents, per model.
 	Models []SpendLine `json:"models"`
 	Since  time.Time   `json:"since"`
+
+	// SystemChecks Requests Koinon made itself, such as the provider echo check, which belong to no agent.
+	// They are billed like any request and count toward the org's monthly cap and the platform
+	// ceiling, but not toward any agent's limit.
+	SystemChecks struct {
+		CostUsd  string `json:"costUsd"`
+		Requests int64  `json:"requests"`
+	} `json:"systemChecks"`
 }
 
 // Token defines model for Token.

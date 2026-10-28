@@ -272,7 +272,7 @@ func (r *Reconciler) applyMCP(ctx context.Context, state *gateway.State, served 
 	for slug := range execOrg {
 		grants := execGrants[slug]
 		ref := gateway.AgentRef{Org: slug, Name: gateway.MCPExecAgentName}
-		key, err := r.execKey(ctx, execOrg[slug], ref)
+		key, err := r.systemKey(ctx, mcpservers.ExecSecretName(execOrg[slug].ID), execOrg[slug], ref)
 		if err != nil {
 			return nil, err
 		}
@@ -300,10 +300,9 @@ func (r *Reconciler) applyMCP(ctx context.Context, state *gateway.State, served 
 	return probes, nil
 }
 
-// execKey returns the org's executor key, issuing it on first use and keeping it in a Secret that
-// koinon-api reads (mcpservers.ExecSecretName).
-func (r *Reconciler) execKey(ctx context.Context, org store.ListOrgsToReconcileRow, ref gateway.AgentRef) (gateway.Key, error) {
-	name := mcpservers.ExecSecretName(org.ID)
+// systemKey returns the org's key for a system principal of Koinon's own (the MCP executor, the model
+// check), issuing it on first use and keeping it in the Secret name, which koinon-api reads.
+func (r *Reconciler) systemKey(ctx context.Context, name string, org store.ListOrgsToReconcileRow, ref gateway.AgentRef) (gateway.Key, error) {
 	sec, found, err := r.secrets.Get(ctx, name)
 	if err != nil {
 		return gateway.Key{}, err
@@ -313,7 +312,7 @@ func (r *Reconciler) execKey(ctx context.Context, org store.ListOrgsToReconcileR
 	}
 	k, err := r.gw.IssueKey(ctx, ref)
 	if err != nil {
-		return gateway.Key{}, fmt.Errorf("issue the MCP executor key of %s: %w", ref, err)
+		return gateway.Key{}, fmt.Errorf("issue the key of %s: %w", ref, err)
 	}
 	if err := r.secrets.Put(ctx, KeySecret{
 		Name: name, KeyID: k.ID, KeyHash: k.Hash, Material: k.Material, Labels: ownerLabels(org.ID, pgtype.UUID{}),
