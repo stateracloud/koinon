@@ -177,7 +177,7 @@ function AgentLimits({ loading, list, actions }: { loading: boolean; list: Agent
                 />
               ) : (
                 <div>
-                  <Button variant="outline" size="sm" aria-label={`Change daily limit of ${a.agentName || 'the agent'}`} onClick={() => setEditing(a.agentId)}>
+                  <Button variant="outline" size="sm" aria-label={`Change limit of ${a.agentName || 'the agent'}`} onClick={() => setEditing(a.agentId)}>
                     Change limit
                   </Button>
                 </div>
