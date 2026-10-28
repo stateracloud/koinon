@@ -46,7 +46,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Buckets: []float64{0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
 		}),
 		ModelWait: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name: "koinon_agentd_model_wait_duration_seconds", Help: "Time a run waited, before starting its harness, for the gateway to serve its model; observed only for runs that waited, a timeout included.",
+			Name: "koinon_agentd_model_wait_duration_seconds", Help: "Time a run waited, before starting its harness, for the gateway to serve its model; observed only for runs that waited and then were served or timed out (not for a wait that ended in a cancel, a lost lease or a shutdown).",
 			Buckets: []float64{1, 5, 10, 30, 60, 90, 120, 180, 300, 600},
 		}),
 	}

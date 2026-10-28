@@ -70,7 +70,7 @@ func parseFlags(args []string) (config, error) {
 	fs.DurationVar(&c.pool.Heartbeat, "heartbeat", 0, "lease renewal and cancel check interval (default lease/3)")
 	fs.DurationVar(&c.pool.Poll, "poll", time.Second, "how often idle workers look for runs")
 	fs.DurationVar(&c.pool.SandboxTimeout, "sandbox-timeout", 5*time.Minute, "how long a run waits for its sandbox")
-	fs.DurationVar(&c.pool.ModelServeTimeout, "model-serve-timeout", agentd.DefaultModelServeTimeout, "how long a run waits for the gateway to serve its model (a new provider still reaching the gateway) before it fails")
+	fs.DurationVar(&c.pool.ModelServeTimeout, "model-serve-timeout", agentd.DefaultModelServeTimeout, "how long a run waits for the gateway to serve its model (a new provider still reaching the gateway) before it fails; keep it well above koinon-reconciler's --provider-key-settle plus a gateway apply")
 	fs.DurationVar(&c.pool.CancelGrace, "cancel-grace", 10*time.Second, "how long a harness gets to end a cancelled turn")
 	fs.IntVar(&c.pool.MaxTakeovers, "max-takeovers", 5, "fail a run taken over more often than this")
 	fs.BoolVar(&c.checkpoints, "checkpoints", false, "save each agent's home to S3 (kopia) hourly, before stops and recreations, and restore it into recreated sandboxes")
