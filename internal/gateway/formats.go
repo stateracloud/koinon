@@ -36,7 +36,11 @@ const StreamUsageExpr = `has(llmRequest.stream) && llmRequest.stream == true ? {
 // code_execution, the memory and tool-search tools, MCP toolsets, and any type added later), or a
 // versioned client tool (bash, text_editor, computer) that Koinon's harnesses do not send. An allow
 // rule fails closed for new server tools.
-const serverToolsExpr = `has(llmRequest.tools) ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : null`
+//
+// The body field is set per model, so it also reaches a chat-completions request sent to an
+// anthropic-format model, whose tools are all `type: "function"`. The filter applies to Messages
+// requests only; any other path keeps its tools.
+const serverToolsExpr = `has(llmRequest.tools) ? (request.path == "/v1/messages" ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : llmRequest.tools) : null`
 
 // Rendering is how both drivers render a model of one format (ADR 0069 decision 3). Every model is a
 // `custom` provider whatever its format; the format only picks what is in this row.

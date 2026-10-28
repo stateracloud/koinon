@@ -296,7 +296,10 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
   server tool, present or future, is dropped. It refuses a request that has `mcp_servers` with 403,
   because dropping an untyped field is not possible: a `null` transformation would add
   `"mcp_servers":null` to every request. The refusal is a CEL condition in the authorization rule
-  (`!has(llmRequest.mcp_servers)`). If OpenCode ever needs a beta flag, PR 3 captures what it sends and
+  (`!has(llmRequest.mcp_servers)`). The refusal is the generic 403 of the authorization rule, with no
+  message naming the field (Koinon's harnesses never send `mcp_servers`). The tools filter applies to
+  Messages requests only (`request.path == "/v1/messages"`), so a chat-completions request sent to an
+  anthropic-format model keeps its `function` tools. If OpenCode ever needs a beta flag, PR 3 captures what it sends and
   pins only that with `set` from the table. The gatewaytest spec sends the attack in both drivers.
 - The sandbox profile's routes come from the same table (`Rendering.Path`), so a new format needs no
   profile edit.

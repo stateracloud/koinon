@@ -262,6 +262,17 @@ func anthropicSpec(env Env) {
 			Expect(string(lastUpstream("claude-test").Body)).NotTo(ContainSubstring("mcp_servers"), "no field is added to a plain request")
 		})
 
+		It("keeps the tools of a chat-completions request sent to an anthropic model", func(ctx SpecContext) {
+			// The tools filter is a per-model body field; it must not touch the type "function" tools of
+			// another route.
+			code, out := post(ctx, "/v1/chat/completions", keyC.Material, map[string]any{
+				"model": "claude-test", "messages": []any{map[string]any{"role": "user", "content": "hi"}},
+				"tools": []any{map[string]any{"type": "function", "function": map[string]any{"name": "lookup", "parameters": map[string]any{"type": "object"}}}},
+			})
+			Expect(code).To(Equal(http.StatusOK), out)
+			Expect(string(lastUpstream("claude-test").Body)).To(ContainSubstring(`"lookup"`), "the function tool is kept")
+		})
+
 		It("adds no stream_options to a streamed Messages request", func(ctx SpecContext) {
 			code, body := messages(ctx, keyC.Material, "claude-test", true)
 			Expect(code).To(Equal(http.StatusOK), body)
@@ -351,16 +362,20 @@ func anthropicSpec(env Env) {
 				gateway.LogFieldCacheWrite: float64(20), gateway.LogFieldOutput: float64(10),
 			}
 			Eventually(func() []map[string]any { return accessLog(logs(ctx), keyC.ID) }, 30*time.Second, time.Second).
-				Should(ContainElement(HaveKeyWithValue(gateway.LogFieldInput, want[gateway.LogFieldInput])))
+				Should(ContainElement(HaveKeyWithValue(gateway.LogFieldOutput, want[gateway.LogFieldOutput])))
+			finished := 0
 			for _, rec := range accessLog(logs(ctx), keyC.ID) {
-				if rec[gateway.LogFieldInput] != want[gateway.LogFieldInput] || rec[gateway.LogFieldError] != nil {
-					continue // not the usage of a finished response
+				if rec[gateway.LogFieldInput] != want[gateway.LogFieldInput] || rec[gateway.LogFieldOutput] != want[gateway.LogFieldOutput] || rec[gateway.LogFieldFormat] != "anthropic" {
+					continue // not the usage of a finished response (the cut stream has output 1; a chat-completions record has format openai)
 				}
+				finished++
+				Expect(rec).NotTo(HaveKey(gateway.LogFieldError), "a normal end carries no error")
 				Expect(rec).To(HaveKeyWithValue(gateway.LogFieldFormat, "anthropic"))
 				for k, v := range want {
 					Expect(rec).To(HaveKeyWithValue(k, v), k)
 				}
 			}
+			Expect(finished).To(BeNumerically(">=", 2), "the streamed and the unstreamed response are both logged")
 		}, SpecTimeout(2*time.Minute))
 	})
 }
