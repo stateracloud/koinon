@@ -23,6 +23,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 )
 
@@ -168,6 +169,22 @@ var _ = Describe("Decode", func() {
 		}
 		Expect(got["r-200"].MaxTokens).To(Equal(int64(4000)))
 		Expect(got["r-200"].RequestBytes).To(Equal(int64(900)))
+	})
+
+	It("reads the format, stream and error fields, with an absent one as OpenAI, unstreamed, no error", func() {
+		id := func(n string) *commonpb.KeyValue { return str(gateway.LogFieldRequest, n) }
+		streamed := &commonpb.KeyValue{Key: gateway.LogFieldStream, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_BoolValue{BoolValue: true}}}
+		entries, rejected, reason := ledger.Decode(export(
+			llmRecord(id("r-cut"), str(gateway.LogFieldFormat, string(modelformat.Anthropic)), streamed, str(gateway.LogFieldError, "Upstream")),
+			llmRecord(id("r-plain")),
+		))
+		Expect(rejected).To(BeZero(), reason)
+		got := map[string]ledger.Entry{}
+		for _, e := range entries {
+			got[e.RequestID] = e
+		}
+		Expect(got["r-cut"]).To(And(HaveField("Format", modelformat.Anthropic), HaveField("Stream", true), HaveField("Error", "Upstream")))
+		Expect(got["r-plain"]).To(And(HaveField("Format", modelformat.OpenAI), HaveField("Stream", false), HaveField("Error", "")))
 	})
 
 	It("accepts numeric costs and tokens", func() {

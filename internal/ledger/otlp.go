@@ -149,6 +149,7 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 					e.Format = modelformat.Format(f)
 				}
 				e.Stream = boolValue(attrs[gateway.LogFieldStream])
+				e.Error = stringValue(attrs[gateway.LogFieldError])
 				org, name, ok := strings.Cut(agent, "/")
 				e.Agent = gateway.AgentRef{Org: org, Name: name}
 				switch {

@@ -471,6 +471,25 @@ var _ = Describe("Settling responses cut short", func() {
 			Expect(e.provisional(ctx)).To(BeZero())
 		})
 
+		It("is cut when the proxy logged an error for it, whatever its run did", func(ctx SpecContext) {
+			x := partial("gen-err")
+			x.Error = "Upstream" // agentgateway v1.7.0 for a stream the upstream cut: 200, out=1
+			_, err := in.Ingest(ctx, []ledger.Entry{x})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateRunning), "the run was not canceled")
+			Expect(e.provisional(ctx)).To(Equal(1), "settled by generation ID")
+			s := e.lastEntry(ctx)
+			Expect(string(s.Estimate)).To(ContainSubstring(`"usage_partial": true`))
+			Expect(s.OutputTokens).To(Equal(int64(1)), "charged as logged")
+
+			By("an OpenAI-format record with an error and no output is cut too")
+			y := cut("gen-err2")
+			y.Error = "Upstream"
+			_, err = in.Ingest(ctx, []ledger.Entry{y})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.provisional(ctx)).To(Equal(2))
+		})
+
 		It("is not cut by an earlier run's cancel: only the attributed run counts", func(ctx SpecContext) {
 			t := clock
 			cancelRun(ctx, t)                                              // run A canceled at T

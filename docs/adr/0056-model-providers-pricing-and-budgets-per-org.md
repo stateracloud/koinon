@@ -424,12 +424,16 @@ replaces decision 6.3 for responses cut short.
    mark logged usage as complete or partial and has no stream-end signal, and procoduck chose not to add
    one upstream. "No output usage logged" is exact for chat-completion streams, whose usage comes
    only at the end. A native Anthropic Messages stream (ADR 0069) logs `message_start`'s usage, input
-   and about one output token, which looks complete. The ledger therefore treats a streamed
-   Anthropic-format record (`koinon.format` = `anthropic` and `koinon.stream`, the fields the
-   Messages routes add; a record without `koinon.format` is OpenAI, which is today's behaviour) as
-   cut when the run it is attributed to (`FindRunAt`) was canceled at or before the record's time.
-   Only that run counts, so a later run's complete response is not marked cut by an earlier run's
-   cancel. Such an entry is charged as logged and flagged `usage_partial`. Via OpenRouter
+   and about one output token, which looks complete. Two signals mark such a record as cut, and
+   either is enough. (a) `koinon.error` (`proxy.error.reason`) is set: on the v1.7.0 container a
+   stream the upstream cut logs status 200 with `Upstream`, and the ledger treats any record with a
+   proxy error as cut (`Aborted: !OutputKnown || Error != ""`). (b) A client that hangs up (a run's
+   cancel stopping the harness) logs no error at all on the v1.7.0 container, so a streamed
+   Anthropic-format record (`koinon.format` = `anthropic` and `koinon.stream`) is also cut when the
+   run it is attributed to (`FindRunAt`) was canceled at or before the record's time. Only that run
+   counts, so a later run's complete response is not marked cut by an earlier run's cancel. The
+   three fields come with the Messages routes; a record without them is OpenAI, unstreamed and
+   without error, which is today's behaviour. Such an entry is charged as logged and flagged `usage_partial`. Via OpenRouter
    it is provisional and settled by generation ID like any cut response. From a provider that cannot
    report (direct Anthropic) it is provisional without a lookup: the `max_tokens` reserve is held
    back from the key until the settlement deadline, then released, and the logged usage is final
