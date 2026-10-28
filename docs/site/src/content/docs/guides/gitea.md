@@ -78,6 +78,17 @@ open a pull request. You approve it, and Koinon pushes the branch from its API w
 and opens the pull request. The agent builder and the connection page warn that this credential is
 weaker than a GitHub App's. All presets (Read only, Standard, Trusted) stay available.
 
+Two more templates work on Gitea. **Researcher** has a read-only grant on one to five repositories
+(`repo.read` only, so it cannot push or propose anything) and answers a question over several runs with
+a cited Markdown report; it keeps its notes in its home. **LCM upgrader** checks one repository every
+Monday at 07:00 UTC for outdated Helm charts, images, Argo CD apps and dependencies, then asks "Create
+the PR?" with up to three low-risk upgrades and opens a pull request only after a yes (you approve that
+pull request too). Both read release notes and the web only through MCP servers you allow for the agent
+([MCP servers](/guides/mcp-servers/)). A scheduled task has no creator, so the trigger's instruction is a form: on Edit triggers
+([Triggers](/guides/triggers/)) set the `Repository:` line (LCM upgrader) and replace `Ask: none` with
+`Ask: name@example.com`, the person whose inbox gets the question. With `none` the agent lists its
+proposal in its reply instead.
+
 ## Workflow files
 
 A branch pushed to Gitea can start Gitea Actions, and nothing on the credential can refuse that.
