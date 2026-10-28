@@ -180,6 +180,28 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		}
 	}, NodeTimeout(3*time.Minute))
 
+	It("lets the sandbox post to the gateway's model routes and nothing else on it (ADR 0069)", func(ctx SpecContext) {
+		// The gateway host does not resolve here, so an allowed request fails past the policy (the
+		// proxy cannot connect) and a denied one is answered 403 by the policy itself.
+		const gw = "http://agentgateway.koinon-escape.invalid:4000"
+		deniedByPolicy := func(method, path string) {
+			GinkgoHelper()
+			code, body, _ := g.curl(ctx, sandbox, method, gw+path)
+			Expect(code).To(Equal("403"), method+" "+path)
+			Expect(body).To(ContainSubstring("policy"), method+" "+path)
+		}
+		for _, path := range []string{"/v1/chat/completions", "/v1/messages"} {
+			code, body, _ := g.curl(ctx, sandbox, "POST", gw+path)
+			Expect(code).NotTo(Equal("403"), "POST "+path+" must pass the policy: "+body)
+		}
+		deniedByPolicy("GET", "/v1/messages")
+		deniedByPolicy("POST", "/v1/messages/count_tokens")
+		deniedByPolicy("POST", "/v1/messages/batches")
+		deniedByPolicy("POST", "/v1/responses")
+		deniedByPolicy("GET", "/v1/models")
+		deniedByPolicy("POST", "/config_dump")
+	}, NodeTimeout(2*time.Minute))
+
 	It("denies DNS to any resolver but the sandbox's own, which answers only synthetic addresses", func(ctx SpecContext) {
 		resolvers := []string{"8.8.8.8", "1.1.1.1", clusterDNS}
 		var checks []check
