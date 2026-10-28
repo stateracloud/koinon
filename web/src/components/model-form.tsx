@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ConnectError } from '@connectrpc/connect'
+import { useQuery } from '@connectrpc/connect-query'
 import { Link } from '@tanstack/react-router'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { CreateModelResponse, Model, Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import { NativeSelect } from '@/components/ui/native-select'
+import { ProviderService, type CreateModelResponse, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import type { ModelChange, ModelCreate } from '@/hooks/use-catalog-actions'
+import { useOrg } from '@/lib/org-context'
 import { guardProviderType, scopedModelName } from '@/lib/providers'
 
 const namePattern = /^[A-Za-z0-9_.:/@-]{1,256}$/
@@ -33,6 +36,23 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
   const editing = !!model
   const [name, setName] = useState(model?.name ?? '')
   const [guard, setGuard] = useState(model?.guard ?? false)
+  const { org } = useOrg()
+  // The default depends on the provider and the name, and only the server knows the table (ADR 0069),
+  // so ask it, once the name has stopped changing.
+  const [askedName, setAskedName] = useState(name)
+  useEffect(() => {
+    const t = setTimeout(() => setAskedName(name), 300)
+    return () => clearTimeout(t)
+  }, [name])
+  const formats = useQuery(ProviderService.method.modelFormats, { orgId: org.orgId, providerId: provider.id, name: askedName }, { enabled: namePattern.test(askedName) })
+  // The provider's formats come from the server's table with their labels; the default is asked per name.
+  const offered = provider.formats
+  const defaultFormat = formats.data?.defaultFormat ?? ''
+  const defaultLabel = offered.find((f) => f.id === defaultFormat)?.label
+  // The choice: "" follows the default, so a later change of the default reaches the model; a format id
+  // pins that format, the default's own id included.
+  const current = model?.formatOverridden ? model.format : ''
+  const [picked, setPicked] = useState(current)
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
@@ -52,8 +72,12 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
     setError(undefined)
     try {
       let warnings: string[] = []
-      if (model) await onUpdate(model.id, { guard: canGuard ? guard : undefined })
-      else warnings = (await onCreate({ providerId: provider.id, name, guard: canGuard && guard })).warnings
+      if (model) {
+        const change: ModelChange = { guard: canGuard ? guard : undefined }
+        // Only a changed choice is sent, so a guard-only edit keeps a pinned format.
+        if (picked !== current) change.format = picked
+        await onUpdate(model.id, change)
+      } else warnings = (await onCreate({ providerId: provider.id, name, guard: canGuard && guard, format: picked })).warnings
       onSaved?.(warnings)
       onDone()
     } catch (e2) {
@@ -82,6 +106,22 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
       <p className="text-muted-foreground text-xs">
         The price of a model is set on the <Link to="/settings/prices" className="underline">Prices page</Link>. Koinon ships prices for common models; add one of your own for the rest.
       </p>
+      <div className="grid gap-1.5">
+        <Label htmlFor="model-format">API format</Label>
+        <NativeSelect id="model-format" value={picked} onChange={(e) => setPicked(e.target.value)} disabled={offered.length < 2} aria-describedby="model-format-help">
+          <option value="">{defaultLabel ? `Default (${defaultLabel})` : 'Default'}</option>
+          {offered.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.label}
+            </option>
+          ))}
+        </NativeSelect>
+        <p id="model-format-help" className="text-muted-foreground text-xs">
+          {offered.length < 2
+            ? `${provider.name} offers one format for its models.`
+            : 'The API the gateway speaks to this model. The default follows Koinon, which may change it in a later release. Choose a format to keep it whatever the default becomes.'}
+        </p>
+      </div>
       {canGuard && (
         <div className="grid gap-1">
           <label className="flex items-center gap-2 text-sm font-medium">

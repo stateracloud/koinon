@@ -11,12 +11,15 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // DeclaredModel is a model of a declared provider.
 type DeclaredModel struct {
 	Name  string
 	Guard bool
+	// Format overrides the model's wire format; "" means the default (ADR 0069).
+	Format string
 }
 
 // DeclaredProvider is a provider declared by a Kubernetes Secret of type model-provider.
@@ -30,7 +33,9 @@ type DeclaredProvider struct {
 	Type    string
 	URL     string
 	APIKey  string
-	Models  []DeclaredModel
+	// AnthropicWorkspaceID is for type anthropic only.
+	AnthropicWorkspaceID string
+	Models               []DeclaredModel
 	// Warnings are things the Secret declares that Koinon ignores (the removed per-model rates).
 	Warnings []string
 }
@@ -43,12 +48,18 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 	if err := ValidateProvider(d.Name, d.Type, d.URL); err != nil {
 		return false, err
 	}
+	if err := ValidateWorkspaceID(d.Type, d.AnthropicWorkspaceID); err != nil {
+		return false, err
+	}
 	if err := s.policy.Check(ctx, d.URL); err != nil {
 		return false, err
 	}
 	seen := map[string]bool{}
 	for _, m := range d.Models {
 		if err := ValidateModel(m.Name, m.Guard, d.Type); err != nil {
+			return false, fmt.Errorf("model %q: %w", m.Name, err)
+		}
+		if err := ValidateModelFormat(d.Type, m.Format); err != nil {
 			return false, fmt.Errorf("model %q: %w", m.Name, err)
 		}
 		if seen[m.Name] {
@@ -98,8 +109,9 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 			}
 			row, err = q.CreateProvider(ctx, store.CreateProviderParams{
 				OrgID: org, ID: id, Name: d.Name, Type: d.Type, Url: d.URL, ApiKey: key, Source: store.ConfigSourceSecret,
-				ManagedBySecret: pgtype.Text{String: d.SecretName, Valid: true},
-				DeclaredVersion: pgtype.Text{String: d.Version, Valid: true},
+				AnthropicWorkspaceID: text(d.AnthropicWorkspaceID),
+				ManagedBySecret:      pgtype.Text{String: d.SecretName, Valid: true},
+				DeclaredVersion:      pgtype.Text{String: d.Version, Valid: true},
 			})
 			if err != nil {
 				return err
@@ -111,7 +123,7 @@ func (s *Service) ApplyDeclaredProvider(ctx context.Context, org pgtype.UUID, d 
 				return err
 			}
 			row, err = q.UpdateDeclaredProvider(ctx, store.UpdateDeclaredProviderParams{
-				OrgID: org, ID: id, Type: d.Type, Url: d.URL, ApiKey: key,
+				OrgID: org, ID: id, Type: d.Type, Url: d.URL, ApiKey: key, AnthropicWorkspaceID: text(d.AnthropicWorkspaceID),
 				DeclaredVersion: pgtype.Text{String: d.Version, Valid: true},
 			})
 			if err != nil {
@@ -155,12 +167,16 @@ func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org 
 		}
 	}
 	for _, m := range d.Models {
+		format, overridden, err := modelformat.Resolve(prov.Type, m.Name, m.Format)
+		if err != nil {
+			return invalid("model %q: %s", m.Name, err.Error())
+		}
 		if err := q.ShadowUIModels(ctx, store.ShadowUIModelsParams{OrgID: org, Name: m.Name, Reason: pgtype.Text{String: ReasonShadowedModel, Valid: true}}); err != nil {
 			return err
 		}
 		if cur, ok := have[m.Name]; ok {
 			delete(have, m.Name)
-			if _, err := q.UpdateModel(ctx, store.UpdateModelParams{OrgID: org, ID: cur.ID, Guard: m.Guard}); err != nil {
+			if _, err := q.UpdateModel(ctx, store.UpdateModelParams{OrgID: org, ID: cur.ID, Guard: m.Guard, Format: string(format), FormatOverridden: overridden}); err != nil {
 				return err
 			}
 			// A model of a provider that was removed and came back is served again.
@@ -175,6 +191,7 @@ func (s *Service) syncDeclaredModels(ctx context.Context, q *store.Queries, org 
 		}
 		if _, err := q.CreateModel(ctx, store.CreateModelParams{
 			OrgID: org, ID: id, ProviderID: prov.ID, Name: m.Name, Guard: m.Guard,
+			Format: string(format), FormatOverridden: overridden,
 			Source:          store.ConfigSourceSecret,
 			ManagedBySecret: pgtype.Text{String: d.SecretName, Valid: true},
 		}); err != nil {

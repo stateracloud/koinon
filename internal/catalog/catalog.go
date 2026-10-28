@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -94,7 +95,13 @@ var (
 	namePattern  = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
 	typePattern  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 	modelPattern = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
+	// workspacePattern is an Anthropic workspace ID; migration 00031 checks the same pattern.
+	workspacePattern = regexp.MustCompile(`^wrkspc_[A-Za-z0-9]+$`)
 )
+
+// WorkspaceProviderType is the only provider type with an Anthropic workspace ID (ADR 0069,
+// decision 5).
+const WorkspaceProviderType = modelformat.ProviderAnthropic
 
 // Rates are the per-model rates of PV1. They were folded into org price entries (ADR 0056,
 // amendment 2026-10-24, W4); the type remains only so a request or Secret that still sets them
@@ -119,22 +126,30 @@ type Provider struct {
 	ManagedBySecret string `json:"managedBySecret,omitempty"`
 	DisabledReason  string `json:"disabledReason,omitempty"`
 	// Removed is set when the declaring Secret was deleted.
-	Removed   bool      `json:"removed,omitempty"`
+	Removed bool `json:"removed,omitempty"`
+	// AnthropicWorkspaceID is the workspace the gateway names for the provider's models (type
+	// anthropic only). An identifier, not a credential.
+	AnthropicWorkspaceID string `json:"anthropicWorkspaceId,omitempty"`
+	// Formats are the model formats the provider's type offers, preferred first (ADR 0069).
+	Formats   []string  `json:"formats"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Model is a model as callers see it.
 type Model struct {
-	ID              string    `json:"id"`
-	ProviderID      string    `json:"providerId"`
-	Name            string    `json:"name"`
-	Guard           bool      `json:"guard"`
-	Source          string    `json:"source"`
-	ManagedBySecret string    `json:"managedBySecret,omitempty"`
-	DisabledReason  string    `json:"disabledReason,omitempty"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ID         string `json:"id"`
+	ProviderID string `json:"providerId"`
+	Name       string `json:"name"`
+	Guard      bool   `json:"guard"`
+	// Format is the model's wire format (ADR 0069); FormatOverridden is set when an admin chose it.
+	Format           string    `json:"format"`
+	FormatOverridden bool      `json:"formatOverridden"`
+	Source           string    `json:"source"`
+	ManagedBySecret  string    `json:"managedBySecret,omitempty"`
+	DisabledReason   string    `json:"disabledReason,omitempty"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 // Service is the catalog service layer.
@@ -180,8 +195,13 @@ func mapErr(err error) error {
 }
 
 func toProvider(p store.Provider) Provider {
+	var offered []string
+	for _, f := range modelformat.Offered(p.Type) {
+		offered = append(offered, string(f))
+	}
 	return Provider{
 		ID: p.ID.String(), Name: p.Name, Type: p.Type, URL: p.Url, HasKey: len(p.ApiKey) > 0,
+		AnthropicWorkspaceID: p.AnthropicWorkspaceID.String, Formats: offered,
 		Source: string(p.Source), ManagedBySecret: p.ManagedBySecret.String, DisabledReason: p.DisabledReason.String,
 		Removed: p.RemovedAt.Valid, CreatedAt: p.CreatedAt.Time, UpdatedAt: p.UpdatedAt.Time,
 	}
@@ -190,7 +210,7 @@ func toProvider(p store.Provider) Provider {
 func toModel(m store.Model) Model {
 	out := Model{
 		ID: m.ID.String(), ProviderID: m.ProviderID.String(), Name: m.Name, Guard: m.Guard,
-		Source: string(m.Source), ManagedBySecret: m.ManagedBySecret.String, DisabledReason: m.DisabledReason.String,
+		Format: m.Format, FormatOverridden: m.FormatOverridden, Source: string(m.Source), ManagedBySecret: m.ManagedBySecret.String, DisabledReason: m.DisabledReason.String,
 		CreatedAt: m.CreatedAt.Time, UpdatedAt: m.UpdatedAt.Time,
 	}
 	return out
@@ -222,6 +242,32 @@ func validateTypeURL(typ, rawURL string) error {
 	return nil
 }
 
+// ValidateWorkspaceID checks a provider's Anthropic workspace ID: empty, or wrkspc_ followed by
+// letters and digits on a provider of type anthropic.
+func ValidateWorkspaceID(typ, id string) error {
+	switch {
+	case id == "":
+		return nil
+	case typ != WorkspaceProviderType:
+		return invalid("the Anthropic workspace ID exists for %s providers only", WorkspaceProviderType)
+	case len(id) > 128 || !workspacePattern.MatchString(id):
+		return invalid("anthropic workspace ID must be wrkspc_ followed by letters and digits")
+	}
+	return nil
+}
+
+// ValidateModelFormat checks a model's format override against its provider's type; "" is the
+// default and always valid.
+func ValidateModelFormat(providerType, format string) error {
+	if format == "" {
+		return nil
+	}
+	if err := modelformat.Validate(providerType, modelformat.Format(format)); err != nil {
+		return invalid("%s", err.Error())
+	}
+	return nil
+}
+
 // ValidateModel checks a model's name and guard against its provider type.
 func ValidateModel(name string, guard bool, providerType string) error {
 	if !modelPattern.MatchString(name) {
@@ -236,11 +282,15 @@ func ValidateModel(name string, guard bool, providerType string) error {
 func providerSummary(p store.Provider) map[string]any {
 	return map[string]any{
 		"name": p.Name, "type": p.Type, "url": p.Url, "hasKey": len(p.ApiKey) > 0, "source": string(p.Source),
+		"anthropicWorkspaceId": p.AnthropicWorkspaceID.String,
 	}
 }
 
 func modelSummary(m store.Model) map[string]any {
-	out := map[string]any{"name": m.Name, "guard": m.Guard, "providerId": m.ProviderID.String(), "source": string(m.Source)}
+	out := map[string]any{
+		"name": m.Name, "guard": m.Guard, "providerId": m.ProviderID.String(), "source": string(m.Source),
+		"format": m.Format, "formatOverridden": m.FormatOverridden,
+	}
 	return out
 }
 

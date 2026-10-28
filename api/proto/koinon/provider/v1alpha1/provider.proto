@@ -31,6 +31,18 @@ service ProviderService {
   rpc CreateModel(CreateModelRequest) returns (CreateModelResponse);
   rpc UpdateModel(UpdateModelRequest) returns (UpdateModelResponse);
   rpc DeleteModel(DeleteModelRequest) returns (DeleteModelResponse);
+
+  // ModelFormats says which formats a model may use on a provider and which one it gets by default
+  // (ADR 0069), so the model form offers exactly what the server will accept.
+  rpc ModelFormats(ModelFormatsRequest) returns (ModelFormatsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ProviderTypeInfo says what a provider type offers before any provider of that type exists, so the
+  // provider form shows only the fields the server will accept.
+  rpc ProviderTypeInfo(ProviderTypeInfoRequest) returns (ProviderTypeInfoResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // Provider is an upstream model API of the org. It never holds the key.
@@ -51,6 +63,18 @@ message Provider {
   bool removed = 9;
   google.protobuf.Timestamp created_at = 10;
   google.protobuf.Timestamp updated_at = 11;
+  // anthropic_workspace_id is the Anthropic workspace the gateway names for the provider's models,
+  // for an API key not scoped to a workspace. Empty when unset. An identifier, not a credential.
+  string anthropic_workspace_id = 12;
+  // formats are the model formats the provider's type offers, preferred first (ADR 0069).
+  repeated ModelFormat formats = 13;
+}
+
+// ModelFormat is a model wire format as the server's format table names it: id is the stored value,
+// label how it reads to a person. The set is open and grows with the formats Koinon supports.
+message ModelFormat {
+  string id = 1;
+  string label = 2;
 }
 
 // Rates are deprecated: per-model rates were folded into org prices (PriceService, ADR 0056). The
@@ -75,6 +99,12 @@ message Model {
   string disabled_reason = 8;
   google.protobuf.Timestamp created_at = 9;
   google.protobuf.Timestamp updated_at = 10;
+  // format is the model's wire format: "openai" (chat completions) or "anthropic" (Messages)
+  // (ADR 0069).
+  string format = 11;
+  // format_overridden is set when an admin chose the format; otherwise it follows the default and
+  // is re-derived when the default changes.
+  bool format_overridden = 12;
 }
 
 message ListProvidersRequest {
@@ -92,6 +122,8 @@ message CreateProviderRequest {
   string url = 4;
   // api_key is empty for keyless upstreams such as Ollama.
   string api_key = 5 [debug_redact = true];
+  // anthropic_workspace_id is allowed for type "anthropic" only: wrkspc_ followed by letters and digits.
+  string anthropic_workspace_id = 6;
 }
 
 message CreateProviderResponse {
@@ -106,6 +138,8 @@ message UpdateProviderRequest {
   optional string url = 4;
   // api_key replaces the key; set to "" it removes the key.
   optional string api_key = 5 [debug_redact = true];
+  // anthropic_workspace_id replaces the workspace ID; set to "" it removes it.
+  optional string anthropic_workspace_id = 6;
 }
 
 message UpdateProviderResponse {
@@ -135,6 +169,9 @@ message CreateModelRequest {
   // rates is deprecated: a request that sets it fails with INVALID_ARGUMENT. Add a price with
   // PriceService.SetPrice instead.
   Rates rates = 5 [deprecated = true];
+  // format is the model's wire format, within what the provider offers. Empty means the default
+  // (ADR 0069); a value marks the model as overridden.
+  string format = 6;
 }
 
 message CreateModelResponse {
@@ -151,6 +188,9 @@ message UpdateModelRequest {
   // rates and clear_rates are deprecated: a request that sets either fails with INVALID_ARGUMENT.
   Rates rates = 4 [deprecated = true];
   bool clear_rates = 5 [deprecated = true];
+  // format overrides the model's wire format, within what the provider offers; set to "" it goes
+  // back to the default and is no longer overridden.
+  optional string format = 6;
 }
 
 message UpdateModelResponse {
@@ -163,3 +203,28 @@ message DeleteModelRequest {
 }
 
 message DeleteModelResponse {}
+
+message ModelFormatsRequest {
+  string org_id = 1;
+  string provider_id = 2;
+  // name is the model name; the default depends on its family.
+  string name = 3;
+}
+
+message ModelFormatsResponse {
+  // default_format is the id of the format the model gets unless overridden. The formats the
+  // provider offers are Provider.formats.
+  string default_format = 1;
+}
+
+message ProviderTypeInfoRequest {
+  string org_id = 1;
+  string type = 2;
+}
+
+message ProviderTypeInfoResponse {
+  // formats are the model formats the type offers, preferred first.
+  repeated ModelFormat formats = 1;
+  // takes_workspace_id is set when the type takes an Anthropic workspace ID.
+  bool takes_workspace_id = 2;
+}
