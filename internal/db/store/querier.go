@@ -670,7 +670,8 @@ type Querier interface {
 	// Records when the run started waiting for its sandbox, once per wait (the first requeue keeps it).
 	// Fenced by the epoch. Returns the recorded start.
 	MarkRunSandboxWait(ctx context.Context, arg MarkRunSandboxWaitParams) (pgtype.Timestamptz, error)
-	// Records that the agent was told its time limit is near; once per run. Fenced by the epoch.
+	// Disarms the wrap-up notice (sent, or suppressed because the harness ignored the cancel); once per
+	// run. Only a sent notice has a run.wrap_up_notice event. Fenced by the epoch.
 	MarkRunWrapUpNotice(ctx context.Context, arg MarkRunWrapUpNoticeParams) (int64, error)
 	// The sandbox and its volume were deleted for the archive tier; the home is in the checkpoint
 	// that restore_checkpoint_id names.

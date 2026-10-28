@@ -5,6 +5,7 @@
 
 -- +goose Up
 
--- When agentd told the run's agent that its time limit is near (ADR 0066 amendment 2026-10-28). At
--- most once per run, across takeovers.
+-- Set when the wrap-up notice of a run is no longer armed (ADR 0066 amendment 2026-10-28): it was
+-- sent, or it was suppressed because the harness ignored the cancel. Only a sent notice has a
+-- run.wrap_up_notice event. At most once per run, across takeovers.
 ALTER TABLE runs ADD COLUMN wrap_up_notice_at timestamptz;

@@ -175,7 +175,8 @@ UPDATE runs SET sandbox_wait_started_at = NULL
 WHERE org_id = @org_id AND agent_id = @agent_id AND sandbox_wait_started_at IS NOT NULL;
 
 -- name: MarkRunWrapUpNotice :execrows
--- Records that the agent was told its time limit is near; once per run. Fenced by the epoch.
+-- Disarms the wrap-up notice (sent, or suppressed because the harness ignored the cancel); once per
+-- run. Only a sent notice has a run.wrap_up_notice event. Fenced by the epoch.
 UPDATE runs SET wrap_up_notice_at = now()
 WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state = 'running' AND wrap_up_notice_at IS NULL;
 

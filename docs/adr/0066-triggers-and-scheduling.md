@@ -482,7 +482,7 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
    - `WrapUpNotice` before `started_at + max_wall_clock + parked`, agentd cancels the current turn
      (`session/cancel`) and sends a wrap-up prompt on the same session. If a turn starts inside the window,
      the notice is prepended instead.
-   - The notice is sent once per run (`runs.wrap_up_notice_at`) and recorded as `run.wrap_up_notice`.
+   - The notice is armed once per run: `runs.wrap_up_notice_at` is set when it is sent or when it is suppressed because the harness ignored the cancel. Only a sent notice is recorded as `run.wrap_up_notice`; that event, not the column, shows that the agent was told.
    - Cost: an in-flight tool call is interrupted. Accepted, because ACP has no way to inject a message
      into a running turn. A refusal is different: there the harness ends the turn itself. This is the
      first time agentd sends `session/prompt` after its own `session/cancel` on a live session. ACP
@@ -495,5 +495,5 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
      notes when it said nothing.
    - Continuation runs (after v0.1.0: at most 3 per task, set per template or agent, only with budget
      left, then the task goes to input-required "blocked on you") build on this note and on
-     `wrap_up_notice_at`. They need only additive columns (a per-task continuation count, and a
+     the `run.wrap_up_notice` event (`wrap_up_notice_at` alone also covers a suppressed notice). They need only additive columns (a per-task continuation count, and a
      per-template or per-agent maximum in the config).

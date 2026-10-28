@@ -1061,7 +1061,8 @@ type MarkRunWrapUpNoticeParams struct {
 	Epoch int64
 }
 
-// Records that the agent was told its time limit is near; once per run. Fenced by the epoch.
+// Disarms the wrap-up notice (sent, or suppressed because the harness ignored the cancel); once per
+// run. Only a sent notice has a run.wrap_up_notice event. Fenced by the epoch.
 func (q *Queries) MarkRunWrapUpNotice(ctx context.Context, arg MarkRunWrapUpNoticeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markRunWrapUpNotice, arg.OrgID, arg.ID, arg.Epoch)
 	if err != nil {
