@@ -383,6 +383,33 @@ type ModelCreate struct {
 	Rates *Rates `json:"rates,omitempty"`
 }
 
+// ModelCreated defines model for ModelCreated.
+type ModelCreated struct {
+	CreatedAt      time.Time `json:"createdAt"`
+	DisabledReason *string   `json:"disabledReason,omitempty"`
+
+	// Guard The routing guard (ADR 0048), for OpenRouter providers.
+	Guard           bool               `json:"guard"`
+	Id              openapi_types.UUID `json:"id"`
+	ManagedBySecret *string            `json:"managedBySecret,omitempty"`
+
+	// Name The name agents use. The gateway serves it per org as `<org slug>/<name>`.
+	Name       string             `json:"name"`
+	ProviderId openapi_types.UUID `json:"providerId"`
+
+	// Rates Deprecated and never returned. Setting it on a request answers 400: add a price with
+	// `POST /admin/v1/prices` instead.
+	// Deprecated: this property has been marked as deprecated upstream, but no `x-deprecated-reason` was set
+	Rates *Rates `json:"rates,omitempty"`
+
+	// Source `secret` entries are declared by a Kubernetes Secret and read-only here.
+	Source    Source    `json:"source"`
+	UpdatedAt time.Time `json:"updatedAt"`
+
+	// Warnings Only on this response. For example, the model's price has a cache_read price but its provider format cannot cache, so it runs uncached (ADR 0068).
+	Warnings *[]string `json:"warnings,omitempty"`
+}
+
 // ModelList defines model for ModelList.
 type ModelList struct {
 	Models []Model `json:"models"`
@@ -513,6 +540,31 @@ type PriceRates struct {
 	Input      *string `json:"input,omitempty"`
 	Output     *string `json:"output,omitempty"`
 	Reasoning  *string `json:"reasoning,omitempty"`
+}
+
+// PriceSaved defines model for PriceSaved.
+type PriceSaved struct {
+	CreatedAt time.Time `json:"createdAt"`
+	CreatedBy string    `json:"createdBy"`
+
+	// Id The ledger cites it as org#<id>.
+	Id openapi_types.UUID `json:"id"`
+
+	// Match Exactly one of glob (`*` any characters, `?` one, case-insensitive) and regex (RE2, whole name).
+	Match PriceMatch `json:"match"`
+	Name  string     `json:"name"`
+
+	// Prices USD per million tokens as decimal strings with at most 6 fraction digits. A free model needs an explicit "0".
+	Prices    PriceRates   `json:"prices"`
+	Provider  string       `json:"provider"`
+	Ratio     *string      `json:"ratio,omitempty"`
+	RetiredAt *time.Time   `json:"retiredAt,omitempty"`
+	Tiers     *[]PriceTier `json:"tiers,omitempty"`
+	Tokenizer *string      `json:"tokenizer,omitempty"`
+	ValidFrom time.Time    `json:"validFrom"`
+
+	// Warnings Only on this response. For example, a cache_read price whose provider format cannot cache runs uncached (ADR 0068).
+	Warnings *[]string `json:"warnings,omitempty"`
 }
 
 // PriceTier defines model for PriceTier.
@@ -2613,7 +2665,7 @@ type CreateModelResponseObject interface {
 	VisitCreateModelResponse(w http.ResponseWriter) error
 }
 
-type CreateModel201JSONResponse Model
+type CreateModel201JSONResponse ModelCreated
 
 func (response CreateModel201JSONResponse) VisitCreateModelResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
@@ -2757,7 +2809,7 @@ type SetPriceResponseObject interface {
 	VisitSetPriceResponse(w http.ResponseWriter) error
 }
 
-type SetPrice201JSONResponse PriceVersion
+type SetPrice201JSONResponse PriceSaved
 
 func (response SetPrice201JSONResponse) VisitSetPriceResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")

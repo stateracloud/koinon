@@ -139,6 +139,9 @@ message CreateModelRequest {
 
 message CreateModelResponse {
   Model model = 1;
+  // warnings are non-fatal notes, for example that the model runs without prompt caching because
+  // Koinon has no cache mode for its provider format (ADR 0068).
+  repeated string warnings = 2;
 }
 
 message UpdateModelRequest {

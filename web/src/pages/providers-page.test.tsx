@@ -36,7 +36,7 @@ const shadowed = create(ProviderSchema, { id: 'p-shadow', name: 'dup', type: 'op
 const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui' })
 const secretModel = create(ModelSchema, { id: 'm-2', providerId: 'p-sec', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret' })
 
-function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string } = {}) {
+function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[] } = {}) {
   const calls = { providerCreates: [] as CreateProviderRequest[], providerUpdates: [] as UpdateProviderRequest[], providerDeletes: [] as DeleteProviderRequest[], modelCreates: [] as CreateModelRequest[], listed: 0 }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
@@ -62,7 +62,7 @@ function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string 
       },
       createModel: (req) => {
         calls.modelCreates.push(req)
-        return { model: create(ModelSchema, { id: 'm-new', providerId: req.providerId, name: req.name, source: 'ui' }) }
+        return { model: create(ModelSchema, { id: 'm-new', providerId: req.providerId, name: req.name, source: 'ui' }), warnings: opts.warnings ?? [] }
       },
     })
   })
@@ -173,6 +173,7 @@ describe('Providers page', () => {
     await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
     await waitFor(() => expect(calls.modelCreates).toHaveLength(1))
     expect(calls.modelCreates[0]).toMatchObject({ providerId: 'p-ui', name: 'qwen/qwen3', guard: true })
+    expect(screen.queryByRole('status', { name: 'Warnings' })).not.toBeInTheDocument()
   })
 
   it('does not offer the routing guard for other providers', async () => {
@@ -257,5 +258,15 @@ describe('Providers page', () => {
     expect(screen.getByRole('button', { name: 'Delete provider' })).toHaveFocus()
     await userEvent.click(screen.getByRole('button', { name: 'Keep it' }))
     expect(screen.getByRole('button', { name: 'Delete provider openrouter' })).toHaveFocus()
+  })
+
+  it('shows the warning when a new model would run without prompt caching', async () => {
+    const warning = 'Model google/gemini-x: the model has a cache_read price but Koinon has no way to turn on prompt caching'
+    setup({ warnings: [warning] })
+    await userEvent.click(await screen.findByRole('button', { name: 'Add model to openrouter' }))
+    const form = screen.getByRole('form', { name: 'Add model to openrouter' })
+    await userEvent.type(within(form).getByLabelText('Model name'), 'google/gemini-x')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
+    expect(await within(await screen.findByRole('status', { name: 'Warnings' })).findByText(warning)).toBeInTheDocument()
   })
 })

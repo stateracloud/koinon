@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { Model, Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
+import type { CreateModelResponse, Model, Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import type { ModelChange, ModelCreate } from '@/hooks/use-catalog-actions'
 import { guardProviderType, scopedModelName } from '@/lib/providers'
 
@@ -18,11 +18,11 @@ export type ModelFormProps = {
   orgSlug: string
   /** Set to edit that model; unset to add one. */
   model?: Model
-  onCreate: (input: ModelCreate) => Promise<unknown>
+  onCreate: (input: ModelCreate) => Promise<CreateModelResponse>
   onUpdate: (id: string, input: ModelChange) => Promise<unknown>
   onDone: () => void
   /** Called after a save, to say when the model will be available. */
-  onSaved?: () => void
+  onSaved?: (warnings: string[]) => void
 }
 
 /**
@@ -51,9 +51,10 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
     setPending(true)
     setError(undefined)
     try {
+      let warnings: string[] = []
       if (model) await onUpdate(model.id, { guard: canGuard ? guard : undefined })
-      else await onCreate({ providerId: provider.id, name, guard: canGuard && guard })
-      onSaved?.()
+      else warnings = (await onCreate({ providerId: provider.id, name, guard: canGuard && guard })).warnings
+      onSaved?.(warnings)
       onDone()
     } catch (e2) {
       setError(ConnectError.from(e2).rawMessage)

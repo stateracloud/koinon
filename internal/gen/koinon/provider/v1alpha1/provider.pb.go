@@ -927,8 +927,11 @@ func (x *CreateModelRequest) GetRates() *Rates {
 }
 
 type CreateModelResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Model         *Model                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Model *Model                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// warnings are non-fatal notes, for example that the model runs without prompt caching because
+	// Koinon has no cache mode for its provider format (ADR 0068).
+	Warnings      []string `protobuf:"bytes,2,rep,name=warnings,proto3" json:"warnings,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -966,6 +969,13 @@ func (*CreateModelResponse) Descriptor() ([]byte, []int) {
 func (x *CreateModelResponse) GetModel() *Model {
 	if x != nil {
 		return x.Model
+	}
+	return nil
+}
+
+func (x *CreateModelResponse) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
 	}
 	return nil
 }
@@ -1264,9 +1274,10 @@ const file_koinon_provider_v1alpha1_provider_proto_rawDesc = "" +
 	"providerId\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x14\n" +
 	"\x05guard\x18\x04 \x01(\bR\x05guard\x129\n" +
-	"\x05rates\x18\x05 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\"L\n" +
+	"\x05rates\x18\x05 \x01(\v2\x1f.koinon.provider.v1alpha1.RatesB\x02\x18\x01R\x05rates\"h\n" +
 	"\x13CreateModelResponse\x125\n" +
-	"\x05model\x18\x01 \x01(\v2\x1f.koinon.provider.v1alpha1.ModelR\x05model\"\xcb\x01\n" +
+	"\x05model\x18\x01 \x01(\v2\x1f.koinon.provider.v1alpha1.ModelR\x05model\x12\x1a\n" +
+	"\bwarnings\x18\x02 \x03(\tR\bwarnings\"\xcb\x01\n" +
 	"\x12UpdateModelRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
 	"\bmodel_id\x18\x02 \x01(\tR\amodelId\x12\x19\n" +
