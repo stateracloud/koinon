@@ -67,8 +67,8 @@ var table = []Descriptor{
 		EntryScript:  "/usr/local/bin/koinon-opencode",
 		ReadyCommand: "koinon:" + gateway.ReadyPromptExposed,
 		ModelPrefix:  "koinon/",
-		// The global config directory's AGENTS.md (flavors/opencode/Dockerfile).
-		InstructionLink:   "/etc/koinon/opencode/AGENTS.md",
+		// None: OpenCode 2.2.0 reads the instruction file through the "instructions" key of its
+		// read-only config (flavors/opencode/README.md, ADR 0052 amendment 2026-10-28).
 		DefaultBinaries:   []string{"/usr/local/bin/opencode"},
 		PluginInstalls:    true,
 		PluginInstallsArg: "--plugin-installs",

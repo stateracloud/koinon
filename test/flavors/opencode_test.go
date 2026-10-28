@@ -39,14 +39,13 @@ var opencode = flavor{
 	// The request arrives with tool kind "read", which agentd's mapping allows, and the path in
 	// its locations: agentd rejects it as outside the session directory.
 	agentdVerdict: "reject",
-	// OpenCode 2.0.24's session/load error for an unknown session.
+	// OpenCode 2.2.0's session/load error for an unknown session.
 	unknownSession: "session not found",
-	// The global AGENTS.md links to the file koinon-agentd writes.
+	// The config's "instructions" key names the file koinon-agentd writes.
 	instructionsInSystem: true,
-	instructionLink:      "/etc/koinon/opencode/AGENTS.md",
 	// OpenCode turns MCP prompts into commands named <server>:<prompt>.
 	readyCommand: "koinon:" + readyPrompt,
-	// OpenCode 2.0.24 reports a model of its own choosing until one is selected.
+	// OpenCode 2.2.0 reports a model of its own choosing until one is selected.
 	selectModel: func(model string) string { return "koinon/" + model },
 	// What a repository could ship to reconfigure OpenCode if project configuration were on
 	// (koinon-opencode sets OPENCODE_DISABLE_PROJECT_CONFIG=1): an opencode.json and a
