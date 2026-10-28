@@ -22,6 +22,7 @@ import { renderApp, whoAmI } from '@/test-utils'
 
 const t = timestampFromMs(Date.now())
 const uiProvider = create(ProviderSchema, { id: 'p-ui', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', formats: [{ id: 'openai', label: 'OpenAI chat completions' }, { id: 'anthropic', label: 'Anthropic Messages' }], createdAt: t, updatedAt: timestampFromMs(Date.now() - 3_600_000) })
+const claude = create(ProviderSchema, { id: 'p-claude', name: 'claude', type: 'anthropic', url: 'https://api.anthropic.com/v1', source: 'ui', anthropicWorkspaceId: 'wrkspc_01Keep', formats: [{ id: 'anthropic', label: 'Anthropic Messages' }], createdAt: t, updatedAt: t })
 const single = [{ id: 'openai', label: 'OpenAI chat completions' }]
 const secretProvider = create(ProviderSchema, { id: 'p-sec', name: 'homelab', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'secret', managedBySecret: 'ollama-secret', createdAt: t })
 const removedProvider = create(ProviderSchema, {
@@ -39,21 +40,24 @@ const shadowed = create(ProviderSchema, { id: 'p-shadow', name: 'dup', type: 'op
 const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', format: 'openai' })
 const secretModel = create(ModelSchema, { id: 'm-2', providerId: 'p-sec', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret' })
 
-function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean } = {}) {
+function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean; slowTypeInfo?: Promise<void>; withAnthropic?: boolean } = {}) {
   const calls = { providerCreates: [] as CreateProviderRequest[], providerUpdates: [] as UpdateProviderRequest[], providerDeletes: [] as DeleteProviderRequest[], modelCreates: [] as CreateModelRequest[], modelUpdates: [] as UpdateModelRequest[], formatAsks: [] as ModelFormatsRequest[], listed: 0 }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ProviderService, {
       listProviders: () => {
         calls.listed++
-        return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh] }
+        return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh, ...(opts.withAnthropic ? [claude] : [])] }
       },
       listModels: () => ({ models: [opts.overridden ? create(ModelSchema, { ...model, format: 'anthropic', formatOverridden: true }) : model, secretModel] }),
       modelFormats: (req) => {
         calls.formatAsks.push(req)
         return { defaultFormat: req.name.startsWith('claude') ? 'anthropic' : 'openai' }
       },
-      providerTypeInfo: (req) => ({ formats: [], workspaceId: req.type === 'anthropic' }),
+      providerTypeInfo: async (req) => {
+        if (opts.slowTypeInfo) await opts.slowTypeInfo
+        return { formats: [], takesWorkspaceId: req.type === 'anthropic' }
+      },
       updateModel: (req) => {
         calls.modelUpdates.push(req)
         return { model }
@@ -358,6 +362,39 @@ describe('Providers page', () => {
   })
 
   describe('Anthropic providers', () => {
+    it('cannot save before the server has said what the type takes, so a stored workspace ID is never cleared', async () => {
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      const calls = setup({ slowTypeInfo: gate })
+      await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+      const form = screen.getByRole('form', { name: 'Add provider' })
+      await userEvent.type(within(form).getByLabelText('Name'), 'quick')
+      expect(within(form).getByRole('button', { name: 'Add provider' })).toBeDisabled()
+      release()
+      await waitFor(() => expect(within(form).getByRole('button', { name: 'Add provider' })).toBeEnabled())
+      await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+      await waitFor(() => expect(calls.providerCreates).toHaveLength(1))
+      expect(calls.providerCreates[0].anthropicWorkspaceId).toBe('')
+    })
+
+    it('keeps the stored workspace ID of an Anthropic provider when it is edited', async () => {
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      const calls = setup({ slowTypeInfo: gate, withAnthropic: true })
+      await userEvent.click(await screen.findByRole('button', { name: 'Edit provider claude' }))
+      const form = screen.getByRole('form', { name: 'Edit provider claude' })
+      expect(within(form).getByRole('button', { name: 'Save provider' })).toBeDisabled()
+      release()
+      const ws = await within(form).findByLabelText('Anthropic workspace ID')
+      expect(ws).toHaveValue('wrkspc_01Keep')
+      expect(ws).toHaveAccessibleDescription(/not a secret.*wrkspc_ followed by letters/s)
+      await userEvent.clear(within(form).getByLabelText('URL'))
+      await userEvent.type(within(form).getByLabelText('URL'), 'https://proxy.example.com/v1')
+      await userEvent.click(within(form).getByRole('button', { name: 'Save provider' }))
+      await waitFor(() => expect(calls.providerUpdates).toHaveLength(1))
+      expect(calls.providerUpdates[0].anthropicWorkspaceId).toBeUndefined()
+    })
+
     it('lists Anthropic as a type and asks for the workspace ID for it only', async () => {
       const calls = setup()
       await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))

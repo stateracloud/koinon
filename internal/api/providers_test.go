@@ -174,11 +174,11 @@ var _ = Describe("ProviderService", func() {
 		Expect(fm.GetDefaultFormat()).To(Equal("openai"), "OpenRouter claude-* is pinned to openai until the flip")
 		ti, err := owner.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "anthropic"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ti.GetWorkspaceId()).To(BeTrue())
+		Expect(ti.GetTakesWorkspaceId()).To(BeTrue())
 		Expect(ti.GetFormats()).To(HaveLen(1))
 		ti, err = owner.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "openrouter"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ti.GetWorkspaceId()).To(BeFalse())
+		Expect(ti.GetTakesWorkspaceId()).To(BeFalse())
 		Expect(ti.GetFormats()).To(HaveLen(2))
 
 		// An override within what the provider offers is stored and marked.

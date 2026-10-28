@@ -217,7 +217,7 @@ func (s *Server) ProviderTypeInfo(ctx context.Context, req *providerv1alpha1.Pro
 		return nil, err
 	}
 	info := catalog.ProviderTypeInfo(req.GetType())
-	return &providerv1alpha1.ProviderTypeInfoResponse{Formats: formatProtos(info.Formats), WorkspaceId: info.WorkspaceID}, nil
+	return &providerv1alpha1.ProviderTypeInfoResponse{Formats: formatProtos(info.Formats), TakesWorkspaceId: info.WorkspaceID}, nil
 }
 
 // formatProtos names formats with the labels of the format table.

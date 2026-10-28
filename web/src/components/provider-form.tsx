@@ -55,7 +55,10 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
   // Whether the type takes a workspace ID is the server's rule; its refusal of a malformed ID is shown as is.
   const { org } = useOrg()
   const typeInfo = useQuery(ProviderService.method.providerTypeInfo, { orgId: org.orgId, type }, { enabled: !errors.type })
-  const takesWorkspaceId = !!typeInfo.data?.workspaceId
+  // Until the server has said what the selected type takes, the form knows nothing about the workspace ID
+  // and must neither send nor clear it.
+  const typeKnown = !!typeInfo.data
+  const takesWorkspaceId = !!typeInfo.data?.takesWorkspaceId
   const invalid = Object.values(errors).some(Boolean)
 
   function pickType(v: string) {
@@ -80,11 +83,13 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
         if (key) change.apiKey = key
         else if (removeKey) change.apiKey = ''
         // The ID exists for Anthropic providers only: leaving the type clears it.
-        const ws = takesWorkspaceId ? workspaceId.trim() : ''
-        if (ws !== provider.anthropicWorkspaceId) change.anthropicWorkspaceId = ws
+        if (typeKnown) {
+          const ws = takesWorkspaceId ? workspaceId.trim() : ''
+          if (ws !== provider.anthropicWorkspaceId) change.anthropicWorkspaceId = ws
+        }
         await onUpdate(provider.id, change)
       } else {
-        await onCreate({ name, type, url: url.trim(), apiKey: key, anthropicWorkspaceId: takesWorkspaceId ? workspaceId.trim() : '' })
+        await onCreate({ name, type, url: url.trim(), apiKey: key, anthropicWorkspaceId: takesWorkspaceId ? workspaceId.trim() : undefined })
       }
       onSaved?.(provider?.name ?? name)
       onDone()
@@ -178,7 +183,7 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
       {takesWorkspaceId && (
         <div className="grid gap-1.5">
           <Label htmlFor="provider-workspace">Anthropic workspace ID</Label>
-          <Input id="provider-workspace" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} placeholder="wrkspc_…" autoComplete="off" spellCheck={false} aria-describedby="provider-workspace-help" />
+          <Input id="provider-workspace" value={workspaceId} onChange={(e) => setWorkspaceId(e.target.value)} placeholder="wrkspc_…" autoComplete="off" spellCheck={false} aria-describedby="provider-workspace-help provider-workspace-hint" />
           <p id="provider-workspace-help" className="text-muted-foreground text-xs">
             Optional. Needed when the API key is not scoped to a workspace; Koinon sends it with every request to this provider. It identifies the workspace and is not a secret.
           </p>
@@ -196,7 +201,7 @@ export function ProviderForm({ provider, onCreate, onUpdate, onDone, onSaved }: 
         <Button type="button" variant="outline" onClick={onDone} disabled={pending}>
           Cancel
         </Button>
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending || !typeKnown}>
           {editing ? 'Save provider' : 'Add provider'}
         </Button>
       </div>

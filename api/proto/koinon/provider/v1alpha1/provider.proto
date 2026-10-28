@@ -225,6 +225,6 @@ message ProviderTypeInfoRequest {
 message ProviderTypeInfoResponse {
   // formats are the model formats the type offers, preferred first.
   repeated ModelFormat formats = 1;
-  // workspace_id is set when the type takes an Anthropic workspace ID.
-  bool workspace_id = 2;
+  // takes_workspace_id is set when the type takes an Anthropic workspace ID.
+  bool takes_workspace_id = 2;
 }
