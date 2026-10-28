@@ -87,7 +87,7 @@ type QuestionServiceClient interface {
 	// the answer and the agent is told. Members and above.
 	DismissQuestion(context.Context, *v1alpha1.DismissQuestionRequest) (*v1alpha1.DismissQuestionResponse, error)
 	// ListAskableMembers lists the org's members who can answer questions (member role or higher), for
-	// picking a trigger's notify target. Members and above.
+	// picking a trigger's notify target. Admins and above.
 	ListAskableMembers(context.Context, *v1alpha1.ListAskableMembersRequest) (*v1alpha1.ListAskableMembersResponse, error)
 }
 
@@ -112,7 +112,7 @@ type QuestionServiceHandler interface {
 	// the answer and the agent is told. Members and above.
 	DismissQuestion(context.Context, *v1alpha1.DismissQuestionRequest) (*v1alpha1.DismissQuestionResponse, error)
 	// ListAskableMembers lists the org's members who can answer questions (member role or higher), for
-	// picking a trigger's notify target. Members and above.
+	// picking a trigger's notify target. Admins and above.
 	ListAskableMembers(context.Context, *v1alpha1.ListAskableMembersRequest) (*v1alpha1.ListAskableMembersResponse, error)
 }
 

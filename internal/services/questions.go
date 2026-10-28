@@ -187,7 +187,7 @@ func (s *Server) ListQuestions(ctx context.Context, req *questionv1alpha1.ListQu
 
 // ListAskableMembers implements QuestionService.
 func (s *Server) ListAskableMembers(ctx context.Context, req *questionv1alpha1.ListAskableMembersRequest) (*questionv1alpha1.ListAskableMembersResponse, error) {
-	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleMember)
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
 	if err != nil {
 		return nil, err
 	}
