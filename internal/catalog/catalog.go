@@ -95,8 +95,6 @@ var (
 	namePattern  = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
 	typePattern  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 	modelPattern = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
-	// workspacePattern is an Anthropic workspace ID; migration 00031 checks the same pattern.
-	workspacePattern = regexp.MustCompile(`^wrkspc_[A-Za-z0-9]+$`)
 )
 
 // WorkspaceProviderType is the only provider type with an Anthropic workspace ID (ADR 0069,
@@ -250,7 +248,7 @@ func ValidateWorkspaceID(typ, id string) error {
 		return nil
 	case typ != WorkspaceProviderType:
 		return invalid("the Anthropic workspace ID exists for %s providers only", WorkspaceProviderType)
-	case len(id) > 128 || !workspacePattern.MatchString(id):
+	case !modelformat.ValidWorkspaceID(id):
 		return invalid("anthropic workspace ID must be wrkspc_ followed by letters and digits")
 	}
 	return nil

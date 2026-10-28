@@ -327,6 +327,9 @@ func (b *builder) gatewayObjects() {
 		attr(gateway.LogFieldCacheRead, `llm.cachedInputTokens`),
 		attr(gateway.LogFieldCacheWrite, `llm.cacheCreationInputTokens`),
 		attr(gateway.LogFieldReasoning, `llm.reasoningTokens`),
+		attr(gateway.LogFieldFormat, gateway.FormatLogExpr()),
+		attr(gateway.LogFieldStream, `llm.streaming`),
+		attr(gateway.LogFieldError, `proxy.error.reason`),
 		attr(gateway.LogFieldStatus, `response.code`),
 		attr(gateway.LogFieldMaxTokens, `llm.params.max_tokens`),
 		attr(gateway.LogFieldRequestBytes, `int(request.headers["content-length"])`),
@@ -414,21 +417,32 @@ func (b *builder) models(s gateway.State) {
 			override := p.Org + "." + p.Type
 			// State.Validate accepted the format, so it has a rendering.
 			rd, _ := gateway.RenderingOf(m)
+			admit := "apiKey.org == " + strconv.Quote(p.Org) + " && !apiKey.internal"
+			for _, f := range rd.Reject {
+				admit += " && !has(llmRequest." + f + ")"
+			}
 			policies := map[string]any{
 				"authorization": map[string]any{
 					"action": "Require",
-					"policy": map[string]any{"matchExpressions": []any{"apiKey.org == " + strconv.Quote(p.Org) + " && !apiKey.internal"}},
+					"policy": map[string]any{"matchExpressions": []any{admit}},
 				},
 			}
 			if t := b.modelTransformations(m, rd); len(t) > 0 {
 				policies["transformations"] = t
 			}
-			if hs := rd.RequestHeaders(p); len(hs) > 0 {
-				set := make([]any, len(hs))
-				for i, h := range hs {
-					set[i] = map[string]any{"name": h.Name, "value": h.Value}
+			if hs, rm := rd.RequestHeaders(p), rd.RemoveHeaders(p); len(hs) > 0 || len(rm) > 0 {
+				req := map[string]any{}
+				if len(hs) > 0 {
+					set := make([]any, len(hs))
+					for i, h := range hs {
+						set[i] = map[string]any{"name": h.Name, "value": h.Value}
+					}
+					req["set"] = set
 				}
-				policies["headers"] = map[string]any{"request": map[string]any{"set": set}}
+				if len(rm) > 0 {
+					req["remove"] = anySlice(rm)
+				}
+				policies["headers"] = map[string]any{"request": req}
 			}
 			if p.APIKeyFile != "" {
 				policies["auth"] = map[string]any{"credentials": []any{map[string]any{

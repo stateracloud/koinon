@@ -3,6 +3,8 @@
 package modelformat_test
 
 import (
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -104,6 +106,26 @@ func TestTableIsConsistent(t *testing.T) {
 		offered[0] = "mutated"
 		if modelformat.Offered(p)[0] == "mutated" {
 			t.Errorf("Offered(%s) leaks its table", p)
+		}
+	}
+}
+
+func TestWorkspaceIDMatchesMigration(t *testing.T) {
+	sql, err := os.ReadFile("../db/migrations/00031_model_formats.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "CHECK (anthropic_workspace_id ~ '" + modelformat.WorkspaceIDPattern + "' AND length(anthropic_workspace_id) <= " + strconv.Itoa(modelformat.MaxWorkspaceIDLength) + ")"
+	if !strings.Contains(string(sql), want) {
+		t.Errorf("migration 00031 does not contain %q", want)
+	}
+	for id, ok := range map[string]bool{
+		"wrkspc_01Abc": true, "wrkspc_": false, "ws_01": false, "wrkspc_01\r\nx: y": false, "wrkspc_01 ": false,
+		"wrkspc_" + strings.Repeat("a", modelformat.MaxWorkspaceIDLength-7): true,
+		"wrkspc_" + strings.Repeat("a", modelformat.MaxWorkspaceIDLength-6): false,
+	} {
+		if got := modelformat.ValidWorkspaceID(id); got != ok {
+			t.Errorf("ValidWorkspaceID(%q) = %v, want %v", id, got, ok)
 		}
 	}
 }

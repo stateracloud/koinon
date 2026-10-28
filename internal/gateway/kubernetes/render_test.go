@@ -40,13 +40,13 @@ func fullState() gateway.State {
 				Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
 				APIKeyFile: "/secrets/providers/acme-openrouter",
 				Models: []gateway.Model{
-					{Name: "deepseek/deepseek-v4.1-flash", Guard: true, Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006", Tiers: []gateway.PriceTier{{ContextOver: 200000, Input: "0.60"}}}},
-					{Name: "unpriced/model"},
+					{Name: "deepseek/deepseek-v4.1-flash", Format: modelformat.OpenAI, Guard: true, Price: &gateway.Price{Input: "0.30", Output: "1.20", CacheRead: "0.006", Tiers: []gateway.PriceTier{{ContextOver: 200000, Input: "0.60"}}}},
+					{Name: "unpriced/model", Format: modelformat.OpenAI},
 				},
 			},
 			{
 				Org: "globex", Name: "local", Type: "ollama", BaseURL: "http://ollama.globex.internal:11434/v1",
-				Models: []gateway.Model{{Name: "deepseek/deepseek-v4.1-flash", Price: &gateway.Price{Input: "0", Output: "0"}}},
+				Models: []gateway.Model{{Name: "deepseek/deepseek-v4.1-flash", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0", Output: "0"}}},
 			},
 		},
 		MCP: []gateway.MCPTarget{
@@ -183,11 +183,17 @@ var _ = Describe("Render", func() {
 		claude := spec("claude-haiku-4-5")
 		Expect(claude["custom"]).To(HaveKeyWithValue("formats", []any{map[string]any{"type": "Messages"}}))
 		pol := claude["policies"].(map[string]any)
-		Expect(pol).NotTo(HaveKey("transformations"), "Messages streams carry usage; there is no stream_options")
-		Expect(pol["headers"]).To(Equal(map[string]any{"request": map[string]any{"set": []any{
-			map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
-			map[string]any{"name": "anthropic-workspace-id", "value": "wrkspc_01ExampleExample"},
-		}}}))
+		Expect(pol["transformations"]).To(ConsistOf(HaveKeyWithValue("field", "tools")),
+			"no stream_options; the agent's server tools are dropped")
+		Expect(pol["authorization"]).To(HaveKeyWithValue("policy", HaveKeyWithValue("matchExpressions", ConsistOf(
+			`apiKey.org == "acme" && !apiKey.internal && !has(llmRequest.mcp_servers)`))), "mcp_servers is refused")
+		Expect(pol["headers"]).To(Equal(map[string]any{"request": map[string]any{
+			"set": []any{
+				map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
+				map[string]any{"name": "anthropic-workspace-id", "value": "wrkspc_01ExampleExample"},
+			},
+			"remove": []any{"anthropic-beta"},
+		}}))
 
 		chat := spec("open/model")
 		Expect(chat["custom"]).To(HaveKeyWithValue("formats", []any{map[string]any{"type": "Completions"}}))
@@ -196,7 +202,7 @@ var _ = Describe("Render", func() {
 			HaveKeyWithValue("field", "stream_options")))
 	})
 
-	It("omits the workspace header when the provider has no workspace ID", func() {
+	It("sets no workspace header and drops the client's when the provider has no workspace ID", func() {
 		s := formatsState()
 		for i := range s.Providers {
 			s.Providers[i].AnthropicWorkspaceID = ""
@@ -209,9 +215,10 @@ var _ = Describe("Render", func() {
 				sp, _ := o.U.Object["spec"].(map[string]any)
 				if sp["match"].(map[string]any)["model"] == "claude-haiku-4-5" && o.Org == "acme" {
 					found = true
-					Expect(sp["policies"].(map[string]any)["headers"]).To(Equal(map[string]any{"request": map[string]any{"set": []any{
-						map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
-					}}}))
+					Expect(sp["policies"].(map[string]any)["headers"]).To(Equal(map[string]any{"request": map[string]any{
+						"set":    []any{map[string]any{"name": "anthropic-version", "value": "2023-06-01"}},
+						"remove": []any{"anthropic-beta", "anthropic-workspace-id"},
+					}}))
 				}
 			}
 		}
@@ -243,7 +250,7 @@ var _ = Describe("Render", func() {
 			s.AddKey(fixedKey("k-xxxxxxxxxxxx", a, "test-x"))
 			s.Providers = append(s.Providers, gateway.Provider{
 				Org: slug, Name: "p", Type: "fake", BaseURL: "http://p.example.com/v1",
-				Models: []gateway.Model{{Name: "m", Price: &gateway.Price{Input: "1", Output: "1"}}},
+				Models: []gateway.Model{{Name: "m", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}},
 			})
 			r, err := gwk8s.Render(s, opts())
 			Expect(err).NotTo(HaveOccurred(), slug)
