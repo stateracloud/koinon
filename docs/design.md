@@ -159,6 +159,14 @@ Upstream research during the ADR work changed some of the decisions above. Detai
 | [0066](adr/0066-triggers-and-scheduling.md) | DBOS Go on Koinon's Postgres; four trigger types on the agent version; signed webhooks, Socket Mode, polling; correlation keys; latency defaults tunable per org; only people interrupt a running turn; task-scoped `watch` (not agent-created triggers); warm pools for home-less sandboxes in v0.3 |
 | [0067](adr/0067-concierge.md) | Concierge in koinon-api, acting as the user capped at their role (exception to 0005); plan, approve, execute; v0.3 |
 
+## Revisions from the 28 October 2026 decisions
+
+| ADR | Change |
+| --- | --- |
+| [0068](adr/0068-prompt-caching-always-on.md) | Prompt caching always on for every model with a `cache_read` price, no switch to turn it off; markers set per provider format; uncached runs warn and record `run.uncached`; OpenRouter runs send the run ID as `session_id` |
+| [0069](adr/0069-native-model-formats.md) | Each model family speaks its native API: the wire format belongs to the model (`openai` or `anthropic`), defaults in one `internal/modelformat` table, admin override; gateway renders each model in its format; Claude uses Messages, OpenRouter after a live check |
+| [0070](adr/0070-model-metadata.md) | Reviewed model metadata snapshot from models.dev and OpenRouter (context windows, limits, capabilities); weekly sync PR, the catalog wins and conflicts are flagged; optional online refresh only proposes; after v0.1.0 |
+
 The Build-vs-reuse rows and execution layer notes that mention LiteLLM, `inference.local` or Pod
 Identity are superseded by these ADRs.
 
