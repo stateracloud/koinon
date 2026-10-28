@@ -89,6 +89,14 @@ const (
 		"# Keys appear only as hashes; key material lives in Kubernetes Secrets.\n"
 )
 
+// admitRule is probeRule, narrowed by the body fields no format admits (gateway.RejectExpr).
+func admitRule() string {
+	if e := gateway.RejectExpr(); e != "" {
+		return probeRule + " && " + e
+	}
+	return probeRule
+}
+
 // Render returns agentgateway's config file for s and its revision. It is a
 // pure function: equal inputs give byte-identical output.
 func Render(s gateway.State, o Options) ([]byte, gateway.Revision, error) {
@@ -303,18 +311,18 @@ type llmModel struct {
 	Provider  llmProvider    `yaml:"provider"`
 	Params    llmParams      `yaml:"params"`
 	Overrides map[string]any `yaml:"overrides,omitempty"`
+	// RequestHeaders sets headers on the upstream request, replacing the client's
+	// (schema/config.md llm.models[].requestHeaders).
+	RequestHeaders *headerSet `yaml:"requestHeaders,omitempty"`
 	// Transformation sets request body fields from CEL expressions, replacing client values
 	// (schema/config.md llm.models[].transformation).
 	Transformation map[string]string `yaml:"transformation,omitempty"`
 }
 
-// streamUsageExpr makes every streamed chat completion ask the upstream for usage. agentgateway
-// v1.7.0 adds stream_options.include_usage itself only when the client sent no stream_options at
-// all (llm/mod.rs, process_completions_request), so a client sending {"include_usage": false} or
-// an empty object would otherwise get its streamed requests charged without usage. For a request
-// that is not streamed the expression is null, which OpenAI-compatible upstreams accept and
-// which drops the field (stream_options is an error without stream).
-const streamUsageExpr = `has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null`
+type headerSet struct {
+	Set    map[string]string `yaml:"set,omitempty"`
+	Remove []string          `yaml:"remove,omitempty"`
+}
 
 type modelMatch struct {
 	Headers []headerMatch `yaml:"headers"`
@@ -443,6 +451,9 @@ func build(s gateway.State, o Options) document {
 			gateway.LogFieldCacheRead:    `llm.cachedInputTokens`,
 			gateway.LogFieldCacheWrite:   `llm.cacheCreationInputTokens`,
 			gateway.LogFieldReasoning:    `llm.reasoningTokens`,
+			gateway.LogFieldFormat:       gateway.FormatLogExpr(),
+			gateway.LogFieldStream:       `llm.streaming`,
+			gateway.LogFieldError:        `proxy.error.reason`,
 			gateway.LogFieldStatus:       `response.code`,
 			gateway.LogFieldMaxTokens:    `llm.params.max_tokens`,
 			gateway.LogFieldRequestBytes: `int(request.headers["content-length"])`,
@@ -481,7 +492,7 @@ func build(s gateway.State, o Options) document {
 	doc.LLM = &llmSection{
 		Policies: llmPolicies{
 			APIKey:        keyPolicy(keys, s.Limits, allowed),
-			Authorization: authorization{Rules: []string{probeRule}},
+			Authorization: authorization{Rules: []string{admitRule()}},
 			Transformations: transformations{Request: headerTransform{Set: map[string]string{
 				gateway.OrgHeader: `default(apiKey.org, "")`,
 			}}},
@@ -503,16 +514,32 @@ func build(s gateway.State, o Options) document {
 				continue
 			}
 			override := p.Org + "." + p.Type
+			// Validate (Render) accepted the format, so it has a rendering.
+			rd, _ := gateway.RenderingOf(m)
 			lm := llmModel{
 				ID:      gateway.ModelRef(p.Org, m.Name),
 				Name:    m.Name,
 				Matches: []modelMatch{{Headers: []headerMatch{{Name: gateway.OrgHeader, Value: exactValue{Exact: p.Org}}}}},
 				Provider: llmProvider{Custom: customProvider{
 					ProviderOverride: override,
-					Formats:          []format{{Type: "completions"}},
+					Formats:          []format{{Type: rd.Standalone}},
 				}},
-				Params:         llmParams{BaseURL: p.BaseURL},
-				Transformation: map[string]string{"stream_options": streamUsageExpr},
+				Params: llmParams{BaseURL: p.BaseURL},
+			}
+			if hs, rm := rd.RequestHeaders(p), rd.RemoveHeaders(p); len(hs) > 0 || len(rm) > 0 {
+				lm.RequestHeaders = &headerSet{Remove: rm}
+				if len(hs) > 0 {
+					lm.RequestHeaders.Set = map[string]string{}
+				}
+				for _, h := range hs {
+					lm.RequestHeaders.Set[h.Name] = h.Value
+				}
+			}
+			for _, f := range rd.Body {
+				if lm.Transformation == nil {
+					lm.Transformation = map[string]string{}
+				}
+				lm.Transformation[f.Field] = f.Expression
 			}
 			if p.APIKeyFile != "" {
 				lm.Params.APIKey = &fileSource{File: p.APIKeyFile}

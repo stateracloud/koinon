@@ -113,7 +113,8 @@ var _ = Describe("Reconciler with the GitHub tool server", func() {
 		for _, rule := range osg.Profile(ws, "koinon-agentgateway-opencode").GetEndpoints()[0].GetRules() {
 			paths = append(paths, rule.GetAllow().GetMethod()+" "+rule.GetAllow().GetPath())
 		}
-		Expect(paths).To(ContainElements("POST /v1/chat/completions", "POST /mcp", "GET /mcp", "DELETE /mcp"))
+		Expect(paths).To(ConsistOf("POST /v1/chat/completions", "POST /v1/messages", "POST /mcp", "GET /mcp", "DELETE /mcp"),
+			"both model routes and the MCP routes, and nothing else (/v1/messages/count_tokens stays closed)")
 	})
 })
 

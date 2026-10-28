@@ -27,6 +27,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/pricing"
@@ -122,8 +123,8 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 			Org: e.ref().Org, Name: "upstream", Type: "fake",
 			BaseURL: fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, hostPort(upstream)),
 			Models: []gateway.Model{
-				{Name: pricedModel, Price: &gateway.Price{Input: "50", Output: "50"}},
-				{Name: unpricedModel},
+				{Name: pricedModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "50", Output: "50"}},
+				{Name: unpricedModel, Format: modelformat.OpenAI},
 			},
 		}}}
 		state.AddKey(key.Key)
@@ -258,7 +259,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		state.Providers = append(state.Providers, gateway.Provider{
 			Org: d.ref().Org, Name: "slow", Type: "fake",
 			BaseURL: fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, slowPort),
-			Models:  []gateway.Model{{Name: slowModel, Price: &gateway.Price{Input: "50", Output: "50"}}},
+			Models:  []gateway.Model{{Name: slowModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "50", Output: "50"}}},
 		})
 		state.AddKey(dkey.Key)
 		_, err = driver.Apply(ctx, state)

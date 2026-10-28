@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 )
 
@@ -299,13 +300,20 @@ type Provider struct {
 	// APIKeyFile is the path, inside the gateway, of the mounted provider key.
 	// Empty means the upstream needs no key.
 	APIKeyFile string
-	Models     []Model
+	// AnthropicWorkspaceID, when set, is sent as the anthropic-workspace-id header on the requests of
+	// this provider's anthropic-format models (ADR 0069 decision 5). It is an identifier, not a
+	// credential.
+	AnthropicWorkspaceID string
+	Models               []Model
 }
 
 // Model is one model clients may request.
 type Model struct {
 	// Name is the plain name agents use; it is unique within the org.
 	Name string
+	// Format is the model's wire format (ADR 0069); the drivers render it through one table
+	// (Rendering). It is required.
+	Format modelformat.Format
 	// Guard turns on the routing guard (ADR 0048): the gateway forces GuardOverrides
 	// into every request body.
 	Guard bool
@@ -548,7 +556,15 @@ func (s State) Validate() error {
 		if p.APIKeyFile != "" && !keyPath.MatchString(p.APIKeyFile) {
 			errs = append(errs, fmt.Errorf("provider %q: invalid key file path", ref))
 		}
+		if p.AnthropicWorkspaceID != "" && !modelformat.ValidWorkspaceID(p.AnthropicWorkspaceID) {
+			errs = append(errs, fmt.Errorf("provider %q: invalid anthropic workspace id", ref))
+		}
 		for _, m := range p.Models {
+			if !modelformat.Known(m.Format) {
+				errs = append(errs, fmt.Errorf("model %q of provider %q: unknown or unset format %q", m.Name, ref, m.Format))
+			} else if _, err := RenderingOf(m); err != nil {
+				errs = append(errs, fmt.Errorf("model %q of provider %q: %w", m.Name, ref, err))
+			}
 			if !modelName.MatchString(m.Name) {
 				errs = append(errs, fmt.Errorf("model %q of provider %q: invalid name", m.Name, ref))
 			}
@@ -630,6 +646,15 @@ const (
 	// LogFieldMaxTokens is the request's max_tokens, to settle an aborted request that bills
 	// hidden thinking.
 	LogFieldMaxTokens = "koinon.max_tokens" //nolint:gosec // attribute name, not a credential
+	// LogFieldFormat is the wire format of the request (a modelformat.Format value, "" for a path that
+	// is not a model route), read from the request path alone, so the log needs no body. The spend
+	// ledger tells a cut Messages stream by it (ADR 0069 amendment).
+	LogFieldFormat = "koinon.format"
+	// LogFieldStream is llm.streaming: whether the request streamed its response.
+	LogFieldStream = "koinon.stream"
+	// LogFieldError is proxy.error.reason: why the proxy failed the request, absent when it did not.
+	// A response that was cut mid-stream is logged with its 200 status and the reason here.
+	LogFieldError = "koinon.error"
 	// LogFieldRequestBytes is the request's Content-Length: the byte count the estimate and its
 	// calibration use. Response bytes are not exposed by agentgateway's CEL context.
 	LogFieldRequestBytes = "koinon.req_bytes"

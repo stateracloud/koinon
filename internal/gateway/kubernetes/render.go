@@ -327,6 +327,9 @@ func (b *builder) gatewayObjects() {
 		attr(gateway.LogFieldCacheRead, `llm.cachedInputTokens`),
 		attr(gateway.LogFieldCacheWrite, `llm.cacheCreationInputTokens`),
 		attr(gateway.LogFieldReasoning, `llm.reasoningTokens`),
+		attr(gateway.LogFieldFormat, gateway.FormatLogExpr()),
+		attr(gateway.LogFieldStream, `llm.streaming`),
+		attr(gateway.LogFieldError, `proxy.error.reason`),
 		attr(gateway.LogFieldStatus, `response.code`),
 		attr(gateway.LogFieldMaxTokens, `llm.params.max_tokens`),
 		attr(gateway.LogFieldRequestBytes, `int(request.headers["content-length"])`),
@@ -401,9 +404,6 @@ func (b *builder) probeKey(rev gateway.Revision) {
 	b.add("", "v1", KindConfigMap, b.name("probe"), nil, map[string]any{gateway.ReloadProbeKeyName: string(raw)}, map[string]any{LabelKeys: b.o.GatewayName})
 }
 
-// streamUsageExpr: see standalone's streamUsageExpr.
-const streamUsageExpr = `has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null`
-
 // models adds one AgentgatewayModel per served model and the catalog ConfigMap. A model carries the
 // authorization `apiKey.org == "<org>"`, so several orgs can serve the same plain model name and the
 // router picks the one the key's org is allowed (verified against controller v1.7.0 on kind).
@@ -415,12 +415,34 @@ func (b *builder) models(s gateway.State) {
 				continue // unpriced models are not served (ADR 0041)
 			}
 			override := p.Org + "." + p.Type
+			// State.Validate accepted the format, so it has a rendering.
+			rd, _ := gateway.RenderingOf(m)
+			admit := "apiKey.org == " + strconv.Quote(p.Org) + " && !apiKey.internal"
+			for _, f := range rd.Reject {
+				admit += " && !has(llmRequest." + f + ")"
+			}
 			policies := map[string]any{
 				"authorization": map[string]any{
 					"action": "Require",
-					"policy": map[string]any{"matchExpressions": []any{"apiKey.org == " + strconv.Quote(p.Org) + " && !apiKey.internal"}},
+					"policy": map[string]any{"matchExpressions": []any{admit}},
 				},
-				"transformations": b.modelTransformations(m),
+			}
+			if t := b.modelTransformations(m, rd); len(t) > 0 {
+				policies["transformations"] = t
+			}
+			if hs, rm := rd.RequestHeaders(p), rd.RemoveHeaders(p); len(hs) > 0 || len(rm) > 0 {
+				req := map[string]any{}
+				if len(hs) > 0 {
+					set := make([]any, len(hs))
+					for i, h := range hs {
+						set[i] = map[string]any{"name": h.Name, "value": h.Value}
+					}
+					req["set"] = set
+				}
+				if len(rm) > 0 {
+					req["remove"] = anySlice(rm)
+				}
+				policies["headers"] = map[string]any{"request": req}
 			}
 			if p.APIKeyFile != "" {
 				policies["auth"] = map[string]any{"credentials": []any{map[string]any{
@@ -435,7 +457,7 @@ func (b *builder) models(s gateway.State) {
 				"baseURL":    p.BaseURL,
 				"custom": map[string]any{
 					"providerOverride": override,
-					"formats":          []any{map[string]any{"type": "Completions"}},
+					"formats":          []any{map[string]any{"type": rd.Kubernetes}},
 				},
 				"policies": policies,
 			}, nil, nil)
@@ -459,8 +481,11 @@ func modelObjectName(org, model string) string {
 	return "m-" + hex.EncodeToString(sum[:10])
 }
 
-func (b *builder) modelTransformations(m gateway.Model) []any {
-	t := []any{map[string]any{"field": "stream_options", "expression": streamUsageExpr}}
+func (b *builder) modelTransformations(m gateway.Model, rd gateway.Rendering) []any {
+	var t []any
+	for _, f := range rd.Body {
+		t = append(t, map[string]any{"field": f.Field, "expression": f.Expression})
+	}
 	if m.Guard {
 		for _, k := range slices.Sorted(maps.Keys(gateway.GuardOverrides())) {
 			t = append(t, map[string]any{"field": k, "expression": celLiteral(gateway.GuardOverrides()[k])})
