@@ -361,7 +361,11 @@ func (r *runner) execute(ctx context.Context) error {
 		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
 	}
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
-	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp"})
+	marker, unknown := cacheMarker(r.cacheMode(fctx, model))
+	if unknown {
+		r.log.Warn("the model has a cache price but no known cache-marker format; it runs without prompt caching", "model", model)
+	}
+	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", CacheMarker: marker})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
@@ -1174,4 +1178,18 @@ func updateKind(update []byte) string {
 		return "unknown"
 	}
 	return b.String()
+}
+
+// cacheMode is the prompt-cache mode of the model the run uses (ADR 0068). A model without a
+// price runs as before: the gateway refuses it anyway.
+func (r *runner) cacheMode(ctx context.Context, name string) prices.CacheMode {
+	m, err := prices.Lookup(ctx, r.q, r.run.OrgID, name)
+	if err != nil {
+		return prices.CacheNone
+	}
+	res, err := prices.Resolve(ctx, r.q, r.run.OrgID, m, time.Now())
+	if err != nil {
+		return prices.CacheNone
+	}
+	return prices.CacheModeFor(m.ProviderType, m.Name, res.Price)
 }
