@@ -459,3 +459,34 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
   it already drove the inbox and `/tasks/{id}`). Approval requests still carry the field `ticket_id`
   (the task's ID) in `ApprovalService`, so the driver sets `TicketId` there. AR1 landed in the
   same wave, so the archive tier section of the home checkpoints guide describes the built behaviour.
+
+## Amendment (2026-10-28, rc.6): ask_user targets and recipients, inbox ageing, unhealthy agents
+
+1. *ask_user targets and recipients.* This supersedes the TK3 sentence "a task not created by a person
+   must name `to`; a role or a group is not accepted yet".
+   - `to` left out on a task with no human creator goes to the task's notify target, by default the
+     org's admins.
+   - A question has a target (`questions.target_*`) and recipients (`question_recipients`), resolved when
+     it is asked. A person who later gains the role is not added.
+   - Every recipient sees the item and can answer or dismiss it. The first answer wins (the `open` row
+     lock), and `answered_by` with its name is shown on the timeline and in the "already answered" error.
+     A dismissal is an answer: the default applies for everyone.
+   - Admins cannot answer a question they are not a recipient of.
+   - A recipient counts only while they can answer (not deleted, role member or higher). When nobody
+     who can answer is left, the question sweep adds the org's admins and owners as recipients
+     (`question.retargeted`). Their age starts then. When the person picked implicitly (the chat's
+     person, the task's creator) or the trigger's notify person can no longer answer at ask time, the
+     question goes to the task's notify target or the default, and the tool result says so.
+   - `asked_to` is deprecated in migration 00036 (nullable, written only for a user target, never read)
+     and dropped after v0.1.0, expand then contract as in ADR 0056.
+   - `to` still takes only a person; accepting a role in `to` is a follow-up.
+2. *Inbox ageing.*
+   - An item's age counts from when it started waiting on that person
+     (`question_recipients.waiting_since`, set when the question opens). Reminders do not reset it.
+   - A reassignment (not in this release) ends the old row (`removed_at`) and adds a new one, so the age
+     restarts for the new person.
+   - The inbox sorts and labels questions by it.
+3. *Unhealthy agents in the inbox.* Admins and owners get one inbox item for each unhealthy agent,
+   derived from `Agent.unhealthy_at`, with a link to the agent.
+4. *13d failure classes.* Add `sandbox_unavailable`: the sandbox never became ready within the org's cap.
+   It is never retried, and the agent is marked unhealthy.
