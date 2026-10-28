@@ -39,6 +39,8 @@ Instructions for coding agents working on Koinon.
   `koinon.imagePullSecrets` (ADR 0061). Values files without an OpenShell client TLS Secret must
   set `openshell.insecure: true`.
 - Metric labels never carry org, agent, user, ticket or run IDs; use fixed label sets (ADR 0023).
+- Every model with a `cache_read` price in the catalog runs with prompt caching on; there is no off
+  switch (ADR 0068).
 
 ## Hard rules
 
