@@ -134,6 +134,66 @@ var _ = Describe("Embedded templates", func() {
 		})
 	})
 
+	Describe("finops-analyst", func() {
+		It("needs no grant and reports daily at 07:00 UTC", func() {
+			t, ok := templates.Get("finops-analyst")
+			Expect(ok).To(BeTrue())
+			Expect(t.Spec.Grants).To(BeEmpty())
+			Expect(t.Spec.Triggers).To(HaveLen(1))
+			tr := t.Spec.Triggers[0]
+			Expect(tr.Type).To(Equal(templates.TriggerSchedule))
+			Expect(tr.Filter).To(Equal(templates.TriggerFilter{Cron: "0 7 * * *", Timezone: "UTC"}))
+			Expect(t.Spec.Limits.Run.MaxDuration.Duration).To(Equal(20 * time.Minute))
+			Expect(t.Spec.Limits.SpendUSD.Cents()).To(BeNumerically("<=", 500))
+			Expect(t.Spec.Instructions).To(ContainSubstring("ask_user"))
+			Expect(t.Metadata.Description).To(ContainSubstring("MCP servers you allow"))
+		})
+	})
+
+	Describe("researcher", func() {
+		It("holds a read-only Gitea grant and never asks to write", func() {
+			t, ok := templates.Get("researcher")
+			Expect(ok).To(BeTrue())
+			Expect(t.Spec.Grants).To(HaveLen(1))
+			g := t.Spec.Grants[0]
+			Expect(g.Connector).To(Equal("gitea"))
+			Expect(g.Scopes).To(ConsistOf("repo.read"))
+			Expect(g.Preset).To(Equal(templates.PresetReadOnly))
+			Expect(g.Targets).To(Equal(&templates.Targets{Min: 1, Max: 5}))
+			Expect(t.Spec.Triggers).To(BeEmpty())
+			Expect(t.Spec.Limits.Run.MaxDuration.Duration).To(Equal(30 * time.Minute))
+			Expect(t.Spec.Instructions).To(ContainSubstring("~/notes/"))
+			Expect(t.Spec.Instructions).NotTo(ContainSubstring("create_pull_request"))
+		})
+	})
+
+	Describe("lcm-upgrader", func() {
+		It("proposes one pull request on one repository after a question, weekly", func() {
+			t, ok := templates.Get("lcm-upgrader")
+			Expect(ok).To(BeTrue())
+			Expect(t.Spec.Grants).To(HaveLen(1))
+			g := t.Spec.Grants[0]
+			Expect(g.Connector).To(Equal("gitea"))
+			Expect(g.Scopes).To(ConsistOf("repo.read", "pull_request.create"))
+			Expect(g.Targets).To(Equal(&templates.Targets{Min: 1, Max: 1}))
+			Expect(t.Spec.Triggers).To(HaveLen(1))
+			Expect(t.Spec.Triggers[0].Filter).To(Equal(templates.TriggerFilter{Cron: "0 7 * * 1", Timezone: "UTC"}))
+			text := t.Spec.Instructions
+			Expect(text).To(ContainSubstring(`"Create the PR?"`))
+			Expect(strings.Index(text, "ask_user")).To(BeNumerically("<", strings.Index(text, "call `create_pull_request`")))
+			Expect(text).To(ContainSubstring(".gitea/workflows/"))
+			Expect(text).To(ContainSubstring(".github/workflows/"))
+		})
+	})
+
+	It("keeps every template's instructions within 80 lines", func() {
+		ts, err := templates.All()
+		Expect(err).NotTo(HaveOccurred())
+		for _, t := range ts {
+			Expect(strings.Count(t.Spec.Instructions, "\n")).To(BeNumerically("<=", 80), t.Metadata.ID)
+		}
+	})
+
 	It("returns false for an unknown ID", func() {
 		_, ok := templates.Get("no-such-template")
 		Expect(ok).To(BeFalse())

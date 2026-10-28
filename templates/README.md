@@ -2,6 +2,9 @@
 
 Agent templates: building blocks for the agent builder; the result is always a draft (ADR 0020).
 
+- Templates: `repo-helper` and `repo-helper-gitea` (small pull requests), `finops-analyst` (daily cost
+  report from MCP cost servers, no grant), `researcher` (read-only research over several runs) and
+  `lcm-upgrader` (weekly upgrade proposals, one pull request after a yes).
 - `<id>.yaml`: one template per file, named after `metadata.id`, `apiVersion:
   templates.koinon.dev/v1alpha1`, `kind: Template`.
 - `schema/template.schema.json`: the JSON Schema (2020-12) every template must pass.
@@ -34,3 +37,8 @@ Europe/Tallinn}`, five cron fields and an IANA zone) or `direct_message` (no fil
 and `channel_event` are reserved for v0.2. The filter is typed per type; there is no expression
 language. The triggers are copied into the agent's first version and fire only once an admin or
 owner activates a version that holds them.
+
+A template may have no grants (`grants: []`): `finops-analyst` works only through the MCP servers an admin
+allows on the agent's page, which are not template grants. A scheduled task has no creator, so an agent
+that uses `ask_user` from a trigger needs `to`; the templates tell admins to add `Ask name@example.com` to the
+trigger instruction.

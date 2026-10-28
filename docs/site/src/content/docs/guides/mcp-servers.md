@@ -106,6 +106,10 @@ Then allow servers per agent. On the agent's page, **MCP servers** lists the org
 the agent may use, and, if you want, **limit to some tools**. Nothing is allowed by default. The change
 takes effect within about a minute, without a new agent version.
 
+The **FinOps analyst** template has no grants at all: it reads yesterday's costs every day at 07:00 UTC
+(change the time and zone in the agent's triggers) through the cost, billing or metrics servers you allow
+here, and replies with a three-part report. Allow those servers on the agent's page after you create it.
+
 ## Health
 
 Koinon checks every server every 60 seconds through the gateway: it connects like an agent would and
