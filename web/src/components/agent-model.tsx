@@ -48,7 +48,7 @@ export function AgentModel({ agent }: { agent: Agent }) {
       </p>
       {m.problem && (
         <Alert variant="destructive" role="alert">
-          <AlertDescription>{m.problem} Runs fail until you pick another model.</AlertDescription>
+          <AlertDescription>{m.problem}{m.source === ModelSource.AGENT && ' Runs fail until you pick another model.'}</AlertDescription>
         </Alert>
       )}
       {m.source === ModelSource.NONE && !m.problem && <p className="text-muted-foreground">The org serves no model with a price, so runs fail. Add a provider, a model and a price first.</p>}

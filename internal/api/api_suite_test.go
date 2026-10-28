@@ -174,6 +174,8 @@ type envOptions struct {
 	username string
 	// directMessages delivers direct messages through a DBOS queue (TR3), if set.
 	directMessages *services.DirectMessageQueue
+	// runNow fires schedule triggers by hand through a DBOS queue, if set.
+	runNow *services.RunNowQueue
 	// modelChat is what the provider echo check sends its request through; nil means the check
 	// finds no gateway.
 	modelChat modelcheck.Chat
@@ -287,7 +289,7 @@ func newEnvOn(ctx context.Context, base *env, opts envOptions) *env {
 		Catalog:    catalog.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
 		MCP:        mcpservers.New(e.pool, catalogKeys, slog.New(slog.NewTextHandler(logOut, nil))).WithURLPolicy(catalog.URLPolicy{Namespace: "koinon"}),
 		ModelCheck: modelcheck.New(e.pool, opts.modelChat, prices.NewResolver(pricing.Embedded())),
-		Hub:        e.hub, WatchPollInterval: opts.watchPoll, WatchHeartbeatInterval: opts.watchHeartbeat, DirectMessages: opts.directMessages,
+		Hub:        e.hub, WatchPollInterval: opts.watchPoll, WatchHeartbeatInterval: opts.watchHeartbeat, DirectMessages: opts.directMessages, RunNow: opts.runNow,
 		Logger: slog.New(slog.NewTextHandler(logOut, nil)),
 		Keys:   servicesKeys(opts.keys), GitHub: opts.github,
 		URLPolicy: catalog.URLPolicy{Namespace: "koinon", AllowedHosts: opts.allowedHosts},

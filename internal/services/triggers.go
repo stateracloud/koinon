@@ -26,11 +26,24 @@ import (
 // scheduled fire; a spent budget stops the run where it stops a scheduled one. What differs is
 // recorded: the task's events say the fire was manual, and by whom. It needs no DBOS: the task is
 // created in the caller's transaction, whether or not the durable runtime is on.
+//
+// With api.durable.enabled the fire goes through the org's partition of the org queue
+// (RunNowQueue), like direct messages, so the org's trigger_concurrency and trigger_rate_per_minute
+// apply to it as they do to scheduled fires; with it off the fire is inline.
 func (s *Server) RunScheduleTrigger(ctx context.Context, in triggers.RunNow) (store.Task, error) {
-	now := in.Now
-	if now.IsZero() {
-		now = time.Now()
+	if in.Now.IsZero() {
+		in.Now = time.Now()
 	}
+	if s.runNow != nil {
+		return s.runNow.fire(ctx, in)
+	}
+	return s.fireNow(ctx, in)
+}
+
+// fireNow creates the task in the caller's transaction: RunScheduleTrigger's body, and what the
+// run-now workflow runs on the queue.
+func (s *Server) fireNow(ctx context.Context, in triggers.RunNow) (store.Task, error) {
+	now := in.Now
 	list, err := triggers.ForAgent(ctx, s.q, in.Org, in.Agent, templates.TriggerSchedule)
 	if err != nil {
 		return store.Task{}, err

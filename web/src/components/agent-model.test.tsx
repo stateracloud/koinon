@@ -80,6 +80,11 @@ describe('AgentModel', () => {
     expect(screen.getByRole('option', { name: 'vendor/gone (not served)' })).toBeInTheDocument()
   })
 
+  it("flags a version's model the org does not serve, without saying that runs fail for the agent's own pick", async () => {
+    setup(OrgRole.ADMIN, { problem: 'The agent\'s version names a model the gateway will not serve (the model "vendor/ghost" is not served in this org); pick a model below.' })
+    expect(await screen.findByText(/version names a model the gateway will not serve/)).not.toHaveTextContent('Runs fail until')
+  })
+
   it('shows why a model was refused', async () => {
     setup(OrgRole.ADMIN, {}, { failSet: 'the model "vendor/a-model" has no price' })
     await userEvent.selectOptions(await screen.findByLabelText('Model for this agent'), 'vendor/a-model')

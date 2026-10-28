@@ -25,7 +25,8 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		_, err := q.SetAgentBudget(ctx, store.SetAgentBudgetParams{OrgID: e.org, AgentID: e.agent.ID, DailyLimit: limit, UpdatedBy: "test"})
 		Expect(err).NotTo(HaveOccurred())
 		_, err = q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
-			OrgID: e.org, AgentID: e.agent.ID, RequestID: uuid.NewString(), KeyID: "k-test", Model: "m",
+			Principal: "agent",
+			OrgID:     e.org, AgentID: e.agent.ID, RequestID: uuid.NewString(), KeyID: "k-test", Model: "m",
 			CostUsd: spent, Priced: true, OccurredAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		})
 		Expect(err).NotTo(HaveOccurred())

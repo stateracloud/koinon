@@ -49,6 +49,8 @@ type failure struct {
 	retryAfter time.Duration
 	// gateway: the gateway answered the harness's model request with 401 or 429 (classify.go).
 	gateway bool
+	// modelNotFound: the gateway answered 404 or model_not_found for the run's model.
+	modelNotFound bool
 }
 
 func (f *failure) Error() string { return f.reason }
@@ -119,6 +121,11 @@ type runner struct {
 	// cwd is the session directory, set before the harness starts; permission requests for
 	// paths outside it are rejected.
 	cwd string
+
+	// model and modelSource are the model the run uses and the layer it came from
+	// (internal/agentmodel).
+	model       string
+	modelSource agentmodel.Source
 
 	// vcfg and home are the run's version config and the sandbox's home generation, for
 	// handling a stuck sandbox (stuck.go).
@@ -298,6 +305,21 @@ func (r *runner) stopped(ctx context.Context) error {
 	return nil
 }
 
+// modelGone turns the gateway's 404 for the agent's own model into the reason a run that began with
+// the model gone gets: the check at the start passed, and the provider or its price was removed
+// before the request. Any other error, and a model that still checks out, stay as they are.
+func (r *runner) modelGone(ctx context.Context, err error) error {
+	var f *failure
+	if r.modelSource != agentmodel.SourceAgent || !errors.As(err, &f) || !f.modelNotFound {
+		return err
+	}
+	var unusable *agentmodel.UnusableError
+	if cerr := agentmodel.Check(ctx, r.p.cfg.Prices, r.q, r.run.OrgID, r.model, time.Now()); errors.As(cerr, &unusable) {
+		return &failure{reason: unusable.RunReason()}
+	}
+	return err
+}
+
 // dbErr classifies a database error of the run's own writes and reads.
 func (r *runner) dbErr(ctx context.Context, what string, err error) error {
 	if stop := r.stopped(ctx); stop != nil {
@@ -376,6 +398,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if model == "" {
 		return &failure{reason: "the agent names no model and its org serves none; add a provider and a model with a price"}
 	}
+	r.model, r.modelSource = model, source
 	r.log.Info("the run's model", "model", model, "source", string(source))
 	gw := strings.TrimSuffix(cfg.GatewayURL, "/")
 	mode, ptype := r.cacheMode(fctx, model)
@@ -675,7 +698,7 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 	select {
 	case res := <-done:
 		if res.err != nil {
-			return r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err))
+			return r.modelGone(ctx, r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)))
 		}
 		switch res.stop {
 		case acp.StopEndTurn:

@@ -11,8 +11,10 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/durable"
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
+	"github.com/stateracloud/koinon/internal/services"
 )
 
 // "Run now" for schedule triggers (rc.6, ADR 0066). The environment has no DBOS runtime, which is
@@ -140,4 +142,37 @@ var _ = Describe("running a schedule trigger now", func() {
 		_, err = run(ctx, admin, "daily-check")
 		Expect(err).NotTo(HaveOccurred())
 	})
+
+	It("goes through the org's partition of the org queue when durable is on, and the same second is the same fire", func(ctx SpecContext) {
+		activate(ctx, daily)
+		dsn := e.pool.Config().ConnString()
+		Expect(durable.Migrate(ctx, dsn, nil)).To(Succeed())
+		rt := durable.New(durable.Config{DatabaseURL: dsn, ApplicationVersion: "v1", ExecutorID: "koinon-api-run-now-test"})
+		work, err := durable.NewOrgWork(rt, durable.OrgQueueConfig{PollingInterval: 50 * time.Millisecond})
+		Expect(err).NotTo(HaveOccurred())
+		queue, err := services.RegisterRunNow(rt, work)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rt.Launch(ctx)).To(Succeed())
+		DeferCleanup(func() { _ = rt.Shutdown(5 * time.Second) })
+		c := owner.on(newEnvOn(ctx, e, envOptions{runNow: queue}))
+
+		res, err := run(ctx, c, "daily-check")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(count(ctx, e, `SELECT count(*) FROM dbos.workflow_status WHERE queue_name = $1 AND name = $2 AND queue_partition_key = $3`,
+			durable.OrgQueueName, services.RunNowWorkflow, org)).To(Equal(1), "on the org's partition, where trigger_concurrency and trigger_rate_per_minute apply")
+		var creator, fire string
+		Expect(e.pool.QueryRow(ctx, `SELECT t.created_by_kind::text, m.payload->>'fire' FROM tasks t
+			JOIN task_events m ON m.org_id = t.org_id AND m.task_id = t.id AND m.kind = 'message' WHERE t.id = $1`, res.GetTaskId()).Scan(&creator, &fire)).To(Succeed())
+		Expect([]string{creator, fire}).To(Equal([]string{"trigger", "manual"}))
+		Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'agent.trigger.run_now'`, org)).To(Equal(1))
+
+		By("errors keep their code through the workflow")
+		_, err = run(ctx, c, "nothing")
+		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+		_, err = e.pool.Exec(ctx, `UPDATE agents SET unhealthy_at = now(), unhealthy_reason = 'stuck' WHERE id = $1`, agent.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		_, err = run(ctx, c, "daily-check")
+		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
+		Expect(err.Error()).To(ContainSubstring("stuck"))
+	}, SpecTimeout(2*time.Minute))
 })
