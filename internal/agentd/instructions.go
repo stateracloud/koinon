@@ -33,6 +33,8 @@ const instructionsPreamble = "# Koinon\n\n" +
 	"These are your instructions from Koinon for this run. Koinon writes this file before the " +
 	"run and restores it before every prompt, so changing it has no effect.\n\n"
 
+// TODO: the tool list below is specific to the OpenCode flavor's image. When a second flavor
+// lands it should move to the flavor descriptor (internal/flavor), not stay a package constant.
 // workingWithData is Koinon's guidance on the tools the flavor image ships (flavors/opencode/
 // README.md) and on how to read large inputs. It follows the preamble in every run, whatever the
 // agent version says. OpenCode cuts a tool result at 2,000 lines or 50 KiB and saves the full
@@ -45,8 +47,8 @@ const workingWithData = "## Working with large data\n\n" +
 	"- JSON and JSONL: `jq`; YAML, XML, TOML and CSV: `yq` (`yq -p xml -o json f.xml | jq ...`). " +
 	"Select fields; do not `cat` a large file.\n" +
 	"- CSV, TSV, JSON and Parquet tables: `duckdb -c \"DESCRIBE SELECT * FROM 'f.csv'\"`, then " +
-	"`SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. Use `-json` or `-csv` for " +
-	"machine-readable output.\n" +
+	"`SUMMARIZE`, `SELECT count(*)` and targeted SQL with `LIMIT`. For machine-readable output " +
+	"put the flag before `-c`: `duckdb -json -c \"SELECT ...\"` (or `-csv`).\n" +
 	"- SQLite files: `sqlite3 -readonly FILE '.schema'`, then targeted queries.\n" +
 	"- PDFs: `pdfinfo FILE`, then `pdftotext -layout -f N -l M FILE - | head -200`. Do not open a " +
 	"PDF with the read tool.\n" +

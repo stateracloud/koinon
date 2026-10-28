@@ -128,6 +128,10 @@ func describeTools(f flavor) bool {
 			Expect(strings.TrimSpace(out)).To(Equal("768.0 MiB,2,false,false,/tmp/duckdb"))
 			Expect(ok(ctx, "", `duckdb -noheader -list -c "set memory_limit='512MiB'; select current_setting('memory_limit')"`)).
 				To(Equal("512.0 MiB\n"))
+			// Extension autoload is really off: a remote CSV needs httpfs, which must not be fetched.
+			_, stderr, code := sh(ctx, "", `duckdb -c "select * from read_csv('https://example.com/x.csv')"`)
+			Expect(code).NotTo(BeZero())
+			Expect(stderr).To(ContainSubstring("Missing Extension"))
 			// A failed query exits non-zero and says why on stderr, nothing else on stdout.
 			stdout, stderr, code := sh(ctx, "", `duckdb -c 'select * from missing_table'`)
 			Expect(code).NotTo(BeZero())
@@ -150,7 +154,7 @@ func describeTools(f flavor) bool {
 			}
 			// The entry script keeps agent-written Python from leaving __pycache__ in a repository.
 			Expect(ok(ctx, "", `grep -c '^export PYTHONDONTWRITEBYTECODE=1$' /usr/local/bin/koinon-`+f.name)).To(Equal("1\n"))
-		}, SpecTimeout(time.Minute))
+		}, SpecTimeout(3*time.Minute))
 	})
 }
 

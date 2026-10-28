@@ -7,6 +7,7 @@
 SET memory_limit = '768MiB';
 SET threads = 2;
 SET temp_directory = '/tmp/duckdb';
+SET max_temp_directory_size = '1GiB';
 -- No extension downloads (there is no network); the built-in readers (CSV, JSON, Parquet) work.
 SET autoinstall_known_extensions = false;
 SET autoload_known_extensions = false;
