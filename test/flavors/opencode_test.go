@@ -204,6 +204,13 @@ var _ = Describe("koinon-opencode and the agent's home", func() {
 		Expect(gw.modelBodies()).To(ContainElement(ContainSubstring(instructionsMarker)))
 		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring(homeMarker))))
 		Expect(loadedPlugins(ctx, sb)).To(BeEmpty())
+
+		// OpenCode's built-in skills ("opencode" and "report", which files issues with the GitHub CLI)
+		// are off too: no skill is listed to the model.
+		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring("<available_skills>"))))
+		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring("<id>report</id>"))))
+		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring("<id>opencode</id>"))))
+		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring("publish the issue with GitHub CLI"))))
 	}, SpecTimeout(3*time.Minute))
 
 	DescribeTable("loads the agent's plugins only with --plugin-installs",
