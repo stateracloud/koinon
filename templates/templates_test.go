@@ -139,6 +139,8 @@ var _ = Describe("Embedded templates", func() {
 			t, ok := templates.Get("finops-analyst")
 			Expect(ok).To(BeTrue())
 			Expect(t.Spec.Grants).To(BeEmpty())
+			Expect(t.Spec.Instructions).To(ContainSubstring("email or user ID"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("used or not used"))
 			Expect(t.Spec.Triggers).To(HaveLen(1))
 			tr := t.Spec.Triggers[0]
 			Expect(tr.Type).To(Equal(templates.TriggerSchedule))
@@ -164,8 +166,17 @@ var _ = Describe("Embedded templates", func() {
 			Expect(t.Spec.Triggers).To(BeEmpty())
 			Expect(t.Spec.Limits.Run.MaxDuration.Duration).To(Equal(30 * time.Minute))
 			Expect(t.Spec.Limits.SpendUSD.String()).To(Equal("3.00"))
-			Expect(t.Spec.Instructions).To(ContainSubstring("~/notes/"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("`notes/<task-slug>.md` in your working directory, `/sandbox/work`"))
 			Expect(t.Spec.Instructions).NotTo(ContainSubstring("create_pull_request"))
+			Expect(t.Spec.Limits.Run.MaxTokens).To(BeEquivalentTo(1000000))
+		})
+
+		It("keeps notes only under /sandbox/work, in every shipped template", func() {
+			all, err := templates.All()
+			Expect(err).NotTo(HaveOccurred())
+			for _, t := range all {
+				Expect(t.Spec.Instructions).NotTo(ContainSubstring("~/notes"), t.Metadata.ID)
+			}
 		})
 	})
 
@@ -183,6 +194,7 @@ var _ = Describe("Embedded templates", func() {
 			Expect(t.Spec.Limits.SpendUSD.String()).To(Equal("2.00"))
 			Expect(t.Spec.Triggers[0].Instruction).To(ContainSubstring("Ask:"))
 			Expect(t.Spec.Triggers[0].Instruction).To(ContainSubstring("Repository:"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("email or user ID"))
 			Expect(t.Spec.Questions.ReminderAfter.Duration).To(Equal(24 * time.Hour))
 			Expect(t.Spec.Questions.ExpireAfter.Duration).To(Equal(144 * time.Hour))
 			text := t.Spec.Instructions
