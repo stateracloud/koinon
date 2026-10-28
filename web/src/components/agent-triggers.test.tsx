@@ -70,7 +70,7 @@ describe('AgentTriggers', () => {
 
   it('lets an admin run a schedule trigger now and opens the task it made', async () => {
     const { runs } = setup(OrgRole.ADMIN)
-    await userEvent.click(await screen.findByRole('button', { name: 'Run daily now' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Run now: daily' }))
     await waitFor(() => expect(runs).toHaveLength(1))
     expect(runs[0]).toMatchObject({ agentId: 'a-1', triggerId: 'daily' })
     expect(await screen.findByRole('link', { name: 'Open the task' })).toHaveAttribute('href', '/tasks/task-9')
@@ -79,12 +79,12 @@ describe('AgentTriggers', () => {
   it('has no Run now for a member, or for an agent that is not active', async () => {
     setup(OrgRole.MEMBER)
     expect(await screen.findByText('0 9 * * * (UTC)')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Run daily now/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Run now: daily/ })).not.toBeInTheDocument()
   })
 
   it('says why a run was refused', async () => {
     setup(OrgRole.ADMIN, { failRun: 'the agent cannot take a run now: it is draft' })
-    await userEvent.click(await screen.findByRole('button', { name: 'Run daily now' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Run now: daily' }))
     expect(await screen.findByText(/Could not run the trigger: .*cannot take a run now/)).toBeInTheDocument()
   })
 })
