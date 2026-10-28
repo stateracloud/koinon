@@ -158,6 +158,28 @@ var _ = Describe("the time limit", func() {
 		Expect(canceledPayload(ctx, e, t)).To(HaveKeyWithValue("reason", "wall_clock_cap"))
 	})
 
+	DescribeTable("tells the agent about a tool call refused while the wrap-up cancel was in flight",
+		func(ctx SpecContext, late time.Duration) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e.harness.set(func(h *harness) { h.lateCancel = late; h.refuseAfterCancel = true })
+			t := e.task(ctx, markWait)
+			r := capped(ctx, e, t, 4)
+			e.pool("agentd-a", withNotice(2*time.Second, nil), func(c *agentd.Config) { c.CancelGrace = 300 * time.Millisecond })
+			Eventually(func() int {
+				prompts, _, _, _ := e.harness.snapshot()
+				return len(prompts)
+			}).WithTimeout(15 * time.Second).Should(BeNumerically(">=", 2))
+			prompts, _, _, _ := e.harness.snapshot()
+			Expect(prompts[1]).To(ContainSubstring("Your last action was refused"))
+			// The refusal note is handled like any other: the run goes on and ends (the harness
+			// answers the note with an end of turn, or the cap comes first), but never as failed.
+			Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(BeElementOf(store.RunStateSucceeded, store.RunStateCanceled))
+			Expect(getRun(ctx, r).FailureClass.Valid).To(BeFalse(), "a refusal is not a fatal failure")
+		},
+		Entry("the harness ends the turn within the grace", time.Duration(0)),
+		Entry("the harness ends the turn after the grace", 800*time.Millisecond),
+	)
+
 	It("uses the task's notes when the agent said nothing", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.harness.set(func(h *harness) { h.noChunk = true })
