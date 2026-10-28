@@ -107,6 +107,7 @@ whose CNI does not enforce NetworkPolicy the port is open to every pod either wa
 
 ## Not built yet
 
-Run traces (ADR 0023 sends them only to an OTLP endpoint an org or platform admin supplies) and
+Run traces (ADR 0023 sends them only to an OTLP endpoint an org or platform admin supplies; ADR 0074
+routes them through a Koinon trace router to each org's backend, after v0.1.0) and
 further metrics: queue depth, per-provider model latency, agentgateway's own metrics in a Koinon
 dashboard, and alerting rules.
