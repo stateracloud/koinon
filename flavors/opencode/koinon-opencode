@@ -6,7 +6,7 @@
 #
 # Usage:
 #   koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs]
-#                   [--cache-anthropic | --cache-alibaba]
+#                   [--cache-anthropic | --cache-alibaba] [--session-id ID]
 #                   [-- OPENCODE_ACP_ARGS...]
 #
 # --plugin-installs is set by koinon-agentd when the agent's template turns
@@ -106,8 +106,18 @@ fi
 # Prompt caching (ADR 0068): the koinon provider's models send Anthropic-style cache_control
 # markers. The key is compatibility.cacheFormat (packages/schema/src/model-compatibility.ts,
 # provider level in packages/schema/src/config/provider.ts).
+# Sticky routing: the run ID goes to OpenRouter as the body field session_id, so the run stays on
+# one upstream and its cache stays warm. The provider-level body overlay is merged into every
+# request (packages/schema/src/config/provider.ts, core/src/config/plugin/provider.ts).
+provider=''
 if [ -n "$cache_format" ]; then
-  config_content="$config_content${config_content:+,}\"providers\":{\"koinon\":{\"compatibility\":{\"cacheFormat\":\"$cache_format\"}}}"
+  provider="\"compatibility\":{\"cacheFormat\":\"$cache_format\"}"
+fi
+if [ -n "$session_id" ]; then
+  provider="$provider${provider:+,}\"body\":{\"session_id\":\"$session_id\"}"
+fi
+if [ -n "$provider" ]; then
+  config_content="$config_content${config_content:+,}\"providers\":{\"koinon\":{$provider}}"
 fi
 if [ -n "$config_content" ]; then
   export OPENCODE_CONFIG_CONTENT="{$config_content}"

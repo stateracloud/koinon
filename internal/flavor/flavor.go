@@ -63,6 +63,10 @@ type Descriptor struct {
 	// "alibaba") to the launch switch that makes the harness send those markers (ADR 0068). A
 	// format missing here cannot be cached on this flavor.
 	CacheArgs map[string]string
+	// SessionArg is the launch switch that takes the run ID, which the harness sends to
+	// OpenRouter as session_id so a run stays on one upstream and its cache stays warm. "" when
+	// the flavor cannot.
+	SessionArg string
 }
 
 var table = []Descriptor{
@@ -79,7 +83,8 @@ var table = []Descriptor{
 		PluginInstallsArg: "--plugin-installs",
 		// The entry script turns each into compatibility.cacheFormat of the koinon provider
 		// (OpenCode 2.2.0, packages/schema/src/model-compatibility.ts).
-		CacheArgs: map[string]string{"anthropic": "--cache-anthropic", "alibaba": "--cache-alibaba"},
+		CacheArgs:  map[string]string{"anthropic": "--cache-anthropic", "alibaba": "--cache-alibaba"},
+		SessionArg: "--session-id",
 	},
 }
 

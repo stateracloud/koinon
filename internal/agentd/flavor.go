@@ -21,6 +21,8 @@ type endpoints struct {
 	// CacheMarker is the cache-marker format the model's provider needs (prices.CacheMode.Marker),
 	// or "" when it needs none.
 	CacheMarker string
+	// SessionID is the run ID to send to OpenRouter as session_id (sticky routing), or "".
+	SessionID string
 }
 
 // launchCommand is the flavor's ACP launch command. Binaries are absolute paths: OpenShell
@@ -42,6 +44,9 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 			return nil, fmt.Errorf("flavor %q cannot send %q prompt-cache markers; add its switch to the flavor table", f, e.CacheMarker)
 		}
 		cmd = append(cmd, arg)
+	}
+	if e.SessionID != "" && d.SessionArg != "" {
+		cmd = append(cmd, d.SessionArg, e.SessionID)
 	}
 	return cmd, nil
 }
@@ -94,8 +99,8 @@ func harnessArgs(f store.AgentFlavor, c agentconfig.Config) []string {
 
 // cacheMarker is the cache-marker format to start the harness with for a model (ADR 0068): ""
 // when the model has no cache price or its provider caches by itself. A model with a cache
-// price but an unmapped provider format runs uncached (the catalog test keeps the default list
+// price but an unmapped or unsupported provider format runs uncached (the catalog test keeps the default list
 // free of those), and the second result says so for the log.
 func cacheMarker(mode prices.CacheMode) (marker string, unknown bool) {
-	return mode.Marker(), mode == prices.CacheUnknown
+	return mode.Marker(), mode.Uncached()
 }

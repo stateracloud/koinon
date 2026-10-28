@@ -364,9 +364,15 @@ func (r *runner) execute(ctx context.Context) error {
 	mode, ptype := r.cacheMode(fctx, model)
 	marker, unknown := cacheMarker(mode)
 	if unknown {
-		r.log.Warn("the model has a cache price but no known cache-marker format; it runs without prompt caching", "model", model)
+		r.log.Warn("the model has a cache price but its provider format cannot be cached by Koinon; it runs without prompt caching", "model", model)
 	}
-	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", CacheMarker: marker})
+	// OpenRouter keeps a session on one upstream, so the run's cache stays warm. Only the run ID
+	// is sent, and only to OpenRouter.
+	sessionID := ""
+	if ptype == "openrouter" {
+		sessionID = r.run.ID.String()
+	}
+	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", CacheMarker: marker, SessionID: sessionID})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}

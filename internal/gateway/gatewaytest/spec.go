@@ -355,7 +355,7 @@ func llmSpec(env Env) {
 					return map[string]any{"type": "text", "text": text, "cache_control": marker}
 				}
 				sent := map[string]any{
-					"model": "open-model",
+					"model": "open-model", "session_id": "01234567-run",
 					"messages": []any{
 						map[string]any{"role": "system", "content": []any{block("You are a helpful agent.")}},
 						map[string]any{"role": "user", "content": []any{block("first question")}},
@@ -382,6 +382,7 @@ func llmSpec(env Env) {
 				var got map[string]any
 				Expect(json.Unmarshal([]byte(ups["guarded"].lastBody()), &got)).To(Succeed())
 				Expect(got["messages"]).To(Equal(sent["messages"]), "the content blocks and their cache_control reach the upstream as sent")
+				Expect(got).To(HaveKeyWithValue("session_id", "01234567-run"), "OpenRouter's sticky-routing field reaches the upstream")
 				Expect(got["tools"]).To(Equal(sent["tools"]), "the tool's cache_control reaches the upstream as sent")
 			})
 

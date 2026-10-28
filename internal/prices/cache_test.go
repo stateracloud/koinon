@@ -3,6 +3,7 @@
 package prices_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stateracloud/koinon/internal/prices"
@@ -27,11 +28,15 @@ func TestEntryWarnings(t *testing.T) {
 		{"anthropic via openrouter", entry("openrouter", "anthropic/claude-*", "0.1"), false},
 		{"qwen via openrouter", entry("openrouter", "qwen/*", "0.1"), false},
 		{"openai", entry("openai", "gpt-*", "0.1"), false},
+		{"direct anthropic", entry("anthropic", "claude-*", "0.1"), true},
 	} {
 		got := prices.EntryWarnings(c.e)
 		if (len(got) > 0) != c.warn {
 			t.Errorf("%s: warnings = %v, want warning %v", c.name, got, c.warn)
 		}
+	}
+	if w := prices.EntryWarnings(entry("anthropic", "claude-*", "0.1")); len(w) != 1 || !strings.Contains(w[0], "OpenAI-compatible endpoint does not cache; use OpenRouter") {
+		t.Errorf("direct anthropic warning = %v", w)
 	}
 	tiered := entry("openrouter", "google/*", "")
 	tiered.Tiers = []pricing.WireTier{{ContextOver: 100, Prices: pricing.Wire{CacheRead: "0.2"}}}
