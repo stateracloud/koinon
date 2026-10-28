@@ -245,7 +245,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 	It("charges a request whose client disconnected before the headers, as an estimate", func(ctx SpecContext) {
 		d := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
 		d.model(ctx, "fake", slowModel)
-		_, err := prices.New(db, nil).SetOverride(ctx, d.org, audit.User(d.user), prices.OverrideInput{
+		_, err := prices.New(db, nil, priceList).SetOverride(ctx, d.org, audit.User(d.user), prices.OverrideInput{
 			Entry: pricing.Entry{
 				ID: "slow", Provider: "fake", Match: pricing.Match{Glob: slowModel}, Spec: pricing.Spec{Prices: pricing.Wire{Input: "50", Output: "50"}},
 				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,

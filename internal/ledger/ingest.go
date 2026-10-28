@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
@@ -30,6 +31,8 @@ type Ingester struct {
 	Now func() time.Time
 	// Metrics counts what Ingest and Handler do; nil counts nothing.
 	Metrics *Metrics
+	// Prices finds the prices of requests; required (prices.NewResolver).
+	Prices prices.Resolver
 }
 
 func (in *Ingester) now() time.Time {

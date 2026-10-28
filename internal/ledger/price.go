@@ -63,7 +63,7 @@ func (in *Ingester) price(ctx context.Context, q *store.Queries, org pgtype.UUID
 	model, err := prices.Lookup(ctx, q, org, e.Model)
 	if err == nil {
 		var res prices.Resolution
-		res, err = prices.Resolve(ctx, q, org, model, e.Time)
+		res, err = in.Prices.Resolve(ctx, q, org, model, e.Time)
 		if err == nil {
 			out, perr := in.priceWith(ctx, q, org, e, p, res, gw)
 			var badPrice *prices.BadPriceError

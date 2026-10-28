@@ -57,6 +57,7 @@ import (
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -99,6 +100,8 @@ type Config struct {
 	ProviderKeys ProviderKeyStore
 	// ProviderKeyDir is where the gateway mounts ProviderKeys, for the rendered config.
 	ProviderKeyDir string
+	// Prices finds the price of each served model; required (prices.NewResolver).
+	Prices prices.Resolver
 	// AgentLimit computes an agent's budget; nil is ledger.AgentLimit. It is a seam for tests.
 	AgentLimit func(ctx context.Context, q *store.Queries, agent store.Agent, now time.Time) (*gateway.Limit, error)
 	// URLPolicy is checked again, with a fresh lookup, for every provider URL before it is served.
@@ -210,6 +213,9 @@ type Reconciler struct {
 func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway, secrets SecretStore, cfg Config) (*Reconciler, error) {
 	if cfg.Gateway.Host == "" || cfg.Gateway.Port == 0 {
 		return nil, errors.New("reconciler: the agentgateway endpoint is required")
+	}
+	if cfg.Prices.IsZero() {
+		return nil, errors.New("reconciler: Prices is required (prices.NewResolver)")
 	}
 	if cfg.ArchiveAfter == 0 {
 		cfg.ArchiveAfter = DefaultArchiveAfter

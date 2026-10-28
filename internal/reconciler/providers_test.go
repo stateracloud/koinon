@@ -21,7 +21,9 @@ import (
 	"github.com/stateracloud/koinon/internal/execution/openshell"
 	"github.com/stateracloud/koinon/internal/execution/openshell/fakegateway"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // Provider delivery (plan item PV1): the reconciler opens each org's provider keys into one
@@ -44,6 +46,7 @@ var _ = Describe("Provider delivery", func() {
 		kube = fake.NewClientset()
 		svc = catalog.New(pool, ring, nil)
 		r, err = reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+			Prices:         prices.NewResolver(pricing.Embedded()),
 			Gateway:        reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 			Keys:           ring,
 			ProviderKeys:   reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
@@ -309,6 +312,7 @@ var _ = Describe("Provider delivery", func() {
 			newR = func() *reconciler.Reconciler {
 				GinkgoHelper()
 				r, err := reconciler.New(pool, openshell.New(cc), mg, reconciler.KubeSecrets{Client: kube, Namespace: namespace}, reconciler.Config{
+					Prices:  prices.NewResolver(pricing.Embedded()),
 					Gateway: reconciler.Endpoint{Host: "koinon-gateway.koinon.svc", Port: 8080},
 					Keys:    ring, ProviderKeys: reconciler.KubeProviderKeys{Client: kube, Namespace: namespace, Name: secretName},
 					ProviderKeyDir: "/secrets/providers", URLPolicy: testPolicy, ProviderKeySettle: time.Minute,

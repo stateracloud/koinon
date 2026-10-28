@@ -41,6 +41,7 @@ import (
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/tokens"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 // BasePath is where the API is mounted.
@@ -63,11 +64,11 @@ type Server struct {
 var _ StrictServerInterface = (*Server)(nil)
 
 // New returns a Server.
-func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Logger) *Server {
+func New(pool *pgxpool.Pool, c *catalog.Service, t *tokens.Service, log *slog.Logger, src pricing.ListSource) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log), budgets: budget.New(pool), log: log, limiter: newLimiter()}
+	return &Server{pool: pool, catalog: c, tokens: t, prices: prices.New(pool, log, src), budgets: budget.New(pool), log: log, limiter: newLimiter()}
 }
 
 type principalKey struct{}

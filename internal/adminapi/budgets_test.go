@@ -10,6 +10,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 var _ = Describe("prices and budgets", func() {
@@ -61,7 +62,7 @@ var _ = Describe("prices and budgets", func() {
 		st, _ = e.call(ctx, e.token, http.MethodDelete, "/prices/nothing", nil)
 		Expect(st).To(Equal(http.StatusNotFound))
 
-		Expect(prices.New(pool, nil).SyncDefaults(ctx)).To(Succeed())
+		Expect(prices.New(pool, nil, pricing.Embedded()).SyncDefaults(ctx)).To(Succeed())
 		st, raw = e.call(ctx, e.token, http.MethodGet, "/prices/defaults", nil)
 		Expect(st).To(Equal(http.StatusOK))
 		defs := decode[struct {
