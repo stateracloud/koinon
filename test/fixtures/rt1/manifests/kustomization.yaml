@@ -11,10 +11,18 @@ resources:
   - motherduck.yaml
   - fakecicost.yaml
   - prometheus.yaml
+  - searxng.yaml
 # Digests are filled in at deploy time (the tags below are placeholders). For example:
 #   kustomize edit set image \
 #     zot.apps.lab.example.invalid/koinon/rt1-motherduck=zot.apps.lab.example.invalid/koinon/rt1-motherduck@sha256:<digest>
 # hack/rt1-fixtures-build.sh prints the digest of every image it pushes.
+# SearXNG's settings are plain configuration for the unmodified image.
+configMapGenerator:
+  - name: rt1-searxng-settings
+    files:
+      - settings.yml=searxng-settings.yml
+    options:
+      disableNameSuffixHash: true
 images:
   - name: zot.apps.lab.example.invalid/koinon/rt1-motherduck
     newTag: dev
@@ -26,3 +34,7 @@ images:
     newTag: v3.7.3
   - name: zot.apps.lab.example.invalid/koinon/rt1-prometheus-mcp
     newTag: dev
+  - name: zot.apps.lab.example.invalid/koinon/rt1-searxng
+    newTag: "2026.10.27"
+  - name: zot.apps.lab.example.invalid/koinon/rt1-searxng-mcp
+    newTag: "2.9.0"

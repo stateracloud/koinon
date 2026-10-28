@@ -11,6 +11,7 @@ no egress at run time.
 | Cloud bill, Athena-like SQL | `motherduck/` | DuckDB over FOCUS 1.0 sample billing data, read-only SQL | `http://rt1-motherduck.koinon-fixtures.svc.cluster.local:8000/mcp` |
 | CI cost | `cmd/koinon-fakecicost` | REST `GET /v1/costs` and the tool `ci_costs`, bearer token required | `http://rt1-fakecicost.koinon-fixtures.svc.cluster.local:8080/mcp` |
 | Inference spend | `prometheus/`, `cmd/koinon-rt1-promgen` | Prometheus with 30 days of backfilled LLM metrics, behind prometheus-mcp-server | `http://rt1-prometheus.koinon-fixtures.svc.cluster.local:8080/mcp` |
+| Web research | `manifests/searxng.yaml` | SearXNG (search) and `web_url_read` (page to Markdown) via mcp-searxng, bearer token required | `http://rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080/mcp` |
 | Internal docs | `docs-repo/` | A fictional platform handbook to push to Gitea | n/a (Gitea MCP) |
 | Manifests | `manifests/` | Deployments, Services, NetworkPolicies, kustomization | n/a |
 
@@ -96,6 +97,46 @@ docker run --rm -p 9090:9090 --user 65534 -v "$PWD/data:/data" prom/prometheus:v
   --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/data --storage.tsdb.retention.time=90d
 ```
 
+## Web research (`manifests/searxng.yaml`)
+
+An unmodified SearXNG (image `searxng/searxng`, pinned by digest `sha256:0f48ffe2...`, version
+2026.10.27) behind `ihor-sokoliuk/mcp-searxng` 2.9.0 (MIT, image by digest `sha256:8f1dd92a...`) in
+Streamable HTTP mode with a static bearer token (`MCP_HTTP_HARDEN`, `MCP_HTTP_AUTH_TOKEN` from Secret
+`rt1-searxng-secrets`, stateless). Tools: `searxng_web_search` and `web_url_read`. SearXNG's config is
+`manifests/searxng-settings.yml`: JSON and HTML formats, engines duckduckgo, bing, wikipedia, github and
+stackoverflow, limiter and image proxy off, no Valkey or Redis. Its secret key comes from the Secret
+(placeholder; set the real one out of band). Nothing is built: the build script copies both images to Zot
+by digest.
+
+- **Internet egress.** Unlike the other fixtures, this namespace's two web-research pods may reach the
+  public internet on ports 80 and 443, because searching and reading pages is their job. The
+  NetworkPolicy allows `0.0.0.0/0` except 10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10 and
+  127/8 (IPv4 only), so a URL cannot send them into the cluster, the LAN or a metadata service. SearXNG
+  accepts connections only from mcp-searxng, and mcp-searxng only from the gateway. DNS is allowed for
+  everything.
+- **Licence.** SearXNG is AGPL-3.0. We run the upstream image unmodified as a separate service for
+  testing; its code is not vendored, patched or bundled into any Koinon image, and `searxng-settings.yml`
+  is configuration only. Keep it that way. Do not ship it as a Koinon component.
+- Duckduckgo and others may answer a CAPTCHA to a home IP; wikipedia, github and bing normally work.
+
+Run locally (public internet needed):
+
+```sh
+docker network create rt1
+docker run -d --name sx --network rt1 --user 977 -e SEARXNG_SECRET=koinon_test_not-a-real-secret \
+  -v "$PWD/test/fixtures/rt1/manifests/searxng-settings.yml:/etc/searxng/settings.yml:ro" \
+  searxng/searxng@sha256:0f48ffe2152f388f5eaede27f96b610449cebfc890d0ad457304475a54ad7b6e
+docker run -d --name mx --network rt1 -p 8081:8080 -e SEARXNG_URL=http://sx:8080 -e MCP_HTTP_PORT=8080 \
+  -e MCP_HTTP_HOST=0.0.0.0 -e MCP_HTTP_HARDEN=true -e MCP_HTTP_STATELESS=true \
+  -e MCP_HTTP_AUTH_TOKEN=koinon_test_not-a-real-token -e MCP_HTTP_ALLOWED_HOSTS=localhost:8081 \
+  -e MCP_HTTP_ALLOWED_ORIGINS=http://localhost:8081 \
+  isokoliuk/mcp-searxng@sha256:8f1dd92a9e2875cb4e8df7036785ec4c088b7600cefb611de472a352a3dcba60
+export MCP_TOKEN=koinon_test_not-a-real-token
+curl -s localhost:8081/mcp -H "Authorization: Bearer $MCP_TOKEN" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"web_url_read","arguments":{"url":"https://example.com"}}}'
+```
+
 ## Internal docs (`docs-repo/`)
 
 An index and six pages of a fictional "Northwind platform handbook" (secret handling, access windows,
@@ -117,16 +158,21 @@ placeholders; fill in digests at deploy (see `kustomization.yaml`).
 |---|---|---|
 | rt1-motherduck | motherduck 192Mi (about 75 MiB measured) | 192Mi |
 | rt1-fakecicost | fakecicost 64Mi | 64Mi |
+| rt1-searxng | searxng 256Mi (about 87 MiB measured) | 256Mi |
+| rt1-searxng-mcp | mcp-searxng 128Mi (about 43 MiB) | 128Mi |
 | rt1-prometheus | prometheus 144Mi (about 95 MiB), prometheus-mcp 112Mi (about 75 MiB); init: promgen 64Mi, promtool 256Mi | 256Mi at run time |
 
-To let agents use them, the gateway must be allowed to reach the three hosts: add them to the chart's
+To let agents use them, the gateway must be allowed to reach the four hosts
+(`rt1-motherduck:8000`, `rt1-fakecicost:8080`, `rt1-prometheus:8080` and `rt1-searxng-mcp:8080`, each
+`<name>.koinon-fixtures.svc.cluster.local`): add them to the chart's
 `egress.allowedInternalHosts` and `networkPolicy.gatewayEgressTo` (ports 8000 and 8080 in
 `koinon-fixtures`), then register each as an MCP server (`docs/site/src/content/docs/guides/mcp-servers.md`).
-For fakecicost, give the server a bearer credential so agentgateway injects the header.
+For fakecicost and rt1-searxng-mcp, give the server a bearer credential so agentgateway injects the header.
 
 ## Building images
 
-`hack/rt1-fixtures-build.sh REGISTRY [TAG]` builds all five images for linux/amd64 and pushes them
+`hack/rt1-fixtures-build.sh REGISTRY [TAG]` builds four images for linux/amd64 (two with ko, two with buildx) and mirrors three (Prometheus and the two
+web-research images) by digest, then pushes them
 (`DRY_RUN=1` prints the commands only). By hand:
 
 ```sh
@@ -140,6 +186,11 @@ docker buildx build --platform linux/amd64 --push -f test/fixtures/rt1/prometheu
 # Prometheus itself (promtool is in the image): a pinned copy
 crane copy prom/prometheus:v3.7.3@sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038 \
   <registry>/koinon/rt1-prometheus:v3.7.3
+# Web research: mirrors, by digest
+crane copy searxng/searxng@sha256:0f48ffe2152f388f5eaede27f96b610449cebfc890d0ad457304475a54ad7b6e \
+  <registry>/koinon/rt1-searxng:2026.10.27
+crane copy isokoliuk/mcp-searxng@sha256:8f1dd92a9e2875cb4e8df7036785ec4c088b7600cefb611de472a352a3dcba60 \
+  <registry>/koinon/rt1-searxng-mcp:2.9.0
 ```
 
 ## Attribution and licences
@@ -149,6 +200,6 @@ crane copy prom/prometheus:v3.7.3@sha256:49214755b6153f90a597adcbff0252cc61069f8
   licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Changes: costs scaled by
   100, dates shifted, one anomaly planted, text columns cast to numbers. See `motherduck/NOTICE`.
   The data is not committed here; it is downloaded at image build time.
-- `mcp-server-motherduck` (MIT), `prometheus-mcp-server` (MIT), DuckDB (MIT) and Prometheus
+- `mcp-server-motherduck` (MIT), `prometheus-mcp-server` (MIT), `mcp-searxng` (MIT), SearXNG (AGPL-3.0, see above), DuckDB (MIT) and Prometheus
   (Apache-2.0) are used unmodified from their releases.
 - Everything under `cmd/` and the rest of this directory is Apache-2.0 like Koinon.
