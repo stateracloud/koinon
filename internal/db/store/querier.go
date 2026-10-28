@@ -484,7 +484,7 @@ type Querier interface {
 	ListMCPTools(ctx context.Context, orgID pgtype.UUID) ([]McpTool, error)
 	ListMCPToolsOfServer(ctx context.Context, arg ListMCPToolsOfServerParams) ([]McpTool, error)
 	ListModels(ctx context.Context, orgID pgtype.UUID) ([]Model, error)
-	// Every model no admin set the format of, in every org, with its provider's type (startup:
+	// Every model no admin set the format of, in every live org, with its provider's type (startup:
 	// catalog.RederiveFormats applies internal/modelformat to them).
 	ListModelsToRederiveFormat(ctx context.Context) ([]ListModelsToRederiveFormatRow, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)

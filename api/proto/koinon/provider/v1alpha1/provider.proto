@@ -37,6 +37,12 @@ service ProviderService {
   rpc ModelFormats(ModelFormatsRequest) returns (ModelFormatsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+
+  // ProviderTypeInfo says what a provider type offers before any provider of that type exists, so the
+  // provider form shows only the fields the server will accept.
+  rpc ProviderTypeInfo(ProviderTypeInfoRequest) returns (ProviderTypeInfoResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // Provider is an upstream model API of the org. It never holds the key.
@@ -61,7 +67,14 @@ message Provider {
   // for an API key not scoped to a workspace. Empty when unset. An identifier, not a credential.
   string anthropic_workspace_id = 12;
   // formats are the model formats the provider's type offers, preferred first (ADR 0069).
-  repeated string formats = 13;
+  repeated ModelFormat formats = 13;
+}
+
+// ModelFormat is a model wire format as the server's format table names it: id is the stored value,
+// label how it reads to a person. The set is open and grows with the formats Koinon supports.
+message ModelFormat {
+  string id = 1;
+  string label = 2;
 }
 
 // Rates are deprecated: per-model rates were folded into org prices (PriceService, ADR 0056). The
@@ -199,8 +212,19 @@ message ModelFormatsRequest {
 }
 
 message ModelFormatsResponse {
-  // offered are the formats the provider offers, preferred first.
-  repeated string offered = 1;
-  // default_format is the format the model gets unless overridden.
-  string default_format = 2;
+  // default_format is the id of the format the model gets unless overridden. The formats the
+  // provider offers are Provider.formats.
+  string default_format = 1;
+}
+
+message ProviderTypeInfoRequest {
+  string org_id = 1;
+  string type = 2;
+}
+
+message ProviderTypeInfoResponse {
+  // formats are the model formats the type offers, preferred first.
+  repeated ModelFormat formats = 1;
+  // workspace_id is set when the type takes an Anthropic workspace ID.
+  bool workspace_id = 2;
 }

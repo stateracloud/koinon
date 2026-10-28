@@ -407,6 +407,20 @@ var _ = Describe("Service", func() {
 			Expect(events(ctx, "model.format_rederived")).To(HaveLen(1), "a second run changes nothing (%d)", n)
 		})
 
+		It("leaves the models of a deleted org alone", func(ctx SpecContext) {
+			router := create(ctx, "openrouter", "")
+			m := model(ctx, router, "deepseek/flash", "")
+			_, err := pool.Exec(ctx, `UPDATE models SET format = 'anthropic' WHERE org_id = $1 AND id = $2`, org, mustUUID(m.ID))
+			Expect(err).NotTo(HaveOccurred())
+			_, err = pool.Exec(ctx, `UPDATE orgs SET deleted_at = now() WHERE id = $1`, org)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = svc.RederiveFormats(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			var f string
+			Expect(pool.QueryRow(ctx, `SELECT format FROM models WHERE org_id = $1 AND id = $2`, org, mustUUID(m.ID)).Scan(&f)).To(Succeed())
+			Expect(f).To(Equal("anthropic"))
+		})
+
 		It("keeps formats within what a provider's new type offers", func(ctx SpecContext) {
 			router := create(ctx, "openrouter", "")
 			m := model(ctx, router, "anthropic/claude-a", "anthropic")

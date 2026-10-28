@@ -59,10 +59,26 @@ func (s *Service) RederiveFormats(ctx context.Context) (int, error) {
 
 // ModelFormats returns the formats a model may use on a provider, preferred first, and the one it
 // gets by default, so a form offers what Create and Update will accept.
-func (s *Service) ModelFormats(ctx context.Context, org pgtype.UUID, providerID, name string) (offered []string, def string, err error) {
+func (s *Service) ModelFormats(ctx context.Context, org pgtype.UUID, providerID, name string) (string, error) {
 	prov, err := s.GetProvider(ctx, org, providerID)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
-	return prov.Formats, string(modelformat.Default(prov.Type, name)), nil
+	return string(modelformat.Default(prov.Type, name)), nil
+}
+
+// TypeInfo says what a provider type offers, so a form can show it before the provider exists: the
+// model formats, and whether the type takes an Anthropic workspace ID.
+type TypeInfo struct {
+	Formats     []string
+	WorkspaceID bool
+}
+
+// ProviderTypeInfo returns what a provider type offers. The rules are the ones validation applies.
+func ProviderTypeInfo(typ string) TypeInfo {
+	var f []string
+	for _, x := range modelformat.Offered(typ) {
+		f = append(f, string(x))
+	}
+	return TypeInfo{Formats: f, WorkspaceID: typ == WorkspaceProviderType}
 }

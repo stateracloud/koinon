@@ -435,7 +435,7 @@ func refitModelFormats(ctx context.Context, q *store.Queries, org pgtype.UUID, a
 		}
 		if m.FormatOverridden {
 			if err := modelformat.Validate(prov.Type, modelformat.Format(m.Format)); err != nil {
-				return invalid("model %q is set to the %s format, which a %s provider does not offer; change the model's format first", m.Name, m.Format, prov.Type)
+				return invalid("model %q is set to the %s format, which a %s provider does not offer; reset the model to the default, or choose a format both types offer", m.Name, m.Format, prov.Type)
 			}
 			continue
 		}

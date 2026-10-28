@@ -12,7 +12,7 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { ProviderService, type CreateModelResponse, type Model, type Provider } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import type { ModelChange, ModelCreate } from '@/hooks/use-catalog-actions'
 import { useOrg } from '@/lib/org-context'
-import { formatLabel, guardProviderType, scopedModelName } from '@/lib/providers'
+import { guardProviderType, scopedModelName } from '@/lib/providers'
 
 const namePattern = /^[A-Za-z0-9_.:/@-]{1,256}$/
 
@@ -45,11 +45,14 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
     return () => clearTimeout(t)
   }, [name])
   const formats = useQuery(ProviderService.method.modelFormats, { orgId: org.orgId, providerId: provider.id, name: askedName }, { enabled: namePattern.test(askedName) })
-  const offered = formats.data?.offered.length ? formats.data.offered : [...provider.formats]
+  // The provider's formats come from the server's table with their labels; the default is asked per name.
+  const offered = provider.formats
   const defaultFormat = formats.data?.defaultFormat ?? ''
-  // The choice: null follows the default; a value is what the person picked.
-  const [picked, setPicked] = useState<string | null>(model?.formatOverridden ? model.format : null)
-  const format = picked ?? defaultFormat
+  const defaultLabel = offered.find((f) => f.id === defaultFormat)?.label
+  // The choice: "" follows the default, so a later change of the default reaches the model; a format id
+  // pins that format, the default's own id included.
+  const current = model?.formatOverridden ? model.format : ''
+  const [picked, setPicked] = useState(current)
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string>()
@@ -69,13 +72,12 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
     setError(undefined)
     try {
       let warnings: string[] = []
-      // Picking the default means following it, so a later change of the default reaches this model.
-      const override = picked !== null && picked !== defaultFormat ? picked : ''
       if (model) {
         const change: ModelChange = { guard: canGuard ? guard : undefined }
-        if (override !== (model.formatOverridden ? model.format : '')) change.format = override
+        // Only a changed choice is sent, so a guard-only edit keeps a pinned format.
+        if (picked !== current) change.format = picked
         await onUpdate(model.id, change)
-      } else warnings = (await onCreate({ providerId: provider.id, name, guard: canGuard && guard, format: override })).warnings
+      } else warnings = (await onCreate({ providerId: provider.id, name, guard: canGuard && guard, format: picked })).warnings
       onSaved?.(warnings)
       onDone()
     } catch (e2) {
@@ -106,19 +108,18 @@ export function ModelForm({ provider, orgSlug, model, onCreate, onUpdate, onDone
       </p>
       <div className="grid gap-1.5">
         <Label htmlFor="model-format">API format</Label>
-        <NativeSelect id="model-format" value={format} onChange={(e) => setPicked(e.target.value)} disabled={offered.length < 2 || !defaultFormat} aria-describedby="model-format-help">
-          {!defaultFormat && <option value="">Loading…</option>}
+        <NativeSelect id="model-format" value={picked} onChange={(e) => setPicked(e.target.value)} disabled={offered.length < 2} aria-describedby="model-format-help">
+          <option value="">{defaultLabel ? `Default (${defaultLabel})` : 'Default'}</option>
           {offered.map((f) => (
-            <option key={f} value={f}>
-              {formatLabel(f)}
-              {f === defaultFormat ? ' (default)' : ''}
+            <option key={f.id} value={f.id}>
+              {f.label}
             </option>
           ))}
         </NativeSelect>
         <p id="model-format-help" className="text-muted-foreground text-xs">
           {offered.length < 2
             ? `${provider.name} offers one format for its models.`
-            : 'The API the gateway speaks to this model. Leave the default unless you know the model works better another way; a format you choose is kept when Koinon changes its defaults.'}
+            : 'The API the gateway speaks to this model. The default follows Koinon, which may change it in a later release. Choose a format to keep it whatever the default becomes.'}
         </p>
       </div>
       {canGuard && (

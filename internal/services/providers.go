@@ -12,6 +12,7 @@ import (
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // The ProviderService is the UI's face of the catalog service layer (ADR 0056): the same
@@ -22,7 +23,7 @@ func providerProto(p catalog.Provider) *providerv1alpha1.Provider {
 	return &providerv1alpha1.Provider{
 		Id: p.ID, Name: p.Name, Type: p.Type, Url: p.URL, HasKey: p.HasKey, Source: p.Source,
 		ManagedBySecret: p.ManagedBySecret, DisabledReason: p.DisabledReason, Removed: p.Removed,
-		AnthropicWorkspaceId: p.AnthropicWorkspaceID, Formats: p.Formats,
+		AnthropicWorkspaceId: p.AnthropicWorkspaceID, Formats: formatProtos(p.Formats),
 		CreatedAt: timestamppb.New(p.CreatedAt), UpdatedAt: timestamppb.New(p.UpdatedAt),
 	}
 }
@@ -203,9 +204,27 @@ func (s *Server) ModelFormats(ctx context.Context, req *providerv1alpha1.ModelFo
 	if err != nil {
 		return nil, err
 	}
-	offered, def, err := s.catalog.ModelFormats(ctx, c.org, req.GetProviderId(), req.GetName())
+	def, err := s.catalog.ModelFormats(requestCtx(ctx), c.org, req.GetProviderId(), req.GetName())
 	if err != nil {
 		return nil, s.catalogError(err)
 	}
-	return &providerv1alpha1.ModelFormatsResponse{Offered: offered, DefaultFormat: def}, nil
+	return &providerv1alpha1.ModelFormatsResponse{DefaultFormat: def}, nil
+}
+
+// ProviderTypeInfo implements ProviderService. Admins and owners.
+func (s *Server) ProviderTypeInfo(ctx context.Context, req *providerv1alpha1.ProviderTypeInfoRequest) (*providerv1alpha1.ProviderTypeInfoResponse, error) {
+	if _, err := s.providerCaller(ctx, req.GetOrgId()); err != nil {
+		return nil, err
+	}
+	info := catalog.ProviderTypeInfo(req.GetType())
+	return &providerv1alpha1.ProviderTypeInfoResponse{Formats: formatProtos(info.Formats), WorkspaceId: info.WorkspaceID}, nil
+}
+
+// formatProtos names formats with the labels of the format table.
+func formatProtos(ids []string) []*providerv1alpha1.ModelFormat {
+	out := make([]*providerv1alpha1.ModelFormat, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, &providerv1alpha1.ModelFormat{Id: id, Label: modelformat.Label(modelformat.Format(id))})
+	}
+	return out
 }

@@ -20,23 +20,12 @@ export function providerTypeLabel(type: string): string {
   return providerTypes.find((t) => t.value === type)?.label ?? type
 }
 
-/** The provider type that takes an Anthropic workspace ID (ADR 0069). */
-export const workspaceProviderType = 'anthropic'
-
-/** An Anthropic workspace ID, as the server and database check it. */
-export const workspaceIdPattern = /^wrkspc_[A-Za-z0-9]+$/
-
 /**
- * Model formats as people read them (ADR 0069). The server decides which formats exist and which one a
- * model gets; this only names them, and an unknown format reads as itself.
+ * formatLabelOf names a model's format with the label the server's format table gave its provider
+ * (ADR 0069); the table is the only place that knows the formats, so an unlisted one reads as its id.
  */
-const formatLabels: Record<string, string> = {
-  openai: 'OpenAI chat completions',
-  anthropic: 'Anthropic Messages',
-}
-
-export function formatLabel(format: string): string {
-  return formatLabels[format] ?? format
+export function formatLabelOf(provider: Provider, format: string): string {
+  return provider.formats.find((f) => f.id === format)?.label ?? format
 }
 
 /** scopedModelName is the name the gateway serves a model under: "<org slug>/<model>" (ADR 0056). */

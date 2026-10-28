@@ -79,12 +79,6 @@ const (
 	McpToolTierUpdateTierNever McpToolTierUpdateTier = "never"
 )
 
-// Defines values for ModelFormat.
-const (
-	Anthropic ModelFormat = "anthropic"
-	Openai    ModelFormat = "openai"
-)
-
 // Defines values for PriceChangeKind.
 const (
 	Added   PriceChangeKind = "added"
@@ -358,8 +352,9 @@ type Model struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	DisabledReason *string   `json:"disabledReason,omitempty"`
 
-	// Format A model's wire format (ADR 0069): `openai` is chat completions, `anthropic` is the Messages API.
-	// The value set grows with the formats Koinon supports.
+	// Format A model's wire format (ADR 0069). The set is open and grows with the formats Koinon supports;
+	// today `openai` is chat completions and `anthropic` is the Messages API. A provider's `formats`
+	// lists the values it accepts.
 	Format ModelFormat `json:"format"`
 
 	// FormatOverridden Whether an admin set the format. Otherwise it follows the default and is re-derived when the default changes.
@@ -403,8 +398,9 @@ type ModelCreated struct {
 	CreatedAt      time.Time `json:"createdAt"`
 	DisabledReason *string   `json:"disabledReason,omitempty"`
 
-	// Format A model's wire format (ADR 0069): `openai` is chat completions, `anthropic` is the Messages API.
-	// The value set grows with the formats Koinon supports.
+	// Format A model's wire format (ADR 0069). The set is open and grows with the formats Koinon supports;
+	// today `openai` is chat completions and `anthropic` is the Messages API. A provider's `formats`
+	// lists the values it accepts.
 	Format ModelFormat `json:"format"`
 
 	// FormatOverridden Whether an admin set the format. Otherwise it follows the default and is re-derived when the default changes.
@@ -432,9 +428,10 @@ type ModelCreated struct {
 	Warnings *[]string `json:"warnings,omitempty"`
 }
 
-// ModelFormat A model's wire format (ADR 0069): `openai` is chat completions, `anthropic` is the Messages API.
-// The value set grows with the formats Koinon supports.
-type ModelFormat string
+// ModelFormat A model's wire format (ADR 0069). The set is open and grows with the formats Koinon supports;
+// today `openai` is chat completions and `anthropic` is the Messages API. A provider's `formats`
+// lists the values it accepts.
+type ModelFormat = string
 
 // ModelList defines model for ModelList.
 type ModelList struct {

@@ -22,7 +22,8 @@ func TestDefault(t *testing.T) {
 		{"openrouter", "deepseek/deepseek-v4", modelformat.OpenAI},
 		{"openrouter", "openai/gpt-5", modelformat.OpenAI},
 		{"openrouter", "anthropic/claude-sonnet-4", modelformat.OpenAI}, // pinned until the flip (decision 4)
-		{"openrouter", "claude-sonnet-4", modelformat.Anthropic},
+		{"openrouter", "claude-sonnet-4", modelformat.OpenAI},           // pinned too
+		{"ollama", "claude-sonnet-4", modelformat.OpenAI},
 		{"custom-vendor", "Claude-Opus", modelformat.OpenAI},
 	}
 	for _, c := range cases {

@@ -151,8 +151,16 @@ var _ = Describe("ProviderService", func() {
 		Expect(err).NotTo(HaveOccurred())
 		oa, err := create(ctx, owner, "openai", "openai", "https://api.openai.com/v1", "k")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(or.GetProvider().GetFormats()).To(Equal([]string{"openai", "anthropic"}))
-		Expect(oa.GetProvider().GetFormats()).To(Equal([]string{"openai"}))
+		ids := func(fs []*providerv1alpha1.ModelFormat) (out []string) {
+			for _, f := range fs {
+				Expect(f.GetLabel()).NotTo(BeEmpty())
+				out = append(out, f.GetId())
+			}
+			return out
+		}
+		Expect(ids(or.GetProvider().GetFormats())).To(Equal([]string{"openai", "anthropic"}))
+		Expect(ids(oa.GetProvider().GetFormats())).To(Equal([]string{"openai"}))
+		Expect(or.GetProvider().GetFormats()[1].GetLabel()).To(Equal("Anthropic Messages"))
 		orID, oaID := or.GetProvider().GetId(), oa.GetProvider().GetId()
 
 		// The default follows the table; OpenRouter anthropic/* stays on openai until the flip.
@@ -163,8 +171,15 @@ var _ = Describe("ProviderService", func() {
 
 		fm, err := owner.providers.ModelFormats(ctx, &providerv1alpha1.ModelFormatsRequest{OrgId: org, ProviderId: orID, Name: "claude-haiku"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(fm.GetOffered()).To(Equal([]string{"openai", "anthropic"}))
-		Expect(fm.GetDefaultFormat()).To(Equal("anthropic"))
+		Expect(fm.GetDefaultFormat()).To(Equal("openai"), "OpenRouter claude-* is pinned to openai until the flip")
+		ti, err := owner.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "anthropic"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ti.GetWorkspaceId()).To(BeTrue())
+		Expect(ti.GetFormats()).To(HaveLen(1))
+		ti, err = owner.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "openrouter"})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ti.GetWorkspaceId()).To(BeFalse())
+		Expect(ti.GetFormats()).To(HaveLen(2))
 
 		// An override within what the provider offers is stored and marked.
 		upd, err := owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), Format: new("anthropic")})
@@ -200,7 +215,7 @@ var _ = Describe("ProviderService", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.GetProvider().GetAnthropicWorkspaceId()).To(Equal("wrkspc_01Abc"))
-		Expect(res.GetProvider().GetFormats()).To(Equal([]string{"anthropic"}))
+		Expect(res.GetProvider().GetFormats()).To(HaveLen(1))
 		m, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: res.GetProvider().GetId(), Name: "claude-haiku-4-5"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(m.GetModel().GetFormat()).To(Equal("anthropic"))
@@ -213,7 +228,8 @@ var _ = Describe("ProviderService", func() {
 		// With it gone the type may change, and the model follows the new type's default.
 		upd, err = owner.providers.UpdateProvider(ctx, &providerv1alpha1.UpdateProviderRequest{OrgId: org, ProviderId: res.GetProvider().GetId(), Type: new("openai")})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(upd.GetProvider().GetFormats()).To(Equal([]string{"openai"}))
+		Expect(upd.GetProvider().GetFormats()).To(HaveLen(1))
+		Expect(upd.GetProvider().GetFormats()[0].GetId()).To(Equal("openai"))
 		list, err := owner.providers.ListModels(ctx, &providerv1alpha1.ListModelsRequest{OrgId: org})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(list.GetModels()[0].GetFormat()).To(Equal("openai"))
