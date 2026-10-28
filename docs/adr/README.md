@@ -90,3 +90,4 @@ are in [0046](0046-adr-conventions.md).
 | [0073](0073-agent-passport.md) | Agent passport: a verifiable identity for every agent call | Accepted (delivery after v0.1.0) |
 | [0074](0074-run-traces-trace-router.md) | Run traces: a Koinon trace router to each org's OTLP backend | Accepted (delivery after v0.1.0) |
 | [0075](0075-isolation-tiers.md) | Isolation tiers: vm, hardened and dev | Accepted (pending qualification on Bottlerocket) |
+| [0076](0076-database-modes.md) | Database modes: bring your own, existing CNPG, or standalone Postgres | Accepted (delivery after v0.1.0, in v0.1.x) |
