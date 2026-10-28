@@ -42,6 +42,14 @@ Instructions for coding agents working on Koinon.
 - Every model with a `cache_read` price in the catalog runs with prompt caching on; there is no off
   switch (ADR 0068).
 
+## Principles
+
+- Favor the long-term, sustainable design: build foundations generic enough to extend, and take no
+  shortcuts or stopgaps presented as the default. Koinon isn't public until it's polished, so there's
+  time to do it properly.
+- When you offer options, the recommended one is the sustainable one; name what a cheaper option
+  costs later.
+
 ## Hard rules
 
 - **Never Kyverno.** Admission policy is native ValidatingAdmissionPolicy only.
