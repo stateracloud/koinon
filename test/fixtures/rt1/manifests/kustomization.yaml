@@ -12,6 +12,11 @@ resources:
   - fakecicost.yaml
   - prometheus.yaml
   - searxng.yaml
+# SearXNG's settings file, mounted by the searxng Deployment.
+configMapGenerator:
+  - name: rt1-searxng-settings
+    files:
+      - settings.yml=searxng-settings.yml
 # Images are pinned by digest. The three mirrored upstream images (prometheus, searxng, mcp-searxng) keep
 # their upstream digests. The four built images were built from bfaab19 for linux/amd64 and pushed with
 # hack/rt1-fixtures-build.sh, which prints this block after a rebuild. The tag is informational.

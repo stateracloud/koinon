@@ -75,6 +75,8 @@ spec:
           volumeMounts:
             - {name: om, mountPath: /om, readOnly: true}
             - {name: data, mountPath: /data}
+            # promtool stages each block in a head directory under the temp dir before moving it to /data.
+            - {name: promtool-tmp, mountPath: /tmp}
       containers:
         - name: prometheus
           image: zot.apps.lab.example.invalid/koinon/rt1-prometheus:v3.7.3
@@ -119,6 +121,8 @@ spec:
           emptyDir: {sizeLimit: 256Mi}
         - name: tmp
           emptyDir: {sizeLimit: 16Mi}
+        - name: promtool-tmp
+          emptyDir: {sizeLimit: 128Mi}
 ---
 apiVersion: v1
 kind: Service
