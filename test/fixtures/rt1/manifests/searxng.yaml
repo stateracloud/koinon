@@ -122,6 +122,12 @@ spec:
             - {name: MCP_HTTP_HARDEN, value: "true"}
             # Sessionless: agentgateway does not keep the MCP server's legacy sessions.
             - {name: MCP_HTTP_STATELESS, value: "true"}
+            # Every agent's calls reach this pod from the gateway's single pod IP, so the per-IP in-flight
+            # limit (default 8) is effectively the global one. Raise it, and keep the global limit above
+            # it (the server ignores a per-IP value above the global one). Pages are cut at 8000 characters.
+            - {name: MCP_HTTP_STATELESS_MAX_IN_FLIGHT_PER_IP, value: "16"}
+            - {name: MCP_HTTP_STATELESS_MAX_IN_FLIGHT, value: "32"}
+            - {name: URL_READ_MAX_CHARS, value: "8000"}
             - {name: MCP_HTTP_ALLOWED_HOSTS, value: "rt1-searxng-mcp:8080,rt1-searxng-mcp,rt1-searxng-mcp.koinon-fixtures:8080,rt1-searxng-mcp.koinon-fixtures,rt1-searxng-mcp.koinon-fixtures.svc:8080,rt1-searxng-mcp.koinon-fixtures.svc,rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080,rt1-searxng-mcp.koinon-fixtures.svc.cluster.local"}
             - {name: MCP_HTTP_ALLOWED_ORIGINS, value: "http://rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080"}
             - name: MCP_HTTP_AUTH_TOKEN
