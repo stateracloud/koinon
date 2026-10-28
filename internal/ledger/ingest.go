@@ -174,24 +174,19 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 	if err := budget.Alert(ctx, q, in.Notifier, st, delta); err != nil {
 		return err
 	}
-	// A limit cancels runs only in its current window: a late entry from last month reaching
-	// last month's cap must not cancel this month's runs.
-	// A level this entry has just crossed (spent before it was below the limit) wins over one that
-	// was already spent, so a late entry that crosses the org cap of an agent whose daily limit is
-	// long spent still cancels the org's runs and wakes the reconciler.
-	var l budget.Level
-	found, crossed := false, false
-	for _, r := range st.Reached() {
-		if !r.WindowStart.Equal(currentWindow(r.Name, in.now())) {
-			continue
-		}
-		crossing := r.Spent-delta < r.Limit
-		if !found || (crossing && !crossed) {
-			l, found, crossed = r, true, crossing
-		}
-	}
+	// The limit named is budget.Status.Pick's (the broadest reached in its current window: a late
+	// entry from last month reaching last month's cap cancels nothing). The reconciler is woken when
+	// this entry crossed any current level, so a late entry that crosses the org cap of an agent
+	// whose daily limit is long spent still wakes it.
+	l, found := st.Pick(in.now())
 	if !found {
 		return nil
+	}
+	crossed := false
+	for _, r := range st.Reached() {
+		if r.WindowStart.Equal(budget.CurrentWindow(r.Name, in.now())) && r.Spent-delta < r.Limit {
+			crossed = true
+		}
 	}
 	// The entry that reaches a limit wakes the reconciler, which recomputes every key's limit net of
 	// the spend and pushes it. Standalone agentgateway then blocks the key itself; in Kubernetes mode

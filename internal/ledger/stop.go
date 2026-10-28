@@ -65,8 +65,7 @@ func Stop(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, l budge
 // every other way a key runs out: an admin lowering a limit below the spend, an entry recorded
 // without a run, a run queued or parked while the agent's budget was spent.
 //
-// Of the levels reached in their current window, an org-wide one wins, since it stops more. It
-// returns the runs it canceled; an agent with budget left, or no limit, stops nothing.
+// The limit stopped at and named is [budget.Status.Pick]'s. It returns the runs it canceled; an agent with budget left, or no limit, stops nothing.
 func StopSpent(ctx context.Context, db scheduler.DB, agent store.Agent, now time.Time) (int, error) {
 	n := 0
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
@@ -78,16 +77,7 @@ func StopSpent(ctx context.Context, db scheduler.DB, agent store.Agent, now time
 		if net, _, ok := st.Net(); !ok || net > 0 {
 			return nil
 		}
-		var pick budget.Level
-		found := false
-		for _, l := range st.Reached() {
-			if !l.WindowStart.Equal(currentWindow(l.Name, now)) {
-				continue
-			}
-			if !found || pick.Name == budget.AgentDaily {
-				pick, found = l, true
-			}
-		}
+		pick, found := st.Pick(now)
 		if !found {
 			return nil
 		}
@@ -95,12 +85,4 @@ func StopSpent(ctx context.Context, db scheduler.DB, agent store.Agent, now time
 		return err
 	})
 	return n, err
-}
-
-// currentWindow is the start of the window that level counts at now.
-func currentWindow(level string, now time.Time) time.Time {
-	if level == budget.AgentDaily {
-		return budget.DayStart(now)
-	}
-	return budget.MonthStart(now)
 }

@@ -118,6 +118,36 @@ func (s Status) Reached() []Level {
 	return out
 }
 
+// CurrentWindow is the start of the window level counts at now: the UTC day for an agent's daily
+// limit, the calendar month (UTC) for the org's cap and the platform ceiling.
+func CurrentWindow(level string, now time.Time) time.Time {
+	if level == AgentDaily {
+		return DayStart(now)
+	}
+	return MonthStart(now)
+}
+
+// Pick is the one limit a stop names when several are reached: of the levels reached in their
+// current window at now (a late entry of last month reaching last month's cap stops nothing), the
+// broadest scope first, platform ceiling, then org monthly cap, then agent daily limit, because
+// the broadest one decides which runs stop (an org-wide limit stops every run of the org) and
+// raising only a narrower limit would not let the agent run again. ok is false when none is
+// reached. Every stop path (the ledger, the reconciler, agentd) reports the limit Pick returns.
+func (s Status) Pick(now time.Time) (Level, bool) {
+	rank := map[string]int{PlatformCeiling: 0, OrgMonthly: 1, AgentDaily: 2}
+	var pick Level
+	found := false
+	for _, l := range s.Reached() {
+		if !l.WindowStart.Equal(CurrentWindow(l.Name, now)) {
+			continue
+		}
+		if !found || rank[l.Name] < rank[pick.Name] {
+			pick, found = l, true
+		}
+	}
+	return pick, found
+}
+
 // Org describes a limit set on an org.
 type Org struct {
 	MonthlyCap      *money.USD
