@@ -38,6 +38,29 @@ meanwhile wait for the new one (up to the sandbox timeout). These recreations co
 a sandbox fails again after that, Koinon does not recreate it but marks the agent **unhealthy**, with
 the reason "the sandbox kept failing" and the last failure, and you resume it as described above. A failure that persists, such as an image that cannot be pulled, ends this way after three recreations.
 
+## A sandbox that never becomes ready
+
+A run waits for its agent's sandbox. After the org's queue wait (5 minutes) it goes back to the queue,
+and it waits again when it is next claimed, so a burst beyond the cluster's capacity shows up as waiting
+and not as failed runs. That wait has a cap: the most a run waits for its sandbox in total, across those
+requeues. The default is 1 hour (`--sandbox-wait-cap` of koinon-agentd), and an org can set its own, from
+5 minutes to 7 days. The cap counts from the first time the run found its sandbox not ready, and starts
+again when any run of the agent finds the sandbox ready or the agent is resumed, so time spent queued
+behind a run that had the sandbox does not count.
+
+At the cap the run **fails** with the class `sandbox_unavailable` and is not retried. Koinon names the
+cause from the sandbox's last condition:
+
+- **the image could not be pulled** (a missing tag, a registry that refuses or cannot be reached);
+- **the cluster's admission policy refused the sandbox**;
+- **no node can run the sandbox** (more CPU or memory than any node has, a taint nothing tolerates);
+- **the cause is unknown**.
+
+The agent is marked **unhealthy** with that reason, the org's owners and admins get a notice, every task
+with a run waiting on the agent gets a note, and admins and owners see an item for the agent in the
+inbox until it is resumed. Fix the cause, then choose **Resume agent** on the agent's page; the waiting
+runs start a new wait. An archived agent cannot be resumed and shows no item.
+
 ## New instructions for open tasks
 
 A new agent version normally applies from the next run, but a task keeps its session, so the agent

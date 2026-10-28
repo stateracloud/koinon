@@ -49,6 +49,9 @@ pruning key files), `gateway_apply` (the gateway was unreachable or the reload d
 | `koinon_agentd_runs_finished_total` | counter | `outcome`: `succeeded`, `failed`, `canceled`, `parked` | Runs this replica ended or parked on approvals. A cancel made by the control plane (a cap, a spend limit, a user) is made by koinon-api and not counted here. |
 | `koinon_agentd_takeovers_total` | counter | none | Runs this replica took over after the owner's lease expired or was released. |
 | `koinon_agentd_sandbox_wait_duration_seconds` | histogram | none | Time a run waited for its agent's sandbox to be ready, whatever the result (a timeout is observed too). |
+| `koinon_agentd_sandbox_wait_cap_total` | counter | `cause`: `image_pull`, `admission`, `no_nodes`, `unknown` | Runs failed because their sandbox never became ready within the org's cap. |
+| `koinon_agentd_wrap_up_notices_total` | counter | none | Runs whose agent was told its time limit is near. |
+| `koinon_agentd_time_limit_stops_total` | counter | none | Runs this replica stopped at their time limit. The api's wall-clock sweep is the backstop and is not counted. |
 | `koinon_agentd_model_wait_duration_seconds` | histogram | none | Time a run waited, before starting its harness, for the gateway to serve its model (a new provider's key still reaching the gateway). Observed only for runs that waited and were then served or timed out, not for a wait ended by a cancel, a lost lease or a shutdown. |
 
 ## koinon-api
@@ -58,6 +61,7 @@ pruning key files), `gateway_apply` (the gateway was unreachable or the reload d
 | `koinon_api_ledger_records_ingested_total` | counter | none | Access-log records recorded as new spend entries. Replays are not counted. |
 | `koinon_api_ledger_records_rejected_total` | counter | `reason`: `invalid_agent`, `invalid_request_id`, `missing_key`, `negative_tokens`, `invalid_cost`, `unattributed` | Records that looked charged but were malformed or named an unknown org or agent. |
 | `koinon_api_ledger_ingest_lag_seconds` | histogram | none | Time from a request's access-log record to its ingestion, for newly recorded entries. |
+| `koinon_api_questions_asked_total` | counter | `target_kind`: `user`, `role`, `channel` | Questions agents asked with `ask_user`, by the kind of target they went to. |
 | `koinon_api_rpc_requests_total` | counter | `procedure` (the RPC's full name), `code` (`ok` or the Connect code) | Connect RPCs finished. Requests the auth interceptor refuses are counted (`unauthenticated`). |
 
 The admin API under `/admin/v1` is plain HTTP, not Connect, and is not counted yet.

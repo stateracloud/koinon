@@ -33,7 +33,12 @@ The home screen is the inbox. Its list, Waiting on you, holds what needs a perso
   task's timeline;
 - a question an agent asked you ([Questions from agents](/guides/ask-user/)): choices as buttons, the
   draft it offers, a free-text answer, and Dismiss;
-- a task waiting for your reply that no approval or question explains.
+- a task waiting for your reply that no approval or question explains;
+- for admins and owners, an agent that is unhealthy and takes no runs, with its reason and a link to the
+  agent ([Agent health](/guides/agent-health/)). The item goes away when the agent is resumed.
+
+A question shows who it was asked to ("the org's admins (2 people; the first answer counts)") and how long
+it has waited on you.
 
 The navigation shows how many items wait, and the browser tab title carries the number. Notifications
 are in-app in v0.1. The page re-reads every 15 seconds and when the window gets focus.
@@ -42,6 +47,19 @@ Next to the list are the open tasks as conversations: pick one to read its timel
 agent, or start a new task from the form under the list. Giving the task a title and a first message is
 all it takes; the agent's sandbox starts as soon as the task exists, and also when you start typing in
 a conversation.
+
+## The time limit
+
+Every run has a wall-clock cap. Five minutes before it, Koinon interrupts the agent's turn and tells it
+to wrap up: not to start new work, to finish or save what it is doing, and to end with a reply that says
+what it finished, what is left and the next step. The timeline shows "about 5 minutes left; the agent was
+asked to wrap up". The agent is told once per run. A turn that starts inside that window gets the notice
+at its start instead. A harness that does not end its interrupted turn is left alone, and the run ends at
+the cap as before.
+
+At the cap Koinon stops the run, and the timeline note says "stopped at the time limit of 30m" and
+shows the agent's last summary: what it said since it last paused, or its notes on the task when it said
+nothing. Nothing continues the work by itself.
 
 ## The board
 
