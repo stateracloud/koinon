@@ -6,7 +6,9 @@
   connection secrets; the Helm model values are dropped),
   [0058](0058-gateway-modes.md) (gateway modes), [0051](0051-session-home-generations.md), and on 2026-10-26 by
   [0062](0062-code-host-connectors.md), [0063](0063-forge-credential-classes.md),
-  [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md) (v0.1 Foundation)
+  [0065](0065-work-model-tasks-inbox.md), [0066](0066-triggers-and-scheduling.md) (v0.1 Foundation),
+  and on 2026-10-28 by [0076](0076-database-modes.md) (database modes) and
+  [0077](0077-pinned-openshell-and-installer.md) (pinned prerequisites and the installer)
 - Amends: [0007](0007-connector-model.md), [0016](0016-harness-and-deployment.md),
   [0036](0036-v01-demo.md); extends [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository)
 - Verification: agentgateway Kubernetes-mode `rawConfig` budgets verified by spike S2
@@ -314,3 +316,18 @@ against the registry on 2026-10-28; the two-week wait was waived. Its breaking c
 - **`anthropic-version`** is forwarded, not replaced: see ADR 0069's amendment.
 
 Gaps it closes: ADR 0058 (MCP isolation in Kubernetes mode) and ADR 0041 (budgets without a window).
+
+## Amendment (2026-10-28): database modes
+
+[0076](0076-database-modes.md) replaces "Postgres: `cnpg` … or `external` … No bundled StatefulSet".
+`postgres.mode` takes `external` (any Postgres 18 or newer), `cnpg` (an existing operator; Koinon
+never installs it) or `standalone`: Koinon's own single-replica StatefulSet on the official
+`postgres:18` image, pinned by digest, with a `pg_dump` CronJob that also backs up the KEK. There
+is no default: the install fails until `postgres.mode` is set.
+
+## Amendment (2026-10-28): pinned prerequisites and the installer
+
+[0077](0077-pinned-openshell-and-installer.md) keeps the quickstart clock at `helm install`, but
+Agent Sandbox and OpenShell are no longer manual prerequisites: each Koinon release pins their
+versions in `release/versions.yaml`. They install as separate Helm releases, either with plain
+`helm install` in a documented order or with `koinon install`, which runs the same steps. Kata, the CNPG operator and the NetworkPolicy engine stay prerequisites.

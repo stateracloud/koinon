@@ -57,4 +57,5 @@ Instructions for coding agents working on Koinon.
   secret store; never put them in sandbox env, images, home volumes or logs. The only exception is
   ADR 0044 and it is gated.
 - No CNI-specific features (no Cilium dependency).
-- Don't weaken OpenShell defaults from ADR 0045 (`enforcement: enforce`, Kata runtime class).
+- Don't weaken OpenShell defaults from ADR 0045 (`enforcement: enforce` in every tier) or the
+  isolation tiers of ADR 0075 (the Kata runtime class is required for the `vm` tier).
