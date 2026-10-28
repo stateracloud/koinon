@@ -73,6 +73,9 @@ func Ensure(ctx context.Context, client kubernetes.Interface, namespace string, 
 		if sp.Name == "" {
 			return results, errors.New("a Secret spec has no name")
 		}
+		if sp.Kind != "" && sp.Kind != KindAES256Key {
+			return results, fmt.Errorf("the Secret spec %s has an unknown kind %q", sp.Name, sp.Kind)
+		}
 		existing, err := secrets.Get(ctx, sp.Name, metav1.GetOptions{})
 		switch {
 		case err == nil && sp.Kind == KindAES256Key:

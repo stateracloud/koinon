@@ -218,8 +218,15 @@ var _ = Describe("Render", func() {
 		lone := gateway.State{MCP: []gateway.MCPTarget{{Name: "acme-only", Org: "acme", URL: "http://acme.example.com/mcp"}}}
 		got := targets(lone)
 		Expect(got).To(HaveLen(2))
-		Expect(got[1]).To(HaveKeyWithValue("name", "koinon-placeholder"))
+		Expect(got[1]).To(HaveKeyWithValue("name", "koinon.placeholder"))
 		Expect(got[1]).To(HaveKeyWithValue("condition", "false"))
+		// An org "koinon" with a server "placeholder" is named koinon-placeholder: no collision.
+		clash := targets(gateway.State{MCP: []gateway.MCPTarget{{Name: "koinon-placeholder", Org: "koinon", URL: "http://k.example.com/mcp"}}})
+		names := []string{}
+		for _, t := range clash {
+			names = append(names, t.(map[string]any)["name"].(string))
+		}
+		Expect(names).To(ConsistOf("koinon-placeholder", "koinon.placeholder"))
 		// A lone platform server needs no partner.
 		Expect(targets(gateway.State{MCP: []gateway.MCPTarget{{Name: "github", URL: "http://g.example.com/mcp"}}})).To(HaveLen(1))
 	})

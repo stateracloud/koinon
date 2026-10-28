@@ -162,20 +162,20 @@ pod waits until the reconciler's next pass (at most the resync, 30 s by default)
 ## Amendment (2026-10-28): MCP isolation in Kubernetes mode is closed (agentgateway v1.7.0)
 
 agentgateway v1.7.0 adds MCP conditional targets to the Kubernetes CRDs
-(`AgentgatewayBackend.spec.mcp.targets[].condition`, a CEL expression evaluated per request; the
-CRD refuses a condition on a lone target unless it uses a selector). The "MCP isolation, stated
-plainly" gap above is closed:
+(`AgentgatewayBackend.spec.mcp.targets[].condition`, a CEL expression evaluated per request). The
+"MCP isolation, stated plainly" gap above is closed:
 
 - the driver renders `apiKey.org == "<org>"` on every org-owned static target, the same expression
   standalone mode uses; platform servers have no condition and stay visible to every key;
-- an org with a lone MCP server and no platform server would break the CRD rule, so the driver adds
-  the never-contacted partner `koinon-placeholder` (condition `false`), as standalone mode does;
-- the tool rules still drop grants that name another org's server. They are a second layer now, not
-  the only one;
-- another org's `initialize`, `ping` and list requests no longer reach the server, so the
-  "differences from standalone mode" no longer include MCP isolation.
+- the tool rules still drop grants that name another org's server, as a second layer;
+- another org's `initialize`, `ping` and list requests no longer reach the server, so MCP isolation
+  is no longer a difference between the modes. The shared gateway spec asserts it for both, and
+  `hack/g2-kind.sh` runs it against controller v1.7.0 on kind.
 
-The shared gateway spec (`internal/gateway/gatewaytest`) now sets `OrgTargetsNotContacted` for both
-modes, and `hack/g2-kind.sh` runs it against controller v1.7.0 on kind. The standalone fix in the
-same release (conditions are evaluated on each request, not only when a session starts) hardens
-standalone mode.
+**The placeholder target is a deliberate workaround.** Upstream refuses a condition on a lone target
+(the CRD rule "mcp target condition requires at least two targets unless the target uses selector",
+and `local.rs` in standalone mode). When the only MCP server is an org's, both drivers add a partner
+named `koinon.placeholder` (condition `false`, host `127.0.0.1:9`, never contacted). The dot keeps the
+name from colliding with an org's `<org>-<server>` name, since slugs and server names never contain
+one. Remove it when upstream allows a condition on a lone target. No upstream issue will be filed
+(procoduck's decision).

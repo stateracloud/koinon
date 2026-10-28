@@ -1359,7 +1359,7 @@ func (r *Reconciler) failClosedLimit(agent gateway.AgentRef, now time.Time) *gat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if g, ok := r.gw.(gateway.LedgerBudgets); ok && g.LedgerEnforcesBudgets() {
-		return &gateway.Limit{Unit: gateway.USD, Amount: 0, Generation: "failed"}
+		return &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: ledger.Window, Generation: "failed"}
 	}
 	if l, ok := r.lastLimit[agent]; ok {
 		day, _, _ := strings.Cut(l.Generation, "-")
@@ -1367,5 +1367,5 @@ func (r *Reconciler) failClosedLimit(agent gateway.AgentRef, now time.Time) *gat
 			return &l
 		}
 	}
-	return &gateway.Limit{Unit: gateway.USD, Amount: 0, Generation: "failed"}
+	return &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: ledger.Window, Generation: "failed"}
 }

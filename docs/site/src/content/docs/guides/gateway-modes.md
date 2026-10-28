@@ -30,10 +30,26 @@ gateway:
 
 Run one replica only. The budget database is not shared.
 
+### Upgrading from agentgateway v1.6
+
+- agentgateway v1.7 always encrypts MCP session IDs. The chart gives the gateway a key from the Secret
+  `<release>-gateway-session-key` (key `key`, 64 hex characters), which the ensure-secrets hook Job
+  creates if it is missing. Sessions opened on v1.6 are refused once after the upgrade, and MCP
+  clients initialize a new session.
+- The hook Job now also runs with external Postgres and an existing bootstrap admin Secret, because
+  of that key. Set `gateway.standalone.sessionKey.existingSecret` to your own Secret (key `key`,
+  `openssl rand -hex 32`) to have no Job.
+- To rotate the key, replace the Secret's `key` value and restart the gateway
+  (`kubectl rollout restart deployment/<release>-gateway`): a changed Secret does not restart it.
+  Open MCP sessions end and clients initialize again.
+
 ## Kubernetes
 
 For clusters that already run the agentgateway controller. Koinon creates its own `Gateway` and the
 objects around it in its namespace and never touches the gateways of others.
+
+When you upgrade from v1.6, upgrade the agentgateway CRDs and controller first, then Koinon: the
+preflight refuses a controller outside v1.7.x.
 
 You install, before Koinon, agentgateway **v1.7.x** with its CRDs and Gateway API v1.4 or newer. The
 tested install is:

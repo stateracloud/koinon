@@ -274,6 +274,28 @@ var _ = Describe("Render", func() {
 		})
 	})
 
+	It("gives a lone org target a placeholder that cannot collide with a server name", func() {
+		s := gateway.State{MCP: []gateway.MCPTarget{{Name: "koinon-placeholder", Org: "koinon", URL: "http://k.example.com/mcp"}}}
+		body, _, err := standalone.Render(s, standalone.Options{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring("name: koinon.placeholder"))
+		Expect(strings.Count(string(body), "name: koinon-placeholder")).To(Equal(1))
+	})
+
+	It("renders a limit with a window, and one without", func() {
+		s := gateway.State{}
+		s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour})
+		o := standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}
+		a, _, err := standalone.Render(s, o)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(a)).To(ContainSubstring("rolling: 24h"))
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 1})
+		b, _, err := standalone.Render(s, o)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(strings.Count(string(b), "rolling:")).To(Equal(1), "only the reload probe keeps a window")
+	})
+
 	It("names the budget after the limit's generation", func() {
 		s := gateway.State{Providers: fixtures()[2].state.Providers}
 		s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))

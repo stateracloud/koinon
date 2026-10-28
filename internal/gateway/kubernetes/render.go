@@ -77,7 +77,7 @@ const (
 	// mcpPath is where the proxy serves MCP, as in standalone mode.
 	mcpPath = "/mcp"
 	// placeholderTarget is the never-contacted partner of a lone org target (see mcp).
-	placeholderTarget = "koinon-placeholder"
+	placeholderTarget = "koinon.placeholder"
 
 	groupGateway = "gateway.networking.k8s.io"
 	groupAgent   = "agentgateway.dev"

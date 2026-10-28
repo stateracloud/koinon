@@ -193,7 +193,7 @@ func llmSpec(env Env) {
 			state.AddKey(keyA.Key)
 			state.AddKey(keyB.Key)
 			state.AddKey(keyG.Key)
-			state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 0.0015})
+			state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 0.0015, Window: 24 * time.Hour})
 			state.GrantTools(agentA, gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}})
 
 			gw, err := env.Start(ctx, []int{port(upstream), port(tools), port(ups["globex"].Server), port(ups["guarded"].Server), port(ups["private"].Server), port(redirector)},
