@@ -1,0 +1,134 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Inference-spend history in Prometheus, behind prometheus-mcp-server (:8080/mcp). On every pod start:
+#   1. init "promgen" writes 30 days of OpenMetrics ending 3 hours ago (deterministic: seed 1),
+#   2. init "promtool" turns that into TSDB blocks in /data,
+#   3. Prometheus (listening on 127.0.0.1 only) serves them with 90 days of retention, no scraping,
+#   4. prometheus-mcp-server talks to it over localhost.
+# The data ends 3 h before the pod started, so restart the pod (kubectl rollout restart) the day a test
+# runs, or "yesterday" will not be the day before the test. Creating the blocks takes about 10 seconds.
+#
+# Memory at run time: prometheus request 48Mi / limit 128Mi (measured 31 MiB idle, 57 MiB under a 30-day range-query loop),
+# prometheus-mcp request 48Mi / limit 112Mi (measured about 78 MiB), so the pod is capped at 240Mi. The init containers run first and one at a time (promtool limit 256Mi).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rt1-prometheus-config
+  labels:
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+data:
+  prometheus.yml: |
+    # No scrape targets: the history is backfilled by promtool and nothing adds to it.
+    global:
+      scrape_interval: 1m
+    scrape_configs: []
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rt1-prometheus
+  labels: &labels
+    app.kubernetes.io/name: rt1-prometheus
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rt1-prometheus
+  template:
+    metadata:
+      labels: *labels
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        - name: promgen
+          # Placeholder tags: digests are filled in at deploy (see kustomization.yaml).
+          image: zot.apps.lab.example.invalid/koinon/rt1-promgen:dev
+          args: ["-seed=1", "-days=30", "-lag=3h", "-o=/om/rt1.om"]
+          securityContext: &sc
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 500m, memory: 64Mi}
+          volumeMounts:
+            - {name: om, mountPath: /om}
+        - name: promtool
+          image: zot.apps.lab.example.invalid/koinon/rt1-prometheus:v3.7.3
+          command: ["/bin/promtool"]
+          # 24 h blocks instead of the default 2 h: 40 blocks, not 360, so building takes seconds and Prometheus
+          # needs no compaction at start. (Hidden flag; accepted by the pinned v3.7.3.)
+          args: ["tsdb", "create-blocks-from", "openmetrics", "--max-block-duration=24h", "/om/rt1.om", "/data"]
+          securityContext: *sc
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          volumeMounts:
+            - {name: om, mountPath: /om, readOnly: true}
+            - {name: data, mountPath: /data}
+      containers:
+        - name: prometheus
+          image: zot.apps.lab.example.invalid/koinon/rt1-prometheus:v3.7.3
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/data
+            - --storage.tsdb.retention.time=90d
+            # Only this pod may reach it; prometheus-mcp-server is in the pod.
+            - --web.listen-address=127.0.0.1:9090
+          securityContext: *sc
+          resources:
+            requests: {cpu: 50m, memory: 48Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+          # The kubelet cannot reach a loopback listener, so the probes run inside the container.
+          readinessProbe:
+            exec: {command: [/bin/promtool, check, ready, --url=http://127.0.0.1:9090]}
+            periodSeconds: 10
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus, readOnly: true}
+            - {name: data, mountPath: /data}
+        - name: prometheus-mcp
+          image: zot.apps.lab.example.invalid/koinon/rt1-prometheus-mcp:dev
+          env:
+            - {name: PROMETHEUS_URL, value: "http://127.0.0.1:9090"}
+          ports:
+            - {name: mcp, containerPort: 8080}
+          securityContext: *sc
+          resources:
+            requests: {cpu: 20m, memory: 48Mi}
+            limits: {cpu: 300m, memory: 112Mi}
+          readinessProbe:
+            tcpSocket: {port: mcp}
+            periodSeconds: 10
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: rt1-prometheus-config}
+        - name: om
+          emptyDir: {sizeLimit: 32Mi}
+        - name: data
+          emptyDir: {sizeLimit: 256Mi}
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rt1-prometheus
+  labels:
+    app.kubernetes.io/name: rt1-prometheus
+    app.kubernetes.io/part-of: koinon-rt1-fixtures
+spec:
+  selector:
+    app.kubernetes.io/name: rt1-prometheus
+  ports:
+    - {name: mcp, port: 8080, targetPort: mcp}
