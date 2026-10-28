@@ -1,16 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// OpenCode 2.0.24 configuration for the Koinon OpenCode flavor. Read-only in the image at
+// OpenCode 2.2.0 configuration for the Koinon OpenCode flavor. Read-only in the image at
 // /etc/koinon/opencode/opencode.jsonc, which is OpenCode's global config because koinon-opencode
 // sets OPENCODE_CONFIG_DIR=/etc/koinon/opencode. The KOINON_* values come from koinon-opencode's
 // arguments; KOINON_MODEL_KEY is the agent's agentgateway key, an OpenShell placeholder inside a
-// sandbox. Koinon's instructions are not configured here: OpenCode loads AGENTS.md from this
-// directory, a link to /sandbox/.koinon/AGENTS.md. See flavors/opencode/README.md.
+// sandbox. See flavors/opencode/README.md.
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "koinon/{env:KOINON_MODEL}",
   "update": "disable",
   "share": "disabled",
+  // Koinon's instructions for the run: koinon-agentd writes this file before every harness start
+  // and restores it before every prompt. An absolute path only, never a URL (OpenCode fetches
+  // those).
+  "instructions": ["/sandbox/.koinon/AGENTS.md"],
+  // OpenCode 2.2.0 dropped the built-in "ask" for external_directory (2.0.24 asked for every path
+  // outside the session directory; its docs still say it does), so a read or edit outside it ran
+  // without a question. Ask again, except for the places OpenCode itself writes to, which 2.0.24
+  // exempted: truncated tool and shell output in the data directory, its temporary directory and
+  // this config directory. Later rules win. The explore subagent allows every external
+  // directory in its own rules, so it gets the same rules after them.
+  "permissions": [
+    { "action": "external_directory", "resource": "*", "effect": "ask" },
+    { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/shell/*/*", "effect": "allow" },
+    { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/tool-output/*", "effect": "allow" },
+    { "action": "external_directory", "resource": "/tmp/opencode/*", "effect": "allow" },
+    { "action": "external_directory", "resource": "/etc/koinon/opencode/*", "effect": "allow" }
+  ],
+  "agents": {
+    "explore": {
+      "permissions": [
+        { "action": "external_directory", "resource": "*", "effect": "ask" },
+        { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/shell/*/*", "effect": "allow" },
+        { "action": "external_directory", "resource": "/sandbox/.local/share/opencode/tool-output/*", "effect": "allow" },
+        { "action": "external_directory", "resource": "/tmp/opencode/*", "effect": "allow" },
+        { "action": "external_directory", "resource": "/etc/koinon/opencode/*", "effect": "allow" }
+      ]
+    }
+  },
   // Built-in plugins Koinon turns off: skills from ~/.claude and ~/.agents, the provider plugins
   // (the koinon provider is defined below; opencode.provider.opencode cannot be removed), web
   // search, and logins for well-known integrations.

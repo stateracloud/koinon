@@ -50,11 +50,12 @@ shift "$koinon_shift"
 
 # Drop anything the caller's environment might carry that would change where OpenCode reads its
 # configuration, its database or its server credentials, or where it sends telemetry
-# (OpenCode 2.0.24, see README.md).
+# (OpenCode 2.2.0, see README.md).
 unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR OPENCODE_CONFIG_CONTENT OPENCODE_CLI_CONFIG_CONTENT \
   OPENCODE_CONFIG_PROJECT_DISABLE OPENCODE_PERMISSION OPENCODE_MODELS_URL OPENCODE_MODELS_PATH \
   OPENCODE_AUTO_SHARE OPENCODE_DB OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD OPENCODE_PTY_HANDOFF \
   OPENCODE_SIMULATE OPENCODE_TEST_HOME OPENCODE_LOCAL OPENCODE_PRINT_LOGS \
+  OPENCODE_REPO_CLONE_GITHUB_BASE_URL OPENCODE_API_KEY \
   OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -73,6 +74,10 @@ export OPENCODE_CONFIG_DIR=/etc/koinon/opencode
 export OPENCODE_DISABLE_AUTOUPDATE=1
 export OPENCODE_DISABLE_MODELS_FETCH=1
 export OPENCODE_DISABLE_PROJECT_CONFIG=1
+# No .claude roots (skills; the compatibility plugin is also off) and none of the free models
+# of OpenCode's built-in provider: the koinon provider is the only one.
+export OPENCODE_DISABLE_CLAUDE_CODE=1
+export OPENCODE_DISABLE_FREE_MODELS=1
 
 # The agent's own plugins load only when the template allows plugin installs. The global config
 # directory is read-only and holds none, project configuration is off and ~/.config/opencode is
@@ -100,9 +105,9 @@ koinon_export_endpoints
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}"
 export no_proxy="127.0.0.1,localhost${no_proxy:+,$no_proxy}"
 
-# Koinon's instructions reach the model only through this file (the AGENTS.md link in the
-# global config directory). OpenCode skips a missing file silently and loads an empty one as
-# empty instructions.
+# Koinon's instructions reach the model only through this file (the "instructions" key in
+# /etc/koinon/opencode/opencode.jsonc). OpenCode skips a missing file silently and loads an empty
+# one as empty instructions.
 koinon_require_instructions
 
 mkdir -p "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"

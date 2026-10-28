@@ -9,24 +9,24 @@
 # OpenShell's default sandbox base (ADR 0035), multi-arch index digest, checked 2026-10-22.
 ARG BASE=nvcr.io/nvidia/base/ubuntu:24.04@sha256:7e0f726d635d440d28a7f18e6498d3bdb76c7038bd4c90a090c21eb7c9f40686
 
-# OpenCode 2.0.24 (ADR 0052) is the compiled glibc build that npm's @opencode/cli package installs
+# OpenCode 2.2.0 (ADR 0052) is the compiled glibc build that npm's @opencode/cli package installs
 # as an optional dependency (@opencode/cli-linux-<arch>). The sha256 values below were computed
 # from the registry tarballs after checking them against npm's published sha512 integrity:
-#   x64:   sha512-WDBunGoImJOYjwUvDDfl0GJiKR/WbATnSXW1QTrK+VDp+oOUNLXo84QTUCBVUqvb8VsseWhs3uyWCD9o9c5JDA==
-#   arm64: sha512-n+C1XkoIB0NaHK9CQo4gGIc9FRGDhrMdCXO8heEOvUgKsH/0ROxCr3CxUuJaKolL/5+c5u3CoiXsckL+fa52ag==
-# Re-pinning is issue #54: the entry script and README name 2.0.24-specific workarounds.
+#   x64:   sha512-XTGFTiZTgugps6rgTXp4mPjOM8klsa5uHn/Shcms2o3k1bjSA3Sgl6O4yJ48y18WWxn9My5Pxt7JKcLID7LOHg==
+#   arm64: sha512-NCCltb8h/8WL30X9o2KTm3UFX0lmfk48lG8tglXJN9moscxeB7w2qOmfHVa32iFngk0iVAKH4xRPlBc88Y0qlw==
+# Re-pinning is issue #54: the entry script and README name 2.2.0-specific workarounds.
 FROM ${BASE} AS fetch-amd64
-ADD --checksum=sha256:21b1ee0683841405d69541fc44481f8e5752e95bea72e8b8ec31dbcdb102e7f8 \
-    https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.0.24.tgz /tmp/opencode.tgz
+ADD --checksum=sha256:fe3046b86872e624f62268058f4801a1f1efffc193103a9988238c891b8ca028 \
+    https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.2.0.tgz /tmp/opencode.tgz
 
 FROM ${BASE} AS fetch-arm64
-ADD --checksum=sha256:9d0cd2bfc060fd6c2afdf6db69837f8690d46a8d8327bb864421851ce004f453 \
-    https://registry.npmjs.org/@opencode/cli-linux-arm64/-/cli-linux-arm64-2.0.24.tgz /tmp/opencode.tgz
+ADD --checksum=sha256:6a40643c0dca3aff9d37c87c26c0ee003c46abb810e1c6ddde094ffbf7460b8b \
+    https://registry.npmjs.org/@opencode/cli-linux-arm64/-/cli-linux-arm64-2.2.0.tgz /tmp/opencode.tgz
 
 FROM fetch-${TARGETARCH} AS fetch
 RUN tar -xzf /tmp/opencode.tgz -C /tmp package/bin/opencode \
  && install -m 0755 /tmp/package/bin/opencode /opencode \
- && /opencode --version | grep -qx 'opencode v2.0.24'
+ && /opencode --version | grep -qx 'opencode v2.2.0'
 
 FROM ${BASE}
 # git for the repository the agent works on, ripgrep so OpenCode does not download its own
@@ -50,11 +50,9 @@ COPY --chmod=0644 etc/koinon/opencode/opencode.jsonc /etc/koinon/opencode/openco
 COPY --from=common --chmod=0755 koinon-git-credential /usr/local/bin/koinon-git-credential
 COPY --from=common --chmod=0644 etc/koinon/git/config /etc/koinon/git/config
 RUN printf '[include]\n\tpath = /etc/koinon/git/config\n\tpath = /sandbox/.koinon/git/config\n' >> /etc/gitconfig
-# OpenCode loads AGENTS.md from its global config directory into the system prompt. Koinon's
-# instructions are per run, so koinon-agentd writes them into the home and this link points there
-# (2.0.24 ignores the "instructions" config key, see README.md).
-RUN ln -s /sandbox/.koinon/AGENTS.md /etc/koinon/opencode/AGENTS.md \
- && chmod -R a+rX,go-w /etc/koinon /usr/local/lib/koinon
+# Koinon's instructions are per run: koinon-agentd writes /sandbox/.koinon/AGENTS.md and the
+# config's "instructions" key names it (see README.md).
+RUN chmod -R a+rX,go-w /etc/koinon /usr/local/lib/koinon
 USER 10001:10001
 WORKDIR /sandbox
 ENTRYPOINT ["/usr/local/bin/koinon-opencode"]

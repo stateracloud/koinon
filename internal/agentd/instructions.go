@@ -14,7 +14,7 @@ import (
 )
 
 // instructionsPath is where a flavor reads Koinon's instructions for the run (for OpenCode,
-// the global AGENTS.md links to it; flavors/opencode/README.md, ADR 0052). The agent can write
+// the "instructions" key of its config names it; flavors/opencode/README.md, ADR 0052). The agent can write
 // the home, so agentd writes the file before every harness start and restores it before every
 // prompt.
 const instructionsPath = "/sandbox/.koinon/AGENTS.md"
