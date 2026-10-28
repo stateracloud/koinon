@@ -179,6 +179,9 @@ var _ = Describe("Parking on approvals", func() {
 		var id string
 		Eventually(ids).WithTimeout(10 * time.Second).Should(Receive(&id))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+		By("the instructions list the granted repository with its clone URL on the default host")
+		written, _ := g.files.get(instructionsFile)
+		Expect(string(written)).To(ContainSubstring("`acme/widgets` on GitHub (connector `github`, host `github.com`): `git clone https://github.com/acme/widgets`"))
 		parked := getRun(ctx, r)
 		Expect(parked.ParkReason.RunParkReason).To(Equal(store.RunParkReasonApproval))
 		Expect(parked.LeaseExpiresAt.Valid).To(BeFalse(), "the run is released")

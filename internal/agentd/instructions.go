@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/stateracloud/koinon/internal/codehost"
+	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/flavor"
 )
@@ -82,13 +84,91 @@ const linkScript = `t=$(readlink -- "$1") && [ "$t" = "$2" ] && exit 0; ` +
 	`mkdir -p -- "$(dirname -- "$1")" && rm -rf -- "$1" && ln -s -- "$2" "$1" && ` +
 	`[ "$(readlink -- "$1")" = "$2" ] && printf '%s' "$t" && exit 3`
 
-// instructionsFile is the file's content for a version's instructions. It is never empty,
-// which the flavors' entry scripts require.
-func instructionsFile(instructions string) []byte {
-	if instructions = strings.TrimSpace(instructions); instructions == "" {
-		return []byte(instructionsPreamble + workingWithData + "The agent version has no instructions of its own.\n")
+// repository is a repository the agent is granted on its code host.
+type repository struct {
+	// Name is owner/name, as the grant's target names it.
+	Name string
+	// Connector is the connector type ID of the code host (github, gitea).
+	Connector string
+	// Provider is the code host's display name.
+	Provider string
+	// Host is the host (and port, when not 443) git talks to.
+	Host string
+	// CloneURL is the HTTPS URL to clone from: the connection's base URL plus the name.
+	CloneURL string
+}
+
+// repositories lists the repositories of the agent's code-host grant with their clone URLs. Which
+// host they live on is the connection's (ADR 0062), so the list is the same for GitHub, GitHub
+// Enterprise Server and Gitea. An agent without a code-host binding has none.
+func (r *runner) repositories(ctx context.Context) ([]repository, error) {
+	_, b, ok := providers.Default().Binding(r.vcfg)
+	if !ok || len(b.Targets) == 0 {
+		return nil, nil
 	}
-	return []byte(instructionsPreamble + workingWithData + instructions + "\n")
+	h, err := r.codeHost(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if h.loc.Web.Host == "" {
+		return nil, nil
+	}
+	provider := h.connector
+	if t, found := providers.Default().Type(h.connector); found {
+		if c, err := codehost.CapabilitiesOf(t); err == nil && c.DisplayName != "" {
+			provider = c.DisplayName
+		}
+	}
+	out := make([]repository, 0, len(b.Targets))
+	for _, name := range b.Targets {
+		out = append(out, repository{
+			Name: name, Connector: h.connector, Provider: provider,
+			Host: h.loc.Web.Authority(), CloneURL: h.loc.BaseURL() + "/" + name,
+		})
+	}
+	return out, nil
+}
+
+// workspaceSection tells the agent where it may work. Koinon refuses a request for any other path
+// (permission.go), which costs the agent a turn, so the instructions say it up front.
+func workspaceSection(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	dir := strings.TrimSuffix(cwd, "/")
+	return "## Your workspace\n\n" +
+		"Your session directory is `" + dir + "`. You can read and change files only under it; " +
+		"Koinon refuses a request for any other path (your home directory included). " +
+		"Keep notes and scratch files under `" + dir + "/notes/`, not in `~`.\n\n"
+}
+
+// repositoriesSection lists the repositories the agent has access to and where to clone them
+// from. A task names a repository as owner/name; without the host the agent guesses github.com.
+func repositoriesSection(repos []repository) string {
+	if len(repos) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Your repositories\n\n" +
+		"You have access to these repositories. A task names one as `owner/name`: clone it from the URL " +
+		"below, over HTTPS. Git already holds the credentials for the host, so do not ask for a token, " +
+		"and do not clone from any other host; it is not reachable.\n\n")
+	for _, r := range repos {
+		fmt.Fprintf(&b, "- `%s` on %s (connector `%s`, host `%s`): `git clone %s`\n", r.Name, r.Provider, r.Connector, r.Host, r.CloneURL)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// instructionsFile is the file's content for a version's instructions. It is never empty,
+// which the flavors' entry scripts require. cwd is the session directory and repos the agent's
+// granted repositories.
+func instructionsFile(instructions, cwd string, repos []repository) []byte {
+	head := instructionsPreamble + workspaceSection(cwd) + repositoriesSection(repos) + workingWithData
+	if instructions = strings.TrimSpace(instructions); instructions == "" {
+		return []byte(head + "The agent version has no instructions of its own.\n")
+	}
+	return []byte(head + instructions + "\n")
 }
 
 func sha256Hex(b []byte) string {

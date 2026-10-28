@@ -125,6 +125,9 @@ type Config struct {
 	// ModelRetries is how often a turn is repeated after a transient or throttled model
 	// error (ADR 0030, failure classes) before the run fails. Default 3.
 	ModelRetries int
+	// MaxRefusedTurns is how often a run continues a turn the harness cancelled after agentd
+	// refused a permission request (refusal.go) before it fails. Default 5.
+	MaxRefusedTurns int
 	// RetryBackoff is the first wait before a transient retry; it doubles per retry up to a
 	// minute. Default 2s.
 	RetryBackoff time.Duration
@@ -185,6 +188,7 @@ func (c *Config) defaults() error {
 	setDefault(&c.ReadySettle, time.Second)
 	setDefault(&c.MaxTakeovers, 5)
 	setDefault(&c.ModelRetries, 3)
+	setDefault(&c.MaxRefusedTurns, 5)
 	setDefault(&c.RetryBackoff, 2*time.Second)
 	setDefault(&c.MaxRetryAfter, 5*time.Minute)
 	setDefault(&c.SummaryTimeout, defaultSummaryWait)
