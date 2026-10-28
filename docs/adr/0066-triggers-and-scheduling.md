@@ -465,7 +465,7 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
      archived until it is resumed. The decision says "the agent's owners". Koinon has no per-agent owner, so
      this means the admins and owners, who are the ones who can resume an agent. Every task with a
      waiting run of the agent gets a note.
-   - Supersedes the consequence at `:172` in part: the requeue is no longer unbounded.
+   - Supersedes in part the follow-up "the 5-minute `SandboxTimeout` failure becomes a requeue" and the LT1 amendment (latency defaults as built): the requeue is no longer unbounded.
    - Alternative rejected: failing at the first queue wait, which brings back #160's fail-on-burst.
 2. *Notify targets on triggers (#182).*
    - `Trigger.notify` is `{kind: user|role|channel, user, role, channel}`. It is accepted on every
