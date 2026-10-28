@@ -263,7 +263,11 @@ type Limit struct {
 	Unit   LimitUnit
 	Amount float64
 	// Window is the accounting window. agentgateway aligns windows to the Unix
-	// epoch (24h starts at midnight UTC).
+	// epoch (24h starts at midnight UTC). Zero means no window: since agentgateway
+	// v1.7 the counter then accumulates for the lifetime of its name and never
+	// resets, so only a new Generation starts a fresh one. The ledger uses this:
+	// its Generation already carries the UTC day, and a gateway-side reset would
+	// grant an amount the ledger did not compute.
 	Window time.Duration
 	// Generation names the gateway's spend counter for this limit. agentgateway
 	// keys budget usage by key and budget name, so a new Generation starts a
@@ -274,10 +278,11 @@ type Limit struct {
 	Generation string
 }
 
-// USDLimit returns a USD limit of amount per window. It is the edge where Koinon's exact
-// money type (package money) becomes the number agentgateway's budget config takes.
-func USDLimit(amount money.USD, window time.Duration, generation string) Limit {
-	return Limit{Unit: USD, Amount: amount.Float64(), Window: window, Generation: generation}
+// USDLimit returns a never-resetting USD limit of amount for the counter named by generation. It is
+// the edge where Koinon's exact money type (package money) becomes the number agentgateway's
+// budget config takes.
+func USDLimit(amount money.USD, generation string) Limit {
+	return Limit{Unit: USD, Amount: amount.Float64(), Generation: generation}
 }
 
 // Provider is one OpenAI-compatible upstream of an org (ADR 0056, plan item PV1). Drivers
@@ -515,8 +520,8 @@ func (s State) Validate() error {
 		if l.Unit != USD && l.Unit != Tokens {
 			errs = append(errs, fmt.Errorf("limit for %s: unknown unit %q", a, l.Unit))
 		}
-		if l.Amount < 0 || l.Window <= 0 {
-			errs = append(errs, fmt.Errorf("limit for %s: amount must be >= 0 and window > 0", a))
+		if l.Amount < 0 || l.Window < 0 {
+			errs = append(errs, fmt.Errorf("limit for %s: amount and window must be >= 0", a))
 		}
 		if !generation.MatchString(l.Generation) {
 			errs = append(errs, fmt.Errorf("limit for %s: generation must be at most 64 of [a-z0-9-]", a))

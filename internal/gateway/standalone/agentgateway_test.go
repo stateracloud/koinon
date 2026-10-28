@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 )
 
 // AgentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
-const AgentgatewayImage = "cr.agentgateway.dev/agentgateway:v1.6.0"
+const AgentgatewayImage = "cr.agentgateway.dev/agentgateway:v1.7.0"
 
 // skipWithoutDocker skips the spec when no container runtime is reachable.
 func skipWithoutDocker(ctx context.Context) {
@@ -138,13 +139,12 @@ var _ = func() bool {
 			}
 			return &r.Gateway, nil
 		},
-		GatewayBudgets:         true,
-		OrgTargetsNotContacted: true,
+		GatewayBudgets: true,
 	})
 	return true
 }()
 
-var _ = Describe("agentgateway v1.6.0 reload detection (standalone only)", Ordered, func() {
+var _ = Describe("agentgateway v1.7.0 reload detection (standalone only)", Ordered, func() {
 	var (
 		r     *running
 		state gateway.State
@@ -271,4 +271,80 @@ var _ = Describe("golden files", func() {
 			Expect(st.ExitCode).To(Equal(0), "%s: %s", f.name, out)
 		}
 	}, NodeTimeout(3*time.Minute))
+})
+
+// ADR 0069 pins anthropic-version with llm.models[].requestHeaders.set. agentgateway v1.7.0 now
+// forwards the client's anthropic-version instead of replacing it, so the pin must still win.
+var _ = Describe("agentgateway v1.7.0 anthropic-version header (ADR 0069)", func() {
+	It("a requestHeaders.set pin overrides the client's value; without one the client's is forwarded", func(ctx SpecContext) {
+		skipWithoutDocker(ctx)
+		var mu sync.Mutex
+		seen := map[string]string{}
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			seen[r.Header.Get("x-probe")] = r.Header.Get("anthropic-version")
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"msg_x","type":"message","role":"assistant","model":"m","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		}))
+		DeferCleanup(upstream.Close)
+
+		dir := GinkgoT().TempDir()
+		Expect(os.Chmod(dir, 0o755)).To(Succeed())
+		secrets := GinkgoT().TempDir()
+		Expect(os.Chmod(secrets, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(secrets, "api_key"), []byte("not-a-real-key"), 0o644)).To(Succeed())
+		model := func(name string, pin bool) string {
+			s := fmt.Sprintf(`    - name: %s
+      provider:
+        custom:
+          formats:
+            - type: messages
+      params:
+        baseUrl: http://%s:%d
+        apiKey:
+          file: /secrets/upstream/api_key
+      requestTransformation:
+        set:
+          x-probe: '"%s"'
+`, name, testcontainers.HostInternal, portOf(upstream), name)
+			if pin {
+				s += "      requestHeaders:\n        set:\n          anthropic-version: \"2023-06-01\"\n"
+			}
+			return s
+		}
+		cfg := "gateways:\n  default:\n    port: 4000\nconfig:\n  readinessAddr: '[::]:15021'\nllm:\n  models:\n" + model("pinned", true) + model("unpinned", false)
+		Expect(os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o644)).To(Succeed())
+
+		ctr, err := testcontainers.Run(ctx, AgentgatewayImage,
+			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
+			testcontainers.WithExposedPorts("4000/tcp", "15021/tcp"),
+			testcontainers.WithHostPortAccess(portOf(upstream)),
+			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
+				hc.Binds = append(hc.Binds, dir+":/cfg:ro", secrets+":/secrets/upstream:ro")
+			}),
+			testcontainers.WithWaitStrategyAndDeadline(time.Minute, wait.ForHTTP("/healthz/ready").WithPort("15021/tcp")),
+		)
+		DeferCleanup(func(ctx context.Context) error { return testcontainers.TerminateContainer(ctr) })
+		Expect(err).NotTo(HaveOccurred())
+		url, err := ctr.PortEndpoint(ctx, "4000/tcp", "http")
+		Expect(err).NotTo(HaveOccurred())
+
+		for _, name := range []string{"pinned", "unpinned"} {
+			body := fmt.Sprintf(`{"model":%q,"max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`, name)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/v1/messages", bytes.NewBufferString(body))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("anthropic-version", "2099-01-01")
+			resp, err := http.DefaultClient.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			Expect(resp.StatusCode).To(Equal(http.StatusOK), string(b))
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		Expect(seen).To(HaveKeyWithValue("pinned", "2023-06-01"), "a requestHeaders.set pin overrides the client's version")
+		Expect(seen).To(HaveKeyWithValue("unpinned", "2099-01-01"), "v1.7 forwards the client's version when nothing pins it")
+	}, SpecTimeout(3*time.Minute))
 })

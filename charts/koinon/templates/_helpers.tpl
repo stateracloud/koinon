@@ -449,7 +449,15 @@ koinon.ensureSecrets. Roles and the bootstrap admin that come from an existing S
 {{- if and .Values.bootstrapAdmin.enabled (not .Values.bootstrapAdmin.existingSecret) -}}
 {{- $specs = append $specs (dict "name" (include "koinon.bootstrapSecretName" .) "type" "Opaque" "username" .Values.bootstrapAdmin.username "labels" (fromYaml (include "koinon.generatedLabels" (list . "api")))) -}}
 {{- end -}}
+{{- if and (eq .Values.gateway.mode "standalone") (not .Values.gateway.standalone.sessionKey.existingSecret) -}}
+{{- $specs = append $specs (dict "name" (include "koinon.gatewaySessionKeyName" .) "type" "Opaque" "kind" "aes256-key" "labels" (fromYaml (include "koinon.generatedLabels" (list . "gateway")))) -}}
+{{- end -}}
 {{- $specs | toJson -}}
+{{- end }}
+
+{{/* The Secret with the standalone gateway's MCP session key (agentgateway SESSION_KEY, key "key"). */}}
+{{- define "koinon.gatewaySessionKeyName" -}}
+{{- .Values.gateway.standalone.sessionKey.existingSecret | default (include "koinon.componentName" (list . "gateway-session-key")) }}
 {{- end }}
 
 {{/*
