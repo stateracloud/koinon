@@ -17,14 +17,17 @@ async function expectAccessible(page: Page) {
 type Json = Record<string, unknown>
 
 function api(role: string) {
+  // What the server's format table says, as the real ProviderService answers it.
+  const label: Record<string, string> = { openai: 'OpenAI chat completions', anthropic: 'Anthropic Messages' }
+  const offered = (type: string) => (type === 'anthropic' ? ['anthropic'] : type === 'openrouter' ? ['openai', 'anthropic'] : ['openai']).map((id) => ({ id, label: label[id] }))
   const providers: Json[] = [
-    { id: 'p-1', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui' },
-    { id: 'p-2', name: 'homelab', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'secret', managedBySecret: 'ollama-secret' },
-    { id: 'p-3', name: 'old', type: 'openai', url: 'https://api.example.com/v1', source: 'secret', managedBySecret: 'old-secret', removed: true, disabledReason: 'its Kubernetes Secret was deleted; restore the Secret or delete this entry' },
+    { id: 'p-1', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', formats: offered('openrouter') },
+    { id: 'p-2', name: 'homelab', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'secret', managedBySecret: 'ollama-secret', formats: offered('ollama') },
+    { id: 'p-3', name: 'old', type: 'openai', url: 'https://api.example.com/v1', source: 'secret', managedBySecret: 'old-secret', formats: offered('openai'), removed: true, disabledReason: 'its Kubernetes Secret was deleted; restore the Secret or delete this entry' },
   ]
   const models: Json[] = [
-    { id: 'm-1', providerId: 'p-1', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui' },
-    { id: 'm-2', providerId: 'p-2', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret' },
+    { id: 'm-1', providerId: 'p-1', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', format: 'openai' },
+    { id: 'm-2', providerId: 'p-2', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret', format: 'openai' },
   ]
   const tokens: Json[] = [
     { id: 't-1', name: 'root', prefix: 'rootpref', role: 'ORG_ROLE_OWNER', createdAt: iso(-1), expiresAt: iso(29), lastUsedAt: iso(0), createdBy: 'u-1', createdByName: 'Admin' },
@@ -41,13 +44,15 @@ function api(role: string) {
       'koinon.provider.v1alpha1.ProviderService/ListModels': () => ({ models }),
       'koinon.provider.v1alpha1.ProviderService/CreateProvider': (req: Json) => {
         seen.providerCreate = req
-        const p = { id: 'p-new', name: req.name, type: req.type, url: req.url, hasKey: !!req.apiKey, source: 'ui' }
+        const p = { id: 'p-new', name: req.name, type: req.type, url: req.url, hasKey: !!req.apiKey, source: 'ui', formats: offered(String(req.type)) }
         providers.push(p)
         return { provider: p }
       },
+      'koinon.provider.v1alpha1.ProviderService/ProviderTypeInfo': (req: Json) => ({ formats: offered(String(req.type)), takesWorkspaceId: req.type === 'anthropic' }),
+      'koinon.provider.v1alpha1.ProviderService/ModelFormats': () => ({ defaultFormat: 'openai' }),
       'koinon.provider.v1alpha1.ProviderService/CreateModel': (req: Json) => {
         seen.modelCreate = req
-        const m = { id: 'm-new', providerId: req.providerId, name: req.name, guard: !!req.guard, source: 'ui' }
+        const m = { id: 'm-new', providerId: req.providerId, name: req.name, guard: !!req.guard, source: 'ui', format: String(req.format || 'openai') }
         models.push(m)
         return { model: m }
       },
