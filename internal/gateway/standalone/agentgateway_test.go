@@ -26,6 +26,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/gatewaytest"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // AgentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
@@ -180,7 +181,7 @@ var _ = Describe("agentgateway v1.7.0 reload detection (standalone only)", Order
 		Expect(err).NotTo(HaveOccurred())
 		state = gateway.State{Providers: []gateway.Provider{{
 			Org: "acme", Name: "upstream", Type: "fake", BaseURL: fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, portOf(upstream)),
-			Models: []gateway.Model{{Name: model, Price: &gateway.Price{Input: "50", Output: "50"}}},
+			Models: []gateway.Model{{Name: model, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "50", Output: "50"}}},
 		}}}
 		state.AddKey(key.Key)
 		_, err = r.driver.Apply(ctx, state)

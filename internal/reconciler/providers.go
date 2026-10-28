@@ -21,6 +21,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 )
 
@@ -166,7 +167,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 					skip[id] = true
 					continue
 				}
-				p = &gateway.Provider{Org: org.Slug, Name: row.ProviderName, Type: row.ProviderType, BaseURL: row.Url}
+				p = &gateway.Provider{Org: org.Slug, Name: row.ProviderName, Type: row.ProviderType, BaseURL: row.Url, AnthropicWorkspaceID: row.AnthropicWorkspaceID.String}
 				if len(row.ApiKey) > 0 {
 					key, err := catalog.OpenKey(r.cfg.Keys, org.ID, row.ProviderID, row.ApiKey)
 					if err != nil {
@@ -185,7 +186,7 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 				pidOf[id] = row.ProviderID
 				order = append(order, id)
 			}
-			m := gateway.Model{Name: row.ModelName, Guard: row.Guard}
+			m := gateway.Model{Name: row.ModelName, Guard: row.Guard, Format: modelformat.Format(row.ModelFormat)}
 			// The price valid now: the org's price entries, else the default list (plan item PV2).
 			// A model with no price is not served.
 			pm := prices.Model{ID: row.ModelID.String(), Name: row.ModelName, ProviderType: row.ProviderType}

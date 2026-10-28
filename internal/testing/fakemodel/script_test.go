@@ -51,6 +51,7 @@ turns:
 		Entry("empty turn", "model: m\nturns: [{}]", "needs text or toolCalls"),
 		Entry("unnamed tool", "model: m\nturns: [{toolCalls: [{arguments: {}}]}]", "name is required"),
 		Entry("cache above input", "model: m\nturns: [{text: a, usage: {inputTokens: 1, cachedInputTokens: 2}}]", "invalid usage"),
+		Entry("cache reads and writes above input", "model: m\nturns: [{text: a, usage: {inputTokens: 3, cachedInputTokens: 2, cacheWriteTokens: 2}}]", "invalid usage"),
 	)
 
 	It("rejects the same model in two files", func() {

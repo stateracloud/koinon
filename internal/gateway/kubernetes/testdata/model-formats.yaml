@@ -1,0 +1,248 @@
+# Revision a42cfde074ff2b5e
+apiVersion: v1
+data:
+  catalog.json: '{"providers":{"acme.anthropic":{"models":{"claude-haiku-4-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}}}},"acme.openrouter":{"models":{"open/model":{"rates":{"input":"1","output":"2"}}}}}}'
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-catalog
+  namespace: koinon
+---
+apiVersion: v1
+data:
+  k-eeeeeeeeeeee: '{"keyHash":"sha256:014273a1a1fe57ae17d55ad2d6362277e04d38c5fb94f994c520a5392cc5f4fd","metadata":{"agent":"acme/repo-helper","internal":false,"name":"k-eeeeeeeeeeee","org":"acme"}}'
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+    koinon.dev/gateway-keys: koinon-gateway
+    koinon.dev/org: acme
+  name: koinon-gateway-keys-acme
+  namespace: koinon
+---
+apiVersion: v1
+data:
+  koinon-reload-probe: '{"keyHash":"sha256:24f73722c5435e0758dce5b5b716e559a2e6eb0a18c4ec01bd634b0a92ae21e9","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+    koinon.dev/gateway-keys: koinon-gateway
+  name: koinon-gateway-probe
+  namespace: koinon
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway
+  namespace: koinon
+spec:
+  modelCatalog:
+    sources:
+      - configMap:
+          key: catalog.json
+          name: koinon-gateway-catalog
+  service:
+    spec:
+      type: ClusterIP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway
+  namespace: koinon
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: koinon-gateway
+  listeners:
+    - allowedRoutes:
+        kinds:
+          - group: agentgateway.dev
+            kind: AgentgatewayModel
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+        namespaces:
+          from: Same
+      name: http
+      port: 4000
+      protocol: HTTP
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+    koinon.dev/org: acme
+  name: m-a4a1774c13b71865fbae
+  namespace: koinon
+spec:
+  baseURL: https://openrouter.ai/api/v1
+  custom:
+    formats:
+      - type: Completions
+    providerOverride: acme.openrouter
+  match:
+    model: open/model
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: koinon-gateway
+  policies:
+    auth:
+      credentials:
+        - location:
+            header:
+              name: Authorization
+              prefix: 'Bearer '
+          secretRef:
+            key: acme-openrouter
+            name: koinon-gateway-providers
+    authorization:
+      action: Require
+      policy:
+        matchExpressions:
+          - apiKey.org == "acme" && !apiKey.internal
+    transformations:
+      - expression: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
+        field: stream_options
+  provider: Custom
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+    koinon.dev/org: acme
+  name: m-c4c22bc4431f382eb2d4
+  namespace: koinon
+spec:
+  baseURL: https://api.anthropic.com/v1
+  custom:
+    formats:
+      - type: Messages
+    providerOverride: acme.anthropic
+  match:
+    model: claude-haiku-4-5
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: koinon-gateway
+  policies:
+    auth:
+      credentials:
+        - location:
+            header:
+              name: Authorization
+              prefix: 'Bearer '
+          secretRef:
+            key: acme-claude
+            name: koinon-gateway-providers
+    authorization:
+      action: Require
+      policy:
+        matchExpressions:
+          - apiKey.org == "acme" && !apiKey.internal && !has(llmRequest.mcp_servers)
+    headers:
+      request:
+        remove:
+          - anthropic-beta
+        set:
+          - name: anthropic-version
+            value: "2023-06-01"
+          - name: anthropic-workspace-id
+            value: wrkspc_01ExampleExample
+    transformations:
+      - expression: 'has(llmRequest.tools) ? (request.path == "/v1/messages" ? llmRequest.tools.filter(t, !has(t.type) || t.type == "custom") : llmRequest.tools) : null'
+        field: tools
+  provider: Custom
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-edge
+  namespace: koinon
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: koinon-gateway
+  traffic:
+    apiKeyAuthentication:
+      configMapSelector:
+        matchLabels:
+          koinon.dev/gateway-keys: koinon-gateway
+      mode: Strict
+    phase: PreRouting
+    transformation:
+      request:
+        set:
+          - name: x-koinon-org
+            value: default(apiKey.org, "")
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: koinon-reconciler
+    koinon.dev/gateway: koinon-gateway
+  name: koinon-gateway-frontend
+  namespace: koinon
+spec:
+  frontend:
+    accessLog:
+      attributes:
+        add:
+          - expression: default(apiKey.name, "")
+            name: koinon.key
+          - expression: default(apiKey.agent, "")
+            name: koinon.agent
+          - expression: uuid()
+            name: koinon.request
+          - expression: llm.inputTokens
+            name: koinon.in
+          - expression: llm.outputTokens
+            name: koinon.out
+          - expression: llm.cachedInputTokens
+            name: koinon.cache_read
+          - expression: llm.cacheCreationInputTokens
+            name: koinon.cache_write
+          - expression: llm.reasoningTokens
+            name: koinon.reasoning
+          - expression: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
+            name: koinon.format
+          - expression: llm.streaming
+            name: koinon.stream
+          - expression: proxy.error.reason
+            name: koinon.error
+          - expression: response.code
+            name: koinon.status
+          - expression: llm.params.max_tokens
+            name: koinon.max_tokens
+          - expression: int(request.headers["content-length"])
+            name: koinon.req_bytes
+      otlp:
+        protocol: HTTP
+        url: http://koinon-api.koinon.svc:4318
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: koinon-gateway

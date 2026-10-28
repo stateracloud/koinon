@@ -19,6 +19,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // breaking is a Store that damages the objects of one org before they are applied, as a bug or a
@@ -77,8 +78,8 @@ var _ = Describe("kubernetes mode: a rejected object (plan item G2)", Ordered, f
 		base := fmt.Sprintf("http://%s:%s/v1", c.host, port)
 		price := &gateway.Price{Input: "1", Output: "1"}
 		state = gateway.State{Providers: []gateway.Provider{
-			{Org: "acme", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Price: price}}},
-			{Org: "globex", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Price: price}}},
+			{Org: "acme", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Format: modelformat.OpenAI, Price: price}}},
+			{Org: "globex", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Format: modelformat.OpenAI, Price: price}}},
 		}}
 		state.AddKey(keyA.Key)
 		state.AddKey(keyG.Key)
@@ -102,7 +103,7 @@ var _ = Describe("kubernetes mode: a rejected object (plan item G2)", Ordered, f
 		// Change the model so that the apply is a real update.
 		changed := state
 		changed.Providers = append([]gateway.Provider(nil), state.Providers...)
-		changed.Providers[0].Models = []gateway.Model{{Name: model, Price: &gateway.Price{Input: "2", Output: "2"}}}
+		changed.Providers[0].Models = []gateway.Model{{Name: model, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "2", Output: "2"}}}
 
 		rev, err := g.driver.Apply(ctx, changed)
 		var rej *gateway.RejectedError

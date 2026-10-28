@@ -479,7 +479,7 @@ func (q *Queries) ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provi
 
 const listServedCatalog = `-- name: ListServedCatalog :many
 SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.url, p.api_key,
-       m.id AS model_id, m.name AS model_name, m.guard
+       p.anthropic_workspace_id, m.id AS model_id, m.name AS model_name, m.guard, m.format AS model_format
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
 WHERE p.org_id = $1 AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND m.disabled_reason IS NULL
@@ -487,14 +487,16 @@ ORDER BY p.name, m.name
 `
 
 type ListServedCatalogRow struct {
-	ProviderID   pgtype.UUID
-	ProviderName string
-	ProviderType string
-	Url          string
-	ApiKey       []byte
-	ModelID      pgtype.UUID
-	ModelName    string
-	Guard        bool
+	ProviderID           pgtype.UUID
+	ProviderName         string
+	ProviderType         string
+	Url                  string
+	ApiKey               []byte
+	AnthropicWorkspaceID pgtype.Text
+	ModelID              pgtype.UUID
+	ModelName            string
+	Guard                bool
+	ModelFormat          string
 }
 
 // Every enabled provider of the org with its enabled models, for the gateway.
@@ -513,9 +515,11 @@ func (q *Queries) ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]L
 			&i.ProviderType,
 			&i.Url,
 			&i.ApiKey,
+			&i.AnthropicWorkspaceID,
 			&i.ModelID,
 			&i.ModelName,
 			&i.Guard,
+			&i.ModelFormat,
 		); err != nil {
 			return nil, err
 		}

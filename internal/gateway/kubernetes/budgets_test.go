@@ -26,6 +26,7 @@ import (
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // otlpSink is the spend ledger's OTLP/HTTP receiver in miniature: it decodes the access log with the
@@ -137,8 +138,8 @@ var _ = Describe("kubernetes mode: fallback budgets (plan items S2 and G2)", Ord
 		// $50 per million tokens: 20 tokens cost $0.001.
 		price := &gateway.Price{Input: "50", Output: "50"}
 		state = gateway.State{Providers: []gateway.Provider{
-			{Org: "acme", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Price: price}}},
-			{Org: "globex", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Price: price}}},
+			{Org: "acme", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Format: modelformat.OpenAI, Price: price}}},
+			{Org: "globex", Name: "up", Type: "fake", BaseURL: base, Models: []gateway.Model{{Name: model, Format: modelformat.OpenAI, Price: price}}},
 		}}
 		for _, k := range []gateway.IssuedKey{keyA, keyB, kC} {
 			state.AddKey(k.Key)

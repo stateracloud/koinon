@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"    //nolint:staticcheck // see above
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // Env is one driver under test.
@@ -65,6 +66,7 @@ var (
 // Register adds the G1 specs for env to the current Ginkgo tree.
 func Register(env Env) {
 	llmSpec(env)
+	anthropicSpec(env)
 	mcpServersSpec(env)
 	loneTargetSpec(env)
 }
@@ -161,27 +163,27 @@ func llmSpec(env Env) {
 						Org: "acme", Name: "upstream", Type: "fake", BaseURL: hostURL(port(upstream)),
 						// $50 per 1M tokens: 20 tokens cost $0.001 per request.
 						Models: []gateway.Model{
-							{Name: testModel, Price: &gateway.Price{Input: "50", Output: "50"}},
-							{Name: "acme-only", Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: testModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "50", Output: "50"}},
+							{Name: "acme-only", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}},
 							// A plain name that is spelled like globex's gateway-wide id.
-							{Name: "globex/" + testModel, Price: &gateway.Price{Input: "1", Output: "1"}},
-							{Name: "unpriced"},
+							{Name: "globex/" + testModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: "unpriced", Format: modelformat.OpenAI},
 						},
 					},
 					{
 						Org: "acme", Name: "redirecting", Type: "fake", BaseURL: hostURL(port(redirector)),
-						Models: []gateway.Model{{Name: "redirect-model", Price: &gateway.Price{Input: "1", Output: "1"}}},
+						Models: []gateway.Model{{Name: "redirect-model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}},
 					},
 					{
 						Org: "globex", Name: "upstream", Type: "fake", BaseURL: hostURL(port(ups["globex"].Server)),
 						APIKeyFile: env.KeyFile("globex_key"),
-						Models:     []gateway.Model{{Name: testModel, Price: &gateway.Price{Input: "1", Output: "1"}}},
+						Models:     []gateway.Model{{Name: testModel, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}}},
 					},
 					{
 						Org: "globex", Name: "guarded", Type: "openrouter", BaseURL: hostURL(port(ups["guarded"].Server)),
 						Models: []gateway.Model{
-							{Name: "guarded-model", Guard: true, Price: &gateway.Price{Input: "1", Output: "1"}},
-							{Name: "open-model", Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: "guarded-model", Format: modelformat.OpenAI, Guard: true, Price: &gateway.Price{Input: "1", Output: "1"}},
+							{Name: "open-model", Format: modelformat.OpenAI, Price: &gateway.Price{Input: "1", Output: "1"}},
 						},
 					},
 				},

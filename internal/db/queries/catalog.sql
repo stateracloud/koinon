@@ -95,7 +95,7 @@ WHERE org_id = @org_id AND id = @id;
 -- name: ListServedCatalog :many
 -- Every enabled provider of the org with its enabled models, for the gateway.
 SELECT p.id AS provider_id, p.name AS provider_name, p.type AS provider_type, p.url, p.api_key,
-       m.id AS model_id, m.name AS model_name, m.guard
+       p.anthropic_workspace_id, m.id AS model_id, m.name AS model_name, m.guard, m.format AS model_format
 FROM providers p
 JOIN models m ON m.org_id = p.org_id AND m.provider_id = p.id
 WHERE p.org_id = @org_id AND p.disabled_reason IS NULL AND p.removed_at IS NULL AND m.disabled_reason IS NULL
