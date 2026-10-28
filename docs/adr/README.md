@@ -86,3 +86,4 @@ are in [0046](0046-adr-conventions.md).
 | [0069](0069-native-model-formats.md) | Models speak their family's native API format | Accepted |
 | [0070](0070-model-metadata.md) | Model metadata: a reviewed snapshot from models.dev and OpenRouter | Accepted (delivery after v0.1.0, UI milestone) |
 | [0071](0071-skill-library.md) | The skill library: pinned, scanned skills delivered by agentd | Accepted (delivery after v0.1.0, UI milestone) |
+| [0073](0073-agent-passport.md) | Agent passport: a verifiable identity for every agent call | Accepted (delivery after v0.1.0) |
