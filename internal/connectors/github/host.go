@@ -10,7 +10,6 @@ import (
 	"path"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/stateracloud/koinon/connectors"
 	"github.com/stateracloud/koinon/internal/codehost"
@@ -28,6 +27,9 @@ const PrivateKeyField = "privateKey"
 type Config struct {
 	AppID          int64 `json:"appId"`
 	InstallationID int64 `json:"installationId"`
+	// Site is the connection's host when it is not github.com (GitHub Enterprise Server): its
+	// base URL and CA bundle. Both are empty for github.com.
+	codehost.Site
 }
 
 // ParseConfig decodes connections.config of a GitHub connection.
@@ -71,19 +73,57 @@ var _ codehost.Provider = (*Host)(nil)
 // ID implements codehost.Provider.
 func (*Host) ID() string { return HostID }
 
-// Capabilities implements codehost.Provider.
+// Capabilities implements codehost.Provider: the descriptor is connector data.
 func (*Host) Capabilities() codehost.Capabilities {
-	return codehost.Capabilities{
-		DisplayName:         "GitHub",
-		CredentialClass:     "app-installation",
-		TokenLifetime:       time.Hour,
-		NarrowsRepositories: true,
-		NarrowsPermissions:  true,
-		MaxRepositories:     MaxRepositories,
-		CanDenyCI:           true,
-		ExactModes:          true,
-		CIPaths:             []string{".github/workflows/"},
+	t, ok := connectors.Get(HostID)
+	if !ok {
+		return codehost.Capabilities{DisplayName: "GitHub"}
 	}
+	c, err := codehost.CapabilitiesOf(t)
+	if err != nil {
+		return codehost.Capabilities{DisplayName: t.Metadata.DisplayName}
+	}
+	return c
+}
+
+// maxRepositories is the bound on repositories per token, from the connector data.
+func maxRepositories() int {
+	if t, ok := connectors.Get(HostID); ok && t.Spec.Capabilities != nil && t.Spec.Capabilities.MaxRepositories > 0 {
+		return t.Spec.Capabilities.MaxRepositories
+	}
+	return MaxRepositories
+}
+
+// location is where the connection's host lives, from its base URL.
+func location(conn codehost.Connection) (connectors.Location, codehost.Site, error) {
+	t, ok := connectors.Get(HostID)
+	if !ok {
+		return connectors.Location{}, codehost.Site{}, errors.New("github: the connector type is not embedded")
+	}
+	site, err := codehost.SiteOf(conn.Config)
+	if err != nil {
+		return connectors.Location{}, codehost.Site{}, err
+	}
+	loc, err := site.Location(t)
+	return loc, site, err
+}
+
+// clientFor returns the client for the connection's host: the Host's own for github.com, one
+// with the connection's API base URL and CA bundle otherwise.
+func (h *Host) clientFor(conn codehost.Connection) (*Client, error) {
+	loc, site, err := location(conn)
+	if err != nil {
+		return nil, fmt.Errorf("connections: connection %s: %w", conn.ID, err)
+	}
+	apiBase := ""
+	if !loc.Default {
+		apiBase = loc.APIBaseURL()
+	}
+	c, err := h.c.For(apiBase, site.CABundle)
+	if err != nil {
+		return nil, fmt.Errorf("connections: connection %s: %w", conn.ID, err)
+	}
+	return c, nil
 }
 
 // ParseRepo implements codehost.Provider.
@@ -93,8 +133,12 @@ func (*Host) ParseRepo(full string) (codehost.Repo, error) {
 }
 
 // BranchURL implements codehost.Provider.
-func (*Host) BranchURL(r codehost.Repo, branch string) string {
-	return "https://github.com/" + r.String() + "/tree/" + branch
+func (*Host) BranchURL(conn codehost.Connection, r codehost.Repo, branch string) string {
+	base := "https://github.com"
+	if loc, _, err := location(conn); err == nil {
+		base = loc.BaseURL()
+	}
+	return base + "/" + r.String() + "/tree/" + branch
 }
 
 // MetadataScope implements codehost.Provider.
@@ -117,7 +161,7 @@ func (*Host) Validate(conn codehost.Connection) error {
 // Describe implements codehost.Provider.
 func (*Host) Describe(config []byte) (codehost.Description, error) {
 	c, err := ParseConfig(config)
-	return codehost.Description{AppID: c.AppID, InstallationID: c.InstallationID}, err
+	return codehost.Description{AppID: c.AppID, InstallationID: c.InstallationID, Site: c.Site}, err
 }
 
 // Open implements codehost.Provider: it mints an installation token narrowed to scope.
@@ -126,14 +170,18 @@ func (h *Host) Open(ctx context.Context, conn codehost.Connection, scope codehos
 	if err != nil {
 		return nil, err
 	}
-	tok, err := h.c.InstallationToken(ctx, app, TokenRequest{Repositories: scope.Repositories, Permissions: scope.Permissions})
+	c, err := h.clientFor(conn)
+	if err != nil {
+		return nil, err
+	}
+	tok, err := c.InstallationToken(ctx, app, TokenRequest{Repositories: scope.Repositories, Permissions: scope.Permissions})
 	if errors.Is(err, ErrRepositoryMismatch) {
 		err = fmt.Errorf("%w: %w", codehost.ErrRepositoryMismatch, err)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &access{c: h.c, tok: tok}, nil
+	return &access{c: c, tok: tok}, nil
 }
 
 type access struct {

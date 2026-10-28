@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/savedwork"
@@ -73,18 +75,23 @@ func (r *runner) saveWork(ctx context.Context, workspace, sandbox string) saveRe
 	if r.p.cfg.SavedWorkURL == "" || r.p.cfg.SavedWorkKey == nil {
 		return lost("saving work is not configured on this koinon-agentd (no koinon-api address)")
 	}
-	sctx, cancel := context.WithTimeout(ctx, r.p.cfg.SaveTimeout)
-	defer cancel()
 	cwd := r.cwd
 	if cwd == "" {
 		cwd = r.p.cfg.SessionCwd
 	}
+	// The database read stays outside the save budget: under load it would use up part of it.
+	host, err := r.codeHost(ctx)
+	if err != nil {
+		return lost("reading the code host of the agent's connection failed: %v", err)
+	}
+	sctx, cancel := context.WithTimeout(ctx, r.p.cfg.SaveTimeout)
+	defer cancel()
 	started := time.Now()
 	out, code, stderr, err := r.sandboxExecLimit(sctx, workspace, sandbox,
-		[]string{"/bin/sh", "-c", saveworkScript, "savework", cwd, strconv.Itoa(savedwork.MaxBytes)},
+		[]string{"/bin/sh", "-c", saveworkScript, "savework", cwd, strconv.Itoa(savedwork.MaxBytes), host.origin()},
 		nil, r.p.cfg.SaveTimeout, savedwork.MaxBytes+(8<<20))
 	switch {
-	case sctx.Err() != nil || (err != nil && time.Since(started) >= r.p.cfg.SaveTimeout):
+	case sctx.Err() != nil || (err != nil && (time.Since(started) >= r.p.cfg.SaveTimeout || status.Code(err) == codes.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded))):
 		return lost("reading the workspace took longer than %s (its storage may be what the stuck process waits on)", r.p.cfg.SaveTimeout)
 	case err != nil:
 		return lost("reading the workspace failed: %v", err)

@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # G2 gateway suite on kind (plan item G2): the shared G1 suite and the Kubernetes-mode specs of
-# internal/gateway/kubernetes, run against agentgateway's real controller v1.6.0.
+# internal/gateway/kubernetes, run against agentgateway's real controller v1.7.0.
 #
 #   1. a throwaway kind cluster (default name koinon-g2; never touches another context: it writes its
 #      own kubeconfig and passes it to the tests);
 #   2. the Gateway API standard CRDs v1.4.0 (sha256 pinned) and agentgateway-crds and agentgateway
-#      v1.6.0 from cr.agentgateway.dev (pinned chart versions);
+#      v1.7.0 from cr.agentgateway.dev (pinned chart versions);
 #   3. go test ./internal/gateway/kubernetes with KOINON_KIND_KUBECONFIG and KOINON_KIND_HOST (the
 #      address pods use to reach the test process: the fakes run in it);
 #   4. the cluster is deleted unless KEEP=1.
@@ -19,7 +19,7 @@ CLUSTER=${CLUSTER:-koinon-g2}
 KEEP=${KEEP:-0}
 GATEWAY_CRDS_VERSION=v1.4.0
 GATEWAY_CRDS_SHA256=6a4029e661446d64add866a00ecdc40c14219b68777ab614c5cdaac0adb481f1
-AGENTGATEWAY_VERSION=v1.6.0
+AGENTGATEWAY_VERSION=v1.7.0
 OUT=${OUT:-$(mktemp -d)}
 mkdir -p "$OUT"
 export KUBECONFIG="$OUT/kubeconfig"

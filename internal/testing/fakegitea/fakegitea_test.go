@@ -468,7 +468,7 @@ var _ = Describe("fake Gitea", func() {
 			one := filepath.Join(tmp, "one")
 			git(tmp, "clone", "-q", cloneURL(fakegitea.DefaultToken), one)
 			blob := make([]byte, 4<<20)
-			rng := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // incompressible filler, not a secret
+			rng := rand.New(rand.NewPCG(1, 2))
 			for i := range blob {
 				blob[i] = byte(rng.UintN(256))
 			}
@@ -527,3 +527,116 @@ func git(dir string, args ...string) string {
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "git %s: %s", strings.Join(args, " "), out)
 	return out
 }
+
+var _ = Describe("fake Gitea permissions", func() {
+	var f *fakegitea.Fake
+	const (
+		readTok  = "fake-read-scope-token"
+		writeTok = "fake-write-scope-token"
+		repo     = "/api/v1/repos/acme/widgets"
+	)
+	as := func(tok, method, path string, body any) resp {
+		return doAuth(f, method, path, body, "token "+tok)
+	}
+
+	BeforeEach(func() {
+		f = fakegitea.New()
+		DeferCleanup(f.Close)
+		f.Tokens = map[string]string{}
+		f.AddScopedToken(readTok, "bot", "read")
+		f.AddScopedToken(writeTok, "bot", "write")
+		f.AddRepo("widgets")
+		f.AddRepo("secrets")
+		f.AddRepo("docs")
+		f.Collaborate("bot", "widgets", "write")
+		f.Collaborate("bot", "docs", "read")
+	})
+
+	It("lets a read-scoped token read and refuses every write with 403 before reading the body", func() {
+		Expect(as(readTok, "GET", repo, nil).Status).To(Equal(200))
+		for _, c := range []struct{ method, path string }{
+			{"POST", repo + "/pulls"},
+			{"POST", repo + "/issues"},
+			{"POST", repo + "/issues/1/comments"},
+			{"POST", repo + "/contents"},
+			{"POST", repo + "/branches"},
+		} {
+			r := as(readTok, c.method, c.path, map[string]string{})
+			Expect(r.Status).To(Equal(403), c.method+" "+c.path)
+			Expect(r.JSON()["message"]).To(ContainSubstring("token does not have at least one of required scope(s)"))
+		}
+		Expect(as(writeTok, "POST", repo+"/issues", map[string]string{}).Status).To(Equal(422), "a write token gets to validation")
+		Expect(f.Snapshot("widgets").Calls).NotTo(HaveKey("POST issues"))
+	})
+
+	It("shows a login only the repositories it collaborates on, with its permission", func() {
+		r := as(writeTok, "GET", "/api/v1/user/repos", nil)
+		var names []string
+		perm := map[string]map[string]any{}
+		for _, m := range r.List() {
+			n := m["full_name"].(string)
+			names = append(names, n)
+			perm[n] = m["permissions"].(map[string]any)
+		}
+		Expect(names).To(ConsistOf("acme/docs", "acme/widgets"))
+		Expect(perm["acme/widgets"]).To(Equal(map[string]any{"admin": false, "push": true, "pull": true}))
+		Expect(perm["acme/docs"]).To(Equal(map[string]any{"admin": false, "push": false, "pull": true}))
+		Expect(as(writeTok, "GET", "/api/v1/repos/acme/secrets", nil).Status).To(Equal(404))
+		Expect(as(writeTok, "GET", "/api/v1/repos/acme/secrets/pulls", nil).Status).To(Equal(404))
+	})
+
+	It("refuses a write to a repository the login can only read", func() {
+		r := as(writeTok, "POST", "/api/v1/repos/acme/docs/pulls", map[string]string{"title": "t", "head": "h", "base": "main"})
+		Expect(r.Status).To(Equal(403))
+		Expect(as(writeTok, "POST", "/api/v1/repos/acme/secrets/pulls", map[string]string{}).Status).To(Equal(404))
+	})
+
+	Describe("git over HTTP", func() {
+		clone := func(tok, name string) (string, error) {
+			dir := GinkgoT().TempDir()
+			out, err := exec.Command("git", "-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+tok,
+				"clone", "-q", f.URL()+"/acme/"+name+".git", filepath.Join(dir, "c")).CombinedOutput()
+			return string(out), err
+		}
+		push := func(tok, name string) (string, error) {
+			dir := GinkgoT().TempDir()
+			run := func(args ...string) (string, error) {
+				out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+				return string(out), err
+			}
+			if out, err := exec.Command("git", "-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+writeTok,
+				"clone", "-q", f.URL()+"/acme/"+name+".git", dir).CombinedOutput(); err != nil {
+				return string(out), err
+			}
+			if out, err := run("-c", "user.email=a@b.invalid", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"); err != nil {
+				return out, err
+			}
+			return run("-c", "credential.helper=", "-c", "http.extraHeader=Authorization: token "+tok, "push", "-q", "origin", "HEAD:refs/heads/new")
+		}
+
+		It("lets the read token clone a repository it can see and refuses its push", func() {
+			// The write token is used to make the working copy; the read token must not push from it.
+			_, err := clone(readTok, "widgets")
+			Expect(err).NotTo(HaveOccurred())
+			out, err := push(readTok, "widgets")
+			Expect(err).To(HaveOccurred(), out)
+			Expect(out).To(ContainSubstring("403"))
+			Expect(f.Snapshot("widgets").Branches).NotTo(HaveKey("new"))
+		})
+
+		It("lets the write token push to a repository it may write, and not to one it can only read", func() {
+			out, err := push(writeTok, "widgets")
+			Expect(err).NotTo(HaveOccurred(), out)
+			Expect(f.Snapshot("widgets").Branches).To(HaveKey("new"))
+			out, err = push(writeTok, "docs")
+			Expect(err).To(HaveOccurred(), out)
+			Expect(f.Snapshot("docs").Branches).NotTo(HaveKey("new"))
+		})
+
+		It("answers 404 for a repository the login has no permission on", func() {
+			out, err := clone(readTok, "secrets")
+			Expect(err).To(HaveOccurred())
+			Expect(out).To(ContainSubstring("404"))
+		})
+	})
+})

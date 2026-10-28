@@ -10,6 +10,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/secretstore"
 )
 
@@ -27,6 +28,8 @@ type ProviderInput struct {
 	URL  string
 	// APIKey is empty for keyless upstreams such as Ollama.
 	APIKey string
+	// AnthropicWorkspaceID is for type anthropic only.
+	AnthropicWorkspaceID string
 }
 
 // ProviderPatch changes a provider; nil fields stay.
@@ -35,6 +38,8 @@ type ProviderPatch struct {
 	URL  *string
 	// APIKey replaces the key; a pointer to "" removes it.
 	APIKey *string
+	// AnthropicWorkspaceID replaces the workspace ID; a pointer to "" removes it.
+	AnthropicWorkspaceID *string
 }
 
 // ListProviders returns the org's providers, declared and entered.
@@ -68,6 +73,9 @@ func (s *Service) CreateProvider(ctx context.Context, org pgtype.UUID, actor aud
 	if err := ValidateProvider(in.Name, in.Type, in.URL); err != nil {
 		return Provider{}, err
 	}
+	if err := ValidateWorkspaceID(in.Type, in.AnthropicWorkspaceID); err != nil {
+		return Provider{}, err
+	}
 	if err := s.policy.Check(ctx, in.URL); err != nil {
 		return Provider{}, err
 	}
@@ -83,7 +91,8 @@ func (s *Service) CreateProvider(ctx context.Context, org pgtype.UUID, actor aud
 	err = s.tx(ctx, func(q *store.Queries) error {
 		row, err = q.CreateProvider(ctx, store.CreateProviderParams{
 			OrgID: org, ID: id, Name: in.Name, Type: in.Type, Url: in.URL, ApiKey: key,
-			Source: store.ConfigSourceUi, CreatedBy: creator,
+			AnthropicWorkspaceID: text(in.AnthropicWorkspaceID),
+			Source:               store.ConfigSourceUi, CreatedBy: creator,
 		})
 		if err != nil {
 			return err
@@ -115,9 +124,15 @@ func (s *Service) UpdateProvider(ctx context.Context, org pgtype.UUID, actor aud
 		if cur.Source != store.ConfigSourceUi {
 			return readOnly(cur.ManagedBySecret.String)
 		}
-		typ, u, key := cur.Type, cur.Url, cur.ApiKey
+		typ, u, key, ws := cur.Type, cur.Url, cur.ApiKey, cur.AnthropicWorkspaceID.String
 		if patch.Type != nil {
 			typ = *patch.Type
+		}
+		if patch.AnthropicWorkspaceID != nil {
+			ws = *patch.AnthropicWorkspaceID
+		}
+		if err := ValidateWorkspaceID(typ, ws); err != nil {
+			return err
 		}
 		if patch.URL != nil {
 			u = *patch.URL
@@ -148,9 +163,15 @@ func (s *Service) UpdateProvider(ctx context.Context, org pgtype.UUID, actor aud
 		// concurrent `keys rewrap` or `reencrypt` may have replaced the envelope since.
 		out, err = q.UpdateProvider(ctx, store.UpdateProviderParams{
 			OrgID: org, ID: pid, Type: typ, Url: u, SetApiKey: patch.APIKey != nil, ApiKey: key,
+			AnthropicWorkspaceID: text(ws),
 		})
 		if err != nil {
 			return err
+		}
+		if typ != cur.Type {
+			if err := refitModelFormats(ctx, q, org, actor, out); err != nil {
+				return err
+			}
 		}
 		after := providerSummary(out)
 		after["keyChanged"] = patch.APIKey != nil
@@ -223,6 +244,9 @@ type ModelInput struct {
 	ProviderID string
 	Name       string
 	Guard      bool
+	// Format overrides the model's wire format, within what the provider offers; "" is the
+	// default (ADR 0069).
+	Format string
 	// Rates are refused: a model's price is an org price entry now (ADR 0056).
 	Rates *Rates
 }
@@ -230,6 +254,8 @@ type ModelInput struct {
 // ModelPatch changes a model; nil fields stay.
 type ModelPatch struct {
 	Guard *bool
+	// Format overrides the format; a pointer to "" goes back to the default.
+	Format *string
 	// Rates and ClearRates are refused, as in ModelInput.
 	Rates      *Rates
 	ClearRates bool
@@ -260,12 +286,17 @@ func (s *Service) CreateModel(ctx context.Context, org pgtype.UUID, actor audit.
 		if err := ValidateModel(in.Name, in.Guard, prov.Type); err != nil {
 			return err
 		}
+		format, overridden, err := modelformat.Resolve(prov.Type, in.Name, in.Format)
+		if err != nil {
+			return invalid("%s", err.Error())
+		}
 		reason := pgtype.Text{}
 		if prov.DisabledReason.Valid {
 			reason = pgtype.Text{String: ReasonProviderDisabled, Valid: true}
 		}
 		row, err = q.CreateModel(ctx, store.CreateModelParams{
 			OrgID: org, ID: id, ProviderID: pid, Name: in.Name, Guard: in.Guard,
+			Format: string(format), FormatOverridden: overridden,
 			Source:         store.ConfigSourceUi,
 			DisabledReason: reason, CreatedBy: creator,
 		})
@@ -311,7 +342,15 @@ func (s *Service) UpdateModel(ctx context.Context, org pgtype.UUID, actor audit.
 		if err := ValidateModel(cur.Name, guard, prov.Type); err != nil {
 			return err
 		}
-		out, err = q.UpdateModel(ctx, store.UpdateModelParams{OrgID: org, ID: mid, Guard: guard})
+		format, overridden := cur.Format, cur.FormatOverridden
+		if patch.Format != nil {
+			f, o, err := modelformat.Resolve(prov.Type, cur.Name, *patch.Format)
+			if err != nil {
+				return invalid("%s", err.Error())
+			}
+			format, overridden = string(f), o
+		}
+		out, err = q.UpdateModel(ctx, store.UpdateModelParams{OrgID: org, ID: mid, Guard: guard, Format: format, FormatOverridden: overridden})
 		if err != nil {
 			return err
 		}
@@ -358,8 +397,9 @@ func parseID(s string) (pgtype.UUID, error) {
 	return id, nil
 }
 
-// OpenKey decrypts a provider's API key, or returns "" for a keyless provider. Only the
-// reconciler calls it, to deliver keys to the gateway.
+// OpenKey decrypts a provider's API key, or returns "" for a keyless provider. Only
+// koinon-reconciler calls it: to deliver keys to the gateway, and for the spend settler to ask a
+// provider what it billed for a response (package ledger).
 func OpenKey(keys Opener, org, id pgtype.UUID, envelope []byte) (string, error) {
 	if len(envelope) == 0 {
 		return "", nil
@@ -377,4 +417,43 @@ func OpenKey(keys Opener, org, id pgtype.UUID, envelope []byte) (string, error) 
 	}
 	defer clear(plain)
 	return string(plain), nil
+}
+
+// text is a nullable text column: NULL for "".
+func text(s string) pgtype.Text { return pgtype.Text{String: s, Valid: s != ""} }
+
+// refitModelFormats follows a provider's type change (ADR 0069): a model whose format an admin set
+// must still be offered by the new type, or the change is refused; every other model takes the
+// new type's default.
+func refitModelFormats(ctx context.Context, q *store.Queries, org pgtype.UUID, actor audit.Actor, prov store.Provider) error {
+	models, err := q.ListModels(ctx, org)
+	if err != nil {
+		return err
+	}
+	for _, m := range models {
+		if m.ProviderID != prov.ID {
+			continue
+		}
+		if m.FormatOverridden {
+			if err := modelformat.Validate(prov.Type, modelformat.Format(m.Format)); err != nil {
+				return invalid("model %q is set to the %s format, which a %s provider does not offer; reset the model to the default, or choose a format both types offer", m.Name, m.Format, prov.Type)
+			}
+			continue
+		}
+		want := string(modelformat.Default(prov.Type, m.Name))
+		if want == m.Format {
+			continue
+		}
+		after, err := q.UpdateModel(ctx, store.UpdateModelParams{OrgID: org, ID: m.ID, Guard: m.Guard, Format: want})
+		if err != nil {
+			return err
+		}
+		if err := audit.RecordErr(ctx, q, audit.Event{
+			Org: org, Actor: actor, Action: "model.update", TargetKind: "model", TargetID: m.ID.String(),
+			Before: modelSummary(m), After: modelSummary(after),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

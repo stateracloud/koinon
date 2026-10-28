@@ -37,6 +37,7 @@ func main() {
 	owner := flag.String("owner", "koinon-demo", "organisation or user that owns the repositories")
 	repos := flag.String("repos", "hello", "comma-separated repositories to create")
 	token := flag.String("token", fakegitea.DefaultToken, "the access token the fake accepts (a fake; never a real credential)")
+	readToken := flag.String("read-token", "", "a second token, read scope only (writes and pushes answer 403); empty for none")
 	login := flag.String("login", fakegitea.DefaultLogin, "the login the token authenticates as")
 	version := flag.String("gitea-version", "28.2.0", "version GET /api/v1/version reports")
 	bearer := flag.Bool("allow-bearer", false, "also accept Authorization: Bearer <token>")
@@ -46,6 +47,9 @@ func main() {
 	defer f.Close()
 	f.Owner, f.Version, f.AllowBearer = *owner, *version, *bearer
 	f.Tokens = map[string]string{*token: *login}
+	if *readToken != "" {
+		f.AddScopedToken(*readToken, *login, "read")
+	}
 	var names []string
 	for r := range strings.SplitSeq(*repos, ",") {
 		if r = strings.TrimSpace(r); r != "" {

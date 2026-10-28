@@ -12,16 +12,22 @@ import type { GrantBinding } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import type { Connection } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { Flavor, type Grant, type Template } from '@/gen/koinon/template/v1alpha1/template_pb'
 import { grantNeedsTargets, validateRepositories } from '@/lib/agents'
+import type { CodeHostInfo } from '@/lib/connector'
 import { flavorLabel, presetLabel } from '@/lib/labels'
 import { cn } from '@/lib/utils'
 
-export type NewAgent = { templateId: string; displayName: string; flavor: Flavor; grants: Pick<GrantBinding, 'connector' | 'connectionId' | 'repositories'>[] }
+export type NewAgent = { templateId: string; displayName: string; flavor: Flavor; grants: Pick<GrantBinding, 'connector' | 'connectionId' | 'repositories'>[]; ephemeral?: boolean }
 
 export type AgentWizardProps = {
   templates: readonly Template[]
   connections: readonly Connection[]
   /** Target patterns by connector type, from the connector type documents. */
   targetPatterns?: ReadonlyMap<string, string>
+  /**
+   * What each code-host connector type says about its credential (spec.capabilities, ADR 0063),
+   * by connector type. A static bot token (Gitea) gets a warning in the access step and the review.
+   */
+  codeHosts?: ReadonlyMap<string, CodeHostInfo>
   /** Whether the viewer may add a connection (admins and owners). */
   canConnect?: boolean
   /**
@@ -54,7 +60,7 @@ function boundsText(g: Grant): string {
  * flavor, the GitHub grant (connection and repositories within the
  * template's bounds), then a summary of what the draft will propose.
  */
-export function AgentWizard({ templates, connections, targetPatterns, canConnect, canListRepos, onCreate, pending, error }: AgentWizardProps) {
+export function AgentWizard({ templates, connections, targetPatterns, codeHosts, canConnect, canListRepos, onCreate, pending, error }: AgentWizardProps) {
   const [step, setStep] = useState(0)
   const [templateId, setTemplateId] = useState(templates.length === 1 ? templates[0].id : '')
   const template = templates.find((t) => t.id === templateId)
@@ -62,8 +68,11 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
   const [name, setName] = useState('')
   const [bindings, setBindings] = useState<Record<number, Binding>>({})
   const [showErrors, setShowErrors] = useState(false)
+  // Unset follows the template; the toggle overrides it for this agent.
+  const [ephemeralChoice, setEphemeralChoice] = useState<boolean | undefined>(undefined)
 
   const chosenFlavor = template && template.allowedFlavors.includes(flavor) ? flavor : (template?.defaultFlavor ?? Flavor.UNSPECIFIED)
+  const ephemeral = ephemeralChoice ?? template?.ephemeral ?? false
   const targetGrants = (template?.grants ?? []).map((g, i) => ({ g, i })).filter(({ g }) => grantNeedsTargets(g))
 
   function binding(i: number, g: Grant): Binding {
@@ -115,6 +124,7 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
       templateId: template.id,
       displayName: name.trim(),
       flavor: chosenFlavor,
+      ephemeral: ephemeral === (template.ephemeral ?? false) ? undefined : ephemeral,
       grants: targetGrants.map(({ g, i }) => {
         const b = binding(i, g)
         return { connector: g.connector, connectionId: b.connectionId, repositories: b.repositories.map((r) => r.trim()).filter(Boolean) }
@@ -171,6 +181,7 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
               grant={g}
               binding={binding(i, g)}
               connections={connections.filter((c) => c.connector === g.connector)}
+              host={codeHosts?.get(g.connector)}
               canConnect={canConnect}
               canListRepos={canListRepos}
               errors={showErrors ? grantErrors(i, g) : []}
@@ -187,6 +198,15 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
             <Label htmlFor="agent-name">Name</Label>
             <Input id="agent-name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={showErrors && !name.trim()} />
           </div>
+          <div className="flex items-start gap-2">
+            <input id="agent-ephemeral" type="checkbox" className="mt-1" checked={ephemeral} onChange={(e) => setEphemeralChoice(e.target.checked)} />
+            <div>
+              <Label htmlFor="agent-ephemeral">Ephemeral: fresh sandbox per task, no home</Label>
+              <p className="text-muted-foreground text-xs">
+                Each task runs in a new sandbox that is deleted when the task ends. Nothing carries over except the task’s notes and the memory stores.
+              </p>
+            </div>
+          </div>
           <section aria-label="Draft summary" className="bg-card grid gap-2 rounded-lg border p-4 text-sm">
             <h2 className="font-semibold">The draft will propose</h2>
             <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
@@ -198,6 +218,8 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
               <dd>{flavorLabel(chosenFlavor)}</dd>
               <dt className="text-muted-foreground">Model</dt>
               <dd>{template.model || 'default'}</dd>
+              <dt className="text-muted-foreground">Sandbox</dt>
+              <dd>{ephemeral ? 'Ephemeral: fresh sandbox per task, no home' : 'Persistent home'}</dd>
               {template.runLimits && (
                 <>
                   <dt className="text-muted-foreground">Run limits</dt>
@@ -222,6 +244,7 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
                     {g.connector} grant · {presetLabel(g.preset)}
                   </p>
                   <p className="text-muted-foreground">Scopes: {g.scopes.join(', ')}</p>
+                  {codeHosts?.get(g.connector)?.weakerCredential && <WeakerCredential host={codeHosts.get(g.connector)!} />}
                   {conn && <p>Connection: {conn.displayName}</p>}
                   {b && <p>Repositories: {b.repositories.filter((r) => r.trim()).join(', ')}</p>}
                 </div>
@@ -266,8 +289,26 @@ export function AgentWizard({ templates, connections, targetPatterns, canConnect
   )
 }
 
+/**
+ * WeakerCredential says that a connection's credential is weaker than GitHub's (ADR 0063): the agent
+ * builder shows it, and every preset stays available.
+ */
+function WeakerCredential({ host }: { host: CodeHostInfo }) {
+  return (
+    <Alert role="note" className="my-1">
+      <AlertDescription>
+        <strong>Weaker credential.</strong> {host.name} gives Koinon a bot token, not an installation token: it is not narrowed to the repositories you
+        choose, it does not expire, and {host.name} cannot refuse it the right to change workflow files. The agent&apos;s sandbox can still reach only the
+        repositories chosen here, and Koinon refuses workflow changes itself. All presets are available; pick Read only or Standard if you want more
+        control.
+      </AlertDescription>
+    </Alert>
+  )
+}
+
 type GrantStepProps = {
   grant: Grant
+  host?: CodeHostInfo
   binding: Binding
   connections: readonly Connection[]
   canConnect?: boolean
@@ -277,26 +318,27 @@ type GrantStepProps = {
   onChange: (patch: Partial<Binding>) => void
 }
 
-function GrantStep({ grant: g, binding: b, connections, canConnect, canListRepos, errors, boundsText, onChange }: GrantStepProps) {
+function GrantStep({ grant: g, host, binding: b, connections, canConnect, canListRepos, errors, boundsText, onChange }: GrantStepProps) {
   const id = useId()
   const max = g.targetsMax
   const atMax = max > 0 && b.repositories.length >= max
   return (
     <fieldset className="bg-card grid gap-3 rounded-lg border p-4" aria-describedby={errors.length ? `${id}-errors` : undefined}>
-      <legend className="px-1 font-semibold">{g.connector === 'github' ? 'GitHub access' : `${g.connector} access`}</legend>
+      <legend className="px-1 font-semibold">{host ? `${host.name} access` : g.connector === 'github' ? 'GitHub access' : `${g.connector} access`}</legend>
       {g.purpose && <p className="text-muted-foreground text-sm">{g.purpose}</p>}
       <p className="text-sm">
         Scopes: <span className="font-mono text-xs">{g.scopes.join(', ')}</span> · {presetLabel(g.preset)}
       </p>
+      {host?.weakerCredential && <WeakerCredential host={host} />}
       {connections.length === 0 ? (
         <p className="text-sm">
           No {g.connector} connection yet.{' '}
           {canConnect ? (
-            <Link to="/connections/new/github" className="underline">
-              Connect GitHub first
+            <Link to={g.connector === 'gitea' ? '/connections/new/gitea' : '/connections/new/github'} className="underline">
+              Connect {host?.name ?? 'GitHub'} first
             </Link>
           ) : (
-            'Ask an org admin or owner to connect GitHub.'
+            `Ask an org admin or owner to connect ${host?.name ?? 'GitHub'}.`
           )}
         </p>
       ) : (
@@ -321,15 +363,15 @@ function GrantStep({ grant: g, binding: b, connections, canConnect, canListRepos
           Repositories ({boundsText})
         </span>
         <p className="text-muted-foreground text-xs">
-          As owner/name. The connection’s GitHub App installation must be able to access each one
-          {canListRepos && g.connector === 'github' ? '; type to search its repositories.' : '.'}
+          As owner/name. {host?.weakerCredential ? 'The connection’s bot must be a collaborator on each one' : 'The connection’s GitHub App installation must be able to access each one'}
+          {canListRepos ? '; type to search its repositories.' : '.'}
         </p>
         {b.repositories.map((r, ri) => (
           <div key={ri} className="flex gap-2">
             <RepoPicker
               aria-label={`Repository ${ri + 1}`}
               connectionId={b.connectionId}
-              searchable={!!canListRepos && g.connector === 'github'}
+              searchable={!!canListRepos}
               value={r}
               onChange={(v) => onChange({ repositories: b.repositories.map((x, xi) => (xi === ri ? v : x)) })}
             />

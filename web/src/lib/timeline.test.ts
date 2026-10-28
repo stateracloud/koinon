@@ -4,7 +4,7 @@ import { create, type JsonObject } from '@bufbuild/protobuf'
 import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { RunEventSchema } from '@/gen/koinon/run/v1alpha1/run_pb'
-import { ActorKind, TicketEventSchema } from '@/gen/koinon/ticket/v1alpha1/ticket_pb'
+import { ActorKind, TaskEventSchema } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { buildTimeline } from '@/lib/timeline'
 
 const run = 'r-1234567890'
@@ -14,8 +14,8 @@ const run = 'r-1234567890'
 const runEvent = (seq: number, kind: string, payload: JsonObject) =>
   create(RunEventSchema, { runId: run, seq: BigInt(seq), kind, payload, createdAt: timestampFromMs(1000 + seq * 10) })
 
-const ticketEvent = (seq: number, at: number, kind: string, payload: JsonObject, actorKind = ActorKind.SYSTEM) =>
-  create(TicketEventSchema, { seq: BigInt(seq), runId: run, kind, actorKind, payload, createdAt: timestampFromMs(at) })
+const taskEvent = (seq: number, at: number, kind: string, payload: JsonObject, actorKind = ActorKind.SYSTEM) =>
+  create(TaskEventSchema, { seq: BigInt(seq), runId: run, kind, actorKind, payload, createdAt: timestampFromMs(at) })
 
 const text = (t: string) => ({ type: 'text', text: t })
 
@@ -64,28 +64,48 @@ describe('buildTimeline', () => {
     ])
   })
 
-  it('shows a park and its approval ticket events', () => {
+  it('shows a wait for the model provider as a note', () => {
+    const items = buildTimeline([], {
+      [run]: [
+        runEvent(1, 'run.waiting_for_model', { model: 'deepseek/flash', provider: 'openrouter', reason: 'waiting for the model provider "openrouter" to reach the gateway' }),
+        runEvent(2, 'run.waiting_for_model', {}),
+      ],
+    })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456 is waiting for the model provider openrouter to reach the gateway (model deepseek/flash)',
+      'Run r-123456 is waiting for the model provider to reach the gateway',
+    ])
+  })
+
+  it('shows an uncached run as a note', () => {
+    const items = buildTimeline([], { [run]: [runEvent(1, 'run.uncached', { model: 'google/gemini-x', reason: 'no cache mode for the provider format' })] })
+    expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
+      'Run r-123456 runs without prompt caching (model google/gemini-x): no cache mode for the provider format',
+    ])
+  })
+
+  it('shows a park and its approval task events', () => {
     const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
     const items = buildTimeline(
       [
-        ticketEvent(1, 100, 'approval.requested', { ...base, decision: 'ask', risk: {} }, ActorKind.AGENT),
-        ticketEvent(2, 200, 'run.parked', { reason: 'approval', approvals: ['ap-1'] }),
-        ticketEvent(3, 300, 'status.changed', { from: 'in_progress', to: 'waiting_on_you' }),
-        ticketEvent(4, 400, 'approval.approved', { ...base, note: 'ship it' }, ActorKind.USER),
-        ticketEvent(5, 500, 'approval.executed', { ...base, result: { url: 'https://github.com/Acme/Widgets/pull/7', number: 7 } }),
-        ticketEvent(6, 600, 'approval.failed', { ...base, error: 'base branch gone' }),
-        ticketEvent(7, 700, 'approval.denied', base, ActorKind.USER),
-        ticketEvent(8, 800, 'approval.expired', { ...base, expires_at: '2026-10-29T00:00:00Z' }),
-        ticketEvent(9, 900, 'approval.canceled', { ...base, reason: 'run ended' }),
-        ticketEvent(10, 950, 'approval.requested', { ...base, decision: 'allow' }, ActorKind.AGENT),
-        ticketEvent(11, 1000, 'run.canceled', { reason: 'approval_expired', message: 'nobody decided in time' }),
+        taskEvent(1, 100, 'approval.requested', { ...base, decision: 'ask', risk: {} }, ActorKind.AGENT),
+        taskEvent(2, 200, 'run.parked', { reason: 'approval', approvals: ['ap-1'] }),
+        taskEvent(3, 300, 'status.changed', { from: 'working', to: 'input_required' }),
+        taskEvent(4, 400, 'approval.approved', { ...base, note: 'ship it' }, ActorKind.USER),
+        taskEvent(5, 500, 'approval.executed', { ...base, result: { url: 'https://github.com/Acme/Widgets/pull/7', number: 7 } }),
+        taskEvent(6, 600, 'approval.failed', { ...base, error: 'base branch gone' }),
+        taskEvent(7, 700, 'approval.denied', base, ActorKind.USER),
+        taskEvent(8, 800, 'approval.expired', { ...base, expires_at: '2026-10-29T00:00:00Z' }),
+        taskEvent(9, 900, 'approval.canceled', { ...base, reason: 'run ended' }),
+        taskEvent(10, 950, 'approval.requested', { ...base, decision: 'allow' }, ActorKind.AGENT),
+        taskEvent(11, 1000, 'run.canceled', { reason: 'approval_expired', message: 'nobody decided in time' }),
       ],
       {},
     )
     expect(items.map((i) => ('text' in i ? i.text : ''))).toEqual([
       'Approval requested: create_pull_request on Acme/Widgets',
       'Run r-123456 paused for 1 approval',
-      'Moved from In progress to Waiting on you',
+      'Moved from Working to Input required',
       'Approved create_pull_request on Acme/Widgets: ship it',
       'Done: create_pull_request on Acme/Widgets',
       'Failed: create_pull_request on Acme/Widgets: base branch gone',
@@ -102,12 +122,27 @@ describe('buildTimeline', () => {
     expect(items[3]).toMatchObject({ ask: false })
   })
 
+  it('names the scope that allowed a call without a decision', () => {
+    const base = { approval_id: 'ap-1', tool: 'create_pull_request', target: 'github:Acme/Widgets', args_sha256: 'ab' }
+    const items = buildTimeline(
+      [
+        taskEvent(1, 100, 'approval.approved', { ...base, scope_id: 'sc-1', scope_kind: 'agent', scope_expires_at: '2099-03-04T12:00:00Z' }, ActorKind.USER),
+        taskEvent(2, 200, 'approval.requested', { ...base, decision: 'allow', scope_id: 'sc-1', scope_kind: 'task', scope_expires_at: '2099-03-04T12:00:00Z' }, ActorKind.AGENT),
+      ],
+      {},
+    )
+    const texts = items.map((i) => ('text' in i ? i.text : ''))
+    expect(texts[0]).toMatch(/^Approved create_pull_request on Acme\/Widgets for this agent until /)
+    expect(texts[1]).toMatch(/^Running create_pull_request on Acme\/Widgets, allowed by a scope for this task until /)
+    expect(items[1]).toMatchObject({ ask: false })
+  })
+
   it('shows a session reset as a note', () => {
     const message = "The agent's workspace was reset, so this run starts a new session."
     const items = buildTimeline(
       [
-        ticketEvent(1, 100, 'run.session_reset', { message, previousSessionId: 'ses_1', sessionId: 'ses_2' }),
-        ticketEvent(2, 200, 'run.session_reset', {}),
+        taskEvent(1, 100, 'run.session_reset', { message, previousSessionId: 'ses_1', sessionId: 'ses_2' }),
+        taskEvent(2, 200, 'run.session_reset', {}),
       ],
       {},
     )
@@ -120,11 +155,11 @@ describe('buildTimeline', () => {
   it("shows Koinon's sandbox and health events as notes with their message", () => {
     const items = buildTimeline(
       [
-        ticketEvent(1, 100, 'sandbox.recreated', { message: 'Sandbox recreated: stuck process' }),
-        ticketEvent(2, 200, 'sandbox.work_lost', { message: 'Unsaved work was lost' }),
-        ticketEvent(3, 300, 'agent.unhealthy', { message: 'Agent marked unhealthy: repeated stuck sandboxes' }),
-        ticketEvent(4, 400, 'run.session_restarted', { message: 'Session restarted: new instructions.' }),
-        ticketEvent(5, 500, 'sandbox.recreated', {}),
+        taskEvent(1, 100, 'sandbox.recreated', { message: 'Sandbox recreated: stuck process' }),
+        taskEvent(2, 200, 'sandbox.work_lost', { message: 'Unsaved work was lost' }),
+        taskEvent(3, 300, 'agent.unhealthy', { message: 'Agent marked unhealthy: repeated stuck sandboxes' }),
+        taskEvent(4, 400, 'run.session_restarted', { message: 'Session restarted: new instructions.' }),
+        taskEvent(5, 500, 'sandbox.recreated', {}),
       ],
       {},
     )
@@ -140,7 +175,7 @@ describe('buildTimeline', () => {
 
   it('gives a system-requested approval (saved work) an approval item that a human decides', () => {
     const items = buildTimeline(
-      [ticketEvent(1, 100, 'approval.requested', { system: true, approval_id: 'ap-9', tool: 'push_saved_work', target: 'github:acme/widgets', args_sha256: 'abc' })],
+      [taskEvent(1, 100, 'approval.requested', { system: true, approval_id: 'ap-9', tool: 'push_saved_work', target: 'github:acme/widgets', args_sha256: 'abc' })],
       {},
     )
     expect(items[0]).toMatchObject({ type: 'approval', approvalId: 'ap-9', kind: 'approval.requested', ask: true, text: 'Approval requested: push_saved_work on acme/widgets' })
@@ -156,7 +191,7 @@ describe('buildTimeline', () => {
   })
 
   it('shows a streamed reply once when the persisted message arrives', () => {
-    const items = buildTimeline([ticketEvent(1, 1100, 'message', { text: 'Hello there' }, ActorKind.AGENT)], {
+    const items = buildTimeline([taskEvent(1, 1100, 'message', { text: 'Hello there' }, ActorKind.AGENT)], {
       [run]: [chunk(1, 'Hello '), chunk(2, 'there')],
     })
     expect(agentTexts(items)).toEqual(['Hello there'])
@@ -166,9 +201,9 @@ describe('buildTimeline', () => {
   it('shows each reply once across a park and resume', () => {
     const items = buildTimeline(
       [
-        ticketEvent(1, 1100, 'message', { text: 'Asked for approval.' }, ActorKind.AGENT),
-        ticketEvent(2, 1200, 'run.parked', { reason: 'approval', approvals: ['a'] }),
-        ticketEvent(3, 1500, 'message', { text: 'The pull request is open.' }, ActorKind.AGENT),
+        taskEvent(1, 1100, 'message', { text: 'Asked for approval.' }, ActorKind.AGENT),
+        taskEvent(2, 1200, 'run.parked', { reason: 'approval', approvals: ['a'] }),
+        taskEvent(3, 1500, 'message', { text: 'The pull request is open.' }, ActorKind.AGENT),
       ],
       { [run]: [chunk(1, 'Asked for '), chunk(2, 'approval.'), chunk(30, 'The pull request '), chunk(31, 'is open.')] },
     )
@@ -176,7 +211,7 @@ describe('buildTimeline', () => {
   })
 
   it('keeps the live text of a resumed turn until its message is persisted', () => {
-    const items = buildTimeline([ticketEvent(1, 1100, 'message', { text: 'Asked for approval.' }, ActorKind.AGENT)], {
+    const items = buildTimeline([taskEvent(1, 1100, 'message', { text: 'Asked for approval.' }, ActorKind.AGENT)], {
       [run]: [chunk(1, 'Asked for approval.'), chunk(30, 'Resumed, still typing')],
     })
     expect(agentTexts(items)).toEqual(['Asked for approval.', 'Resumed, still typing'])
@@ -184,12 +219,20 @@ describe('buildTimeline', () => {
 })
 
 describe('a spend limit', () => {
-  it('shows the ticket note the ledger writes when a run is stopped at a limit', () => {
+  it('shows the task note the ledger writes when a run is stopped at a limit', () => {
     const items = buildTimeline(
-      [ticketEvent(1, 100, 'run.canceled', { reason: 'spend_limit', limit: 'org_monthly', message: 'Org monthly cap reached ($10.00 of $10.00 since 2026-10-01 00:00 UTC)' })],
+      [taskEvent(1, 100, 'run.canceled', { reason: 'spend_limit', limit: 'org_monthly', message: 'Org monthly cap reached ($10.00 of $10.00 since 2026-10-01 00:00 UTC)' })],
       {},
     )
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ type: 'note', text: 'Run r-123456 stopped at a spend limit: Org monthly cap reached ($10.00 of $10.00 since 2026-10-01 00:00 UTC)' })
+  })
+
+  it('names states from events written before the move from tickets', () => {
+    const items = buildTimeline(
+      [taskEvent(1, 100, 'status.changed', { from: 'todo', to: 'waiting_on_you' }), taskEvent(2, 200, 'status.changed', { from: 'input_required', to: 'completed' }), taskEvent(3, 300, 'ticket.created', { title: 'Old' })],
+      {},
+    )
+    expect(items.map((i) => (i.type === 'note' ? i.text : ''))).toEqual(['Moved from Submitted to Input required', 'Moved from Input required to Completed', 'Task created: Old'])
   })
 })

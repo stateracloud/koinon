@@ -6,10 +6,14 @@
 #
 # Usage:
 #   koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs]
+#                   [--cache-anthropic | --cache-alibaba] [--session-id ID]
 #                   [-- OPENCODE_ACP_ARGS...]
 #
 # --plugin-installs is set by koinon-agentd when the agent's template turns
 # harness.pluginInstalls on; only then are the agent's own plugins loaded (see README.md).
+#
+# --cache-anthropic and --cache-alibaba are set by koinon-agentd for a model whose provider needs
+# explicit prompt-cache markers (ADR 0068); the config then sets compatibility.cacheFormat.
 #
 # koinon-agentd writes the run's instructions to /sandbox/.koinon/AGENTS.md before it starts
 # this script; without that file the script refuses to start (exit 64).
@@ -38,9 +42,12 @@ check() {
 
 # --plugin-installs is the one switch only this flavor takes.
 plugin_installs=''
+cache_format=''
 koinon_extra_arg() {
   case $1 in
     --plugin-installs) plugin_installs=1 ;;
+    --cache-anthropic) cache_format=anthropic ;;
+    --cache-alibaba) cache_format=alibaba ;;
     *) return 1 ;;
   esac
 }
@@ -50,14 +57,17 @@ shift "$koinon_shift"
 
 # Drop anything the caller's environment might carry that would change where OpenCode reads its
 # configuration, its database or its server credentials, or where it sends telemetry
-# (OpenCode 2.0.24, see README.md).
-unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR OPENCODE_CONFIG_CONTENT OPENCODE_CLI_CONFIG_CONTENT \
-  OPENCODE_CONFIG_PROJECT_DISABLE OPENCODE_PERMISSION OPENCODE_MODELS_URL OPENCODE_MODELS_PATH \
-  OPENCODE_AUTO_SHARE OPENCODE_DB OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD OPENCODE_PTY_HANDOFF \
-  OPENCODE_SIMULATE OPENCODE_TEST_HOME OPENCODE_LOCAL OPENCODE_PRINT_LOGS \
+# (OpenCode 2.2.0, see README.md).
+for koinon_var in $(env | sed -n 's/^\(OPENCODE_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  unset "$koinon_var"
+done
+unset koinon_var TMPDIR \
   OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# The agent's python3 scripts must not leave __pycache__ directories in the repository it works
+# on (the image's standard library is precompiled and read-only).
+export PYTHONDONTWRITEBYTECODE=1
 # State lives in the sandbox home, which is the agent's volume (ADR 0048, 0049).
 koinon_export_base_env
 export XDG_DATA_HOME=/sandbox/.local/share
@@ -73,11 +83,16 @@ export OPENCODE_CONFIG_DIR=/etc/koinon/opencode
 export OPENCODE_DISABLE_AUTOUPDATE=1
 export OPENCODE_DISABLE_MODELS_FETCH=1
 export OPENCODE_DISABLE_PROJECT_CONFIG=1
+# No .claude roots (skills; the compatibility plugin is also off) and none of the free models
+# of OpenCode's built-in provider: the koinon provider is the only one.
+export OPENCODE_DISABLE_CLAUDE_CODE=1
+export OPENCODE_DISABLE_FREE_MODELS=1
 
 # The agent's own plugins load only when the template allows plugin installs. The global config
 # directory is read-only and holds none, project configuration is off and ~/.config/opencode is
 # no config directory here, so the only way in is this list: each directory under
 # ~/.config/opencode/plugins/, merged into the config as OPENCODE_CONFIG_CONTENT.
+config_content=''
 if [ -n "$plugin_installs" ]; then
   list=''
   for d in /sandbox/.config/opencode/plugins/*/; do
@@ -86,7 +101,26 @@ if [ -n "$plugin_installs" ]; then
     check plugin "$d"
     list="$list${list:+,}\"$d\""
   done
-  export OPENCODE_CONFIG_CONTENT="{\"plugins\":[$list]}"
+  config_content="\"plugins\":[$list]"
+fi
+# Prompt caching (ADR 0068): the koinon provider's models send Anthropic-style cache_control
+# markers. The key is compatibility.cacheFormat (packages/schema/src/model-compatibility.ts,
+# provider level in packages/schema/src/config/provider.ts).
+# Sticky routing: the run ID goes to OpenRouter as the body field session_id, so the run stays on
+# one upstream and its cache stays warm. The provider-level body overlay is merged into every
+# request (packages/schema/src/config/provider.ts, core/src/config/plugin/provider.ts).
+provider=''
+if [ -n "$cache_format" ]; then
+  provider="\"compatibility\":{\"cacheFormat\":\"$cache_format\"}"
+fi
+if [ -n "$session_id" ]; then
+  provider="$provider${provider:+,}\"body\":{\"session_id\":\"$session_id\"}"
+fi
+if [ -n "$provider" ]; then
+  config_content="$config_content${config_content:+,}\"providers\":{\"koinon\":{$provider}}"
+fi
+if [ -n "$config_content" ]; then
+  export OPENCODE_CONFIG_CONTENT="{$config_content}"
 fi
 
 # The agentgateway key under a name no built-in OpenCode provider reads: with OPENAI_API_KEY
@@ -100,9 +134,9 @@ koinon_export_endpoints
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}"
 export no_proxy="127.0.0.1,localhost${no_proxy:+,$no_proxy}"
 
-# Koinon's instructions reach the model only through this file (the AGENTS.md link in the
-# global config directory). OpenCode skips a missing file silently and loads an empty one as
-# empty instructions.
+# Koinon's instructions reach the model only through this file (the "instructions" key in
+# /etc/koinon/opencode/opencode.jsonc). OpenCode skips a missing file silently and loads an empty
+# one as empty instructions.
 koinon_require_instructions
 
 mkdir -p "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"

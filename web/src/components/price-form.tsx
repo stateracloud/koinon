@@ -37,7 +37,7 @@ export function PriceForm({
   existing?: PriceVersion
   actions: Actions
   onDone: () => void
-  onSaved: (name: string) => void
+  onSaved: (name: string, warnings: string[]) => void
 }) {
   const editing = !!existing
   const [f, setF] = useState<PriceFormValues>(() => (existing ? formFromVersion(existing) : emptyPriceForm()))
@@ -56,8 +56,8 @@ export function PriceForm({
     setPending(true)
     setError(undefined)
     try {
-      await actions.setPrice(toSetPrice(orgId, f))
-      onSaved(f.name)
+      const res = await actions.setPrice(toSetPrice(orgId, f))
+      onSaved(f.name, res.warnings)
       onDone()
     } catch (err) {
       setError(ConnectError.from(err).rawMessage)

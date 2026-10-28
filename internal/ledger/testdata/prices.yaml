@@ -1,0 +1,27 @@
+# The default price list the ledger specs run against (pricing.ReplaceDefault). The specs assert
+# exact money values computed from these prices, so the file is fixed: a price update to
+# pricing/default.yaml must never change it. The models are made up (vendor "acme").
+# USD per 1,000,000 tokens.
+version: "2000-01-01.1"
+entries:
+  - id: acme-flash
+    provider: openrouter
+    match: {glob: "acme/flash"}
+    valid_from: 2000-01-01
+    prices: {input: "0.20", output: "2", cache_read: "0.05"}
+    tokenizer: bytes
+    ratio: "3.0"
+    max_output: 1000000
+    source: {url: "https://example.com/test-prices", accessed: 2000-01-01}
+    note: "Test fixture: a cheap model that caches by itself."
+  - id: acme-frontier
+    provider: openrouter
+    match: {glob: "acme/frontier"}
+    valid_from: 2000-01-01
+    prices: {input: "10", output: "50", cache_read: "0.25", cache_write: "12.5"}
+    tokenizer: bytes
+    ratio: "2.3"
+    hidden_thinking: true
+    max_output: 128000
+    source: {url: "https://example.com/test-prices", accessed: 2000-01-01}
+    note: "Test fixture: an expensive model that bills cache writes and hidden thinking."

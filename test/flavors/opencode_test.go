@@ -24,6 +24,11 @@ var opencode = flavor{
 	writeFile: func(path, content string) fakemodel.ToolCall {
 		return fakemodel.ToolCall{Name: "write", Arguments: map[string]any{"path": path, "content": content}}
 	},
+	// jq, yq, fd, ast-grep, duckdb, sqlite3, poppler, python3 and friends (flavors/opencode/README.md).
+	dataTools: true,
+	// Measured 2026-10-28 with the data tools: arm64 650,916 KiB (429,148 before them), amd64
+	// 632,836 KiB (409,084 before); plus about 10% (flavors/opencode/README.md, "Tools in the image").
+	sizeBudget: map[string]int64{"arm64": 716_000, "amd64": 696_000},
 	// OpenCode names MCP tools <server>_<tool>; the server is "koinon" in its config.
 	mcpToolName: "koinon_" + mcpTool,
 	// OpenCode also advertises session/resume; Koinon does not rely on it.
@@ -39,14 +44,16 @@ var opencode = flavor{
 	// The request arrives with tool kind "read", which agentd's mapping allows, and the path in
 	// its locations: agentd rejects it as outside the session directory.
 	agentdVerdict: "reject",
-	// OpenCode 2.0.24's session/load error for an unknown session.
+	// OpenCode 2.2.0 treats a plain decline as a defect that interrupts the step
+	// (packages/core/src/permission.ts), so the turn ends cancelled.
+	rejectEndsTurn: true,
+	// OpenCode 2.2.0's session/load error for an unknown session.
 	unknownSession: "session not found",
-	// The global AGENTS.md links to the file koinon-agentd writes.
+	// The config's "instructions" key names the file koinon-agentd writes.
 	instructionsInSystem: true,
-	instructionLink:      "/etc/koinon/opencode/AGENTS.md",
 	// OpenCode turns MCP prompts into commands named <server>:<prompt>.
 	readyCommand: "koinon:" + readyPrompt,
-	// OpenCode 2.0.24 reports a model of its own choosing until one is selected.
+	// OpenCode 2.2.0 reports a model of its own choosing until one is selected.
 	selectModel: func(model string) string { return "koinon/" + model },
 	// What a repository could ship to reconfigure OpenCode if project configuration were on
 	// (koinon-opencode sets OPENCODE_DISABLE_PROJECT_CONFIG=1): an opencode.json and a
@@ -197,6 +204,13 @@ var _ = Describe("koinon-opencode and the agent's home", func() {
 		Expect(gw.modelBodies()).To(ContainElement(ContainSubstring(instructionsMarker)))
 		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring(homeMarker))))
 		Expect(loadedPlugins(ctx, sb)).To(BeEmpty())
+
+		// OpenCode's built-in skills ("opencode" and "report", which files issues with the GitHub CLI)
+		// are off too: no skill is listed to the model.
+		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring("<available_skills>"))))
+		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring("<id>report</id>"))))
+		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring("<id>opencode</id>"))))
+		Expect(gw.modelBodies()).To(HaveEach(Not(ContainSubstring("publish the issue with GitHub CLI"))))
 	}, SpecTimeout(3*time.Minute))
 
 	DescribeTable("loads the agent's plugins only with --plugin-installs",
@@ -297,6 +311,18 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 		env := entryEnv(ctx, "--plugin-installs")
 		Expect(env).To(ContainSubstring(`OPENCODE_CONFIG_CONTENT={"plugins":["/sandbox/.config/opencode/plugins/one"]}` + "\n"))
 		Expect(env).To(ContainSubstring("OPENCODE_DISABLE_PROJECT_CONFIG=1\n"), "a repository still cannot configure the harness")
+	})
+
+	It("sets the cache format of the koinon provider with --cache-anthropic, next to the plugins", func(ctx SpecContext) {
+		Expect(entryEnv(ctx, "--cache-anthropic")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"compatibility":{"cacheFormat":"anthropic"}}}}` + "\n"))
+		Expect(entryEnv(ctx, "--plugin-installs", "--cache-alibaba")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"plugins":["/sandbox/.config/opencode/plugins/one"],"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
+	})
+
+	It("sends the run ID as the body field session_id with --session-id", func(ctx SpecContext) {
+		Expect(entryEnv(ctx, "--session-id", "01234567-run")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"body":{"session_id":"01234567-run"}}}}` + "\n"))
 	})
 
 	It("keeps the model key from OpenCode's built-in providers", func(ctx SpecContext) {

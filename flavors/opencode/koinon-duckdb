@@ -1,0 +1,11 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# duckdb: the DuckDB CLI (/usr/local/libexec/duckdb) with Koinon's defaults from
+# /etc/koinon/duckdb/init.sql (memory and thread limits, no extension downloads). Arguments and
+# standard input pass through unchanged: duckdb -c SQL, duckdb -json -c SQL, duckdb FILE.db,
+# duckdb < script.sql.
+#
+# The defaults go in as -cmd, not -init: with -init the CLI prints "-- Loading resources from
+# ..." (in colour) on every start, which would land in the agent's tool output each time.
+exec /usr/local/libexec/duckdb -cmd "$(cat /etc/koinon/duckdb/init.sql)" "$@"

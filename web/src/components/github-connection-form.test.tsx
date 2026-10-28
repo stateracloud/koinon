@@ -17,7 +17,9 @@ import {
 import { fakePem, githubConnectorType } from '@/test-fixtures'
 import { orgId, renderApp, whoAmI } from '@/test-utils'
 
-function setup(opts: { fail?: boolean } = {}) {
+const fakeCa = '-----BEGIN CERTIFICATE-----\nTEST-ONLY-NOT-A-CERT\n-----END CERTIFICATE-----'
+
+function setup(opts: { fail?: boolean; site?: boolean } = {}) {
   const creates: CreateGitHubConnectionRequest[] = []
   let tests = 0
   const results = [
@@ -32,7 +34,15 @@ function setup(opts: { fail?: boolean } = {}) {
     displayName: 'Acme GitHub',
     status: ConnectionStatus.FAILING,
     lastTest: results,
-    settings: { case: 'github', value: create(GitHubConnectionSchema, { appId: 12n, installationId: 34n, keyFingerprint: 'SHA256:abc' }) },
+    settings: {
+      case: 'github',
+      value: create(GitHubConnectionSchema, {
+        appId: 12n,
+        installationId: 34n,
+        keyFingerprint: 'SHA256:abc',
+        ...(opts.site ? { baseUrl: 'https://github.example.test:8443', caBundle: fakeCa } : {}),
+      }),
+    },
   })
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI() })
@@ -75,6 +85,21 @@ describe('GitHub connection page', () => {
     expect(screen.getByText('Contents').tagName).toBe('STRONG')
   })
 
+  it('sends the extra CI directories, one per line, and refuses unsafe ones', async () => {
+    const { creates } = setup()
+    await fill()
+    await userEvent.type(screen.getByLabelText('Extra CI directories (optional)'), '../up')
+    await userEvent.click(screen.getByRole('button', { name: 'Create and test connection' }))
+    expect(await screen.findByText('../up leaves the repository.')).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+
+    await userEvent.clear(screen.getByLabelText('Extra CI directories (optional)'))
+    await userEvent.type(screen.getByLabelText('Extra CI directories (optional)'), 'ci/pipelines{Enter}.build/')
+    await userEvent.click(screen.getByRole('button', { name: 'Create and test connection' }))
+    await waitFor(() => expect(creates).toHaveLength(1))
+    expect(creates[0].ciDirs).toEqual(['ci/pipelines', '.build/'])
+  })
+
   it('sends the private key once, clears it, and never shows it again', async () => {
     const { creates, tests } = setup()
     await fill()
@@ -84,7 +109,7 @@ describe('GitHub connection page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Create and test connection' }))
 
     await waitFor(() => expect(creates).toHaveLength(1))
-    expect(creates[0]).toMatchObject({ orgId, displayName: 'Acme GitHub', appId: 12n, installationId: 34n, privateKey: fakePem, test: true })
+    expect(creates[0]).toMatchObject({ orgId, displayName: 'Acme GitHub', appId: 12n, installationId: 34n, privateKey: fakePem, baseUrl: '', caBundle: '', test: true, ciDirs: [] })
 
     // The connection page: per-step results, the fingerprint, never the key.
     expect(await screen.findByRole('heading', { name: 'Acme GitHub' })).toBeInTheDocument()
@@ -120,5 +145,44 @@ describe('GitHub connection page', () => {
     expect(await screen.findByText('App ID must be a positive whole number.')).toBeInTheDocument()
     expect(screen.getByText('Private key is required.')).toBeInTheDocument()
     expect(creates).toHaveLength(0)
+  })
+
+  it('sends the base URL and CA bundle of a GitHub Enterprise Server', async () => {
+    const { creates } = setup()
+    await fill()
+    await userEvent.click(screen.getByText('GitHub Enterprise Server (optional)'))
+    await userEvent.type(screen.getByLabelText('Base URL'), ' https://github.example.test:8443 ')
+    await userEvent.click(screen.getByLabelText('CA bundle'))
+    await userEvent.paste(fakeCa)
+    await userEvent.click(screen.getByRole('button', { name: 'Create and test connection' }))
+    await waitFor(() => expect(creates).toHaveLength(1))
+    expect(creates[0]).toMatchObject({
+      baseUrl: 'https://github.example.test:8443',
+      caBundle: fakeCa,
+    })
+  })
+
+  it('validates the base URL and the CA bundle like the API does', async () => {
+    const { creates } = setup()
+    await fill()
+    await userEvent.type(screen.getByLabelText('Base URL'), 'http://github.example.test')
+    await userEvent.click(screen.getByLabelText('CA bundle'))
+    await userEvent.paste('-----BEGIN PRIVATE KEY-----\nTEST-ONLY\n-----END PRIVATE KEY-----')
+    await userEvent.click(screen.getByRole('button', { name: 'Create and test connection' }))
+    expect(await screen.findByText('Base URL must start with https://.')).toBeInTheDocument()
+    expect(screen.getByText('CA bundle holds a "PRIVATE KEY" block; only certificates are allowed.')).toBeInTheDocument()
+    expect(creates).toHaveLength(0)
+
+    await userEvent.clear(screen.getByLabelText('Base URL'))
+    await userEvent.type(screen.getByLabelText('Base URL'), 'https://github.example.test/api/v3')
+    expect(screen.getByText(/must be only a host and an optional port/)).toBeInTheDocument()
+  })
+
+  it('shows the base URL and CA bundle on the connection page', async () => {
+    setup({ site: true })
+    await fill()
+    await userEvent.click(screen.getByRole('button', { name: 'Create and test connection' }))
+    expect(await screen.findByText('https://github.example.test:8443')).toBeInTheDocument()
+    expect(screen.getByText('1 certificate(s)')).toBeInTheDocument()
   })
 })

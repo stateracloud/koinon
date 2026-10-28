@@ -93,7 +93,7 @@ func List(ctx context.Context, q *store.Queries, f Filter) ([]store.AuditEvent, 
 		err  error
 	)
 	// One more than the page, to know whether another page follows.
-	limit := int32(size + 1) //nolint:gosec // at most MaxPageSize+1
+	limit := int32(size + 1)
 	if !f.AllOrgs {
 		rows, err = q.ListAuditEventsFiltered(ctx, store.ListAuditEventsFilteredParams{
 			OrgID: f.Org, BeforeID: before, Since: timeArg(f.Since), Until: timeArg(f.Until),

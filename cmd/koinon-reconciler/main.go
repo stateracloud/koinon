@@ -35,11 +35,15 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/internal/reconciler"
+	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/secretstore"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 func main() {
@@ -110,11 +114,11 @@ func run() error {
 			w.WriteHeader(http.StatusOK)
 		})
 		health := &http.Server{Addr: cfg.healthAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-		go func() {
+		safego.Go(ctx, log, "health-listener", func(context.Context) {
 			if err := health.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Error("health listener failed", "err", err)
 			}
-		}()
+		})
 		defer func() { _ = health.Close() }()
 	}
 	var keyring *secretstore.Keyring
@@ -132,16 +136,19 @@ func run() error {
 		}
 	}
 	ready.Store(true)
-	go keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log)
+	safego.GoOrStop(ctx, log, "keyring-watch-dir", stop, func(ctx context.Context) { keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log) })
 
 	reg := metrics.NewRegistry()
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
 		return err
 	}
+	// One price list for the reconciler and the settler.
+	priceResolver := prices.NewResolver(pricing.Embedded())
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{
 			Gateway:           endpoint,
+			Prices:            priceResolver,
 			Keys:              keyring,
 			ProviderKeys:      reconciler.KubeProviderKeys{Client: kube, Namespace: cfg.namespace, Name: cfg.providerKeysSecret},
 			ProviderKeyDir:    cfg.providerKeysDir,
@@ -151,9 +158,11 @@ func run() error {
 			RuntimeClassName:  cfg.runtimeClass,
 			IdleTimeout:       cfg.idleTimeout,
 			ParkWarm:          cfg.parkWarm,
+			ArchiveAfter:      cfg.archiveAfter,
 			SandboxJobs:       cfg.sandboxJobs,
 			ResyncInterval:    cfg.resyncInterval,
 			HomeRetention:     reconciler.Retention(cfg.homeRetention),
+			Checkpoints:       cfg.checkpoints,
 			ToolServers:       cfg.toolServers(),
 			MCPAskURL:         cfg.mcpAskURL,
 			// repo.read grants (plan item C2): tokens minted with the App key opened from the
@@ -168,6 +177,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Responses cut short are settled with their provider's own usage (ADR 0056, amendment
+	// 2026-10-28). It runs on every replica: a settlement is claimed with SKIP LOCKED.
+	settler := &ledger.Settler{DB: pool, Keys: keyring, Prices: priceResolver, Log: log}
+	if err := settler.Validate(); err != nil {
+		return err
+	}
+	safego.Go(ctx, log, "spend-settler", settler.Run)
 	err = r.Run(ctx)
 	log.Info("stopping koinon-reconciler")
 	return err

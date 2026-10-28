@@ -66,12 +66,14 @@ func templateProto(row store.Template, t *templates.Template) *templatev1alpha1.
 		Model:        t.Spec.Model.Name,
 		Instructions: t.Spec.Instructions,
 		Grants:       grantsProto(t.Spec.Grants),
+		Triggers:     triggersProto(t.Spec.Triggers),
 		RunLimits: &templatev1alpha1.RunLimits{
 			MaxDurationSeconds: int64(t.Spec.Limits.Run.MaxDuration.Seconds()),
 			MaxTokens:          t.Spec.Limits.Run.MaxTokens,
 		},
 		SpendLimitUsd: t.Spec.Limits.SpendUSD.String(),
 		DefaultFlavor: flavorProto(string(t.Spec.Flavors.Default)),
+		Ephemeral:     t.Spec.Ephemeral,
 	}
 	for _, f := range t.Spec.Flavors.Allowed {
 		out.AllowedFlavors = append(out.AllowedFlavors, flavorProto(string(f)))

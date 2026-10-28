@@ -1,0 +1,10 @@
+This fixture contains data derived from the FOCUS 1.0 Sample Data
+(https://github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS-Sample-Data, FOCUS-1.0/focus_sample_10000.csv),
+(c) FinOps Foundation, licensed under the Creative Commons Attribution 4.0 International License
+(CC BY 4.0, https://creativecommons.org/licenses/by/4.0/).
+
+Changes made: the cost columns (BilledCost, EffectiveCost, ListCost, ContractedCost) are multiplied by 100;
+all dates are shifted by a whole number of days so the data ends yesterday, and the billing periods are
+recomputed as calendar months; yesterday's cost for "Amazon Virtual Private Cloud" is set to three times its
+average of the seven days before. Numeric columns stored as text in the CSV are cast to numbers. The result is
+synthetic and is not the FinOps Foundation's data or an endorsement by it.

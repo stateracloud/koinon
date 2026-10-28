@@ -42,7 +42,7 @@ func modelCaller(url string) func(context.Context, string) error {
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close() //nolint:errcheck
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			var e struct {
 				Error struct{ Type, Message string } `json:"error"`

@@ -56,6 +56,10 @@ type Token struct {
 	value        string
 	ExpiresAt    time.Time
 	Repositories []string
+	// Revision names the credential without revealing it, for a token that does not expire (a
+	// static token has a zero ExpiresAt): it changes when the token does, so the reconciler
+	// knows to push a new value.
+	Revision string
 }
 
 // NewToken returns a Token holding value.
@@ -68,6 +72,9 @@ func (t Token) Value() string { return t.value }
 
 // String implements fmt.Stringer without revealing the token.
 func (t Token) String() string {
+	if t.ExpiresAt.IsZero() {
+		return fmt.Sprintf("code host token (revision %s, %d repositories)", t.Revision, len(t.Repositories))
+	}
 	return fmt.Sprintf("code host token (expires %s, %d repositories)", t.ExpiresAt.Format(time.RFC3339), len(t.Repositories))
 }
 
@@ -76,6 +83,9 @@ func (t Token) GoString() string { return t.String() }
 
 // LogValue implements slog.LogValuer without revealing the token.
 func (t Token) LogValue() slog.Value {
+	if t.ExpiresAt.IsZero() {
+		return slog.GroupValue(slog.String("revision", t.Revision), slog.Any("repositories", t.Repositories))
+	}
 	return slog.GroupValue(slog.Time("expires_at", t.ExpiresAt), slog.Any("repositories", t.Repositories))
 }
 
@@ -199,11 +209,17 @@ type CheckResult struct {
 type Description struct {
 	AppID          int64
 	InstallationID int64
+	// Site is the connection's host when it is not the connector's default.
+	Site Site
+	// Token-based providers (Gitea, ADR 0063): when each token was entered in Koinon (the
+	// provider does not expose its creation date). The tokens never leave the secret store.
+	ReadTokenSetAt, WriteTokenSetAt time.Time
 }
 
 // Capabilities says what a provider's credential and write API can and cannot narrow, so risk
 // tiers, approvals and the UI can compensate (ADR 0062, 0063). The fields are a starting point
-// (ADR 0062 open questions); CH2 moves the descriptor into connector.yaml.
+// (ADR 0062 open questions). The descriptor is data: connector.yaml's spec.capabilities,
+// spec.ciPaths and auth.tokenLifetime, read by CapabilitiesOf.
 type Capabilities struct {
 	// DisplayName is how messages name the provider.
 	DisplayName string
@@ -212,6 +228,9 @@ type Capabilities struct {
 	CredentialClass string
 	// TokenLifetime is zero for a credential that does not expire.
 	TokenLifetime time.Duration
+	// TokenWarnAfter is the age of a static token after which Koinon warns; zero for none. It
+	// never blocks and never rotates (ADR 0063).
+	TokenWarnAfter time.Duration
 	// NarrowsRepositories and NarrowsPermissions say whether one use of the credential can
 	// be limited to the call's repositories and permissions.
 	NarrowsRepositories bool
@@ -223,9 +242,22 @@ type Capabilities struct {
 	CanDenyCI bool
 	// ExactModes is whether WriteCommit sets exact file modes through the provider's API.
 	ExactModes bool
+	// Writes is how commits reach the host: WritesAPI (the default when empty) through the
+	// provider's API, or WritesPush by git push from koinon-api (ADR 0062; gitpush wraps the
+	// provider's Access).
+	Writes string
 	// CIPaths are the path prefixes whose changes run CI, which the workflow guard refuses.
 	CIPaths []string
+	// CIPathsFoldCase is whether the provider's file system ignores case, so the guard matches
+	// CIPaths without regard to case. False (exact) unless the connector data says so.
+	CIPathsFoldCase bool
 }
+
+// Values of Capabilities.Writes.
+const (
+	WritesAPI  = "api"
+	WritesPush = "push"
+)
 
 // Provider is one code host.
 type Provider interface {
@@ -234,8 +266,8 @@ type Provider interface {
 	Capabilities() Capabilities
 	// ParseRepo parses and validates a repository name as bound to an agent.
 	ParseRepo(full string) (Repo, error)
-	// BranchURL is the page of a branch on the host.
-	BranchURL(r Repo, branch string) string
+	// BranchURL is the page of a branch on the connection's host.
+	BranchURL(conn Connection, r Repo, branch string) string
 	// MetadataScope is the least scope that lists and names repositories, for connection checks
 	// and for validating bindings. Empty repositories means every repository the connection
 	// can access.

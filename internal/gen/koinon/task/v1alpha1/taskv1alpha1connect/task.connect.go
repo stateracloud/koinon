@@ -38,6 +38,9 @@ const (
 	TaskServiceCancelTaskProcedure = "/koinon.task.v1alpha1.TaskService/CancelTask"
 	// TaskServiceNotifyTypingProcedure is the procedure name of the TaskService's NotifyTyping RPC.
 	TaskServiceNotifyTypingProcedure = "/koinon.task.v1alpha1.TaskService/NotifyTyping"
+	// TaskServiceSendDirectMessageProcedure is the procedure name of the TaskService's
+	// SendDirectMessage RPC.
+	TaskServiceSendDirectMessageProcedure = "/koinon.task.v1alpha1.TaskService/SendDirectMessage"
 )
 
 var (
@@ -85,6 +88,13 @@ var (
 			Procedure:  TaskServiceNotifyTypingProcedure,
 		}
 	})
+	taskServiceSendDirectMessageSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_task_v1alpha1_task_proto.Services().ByName("TaskService").Methods().ByName("SendDirectMessage"),
+			Procedure:  TaskServiceSendDirectMessageProcedure,
+		}
+	})
 )
 
 // TaskServiceClient is a client for the koinon.task.v1alpha1.TaskService service.
@@ -108,6 +118,14 @@ type TaskServiceClient interface {
 	// Clients call it when typing starts; calls for the same task within ten seconds of the last one
 	// are ignored. Members and above.
 	NotifyTyping(context.Context, *v1alpha1.NotifyTypingRequest) (*v1alpha1.NotifyTypingResponse, error)
+	// SendDirectMessage sends a message to an agent in the inbox chat (plan item TR3, ADR 0066). The
+	// agent must have a direct_message trigger in its active version, else the call fails with
+	// FAILED_PRECONDITION. Without task_id it starts a thread: a new task (created by the trigger,
+	// interactive priority) whose first message is the trigger's instruction plus the text. With
+	// task_id it replies in that thread: an open task takes the message and its agent is woken; a
+	// completed task is reopened as a follow-up; a canceled or failed one takes no message. The
+	// message_id makes a retry or replay a no-op. Members and above.
+	SendDirectMessage(context.Context, *v1alpha1.SendDirectMessageRequest) (*v1alpha1.SendDirectMessageResponse, error)
 }
 
 // NewTaskServiceClient constructs a client for the koinon.task.v1alpha1.TaskService service.
@@ -137,6 +155,14 @@ type TaskServiceHandler interface {
 	// Clients call it when typing starts; calls for the same task within ten seconds of the last one
 	// are ignored. Members and above.
 	NotifyTyping(context.Context, *v1alpha1.NotifyTypingRequest) (*v1alpha1.NotifyTypingResponse, error)
+	// SendDirectMessage sends a message to an agent in the inbox chat (plan item TR3, ADR 0066). The
+	// agent must have a direct_message trigger in its active version, else the call fails with
+	// FAILED_PRECONDITION. Without task_id it starts a thread: a new task (created by the trigger,
+	// interactive priority) whose first message is the trigger's instruction plus the text. With
+	// task_id it replies in that thread: an open task takes the message and its agent is woken; a
+	// completed task is reopened as a follow-up; a canceled or failed one takes no message. The
+	// message_id makes a retry or replay a no-op. Members and above.
+	SendDirectMessage(context.Context, *v1alpha1.SendDirectMessageRequest) (*v1alpha1.SendDirectMessageResponse, error)
 }
 
 // RegisterTaskServiceHandler registers svc as the koinon.task.v1alpha1.TaskService implementation
@@ -150,6 +176,7 @@ func RegisterTaskServiceHandler(server *connect.Server, svc TaskServiceHandler) 
 		connect.Method{Spec: taskServiceAppendMessageSpec(), Handler: adapter.appendMessage},
 		connect.Method{Spec: taskServiceCancelTaskSpec(), Handler: adapter.cancelTask},
 		connect.Method{Spec: taskServiceNotifyTypingSpec(), Handler: adapter.notifyTyping},
+		connect.Method{Spec: taskServiceSendDirectMessageSpec(), Handler: adapter.sendDirectMessage},
 	)
 }
 
@@ -178,6 +205,10 @@ func (UnimplementedTaskServiceHandler) CancelTask(context.Context, *v1alpha1.Can
 
 func (UnimplementedTaskServiceHandler) NotifyTyping(context.Context, *v1alpha1.NotifyTypingRequest) (*v1alpha1.NotifyTypingResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.task.v1alpha1.TaskService.NotifyTyping is not implemented")
+}
+
+func (UnimplementedTaskServiceHandler) SendDirectMessage(context.Context, *v1alpha1.SendDirectMessageRequest) (*v1alpha1.SendDirectMessageResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.task.v1alpha1.TaskService.SendDirectMessage is not implemented")
 }
 
 type taskServiceClient struct {
@@ -227,6 +258,14 @@ func (c *taskServiceClient) CancelTask(ctx context.Context, req *v1alpha1.Cancel
 func (c *taskServiceClient) NotifyTyping(ctx context.Context, req *v1alpha1.NotifyTypingRequest) (*v1alpha1.NotifyTypingResponse, error) {
 	var res v1alpha1.NotifyTypingResponse
 	if err := c.client.CallUnary(ctx, taskServiceNotifyTypingSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *taskServiceClient) SendDirectMessage(ctx context.Context, req *v1alpha1.SendDirectMessageRequest) (*v1alpha1.SendDirectMessageResponse, error) {
+	var res v1alpha1.SendDirectMessageResponse
+	if err := c.client.CallUnary(ctx, taskServiceSendDirectMessageSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -300,6 +339,18 @@ func (h taskServiceHandler) notifyTyping(ctx context.Context, _ connect.Spec, st
 		return err
 	}
 	res, err := h.svc.NotifyTyping(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h taskServiceHandler) sendDirectMessage(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SendDirectMessageRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SendDirectMessage(ctx, &req)
 	if err != nil {
 		return err
 	}

@@ -135,6 +135,26 @@ var _ = Describe("BudgetService and PriceService", func() {
 		Expect(list.GetNotifications()[0].GetReadAt()).NotTo(BeNil())
 	})
 
+	It("warns when a saved price has a cache_read price but no prompt-cache mode (ADR 0068)", func(ctx SpecContext) {
+		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
+		uncached, err := priceSvc(admin).SetPrice(ctx, &budgetv1alpha1.SetPriceRequest{
+			OrgId: org, Name: "gemini", Provider: "openrouter", Match: &budgetv1alpha1.PriceMatch{Glob: "google/*"},
+			Rates: &budgetv1alpha1.Rates{Input: "1", Output: "2", CacheRead: "0.1"}, MaxOutput: 4096,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(uncached.GetWarnings()).To(ConsistOf(ContainSubstring("without caching")), "ADR 0068: no cache mode for this provider format")
+		cached, err := priceSvc(admin).SetPrice(ctx, &budgetv1alpha1.SetPriceRequest{
+			OrgId: org, Name: "claude", Provider: "openrouter", Match: &budgetv1alpha1.PriceMatch{Glob: "anthropic/*"},
+			Rates: &budgetv1alpha1.Rates{Input: "1", Output: "2", CacheRead: "0.1"}, MaxOutput: 4096,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cached.GetWarnings()).To(BeEmpty())
+		_, err = priceSvc(admin).RetirePrice(ctx, &budgetv1alpha1.RetirePriceRequest{OrgId: org, Name: "gemini"})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = priceSvc(admin).RetirePrice(ctx, &budgetv1alpha1.RetirePriceRequest{OrgId: org, Name: "claude"})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	It("versions org prices and shows the default list", func(ctx SpecContext) {
 		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
 		member := e.userIn(ctx, org, store.OrgRoleMember)

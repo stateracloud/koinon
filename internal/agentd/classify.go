@@ -38,6 +38,10 @@ type classified struct {
 	retryAfter time.Duration
 	// message tells the person what happened, without the raw error.
 	message string
+	// gateway: the model gateway refused the request, with 401 (the key is rejected or revoked)
+	// or 429 (a limit). A spent budget revokes the key (ADR 0050), so these are the errors a
+	// run sees when a limit stopped it before its cancel arrived (budgetstop.go).
+	gateway bool
 }
 
 var (
@@ -85,6 +89,9 @@ func classifyPromptError(err error) classified {
 		}
 		return false
 	}
+	// 401 is the gateway rejecting the agent's key. Harnesses may report it without the status
+	// (OpenCode: "Authentication required: provider authentication required").
+	auth := status == 401 || (!hasStatus && has("authentication required", "authentication failure", "invalid credentials"))
 	// The class-specific phrases name their class whatever the status says.
 	switch {
 	case has("context_length_exceeded", "prompt is too long", "maximum context length", "context window"):
@@ -99,20 +106,24 @@ func classifyPromptError(err error) classified {
 		return classified{class: classBudget, message: "A spend or token limit stopped the run."}
 	case status == 403:
 		return classified{class: classPolicy, message: "A policy denied the request."}
+	case auth:
+		return classified{class: classFatal, gateway: true}
 	case status == 429:
-		return classified{class: classThrottled, retryAfter: retryAfter, message: "The model provider is rate limiting requests."}
+		return classified{class: classThrottled, retryAfter: retryAfter, gateway: true, message: "The model provider is rate limiting requests."}
 	case status == 500, status == 502, status == 503, status == 504, status == 529:
 		return classified{class: classTransient, message: "The model provider had a temporary fault."}
 	case hasStatus:
 		return classified{class: classFatal}
 	}
 	switch {
+	case auth:
+		return classified{class: classFatal, gateway: true}
 	case has("spend limit", "budget exceeded", "token cap"):
 		return classified{class: classBudget, message: "A spend or token limit stopped the run."}
 	case has("denied by policy", "policy denied", "blocked by policy"):
 		return classified{class: classPolicy, message: "A policy denied the request."}
 	case has("rate limit", "rate_limit", "too many requests"):
-		return classified{class: classThrottled, retryAfter: retryAfter, message: "The model provider is rate limiting requests."}
+		return classified{class: classThrottled, retryAfter: retryAfter, gateway: true, message: "The model provider is rate limiting requests."}
 	case has("overloaded", "service unavailable", "timed out", "timeout", "connection reset", "unexpected eof", "bad gateway"):
 		return classified{class: classTransient, message: "The model provider had a temporary fault."}
 	}
@@ -189,7 +200,7 @@ func number(v any) (float64, bool) {
 func classFailure(what string, err error) *failure {
 	c := classifyPromptError(err)
 	raw := what + ": " + err.Error()
-	f := &failure{reason: raw, class: c.class, retryAfter: c.retryAfter}
+	f := &failure{reason: raw, class: c.class, retryAfter: c.retryAfter, gateway: c.gateway}
 	if c.message != "" {
 		f.reason = c.message + " (" + raw + ")"
 	}

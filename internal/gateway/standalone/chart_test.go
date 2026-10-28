@@ -25,7 +25,7 @@ var _ = Describe("the chart and the gateway config", func() {
 		if err != nil {
 			Skip("helm is not installed")
 		}
-		cmd := exec.Command(helm, append([]string{ //nolint:gosec // fixed test arguments
+		cmd := exec.Command(helm, append([]string{
 			"template", "koinon", chart, "--namespace", "koinon",
 			"--set", "gateway.mode=standalone", "--set", "openshell.insecure=true",
 		}, args...)...)

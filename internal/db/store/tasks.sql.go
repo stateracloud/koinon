@@ -201,6 +201,27 @@ func (q *Queries) GetTaskForUpdate(ctx context.Context, arg GetTaskForUpdatePara
 	return i, err
 }
 
+const latestUserMessageActor = `-- name: LatestUserMessageActor :one
+SELECT actor_user_id FROM task_events
+WHERE org_id = $1 AND task_id = $2 AND kind = 'message' AND actor_kind = 'user'
+  AND actor_user_id IS NOT NULL
+ORDER BY seq DESC
+LIMIT 1
+`
+
+type LatestUserMessageActorParams struct {
+	OrgID  pgtype.UUID
+	TaskID pgtype.UUID
+}
+
+// The person who wrote the task's latest user message (the person on the other end of a chat thread).
+func (q *Queries) LatestUserMessageActor(ctx context.Context, arg LatestUserMessageActorParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, latestUserMessageActor, arg.OrgID, arg.TaskID)
+	var actor_user_id pgtype.UUID
+	err := row.Scan(&actor_user_id)
+	return actor_user_id, err
+}
+
 const listTaskEvents = `-- name: ListTaskEvents :many
 SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM task_events
 WHERE org_id = $1 AND task_id = $2 AND seq > $3
@@ -256,7 +277,8 @@ func (q *Queries) ListTaskEvents(ctx context.Context, arg ListTaskEventsParams) 
 const listTaskMessagesAfter = `-- name: ListTaskMessagesAfter :many
 SELECT org_id, id, task_id, seq, kind, actor_kind, actor_user_id, actor_agent_id, run_id, payload, created_at FROM task_events
 WHERE org_id = $1 AND task_id = $2 AND seq > $3
-  AND kind = 'message' AND actor_kind = 'user'
+  AND kind = 'message'
+  AND (actor_kind = 'user' OR (actor_kind = 'system' AND payload ->> 'source' IS NOT NULL))
 ORDER BY seq
 `
 
@@ -267,7 +289,8 @@ type ListTaskMessagesAfterParams struct {
 }
 
 // The users' messages on the task after a timeline seq, in order: what
-// agentd sends the harness as a run's prompt.
+// agentd sends the harness as a run's prompt. A trigger's instruction (a system message whose
+// payload carries its source) is part of it, so a scheduled run sees what it was scheduled to do.
 func (q *Queries) ListTaskMessagesAfter(ctx context.Context, arg ListTaskMessagesAfterParams) ([]TaskEvent, error) {
 	rows, err := q.db.Query(ctx, listTaskMessagesAfter, arg.OrgID, arg.TaskID, arg.AfterSeq)
 	if err != nil {

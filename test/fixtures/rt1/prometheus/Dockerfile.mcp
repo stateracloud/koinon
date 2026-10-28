@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# RT1 fixture: pab1it0/prometheus-mcp-server v1.6.2 (MIT, PyPI prometheus-mcp-server), Streamable HTTP on
+# :8080/mcp. It has no authentication of its own: the pod's NetworkPolicy lets only Koinon's gateway in.
+# PROMETHEUS_URL is set by the pod (the Prometheus container shares the pod).
+#
+# Packages are hash-locked: requirements.txt is `uv pip compile requirements.in --universal --python-version 3.12
+# --generate-hashes -o requirements.txt`.
+# Build (from this directory): docker buildx build --platform linux/amd64 -f Dockerfile.mcp -t <registry>/koinon/rt1-prometheus-mcp:<tag> .
+# python:3.12-slim, re-pin with: docker buildx imagetools inspect python:3.12-slim
+ARG PYTHON=python:3.12-slim@sha256:12316debbfb86890f6b2d825820612741ba527ad5a44e3902759141d572bfe8f
+
+FROM ${PYTHON} AS build
+COPY requirements.txt /tmp/requirements.txt
+RUN python -m venv /opt/venv \
+ && /opt/venv/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt
+
+FROM ${PYTHON}
+COPY --from=build /opt/venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PROMETHEUS_MCP_SERVER_TRANSPORT=http \
+    PROMETHEUS_MCP_BIND_HOST=0.0.0.0 \
+    PROMETHEUS_MCP_BIND_PORT=8080 \
+    PROMETHEUS_MCP_STATELESS_HTTP=true
+WORKDIR /tmp
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["prometheus-mcp-server"]

@@ -292,3 +292,25 @@ Checked 2026-10-22:
   [0020](0020-agent-builder-and-templates.md), [0036](0036-v01-demo.md), [0041](0041-koinon-spend-ledger-and-budget-stops.md),
   [0042](0042-ask-tier-park-and-execute.md), [0048](0048-openshell-spike-results.md)
 - Spike results: `hack/spike/results/` (PR 15 in the previous repository)
+
+## Amendment (2026-10-28): agentgateway v1.7.0
+
+The pinned release is v1.7.0 (image `sha256:60216aaf...`, `agentgateway-crds` digest
+`sha256:946b739c0fcda4d47a72d1589d184b6fd507772e733cbedf02789bafd0468064`, `agentgateway`
+chart digest `sha256:40340d639e35206317c934e9af3e29575cf7c5377b2940679732baac6e108c15`), checked
+against the registry on 2026-10-28; the two-week wait was waived. Its breaking changes:
+
+- **MCP session encryption.** Standalone always encrypts MCP session IDs. The gateway Deployment gets
+  `SESSION_KEY` (the upstream-recommended form, not `config.session.key`, which would put the key in
+  the config ConfigMap) from the Secret `<release>-gateway-session-key`, key `key`, 64 hex characters.
+  The ensure-secrets hook Job generates it (`kind: aes256-key`) and never changes it;
+  `gateway.standalone.sessionKey.existingSecret` supplies one instead. Without it v1.7.0 would write a
+  key into the config file when it is writable, or leave sessions unencrypted when it is not.
+- **Prompt guards** now also inspect tool output. Koinon configures no prompt guard, so nothing
+  changes; a future guard must say which of request, response and tool output it covers.
+- **Dynamic backends** cannot reach loopback or link-local addresses. Koinon's backends are static
+  (the `127.0.0.1:9` placeholder MCP target is static and never contacted), and the suites reach
+  their fakes through the host address, so nothing changes.
+- **`anthropic-version`** is forwarded, not replaced: see ADR 0069's amendment.
+
+Gaps it closes: ADR 0058 (MCP isolation in Kubernetes mode) and ADR 0041 (budgets without a window).

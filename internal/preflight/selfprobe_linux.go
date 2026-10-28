@@ -28,7 +28,7 @@ func keyctl() string {
 	const getKeyringID = 0
 	// KEY_SPEC_SESSION_KEYRING; the kernel takes key serials as signed ints.
 	sessionKeyring := -3
-	_, _, errno := syscall.Syscall(syscall.SYS_KEYCTL, getKeyringID, uintptr(sessionKeyring), 0) //nolint:gosec // signed key serial
+	_, _, errno := syscall.Syscall(syscall.SYS_KEYCTL, getKeyringID, uintptr(sessionKeyring), 0)
 	switch {
 	case errno == 0:
 		return "allowed"

@@ -137,6 +137,48 @@ func (ns NullApprovalDecision) Value() (driver.Value, error) {
 	return string(ns.ApprovalDecision), nil
 }
 
+type ApprovalScopeKind string
+
+const (
+	ApprovalScopeKindTask  ApprovalScopeKind = "task"
+	ApprovalScopeKindAgent ApprovalScopeKind = "agent"
+)
+
+func (e *ApprovalScopeKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ApprovalScopeKind(s)
+	case string:
+		*e = ApprovalScopeKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ApprovalScopeKind: %T", src)
+	}
+	return nil
+}
+
+type NullApprovalScopeKind struct {
+	ApprovalScopeKind ApprovalScopeKind
+	Valid             bool // Valid is true if ApprovalScopeKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullApprovalScopeKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.ApprovalScopeKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ApprovalScopeKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullApprovalScopeKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ApprovalScopeKind), nil
+}
+
 type ApprovalStatus string
 
 const (
@@ -224,6 +266,93 @@ func (ns NullAuthMethod) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.AuthMethod), nil
+}
+
+type CheckpointReason string
+
+const (
+	CheckpointReasonHourly   CheckpointReason = "hourly"
+	CheckpointReasonStop     CheckpointReason = "stop"
+	CheckpointReasonRecreate CheckpointReason = "recreate"
+)
+
+func (e *CheckpointReason) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CheckpointReason(s)
+	case string:
+		*e = CheckpointReason(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CheckpointReason: %T", src)
+	}
+	return nil
+}
+
+type NullCheckpointReason struct {
+	CheckpointReason CheckpointReason
+	Valid            bool // Valid is true if CheckpointReason is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCheckpointReason) Scan(value interface{}) error {
+	if value == nil {
+		ns.CheckpointReason, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CheckpointReason.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCheckpointReason) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CheckpointReason), nil
+}
+
+type CheckpointStatus string
+
+const (
+	CheckpointStatusRequested CheckpointStatus = "requested"
+	CheckpointStatusRunning   CheckpointStatus = "running"
+	CheckpointStatusComplete  CheckpointStatus = "complete"
+	CheckpointStatusFailed    CheckpointStatus = "failed"
+)
+
+func (e *CheckpointStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CheckpointStatus(s)
+	case string:
+		*e = CheckpointStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CheckpointStatus: %T", src)
+	}
+	return nil
+}
+
+type NullCheckpointStatus struct {
+	CheckpointStatus CheckpointStatus
+	Valid            bool // Valid is true if CheckpointStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCheckpointStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.CheckpointStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CheckpointStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCheckpointStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CheckpointStatus), nil
 }
 
 type ConfigSource string
@@ -652,6 +781,96 @@ func (ns NullPlatformAdminSource) Value() (driver.Value, error) {
 	return string(ns.PlatformAdminSource), nil
 }
 
+type QuestionAnswerKind string
+
+const (
+	QuestionAnswerKindChoice  QuestionAnswerKind = "choice"
+	QuestionAnswerKindDraft   QuestionAnswerKind = "draft"
+	QuestionAnswerKindText    QuestionAnswerKind = "text"
+	QuestionAnswerKindDefault QuestionAnswerKind = "default"
+)
+
+func (e *QuestionAnswerKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = QuestionAnswerKind(s)
+	case string:
+		*e = QuestionAnswerKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for QuestionAnswerKind: %T", src)
+	}
+	return nil
+}
+
+type NullQuestionAnswerKind struct {
+	QuestionAnswerKind QuestionAnswerKind
+	Valid              bool // Valid is true if QuestionAnswerKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullQuestionAnswerKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.QuestionAnswerKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.QuestionAnswerKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullQuestionAnswerKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.QuestionAnswerKind), nil
+}
+
+type QuestionState string
+
+const (
+	QuestionStateAsked     QuestionState = "asked"
+	QuestionStateOpen      QuestionState = "open"
+	QuestionStateAnswered  QuestionState = "answered"
+	QuestionStateDismissed QuestionState = "dismissed"
+	QuestionStateExpired   QuestionState = "expired"
+	QuestionStateCanceled  QuestionState = "canceled"
+)
+
+func (e *QuestionState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = QuestionState(s)
+	case string:
+		*e = QuestionState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for QuestionState: %T", src)
+	}
+	return nil
+}
+
+type NullQuestionState struct {
+	QuestionState QuestionState
+	Valid         bool // Valid is true if QuestionState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullQuestionState) Scan(value interface{}) error {
+	if value == nil {
+		ns.QuestionState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.QuestionState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullQuestionState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.QuestionState), nil
+}
+
 type RunFailureClass string
 
 const (
@@ -1071,6 +1290,10 @@ type AgentSandbox struct {
 	UnhealthyReason     pgtype.Text
 	UnhealthyGeneration pgtype.Text
 	WokenAt             pgtype.Timestamptz
+	SandboxID           pgtype.Text
+	RestoreCheckpointID pgtype.UUID
+	RestoreClaimedAt    pgtype.Timestamptz
+	ArchivedAt          pgtype.Timestamptz
 }
 
 type AgentVersion struct {
@@ -1128,6 +1351,25 @@ type ApprovalRequest struct {
 	FirstApprover       pgtype.UUID
 	CallBinding         []byte
 	System              bool
+	ScopeID             pgtype.UUID
+}
+
+type ApprovalScope struct {
+	OrgID            pgtype.UUID
+	ID               pgtype.UUID
+	AgentID          pgtype.UUID
+	Connector        string
+	Tool             string
+	Target           string
+	Kind             ApprovalScopeKind
+	TaskID           pgtype.UUID
+	ExpiresAt        pgtype.Timestamptz
+	CreatedBy        pgtype.UUID
+	SourceApprovalID pgtype.UUID
+	CallBinding      []byte
+	RevokedAt        pgtype.Timestamptz
+	RevokedBy        pgtype.UUID
+	CreatedAt        pgtype.Timestamptz
 }
 
 type AuditChainHead struct {
@@ -1173,11 +1415,55 @@ type Connection struct {
 	RemovedAt         pgtype.Timestamptz
 }
 
+type DedupeRecord struct {
+	OrgID      pgtype.UUID
+	Source     string
+	Key        string
+	EffectKind pgtype.Text
+	EffectID   pgtype.UUID
+	CreatedAt  pgtype.Timestamptz
+}
+
 type DefaultPriceList struct {
 	Version  string
 	Seq      pgtype.Int8
 	Entries  []byte
 	LoadedAt pgtype.Timestamptz
+}
+
+type GatewayServedModel struct {
+	OrgID       pgtype.UUID
+	ModelID     pgtype.UUID
+	ProviderID  pgtype.UUID
+	KeyFile     pgtype.Text
+	ServedSince pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type HomeCheckpoint struct {
+	OrgID       pgtype.UUID
+	ID          pgtype.UUID
+	AgentID     pgtype.UUID
+	Reason      CheckpointReason
+	Status      CheckpointStatus
+	SandboxID   string
+	Generation  string
+	Epoch       int64
+	SnapshotID  pgtype.Text
+	SizeBytes   pgtype.Int8
+	Attempts    int32
+	Error       pgtype.Text
+	RequestedAt pgtype.Timestamptz
+	StartedAt   pgtype.Timestamptz
+	FinishedAt  pgtype.Timestamptz
+}
+
+type HomeRepository struct {
+	OrgID            pgtype.UUID
+	AgentID          pgtype.UUID
+	Prefix           string
+	PasswordEnvelope []byte
+	CreatedAt        pgtype.Timestamptz
 }
 
 type LocalCredential struct {
@@ -1244,13 +1530,15 @@ type Model struct {
 	// Deprecated and unread since migration 00014. Dropped later.
 	OutputRate pgtype.Text
 	// Deprecated and unread since migration 00014. Dropped later.
-	CacheReadRate   pgtype.Text
-	Source          ConfigSource
-	ManagedBySecret pgtype.Text
-	DisabledReason  pgtype.Text
-	CreatedBy       pgtype.UUID
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
+	CacheReadRate    pgtype.Text
+	Source           ConfigSource
+	ManagedBySecret  pgtype.Text
+	DisabledReason   pgtype.Text
+	CreatedBy        pgtype.UUID
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	Format           string
+	FormatOverridden bool
 }
 
 type Notification struct {
@@ -1314,12 +1602,15 @@ type OrgMembership struct {
 }
 
 type OrgSetting struct {
-	OrgID              pgtype.UUID
-	IdleTimeoutSeconds pgtype.Int4
-	ParkWarmSeconds    pgtype.Int4
-	QueueWaitSeconds   pgtype.Int4
-	CreatedAt          pgtype.Timestamptz
-	UpdatedAt          pgtype.Timestamptz
+	OrgID                pgtype.UUID
+	IdleTimeoutSeconds   pgtype.Int4
+	ParkWarmSeconds      pgtype.Int4
+	QueueWaitSeconds     pgtype.Int4
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	MaxConcurrentRuns    pgtype.Int4
+	TriggerConcurrency   pgtype.Int4
+	TriggerRatePerMinute pgtype.Int4
 }
 
 type OrgWorkspace struct {
@@ -1349,20 +1640,50 @@ type PriceOverride struct {
 }
 
 type Provider struct {
-	OrgID           pgtype.UUID
-	ID              pgtype.UUID
-	Name            string
-	Type            string
-	Url             string
-	ApiKey          []byte
-	Source          ConfigSource
-	ManagedBySecret pgtype.Text
-	DeclaredVersion pgtype.Text
-	RemovedAt       pgtype.Timestamptz
-	DisabledReason  pgtype.Text
-	CreatedBy       pgtype.UUID
-	CreatedAt       pgtype.Timestamptz
-	UpdatedAt       pgtype.Timestamptz
+	OrgID                pgtype.UUID
+	ID                   pgtype.UUID
+	Name                 string
+	Type                 string
+	Url                  string
+	ApiKey               []byte
+	Source               ConfigSource
+	ManagedBySecret      pgtype.Text
+	DeclaredVersion      pgtype.Text
+	RemovedAt            pgtype.Timestamptz
+	DisabledReason       pgtype.Text
+	CreatedBy            pgtype.UUID
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	AnthropicWorkspaceID pgtype.Text
+}
+
+type Question struct {
+	OrgID          pgtype.UUID
+	ID             pgtype.UUID
+	TaskID         pgtype.UUID
+	RunID          pgtype.UUID
+	AgentID        pgtype.UUID
+	AskedTo        pgtype.UUID
+	Question       string
+	Choices        []byte
+	Draft          pgtype.Text
+	DefaultAnswer  string
+	State          QuestionState
+	Answer         pgtype.Text
+	AnswerKind     NullQuestionAnswerKind
+	AnsweredBy     pgtype.UUID
+	CallSha256     string
+	ExpiresAt      pgtype.Timestamptz
+	OpenedAt       pgtype.Timestamptz
+	NotifiedAt     pgtype.Timestamptz
+	NotifyFailures int32
+	ResolvedAt     pgtype.Timestamptz
+	DeliveredAt    pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	RemindAt       pgtype.Timestamptz
+	RemindedAt     pgtype.Timestamptz
+	RemindFailures int32
 }
 
 type Run struct {
@@ -1485,6 +1806,33 @@ type SpendEntry struct {
 	CostFlagged      bool
 	RequestBytes     pgtype.Int8
 	ResponseBytes    pgtype.Int8
+	Provisional      bool
+	ReserveUsd       pgtype.Numeric
+	ResponseID       pgtype.Text
+}
+
+type SpendEntryRevision struct {
+	OrgID     pgtype.UUID
+	ID        pgtype.UUID
+	EntryID   pgtype.UUID
+	Reason    string
+	Source    string
+	Before    []byte
+	After     []byte
+	RevisedAt pgtype.Timestamptz
+}
+
+type SpendSettlement struct {
+	OrgID         pgtype.UUID
+	EntryID       pgtype.UUID
+	ProviderID    pgtype.UUID
+	ProviderType  string
+	ResponseID    pgtype.Text
+	Attempts      int32
+	NextAttemptAt pgtype.Timestamptz
+	Deadline      pgtype.Timestamptz
+	LastError     pgtype.Text
+	CreatedAt     pgtype.Timestamptz
 }
 
 type Task struct {

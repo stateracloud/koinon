@@ -30,3 +30,31 @@ export function approveLabel(approvalsRequired: number, firstApprover: string): 
   if (approvalsRequired !== 2) return 'Approve'
   return firstApprover ? 'Give second approval' : 'Give first approval'
 }
+
+/** What an approver chooses when approving: this call only, this task, or this agent until a date (ADR 0042 amendment). */
+export type ScopeChoice = { kind: 'once' } | { kind: 'task' } | { kind: 'agent'; until: Date }
+
+/** scopeLabel describes a scope kind for the agent page and the timeline. */
+export function scopeKindLabel(kind: 'task' | 'agent'): string {
+  return kind === 'task' ? 'this task' : 'this agent'
+}
+
+/** defaultScopeEnd is the date the agent scope offers first: two weeks ahead, as yyyy-mm-dd in local time. */
+export function defaultScopeEnd(now: Date = new Date()): string {
+  const d = new Date(now.getTime() + 14 * 24 * 3600 * 1000)
+  return localDate(d)
+}
+
+/** localDate formats a date as yyyy-mm-dd in the viewer's time zone. */
+export function localDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** endOfLocalDay turns a yyyy-mm-dd value into the end of that day in the viewer's time zone; undefined if it is not a date. */
+export function endOfLocalDay(value: string): Date | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!m) return undefined
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59)
+  return Number.isNaN(d.getTime()) ? undefined : d
+}

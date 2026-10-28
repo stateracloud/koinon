@@ -22,6 +22,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/safego"
 )
 
 // Access-log attributes agentgateway v1.6.0 sets on LLM requests
@@ -139,6 +141,15 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				if hasReqBytes && reqBytes >= 0 {
 					e.RequestBytes = reqBytes
 				}
+				if id := stringValue(attrs[gateway.LogFieldResponseID]); len(id) <= 256 {
+					e.ResponseID = id
+				}
+				e.Format = modelformat.OpenAI
+				if f := stringValue(attrs[gateway.LogFieldFormat]); f != "" {
+					e.Format = modelformat.Format(f)
+				}
+				e.Stream = boolValue(attrs[gateway.LogFieldStream])
+				e.Error = stringValue(attrs[gateway.LogFieldError])
 				org, name, ok := strings.Cut(agent, "/")
 				e.Agent = gateway.AgentRef{Org: org, Name: name}
 				switch {
@@ -172,6 +183,17 @@ func recordTime(t, observed uint64) time.Time {
 		}
 	}
 	return time.Now().UTC()
+}
+
+// boolValue reads a boolean attribute, or the strings "true" and "false" (CEL may log either).
+func boolValue(v *commonpb.AnyValue) bool {
+	switch x := v.GetValue().(type) {
+	case *commonpb.AnyValue_BoolValue:
+		return x.BoolValue
+	case *commonpb.AnyValue_StringValue:
+		return x.StringValue == "true"
+	}
+	return false
 }
 
 func stringValue(v *commonpb.AnyValue) string {
@@ -306,13 +328,16 @@ func readBody(r *http.Request) ([]byte, error) {
 
 // Serve runs the OTLP receiver on addr until ctx ends.
 func Serve(ctx context.Context, addr string, in *Ingester, log *slog.Logger) error {
+	if err := in.Validate(); err != nil {
+		return err
+	}
 	srv := &http.Server{Addr: addr, Handler: Handler(in, log), ReadHeaderTimeout: 10 * time.Second}
-	go func() {
+	safego.Go(ctx, log, "otlp-shutdown", func(context.Context) {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
-	}()
+	})
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

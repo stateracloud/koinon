@@ -3,6 +3,7 @@
 package money_test
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/stateracloud/koinon/internal/money"
@@ -81,5 +82,27 @@ func TestCents(t *testing.T) {
 	}
 	if s := money.MustParse("1").SubFloor(money.MustParse("2")); s != 0 {
 		t.Fatal(s)
+	}
+}
+
+func TestFromRatRoundsHalfUpAtThePicoUSD(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"0.0001234", "0.0001234"},
+		{"1.234e-4", "0.0001234"},
+		{"0.0000000000005", "0.000000000001"},
+		{"0.0000000000004", "0.00"},
+		{"3", "3.00"},
+	} {
+		r, _ := new(big.Rat).SetString(c.in)
+		got, err := money.FromRat(r)
+		if err != nil || got.String() != c.want {
+			t.Errorf("%s: %v %v, want %s", c.in, got, err, c.want)
+		}
+	}
+	if _, err := money.FromRat(big.NewRat(-1, 1)); err == nil {
+		t.Error("negative accepted")
+	}
+	if _, err := money.FromRat(new(big.Rat).SetInt64(1 << 62)); err == nil {
+		t.Error("overflow accepted")
 	}
 }

@@ -49,7 +49,7 @@ func (q *Queries) GetDefaultPriceList(ctx context.Context, version string) (Defa
 }
 
 const getModelForPricing = `-- name: GetModelForPricing :one
-SELECT m.id, m.name, p.type AS provider_type
+SELECT m.id, m.name, p.type AS provider_type, p.id AS provider_id, p.url AS provider_url
 FROM models m
 JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
 WHERE m.org_id = $1 AND m.name = $2 AND m.disabled_reason IS NULL AND p.disabled_reason IS NULL
@@ -65,6 +65,8 @@ type GetModelForPricingRow struct {
 	ID           pgtype.UUID
 	Name         string
 	ProviderType string
+	ProviderID   pgtype.UUID
+	ProviderUrl  string
 }
 
 // The enabled model an agent asks for by its plain name, with its provider's type, for
@@ -72,7 +74,13 @@ type GetModelForPricingRow struct {
 func (q *Queries) GetModelForPricing(ctx context.Context, arg GetModelForPricingParams) (GetModelForPricingRow, error) {
 	row := q.db.QueryRow(ctx, getModelForPricing, arg.OrgID, arg.Name)
 	var i GetModelForPricingRow
-	err := row.Scan(&i.ID, &i.Name, &i.ProviderType)
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.ProviderType,
+		&i.ProviderID,
+		&i.ProviderUrl,
+	)
 	return i, err
 }
 
