@@ -4,7 +4,7 @@
 // mode (ADR 0048, ADR 0049): Koinon renders agentgateway's whole local config
 // file, writes it into a ConfigMap and waits for agentgateway's hot reload.
 //
-// Config schema: agentgateway v1.6.0 schema/config.md (llm, mcp, frontendPolicies,
+// Config schema: agentgateway v1.7.0 schema/config.md (llm, mcp, frontendPolicies,
 // config.modelCatalog) and schema/cel.md (apiKey, mcp.tool.*), plus the working
 // spike config hack/spike/agentgateway/platform-config.yaml.
 package standalone
@@ -46,7 +46,7 @@ type Options struct {
 
 // OTLPExport is an OTLP/HTTP (protobuf) logs endpoint.
 //
-// agentgateway v1.6.0 schema/config.md: frontendPolicies.accessLog.otlp takes
+// agentgateway v1.7.0 schema/config.md: frontendPolicies.accessLog.otlp takes
 // a backend reference (`host`: "host:port"), `protocol` (grpc, the default, or
 // http) and `path` (default /v1/logs). With `otlp.fields` unset, the export
 // carries the same `add` fields as the stdout log.
@@ -78,12 +78,12 @@ const (
 	ReloadProbeModel = "koinon/reload-probe"
 
 	// probeRule is the llm authorization rule that refuses the probe key with
-	// 403 before routing. agentgateway v1.6.0 checks budgets first, so with a
+	// 403 before routing. agentgateway v1.7.0 checks budgets first, so with a
 	// database the zero budget answers (429); without one, this rule does.
 	probeRule = `apiKey.name != "` + gateway.ReloadProbeKeyName + `"`
 
 	// placeholderTarget is added next to a lone org target (see build).
-	placeholderTarget = "koinon-placeholder"
+	placeholderTarget = "koinon.placeholder"
 
 	header = "# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.\n" +
 		"# Keys appear only as hashes; key material lives in Kubernetes Secrets.\n"
@@ -150,7 +150,7 @@ func marshal(doc document) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// The types below mirror the subset of agentgateway's v1.6 LocalConfig that
+// The types below mirror the subset of agentgateway's v1.7 LocalConfig that
 // Koinon writes. Field order is the output order.
 
 type document struct {
@@ -246,7 +246,7 @@ type apiKey struct {
 	KeyHash  string      `yaml:"keyHash"`
 	Metadata keyMetadata `yaml:"metadata"`
 	// AllowedModels lists the plain model names the key may request (llm only). A pointer so
-	// an empty list is rendered: it denies every model. agentgateway v1.6.0 schema/config.md
+	// an empty list is rendered: it denies every model. agentgateway v1.7.0 schema/config.md
 	// llm.policies.apiKey.keys[].allowedModels.
 	AllowedModels *[]string `yaml:"allowedModels,omitempty"`
 	Budgets       []budget  `yaml:"budgets,omitempty"`
@@ -262,7 +262,7 @@ type keyMetadata struct {
 type budget struct {
 	Name             string      `yaml:"name"`
 	Limit            budgetLimit `yaml:"limit"`
-	Window           window      `yaml:"window"`
+	Window           *window     `yaml:"window,omitempty"`
 	OnBudgetExceeded string      `yaml:"onBudgetExceeded"`
 }
 
@@ -309,7 +309,7 @@ type llmModel struct {
 }
 
 // streamUsageExpr makes every streamed chat completion ask the upstream for usage. agentgateway
-// v1.6.0 adds stream_options.include_usage itself only when the client sent no stream_options at
+// v1.7.0 adds stream_options.include_usage itself only when the client sent no stream_options at
 // all (llm/mod.rs, process_completions_request), so a client sending {"include_usage": false} or
 // an empty object would otherwise get its streamed requests charged without usage. For a request
 // that is not streamed the expression is null, which OpenAI-compatible upstreams accept and
@@ -387,7 +387,7 @@ type mcpAuthorization struct {
 type mcpTarget struct {
 	Name string `yaml:"name"`
 	// Condition hides the target from keys it returns false for: the target is not contacted for
-	// them (agentgateway v1.6.0 mcp/README.md, target conditions).
+	// them (agentgateway v1.7.0 mcp/README.md, target conditions).
 	Condition string          `yaml:"condition,omitempty"`
 	MCP       *mcpEndpoint    `yaml:"mcp,omitempty"`
 	SSE       *mcpEndpoint    `yaml:"sse,omitempty"`
@@ -403,7 +403,7 @@ type targetPolicies struct {
 }
 
 // backendAuth injects a static credential read from a file when the config loads (agentgateway
-// v1.6.0 http/auth BackendAuthKind key; the key is a file source like llm params.apiKey).
+// v1.7.0 http/auth BackendAuthKind key; the key is a file source like llm params.apiKey).
 type backendAuth struct {
 	Credentials []backendCredential `yaml:"credentials"`
 }
@@ -589,7 +589,7 @@ func build(s gateway.State, o Options) document {
 }
 
 // probeKey is the reload probe's llm key entry, without its hash.
-// agentgateway v1.6.0 refuses a config with budgets but no config.database,
+// agentgateway v1.7.0 refuses a config with budgets but no config.database,
 // so the zero budget (429 before routing) is rendered only with a database;
 // the authorization rule (403) covers both cases.
 func probeKey(withBudget bool) apiKey {
@@ -598,7 +598,7 @@ func probeKey(withBudget bool) apiKey {
 		k.Budgets = []budget{{
 			Name:             gateway.ReloadProbeKeyName,
 			Limit:            budgetLimit{Unit: string(gateway.Tokens), Amount: 0},
-			Window:           window{Rolling: "24h"},
+			Window:           &window{Rolling: "24h"},
 			OnBudgetExceeded: "Block",
 		}}
 	}
@@ -632,9 +632,13 @@ func keyPolicy(keys []gateway.Key, limits map[gateway.AgentRef]gateway.Limit, al
 			ak.Budgets = []budget{{
 				Name:             name,
 				Limit:            budgetLimit{Unit: string(l.Unit), Amount: l.Amount},
-				Window:           window{Rolling: formatWindow(l.Window)},
 				OnBudgetExceeded: "Block",
 			}}
+			// No window: the counter accumulates for its lifetime (agentgateway v1.7), so a
+			// generation, not the gateway's clock, decides when spend starts over.
+			if l.Window > 0 {
+				ak.Budgets[0].Window = &window{Rolling: formatWindow(l.Window)}
+			}
 		}
 		p.Keys = append(p.Keys, ak)
 	}

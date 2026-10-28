@@ -34,7 +34,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"790ca40f4d04e4ed"'
+      koinon.config: '"fd32b1d49454fa94"'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
       koinon.max_tokens: llm.params.max_tokens
@@ -71,8 +71,6 @@ llm:
               limit:
                 unit: USD
                 amount: 4.25
-              window:
-                rolling: 24h
               onBudgetExceeded: Block
         - keyHash: sha256:afba2a391fafa9cdf6ca56f8efe1d251dcc3829546026c10f2694c0b2c759a32
           metadata:
@@ -97,7 +95,7 @@ llm:
             org: globex
           allowedModels:
             - deepseek/deepseek-v4.1-flash
-        - keyHash: sha256:6d5cf06a20aef6b2bcc2860982b7f85f168501add5ad5bd27990e8f959bcb731
+        - keyHash: sha256:a66d1b28421dbb867d071dc9c62d6d90c294024361f4e815db4e1b95a12f885a
           metadata:
             name: koinon-reload-probe
             agent: ""

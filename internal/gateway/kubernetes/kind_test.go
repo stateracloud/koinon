@@ -31,7 +31,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 )
 
-// The kind suite needs a cluster with the Gateway API CRDs and agentgateway v1.6.0 (hack/g2-kind.sh
+// The kind suite needs a cluster with the Gateway API CRDs and agentgateway v1.7.0 (hack/g2-kind.sh
 // creates one, runs this package and deletes it). KOINON_KIND_KUBECONFIG points at its kubeconfig;
 // without it the specs skip. KOINON_KIND_HOST is the address pods use to reach the test host.
 const (

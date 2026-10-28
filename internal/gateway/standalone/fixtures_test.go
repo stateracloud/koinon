@@ -51,7 +51,7 @@ func fixtures() []fixture {
 	full.AddKey(fixedKey("k-bbbbbbbbbbbb", agentB, "test-b"))
 	full.AddKey(fixedKey("k-gggggggggggg", agentG, "test-g"))
 	full.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
-	full.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 4.25, Window: 24 * time.Hour, Generation: "1792627200-750000000"})
+	full.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 4.25, Generation: "1792627200-750000000"})
 	full.SetLimit(agentB, &gateway.Limit{Unit: gateway.Tokens, Amount: 200000, Window: 30 * 24 * time.Hour})
 	full.GrantTools(agentA,
 		gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}},

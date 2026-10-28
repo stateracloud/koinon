@@ -263,7 +263,11 @@ type Limit struct {
 	Unit   LimitUnit
 	Amount float64
 	// Window is the accounting window. agentgateway aligns windows to the Unix
-	// epoch (24h starts at midnight UTC).
+	// epoch (24h starts at midnight UTC). Zero means no window: since agentgateway
+	// v1.7 the counter then accumulates for the lifetime of its name and never
+	// resets, so only a new Generation starts a fresh one. Koinon does not use
+	// that yet: agentgateway deletes only expired windowed counters at startup,
+	// so every unwindowed generation would stay in its table (and in memory) forever.
 	Window time.Duration
 	// Generation names the gateway's spend counter for this limit. agentgateway
 	// keys budget usage by key and budget name, so a new Generation starts a
@@ -515,8 +519,8 @@ func (s State) Validate() error {
 		if l.Unit != USD && l.Unit != Tokens {
 			errs = append(errs, fmt.Errorf("limit for %s: unknown unit %q", a, l.Unit))
 		}
-		if l.Amount < 0 || l.Window <= 0 {
-			errs = append(errs, fmt.Errorf("limit for %s: amount must be >= 0 and window > 0", a))
+		if l.Amount < 0 || l.Window < 0 {
+			errs = append(errs, fmt.Errorf("limit for %s: amount and window must be >= 0", a))
 		}
 		if !generation.MatchString(l.Generation) {
 			errs = append(errs, fmt.Errorf("limit for %s: generation must be at most 64 of [a-z0-9-]", a))
