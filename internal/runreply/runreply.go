@@ -76,6 +76,22 @@ func Truncate(s string, max int) string {
 	return strings.TrimSpace(s[:cut]) + truncated
 }
 
+const truncatedHead = "[truncated]\n"
+
+// TruncateTail trims s and keeps its last max bytes on a character boundary, starting with
+// "[truncated]". It is for text whose end matters most, such as the agent's last reply.
+func TruncateTail(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	cut := len(s) - (max - len(truncatedHead))
+	for cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut++
+	}
+	return truncatedHead + strings.TrimSpace(s[cut:])
+}
+
 // Human formats a cap for people: "1h", "1h30m", "30m", "45s" (no zero units).
 func Human(d time.Duration) string {
 	d = d.Round(time.Second)
@@ -98,25 +114,30 @@ func Human(d time.Duration) string {
 	return b.String()
 }
 
-// TimeLimitNote is the payload of the run.canceled events of a run stopped at its time limit:
-// reason "wall_clock_cap", message "Stopped at the time limit of <Human(cap)>.", maxWallClockSeconds,
-// summary, summarySource ("reply": the agent's text since its last park; "notes": the task's last
-// end-of-turn summary, when the agent said nothing; "none"). The summary is cut to MaxSummaryBytes
-// on a character boundary. On an error the note is still returned, with summarySource "none", so
-// the caller can use it as the fallback.
-func TimeLimitNote(ctx context.Context, q *store.Queries, run store.Run) (map[string]any, error) {
-	note := map[string]any{
+// TimeLimitNoteBase is the note without a summary (summarySource "none").
+func TimeLimitNoteBase(run store.Run) map[string]any {
+	return map[string]any{
 		"reason":              "wall_clock_cap",
 		"message":             "Stopped at the time limit of " + Human(time.Duration(run.MaxWallClockSeconds)*time.Second) + ".",
 		"maxWallClockSeconds": run.MaxWallClockSeconds,
 		"summarySource":       "none",
 	}
+}
+
+// TimeLimitNote is the payload of the run.canceled events of a run stopped at its time limit:
+// reason "wall_clock_cap", message "Stopped at the time limit of <Human(cap)>.", maxWallClockSeconds,
+// summary, summarySource ("reply": the agent's text since its last park; "notes": the task's last
+// end-of-turn summary, when the agent said nothing; "none"). The summary is cut to MaxSummaryBytes
+// on a character boundary; a long reply keeps its end (the wrap-up reply is last), a long note its start. On an error the note is still returned, with summarySource "none", so
+// the caller can use it as the fallback.
+func TimeLimitNote(ctx context.Context, q *store.Queries, run store.Run) (map[string]any, error) {
+	note := TimeLimitNoteBase(run)
 	reply, err := Reply(ctx, q, run.OrgID, run.ID)
 	if err != nil {
 		return note, fmt.Errorf("read the agent's reply: %w", err)
 	}
 	if reply != "" {
-		note["summary"], note["summarySource"] = Truncate(reply, MaxSummaryBytes), "reply"
+		note["summary"], note["summarySource"] = TruncateTail(reply, MaxSummaryBytes), "reply"
 		return note, nil
 	}
 	t, err := q.GetTask(ctx, store.GetTaskParams{OrgID: run.OrgID, ID: run.TaskID})
