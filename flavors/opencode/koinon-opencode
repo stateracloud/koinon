@@ -51,11 +51,10 @@ shift "$koinon_shift"
 # Drop anything the caller's environment might carry that would change where OpenCode reads its
 # configuration, its database or its server credentials, or where it sends telemetry
 # (OpenCode 2.2.0, see README.md).
-unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR OPENCODE_CONFIG_CONTENT OPENCODE_CLI_CONFIG_CONTENT \
-  OPENCODE_CONFIG_PROJECT_DISABLE OPENCODE_PERMISSION OPENCODE_MODELS_URL OPENCODE_MODELS_PATH \
-  OPENCODE_AUTO_SHARE OPENCODE_DB OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD OPENCODE_PTY_HANDOFF \
-  OPENCODE_SIMULATE OPENCODE_TEST_HOME OPENCODE_LOCAL OPENCODE_PRINT_LOGS \
-  OPENCODE_REPO_CLONE_GITHUB_BASE_URL OPENCODE_API_KEY \
+for koinon_var in $(env | sed -n 's/^\(OPENCODE_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  unset "$koinon_var"
+done
+unset koinon_var TMPDIR \
   OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_HEADERS
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

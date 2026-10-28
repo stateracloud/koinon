@@ -118,13 +118,6 @@ type files struct {
 	tar func(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 }
 
-func (f *files) link(path string) (string, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	t, ok := f.links[path]
-	return t, ok
-}
-
 // sweepCount is how many times agentd ran the sweep script.
 func (f *files) sweepCount() int {
 	f.mu.Lock()
