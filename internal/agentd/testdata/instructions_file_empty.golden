@@ -2,6 +2,10 @@
 
 These are your instructions from Koinon for this run. Koinon writes this file before the run and restores it before every prompt, so changing it has no effect.
 
+## Your workspace
+
+Your session directory is `/sandbox/work`. You can read and change files only under it; Koinon refuses a request for any other path (your home directory included). Keep notes and scratch files under `/sandbox/work/notes/`, not in `~`.
+
 ## Working with large data
 
 - Check size before reading: `wc -c FILE`, `ls -l`, `file FILE`. Read in ranges, not whole files.

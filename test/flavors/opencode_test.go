@@ -44,6 +44,9 @@ var opencode = flavor{
 	// The request arrives with tool kind "read", which agentd's mapping allows, and the path in
 	// its locations: agentd rejects it as outside the session directory.
 	agentdVerdict: "reject",
+	// OpenCode 2.2.0 treats a plain decline as a defect that interrupts the step
+	// (packages/core/src/permission.ts), so the turn ends cancelled.
+	rejectEndsTurn: true,
 	// OpenCode 2.2.0's session/load error for an unknown session.
 	unknownSession: "session not found",
 	// The config's "instructions" key names the file koinon-agentd writes.
