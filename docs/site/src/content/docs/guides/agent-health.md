@@ -43,8 +43,8 @@ the reason "the sandbox kept failing" and the last failure, and you resume it as
 A run waits for its agent's sandbox. After the org's queue wait (5 minutes) it goes back to the queue,
 and it waits again when it is next claimed, so a burst beyond the cluster's capacity shows up as waiting
 and not as failed runs. That wait has a cap: the most a run waits for its sandbox in total, across those
-requeues. The default is 1 hour (`--sandbox-wait-cap` of koinon-agentd), and an org can set its own, from
-5 minutes to 7 days. The cap counts from the first time the run found its sandbox not ready, and starts
+requeues. The default is 1 hour (`--sandbox-wait-cap` of koinon-agentd, for every org). A per-org cap
+(5 minutes to 7 days) is stored in the org's settings, which have no API yet. The cap counts from the first time the run found its sandbox not ready, and starts
 again when any run of the agent finds the sandbox ready or the agent is resumed, so time spent queued
 behind a run that had the sandbox does not count.
 
