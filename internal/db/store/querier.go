@@ -287,6 +287,9 @@ type Querier interface {
 	// between runs) the task of the agent's latest finished run whose task is not in an end state.
 	// Only a task's end (completed, canceled, failed) deletes its sandbox. No row: no task needs one.
 	GetEphemeralFocusTask(ctx context.Context, arg GetEphemeralFocusTaskParams) (pgtype.UUID, error)
+	// koinon-reconciler, after a restart: the key file a provider was last applied with, so a key rotated
+	// while it was down keeps being served with the previous file until the new one has arrived.
+	GetGatewayServedKeyFile(ctx context.Context, arg GetGatewayServedKeyFileParams) (string, error)
 	GetHomeCheckpoint(ctx context.Context, arg GetHomeCheckpointParams) (HomeCheckpoint, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -303,6 +306,10 @@ type Querier interface {
 	// The enabled model an agent asks for by its plain name, with its provider's type, for
 	// finding its price.
 	GetModelForPricing(ctx context.Context, arg GetModelForPricingParams) (GetModelForPricingRow, error)
+	// koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
+	// provider and whether the gateway serves it (gateway_served_models). Enabled models have unique
+	// names in an org (a declared one disables a UI one of the same name), so there is one at most.
+	GetModelServing(ctx context.Context, arg GetModelServingParams) (GetModelServingRow, error)
 	GetOpenHomeCheckpoint(ctx context.Context, arg GetOpenHomeCheckpointParams) (HomeCheckpoint, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -626,6 +633,9 @@ type Querier interface {
 	// running -> parked. The owner releases the run; a later claim resumes it
 	// after ResolveRunPark.
 	ParkRun(ctx context.Context, arg ParkRunParams) (Run, error)
+	// The same for an org whose model objects the gateway rejected: nothing new is recorded, rows of
+	// models the state no longer serves are removed.
+	PruneGatewayServedModels(ctx context.Context, arg PruneGatewayServedModelsParams) error
 	// A tool turned two-approver on after the request was recorded: the pending request needs two too.
 	RaiseApprovalsRequired(ctx context.Context, arg RaiseApprovalsRequiredParams) (ApprovalRequest, error)
 	// Records the observed sandbox. started_at and stopped_at are stamped on the
@@ -753,6 +763,10 @@ type Querier interface {
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// Totals per task, for the tasks in @task_ids that have spend.
 	SumTaskCosts(ctx context.Context, arg SumTaskCostsParams) ([]SumTaskCostsRow, error)
+	// koinon-reconciler, after an applied gateway state: the org's models that state serves, with
+	// the provider and key file each is served with. Rows of models it does not serve are removed; a
+	// row whose key file is unchanged is left alone, so served_since stays.
+	SyncGatewayServedModels(ctx context.Context, arg SyncGatewayServedModelsParams) error
 	// Takes ownership of a starting or running run whose owner's lease expired
 	// (for example a killed agentd). The state is unchanged; the new epoch makes
 	// every later write of the old owner match no rows.

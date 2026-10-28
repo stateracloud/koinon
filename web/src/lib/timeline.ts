@@ -189,6 +189,14 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
       const reason = str(p.reason)
       return { key, at, type: 'note', text: `Run ${shortId(runId)} is waiting for a sandbox${reason ? ` (${reason})` : ''}`, runId }
     }
+    case 'run.waiting_for_model': {
+      // agentd waits before it starts the harness until the gateway serves the run's model: a new
+      // provider's key is still reaching the gateway (#174). {model, provider, reason}.
+      const provider = str(p.provider)
+      const model = str(p.model)
+      const what = provider ? `the model provider ${provider}` : 'the model provider'
+      return { key, at, type: 'note', text: `Run ${shortId(runId)} is waiting for ${what} to reach the gateway${model ? ` (model ${model})` : ''}`, runId }
+    }
     case 'run.retry': {
       // agentd retries a turn after a transient model fault: {failureClass, attempt, delaySeconds, reason}.
       const attempt = typeof p.attempt === 'number' ? ` (attempt ${p.attempt})` : ''

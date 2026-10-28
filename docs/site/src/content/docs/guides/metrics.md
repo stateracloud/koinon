@@ -49,6 +49,7 @@ pruning key files), `gateway_apply` (the gateway was unreachable or the reload d
 | `koinon_agentd_runs_finished_total` | counter | `outcome`: `succeeded`, `failed`, `canceled`, `parked` | Runs this replica ended or parked on approvals. A cancel made by the control plane (a cap, a spend limit, a user) is made by koinon-api and not counted here. |
 | `koinon_agentd_takeovers_total` | counter | none | Runs this replica took over after the owner's lease expired or was released. |
 | `koinon_agentd_sandbox_wait_duration_seconds` | histogram | none | Time a run waited for its agent's sandbox to be ready, whatever the result (a timeout is observed too). |
+| `koinon_agentd_model_wait_duration_seconds` | histogram | none | Time a run waited, before starting its harness, for the gateway to serve its model (a new provider's key still reaching the gateway). Observed only for runs that waited and were then served or timed out, not for a wait ended by a cancel, a lost lease or a shutdown. |
 
 ## koinon-api
 
