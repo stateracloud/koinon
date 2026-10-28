@@ -1,6 +1,6 @@
 # 0006. Identity layers: per-agent ServiceAccount, no usable token in the sandbox
 
-- Status: Accepted; amended by [0043](0043-workload-identity-adapters-and-koinon-issuer.md), [0044](0044-in-sandbox-credential-exception.md), [0063](0063-forge-credential-classes.md) and [0065](0065-work-model-tasks-inbox.md)
+- Status: Accepted; amended by [0043](0043-workload-identity-adapters-and-koinon-issuer.md), [0044](0044-in-sandbox-credential-exception.md), [0063](0063-forge-credential-classes.md), [0065](0065-work-model-tasks-inbox.md) and [0073](0073-agent-passport.md)
 - Date: 2026-10-21
 - Decision: [design.md#6](../design.md)
 - Verification: Pending: OpenShell spike ([#3](https://github.com/stateracloud/koinon/issues/3))
@@ -121,6 +121,22 @@ sequenceDiagram
 - **Auth types.** [0063](0063-forge-credential-classes.md) adds a credential class beyond
   `federated`, `app-credential` and `delegated-user`: static code-host tokens (Gitea), held by
   Koinon and delivered only through OpenShell placeholders.
+
+## Amendment (2026-10-28): the agent passport
+
+[0073](0073-agent-passport.md) adds an identity that systems outside Koinon can verify.
+
+- **The passport.** Calls to MCP servers and org APIs carry a short-lived, Koinon-signed JWT. It names
+  the org, agent, version, run, task, requester and approval, with an RFC 8693 `act` chain for
+  delegation, and is bound to one audience.
+- **Outside the sandbox.** The gateway attaches the passport after the supervisor has resolved the
+  placeholder. The sandbox never sees it, and it is never logged. The rule of this ADR, "no usable
+  token in the sandbox", is unchanged.
+- **Per-run keys.** Each run gets its own short-lived gateway key, so the gateway knows the exact run.
+- **The agent header.** The unsigned `x-koinon-agent` header stays only as a hint for Koinon's own
+  tool servers, which verify the passport as well.
+- **A2A tokens.** The open question on A2A authentication tokens is answered for the later external A2A
+  gateway: passports with an `act` chain.
 
 ## Links
 
