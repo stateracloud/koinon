@@ -14,12 +14,14 @@ import {
   type CreateModelRequest,
   type CreateProviderRequest,
   type DeleteProviderRequest,
+  type ModelFormatsRequest,
+  type UpdateModelRequest,
   type UpdateProviderRequest,
 } from '@/gen/koinon/provider/v1alpha1/provider_pb'
 import { renderApp, whoAmI } from '@/test-utils'
 
 const t = timestampFromMs(Date.now())
-const uiProvider = create(ProviderSchema, { id: 'p-ui', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', createdAt: t, updatedAt: timestampFromMs(Date.now() - 3_600_000) })
+const uiProvider = create(ProviderSchema, { id: 'p-ui', name: 'openrouter', type: 'openrouter', url: 'https://openrouter.ai/api/v1', hasKey: true, source: 'ui', formats: ['openai', 'anthropic'], createdAt: t, updatedAt: timestampFromMs(Date.now() - 3_600_000) })
 const secretProvider = create(ProviderSchema, { id: 'p-sec', name: 'homelab', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'secret', managedBySecret: 'ollama-secret', createdAt: t })
 const removedProvider = create(ProviderSchema, {
   id: 'p-gone',
@@ -33,11 +35,11 @@ const removedProvider = create(ProviderSchema, {
 })
 const fresh = create(ProviderSchema, { id: 'p-fresh', name: 'fresh', type: 'ollama', url: 'http://ollama.lab.example.com:11434/v1', source: 'ui', createdAt: t, updatedAt: t })
 const shadowed = create(ProviderSchema, { id: 'p-shadow', name: 'dup', type: 'openai', url: 'https://api.example.com/v1', source: 'ui', disabledReason: 'shadowed by a provider of the same name declared in a Kubernetes Secret' })
-const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui' })
+const model = create(ModelSchema, { id: 'm-1', providerId: 'p-ui', name: 'deepseek/deepseek-v4.1-flash', guard: true, source: 'ui', format: 'openai' })
 const secretModel = create(ModelSchema, { id: 'm-2', providerId: 'p-sec', name: 'llama3', source: 'secret', managedBySecret: 'ollama-secret' })
 
-function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[] } = {}) {
-  const calls = { providerCreates: [] as CreateProviderRequest[], providerUpdates: [] as UpdateProviderRequest[], providerDeletes: [] as DeleteProviderRequest[], modelCreates: [] as CreateModelRequest[], listed: 0 }
+function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string; warnings?: string[]; overridden?: boolean } = {}) {
+  const calls = { providerCreates: [] as CreateProviderRequest[], providerUpdates: [] as UpdateProviderRequest[], providerDeletes: [] as DeleteProviderRequest[], modelCreates: [] as CreateModelRequest[], modelUpdates: [] as UpdateModelRequest[], formatAsks: [] as ModelFormatsRequest[], listed: 0 }
   const transport = createRouterTransport(({ service }) => {
     service(AuthService, { whoAmI: () => whoAmI({ role: opts.role }) })
     service(ProviderService, {
@@ -45,7 +47,16 @@ function setup(opts: { role?: OrgRole; failCreate?: string; failDelete?: string;
         calls.listed++
         return { providers: [uiProvider, secretProvider, removedProvider, shadowed, fresh] }
       },
-      listModels: () => ({ models: [model, secretModel] }),
+      listModels: () => ({ models: [opts.overridden ? create(ModelSchema, { ...model, format: 'anthropic', formatOverridden: true }) : model, secretModel] }),
+      modelFormats: (req) => {
+        calls.formatAsks.push(req)
+        if (req.providerId !== 'p-ui') return { offered: ['openai'], defaultFormat: 'openai' }
+        return { offered: ['openai', 'anthropic'], defaultFormat: req.name.startsWith('claude') ? 'anthropic' : 'openai' }
+      },
+      updateModel: (req) => {
+        calls.modelUpdates.push(req)
+        return { model }
+      },
       createProvider: (req) => {
         calls.providerCreates.push(req)
         if (opts.failCreate) throw new ConnectError(opts.failCreate, Code.InvalidArgument)
@@ -268,5 +279,103 @@ describe('Providers page', () => {
     await userEvent.type(within(form).getByLabelText('Model name'), 'google/gemini-x')
     await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
     expect(await within(await screen.findByRole('status', { name: 'Warnings' })).findByText(warning)).toBeInTheDocument()
+  })
+
+  describe('model formats (ADR 0069)', () => {
+    it('badges each model with its format, and says when it was set', async () => {
+      setup()
+      const list = await screen.findByRole('list', { name: 'Providers' })
+      const ui = within(within(list).getByRole('region', { name: 'openrouter' }))
+      expect(ui.getByText('OpenAI chat completions')).toHaveAttribute('title', 'The default for this model')
+    })
+
+    it('shows an overridden format as set', async () => {
+      setup({ overridden: true })
+      const ui = within(within(await screen.findByRole('list', { name: 'Providers' })).getByRole('region', { name: 'openrouter' }))
+      expect(ui.getByText('Anthropic Messages (set)')).toHaveAttribute('title', 'Set for this model')
+    })
+
+    it('offers the provider\'s formats with the default marked, and follows the default unless another is picked', async () => {
+      const calls = setup()
+      await userEvent.click(await screen.findByRole('button', { name: 'Add model to openrouter' }))
+      const form = screen.getByRole('form', { name: 'Add model to openrouter' })
+      await userEvent.type(within(form).getByLabelText('Model name'), 'claude-haiku-4-5')
+      const select = within(form).getByLabelText('API format')
+      await waitFor(() => expect(within(select).getByRole('option', { name: 'Anthropic Messages (default)' })).toBeInTheDocument())
+      expect(within(select).getByRole('option', { name: 'OpenAI chat completions' })).toBeInTheDocument()
+      expect(select).toHaveValue('anthropic')
+      expect(calls.formatAsks.at(-1)).toMatchObject({ providerId: 'p-ui', name: 'claude-haiku-4-5' })
+      await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
+      await waitFor(() => expect(calls.modelCreates).toHaveLength(1))
+      // The default is followed, not pinned.
+      expect(calls.modelCreates[0].format).toBe('')
+    })
+
+    it('sends a format that differs from the default', async () => {
+      const calls = setup()
+      await userEvent.click(await screen.findByRole('button', { name: 'Add model to openrouter' }))
+      const form = screen.getByRole('form', { name: 'Add model to openrouter' })
+      await userEvent.type(within(form).getByLabelText('Model name'), 'claude-haiku-4-5')
+      const select = within(form).getByLabelText('API format')
+      await waitFor(() => expect(select).toBeEnabled())
+      await userEvent.selectOptions(select, 'openai')
+      await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
+      await waitFor(() => expect(calls.modelCreates).toHaveLength(1))
+      expect(calls.modelCreates[0].format).toBe('openai')
+    })
+
+    it('has nothing to choose on a provider that offers one format', async () => {
+      setup()
+      await userEvent.click(await screen.findByRole('button', { name: 'Add model to dup' }))
+      const form = screen.getByRole('form', { name: 'Add model to dup' })
+      await userEvent.type(within(form).getByLabelText('Model name'), 'gpt-5')
+      await waitFor(() => expect(within(form).getByText(/offers one format/)).toBeInTheDocument())
+      expect(within(form).getByLabelText('API format')).toBeDisabled()
+    })
+
+    it('goes back to the default when an edit picks it again', async () => {
+      const calls = setup({ overridden: true })
+      await userEvent.click(await screen.findByRole('button', { name: 'Edit model deepseek/deepseek-v4.1-flash' }))
+      const form = screen.getByRole('form', { name: 'Edit model deepseek/deepseek-v4.1-flash' })
+      const select = within(form).getByLabelText('API format')
+      expect(select).toHaveValue('anthropic')
+      await waitFor(() => expect(within(select).getByRole('option', { name: 'OpenAI chat completions (default)' })).toBeInTheDocument())
+      await userEvent.selectOptions(select, 'openai')
+      await userEvent.click(within(form).getByRole('button', { name: 'Save model' }))
+      await waitFor(() => expect(calls.modelUpdates).toHaveLength(1))
+      expect(calls.modelUpdates[0].format).toBe('')
+    })
+  })
+
+  describe('Anthropic providers', () => {
+    it('lists Anthropic as a type and asks for the workspace ID for it only', async () => {
+      const calls = setup()
+      await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+      const form = screen.getByRole('form', { name: 'Add provider' })
+      expect(within(form).queryByLabelText('Anthropic workspace ID')).not.toBeInTheDocument()
+      await userEvent.selectOptions(within(form).getByLabelText('Provider type'), 'anthropic')
+      expect(within(form).getByLabelText('URL')).toHaveValue('https://api.anthropic.com/v1')
+      const ws = within(form).getByLabelText('Anthropic workspace ID')
+      await userEvent.type(within(form).getByLabelText('Name'), 'claude')
+      await userEvent.type(ws, 'ws-1')
+      await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+      expect(within(form).getByText(/wrkspc_ followed by letters and digits/)).toBeInTheDocument()
+      expect(calls.providerCreates).toHaveLength(0)
+      await userEvent.clear(ws)
+      await userEvent.type(ws, 'wrkspc_01AbCd')
+      await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+      await waitFor(() => expect(calls.providerCreates).toHaveLength(1))
+      expect(calls.providerCreates[0]).toMatchObject({ name: 'claude', type: 'anthropic', anthropicWorkspaceId: 'wrkspc_01AbCd' })
+    })
+
+    it('does not send a workspace ID for another type', async () => {
+      const calls = setup()
+      await userEvent.click(await screen.findByRole('button', { name: 'Add provider' }))
+      const form = screen.getByRole('form', { name: 'Add provider' })
+      await userEvent.type(within(form).getByLabelText('Name'), 'second')
+      await userEvent.click(within(form).getByRole('button', { name: 'Add provider' }))
+      await waitFor(() => expect(calls.providerCreates).toHaveLength(1))
+      expect(calls.providerCreates[0].anthropicWorkspaceId).toBe('')
+    })
   })
 })

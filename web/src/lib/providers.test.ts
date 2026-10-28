@@ -5,7 +5,7 @@ import { timestampFromMs } from '@bufbuild/protobuf/wkt'
 import { describe, expect, it } from 'vitest'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { TokenSchema } from '@/gen/koinon/token/v1alpha1/token_pb'
-import { createdByLabel, savedRecently, daysToSeconds, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
+import { createdByLabel, formatLabel, providerTypeLabel, savedRecently, workspaceIdPattern, daysToSeconds, scopedModelName, tokenDaysError, tokenStatus } from '@/lib/providers'
 
 describe('forms', () => {
   it('names a model the way the gateway serves it', () => {
@@ -16,6 +16,21 @@ describe('forms', () => {
     expect(tokenDaysError('90')).toBeUndefined()
     for (const bad of ['0', '91', '1.5', '', 'x']) expect(tokenDaysError(bad)).toBeDefined()
     expect(daysToSeconds(30)).toBe(2592000n)
+  })
+})
+
+describe('model formats and Anthropic providers', () => {
+  it('names the formats, and leaves an unknown one as it is', () => {
+    expect(formatLabel('openai')).toBe('OpenAI chat completions')
+    expect(formatLabel('anthropic')).toBe('Anthropic Messages')
+    expect(formatLabel('gemini')).toBe('gemini')
+  })
+  it('lists Anthropic as a provider type', () => {
+    expect(providerTypeLabel('anthropic')).toBe('Anthropic')
+  })
+  it('checks a workspace ID like the server', () => {
+    expect(workspaceIdPattern.test('wrkspc_01AbC')).toBe(true)
+    for (const bad of ['wrkspc_', 'ws_01', 'wrkspc_a-b', ' wrkspc_01']) expect(workspaceIdPattern.test(bad)).toBe(false)
   })
 })
 
