@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/stateracloud/koinon/internal/errbody"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 )
@@ -334,6 +335,8 @@ func (b *builder) gatewayObjects() {
 		attr(gateway.LogFieldMaxTokens, `llm.params.max_tokens`),
 		attr(gateway.LogFieldRequestBytes, `int(request.headers["content-length"])`),
 		attr(gateway.LogFieldResponseID, gateway.ResponseIDCEL),
+		attr(gateway.LogFieldUpstream, gateway.UpstreamCEL),
+		attr(gateway.LogFieldErrorBody, errbody.GatewayExpr()),
 	}
 	access := map[string]any{"attributes": map[string]any{"add": attrs}}
 	if b.o.AccessLogOTLP != nil {
