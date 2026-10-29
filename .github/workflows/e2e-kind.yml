@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# E1 quickstart e2e on kind (plan item E1): test/e2e/run.sh on a GitHub-hosted runner. Manual
-# trigger only while the repository is private, where Actions minutes cost money; once it is
-# public, it runs on every pull request to main and nightly. Calls no external service besides
+# E1 quickstart e2e on kind (plan item E1): test/e2e/run.sh on a GitHub-hosted runner. Not on
+# Blacksmith like the other workflows (ADR 0047): its kernel has no Landlock, which the OpenShell
+# sandbox supervisor requires (issue #159). Manual trigger only while the repository is private,
+# where it spends the plan's included Actions minutes; once it is public, it runs on every pull
+# request to main and nightly. Calls no external service besides
 # image and manifest downloads: the model is the fake model server and GitHub is the fake
 # GitHub, both in the cluster.
 name: e2e-kind
@@ -25,8 +27,8 @@ concurrency:
 
 jobs:
   quickstart:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
     defaults:
       run:
         # Explicit bash adds -o pipefail, so `| tee` keeps the script's exit code.
@@ -66,6 +68,15 @@ jobs:
           nproc; free -m; df -h /; uname -a
           cat /sys/kernel/security/lsm || true
           docker info --format '{{.ServerVersion}} {{.CgroupVersion}} {{.SecurityOptions}}'
+
+      # The OpenShell sandbox supervisor refuses to start without Landlock ABI v3 (Linux 6.2+).
+      # Fail here, in seconds, rather than as "sandbox not ready" minutes into the quickstart.
+      - name: Kernel has Landlock
+        run: |
+          if ! grep -qw landlock /sys/kernel/security/lsm; then
+            echo "::error::this runner's kernel ($(uname -r)) has no Landlock; OpenShell's sandbox supervisor needs it (issue #159)"
+            exit 1
+          fi
 
       - name: Install kind and ko
         run: |
