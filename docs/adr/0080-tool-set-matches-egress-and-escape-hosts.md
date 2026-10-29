@@ -38,8 +38,9 @@ the network must be what the sandbox's proxy actually does.
    `test/escape`), never an expected code, in every case that expects a policy answer. The
    direct-egress cases still expect `000`, because there the sandbox refuses the connection
    itself. The two cases from #244 use hosts that resolve inside the sandbox:
-   `KOINON_ESCAPE_GATEWAY_HOST` (default `localhost`, nothing listening on 4000, so an allowed
-   request fails at connect with 502 and a denied one gets 403) and
+   `KOINON_ESCAPE_GATEWAY_HOST` (no default: a non-loopback name the proxy resolves with nothing
+   listening on 4000, such as a Service without endpoints, so an allowed request fails at connect
+   with 502 and a denied one gets 403; the case skips without it) and
    `KOINON_ESCAPE_GITEA_URL` (default `https://example.com/gitea`; every request is denied by
    policy before the proxy connects). OpenShell cases run only where `KOINON_OPENSHELL_ENDPOINT`
    is set (the home lab) and skip everywhere else, kind and CI included, so nothing about the kind
@@ -52,5 +53,6 @@ the network must be what the sandbox's proxy actually does.
   instructions following from it.
 - A DNS miss in the escape suite fails loudly with the reason instead of passing or failing
   with a bare `000`.
-- Open: the default gateway stand-in (`localhost`) must be confirmed on the home lab; if
-  OpenShell treats loopback specially, set `KOINON_ESCAPE_GATEWAY_HOST` to another resolvable name.
+- OpenShell always blocks loopback and link-local targets, so `localhost` cannot produce the 502
+  and is not a default. The gateway case needs `KOINON_ESCAPE_GATEWAY_HOST` set explicitly; the 502
+  with a real stand-in is still to be confirmed on the home lab.
