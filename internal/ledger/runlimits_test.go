@@ -13,6 +13,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
@@ -151,23 +152,23 @@ var _ = Describe("run limits", func() {
 			now := time.Now()
 			l, err := ledger.AgentLimit(ctx, q, e.agent, now)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(l.Amount).To(BeNumerically("~", 10.0, 1e-9), "no run: the agent's daily limit")
+			Expect(l.Amount).To(Equal(money.MustParse("10.0")), "no run: the agent's daily limit")
 
 			r := e.startLimitedRun(ctx, e.task(ctx), runLimits{requests: 100, spendUSD: "0.50"}, now.Add(-time.Minute))
 			l, err = ledger.AgentLimit(ctx, q, e.agent, now)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(l.Amount).To(BeNumerically("~", 0.50, 1e-9), "the run level is the smallest remaining")
+			Expect(l.Amount).To(Equal(money.MustParse("0.50")), "the run level is the smallest remaining")
 
 			_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(now, "0.20", 10, 1)})
 			Expect(err).NotTo(HaveOccurred())
 			l, err = ledger.AgentLimit(ctx, q, e.agent, now)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(l.Amount).To(BeNumerically("~", 0.30, 1e-9), "net of what the run has spent")
+			Expect(l.Amount).To(Equal(money.MustParse("0.30")), "net of what the run has spent")
 
 			e.finishRun(ctx, r.ID, now)
 			l, err = ledger.AgentLimit(ctx, q, e.agent, now)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(l.Amount).To(BeNumerically("~", 9.80, 1e-9), "the run is over: the agent's daily remainder")
+			Expect(l.Amount).To(Equal(money.MustParse("9.80")), "the run is over: the agent's daily remainder")
 		})
 
 		It("does not hold a pending response's reserve back at the run level (it can exceed the whole limit)", func(ctx SpecContext) {
@@ -181,7 +182,7 @@ var _ = Describe("run limits", func() {
 			Expect(err).NotTo(HaveOccurred())
 			l, err := ledger.AgentLimit(ctx, q, e.agent, now)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(l.Amount).To(BeNumerically("~", 0.40, 1e-9), "$0.50 less the $0.10 charge; the $0.25 reserve is held at the agent's level only")
+			Expect(l.Amount).To(Equal(money.MustParse("0.40")), "$0.50 less the $0.10 charge; the $0.25 reserve is held at the agent's level only")
 		})
 
 		It("keeps a run whose limit a cut response's reserve exceeds running, with a positive run level", func(ctx SpecContext) {
@@ -195,7 +196,7 @@ var _ = Describe("run limits", func() {
 			Expect(err).NotTo(HaveOccurred())
 			l, err := ledger.AgentLimit(ctx, q, e.agent, now)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(l.Amount).To(BeNumerically("~", 0.2998, 1e-9), "the run's remaining spend: the wrap-up turn is not refused")
+			Expect(l.Amount).To(Equal(money.MustParse("0.2998")), "the run's remaining spend: the wrap-up turn is not refused")
 			n, err := ledger.StopSpent(ctx, db, e.agent, now)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(n).To(BeZero())
