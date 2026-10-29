@@ -4,9 +4,11 @@ package reconciler_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
 	"sync/atomic"
 	"time"
@@ -15,9 +17,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/protobuf/encoding/protojson"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
@@ -458,6 +469,149 @@ var _ = Describe("Reconciler", func() {
 			got := sandboxRow(ctx, agent.ID)
 			Expect(got.Reason).To(Equal("ErrImagePull"))
 			Expect(got.Message).To(Equal("boom"))
+		})
+
+		Describe("the sandbox observer (ADR 0078)", func() {
+			var (
+				names   execution.AgentNames
+				dyn     *dynamicfake.FakeDynamicClient
+				metrics *reconciler.Metrics
+				ns      string
+			)
+			const osReason, osMessage = "ConfigurationPending", "Waiting for effective configuration validation before workload activation"
+			imagePullPod := func() *corev1.Pod {
+				// The captured wc-img pod status (internal/execution/testdata).
+				data, err := os.ReadFile("../execution/testdata/wc-img-init-container-statuses.json")
+				Expect(err).NotTo(HaveOccurred())
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: names.Sandbox, Namespace: ns}}
+				Expect(json.Unmarshal(data, &pod.Status.InitContainerStatuses)).To(Succeed())
+				return pod
+			}
+			BeforeEach(func() {
+				names = execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+				ns = execution.WorkspaceNamespace("openshell", row.Workspace)
+				scheme := runtime.NewScheme()
+				dyn = dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+					{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}: "SandboxList",
+				})
+				metrics = reconciler.NewMetrics(nil)
+				cfg.Metrics = metrics
+				cfg.Observer = &reconciler.SandboxObserver{
+					Kube: kube, Dynamic: dyn, GatewayID: "openshell", ClusterRole: "koinon-koinon-sandbox-observer",
+					ServiceAccount: "koinon-reconciler", ServiceAccountNamespace: namespace,
+				}
+				r = newReconciler()
+			})
+			provisioning := func() {
+				osg.SetPhase(row.Workspace, names.Sandbox, openshellv1.SandboxPhase_SANDBOX_PHASE_PROVISIONING)
+				osg.SetCondition(row.Workspace, names.Sandbox, osReason, osMessage)
+			}
+
+			It("binds the observer role once per workspace namespace", func(ctx SpecContext) {
+				pass(ctx, r)
+				pass(ctx, r)
+				bindings, err := kube.RbacV1().RoleBindings(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(bindings.Items).To(HaveLen(1))
+				b := bindings.Items[0]
+				Expect(b.Name).To(Equal("koinon-koinon-sandbox-observer"))
+				Expect(b.RoleRef).To(Equal(rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "koinon-koinon-sandbox-observer"}))
+				Expect(b.Subjects).To(Equal([]rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: "koinon-reconciler", Namespace: namespace}}))
+			})
+
+			It("records the pod's pull error in place of OpenShell's opaque reason", func(ctx SpecContext) {
+				_, err := kube.CoreV1().Pods(ns).Create(ctx, imagePullPod(), metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				provisioning()
+				pass(ctx, r)
+				got := sandboxRow(ctx, agent.ID)
+				Expect(got.Reason).To(Equal("ImagePullBackOff"))
+				Expect(got.Message).To(HavePrefix(`Back-off pulling image "kind.local/koinon-escape/agent:nope"`))
+				Expect(execution.ClassifySandboxWait(got.Reason, got.Message)).To(Equal(execution.WaitCauseImagePull))
+			})
+
+			It("reads the Agent Sandbox object when the pod is missing", func(ctx SpecContext) {
+				cr := &unstructured.Unstructured{Object: map[string]any{
+					"apiVersion": "agents.x-k8s.io/v1beta1", "kind": "Sandbox",
+					"metadata": map[string]any{"name": names.Sandbox, "namespace": ns},
+					"status": map[string]any{"conditions": []any{map[string]any{
+						"type": "Ready", "status": "False", "reason": "ReconcilerError",
+						"message": `Error seen: pods "x" is forbidden: ValidatingAdmissionPolicy 'p' with binding 'b' denied request: no`,
+					}}},
+				}}
+				_, err := dyn.Resource(schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}).
+					Namespace(ns).Create(ctx, cr, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				provisioning()
+				pass(ctx, r)
+				got := sandboxRow(ctx, agent.ID)
+				Expect(got.Reason).To(Equal("ReconcilerError"))
+				Expect(execution.ClassifySandboxWait(got.Reason, got.Message)).To(Equal(execution.WaitCauseAdmission))
+			})
+
+			It("keeps OpenShell's words when the pod says nothing, and reads nothing for an informative reason", func(ctx SpecContext) {
+				pod := imagePullPod()
+				pod.Status.InitContainerStatuses = nil
+				_, err := kube.CoreV1().Pods(ns).Create(ctx, pod, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				provisioning()
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).Reason).To(Equal(osReason))
+
+				_, err = kube.CoreV1().Pods(ns).Update(ctx, imagePullPod(), metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				osg.SetCondition(row.Workspace, names.Sandbox, "Unschedulable", "0/1 nodes are available: 1 Insufficient cpu.")
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).Reason).To(Equal("Unschedulable"))
+			})
+
+			It("counts a forbidden read, keeps OpenShell's reason and does not fail the pass", func(ctx SpecContext) {
+				kube.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, names.Sandbox, errors.New("no"))
+				})
+				provisioning()
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).Reason).To(Equal(osReason))
+				Expect(testutil.ToFloat64(metrics.ObserverErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
+			})
+
+			It("counts a refused RoleBinding and retries it on the next pass", func(ctx SpecContext) {
+				var refuse atomic.Bool
+				refuse.Store(true)
+				kube.PrependReactor("create", "rolebindings", func(k8stesting.Action) (bool, runtime.Object, error) {
+					if refuse.Load() {
+						return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "rolebindings"}, "b", errors.New("policy"))
+					}
+					return false, nil, nil
+				})
+				pass(ctx, r)
+				Expect(testutil.ToFloat64(metrics.ObserverErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
+				refuse.Store(false)
+				pass(ctx, r)
+				bindings, err := kube.RbacV1().RoleBindings(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(bindings.Items).To(HaveLen(1))
+			})
+
+			It("treats AlreadyExists as done", func(ctx SpecContext) {
+				_, err := kube.RbacV1().RoleBindings(ns).Create(ctx, &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "koinon-koinon-sandbox-observer", Namespace: ns}}, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				pass(ctx, r)
+				Expect(testutil.ToFloat64(metrics.ObserverErrors.WithLabelValues("other"))).To(BeZero())
+			})
+
+			It("is off when no observer is configured", func(ctx SpecContext) {
+				cfg.Observer = nil
+				r = newReconciler()
+				_, err := kube.CoreV1().Pods(ns).Create(ctx, imagePullPod(), metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				provisioning()
+				pass(ctx, r)
+				Expect(sandboxRow(ctx, agent.ID).Reason).To(Equal(osReason))
+				bindings, err := kube.RbacV1().RoleBindings(ns).List(ctx, metav1.ListOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(bindings.Items).To(BeEmpty())
+			})
 		})
 
 		Describe("a sandbox in Error or Completed", func() {

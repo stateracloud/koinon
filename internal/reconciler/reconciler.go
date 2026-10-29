@@ -158,6 +158,9 @@ type Config struct {
 	ArchiveAfter time.Duration
 	// HomeRetention decides the home volume's fate on archive. Default RetentionDelete.
 	HomeRetention Retention
+	// Observer explains sandboxes that never become ready by reading their pods (ADR 0078). Nil turns
+	// it off (sandboxObserver.enabled=false): the recorded reason is then OpenShell's.
+	Observer *SandboxObserver
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pass metrics; nil keeps them unexported.
@@ -253,6 +256,15 @@ func New(pool *pgxpool.Pool, backend execution.Backend, gw gateway.ModelGateway,
 	}
 	if cfg.GitBinaries == nil {
 		cfg.GitBinaries = DefaultGitBinaries
+	}
+	if cfg.Observer != nil {
+		if err := cfg.Observer.validate(); err != nil {
+			return nil, err
+		}
+		cfg.Observer.Errors = cfg.Metrics.ObserverErrors
+		if cfg.Observer.Log == nil {
+			cfg.Observer.Log = cfg.Logger
+		}
 	}
 	return &Reconciler{
 		cfg: cfg, log: cfg.Logger, pool: pool, q: store.New(pool),
@@ -934,6 +946,10 @@ func (r *Reconciler) ensureWorkspace(ctx context.Context, org store.ListOrgsToRe
 		return "", fmt.Errorf("reconciler: record workspace of org %s: %w", org.Slug, err)
 	}
 	done[id] = name
+	if r.cfg.Observer != nil && ws.Active {
+		// The observer only adds detail to a wait: a failure is counted and logged there, never fatal here.
+		_ = r.cfg.Observer.EnsureAccess(ctx, name)
+	}
 	return name, nil
 }
 
@@ -1305,11 +1321,15 @@ func (r *Reconciler) reconcileArchived(ctx context.Context, w *work) error {
 // deletes the home volume with the sandbox, so a new sandbox (a new ID) means a new, empty home,
 // while stop and start keep both.
 func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, hash, note string) error {
-	msg := sb.Message
+	msg, reason := sb.Message, sb.Reason
 	if note != "" {
 		msg = note
+	} else if r.cfg.Observer != nil && sb.Phase == execution.PhaseProvisioning && execution.OpaqueWaitReason(sb.Reason) && sb.Workspace != "" {
+		// OpenShell hides the pod's pull and crash errors behind ConfigurationPending (ADR 0078): read the
+		// pod, only for such a reason, and keep OpenShell's words when the pod says nothing.
+		reason, msg = execution.ExplainWait(sb.Reason, sb.Message, r.cfg.Observer.Explain(ctx, sb.Workspace, sb.Name))
 	}
-	return r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, sb.Reason, hash, sb.ID)
+	return r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID)
 }
 
 // recordState stores a state without an observed sandbox; the recorded home generation is kept.
