@@ -25,11 +25,11 @@ var _ = Describe("Ingester", func() {
 	BeforeEach(needDocker)
 
 	It("attributes each request to the run the agent had at its time", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		t0 := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
-		first := e.startRun(ctx, e.task(ctx), 100_000, t0)
+		first := e.startRun(ctx, e.task(ctx), t0)
 		e.finishRun(ctx, first.ID, t0.Add(10*time.Minute))
-		second := e.startRun(ctx, e.task(ctx), 100_000, t0.Add(20*time.Minute))
+		second := e.startRun(ctx, e.task(ctx), t0.Add(20*time.Minute))
 
 		before := e.entry(t0.Add(-time.Minute), "0.001", 1, 1)                 // no run yet
 		during := e.entry(t0.Add(5*time.Minute), "0.002", 10, 20)              // first run
@@ -62,8 +62,8 @@ var _ = Describe("Ingester", func() {
 	})
 
 	It("records a replayed export once and charges its tokens once", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
-		r := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+		e := newEnv(ctx, uniq("org"), "", "10.00")
+		r := e.startRun(ctx, e.task(ctx), time.Now().Add(-time.Minute))
 		batch := []ledger.Entry{e.entry(time.Now(), "0.01", 100, 50), e.entry(time.Now(), "0.02", 200, 100)}
 
 		res, err := ing.Ingest(ctx, batch)
@@ -77,20 +77,8 @@ var _ = Describe("Ingester", func() {
 		Expect(e.run(ctx, r.ID).TokensUsed).To(Equal(int64(450)))
 	})
 
-	It("cancels the run at its token cap", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 1000)
-		r := e.startRun(ctx, e.task(ctx), 1000, time.Now().Add(-time.Minute))
-		_, err := ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.01", 600, 500)})
-		Expect(err).NotTo(HaveOccurred())
-
-		run := e.run(ctx, r.ID)
-		Expect(run.State).To(Equal(store.RunStateCanceled))
-		Expect(run.OutcomeReason.String).To(ContainSubstring("token cap"))
-		Expect(run.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
-	})
-
 	It("wakes the reconciler once, when a request reaches the limit (Kubernetes mode revokes the key then)", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
+		e := newEnv(ctx, uniq("org"), "", "0.05")
 		conn, err := db.Acquire(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		defer conn.Release()
@@ -120,10 +108,10 @@ var _ = Describe("Ingester", func() {
 	})
 
 	It("wakes the reconciler and cancels the org's runs when a late entry crosses the org cap of an agent whose daily limit is long spent", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
+		e := newEnv(ctx, uniq("org"), "", "0.05")
 		_, err := db.Exec(ctx, `INSERT INTO org_budgets (org_id, monthly_cap, updated_by) VALUES ($1, 1.00, 'test')`, e.org)
 		Expect(err).NotTo(HaveOccurred())
-		r := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+		r := e.startRun(ctx, e.task(ctx), time.Now().Add(-time.Minute))
 		// The agent's daily limit ($0.05) is spent first, then the org cap ($1.00) is crossed.
 		_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.06", 1, 1)})
 		Expect(err).NotTo(HaveOccurred())
@@ -152,8 +140,8 @@ var _ = Describe("Ingester", func() {
 		}
 
 		It("records the request with the principal system, no agent and no run, and counts it against the org", func(ctx SpecContext) {
-			e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
-			e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+			e := newEnv(ctx, uniq("org"), "", "10.00")
+			e.startRun(ctx, e.task(ctx), time.Now().Add(-time.Minute))
 			res, err := ing.Ingest(ctx, []ledger.Entry{sysEntry(e, time.Now(), "0.03")})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.Recorded).To(Equal(1))
@@ -172,10 +160,10 @@ var _ = Describe("Ingester", func() {
 		})
 
 		It("stops the org's runs when it reaches the org cap, and wakes the reconciler", func(ctx SpecContext) {
-			e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+			e := newEnv(ctx, uniq("org"), "", "10.00")
 			_, err := db.Exec(ctx, `INSERT INTO org_budgets (org_id, monthly_cap, updated_by) VALUES ($1, 0.05, 'test')`, e.org)
 			Expect(err).NotTo(HaveOccurred())
-			r := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+			r := e.startRun(ctx, e.task(ctx), time.Now().Add(-time.Minute))
 			_, err = ing.Ingest(ctx, []ledger.Entry{sysEntry(e, time.Now(), "0.04")})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(e.run(ctx, r.ID).State).NotTo(Equal(store.RunStateCanceled))
@@ -186,8 +174,8 @@ var _ = Describe("Ingester", func() {
 		})
 
 		It("does not stop runs for the key's own daily budget, but the next limit pushed is zero", func(ctx SpecContext) {
-			e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
-			r := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+			e := newEnv(ctx, uniq("org"), "", "10.00")
+			r := e.startRun(ctx, e.task(ctx), time.Now().Add(-time.Minute))
 			_, err := ing.Ingest(ctx, []ledger.Entry{sysEntry(e, time.Now(), "0.11")})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(e.run(ctx, r.ID).State).NotTo(Equal(store.RunStateCanceled))
@@ -206,9 +194,9 @@ var _ = Describe("Ingester", func() {
 	})
 
 	It("cancels the run with a task event when the agent's spend reaches its limit", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
+		e := newEnv(ctx, uniq("org"), "", "0.05")
 		t := e.task(ctx)
-		r := e.startRun(ctx, t, 100_000, time.Now().Add(-time.Minute))
+		r := e.startRun(ctx, t, time.Now().Add(-time.Minute))
 		// Yesterday's spend is another window.
 		yesterday := e.entry(time.Now().Add(-ledger.Window), "1.00", 1, 1)
 		_, err := ing.Ingest(ctx, []ledger.Entry{yesterday, e.entry(time.Now(), "0.03", 1, 1)})
@@ -242,10 +230,10 @@ var _ = Describe("Ingester", func() {
 	// agent's other run is stopped with the budget reason, never starts on the spent budget, and
 	// only the in-flight response is recorded past the limit.
 	It("bounds an agent's overshoot to the response in flight, with two tasks queued together", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "0.05", 100_000)
-		first := e.startRun(ctx, e.task(ctx), 100_000, time.Now().Add(-time.Minute))
+		e := newEnv(ctx, uniq("org"), "", "0.05")
+		first := e.startRun(ctx, e.task(ctx), time.Now().Add(-time.Minute))
 		second, err := q.CreateRun(ctx, store.CreateRunParams{
-			OrgID: e.org, AgentID: e.agent.ID, TaskID: e.task(ctx).ID, MaxWallClockSeconds: 1800, MaxTokens: 100_000,
+			OrgID: e.org, AgentID: e.agent.ID, TaskID: e.task(ctx).ID, MaxWallClockSeconds: 1800,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		claim := func() error {
@@ -276,7 +264,7 @@ var _ = Describe("Ingester", func() {
 	})
 
 	It("counts entries of unknown orgs and agents as unattributed", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		unknownAgent := e.entry(time.Now(), "0.01", 1, 1)
 		unknownAgent.Agent.Name = "019a0000-0000-7000-8000-00000000ffff"
 		unknownOrg := e.entry(time.Now(), "0.01", 1, 1)
@@ -291,12 +279,12 @@ var _ = Describe("Totals", func() {
 	BeforeEach(needDocker)
 
 	It("sums cost and tokens per run and per task", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		t := e.task(ctx)
 		t0 := time.Now().Add(-time.Hour)
-		r1 := e.startRun(ctx, t, 100_000, t0)
+		r1 := e.startRun(ctx, t, t0)
 		e.finishRun(ctx, r1.ID, t0.Add(10*time.Minute))
-		r2 := e.startRun(ctx, t, 100_000, t0.Add(20*time.Minute))
+		r2 := e.startRun(ctx, t, t0.Add(20*time.Minute))
 		other := e.task(ctx)
 
 		_, err := ing.Ingest(ctx, []ledger.Entry{
@@ -333,7 +321,7 @@ var _ = Describe("AgentLimit", func() {
 	BeforeEach(needDocker)
 
 	It("nets the template's limit against the current window's spend", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		now := time.Now()
 		l, err := ledger.AgentLimit(ctx, q, e.agent, now)
 		Expect(err).NotTo(HaveOccurred())
@@ -351,7 +339,7 @@ var _ = Describe("AgentLimit", func() {
 	})
 
 	It("has no limit for an agent without an active version", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		a := e.agent
 		a.ActiveVersionID = pgtype.UUID{}
 		l, err := ledger.AgentLimit(ctx, q, a, time.Now())
@@ -364,7 +352,7 @@ var _ = Describe("InsertSpendEntry", func() {
 	BeforeEach(needDocker)
 
 	It("records an entry that holds nothing without the settlement fields set", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 100_000)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		_, err := q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
 			Principal: "agent",
 			OrgID:     e.org, AgentID: e.agent.ID, RequestID: uniq("req"), KeyID: "k-test", Model: "m",

@@ -20,6 +20,7 @@ import (
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -317,6 +318,95 @@ func (s *Server) SetAgentBudget(ctx context.Context, req *budgetv1alpha1.SetAgen
 		return nil, err
 	}
 	return &budgetv1alpha1.SetAgentBudgetResponse{Budget: b}, nil
+}
+
+func runLimitValuesProto(wall time.Duration, requests int64, spend money.USD) *budgetv1alpha1.RunLimitValues {
+	out := &budgetv1alpha1.RunLimitValues{MaxModelRequests: requests, MaxDurationSeconds: int64(wall / time.Second)}
+	if spend > 0 {
+		out.MaxSpendUsd = spend.String()
+	}
+	return out
+}
+
+// agentRunLimitsView is what a run of the agent gets now: the active version's values (the
+// template's defaults), the admin's override and the two merged.
+func (s *Server) agentRunLimitsView(ctx context.Context, org, agent pgtype.UUID) (*budgetv1alpha1.AgentRunLimits, error) {
+	a, err := s.q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent})
+	if err != nil {
+		return nil, s.dbError(err, "agent")
+	}
+	// The active version's values; a draft has none yet, so its latest version's.
+	var cfg agentconfig.Config
+	versions, err := s.q.ListAgentVersions(ctx, store.ListAgentVersionsParams{OrgID: org, AgentID: agent})
+	if err != nil {
+		return nil, s.dbError(err, "agent versions")
+	}
+	for _, v := range versions {
+		if v.ID == a.ActiveVersionID || (!a.ActiveVersionID.Valid && v.Version == a.LatestVersion) {
+			if cfg, err = agentconfig.Parse(v.Config); err != nil {
+				return nil, s.dbError(err, "agent version")
+			}
+		}
+	}
+	base := cfg.RunLimits()
+	o, err := runlimits.GetOverride(ctx, s.q, org, agent)
+	if err != nil {
+		return nil, s.dbError(err, "run limits")
+	}
+	eff := o.Apply(base)
+	return &budgetv1alpha1.AgentRunLimits{
+		AgentId: a.ID.String(), AgentName: a.DisplayName,
+		Effective:       runLimitValuesProto(eff.WallClock, eff.MaxModelRequests, eff.MaxSpend),
+		TemplateDefault: runLimitValuesProto(base.WallClock, base.MaxModelRequests, base.MaxSpend),
+		Override:        runLimitValuesProto(o.WallClock, o.MaxModelRequests, o.MaxSpend),
+	}, nil
+}
+
+// GetAgentRunLimits implements BudgetService. Admins and owners.
+func (s *Server) GetAgentRunLimits(ctx context.Context, req *budgetv1alpha1.GetAgentRunLimitsRequest) (*budgetv1alpha1.GetAgentRunLimitsResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	l, err := s.agentRunLimitsView(ctx, c.org, id)
+	if err != nil {
+		return nil, err
+	}
+	return &budgetv1alpha1.GetAgentRunLimitsResponse{Limits: l}, nil
+}
+
+// SetAgentRunLimits implements BudgetService. Admins and owners.
+func (s *Server) SetAgentRunLimits(ctx context.Context, req *budgetv1alpha1.SetAgentRunLimitsRequest) (*budgetv1alpha1.SetAgentRunLimitsResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	in := req.GetOverride()
+	o := runlimits.Override{
+		MaxModelRequests: in.GetMaxModelRequests(),
+		WallClock:        time.Duration(in.GetMaxDurationSeconds()) * time.Second,
+	}
+	if in.GetMaxSpendUsd() != "" {
+		if o.MaxSpend, err = money.Parse(in.GetMaxSpendUsd()); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
+		}
+	}
+	if err := s.budgets.SetAgentRunLimits(requestCtx(ctx), c.org, id, c.auditActor(), o); err != nil {
+		return nil, s.budgetError(err)
+	}
+	l, err := s.agentRunLimitsView(ctx, c.org, id)
+	if err != nil {
+		return nil, err
+	}
+	return &budgetv1alpha1.SetAgentRunLimitsResponse{Limits: l}, nil
 }
 
 func notificationProto(n store.Notification) *budgetv1alpha1.Notification {

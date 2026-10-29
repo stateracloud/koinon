@@ -375,7 +375,7 @@ func (e *env) message(ctx context.Context, t store.Task, text string) {
 
 func (e *env) enqueue(ctx context.Context, t store.Task) store.Run {
 	r, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 100_000,
+		OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return r

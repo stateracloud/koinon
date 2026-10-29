@@ -89,7 +89,7 @@ func newFixture(ctx context.Context) fixture {
 // enqueue queues a run of agent for task.
 func enqueue(ctx context.Context, org, agent, task pgtype.UUID) store.Run {
 	r, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: org, AgentID: agent, TaskID: task, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
+		OrgID: org, AgentID: agent, TaskID: task, MaxWallClockSeconds: 1800,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(r.State).To(Equal(store.RunStateQueued))

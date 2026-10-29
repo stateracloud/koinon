@@ -55,11 +55,18 @@ message Grant {
   repeated string repositories = 8;
 }
 
-// RunLimits cap a single run; hitting one cancels the run (plan item A4).
+// RunLimits cap a single run; the first one reached cancels it (plan item A4, ADR 0081).
 message RunLimits {
   // Wall-clock time a run may be owned (starting or running), in seconds.
   int64 max_duration_seconds = 1;
-  int64 max_tokens = 2;
+  // Deprecated: tokens are reported, not enforced (ADR 0081). Kept so older clients and stored
+  // templates still decode; it caps nothing and is zero on new templates and agents.
+  int64 max_tokens = 2 [deprecated = true];
+  // Model requests a run may make: every request through the agent's key counts, the harness's
+  // own title, summary and compaction calls included.
+  int64 max_model_requests = 3;
+  // USD a run may spend, by the ledger's settled cost, as an exact decimal string such as "2.00".
+  string max_spend_usd = 4;
 }
 
 // TriggerType says what starts work on an agent (ADR 0066).

@@ -23,7 +23,7 @@ import (
 var _ = Describe("metrics", func() {
 	It("counts ingested and rejected records, and observes the ingest lag", func(ctx SpecContext) {
 		needDocker()
-		e := newEnv(ctx, uniq("metrics"), "", "10.00", 100_000)
+		e := newEnv(ctx, uniq("metrics"), "", "10.00")
 		reg := prometheus.NewRegistry()
 		m := ledger.NewMetrics(reg)
 		srv := httptest.NewServer(ledger.Handler(&ledger.Ingester{DB: db, Metrics: m, Prices: prices.NewResolver(priceList)}, slog.New(slog.NewTextHandler(io.Discard, nil))))

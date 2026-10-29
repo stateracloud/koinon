@@ -2,8 +2,9 @@
 
 import { create } from '@bufbuild/protobuf'
 import { describe, expect, it } from 'vitest'
-import { CostSchema } from '@/gen/koinon/run/v1alpha1/run_pb'
-import { costDetail, costLabel, estimateNote, formatUSD } from '@/lib/cost'
+import { CostSchema, RunSchema } from '@/gen/koinon/run/v1alpha1/run_pb'
+import { RunLimitsSchema } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { costDetail, costLabel, estimateNote, formatUSD, runLimitsLabel, runProgress } from '@/lib/cost'
 
 describe('formatUSD', () => {
   it.each([
@@ -47,5 +48,40 @@ describe('costDetail', () => {
     expect(estimateNote(undefined)).toBeUndefined()
     expect(costDetail(c)).toContain('did not report their usage')
     expect(costDetail(create(CostSchema, { requests: 1n, priced: true }))).not.toContain('estimated')
+  })
+})
+
+describe('costDetail token split', () => {
+  it('says how the tokens divide by type', () => {
+    const c = create(CostSchema, { requests: 2n, inputTokens: 1200n, outputTokens: 80n, cacheReadTokens: 900n, cacheWriteTokens: 100n, reasoningTokens: 30n, usd: '0.01', priced: true })
+    expect(costDetail(c)).toBe('2 model requests, 1200 input and 80 output tokens (900 read from the cache, 100 written to it, 30 of the output reasoning)')
+  })
+})
+
+describe('runLimitsLabel', () => {
+  it('lists time, requests and spend', () => {
+    expect(runLimitsLabel(create(RunLimitsSchema, { maxDurationSeconds: 1800n, maxModelRequests: 200n, maxSpendUsd: '2.00' }))).toBe('30m, 200 model requests, $2.00')
+    expect(runLimitsLabel(create(RunLimitsSchema, { maxDurationSeconds: 5400n }))).toBe('1h30m')
+  })
+})
+
+describe('runProgress', () => {
+  const at = (iso: string) => ({ seconds: BigInt(Math.floor(Date.parse(iso) / 1000)), nanos: 0 })
+  const now = new Date('2026-10-29T10:06:00Z')
+
+  it('shows requests, spend and time against the limits', () => {
+    const run = create(RunSchema, { maxWallClockSeconds: 1800n, maxModelRequests: 200n, maxSpendUsd: '2.00', startedAt: at('2026-10-29T10:00:00Z') })
+    const cost = create(CostSchema, { requests: 12n, usd: '0.42', priced: true })
+    expect(runProgress(run, cost, now)).toEqual(['12 of 200 requests', '$0.42 of $2.00', '6m of 30m'])
+  })
+
+  it('uses the finish time of a finished run and shows only usage for a run without request or spend limits', () => {
+    const run = create(RunSchema, { maxWallClockSeconds: 1800n, startedAt: at('2026-10-29T10:00:00Z'), finishedAt: at('2026-10-29T10:02:30Z') })
+    const cost = create(CostSchema, { requests: 1n, usd: '0.01', priced: true })
+    expect(runProgress(run, cost, now)).toEqual(['1 request', '$0.01', '2m of 30m'])
+  })
+
+  it('shows nothing for a run that has not started and has no cost', () => {
+    expect(runProgress(create(RunSchema, {}), undefined, now)).toEqual([])
   })
 })

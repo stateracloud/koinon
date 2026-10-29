@@ -403,7 +403,7 @@ tokens are billed as output).
    claim is relied on. For OpenRouter models no beta is pinned: the live check of
    2026-10-29 passed through OpenRouter's Messages route with none. If a later check shows OpenRouter
    needs one, it is a field in the row.
-4. **The agent's setting.** `agents.thinking` (migration 00038) is `NULL`, `on` or `off`, a mutable
+4. **The agent's setting.** `agents.thinking` (migration 00039) is `NULL`, `on` or `off`, a mutable
    setting of the agent like `agents.model` (ADR 0072): not part of a version, applied to the next
    run, audited as `agent.thinking.set` with the old and new value in the same transaction, a repeat
    writes nothing. Precedence: the agent's setting, then the version's value (a template's

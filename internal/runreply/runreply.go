@@ -132,20 +132,30 @@ func TimeLimitNoteBase(run store.Run) map[string]any {
 // the caller can use it as the fallback.
 func TimeLimitNote(ctx context.Context, q *store.Queries, run store.Run) (map[string]any, error) {
 	note := TimeLimitNoteBase(run)
+	summary, source, err := Summary(ctx, q, run)
+	if summary != "" {
+		note["summary"], note["summarySource"] = summary, source
+	}
+	return note, err
+}
+
+// Summary is what the agent last said on a run that was stopped: its text since its last park
+// (source "reply"), else the task's last end-of-turn summary (source "notes"), cut to
+// MaxSummaryBytes. It is empty when the agent said nothing.
+func Summary(ctx context.Context, q *store.Queries, run store.Run) (summary, source string, err error) {
 	reply, err := Reply(ctx, q, run.OrgID, run.ID)
 	if err != nil {
-		return note, fmt.Errorf("read the agent's reply: %w", err)
+		return "", "", fmt.Errorf("read the agent's reply: %w", err)
 	}
 	if reply != "" {
-		note["summary"], note["summarySource"] = TruncateTail(reply, MaxSummaryBytes), "reply"
-		return note, nil
+		return TruncateTail(reply, MaxSummaryBytes), "reply", nil
 	}
 	t, err := q.GetTask(ctx, store.GetTaskParams{OrgID: run.OrgID, ID: run.TaskID})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return note, fmt.Errorf("read the task's notes: %w", err)
+		return "", "", fmt.Errorf("read the task's notes: %w", err)
 	}
 	if err == nil && strings.TrimSpace(t.AgentSummary.String) != "" {
-		note["summary"], note["summarySource"] = Truncate(t.AgentSummary.String, MaxSummaryBytes), "notes"
+		return Truncate(t.AgentSummary.String, MaxSummaryBytes), "notes", nil
 	}
-	return note, nil
+	return "", "", nil
 }

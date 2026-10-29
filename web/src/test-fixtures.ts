@@ -25,7 +25,7 @@ export function repoHelperTemplate(targets: { min: number; max: number } = { min
         purpose: 'Clone and read the repository; propose pull requests.',
       }),
     ],
-    runLimits: create(RunLimitsSchema, { maxDurationSeconds: 1800n, maxTokens: 2000000n }),
+    runLimits: create(RunLimitsSchema, { maxDurationSeconds: 1800n, maxModelRequests: 300n, maxSpendUsd: '5.00' }),
     spendLimitUsd: '10.00',
   })
 }

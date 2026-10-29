@@ -25,6 +25,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/runreply"
 	"github.com/stateracloud/koinon/internal/safego"
 	"github.com/stateracloud/koinon/internal/thinking"
@@ -129,6 +130,8 @@ type runner struct {
 	// wrapUpSent: this owner sent (or found sent) the wrap-up notice. Only the run goroutine
 	// touches it.
 	wrapUpSent bool
+	// wrapUpCause is the limit the turn was interrupted for; turnWithRetry reads it after errWrapUp.
+	wrapUpCause wrapUpCause
 
 	toolsMu sync.Mutex
 	tools   map[string]chan struct{} // tool call IDs; closed once the tool call is recorded
@@ -727,13 +730,22 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 	end := r.capEnd()
 	capTimer := time.NewTimer(max(time.Until(end), 0))
 	defer capTimer.Stop()
-	// The wrap-up notice interrupts the turn WrapUpNotice before the cap. A turn that starts inside
-	// the window gets the notice prepended instead (turnWithRetry).
+	// The wrap-up notice interrupts the turn WrapUpNotice before the time cap, or when the run's
+	// model requests or spend reach WrapUpFraction of their limit. A turn that starts inside a
+	// window gets the notice prepended instead (turnWithRetry).
 	var notice <-chan time.Time
-	if r.wantsWrapUp() && time.Until(end) > r.p.cfg.WrapUpNotice {
+	if r.wantsWrapUp() && r.timeNotice() && time.Until(end) > r.p.cfg.WrapUpNotice {
 		t := time.NewTimer(time.Until(end.Add(-r.p.cfg.WrapUpNotice)))
 		defer t.Stop()
 		notice = t.C
+	}
+	var usageNotice <-chan wrapUpCause
+	if r.wantsWrapUp() && r.countLimits() && r.p.cfg.WrapUpFraction > 0 {
+		ch := make(chan wrapUpCause, 1)
+		wctx, stop := context.WithCancel(ctx)
+		defer stop()
+		go r.watchUsage(wctx, ch)
+		usageNotice = ch
 	}
 
 	// cancelSent: the wrap-up cancel went out and the harness ignored it for CancelGrace.
@@ -743,6 +755,34 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 			reason:    fmt.Sprintf("wall-clock cap of %s reached", time.Duration(r.run.MaxWallClockSeconds)*time.Second),
 			timeLimit: true,
 		}
+	}
+	// wrapUp interrupts the turn to tell the agent that c's limit is near. stop is set when turn
+	// returns err.
+	wrapUp := func(c wrapUpCause) (stop bool, err error) {
+		r.log.Info("run limit near; interrupting the turn to ask the agent to wrap up", "limit", c.kind)
+		r.wrapUpCause = c
+		res, ended := r.cancelTurn(ctx, conn, session, done)
+		switch {
+		case ended && (res.stop == acp.StopCancelled || res.err != nil):
+			// A refused tool call may be why the turn ended; the agent must still be told.
+			if refs := r.takeRefusals(); len(refs) > 0 {
+				return true, &refused{refusals: refs}
+			}
+			return true, errWrapUp
+		case ended:
+			// The turn ended on its own while the timer fired (for example end_turn after an
+			// ask_user, where the run must park and must not get another prompt). Honour it; if a
+			// next turn starts inside the window, it gets the notice prepended.
+			return true, r.turnResult(ctx, conn, proc, stderr, res, started)
+		}
+		// The harness ignored session/cancel: a second session/prompt must not overlap the first.
+		// Arm no new notice; the run ends at the limit as it does without one.
+		cancelSent = true
+		if err := r.suppressWrapUp(ctx); err != nil {
+			return true, err
+		}
+		r.log.Warn("the harness did not end its turn for the wrap-up notice; no notice is sent")
+		return false, nil
 	}
 	for {
 		select {
@@ -776,28 +816,14 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 			return capCanceled()
 		case <-notice:
 			notice = nil
-			r.log.Info("time limit near; interrupting the turn to ask the agent to wrap up")
-			res, ended := r.cancelTurn(ctx, conn, session, done)
-			switch {
-			case ended && (res.stop == acp.StopCancelled || res.err != nil):
-				// A refused tool call may be why the turn ended; the agent must still be told.
-				if refs := r.takeRefusals(); len(refs) > 0 {
-					return &refused{refusals: refs}
-				}
-				return errWrapUp
-			case ended:
-				// The turn ended on its own while the timer fired (for example end_turn after an
-				// ask_user, where the run must park and must not get another prompt). Honour it; if a
-				// next turn starts inside the window, it gets the notice prepended.
-				return r.turnResult(ctx, conn, proc, stderr, res, started)
-			}
-			// The harness ignored session/cancel: a second session/prompt must not overlap the first.
-			// Arm no new notice; the run ends at the cap as it does without one.
-			cancelSent = true
-			if err := r.suppressWrapUp(ctx); err != nil {
+			if stop, err := wrapUp(wrapUpCause{kind: runlimits.KindTime, remaining: time.Until(end)}); stop {
 				return err
 			}
-			r.log.Warn("the harness did not end its turn for the wrap-up notice; no notice is sent")
+		case c := <-usageNotice:
+			usageNotice = nil
+			if stop, err := wrapUp(c); stop {
+				return err
+			}
 		case <-ctx.Done():
 			return errShutdown
 		}
@@ -831,19 +857,20 @@ func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc e
 	refusedTurns := 0
 	limit := time.Duration(r.run.MaxWallClockSeconds) * time.Second
 	for attempt := 0; ; attempt++ {
-		// The window is the last WrapUpNotice before the cap. A run already past its cap (taken over
-		// after its lease expired) gets no notice: its turn is cancelled at once, so the agent could
-		// not act on it, and the event and the metric must mean the agent was told.
-		if remaining := time.Until(r.capEnd()); r.wantsWrapUp() && remaining > 0 && remaining <= cfg.WrapUpNotice {
-			// The turn starts inside the window (a resume, a retry or a takeover), so it is not
-			// interrupted. The notice is recorded first and prepended only by the owner that
-			// recorded it, so two owners never both send it.
-			recorded, merr := r.markWrapUp(fctx, remaining)
-			if merr != nil {
-				return merr
-			}
-			if recorded {
-				text = wrapUpNote(remaining, limit) + "\n\n" + text
+		// A turn that starts inside a limit's window (a resume, a retry or a takeover) is not
+		// interrupted: the notice is recorded first and prepended only by the owner that recorded it,
+		// so two owners never both send it. A run already past its time cap (taken over after its
+		// lease expired) gets none: its turn is cancelled at once, so the agent could not act on it,
+		// and the event and the metric must mean the agent was told.
+		if r.wantsWrapUp() {
+			if c, due := r.wrapUpDue(fctx); due {
+				recorded, merr := r.markWrapUp(fctx, c)
+				if merr != nil {
+					return merr
+				}
+				if recorded {
+					text = wrapUpNote(c, limit) + "\n\n" + text
+				}
 			}
 		}
 		err := r.turn(ctx, conn, proc, stderr, session, text)
@@ -852,8 +879,11 @@ func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc e
 			if stop := r.stopped(ctx); stop != nil {
 				return stop
 			}
-			remaining := time.Until(r.capEnd())
-			recorded, merr := r.markWrapUp(fctx, remaining)
+			c := r.wrapUpCause
+			if c.kind == runlimits.KindTime {
+				c.remaining = time.Until(r.capEnd())
+			}
+			recorded, merr := r.markWrapUp(fctx, c)
 			if merr != nil {
 				return merr
 			}
@@ -861,7 +891,7 @@ func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc e
 				return errFenced // another owner holds the run
 			}
 			// Like a refusal, this is not a retry and does not reset refusedTurns.
-			text = wrapUpNote(remaining, limit)
+			text = wrapUpNote(c, limit)
 			attempt--
 			continue
 		}
@@ -1341,8 +1371,9 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if n.Update.ToolCall != nil {
 		h.r.markTool(string(n.Update.ToolCall.ToolCallId))
 	}
-	// The token cap (#27) is fed by the spend ledger (package ledger, plan item L1), which calls
-	// scheduler.RecordTokenUsage for every request agentgateway logs. ACP cannot feed it: the
+	// A run's tokens are reported by the spend ledger (package ledger, plan item L1), which adds
+	// them to the run for every request agentgateway logs (tokens are reported, not enforced:
+	// ADR 0081). ACP cannot report them: the
 	// only usage update (usage_update, unstable in acp-go-sdk v0.13.5) reports the context
 	// window's occupancy (used/size) and a cost, which rise and fall with compaction and cannot
 	// be summed into tokens used, and the unstable PromptResponse.usage arrives only when the turn,

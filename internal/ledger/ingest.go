@@ -77,7 +77,7 @@ type Result struct {
 var errUnattributed = errors.New("unknown org or agent")
 
 // Ingest records each entry in its own transaction: the entry, the run's token
-// usage (which may cancel the run at its token cap) and, when the agent's
+// usage (reported, not enforced) and, when the agent's
 // recorded spend reaches its limit, the run's cancel. A replayed entry changes
 // nothing. It stops at the first database error; entries before it stay
 // recorded, and replaying the whole batch is safe.
@@ -156,6 +156,15 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		// The run's row is locked before the entry is written, so concurrent requests of one run are
+		// serialised from here to the commit: each counts the entries the others committed (the
+		// request limit is exact, ADR 0081), and none holds the key-share lock the entry's foreign
+		// key takes on the row while waiting to update it (a deadlock between two such requests).
+		if run.ID.Valid {
+			if _, err := q.LockRun(ctx, store.LockRunParams{OrgID: org.ID, ID: run.ID}); err != nil {
+				return fmt.Errorf("lock the run: %w", err)
+			}
+		}
 		// A streamed Anthropic-format response logs message_start's usage, which looks complete, and
 		// agentgateway v1.7.0 has no stream-end signal (ADR 0056, amendment 2026-10-28). Only the
 		// attributed run counts: a later run's response is not cut by an earlier run's cancel.
@@ -221,10 +230,9 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			}
 		}
 		if run.ID.Valid {
-			// The token cap (plan item A4). RecordTokenUsage nests a savepoint. Estimated
-			// tokens count like reported ones.
-			if _, err := scheduler.RecordTokenUsage(ctx, tx, org.ID, run.ID, pr.inTokens+pr.outTokens); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("record token usage: %w", err)
+			// Tokens are reported, not enforced (ADR 0081). Estimated tokens count like reported ones.
+			if _, err := q.AddRunTokens(ctx, store.AddRunTokensParams{OrgID: org.ID, ID: run.ID, Tokens: pr.inTokens + pr.outTokens}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("record run tokens: %w", err)
 			}
 		}
 		// Budgets, alerts and stops count the charge only; the reserve gates the gateway key, so
@@ -234,7 +242,12 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 				return fmt.Errorf("wake the reconciler: %w", err)
 			}
 		}
-		return in.enforce(ctx, q, org.ID, agent.ID, run, e, pr.cost)
+		// The agent's, org's and platform's budgets stop first: the broadest limit reached names the
+		// stop. Then the run's own limits (ADR 0081), against the ledger including this entry: its
+		// model requests and its spend. CheckRunLimits nests a savepoint.
+		return enforce(ctx, tx, in.Notifier, in.now(), enforcement{
+			org: org.ID, agent: agent.ID, version: run.AgentVersionID, run: run.ID, at: e.Time, delta: pr.cost,
+		})
 	})
 	return recorded, err
 }
@@ -299,22 +312,59 @@ func (in *Ingester) ingestSystem(ctx context.Context, e Entry) (bool, error) {
 			}
 		}
 		if l, found := orgOnly.Pick(in.now()); found {
-			_, err = Stop(ctx, q, org.ID, pgtype.UUID{}, l)
+			_, err = Stop(ctx, tx, org.ID, pgtype.UUID{}, l)
 		}
 		return err
 	})
 	return recorded, err
 }
 
-// enforce checks the agent's daily limit, the org's monthly cap and the platform ceiling with
+// enforcement is what enforce checks: the agent's, org's and platform's budgets and the run's own
+// limits, after a ledger entry of the run was recorded or its cost changed.
+type enforcement struct {
+	org, agent pgtype.UUID
+	// version is the agent version of the run the entry belongs to; unset when the entry has no
+	// run (the agent's active version stands in).
+	version pgtype.UUID
+	// run is the run the entry belongs to; unset for an entry without one.
+	run pgtype.UUID
+	// at is when the request happened (it picks the windows the entry counts in).
+	at time.Time
+	// delta is the cost the entry added (a settlement: the change, never below zero).
+	delta money.USD
+}
+
+// enforce is the one sequence every writer of a ledger entry runs, so they name a stop alike (ADR
+// 0081, decision 5): first the agent's daily limit, the org's monthly cap and the platform ceiling
+// (budgets), then the run's own limits. The broadest limit reached names the stop: a request that
+// reaches both the agent's daily limit and the run's spend limit cancels with the daily limit,
+// whether it was ingested or a settlement raised its cost. Ingest and the settler both call it.
+func enforce(ctx context.Context, tx pgx.Tx, nf budget.Notifier, now time.Time, x enforcement) error {
+	if err := enforceBudgets(ctx, tx, nf, now, x); err != nil {
+		return err
+	}
+	if !x.run.Valid {
+		return nil
+	}
+	// CheckRunLimits nests a savepoint; pgx.ErrNoRows: the run finished already (a budget stop
+	// above, or its own end).
+	if _, err := scheduler.CheckRunLimits(ctx, tx, x.org, x.run); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("check run limits: %w", err)
+	}
+	return nil
+}
+
+// enforceBudgets checks the agent's daily limit, the org's monthly cap and the platform ceiling with
 // the entry just recorded, alerts at 80% and 100%, and cancels at the first limit reached ([Stop]):
 // every open run of the agent for its limit, every open run of the org for an org-wide one.
 // agentgateway blocks the key's next request anyway; the cancel tells the task which limit, and
 // it commits before the reconciler it wakes can take the key out.
-func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, run store.FindRunAtRow, e Entry, delta money.USD) error {
+func enforceBudgets(ctx context.Context, tx pgx.Tx, nf budget.Notifier, now time.Time, x enforcement) error {
+	q := store.New(tx)
+	org, agent, delta := x.org, x.agent, x.delta
 	var fallback money.USD
-	if run.AgentVersionID.Valid {
-		version, err := q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: org, ID: run.AgentVersionID})
+	if x.version.Valid {
+		version, err := q.GetAgentVersion(ctx, store.GetAgentVersionParams{OrgID: org, ID: x.version})
 		if err != nil {
 			return fmt.Errorf("read agent version: %w", err)
 		}
@@ -328,23 +378,23 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 	} else {
 		fallback = f
 	}
-	st, err := budget.Compute(ctx, q, org, agent, fallback, e.Time)
+	st, err := budget.Compute(ctx, q, org, agent, fallback, x.at)
 	if err != nil {
 		return err
 	}
-	if err := budget.Alert(ctx, q, in.Notifier, st, delta); err != nil {
+	if err := budget.Alert(ctx, q, nf, st, delta); err != nil {
 		return err
 	}
 	// The limit named is budget.Status.Pick's (the broadest reached in its current window: a late
 	// entry from last month reaching last month's cap cancels nothing). The reconciler is woken when
 	// this entry crossed any current level, so a late entry that crosses the org cap of an agent
 	// whose daily limit is long spent still wakes it.
-	l, found := st.Pick(in.now())
+	l, found := st.Pick(now)
 	if !found {
 		return nil
 	}
 	crossed := false
-	for _, r := range st.Current(in.now()) {
+	for _, r := range st.Current(now) {
 		if r.Spent-delta < r.Limit {
 			crossed = true
 		}
@@ -358,7 +408,7 @@ func (in *Ingester) enforce(ctx context.Context, q *store.Queries, org, agent pg
 			return fmt.Errorf("wake the reconciler: %w", err)
 		}
 	}
-	_, err = Stop(ctx, q, org, agent, l)
+	_, err = Stop(ctx, tx, org, agent, l)
 	return err
 }
 

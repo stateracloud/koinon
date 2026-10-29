@@ -107,7 +107,7 @@ var _ = Describe("Settling responses cut short", func() {
 		run     store.Run
 	)
 	BeforeEach(func(ctx SpecContext) {
-		e = newEnv(ctx, uniq("org"), "", "1.00", 1<<40)
+		e = newEnv(ctx, uniq("org"), "", "1.00")
 		e.model(ctx, "openrouter", flash)
 		src = &fakeSource{}
 		// The specs move the clock by up to a few hours and read the agent's UTC-day limit at the
@@ -118,7 +118,7 @@ var _ = Describe("Settling responses cut short", func() {
 		sources := providerusage.Registry{"openrouter": src}
 		in = &ledger.Ingester{DB: db, Log: ing.Log, Prices: ing.Prices, Sources: sources, Now: now}
 		settler = &ledger.Settler{DB: db, Prices: ing.Prices, Sources: sources, Log: ing.Log, Now: now}
-		run = e.startRun(ctx, e.task(ctx), 1<<40, clock.Add(-time.Minute))
+		run = e.startRun(ctx, e.task(ctx), clock.Add(-time.Minute))
 	})
 
 	// cut is a response canceled mid-stream: 1000 input logged, no output, max_tokens 200k.
@@ -243,6 +243,69 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(l2.Amount).To(Equal(money.MustParse("0.998")))
 		Expect(l2.Generation).NotTo(Equal(l.Generation), "a fresh gateway counter for the new amount")
+	})
+
+	Describe("a settlement that raises the cost to a run limit (ADR 0081, decision 5)", func() {
+		canceled := func(ctx SpecContext) map[string]any {
+			GinkgoHelper()
+			var raw []byte
+			Expect(db.QueryRow(ctx, `SELECT payload FROM task_events WHERE org_id = $1 AND run_id = $2 AND kind = 'run.canceled'`,
+				e.org, run.ID).Scan(&raw)).To(Succeed())
+			var p map[string]any
+			Expect(json.Unmarshal(raw, &p)).To(Succeed())
+			return p
+		}
+		limit := func(ctx SpecContext, spendUSD string) {
+			GinkgoHelper()
+			_, err := db.Exec(ctx, `UPDATE runs SET max_spend_usd = $3::numeric WHERE org_id = $1 AND id = $2`, e.org, run.ID, spendUSD)
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		It("cancels the run at its spend limit and names it, with what the agent last said", func(ctx SpecContext) {
+			limit(ctx, "0.50")
+			_, err := db.Exec(ctx, `UPDATE tasks SET agent_summary = 'the draft is in notes', agent_summary_at = now() WHERE org_id = $1 AND id = $2`, e.org, run.TaskID)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = in.Ingest(ctx, []ledger.Entry{cut("gen-r1")})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateRunning), "$0.0002 charged at ingest")
+
+			// 1000 in at 0.20 and 300k out at 2, per million: $0.6002 against the $0.50 limit.
+			src.answer("gen-r1", providerusage.Usage{InputTokens: 1000, OutputTokens: 300_000, Cost: money.MustParse("0.6002")})
+			clock = clock.Add(time.Minute)
+			_, err = settler.SettleDue(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateCanceled))
+			p := canceled(ctx)
+			Expect(p).To(HaveKeyWithValue("reason", "run_spend_cap"))
+			Expect(p).To(HaveKeyWithValue("limit", "run_spend"))
+			Expect(p).To(HaveKeyWithValue("summary", "the draft is in notes"))
+		})
+
+		It("names the agent's daily limit when the settlement reaches it too", func(ctx SpecContext) {
+			limit(ctx, "1.00")
+			_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-r2")})
+			Expect(err).NotTo(HaveOccurred())
+			// 600k out at 2 per million: $1.2002, over the agent's $1.00 a day and the run's $1.00.
+			src.answer("gen-r2", providerusage.Usage{InputTokens: 1000, OutputTokens: 600_000, Cost: money.MustParse("1.2002")})
+			clock = clock.Add(time.Minute)
+			_, err = settler.SettleDue(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateCanceled))
+			p := canceled(ctx)
+			Expect(p).To(HaveKeyWithValue("reason", "spend_limit"), "the broadest limit reached names the stop")
+			Expect(p).To(HaveKeyWithValue("limit", budget.AgentDaily))
+		})
+
+		It("leaves the run running when the settlement stays below its limits", func(ctx SpecContext) {
+			limit(ctx, "0.50")
+			_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-r3")})
+			Expect(err).NotTo(HaveOccurred())
+			src.answer("gen-r3", providerusage.Usage{InputTokens: 1000, OutputTokens: 100, Cost: money.MustParse("0.0004")})
+			clock = clock.Add(time.Minute)
+			_, err = settler.SettleDue(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateRunning))
+		})
 	})
 
 	It("pushes a limit with at most nine fraction digits, rounded down (issue #245)", func(ctx SpecContext) {
@@ -380,7 +443,7 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(e.provisional(ctx)).To(BeZero())
 
 		By("but does for a provider at https://openrouter.ai")
-		o := newEnv(ctx, uniq("org"), "", "1.00", 1<<40)
+		o := newEnv(ctx, uniq("org"), "", "1.00")
 		o.modelAt(ctx, "openrouter", flash, "https://openrouter.ai/api/v1")
 		x := cut("gen-s3")
 		x.Agent = o.ref()
@@ -427,7 +490,7 @@ var _ = Describe("Settling responses cut short", func() {
 	})
 
 	It("takes orgs in turn, so one busy org cannot use up a pass", func(ctx SpecContext) {
-		other := newEnv(ctx, uniq("org"), "", "1.00", 1<<40)
+		other := newEnv(ctx, uniq("org"), "", "1.00")
 		other.model(ctx, "openrouter", flash)
 		// Expire every settlement other specs left behind, so only these two orgs are due.
 		later := clock.Add(2 * ledger.SettleWindow)
@@ -511,8 +574,8 @@ var _ = Describe("Settling responses cut short", func() {
 
 		It("is not cut by an earlier run's cancel: only the attributed run counts", func(ctx SpecContext) {
 			t := clock
-			cancelRun(ctx, t)                                              // run A canceled at T
-			b := e.startRun(ctx, e.task(ctx), 1<<40, t.Add(5*time.Second)) // run B starts at T+5s
+			cancelRun(ctx, t)                                       // run A canceled at T
+			b := e.startRun(ctx, e.task(ctx), t.Add(5*time.Second)) // run B starts at T+5s
 			x := partial("gen-ab")
 			x.Time = t.Add(30 * time.Second) // B's complete response, logged at T+30s
 			_, err := in.Ingest(ctx, []ledger.Entry{x})
@@ -555,7 +618,7 @@ var _ = Describe("Settling responses cut short", func() {
 		})
 
 		It("from a provider that cannot report: charged as logged, the reserve held until the deadline", func(ctx SpecContext) {
-			d := newEnv(ctx, uniq("org"), "", "1.00", 1<<40)
+			d := newEnv(ctx, uniq("org"), "", "1.00")
 			d.model(ctx, "anthropic", flash) // a provider type without a usage source
 			_, err := prices.New(db, nil, priceList).SetOverride(ctx, d.org, audit.User(d.user), prices.OverrideInput{
 				Entry: pricing.Entry{
@@ -566,7 +629,7 @@ var _ = Describe("Settling responses cut short", func() {
 				ValidFrom: clock.Add(-time.Hour),
 			})
 			Expect(err).NotTo(HaveOccurred())
-			drun := d.startRun(ctx, d.task(ctx), 1<<40, clock.Add(-time.Minute))
+			drun := d.startRun(ctx, d.task(ctx), clock.Add(-time.Minute))
 			_, err = db.Exec(ctx, `UPDATE runs SET state = 'canceled', finished_at = $3, lease_expires_at = NULL WHERE org_id = $1 AND id = $2`, d.org, drun.ID, clock)
 			Expect(err).NotTo(HaveOccurred())
 			x := partial("")

@@ -196,10 +196,21 @@ type Limits struct {
 	SpendUSD USD       `json:"spendUSD"`
 }
 
-// RunLimits cap a single run; hitting one cancels the run.
+// RunLimits cap a single run; the first one reached cancels it (ADR 0081).
 type RunLimits struct {
+	// MaxDuration is the wall-clock limit.
 	MaxDuration Duration `json:"maxDuration"`
-	MaxTokens   int64    `json:"maxTokens"`
+	// MaxModelRequests counts every model request through the agent's key, the harness's own title,
+	// summary and compaction calls included. Optional: zero means unset, and a run gets the platform
+	// default (ADR 0081). The schema refuses an explicit zero.
+	MaxModelRequests int64 `json:"maxModelRequests,omitempty"`
+	// MaxSpendUSD is the run's spend by the ledger's settled cost. Optional like MaxModelRequests.
+	MaxSpendUSD USD `json:"maxSpendUSD,omitempty"`
+	// MaxTokens is deprecated: tokens are reported, not enforced (ADR 0081). A template may still
+	// carry it; nothing reads it.
+	//
+	// Deprecated: tokens are reported, not enforced.
+	MaxTokens int64 `json:"maxTokens,omitempty"`
 }
 
 // Duration is a time.Duration written as a Go duration string.
