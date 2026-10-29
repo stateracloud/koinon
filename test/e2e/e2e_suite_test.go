@@ -10,6 +10,7 @@
 //
 //	KOINON_E2E_API_URL         koinon-api, e.g. http://127.0.0.1:8080
 //	KOINON_E2E_FAKEGITHUB_URL  the fake GitHub, e.g. http://127.0.0.1:18090
+//	KOINON_E2E_FAKEMODEL_URL   the fake model server, e.g. http://127.0.0.1:18092
 //	KOINON_E2E_PASSWORD        the bootstrap admin's one-time password
 //	KOINON_E2E_T0              optional: Unix time `helm install` started, for the total and the 15-minute bound
 //	KOINON_E2E_REPORT          optional: file to write the step timings to (Markdown)

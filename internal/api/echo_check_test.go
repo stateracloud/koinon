@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	providerv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/provider/v1alpha1"
 	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
@@ -25,7 +26,7 @@ type blockingChat struct {
 	calls            atomic.Int32
 }
 
-func (b *blockingChat) Complete(ctx context.Context, _ pgtype.UUID, _, _ string) (string, error) {
+func (b *blockingChat) Complete(ctx context.Context, _ pgtype.UUID, _ string, _ modelformat.Format, _ string) (string, error) {
 	if b.calls.Add(1) == 1 {
 		close(b.entered)
 		select {
@@ -87,6 +88,18 @@ var _ = Describe("the provider echo check", func() {
 		Expect(reqs).To(HaveLen(1), "exactly one request")
 		Expect(string(reqs[0].Body)).To(ContainSubstring("Echo this line back exactly, character for character, nothing else: " + modelcheck.Line))
 		Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'provider.echo_check' AND target_id = $2`, org, provider)).To(Equal(1))
+	})
+
+	It("sends the check in the model's own format: Messages for an anthropic model", func(ctx SpecContext) {
+		provider := serveModel(ctx, e, org, "fake/faithful", true)
+		_, err := e.pool.Exec(ctx, `UPDATE models SET format = 'anthropic', format_overridden = true WHERE org_id = $1 AND provider_id = $2`, org, provider)
+		Expect(err).NotTo(HaveOccurred())
+		res, err := check(ctx, owner, provider, "fake/faithful")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetEchoCheck().GetUnchanged()).To(BeTrue())
+		reqs := fake.Requests()
+		Expect(reqs).To(HaveLen(1))
+		Expect(reqs[0].Path).To(Equal("/v1/messages"))
 	})
 
 	It("does not mistake a quoted reply for masking", func(ctx SpecContext) {

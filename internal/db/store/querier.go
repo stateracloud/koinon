@@ -315,8 +315,8 @@ type Querier interface {
 	GetMCPServer(ctx context.Context, arg GetMCPServerParams) (McpServer, error)
 	GetMCPTool(ctx context.Context, arg GetMCPToolParams) (McpTool, error)
 	GetModel(ctx context.Context, arg GetModelParams) (Model, error)
-	// The enabled model an agent asks for by its plain name, with its provider's type, for
-	// finding its price.
+	// The enabled model an agent asks for by its plain name, with its provider's type, id and URL and its
+	// wire format, for finding its price and its cache mode.
 	GetModelForPricing(ctx context.Context, arg GetModelForPricingParams) (GetModelForPricingRow, error)
 	// koinon-agentd, before a run starts its harness: the org's enabled model of this name, its
 	// provider and whether the gateway serves it (gateway_served_models). Enabled models have unique

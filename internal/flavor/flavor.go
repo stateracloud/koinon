@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	"github.com/stateracloud/koinon/internal/gateway"
+	"github.com/stateracloud/koinon/internal/modelformat"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
@@ -39,11 +40,18 @@ type Descriptor struct {
 	// its first prompt already carries the Koinon tools (the contract suite checks the first chat
 	// request of every flavor).
 	ReadyCommand string
-	// ModelPrefix is put before the model name to form the value agentd selects for the
-	// session's model option (session/set_config_option); "" when the flavor takes its model
-	// from the launch command alone. OpenCode names models <provider>/<model>; the provider is
-	// "koinon".
-	ModelPrefix string
+	// ModelEntries maps each model format to the flavor's provider entry for it (ADR 0069
+	// decision 6). agentd selects "<entry>/<model>" as the session's model option
+	// (session/set_config_option), and the entry script picks the same entry from its
+	// FormatArg. OpenCode names models <provider>/<model>. Empty when the flavor takes its model
+	// from the launch command alone. A format with no row cannot run on the flavor; a new format
+	// is one row here, one in the flavor's entry script (the case on --model-format in
+	// flavors/<flavor>/koinon-<flavor>, with its provider in the configuration) and one in the
+	// gateway's table. test/flavors checks that the script and this table agree.
+	ModelEntries map[modelformat.Format]string
+	// FormatArg is the launch switch that takes the model's format, so the entry script uses the
+	// matching entry. "" when the flavor has one entry only.
+	FormatArg string
 	// InstructionLink is the path the flavor's harness reads its instructions from: a symbolic
 	// link to the instruction file, which agentd restores before every prompt. "" when the
 	// flavor needs none.
@@ -61,7 +69,8 @@ type Descriptor struct {
 	PluginInstallsArg string
 	// CacheArgs maps a prompt-cache marker format (prices.CacheMode.Marker: "anthropic",
 	// "alibaba") to the launch switch that makes the harness send those markers (ADR 0068). A
-	// format missing here cannot be cached on this flavor.
+	// format missing here cannot be cached on this flavor. A model whose format has its own markers
+	// (prices.CacheNative) needs no switch: the harness places them.
 	CacheArgs map[string]string
 	// SessionArg is the launch switch that takes the run ID, which the harness sends to
 	// OpenRouter as session_id so a run stays on one upstream and its cache stays warm. "" when
@@ -75,7 +84,13 @@ var table = []Descriptor{
 		Proto:        templatev1alpha1.Flavor_FLAVOR_OPENCODE,
 		EntryScript:  "/usr/local/bin/koinon-opencode",
 		ReadyCommand: "koinon:" + gateway.ReadyPromptExposed,
-		ModelPrefix:  "koinon/",
+		// koinon speaks chat completions (@ai-sdk/openai-compatible), koinon-anthropic the Messages
+		// API (@ai-sdk/anthropic); both are in flavors/opencode/etc/koinon/opencode/opencode.jsonc.
+		ModelEntries: map[modelformat.Format]string{
+			modelformat.OpenAI:    "koinon",
+			modelformat.Anthropic: "koinon-anthropic",
+		},
+		FormatArg: "--model-format",
 		// None: OpenCode 2.2.0 reads the instruction file through the "instructions" key of its
 		// read-only config (flavors/opencode/README.md, ADR 0052 amendment 2026-10-28).
 		DefaultBinaries:   []string{"/usr/local/bin/opencode"},
@@ -101,6 +116,7 @@ func All() []Descriptor {
 func (d Descriptor) clone() Descriptor {
 	d.DefaultBinaries = slices.Clone(d.DefaultBinaries)
 	d.CacheArgs = maps.Clone(d.CacheArgs)
+	d.ModelEntries = maps.Clone(d.ModelEntries)
 	return d
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/flavor"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 )
 
@@ -18,6 +19,10 @@ type endpoints struct {
 	ModelBaseURL string
 	Model        string
 	MCPURL       string
+	// Format is the model's wire format (models.format). The flavor's entry script uses the
+	// provider entry for it (flavor.Descriptor.ModelEntries). Empty leaves the switch out, which
+	// the entry script reads as chat completions.
+	Format modelformat.Format
 	// CacheMarker is the cache-marker format the model's provider needs (prices.CacheMode.Marker),
 	// or "" when it needs none.
 	CacheMarker string
@@ -37,6 +42,14 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 		"--model-base-url", e.ModelBaseURL,
 		"--model", e.Model,
 		"--mcp-url", e.MCPURL,
+	}
+	if e.Format != "" && len(d.ModelEntries) > 0 {
+		if _, ok := d.ModelEntries[e.Format]; !ok {
+			return nil, fmt.Errorf("flavor %q has no provider entry for the %q model format; add a row to its ModelEntries", f, e.Format)
+		}
+		if d.FormatArg != "" {
+			cmd = append(cmd, d.FormatArg, string(e.Format))
+		}
 	}
 	if e.CacheMarker != "" {
 		arg, ok := d.CacheArgs[e.CacheMarker]
@@ -60,10 +73,15 @@ func readyCommand(f store.AgentFlavor) string {
 
 // modelOption is the value agentd selects for the session's model option
 // (session/set_config_option), or "" when the flavor takes its model from the launch command
-// alone. OpenCode names models <provider>/<model>; the provider is "koinon".
-func modelOption(f store.AgentFlavor, model string) string {
-	if d, _ := flavor.Lookup(f); d.ModelPrefix != "" {
-		return d.ModelPrefix + model
+// alone. OpenCode names models <provider>/<model>; the provider is the flavor's entry for the
+// model's format (flavor.Descriptor.ModelEntries). An empty format means chat completions.
+func modelOption(f store.AgentFlavor, format modelformat.Format, model string) string {
+	d, _ := flavor.Lookup(f)
+	if format == "" {
+		format = modelformat.OpenAI
+	}
+	if entry := d.ModelEntries[format]; entry != "" {
+		return entry + "/" + model
 	}
 	return ""
 }
@@ -99,8 +117,9 @@ func harnessArgs(f store.AgentFlavor, c agentconfig.Config) []string {
 
 // cacheMarker is the cache-marker format to start the harness with for a model (ADR 0068): ""
 // when the model has no cache price or its provider caches by itself. A model with a cache
-// price but an unmapped or unsupported provider format runs uncached (the catalog test keeps the default list
-// free of those), and the second result says so for the log.
+// price but an unmapped provider format runs uncached (the catalog test keeps the default list
+// free of those), and the second result says so for the log. A native-format model (CacheNative)
+// needs no switch either: the harness places its markers.
 func cacheMarker(mode prices.CacheMode) (marker string, unknown bool) {
 	return mode.Marker(), mode.Uncached()
 }

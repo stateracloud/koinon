@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -256,12 +258,20 @@ var _ = Describe("the quickstart", Ordered, func() {
 			code, body := admin(ctx, http.MethodGet, "/providers")
 			g.Expect(code).To(Equal(http.StatusOK), string(body))
 			g.Expect(json.Unmarshal(body, &providers)).To(Succeed())
-			g.Expect(providers.Providers).To(HaveLen(1))
+			// The quickstart's provider and the e2e's direct Anthropic one (kind/model-provider-anthropic.yaml).
+			g.Expect(providers.Providers).To(HaveLen(2))
 		}).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
-		Expect(providers.Providers[0].Name).To(Equal("fake"))
-		Expect(providers.Providers[0].Source).To(Equal("secret"))
-		Expect(providers.Providers[0].ManagedBySecret).To(Equal("fake-model"))
-		code, body := admin(ctx, http.MethodDelete, "/providers/"+providers.Providers[0].ID)
+		byName := map[string]int{}
+		for i, p := range providers.Providers {
+			byName[p.Name] = i
+		}
+		Expect(byName).To(HaveKey("fake"))
+		fake := providers.Providers[byName["fake"]]
+		Expect(fake.Source).To(Equal("secret"))
+		Expect(fake.ManagedBySecret).To(Equal("fake-model"))
+		Expect(byName).To(HaveKey("anthropic-fake"))
+		Expect(providers.Providers[byName["anthropic-fake"]].ManagedBySecret).To(Equal("fake-anthropic"))
+		code, body := admin(ctx, http.MethodDelete, "/providers/"+fake.ID)
 		Expect(code).To(Equal(http.StatusConflict), "declared providers are read-only: %s", body)
 		// A model has no rates of its own; its price is an org price (or a default one). The fake model
 		// is in no default list, so the run is priced by this entry and the ledger's estimates work.
@@ -541,9 +551,151 @@ var _ = Describe("the quickstart", Ordered, func() {
 		t.end("6c. Ask-tier MCP call: parks, approved, runs once through the gateway")
 	})
 
+	It("6d. a direct Anthropic model runs in the Messages format through OpenShell and the gateway, and its second request reads the cache", func(ctx SpecContext) {
+		t.begin()
+		// The run's wire format comes from the agent's effective model (ADR 0072, 0069), so the agent
+		// is set to claude-e2e below; that does not depend on how the org's models sort.
+		// Prices in USD per million tokens, as Claude's list: a cache read costs a tenth of an input.
+		price := map[string]string{"input": "3.00", "output": "15.00", "cacheRead": "0.30", "cacheWrite": "3.75"}
+		code, body := admin(ctx, http.MethodPost, "/prices", `{"name":"fake-claude-e2e","provider":"anthropic","match":{"glob":"claude-e2e"},`+
+			`"prices":{"input":"3.00","output":"15.00","cacheRead":"0.30","cacheWrite":"3.75"},"maxOutput":4096}`)
+		Expect(code).To(Equal(http.StatusCreated), string(body))
+
+		// A model is settable once the org serves it, which the reconciler does after the price exists.
+		modelPath := "/agents/" + agent.GetId() + "/model"
+		DeferCleanup(func(ctx context.Context) {
+			code, body := admin(ctx, http.MethodPut, modelPath, `{"model":"default"}`)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+		})
+		Eventually(func(g Gomega) {
+			code, body := admin(ctx, http.MethodPut, modelPath, `{"model":"claude-e2e"}`)
+			g.Expect(code).To(Equal(http.StatusOK), string(body))
+		}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+
+		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+			OrgId: org, AgentId: agent.GetId(), Title: "Cache probe", Message: "Run the cache probe and say when it is done.",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var seq int64
+		var evKinds []string
+		cw := watchRun(context.WithoutCancel(ctx), c, org, res.GetRun().GetId(), 0)
+		done := cw.until(ctx, c, org, res.GetRun().GetId(), 8*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+			return terminal(r.GetState())
+		})
+		Expect(done.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_SUCCEEDED), done.GetOutcomeReason())
+		Expect(evKinds).NotTo(ContainElement("run.uncached"), "a native-format model caches; the run does not say it runs uncached")
+
+		By("every request of the run went to /v1/messages, through the sandbox profile and the key policy")
+		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
+		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+		fakeModel := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMODEL_URL"), "/")
+		Expect(fakeModel).NotTo(BeEmpty(), "KOINON_E2E_FAKEMODEL_URL")
+		var seen []string
+		Eventually(func(g Gomega) {
+			seen = fakeModelPaths(ctx, g, fakeModel, "claude-e2e")
+			g.Expect(len(seen)).To(BeNumerically(">=", 2), "the task's request and the end-of-turn note")
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		Expect(seen).To(HaveEach("/v1/messages"))
+
+		By("the ledger has a cache write, then a cache read priced at the cache-read rate")
+		var rows []ledgerRow
+		Eventually(func(g Gomega) {
+			rows = ledgerRows(ctx, g, kubectl, done.GetId())
+			var reads int
+			for _, r := range rows {
+				if r.CacheRead > 0 {
+					reads++
+				}
+			}
+			g.Expect(reads).To(BeNumerically(">=", 1), "a ledger entry with cache_read_tokens > 0: %v", rows)
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		writeIdx, readIdx := -1, -1
+		for i, r := range rows {
+			Expect(r.Model).To(Equal("claude-e2e"))
+			if r.CacheWrite > 0 && writeIdx < 0 {
+				writeIdx = i
+			}
+			if r.CacheRead > 0 && readIdx < 0 {
+				readIdx = i
+			}
+			// The ledger's input_tokens includes the cache reads and writes (the gateway normalises
+			// Anthropic's input_tokens that way); each part is priced at its own rate.
+			want := new(big.Rat).Add(
+				new(big.Rat).Add(rate(price["input"], r.Input-r.CacheRead-r.CacheWrite), rate(price["cacheRead"], r.CacheRead)),
+				new(big.Rat).Add(rate(price["cacheWrite"], r.CacheWrite), rate(price["output"], r.Output)))
+			Expect(r.Cost.Cmp(want)).To(Equal(0), "entry %+v costs %s, want %s", r, r.Cost.FloatString(9), want.FloatString(9))
+		}
+		Expect(writeIdx).To(BeNumerically(">=", 0), "a request wrote the cache: %v", rows)
+		Expect(writeIdx).To(BeNumerically("<", readIdx), "the cache write comes before the first cache read: %v", rows)
+		t.end("6d. Direct Anthropic model: Messages through the gateway, cache read priced")
+	})
+
 	It("7. took at most 15 minutes from helm install", func() {
 		total := time.Since(t.t0)
 		Expect(total).To(BeNumerically("<=", quickstartBudget),
 			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)
 	})
 })
+
+// fakeModelPaths returns the URL paths of the requests the fake model server received for model,
+// from its /_fake/requests listing.
+func fakeModelPaths(ctx context.Context, g Gomega, base, model string) []string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/_fake/requests", nil)
+	g.Expect(err).NotTo(HaveOccurred())
+	res, err := http.DefaultClient.Do(req)
+	g.Expect(err).NotTo(HaveOccurred())
+	defer func() { _ = res.Body.Close() }()
+	g.Expect(res.StatusCode).To(Equal(http.StatusOK))
+	var list []struct{ Path, Model string }
+	g.Expect(json.NewDecoder(res.Body).Decode(&list)).To(Succeed())
+	var out []string
+	for _, r := range list {
+		if r.Model == model {
+			out = append(out, r.Path)
+		}
+	}
+	return out
+}
+
+// ledgerRow is one spend ledger entry (spend_entries).
+type ledgerRow struct {
+	Model                                string
+	Input, Output, CacheRead, CacheWrite int64
+	Cost                                 *big.Rat
+}
+
+// ledgerRows reads the run's spend entries straight from the primary Postgres pod, as its local
+// superuser: the admin API reports cost, not cache tokens.
+func ledgerRows(ctx context.Context, g Gomega, kubectl, run string) []ledgerRow {
+	pod, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "pod", "-l", "cnpg.io/instanceRole=primary", "-o", "name").Output()
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(strings.TrimSpace(string(pod))).NotTo(BeEmpty(), "the primary Postgres pod")
+	query := "SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd::text FROM spend_entries WHERE run_id = '" + run + "' ORDER BY occurred_at"
+	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "exec", strings.TrimSpace(string(pod)), "-c", "postgres", "--",
+		"psql", "-U", "postgres", "-d", "koinon", "-At", "-F", "|", "-c", query).CombinedOutput()
+	g.Expect(err).NotTo(HaveOccurred(), string(out))
+	var rows []ledgerRow
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f := strings.Split(line, "|")
+		if len(f) != 6 {
+			continue
+		}
+		r := ledgerRow{Model: f[0]}
+		for i, dst := range []*int64{&r.Input, &r.Output, &r.CacheRead, &r.CacheWrite} {
+			n, err := strconv.ParseInt(f[i+1], 10, 64)
+			g.Expect(err).NotTo(HaveOccurred())
+			*dst = n
+		}
+		var ok bool
+		r.Cost, ok = new(big.Rat).SetString(f[5])
+		g.Expect(ok).To(BeTrue(), line)
+		rows = append(rows, r)
+	}
+	return rows
+}
+
+// rate is tokens at a USD price per million tokens.
+func rate(perMillion string, tokens int64) *big.Rat {
+	p, _ := new(big.Rat).SetString(perMillion)
+	return p.Mul(p, big.NewRat(tokens, 1_000_000))
+}

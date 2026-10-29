@@ -182,7 +182,7 @@ func (s *Server) CreateModel(ctx context.Context, req *providerv1alpha1.CreateMo
 	}
 	var warnings []string
 	if pid, err := parseID("provider_id", req.GetProviderId()); err == nil {
-		warnings = s.prices.ModelWarnings(requestCtx(ctx), c.org, pid, m.Name)
+		warnings = s.prices.ModelWarnings(requestCtx(ctx), c.org, pid, m.Name, modelformat.Format(m.Format))
 	}
 	return &providerv1alpha1.CreateModelResponse{Model: modelProto(m), Warnings: warnings}, nil
 }

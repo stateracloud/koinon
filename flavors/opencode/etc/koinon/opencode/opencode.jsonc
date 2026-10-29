@@ -79,6 +79,23 @@
       "models": {
         "{env:KOINON_MODEL}": {}
       }
+    },
+    // The same gateway, for a model whose format is Anthropic Messages (ADR 0069). The base URL is
+    // the same <gateway>/v1; the provider posts to <baseURL>/messages. authToken makes it send
+    // "Authorization: Bearer", the header OpenShell rewrites the placeholder in and the gateway's
+    // key policy reads. Never set apiKey as well: the provider refuses both
+    // (packages/ai/src/providers/anthropic.ts). The entry script and koinon-agentd choose the entry
+    // from the model's format (--model-format, internal/flavor).
+    "koinon-anthropic": {
+      "name": "Koinon agentgateway (Anthropic Messages)",
+      "package": "aisdk:@ai-sdk/anthropic",
+      "settings": {
+        "baseURL": "{env:KOINON_MODEL_BASE_URL}",
+        "authToken": "{env:KOINON_MODEL_KEY}"
+      },
+      "models": {
+        "{env:KOINON_MODEL}": {}
+      }
     }
   },
   "mcp": {

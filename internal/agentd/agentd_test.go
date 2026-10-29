@@ -80,7 +80,7 @@ var _ = Describe("Pool", func() {
 		// The launch command and its endpoints, run in the session directory.
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(Equal([][]string{{
-			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp",
+			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-format", "openai",
 		}}))
 		// The sweep, mkdir, the instruction file and its check, the git configuration and the CA
 		// file's removal (no custom host), the harness, the instruction file's check
@@ -470,7 +470,7 @@ var _ = Describe("Pool", func() {
 			Eventually(e.gw.Execs).WithTimeout(10 * time.Second).Should(HaveLen(9))
 			execs := e.gw.Execs()
 			Expect(execs[6].GetCommand()).To(Equal([]string{
-				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp",
+				script, "--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-format", "openai",
 			}))
 			Expect(execs[6].GetWorkdir()).To(Equal("/sandbox/work"))
 		},
