@@ -117,6 +117,16 @@ scrape interval. If the renderer cannot see the CRD (`helm template` pipelines, 
 `helmCharts` without `apiVersions`, or an Argo CD first sync that installs the CRD in the same sync),
 set `metrics.serviceMonitor.skipCapabilityCheck: true` to render the ServiceMonitors without the check. Without prometheus-operator, point any scraper at the metrics Services.
 
+The same switch scrapes agentgateway's own stats port (15020): in `gateway.mode: standalone` the chart
+adds a `ServiceMonitor` on the gateway Service's `stats` port; in `kubernetes` mode the controller owns
+the proxy and its Service, so the chart adds a `PodMonitor` on the proxy pods instead (that needs the
+`PodMonitor` CRD as well). The same `labels` and `interval` apply.
+
+A scraper that is not prometheus-operator, such as VictoriaMetrics' `VMServiceScrape`, needs none of
+this: leave `metrics.serviceMonitor.enabled` false, open the ports with `metrics.allowFrom` and
+`networkPolicy.metricsFrom`, and point the scraper at the metrics Services (port `metrics`) and at
+the gateway's `stats` port.
+
 ### Letting Prometheus in
 
 With `networkPolicy.enabled` (the default), the metrics port is **closed**: the NetworkPolicies admit
@@ -134,7 +144,8 @@ metrics:
 ```
 
 `metrics.allowFrom` covers koinon-api, koinon-reconciler and koinon-agentd. It is separate from
-`networkPolicy.metricsFrom`, which admits scrapes of agentgateway's own stats port. On a cluster
+`networkPolicy.metricsFrom`, which admits scrapes of agentgateway's own stats port (name the scraper in
+both). Neither depends on `metrics.serviceMonitor.enabled`. On a cluster
 whose CNI does not enforce NetworkPolicy the port is open to every pod either way.
 
 ## Not built yet
