@@ -114,7 +114,7 @@ func checkStrictMessages(body []byte, h http.Header) error {
 	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
-		return fmt.Errorf("invalid JSON body: %v", err)
+		return fmt.Errorf("invalid JSON body: %w", err)
 	}
 	have := betas(h)
 	// The first unknown field in sorted order is reported, so the message is the same on every run.
