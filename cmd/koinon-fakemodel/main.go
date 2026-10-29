@@ -25,15 +25,16 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	scripts := flag.String("scripts", "", "directory of YAML scripts (default: the example scripts built into the binary)")
+	strict := flag.Bool("strict-messages", false, "refuse Messages requests the way Anthropic does: unknown fields, and beta-only fields without their anthropic-beta")
 	flag.Parse()
 
-	if err := run(*addr, *scripts); err != nil {
+	if err := run(*addr, *scripts, *strict); err != nil {
 		slog.Error("koinon-fakemodel failed", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(addr, dir string) error {
+func run(addr, dir string, strict bool) error {
 	scripts, err := loadScripts(dir)
 	if err != nil {
 		return err
@@ -42,6 +43,7 @@ func run(addr, dir string) error {
 	if err != nil {
 		return err
 	}
+	srv.SetStrictMessages(strict)
 	models := make([]string, 0, len(scripts))
 	for _, s := range scripts {
 		models = append(models, s.Model)
@@ -59,7 +61,7 @@ func run(addr, dir string) error {
 		_ = hs.Shutdown(shutdownCtx)
 	}()
 
-	slog.Info("starting koinon-fakemodel", "version", project.Version, "addr", addr, "scripts", cmp.Or(dir, "built-in"), "models", models)
+	slog.Info("starting koinon-fakemodel", "version", project.Version, "addr", addr, "scripts", cmp.Or(dir, "built-in"), "strictMessages", strict, "models", models)
 	if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

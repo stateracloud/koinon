@@ -40,7 +40,9 @@ type Server struct {
 	scripts  map[string]*entry
 	requests []Request
 	seq      int
-	created  int64
+	// strictMessages makes /v1/messages check bodies and headers as Anthropic does (strict.go).
+	strictMessages bool
+	created        int64
 }
 
 type entry struct {
