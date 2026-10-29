@@ -68,11 +68,8 @@ func templateProto(row store.Template, t *templates.Template) *templatev1alpha1.
 		Instructions: t.Spec.Instructions,
 		Grants:       grantsProto(t.Spec.Grants),
 		Triggers:     triggersProto(t.Spec.Triggers),
-		RunLimits: &templatev1alpha1.RunLimits{
-			MaxDurationSeconds: int64(t.Spec.Limits.Run.MaxDuration.Seconds()),
-			MaxModelRequests:   t.Spec.Limits.Run.MaxModelRequests,
-			MaxSpendUsd:        t.Spec.Limits.Run.MaxSpendUSD.String(),
-		},
+		// The limits a run would get, the platform defaults filling what the template leaves out.
+		RunLimits:     runLimitsProto(agentconfig.FromTemplate(t, row.ContentHash).RunLimits()),
 		SpendLimitUsd: t.Spec.Limits.SpendUSD.String(),
 		DefaultFlavor: flavorProto(string(t.Spec.Flavors.Default)),
 		Ephemeral:     t.Spec.Ephemeral,
