@@ -187,6 +187,10 @@ spec:
             {{- end }}
             - --openshell-config-namespace={{ .Values.preflight.openshell.namespace }}
             - --openshell-config-map={{ .Values.preflight.openshell.configMap }}
+            - --openshell-gateway-id={{ .Values.openshell.gatewayId }}
+            {{- if not .Values.sandboxObserver.enabled }}
+            - --sandbox-observer-disabled
+            {{- end }}
             {{- if include "koinon.expectSandboxPullSecrets" . }}
             - --expect-sandbox-pull-secrets
             {{- end }}
