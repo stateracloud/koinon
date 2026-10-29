@@ -205,6 +205,7 @@ var _ = Describe("Embedded connector types", func() {
 			for _, bad := range []string{
 				"http://ghes.example.test", "https://ghes.example.test/sub", "https://u:p@ghes.example.test",
 				"https://ghes.example.test?x=1", "ghes.example.test", "https://", "https://ghes.example.test:99999", "https://-bad-",
+				"https://*.example.test", "https://*", "https://ghes.*.test", "https://gh?s.example.test",
 			} {
 				_, err := githubType().Locate(bad)
 				Expect(err).To(HaveOccurred(), bad)

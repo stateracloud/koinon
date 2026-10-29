@@ -547,6 +547,9 @@ func run() error {
 	// One egress policy for everything an org points the gateway or Koinon at: model providers and
 	// remote MCP servers.
 	urlPolicy := catalog.URLPolicy{Namespace: cfg.secretsNamespace, AllowedHosts: splitList(cfg.egressAllowedHosts + "," + cfg.providerAllowedHosts)}
+	if err := catalog.ValidateAllowedHosts(urlPolicy.AllowedHosts); err != nil {
+		return err
+	}
 	approvalOpts := approvals.Options{Keys: opener, Hosts: hosts, GatewayMCPURL: cfg.gatewayMCPURL, Logger: slog.Default()}
 	if kube != nil {
 		// Approved calls to remote MCP servers go through the gateway with the org's executor key,

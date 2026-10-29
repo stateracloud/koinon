@@ -149,6 +149,9 @@ func run() error {
 	}
 	// One price list for the reconciler and the settler.
 	priceResolver := prices.NewResolver(pricing.Embedded())
+	if err := catalog.ValidateAllowedHosts(splitHosts(cfg.egressHosts + "," + cfg.allowedHosts)); err != nil {
+		return err
+	}
 	r, err := reconciler.New(pool, backend, driver,
 		reconciler.KubeSecrets{Client: kube, Namespace: cfg.namespace},
 		reconciler.Config{

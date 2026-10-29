@@ -50,6 +50,23 @@ var _ = Describe("URLPolicy", func() {
 			"v6.example.com":          {"fe80::1"},
 		}),
 	}
+	DescribeTable("refuses a pattern host, strict or not",
+		func(ctx SpecContext, u string) {
+			for _, check := range []func(context.Context, string) error{p.Check, p.CheckStrict} {
+				err := check(ctx, u)
+				var inv *catalog.InvalidError
+				Expect(errors.As(err, &inv)).To(BeTrue(), u)
+				Expect(err.Error()).To(ContainSubstring("DNS exfiltration"))
+			}
+		},
+		Entry("wildcard label", "https://*.example.com/v1"),
+		Entry("bare star", "https://*/v1"),
+		Entry("inner glob", "https://api.*.example.com"),
+	)
+	It("refuses a pattern in the platform allow list", func() {
+		Expect(catalog.ValidateAllowedHosts([]string{"ollama.lab.example.com:11434", "10.20.0.0/24"})).To(Succeed())
+		Expect(catalog.ValidateAllowedHosts([]string{"*.lab.example.com"})).To(MatchError(ContainSubstring("is a pattern")))
+	})
 	DescribeTable("denies",
 		func(ctx SpecContext, u string) {
 			err := p.Check(ctx, u)
