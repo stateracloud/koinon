@@ -24,6 +24,30 @@ var _ = DescribeTable("ClassifySandboxWait",
 	Entry("nothing", "", "", execution.WaitCauseUnknown),
 	Entry("a reason that says nothing", "Pending", "waiting", execution.WaitCauseUnknown),
 	Entry("a reason in other case", "errimagepull", "", execution.WaitCauseImagePull),
+	// Captured from OpenShell 0.1.5 and Agent Sandbox v1.0.7 on kind, 2026-10-29: the first condition
+	// that is not True in OpenShell's sandbox status, which is what the classifier is given.
+	Entry("captured: no node has the CPU", "Unschedulable",
+		"0/1 nodes are available: 1 Insufficient cpu. preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.",
+		execution.WaitCauseNoNodes),
+	// With a flavor image that cannot be pulled, OpenShell reports no pull error in its conditions: its
+	// ConfigurationReady condition stays False and the pod's ImagePullBackOff shows only in the pod's
+	// container status and events. Koinon sees nothing to classify, so this is unknown today.
+	Entry("captured: OpenShell while the image cannot be pulled", "ConfigurationPending",
+		"Waiting for effective configuration validation before workload activation", execution.WaitCauseUnknown),
+	Entry("captured: Agent Sandbox ready condition while the pod is pending", "DependenciesNotReady",
+		"Pod exists with phase: Pending", execution.WaitCauseUnknown),
+	Entry("captured: OpenShell while the sandbox is scheduling-gated", "SchedulingGated",
+		"Scheduling is blocked due to non-empty scheduling gates", execution.WaitCauseUnknown),
+	// Not sandbox conditions, but the real kubelet and API server strings a pod-level source would carry.
+	Entry("captured: kubelet waiting state of an unpullable image", "ImagePullBackOff",
+		`Back-off pulling image "kind.local/koinon-escape/agent:nope": ErrImagePull: failed to pull and unpack image "kind.local/koinon-escape/agent:nope": failed to resolve reference "kind.local/koinon-escape/agent:nope": failed to do request: Head "https://kind.local/v2/koinon-escape/agent/manifests/nope": dial tcp: lookup kind.local on 0.250.250.254:53: server misbehaving`,
+		execution.WaitCauseImagePull),
+	Entry("captured: kubelet pull failure event", "Failed",
+		`Failed to pull image "kind.local/koinon-escape/agent:nope": failed to pull and unpack image "kind.local/koinon-escape/agent:nope": failed to resolve reference "kind.local/koinon-escape/agent:nope": failed to do request: Head "https://kind.local/v2/koinon-escape/agent/manifests/nope": dial tcp: lookup kind.local on 0.250.250.254:53: server misbehaving`,
+		execution.WaitCauseImagePull),
+	Entry("captured: the chart's ValidatingAdmissionPolicy refusing a pod", "",
+		"The pods \"vap-probe\" is invalid: : ValidatingAdmissionPolicy 'koinon-koinon-sandbox-pods' with binding 'koinon-koinon-sandbox-pods' denied request: only the Agent Sandbox controller (and the OpenShell gateway, for supervisor pods) may create pods in sandbox namespaces, not kubernetes-admin",
+		execution.WaitCauseAdmission),
 )
 
 var _ = DescribeTable("SandboxWaitCause.Describe",
