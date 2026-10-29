@@ -287,13 +287,7 @@ func (s *Server) addressee(ctx context.Context, c caller, to string) (questions.
 // notifyTarget is the task's notify target (copied from its trigger), or the org's default when it
 // has none. A notify person who can no longer answer is replaced by the default.
 func (s *Server) notifyTarget(ctx context.Context, c caller, task store.Task) (questions.Target, []pgtype.UUID, string, map[string]any, error) {
-	t := questions.DefaultTarget
-	if task.NotifyKind.Valid {
-		t = questions.Target{Kind: task.NotifyKind.NotifyTargetKind, User: task.NotifyUserID}
-		if task.NotifyRole.Valid {
-			t.Role = task.NotifyRole.OrgRole
-		}
-	}
+	t := questions.TaskTarget(task.NotifyKind, task.NotifyUserID, task.NotifyRole)
 	var fallback map[string]any
 	rec, err := questions.Recipients(ctx, s.q, c.org.ID, t)
 	if err != nil {

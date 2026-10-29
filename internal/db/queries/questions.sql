@@ -136,17 +136,13 @@ WHERE qr.org_id = @org_id AND qr.question_id = @question_id AND qr.removed_at IS
               WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member')
 ORDER BY qr.user_id;
 
--- name: AddDefaultRecipientsToOrphanedQuestions :many
+-- name: ListOrphanedQuestions :many
 -- Open questions (run still parked) with no recipient who can still answer, because everyone left
--- the org or lost the role: the org's admins and owners become recipients and start waiting now (a
--- new recipient's age starts when the item starts waiting on them). Returns the new rows.
-INSERT INTO question_recipients (org_id, question_id, user_id, waiting_since)
-SELECT qn.org_id, qn.id, m.user_id, now()
+-- the org or lost the role, with the notify target of their task (NULL kind: the org's default).
+SELECT qn.id, qn.task_id, qn.run_id, t.agent_id, t.notify_kind, t.notify_user_id, t.notify_role
 FROM questions qn
 JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id AND r.state = 'parked'
-CROSS JOIN LATERAL (
-    SELECT om.user_id FROM org_memberships om JOIN users u ON u.id = om.user_id AND u.deleted_at IS NULL
-    WHERE om.org_id = qn.org_id GROUP BY om.user_id HAVING max(om.role) >= 'admin') m
+JOIN tasks t ON t.org_id = qn.org_id AND t.id = qn.task_id
 WHERE qn.org_id = @org_id AND qn.state = 'open'
   AND NOT EXISTS (
     SELECT 1 FROM question_recipients qr
@@ -154,8 +150,15 @@ WHERE qn.org_id = @org_id AND qn.state = 'open'
     WHERE qr.org_id = qn.org_id AND qr.question_id = qn.id AND qr.removed_at IS NULL
       AND EXISTS (SELECT 1 FROM org_memberships om
                   WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member'))
+ORDER BY qn.id;
+
+-- name: AddWaitingQuestionRecipients :many
+-- The people a question is retargeted to start waiting now (a new recipient's age starts when the
+-- item starts waiting on them). Returns the rows that were new.
+INSERT INTO question_recipients (org_id, question_id, user_id, waiting_since)
+SELECT @org_id, @question_id, unnest(@user_ids::uuid[]), now()
 ON CONFLICT DO NOTHING
-RETURNING question_id, user_id;
+RETURNING user_id;
 
 -- name: ListQuestionRecipients :many
 -- The active recipients of these questions, with names, for the API.

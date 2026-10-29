@@ -177,11 +177,59 @@ var _ = Describe("a question to a role", func() {
 			Expect(countOf(ctx, `SELECT count(*) FROM notifications WHERE org_id = $1 AND user_id = $2 AND kind = $3`, w.org, u, questions.NotificationKind)).To(Equal(1))
 		}
 		Expect(countOf(ctx, `SELECT count(*) FROM task_events WHERE org_id = $1 AND task_id = $2 AND kind = $3`, w.org, w.task, questions.KindRetargeted)).To(Equal(1))
+		// Who may answer changed, so the audit log says so: by the system, to whom and why.
+		Expect(countOf(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'question.retarget' AND target_kind = 'question' AND target_id = $2 AND actor_kind = 'system'`, w.org, row.ID.String())).To(Equal(1))
+		var after []byte
+		Expect(pool.QueryRow(ctx, `SELECT summary->'after' FROM audit_events WHERE org_id = $1 AND action = 'question.retarget' AND target_id = $2`, w.org, row.ID.String()).Scan(&after)).To(Succeed())
+		var a struct {
+			ToLabel    string   `json:"toLabel"`
+			Recipients []string `json:"recipients"`
+			Reason     string   `json:"reason"`
+			TaskID     string   `json:"taskId"`
+		}
+		Expect(json.Unmarshal(after, &a)).To(Succeed())
+		Expect(a.ToLabel).To(Equal("the org's admins"))
+		Expect(a.Recipients).To(ConsistOf(w.user.String(), admin.String()))
+		Expect(a.Reason).NotTo(BeEmpty())
+		Expect(a.TaskID).To(Equal(w.task.String()))
 
 		_, err = questions.RetargetOrphaned(ctx, pool)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(countOf(ctx, `SELECT count(*) FROM question_recipients WHERE question_id = $1 AND removed_at IS NULL`, row.ID)).To(Equal(3), "a second pass adds nobody")
 		Expect(countOf(ctx, `SELECT count(*) FROM task_events WHERE org_id = $1 AND task_id = $2 AND kind = $3`, w.org, w.task, questions.KindRetargeted)).To(Equal(1))
+		Expect(countOf(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'question.retarget'`, w.org)).To(Equal(1), "a pass that changes nothing records nothing")
+	})
+
+	It("retargets an orphaned question to the trigger's notify target, not to every admin", func(ctx SpecContext) {
+		// The task's trigger notifies the org's owners; w.user is the owner, admin is not.
+		_, err := pool.Exec(ctx, `UPDATE tasks SET notify_kind = 'role', notify_role = 'owner' WHERE org_id = $1 AND id = $2`, w.org, w.task)
+		Expect(err).NotTo(HaveOccurred())
+		member := addUser(ctx, store.OrgRoleMember)
+		row := ask(ctx, questions.Target{Kind: store.NotifyTargetKindUser, User: member})
+		_, err = pool.Exec(ctx, `DELETE FROM org_memberships WHERE org_id = $1 AND user_id = $2`, w.org, member)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = questions.RetargetOrphaned(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(recipients(ctx, row.ID)).To(ConsistOf(w.user), "the owners only; the admin was not named")
+		var after []byte
+		Expect(pool.QueryRow(ctx, `SELECT summary->'after' FROM audit_events WHERE org_id = $1 AND action = 'question.retarget' AND target_id = $2`, w.org, row.ID.String()).Scan(&after)).To(Succeed())
+		Expect(string(after)).To(ContainSubstring("the org's owners"))
+		Expect(string(after)).NotTo(ContainSubstring(admin.String()))
+		Expect(countOf(ctx, `SELECT count(*) FROM notifications WHERE org_id = $1 AND user_id = $2 AND kind = $3`, w.org, admin, questions.NotificationKind)).To(BeZero())
+	})
+
+	It("falls back to the admins when the trigger's notify person is gone too", func(ctx SpecContext) {
+		member := addUser(ctx, store.OrgRoleMember)
+		_, err := pool.Exec(ctx, `UPDATE tasks SET notify_kind = 'user', notify_user_id = $3 WHERE org_id = $1 AND id = $2`, w.org, w.task, member)
+		Expect(err).NotTo(HaveOccurred())
+		row := ask(ctx, questions.Target{Kind: store.NotifyTargetKindUser, User: member})
+		_, err = pool.Exec(ctx, `DELETE FROM org_memberships WHERE org_id = $1 AND user_id = $2`, w.org, member)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = questions.RetargetOrphaned(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(recipients(ctx, row.ID)).To(ConsistOf(w.user, admin))
 	})
 
 	It("keeps the call hash of a user target", func(ctx SpecContext) {

@@ -36,8 +36,8 @@ answer, so the default applies for everyone. An answer resumes the run exactly o
 
 The age shown in the inbox counts from when the question started waiting on that person. A reminder does
 not reset it. A person counts as a recipient only while they can answer: if everyone a question was asked
-to leaves the org or becomes a viewer, Koinon adds the org's admins and owners, and their age starts
-then.
+to leaves the org or becomes a viewer, Koinon asks the trigger's notify target instead (the org's admins and owners unless the trigger names
+someone else), their age starts then, and the audit log records the change as `question.retarget`.
 
 The answer reaches the agent as part of its next prompt: `the person answered: "..."`, or, when the
 question was dismissed or timed out, that the default was applied and what it is. The agent is always

@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/durable"
 )
@@ -177,12 +178,29 @@ func clip(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// RetargetOrphaned gives the open questions that nobody can answer any more to the org's admins and
-// owners, and returns how many questions it changed. A recipient counts only while they can answer
-// (not deleted, role member or higher); when the last one leaves the org or becomes a viewer, the
-// question would otherwise wait on nobody until it expires. The new recipients get the question.asked
-// notification, and their age starts then (ADR 0065 amendment 2026-10-28). An org with no admin or
-// owner gets no rows, and the question expires as before.
+// TaskTarget is the notify target a task carries (copied from its trigger when it was created), or
+// the org's default (DefaultTarget, the admins) when it has none.
+func TaskTarget(kind store.NullNotifyTargetKind, user pgtype.UUID, role store.NullOrgRole) Target {
+	if !kind.Valid {
+		return DefaultTarget
+	}
+	t := Target{Kind: kind.NotifyTargetKind, User: user}
+	if role.Valid {
+		t.Role = role.OrgRole
+	}
+	return t
+}
+
+// RetargetOrphaned gives the open questions that nobody can answer any more to the task's notify
+// target (the trigger's, by default the org's admins), and returns how many questions it changed. A
+// recipient counts only while they can answer (not deleted, role member or higher); when the last one
+// leaves the org or becomes a viewer, the question would otherwise wait on nobody until it expires.
+// The target resolves as it does when a question is asked: a notify person who can no longer answer,
+// or a target nobody holds, falls back to the default. The new recipients get the question.asked
+// notification and their age starts then (ADR 0065 amendment 2026-10-28). Who may answer is an
+// authorization change, so each question that changes is audited as question.retarget, by the system,
+// in the same transaction. An org with nobody to give the question to changes nothing, and the
+// question expires as before.
 func RetargetOrphaned(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	orgs, err := store.New(pool).ListOrgsWithOpenQuestions(ctx)
 	if err != nil {
@@ -194,48 +212,76 @@ func RetargetOrphaned(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 		n := 0
 		err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 			q := store.New(tx)
-			rows, err := q.AddDefaultRecipientsToOrphanedQuestions(ctx, org)
+			orphans, err := q.ListOrphanedQuestions(ctx, org)
 			if err != nil {
 				return err
 			}
-			byQuestion := map[pgtype.UUID][]pgtype.UUID{}
-			var order []pgtype.UUID
-			for _, r := range rows {
-				if _, ok := byQuestion[r.QuestionID]; !ok {
-					order = append(order, r.QuestionID)
+			n = 0
+			for _, o := range orphans {
+				target := TaskTarget(o.NotifyKind, o.NotifyUserID, o.NotifyRole)
+				people, err := Recipients(ctx, q, org, target)
+				if err != nil {
+					return err
 				}
-				byQuestion[r.QuestionID] = append(byQuestion[r.QuestionID], r.UserID)
-			}
-			for _, id := range order {
-				qn, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: org, ID: id})
+				if len(people) == 0 && target != DefaultTarget {
+					target = DefaultTarget
+					if people, err = Recipients(ctx, q, org, target); err != nil {
+						return err
+					}
+				}
+				if len(people) == 0 {
+					continue
+				}
+				added, err := q.AddWaitingQuestionRecipients(ctx, store.AddWaitingQuestionRecipientsParams{OrgID: org, QuestionID: o.ID, UserIds: people})
+				if err != nil {
+					return err
+				}
+				if len(added) == 0 {
+					continue
+				}
+				qn, err := q.GetQuestion(ctx, store.GetQuestionParams{OrgID: org, ID: o.ID})
 				if err != nil {
 					return err
 				}
 				body, _ := json.Marshal(map[string]any{
 					"question_id": qn.ID.String(), "task_id": qn.TaskID.String(), "question": qn.Question,
 				})
-				for _, u := range byQuestion[id] {
+				ids := make([]string, 0, len(added))
+				for _, u := range added {
+					ids = append(ids, u.String())
 					if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
 						OrgID: org, UserID: u, Kind: NotificationKind, DedupeKey: "question:" + qn.ID.String(), Payload: body,
 					}); err != nil {
 						return err
 					}
 				}
-				ids := make([]string, 0, len(byQuestion[id]))
-				for _, u := range byQuestion[id] {
-					ids = append(ids, u.String())
+				name := ""
+				if target.Kind == store.NotifyTargetKindUser {
+					if name, err = q.GetUserDisplayName(ctx, target.User); err != nil {
+						return err
+					}
 				}
+				toLabel := Label(target, name)
 				if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 					OrgID: org, TaskID: qn.TaskID, RunID: qn.RunID, Kind: KindRetargeted, ActorKind: store.TaskActorKindSystem,
 					Payload: mustJSON(map[string]any{
-						"question_id": qn.ID.String(), "to_label": Label(DefaultTarget, ""), "recipients": ids,
+						"question_id": qn.ID.String(), "to_label": toLabel, "recipients": ids,
 						"reason": "nobody it was addressed to can answer any more",
 					}),
 				}); err != nil {
 					return err
 				}
+				if err := audit.RecordErr(ctx, q, audit.Event{
+					Org: org, Actor: audit.System(), Action: "question.retarget", TargetKind: "question", TargetID: qn.ID.String(),
+					After: map[string]any{
+						"toLabel": toLabel, "recipients": ids, "reason": "nobody it was addressed to can answer any more",
+						"taskId": qn.TaskID.String(), "runId": qn.RunID.String(), "agentId": o.AgentID.String(),
+					},
+				}); err != nil {
+					return err
+				}
+				n++
 			}
-			n = len(order)
 			return nil
 		})
 		if err != nil {
