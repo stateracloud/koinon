@@ -4,6 +4,7 @@ package agentd_test
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	sdk "github.com/coder/acp-go-sdk"
@@ -173,5 +174,87 @@ var _ = Describe("The agent's model setting", func() {
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).OutcomeReason.String).To(ContainSubstring("session/prompt"))
+	})
+
+	// Koinon decides whether the model thinks, and the harness renders that (rc.8, ADR 0069 amendment
+	// 2026-10-29): thinking is on unless the agent, or its version, turns it off, and a model whose
+	// catalog capability says it cannot think runs with none.
+	var _ = Describe("The agent's thinking setting", func() {
+		serveClaude := func(ctx context.Context, e *env, name string) {
+			GinkgoHelper()
+			var providerID, modelID pgtype.UUID
+			Expect(db.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, $2, 'anthropic', 'http://fakemodel.example.com/v1') RETURNING id`,
+				e.org, uniq("prov")).Scan(&providerID)).To(Succeed())
+			Expect(db.QueryRow(ctx, `INSERT INTO models (org_id, provider_id, name, format) VALUES ($1, $2, $3, 'anthropic') RETURNING id`,
+				e.org, providerID, name).Scan(&modelID)).To(Succeed())
+			_, err := db.Exec(ctx, `INSERT INTO gateway_served_models (org_id, model_id, provider_id) VALUES ($1, $2, $3)`, e.org, modelID, providerID)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = db.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by)
+				VALUES ($1, $2, jsonb_build_object('provider', 'anthropic', 'match', jsonb_build_object('glob', $3::text),
+				'validFrom', '2020-01-01', 'prices', jsonb_build_object('input', '1', 'output', '2'),
+				'tokenizer', 'bytes', 'ratio', '3.0', 'maxOutput', 10), now() - interval '1 hour', 'test')`,
+				e.org, uniq("price"), name)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		setThinking := func(ctx context.Context, e *env, v string) {
+			GinkgoHelper()
+			_, err := q.SetAgentThinking(ctx, store.SetAgentThinkingParams{OrgID: e.org, ID: e.agent.ID, Thinking: pgtype.Text{String: v, Valid: v != ""}})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		// thinkingArg runs one task and returns the value after --thinking in the launch command.
+		thinkingArg := func(ctx context.Context, e *env) string {
+			GinkgoHelper()
+			r := e.enqueue(ctx, e.task(ctx, "hello"))
+			e.pool("agentd-a")
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			_, _, _, args := e.harness.snapshot()
+			Expect(args).To(HaveLen(1))
+			i := slices.Index(args[0], "--thinking")
+			Expect(i).To(BeNumerically(">=", 0), "the launch command always states the mode: %v", args[0])
+			return args[0][i+1]
+		}
+
+		It("is on by default for a model the catalog says can think", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			serveClaude(ctx, e, "claude-haiku-5-5")
+			setModel(ctx, e, "claude-haiku-5-5")
+			Expect(thinkingArg(ctx, e)).To(Equal("adaptive"))
+		})
+
+		It("is off when the agent turns it off, and on again when it turns it on over its version's off", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			serveClaude(ctx, e, "claude-haiku-5-5")
+			setModel(ctx, e, "claude-haiku-5-5")
+			setThinking(ctx, e, "off")
+			Expect(thinkingArg(ctx, e)).To(Equal("none"))
+		})
+
+		It("follows the version's value until the agent sets its own", func(ctx SpecContext) {
+			e := newEnvWith(ctx, store.AgentFlavorOpencode, func(*env) string {
+				return `{"model":"claude-haiku-5-5","thinking":"off","instructions":"x"}`
+			})
+			serveClaude(ctx, e, "claude-haiku-5-5")
+			Expect(thinkingArg(ctx, e)).To(Equal("none"))
+			setThinking(ctx, e, "on")
+			second := e.enqueue(ctx, e.task(ctx, "again"))
+			Eventually(runState(ctx, second)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			_, _, _, args := e.harness.snapshot()
+			Expect(args).To(HaveLen(2))
+			Expect(args[1][slices.Index(args[1], "--thinking")+1]).To(Equal("adaptive"))
+		})
+
+		It("is none for a model the catalog says cannot think, whatever the setting", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			serveModel(ctx, e, model, true)
+			setThinking(ctx, e, "on")
+			Expect(thinkingArg(ctx, e)).To(Equal("none"))
+		})
+
+		It("is none on chat completions even for a Claude-shaped name", func(ctx SpecContext) {
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			serveModelAs(ctx, e, "claude-haiku-5-5", true, "anthropic", modelformat.OpenAI)
+			setModel(ctx, e, "claude-haiku-5-5")
+			Expect(thinkingArg(ctx, e)).To(Equal("none"))
+		})
 	})
 })

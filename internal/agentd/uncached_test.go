@@ -58,7 +58,7 @@ var _ = Describe("Runs without prompt caching", func() {
 		_, _, _, args := e.harness.snapshot()
 		Expect(args).To(HaveLen(1))
 		Expect(args[0]).To(Equal([]string{
-			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-format", "anthropic",
+			"--model-base-url", gatewayURL + "/v1", "--model", model, "--mcp-url", gatewayURL + "/mcp", "--model-format", "anthropic", "--thinking", "none",
 		}), "no --cache-* switch: OpenCode places the Messages cache_control itself")
 	})
 

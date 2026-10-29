@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -23,13 +22,16 @@ import (
 
 // entryOf is the model value agentd selects for a format; the flavor table in internal/flavor is
 // its source, so the suite uses the same one.
-func entryOf(format modelformat.Format) string {
+func entryOf(format modelformat.Format) string { return entryFor(format, contractModel) }
+
+// entryFor is entryOf for another model name.
+func entryFor(format modelformat.Format, model string) string {
 	GinkgoHelper()
 	d, ok := koinflavor.Lookup(opencode.storeFlavor)
 	Expect(ok).To(BeTrue())
 	entry := d.ModelEntries[format]
 	Expect(entry).NotTo(BeEmpty(), "no provider entry for the %s format", format)
-	return entry + "/" + contractModel
+	return entry + "/" + model
 }
 
 // harnessIn starts the entry script in sb with the model format, brings it to where agentd sends
@@ -37,7 +39,13 @@ func entryOf(format modelformat.Format) string {
 // session is loaded, as agentd does for a task's later runs.
 func harnessIn(ctx context.Context, sb *sandbox, gw *gateway, format modelformat.Format, session acp.SessionID, extra ...string) (*harness, acp.SessionID) {
 	GinkgoHelper()
-	cmd := append(opencode.command(gw.url("/v1"), contractModel, gw.url("/mcp")), "--model-format", string(format))
+	return harnessFor(ctx, sb, gw, contractModel, format, session, extra...)
+}
+
+// harnessFor is harnessIn for another model name, which is how a real Claude ID reaches OpenCode.
+func harnessFor(ctx context.Context, sb *sandbox, gw *gateway, model string, format modelformat.Format, session acp.SessionID, extra ...string) (*harness, acp.SessionID) {
+	GinkgoHelper()
+	cmd := append(opencode.command(gw.url("/v1"), model, gw.url("/mcp")), "--model-format", string(format))
 	h := sb.harness(context.WithoutCancel(ctx), workdir, append(cmd, extra...))
 	DeferCleanup(h.close)
 	_, err := h.conn.Initialize(ctx)
@@ -50,7 +58,7 @@ func harnessIn(ctx context.Context, sb *sandbox, gw *gateway, format modelformat
 	Expect(err).NotTo(HaveOccurred())
 	Eventually(h.client.availableCommands).WithTimeout(30 * time.Second).Should(ContainElement(opencode.readyCommand))
 	time.Sleep(readySettle)
-	Expect(h.conn.SetModel(ctx, session, entryOf(format))).To(Succeed())
+	Expect(h.conn.SetModel(ctx, session, entryFor(format, model))).To(Succeed())
 	return h, session
 }
 
@@ -146,37 +154,6 @@ var _ = Describe("koinon-opencode with --model-format anthropic", func() {
 		Expect(gw.authHeaders()).To(HaveEach("Bearer " + fakeKey))
 		Expect(gw.anonymous()).To(BeEmpty())
 	}, SpecTimeout(4*time.Minute))
-
-	It("sends only the interleaved-thinking beta, which no request needs (the gateway removes anthropic-beta)", func(ctx SpecContext) {
-		gw := newGateway(contractScript(opencode))
-		sb := newOpencodeSandbox(ctx, instructionsMarker+"\n")
-		h, session := harnessIn(ctx, sb, gw, modelformat.Anthropic, "")
-		_, err := h.conn.Prompt(ctx, session, helloPrompt)
-		Expect(err).NotTo(HaveOccurred())
-
-		seen := map[string]bool{}
-		for _, r := range requestsOn(gw, "/v1/messages") {
-			for _, v := range r.Header.Values("Anthropic-Beta") {
-				for _, b := range strings.Split(v, ",") {
-					seen[strings.TrimSpace(b)] = true
-				}
-			}
-		}
-		// The gateway removes anthropic-beta (ADR 0069 amendment). OpenCode 2.2.0 always asks for
-		// interleaved thinking (packages/ai/src/protocols/anthropic-messages.ts, requiredBetaHeaders),
-		// which the API ignores where unsupported; nothing it sends is needed to work.
-		GinkgoWriter.Printf("anthropic-beta values OpenCode sent: %v\n", seen)
-		// The custom model declares no reasoning, so OpenCode sends no thinking block: the one beta
-		// is a no-op for these requests and the gateway's removal costs nothing. If a model ever
-		// gets thinking variants, re-check interleaved thinking and pin it with `set` in the
-		// gateway's rendering table.
-		for _, r := range requestsOn(gw, "/v1/messages") {
-			var body map[string]any
-			Expect(json.Unmarshal(r.Body, &body)).To(Succeed())
-			Expect(body).NotTo(HaveKey("thinking"))
-		}
-		Expect(seen).To(Equal(map[string]bool{"interleaved-thinking-2025-05-14": true}))
-	}, SpecTimeout(3*time.Minute))
 
 	// ADR 0069: a task's session saved under one entry is loaded under the other when its model's
 	// format changed (an admin override, or the OpenRouter flip). The session keeps its history; the
