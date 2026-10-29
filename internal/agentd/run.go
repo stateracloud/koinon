@@ -149,6 +149,9 @@ type runner struct {
 	// cwd is the session directory, set before the harness starts; permission requests for
 	// paths outside it are rejected.
 	cwd string
+	// sbWorkspace and sbName are the sandbox the harness runs in, set with cwd; permission
+	// requests resolve their paths in it.
+	sbWorkspace, sbName string
 
 	// model and modelSource are the model the run uses and the layer it came from
 	// (internal/agentmodel).
@@ -536,6 +539,7 @@ func (r *runner) execute(ctx context.Context) error {
 		return r.execErr(ctx, "prepare the session directory", err)
 	}
 	r.cwd = cwd
+	r.sbWorkspace, r.sbName = workspace, sandbox
 	// The run's own version decides the instructions, so a version bump applies at the next
 	// run without recreating the sandbox.
 	repos, err := r.repositories(fctx)
@@ -1391,12 +1395,12 @@ func (h handler) RequestPermission(ctx context.Context, req acp.PermissionReques
 	if h.r.summarizingNow() {
 		// The summary prompt does nothing: every permission request is refused.
 		h.r.log.Warn("permission refused during the end-of-turn summary")
-		return acp.Choose(req, acp.RejectOnce, acp.RejectAlways), nil
+		return acp.Choose(req, acp.RejectOnce), nil
 	}
-	d := h.r.p.cfg.Permissions.decide(req, h.r.cwd)
 	if h.r.replaying.Load() {
 		return acp.Decision{}, nil
 	}
+	d := h.r.p.cfg.Permissions.decide(req, h.r.cwd, h.r.pathResolver(ctx))
 	if d.Verdict == Reject {
 		h.r.noteRefusal(req, d)
 	}
