@@ -61,6 +61,60 @@ jobs:
       # The reconciler runs per-sandbox jobs concurrently (LT1); keep its state guarded.
       - run: go test -race -count=1 ./internal/reconciler/
 
+  # Known vulnerabilities in the Go dependencies, by reachability (ADR 0079): a reachable finding
+  # is what lets a fix take the security fast path instead of waiting out the cooldown.
+  govulncheck:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    name: govulncheck
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  # Dependency cooldown (ADR 0079): versions this pull request adds must be at least 3 days old.
+  # Public endpoints only. The waiver is the label `dependency-age-waiver`, honoured only when
+  # the maintainer put it on; the job reads the label when it runs, so re-run the job after
+  # labelling. Timestamps guard against accidents, they are not proof.
+  dep-age:
+    name: dependency age
+    if: github.event_name == 'pull_request'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: waiver
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          # Waivers outside the security fast path are procoduck's alone (ADR 0079).
+          APPROVER: procoduck
+        run: |
+          label=dependency-age-waiver
+          if gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name' | grep -qx "$label"; then
+            actor=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/events" \
+              --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$label\")] | last | .actor.login // empty" | tail -n1)
+            if [[ $actor == "$APPROVER" ]]; then
+              echo "label $label was added by $actor: age failures are waived and listed below"
+              echo "by=$actor" >>"$GITHUB_OUTPUT"
+            else
+              echo "::error::label $label was added by '${actor:-unknown}', not by $APPROVER; it does not waive anything"
+            fi
+          fi
+      - name: versions are at least 3 days old
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEP_AGE_WAIVER: ${{ steps.waiver.outputs.by }}
+        run: hack/dep-age-check.sh "origin/${{ github.base_ref }}"
+
   web:
     needs: changes
     if: needs.changes.outputs.web == 'true'

@@ -45,7 +45,28 @@ make dev        # Tilt against the home lab, or kind after `make dev-kind-up` (d
   above passing and every review thread resolved; force-pushes and deletion are blocked, with no
   bypass. Merge with a merge commit (keeps stacked pull requests intact) or squash; rebase merges
   are off. CODEOWNERS requests the maintainer's review on every pull request.
-- Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions) each Monday;
-  security updates arrive as soon as they are published.
+- Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions, Docker) each Monday
+  (see [Dependency updates](#dependency-updates)); security updates arrive as soon as they are
+  published.
 - Migrations are forward-only: add a new `NNNNN_name.sql` file; never edit a merged one.
 - Decisions that change architecture get an ADR (copy `docs/adr/0000-template.md`).
+
+## Dependency updates
+
+No dependency version enters Koinon until it has been published for at least 3 days. That covers Go
+modules, npm packages (including transitive ones), GitHub Actions, container images, release
+binaries, Helm dependencies and the pinned OpenShell and Agent Sandbox versions, major versions
+included. [ADR 0079](docs/adr/0079-dependency-cooldown.md) has the reasoning and the exact rules.
+
+- Dependabot (`cooldown`) and pnpm (`web/pnpm-workspace.yaml`, strict) enforce it for the bot and for
+  `pnpm add`. The `dependency age` CI check (`hack/dep-age-check.sh`) checks the rest on every pull
+  request. You can run it locally: `hack/dep-age-check.sh origin/main`. Publication dates are a guard
+  against accidents, not proof of safety.
+- Security fixes may skip the wait, with checks: a reviewed advisory names the fix (take the lowest
+  fixing version), it is reachable (`govulncheck`) or high, critical or in CISA's KEV list, the
+  publication is verified (npm provenance, a signature or upstream checksum, a genuinely new tag for
+  an Action), and a human reads the diff and records that in the pull request. A pnpm exemption lists
+  one exact version (`pkg@1.2.3`) with a comment naming the advisory and the date.
+- Anything else younger than 3 days needs a waiver from the maintainer, recorded in the pull
+  request (who decided, why, what was verified), and the `dependency-age-waiver` label. Re-run the
+  `dependency age` job after labelling.
