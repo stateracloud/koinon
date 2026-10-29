@@ -64,7 +64,7 @@ are in [0046](0046-adr-conventions.md).
 | [0047](0047-repository-scaffold.md) | Repository scaffold, data model foundations and CI gates | Accepted, amended 2026-10-26 |
 | [0048](0048-openshell-spike-results.md) | OpenShell spike results | Accepted (2026-10-26, after implementation), amended by 0052 and 2026-10-26 |
 | [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes, agentd placement | Accepted, amended by 0051, 0056, 0058, 0062, 0063, 0065, 0066 and (Kubernetes mode on native CRDs, ledger budgets) by its own G2 amendment |
-| [0050](0050-spend-ledger-ingestion-and-net-limits.md) | Spend ledger ingestion and net limits | Accepted (2026-10-26, after implementation), amended by 0056 and 2026-10-23 |
+| [0050](0050-spend-ledger-ingestion-and-net-limits.md) | Spend ledger ingestion and net limits | Accepted (2026-10-26, after implementation), amended by 0056, 2026-10-23 and 2026-10-29 |
 | [0051](0051-session-home-generations.md) | Session home generations | Accepted, amended by 0054, 0065 and 2026-10-23, 2026-10-24, 2026-10-26 |
 | [0052](0052-opencode-v2-flavor.md) | OpenCode flavor on OpenCode v2 | Accepted, amended by 0079 |
 | [0053](0053-hermes-context-file-patch.md) | Hermes context-file build patch: redo on every upgrade, with a guard test | Superseded by 0059 |

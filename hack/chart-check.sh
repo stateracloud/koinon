@@ -416,6 +416,9 @@ cms=$(kinds_named ConfigMap --set gateway.mode=standalone | tr '\n' ' ')
 [[ $cms == *gateway-config* ]] && fail "standalone mode renders the gateway ConfigMap ($cms)"
 has "the gateway mounts its config by name" 'name: koinon-gateway-config$' --set gateway.mode=standalone --show-only templates/gateway-standalone.yaml
 has "the reconciler may create the config and read the gateway Deployment" 'resourceNames: \[koinon-gateway\]' --set gateway.mode=standalone --show-only templates/rbac.yaml
+has "the standalone reconciler may read the gateway pods' logs (agentgateway's reload errors, ADR 0050)" 'resources: \[pods/log\]' --set gateway.mode=standalone --show-only templates/rbac.yaml
+has "the standalone reconciler may list the gateway pods" 'resources: \[pods\]' --set gateway.mode=standalone --show-only templates/rbac.yaml
+lacks "the kubernetes-mode reconciler reads no pod logs" 'pods/log' "${k8s[@]}" --show-only templates/rbac.yaml
 has "the reconciler is told the gateway Deployment" 'deployment: koinon-gateway$' --set gateway.mode=standalone --show-only templates/config.yaml
 # Registry mirrors and pull secrets (#130): global.imageRegistry, global.registryMirrors and
 # global.imagePullSecrets reach every image the chart runs or names. image_refs lists every image

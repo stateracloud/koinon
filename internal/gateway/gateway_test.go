@@ -16,6 +16,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
 )
 
 func TestGateway(t *testing.T) {
@@ -61,11 +62,44 @@ var _ = Describe("State", func() {
 		Expect(s.RevokeKey(a.ID)).To(BeFalse())
 		Expect(s.Keys).To(Equal([]gateway.Key{b.Key}))
 
-		s.SetLimit(agent, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: time.Hour})
+		s.SetLimit(agent, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("1"), Window: time.Hour})
 		Expect(s.Limits).To(HaveKey(agent))
 		s.SetLimit(agent, nil)
 		Expect(s.Limits).NotTo(HaveKey(agent))
 		Expect(s.Validate()).To(Succeed())
+	})
+
+	It("rounds a USD limit down to the gateway's nine fraction digits", func() {
+		l := gateway.USDLimit(money.MustParse("4.9827242408"), time.Hour, "g")
+		Expect(l.Amount).To(Equal(money.MustParse("4.98272424")))
+		Expect(l.Validate()).To(Succeed())
+		l.Amount = money.MustParse("4.9827242408")
+		Expect(l.Validate()).To(MatchError(ContainSubstring("more than 9 fraction digits")))
+		Expect((gateway.Limit{Unit: gateway.USD, Amount: -1}).Validate()).To(HaveOccurred())
+		Expect((gateway.Limit{Unit: "Tokens", Amount: 1}).Validate()).To(MatchError(ContainSubstring("unknown unit")))
+	})
+
+	It("takes the keys of agents with an invalid limit out, one rejection each", func() {
+		var s gateway.State
+		bad, _ := gateway.NewKey(agent)
+		good, _ := gateway.NewKey(gateway.AgentRef{Org: "acme", Name: "other"})
+		s.AddKey(bad.Key)
+		s.AddKey(good.Key)
+		s.SetLimit(agent, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("0.0000000001"), Window: time.Hour})
+		s.SetLimit(good.Agent, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("1"), Window: time.Hour})
+		out, rej := s.WithoutInvalidLimits()
+		Expect(out.Keys).To(Equal([]gateway.Key{good.Key}))
+		Expect(out.Limits).To(HaveKey(good.Agent))
+		Expect(out.Limits).NotTo(HaveKey(agent))
+		Expect(rej).To(HaveLen(1))
+		Expect(rej[0].Kind).To(Equal("Key"))
+		Expect(rej[0].Name).To(Equal(bad.ID))
+		Expect(s.Limits).To(HaveKey(agent), "the input is not changed")
+		Expect(s.Validate()).NotTo(Succeed())
+		Expect(out.Validate()).To(Succeed())
+		same, none := out.WithoutInvalidLimits()
+		Expect(none).To(BeEmpty())
+		Expect(same.Keys).To(Equal(out.Keys))
 	})
 
 	It("rejects grants for unknown targets and duplicate keys", func() {

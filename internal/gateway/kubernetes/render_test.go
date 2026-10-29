@@ -18,6 +18,7 @@ import (
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
 )
 
 // update rewrites golden files: go test ./internal/gateway/kubernetes -args -update
@@ -59,7 +60,7 @@ func fullState() gateway.State {
 	s.AddKey(fixedKey("k-bbbbbbbbbbbb", agentB, "test-b"))
 	s.AddKey(fixedKey("k-gggggggggggg", agentG, "test-g"))
 	s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
-	s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 4.25, Window: 24 * time.Hour, Generation: "1792627200-750000000"})
+	s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("4.25"), Window: 24 * time.Hour, Generation: "1792627200-750000000"})
 	s.SetLimit(agentB, &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: 24 * time.Hour, Generation: "failed"})
 	s.GrantTools(agentA,
 		gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request"}},
@@ -156,7 +157,7 @@ var _ = Describe("Render", func() {
 		Expect(cm.U.Object["data"]).NotTo(HaveKey("k-bbbbbbbbbbbb"))
 
 		s := fullState()
-		s.SetLimit(agentB, &gateway.Limit{Unit: gateway.USD, Amount: 1, Window: 24 * time.Hour})
+		s.SetLimit(agentB, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("1"), Window: 24 * time.Hour})
 		again, err := gwk8s.Render(s, opts())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(again.Revoked).To(BeEmpty())
@@ -230,7 +231,7 @@ var _ = Describe("Render", func() {
 		check := gateway.AgentRef{Org: "acme", Name: gateway.ModelCheckAgentName}
 		s := fullState()
 		s.AddKey(fixedKey("k-cccccccccccc", check, "test-check"))
-		s.SetLimit(check, &gateway.Limit{Unit: gateway.USD, Amount: 0.10, Window: 24 * time.Hour, Generation: "d"})
+		s.SetLimit(check, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("0.10"), Window: 24 * time.Hour, Generation: "d"})
 		s.RestrictModels(check, "deepseek/deepseek-v4.1-flash", "not-served/model")
 		r, err := gwk8s.Render(s, opts())
 		Expect(err).NotTo(HaveOccurred())
