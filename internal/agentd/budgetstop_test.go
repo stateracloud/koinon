@@ -95,25 +95,26 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		spend(ctx, e, "2.40", "2.5")
 		// The reconciler stops the agent's runs before it revokes the key; the harness's 401 follows.
-		// The stop happens once, with the spec's context: agentd may send another prompt before it
-		// sees the cancel, and that prompt's request context ends with the canceled run.
-		var stop sync.Once
-		e.harness.modelFault = func(context.Context, string) error {
-			stop.Do(func() {
-				// modelFault runs on the ACP SDK's goroutine.
-				defer GinkgoRecover()
-				st, err := budget.Compute(ctx, q, e.org, e.agent.ID, 0, time.Now())
-				Expect(err).NotTo(HaveOccurred())
-				l, ok := st.Pick(time.Now())
-				Expect(ok).To(BeTrue())
-				n, err := ledger.Stop(ctx, q, e.org, e.agent.ID, l)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(n).To(Equal(1))
-			})
+		// The harness holds its first model request until the spec has stopped the run, so the
+		// order is the spec's and nothing asserts on the ACP SDK's goroutine. The stop is the
+		// reconciler's own (ledger.StopSpent): the cancel and its events commit together.
+		requested, stopped := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		e.harness.modelFault = func(ctx context.Context, _ string) error {
+			once.Do(func() { close(requested) })
+			select {
+			case <-stopped:
+			case <-ctx.Done():
+			}
 			return unauthorized
 		}
 		r := e.enqueue(ctx, e.task(ctx, "hello"))
 		e.pool("agentd-a")
+		Eventually(requested).WithTimeout(15 * time.Second).Should(BeClosed())
+		n, err := ledger.StopSpent(ctx, db, e.agent, time.Now())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(Equal(1))
+		close(stopped)
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
 		Consistently(func() int { return len(eventOf(events(ctx, r), "run.canceled")) }, 500*time.Millisecond).Should(Equal(1))
 		got := getRun(ctx, r)
