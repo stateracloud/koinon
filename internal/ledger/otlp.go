@@ -37,10 +37,11 @@ const (
 	attrCostTotal    = "agw.ai.usage.cost.total"
 )
 
-// refusedBeforeUpstream are the statuses agentgateway sets itself, before it calls the provider
-// (bad or missing key, model not allowed or unknown, request too large, its own budget or rate
-// limit). A record with one of them and no usage was never charged.
-var refusedBeforeUpstream = map[int64]bool{401: true, 403: true, 404: true, 405: true, 413: true, 415: true, 429: true}
+// gatewayStatuses are the statuses agentgateway sets itself, before it calls the provider (bad or
+// missing key, model not allowed or unknown, request too large, its own budget or rate limit). A
+// record from a config that does not log koinon.upstream cannot say who answered, so such a record
+// with one of these statuses and no usage is taken as the gateway's and never charged.
+var gatewayStatuses = map[int64]bool{401: true, 403: true, 404: true, 405: true, 413: true, 415: true, 429: true}
 
 func isZeroDecimal(s string) bool { return strings.Trim(s, "0.") == "" }
 
@@ -106,10 +107,14 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				if model == "" {
 					continue // not an LLM request (MCP, or refused before the model)
 				}
+				upstreamKnown := attrs[gateway.LogFieldUpstream] != nil
+				upstream := boolValue(attrs[gateway.LogFieldUpstream])
 				if !usage {
 					switch {
-					case statusOK && refusedBeforeUpstream[status]:
-						continue // answered by the gateway itself, never reached the provider
+					case statusOK && upstreamKnown && !upstream:
+						continue // answered by the gateway itself (a refused key, its own budget): never reached the provider
+					case statusOK && !upstreamKnown && gatewayStatuses[status]:
+						continue // a config that cannot say who answered: these statuses are the gateway's
 					case statusOK, hasReqBytes:
 						// A 2xx without usage (an aborted stream, a provider that reports none), any
 						// other non-2xx, or no status at all (the client disconnected before the
@@ -134,6 +139,7 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 					InputKnown:   inOK, OutputKnown: outOK,
 					CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite, ReasoningTokens: reasoning,
 					CostUSD: cost, Status: status,
+					UpstreamKnown: upstreamKnown, Upstream: upstream,
 					RequestBytes: -1, ResponseBytes: -1,
 					Time: recordTime(lr.GetTimeUnixNano(), lr.GetObservedTimeUnixNano()),
 				}
