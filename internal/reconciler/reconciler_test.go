@@ -477,6 +477,7 @@ var _ = Describe("Reconciler", func() {
 				dyn     *dynamicfake.FakeDynamicClient
 				metrics *reconciler.Metrics
 				ns      string
+				obsNow  atomic.Pointer[time.Time]
 			)
 			const osReason, osMessage = "ConfigurationPending", "Waiting for effective configuration validation before workload activation"
 			imagePullPod := func() *corev1.Pod {
@@ -499,7 +500,10 @@ var _ = Describe("Reconciler", func() {
 				cfg.Observer = &reconciler.SandboxObserver{
 					Kube: kube, Dynamic: dyn, GatewayID: "openshell", ClusterRole: "koinon-koinon-sandbox-observer",
 					ServiceAccount: "koinon-reconciler", ServiceAccountNamespace: namespace,
+					Now: func() time.Time { return *obsNow.Load() },
 				}
+				t0 := time.Now()
+				obsNow.Store(&t0)
 				r = newReconciler()
 			})
 			provisioning := func() {
@@ -597,7 +601,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(testutil.ToFloat64(metrics.ObserverErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
 			})
 
-			It("counts a refused RoleBinding and retries it on the next pass", func(ctx SpecContext) {
+			It("counts a refused RoleBinding and retries it after the backoff", func(ctx SpecContext) {
 				var refuse atomic.Bool
 				refuse.Store(true)
 				kube.PrependReactor("create", "rolebindings", func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -608,7 +612,19 @@ var _ = Describe("Reconciler", func() {
 				})
 				pass(ctx, r)
 				Expect(testutil.ToFloat64(metrics.ObserverErrors.WithLabelValues("forbidden"))).To(BeNumerically(">=", 1))
+				By("the next pass does not ask again inside the backoff")
+				before := len(kube.Actions())
+				pass(ctx, r)
+				creates := 0
+				for _, a := range kube.Actions()[before:] {
+					if a.Matches("create", "rolebindings") {
+						creates++
+					}
+				}
+				Expect(creates).To(BeZero())
 				refuse.Store(false)
+				later := obsNow.Load().Add(11 * time.Second)
+				obsNow.Store(&later)
 				pass(ctx, r)
 				bindings, err := kube.RbacV1().RoleBindings(ns).List(ctx, metav1.ListOptions{})
 				Expect(err).NotTo(HaveOccurred())
