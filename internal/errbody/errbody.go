@@ -8,8 +8,9 @@
 // short, capped excerpt, and applies the same redaction in two places:
 //
 //   - at the gateway, in the CEL expression of the access-log field koinon.error_body
-//     ([GatewayExpr]), so the gateway's own log and the OTLP export never carry more than
-//     [GatewayCap] characters of a body, with secrets replaced;
+//     ([GatewayExpr]), which keeps only the known error fields of a JSON body (never a field
+//     that quotes the prompt), so the gateway's own log and the OTLP export carry no prompt text
+//     and secrets are replaced;
 //   - in the spend ledger, which runs [Summarize] on the exported field before it stores anything.
 //     It reads the provider's error message and reasons from the known JSON shapes, drops
 //     everything else (metadata such as flagged_input or raw), redacts again and caps the result
@@ -75,12 +76,40 @@ func Redact(s string) string {
 }
 
 // GatewayExpr is the CEL expression of the access-log field koinon.error_body: for a response with
-// an error status, the first GatewayCap characters of its body with the patterns applied; for any
-// other response it fails, which leaves the field out of the record. It reads the body prefix the
-// gateway records for logging only, as the stream passes; nothing is buffered before the response
-// is forwarded (agentgateway schema/cel-functions.md, "Body Variables").
+// an error status, a sanitized body with the patterns applied; for any other response it fails,
+// which leaves the field out of the record. It reads the body prefix the gateway records for
+// logging only, as the stream passes; nothing is buffered before the response is forwarded
+// (agentgateway schema/cel-functions.md, "Body Variables").
+//
+// The expression never copies the body. For a JSON body it builds a new object from the known
+// error fields only, in the shape [Summarize] reads ({"error": {type, code, message,
+// metadata: {reasons, provider_name}}}), so a field that carries the prompt (OpenRouter's
+// metadata.flagged_input, raw) never reaches the gateway's log or the OTLP export (ADR 0074
+// decision 6). The first alternative that resolves wins (coalesce):
+//
+//  1. {"error": {"message": ...}} (OpenAI, OpenRouter, Anthropic), with the optional fields;
+//  2. {"error": "text"};
+//  3. {"message": "text"};
+//  4. any other JSON, or a JSON body that does not parse as a whole (cut at the prefix limit):
+//     a fixed placeholder, so an unknown shape can not carry a prompt either;
+//  5. a body that is not JSON: its first [GatewayCap] characters.
 func GatewayExpr() string {
-	e := `string(response.bodyPrefix).with(b, size(b) > ` + fmt.Sprint(GatewayCap) + ` ? b.substring(0, ` + fmt.Sprint(GatewayCap) + `) : b)`
+	capTo := func(expr string, n int) string {
+		return `(` + expr + `).with(m, size(m) > ` + fmt.Sprint(n) + ` ? m.substring(0, ` + fmt.Sprint(n) + `) : m)`
+	}
+	const body = `response.bodyPrefix`
+	// A missing or non-string field is an error here, which moves the coalesce to the next shape.
+	msg := func(expr string) string { return capTo(expr+` + ""`, messageMax) }
+	structured := `json(` + body + `).error.with(e, toJson({"error": {` +
+		`"type": coalesce(e.type + "", ""), ` +
+		`"code": coalesce(e.code, ""), ` +
+		`"message": ` + capTo(`e.message + ""`, messageMax) + `, ` +
+		`"metadata": {"reasons": coalesce(e.metadata.reasons, []), "provider_name": coalesce(e.metadata.provider_name + "", "")}}}))`
+	errorText := `toJson({"error": {"message": ` + msg(`json(`+body+`).error`) + `}})`
+	topMessage := `toJson({"error": {"message": ` + msg(`json(`+body+`).message`) + `}})`
+	otherJSON := `json(` + body + `).with(j, "[error body of an unrecognised shape]")`
+	text := `string(` + body + `).with(b, b.trim().startsWith("{") || b.trim().startsWith("[") ? "[error body that is not complete JSON]" : ` + capTo(`b`, GatewayCap) + `)`
+	e := `coalesce(` + strings.Join([]string{structured, errorText, topMessage, otherJSON, text}, ", ") + `)`
 	for _, p := range Patterns {
 		e += `.regexReplaceAll(` + celString(p.Regex) + `, ` + celString(Redacted) + `)`
 	}

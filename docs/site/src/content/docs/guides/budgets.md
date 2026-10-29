@@ -49,8 +49,9 @@ A provider can refuse a request: it is invalid, or the provider's moderation fla
 OpenRouter and OpenAI do not bill a request they refuse, so Koinon charges **nothing** for it and it
 does not count toward a run's token cap. The request stays in the spend report with a zero cost,
 marked `rejected_by_upstream`, so you can still see it happened; the entry keeps the HTTP status and a
-short, redacted excerpt of the provider's error (never the full body, and never the part that quotes
-your prompt). For a provider Koinon has no billing information for (Ollama, a custom or unknown
+short excerpt of the provider's error (never the full body: credentials are redacted, the excerpt is
+capped, and the fields that carry your prompt are dropped, but a provider's message can still quote a
+few words of the request). For a provider Koinon has no billing information for (Ollama, a custom or unknown
 OpenAI-compatible API) a refused request is charged the input it probably cost, which can only
 overstate spend. Requests that the gateway itself refuses (a revoked key, a model the key may not use, a
 spent limit) never reach a provider and are never charged. A server error from the provider is
