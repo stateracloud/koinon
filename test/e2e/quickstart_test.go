@@ -29,6 +29,7 @@ import (
 	taskv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/task/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	tokenv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/token/v1alpha1"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // What the fake model script test/fakemodel/scripts/repo-helper.yaml does, and the fake
@@ -636,6 +637,86 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(total).To(BeNumerically("<=", quickstartBudget),
 			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)
 	})
+
+	It("8. (not part of the quickstart, after its time check) adaptive thinking on and off crosses the real gateway to the strict fake model (rc.7, #240)", func(ctx SpecContext) {
+		t.begin()
+		// The fake model server runs with -strict-messages (test/e2e/kind/fakes.yaml): it answers 400
+		// to a body field whose beta is missing, as api.anthropic.com does, so a run that succeeds
+		// shows OpenCode's real body and the gateway's pinned beta agree. claude-haiku-5-5 is an ID
+		// the thinking table matches (internal/thinking); claude-e2e of 6d is not.
+		const model = "claude-haiku-5-5"
+		code, body := admin(ctx, http.MethodPost, "/prices", `{"name":"fake-claude-haiku-5-5","provider":"anthropic","match":{"glob":"`+model+`"},`+
+			`"prices":{"input":"3.00","output":"15.00","cacheRead":"0.30","cacheWrite":"3.75"},"maxOutput":4096}`)
+		Expect(code).To(Equal(http.StatusCreated), string(body))
+
+		modelPath := "/agents/" + agent.GetId() + "/model"
+		thinkingPath := "/agents/" + agent.GetId() + "/thinking"
+		DeferCleanup(func(ctx context.Context) {
+			code, body := admin(ctx, http.MethodPut, thinkingPath, `{"thinking":"default"}`)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+			code, body = admin(ctx, http.MethodPut, modelPath, `{"model":"default"}`)
+			Expect(code).To(Equal(http.StatusOK), string(body))
+		})
+		Eventually(func(g Gomega) {
+			code, body := admin(ctx, http.MethodPut, modelPath, `{"model":"`+model+`"}`)
+			g.Expect(code).To(Equal(http.StatusOK), string(body))
+		}).WithContext(ctx).WithTimeout(2 * time.Minute).WithPolling(2 * time.Second).Should(Succeed())
+
+		fakeModel := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMODEL_URL"), "/")
+		Expect(fakeModel).NotTo(BeEmpty(), "KOINON_E2E_FAKEMODEL_URL")
+		runTask := func(title string) {
+			GinkgoHelper()
+			res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+				OrgId: org, AgentId: agent.GetId(), Title: title, Message: "Run the cache probe and say when it is done.",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			var seq int64
+			var evKinds []string
+			cw := watchRun(context.WithoutCancel(ctx), c, org, res.GetRun().GetId(), 0)
+			done := cw.until(ctx, c, org, res.GetRun().GetId(), 8*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+				return terminal(r.GetState())
+			})
+			Expect(done.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_SUCCEEDED), done.GetOutcomeReason())
+		}
+		count := func() int {
+			var n int
+			Eventually(func(g Gomega) {
+				n = len(fakeModelRequests(ctx, g, fakeModel, model))
+			}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+			return n
+		}
+
+		By("thinking on: every request carries adaptive thinking, and the beta the gateway pins is the only one")
+		code, body = admin(ctx, http.MethodPut, thinkingPath, `{"thinking":"on"}`)
+		Expect(code).To(Equal(http.StatusOK), string(body))
+		runTask("Thinking on")
+		var on []fakeRequest
+		Eventually(func(g Gomega) {
+			on = fakeModelRequests(ctx, g, fakeModel, model)
+			g.Expect(len(on)).To(BeNumerically(">=", 2), "the task's request and the end-of-turn note")
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		for _, r := range on {
+			Expect(r.Path).To(Equal("/v1/messages"))
+			Expect(r.Thinking).To(Equal("adaptive"), "%+v", r)
+			Expect(r.Betas).To(Equal([]string{thinking.BindingBeta}), "the gateway replaces the client's betas: %+v", r)
+		}
+
+		By("thinking off: no request carries a thinking block")
+		before := count()
+		code, body = admin(ctx, http.MethodPut, thinkingPath, `{"thinking":"off"}`)
+		Expect(code).To(Equal(http.StatusOK), string(body))
+		runTask("Thinking off")
+		var all []fakeRequest
+		Eventually(func(g Gomega) {
+			all = fakeModelRequests(ctx, g, fakeModel, model)
+			g.Expect(len(all)).To(BeNumerically(">=", before+2))
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		for _, r := range all[before:] {
+			Expect(r.Path).To(Equal("/v1/messages"))
+			Expect(r.Thinking).To(BeEmpty(), "%+v", r)
+		}
+		t.end("8. Adaptive thinking on and off: strict fake behind the real gateway")
+	})
 	// Not part of the quickstart, and after its time check: the flavor image is broken for the rest of
 	// the run (the cluster is deleted afterwards).
 	It("8. a flavor image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
@@ -732,18 +813,34 @@ var _ = Describe("the quickstart", Ordered, func() {
 // fakeModelPaths returns the URL paths of the requests the fake model server received for model,
 // from its /_fake/requests listing.
 func fakeModelPaths(ctx context.Context, g Gomega, base, model string) []string {
+	var out []string
+	for _, r := range fakeModelRequests(ctx, g, base, model) {
+		out = append(out, r.Path)
+	}
+	return out
+}
+
+// fakeRequest is one request the fake model server received: the path, the thinking type of the
+// body ("" for none) and the anthropic-beta values.
+type fakeRequest struct {
+	Path, Model, Thinking string
+	Betas                 []string
+}
+
+// fakeModelRequests returns the requests the fake model server got for model, in arrival order.
+func fakeModelRequests(ctx context.Context, g Gomega, base, model string) []fakeRequest {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/_fake/requests", nil)
 	g.Expect(err).NotTo(HaveOccurred())
 	res, err := http.DefaultClient.Do(req)
 	g.Expect(err).NotTo(HaveOccurred())
 	defer func() { _ = res.Body.Close() }()
 	g.Expect(res.StatusCode).To(Equal(http.StatusOK))
-	var list []struct{ Path, Model string }
+	var list []fakeRequest
 	g.Expect(json.NewDecoder(res.Body).Decode(&list)).To(Succeed())
-	var out []string
+	var out []fakeRequest
 	for _, r := range list {
 		if r.Model == model {
-			out = append(out, r.Path)
+			out = append(out, r)
 		}
 	}
 	return out

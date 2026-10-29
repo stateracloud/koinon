@@ -6,6 +6,9 @@
 # claude-e2e explicitly, so the provider's name plays no part in which model the run uses. Side effect:
 # once 6d prices claude-e2e it becomes the org default, because "anthropic-fake" sorts before "fake";
 # a step added after 6d that relies on the default model must set its model explicitly.
+# claude-haiku-5-5 is a Claude 5.x ID the thinking table matches (internal/thinking), so step 6e
+# sends adaptive thinking with block_binding through the real gateway to the strict fake model
+# (script claude-haiku-5-5.yaml; the fake runs with -strict-messages, test/e2e/kind/fakes.yaml).
 # test/e2e/run.sh applies it next to model-provider.yaml; it is no part of the quickstart.
 apiVersion: v1
 kind: Secret
@@ -22,3 +25,4 @@ stringData:
   apiKey: e2e-dummy-key
   models: |
     - name: claude-e2e
+    - name: claude-haiku-5-5

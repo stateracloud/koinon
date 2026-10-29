@@ -78,15 +78,26 @@ func New(scripts ...Script) (*Server, error) {
 
 // listRequests answers GET /_fake/requests with the path and model of every request received, in
 // arrival order, so a test that reaches the binary over the network (e2e) can check which API a
-// harness used. Bodies and headers stay in-process ([Server.Requests]).
+// harness used, and for a Messages request the thinking type of the body and its anthropic-beta
+// values. Full bodies and headers stay in-process ([Server.Requests]).
 func (s *Server) listRequests(w http.ResponseWriter, _ *http.Request) {
 	type item struct {
 		Path  string `json:"path"`
 		Model string `json:"model"`
+		// Thinking is the type of the body's thinking object, "" when it has none.
+		Thinking string `json:"thinking,omitempty"`
+		// Betas are the values of the anthropic-beta header.
+		Betas []string `json:"betas,omitempty"`
 	}
 	out := []item{}
 	for _, r := range s.Requests() {
-		out = append(out, item{Path: r.Path, Model: r.Model})
+		var body struct {
+			Thinking struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+		}
+		_ = json.Unmarshal(r.Body, &body)
+		out = append(out, item{Path: r.Path, Model: r.Model, Thinking: body.Thinking.Type, Betas: betas(r.Header)})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
