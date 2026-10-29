@@ -1,6 +1,6 @@
 # 0023. Optional observability, hash-chained audit on by default
 
-- Status: Accepted; amended 2026-10-26 and 2026-10-28 (below); run traces by [0074](0074-run-traces-trace-router.md)
+- Status: Accepted; amended 2026-10-26, 2026-10-28 and 2026-10-30 (below); run traces by [0074](0074-run-traces-trace-router.md)
 - Date: 2026-10-21
 - Decision: [design.md#23](../design.md)
 
@@ -151,6 +151,16 @@ that org's traces, and nothing is exported by default.
 
 The metrics amendment's "Deferred: run traces and the org-level OTLP endpoint" now points to 0074,
 which ships after v0.1.0.
+
+## Amendment (2026-10-30): agentgateway's stats port
+
+`metrics.serviceMonitor.enabled` also scrapes agentgateway's stats port (15020). Standalone mode renders
+a `ServiceMonitor` on the gateway Service's `stats` port. In kubernetes mode the controller owns the
+proxy and its Service (which exposes only the listener port), so the chart renders a `PodMonitor` on the
+proxy pods, selected by the controller's `gateway-name` label, and the install needs the `PodMonitor`
+CRD unless `skipCapabilityCheck` is set. The label rule holds: agentgateway's series are labelled by
+gateway, listener, route, backend, status and model, with no key or agent ID. `networkPolicy.metricsFrom`
+still decides who may reach the port, and a non-operator scraper works with the monitors off.
 
 ## Open questions
 
