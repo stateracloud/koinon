@@ -35,6 +35,27 @@ var _ = Describe("Render", func() {
 		})
 	}
 
+	It("logs who answered and a redacted prefix of a failed response, with no \"$\" the config loader would expand (ADR 0056 amendment 2026-10-29)", func() {
+		f := fixtures()[2]
+		got, _, err := standalone.Render(f.state, f.options)
+		Expect(err).NotTo(HaveOccurred())
+		var doc struct {
+			Frontend struct {
+				AccessLog struct {
+					Add map[string]string `yaml:"add"`
+				} `yaml:"accessLog"`
+			} `yaml:"frontendPolicies"`
+		}
+		Expect(yaml.Unmarshal(got, &doc)).To(Succeed())
+		add := doc.Frontend.AccessLog.Add
+		Expect(add).To(HaveKeyWithValue(gateway.LogFieldUpstream, gateway.UpstreamCEL))
+		Expect(add).To(HaveKey(gateway.LogFieldErrorBody))
+		Expect(add[gateway.LogFieldErrorBody]).To(And(ContainSubstring("response.bodyPrefix"), ContainSubstring("response.code >= 400")))
+		for name, expr := range add {
+			Expect(expr).NotTo(ContainSubstring("$"), name+": agentgateway expands $ in its config file as an environment variable")
+		}
+	})
+
 	It("is deterministic and independent of key order", func() {
 		f := fixtures()[2]
 		a, revA, err := standalone.Render(f.state, f.options)

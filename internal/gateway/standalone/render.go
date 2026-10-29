@@ -22,6 +22,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/stateracloud/koinon/internal/errbody"
 	"github.com/stateracloud/koinon/internal/gateway"
 )
 
@@ -459,7 +460,10 @@ func build(s gateway.State, o Options) document {
 			gateway.LogFieldRequestBytes: `int(request.headers["content-length"])`,
 			// The provider's response ID, to settle a stream cut short (ADR 0056, amendment 2026-10-28).
 			gateway.LogFieldResponseID: gateway.ResponseIDCEL,
-			MarkerField:                `""`,
+			// Who answered, and what a failed response said (ADR 0056, amendment 2026-10-29).
+			gateway.LogFieldUpstream:  gateway.UpstreamCEL,
+			gateway.LogFieldErrorBody: errbody.GatewayExpr(),
+			MarkerField:               `""`,
 		}}},
 		Gateways: map[string]listener{"default": {Port: o.Port}},
 	}

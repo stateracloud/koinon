@@ -124,6 +124,15 @@ var _ = Describe("Render", func() {
 	It("matches the golden file", func() { golden(fullState(), "full") })
 	It("matches the golden file for models in each format (ADR 0069)", func() { golden(formatsState(), "model-formats") })
 
+	It("logs who answered and a redacted prefix of a failed response (ADR 0056 amendment 2026-10-29)", func() {
+		r, err := gwk8s.Render(fullState(), opts())
+		Expect(err).NotTo(HaveOccurred())
+		out := string(dump(r))
+		Expect(out).To(ContainSubstring("name: " + gateway.LogFieldUpstream))
+		Expect(out).To(ContainSubstring("name: " + gateway.LogFieldErrorBody))
+		Expect(out).To(ContainSubstring("response.bodyPrefix"))
+	})
+
 	It("is deterministic and independent of input order", func() {
 		a, err := gwk8s.Render(fullState(), opts())
 		Expect(err).NotTo(HaveOccurred())

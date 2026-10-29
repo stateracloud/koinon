@@ -12,8 +12,9 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"eb99b5964c198e04"'
+      koinon.config: '"3e370dbca886e345"'
       koinon.error: proxy.error.reason
+      koinon.error_body: 'response.code >= 400 ? string(response.bodyPrefix).with(b, size(b) > 2048 ? b.substring(0, 2048) : b).regexReplaceAll("(?i)bearer\\s+[A-Za-z0-9._~+/=-]{8,}", "[redacted]").regexReplaceAll("kgw[_][A-Za-z0-9_-]{8,}", "[redacted]").regexReplaceAll("\\b(?:sk|pk|rk|gsk|xai)-[A-Za-z0-9_-]{8,}", "[redacted]").regexReplaceAll("(?i)\"?(?:api[_-]?key|authorization|access[_-]?token|secret|password)\"?\\s*[:=]\\s*\"?[^\",\\s}]+\"?", "[redacted]").regexReplaceAll("\\b[A-Za-z0-9_-]{40,}\\b", "[redacted]") : fail("not an error response")'
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
@@ -25,6 +26,7 @@ frontendPolicies:
       koinon.response_id: coalesce(response.headers["x-generation-id"])
       koinon.status: response.code
       koinon.stream: llm.streaming
+      koinon.upstream: default(proxy.upstreamDuration, "") != ""
 gateways:
   default:
     port: 4000
@@ -49,7 +51,7 @@ llm:
             agent: globex/analyst
             org: globex
           allowedModels: []
-        - keyHash: sha256:d5cd608f26bf6eab54ecd4387ded4d95c881342e7a6ede12778228653454f908
+        - keyHash: sha256:e8ef7e0d6217045f28ea6a68de74a94aa7f6e14b634b7448aa735bce79e1017c
           metadata:
             name: koinon-reload-probe
             agent: ""
