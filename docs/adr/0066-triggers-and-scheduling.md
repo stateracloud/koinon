@@ -500,7 +500,7 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
 
 ## Amendment (2026-10-29, rc.7): the wait cause reads the pod, and `crash_loop`
 
-The cause set is `image_pull`, `admission`, `no_nodes`, `crash_loop` and `unknown`. In rc.6 an image that
+The cause set is `image_pull`, `admission`, `no_nodes`, `crash_loop`, `container_create` and `unknown`. In rc.6 an image that
 cannot be pulled was always `unknown`, because OpenShell replaces the pod's reason with
 `ConfigurationPending` (capture on kind, 2026-10-29). [0078](0078-sandbox-observer.md) has the reconciler
 read the pod when OpenShell's reason says nothing and write the kubelet's reason and message into

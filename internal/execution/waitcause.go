@@ -13,11 +13,14 @@ const (
 	WaitCauseAdmission SandboxWaitCause = "admission"
 	WaitCauseNoNodes   SandboxWaitCause = "no_nodes"
 	WaitCauseCrashLoop SandboxWaitCause = "crash_loop"
-	WaitCauseUnknown   SandboxWaitCause = "unknown"
+	// WaitCauseContainerCreate is a container the kubelet cannot create: a missing Secret or ConfigMap it
+	// mounts, an invalid setting, a runtime that refuses it.
+	WaitCauseContainerCreate SandboxWaitCause = "container_create"
+	WaitCauseUnknown         SandboxWaitCause = "unknown"
 )
 
 // WaitCauses lists every cause, for pre-initialising metric labels.
-var WaitCauses = []SandboxWaitCause{WaitCauseImagePull, WaitCauseAdmission, WaitCauseNoNodes, WaitCauseCrashLoop, WaitCauseUnknown}
+var WaitCauses = []SandboxWaitCause{WaitCauseImagePull, WaitCauseAdmission, WaitCauseNoNodes, WaitCauseCrashLoop, WaitCauseContainerCreate, WaitCauseUnknown}
 
 var (
 	imagePullReasons = []string{"errimagepull", "imagepullbackoff", "invalidimagename", "errimageneverpull"}
@@ -29,9 +32,12 @@ var (
 		"admission webhook", "validatingadmissionpolicy", "denied request",
 		"denied the request", "exceeded quota", "violates podsecurity",
 	}
-	crashLoopReasons = []string{"crashloopbackoff", "createcontainererror"}
+	crashLoopReasons = []string{"crashloopbackoff"}
 	crashLoopText    = []string{"crashloopbackoff"}
-	noNodesText      = []string{
+	// The kubelet reasons for a container it could not create (CreateContainerConfigError: a Secret or
+	// ConfigMap reference or a setting; CreateContainerError: the runtime refused), and RunContainerError.
+	containerCreateReasons = []string{"createcontainererror", "createcontainerconfigerror", "runcontainererror"}
+	noNodesText            = []string{
 		"nodes are available", "unschedulable", "insufficient cpu", "insufficient memory",
 		"untolerated taint", "didn't match pod's node affinity",
 	}
@@ -50,6 +56,8 @@ func ClassifySandboxWait(reason, message string) SandboxWaitCause {
 		return WaitCauseNoNodes
 	case containsExact(crashLoopReasons, r) || containsAny(m, crashLoopText):
 		return WaitCauseCrashLoop
+	case containsExact(containerCreateReasons, r):
+		return WaitCauseContainerCreate
 	}
 	return WaitCauseUnknown
 }
@@ -65,6 +73,8 @@ func (c SandboxWaitCause) Describe() string {
 		return "no node can run the sandbox"
 	case WaitCauseCrashLoop:
 		return "a container in the sandbox keeps crashing"
+	case WaitCauseContainerCreate:
+		return "a container in the sandbox could not be created"
 	}
 	return "the cause is unknown"
 }
