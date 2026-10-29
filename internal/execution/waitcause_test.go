@@ -31,10 +31,12 @@ var _ = DescribeTable("ClassifySandboxWait",
 		execution.WaitCauseNoNodes),
 	// With a flavor image that cannot be pulled, OpenShell reports no pull error in its conditions: its
 	// ConfigurationReady condition stays False and the pod's ImagePullBackOff shows only in the pod's
-	// container status and events. Koinon sees nothing to classify, so this is unknown today.
-	Entry("captured: OpenShell while the image cannot be pulled", "ConfigurationPending",
+	// container status and events. These two entries pin what the classifier does with OpenShell's
+	// words alone (the sandbox observer, ADR 0078, off or unable to read): unknown. With the observer
+	// the pod's detail replaces them (podcause_test.go: the same sandbox is image_pull).
+	Entry("captured: OpenShell alone while the image cannot be pulled (no observer)", "ConfigurationPending",
 		"Waiting for effective configuration validation before workload activation", execution.WaitCauseUnknown),
-	Entry("captured: Agent Sandbox ready condition while the pod is pending", "DependenciesNotReady",
+	Entry("captured: Agent Sandbox ready condition while the pod is pending (no observer)", "DependenciesNotReady",
 		"Pod exists with phase: Pending", execution.WaitCauseUnknown),
 	Entry("captured: OpenShell while the sandbox is scheduling-gated", "SchedulingGated",
 		"Scheduling is blocked due to non-empty scheduling gates", execution.WaitCauseUnknown),
@@ -45,6 +47,9 @@ var _ = DescribeTable("ClassifySandboxWait",
 	Entry("captured: kubelet pull failure event", "Failed",
 		`Failed to pull image "kind.local/koinon-escape/agent:nope": failed to pull and unpack image "kind.local/koinon-escape/agent:nope": failed to resolve reference "kind.local/koinon-escape/agent:nope": failed to do request: Head "https://kind.local/v2/koinon-escape/agent/manifests/nope": dial tcp: lookup kind.local on 0.250.250.254:53: server misbehaving`,
 		execution.WaitCauseImagePull),
+	Entry("a crash loop", "CrashLoopBackOff", "", execution.WaitCauseCrashLoop),
+	Entry("a crash loop in the message", "", `container "agent" is in CrashLoopBackOff (last exit: Error)`, execution.WaitCauseCrashLoop),
+	Entry("a container that cannot be created", "CreateContainerError", "", execution.WaitCauseCrashLoop),
 	Entry("captured: the chart's ValidatingAdmissionPolicy refusing a pod", "",
 		"The pods \"vap-probe\" is invalid: : ValidatingAdmissionPolicy 'koinon-koinon-sandbox-pods' with binding 'koinon-koinon-sandbox-pods' denied request: only the Agent Sandbox controller (and the OpenShell gateway, for supervisor pods) may create pods in sandbox namespaces, not kubernetes-admin",
 		execution.WaitCauseAdmission),
@@ -55,5 +60,6 @@ var _ = DescribeTable("SandboxWaitCause.Describe",
 	Entry("image_pull", execution.WaitCauseImagePull, "the image could not be pulled"),
 	Entry("admission", execution.WaitCauseAdmission, "the cluster's admission policy refused the sandbox"),
 	Entry("no_nodes", execution.WaitCauseNoNodes, "no node can run the sandbox"),
+	Entry("crash_loop", execution.WaitCauseCrashLoop, "a container in the sandbox keeps crashing"),
 	Entry("unknown", execution.WaitCauseUnknown, "the cause is unknown"),
 )
