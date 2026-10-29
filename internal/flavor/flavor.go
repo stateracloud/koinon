@@ -72,6 +72,11 @@ type Descriptor struct {
 	// format missing here cannot be cached on this flavor. A model whose format has its own markers
 	// (prices.CacheNative) needs no switch: the harness places them.
 	CacheArgs map[string]string
+	// NoWebToolsArg is the launch switch that removes the harness's built-in web tools (fetch and
+	// search) from the tools offered to the model. koinon-agentd passes it when the agent has no
+	// web egress (agentconfig.Config.WebEgress), so the tool set matches the sandbox's network
+	// policy (ADR 0080). "" when the flavor has no such tools.
+	NoWebToolsArg string
 	// SessionArg is the launch switch that takes the run ID, which the harness sends to
 	// OpenRouter as session_id so a run stays on one upstream and its cache stays warm. "" when
 	// the flavor cannot.
@@ -98,8 +103,9 @@ var table = []Descriptor{
 		PluginInstallsArg: "--plugin-installs",
 		// The entry script turns each into compatibility.cacheFormat of the koinon provider
 		// (OpenCode 2.2.0, packages/schema/src/model-compatibility.ts).
-		CacheArgs:  map[string]string{"anthropic": "--cache-anthropic", "alibaba": "--cache-alibaba"},
-		SessionArg: "--session-id",
+		CacheArgs:     map[string]string{"anthropic": "--cache-anthropic", "alibaba": "--cache-alibaba"},
+		NoWebToolsArg: "--no-web-tools",
+		SessionArg:    "--session-id",
 	},
 }
 

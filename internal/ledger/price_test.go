@@ -278,7 +278,7 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(err).NotTo(HaveOccurred())
 		l, err := ledger.AgentLimit(ctx, q, other.agent, time.Now())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(l.Amount).To(BeNumerically("~", 9.80, 0.001))
+		Expect(l.Amount).To(Equal(money.MustParse("9.80")))
 
 		// A sum beyond what a field could hold saturates instead of failing.
 		_, err = db.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)
@@ -466,7 +466,7 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(ledger.FormatUSD(reserve)).To(Equal("0.004"))
 		l, err := ledger.AgentLimit(ctx, q, e.agent, time.Now())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(l.Amount).To(BeNumerically("~", 100-0.0002-0.0042, 1e-9), "the key's limit holds the reserve back")
+		Expect(l.Amount).To(Equal(money.MustParse("99.9956")), "the key's limit holds the reserve back")
 		v, _, err := budget.New(db).GetAgent(ctx, e.org, e.agent.ID, money.MustParse("100.00"), time.Now())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v.SpentToday).To(Equal(money.MustParse("0.0004")), "the budget counts the charges only")
@@ -530,15 +530,15 @@ var _ = Describe("Budgets", func() {
 		now := time.Now()
 		l, err := ledger.AgentLimit(ctx, q, e.agent, now)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(l.Amount).To(BeNumerically("==", 10), "the template's value is the default")
+		Expect(l.Amount).To(Equal(money.MustParse("10")), "the template's value is the default")
 
 		Expect(svc.SetAgentDaily(ctx, e.org, e.agent.ID, audit.User(e.user), money.MustParse("5"))).To(Succeed())
 		l, _ = ledger.AgentLimit(ctx, q, e.agent, now)
-		Expect(l.Amount).To(BeNumerically("==", 5), "an admin's limit replaces the template's")
+		Expect(l.Amount).To(Equal(money.MustParse("5")), "an admin's limit replaces the template's")
 
 		Expect(svc.SetOrgCap(ctx, e.org, audit.User(e.user), ptr(money.MustParse("3")))).To(Succeed())
 		l, _ = ledger.AgentLimit(ctx, q, e.agent, now)
-		Expect(l.Amount).To(BeNumerically("==", 3))
+		Expect(l.Amount).To(Equal(money.MustParse("3")))
 
 		// Only a platform admin may set the ceiling; the cap must fit under it.
 		err = svc.SetPlatformCeiling(ctx, e.org, audit.User(e.user), e.user, ptr(money.MustParse("2")))
@@ -554,7 +554,7 @@ var _ = Describe("Budgets", func() {
 		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(now, flash, 5_000_000, 0, 0, "")}) // 1.00
 		Expect(err).NotTo(HaveOccurred())
 		l, _ = ledger.AgentLimit(ctx, q, e.agent, now)
-		Expect(l.Amount).To(BeNumerically("==", 2), "min(5-1, 3-1, 4-1)")
+		Expect(l.Amount).To(Equal(money.MustParse("2")), "min(5-1, 3-1, 4-1)")
 
 		var n int
 		Expect(db.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action LIKE 'budget.%'`, e.org).Scan(&n)).To(Succeed())

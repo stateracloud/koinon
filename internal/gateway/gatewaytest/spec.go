@@ -24,6 +24,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
 )
 
 // Env is one driver under test.
@@ -200,7 +201,7 @@ func llmSpec(env Env) {
 			state.AddKey(keyG.Key)
 			state.AddKey(keyC.Key)
 			state.RestrictModels(keyC.Agent, "open-model")
-			state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: 0.0015, Window: 24 * time.Hour})
+			state.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("0.0015"), Window: 24 * time.Hour})
 			state.GrantTools(agentA, gateway.ToolGrant{Target: "github", Tools: []string{"create_pull_request", "get_approval_status"}})
 
 			gw, err := env.Start(ctx, []int{port(upstream), port(tools), port(ups["globex"].Server), port(ups["guarded"].Server), port(ups["private"].Server), port(redirector)},

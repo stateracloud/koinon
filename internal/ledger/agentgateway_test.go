@@ -30,6 +30,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providerusage"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
@@ -237,7 +238,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 
 	It("re-pushes the limit net of recorded spend without counting that spend twice", func(ctx SpecContext) {
 		l := push(ctx)
-		Expect(l.Amount).To(BeNumerically("~", 0.027, 1e-12))
+		Expect(l.Amount).To(Equal(money.MustParse("0.027")))
 
 		// The same key gets a fresh gateway counter with the remainder: 27 more requests pass,
 		// not 24 (remainder minus the gateway's own count) and not 30 (the full limit).

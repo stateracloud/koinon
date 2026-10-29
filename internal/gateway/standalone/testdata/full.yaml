@@ -34,7 +34,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"ead1dd589bab1f8f"'
+      koinon.config: '"28e2362056cac58b"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -88,8 +88,8 @@ llm:
           budgets:
             - name: koinon-agent-limit
               limit:
-                unit: Tokens
-                amount: 200000
+                unit: USD
+                amount: 200.0
               window:
                 rolling: 30d
               onBudgetExceeded: Block
@@ -100,7 +100,7 @@ llm:
             org: globex
           allowedModels:
             - deepseek/deepseek-v4.1-flash
-        - keyHash: sha256:ba3ec753abd2464a226f417b5ad60fdb01d25ba2bbdbe23863efe3d6b7d7463c
+        - keyHash: sha256:7ed9a2127473c9d5d2949d74d53971f3cffd710cdaadeae4ba22236230b494ae
           metadata:
             name: koinon-reload-probe
             agent: ""

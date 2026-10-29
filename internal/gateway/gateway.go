@@ -94,6 +94,31 @@ func (e *RejectedError) Orgs() []string {
 	return slices.Compact(out)
 }
 
+// ErrConfigRejected means the gateway failed to load the whole config it was given and keeps
+// serving its previous one (standalone mode). Unlike a RejectedError, nothing in the new config
+// is live.
+var ErrConfigRejected = errors.New("standalone: agentgateway rejected the config")
+
+// ConfigRejectedError is ErrConfigRejected with the revision and the gateway's own reason
+// ("USD budget limits support at most 9 fractional digits"), so an operator does not have to read
+// the gateway's log to learn it. errors.Is(err, ErrConfigRejected) matches it.
+type ConfigRejectedError struct {
+	Revision Revision
+	// Reason is the gateway's reload error, or empty when it could not be read.
+	Reason string
+}
+
+func (e *ConfigRejectedError) Error() string {
+	msg := fmt.Sprintf("%s (revision %s)", ErrConfigRejected.Error(), e.Revision)
+	if e.Reason != "" {
+		msg += ": " + e.Reason
+	}
+	return msg
+}
+
+// Is makes errors.Is(err, ErrConfigRejected) true.
+func (e *ConfigRejectedError) Is(target error) bool { return target == ErrConfigRejected }
+
 // LedgerBudgets is implemented by a driver whose gateway cannot enforce a spend limit itself: the
 // only limit it honours is an amount of zero, which it enforces by revoking the agent's keys (the
 // Kubernetes driver). A caller that cannot compute a budget must then fail closed to zero, because a
@@ -262,19 +287,23 @@ func HashKey(material string) string {
 // LimitUnit is the unit of a spend limit.
 type LimitUnit string
 
-const (
-	// USD limits spend priced by the gateway's model cost catalog.
-	USD LimitUnit = "USD"
-	// Tokens limits input plus output tokens.
-	Tokens LimitUnit = "Tokens"
-)
+// USD limits spend priced by the gateway's model cost catalog. It is the only unit a Limit
+// carries: Koinon budgets money, and the amount is an exact money.USD (issue #245).
+const USD LimitUnit = "USD"
+
+// BudgetFractionDigits is how many fraction digits of a USD limit the gateway accepts: standalone
+// agentgateway v1.7.0 rejects its whole config for a budget with more ("USD budget limits support
+// at most 9 fractional digits"). A gateway upgrade revisits it (ADR 0050, amendment 2026-10-29).
+const BudgetFractionDigits = 9
 
 // Limit is a per-agent spend limit enforced in the request path. Spend is
 // charged after a response completes, so a limit can be overshot by up to one
 // in-flight response (ADR 0041).
 type Limit struct {
-	Unit   LimitUnit
-	Amount float64
+	Unit LimitUnit
+	// Amount is exact, in USD with at most BudgetFractionDigits fraction digits (USDLimit rounds
+	// down to it; Validate rejects more).
+	Amount money.USD
 	// Window is the accounting window. agentgateway aligns windows to the Unix
 	// epoch (24h starts at midnight UTC). Zero means no window: since agentgateway
 	// v1.7 the counter then accumulates for the lifetime of its name and never
@@ -291,10 +320,28 @@ type Limit struct {
 	Generation string
 }
 
-// USDLimit returns a USD limit of amount per window. It is the edge where Koinon's exact
-// money type (package money) becomes the number agentgateway's budget config takes.
+// USDLimit returns a USD limit of amount per window. It is the edge where Koinon's exact money
+// type (package money) meets the gateway's precision: the amount is rounded down to
+// BudgetFractionDigits, which never hands out more than the remainder. The generation is not
+// derived from the amount, so the rounding does not change which counter the gateway uses.
 func USDLimit(amount money.USD, window time.Duration, generation string) Limit {
-	return Limit{Unit: USD, Amount: amount.Float64(), Window: window, Generation: generation}
+	return Limit{Unit: USD, Amount: amount.Floor(BudgetFractionDigits), Window: window, Generation: generation}
+}
+
+// Validate reports why the gateway cannot take the limit, or nil. A limit that fails it is
+// quarantined with its key by drivers that can (standalone: one bad limit must not freeze the file).
+func (l Limit) Validate() error {
+	switch {
+	case l.Unit != USD:
+		return fmt.Errorf("unknown unit %q", l.Unit)
+	case l.Amount < 0 || l.Window < 0:
+		return errors.New("amount and window must be >= 0")
+	case !l.Amount.HasFractionDigits(BudgetFractionDigits):
+		return fmt.Errorf("amount %s has more than %d fraction digits", l.Amount.Numeric(), BudgetFractionDigits)
+	case !generation.MatchString(l.Generation):
+		return errors.New("generation must be at most 64 of [a-z0-9-]")
+	}
+	return nil
 }
 
 // Provider is one OpenAI-compatible upstream of an org (ADR 0056, plan item PV1). Drivers
@@ -423,6 +470,43 @@ type State struct {
 	// key's org to count. An agent without an entry may request all of its org's models; a system
 	// agent (IsSystemAgent) without one may request none.
 	Models map[AgentRef][]string
+}
+
+// WithoutInvalidLimits returns s without the keys and limits of agents whose Limit fails
+// Limit.Validate, and one Rejection per dropped key. A driver that serves the rest of the state
+// uses it so that one agent's bad limit fails that agent's key (it is not served: fail closed)
+// and not the whole config.
+func (s State) WithoutInvalidLimits() (State, []Rejection) {
+	var bad map[AgentRef]error
+	for a, l := range s.Limits {
+		if err := l.Validate(); err != nil {
+			if bad == nil {
+				bad = map[AgentRef]error{}
+			}
+			bad[a] = err
+		}
+	}
+	if bad == nil {
+		return s, nil
+	}
+	out := s
+	out.Limits = map[AgentRef]Limit{}
+	for a, l := range s.Limits {
+		if _, ok := bad[a]; !ok {
+			out.Limits[a] = l
+		}
+	}
+	out.Keys = nil
+	var rej []Rejection
+	for _, k := range s.Keys {
+		if err, ok := bad[k.Agent]; ok {
+			rej = append(rej, Rejection{Org: k.Agent.Org, Kind: "Key", Name: k.ID, Reason: "limit: " + err.Error()})
+			continue
+		}
+		out.Keys = append(out.Keys, k)
+	}
+	slices.SortFunc(rej, func(a, b Rejection) int { return strings.Compare(a.Name, b.Name) })
+	return out, rej
 }
 
 // AddKey adds k to the State.
@@ -596,14 +680,8 @@ func (s State) Validate() error {
 		if err := a.Validate(); err != nil {
 			errs = append(errs, err)
 		}
-		if l.Unit != USD && l.Unit != Tokens {
-			errs = append(errs, fmt.Errorf("limit for %s: unknown unit %q", a, l.Unit))
-		}
-		if l.Amount < 0 || l.Window < 0 {
-			errs = append(errs, fmt.Errorf("limit for %s: amount and window must be >= 0", a))
-		}
-		if !generation.MatchString(l.Generation) {
-			errs = append(errs, fmt.Errorf("limit for %s: generation must be at most 64 of [a-z0-9-]", a))
+		if err := l.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("limit for %s: %w", a, err))
 		}
 	}
 	seenModel := map[string]bool{}
