@@ -66,7 +66,7 @@ are in [0046](0046-adr-conventions.md).
 | [0049](0049-v01-scope-decisions.md) | v0.1 scope: template, approvals, gateway modes, agentd placement | Accepted, amended by 0051, 0056, 0058, 0062, 0063, 0065, 0066 and (Kubernetes mode on native CRDs, ledger budgets) by its own G2 amendment |
 | [0050](0050-spend-ledger-ingestion-and-net-limits.md) | Spend ledger ingestion and net limits | Accepted (2026-10-26, after implementation), amended by 0056 and 2026-10-23 |
 | [0051](0051-session-home-generations.md) | Session home generations | Accepted, amended by 0054, 0065 and 2026-10-23, 2026-10-24, 2026-10-26 |
-| [0052](0052-opencode-v2-flavor.md) | OpenCode flavor on OpenCode v2 | Accepted |
+| [0052](0052-opencode-v2-flavor.md) | OpenCode flavor on OpenCode v2 | Accepted, amended by 0079 |
 | [0053](0053-hermes-context-file-patch.md) | Hermes context-file build patch: redo on every upgrade, with a guard test | Superseded by 0059 |
 | [0054](0054-unkillable-sandbox-process.md) | A sandbox with an unkillable process is recreated | Accepted, amended 2026-10-24 |
 | [0055](0055-chat-as-its-own-object.md) | Chat is its own object | Accepted, amended by 0065 |
@@ -93,3 +93,4 @@ are in [0046](0046-adr-conventions.md).
 | [0076](0076-database-modes.md) | Database modes: bring your own, existing CNPG, or standalone Postgres | Accepted (delivery after v0.1.0, in v0.1.x) |
 | [0077](0077-pinned-openshell-and-installer.md) | Koinon pins OpenShell and Agent Sandbox per release, and ships an installer | Accepted (delivery after v0.1.0, in v0.1.x) |
 | [0078](0078-sandbox-observer.md) | Sandbox observer: get-only reads of sandbox pods to explain why a sandbox never became ready | Accepted (delivery in rc.7) |
+| [0079](0079-dependency-cooldown.md) | Dependency cooldown: three days everywhere, and a checked fast path for security fixes | Accepted |
