@@ -60,6 +60,8 @@ func parsePreflightFlags(args []string) (preflightConfig, error) {
 	fs.StringVar(&c.check.OpenShellConfigNamespace, "openshell-config-namespace", "openshell", "namespace of OpenShell's gateway ConfigMap")
 	fs.StringVar(&c.check.OpenShellConfigMap, "openshell-config-map", "", "OpenShell's gateway ConfigMap (<fullname>-config); empty skips the sandbox image checks")
 	fs.BoolVar(&c.check.ExpectSandboxPullSecrets, "expect-sandbox-pull-secrets", false, "the release pulls with credentials or through a mirror: warn when the OpenShell gateway has no sandbox pull secrets")
+	fs.StringVar(&c.check.OpenShellGatewayID, "openshell-gateway-id", "", "openshell.gatewayId: warn when it differs from the OpenShell gateway's gateway_id (the sandbox observer's namespaces)")
+	fs.BoolVar(&c.check.SandboxObserverDisabled, "sandbox-observer-disabled", false, "sandboxObserver.enabled is false: warn that pull failures will show an unknown cause")
 	supervisorImages := fs.String("supervisor-images", "", "comma-separated sandboxPolicy.supervisorImages: warn when the OpenShell gateway's supervisor image is not one of them")
 	fs.BoolVar(&c.seccompProbe, "seccomp-probe", true, "run a pod with the sandbox RuntimeClass to check Kata guest seccomp")
 	fs.StringVar(&c.probeImage, "probe-image", "", "image of the seccomp probe pod (this binary's image)")
