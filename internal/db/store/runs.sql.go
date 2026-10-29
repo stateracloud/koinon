@@ -16,7 +16,7 @@ UPDATE runs
 SET tokens_used = tokens_used + $1::bigint
 WHERE org_id = $2 AND id = $3
   AND state IN ('queued', 'starting', 'running', 'parked')
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type AddRunTokensParams struct {
@@ -25,8 +25,8 @@ type AddRunTokensParams struct {
 	ID     pgtype.UUID
 }
 
-// Adds reported token usage to an unfinished run. The caller cancels the run
-// when tokens_used reaches max_tokens. No row: the run is finished or absent.
+// Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0080):
+// the run limits are requests, spend and time. No row: the run is finished or absent.
 func (q *Queries) AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run, error) {
 	row := q.db.QueryRow(ctx, addRunTokens, arg.Tokens, arg.OrgID, arg.ID)
 	var i Run
@@ -63,6 +63,8 @@ func (q *Queries) AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -77,7 +79,7 @@ SET state = 'canceled',
     heartbeat_at = NULL
 WHERE org_id = $2 AND agent_id = $3
   AND state IN ('queued', 'starting', 'running', 'parked')
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type CancelOpenRunsForAgentParams struct {
@@ -129,6 +131,8 @@ func (q *Queries) CancelOpenRunsForAgent(ctx context.Context, arg CancelOpenRuns
 			&i.ClaimedAt,
 			&i.SandboxWaitStartedAt,
 			&i.WrapUpNoticeAt,
+			&i.MaxModelRequests,
+			&i.MaxSpendUsd,
 		); err != nil {
 			return nil, err
 		}
@@ -147,7 +151,7 @@ SET state = 'canceled',
     finished_at = now(),
     ready_at = NULL
 WHERE org_id = $2 AND task_id = $3 AND state = 'queued'
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type CancelQueuedRunsForTaskParams struct {
@@ -199,6 +203,8 @@ func (q *Queries) CancelQueuedRunsForTask(ctx context.Context, arg CancelQueuedR
 			&i.ClaimedAt,
 			&i.SandboxWaitStartedAt,
 			&i.WrapUpNoticeAt,
+			&i.MaxModelRequests,
+			&i.MaxSpendUsd,
 		); err != nil {
 			return nil, err
 		}
@@ -221,7 +227,7 @@ SET state = 'canceled',
     heartbeat_at = NULL
 WHERE org_id = $3 AND id = $4
   AND state IN ('queued', 'starting', 'running', 'parked')
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type CancelRunParams struct {
@@ -275,6 +281,8 @@ func (q *Queries) CancelRun(ctx context.Context, arg CancelRunParams) (Run, erro
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -290,7 +298,7 @@ SET state = 'canceled',
 WHERE org_id = $2
   AND state IN ('starting', 'running')
   AND started_at + make_interval(secs => max_wall_clock_seconds + parked_seconds) < now()
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type CancelRunsOverWallClockParams struct {
@@ -343,6 +351,8 @@ func (q *Queries) CancelRunsOverWallClock(ctx context.Context, arg CancelRunsOve
 			&i.ClaimedAt,
 			&i.SandboxWaitStartedAt,
 			&i.WrapUpNoticeAt,
+			&i.MaxModelRequests,
+			&i.MaxSpendUsd,
 		); err != nil {
 			return nil, err
 		}
@@ -401,7 +411,7 @@ FROM next
 JOIN agent ON agent.id = next.agent_id
 WHERE runs.org_id = $3 AND runs.id = next.run_id
   AND runs.state IN ('queued', 'parked') AND runs.ready_at IS NOT NULL
-RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.task_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.parked_seconds, runs.tokens_used, runs.prompt_through_seq, runs.takeovers, runs.summarizing, runs.failure_class, runs.origin, runs.claimed_at, runs.sandbox_wait_started_at, runs.wrap_up_notice_at
+RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.task_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.parked_seconds, runs.tokens_used, runs.prompt_through_seq, runs.takeovers, runs.summarizing, runs.failure_class, runs.origin, runs.claimed_at, runs.sandbox_wait_started_at, runs.wrap_up_notice_at, runs.max_model_requests, runs.max_spend_usd
 `
 
 type ClaimNextRunParams struct {
@@ -460,6 +470,8 @@ func (q *Queries) ClaimNextRun(ctx context.Context, arg ClaimNextRunParams) (Run
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -488,19 +500,20 @@ func (q *Queries) ClearSandboxWaitForAgent(ctx context.Context, arg ClearSandbox
 const createRun = `-- name: CreateRun :one
 
 INSERT INTO runs (org_id, agent_id, agent_version_id, task_id, ready_at,
-                  max_wall_clock_seconds, max_tokens, origin)
+                  max_wall_clock_seconds, max_model_requests, max_spend_usd, origin)
 SELECT a.org_id, a.id, a.active_version_id, $1, now(),
-       $2, $3,
-       coalesce($4::run_origin, 'interactive')
+       $2, $3, ($4::text)::numeric,
+       coalesce($5::run_origin, 'interactive')
 FROM agents a
-WHERE a.org_id = $5 AND a.id = $6 AND a.status = 'active'
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+WHERE a.org_id = $6 AND a.id = $7 AND a.status = 'active'
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type CreateRunParams struct {
 	TaskID              pgtype.UUID
 	MaxWallClockSeconds int32
-	MaxTokens           int64
+	MaxModelRequests    pgtype.Int8
+	MaxSpendUsd         pgtype.Text
 	Origin              NullRunOrigin
 	OrgID               pgtype.UUID
 	AgentID             pgtype.UUID
@@ -522,7 +535,8 @@ func (q *Queries) CreateRun(ctx context.Context, arg CreateRunParams) (Run, erro
 	row := q.db.QueryRow(ctx, createRun,
 		arg.TaskID,
 		arg.MaxWallClockSeconds,
-		arg.MaxTokens,
+		arg.MaxModelRequests,
+		arg.MaxSpendUsd,
 		arg.Origin,
 		arg.OrgID,
 		arg.AgentID,
@@ -561,6 +575,8 @@ func (q *Queries) CreateRun(ctx context.Context, arg CreateRunParams) (Run, erro
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -576,7 +592,7 @@ SET state = $1::run_state,
 WHERE org_id = $4 AND id = $5 AND epoch = $6
   AND ((state = 'running' AND $1::run_state IN ('succeeded', 'failed', 'canceled'))
        OR (state = 'starting' AND $1::run_state IN ('failed', 'canceled')))
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type FinishRunParams struct {
@@ -633,12 +649,14 @@ func (q *Queries) FinishRun(ctx context.Context, arg FinishRunParams) (Run, erro
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
 
 const getRun = `-- name: GetRun :one
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd FROM runs
 WHERE org_id = $1 AND id = $2
 `
 
@@ -683,6 +701,8 @@ func (q *Queries) GetRun(ctx context.Context, arg GetRunParams) (Run, error) {
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -734,7 +754,7 @@ SET heartbeat_at = now(),
     lease_expires_at = now() + make_interval(secs => $1::integer)
 WHERE org_id = $2 AND id = $3 AND epoch = $4
   AND state IN ('starting', 'running')
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type HeartbeatRunParams struct {
@@ -787,12 +807,14 @@ func (q *Queries) HeartbeatRun(ctx context.Context, arg HeartbeatRunParams) (Run
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
 
 const listExpiredParkedRuns = `-- name: ListExpiredParkedRuns :many
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd FROM runs
 WHERE org_id = $1 AND state = 'parked' AND park_expires_at < now()
 ORDER BY park_expires_at, id
 `
@@ -840,6 +862,8 @@ func (q *Queries) ListExpiredParkedRuns(ctx context.Context, orgID pgtype.UUID) 
 			&i.ClaimedAt,
 			&i.SandboxWaitStartedAt,
 			&i.WrapUpNoticeAt,
+			&i.MaxModelRequests,
+			&i.MaxSpendUsd,
 		); err != nil {
 			return nil, err
 		}
@@ -852,7 +876,7 @@ func (q *Queries) ListExpiredParkedRuns(ctx context.Context, orgID pgtype.UUID) 
 }
 
 const listRunsForTask = `-- name: ListRunsForTask :many
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd FROM runs
 WHERE org_id = $1 AND task_id = $2
 ORDER BY created_at, id
 `
@@ -904,6 +928,8 @@ func (q *Queries) ListRunsForTask(ctx context.Context, arg ListRunsForTaskParams
 			&i.ClaimedAt,
 			&i.SandboxWaitStartedAt,
 			&i.WrapUpNoticeAt,
+			&i.MaxModelRequests,
+			&i.MaxSpendUsd,
 		); err != nil {
 			return nil, err
 		}
@@ -916,7 +942,7 @@ func (q *Queries) ListRunsForTask(ctx context.Context, arg ListRunsForTaskParams
 }
 
 const lockRun = `-- name: LockRun :one
-SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at FROM runs
+SELECT org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd FROM runs
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -964,6 +990,8 @@ func (q *Queries) LockRun(ctx context.Context, arg LockRunParams) (Run, error) {
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -972,7 +1000,7 @@ const markRunRunning = `-- name: MarkRunRunning :one
 UPDATE runs
 SET state = 'running'
 WHERE org_id = $1 AND id = $2 AND epoch = $3 AND state = 'starting'
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type MarkRunRunningParams struct {
@@ -1018,6 +1046,8 @@ func (q *Queries) MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) 
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -1080,7 +1110,7 @@ SET state = 'parked',
     lease_expires_at = NULL,
     heartbeat_at = NULL
 WHERE org_id = $3 AND id = $4 AND epoch = $5 AND state = 'running'
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type ParkRunParams struct {
@@ -1135,6 +1165,8 @@ func (q *Queries) ParkRun(ctx context.Context, arg ParkRunParams) (Run, error) {
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -1144,7 +1176,7 @@ UPDATE runs
 SET lease_expires_at = now() - interval '1 second'
 WHERE org_id = $1 AND id = $2 AND epoch = $3
   AND state IN ('starting', 'running')
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type ReleaseRunLeaseParams struct {
@@ -1192,6 +1224,8 @@ func (q *Queries) ReleaseRunLease(ctx context.Context, arg ReleaseRunLeaseParams
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -1208,7 +1242,7 @@ SET state = 'queued',
     lease_expires_at = NULL,
     heartbeat_at = NULL
 WHERE org_id = $1 AND id = $2 AND epoch = $3 AND state = 'starting'
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type RequeueRunParams struct {
@@ -1260,6 +1294,8 @@ func (q *Queries) RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, er
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -1268,7 +1304,7 @@ const resolveRunPark = `-- name: ResolveRunPark :one
 UPDATE runs
 SET ready_at = now()
 WHERE org_id = $1 AND id = $2 AND state = 'parked' AND ready_at IS NULL
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type ResolveRunParkParams struct {
@@ -1314,6 +1350,8 @@ func (q *Queries) ResolveRunPark(ctx context.Context, arg ResolveRunParkParams) 
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -1323,7 +1361,7 @@ UPDATE runs
 SET prompt_through_seq = $1::bigint
 WHERE org_id = $2 AND id = $3 AND epoch = $4
   AND state IN ('starting', 'running')
-RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at
+RETURNING org_id, id, agent_id, agent_version_id, task_id, state, epoch, owner_id, lease_expires_at, heartbeat_at, ready_at, park_reason, parked_at, park_expires_at, outcome_reason, max_wall_clock_seconds, max_tokens, last_event_seq, started_at, finished_at, created_at, updated_at, parked_seconds, tokens_used, prompt_through_seq, takeovers, summarizing, failure_class, origin, claimed_at, sandbox_wait_started_at, wrap_up_notice_at, max_model_requests, max_spend_usd
 `
 
 type SetRunPromptThroughParams struct {
@@ -1376,6 +1414,8 @@ func (q *Queries) SetRunPromptThrough(ctx context.Context, arg SetRunPromptThrou
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
@@ -1410,7 +1450,7 @@ SET epoch = agent.epoch,
 FROM stale
 JOIN agent ON agent.id = stale.agent_id
 WHERE runs.org_id = $3 AND runs.id = stale.run_id
-RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.task_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.parked_seconds, runs.tokens_used, runs.prompt_through_seq, runs.takeovers, runs.summarizing, runs.failure_class, runs.origin, runs.claimed_at, runs.sandbox_wait_started_at, runs.wrap_up_notice_at
+RETURNING runs.org_id, runs.id, runs.agent_id, runs.agent_version_id, runs.task_id, runs.state, runs.epoch, runs.owner_id, runs.lease_expires_at, runs.heartbeat_at, runs.ready_at, runs.park_reason, runs.parked_at, runs.park_expires_at, runs.outcome_reason, runs.max_wall_clock_seconds, runs.max_tokens, runs.last_event_seq, runs.started_at, runs.finished_at, runs.created_at, runs.updated_at, runs.parked_seconds, runs.tokens_used, runs.prompt_through_seq, runs.takeovers, runs.summarizing, runs.failure_class, runs.origin, runs.claimed_at, runs.sandbox_wait_started_at, runs.wrap_up_notice_at, runs.max_model_requests, runs.max_spend_usd
 `
 
 type TakeOverExpiredRunParams struct {
@@ -1458,6 +1498,8 @@ func (q *Queries) TakeOverExpiredRun(ctx context.Context, arg TakeOverExpiredRun
 		&i.ClaimedAt,
 		&i.SandboxWaitStartedAt,
 		&i.WrapUpNoticeAt,
+		&i.MaxModelRequests,
+		&i.MaxSpendUsd,
 	)
 	return i, err
 }
