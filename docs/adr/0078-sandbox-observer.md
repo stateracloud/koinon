@@ -47,7 +47,8 @@ credentials, or a mirror that is down. Today the run fails after the cap with "t
 1. **The reconciler reads the pod, with `get` only.** When a sandbox is in phase Provisioning and OpenShell's
    reason is one of `ConfigurationPending`, `DependenciesNotReady` or `SchedulingGated`, the reconciler gets
    the pod named like the sandbox in the workspace's namespace (in managed mode the pod and the Sandbox
-   object carry the OpenShell sandbox's name). When the pod does not exist it gets the Sandbox object and
+   object carry the OpenShell sandbox's name). When that pod says nothing it also gets the supervisor pod, `os-supervisor-<OpenShell sandbox ID>`, by that
+   deterministic name (decision 10). When the pod does not exist it gets the Sandbox object and
    reads its `Ready=False` condition, which is where Agent Sandbox puts an admission refusal
    (`ReconcilerError "Error seen: pods ... is forbidden: ValidatingAdmissionPolicy ..."`). It never lists or
    watches, and it reads nothing for an informative reason such as `Unschedulable`.
@@ -57,10 +58,13 @@ credentials, or a mirror that is down. Today the run fails after the cap with "t
    `record()` writes it into the existing `agent_sandboxes.reason` and `message` columns. agentd and the
    classifier read the same columns, so no migration and no agentd change are needed. When the pod says
    nothing, OpenShell's words stay. A failed read never fails a reconcile pass: it is counted and logged.
-3. **A new wait cause, `crash_loop`.** The classifier maps `CrashLoopBackOff` and `CreateContainerError` (and
-   the v1.0.8 text `container "agent" is in CrashLoopBackOff (last exit: Error)`) to it. The hand-written
-   causes are now `image_pull`, `admission`, `no_nodes`, `crash_loop` and `unknown`: a fixed set, so the
-   metric label set stays fixed (ADR 0023). Web timeline labels and the metrics guide list it.
+3. **Two new wait causes, `crash_loop` and `container_create`.** `crash_loop` is `CrashLoopBackOff` (and the
+   v1.0.8 text `container "agent" is in CrashLoopBackOff (last exit: Error)`). `container_create` is
+   `CreateContainerConfigError` (a Secret or ConfigMap reference, a setting), `CreateContainerError` and
+   `RunContainerError`: the kubelet could not create or start the container, which is not a crash. The
+   hand-written causes are now `image_pull`, `admission`, `no_nodes`, `crash_loop`, `container_create` and
+   `unknown`: a fixed set, so the metric label set stays fixed (ADR 0023). The cause is a string in the run's
+   event payload and the metric, not an API enum. Web timeline labels and the metrics guide list both.
 4. **Access is one RoleBinding per workspace namespace, created by the reconciler.** The chart renders
    (`templates/sandbox-observer.yaml`, names prefixed `<namespace>-<fullname>` like the sandbox policies):
    - the **observer ClusterRole**: `get` on `pods` and on `agents.x-k8s.io` `sandboxes`. It is never bound
@@ -68,9 +72,11 @@ credentials, or a mirror that is down. Today the run fails after the cap with "t
    - the **binder ClusterRole**, bound cluster-wide to the reconciler's ServiceAccount: `create` on
      `rolebindings`, and `bind` on `clusterroles` with `resourceNames` the observer ClusterRole;
    - when the reconciler has a workspace that is Active it creates, once per namespace and process, a
-     RoleBinding named like the observer ClusterRole, with that ClusterRole as `roleRef` and the reconciler
-     as its only subject, in `openshell-<gatewayId>-<workspace>`. `AlreadyExists` counts as done.
-     A `Forbidden` on a read drops the cache entry so that the binding is made again.
+     RoleBinding named like the observer ClusterRole (label `koinon.dev/sandbox-observer=true`), with that
+     ClusterRole as `roleRef` and the reconciler as its only subject, in `openshell-<gatewayId>-<workspace>`.
+     `AlreadyExists` counts as done. A `Forbidden` on a read drops the cache entry so that the binding is made
+     again. A refused or failed create is remembered per namespace and not repeated until a backoff has
+     passed: 10 s, doubled for each failure in a row, capped at 5 minutes. A success forgets it.
 
    There is no list, watch, events, update or delete: the pod name is the sandbox name, the kubelet's waiting
    message already holds the whole pull error, `PodScheduled` already arrives through OpenShell, and the
@@ -82,11 +88,16 @@ credentials, or a mirror that is down. Today the run fails after the cap with "t
    answer 403) matches RoleBinding CREATE and UPDATE in all namespaces. A `matchConditions` expression lets
    only the reconciler's writes, writes under the fixed name, and writes that reference the observer
    ClusterRole reach the validations; every other RoleBinding in the cluster passes untouched. Then:
-   - the reconciler may write only in a namespace labelled `openshell.ai/managed-by=openshell` and
-     `openshell.ai/gateway-id=<openshell.gatewayId>`, only under the fixed name, only with `roleRef` exactly
-     the observer ClusterRole, and only with `subjects` exactly its own ServiceAccount;
-   - nobody else may write that name, or any RoleBinding to that ClusterRole, in an OpenShell sandbox
-     namespace, cluster admins included (the identity-keyed pattern of `sandbox-policy.yaml`).
+   - the reconciler may write only in a workspace namespace of its gateway: one that
+     `sandboxPolicy.namespaceSelector` selects (the policy derives its CEL from `matchLabels` and from the
+     `In`, `NotIn`, `Exists` and `DoesNotExist` expressions, and the chart fails on another operator), labelled
+     `openshell.ai/gateway-id=<openshell.gatewayId>` and `openshell.ai/sandbox-workspace`, named
+     `openshell-<gatewayId>-<workspace>`, and not Koinon's own namespace. It writes only under the fixed name,
+     only with `roleRef` exactly the observer ClusterRole (kind `ClusterRole`), and only with `subjects`
+     exactly its own ServiceAccount. A labelled `kube-system`, or a labelled namespace with another name,
+     does not qualify;
+   - nobody else may write that name, or any RoleBinding whose `roleRef` has the observer's name (of any kind),
+     in a sandbox namespace, cluster admins included (the identity-keyed pattern of `sandbox-policy.yaml`).
 6. **The chart refuses to render the observer without the policy.** `koinon.validate` fails when
    `sandboxObserver.enabled` is set and `sandboxPolicy.enabled` is not, or `sandboxPolicy.validationActions` lacks
    `Deny`. The policy is what bounds the grant, so the grant does not exist without it.
@@ -103,8 +114,20 @@ credentials, or a mirror that is down. Today the run fails after the cap with "t
    no new identity writes pods or Sandboxes, reads do not pass through admission, and every tier behaves the same
    (reads do not depend on the runtime class, user namespaces or the dedicated pool).
 9. **Metrics.** `koinon_reconciler_sandbox_observer_errors_total{reason}` with `reason` one of `forbidden`,
-   `not_found` or `other`. `koinon_agentd_sandbox_wait_cap_total{cause}` gains the value `crash_loop`.
-10. **Exit.** This is a workaround for two upstream defects, and it is removed when they are fixed. Koinon
+   `not_found` or `other`. `koinon_agentd_sandbox_wait_cap_total{cause}` gains the values `crash_loop` and `container_create`.
+10. **The supervisor pod is read too (found on kind, 2026-10-29).** OpenShell 0.1.5 creates a separate pod,
+    `os-supervisor-<sandbox ID>` (label `openshell.ai/boundary-role=supervisor`), next to the workload pod.
+    With the gateway's `supervisor_image` pointing at an image that does not exist, the gateway reported
+    `Provisioning`, `ConfigurationPending "Waiting for effective configuration validation before workload
+    activation"` for 120 s (twelve polls), so the cause was `unknown`. The workload pod ended `Error` (exit
+    code 1, terminated, nothing waiting), so reading it explains nothing. The supervisor pod showed
+    `ErrImagePull` with the full kubelet message in its container status
+    (`internal/execution/testdata/supervisor-bad-image-container-statuses.json`). So yes, a supervisor
+    pull failure leaves the cause unknown, and the observer reads the supervisor pod (get by name, same
+    ClusterRole, no list) when the workload pod gives no detail. The detail is prefixed "supervisor pod:".
+    The sandbox policy pins the supervisor image, so this is rare; it happens when the pin and the registry
+    disagree, which is what a mirror misconfiguration looks like.
+11. **Exit.** This is a workaround for two upstream defects, and it is removed when they are fixed. Koinon
     files both against OpenShell (drafts in the 2026-10-29 research): the cluster-wide watch has no Event
     watcher, and the gateway should keep the driver's message, for example as a separate `WorkloadReady`
     condition, when it writes `ConfigurationPending`. When a pinned OpenShell release has them, Koinon
@@ -133,12 +156,31 @@ credentials, or a mirror that is down. Today the run fails after the cap with "t
   the CEL work to the reconciler's and observer-role writes. A CEL error would deny those writes only.
 - If `openshell.gatewayId` is wrong, the reconciler's RoleBinding is refused by the policy (a `forbidden`
   count), the reads do not happen and causes stay `unknown`; the preflight names the mismatch.
+- **Install and uninstall order.** The chart adds no hooks. Helm applies the binder ClusterRoleBinding and the
+  policy objects in one release, and the API server compiles a new policy asynchronously, so for a few
+  seconds after an install or an upgrade that adds them (and again when they are removed) the reconciler's
+  right to create RoleBindings can exist while the policy is not yet enforced. The bound in that window is the
+  RBAC grant, which does not depend on the policy: the reconciler can bind only the observer ClusterRole
+  (`resourceNames`), so at worst it could bind `get` on pods and Sandboxes, to the one subject or another,
+  in a namespace the policy would have refused. The reconciler Deployment is applied after the RBAC objects
+  and creates RoleBindings only after a workspace is Active, so in practice the window passes before the
+  first one. On a cluster that has the ValidatingAdmissionPolicy API but runs with the
+  ValidatingAdmissionPolicy admission plugin off, the policy enforces nothing, exactly as `sandbox-policy.yaml`
+  does; the RBAC bound above is then the only one. The preflight does not detect this.
+- **After uninstall or opt-out,** RoleBindings stay in the workspace namespaces. They point at a ClusterRole
+  that no longer exists and grant nothing, and a new install with the same release name reuses them
+  (`AlreadyExists`). Remove them with `kubectl delete rolebinding --all-namespaces -l koinon.dev/sandbox-observer=true`
+  (documented in the Agent health guide). Bindings made by an earlier rc.7 build lack the label: delete the
+  RoleBinding named like the ClusterRole in each `openshell-<gatewayId>-*` namespace.
+- **Upgrading with the sandbox policy off.** The chart refuses to render, by design (decision 6), rather than
+  turn the observer off silently. Operators with `sandboxPolicy.enabled: false` set
+  `sandboxObserver.enabled: false`. The Tilt home-lab profile does so.
 - Costs: one `get` per pass for each sandbox that is provisioning with an opaque reason, bounded by the
   sandbox job limit and a 5 s timeout per call.
 
 ## Alternatives
 
-- **O1. OpenShell surfaces it (the exit, decision 10).** Best security: Koinon talks only to OpenShell, no
+- **O1. OpenShell surfaces it (the exit, decision 11).** Best security: Koinon talks only to OpenShell, no
   RBAC delta. Rejected for rc.7 only because it needs an OpenShell release Koinon does not control, and
   v0.1.6 and main have neither fix (related upstream: #4415 closed into #2675, which covers the CLI
   progress output only).

@@ -54,7 +54,8 @@ cause from the sandbox's last condition:
 - **the image could not be pulled** (a missing tag, a registry that refuses or cannot be reached);
 - **the cluster's admission policy refused the sandbox**;
 - **no node can run the sandbox** (more CPU or memory than any node has, a taint nothing tolerates);
-- **a container in the sandbox keeps crashing** (`CrashLoopBackOff`, or a container that cannot be created);
+- **a container in the sandbox keeps crashing** (`CrashLoopBackOff`);
+- **a container in the sandbox could not be created** (`CreateContainerConfigError`, for example a Secret it mounts that is missing, or `CreateContainerError`);
 - **the cause is unknown**.
 
 The run's failure message carries the detail, for example the registry's own error for an image that
@@ -86,6 +87,23 @@ Platform teams that do not want the extra grant set `sandboxObserver.enabled: fa
 none of it, the reconciler reads nothing, and the preflight warns that an unpullable image or a crash loop
 will show as **the cause is unknown**. Everything else, including the wait cap and the unhealthy mark, works
 the same. The observer goes away once OpenShell reports pod failures itself.
+
+**Upgrading with `sandboxPolicy.enabled: false`.** The observer's RoleBinding policy is what limits its grant, so the chart
+refuses to render `sandboxObserver.enabled` (the default) without `sandboxPolicy.enabled`, or without a `Deny` entry in
+`sandboxPolicy.validationActions`. If you turned the sandbox policy off, also set `sandboxObserver.enabled: false` before you
+upgrade. The error names both settings.
+
+**Turning the observer off later.** The reconciler does not delete what it made. The RoleBindings stay in the workspace
+namespaces, harmless once the ClusterRole is gone (they point at nothing) and reused if you turn the observer on again. To
+remove them:
+
+```sh
+kubectl delete rolebinding --all-namespaces -l koinon.dev/sandbox-observer=true
+```
+
+A sandbox pod can also fail because of the supervisor pod OpenShell starts next to it (for example a supervisor image that
+cannot be pulled). The observer reads that pod too, by name, when the workload pod says nothing; the detail then starts with
+"supervisor pod:".
 
 The agent is marked **unhealthy** with that reason, the org's owners and admins get a notice, every task
 with a run waiting on the agent gets a note, and admins and owners see an item for the agent in the
