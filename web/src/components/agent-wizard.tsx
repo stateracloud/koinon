@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { GrantBinding } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import type { Connection } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import { Flavor, type Grant, type Template } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { runLimitsLabel } from '@/lib/cost'
 import { grantNeedsTargets, validateRepositories } from '@/lib/agents'
 import type { CodeHostInfo } from '@/lib/connector'
 import { flavorLabel, presetLabel } from '@/lib/labels'
@@ -224,7 +225,7 @@ export function AgentWizard({ templates, connections, targetPatterns, codeHosts,
                 <>
                   <dt className="text-muted-foreground">Run limits</dt>
                   <dd>
-                    {Math.round(Number(template.runLimits.maxDurationSeconds) / 60)} min, {Number(template.runLimits.maxTokens).toLocaleString()} tokens per run
+                    {runLimitsLabel(template.runLimits)} per run
                   </dd>
                 </>
               )}
