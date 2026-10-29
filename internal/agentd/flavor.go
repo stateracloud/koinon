@@ -108,11 +108,20 @@ func versionModel(c agentconfig.Config) string {
 // settings ({"harness": {"pluginInstalls": true}}, copied from the template). Only flavors
 // with the option have one (OpenCode: --plugin-installs lets it load external plugins,
 // flavors/opencode/README.md); the reconciler opens the npm registry for the same agents.
+//
+// A flavor with built-in web tools also gets its NoWebToolsArg unless the version has web egress
+// (agentconfig.Config.WebEgress): a tool the sandbox's network policy would only fail is not
+// offered, so the model uses the org's MCP tools instead (ADR 0080).
 func harnessArgs(f store.AgentFlavor, c agentconfig.Config) []string {
-	if d, _ := flavor.Lookup(f); c.Harness.PluginInstalls && d.PluginInstalls {
-		return []string{d.PluginInstallsArg}
+	d, _ := flavor.Lookup(f)
+	var args []string
+	if c.Harness.PluginInstalls && d.PluginInstalls {
+		args = append(args, d.PluginInstallsArg)
 	}
-	return nil
+	if d.NoWebToolsArg != "" && !c.WebEgress() {
+		args = append(args, d.NoWebToolsArg)
+	}
+	return args
 }
 
 // cacheMarker is the cache-marker format to start the harness with for a model (ADR 0068): ""
