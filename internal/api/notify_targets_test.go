@@ -82,6 +82,8 @@ var _ = Describe("notify targets", func() {
 				Expect(got.GetTarget().GetKind()).To(Equal(templatev1alpha1.NotifyTargetKind_NOTIFY_TARGET_KIND_ROLE))
 				Expect(got.GetTarget().GetRole()).To(Equal(authv1alpha1.OrgRole_ORG_ROLE_ADMIN))
 				Expect(got.GetRecipients()).To(HaveLen(2))
+				// The deprecated field is the lowest recipient ID, the same for every viewer.
+				Expect(got.GetAskedTo()) //nolint:staticcheck // the deprecated field is still served.To(Equal(min(f.owner.userID, admin.userID)))
 				Expect(got.GetWaitingSince()).NotTo(BeNil())
 				Expect(got.GetCanAnswer()).To(BeTrue())
 			}
@@ -117,6 +119,7 @@ var _ = Describe("notify targets", func() {
 			}
 			Expect(task).NotTo(BeNil())
 			Expect(task.GetWaitingOnUserIds()).To(ConsistOf(f.owner.userID, admin.userID))
+			Expect(task.GetWaitingOnUserId()) //nolint:staticcheck // the deprecated field is still served.To(Equal(task.GetWaitingOnUserIds()[0]))
 			Expect(task.GetWaitingOnName()).To(Equal("the org's admins"))
 		})
 	})

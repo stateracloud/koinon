@@ -155,13 +155,17 @@ func (AnswerKind) EnumDescriptor() ([]byte, []int) {
 
 // Question is one question of an agent to a person.
 type Question struct {
-	state    protoimpl.MessageState `protogen:"open.v1"`
-	Id       string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	OrgId    string                 `protobuf:"bytes,2,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
-	TaskId   string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
-	RunId    string                 `protobuf:"bytes,4,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	AgentId  string                 `protobuf:"bytes,5,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	Question string                 `protobuf:"bytes,7,opt,name=question,proto3" json:"question,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	OrgId   string                 `protobuf:"bytes,2,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	TaskId  string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	RunId   string                 `protobuf:"bytes,4,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	AgentId string                 `protobuf:"bytes,5,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// Deprecated: use recipients / waiting_on_user_ids. Set to the first recipient, for older clients.
+	//
+	// Deprecated: Marked as deprecated in koinon/question/v1alpha1/question.proto.
+	AskedTo  string `protobuf:"bytes,6,opt,name=asked_to,json=askedTo,proto3" json:"asked_to,omitempty"`
+	Question string `protobuf:"bytes,7,opt,name=question,proto3" json:"question,omitempty"`
 	// Answers offered as buttons; empty means free text only.
 	Choices []string `protobuf:"bytes,8,rep,name=choices,proto3" json:"choices,omitempty"`
 	// Text the agent proposes; empty when none.
@@ -254,6 +258,14 @@ func (x *Question) GetRunId() string {
 func (x *Question) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
+	}
+	return ""
+}
+
+// Deprecated: Marked as deprecated in koinon/question/v1alpha1/question.proto.
+func (x *Question) GetAskedTo() string {
+	if x != nil {
+		return x.AskedTo
 	}
 	return ""
 }
@@ -967,13 +979,14 @@ var File_koinon_question_v1alpha1_question_proto protoreflect.FileDescriptor
 
 const file_koinon_question_v1alpha1_question_proto_rawDesc = "" +
 	"\n" +
-	"'koinon/question/v1alpha1/question.proto\x12\x18koinon.question.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fkoinon/auth/v1alpha1/auth.proto\x1a'koinon/template/v1alpha1/template.proto\"\xdc\a\n" +
+	"'koinon/question/v1alpha1/question.proto\x12\x18koinon.question.v1alpha1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1fkoinon/auth/v1alpha1/auth.proto\x1a'koinon/template/v1alpha1/template.proto\"\xeb\a\n" +
 	"\bQuestion\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x17\n" +
 	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x15\n" +
 	"\x06run_id\x18\x04 \x01(\tR\x05runId\x12\x19\n" +
-	"\bagent_id\x18\x05 \x01(\tR\aagentId\x12\x1a\n" +
+	"\bagent_id\x18\x05 \x01(\tR\aagentId\x12\x1d\n" +
+	"\basked_to\x18\x06 \x01(\tB\x02\x18\x01R\aaskedTo\x12\x1a\n" +
 	"\bquestion\x18\a \x01(\tR\bquestion\x12\x18\n" +
 	"\achoices\x18\b \x03(\tR\achoices\x12\x14\n" +
 	"\x05draft\x18\t \x01(\tR\x05draft\x12%\n" +
@@ -1000,7 +1013,7 @@ const file_koinon_question_v1alpha1_question_proto_rawDesc = "" +
 	"recipients\x18\x16 \x03(\v2#.koinon.question.v1alpha1.RecipientR\n" +
 	"recipients\x12?\n" +
 	"\rwaiting_since\x18\x17 \x01(\v2\x1a.google.protobuf.TimestampR\fwaitingSince\x12(\n" +
-	"\x10answered_by_name\x18\x18 \x01(\tR\x0eansweredByNameJ\x04\b\x06\x10\aR\basked_to\"\x88\x01\n" +
+	"\x10answered_by_name\x18\x18 \x01(\tR\x0eansweredByName\"\x88\x01\n" +
 	"\tRecipient\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12?\n" +
