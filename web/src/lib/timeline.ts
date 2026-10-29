@@ -46,6 +46,11 @@ function humanSeconds(total: number): string {
   return `${h > 0 ? `${h}h` : ''}${m > 0 ? `${m}m` : ''}${s > 0 ? `${s}s` : ''}` || '0s'
 }
 
+/** num shows a count from an event payload, or a question mark when the payload has none. */
+function num(v: unknown): string {
+  return typeof v === 'number' ? String(v) : '?'
+}
+
 /** The words for why a sandbox never became ready; the same as execution.SandboxWaitCause.Describe. */
 const sandboxCauses: Record<string, string> = {
   image_pull: 'the image could not be pulled',
@@ -180,6 +185,20 @@ function taskItem(ev: TaskEvent): TimelineItem {
           runId,
         }
       }
+      // The ledger ends a run at its model-request or spend limit (ADR 0080) with the same note as
+      // the time limit: {reason, message, limit, ..., summary?, summarySource?}.
+      if (ev.kind === 'run.canceled' && (str(p.reason) === 'request_cap' || str(p.reason) === 'run_spend_cap')) {
+        const what = str(p.reason) === 'request_cap' ? 'model request limit' : 'spend limit'
+        const summary = str(p.summary)
+        const source = str(p.summarySource) === 'notes' ? " (from the agent's notes)" : ''
+        return {
+          key,
+          at,
+          type: 'note',
+          text: `Run ${shortId(ev.runId)} stopped at its ${what}: ${str(p.message) ?? 'the limit was reached'}.${summary ? `\n\nLast summary${source}:\n${summary}` : ''}`,
+          runId,
+        }
+      }
       if (ev.kind === 'run.failed' && str(p.failureClass) === 'sandbox_unavailable') {
         const cause = sandboxCauses[str(p.sandboxCause) ?? ''] ?? sandboxCauses.unknown
         return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} failed: the sandbox never became ready (${cause})`, runId }
@@ -232,7 +251,15 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
       return { key, at, type: 'note', text: `Run ${shortId(runId)} lost its harness${reason ? `: ${reason}` : ''}`, runId }
     }
     case 'run.wrap_up_notice': {
-      // agentd told the agent its time limit is near: {remainingSeconds, maxWallClockSeconds}.
+      // agentd told the agent a run limit is near: {limit, remainingSeconds, maxWallClockSeconds} and,
+      // for the request and spend limits, {modelRequests, maxModelRequests} or {spentUSD, maxSpendUSD}.
+      const limit = str(p.limit)
+      if (limit === 'requests') {
+        return { key, at, type: 'note', text: `Run ${shortId(runId)}: ${num(p.modelRequests)} of ${num(p.maxModelRequests)} model requests used; the agent was asked to wrap up`, runId }
+      }
+      if (limit === 'spend') {
+        return { key, at, type: 'note', text: `Run ${shortId(runId)}: $${str(p.spentUSD) ?? '?'} of $${str(p.maxSpendUSD) ?? '?'} spent; the agent was asked to wrap up`, runId }
+      }
       const mins = Math.max(1, Math.round((typeof p.remainingSeconds === 'number' ? p.remainingSeconds : 0) / 60))
       return { key, at, type: 'note', text: `Run ${shortId(runId)}: about ${mins} ${mins === 1 ? 'minute' : 'minutes'} left; the agent was asked to wrap up`, runId }
     }
