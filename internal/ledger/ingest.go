@@ -197,7 +197,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
 			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: at,
 			Provisional: provisional, ReserveUsd: pgtype.Text{String: pr.reserve.Numeric(), Valid: pr.reserve > 0}, ResponseID: responseID,
-			UpstreamStatus: e.upstreamStatus(), UpstreamError: e.upstreamError(),
+			UpstreamStatus: e.upstreamStatus(),
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded
@@ -266,7 +266,7 @@ func (in *Ingester) ingestSystem(ctx context.Context, e Entry) (bool, error) {
 			CostUsd: pr.cost.Numeric(), GatewayCostUsd: pr.gatewayCost, PriceRef: pr.ref,
 			Priced: pr.priced, Estimated: pr.estimated, Estimate: pr.estimate, CostFlagged: pr.flagged,
 			RequestBytes: pr.reqBytes, ResponseBytes: pr.respBytes, OccurredAt: pgtype.Timestamptz{Time: e.Time, Valid: true},
-			UpstreamStatus: e.upstreamStatus(), UpstreamError: e.upstreamError(),
+			UpstreamStatus: e.upstreamStatus(),
 		}); errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded
 		} else if err != nil {
@@ -385,12 +385,4 @@ func (e Entry) upstreamStatus() pgtype.Int2 {
 		return pgtype.Int2{Int16: int16(e.Status), Valid: true}
 	}
 	return pgtype.Int2{}
-}
-
-// upstreamError is the excerpt of the provider's error, NULL without a status or text.
-func (e Entry) upstreamError() pgtype.Text {
-	if !e.upstreamStatus().Valid || e.ErrorExcerpt == "" {
-		return pgtype.Text{}
-	}
-	return pgtype.Text{String: e.ErrorExcerpt, Valid: true}
 }

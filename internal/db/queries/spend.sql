@@ -34,7 +34,7 @@ INSERT INTO spend_entries (
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
-    upstream_status, upstream_error
+    upstream_status
 ) VALUES (
     @org_id, sqlc.narg(agent_id), @principal, sqlc.narg(run_id), sqlc.narg(task_id), @request_id, @key_id, @model,
     @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens, @reasoning_tokens,
@@ -42,7 +42,7 @@ INSERT INTO spend_entries (
     sqlc.narg(price_ref), @priced, @estimated, sqlc.narg(estimate)::jsonb, @cost_flagged,
     sqlc.narg(request_bytes), sqlc.narg(response_bytes), @occurred_at,
     @provisional, coalesce((sqlc.narg(reserve_usd)::text)::numeric, 0), sqlc.narg(response_id),
-    sqlc.narg(upstream_status), sqlc.narg(upstream_error)
+    sqlc.narg(upstream_status)
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id;
@@ -52,7 +52,7 @@ RETURNING id;
 -- gateway's own record of why a model request failed (agentd reads it when a harness reports an
 -- error without a status). Only the statuses in @statuses count. No row when the provider
 -- refused nothing in the window.
-SELECT upstream_status::int AS status, coalesce(upstream_error, '')::text AS detail, model, occurred_at
+SELECT upstream_status::int AS status, model, occurred_at
 FROM spend_entries
 WHERE org_id = @org_id AND run_id = @run_id AND upstream_status = ANY(@statuses::int[]) AND occurred_at >= @since
 ORDER BY occurred_at DESC, id DESC

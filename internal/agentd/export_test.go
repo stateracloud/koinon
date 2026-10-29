@@ -30,9 +30,9 @@ func ClassifyGateway(err error) bool { return classifyPromptError(err).gateway }
 // RefusedByProvider applies the gateway's record of a provider refusal to the failure the harness's
 // error classifies as, and returns the class, whether it still counts as a gateway refusal, and the
 // reason.
-func RefusedByProvider(err error, status int, detail, providerType string) (class string, gateway bool, reason string) {
+func RefusedByProvider(err error, status int, providerType string) (class string, gateway bool, reason string) {
 	f := classFailure("session/prompt", err)
-	f = refusedByProvider(f, providerRefusal{status: status, detail: detail, providerType: providerType})
+	f = refusedByProvider(f, providerRefusal{status: status, providerType: providerType})
 	return string(f.class), f.gateway, f.reason
 }
 

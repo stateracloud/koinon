@@ -25,7 +25,7 @@ var _ = Describe("Who refused the model request", func() {
 
 	// refuse makes the harness fail its prompt with opencode's error. The gateway's record of the
 	// provider's refusal (status 0: none) reaches the ledger recordDelay after the request.
-	refuse := func(ctx SpecContext, e *env, status int, detail string, recordDelay time.Duration) store.Run {
+	refuse := func(ctx SpecContext, e *env, status int, recordDelay time.Duration) store.Run {
 		var run atomic.Value // store.Run
 		e.harness.modelFault = func(context.Context, string) error {
 			if status != 0 {
@@ -36,7 +36,7 @@ var _ = Describe("Who refused the model request", func() {
 					_, err := q.InsertSpendEntry(context.Background(), store.InsertSpendEntryParams{
 						Principal: "agent", OrgID: e.org, AgentID: e.agent.ID, RunID: r.ID, TaskID: r.TaskID, RequestID: uuid.NewString(), KeyID: "k-test", Model: "m",
 						CostUsd: "0", Priced: true, OccurredAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-						UpstreamStatus: pgtype.Int2{Int16: int16(status), Valid: true}, UpstreamError: pgtype.Text{String: detail, Valid: detail != ""},
+						UpstreamStatus: pgtype.Int2{Int16: int16(status), Valid: true},
 					})
 					Expect(err).NotTo(HaveOccurred())
 				}()
@@ -50,17 +50,17 @@ var _ = Describe("Who refused the model request", func() {
 
 	It("fails a provider's 403 as policy, naming the provider's refusal, once the gateway's record arrives", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		r := refuse(ctx, e, 403, "403: Input flagged by moderation (reasons: violence)", time.Second)
+		r := refuse(ctx, e, 403, time.Second)
 		e.pool("agentd-a", func(c *agentd.Config) { c.GatewayRecordWait = 10 * time.Second })
 		Eventually(runState(ctx, r)).WithTimeout(30 * time.Second).Should(Equal(store.RunStateFailed))
 		got := getRun(ctx, r)
 		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassPolicy))
-		Expect(got.OutcomeReason.String).To(HavePrefix("The model provider refused the request (HTTP 403): 403: Input flagged by moderation"))
+		Expect(got.OutcomeReason.String).To(HavePrefix("The model provider refused the request (HTTP 403) [as reported by the harness: "))
 	})
 
 	It("fails a provider's 401 as a provider-key fault", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		r := refuse(ctx, e, 401, "401: No auth credentials found", 0)
+		r := refuse(ctx, e, 401, 0)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
 		got := getRun(ctx, r)
@@ -71,7 +71,7 @@ var _ = Describe("Who refused the model request", func() {
 
 	It("keeps a gateway-key fault when the gateway has no record of the provider refusing anything", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
-		r := refuse(ctx, e, 0, "", 0)
+		r := refuse(ctx, e, 0, 0)
 		start := time.Now()
 		e.pool("agentd-a", func(c *agentd.Config) { c.GatewayRecordWait = time.Second })
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
@@ -92,7 +92,7 @@ var _ = Describe("Who refused the model request", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = db.Exec(ctx, `UPDATE runs SET state = 'canceled', outcome_reason = 'spec', finished_at = now(), ready_at = NULL, lease_expires_at = NULL WHERE org_id = $1 AND id = $2`, e.org, other.ID)
 		Expect(err).NotTo(HaveOccurred())
-		r := refuse(ctx, e, 0, "", 0)
+		r := refuse(ctx, e, 0, 0)
 		e.pool("agentd-a")
 		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateFailed))
 		Expect(getRun(ctx, r).FailureClass.RunFailureClass).To(Equal(store.RunFailureClassFatal))

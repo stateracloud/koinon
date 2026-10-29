@@ -190,19 +190,15 @@ var _ = Describe("Decode", func() {
 			return got
 		}
 		id := func(n string) *commonpb.KeyValue { return str(gateway.LogFieldRequest, n) }
-		moderation := `{"error":{"code":403,"message":"Input flagged","metadata":{"reasons":["violence"],"flagged_input":"private prompt text"}}}`
 
-		It("keeps a status the provider answered, even one the gateway also uses, with its excerpt", func() {
+		It("keeps a status the provider answered, even one the gateway also uses", func() {
 			got := decode(
-				noUsage(llmRecord(id("up-403"), num(gateway.LogFieldStatus, 403), boolean(gateway.LogFieldUpstream, true), str(gateway.LogFieldErrorBody, moderation))),
+				noUsage(llmRecord(id("up-403"), num(gateway.LogFieldStatus, 403), boolean(gateway.LogFieldUpstream, true))),
 				noUsage(llmRecord(id("up-401"), num(gateway.LogFieldStatus, 401), boolean(gateway.LogFieldUpstream, true))),
 				noUsage(llmRecord(id("up-400"), num(gateway.LogFieldStatus, 400), boolean(gateway.LogFieldUpstream, true), num(gateway.LogFieldRequestBytes, 10))),
 			)
 			Expect(got).To(HaveLen(3))
-			Expect(got["up-403"]).To(And(HaveField("Upstream", true), HaveField("UpstreamKnown", true), HaveField("Status", int64(403)),
-				HaveField("ErrorExcerpt", "403: Input flagged (reasons: violence)")))
-			Expect(got["up-403"].ErrorExcerpt).NotTo(ContainSubstring("private prompt text"))
-			Expect(got["up-401"].ErrorExcerpt).To(BeEmpty())
+			Expect(got["up-403"]).To(And(HaveField("Upstream", true), HaveField("UpstreamKnown", true), HaveField("Status", int64(403))))
 		})
 
 		It("skips a status the gateway made itself", func() {
@@ -222,15 +218,6 @@ var _ = Describe("Decode", func() {
 			)
 			Expect(got).To(HaveLen(1))
 			Expect(got["old-400"].UpstreamKnown).To(BeFalse())
-		})
-
-		It("drops the error body of a record the provider did not answer with an error", func() {
-			got := decode(
-				llmRecord(id("ok"), num(gateway.LogFieldStatus, 200), boolean(gateway.LogFieldUpstream, true), str(gateway.LogFieldErrorBody, "stray")),
-				llmRecord(id("gw"), num(gateway.LogFieldStatus, 500), boolean(gateway.LogFieldUpstream, false), str(gateway.LogFieldErrorBody, "gateway text")),
-			)
-			Expect(got["ok"].ErrorExcerpt).To(BeEmpty())
-			Expect(got["gw"].ErrorExcerpt).To(BeEmpty())
 		})
 	})
 

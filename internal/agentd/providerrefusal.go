@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/errbody"
 	"github.com/stateracloud/koinon/internal/prices"
 )
 
@@ -23,7 +24,9 @@ import (
 // gateway key failed; a run whose model provider answered 403 (OpenRouter's moderation flag, a
 // guardrail) was therefore failed as a gateway-key fault and sent its people to debug keys that
 // were fine. The gateway knows better: its access log, which the spend ledger records, says whether
-// it called the provider and what status the provider answered. agentd asks the ledger.
+// it called the provider and what status the provider answered. agentd asks the ledger. The log
+// carries no response body (agentgateway buffers every response once an expression reads one), so
+// the words of the failure are the harness's own, labelled so.
 //
 //   - a provider 403: policy, "the provider refused the request";
 //   - a provider 401: the provider rejected the key Koinon holds for it, a fault of the provider
@@ -44,10 +47,7 @@ const (
 
 // providerRefusal is the gateway's record of a model request its provider refused.
 type providerRefusal struct {
-	status int
-	// detail is the excerpt of the provider's error (package errbody), empty when the gateway
-	// logged none.
-	detail       string
+	status       int
 	model        string
 	providerType string
 }
@@ -88,7 +88,7 @@ func (r *runner) awaitRefusal(ctx context.Context, since time.Time) (providerRef
 		})
 		switch {
 		case err == nil:
-			return providerRefusal{status: int(row.Status), detail: row.Detail, model: row.Model}, true
+			return providerRefusal{status: int(row.Status), model: row.Model}, true
 		case !errors.Is(err, pgx.ErrNoRows):
 			r.log.Warn("reading the gateway's record of the refused request failed", "err", err)
 			return providerRefusal{}, false
@@ -115,17 +115,17 @@ func refusedByProvider(f *failure, ref providerRefusal) *failure {
 	if ref.providerType != "" {
 		from = "the model provider (" + ref.providerType + ")"
 	}
-	detail := ""
-	if ref.detail != "" {
-		detail = ": " + ref.detail
-	}
+	// The gateway's record has the status only: it reads no response body, because agentgateway
+	// would then buffer every response (ADR 0056 amendment 2026-10-29). What the provider said is
+	// shown only as the harness reported it, redacted and capped, and labelled as such.
+	harness := " [as reported by the harness: " + errbody.Excerpt(f.reason) + "]"
 	switch ref.status {
 	case 403:
 		out.class = classPolicy
-		out.reason = fmt.Sprintf("%s refused the request (HTTP 403)%s [%s]", capitalize(from), detail, f.reason)
+		out.reason = fmt.Sprintf("%s refused the request (HTTP 403)%s", capitalize(from), harness)
 	default: // 401
 		out.class = classFatal
-		out.reason = fmt.Sprintf("%s rejected the API key Koinon holds for it (HTTP 401)%s; check the provider's key in the catalog [%s]", capitalize(from), detail, f.reason)
+		out.reason = fmt.Sprintf("%s rejected the API key Koinon holds for it (HTTP 401); check the provider's key in the catalog%s", capitalize(from), harness)
 	}
 	return &out
 }

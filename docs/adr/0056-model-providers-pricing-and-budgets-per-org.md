@@ -518,14 +518,16 @@ the last (the gateway's refusals) sentences of the 2026-10-24 decision (3) and o
    - A record from a config that predates the field cannot say who answered. It is read as before: the
      statuses the gateway uses (401, 403, 404, 405, 413, 415, 429) are skipped, any other 4xx is a
      refusal. A rolling update therefore changes nothing until the new config is served.
-3. **What a refusal costs.** Nothing, for two reasons, tried in this order:
-   - the status is never billed by any provider (401, 402, 403, 404, 405, 413, 415, 429:
-     `ledger.neverBilled`); or
-   - the model's provider type documents that it does not bill refused requests. That is an
-     explicit per-type flag, `providertype.Traits.BillsRejectedRequests`, set false for `anthropic`,
-     `openrouter` and `openai` (each row cites the provider's error page). A type without a row
-     (`ollama`, a custom or unknown type) takes the conservative default, true: any other 4xx is
-     charged the input estimate only, as before.
+3. **What a refusal costs.** The provider type decides, by an explicit flag and not by the status:
+   `providertype.Traits.BillsRejectedRequests` is false for `anthropic`, `openrouter` and `openai`
+   (each row cites the provider's error page; issue #241). For those types a refused 4xx is charged
+   nothing, whatever its number (400, 401, 403, 404, 429, ...). A type without a row (`ollama`, a
+   custom or unknown type, or a model Koinon cannot tell the provider of) takes the conservative
+   default, true: any provider 4xx is charged the input estimate only, 401 and 403 included. The
+   gateway's own refusals never reach this rule (point 2). An earlier revision of this amendment
+   waived the statuses 401/402/403/404/405/413/415/429 for every provider type; issue #241 asked for
+   the flag alone, because a custom provider may bill what it refused and the ledger must not
+   under-count.
    A waived entry keeps its row, with tokens 0 and cost 0 (it must not count toward the run's token
    cap either), `rejected_by_upstream: true`, `charge_waived` (why) and `waived_input_tokens` (what
    the estimate would have charged, so the size of the request stays visible). It is not
@@ -535,32 +537,37 @@ the last (the gateway's refusals) sentences of the 2026-10-24 decision (3) and o
    agentd failing the run fast on a non-transient error (ADR 0030 amendment 2026-10-26) and the model
    retry limit, not by phantom charges.
 5. **Stored for the run's sake.** `spend_entries` gains `upstream_status` (the provider's error
-   status, NULL otherwise) and `upstream_error` (a one-line excerpt), migration 00038. agentd reads
-   them to say why a run failed (ADR 0030 amendment 2026-10-29).
-6. **The error body is logged, redacted and capped.** For a response with status >= 400 the access log
-   carries `koinon.error_body` (`gateway.LogFieldErrorBody`): the error's known fields (type, code,
-   message, reasons, provider) with credentials replaced by `[redacted]`, and the first 2,048 characters
-   only for a body that is not JSON (ADR 0074 amendment 2026-10-29: no prompt text leaves the gateway).
-   The CEL (`errbody.GatewayExpr`) reads
-   `response.bodyPrefix`, which agentgateway records for the log as the stream passes; the response is
-   never held back (schema/cel-functions.md, "Body Variables"). For a success the expression fails and
-   the field is left out. The recording costs one copy of at most 2 MiB per response, the price of
-   having the body at all; the earlier worry (point 2 of the 2026-10-24 decision) was a body that
-   delays or breaks the stream, and the gateway specs (streaming, cut streams, cache markers) pass
-   with it on.
-7. **Redaction.** Two layers share one list of patterns (`errbody.Patterns`, RE2 syntax valid in Go and
-   in the gateway's regex engine): a bearer token, a Koinon gateway key, a provider key (`sk-`,
-   `sk-or-v1-`, ...), a credential-like JSON field with its value, and any unbroken token of 40 or
-   more characters. The gateway applies them in the CEL (so neither its stdout log nor the OTLP export
-   carries a credential a provider echoed, or a field that quotes the prompt). The ledger then reduces the body to
-   `errbody.Summarize`: for the known error shapes (OpenAI, OpenRouter, Anthropic, plain) the
-   provider's code, type, message (400 characters) and moderation reasons, and nothing else. Fields
-   that carry the prompt, such as OpenRouter's `metadata.flagged_input`, are dropped by design; an
-   unknown shape is whitespace-collapsed, redacted and cut. The excerpt is at most 512 characters.
-   Redaction removes what looks like a credential; the cap bounds the rest, so a provider message that
-   quotes a few words of the prompt can appear in the excerpt, never more than that. No
-   `$` appears in any expression: agentgateway's config loader expands `$` in the file as an
-   environment variable, so the patterns have no capture groups.
+   status, NULL otherwise), migration 00038. agentd reads it to say why a run failed (ADR 0030
+   amendment 2026-10-29). No error text is stored.
+6. **The gateway reads no response body.** An earlier revision logged a redacted prefix of a failed
+   response (`koinon.error_body`, CEL over `response.bodyPrefix`) so the ledger could keep an excerpt
+   of the provider's message. Reading agentgateway v1.7.0 (tag commit 26f5aebe) showed what that
+   costs. A reference to `response.bodyPrefix` or `response.body` in any access-log or tracer CEL
+   field is found from the expression text (`crates/policy-core/src/expression.rs:203-204`,
+   `telemetry/log.rs:721-731`) and turns on body recording for EVERY response on the listener
+   (`agentgateway/src/cel/mod.rs:150-161`, called for each response at `proxy/httpproxy.rs:776-778`),
+   whatever its status and however the expression is guarded: no status condition narrows it. On an
+   LLM route the cap is 32 MiB (`llm::DEFAULT_BUFFER_LIMIT`, `proxy/httpproxy.rs:1047-1051`), held
+   for the whole stream with one more copy at the end; an MCP SSE stream holds 2 MiB for its
+   lifetime. Koinon's gateway runs in 512Mi and was designed to buffer no response (point 2 of the
+   2026-10-24 decision), so a single such field puts it at risk of OOM under concurrent streams.
+   `maxBufferSize` would bound the memory by capping prompts, which is worse. Therefore **no log or
+   tracer expression Koinon renders may reference `response.body` or `response.bodyPrefix`**; the
+   render specs of both drivers assert it. The classification rests on the gateway's own record that
+   needs no body: the status, `koinon.upstream` (point 1) and the model.
+7. **Where the provider's words come from.** The failure of a run says "the model provider (openrouter)
+   refused the request (HTTP 403)" from the gateway's record, and appends what the harness reported,
+   labelled "as reported by the harness", whitespace-collapsed, redacted and capped at 512
+   characters (`errbody.Excerpt`). Harnesses that put the provider's message in their error (OpenCode
+   today words it as "Authentication required" only) show it; none is required to. This is the source
+   that does not buffer: agentd already receives the text. If a provider's message is wanted
+   in the ledger itself, it must come from a source that does not make the gateway record bodies (for
+   example the harness reporting the provider's error in the ACP error `data`); the table has no
+   column for it until one exists. Redaction (`errbody.Patterns`) removes what looks like a
+   credential: a bearer token, a Koinon gateway key, a provider key (`sk-`, `sk-or-v1-`, ...), a
+   credential-like field with its value, and any unbroken token of 40 or more characters. The cap
+   bounds the rest, so a harness message that quotes a few words of the prompt can appear, never
+   more than that.
 8. **Metrics.** None added. Labels stay the fixed sets of ADR 0023; the status and the excerpt are
    row data, not labels.
 9. **History is not rewritten.** Entries recorded before this change (the rc.7 phantom charges) stay

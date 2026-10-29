@@ -21,7 +21,6 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/stateracloud/koinon/internal/errbody"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/safego"
@@ -43,12 +42,6 @@ const (
 // record from a config that does not log koinon.upstream cannot say who answered, so such a record
 // with one of these statuses and no usage is taken as the gateway's and never charged.
 var gatewayStatuses = map[int64]bool{401: true, 403: true, 404: true, 405: true, 413: true, 415: true, 429: true}
-
-// neverBilled are the statuses a provider answers without having run the model, whatever the
-// provider: authentication, permission, unknown model, method, size, media type and rate limits. A
-// request the provider refused with one of them is recorded (the run can be told why it failed) and
-// charged nothing. Any other 4xx follows the provider type's documented billing (providertype).
-var neverBilled = map[int64]bool{401: true, 402: true, 403: true, 404: true, 405: true, 413: true, 415: true, 429: true}
 
 func isZeroDecimal(s string) bool { return strings.Trim(s, "0.") == "" }
 
@@ -163,9 +156,6 @@ func decode(req *collogspb.ExportLogsServiceRequest, onReject func(kind string))
 				}
 				e.Stream = boolValue(attrs[gateway.LogFieldStream])
 				e.Error = stringValue(attrs[gateway.LogFieldError])
-				if upstream && status >= 400 {
-					e.ErrorExcerpt = errbody.Summarize(stringValue(attrs[gateway.LogFieldErrorBody]))
-				}
 				org, name, ok := strings.Cut(agent, "/")
 				e.Agent = gateway.AgentRef{Org: org, Name: name}
 				switch {

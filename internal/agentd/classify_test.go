@@ -64,15 +64,15 @@ var _ = Describe("Error classification", func() {
 		opencode := rpc("Authentication required: provider authentication required", nil)
 
 		It("makes a provider 403 a policy failure, not a gateway-key fault", func() {
-			class, gateway, reason := agentd.RefusedByProvider(opencode, 403, "403: Input flagged by moderation (reasons: violence)", "openrouter")
+			class, gateway, reason := agentd.RefusedByProvider(opencode, 403, "openrouter")
 			Expect(class).To(Equal("policy"))
 			Expect(gateway).To(BeFalse(), "a spent budget's check must not take it")
-			Expect(reason).To(HavePrefix("The model provider (openrouter) refused the request (HTTP 403): 403: Input flagged by moderation (reasons: violence)"))
-			Expect(reason).To(ContainSubstring("Authentication required: provider authentication required"), "the harness's own words stay for the record")
+			Expect(reason).To(HavePrefix("The model provider (openrouter) refused the request (HTTP 403) [as reported by the harness: "))
+			Expect(reason).To(ContainSubstring("Authentication required: provider authentication required"), "the harness's own words stay, labelled as such")
 		})
 
 		It("makes a provider 401 a provider-key fault, fatal, not the agent's gateway key", func() {
-			class, gateway, reason := agentd.RefusedByProvider(opencode, 401, "", "anthropic")
+			class, gateway, reason := agentd.RefusedByProvider(opencode, 401, "anthropic")
 			Expect(class).To(Equal("fatal"))
 			Expect(gateway).To(BeFalse())
 			Expect(reason).To(And(ContainSubstring("rejected the API key Koinon holds for it (HTTP 401)"), ContainSubstring("provider's key in the catalog")))
@@ -80,8 +80,8 @@ var _ = Describe("Error classification", func() {
 		})
 
 		It("names the provider only when it is known", func() {
-			_, _, reason := agentd.RefusedByProvider(opencode, 403, "", "")
-			Expect(reason).To(HavePrefix("The model provider refused the request (HTTP 403) ["))
+			_, _, reason := agentd.RefusedByProvider(opencode, 403, "")
+			Expect(reason).To(HavePrefix("The model provider refused the request (HTTP 403) [as reported by the harness: "))
 		})
 	})
 

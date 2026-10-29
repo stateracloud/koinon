@@ -1886,7 +1886,6 @@ type SpendEntry struct {
 	ResponseID       pgtype.Text
 	Principal        string
 	UpstreamStatus   pgtype.Int2
-	UpstreamError    pgtype.Text
 }
 
 type SpendEntryRevision struct {

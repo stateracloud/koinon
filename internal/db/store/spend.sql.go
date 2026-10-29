@@ -262,7 +262,7 @@ func (q *Queries) GetCalibration(ctx context.Context, arg GetCalibrationParams) 
 }
 
 const getLastUpstreamRefusal = `-- name: GetLastUpstreamRefusal :one
-SELECT upstream_status::int AS status, coalesce(upstream_error, '')::text AS detail, model, occurred_at
+SELECT upstream_status::int AS status, model, occurred_at
 FROM spend_entries
 WHERE org_id = $1 AND run_id = $2 AND upstream_status = ANY($3::int[]) AND occurred_at >= $4
 ORDER BY occurred_at DESC, id DESC
@@ -278,7 +278,6 @@ type GetLastUpstreamRefusalParams struct {
 
 type GetLastUpstreamRefusalRow struct {
 	Status     int32
-	Detail     string
 	Model      string
 	OccurredAt pgtype.Timestamptz
 }
@@ -295,12 +294,7 @@ func (q *Queries) GetLastUpstreamRefusal(ctx context.Context, arg GetLastUpstrea
 		arg.Since,
 	)
 	var i GetLastUpstreamRefusalRow
-	err := row.Scan(
-		&i.Status,
-		&i.Detail,
-		&i.Model,
-		&i.OccurredAt,
-	)
+	err := row.Scan(&i.Status, &i.Model, &i.OccurredAt)
 	return i, err
 }
 
@@ -387,7 +381,7 @@ INSERT INTO spend_entries (
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
     request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
-    upstream_status, upstream_error
+    upstream_status
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
     $9, $10, $11, $12, $13,
@@ -395,7 +389,7 @@ INSERT INTO spend_entries (
     $16, $17, $18, $19::jsonb, $20,
     $21, $22, $23,
     $24, coalesce(($25::text)::numeric, 0), $26,
-    $27, $28
+    $27
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id
@@ -429,7 +423,6 @@ type InsertSpendEntryParams struct {
 	ReserveUsd       pgtype.Text
 	ResponseID       pgtype.Text
 	UpstreamStatus   pgtype.Int2
-	UpstreamError    pgtype.Text
 }
 
 // Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
@@ -467,7 +460,6 @@ func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryPara
 		arg.ReserveUsd,
 		arg.ResponseID,
 		arg.UpstreamStatus,
-		arg.UpstreamError,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
