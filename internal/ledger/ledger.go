@@ -73,9 +73,6 @@ type Entry struct {
 	// called the provider, so Status is the provider's. Without the field (a config that predates
 	// it) the origin of a status is not known.
 	UpstreamKnown, Upstream bool
-	// ErrorExcerpt is the one-line, redacted excerpt of the provider's error body (package errbody),
-	// for a provider's error status.
-	ErrorExcerpt string
 	// MaxTokens is the request's max_tokens (0 when not logged).
 	MaxTokens int64
 	// RequestBytes and ResponseBytes are -1 when not logged.

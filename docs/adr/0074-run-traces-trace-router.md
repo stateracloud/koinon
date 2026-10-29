@@ -414,27 +414,23 @@ so the router needs only that.
   table, and the prior-art pages in the Context.
 - OpenShell passing a harness's `traceparent` header to the gateway: not yet tested (decision 2).
 
-## Amendment (2026-10-29): the gateway's error-body log field carries no prompt text
+## Amendment (2026-10-29): the gateway logs no response body
 
-Decision 6 says an org at `none` sends no content off the gateway at all. The error body the gateway
-logs for a failed response (`koinon.error_body`, ADR 0056 amendment 2026-10-29) did not meet that: its
-CEL cut the body to 2,048 characters and redacted credentials, but a provider that echoes the prompt
-(OpenRouter's `metadata.flagged_input`) put it in the gateway's stdout log and in the OTLP export.
-Only the ledger dropped it, later.
+Decision 6 says an org at `none` sends no content off the gateway at all. A first version of the
+failed-response log field (`koinon.error_body`, ADR 0056 amendment 2026-10-29) did not meet that: a
+provider that echoes the prompt (OpenRouter's `metadata.flagged_input`) put it in the gateway's stdout
+log and in the OTLP export. Redacting it in CEL would have fixed that, but reading agentgateway v1.7.0
+showed a larger fault: any log or tracer expression that references `response.body` or
+`response.bodyPrefix` makes the gateway record the body of every response on the listener (up to 32 MiB
+on an LLM route, held for the whole stream; ADR 0056 amendment 2026-10-29, point 6).
 
-1. **The gateway builds the field from known fields; it never copies the body.** `errbody.GatewayExpr`
-   parses a JSON body (`json(response.bodyPrefix)`) and emits a new object with the error's type, code,
-   message (400 characters), moderation reasons and provider name, in the shape the ledger's
-   `errbody.Summarize` reads. `{"error": "text"}` and `{"message": "text"}` give the text alone. JSON of
-   any other shape, and JSON cut at the prefix limit, give a fixed placeholder. Only a body that is not
-   JSON is copied, as its first 2,048 characters. Credential redaction is applied on top, as before.
-2. **Content level does not change it.** The field holds provider error metadata, never the request or
-   the completion, so it is the same at every content level and `none` stays true to its word. A
-   provider message that quotes a few words of the prompt in `message` is still passed on (capped at 400
-   characters), as the ADR 0056 amendment already says; moderation fields that carry the whole input
-   are not.
-3. **Test.** The ledger's gateway specs assert, against the real binary's container log, that
-   `flagged_input` text never appears, for the OpenRouter shape and for each fallback shape.
+1. **No rendered expression reads a response body**, in the access log or in a tracer field, in either
+   driver. The field and `errbody.GatewayExpr` are removed, and a render spec in each driver fails if
+   `response.body` appears in any rendered output.
+2. **Content level is unaffected.** The gateway's log and the OTLP export hold provider status and
+   metadata only, never the request, the completion or an error body, so `none` stays true to its word.
+3. **Any future trace field that wants a body** must be weighed against that cost first; the
+   per-response buffering is what a per-field status guard cannot avoid.
 
 ## Links
 

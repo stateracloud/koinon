@@ -750,10 +750,6 @@ const (
 	// the first and ignores the second (ADR 0056, amendment 2026-10-29). A record without the field
 	// comes from a config that predates it.
 	LogFieldUpstream = "koinon.upstream"
-	// LogFieldErrorBody is the first characters of a failed model response's body, with credentials
-	// redacted (errbody.GatewayExpr). It is absent for a response that is not an error. The ledger
-	// reduces it to a one-line excerpt before it stores anything.
-	LogFieldErrorBody = "koinon.error_body"
 )
 
 // UpstreamCEL is the CEL of LogFieldUpstream. proxy.upstreamDuration is the time spent waiting for

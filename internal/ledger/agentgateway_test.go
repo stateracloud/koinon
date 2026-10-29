@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/moby/moby/api/types/container"
 	. "github.com/onsi/ginkgo/v2"
@@ -27,7 +26,6 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
-	"github.com/stateracloud/koinon/internal/errbody"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/ledger"
@@ -409,8 +407,9 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		Expect(settlements).To(Equal(1))
 	}, SpecTimeout(time.Minute))
 
-	// A provider's refusal reaches the ledger with the provider's status and a redacted excerpt of its
-	// error, and costs nothing from a provider that does not bill it; the gateway's own refusals (a
+	// A provider's refusal reaches the ledger with the provider's status, and costs nothing from a
+	// provider type that documents not billing it. The gateway reads no response body (agentgateway
+	// would buffer every response), so no error text is recorded; the gateway's own refusals (a
 	// bad key, a model the key may not use) are not records of the provider (ADR 0056, amendment
 	// 2026-10-29; ADR 0030, amendment 2026-10-29). Verified against the real binary: koinon.upstream
 	// is true exactly when agentgateway called the provider.
@@ -439,7 +438,6 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 
 		type refused struct {
 			status       int
-			detail       *string
 			cost         string
 			tokens       int64
 			estimateJSON string
@@ -463,57 +461,36 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 				if n <= before {
 					return fmt.Errorf("not recorded yet")
 				}
-				return db.QueryRow(ctx, `SELECT coalesce(upstream_status, 0), upstream_error, cost_usd::text, input_tokens + output_tokens, coalesce(estimate, '{}'::jsonb)::text, run_id::text
-					FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, d.org).Scan(&r.status, &r.detail, &r.cost, &r.tokens, &r.estimateJSON, &r.runID)
+				return db.QueryRow(ctx, `SELECT coalesce(upstream_status, 0), cost_usd::text, input_tokens + output_tokens, coalesce(estimate, '{}'::jsonb)::text, run_id::text
+					FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, d.org).Scan(&r.status, &r.cost, &r.tokens, &r.estimateJSON, &r.runID)
 			}).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(Succeed())
 			return got, r
 		}
 
-		It("records an OpenRouter-style moderation 403: the status, the reasons, no prompt text, no charge", func(ctx SpecContext) {
+		It("records an OpenRouter-style moderation 403: the status, no body, no charge", func(ctx SpecContext) {
 			got, r := refusedWith(ctx, http.StatusForbidden, `{"error":{"code":403,"message":"Input flagged by moderation","metadata":{"reasons":["violence"],"flagged_input":"the agent's private prompt text","provider_name":"OpenAI"}}}`)
 			Expect(got).To(Equal(http.StatusForbidden))
 			Expect(r.status).To(Equal(403))
-			Expect(r.detail).NotTo(BeNil())
-			Expect(*r.detail).To(Equal("403: Input flagged by moderation (reasons: violence; provider: OpenAI)"))
 			Expect(ledger.FormatUSD(r.cost)).To(Equal("0.00"))
 			Expect(r.tokens).To(BeZero())
-			Expect(r.estimateJSON).To(ContainSubstring("never billed"))
+			Expect(r.estimateJSON).To(ContainSubstring("does not bill refused requests"))
 			// agentd finds the refusal by the run (ADR 0030, amendment 2026-10-29): a refused request
 			// must be attributed to the run that was active, whatever it cost.
 			Expect(r.runID).NotTo(BeNil())
 			Expect(*r.runID).To(Equal(drun.ID.String()))
-			// ADR 0074 decision 6: the prompt the provider echoed is not in the gateway's log either.
+			// The gateway reads no response body, so nothing the provider echoed is in its log.
 			logs, err := ctr.Logs(ctx)
 			Expect(err).NotTo(HaveOccurred())
 			raw, _ := io.ReadAll(logs)
-			Expect(string(raw)).To(ContainSubstring("Input flagged by moderation"), "the failed response is logged")
 			Expect(string(raw)).NotTo(ContainSubstring("private prompt text"))
 			Expect(string(raw)).NotTo(ContainSubstring("flagged_input"))
+			Expect(string(raw)).NotTo(ContainSubstring("error_body"))
 		})
-
-		DescribeTable("logs an error body of another shape without quoting it",
-			func(ctx SpecContext, body, wantLogged, wantExcerpt string) {
-				_, r := refusedWith(ctx, http.StatusBadRequest, body)
-				Expect(r.detail).NotTo(BeNil())
-				Expect(*r.detail).To(Equal(wantExcerpt))
-				logs, err := ctr.Logs(ctx)
-				Expect(err).NotTo(HaveOccurred())
-				raw, _ := io.ReadAll(logs)
-				Expect(string(raw)).To(ContainSubstring(wantLogged))
-				Expect(string(raw)).NotTo(ContainSubstring("PROMPT-QUOTE"))
-			},
-			Entry("an error that is a string", `{"error":"bad request","input":"PROMPT-QUOTE"}`, "bad request", "bad request"),
-			Entry("a top-level message", `{"message":"bad shape","input":"PROMPT-QUOTE"}`, "bad shape", "bad shape"),
-			Entry("JSON of no known shape", `{"detail":"PROMPT-QUOTE"}`, "unrecognised shape", "[error body of an unrecognised shape]"),
-			Entry("a body that is cut JSON", `{"error":{"message":"`+strings.Repeat("x", 3_000_000)+`PROMPT-QUOTE`, "not complete JSON", "[error body that is not complete JSON]"),
-			Entry("a plain-text body", "upstream connect error", "upstream connect error", "upstream connect error"),
-		)
 
 		It("records a provider's 401 with its status", func(ctx SpecContext) {
 			got, r := refusedWith(ctx, http.StatusUnauthorized, `{"error":{"code":401,"message":"No auth credentials found"}}`)
 			Expect(got).To(Equal(http.StatusUnauthorized))
 			Expect(r.status).To(Equal(401))
-			Expect(*r.detail).To(Equal("401: No auth credentials found"))
 		})
 
 		It("waives an OpenRouter 400 and keeps its status, as a refused request that is not billed", func(ctx SpecContext) {
@@ -523,31 +500,6 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 			Expect(r.tokens).To(BeZero())
 			Expect(r.estimateJSON).To(ContainSubstring(`"rejected_by_upstream": true`))
 			Expect(r.estimateJSON).To(ContainSubstring("does not bill refused requests"))
-		})
-
-		It("keeps a credential the provider echoed out of the ledger and out of the gateway's log", func(ctx SpecContext) {
-			const echoed = "sk-or-v1-0123456789abcdef0123456789abcdef"
-			_, r := refusedWith(ctx, http.StatusUnauthorized, `{"error":{"code":401,"message":"Invalid key `+echoed+` for Bearer abcdef0123456789xyz"}}`)
-			Expect(*r.detail).NotTo(ContainSubstring("0123456789abcdef"))
-			Expect(*r.detail).To(ContainSubstring("[redacted]"))
-			logs, err := ctr.Logs(ctx)
-			Expect(err).NotTo(HaveOccurred())
-			raw, _ := io.ReadAll(logs)
-			Expect(string(raw)).To(ContainSubstring(`"koinon.error_body"`), "the failed response's body is logged")
-			Expect(string(raw)).NotTo(ContainSubstring("0123456789abcdef0123456789abcdef"))
-			Expect(string(raw)).NotTo(ContainSubstring("abcdef0123456789xyz"))
-		})
-
-		It("caps the logged body, whatever its size or encoding", func(ctx SpecContext) {
-			big := `{"error":{"message":"` + strings.Repeat("é", 50_000) + `"}}`
-			_, r := refusedWith(ctx, http.StatusBadRequest, big)
-			Expect(r.status).To(Equal(400))
-			Expect(*r.detail).NotTo(BeEmpty())
-			Expect(utf8.RuneCountInString(*r.detail)).To(BeNumerically("<=", errbody.ExcerptMax))
-			logs, err := ctr.Logs(ctx)
-			Expect(err).NotTo(HaveOccurred())
-			raw, _ := io.ReadAll(logs)
-			Expect(strings.Count(string(raw), "é")).To(BeNumerically("<", 40_000), "the gateway logs a prefix, not the body")
 		})
 
 		It("does not record the gateway's own refusals as the provider's", func(ctx SpecContext) {

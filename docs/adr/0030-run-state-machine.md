@@ -210,8 +210,8 @@ batches), and decides:
 
 | The gateway's record | Class | Reason shown |
 | --- | --- | --- |
-| provider `403` | `policy` | "The model provider (openrouter) refused the request (HTTP 403): ..." with the excerpt of the provider's error |
-| provider `401` | `fatal` | "The model provider ... rejected the API key Koinon holds for it (HTTP 401); check the provider's key in the catalog" |
+| provider `403` | `policy` | "The model provider (openrouter) refused the request (HTTP 403) [as reported by the harness: ...]" |
+| provider `401` | `fatal` | "The model provider ... rejected the API key Koinon holds for it (HTTP 401); check the provider's key in the catalog [as reported by the harness: ...]" |
 | none | `fatal`, gateway fault | the error text as before |
 
 - **No record means the gateway refused the key itself.** A bad or revoked key is answered before any
@@ -221,8 +221,11 @@ batches), and decides:
   lookup, so a revoked key of a spent limit still ends as a budget stop at once. A provider refusal
   is no longer a gateway refusal for that check (`failure.gateway` is cleared).
 - **A cancel wins.** If the run is fenced or canceled while the record is awaited, that decides.
-- **The excerpt is redacted and capped** (ADR 0056 amendment 2026-10-29, points 6 and 7), so the
-  reason may be shown to the person and written to the run's events.
+- **The gateway's record has the status, not the provider's words.** The gateway logs no response
+  body (ADR 0056 amendment 2026-10-29, point 6: agentgateway would buffer every response). The
+  harness's own error text is appended, labelled "as reported by the harness", redacted and capped
+  at 512 characters (`errbody.Excerpt`), so the reason may be shown to the person and written to the
+  run's events.
 - **Not retried.** `policy` and `fatal` are not retried (the table above).
 - **Upstream.** OpenCode should put the status code and error body in the ACP error `data`; the
   structured `statusCode` is already read first (`structured`). The ledger lookup is the fallback

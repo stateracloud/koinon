@@ -124,13 +124,22 @@ var _ = Describe("Render", func() {
 	It("matches the golden file", func() { golden(fullState(), "full") })
 	It("matches the golden file for models in each format (ADR 0069)", func() { golden(formatsState(), "model-formats") })
 
-	It("logs who answered and a redacted prefix of a failed response (ADR 0056 amendment 2026-10-29)", func() {
+	It("logs who answered (ADR 0056 amendment 2026-10-29)", func() {
 		r, err := gwk8s.Render(fullState(), opts())
 		Expect(err).NotTo(HaveOccurred())
-		out := string(dump(r))
-		Expect(out).To(ContainSubstring("name: " + gateway.LogFieldUpstream))
-		Expect(out).To(ContainSubstring("name: " + gateway.LogFieldErrorBody))
-		Expect(out).To(ContainSubstring("response.bodyPrefix"))
+		Expect(string(dump(r))).To(ContainSubstring("name: " + gateway.LogFieldUpstream))
+	})
+
+	// agentgateway v1.7.0 records the body of EVERY response on a listener (up to 32 MiB per LLM
+	// response, held for the whole stream) as soon as any log or tracer expression mentions
+	// response.body or response.bodyPrefix, detected from the expression text and not narrowed by a
+	// status guard. Koinon's gateway has 512Mi and buffers nothing (ADR 0056 amendment 2026-10-29).
+	It("renders no expression that reads a response body", func() {
+		for name, s := range map[string]gateway.State{"full": fullState(), "model-formats": formatsState()} {
+			r, err := gwk8s.Render(s, opts())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(dump(r))).NotTo(ContainSubstring("response.body"), name)
+		}
 	})
 
 	It("is deterministic and independent of input order", func() {

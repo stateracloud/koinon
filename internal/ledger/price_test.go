@@ -293,7 +293,7 @@ var _ = Describe("An unusable stored price", func() {
 		rejected := func(e *env, status int64) ledger.Entry {
 			return ledger.Entry{
 				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: status,
-				UpstreamKnown: true, Upstream: true, ErrorExcerpt: "invalid_request_error: max_tokens must be positive",
+				UpstreamKnown: true, Upstream: true,
 				MaxTokens: 4000, RequestBytes: 3_000_000, ResponseBytes: -1, Time: time.Now(),
 			}
 		}
@@ -312,18 +312,14 @@ var _ = Describe("An unusable stored price", func() {
 			Expect(err).NotTo(HaveOccurred())
 			return e
 		}
-		stored := func(ctx SpecContext, e *env) (status int, detail string) {
+		stored := func(ctx SpecContext, e *env) (status int) {
 			GinkgoHelper()
 			var st *int
-			var d *string
-			Expect(db.QueryRow(ctx, `SELECT upstream_status, upstream_error FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, e.org).Scan(&st, &d)).To(Succeed())
+			Expect(db.QueryRow(ctx, `SELECT upstream_status FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, e.org).Scan(&st)).To(Succeed())
 			if st != nil {
 				status = *st
 			}
-			if d != nil {
-				detail = *d
-			}
-			return status, detail
+			return status
 		}
 
 		for _, typ := range []string{"anthropic", "openrouter", "openai"} {
@@ -354,9 +350,7 @@ var _ = Describe("An unusable stored price", func() {
 				Expect(string(s.Estimate)).To(ContainSubstring(`"charge_waived": "provider type ` + typ + ` does not bill refused requests"`))
 				Expect(string(s.Estimate)).To(ContainSubstring(`"waived_input_tokens": 1000000`), "what the estimate would have charged stays visible")
 				Expect(string(s.Estimate)).NotTo(ContainSubstring("usage_missing"))
-				status, detail := stored(ctx, e)
-				Expect(status).To(Equal(400))
-				Expect(detail).To(Equal("invalid_request_error: max_tokens must be positive"))
+				Expect(stored(ctx, e)).To(Equal(400))
 				Expect(e.run(ctx, run.ID).TokensUsed).To(BeZero(), "the run's token cap is not charged")
 			})
 		}
@@ -372,33 +366,46 @@ var _ = Describe("An unusable stored price", func() {
 			Expect(s.CostFlagged).To(BeTrue())
 			Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
 			Expect(string(s.Estimate)).To(ContainSubstring(`"rejected_by_upstream": true`))
-			status, _ := stored(ctx, e)
-			Expect(status).To(Equal(400))
+			Expect(stored(ctx, e)).To(Equal(400))
 		})
 
 		It("charges a record from a config that cannot say who answered the same way", func(ctx SpecContext) {
 			e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
 			e.model(ctx, "openrouter", flash)
 			x := rejected(e, 400)
-			x.UpstreamKnown, x.Upstream, x.ErrorExcerpt = false, false, ""
+			x.UpstreamKnown, x.Upstream = false, false
 			_, err := ing.Ingest(ctx, []ledger.Entry{x})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("0.00"), "openrouter does not bill a refused request")
-			status, _ := stored(ctx, e)
-			Expect(status).To(BeZero(), "without koinon.upstream the status is not known to be the provider's")
+			Expect(stored(ctx, e)).To(BeZero(), "without koinon.upstream the status is not known to be the provider's")
 		})
 
-		for _, status := range []int64{401, 403, 404, 429} {
-			It(fmt.Sprintf("records a provider's %d and never charges it, whatever the provider type", status), func(ctx SpecContext) {
-				e := customProvider(ctx)
+		// Issue #241: the per-provider-type flag decides, not the status. A provider type that
+		// documents it does not bill refused requests is charged nothing for any 4xx; an unknown or
+		// custom one keeps the conservative input charge for any 4xx, 401 and 403 included.
+		for _, status := range []int64{401, 402, 403, 404, 413, 429} {
+			It(fmt.Sprintf("charges nothing for a provider's %d when its type documents not billing it", status), func(ctx SpecContext) {
+				e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+				e.model(ctx, "openrouter", flash)
 				_, err := ing.Ingest(ctx, []ledger.Entry{rejected(e, status)})
 				Expect(err).NotTo(HaveOccurred())
 				s := e.lastEntry(ctx)
 				Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.00"))
 				Expect(s.InputTokens).To(BeZero())
-				Expect(string(s.Estimate)).To(ContainSubstring(fmt.Sprintf(`"charge_waived": "status %d is never billed"`, status)))
-				got, _ := stored(ctx, e)
-				Expect(got).To(Equal(int(status)))
+				Expect(string(s.Estimate)).To(ContainSubstring(`"charge_waived": "provider type openrouter does not bill refused requests"`))
+				Expect(stored(ctx, e)).To(Equal(int(status)))
+			})
+
+			It(fmt.Sprintf("keeps the conservative charge for a provider's %d on a custom provider type", status), func(ctx SpecContext) {
+				e := customProvider(ctx)
+				_, err := ing.Ingest(ctx, []ledger.Entry{rejected(e, status)})
+				Expect(err).NotTo(HaveOccurred())
+				s := e.lastEntry(ctx)
+				Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.20"))
+				Expect(s.InputTokens).To(Equal(int64(1_000_000)))
+				Expect(string(s.Estimate)).NotTo(ContainSubstring("charge_waived"))
+				Expect(string(s.Estimate)).To(ContainSubstring(`"rejected_by_upstream": true`))
+				Expect(stored(ctx, e)).To(Equal(int(status)), "still recorded, with the provider's status")
 			})
 		}
 
@@ -413,15 +420,14 @@ var _ = Describe("An unusable stored price", func() {
 			Expect(s.Estimated).To(BeTrue())
 			Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
 			Expect(string(s.Estimate)).NotTo(ContainSubstring("charge_waived"))
-			status, _ := stored(ctx, e)
-			Expect(status).To(Equal(502))
+			Expect(stored(ctx, e)).To(Equal(502))
 		})
 
 		It("settles a record without a status as it did", func(ctx SpecContext) {
 			e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
 			e.model(ctx, "openrouter", flash)
 			x := rejected(e, 0)
-			x.UpstreamKnown, x.Upstream, x.ErrorExcerpt = false, false, ""
+			x.UpstreamKnown, x.Upstream = false, false
 			_, err := ing.Ingest(ctx, []ledger.Entry{x})
 			Expect(err).NotTo(HaveOccurred())
 			s := e.lastEntry(ctx)

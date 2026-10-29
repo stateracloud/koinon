@@ -48,17 +48,16 @@ agent runs one task at a time. When several limits are reached at once, the stop
 A provider can refuse a request: it is invalid, or the provider's moderation flagged it. Anthropic,
 OpenRouter and OpenAI do not bill a request they refuse, so Koinon charges **nothing** for it and it
 does not count toward a run's token cap. The request stays in the spend report with a zero cost,
-marked `rejected_by_upstream`, so you can still see it happened; the entry keeps the HTTP status and a
-short excerpt of the provider's error (never the full body: credentials are redacted, the excerpt is
-capped, and the fields that carry your prompt are dropped, but a provider's message can still quote a
-few words of the request). For a provider Koinon has no billing information for (Ollama, a custom or unknown
-OpenAI-compatible API) a refused request is charged the input it probably cost, which can only
-overstate spend. Requests that the gateway itself refuses (a revoked key, a model the key may not use, a
+marked `rejected_by_upstream`, so you can still see it happened; the entry keeps the HTTP status. Koinon
+does not keep the provider's error text: the gateway reads no response bodies, because that would make
+it hold every response in memory. For a provider Koinon has no billing information for (Ollama, a
+custom or unknown OpenAI-compatible API) a refused request, whatever its status, is charged the input it
+probably cost, which can only overstate spend. Requests that the gateway itself refuses (a revoked key, a model the key may not use, a
 spent limit) never reach a provider and are never charged. A server error from the provider is
 charged what it streamed, as before.
 
 When a run fails because the provider refused a request, the run says so ("the model provider
-(openrouter) refused the request (HTTP 403): ..."), and a refusal of the provider's own API key is
+(openrouter) refused the request (HTTP 403)"), followed by what the agent's harness reported, and a refusal of the provider's own API key is
 reported as a fault of the provider's key in the catalog, not of the agent's gateway key. Koinon works
 this out from the gateway's record of the request, because some harnesses report both as
 "authentication required". Because the gateway exports that record in batches, a run that failed with

@@ -51,20 +51,12 @@ func (e Entry) rejectedByUpstream() bool {
 	return !e.InputKnown && !e.OutputKnown && e.Status >= 400 && e.Status < 500
 }
 
-// waivesRejected reports whether a request the provider refused is charged nothing: the status is
-// one no provider bills (neverBilled), or the model's provider type documents that it does not
-// bill refused requests (package providertype). A request whose provider Koinon cannot tell (no
-// priced model, a custom type) keeps the conservative charge.
-func waivesRejected(e Entry, m prices.Model) bool {
-	return neverBilled[e.Status] || (m.ProviderType != "" && !providertype.For(m.ProviderType).BillsRejectedRequests)
-}
-
-// waiveReason says in the entry why nothing was charged.
-func waiveReason(e Entry, m prices.Model) string {
-	if neverBilled[e.Status] {
-		return fmt.Sprintf("status %d is never billed", e.Status)
-	}
-	return "provider type " + m.ProviderType + " does not bill refused requests"
+// waivesRejected reports whether a request the provider refused is charged nothing: only when the
+// model's provider type documents that it does not bill refused requests, an explicit per-type
+// catalog flag (package providertype, issue #241). A request whose provider Koinon cannot tell (no
+// priced model, a custom or unknown type) keeps the conservative charge, whatever the status.
+func waivesRejected(m prices.Model) bool {
+	return m.ProviderType != "" && !providertype.For(m.ProviderType).BillsRejectedRequests
 }
 
 // price computes the request's cost from its usage (estimated when missing) and the price valid
@@ -162,13 +154,13 @@ func (in *Ingester) priceWith(ctx context.Context, q *store.Queries, org pgtype.
 		}
 		r := estimate.Estimate(params, x)
 		switch {
-		case x.Rejected && waivesRejected(e, p.model):
+		case x.Rejected && waivesRejected(p.model):
 			// The provider refused the request and is known not to bill that (ADR 0056, amendment
 			// 2026-10-29): nothing is charged and no tokens count, but the entry stays, flagged
 			// rejected_by_upstream, with the input the estimate would have charged. It is not a
 			// price problem, so the price report does not flag it.
 			meta["rejected_by_upstream"] = true
-			meta["charge_waived"] = waiveReason(e, p.model)
+			meta["charge_waived"] = "provider type " + p.model.ProviderType + " does not bill refused requests"
 			meta["waived_input_tokens"] = r.InputTokens
 			p.waived = true
 			r.InputTokens, r.OutputTokens = 0, 0
