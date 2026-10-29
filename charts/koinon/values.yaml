@@ -502,8 +502,9 @@ metrics:
   allowFrom: []
   serviceMonitor:
     # A prometheus-operator ServiceMonitor per component, plus one for agentgateway's stats port
-    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes). Needs the monitoring.coreos.com/v1
-    # ServiceMonitor CRD: enabling it without the CRD fails the install.
+    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes). Needs
+    # the monitoring.coreos.com/v1 ServiceMonitor CRD, and in kubernetes mode the PodMonitor CRD:
+    # enabling it without them fails the install.
     enabled: false
     # Extra labels on the ServiceMonitors, for example the release label your Prometheus selects on.
     labels: {}
