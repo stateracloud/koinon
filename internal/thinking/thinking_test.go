@@ -3,11 +3,14 @@
 package thinking_test
 
 import (
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/thinking"
+	"github.com/stateracloud/koinon/pricing"
 )
 
 var _ = Describe("Of", func() {
@@ -77,5 +80,26 @@ var _ = Describe("ParseSetting", func() {
 		}
 		_, err := thinking.ParseSetting("high")
 		Expect(err).To(MatchError(ContainSubstring(`"on" or "off"`)))
+	})
+})
+
+// A model that can think bills thinking as output the response may not show, so its price entry
+// says so: that is what flags an aborted response's output as unmeasured (ADR 0056) and what the
+// run's reserve is held for. Haiku 5.5 lacked the flag until thinking went on by default.
+var _ = Describe("the default price list", func() {
+	It("marks every model the catalog says can think as billing hidden thinking", func() {
+		_, entries := pricing.Default()
+		checked := 0
+		for _, r := range entries {
+			glob := r.Entry.Match.Glob
+			if glob == "" || strings.ContainsAny(glob, "*?[") {
+				continue
+			}
+			if thinking.Of(r.Entry.Provider, glob, modelformat.Anthropic).Supported() {
+				checked++
+				Expect(r.Entry.HiddenThinking).To(BeTrue(), "%s (%s) can think", r.Entry.ID, glob)
+			}
+		}
+		Expect(checked).To(BeNumerically(">=", 8), "the price list ships four Claude models on two providers")
 	})
 })

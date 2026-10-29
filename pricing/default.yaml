@@ -15,7 +15,7 @@
 # tokenizer/ratio estimate usage a provider did not report: ratio is UTF-8 bytes per token
 # (Claude before Opus 4.7: 3.0; Opus 4.7 and later: 2.3; others 3.0; see
 # docs/research/claude-token-estimation.md).
-version: "2026-10-28.1"
+version: "2026-10-29.1"
 entries:
   - id: ollama-local
     provider: ollama
@@ -180,6 +180,7 @@ entries:
         prices: {input: "0.5", output: "2.5", cache_read: "0.05", cache_write: "0.625"}
     tokenizer: bytes
     ratio: "2.3"
+    hidden_thinking: true
     max_output: 128000
     source: {url: "https://platform.claude.com/docs/en/about-claude/pricing", accessed: 2026-10-24}
     note: "Anthropic pricing page 2026-10-24, Claude Haiku 5.5: cache_write is the 5-minute write price. Newer tokenizer (about 30% more tokens than before Opus 4.7), so ratio 2.3. Prompts over 100,000 tokens (cache tokens included) bill at the tier. max_output taken from OpenRouter models API top_provider.max_completion_tokens (2026-10-24), not from the provider page."
@@ -193,6 +194,7 @@ entries:
         prices: {input: "0.5", output: "2.5", cache_read: "0.05", cache_write: "0.625"}
     tokenizer: bytes
     ratio: "2.3"
+    hidden_thinking: true
     max_output: 128000
     source: {url: "https://openrouter.ai/api/v1/models", accessed: 2026-10-24}
     note: "OpenRouter models API 2026-10-24: the same prices as Anthropic's page including the min_prompt_tokens 100000 override. max_output from OpenRouter models API top_provider.max_completion_tokens (2026-10-24)."
