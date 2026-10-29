@@ -77,7 +77,7 @@ like the real one.
 
 ## Amendment (2026-10-29, rc.8): the thinking setting
 
-The agent gets a second mutable setting beside its model: `agents.thinking` (migration 00038), `on`,
+The agent gets a second mutable setting beside its model: `agents.thinking` (migration 00039), `on`,
 `off` or unset, with the same shape as the model setting: not part of a version, applied to the next
 run, audited (`agent.thinking.set`, old and new value, one transaction, a repeat writes nothing), on
 `AgentService.SetAgentThinking` and `PUT /admin/v1/agents/{id}/thinking`, and shown on the agent page
