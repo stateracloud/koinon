@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sdk "github.com/coder/acp-go-sdk"
+	. "github.com/onsi/ginkgo/v2"
 )
 
 // Prompt markers that script the fake harness.
@@ -292,6 +293,9 @@ func (p *process) LoadSession(ctx context.Context, r sdk.LoadSessionRequest) (sd
 }
 
 func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptResponse, error) {
+	// The callbacks a spec installs (modelFault, onPrompt, onRefuse, onSummary) run here, on the
+	// ACP SDK's goroutine: a failed Expect in one fails the spec instead of crashing the binary.
+	defer GinkgoRecover()
 	text := r.Prompt[0].Text.Text
 	if strings.HasPrefix(text, summaryMarker) {
 		return p.summary(ctx, r.SessionId, text)
