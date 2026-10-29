@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // Provider keys reach the gateway as files (plan item PV1, ADR 0056). The reconciler opens
@@ -186,7 +187,9 @@ func (r *Reconciler) loadProviders(ctx context.Context, orgs []store.ListOrgsToR
 				pidOf[id] = row.ProviderID
 				order = append(order, id)
 			}
-			m := gateway.Model{Name: row.ModelName, Guard: row.Guard, Format: modelformat.Format(row.ModelFormat)}
+			// The beta the gateway pins comes from the catalog's thinking capability, never from a client
+			// (ADR 0069 amendment 2026-10-29).
+			m := gateway.Model{Name: row.ModelName, Guard: row.Guard, Format: modelformat.Format(row.ModelFormat), Thinking: thinking.Of(row.ProviderType, row.ModelName, modelformat.Format(row.ModelFormat))}
 			// The price valid now: the org's price entries, else the default list (plan item PV2).
 			// A model with no price is not served.
 			pm := prices.Model{ID: row.ModelID.String(), Name: row.ModelName, ProviderType: row.ProviderType, Format: modelformat.Format(row.ModelFormat)}

@@ -528,7 +528,7 @@ func build(s gateway.State, o Options) document {
 				}},
 				Params: llmParams{BaseURL: p.BaseURL},
 			}
-			if hs, rm := rd.RequestHeaders(p), rd.RemoveHeaders(p); len(hs) > 0 || len(rm) > 0 {
+			if hs, rm := rd.RequestHeaders(p, m), rd.RemoveHeaders(p, m); len(hs) > 0 || len(rm) > 0 {
 				lm.RequestHeaders = &headerSet{Remove: rm}
 				if len(hs) > 0 {
 					lm.RequestHeaders.Set = map[string]string{}

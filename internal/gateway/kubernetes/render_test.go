@@ -18,6 +18,7 @@ import (
 	gwk8s "github.com/stateracloud/koinon/internal/gateway/kubernetes"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // update rewrites golden files: go test ./internal/gateway/kubernetes -args -update
@@ -77,7 +78,11 @@ func formatsState() gateway.State {
 		{
 			Org: "acme", Name: "claude", Type: "anthropic", BaseURL: "https://api.anthropic.com/v1",
 			APIKeyFile: "/secrets/providers/acme-claude", AnthropicWorkspaceID: "wrkspc_01ExampleExample",
-			Models: []gateway.Model{{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}}},
+			Models: []gateway.Model{
+				{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
+				// A model the catalog says can think: the gateway pins the beta its mode needs.
+				{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Of("anthropic", "claude-haiku-5-5", modelformat.Anthropic), Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
+			},
 		},
 		{
 			Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
@@ -195,6 +200,16 @@ var _ = Describe("Render", func() {
 			},
 			"remove": []any{"anthropic-beta"},
 		}}))
+
+		By("a model that can think gets the catalog's beta pinned, replacing whatever the client sends")
+		think := spec("claude-haiku-5-5")["policies"].(map[string]any)
+		Expect(think["headers"]).To(Equal(map[string]any{"request": map[string]any{
+			"set": []any{
+				map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
+				map[string]any{"name": "anthropic-workspace-id", "value": "wrkspc_01ExampleExample"},
+				map[string]any{"name": "anthropic-beta", "value": thinking.BindingBeta},
+			},
+		}}), "a set replaces the client's header, so nothing is removed")
 
 		chat := spec("open/model")
 		Expect(chat["custom"]).To(HaveKeyWithValue("formats", []any{map[string]any{"type": "Completions"}}))
