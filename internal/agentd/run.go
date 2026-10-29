@@ -1362,8 +1362,9 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if n.Update.ToolCall != nil {
 		h.r.markTool(string(n.Update.ToolCall.ToolCallId))
 	}
-	// The token cap (#27) is fed by the spend ledger (package ledger, plan item L1), which calls
-	// scheduler.RecordTokenUsage for every request agentgateway logs. ACP cannot feed it: the
+	// A run's tokens are reported by the spend ledger (package ledger, plan item L1), which adds
+	// them to the run for every request agentgateway logs (tokens are reported, not enforced:
+	// ADR 0080). ACP cannot report them: the
 	// only usage update (usage_update, unstable in acp-go-sdk v0.13.5) reports the context
 	// window's occupancy (used/size) and a cost, which rise and fall with compaction and cannot
 	// be summed into tokens used, and the unstable PromptResponse.usage arrives only when the turn,
