@@ -112,9 +112,7 @@ message Task {
   // last turn (ADR 0051 amendment). Set by GetTask only.
   string agent_summary = 12;
   google.protobuf.Timestamp agent_summary_at = 13;
-  // Set by ListTasks and GetTask while an open question of the task waits on a person: who it is
-  // addressed to. The inbox uses it so that a task waiting on someone else's answer is not shown
-  // to its creator as theirs to act on.
+  // Removed in migration 00036 (rc.6): see waiting_on_user_ids.
   reserved 14;
   reserved "waiting_on_user_id";
   // The target label of the oldest open question.
@@ -122,7 +120,8 @@ message Task {
   // True when a direct message to the agent started the task: replies in its inbox-chat thread
   // go to SendDirectMessage with this task_id (plan item TR3).
   bool direct_message_thread = 16;
-  // Everyone the task's open questions wait on.
+  // Everyone the task's open questions wait on. Set by ListTasks and GetTask. The inbox uses it so
+  // that a task waiting on someone else's answer is not shown to its creator as theirs to act on.
   repeated string waiting_on_user_ids = 17;
 }
 

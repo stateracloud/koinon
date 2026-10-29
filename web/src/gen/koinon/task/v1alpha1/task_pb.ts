@@ -151,7 +151,8 @@ export type Task = Message<"koinon.task.v1alpha1.Task"> & {
   directMessageThread: boolean;
 
   /**
-   * Everyone the task's open questions wait on.
+   * Everyone the task's open questions wait on. Set by ListTasks and GetTask. The inbox uses it so
+   * that a task waiting on someone else's answer is not shown to its creator as theirs to act on.
    *
    * @generated from field: repeated string waiting_on_user_ids = 17;
    */
