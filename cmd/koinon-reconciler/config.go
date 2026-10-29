@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/metrics"
 	"github.com/stateracloud/koinon/internal/project"
@@ -49,7 +50,17 @@ type fileConfig struct {
 		Address          string `yaml:"address"`
 		TLS              string `yaml:"tls"`
 		RuntimeClassName string `yaml:"runtimeClassName"`
+		// GatewayID is OpenShell's gateway_id, which names the workspace namespaces.
+		GatewayID string `yaml:"gatewayId"`
 	} `yaml:"openshell"`
+	// SandboxObserver is the chart's sandboxObserver (ADR 0078).
+	SandboxObserver struct {
+		Enabled bool `yaml:"enabled"`
+		// ClusterRole is the observer ClusterRole, and the name of the RoleBinding to it.
+		ClusterRole string `yaml:"clusterRole"`
+		// ServiceAccount is the reconciler's, the RoleBinding's subject.
+		ServiceAccount string `yaml:"serviceAccount"`
+	} `yaml:"sandboxObserver"`
 	Reconciler struct {
 		IdleTimeout    string `yaml:"idleTimeout"`
 		ParkWarm       string `yaml:"parkWarm"`
@@ -87,6 +98,11 @@ type config struct {
 	openshellAddress string
 	openshellTLSDir  string
 	runtimeClass     string
+	openshellGateway string
+
+	sandboxObserver               bool
+	sandboxObserverClusterRole    string
+	sandboxObserverServiceAccount string
 
 	gatewayMode        project.GatewayMode
 	gatewayURL         string
@@ -135,6 +151,10 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	fs.StringVar(&c.openshellAddress, "openshell-address", "", "OpenShell gateway host:port")
 	fs.StringVar(&c.openshellTLSDir, "openshell-tls-dir", "", "directory with tls.crt, tls.key and ca.crt for mTLS; empty connects without TLS")
 	fs.StringVar(&c.runtimeClass, "runtime-class", "", "sandbox runtime class (ADR 0045: kata)")
+	fs.StringVar(&c.openshellGateway, "openshell-gateway-id", "", "OpenShell's gateway_id, which names the workspace namespaces (default openshell)")
+	fs.BoolVar(&c.sandboxObserver, "sandbox-observer", false, "read the pods of sandboxes that never became ready, to say why (ADR 0078); needs the chart's observer ClusterRole")
+	fs.StringVar(&c.sandboxObserverClusterRole, "sandbox-observer-cluster-role", "", "the observer ClusterRole, and the name of the RoleBinding to it in each workspace namespace")
+	fs.StringVar(&c.sandboxObserverServiceAccount, "sandbox-observer-service-account", "", "the reconciler's ServiceAccount, the subject of those RoleBindings")
 	fs.Var(&c.gatewayMode, "gateway-mode", "standalone or kubernetes (default standalone)")
 	fs.StringVar(&c.gatewayURL, "gateway-url", "", "agentgateway's LLM listener URL as sandboxes reach it; the reconciler also sends its reload probe there")
 	fs.StringVar(&c.gatewayConfigMap, "gateway-config-map", "", "ConfigMap holding the standalone agentgateway config; created when missing")
@@ -210,6 +230,11 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.openshellAddress, fc.OpenShell.Address)
 	orDefault(&c.openshellTLSDir, fc.OpenShell.TLS)
 	orDefault(&c.runtimeClass, fc.OpenShell.RuntimeClassName)
+	orDefault(&c.openshellGateway, fc.OpenShell.GatewayID)
+	orDefault(&c.openshellGateway, execution.DefaultGatewayID)
+	orDefault(&c.sandboxObserver, fc.SandboxObserver.Enabled)
+	orDefault(&c.sandboxObserverClusterRole, fc.SandboxObserver.ClusterRole)
+	orDefault(&c.sandboxObserverServiceAccount, fc.SandboxObserver.ServiceAccount)
 	orDefault(&c.gatewayMode, fc.Gateway.Mode)
 	orDefault(&c.gatewayMode, project.GatewayStandalone)
 	orDefault(&c.gatewayURL, fc.Gateway.URL)
@@ -269,6 +294,9 @@ func (c *config) validate() error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required settings: %s", strings.Join(missing, ", "))
+	}
+	if c.sandboxObserver && (c.sandboxObserverClusterRole == "" || c.sandboxObserverServiceAccount == "") {
+		return errors.New("--sandbox-observer-cluster-role and --sandbox-observer-service-account are required with --sandbox-observer")
 	}
 	if c.gatewayMode == project.GatewayStandalone && c.gatewayConfigMap == "" {
 		return errors.New("--gateway-config-map is required in standalone mode")

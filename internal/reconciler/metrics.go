@@ -40,6 +40,9 @@ type Metrics struct {
 	AgentsHeldBack  prometheus.Gauge
 	SandboxRepairs  prometheus.Counter
 	AgentsUnhealthy prometheus.Counter
+	// ObserverErrors counts failures of the sandbox observer (ADR 0078), by reason: forbidden,
+	// not_found or other.
+	ObserverErrors *prometheus.CounterVec
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered, for tests that
@@ -72,6 +75,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		AgentsUnhealthy: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_reconciler_agents_marked_unhealthy_total", Help: "Agents marked unhealthy because their sandbox kept failing.",
 		}),
+		ObserverErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_reconciler_sandbox_observer_errors_total",
+			Help: "Failed reads or RoleBindings of the sandbox observer (ADR 0078), by reason (forbidden, not_found or other).",
+		}, []string{"reason"}),
 	}
 	for _, k := range []string{"ok", "error"} {
 		m.Passes.WithLabelValues(k)
@@ -82,12 +89,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	} {
 		m.PassErrors.WithLabelValues(k)
 	}
+	for _, k := range observerReasons {
+		m.ObserverErrors.WithLabelValues(k)
+	}
 	for _, s := range sandboxStates {
 		m.Sandboxes.WithLabelValues(string(s))
 	}
 	if reg != nil {
 		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.Sandboxes, m.AgentsHeldBack,
-			m.SandboxRepairs, m.AgentsUnhealthy)
+			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors)
 	}
 	return m
 }
