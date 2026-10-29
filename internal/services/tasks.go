@@ -384,6 +384,10 @@ func (s *Server) setWaitingOn(ctx context.Context, c caller, tasks []*taskv1alph
 	}
 	for _, t := range byID {
 		slices.Sort(t.WaitingOnUserIds)
+		// Deprecated waiting_on_user_id: the first of the list, for older clients.
+		if len(t.WaitingOnUserIds) > 0 {
+			t.WaitingOnUserId = t.WaitingOnUserIds[0] //nolint:staticcheck // deprecated field, still set for older clients
+		}
 	}
 	return nil
 }

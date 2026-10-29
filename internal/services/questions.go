@@ -108,6 +108,14 @@ func (s *Server) questionsProto(ctx context.Context, c caller, rows []store.Ques
 				UserId: idString(r.UserID), DisplayName: r.DisplayName, WaitingSince: tsProto(r.WaitingSince),
 			})
 		}
+		// Deprecated asked_to: the first recipient by user ID, for older clients.
+		first := ""
+		for _, r := range p.Recipients {
+			if first == "" || r.GetUserId() < first {
+				first = r.GetUserId()
+			}
+		}
+		p.AskedTo = first //nolint:staticcheck // deprecated field, still set for older clients
 		out = append(out, p)
 	}
 	return out, nil

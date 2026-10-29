@@ -74,8 +74,8 @@ message Question {
   string task_id = 3;
   string run_id = 4;
   string agent_id = 5;
-  reserved 6;
-  reserved "asked_to";
+  // Deprecated: use recipients / waiting_on_user_ids. Set to the first recipient, for older clients.
+  string asked_to = 6 [deprecated = true];
   string question = 7;
   // Answers offered as buttons; empty means free text only.
   repeated string choices = 8;

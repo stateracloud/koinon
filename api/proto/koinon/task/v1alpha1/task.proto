@@ -112,9 +112,8 @@ message Task {
   // last turn (ADR 0051 amendment). Set by GetTask only.
   string agent_summary = 12;
   google.protobuf.Timestamp agent_summary_at = 13;
-  // Removed in migration 00036 (rc.6): see waiting_on_user_ids.
-  reserved 14;
-  reserved "waiting_on_user_id";
+  // Deprecated: use recipients / waiting_on_user_ids. Set to the first recipient, for older clients.
+  string waiting_on_user_id = 14 [deprecated = true];
   // The target label of the oldest open question.
   string waiting_on_name = 15;
   // True when a direct message to the agent started the task: replies in its inbox-chat thread

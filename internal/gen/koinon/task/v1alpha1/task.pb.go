@@ -288,6 +288,10 @@ type Task struct {
 	// last turn (ADR 0051 amendment). Set by GetTask only.
 	AgentSummary   string                 `protobuf:"bytes,12,opt,name=agent_summary,json=agentSummary,proto3" json:"agent_summary,omitempty"`
 	AgentSummaryAt *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=agent_summary_at,json=agentSummaryAt,proto3" json:"agent_summary_at,omitempty"`
+	// Deprecated: use recipients / waiting_on_user_ids. Set to the first recipient, for older clients.
+	//
+	// Deprecated: Marked as deprecated in koinon/task/v1alpha1/task.proto.
+	WaitingOnUserId string `protobuf:"bytes,14,opt,name=waiting_on_user_id,json=waitingOnUserId,proto3" json:"waiting_on_user_id,omitempty"`
 	// The target label of the oldest open question.
 	WaitingOnName string `protobuf:"bytes,15,opt,name=waiting_on_name,json=waitingOnName,proto3" json:"waiting_on_name,omitempty"`
 	// True when a direct message to the agent started the task: replies in its inbox-chat thread
@@ -419,6 +423,14 @@ func (x *Task) GetAgentSummaryAt() *timestamppb.Timestamp {
 		return x.AgentSummaryAt
 	}
 	return nil
+}
+
+// Deprecated: Marked as deprecated in koinon/task/v1alpha1/task.proto.
+func (x *Task) GetWaitingOnUserId() string {
+	if x != nil {
+		return x.WaitingOnUserId
+	}
+	return ""
 }
 
 func (x *Task) GetWaitingOnName() string {
@@ -1360,7 +1372,7 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x19\n" +
 	"\bagent_id\x18\x03 \x01(\tR\aagentId\x12\x1d\n" +
 	"\n" +
-	"trigger_id\x18\x04 \x01(\tR\ttriggerId\"\xeb\x05\n" +
+	"trigger_id\x18\x04 \x01(\tR\ttriggerId\"\x82\x06\n" +
 	"\x04Task\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x14\n" +
@@ -1379,10 +1391,11 @@ const file_koinon_task_v1alpha1_task_proto_rawDesc = "" +
 	"finishedAt\x12-\n" +
 	"\x04cost\x18\v \x01(\v2\x19.koinon.run.v1alpha1.CostR\x04cost\x12#\n" +
 	"\ragent_summary\x18\f \x01(\tR\fagentSummary\x12D\n" +
-	"\x10agent_summary_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\x0eagentSummaryAt\x12&\n" +
+	"\x10agent_summary_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\x0eagentSummaryAt\x12/\n" +
+	"\x12waiting_on_user_id\x18\x0e \x01(\tB\x02\x18\x01R\x0fwaitingOnUserId\x12&\n" +
 	"\x0fwaiting_on_name\x18\x0f \x01(\tR\rwaitingOnName\x122\n" +
 	"\x15direct_message_thread\x18\x10 \x01(\bR\x13directMessageThread\x12-\n" +
-	"\x13waiting_on_user_ids\x18\x11 \x03(\tR\x10waitingOnUserIdsJ\x04\b\x0e\x10\x0fR\x12waiting_on_user_id\"\xc0\x02\n" +
+	"\x13waiting_on_user_ids\x18\x11 \x03(\tR\x10waitingOnUserIds\"\xc0\x02\n" +
 	"\tTaskEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12>\n" +
