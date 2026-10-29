@@ -89,6 +89,10 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		gatewayKey = fmt.Sprintf("koinon-escape-key-%d-%x", n, time.Now().UnixNano())
 		githubKey  = fmt.Sprintf("koinon-escape-gh-%d-%x", n, time.Now().UnixNano())
 		clusterDNS = envOr("KOINON_ESCAPE_CLUSTER_DNS", "10.96.0.10")
+		// A model gateway stand-in that resolves inside the sandbox and has nothing listening: the
+		// proxy resolves it, applies the policy and, for a request the policy allows, fails to
+		// connect (502). A name that fails DNS would never reach the proxy (issue #244).
+		gwHost = envOr("KOINON_ESCAPE_GATEWAY_HOST", "localhost")
 	)
 
 	// probe runs checks in the sandbox and returns each check's result by id.
@@ -133,7 +137,7 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 
 		key := reconciler.GatewayProfile(store.AgentFlavorOpencode,
 			reconciler.Flavor{Binaries: reconciler.DefaultBinaries[store.AgentFlavorOpencode]},
-			reconciler.Endpoint{Host: "agentgateway.koinon-escape.invalid", Port: 4000}, true)
+			reconciler.Endpoint{Host: gwHost, Port: 4000}, true)
 		key.ID = fmt.Sprintf("koinon-escape-agentgateway-%d", n)
 		g.provider(ctx, execution.Provider{
 			Name: keyRecord, Profile: key, Credentials: map[string]string{reconciler.GatewayKeyEnvVar: gatewayKey},
@@ -182,18 +186,21 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	}, NodeTimeout(3*time.Minute))
 
 	It("lets the sandbox post to the gateway's model routes and nothing else on it (ADR 0069)", func(ctx SpecContext) {
-		// The gateway host does not resolve here, so a request the policy allows fails when the proxy
-		// tries to connect (502, Bad Gateway) and a denied one is answered 403 by the policy itself.
-		// Runs against the home-lab OpenShell only (KOINON_OPENSHELL_ENDPOINT=... make test-escape);
-		// the connect-failure code below is the one to confirm there.
-		const gw = "http://agentgateway.koinon-escape.invalid:4000"
+		// The gateway host resolves but nothing listens on it, so a request the policy allows
+		// fails when the proxy tries to connect (502, Bad Gateway) and a denied one is answered 403
+		// by the policy itself. Either way the proxy answers: curl code 000 (DNS or connect
+		// failure before the proxy decided) is a test error, not a pass. Runs against a real
+		// OpenShell only (KOINON_OPENSHELL_ENDPOINT=... make test-escape).
+		gw := "http://" + net.JoinHostPort(gwHost, "4000")
 		for _, path := range modelgw.RoutePaths() {
 			code, body := g.curlGateway(ctx, sandbox, "POST", gw+path)
+			answered(code, body)
 			Expect(code).To(Equal("502"), "POST "+path+" passes the policy and fails to connect: "+body)
 		}
 		denied := func(method, path string) {
 			GinkgoHelper()
 			code, body := g.curlGateway(ctx, sandbox, method, gw+path)
+			answered(code, body)
 			Expect(code).To(Equal("403"), method+" "+path)
 			Expect(body).To(ContainSubstring("policy"), method+" "+path)
 		}
