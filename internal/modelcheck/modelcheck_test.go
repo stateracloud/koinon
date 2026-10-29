@@ -4,6 +4,7 @@ package modelcheck_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,6 +84,34 @@ var _ = Describe("GatewayChat", func() {
 		Expect(path).To(Equal("/v1/chat/completions"))
 		Expect(auth).To(Equal("Bearer koinon_test_not-a-real-token"))
 	})
+
+	// The check only compares text, so it sends no sampling parameters: newer models reject them
+	// (Anthropic: "temperature is deprecated for this model").
+	DescribeTable("sends only model, messages, max_tokens and stream",
+		func(ctx SpecContext, format modelformat.Format, path string) {
+			var gotPath string
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"x"}}],"content":[{"type":"text","text":"x"}]}`))
+			}))
+			DeferCleanup(srv.Close)
+			_, err := modelcheck.GatewayChat{URL: srv.URL, Keys: key("k")}.Complete(ctx, pgtype.UUID{}, "m", format, "hi")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gotPath).To(Equal(path))
+			Expect(body).NotTo(HaveKey("temperature"))
+			Expect(body).NotTo(HaveKey("top_p"))
+			Expect(body).NotTo(HaveKey("top_k"))
+			Expect(body).To(HaveLen(4))
+			Expect(body).To(HaveKey("model"))
+			Expect(body).To(HaveKey("messages"))
+			Expect(body).To(HaveKey("max_tokens"))
+			Expect(body).To(HaveKey("stream"))
+		},
+		Entry("openai: chat completions", modelformat.OpenAI, "/v1/chat/completions"),
+		Entry("anthropic: Messages", modelformat.Anthropic, "/v1/messages"),
+	)
 
 	It("reports a gateway refusal", func(ctx SpecContext) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
