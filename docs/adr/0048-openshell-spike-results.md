@@ -192,6 +192,15 @@ removed (issue [#110](https://github.com/stateracloud/koinon/issues/110)).
 Orphan garbage collection is deferred. When it is built, it adds back only the Sandbox access it
 needs, scoped to the namespaces it works in, with its own tests.
 
+## Amendment (2026-10-29, rc.7): the reconciler reads sandbox pods, get only
+
+The 2026-10-26 amendment left the reconciler without Kubernetes access to Agent Sandbox objects. rc.7
+adds one narrow, used grant: [0078](0078-sandbox-observer.md). A ClusterRole with `get` on pods and
+`agents.x-k8s.io` sandboxes is bound to the reconciler per workspace namespace, by RoleBindings it creates
+(`create` on rolebindings and `bind` on that one ClusterRole), and a native ValidatingAdmissionPolicy limits
+those bindings to OpenShell workspace namespaces with a fixed name, role and subject (decision 3's identity
+keyed rules, extended). Nothing in sandbox namespaces is written by a new identity.
+
 ## Links
 
 - [Spike plan](../spikes/openshell.md) and [results](../../hack/spike/results/)
