@@ -149,6 +149,9 @@ if not KIND and not cfg.get('sandbox-policy', False):
     # The policy's ValidatingAdmissionPolicy bindings are cluster-wide and would also deny writes in
     # the platform's existing OpenShell sandbox namespaces.
     sets.append('sandboxPolicy.enabled=false')
+    # The sandbox observer's RoleBinding policy (ADR 0078) needs the sandbox policy: the chart refuses to
+    # render one without the other.
+    sets.append('sandboxObserver.enabled=false')
 for f in ALL_FLAVORS:
     if f in flavors:
         sets.append('flavors.%s.image.tag=%s' % (f, flavor_tags[f]))
