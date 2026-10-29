@@ -21,7 +21,9 @@ spec:
   limits:
     run:
       maxDuration: 30m
-      maxTokens: 2000000
+      maxModelRequests: 150
+      maxSpendUSD: "5.00"
+      maxTokens: 2000000 # deprecated, still accepted (ADR 0080)
     spendUSD: "10.00"
   instructions: |
     Do the thing.

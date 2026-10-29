@@ -4,10 +4,12 @@ package ledger
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
@@ -18,8 +20,10 @@ import (
 )
 
 // AgentLimit returns the budget to push to agentgateway for agent at now: the smallest of the
-// agent's remaining daily limit, its org's remaining monthly cap and the remaining platform
-// ceiling (package budget), net of the spend recorded in each window.
+// agent's remaining daily limit, its org's remaining monthly cap, the remaining platform ceiling
+// and, while the agent has a run, the run's remaining spend limit (package budget; ADR 0041 decision
+// 5, ADR 0080), net of the spend recorded in each window. The run level is why the gateway can stop
+// a run between ledger passes: overshoot is bounded by one in-flight response, as for the others.
 //
 // agentgateway charges a budget after each response and keeps the running total per key and
 // budget name. Pushing the full limit after the gateway lost that total (proxy pod replaced,
@@ -71,6 +75,20 @@ func withReserves(ctx context.Context, q *store.Queries, st budget.Status) (budg
 		var err error
 		if l.Name == budget.SystemDaily {
 			continue // the system key holds nothing back: its entries are never provisional
+		}
+		if l.Name == budget.RunSpend {
+			u, err := q.GetRunUsage(ctx, store.GetRunUsageParams{OrgID: st.Org, RunID: l.Run})
+			if err != nil {
+				return st, fmt.Errorf("read reserves: %w", err)
+			}
+			r, err := money.ParseNumeric(u.ReserveUsd)
+			if err != nil {
+				return st, err
+			}
+			if out.Levels[i].Spent, err = l.Spent.Add(r); err != nil {
+				out.Levels[i].Spent = money.MaxLimit
+			}
+			continue
 		}
 		if l.Name == budget.AgentDaily {
 			s, err = q.GetAgentReserveSince(ctx, store.GetAgentReserveSinceParams{OrgID: st.Org, AgentID: st.Agent, Since: since})
@@ -127,6 +145,17 @@ func agentStatus(ctx context.Context, q *store.Queries, agent store.Agent, now t
 	st, err := budget.Compute(ctx, q, agent.OrgID, agent.ID, money.FromCents(cfg.Limits.SpendUSD.Cents()), now)
 	if err != nil {
 		return budget.Status{}, false, fmt.Errorf("read budgets: %w", err)
+	}
+	// The run the key is serving adds its own spend limit (ADR 0080).
+	run, err := q.GetOwnedRunOfAgent(ctx, store.GetOwnedRunOfAgentParams{OrgID: agent.OrgID, AgentID: agent.ID})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return st, true, nil
+	case err != nil:
+		return budget.Status{}, false, fmt.Errorf("read the agent's run: %w", err)
+	}
+	if st, err = st.WithRun(ctx, q, run); err != nil {
+		return budget.Status{}, false, fmt.Errorf("read the run's spend: %w", err)
 	}
 	return st, true, nil
 }

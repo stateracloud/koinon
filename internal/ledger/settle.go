@@ -307,11 +307,14 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 		if err != nil {
 			return false, err
 		}
-		// Tokens the provider reports beyond the logged usage count toward the run's cap, once: only
-		// the settlement that changed the entry adds them.
-		if delta := (u.InputTokens + u.OutputTokens) - (row.InputTokens + row.OutputTokens); updated && delta > 0 && row.RunID.Valid {
-			if _, err := scheduler.RecordTokenUsage(ctx, tx, org, row.RunID, delta); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return false, fmt.Errorf("record token usage: %w", err)
+		// Tokens the provider reports beyond the logged usage are added to the run's reported total,
+		// once: only the settlement that changed the entry adds them. A settlement that raised the
+		// entry's cost can reach the run's spend limit (ADR 0080), so the run's limits are checked
+		// whenever the entry changed.
+		if updated && row.RunID.Valid {
+			delta := max((u.InputTokens+u.OutputTokens)-(row.InputTokens+row.OutputTokens), 0)
+			if _, err := scheduler.RecordUsage(ctx, tx, org, row.RunID, delta); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return false, fmt.Errorf("record run usage: %w", err)
 			}
 		}
 		return updated, nil

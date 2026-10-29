@@ -339,7 +339,7 @@ func ticketKinds(res *ticketv1alpha1.GetTicketResponse) []string {
 func sweep(ctx context.Context, e *env) (int, error) { return scheduler.SweepWallClock(ctx, e.pool) }
 
 func recordTokens(ctx context.Context, e *env, r store.Run, tokens int64) (store.Run, error) {
-	return scheduler.RecordTokenUsage(ctx, e.pool, r.OrgID, r.ID, tokens)
+	return scheduler.RecordUsage(ctx, e.pool, r.OrgID, r.ID, tokens)
 }
 
 func mustUUID(s string) pgtype.UUID {

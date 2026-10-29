@@ -242,7 +242,7 @@ var _ = Describe("Handler", func() {
 
 	It("records the captured export once, however often it is replayed", func(ctx SpecContext) {
 		needDocker()
-		e := newEnv(ctx, "acme", fixtureAgent, "10.00", 100_000)
+		e := newEnv(ctx, "acme", fixtureAgent, "10.00")
 
 		resp, out := post(ctx, fixture(), nil)
 		Expect(resp.StatusCode).To(Equal(http.StatusOK))
@@ -274,9 +274,9 @@ var _ = Describe("Handler", func() {
 
 	It("stores nothing for the reload probe: no spend entry, run match or token usage", func(ctx SpecContext) {
 		needDocker()
-		e := newEnv(ctx, uniq("probe"), "", "10.00", 100_000)
+		e := newEnv(ctx, uniq("probe"), "", "10.00")
 		at := time.Date(2026, 10, 22, 3, 0, 0, 0, time.UTC) // llmRecord's time
-		run := e.startRun(ctx, e.task(ctx), 100_000, at.Add(-time.Minute))
+		run := e.startRun(ctx, e.task(ctx), at.Add(-time.Minute))
 
 		body, err := proto.Marshal(export(llmRecord(
 			str(gateway.LogFieldKey, gateway.ReloadProbeKeyName),

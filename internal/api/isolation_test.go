@@ -381,6 +381,18 @@ var isolationCases = map[string]isolationCase{
 			return budgetClient(c).SetAgentBudget(ctx, &budgetv1alpha1.SetAgentBudgetRequest{OrgId: org, AgentId: f.agent.GetId(), DailyLimitUsd: "1"})
 		},
 	},
+	budgetv1alpha1connect.BudgetServiceGetAgentRunLimitsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return budgetClient(c).GetAgentRunLimits(ctx, &budgetv1alpha1.GetAgentRunLimitsRequest{OrgId: org, AgentId: f.agent.GetId()})
+		},
+	},
+	budgetv1alpha1connect.BudgetServiceSetAgentRunLimitsProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return budgetClient(c).SetAgentRunLimits(ctx, &budgetv1alpha1.SetAgentRunLimitsRequest{
+				OrgId: org, AgentId: f.agent.GetId(), Override: &budgetv1alpha1.RunLimitValues{MaxModelRequests: 10},
+			})
+		},
+	},
 	budgetv1alpha1connect.BudgetServiceListNotificationsProcedure: {
 		ownOrgOK: true,
 		call: func(ctx context.Context, c *client, org string, _ orgFixture) (proto.Message, error) {

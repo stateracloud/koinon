@@ -111,9 +111,10 @@ var _ = Describe("Embedded templates", func() {
 			Expect(g.Targets).To(Equal(&templates.Targets{Min: 1, Max: 1}))
 		})
 
-		It("caps runs at 30 minutes and a token budget, with a spend limit", func() {
+		It("caps runs at 30 minutes, a model-request count and a run spend, with a daily spend limit", func() {
 			Expect(t.Spec.Limits.Run.MaxDuration.Duration).To(Equal(30 * time.Minute))
-			Expect(t.Spec.Limits.Run.MaxTokens).To(BeNumerically(">", 0))
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeNumerically(">", 0))
+			Expect(t.Spec.Limits.Run.MaxSpendUSD.Cents()).To(BeNumerically(">", 0))
 			Expect(t.Spec.Limits.SpendUSD.Cents()).To(BeNumerically(">", 0))
 		})
 
@@ -172,7 +173,9 @@ var _ = Describe("Embedded templates", func() {
 			Expect(t.Spec.Instructions).NotTo(ContainSubstring("create_pull_request"))
 			Expect(t.Spec.Instructions).To(ContainSubstring("about 5 minutes remain"))
 			Expect(t.Spec.Instructions).NotTo(ContainSubstring("date -u"))
-			Expect(t.Spec.Limits.Run.MaxTokens).To(BeEquivalentTo(1000000))
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeEquivalentTo(200))
+			Expect(t.Spec.Limits.Run.MaxSpendUSD.String()).To(Equal("2.00"))
+			Expect(t.Spec.Limits.Run.MaxTokens).To(BeZero(), "the token cap is deprecated and no shipped template sets it")
 		})
 
 		It("keeps notes only under /sandbox/work, in every shipped template", func() {

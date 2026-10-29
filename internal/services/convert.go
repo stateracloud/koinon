@@ -12,6 +12,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
 	"github.com/stateracloud/koinon/internal/auth"
+	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/flavor"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
@@ -198,12 +199,15 @@ func runProto(r store.Run) *runv1alpha1.Run {
 		State:               runStateToProto[r.State],
 		OutcomeReason:       r.OutcomeReason.String,
 		MaxWallClockSeconds: int64(r.MaxWallClockSeconds),
-		MaxTokens:           r.MaxTokens,
+		MaxModelRequests:    r.MaxModelRequests.Int64,
 		TokensUsed:          r.TokensUsed,
 		LastEventSeq:        r.LastEventSeq,
 		CreatedAt:           tsProto(r.CreatedAt),
 		StartedAt:           tsProto(r.StartedAt),
 		FinishedAt:          tsProto(r.FinishedAt),
+	}
+	if spend, ok, err := budget.RunSpendLimit(r); err == nil && ok {
+		out.MaxSpendUsd = spend.String()
 	}
 	if r.ParkReason.Valid {
 		out.ParkReason = parkReasonToProto[r.ParkReason.RunParkReason]

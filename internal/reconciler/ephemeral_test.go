@@ -144,7 +144,7 @@ var _ = Describe("Reconciler ephemeral agents", func() {
 
 		// A follow-up message: a second run on the same task.
 		_, err := q.CreateRun(ctx, store.CreateRunParams{
-			OrgID: org, AgentID: agent.ID, TaskID: a.TaskID, MaxWallClockSeconds: 1800, MaxTokens: 200_000,
+			OrgID: org, AgentID: agent.ID, TaskID: a.TaskID, MaxWallClockSeconds: 1800,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		pass(ctx)

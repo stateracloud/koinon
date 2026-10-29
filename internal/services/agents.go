@@ -21,6 +21,7 @@ import (
 	agentv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/agent/v1alpha1"
 	templatev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/templates"
 )
@@ -84,8 +85,12 @@ func (s *Server) agentView(ctx context.Context, q *store.Queries, a store.Agent,
 			out.Instructions = cfg.Instructions
 			out.Model = cfg.Model
 			out.Ephemeral = agentconfig.IsEphemeral(cfg)
-			wall, tokens := cfg.RunCaps()
-			out.RunLimits = &templatev1alpha1.RunLimits{MaxDurationSeconds: int64(wall.Seconds()), MaxTokens: tokens}
+			// The limits a run queued now gets: the version's, with the admin's override on top.
+			o, err := runlimits.GetOverride(ctx, q, a.OrgID, a.ID)
+			if err != nil {
+				return nil, err
+			}
+			out.RunLimits = runLimitsProto(o.Apply(cfg.RunLimits()))
 		}
 		if v.ID == a.ActiveVersionID {
 			out.ActiveVersion = v.Version

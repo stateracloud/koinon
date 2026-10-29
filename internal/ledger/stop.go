@@ -17,7 +17,7 @@ import (
 )
 
 // Stop cancels, with the budget reason, every open run of the scope that the reached limit l
-// covers: the agent's runs for its daily limit, every run of the org for the monthly cap or the
+// covers: the run alone for its own spend limit, the agent's runs for its daily limit, every run of the org for the monthly cap or the
 // platform ceiling. Queued and parked runs are canceled too: they would start, or resume, on a key
 // that has nothing left. It returns how many runs it canceled.
 //
@@ -27,9 +27,20 @@ import (
 func Stop(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, l budget.Level) (int, error) {
 	var runs []store.Run
 	var err error
-	if l.Name == budget.AgentDaily {
+	reason := scheduler.ReasonSpendLimit
+	switch l.Name {
+	case budget.RunSpend:
+		// The run's own limit covers that run only (ADR 0080).
+		reason = scheduler.ReasonRunSpendCap
+		var r store.Run
+		if r, err = q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: l.Run}); err == nil {
+			runs = []store.Run{r}
+		} else if errors.Is(err, pgx.ErrNoRows) {
+			err = nil
+		}
+	case budget.AgentDaily:
 		runs, err = q.ListOpenRunsOfAgent(ctx, store.ListOpenRunsOfAgentParams{OrgID: org, AgentID: agent})
-	} else {
+	default:
 		runs, err = q.ListOpenRunsOfOrg(ctx, org)
 	}
 	if err != nil {
@@ -47,7 +58,7 @@ func Stop(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, l budge
 		} else if err != nil {
 			return n, err
 		}
-		if _, err := scheduler.RecordCancel(ctx, q, c, scheduler.ReasonSpendLimit, msg, scheduler.System, extra); err != nil {
+		if _, err := scheduler.RecordCancel(ctx, q, c, reason, msg, scheduler.System, extra); err != nil {
 			return n, err
 		}
 		n++
