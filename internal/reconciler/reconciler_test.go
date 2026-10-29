@@ -38,6 +38,7 @@ import (
 	sandboxv1 "github.com/stateracloud/koinon/internal/gen/openshell/sandbox/v1"
 	openshellv1 "github.com/stateracloud/koinon/internal/gen/openshell/v1"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/pricing"
@@ -890,7 +891,7 @@ var _ = Describe("Reconciler", func() {
 		ref := agentKeys(mg.last())[0].Agent
 		full := mg.last().Limits[ref]
 		Expect(full.Unit).To(Equal(gateway.USD))
-		Expect(full.Amount).To(BeNumerically("==", 10))
+		Expect(full.Amount).To(Equal(money.MustParse("10")))
 		Expect(full.Window).To(Equal(ledger.Window), "windowed, so agentgateway can drop expired counters")
 
 		By("recorded spend lowers the pushed amount and starts a new gateway counter")
@@ -900,7 +901,7 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 		pass(ctx, r)
 		net := mg.last().Limits[ref]
-		Expect(net.Amount).To(BeNumerically("==", 7.5))
+		Expect(net.Amount).To(Equal(money.MustParse("7.5")))
 		Expect(net.Generation).NotTo(Equal(full.Generation))
 
 		By("a rotated key gets the remainder, not the full limit")
@@ -931,7 +932,7 @@ var _ = Describe("Reconciler", func() {
 		for _, k := range st.Keys {
 			byAgent[k.Agent.Name] = st.Limits[k.Agent]
 		}
-		Expect(byAgent[good.ID.String()].Amount).To(BeNumerically("==", 10), "the other agent is served with its budget")
+		Expect(byAgent[good.ID.String()].Amount).To(Equal(money.MustParse("10")), "the other agent is served with its budget")
 		Expect(byAgent[broken.ID.String()].Amount).To(BeZero(), "no earlier limit: the key is blocked")
 	})
 
@@ -949,11 +950,11 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 		ref := agentKeys(mg.last())[0].Agent
-		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10))
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("10")))
 
 		failing = true
 		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
-		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10), "the same day: the last pushed limit stands")
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("10")), "the same day: the last pushed limit stands")
 
 		advance(26 * time.Hour)
 		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
@@ -975,7 +976,7 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 		ref := agentKeys(mg.last())[0].Agent
-		Expect(mg.last().Limits[ref].Amount).To(BeNumerically("==", 10))
+		Expect(mg.last().Limits[ref].Amount).To(Equal(money.MustParse("10")))
 
 		failing = true
 		Expect(r.ReconcileAll(ctx)).NotTo(Succeed())
@@ -1115,6 +1116,59 @@ var _ = Describe("Reconciler", func() {
 			now.Store(nil)
 			pass(ctx, r)
 			Expect(osg.Calls("CreateSandbox")).To(Equal(2))
+			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("names agentgateway's reason on the agents it holds back when the whole config is refused (issue #245)", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			mg.fail = &gateway.ConfigRejectedError{Revision: "abc", Reason: "USD budget limits support at most 9 fractional digits"}
+			fresh := newAgent(ctx, org, user)
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(MatchError(gateway.ErrConfigRejected))
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1), "the fresh agent's key is not live")
+			msg := sandboxRow(ctx, fresh.ID).Message
+			Expect(msg).To(ContainSubstring("waiting for the gateway"))
+			Expect(msg).To(ContainSubstring("USD budget limits support at most 9 fractional digits"))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "an agent with a live key is still converged")
+
+			By("a good file loads")
+			mg.fail = nil
+			now.Store(nil)
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
+		It("keeps a key the gateway refused not live and holds its agent back, while served keys are converged (issue #245)", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			served := map[string]bool{}
+			for _, k := range mg.last().Keys {
+				served[k.ID] = true
+			}
+			fresh := newAgent(ctx, org, user)
+			// The gateway judges the new key alone: everything else of the state is live.
+			mg.onApply = func(s gateway.State) {
+				for _, k := range s.Keys {
+					if !served[k.ID] {
+						mg.fail = &gateway.RejectedError{Rejected: []gateway.Rejection{
+							{Kind: "Key", Name: k.ID, Reason: "USD budget limits support at most 9 fractional digits"},
+						}}
+					}
+				}
+			}
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1), "the refused key is not live: no sandbox for the fresh agent")
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for the gateway"))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "the live key's agent is converged")
+
+			By("the key is accepted")
+			mg.onApply, mg.fail = nil, nil
+			now.Store(nil)
+			pass(ctx, r)
 			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
 		})
 
