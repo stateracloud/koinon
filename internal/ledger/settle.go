@@ -15,12 +15,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providerusage"
-	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -59,6 +59,8 @@ type Settler struct {
 	// Sources looks responses up per provider type; nil is providerusage.Default.
 	Sources providerusage.Registry
 	Log     *slog.Logger
+	// Notifier delivers budget alerts a settlement causes; nil stores in-app notifications.
+	Notifier budget.Notifier
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 	// Interval between passes; zero is 15 seconds.
@@ -307,14 +309,14 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 		if err != nil {
 			return false, err
 		}
-		// Tokens the provider reports beyond the logged usage are added to the run's reported total,
-		// once: only the settlement that changed the entry adds them. A settlement that raised the
-		// entry's cost can reach the run's spend limit (ADR 0080), so the run's limits are checked
-		// whenever the entry changed.
-		if updated && row.RunID.Valid {
-			delta := max((u.InputTokens+u.OutputTokens)-(row.InputTokens+row.OutputTokens), 0)
-			if _, err := scheduler.RecordUsage(ctx, tx, org, row.RunID, delta); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return false, fmt.Errorf("record run usage: %w", err)
+		// A settlement that raised the entry's cost can reach a limit: the agent's, the org's and the
+		// platform's budgets and then the run's own, in the order and with the naming of an
+		// ingested entry (ADR 0080, decision 5). Tokens the provider reports beyond the logged usage
+		// are added to the run's reported total, once: only the settlement that changed the entry
+		// adds them.
+		if updated {
+			if err := s.enforceSettled(ctx, tx, org, row, cost, max((u.InputTokens+u.OutputTokens)-(row.InputTokens+row.OutputTokens), 0)); err != nil {
+				return false, err
 			}
 		}
 		return updated, nil
@@ -349,6 +351,32 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 			LastError:     pgtype.Text{String: lookupErr.Error(), Valid: true},
 		})
 	}
+}
+
+// enforceSettled runs the checks of a recorded entry for one whose settlement changed it: the run's
+// reported tokens grow by tokens (what the provider reports beyond the logged usage), then [enforce].
+func (s *Settler) enforceSettled(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row store.ClaimDueSettlementsRow, cost money.USD, tokens int64) error {
+	q := store.New(tx)
+	x := enforcement{org: org, agent: row.AgentID, run: row.RunID, at: row.OccurredAt.Time}
+	if !x.agent.Valid {
+		return nil // an entry of a system key is never provisional
+	}
+	if before, err := money.ParseNumeric(row.CostUsd); err != nil {
+		return err
+	} else {
+		x.delta = cost.SubFloor(before)
+	}
+	if row.RunID.Valid {
+		run, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: row.RunID})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("read the entry's run: %w", err)
+		}
+		x.version = run.AgentVersionID
+		if _, err := q.AddRunTokens(ctx, store.AddRunTokensParams{OrgID: org, ID: row.RunID, Tokens: tokens}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("record run tokens: %w", err)
+		}
+	}
+	return enforce(ctx, tx, s.Notifier, s.now(), x)
 }
 
 // reprice prices the provider-reported tokens with Koinon's price valid at the request's time, as

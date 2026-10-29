@@ -66,6 +66,13 @@ func AgentLimit(ctx context.Context, q *store.Queries, agent store.Agent, now ti
 // provider figure is pending. Only the pushed limit uses it; budgets, alerts and stops count the
 // charges alone. The counter generation then digests the reserves too, so a reserve that is
 // released starts a fresh gateway counter.
+//
+// The run level holds nothing back (ADR 0080, decision 3): a reserve is priced at the request's
+// max_tokens and can exceed the whole run limit, which would push a limit of zero for a run the
+// ledger has not stopped, and the gateway would refuse the run's wrap-up turn. The agent, org and
+// platform levels still hold the reserve, so the key stays bounded by them; the run level's
+// overshoot is one in-flight response, as for every level, and the settlement of the cut response
+// checks the run's limits when its cost is known.
 func withReserves(ctx context.Context, q *store.Queries, st budget.Status) (budget.Status, error) {
 	out := st
 	out.Levels = append([]budget.Level(nil), st.Levels...)
@@ -77,18 +84,7 @@ func withReserves(ctx context.Context, q *store.Queries, st budget.Status) (budg
 			continue // the system key holds nothing back: its entries are never provisional
 		}
 		if l.Name == budget.RunSpend {
-			u, err := q.GetRunUsage(ctx, store.GetRunUsageParams{OrgID: st.Org, RunID: l.Run})
-			if err != nil {
-				return st, fmt.Errorf("read reserves: %w", err)
-			}
-			r, err := money.ParseNumeric(u.ReserveUsd)
-			if err != nil {
-				return st, err
-			}
-			if out.Levels[i].Spent, err = l.Spent.Add(r); err != nil {
-				out.Levels[i].Spent = money.MaxLimit
-			}
-			continue
+			continue // the run level holds nothing back: see above
 		}
 		if l.Name == budget.AgentDaily {
 			s, err = q.GetAgentReserveSince(ctx, store.GetAgentReserveSinceParams{OrgID: st.Org, AgentID: st.Agent, Since: since})

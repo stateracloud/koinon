@@ -91,6 +91,30 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		Expect(payload(eventOf(events(ctx, r), "run.canceled")[0])).To(HaveKeyWithValue("limit", budget.OrgMonthly))
 	})
 
+	It("names the run's spend limit when only the run level is reached (ADR 0080)", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		_, err := q.SetAgentBudget(ctx, store.SetAgentBudgetParams{OrgID: e.org, AgentID: e.agent.ID, DailyLimit: "100", UpdatedBy: "test"})
+		Expect(err).NotTo(HaveOccurred())
+		e.harness.modelFault = func(context.Context, string) error { return unauthorized }
+		r := e.enqueue(ctx, e.task(ctx, "hello"))
+		_, err = db.Exec(ctx, `UPDATE runs SET max_spend_usd = 0.50 WHERE org_id = $1 AND id = $2`, e.org, r.ID)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
+			Principal: "agent", OrgID: e.org, AgentID: e.agent.ID, RunID: r.ID, RequestID: uuid.NewString(), KeyID: "k-test",
+			Model: "m", CostUsd: "0.60", Priced: true, OccurredAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		e.pool("agentd-a")
+		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+
+		got := getRun(ctx, r)
+		Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
+		Expect(got.OutcomeReason.String).To(HavePrefix("run spend limit reached ($0.60"))
+		p := payload(eventOf(events(ctx, r), "run.canceled")[0])
+		Expect(p).To(HaveKeyWithValue("limit", budget.RunSpend))
+		Expect(p).To(HaveKeyWithValue("reason", "run_spend_cap"))
+	})
+
 	It("leaves the run to the control plane's cancel when that came first", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		spend(ctx, e, "2.40", "2.5")
@@ -106,7 +130,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 				Expect(err).NotTo(HaveOccurred())
 				l, ok := st.Pick(time.Now())
 				Expect(ok).To(BeTrue())
-				n, err := ledger.Stop(ctx, q, e.org, e.agent.ID, l)
+				n, err := ledger.Stop(ctx, db, e.org, e.agent.ID, l)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(n).To(Equal(1))
 			})
