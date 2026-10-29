@@ -81,6 +81,32 @@ var _ = Describe("parseConfig for the sandbox observer", func() {
 		Expect(c.sandboxObserver).To(BeFalse())
 	})
 
+	It("lets an explicit flag or variable override the file in both directions", func() {
+		c, err := parse(chartConfig, "--sandbox-observer=false")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxObserver).To(BeFalse(), "the flag turns off what the file turns on")
+
+		c, err = parse(chartConfig)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxObserver).To(BeTrue(), "no flag: the file")
+
+		c, err = parse(stripObserver(chartConfig)+"sandboxObserver:\n  enabled: false\n  clusterRole: r\n  serviceAccount: s\n", "--sandbox-observer")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxObserver).To(BeTrue(), "the flag turns on what the file turns off")
+	})
+
+	It("lets KOINON_SANDBOX_OBSERVER override the file", func() {
+		path := filepath.Join(GinkgoT().TempDir(), "config.yaml")
+		Expect(os.WriteFile(path, []byte(chartConfig), 0o600)).To(Succeed())
+		env := map[string]string{
+			"KOINON_CONFIG": path, "DATABASE_URL": "postgres://x@db/koinon", "POD_NAMESPACE": "koinon", "KOINON_KEK_DIR": "/k",
+			"KOINON_SANDBOX_OBSERVER": "false",
+		}
+		c, err := parseConfig(nil, func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		Expect(err).NotTo(HaveOccurred())
+		Expect(c.sandboxObserver).To(BeFalse())
+	})
+
 	It("needs its ClusterRole and ServiceAccount", func() {
 		_, err := parse(stripObserver(chartConfig), "--sandbox-observer")
 		Expect(err).To(MatchError(ContainSubstring("--sandbox-observer-cluster-role")))

@@ -101,6 +101,7 @@ type config struct {
 	openshellGateway string
 
 	sandboxObserver               bool
+	sandboxObserverSet            bool // --sandbox-observer (or KOINON_SANDBOX_OBSERVER) was given: it wins over the config file
 	sandboxObserverClusterRole    string
 	sandboxObserverServiceAccount string
 
@@ -196,6 +197,15 @@ func parseConfig(args []string, getenv func(string) (string, bool)) (config, err
 	if fs.NArg() > 0 {
 		return c, fmt.Errorf("unexpected arguments %q", fs.Args())
 	}
+	// BindEnv sets flags without marking them visited, so the variable is looked at too.
+	if _, ok := getenv(cli.EnvName("sandbox-observer")); ok {
+		c.sandboxObserverSet = true
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "sandbox-observer" {
+			c.sandboxObserverSet = true
+		}
+	})
 	if c.databaseURL == "" {
 		c.databaseURL, _ = getenv("DATABASE_URL")
 	}
@@ -232,7 +242,10 @@ func (c *config) fill(fc fileConfig) error {
 	orDefault(&c.runtimeClass, fc.OpenShell.RuntimeClassName)
 	orDefault(&c.openshellGateway, fc.OpenShell.GatewayID)
 	orDefault(&c.openshellGateway, execution.DefaultGatewayID)
-	orDefault(&c.sandboxObserver, fc.SandboxObserver.Enabled)
+	// An explicit flag or variable wins over the file in both directions: flag > file > default (off).
+	if !c.sandboxObserverSet {
+		c.sandboxObserver = fc.SandboxObserver.Enabled
+	}
 	orDefault(&c.sandboxObserverClusterRole, fc.SandboxObserver.ClusterRole)
 	orDefault(&c.sandboxObserverServiceAccount, fc.SandboxObserver.ServiceAccount)
 	orDefault(&c.gatewayMode, fc.Gateway.Mode)
