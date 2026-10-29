@@ -29,7 +29,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"7cf4d722d1d27cc4"'
+      koinon.config: '"448b3046335b6f3b"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -42,6 +42,7 @@ frontendPolicies:
       koinon.response_id: coalesce(response.headers["x-generation-id"])
       koinon.status: response.code
       koinon.stream: llm.streaming
+      koinon.upstream: default(proxy.upstreamDuration, "") != ""
 gateways:
   default:
     port: 4000
@@ -62,7 +63,7 @@ llm:
           allowedModels:
             - claude-haiku-4-5
             - open/model
-        - keyHash: sha256:96decf0680d20e313162122cd3fc96432adeb744106ee52f53102c9205efb003
+        - keyHash: sha256:d39e82f9c2f329be45eb35fe149b9385887e55b1692581f7c28fd5eeb5ce68fd
           metadata:
             name: koinon-reload-probe
             agent: ""

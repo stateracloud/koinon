@@ -33,17 +33,30 @@ INSERT INTO spend_entries (
     org_id, agent_id, principal, run_id, task_id, request_id, key_id, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
-    request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id
+    request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
+    upstream_status
 ) VALUES (
     @org_id, sqlc.narg(agent_id), @principal, sqlc.narg(run_id), sqlc.narg(task_id), @request_id, @key_id, @model,
     @input_tokens, @output_tokens, @cache_read_tokens, @cache_write_tokens, @reasoning_tokens,
     (sqlc.arg(cost_usd)::text)::numeric, (sqlc.narg(gateway_cost_usd)::text)::numeric,
     sqlc.narg(price_ref), @priced, @estimated, sqlc.narg(estimate)::jsonb, @cost_flagged,
     sqlc.narg(request_bytes), sqlc.narg(response_bytes), @occurred_at,
-    @provisional, coalesce((sqlc.narg(reserve_usd)::text)::numeric, 0), sqlc.narg(response_id)
+    @provisional, coalesce((sqlc.narg(reserve_usd)::text)::numeric, 0), sqlc.narg(response_id),
+    sqlc.narg(upstream_status)
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id;
+
+-- name: GetLastUpstreamRefusal :one
+-- The last request of a run that its provider answered with an error status at or after @since: the
+-- gateway's own record of why a model request failed (agentd reads it when a harness reports an
+-- error without a status). Only the statuses in @statuses count. No row when the provider
+-- refused nothing in the window.
+SELECT upstream_status::int AS status, model, occurred_at
+FROM spend_entries
+WHERE org_id = @org_id AND run_id = @run_id AND upstream_status = ANY(@statuses::int[]) AND occurred_at >= @since
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1;
 
 -- name: GetAgentSpendSince :one
 -- An agent's recorded USD spend since @since, for its spend limit: the charges only. Reserves

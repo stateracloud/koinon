@@ -4,6 +4,7 @@ package ledger_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -288,26 +289,151 @@ var _ = Describe("An unusable stored price", func() {
 		Expect(l.Amount).To(BeZero())
 	})
 
-	It("charges an upstream 4xx without usage the input estimate only, flagged usage_missing", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
-		e.model(ctx, "openrouter", flash)
-		x := ledger.Entry{
-			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 400,
-			MaxTokens: 4000, RequestBytes: 3_000_000, ResponseBytes: -1, Time: time.Now(),
+	Describe("requests the provider refused with a 4xx and no usage (ADR 0056, amendment 2026-10-29)", func() {
+		rejected := func(e *env, status int64) ledger.Entry {
+			return ledger.Entry{
+				RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: status,
+				UpstreamKnown: true, Upstream: true,
+				MaxTokens: 4000, RequestBytes: 3_000_000, ResponseBytes: -1, Time: time.Now(),
+			}
 		}
-		_, err := ing.Ingest(ctx, []ledger.Entry{x})
-		Expect(err).NotTo(HaveOccurred())
-		s := e.lastEntry(ctx)
-		Expect(s.InputTokens).To(Equal(int64(1_000_000)))
-		Expect(s.OutputTokens).To(BeZero())
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.20"))
-		Expect(s.CostFlagged).To(BeTrue())
-		Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
+		// customProvider serves flash on a provider type with no documented billing, priced by an org entry.
+		customProvider := func(ctx SpecContext) *env {
+			e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+			e.model(ctx, "acme-gateway", flash)
+			_, err := prices.New(db, nil, priceList).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
+				Entry: pricing.Entry{
+					ID: "custom-flash", Provider: "acme-gateway", Match: pricing.Match{Glob: flash},
+					Spec:      pricing.Spec{Prices: pricing.Wire{Input: "0.20", Output: "2"}},
+					Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 1000000,
+				},
+				ValidFrom: time.Now().Add(-time.Hour),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			return e
+		}
+		stored := func(ctx SpecContext, e *env) (status int) {
+			GinkgoHelper()
+			var st *int
+			Expect(db.QueryRow(ctx, `SELECT upstream_status FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, e.org).Scan(&st)).To(Succeed())
+			if st != nil {
+				status = *st
+			}
+			return status
+		}
 
-		x.RequestID, x.Status = uniq("req"), 502
-		_, err = ing.Ingest(ctx, []ledger.Entry{x})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(e.lastEntry(ctx).OutputTokens).To(BeZero(), "a 5xx is charged what it streamed, nothing here")
+		for _, typ := range []string{"anthropic", "openrouter", "openai"} {
+			It("charges nothing for a 400 from "+typ+", which does not bill it, and keeps the entry flagged rejected_by_upstream", func(ctx SpecContext) {
+				e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+				e.model(ctx, typ, flash)
+				if typ != "openrouter" {
+					_, err := prices.New(db, nil, priceList).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
+						Entry: pricing.Entry{
+							ID: "p-" + typ, Provider: typ, Match: pricing.Match{Glob: flash},
+							Spec:      pricing.Spec{Prices: pricing.Wire{Input: "0.20", Output: "2"}},
+							Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 1000000,
+						},
+						ValidFrom: time.Now().Add(-time.Hour),
+					})
+					Expect(err).NotTo(HaveOccurred())
+				}
+				run := e.startRun(ctx, e.task(ctx), 1_000_000, time.Now().Add(-time.Minute))
+				_, err := ing.Ingest(ctx, []ledger.Entry{rejected(e, 400)})
+				Expect(err).NotTo(HaveOccurred())
+				s := e.lastEntry(ctx)
+				Expect(s.InputTokens).To(BeZero(), "no phantom tokens either")
+				Expect(s.OutputTokens).To(BeZero())
+				Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.00"))
+				Expect(s.Estimated).To(BeFalse(), "the usage is zero, not estimated")
+				Expect(s.CostFlagged).To(BeFalse(), "not a price problem")
+				Expect(string(s.Estimate)).To(ContainSubstring(`"rejected_by_upstream": true`))
+				Expect(string(s.Estimate)).To(ContainSubstring(`"charge_waived": "provider type ` + typ + ` does not bill refused requests"`))
+				Expect(string(s.Estimate)).To(ContainSubstring(`"waived_input_tokens": 1000000`), "what the estimate would have charged stays visible")
+				Expect(string(s.Estimate)).NotTo(ContainSubstring("usage_missing"))
+				Expect(stored(ctx, e)).To(Equal(400))
+				Expect(e.run(ctx, run.ID).TokensUsed).To(BeZero(), "the run's token cap is not charged")
+			})
+		}
+
+		It("keeps the conservative charge, the input estimate only, for a provider type with no documented billing", func(ctx SpecContext) {
+			e := customProvider(ctx)
+			_, err := ing.Ingest(ctx, []ledger.Entry{rejected(e, 400)})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.InputTokens).To(Equal(int64(1_000_000)))
+			Expect(s.OutputTokens).To(BeZero())
+			Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.20"))
+			Expect(s.CostFlagged).To(BeTrue())
+			Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
+			Expect(string(s.Estimate)).To(ContainSubstring(`"rejected_by_upstream": true`))
+			Expect(stored(ctx, e)).To(Equal(400))
+		})
+
+		It("charges a record from a config that cannot say who answered the same way", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+			e.model(ctx, "openrouter", flash)
+			x := rejected(e, 400)
+			x.UpstreamKnown, x.Upstream = false, false
+			_, err := ing.Ingest(ctx, []ledger.Entry{x})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("0.00"), "openrouter does not bill a refused request")
+			Expect(stored(ctx, e)).To(BeZero(), "without koinon.upstream the status is not known to be the provider's")
+		})
+
+		// Issue #241: the per-provider-type flag decides, not the status. A provider type that
+		// documents it does not bill refused requests is charged nothing for any 4xx; an unknown or
+		// custom one keeps the conservative input charge for any 4xx, 401 and 403 included.
+		for _, status := range []int64{401, 402, 403, 404, 413, 429} {
+			It(fmt.Sprintf("charges nothing for a provider's %d when its type documents not billing it", status), func(ctx SpecContext) {
+				e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+				e.model(ctx, "openrouter", flash)
+				_, err := ing.Ingest(ctx, []ledger.Entry{rejected(e, status)})
+				Expect(err).NotTo(HaveOccurred())
+				s := e.lastEntry(ctx)
+				Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.00"))
+				Expect(s.InputTokens).To(BeZero())
+				Expect(string(s.Estimate)).To(ContainSubstring(`"charge_waived": "provider type openrouter does not bill refused requests"`))
+				Expect(stored(ctx, e)).To(Equal(int(status)))
+			})
+
+			It(fmt.Sprintf("keeps the conservative charge for a provider's %d on a custom provider type", status), func(ctx SpecContext) {
+				e := customProvider(ctx)
+				_, err := ing.Ingest(ctx, []ledger.Entry{rejected(e, status)})
+				Expect(err).NotTo(HaveOccurred())
+				s := e.lastEntry(ctx)
+				Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("0.20"))
+				Expect(s.InputTokens).To(Equal(int64(1_000_000)))
+				Expect(string(s.Estimate)).NotTo(ContainSubstring("charge_waived"))
+				Expect(string(s.Estimate)).To(ContainSubstring(`"rejected_by_upstream": true`))
+				Expect(stored(ctx, e)).To(Equal(int(status)), "still recorded, with the provider's status")
+			})
+		}
+
+		It("settles a 5xx as it did: not waived, and the provider's status is kept", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+			e.model(ctx, "openrouter", flash)
+			x := rejected(e, 502)
+			_, err := ing.Ingest(ctx, []ledger.Entry{x})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.OutputTokens).To(BeZero(), "a 5xx is charged what it streamed, nothing here")
+			Expect(s.Estimated).To(BeTrue())
+			Expect(string(s.Estimate)).To(ContainSubstring(`"usage_missing": true`))
+			Expect(string(s.Estimate)).NotTo(ContainSubstring("charge_waived"))
+			Expect(stored(ctx, e)).To(Equal(502))
+		})
+
+		It("settles a record without a status as it did", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+			e.model(ctx, "openrouter", flash)
+			x := rejected(e, 0)
+			x.UpstreamKnown, x.Upstream = false, false
+			_, err := ing.Ingest(ctx, []ledger.Entry{x})
+			Expect(err).NotTo(HaveOccurred())
+			s := e.lastEntry(ctx)
+			Expect(s.InputTokens).To(BeNumerically(">", 0), "the client left before the headers: the provider may have read the prompt")
+			Expect(string(s.Estimate)).NotTo(ContainSubstring("charge_waived"))
+		})
 	})
 
 	It("charges an aborted response the usage the gateway logged and holds max_tokens back from the key while the provider's figure is pending", func(ctx SpecContext) {

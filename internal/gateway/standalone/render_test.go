@@ -36,6 +36,40 @@ var _ = Describe("Render", func() {
 		})
 	}
 
+	It("logs who answered, with no \"$\" the config loader would expand (ADR 0056 amendment 2026-10-29)", func() {
+		f := fixtures()[2]
+		got, _, err := standalone.Render(f.state, f.options)
+		Expect(err).NotTo(HaveOccurred())
+		var doc struct {
+			Frontend struct {
+				AccessLog struct {
+					Add map[string]string `yaml:"add"`
+				} `yaml:"accessLog"`
+			} `yaml:"frontendPolicies"`
+		}
+		Expect(yaml.Unmarshal(got, &doc)).To(Succeed())
+		add := doc.Frontend.AccessLog.Add
+		Expect(add).To(HaveKeyWithValue(gateway.LogFieldUpstream, gateway.UpstreamCEL))
+		for name, expr := range add {
+			Expect(expr).NotTo(ContainSubstring("$"), name+": agentgateway expands $ in its config file as an environment variable")
+		}
+	})
+
+	// agentgateway v1.7.0 detects a reference to response.body or response.bodyPrefix from the
+	// expression TEXT (crates/policy-core/src/expression.rs, telemetry/log.rs) and then records the
+	// body of EVERY response on the listener (cel/mod.rs, called for each response in
+	// proxy/httpproxy.rs), whatever its status and however the expression is guarded: up to 32 MiB
+	// per LLM response held for the whole stream, and 2 MiB per MCP SSE stream for its lifetime.
+	// Koinon's gateway has 512Mi and was designed to buffer nothing (ADR 0056 amendment 2026-10-29),
+	// so no rendered log or tracer expression may read a response body.
+	It("renders no expression that reads a response body", func() {
+		for _, f := range fixtures() {
+			got, _, err := standalone.Render(f.state, f.options)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(got)).NotTo(ContainSubstring("response.body"), f.name)
+		}
+	})
+
 	It("is deterministic and independent of key order", func() {
 		f := fixtures()[2]
 		a, revA, err := standalone.Render(f.state, f.options)

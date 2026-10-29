@@ -822,7 +822,18 @@ const (
 	// generation ID, x-generation-id), so the ledger can ask the provider later what it billed for a
 	// response cut short (ADR 0056, amendment 2026-10-28). See ResponseIDCEL.
 	LogFieldResponseID = "koinon.response_id"
+	// LogFieldUpstream is whether the gateway called the provider for this request (a boolean,
+	// UpstreamCEL). It tells a status the provider answered from one the gateway made itself (a bad
+	// or revoked key, a model the key may not use, its own budget): the ledger charges and attributes
+	// the first and ignores the second (ADR 0056, amendment 2026-10-29). A record without the field
+	// comes from a config that predates it.
+	LogFieldUpstream = "koinon.upstream"
 )
+
+// UpstreamCEL is the CEL of LogFieldUpstream. proxy.upstreamDuration is the time spent waiting for
+// the outbound call, so it exists exactly when the gateway made one (verified against v1.7.0: a
+// provider's 403 has it, a gateway 401 or model_not_allowed 403 does not).
+const UpstreamCEL = `default(proxy.upstreamDuration, "") != ""`
 
 // ResponseIDHeaders are the response headers that carry a provider's response ID, in the order
 // tried. OpenRouter returns x-generation-id on every endpoint; the ID is what its generation

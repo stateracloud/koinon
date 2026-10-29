@@ -44,6 +44,10 @@ type classified struct {
 	// or 429 (a limit). A spent budget revokes the key (ADR 0050), so these are the errors a
 	// run sees when a limit stopped it before its cancel arrived (budgetstop.go).
 	gateway bool
+	// auth: the error says authentication failed, with a 401 or in words alone (OpenCode reports a
+	// provider's 401 and 403 alike as "Authentication required"). Which party refused, the gateway
+	// or the provider, is not in the error; the gateway's record says (providerrefusal.go).
+	auth bool
 }
 
 var (
@@ -109,7 +113,7 @@ func classifyPromptError(err error) classified {
 	case status == 403:
 		return classified{class: classPolicy, message: "A policy denied the request."}
 	case auth:
-		return classified{class: classFatal, gateway: true}
+		return classified{class: classFatal, gateway: true, auth: true}
 	case status == 429:
 		return classified{class: classThrottled, retryAfter: retryAfter, gateway: true, message: "The model provider is rate limiting requests."}
 	case status == 500, status == 502, status == 503, status == 504, status == 529:
@@ -119,7 +123,7 @@ func classifyPromptError(err error) classified {
 	}
 	switch {
 	case auth:
-		return classified{class: classFatal, gateway: true}
+		return classified{class: classFatal, gateway: true, auth: true}
 	case has("spend limit", "budget exceeded", "token cap"):
 		return classified{class: classBudget, message: "A spend or token limit stopped the run."}
 	case has("denied by policy", "policy denied", "blocked by policy"):
@@ -224,7 +228,7 @@ func modelNotFound(err error) bool {
 func classFailure(what string, err error) *failure {
 	c := classifyPromptError(err)
 	raw := what + ": " + err.Error()
-	f := &failure{reason: raw, class: c.class, retryAfter: c.retryAfter, gateway: c.gateway, modelNotFound: modelNotFound(err)}
+	f := &failure{reason: raw, class: c.class, retryAfter: c.retryAfter, gateway: c.gateway, authLike: c.auth, modelNotFound: modelNotFound(err)}
 	if c.message != "" {
 		f.reason = c.message + " (" + raw + ")"
 	}
