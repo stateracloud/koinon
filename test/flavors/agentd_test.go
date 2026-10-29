@@ -144,7 +144,7 @@ func describeAgentd(f flavor) bool {
 				ActorUserID: user, Payload: []byte(fmt.Sprintf(`{"text":%q}`, text)),
 			})
 			Expect(err).NotTo(HaveOccurred())
-			r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: task.ID, MaxWallClockSeconds: 300, MaxTokens: 100_000})
+			r, err := q.CreateRun(ctx, store.CreateRunParams{OrgID: org, AgentID: agent.ID, TaskID: task.ID, MaxWallClockSeconds: 300})
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() store.RunState {
 				got, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: r.ID})
