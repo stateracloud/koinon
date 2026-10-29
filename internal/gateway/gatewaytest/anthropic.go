@@ -105,6 +105,7 @@ func anthropicSpec(env Env) {
 			upstrm, err = fakemodel.New(
 				fakemodel.Script{Model: "claude-test", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 				fakemodel.Script{Model: "claude-haiku-5-5", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
+				fakemodel.Script{Model: "anthropic/claude-haiku-5.5", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 				fakemodel.Script{Model: "claude-nows", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 				fakemodel.Script{Model: "gpt-test", Turns: []fakemodel.Turn{{Text: "ok", Usage: fakemodel.Usage{InputTokens: 10, OutputTokens: 10}}}},
 				fakemodel.Script{Model: "claude-cut", Faults: fakemodel.Faults{Truncate: true}, Turns: []fakemodel.Turn{{Text: "a long answer that is cut", Usage: usage}}},
@@ -134,6 +135,14 @@ func anthropicSpec(env Env) {
 						// provider and no thinking capability.
 						{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Of("anthropic", "claude-haiku-5-5", modelformat.Anthropic), Price: price},
 					},
+				},
+				{
+					// OpenRouter's Messages route: the catalog says adaptive thinking and pins no beta.
+					Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: url, APIKeyFile: env.KeyFile("provider_key"),
+					Models: []gateway.Model{{
+						Name: "anthropic/claude-haiku-5.5", Format: modelformat.Anthropic,
+						Thinking: thinking.Of("openrouter", "anthropic/claude-haiku-5.5", modelformat.Anthropic), Price: price,
+					}},
 				},
 				{
 					Org: "acme", Name: "claude-unscoped", Type: "anthropic", BaseURL: url, APIKeyFile: env.KeyFile("provider_key"),
@@ -300,6 +309,30 @@ func anthropicSpec(env Env) {
 			code, out = messages(ctx, keyC.Material, "claude-haiku-5-5", false)
 			Expect(code).To(Equal(http.StatusOK), out)
 			Expect(string(lastUpstream("claude-haiku-5-5").Body)).NotTo(ContainSubstring("thinking"))
+		})
+
+		It("drops the client's anthropic-beta for a model that thinks without a pinned beta (OpenRouter, #240)", func(ctx SpecContext) {
+			// The catalog says adaptive and lists no beta, so nothing replaces the client's header and
+			// the gateway must remove it: otherwise OpenCode's own betas reach the upstream and hide a
+			// request that only works because of them (rc.7).
+			const model = "anthropic/claude-haiku-5.5"
+			Expect(thinking.Of("openrouter", model, modelformat.Anthropic)).To(
+				And(HaveField("Mode", thinking.Adaptive), HaveField("Betas", BeEmpty())))
+			body := msgBody(model, false)
+			body["thinking"] = map[string]any{"type": "adaptive"}
+			code, out := post(ctx, "/v1/messages", keyC.Material, body, "anthropic-version", clientDate,
+				"anthropic-beta", "interleaved-thinking-2025-05-14,"+thinking.BindingBeta)
+			Expect(code).To(Equal(http.StatusOK), out)
+			up := lastUpstream(model)
+			Expect(up.Header).NotTo(HaveKey("Anthropic-Beta"))
+			Expect(string(up.Body)).To(ContainSubstring(`"adaptive"`))
+
+			By("a beta-only field is then refused by the strict upstream, as it would be if the client's beta leaked or were missing")
+			body["thinking"] = map[string]any{"type": "adaptive", "block_binding": map[string]any{"prefix_mismatch_behavior": "drop_block"}}
+			code, out = post(ctx, "/v1/messages", keyC.Material, body, "anthropic-version", clientDate,
+				"anthropic-beta", thinking.BindingBeta)
+			Expect(code).To(Equal(http.StatusBadRequest), out)
+			Expect(lastUpstream(model).Header).NotTo(HaveKey("Anthropic-Beta"), "the client's beta never passes")
 		})
 
 		It("keeps the tools of a chat-completions request sent to an anthropic model", func(ctx SpecContext) {
