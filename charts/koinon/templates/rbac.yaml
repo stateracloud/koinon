@@ -92,6 +92,14 @@ rules:
     resources: [deployments]
     resourceNames: [{{ include "koinon.componentName" (list . "gateway") }}]
     verbs: [get]
+  # The reason agentgateway refused a config is only in its log (ADR 0050): the reconciler reads
+  # the gateway pods' logs to report it. pods/log cannot be limited by resourceNames of pods.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
   {{- end }}
   {{- if eq .Values.gateway.mode "kubernetes" }}
   - apiGroups: [""]
