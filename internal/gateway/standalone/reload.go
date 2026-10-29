@@ -22,9 +22,28 @@ type Waiter interface {
 	Wait(ctx context.Context, rev gateway.Revision) error
 }
 
-// ErrConfigRejected means agentgateway failed to load the file it was given
-// and keeps serving its previous config.
-var ErrConfigRejected = errors.New("standalone: agentgateway rejected the config")
+// ErrConfigRejected means agentgateway failed to load the file it was given and keeps serving
+// its previous config. errors.Is matches a *ConfigRejectedError.
+var ErrConfigRejected = gateway.ErrConfigRejected
+
+// ConfigRejectedError is ErrConfigRejected with the revision and agentgateway's own reason.
+type ConfigRejectedError = gateway.ConfigRejectedError
+
+// ReloadFailure is one failed reload in agentgateway's log.
+type ReloadFailure struct {
+	// At is the time agentgateway logged the failure (its own clock).
+	At time.Time
+	// Reason is agentgateway's reload error.
+	Reason string
+}
+
+// ReloadLog reads why agentgateway refused a config. agentgateway reports a failed reload only in
+// its own log, never on a listener, so a deployment supplies where to read it (PodLogReload).
+type ReloadLog interface {
+	// LatestReloadFailure returns the latest failed reload logged strictly after the given
+	// time (zero: any), by agentgateway's own clock. found is false when there is none.
+	LatestReloadFailure(ctx context.Context, after time.Time) (f ReloadFailure, found bool, err error)
+}
 
 // ProbeWaiter detects a reload on agentgateway's data plane: it sends a chat
 // completion with the revision's probe key (ReloadProbeKey) to the LLM
@@ -44,8 +63,16 @@ var ErrConfigRejected = errors.New("standalone: agentgateway rejected the config
 //
 // When StatsURL is set, the waiter also reads the
 // agentgateway_config_synchronized gauge from GET /metrics on the stats
-// listener (:15020) and returns ErrConfigRejected once it reads 0 on
-// rejectAfter consecutive polls, instead of waiting for ctx to expire.
+// listener (:15020). The gauge stays 0 after a rejection until the next file is
+// loaded, and a ConfigMap delivers that file 60 to 80 s later, so a 0 alone does not say
+// that the file of this revision was refused. The waiter returns ErrConfigRejected when
+//
+//   - the gauge reads 0 and Reload reports a reload failure logged after the newest one seen before delivery (the
+//     failure is of this revision's file: it is returned at once, with agentgateway's reason), or
+//   - the gauge has read 0 for RejectAfter (no Reload, or no failure in its log), with
+//     RejectAfter longer than the deliverer's latency.
+//
+// Otherwise it waits for ctx to expire.
 type ProbeWaiter struct {
 	// GatewayURL is the LLM listener base, for example http://agentgateway:4000.
 	GatewayURL string
@@ -57,17 +84,42 @@ type ProbeWaiter struct {
 	// MaxInterval caps the wait between polls, default 5s (or Interval, if
 	// that is longer).
 	MaxInterval time.Duration
+	// Reload reads agentgateway's reload errors. Optional; without it a rejection is told only
+	// by the gauge and RejectAfter, and carries no reason.
+	Reload ReloadLog
+	// RejectAfter is how long the gauge must read 0 without a log to call the config rejected,
+	// default 2 minutes: longer than a ConfigMap takes to reach the pod (about a minute). A file
+	// delivered at once (FileDeliverer) can use a shorter one.
+	RejectAfter time.Duration
 	// Client defaults to a client with a 5 s timeout.
 	Client *http.Client
 	// Log defaults to slog.Default.
 	Log *slog.Logger
 }
 
-// rejectAfter is how many consecutive polls must see the gauge at 0 before
-// Wait gives up. A single 0 can be the previous, already rejected file. It
-// counts polls, not time: with the default schedule four polls span 3.5 s
-// (0 s, 0.5 s, 1.5 s, 3.5 s).
-const rejectAfter = 4
+// defaultRejectAfter is how long the gauge must read 0 before a waiter without a reload log gives
+// up. It counts time, not polls: the gauge also reads 0 from an earlier rejection until the next
+// file is loaded, and a ConfigMap takes 60 to 80 s to arrive (issue #245: four polls, 3.5 s,
+// misreported the good file that followed a rejected one).
+const defaultRejectAfter = 2 * time.Minute
+
+type afterKey struct{}
+
+// Prepare reads agentgateway's newest reload failure before a file is delivered and remembers its
+// time, so that Wait counts only failures logged after it: a rejection can come before Wait is
+// called (a file on disk is read at once), and an earlier file's failure must not count. The time
+// is the gateway's own, so clock skew between the reconciler and the gateway does not matter.
+// Driver calls it before Deliver when the Waiter has it.
+func (w ProbeWaiter) Prepare(ctx context.Context) context.Context {
+	if w.Reload == nil {
+		return ctx
+	}
+	f, found, err := w.Reload.LatestReloadFailure(ctx, time.Time{})
+	if err != nil || !found {
+		return ctx // nothing logged yet, or unreadable: any failure counts
+	}
+	return context.WithValue(ctx, afterKey{}, f.At)
+}
 
 // The default poll schedule: waits of 0.5 s, 1 s, 2 s, 4 s, then 5 s.
 const (
@@ -97,8 +149,13 @@ func (w ProbeWaiter) Wait(ctx context.Context, rev gateway.Revision) error {
 	if log == nil {
 		log = slog.Default()
 	}
+	rejectAfter := w.RejectAfter
+	if rejectAfter <= 0 {
+		rejectAfter = defaultRejectAfter
+	}
+	after, _ := ctx.Value(afterKey{}).(time.Time)
 	var lastErr error
-	unsynced := 0
+	var unsyncedSince time.Time
 	t := time.NewTimer(interval)
 	defer t.Stop()
 	for {
@@ -117,12 +174,23 @@ func (w ProbeWaiter) Wait(ctx context.Context, rev gateway.Revision) error {
 		}
 		if w.StatsURL != "" {
 			if synced, err := w.synchronized(ctx, client); err == nil && !synced {
-				unsynced++
-				if unsynced >= rejectAfter {
-					return fmt.Errorf("%w (revision %s)", ErrConfigRejected, rev)
+				if unsyncedSince.IsZero() {
+					unsyncedSince = time.Now()
+				}
+				if w.Reload != nil {
+					f, found, err := w.Reload.LatestReloadFailure(ctx, after)
+					switch {
+					case err != nil:
+						log.WarnContext(ctx, "cannot read agentgateway's reload errors", "err", err)
+					case found:
+						return &ConfigRejectedError{Revision: rev, Reason: f.Reason}
+					}
+				}
+				if time.Since(unsyncedSince) >= rejectAfter {
+					return &ConfigRejectedError{Revision: rev}
 				}
 			} else {
-				unsynced = 0
+				unsyncedSince = time.Time{}
 			}
 		}
 		// The wait starts after the probe answered, so a slow answer does not

@@ -137,8 +137,9 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    (10^-12 USD). A price is USD per million tokens with at most six fraction digits, so one token
    costs a whole number of pico-USD (`money.Rate`) and a request's cost is tokens times rate with no
    rounding. Arithmetic is checked. Limits are at most 1,000,000 USD. The database holds
-   `numeric(24,12)` and crosses the Go boundary as text. A float appears only where agentgateway's
-   budget config takes a JSON number (`gateway.USDLimit`). Template `spendUSD` stays cents in the
+   `numeric(24,12)` and crosses the Go boundary as text. No float is used: `gateway.USDLimit`
+   rounds down to the nine fraction digits agentgateway accepts and the renderer writes fixed-point
+   (ADR 0050, amendment 2026-10-29). Template `spendUSD` stays cents in the
    template file format and is converted at the edge (`money.FromCents`).
 2. **Price schema.** A price has a rate per usage type for non-overlapping buckets: input (not
    cached), cache read, cache write, output (not reasoning) and reasoning. Cached tokens are in one
