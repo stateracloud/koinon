@@ -242,6 +242,27 @@ sandboxed Pods". OpenShell therefore fails closed under gVisor _(inferred)_.
     The Rivet request is drafted after the rc.6 re-run (procoduck, 2026-10-28). The status stays
     "pending qualification" until the run passes.
 
+### Amendment 2026-10-30: no wildcard egress hosts
+
+13. **The `vm` and `hardened` tiers refuse wildcard egress hosts.**
+    - OpenShell documents that a wildcard host rule (`*.example.com`, `**`, any glob) reopens a
+      DNS-label channel: a sandbox can resolve `<secret>.attacker.example` and the lookup leaks the
+      data without a connection (`network-rules.mdx@v0.1.5:634-656`, issue #266).
+    - **Where it is refused.** Every host that reaches a sandbox policy is an exact name today:
+      connector hosts come from a base URL that must be a bare `https` host
+      (`connectors.Locate`) and from `connector.schema.json`, whose `networkRule.host` now has the
+      same pattern as `host.host`; the gateway and the npm registry are constants. The checks:
+      1. the API refuses a pattern base URL, provider URL or MCP server URL with a message that
+         names the host and says to write it exactly (`catalog.URLPolicy`, `connectors.Locate`);
+      2. koinon-api and koinon-reconciler refuse to start with a pattern in
+         `egress.allowedInternalHosts` (`catalog.ValidateAllowedHosts`);
+      3. the OpenShell backend refuses to render a policy or provider profile with a pattern host
+         (`execution.CheckEgressHost`), as defence in depth.
+    - **Today the refusal is unconditional.** The tier setting is not wired into the Go services
+      yet, and no feature needs a wildcard. When a tier needs one, only `dev` may admit it, by an
+      explicit setting that names the tier; the refusal message then names the tier and the setting
+      (decision 8, "Refusals").
+
 ## Consequences
 
 - **Koinon runs on the clusters platform teams have.** Bottlerocket, EKS Auto Mode and ordinary

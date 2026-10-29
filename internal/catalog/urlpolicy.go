@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"net/url"
@@ -71,6 +72,18 @@ func deniedAddr(a netip.Addr) bool {
 }
 
 // allowedAddr reports whether an AllowedHosts entry (an IP or a CIDR) covers a.
+// ValidateAllowedHosts refuses an AllowedHosts entry that is a pattern. Entries are matched
+// exactly, so a wildcard never matched anything; failing at startup tells the operator instead of
+// leaving a setting that looks like it allows a whole domain (ADR 0075, decision 13).
+func ValidateAllowedHosts(entries []string) error {
+	for _, e := range entries {
+		if strings.ContainsAny(e, "*?[]{}") {
+			return fmt.Errorf("egress.allowedInternalHosts entry %q is a pattern; list each host exactly (an IP or a CIDR is fine)", e)
+		}
+	}
+	return nil
+}
+
 func (p URLPolicy) allowedAddr(a netip.Addr) bool {
 	a = a.Unmap()
 	for _, e := range p.AllowedHosts {
@@ -231,6 +244,11 @@ func (p URLPolicy) check(ctx context.Context, rawURL string, strict bool) error 
 		if host[i] >= 0x80 {
 			return invalid("the url's host must be ASCII; write an internationalised name in its xn-- form")
 		}
+	}
+	if strings.ContainsAny(host, "*?[]{}") {
+		// Never an exact host, and never allow-listable: a pattern is how the DNS exfiltration
+		// channel of a wildcard egress rule opens (ADR 0075, decision 13).
+		return invalid("the url's host %q is a pattern; name the host exactly, because wildcard hosts reopen a DNS exfiltration channel", host)
 	}
 	if p.allowedName(strings.TrimSuffix(host, "."), strings.ToLower(u.Host)) {
 		return nil
