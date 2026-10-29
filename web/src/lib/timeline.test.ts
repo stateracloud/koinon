@@ -258,6 +258,13 @@ describe('a spend limit', () => {
       expect(text).toContain('no node can run the sandbox')
     })
 
+    it('names a crash loop, an image pull and an unknown cause', () => {
+      const text = (cause: string) => noteText(taskEvent(1, 100, 'run.failed', { reason: 'x', failureClass: 'sandbox_unavailable', sandboxCause: cause }))[0]
+      expect(text('crash_loop')).toContain('a container in the sandbox keeps crashing')
+      expect(text('image_pull')).toContain('the image could not be pulled')
+      expect(text('unknown')).toContain('the cause is unknown')
+    })
+
     it('shows who answered a question', () => {
       expect(noteText(taskEvent(1, 100, 'question.answered', { answered_by_name: 'Ana', answer: 'Yes' }))).toEqual(['Ana answered: Yes'])
     })
