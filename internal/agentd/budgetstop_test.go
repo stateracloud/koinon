@@ -100,7 +100,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		_, err = db.Exec(ctx, `UPDATE runs SET max_spend_usd = 0.50 WHERE org_id = $1 AND id = $2`, e.org, r.ID)
 		Expect(err).NotTo(HaveOccurred())
 		_, err = q.InsertSpendEntry(ctx, store.InsertSpendEntryParams{
-			Principal: "agent", OrgID: e.org, AgentID: e.agent.ID, RunID: r.ID, RequestID: uuid.NewString(), KeyID: "k-test",
+			Principal: "agent", OrgID: e.org, AgentID: e.agent.ID, RunID: r.ID, TaskID: r.TaskID, RequestID: uuid.NewString(), KeyID: "k-test",
 			Model: "m", CostUsd: "0.60", Priced: true, OccurredAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		})
 		Expect(err).NotTo(HaveOccurred())
