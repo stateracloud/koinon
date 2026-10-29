@@ -319,6 +319,39 @@ var _ = Describe("schedule triggers", func() {
 		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(1))
 	}, SpecTimeout(time.Minute))
 
+	It("gives the task the notify target of the trigger in effect at the fire, not at the enqueue", func(ctx SpecContext) {
+		withNotify := func(n *templates.NotifyTarget) templates.Trigger {
+			tr := cronTrigger("hourly", "0 * * * *")
+			tr.Notify = n
+			return tr
+		}
+		agent := newAgent(ctx, org, withNotify(&templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleAdmin}))
+		due := hourAfterNow()
+		start := due.Add(schedule.Jitter(agent.ID, due))
+		r := startUnbound(ctx, due.Add(-time.Minute))
+		DeferCleanup(r.stop)
+		r.tick(ctx, due.Add(-time.Minute))
+		r.tick(ctx, start.Add(time.Second)) // enqueued; the fire waits for the creator
+
+		// A new version with the same cron, timezone and instruction, and another notify target.
+		raw, err := agentconfig.Config{Instructions: "do the job", Triggers: []templates.Trigger{
+			withNotify(&templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleOwner}),
+		}}.Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		q := store.New(pool)
+		v, err := q.CreateAgentVersion(ctx, store.CreateAgentVersionParams{OrgID: org, AgentID: agent.ID, Config: raw})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = q.ActivateAgent(ctx, store.ActivateAgentParams{OrgID: org, ID: agent.ID, VersionID: v.ID})
+		Expect(err).NotTo(HaveOccurred())
+
+		r.sched.Bind(services.New(pool, services.Options{Prices: pricing.Embedded()}))
+		Eventually(func() int { return tasksOf(ctx, org) }, "20s", "100ms").Should(Equal(1))
+		var kind, role string
+		Expect(pool.QueryRow(ctx, `SELECT notify_kind::text, notify_role::text FROM tasks WHERE org_id = $1`, org).Scan(&kind, &role)).To(Succeed())
+		Expect(kind).To(Equal("role"))
+		Expect(role).To(Equal("owner"))
+	}, SpecTimeout(time.Minute))
+
 	It("skips an agent whose config does not parse instead of failing the tick", func(ctx SpecContext) {
 		good := newAgent(ctx, org, cronTrigger("hourly", "0 * * * *"))
 		bad := newAgent(ctx, org, cronTrigger("hourly", "0 * * * *"))

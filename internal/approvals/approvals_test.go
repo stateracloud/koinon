@@ -442,7 +442,8 @@ var _ = Describe("Service", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		qrow, _, err := questions.Create(ctx, q, questions.Ask{
-			Org: f.org, Task: f.task.ID, Run: f.run.ID, Agent: f.agent.ID, To: f.owner,
+			Org: f.org, Task: f.task.ID, Run: f.run.ID, Agent: f.agent.ID,
+			Target: questions.Target{Kind: store.NotifyTargetKindUser, User: f.owner}, Recipients: []pgtype.UUID{f.owner},
 			Question: "Which region?", Default: "eu-west-1", ExpiresAt: time.Now().Add(24 * time.Hour),
 		})
 		Expect(err).NotTo(HaveOccurred())

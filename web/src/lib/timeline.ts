@@ -38,6 +38,22 @@ function shortId(id: string): string {
   return id.slice(0, 8)
 }
 
+/** humanSeconds formats a duration like agentd's runreply.Human: "1h", "1h30m", "30m", "45s". */
+function humanSeconds(total: number): string {
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = Math.floor(total % 60)
+  return `${h > 0 ? `${h}h` : ''}${m > 0 ? `${m}m` : ''}${s > 0 ? `${s}s` : ''}` || '0s'
+}
+
+/** The words for why a sandbox never became ready; the same as execution.SandboxWaitCause.Describe. */
+const sandboxCauses: Record<string, string> = {
+  image_pull: 'the image could not be pulled',
+  admission: "the cluster's admission policy refused the sandbox",
+  no_nodes: 'no node can run the sandbox',
+  unknown: 'the cause is unknown',
+}
+
 function approvalTarget(p: JsonObject): string {
   const tool = str(p.tool) ?? 'tool call'
   // Targets are "<connector>:<resource>", e.g. "github:owner/repo".
@@ -135,8 +151,37 @@ function taskItem(ev: TaskEvent): TimelineItem {
       }
       return { key, at, type: 'note', text: str(p.message) || fallback[ev.kind], runId }
     }
+    case 'question.asked':
+      return { key, at, type: 'note', text: `Asked ${str(p.to_label) ?? 'someone'}: ${str(p.question) ?? ''}`.trim(), runId }
+    case 'question.answered':
+      return { key, at, type: 'note', text: `${str(p.answered_by_name) || 'Someone'} answered: ${str(p.answer) ?? ''}`.trim(), runId }
+    case 'question.dismissed':
+      return { key, at, type: 'note', text: `${str(p.answered_by_name) || 'Someone'} dismissed the question; the default applied: ${str(p.answer) ?? ''}`.trim(), runId }
+    case 'question.expired':
+      return { key, at, type: 'note', text: `Nobody answered in time; the default applied: ${str(p.answer) ?? ''}`.trim(), runId }
+    case 'question.canceled':
+      return { key, at, type: 'note', text: 'The question was closed: the run ended', runId }
+    case 'question.retargeted':
+      return { key, at, type: 'note', text: `Nobody it was asked to can answer any more; now asked ${str(p.to_label) ?? 'the org\'s admins'}`, runId }
     case 'run.canceled':
     case 'run.failed': {
+      if (ev.kind === 'run.canceled' && str(p.reason) === 'wall_clock_cap') {
+        // agentd and the api's sweep write the same note: {reason, message, maxWallClockSeconds, summary?, summarySource}.
+        const limit = typeof p.maxWallClockSeconds === 'number' ? ` of ${humanSeconds(p.maxWallClockSeconds)}` : ''
+        const summary = str(p.summary)
+        const source = str(p.summarySource) === 'notes' ? " (from the agent's notes)" : ''
+        return {
+          key,
+          at,
+          type: 'note',
+          text: `Run ${shortId(ev.runId)} stopped at the time limit${limit}.${summary ? `\n\nLast summary${source}:\n${summary}` : ''}`,
+          runId,
+        }
+      }
+      if (ev.kind === 'run.failed' && str(p.failureClass) === 'sandbox_unavailable') {
+        const cause = sandboxCauses[str(p.sandboxCause) ?? ''] ?? sandboxCauses.unknown
+        return { key, at, type: 'note', text: `Run ${shortId(ev.runId)} failed: the sandbox never became ready (${cause})`, runId }
+      }
       // scheduler.RecordCancel writes {reason, message}; agentd's finish writes {reason}.
       // A spend limit reached (the ledger, ADR 0056) says which limit and what was spent in its message.
       if (str(p.reason) === 'spend_limit') {
@@ -183,6 +228,11 @@ function runItem(ev: RunEvent): TimelineItem | undefined {
     case 'run.interrupted': {
       const reason = str(p.reason)
       return { key, at, type: 'note', text: `Run ${shortId(runId)} lost its harness${reason ? `: ${reason}` : ''}`, runId }
+    }
+    case 'run.wrap_up_notice': {
+      // agentd told the agent its time limit is near: {remainingSeconds, maxWallClockSeconds}.
+      const mins = Math.max(1, Math.round((typeof p.remainingSeconds === 'number' ? p.remainingSeconds : 0) / 60))
+      return { key, at, type: 'note', text: `Run ${shortId(runId)}: about ${mins} ${mins === 1 ? 'minute' : 'minutes'} left; the agent was asked to wrap up`, runId }
     }
     case 'run.requeued': {
       // agentd put the run back in the queue because its sandbox was not ready in time (ADR 0066).

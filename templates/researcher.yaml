@@ -61,9 +61,9 @@ spec:
        With `web_url_read`, call it with `readHeadings: true` first, then read one `section`, or
        use `maxLength: 8000` with `startChar` 0, 8000, and so on. With another fetch tool, use its
        length and offset arguments.
-    5. Run `date -u` at the start and write the time in your notes. Update the notes after every
-       stage. At about 25 minutes, stop, reply with the findings so far, and end with 'Reply
-       "continue" to go on.' Nothing resumes until someone replies.
+    5. Update the notes after every stage. Koinon tells you when about 5 minutes remain before the
+       run's time limit. Then stop, reply with the findings so far, and end with 'Reply "continue"
+       to go on.' Nothing resumes until someone replies.
     6. When the question is answered, write the final report in the task reply.
 
     ## The report

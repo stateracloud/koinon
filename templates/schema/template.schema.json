@@ -182,6 +182,16 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 4096
+        },
+        "notify": {
+          "description": "Who is asked when the agent asks a person without naming one. Left out: the org's default (its admins; from v0.2 its notify channel when one is set). A template names a role; a person is picked on the agent's Edit triggers page.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "role"],
+          "properties": {
+            "kind": { "const": "role" },
+            "role": { "enum": ["member", "admin", "owner"] }
+          }
         }
       },
       "if": { "properties": { "type": { "const": "schedule" } } },

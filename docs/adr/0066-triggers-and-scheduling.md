@@ -446,3 +446,54 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
   prompt contains its instruction. A direct-message replay (`!First`) returns the recorded task only
   when it belongs to the same agent (and the same thread when one is given); otherwise it is
   `AlreadyExists`.
+
+## Amendment (2026-10-28, rc.6): the sandbox wait cap, notify targets and a warning before the time limit
+
+1. *The sandbox wait is capped (#160).*
+   - The LT1 requeue is bounded by `org_settings.sandbox_wait_cap_seconds` (default 1 h, agentd
+     `--sandbox-wait-cap`). It counts from the first not-ready poll of the current wait
+     (`runs.sandbox_wait_started_at`, set by agentd and kept across requeues, so queue time between claims
+     counts). It is cleared for all of the agent's runs when any of them finds the sandbox ready, and
+     when the agent is resumed. So the cap measures "the sandbox has not been ready since this run
+     started waiting", and not time spent queued behind a sibling run that had the sandbox. Every claim
+     gets at least one reconciler nudge and one poll before the cap can fail it.
+   - At the cap the run fails with class `sandbox_unavailable`. agentd names the cause from the
+     sandbox's latest condition reason and message (`agent_sandboxes.reason`, new):
+     `image_pull`, `admission`, `no_nodes` or `unknown`.
+   - The agent is marked unhealthy (audited `agent.mark_unhealthy`), the org's owners and admins get an
+     `agent.unhealthy` notification, and the inbox shows an item for every unhealthy agent that is not
+     archived until it is resumed. The decision says "the agent's owners". Koinon has no per-agent owner, so
+     this means the admins and owners, who are the ones who can resume an agent. Every task with a
+     waiting run of the agent gets a note.
+   - Supersedes in part the follow-up "the 5-minute `SandboxTimeout` failure becomes a requeue" and the LT1 amendment (latency defaults as built): the requeue is no longer unbounded.
+   - Alternative rejected: failing at the first queue wait, which brings back #160's fail-on-burst.
+2. *Notify targets on triggers (#182).*
+   - `Trigger.notify` is `{kind: user|role|channel, user, role, channel}`. It is accepted on every
+     trigger type except `direct_message`, which asks the chat's person. A template names a role only:
+     a person and a channel both belong to one org.
+   - Unset means the org's default, today admins and owners. From v0.2 the default is the org's notify
+     channel when one is set, else the admins, and the inbox item is always created.
+   - `channel` is refused until chat connectors exist.
+   - The target is copied to the task when the trigger fires (`tasks.notify_*`), so a later version
+     change does not move a task's questions.
+   - A person target is checked when the triggers are set (member or higher) and again when the question
+     is asked. If it is no longer valid, the question falls back to the default and the tool result says so.
+3. *A warning before the time limit (#183).*
+   - `WrapUpNotice` before `started_at + max_wall_clock + parked`, agentd cancels the current turn
+     (`session/cancel`) and sends a wrap-up prompt on the same session. If a turn starts inside the window,
+     the notice is prepended instead.
+   - The notice is armed once per run: `runs.wrap_up_notice_at` is set when it is sent or when it is suppressed because the harness ignored the cancel. Only a sent notice is recorded as `run.wrap_up_notice`; that event, not the column, shows that the agent was told.
+   - Cost: an in-flight tool call is interrupted. Accepted, because ACP has no way to inject a message
+     into a running turn. A refusal is different: there the harness ends the turn itself. This is the
+     first time agentd sends `session/prompt` after its own `session/cancel` on a live session. ACP
+     allows it, but the shipped harnesses must show that they do. If a harness does not end the turn
+     within `CancelGrace`, no second prompt is sent and the run ends at the cap as before. If the turn
+     ended on its own at that moment (for example after an `ask_user`), that end is honoured and the
+     notice waits for the next turn.
+   - At the cap, both agentd and the api's sweep write the same `run.canceled` payload: reason
+     `wall_clock_cap`, a message, and the agent's text since its last park as `summary`, or the task's
+     notes when it said nothing.
+   - Continuation runs (after v0.1.0: at most 3 per task, set per template or agent, only with budget
+     left, then the task goes to input-required "blocked on you") build on this note and on
+     the `run.wrap_up_notice` event (`wrap_up_notice_at` alone also covers a suppressed notice). They need only additive columns (a per-task continuation count, and a
+     per-template or per-agent maximum in the config).

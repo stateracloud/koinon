@@ -12,11 +12,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/orgsettings"
+	"github.com/stateracloud/koinon/internal/runreply"
 )
 
 // waitSandbox waits until the agent's sandbox is ready and returns its row: the workspace, the
@@ -31,7 +34,10 @@ import (
 // trigger). A missing row is waited for, since the reconciler creates it when the agent is
 // activated. A run whose sandbox is not ready within the org's queue wait (SandboxTimeout by
 // default) goes back to the queue (requeued) instead of failing, so a burst beyond the cluster's
-// capacity shows up as waiting, not as failed runs (ADR 0066, plan item LT1).
+// capacity shows up as waiting, not as failed runs (ADR 0066, plan item LT1). The requeue is
+// bounded: a run that has waited longer than the org's sandbox wait cap in total, across requeues
+// (runs.sandbox_wait_started_at), fails with the class sandbox_unavailable and names the cause
+// (ADR 0066 amendment 2026-10-28).
 func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 	now := r.p.cfg.Now
 	started := now()
@@ -42,8 +48,16 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 	var deadline time.Time
 	var nudged time.Time
 	var last string
+	// The latest row observed, for naming the cause at the cap.
+	var lastReason, lastMessage string
+	observed := false
+	var waitStart time.Time
+	var capd time.Duration
 	for {
 		sb, err := r.q.GetAgentSandbox(ctx, store.GetAgentSandboxParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
+		if err == nil {
+			lastReason, lastMessage, observed = sb.Reason, sb.Message, true
+		}
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			last = "not rendered yet"
@@ -66,6 +80,13 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 			// Found stuck: the reconciler recreates it (ADR 0054).
 			last = "recreating the stuck sandbox"
 		case sb.State == store.SandboxStateReady:
+			// A sandbox that was ready since is not one that "never became ready": every run of the
+			// agent starts a fresh wait the next time it finds the sandbox not ready.
+			if _, err := r.q.ClearSandboxWaitForAgent(ctx, store.ClearSandboxWaitForAgentParams{
+				OrgID: r.run.OrgID, AgentID: r.run.AgentID,
+			}); err != nil && ctx.Err() == nil {
+				r.log.Warn("clearing the sandbox wait failed", "err", err)
+			}
 			return sb, nil
 		case sb.State == store.SandboxStateError && r.agentHealthy(ctx):
 			// The reconciler recreates a failed sandbox once no run is active (and gives up by
@@ -91,12 +112,29 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 			last = string(sb.State)
 		}
 		if deadline.IsZero() {
-			if s, err := orgsettings.Get(ctx, r.q, r.run.OrgID, orgsettings.Settings{QueueWait: wait}); err == nil {
-				wait = s.QueueWait
+			capd = r.p.cfg.SandboxWaitCap
+			if s, err := orgsettings.Get(ctx, r.q, r.run.OrgID, orgsettings.Settings{QueueWait: wait, SandboxWaitCap: capd}); err == nil {
+				wait, capd = s.QueueWait, s.SandboxWaitCap
 			} else if ctx.Err() == nil {
 				r.log.Warn("reading the org's settings failed; using the default queue wait", "err", err)
 			}
-			deadline = started.Add(wait)
+			waitStart = started
+			switch ws, err := r.q.MarkRunSandboxWait(ctx, store.MarkRunSandboxWaitParams{
+				OrgID: r.run.OrgID, ID: r.run.ID, Epoch: r.run.Epoch, Started: pgtype.Timestamptz{Time: started, Valid: true},
+			}); {
+			case errors.Is(err, pgx.ErrNoRows):
+				return store.AgentSandbox{}, errFenced
+			case err != nil:
+				if ctx.Err() != nil {
+					return store.AgentSandbox{}, ctx.Err()
+				}
+				r.log.Warn("recording the start of the sandbox wait failed; counting from now", "err", err)
+			case ws.Valid:
+				waitStart = ws.Time
+			}
+			// Every claim gets one nudge to the reconciler and one poll after it before the cap can
+			// fail it: a run whose cap ran out while it was queued must not fail on its first poll.
+			deadline = laterOf(earlierOf(started.Add(wait), waitStart.Add(capd)), started.Add(r.p.cfg.ReconcileNudge+r.p.cfg.Poll))
 		}
 		if now().Sub(nudged) >= r.p.cfg.ReconcileNudge {
 			if nudged.IsZero() {
@@ -108,6 +146,17 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 			}
 		}
 		if now().After(deadline) {
+			if waited := now().Sub(waitStart); waited >= capd {
+				cause, detail := execution.ClassifySandboxWait(lastReason, lastMessage), last
+				if !observed {
+					cause, detail = execution.WaitCauseUnknown, "the sandbox was never rendered"
+				}
+				return store.AgentSandbox{}, &failure{
+					reason:  fmt.Sprintf("the sandbox never became ready in %s: %s (%s)", runreply.Human(capd), cause.Describe(), detail),
+					class:   classSandboxUnavailable,
+					sandbox: &sandboxUnavailable{cause: cause, detail: detail, waited: waited, cap: capd},
+				}
+			}
 			reason := fmt.Sprintf("sandbox not ready after %s (%s)", wait, last)
 			// Only a starting run can go back to the queue (RequeueRun). A run taken over while
 			// running has no queue to return to, so it fails, as it did before LT1.
@@ -120,6 +169,20 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 			return store.AgentSandbox{}, ctx.Err()
 		}
 	}
+}
+
+func earlierOf(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
+}
+
+func laterOf(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // taskSandboxName is the sandbox the run's task has when its agent is ephemeral.
@@ -245,5 +308,81 @@ func (r *runner) requeue(ctx context.Context, reason string) error {
 	}
 	r.p.cfg.Metrics.Requeued.Inc()
 	r.log.Info("run back in the queue", "reason", reason)
+	return nil
+}
+
+// failSandboxUnavailable fails a run whose sandbox never became ready within the org's cap, in one
+// transaction: the run's end, the agent's unhealthy mark with its audit event, the notification of
+// the org's owners and admins, and a note on every task with a run waiting on the agent (ADR 0066
+// amendment 2026-10-28). The agent's other queued runs stop being claimable at the same moment
+// (ClaimNextRun skips unhealthy agents), so their tasks must say why they stopped moving.
+func (r *runner) failSandboxUnavailable(ctx context.Context, f *failure) error {
+	su := f.sandbox
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.srcSeq++
+	src := r.srcSeq
+	capd := su.cap
+	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
+		q := r.q.WithTx(tx)
+		if err := r.finishIn(ctx, q, src, store.RunStateFailed, f.reason, classSandboxUnavailable, map[string]any{
+			"sandboxCause": string(su.cause), "waitedSeconds": int64(su.waited.Seconds()), "detail": su.detail,
+		}); err != nil {
+			return err
+		}
+		a, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: r.run.OrgID, ID: r.run.AgentID})
+		if err != nil {
+			return err
+		}
+		reason := fmt.Sprintf("its sandbox never became ready in %s: %s (%s)", runreply.Human(capd), su.cause.Describe(), su.detail)
+		if _, err := q.MarkAgentUnhealthy(ctx, store.MarkAgentUnhealthyParams{
+			OrgID: r.run.OrgID, ID: r.run.AgentID, Reason: reason,
+		}); errors.Is(err, pgx.ErrNoRows) {
+			return nil // already unhealthy: it was told, audited and noted
+		} else if err != nil {
+			return err
+		}
+		if err := audit.RecordErr(ctx, q, audit.Event{
+			Org: r.run.OrgID, Actor: audit.System(), Action: "agent.mark_unhealthy",
+			TargetKind: "agent", TargetID: r.run.AgentID.String(),
+			After: map[string]any{
+				"reason": reason, "cause": "sandbox_unavailable", "sandboxCause": string(su.cause),
+				"runId": r.run.ID.String(), "waitedSeconds": int64(su.waited.Seconds()),
+			},
+		}); err != nil {
+			return err
+		}
+		// The decision says "the agent's owners". Koinon has no per-agent owner (agents.created_by is
+		// only who created it): the people who can act are the ones who can resume an agent, the
+		// org's admins and owners.
+		message := fmt.Sprintf("%s was marked unhealthy: its sandbox never became ready in %s (%s). Fix the cause, then resume the agent on its page.",
+			a.DisplayName, runreply.Human(capd), su.cause.Describe())
+		if err := r.notifyUnhealthy(ctx, q, "agent.unhealthy:"+r.run.AgentID.String()+":sandbox-wait:"+r.run.ID.String(), map[string]string{
+			"run_id": r.run.ID.String(), "sandbox_cause": string(su.cause), "message": message,
+		}); err != nil {
+			return err
+		}
+		waiting, err := q.ListTasksWithWaitingRunOfAgent(ctx, store.ListTasksWithWaitingRunOfAgentParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
+		if err != nil {
+			return err
+		}
+		tasks := map[pgtype.UUID]bool{r.run.TaskID: true}
+		for _, t := range waiting {
+			tasks[t] = true
+		}
+		for t := range tasks {
+			if err := r.taskNote(ctx, q, t, kindAgentUnhealthy,
+				message+" Its waiting runs do not start until an admin resumes the agent."); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return r.dbErr(ctx, "fail the run", err)
+	}
+	r.p.cfg.Metrics.Finished.WithLabelValues(string(store.RunStateFailed)).Inc()
+	r.p.cfg.Metrics.SandboxWaitCap.WithLabelValues(string(su.cause)).Inc()
+	r.log.Error("the sandbox never became ready", "cause", su.cause, "detail", su.detail, "waited", su.waited)
 	return nil
 }

@@ -17,9 +17,14 @@ type Querier interface {
 	// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
+	// The question's recipients, when it is created (waiting_since stays NULL until it is opened).
+	AddQuestionRecipients(ctx context.Context, arg AddQuestionRecipientsParams) error
 	// Adds reported token usage to an unfinished run. The caller cancels the run
 	// when tokens_used reaches max_tokens. No row: the run is finished or absent.
 	AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run, error)
+	// The people a question is retargeted to start waiting now (a new recipient's age starts when the
+	// item starts waiting on them). Returns the rows that were new.
+	AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error)
 	// Appends an event from the control plane (API, scheduler) without an epoch,
 	// for example a cancel notice. Stamped with the run's current epoch.
 	AppendRunControlEvent(ctx context.Context, arg AppendRunControlEventParams) (RunEvent, error)
@@ -94,6 +99,10 @@ type Querier interface {
 	ClearAgentSandboxKey(ctx context.Context, arg ClearAgentSandboxKeyParams) (AgentSandbox, error)
 	ClearConnectionSecretName(ctx context.Context, arg ClearConnectionSecretNameParams) error
 	ClearSandboxRestore(ctx context.Context, arg ClearSandboxRestoreParams) error
+	// The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
+	// run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
+	// runs_sandbox_waiting.
+	ClearSandboxWaitForAgent(ctx context.Context, arg ClearSandboxWaitForAgentParams) (int64, error)
 	// approved -> executed | failed, by the executor that claimed it (fenced on
 	// executions). No row: another executor took it over.
 	CompleteApprovalExecution(ctx context.Context, arg CompleteApprovalExecutionParams) (ApprovalRequest, error)
@@ -171,6 +180,7 @@ type Querier interface {
 	CreateProvider(ctx context.Context, arg CreateProviderParams) (Provider, error)
 	// Records a question as 'asked'. No row for the same call in the same run: use
 	// GetQuestionByCall.
+	// asked_to is deprecated (00036): written for a user target, NULL otherwise, and never read.
 	CreateQuestion(ctx context.Context, arg CreateQuestionParams) (Question, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
@@ -378,6 +388,7 @@ type Querier interface {
 	GetTaskPromptedThrough(ctx context.Context, arg GetTaskPromptedThroughParams) (int64, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
+	GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
 	// The OIDC login grants platform admin to a user in one of oidc.platformAdminGroups. It returns
 	// no row when the user already is a platform admin (from any source), which keeps that source.
@@ -420,6 +431,7 @@ type Querier interface {
 	InsertSpendSettlement(ctx context.Context, arg InsertSpendSettlementParams) error
 	// Zero rows: the nonce was used before (a replay).
 	InsertUploadNonce(ctx context.Context, arg InsertUploadNonceParams) (int64, error)
+	IsActiveQuestionRecipient(ctx context.Context, arg IsActiveQuestionRecipientParams) (bool, error)
 	// Whether the user may answer questions in the org: role member or higher.
 	IsOrgMember(ctx context.Context, arg IsOrgMemberParams) (bool, error)
 	IsPlatformAdmin(ctx context.Context, userID pgtype.UUID) (bool, error)
@@ -443,6 +455,10 @@ type Querier interface {
 	// ListActiveAgentVersions across every live org, for the scheduler (ADR 0066).
 	ListActiveAgentVersionsAllOrgs(ctx context.Context) ([]ListActiveAgentVersionsAllOrgsRow, error)
 	ListActiveApprovalScopesForAgent(ctx context.Context, arg ListActiveApprovalScopesForAgentParams) ([]ApprovalScope, error)
+	// The recipients who can still answer: active rows whose user is not deleted and still has role
+	// member or higher in the org (the IsOrgMember rule). A recipient who left the org or became a
+	// viewer is not notified, reminded or counted as waited on.
+	ListActiveQuestionRecipientIDs(ctx context.Context, arg ListActiveQuestionRecipientIDsParams) ([]pgtype.UUID, error)
 	// The config of each agent's active version, for the template default of its daily limit.
 	ListActiveVersionConfigs(ctx context.Context, orgID pgtype.UUID) ([]ListActiveVersionConfigsRow, error)
 	// When each active agent's current version was activated, across every live org, so the schedule
@@ -465,6 +481,8 @@ type Querier interface {
 	ListApprovalRequestsForTask(ctx context.Context, arg ListApprovalRequestsForTaskParams) ([]ApprovalRequest, error)
 	// Which of an org's agents have their sandbox archived (plan item AR1), for one read of a list.
 	ListArchivedAgentSandboxes(ctx context.Context, orgID pgtype.UUID) ([]ListArchivedAgentSandboxesRow, error)
+	// Members who can answer questions (member or higher), highest role per user.
+	ListAskableMembers(ctx context.Context, orgID pgtype.UUID) ([]ListAskableMembersRow, error)
 	// Every org that has a chain, for the verifier.
 	ListAuditChainOrgs(ctx context.Context) ([]pgtype.UUID, error)
 	// One page of an org's chain in chain order, with the fields the hash covers as text, so the
@@ -512,10 +530,11 @@ type Querier interface {
 	// catalog.RederiveFormats applies internal/modelformat to them).
 	ListModelsToRederiveFormat(ctx context.Context) ([]ListModelsToRederiveFormatRow, error)
 	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]Notification, error)
-	// The inbox: open questions asked to the user, newest first.
+	// The inbox: open questions the user is an active recipient of, longest waiting on the user last
+	// (newest first), with the time it started waiting on the user.
 	// Only those whose run is still parked: a question outlives no run (the sweep closes it, this
 	// hides it meanwhile).
-	ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQuestionsForUserParams) ([]Question, error)
+	ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQuestionsForUserParams) ([]ListOpenQuestionsForUserRow, error)
 	// Runs that can still be canceled, when the agent's daily limit is reached.
 	ListOpenRunsOfAgent(ctx context.Context, arg ListOpenRunsOfAgentParams) ([]Run, error)
 	// Runs that can still be canceled, when an org-wide limit is reached.
@@ -527,6 +546,8 @@ type Querier interface {
 	// Every live org, for control-plane sweeps and workers that then work org by
 	// org (koinon-agentd claims runs org by org, so each claim stays org-scoped).
 	ListOrgIDs(ctx context.Context) ([]pgtype.UUID, error)
+	// Users whose highest role in the org is at least @min_role (deleted users excluded).
+	ListOrgMemberIDsWithRole(ctx context.Context, arg ListOrgMemberIDsWithRoleParams) ([]pgtype.UUID, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Execution state rendered by koinon-reconciler (plan item R2) and read by
@@ -540,10 +561,16 @@ type Querier interface {
 	ListOrgsWithDueQuestions(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error)
 	// The settler: every org with a provisional entry due for an attempt, the longest waiting first.
 	ListOrgsWithDueSettlements(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error)
+	// Orgs with an open question, for the sweep that gives orphaned questions to the org's admins.
+	ListOrgsWithOpenQuestions(ctx context.Context) ([]pgtype.UUID, error)
 	// Orgs with a question whose run ended (the sweeper then queries per org).
 	ListOrgsWithQuestionsOfFinishedRuns(ctx context.Context) ([]pgtype.UUID, error)
 	// Orgs that have at least one opened question to notify about (the sweeper then queries per org).
 	ListOrgsWithQuestionsToNotify(ctx context.Context) ([]pgtype.UUID, error)
+	// Open questions (run still parked) with no recipient who can still answer, because everyone left
+	// the org or lost the role, with the notify target of their task (NULL kind: the org's default). The rows are locked, and a question that is being resolved or canceled is
+	// skipped, so a question closed meanwhile gets no recipients, notification or audit row.
+	ListOrphanedQuestions(ctx context.Context, orgID pgtype.UUID) ([]ListOrphanedQuestionsRow, error)
 	// The org's requests waiting for a human (input_required), oldest first.
 	// Trusted-preset calls are recorded as approved and never listed here.
 	ListPendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
@@ -560,11 +587,13 @@ type Querier interface {
 	ListPriceOverrides(ctx context.Context, orgID pgtype.UUID) ([]PriceOverride, error)
 	ListProviderEchoChecks(ctx context.Context, orgID pgtype.UUID) ([]ProviderEchoCheck, error)
 	ListProviders(ctx context.Context, orgID pgtype.UUID) ([]Provider, error)
-	// Who the open questions of these tasks wait on (only where the run is still parked), for the
-	// inbox: a task waiting on someone else's question is not its creator's to act on.
-	ListQuestionAddresseesForTasks(ctx context.Context, arg ListQuestionAddresseesForTasksParams) ([]ListQuestionAddresseesForTasksRow, error)
+	// The active recipients of these questions, with names, for the API.
+	ListQuestionRecipients(ctx context.Context, arg ListQuestionRecipientsParams) ([]ListQuestionRecipientsRow, error)
 	// Runs that ended while a question of theirs was still asked or open.
 	ListQuestionRunsOfFinishedRuns(ctx context.Context, orgID pgtype.UUID) ([]pgtype.UUID, error)
+	// The open questions of these tasks whose run is still parked, oldest first, with their target and
+	// recipients, for the inbox (ListTasks/GetTask waiting_on_*).
+	ListQuestionWaitersForTasks(ctx context.Context, arg ListQuestionWaitersForTasksParams) ([]ListQuestionWaitersForTasksRow, error)
 	ListQuestionsForTask(ctx context.Context, arg ListQuestionsForTaskParams) ([]Question, error)
 	// Opened questions whose notification has not gone out, oldest first.
 	ListQuestionsToNotify(ctx context.Context, arg ListQuestionsToNotifyParams) ([]Question, error)
@@ -641,6 +670,12 @@ type Querier interface {
 	MarkQuestionsDelivered(ctx context.Context, arg MarkQuestionsDeliveredParams) (int64, error)
 	// starting -> running once the harness session is ready.
 	MarkRunRunning(ctx context.Context, arg MarkRunRunningParams) (Run, error)
+	// Records when the run started waiting for its sandbox, once per wait (the first requeue keeps it).
+	// Fenced by the epoch. Returns the recorded start.
+	MarkRunSandboxWait(ctx context.Context, arg MarkRunSandboxWaitParams) (pgtype.Timestamptz, error)
+	// Disarms the wrap-up notice (sent, or suppressed because the harness ignored the cancel); once per
+	// run. Only a sent notice has a run.wrap_up_notice event. Fenced by the epoch.
+	MarkRunWrapUpNotice(ctx context.Context, arg MarkRunWrapUpNoticeParams) (int64, error)
 	// The sandbox and its volume were deleted for the archive tier; the home is in the checkpoint
 	// that restore_checkpoint_id names.
 	MarkSandboxArchived(ctx context.Context, arg MarkSandboxArchivedParams) (AgentSandbox, error)
@@ -709,7 +744,9 @@ type Querier interface {
 	RequestSessionRestartForAgent(ctx context.Context, arg RequestSessionRestartForAgentParams) ([]pgtype.UUID, error)
 	// starting -> queued, for the owner (epoch compare-and-set): the sandbox was not ready within the
 	// org's wait (LT1, ADR 0066), so the run waits in the queue instead of failing. It goes to the back
-	// of its origin's queue (ready_at = now) and the next claim gives it a new epoch. The time since the
+	// of its origin's queue (ready_at = now) and the next claim gives it a new epoch.
+	// sandbox_wait_started_at is kept, so the total wait is capped (ADR 0066 amendment
+	// 2026-10-28). The time since the
 	// claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
 	// against the wall-clock cap.
 	RequeueRun(ctx context.Context, arg RequeueRunParams) (Run, error)
@@ -804,6 +841,8 @@ type Querier interface {
 	// The system checks of an org since @since: requests and cost. They count against the org's
 	// monthly cap and the platform ceiling.
 	SpendSystemSince(ctx context.Context, arg SpendSystemSinceParams) (SpendSystemSinceRow, error)
+	// The questions became visible: their recipients start waiting now.
+	StartQuestionRecipientsWaiting(ctx context.Context, arg StartQuestionRecipientsWaitingParams) error
 	// Totals per run, for the runs in @run_ids that have spend.
 	SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]SumRunCostsRow, error)
 	// Totals per task, for the tasks in @task_ids that have spend.

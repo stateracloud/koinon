@@ -4,6 +4,8 @@ syntax = "proto3";
 
 package koinon.template.v1alpha1;
 
+import "koinon/auth/v1alpha1/auth.proto";
+
 option go_package = "github.com/stateracloud/koinon/internal/gen/koinon/template/v1alpha1;templatev1alpha1";
 
 // TemplateService lists the agent templates shipped with Koinon (ADR 0020).
@@ -83,6 +85,31 @@ message Trigger {
   string timezone = 4;
   // Text given to the agent when the trigger fires.
   string instruction = 5;
+  // Who is asked when the agent asks a person without naming one. Every type but direct_message
+  // (which asks the person in the chat). Unset: the org's default, today its admins and owners.
+  NotifyTarget notify = 6;
+}
+
+// NotifyTargetKind says who a trigger's task asks (ADR 0066 amendment 2026-10-28).
+enum NotifyTargetKind {
+  NOTIFY_TARGET_KIND_UNSPECIFIED = 0;
+  // One member of the org.
+  NOTIFY_TARGET_KIND_USER = 1;
+  // Everyone with the role or higher (member, admin or owner).
+  NOTIFY_TARGET_KIND_ROLE = 2;
+  // A chat channel. Reserved for v0.2; refused until chat connectors exist.
+  NOTIFY_TARGET_KIND_CHANNEL = 3;
+}
+
+// NotifyTarget is who is asked when the agent asks a person without naming one.
+message NotifyTarget {
+  NotifyTargetKind kind = 1;
+  // Kind USER: the user's ID.
+  string user_id = 2;
+  // Kind ROLE: MEMBER, ADMIN or OWNER.
+  koinon.auth.v1alpha1.OrgRole role = 3;
+  // Kind CHANNEL (v0.2): must be empty until then.
+  string channel_id = 4;
 }
 
 // Template is one version of an agent template.

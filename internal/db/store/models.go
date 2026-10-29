@@ -653,6 +653,49 @@ func (ns NullMembershipSource) Value() (driver.Value, error) {
 	return string(ns.MembershipSource), nil
 }
 
+type NotifyTargetKind string
+
+const (
+	NotifyTargetKindUser    NotifyTargetKind = "user"
+	NotifyTargetKindRole    NotifyTargetKind = "role"
+	NotifyTargetKindChannel NotifyTargetKind = "channel"
+)
+
+func (e *NotifyTargetKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = NotifyTargetKind(s)
+	case string:
+		*e = NotifyTargetKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for NotifyTargetKind: %T", src)
+	}
+	return nil
+}
+
+type NullNotifyTargetKind struct {
+	NotifyTargetKind NotifyTargetKind
+	Valid            bool // Valid is true if NotifyTargetKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullNotifyTargetKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.NotifyTargetKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.NotifyTargetKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullNotifyTargetKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.NotifyTargetKind), nil
+}
+
 type OrgKind string
 
 const (
@@ -874,12 +917,13 @@ func (ns NullQuestionState) Value() (driver.Value, error) {
 type RunFailureClass string
 
 const (
-	RunFailureClassTransient       RunFailureClass = "transient"
-	RunFailureClassThrottled       RunFailureClass = "throttled"
-	RunFailureClassContextOverflow RunFailureClass = "context_overflow"
-	RunFailureClassBudget          RunFailureClass = "budget"
-	RunFailureClassPolicy          RunFailureClass = "policy"
-	RunFailureClassFatal           RunFailureClass = "fatal"
+	RunFailureClassTransient          RunFailureClass = "transient"
+	RunFailureClassThrottled          RunFailureClass = "throttled"
+	RunFailureClassContextOverflow    RunFailureClass = "context_overflow"
+	RunFailureClassBudget             RunFailureClass = "budget"
+	RunFailureClassPolicy             RunFailureClass = "policy"
+	RunFailureClassFatal              RunFailureClass = "fatal"
+	RunFailureClassSandboxUnavailable RunFailureClass = "sandbox_unavailable"
 )
 
 func (e *RunFailureClass) Scan(src interface{}) error {
@@ -1295,6 +1339,7 @@ type AgentSandbox struct {
 	RestoreCheckpointID pgtype.UUID
 	RestoreClaimedAt    pgtype.Timestamptz
 	ArchivedAt          pgtype.Timestamptz
+	Reason              string
 }
 
 type AgentVersion struct {
@@ -1603,15 +1648,16 @@ type OrgMembership struct {
 }
 
 type OrgSetting struct {
-	OrgID                pgtype.UUID
-	IdleTimeoutSeconds   pgtype.Int4
-	ParkWarmSeconds      pgtype.Int4
-	QueueWaitSeconds     pgtype.Int4
-	CreatedAt            pgtype.Timestamptz
-	UpdatedAt            pgtype.Timestamptz
-	MaxConcurrentRuns    pgtype.Int4
-	TriggerConcurrency   pgtype.Int4
-	TriggerRatePerMinute pgtype.Int4
+	OrgID                 pgtype.UUID
+	IdleTimeoutSeconds    pgtype.Int4
+	ParkWarmSeconds       pgtype.Int4
+	QueueWaitSeconds      pgtype.Int4
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	MaxConcurrentRuns     pgtype.Int4
+	TriggerConcurrency    pgtype.Int4
+	TriggerRatePerMinute  pgtype.Int4
+	SandboxWaitCapSeconds pgtype.Int4
 }
 
 type OrgWorkspace struct {
@@ -1670,65 +1716,82 @@ type ProviderEchoCheck struct {
 }
 
 type Question struct {
-	OrgID          pgtype.UUID
-	ID             pgtype.UUID
-	TaskID         pgtype.UUID
-	RunID          pgtype.UUID
-	AgentID        pgtype.UUID
-	AskedTo        pgtype.UUID
-	Question       string
-	Choices        []byte
-	Draft          pgtype.Text
-	DefaultAnswer  string
-	State          QuestionState
-	Answer         pgtype.Text
-	AnswerKind     NullQuestionAnswerKind
-	AnsweredBy     pgtype.UUID
-	CallSha256     string
-	ExpiresAt      pgtype.Timestamptz
-	OpenedAt       pgtype.Timestamptz
-	NotifiedAt     pgtype.Timestamptz
-	NotifyFailures int32
-	ResolvedAt     pgtype.Timestamptz
-	DeliveredAt    pgtype.Timestamptz
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
-	RemindAt       pgtype.Timestamptz
-	RemindedAt     pgtype.Timestamptz
-	RemindFailures int32
+	OrgID   pgtype.UUID
+	ID      pgtype.UUID
+	TaskID  pgtype.UUID
+	RunID   pgtype.UUID
+	AgentID pgtype.UUID
+	// Deprecated (00036): read target_* and question_recipients. Dropped after v0.1.0.
+	AskedTo         pgtype.UUID
+	Question        string
+	Choices         []byte
+	Draft           pgtype.Text
+	DefaultAnswer   string
+	State           QuestionState
+	Answer          pgtype.Text
+	AnswerKind      NullQuestionAnswerKind
+	AnsweredBy      pgtype.UUID
+	CallSha256      string
+	ExpiresAt       pgtype.Timestamptz
+	OpenedAt        pgtype.Timestamptz
+	NotifiedAt      pgtype.Timestamptz
+	NotifyFailures  int32
+	ResolvedAt      pgtype.Timestamptz
+	DeliveredAt     pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+	RemindAt        pgtype.Timestamptz
+	RemindedAt      pgtype.Timestamptz
+	RemindFailures  int32
+	TargetKind      NotifyTargetKind
+	TargetUserID    pgtype.UUID
+	TargetRole      NullOrgRole
+	TargetChannelID pgtype.UUID
+}
+
+type QuestionRecipient struct {
+	OrgID        pgtype.UUID
+	ID           pgtype.UUID
+	QuestionID   pgtype.UUID
+	UserID       pgtype.UUID
+	WaitingSince pgtype.Timestamptz
+	RemovedAt    pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
 }
 
 type Run struct {
-	OrgID               pgtype.UUID
-	ID                  pgtype.UUID
-	AgentID             pgtype.UUID
-	AgentVersionID      pgtype.UUID
-	TaskID              pgtype.UUID
-	State               RunState
-	Epoch               int64
-	OwnerID             pgtype.Text
-	LeaseExpiresAt      pgtype.Timestamptz
-	HeartbeatAt         pgtype.Timestamptz
-	ReadyAt             pgtype.Timestamptz
-	ParkReason          NullRunParkReason
-	ParkedAt            pgtype.Timestamptz
-	ParkExpiresAt       pgtype.Timestamptz
-	OutcomeReason       pgtype.Text
-	MaxWallClockSeconds int32
-	MaxTokens           int64
-	LastEventSeq        int64
-	StartedAt           pgtype.Timestamptz
-	FinishedAt          pgtype.Timestamptz
-	CreatedAt           pgtype.Timestamptz
-	UpdatedAt           pgtype.Timestamptz
-	ParkedSeconds       int64
-	TokensUsed          int64
-	PromptThroughSeq    pgtype.Int8
-	Takeovers           int32
-	Summarizing         bool
-	FailureClass        NullRunFailureClass
-	Origin              RunOrigin
-	ClaimedAt           pgtype.Timestamptz
+	OrgID                pgtype.UUID
+	ID                   pgtype.UUID
+	AgentID              pgtype.UUID
+	AgentVersionID       pgtype.UUID
+	TaskID               pgtype.UUID
+	State                RunState
+	Epoch                int64
+	OwnerID              pgtype.Text
+	LeaseExpiresAt       pgtype.Timestamptz
+	HeartbeatAt          pgtype.Timestamptz
+	ReadyAt              pgtype.Timestamptz
+	ParkReason           NullRunParkReason
+	ParkedAt             pgtype.Timestamptz
+	ParkExpiresAt        pgtype.Timestamptz
+	OutcomeReason        pgtype.Text
+	MaxWallClockSeconds  int32
+	MaxTokens            int64
+	LastEventSeq         int64
+	StartedAt            pgtype.Timestamptz
+	FinishedAt           pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	ParkedSeconds        int64
+	TokensUsed           int64
+	PromptThroughSeq     pgtype.Int8
+	Takeovers            int32
+	Summarizing          bool
+	FailureClass         NullRunFailureClass
+	Origin               RunOrigin
+	ClaimedAt            pgtype.Timestamptz
+	SandboxWaitStartedAt pgtype.Timestamptz
+	WrapUpNoticeAt       pgtype.Timestamptz
 }
 
 type RunEvent struct {
@@ -1868,6 +1931,10 @@ type Task struct {
 	CreatedByKind            TaskCreatorKind
 	CreatedByAgentID         pgtype.UUID
 	CreatedByTriggerID       pgtype.UUID
+	NotifyKind               NullNotifyTargetKind
+	NotifyUserID             pgtype.UUID
+	NotifyRole               NullOrgRole
+	NotifyChannelID          pgtype.UUID
 }
 
 type TaskEvent struct {

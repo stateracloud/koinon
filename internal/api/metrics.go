@@ -13,6 +13,9 @@ import (
 // code, both from fixed sets; never a user, org or request ID (internal/metrics states the rule).
 type Metrics struct {
 	RPCRequests *prometheus.CounterVec
+	// QuestionsAsked counts the questions agents asked, by target kind (user, role, channel). The
+	// ask_user tool increments it.
+	QuestionsAsked *prometheus.CounterVec
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -22,9 +25,16 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_api_rpc_requests_total",
 			Help: "Connect RPCs finished, by procedure and Connect code (ok when the RPC succeeded).",
 		}, []string{"procedure", "code"}),
+		QuestionsAsked: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_api_questions_asked_total",
+			Help: "Questions agents asked with ask_user, by target kind (user, role, channel).",
+		}, []string{"target_kind"}),
+	}
+	for _, k := range []string{"user", "role", "channel"} {
+		m.QuestionsAsked.WithLabelValues(k)
 	}
 	if reg != nil {
-		reg.MustRegister(m.RPCRequests)
+		reg.MustRegister(m.RPCRequests, m.QuestionsAsked)
 	}
 	return m
 }

@@ -2,7 +2,8 @@
 
 // Package orgsettings resolves the per-org latency tunables of plan item LT1 (ADRs 0049, 0065,
 // 0066): how long an idle sandbox stays up, how long one whose run waits on a person or another
-// agent stays warm, and how long a run waits for its sandbox before it goes back to the queue.
+// agent stays warm, and how long a run waits for its sandbox before it goes back to the queue, and the most it waits for
+// it in total, across requeues, before it fails (issue #160).
 // A value the org did not set is the platform default, which the caller passes in (the
 // reconciler's and agentd's own configuration).
 package orgsettings
@@ -24,6 +25,8 @@ const (
 	DefaultIdleTimeout = 10 * time.Minute
 	DefaultParkWarm    = 15 * time.Minute
 	DefaultQueueWait   = 5 * time.Minute
+	// DefaultSandboxWaitCap is the most a run waits for its sandbox in total, across requeues.
+	DefaultSandboxWaitCap = time.Hour
 
 	// DefaultMaxConcurrentRuns is the cap on an org's owned runs. The same number is in
 	// run_claimable (migration 00023); the two must change together.
@@ -42,6 +45,9 @@ type Settings struct {
 	ParkWarm time.Duration
 	// QueueWait is how long a claimed run waits for its sandbox before it returns to the queue.
 	QueueWait time.Duration
+	// SandboxWaitCap is the most a run waits for its sandbox in total, across requeues; then it fails
+	// (sandbox_unavailable).
+	SandboxWaitCap time.Duration
 	// MaxConcurrentRuns caps the runs the org has starting or running at once (run_claimable).
 	MaxConcurrentRuns int
 	// TriggerConcurrency is how many trigger, webhook and task-creation items of the org run at
@@ -53,6 +59,7 @@ type Settings struct {
 func Defaults() Settings {
 	return Settings{
 		IdleTimeout: DefaultIdleTimeout, ParkWarm: DefaultParkWarm, QueueWait: DefaultQueueWait,
+		SandboxWaitCap:    DefaultSandboxWaitCap,
 		MaxConcurrentRuns: DefaultMaxConcurrentRuns, TriggerConcurrency: DefaultTriggerConcurrency,
 		TriggerRatePerMinute: DefaultTriggerRatePerMinute,
 	}
@@ -80,6 +87,9 @@ func apply(def Settings, row store.OrgSetting) Settings {
 	if row.QueueWaitSeconds.Valid {
 		def.QueueWait = time.Duration(row.QueueWaitSeconds.Int32) * time.Second
 	}
+	if row.SandboxWaitCapSeconds.Valid {
+		def.SandboxWaitCap = time.Duration(row.SandboxWaitCapSeconds.Int32) * time.Second
+	}
 	if row.MaxConcurrentRuns.Valid {
 		def.MaxConcurrentRuns = int(row.MaxConcurrentRuns.Int32)
 	}
@@ -95,6 +105,8 @@ func apply(def Settings, row store.OrgSetting) Settings {
 // Override is a change to the org's settings; a nil field means the platform default.
 type Override struct {
 	IdleTimeout, ParkWarm, QueueWait *time.Duration
+	// SandboxWaitCap is the total wait for a sandbox (300 s to 7 days).
+	SandboxWaitCap *time.Duration
 	// MaxConcurrentRuns, TriggerConcurrency and TriggerRatePerMinute are the DB2 limits.
 	MaxConcurrentRuns, TriggerConcurrency, TriggerRatePerMinute *int
 }
@@ -102,10 +114,11 @@ type Override struct {
 // Set replaces the org's overrides. The database bounds each value (see migrations 00022 and 00023).
 func Set(ctx context.Context, q *store.Queries, org pgtype.UUID, o Override) error {
 	_, err := q.UpsertOrgSettings(ctx, store.UpsertOrgSettingsParams{
-		OrgID:              org,
-		IdleTimeoutSeconds: seconds(o.IdleTimeout),
-		ParkWarmSeconds:    seconds(o.ParkWarm),
-		QueueWaitSeconds:   seconds(o.QueueWait),
+		OrgID:                 org,
+		IdleTimeoutSeconds:    seconds(o.IdleTimeout),
+		ParkWarmSeconds:       seconds(o.ParkWarm),
+		QueueWaitSeconds:      seconds(o.QueueWait),
+		SandboxWaitCapSeconds: seconds(o.SandboxWaitCap),
 
 		MaxConcurrentRuns:    count(o.MaxConcurrentRuns),
 		TriggerConcurrency:   count(o.TriggerConcurrency),

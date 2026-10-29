@@ -259,7 +259,10 @@ func (r *runner) recreateStuck(ctx context.Context, workspace, sandbox string, p
 			}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
-			if err := r.notifyUnhealthy(ctx, q, inc.ID, reason); err != nil {
+			if err := r.notifyUnhealthy(ctx, q, "agent.unhealthy:"+r.run.AgentID.String()+":"+inc.ID.String(), map[string]string{
+				"incident_id": inc.ID.String(),
+				"message":     "An agent is unhealthy and will not start runs until an admin resumes it. " + reason,
+			}); err != nil {
 				return err
 			}
 			waiting, err := q.ListTasksWithWaitingRunOfAgent(ctx, store.ListTasksWithWaitingRunOfAgentParams{OrgID: r.run.OrgID, AgentID: r.run.AgentID})
@@ -330,23 +333,25 @@ func (r *runner) taskNote(ctx context.Context, q *store.Queries, task pgtype.UUI
 	return err
 }
 
-// notifyUnhealthy tells the org's owners and admins, once per incident.
-func (r *runner) notifyUnhealthy(ctx context.Context, q *store.Queries, incident pgtype.UUID, reason string) error {
+// notifyUnhealthy tells the org's owners and admins, once per dedupe key. The payload carries the
+// message and whatever else the notification needs; agent_id is always set.
+func (r *runner) notifyUnhealthy(ctx context.Context, q *store.Queries, dedupe string, fields map[string]string) error {
 	users, err := q.ListOrgBudgetRecipients(ctx, r.run.OrgID)
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(map[string]string{
-		"agent_id": r.run.AgentID.String(), "incident_id": incident.String(),
-		"message": "An agent is unhealthy and will not start runs until an admin resumes it. " + reason,
-	})
+	payload := map[string]string{}
+	for k, v := range fields {
+		payload[k] = v
+	}
+	payload["agent_id"] = r.run.AgentID.String()
+	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	for _, u := range users {
 		if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
-			OrgID: r.run.OrgID, UserID: u, Kind: NotificationAgentUnhealthy,
-			DedupeKey: "agent.unhealthy:" + r.run.AgentID.String() + ":" + incident.String(), Payload: payload,
+			OrgID: r.run.OrgID, UserID: u, Kind: NotificationAgentUnhealthy, DedupeKey: dedupe, Payload: raw,
 		}); err != nil {
 			return err
 		}

@@ -11,11 +11,64 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addQuestionRecipients = `-- name: AddQuestionRecipients :exec
+INSERT INTO question_recipients (org_id, question_id, user_id)
+SELECT $1, $2, unnest($3::uuid[])
+ON CONFLICT DO NOTHING
+`
+
+type AddQuestionRecipientsParams struct {
+	OrgID      pgtype.UUID
+	QuestionID pgtype.UUID
+	UserIds    []pgtype.UUID
+}
+
+// The question's recipients, when it is created (waiting_since stays NULL until it is opened).
+func (q *Queries) AddQuestionRecipients(ctx context.Context, arg AddQuestionRecipientsParams) error {
+	_, err := q.db.Exec(ctx, addQuestionRecipients, arg.OrgID, arg.QuestionID, arg.UserIds)
+	return err
+}
+
+const addWaitingQuestionRecipients = `-- name: AddWaitingQuestionRecipients :many
+INSERT INTO question_recipients (org_id, question_id, user_id, waiting_since)
+SELECT $1, $2, unnest($3::uuid[]), now()
+ON CONFLICT DO NOTHING
+RETURNING user_id
+`
+
+type AddWaitingQuestionRecipientsParams struct {
+	OrgID      pgtype.UUID
+	QuestionID pgtype.UUID
+	UserIds    []pgtype.UUID
+}
+
+// The people a question is retargeted to start waiting now (a new recipient's age starts when the
+// item starts waiting on them). Returns the rows that were new.
+func (q *Queries) AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, addWaitingQuestionRecipients, arg.OrgID, arg.QuestionID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var user_id pgtype.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cancelOpenQuestionsForRun = `-- name: CancelOpenQuestionsForRun :many
 UPDATE questions
 SET state = 'canceled', resolved_at = now()
 WHERE org_id = $1 AND run_id = $2 AND state IN ('asked', 'open')
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id
 `
 
 type CancelOpenQuestionsForRunParams struct {
@@ -60,6 +113,10 @@ func (q *Queries) CancelOpenQuestionsForRun(ctx context.Context, arg CancelOpenQ
 			&i.RemindAt,
 			&i.RemindedAt,
 			&i.RemindFailures,
+			&i.TargetKind,
+			&i.TargetUserID,
+			&i.TargetRole,
+			&i.TargetChannelID,
 		); err != nil {
 			return nil, err
 		}
@@ -90,12 +147,14 @@ func (q *Queries) CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQue
 }
 
 const createQuestion = `-- name: CreateQuestion :one
-INSERT INTO questions (org_id, task_id, run_id, agent_id, asked_to, question, choices, draft,
+INSERT INTO questions (org_id, task_id, run_id, agent_id, asked_to, target_kind, target_user_id,
+                       target_role, question, choices, draft,
                        default_answer, call_sha256, expires_at, remind_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10, $11, $12)
+VALUES ($1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15)
 ON CONFLICT (org_id, run_id, call_sha256) DO NOTHING
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id
 `
 
 type CreateQuestionParams struct {
@@ -104,6 +163,9 @@ type CreateQuestionParams struct {
 	RunID         pgtype.UUID
 	AgentID       pgtype.UUID
 	AskedTo       pgtype.UUID
+	TargetKind    NotifyTargetKind
+	TargetUserID  pgtype.UUID
+	TargetRole    NullOrgRole
 	Question      string
 	Choices       []byte
 	Draft         pgtype.Text
@@ -115,6 +177,7 @@ type CreateQuestionParams struct {
 
 // Records a question as 'asked'. No row for the same call in the same run: use
 // GetQuestionByCall.
+// asked_to is deprecated (00036): written for a user target, NULL otherwise, and never read.
 func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) (Question, error) {
 	row := q.db.QueryRow(ctx, createQuestion,
 		arg.OrgID,
@@ -122,6 +185,9 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 		arg.RunID,
 		arg.AgentID,
 		arg.AskedTo,
+		arg.TargetKind,
+		arg.TargetUserID,
+		arg.TargetRole,
 		arg.Question,
 		arg.Choices,
 		arg.Draft,
@@ -158,6 +224,10 @@ func (q *Queries) CreateQuestion(ctx context.Context, arg CreateQuestionParams) 
 		&i.RemindAt,
 		&i.RemindedAt,
 		&i.RemindFailures,
+		&i.TargetKind,
+		&i.TargetUserID,
+		&i.TargetRole,
+		&i.TargetChannelID,
 	)
 	return i, err
 }
@@ -204,7 +274,7 @@ func (q *Queries) FindOrgMemberByIdent(ctx context.Context, arg FindOrgMemberByI
 }
 
 const getQuestion = `-- name: GetQuestion :one
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id FROM questions
 WHERE org_id = $1 AND id = $2
 `
 
@@ -243,12 +313,16 @@ func (q *Queries) GetQuestion(ctx context.Context, arg GetQuestionParams) (Quest
 		&i.RemindAt,
 		&i.RemindedAt,
 		&i.RemindFailures,
+		&i.TargetKind,
+		&i.TargetUserID,
+		&i.TargetRole,
+		&i.TargetChannelID,
 	)
 	return i, err
 }
 
 const getQuestionByCall = `-- name: GetQuestionByCall :one
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id FROM questions
 WHERE org_id = $1 AND run_id = $2 AND call_sha256 = $3
 `
 
@@ -288,8 +362,42 @@ func (q *Queries) GetQuestionByCall(ctx context.Context, arg GetQuestionByCallPa
 		&i.RemindAt,
 		&i.RemindedAt,
 		&i.RemindFailures,
+		&i.TargetKind,
+		&i.TargetUserID,
+		&i.TargetRole,
+		&i.TargetChannelID,
 	)
 	return i, err
+}
+
+const getUserDisplayName = `-- name: GetUserDisplayName :one
+SELECT display_name FROM users WHERE id = $1
+`
+
+func (q *Queries) GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getUserDisplayName, id)
+	var display_name string
+	err := row.Scan(&display_name)
+	return display_name, err
+}
+
+const isActiveQuestionRecipient = `-- name: IsActiveQuestionRecipient :one
+SELECT EXISTS (
+    SELECT 1 FROM question_recipients
+    WHERE org_id = $1 AND question_id = $2 AND user_id = $3 AND removed_at IS NULL)
+`
+
+type IsActiveQuestionRecipientParams struct {
+	OrgID      pgtype.UUID
+	QuestionID pgtype.UUID
+	UserID     pgtype.UUID
+}
+
+func (q *Queries) IsActiveQuestionRecipient(ctx context.Context, arg IsActiveQuestionRecipientParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isActiveQuestionRecipient, arg.OrgID, arg.QuestionID, arg.UserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const isOrgMember = `-- name: IsOrgMember :one
@@ -314,8 +422,87 @@ func (q *Queries) IsOrgMember(ctx context.Context, arg IsOrgMemberParams) (bool,
 	return exists, err
 }
 
+const listActiveQuestionRecipientIDs = `-- name: ListActiveQuestionRecipientIDs :many
+SELECT qr.user_id FROM question_recipients qr
+JOIN users u ON u.id = qr.user_id AND u.deleted_at IS NULL
+WHERE qr.org_id = $1 AND qr.question_id = $2 AND qr.removed_at IS NULL
+  AND EXISTS (SELECT 1 FROM org_memberships om
+              WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member')
+ORDER BY qr.user_id
+`
+
+type ListActiveQuestionRecipientIDsParams struct {
+	OrgID      pgtype.UUID
+	QuestionID pgtype.UUID
+}
+
+// The recipients who can still answer: active rows whose user is not deleted and still has role
+// member or higher in the org (the IsOrgMember rule). A recipient who left the org or became a
+// viewer is not notified, reminded or counted as waited on.
+func (q *Queries) ListActiveQuestionRecipientIDs(ctx context.Context, arg ListActiveQuestionRecipientIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listActiveQuestionRecipientIDs, arg.OrgID, arg.QuestionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var user_id pgtype.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskableMembers = `-- name: ListAskableMembers :many
+SELECT u.id, u.email, u.display_name, max(om.role)::org_role AS role
+FROM users u JOIN org_memberships om ON om.user_id = u.id AND om.org_id = $1
+WHERE u.deleted_at IS NULL
+GROUP BY u.id, u.email, u.display_name
+HAVING max(om.role) >= 'member'
+ORDER BY u.display_name, u.email
+`
+
+type ListAskableMembersRow struct {
+	ID          pgtype.UUID
+	Email       pgtype.Text
+	DisplayName string
+	Role        OrgRole
+}
+
+// Members who can answer questions (member or higher), highest role per user.
+func (q *Queries) ListAskableMembers(ctx context.Context, orgID pgtype.UUID) ([]ListAskableMembersRow, error) {
+	rows, err := q.db.Query(ctx, listAskableMembers, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskableMembersRow
+	for rows.Next() {
+		var i ListAskableMembersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.DisplayName,
+			&i.Role,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDueQuestions = `-- name: ListDueQuestions :many
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id FROM questions
 WHERE org_id = $1 AND state = 'open' AND expires_at <= $2
 ORDER BY expires_at, id
 LIMIT $3
@@ -364,6 +551,10 @@ func (q *Queries) ListDueQuestions(ctx context.Context, arg ListDueQuestionsPara
 			&i.RemindAt,
 			&i.RemindedAt,
 			&i.RemindFailures,
+			&i.TargetKind,
+			&i.TargetUserID,
+			&i.TargetRole,
+			&i.TargetChannelID,
 		); err != nil {
 			return nil, err
 		}
@@ -376,60 +567,108 @@ func (q *Queries) ListDueQuestions(ctx context.Context, arg ListDueQuestionsPara
 }
 
 const listOpenQuestionsForUser = `-- name: ListOpenQuestionsForUser :many
-SELECT qn.org_id, qn.id, qn.task_id, qn.run_id, qn.agent_id, qn.asked_to, qn.question, qn.choices, qn.draft, qn.default_answer, qn.state, qn.answer, qn.answer_kind, qn.answered_by, qn.call_sha256, qn.expires_at, qn.opened_at, qn.notified_at, qn.notify_failures, qn.resolved_at, qn.delivered_at, qn.created_at, qn.updated_at, qn.remind_at, qn.reminded_at, qn.remind_failures FROM questions qn
+SELECT qn.org_id, qn.id, qn.task_id, qn.run_id, qn.agent_id, qn.asked_to, qn.question, qn.choices, qn.draft, qn.default_answer, qn.state, qn.answer, qn.answer_kind, qn.answered_by, qn.call_sha256, qn.expires_at, qn.opened_at, qn.notified_at, qn.notify_failures, qn.resolved_at, qn.delivered_at, qn.created_at, qn.updated_at, qn.remind_at, qn.reminded_at, qn.remind_failures, qn.target_kind, qn.target_user_id, qn.target_role, qn.target_channel_id, qr.waiting_since
+FROM questions qn
 JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
-WHERE qn.org_id = $1 AND qn.asked_to = $2 AND qn.state = 'open' AND r.state = 'parked'
-ORDER BY qn.opened_at DESC, qn.id DESC
+JOIN question_recipients qr ON qr.org_id = qn.org_id AND qr.question_id = qn.id
+                           AND qr.user_id = $1 AND qr.removed_at IS NULL
+WHERE qn.org_id = $2 AND qn.state = 'open' AND r.state = 'parked'
+ORDER BY qr.waiting_since DESC NULLS LAST, qn.id DESC
 `
 
 type ListOpenQuestionsForUserParams struct {
-	OrgID  pgtype.UUID
 	UserID pgtype.UUID
+	OrgID  pgtype.UUID
 }
 
-// The inbox: open questions asked to the user, newest first.
+type ListOpenQuestionsForUserRow struct {
+	Question     Question
+	WaitingSince pgtype.Timestamptz
+}
+
+// The inbox: open questions the user is an active recipient of, longest waiting on the user last
+// (newest first), with the time it started waiting on the user.
 // Only those whose run is still parked: a question outlives no run (the sweep closes it, this
 // hides it meanwhile).
-func (q *Queries) ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQuestionsForUserParams) ([]Question, error) {
-	rows, err := q.db.Query(ctx, listOpenQuestionsForUser, arg.OrgID, arg.UserID)
+func (q *Queries) ListOpenQuestionsForUser(ctx context.Context, arg ListOpenQuestionsForUserParams) ([]ListOpenQuestionsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listOpenQuestionsForUser, arg.UserID, arg.OrgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Question
+	var items []ListOpenQuestionsForUserRow
 	for rows.Next() {
-		var i Question
+		var i ListOpenQuestionsForUserRow
 		if err := rows.Scan(
-			&i.OrgID,
-			&i.ID,
-			&i.TaskID,
-			&i.RunID,
-			&i.AgentID,
-			&i.AskedTo,
-			&i.Question,
-			&i.Choices,
-			&i.Draft,
-			&i.DefaultAnswer,
-			&i.State,
-			&i.Answer,
-			&i.AnswerKind,
-			&i.AnsweredBy,
-			&i.CallSha256,
-			&i.ExpiresAt,
-			&i.OpenedAt,
-			&i.NotifiedAt,
-			&i.NotifyFailures,
-			&i.ResolvedAt,
-			&i.DeliveredAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.RemindAt,
-			&i.RemindedAt,
-			&i.RemindFailures,
+			&i.Question.OrgID,
+			&i.Question.ID,
+			&i.Question.TaskID,
+			&i.Question.RunID,
+			&i.Question.AgentID,
+			&i.Question.AskedTo,
+			&i.Question.Question,
+			&i.Question.Choices,
+			&i.Question.Draft,
+			&i.Question.DefaultAnswer,
+			&i.Question.State,
+			&i.Question.Answer,
+			&i.Question.AnswerKind,
+			&i.Question.AnsweredBy,
+			&i.Question.CallSha256,
+			&i.Question.ExpiresAt,
+			&i.Question.OpenedAt,
+			&i.Question.NotifiedAt,
+			&i.Question.NotifyFailures,
+			&i.Question.ResolvedAt,
+			&i.Question.DeliveredAt,
+			&i.Question.CreatedAt,
+			&i.Question.UpdatedAt,
+			&i.Question.RemindAt,
+			&i.Question.RemindedAt,
+			&i.Question.RemindFailures,
+			&i.Question.TargetKind,
+			&i.Question.TargetUserID,
+			&i.Question.TargetRole,
+			&i.Question.TargetChannelID,
+			&i.WaitingSince,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgMemberIDsWithRole = `-- name: ListOrgMemberIDsWithRole :many
+SELECT u.id FROM users u JOIN org_memberships om ON om.user_id = u.id AND om.org_id = $1
+WHERE u.deleted_at IS NULL
+GROUP BY u.id
+HAVING max(om.role) >= $2::org_role
+ORDER BY u.id
+`
+
+type ListOrgMemberIDsWithRoleParams struct {
+	OrgID   pgtype.UUID
+	MinRole OrgRole
+}
+
+// Users whose highest role in the org is at least @min_role (deleted users excluded).
+func (q *Queries) ListOrgMemberIDsWithRole(ctx context.Context, arg ListOrgMemberIDsWithRoleParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgMemberIDsWithRole, arg.OrgID, arg.MinRole)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -445,6 +684,31 @@ WHERE state = 'open' AND (expires_at <= $1 OR (remind_at <= $1 AND reminded_at I
 // Orgs with an open question past its expiry at @now or a reminder due at @now.
 func (q *Queries) ListOrgsWithDueQuestions(ctx context.Context, now pgtype.Timestamptz) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listOrgsWithDueQuestions, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var org_id pgtype.UUID
+		if err := rows.Scan(&org_id); err != nil {
+			return nil, err
+		}
+		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrgsWithOpenQuestions = `-- name: ListOrgsWithOpenQuestions :many
+SELECT DISTINCT org_id FROM questions WHERE state = 'open'
+`
+
+// Orgs with an open question, for the sweep that gives orphaned questions to the org's admins.
+func (q *Queries) ListOrgsWithOpenQuestions(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listOrgsWithOpenQuestions)
 	if err != nil {
 		return nil, err
 	}
@@ -516,37 +780,98 @@ func (q *Queries) ListOrgsWithQuestionsToNotify(ctx context.Context) ([]pgtype.U
 	return items, nil
 }
 
-const listQuestionAddresseesForTasks = `-- name: ListQuestionAddresseesForTasks :many
-SELECT DISTINCT qn.task_id, qn.asked_to, u.display_name
+const listOrphanedQuestions = `-- name: ListOrphanedQuestions :many
+SELECT qn.id, qn.task_id, qn.run_id, t.agent_id, t.notify_kind, t.notify_user_id, t.notify_role
 FROM questions qn
-JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
-JOIN users u ON u.id = qn.asked_to
-WHERE qn.org_id = $1 AND qn.task_id = ANY($2::uuid[]) AND qn.state = 'open' AND r.state = 'parked'
+JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id AND r.state = 'parked'
+JOIN tasks t ON t.org_id = qn.org_id AND t.id = qn.task_id
+WHERE qn.org_id = $1 AND qn.state = 'open'
+  AND NOT EXISTS (
+    SELECT 1 FROM question_recipients qr
+    JOIN users u ON u.id = qr.user_id AND u.deleted_at IS NULL
+    WHERE qr.org_id = qn.org_id AND qr.question_id = qn.id AND qr.removed_at IS NULL
+      AND EXISTS (SELECT 1 FROM org_memberships om
+                  WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member'))
+ORDER BY qn.id
+FOR UPDATE OF qn SKIP LOCKED
 `
 
-type ListQuestionAddresseesForTasksParams struct {
-	OrgID   pgtype.UUID
-	TaskIds []pgtype.UUID
+type ListOrphanedQuestionsRow struct {
+	ID           pgtype.UUID
+	TaskID       pgtype.UUID
+	RunID        pgtype.UUID
+	AgentID      pgtype.UUID
+	NotifyKind   NullNotifyTargetKind
+	NotifyUserID pgtype.UUID
+	NotifyRole   NullOrgRole
 }
 
-type ListQuestionAddresseesForTasksRow struct {
-	TaskID      pgtype.UUID
-	AskedTo     pgtype.UUID
-	DisplayName string
-}
-
-// Who the open questions of these tasks wait on (only where the run is still parked), for the
-// inbox: a task waiting on someone else's question is not its creator's to act on.
-func (q *Queries) ListQuestionAddresseesForTasks(ctx context.Context, arg ListQuestionAddresseesForTasksParams) ([]ListQuestionAddresseesForTasksRow, error) {
-	rows, err := q.db.Query(ctx, listQuestionAddresseesForTasks, arg.OrgID, arg.TaskIds)
+// Open questions (run still parked) with no recipient who can still answer, because everyone left
+// the org or lost the role, with the notify target of their task (NULL kind: the org's default). The rows are locked, and a question that is being resolved or canceled is
+// skipped, so a question closed meanwhile gets no recipients, notification or audit row.
+func (q *Queries) ListOrphanedQuestions(ctx context.Context, orgID pgtype.UUID) ([]ListOrphanedQuestionsRow, error) {
+	rows, err := q.db.Query(ctx, listOrphanedQuestions, orgID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListQuestionAddresseesForTasksRow
+	var items []ListOrphanedQuestionsRow
 	for rows.Next() {
-		var i ListQuestionAddresseesForTasksRow
-		if err := rows.Scan(&i.TaskID, &i.AskedTo, &i.DisplayName); err != nil {
+		var i ListOrphanedQuestionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.RunID,
+			&i.AgentID,
+			&i.NotifyKind,
+			&i.NotifyUserID,
+			&i.NotifyRole,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQuestionRecipients = `-- name: ListQuestionRecipients :many
+SELECT qr.question_id, qr.user_id, u.display_name, qr.waiting_since
+FROM question_recipients qr JOIN users u ON u.id = qr.user_id
+WHERE qr.org_id = $1 AND qr.question_id = ANY($2::uuid[]) AND qr.removed_at IS NULL
+ORDER BY qr.question_id, u.display_name, qr.user_id
+`
+
+type ListQuestionRecipientsParams struct {
+	OrgID       pgtype.UUID
+	QuestionIds []pgtype.UUID
+}
+
+type ListQuestionRecipientsRow struct {
+	QuestionID   pgtype.UUID
+	UserID       pgtype.UUID
+	DisplayName  string
+	WaitingSince pgtype.Timestamptz
+}
+
+// The active recipients of these questions, with names, for the API.
+func (q *Queries) ListQuestionRecipients(ctx context.Context, arg ListQuestionRecipientsParams) ([]ListQuestionRecipientsRow, error) {
+	rows, err := q.db.Query(ctx, listQuestionRecipients, arg.OrgID, arg.QuestionIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListQuestionRecipientsRow
+	for rows.Next() {
+		var i ListQuestionRecipientsRow
+		if err := rows.Scan(
+			&i.QuestionID,
+			&i.UserID,
+			&i.DisplayName,
+			&i.WaitingSince,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -585,8 +910,65 @@ func (q *Queries) ListQuestionRunsOfFinishedRuns(ctx context.Context, orgID pgty
 	return items, nil
 }
 
+const listQuestionWaitersForTasks = `-- name: ListQuestionWaitersForTasks :many
+SELECT qn.task_id, qn.id AS question_id, qn.target_kind, qn.target_role, tu.display_name AS target_user_name,
+       array_agg(qr.user_id ORDER BY qr.user_id)::uuid[] AS recipient_ids
+FROM questions qn
+JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id
+JOIN question_recipients qr ON qr.org_id = qn.org_id AND qr.question_id = qn.id AND qr.removed_at IS NULL
+JOIN users ru ON ru.id = qr.user_id AND ru.deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM org_memberships om WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member')
+LEFT JOIN users tu ON tu.id = qn.target_user_id
+WHERE qn.org_id = $1 AND qn.task_id = ANY($2::uuid[]) AND qn.state = 'open' AND r.state = 'parked'
+GROUP BY qn.task_id, qn.id, qn.target_kind, qn.target_role, tu.display_name, qn.opened_at
+ORDER BY qn.opened_at, qn.id
+`
+
+type ListQuestionWaitersForTasksParams struct {
+	OrgID   pgtype.UUID
+	TaskIds []pgtype.UUID
+}
+
+type ListQuestionWaitersForTasksRow struct {
+	TaskID         pgtype.UUID
+	QuestionID     pgtype.UUID
+	TargetKind     NotifyTargetKind
+	TargetRole     NullOrgRole
+	TargetUserName pgtype.Text
+	RecipientIds   []pgtype.UUID
+}
+
+// The open questions of these tasks whose run is still parked, oldest first, with their target and
+// recipients, for the inbox (ListTasks/GetTask waiting_on_*).
+func (q *Queries) ListQuestionWaitersForTasks(ctx context.Context, arg ListQuestionWaitersForTasksParams) ([]ListQuestionWaitersForTasksRow, error) {
+	rows, err := q.db.Query(ctx, listQuestionWaitersForTasks, arg.OrgID, arg.TaskIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListQuestionWaitersForTasksRow
+	for rows.Next() {
+		var i ListQuestionWaitersForTasksRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.QuestionID,
+			&i.TargetKind,
+			&i.TargetRole,
+			&i.TargetUserName,
+			&i.RecipientIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listQuestionsForTask = `-- name: ListQuestionsForTask :many
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id FROM questions
 WHERE org_id = $1 AND task_id = $2
 ORDER BY created_at, id
 `
@@ -632,6 +1014,10 @@ func (q *Queries) ListQuestionsForTask(ctx context.Context, arg ListQuestionsFor
 			&i.RemindAt,
 			&i.RemindedAt,
 			&i.RemindFailures,
+			&i.TargetKind,
+			&i.TargetUserID,
+			&i.TargetRole,
+			&i.TargetChannelID,
 		); err != nil {
 			return nil, err
 		}
@@ -644,7 +1030,7 @@ func (q *Queries) ListQuestionsForTask(ctx context.Context, arg ListQuestionsFor
 }
 
 const listQuestionsToNotify = `-- name: ListQuestionsToNotify :many
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id FROM questions
 WHERE org_id = $1 AND state IN ('open', 'answered', 'dismissed', 'expired') AND notified_at IS NULL
 ORDER BY opened_at, id
 LIMIT $2
@@ -692,6 +1078,10 @@ func (q *Queries) ListQuestionsToNotify(ctx context.Context, arg ListQuestionsTo
 			&i.RemindAt,
 			&i.RemindedAt,
 			&i.RemindFailures,
+			&i.TargetKind,
+			&i.TargetUserID,
+			&i.TargetRole,
+			&i.TargetChannelID,
 		); err != nil {
 			return nil, err
 		}
@@ -704,7 +1094,7 @@ func (q *Queries) ListQuestionsToNotify(ctx context.Context, arg ListQuestionsTo
 }
 
 const listQuestionsToRemind = `-- name: ListQuestionsToRemind :many
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id FROM questions
 WHERE org_id = $1 AND state = 'open' AND remind_at <= $2 AND reminded_at IS NULL
 ORDER BY remind_at, id
 LIMIT $3
@@ -753,6 +1143,10 @@ func (q *Queries) ListQuestionsToRemind(ctx context.Context, arg ListQuestionsTo
 			&i.RemindAt,
 			&i.RemindedAt,
 			&i.RemindFailures,
+			&i.TargetKind,
+			&i.TargetUserID,
+			&i.TargetRole,
+			&i.TargetChannelID,
 		); err != nil {
 			return nil, err
 		}
@@ -765,7 +1159,7 @@ func (q *Queries) ListQuestionsToRemind(ctx context.Context, arg ListQuestionsTo
 }
 
 const listUndeliveredQuestionsForRun = `-- name: ListUndeliveredQuestionsForRun :many
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id FROM questions
 WHERE org_id = $1 AND run_id = $2 AND delivered_at IS NULL AND state <> 'canceled'
 ORDER BY created_at, id
 `
@@ -812,6 +1206,10 @@ func (q *Queries) ListUndeliveredQuestionsForRun(ctx context.Context, arg ListUn
 			&i.RemindAt,
 			&i.RemindedAt,
 			&i.RemindFailures,
+			&i.TargetKind,
+			&i.TargetUserID,
+			&i.TargetRole,
+			&i.TargetChannelID,
 		); err != nil {
 			return nil, err
 		}
@@ -824,7 +1222,7 @@ func (q *Queries) ListUndeliveredQuestionsForRun(ctx context.Context, arg ListUn
 }
 
 const lockQuestion = `-- name: LockQuestion :one
-SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures FROM questions
+SELECT org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id FROM questions
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -864,6 +1262,10 @@ func (q *Queries) LockQuestion(ctx context.Context, arg LockQuestionParams) (Que
 		&i.RemindAt,
 		&i.RemindedAt,
 		&i.RemindFailures,
+		&i.TargetKind,
+		&i.TargetUserID,
+		&i.TargetRole,
+		&i.TargetChannelID,
 	)
 	return i, err
 }
@@ -929,7 +1331,7 @@ const openAskedQuestionsForRun = `-- name: OpenAskedQuestionsForRun :many
 UPDATE questions
 SET state = 'open', opened_at = now()
 WHERE org_id = $1 AND run_id = $2 AND state = 'asked'
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id
 `
 
 type OpenAskedQuestionsForRunParams struct {
@@ -975,6 +1377,10 @@ func (q *Queries) OpenAskedQuestionsForRun(ctx context.Context, arg OpenAskedQue
 			&i.RemindAt,
 			&i.RemindedAt,
 			&i.RemindFailures,
+			&i.TargetKind,
+			&i.TargetUserID,
+			&i.TargetRole,
+			&i.TargetChannelID,
 		); err != nil {
 			return nil, err
 		}
@@ -991,7 +1397,7 @@ UPDATE questions
 SET notify_failures = notify_failures + 1,
     notified_at = CASE WHEN notify_failures + 1 >= $1::int THEN now() ELSE notified_at END
 WHERE org_id = $2 AND id = $3 AND notified_at IS NULL
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id
 `
 
 type RecordQuestionNotifyFailureParams struct {
@@ -1032,6 +1438,10 @@ func (q *Queries) RecordQuestionNotifyFailure(ctx context.Context, arg RecordQue
 		&i.RemindAt,
 		&i.RemindedAt,
 		&i.RemindFailures,
+		&i.TargetKind,
+		&i.TargetUserID,
+		&i.TargetRole,
+		&i.TargetChannelID,
 	)
 	return i, err
 }
@@ -1041,7 +1451,7 @@ UPDATE questions
 SET remind_failures = remind_failures + 1,
     reminded_at = CASE WHEN remind_failures + 1 >= $1::int THEN now() ELSE reminded_at END
 WHERE org_id = $2 AND id = $3 AND reminded_at IS NULL
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id
 `
 
 type RecordQuestionRemindFailureParams struct {
@@ -1081,6 +1491,10 @@ func (q *Queries) RecordQuestionRemindFailure(ctx context.Context, arg RecordQue
 		&i.RemindAt,
 		&i.RemindedAt,
 		&i.RemindFailures,
+		&i.TargetKind,
+		&i.TargetUserID,
+		&i.TargetRole,
+		&i.TargetChannelID,
 	)
 	return i, err
 }
@@ -1093,7 +1507,7 @@ SET state = $1::question_state,
     answered_by = $4,
     resolved_at = now()
 WHERE org_id = $5 AND id = $6 AND state = 'open'
-RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures
+RETURNING org_id, id, task_id, run_id, agent_id, asked_to, question, choices, draft, default_answer, state, answer, answer_kind, answered_by, call_sha256, expires_at, opened_at, notified_at, notify_failures, resolved_at, delivered_at, created_at, updated_at, remind_at, reminded_at, remind_failures, target_kind, target_user_id, target_role, target_channel_id
 `
 
 type ResolveQuestionParams struct {
@@ -1143,6 +1557,26 @@ func (q *Queries) ResolveQuestion(ctx context.Context, arg ResolveQuestionParams
 		&i.RemindAt,
 		&i.RemindedAt,
 		&i.RemindFailures,
+		&i.TargetKind,
+		&i.TargetUserID,
+		&i.TargetRole,
+		&i.TargetChannelID,
 	)
 	return i, err
+}
+
+const startQuestionRecipientsWaiting = `-- name: StartQuestionRecipientsWaiting :exec
+UPDATE question_recipients SET waiting_since = now()
+WHERE org_id = $1 AND question_id = ANY($2::uuid[]) AND removed_at IS NULL AND waiting_since IS NULL
+`
+
+type StartQuestionRecipientsWaitingParams struct {
+	OrgID       pgtype.UUID
+	QuestionIds []pgtype.UUID
+}
+
+// The questions became visible: their recipients start waiting now.
+func (q *Queries) StartQuestionRecipientsWaiting(ctx context.Context, arg StartQuestionRecipientsWaitingParams) error {
+	_, err := q.db.Exec(ctx, startQuestionRecipientsWaiting, arg.OrgID, arg.QuestionIds)
+	return err
 }

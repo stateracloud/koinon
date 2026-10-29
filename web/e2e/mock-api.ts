@@ -131,3 +131,18 @@ export function mcpServerHandlers() {
   }
   return { unary, seen }
 }
+
+/**
+ * askableMembersHandlers answers QuestionService.ListAskableMembers with two members, for the
+ * trigger editor's "Who is asked" picker.
+ */
+export function askableMembersHandlers(): Handlers['unary'] {
+  return {
+    'koinon.question.v1alpha1.QuestionService/ListAskableMembers': () => ({
+      members: [
+        { userId: 'u-ana', email: 'ana@example.test', displayName: 'Ana Example', role: 'ORG_ROLE_MEMBER' },
+        { userId: 'u-sam', email: 'sam@example.test', displayName: 'Sam Example', role: 'ORG_ROLE_ADMIN' },
+      ],
+    }),
+  }
+}

@@ -58,6 +58,28 @@ api:
     enabled: true
 ```
 
+## Who is asked
+
+A task a trigger starts has no person who created it, so when its agent calls `ask_user` without naming
+anyone, Koinon asks the trigger's notify target. On a schedule trigger, Edit triggers shows it as **Who is
+asked**:
+
+- **The org's admins (default).** Every admin and owner gets the question; the first answer counts. This is
+  what a trigger without a target does.
+- **The org's owners**, or **all members** (everyone with the member role or higher).
+- **A person.** Pick a member who can answer questions. The choice is checked when you propose the
+  version, and again when the question is asked: if that person has left the org or become a viewer, the
+  question goes to the org's admins and the agent is told so.
+- **A chat channel** is for v0.2, when Slack and Teams connectors exist. The editor shows it disabled.
+
+A direct-message trigger takes no target: it asks the person in the chat. A template can name a role but
+never a person or a channel, because both belong to one org; pick the person on the agent's Edit triggers
+page after you create the agent.
+
+The target is copied to each task when the trigger fires, so changing it later does not move the questions
+of tasks that already exist. **Run now** uses the trigger's target too, not the person who pressed the
+button, so a test fire behaves like the real one.
+
 ## Direct message
 
 A direct-message trigger lets people chat with the agent in the inbox. An agent has at most one, and it
