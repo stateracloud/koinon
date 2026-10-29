@@ -154,7 +154,7 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 				return store.AgentSandbox{}, &failure{
 					reason:  fmt.Sprintf("the sandbox never became ready in %s: %s (%s)", runreply.Human(capd), cause.Describe(), detail),
 					class:   classSandboxUnavailable,
-					sandbox: &sandboxUnavailable{cause: cause, detail: detail, waited: waited},
+					sandbox: &sandboxUnavailable{cause: cause, detail: detail, waited: waited, cap: capd},
 				}
 			}
 			reason := fmt.Sprintf("sandbox not ready after %s (%s)", wait, last)
@@ -322,10 +322,7 @@ func (r *runner) failSandboxUnavailable(ctx context.Context, f *failure) error {
 	defer r.mu.Unlock()
 	r.srcSeq++
 	src := r.srcSeq
-	capd := f.sandbox.waited
-	if s, err := orgsettings.Get(ctx, r.q, r.run.OrgID, orgsettings.Settings{SandboxWaitCap: r.p.cfg.SandboxWaitCap}); err == nil {
-		capd = s.SandboxWaitCap
-	}
+	capd := su.cap
 	err := pgx.BeginFunc(ctx, r.p.db, func(tx pgx.Tx) error {
 		q := r.q.WithTx(tx)
 		if err := r.finishIn(ctx, q, src, store.RunStateFailed, f.reason, classSandboxUnavailable, map[string]any{

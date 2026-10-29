@@ -117,6 +117,31 @@ var _ = Describe("the time limit", func() {
 		Expect(notices(ctx, r)).To(Equal(1))
 	})
 
+	It("records no notice for a run taken over after its cap has passed", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		t := e.task(ctx, markWait)
+		r := capped(ctx, e, t, 8)
+		claimed, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: e.org, OwnerID: "dead-owner", LeaseSeconds: 60})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(claimed.ID).To(Equal(r.ID))
+		_, err = q.MarkRunRunning(ctx, store.MarkRunRunningParams{OrgID: e.org, ID: r.ID, Epoch: claimed.Epoch})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = db.Exec(ctx, `UPDATE runs SET started_at = now() - interval '1 minute', lease_expires_at = now() - interval '1 minute'
+			WHERE org_id = $1 AND id = $2`, e.org, r.ID)
+		Expect(err).NotTo(HaveOccurred())
+
+		m := agentd.NewMetrics(prometheus.NewRegistry())
+		e.pool("agentd-a", withNotice(5*time.Second, m))
+		Eventually(runState(ctx, r)).WithTimeout(15 * time.Second).Should(Equal(store.RunStateCanceled))
+		prompts, _, _, _ := e.harness.snapshot()
+		for _, p := range prompts {
+			Expect(p).NotTo(ContainSubstring(wrapUpMarker), "the agent was never told to wrap up")
+		}
+		Expect(notices(ctx, r)).To(BeZero(), "no run.wrap_up_notice event for a notice nobody got")
+		Expect(getRun(ctx, r).WrapUpNoticeAt.Valid).To(BeFalse())
+		Expect(testutil.ToFloat64(m.WrapUpNotices)).To(BeZero())
+	})
+
 	It("honours an end of turn that races the notice", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		e.harness.set(func(h *harness) { h.endOnCancel = true })
