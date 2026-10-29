@@ -97,6 +97,13 @@ Garage S3 and Gitea; items 6 and 12 reflect that.
 - Actions stay pinned to commit SHAs, `actions/checkout` included; Blacksmith's checkout action
   is not used. The Blacksmith app is limited to this repository.
 - When the repository goes public, standard GitHub-hosted runners are free again; revisit then.
+- _Amended (2026-10-29):_ `e2e-kind.yml` runs on GitHub-hosted `ubuntu-24.04`, not Blacksmith.
+  Blacksmith's kernel (6.6, `lsm=capability,bpf,integrity`) has no Landlock, which the OpenShell
+  sandbox supervisor requires (issue #159); `ubuntu-24.04` has it. The job's first step fails in
+  seconds when the kernel lacks Landlock. While the repository is private, the job is dispatched by
+  hand (about 22 minutes of the plan's included minutes per run); once it is public it runs on every
+  pull request to main and nightly. `g2-kind.yml` keeps Blacksmith: it creates no OpenShell
+  sandbox. `spike-kind.yml` is a draft that has never run; its removal is tracked in issue #234.
 
 ## Alternatives considered
 
