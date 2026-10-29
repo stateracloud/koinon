@@ -1,6 +1,6 @@
 ---
 title: Budgets
-description: Set the org's monthly cap and each agent's daily limit, and read the notices.
+description: Set the org's monthly cap, each agent's daily limit and the limits of one run, and read the notices.
 ---
 
 Budgets stop spending, not just report it. There are three limits, and the first one reached stops the
@@ -26,6 +26,31 @@ template default and what it spent today. **Change limit** sets another limit fo
 template is not touched. When an agent's limit is reached, every open run of that agent stops, including
 runs still queued or waiting on a person, and the task's timeline names the limit. Lowering a limit below
 what the agent already spent today stops its runs the same way.
+
+## Run limits
+
+A single run has its own limits, so one loop cannot spend a day's budget. **The first one reached ends
+the run**:
+
+- **Model requests**: every request through the agent's key counts, including the harness's own title,
+  summary and compaction calls. It is the same on every model and still stops a run on a model priced
+  at zero.
+- **Spend**: the run's cost in US dollars, as the ledger records it (cache reads, thinking and the
+  provider's settled figure included). It joins the daily limit and the monthly cap in the limit the
+  gateway enforces on the agent's key, so a run is also refused between ledger checks.
+- **Time**: the wall clock of the run, without the time it is parked.
+
+The template sets the defaults (the agent and template pages show them as "Run limits"). An org admin
+can change them for one agent; the change applies to runs queued afterwards. The task's timeline shows each run's
+use of its limits (requests, spend and time), and names the limit a run stopped at.
+
+At about 80% of the nearest limit the agent is told to wrap up: it is asked to say what it finished,
+what is left and the next step, and that reply is posted on the task when the run stops.
+
+Tokens are **reported, not limited**. A run's cost shows the tokens by type (input, cache read, cache
+write, output and reasoning), and no total of tokens ends a run. The old `maxTokens` setting in
+templates is ignored. The reasons are in
+[ADR 0080](https://github.com/stateracloud/koinon/blob/main/docs/adr/0080-run-limits.md).
 
 ## Notices
 

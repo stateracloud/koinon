@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-21
 - Amends: ADR 0013 (model access)
-- Amended by: [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), 2026-10-28 (below)
+- Amended by: [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), 2026-10-28 (below), [0080](0080-run-limits.md) (2026-10-29, the run level)
 
 ## Context
 
@@ -207,3 +207,24 @@ Decision: the ledger keeps pushing the 24-hour window (`ledger.Window`). `gatewa
 before: at midnight a windowed counter resets before the reconciler pushes the new day's generation,
 so the gateway can regrant the previous net amount until the next pass, at most 30 seconds, the kind
 of overshoot this ADR accepts. Counters of past days are removed by agentgateway at its next start.
+
+## Amendment 2026-10-29: the run level is built (ADR 0080)
+
+Decision 5 named the **run** among the levels whose remaining amount is netted into the gateway key
+limit ("the minimum of run, ticket, agent, org and platform remaining") and it was never built. ADR
+0080 builds it, for the spend of one run (issue #243):
+
+- A run's spend limit, `limits.run.maxSpendUSD` (default per template, overridable per agent), is
+  copied to the run when it is queued. While an agent has a starting or running run, the key's net
+  limit includes the run's remaining spend as the level `run_spend`, narrower than the agent's daily
+  limit, and the pushed limit is the minimum of the levels. The gateway therefore enforces it between
+  ledger passes, and the overshoot is bounded by one in-flight response, as for the other levels. The
+  reserves of the run's provisional entries are held back from it like the others (ADR 0056).
+- The ledger cancels at the entry that reaches it, after the agent, org and platform limits are
+  checked: reason `run_spend_cap`, failure class `budget`. A run's limit covers that run only; it
+  stops no other run of the agent or the org. It sends no notification to people, because a run
+  limit is for the agent, which is told at 80% by the wrap-up notice.
+- The ticket level of the decision is the task level of ADR 0065; its cap (#183) plugs into the same
+  spend-scope check after v0.1.0.
+- The model-request limit is not a key level; it is checked by the ledger only.
+
