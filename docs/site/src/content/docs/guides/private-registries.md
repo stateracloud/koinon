@@ -102,6 +102,14 @@ The preflight checks this. When `global.imagePullSecrets`, `global.imageRegistry
 the gateway has no `image_pull_secrets`. It only warns: the nodes may hold the credentials, or the
 mirror may be anonymous.
 
+## When the pull fails
+
+A flavor image that a node cannot pull leaves the sandbox waiting. After the org's wait cap the run fails with
+the cause **the image could not be pulled** and the registry's error as its detail (for example a failed name
+lookup, `pull access denied` or `manifest unknown`), and the agent is marked unhealthy. Koinon learns this by
+reading the sandbox's pod ([How Koinon finds the cause](../agent-health/#how-koinon-finds-the-cause)); with
+`sandboxObserver.enabled: false` the cause shows as unknown.
+
 ## The supervisor image
 
 OpenShell starts a supervisor pod for every sandbox, and Koinon's admission policy admits exactly one
