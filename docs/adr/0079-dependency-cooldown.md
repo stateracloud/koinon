@@ -73,6 +73,8 @@ cooldown (golang/go#76485 is on hold).
   (actions pinned by SHA, release assets, ADR 0077 pins), registry image configs (`created`), the
   npm registry, Helm repository indexes. No secrets are used. The `govulncheck` job (pinned version)
   reports reachable vulnerabilities in Go dependencies; that report is what starts the Go fast path.
+  It runs on pull requests that change Go code and nightly on main (`govulncheck.yml`), because a
+  new advisory needs no code change to apply.
 - **Docs**: CONTRIBUTING.md has a short "Dependency updates" section that links this ADR.
 
 ### Security fast path
