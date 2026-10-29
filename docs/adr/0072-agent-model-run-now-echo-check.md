@@ -54,8 +54,10 @@ namespaces come back altered), with nothing in Koinon able to say so.
 
 ### The provider echo check
 
-8. `CheckProviderEcho` / `POST /admin/v1/providers/{id}/echo-check` sends one chat request through
-   the gateway to a chosen served, priced model of the provider: "Echo this line back exactly,
+8. `CheckProviderEcho` / `POST /admin/v1/providers/{id}/echo-check` sends one request through
+   the gateway to a chosen served, priced model of the provider, on the route of the model's wire
+   format as a run does (ADR 0069): Messages (`/v1/messages`) for an `anthropic` model, chat
+   completions for the rest: "Echo this line back exactly,
    character for character, nothing else: <a name, an address-like string and a Kubernetes
    namespace>". `modelcheck.Compare` ignores surrounding whitespace and one pair of quotes and
    otherwise needs a character-for-character match; the word-level diff is returned. The latest
