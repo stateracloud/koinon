@@ -25,3 +25,10 @@ export function modelChoices(m: GetAgentModelResponse): { name: string; label: s
   if (m.setting !== '' && !out.some((c) => c.name === m.setting)) out.push({ name: m.setting, label: `${m.setting} (not served)` })
   return out
 }
+
+/** thinkingSourceLabel says where the thinking setting comes from, in the words of the precedence: the agent's own, then the version's (its template), then the default, on. */
+export function thinkingSourceLabel(setting: string, versionSetting: string): string {
+  if (setting !== '') return `Set on this agent (${setting}).`
+  if (versionSetting !== '') return `From the agent's version (its template): ${versionSetting}.`
+  return 'On by default.'
+}

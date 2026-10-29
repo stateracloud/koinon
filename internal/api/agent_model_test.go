@@ -163,3 +163,122 @@ var _ = Describe("the agent's model setting", func() {
 		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
 	})
 })
+
+// serveClaude adds a direct Anthropic provider (Messages format) with a priced model, the case the
+// catalog says can think.
+func serveClaude(ctx context.Context, e *env, org, name string) {
+	GinkgoHelper()
+	var providerID pgtype.UUID
+	Expect(e.pool.QueryRow(ctx, `INSERT INTO providers (org_id, name, type, url) VALUES ($1, $2, 'anthropic', 'http://fakemodel.example.com/v1') RETURNING id`,
+		org, "claude-"+guuid.NewString()).Scan(&providerID)).To(Succeed())
+	_, err := e.pool.Exec(ctx, `INSERT INTO models (org_id, provider_id, name, format) VALUES ($1, $2, $3, 'anthropic')`, org, providerID, name)
+	Expect(err).NotTo(HaveOccurred())
+	_, err = e.pool.Exec(ctx, `INSERT INTO price_overrides (org_id, name, entry, valid_from, created_by)
+		VALUES ($1, $2, jsonb_build_object('provider', 'anthropic', 'match', jsonb_build_object('glob', $3::text),
+		'validFrom', '2020-01-01', 'prices', jsonb_build_object('input', '1', 'output', '2'),
+		'tokenizer', 'bytes', 'ratio', '3.0', 'maxOutput', 10), now() - interval '1 hour', 'test')`,
+		org, "price-"+guuid.NewString(), name)
+	Expect(err).NotTo(HaveOccurred())
+}
+
+// The per-agent thinking setting (rc.8, ADR 0069 amendment 2026-10-29): on unless turned off,
+// mutable and audited like the model, ignored by a model that cannot think.
+var _ = Describe("the agent's thinking setting", func() {
+	var (
+		e     *env
+		org   string
+		owner *client
+		agent *agentv1alpha1.Agent
+	)
+	BeforeEach(func(ctx SpecContext) {
+		e = newEnv(ctx, envOptions{})
+		org, owner = e.newTeamOrg(ctx)
+		agent = owner.activeAgent(ctx, org)
+		serveClaude(ctx, e, org, "claude-haiku-5-5")
+		serveModel(ctx, e, org, "vendor/plain", true)
+	})
+	pick := func(ctx SpecContext, model string) {
+		GinkgoHelper()
+		_, err := owner.agents.SetAgentModel(ctx, &agentv1alpha1.SetAgentModelRequest{OrgId: org, AgentId: agent.GetId(), Model: model})
+		Expect(err).NotTo(HaveOccurred())
+	}
+	get := func(ctx SpecContext) *agentv1alpha1.ThinkingState {
+		GinkgoHelper()
+		res, err := owner.agents.GetAgentModel(ctx, &agentv1alpha1.GetAgentModelRequest{OrgId: org, AgentId: agent.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		return res.GetThinking()
+	}
+	set := func(ctx SpecContext, c *client, v string) (*agentv1alpha1.SetAgentThinkingResponse, error) {
+		return c.agents.SetAgentThinking(ctx, &agentv1alpha1.SetAgentThinkingRequest{OrgId: org, AgentId: agent.GetId(), Thinking: v})
+	}
+
+	It("is on by default, and says so only for a model that can think", func(ctx SpecContext) {
+		pick(ctx, "claude-haiku-5-5")
+		Expect(get(ctx)).To(And(
+			HaveField("Setting", ""), HaveField("Effective", "on"), HaveField("Supported", true), HaveField("Mode", "adaptive")))
+		pick(ctx, "vendor/plain")
+		Expect(get(ctx)).To(And(
+			HaveField("Effective", "on"), HaveField("Supported", false), HaveField("Mode", "none")),
+			"the setting is kept, the model ignores it")
+	})
+
+	It("turns off and on again without a new version, and clears back to the default", func(ctx SpecContext) {
+		pick(ctx, "claude-haiku-5-5")
+		res, err := set(ctx, owner, "off")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetModel().GetThinking()).To(And(
+			HaveField("Setting", "off"), HaveField("Effective", "off"), HaveField("Supported", true), HaveField("Mode", "none")))
+		got, err := owner.agents.GetAgent(ctx, &agentv1alpha1.GetAgentRequest{OrgId: org, AgentId: agent.GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got.GetAgent().GetLatestVersion()).To(Equal(agent.GetLatestVersion()), "a setting is not a new version")
+
+		res, err = set(ctx, owner, "on")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetModel().GetThinking()).To(And(HaveField("Setting", "on"), HaveField("Mode", "adaptive")))
+		res, err = set(ctx, owner, "default")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetModel().GetThinking().GetSetting()).To(BeEmpty())
+	})
+
+	It("follows the version's value until the agent sets its own", func(ctx SpecContext) {
+		pick(ctx, "claude-haiku-5-5")
+		_, err := e.pool.Exec(ctx, `UPDATE agent_versions SET config = jsonb_set(config, '{thinking}', '"off"') WHERE agent_id = $1`, agent.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(get(ctx)).To(And(HaveField("Setting", ""), HaveField("VersionSetting", "off"), HaveField("Effective", "off")))
+		res, err := set(ctx, owner, "on")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.GetModel().GetThinking()).To(And(HaveField("VersionSetting", "off"), HaveField("Effective", "on")))
+	})
+
+	It("audits every change with the old and the new value, and a repeat is no change", func(ctx SpecContext) {
+		for _, v := range []string{"off", "off", "on", "default"} {
+			_, err := set(ctx, owner, v)
+			Expect(err).NotTo(HaveOccurred())
+		}
+		rows, err := e.pool.Query(ctx, `SELECT summary->'before'->>'thinking', summary->'after'->>'thinking' FROM audit_events
+			WHERE org_id = $1 AND action = 'agent.thinking.set' AND target_id = $2 ORDER BY id`, org, agent.GetId())
+		Expect(err).NotTo(HaveOccurred())
+		defer rows.Close()
+		var changes [][2]string
+		for rows.Next() {
+			var before, after string
+			Expect(rows.Scan(&before, &after)).To(Succeed())
+			changes = append(changes, [2]string{before, after})
+		}
+		Expect(changes).To(Equal([][2]string{{"default", "off"}, {"off", "on"}, {"on", "default"}}))
+	})
+
+	It("refuses a value that is not on, off or default", func(ctx SpecContext) {
+		_, err := set(ctx, owner, "high")
+		Expect(codeOf(err)).To(Equal(connect.CodeInvalidArgument))
+		Expect(count(ctx, e, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'agent.thinking.set'`, org)).To(BeZero())
+	})
+
+	It("is for admins and owners, and an agent of another org is not found", func(ctx SpecContext) {
+		member := e.userIn(ctx, org, store.OrgRoleMember)
+		_, err := set(ctx, member, "off")
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		_, err = owner.agents.SetAgentThinking(ctx, &agentv1alpha1.SetAgentThinkingRequest{OrgId: org, AgentId: "019a0000-0000-7000-8000-00000000ffff", Thinking: "off"})
+		Expect(codeOf(err)).To(Equal(connect.CodeNotFound))
+	})
+})

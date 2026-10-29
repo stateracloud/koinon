@@ -29,10 +29,13 @@ type TemplateRef struct {
 // Config is one agent version's definition. Treat it as immutable once
 // stored: edits add a version.
 type Config struct {
-	Template     *TemplateRef      `json:"template,omitempty"`
-	Instructions string            `json:"instructions"`
-	Model        string            `json:"model,omitempty"`
-	Grants       []templates.Grant `json:"grants,omitempty"`
+	Template     *TemplateRef `json:"template,omitempty"`
+	Instructions string       `json:"instructions"`
+	Model        string       `json:"model,omitempty"`
+	// Thinking is the template's starting value for the thinking setting, "on" or "off", "" when
+	// it names none (internal/thinking.Choose reads it after the agent's own setting).
+	Thinking string            `json:"thinking,omitempty"`
+	Grants   []templates.Grant `json:"grants,omitempty"`
 	// Bindings tie grants to an org's connections and targets (for GitHub:
 	// the repositories). The grant says what the agent may do; its binding
 	// says where. Set from CreateAgentFromTemplate's grants (plan item C2).
@@ -128,6 +131,7 @@ func FromTemplate(t *templates.Template, contentHash string) Config {
 		},
 		Instructions: t.Spec.Instructions,
 		Model:        t.Spec.Model.Name,
+		Thinking:     t.Spec.Model.Thinking,
 		Grants:       t.Spec.Grants,
 		Limits:       t.Spec.Limits,
 		Triggers:     t.Spec.Triggers,

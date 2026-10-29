@@ -1295,6 +1295,7 @@ type Agent struct {
 	UnhealthyReason pgtype.Text
 	ResumedAt       pgtype.Timestamptz
 	Model           pgtype.Text
+	Thinking        pgtype.Text
 }
 
 type AgentBudget struct {
