@@ -11,53 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const addDefaultRecipientsToOrphanedQuestions = `-- name: AddDefaultRecipientsToOrphanedQuestions :many
-INSERT INTO question_recipients (org_id, question_id, user_id, waiting_since)
-SELECT qn.org_id, qn.id, m.user_id, now()
-FROM questions qn
-JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id AND r.state = 'parked'
-CROSS JOIN LATERAL (
-    SELECT om.user_id FROM org_memberships om JOIN users u ON u.id = om.user_id AND u.deleted_at IS NULL
-    WHERE om.org_id = qn.org_id GROUP BY om.user_id HAVING max(om.role) >= 'admin') m
-WHERE qn.org_id = $1 AND qn.state = 'open'
-  AND NOT EXISTS (
-    SELECT 1 FROM question_recipients qr
-    JOIN users u ON u.id = qr.user_id AND u.deleted_at IS NULL
-    WHERE qr.org_id = qn.org_id AND qr.question_id = qn.id AND qr.removed_at IS NULL
-      AND EXISTS (SELECT 1 FROM org_memberships om
-                  WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member'))
-ON CONFLICT DO NOTHING
-RETURNING question_id, user_id
-`
-
-type AddDefaultRecipientsToOrphanedQuestionsRow struct {
-	QuestionID pgtype.UUID
-	UserID     pgtype.UUID
-}
-
-// Open questions (run still parked) with no recipient who can still answer, because everyone left
-// the org or lost the role: the org's admins and owners become recipients and start waiting now (a
-// new recipient's age starts when the item starts waiting on them). Returns the new rows.
-func (q *Queries) AddDefaultRecipientsToOrphanedQuestions(ctx context.Context, orgID pgtype.UUID) ([]AddDefaultRecipientsToOrphanedQuestionsRow, error) {
-	rows, err := q.db.Query(ctx, addDefaultRecipientsToOrphanedQuestions, orgID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AddDefaultRecipientsToOrphanedQuestionsRow
-	for rows.Next() {
-		var i AddDefaultRecipientsToOrphanedQuestionsRow
-		if err := rows.Scan(&i.QuestionID, &i.UserID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const addQuestionRecipients = `-- name: AddQuestionRecipients :exec
 INSERT INTO question_recipients (org_id, question_id, user_id)
 SELECT $1, $2, unnest($3::uuid[])
@@ -74,6 +27,41 @@ type AddQuestionRecipientsParams struct {
 func (q *Queries) AddQuestionRecipients(ctx context.Context, arg AddQuestionRecipientsParams) error {
 	_, err := q.db.Exec(ctx, addQuestionRecipients, arg.OrgID, arg.QuestionID, arg.UserIds)
 	return err
+}
+
+const addWaitingQuestionRecipients = `-- name: AddWaitingQuestionRecipients :many
+INSERT INTO question_recipients (org_id, question_id, user_id, waiting_since)
+SELECT $1, $2, unnest($3::uuid[]), now()
+ON CONFLICT DO NOTHING
+RETURNING user_id
+`
+
+type AddWaitingQuestionRecipientsParams struct {
+	OrgID      pgtype.UUID
+	QuestionID pgtype.UUID
+	UserIds    []pgtype.UUID
+}
+
+// The people a question is retargeted to start waiting now (a new recipient's age starts when the
+// item starts waiting on them). Returns the rows that were new.
+func (q *Queries) AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, addWaitingQuestionRecipients, arg.OrgID, arg.QuestionID, arg.UserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var user_id pgtype.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const cancelOpenQuestionsForRun = `-- name: CancelOpenQuestionsForRun :many
@@ -785,6 +773,61 @@ func (q *Queries) ListOrgsWithQuestionsToNotify(ctx context.Context) ([]pgtype.U
 			return nil, err
 		}
 		items = append(items, org_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrphanedQuestions = `-- name: ListOrphanedQuestions :many
+SELECT qn.id, qn.task_id, qn.run_id, t.agent_id, t.notify_kind, t.notify_user_id, t.notify_role
+FROM questions qn
+JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id AND r.state = 'parked'
+JOIN tasks t ON t.org_id = qn.org_id AND t.id = qn.task_id
+WHERE qn.org_id = $1 AND qn.state = 'open'
+  AND NOT EXISTS (
+    SELECT 1 FROM question_recipients qr
+    JOIN users u ON u.id = qr.user_id AND u.deleted_at IS NULL
+    WHERE qr.org_id = qn.org_id AND qr.question_id = qn.id AND qr.removed_at IS NULL
+      AND EXISTS (SELECT 1 FROM org_memberships om
+                  WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member'))
+ORDER BY qn.id
+`
+
+type ListOrphanedQuestionsRow struct {
+	ID           pgtype.UUID
+	TaskID       pgtype.UUID
+	RunID        pgtype.UUID
+	AgentID      pgtype.UUID
+	NotifyKind   NullNotifyTargetKind
+	NotifyUserID pgtype.UUID
+	NotifyRole   NullOrgRole
+}
+
+// Open questions (run still parked) with no recipient who can still answer, because everyone left
+// the org or lost the role, with the notify target of their task (NULL kind: the org's default).
+func (q *Queries) ListOrphanedQuestions(ctx context.Context, orgID pgtype.UUID) ([]ListOrphanedQuestionsRow, error) {
+	rows, err := q.db.Query(ctx, listOrphanedQuestions, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrphanedQuestionsRow
+	for rows.Next() {
+		var i ListOrphanedQuestionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.RunID,
+			&i.AgentID,
+			&i.NotifyKind,
+			&i.NotifyUserID,
+			&i.NotifyRole,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

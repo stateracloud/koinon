@@ -473,8 +473,11 @@ The diagram is a reading aid. The mapping from today's columns and parks is reco
      A dismissal is an answer: the default applies for everyone.
    - Admins cannot answer a question they are not a recipient of.
    - A recipient counts only while they can answer (not deleted, role member or higher). When nobody
-     who can answer is left, the question sweep adds the org's admins and owners as recipients
-     (`question.retargeted`). Their age starts then. When the person picked implicitly (the chat's
+     who can answer is left, the question sweep adds the task's notify target (the trigger's, by
+     default the org's admins and owners; a notify person who is gone falls back to the default) as
+     recipients (`question.retargeted` on the timeline). Their age starts then. This changes who
+     may answer, so each retarget is audited as `question.retarget` (actor system; the label, the
+     recipients, the reason, the task, run and agent). When the person picked implicitly (the chat's
      person, the task's creator) or the trigger's notify person can no longer answer at ask time, the
      question goes to the task's notify target or the default, and the tool result says so.
    - `asked_to` is deprecated in migration 00036 (nullable, written only for a user target, never read)

@@ -16,16 +16,15 @@ type Querier interface {
 	// (a trigger-only proposal, ADR 0066). No row: archived, or the agent already runs this version
 	// (a concurrent duplicate activation re-evaluates the WHERE clause and gets no row).
 	ActivateAgent(ctx context.Context, arg ActivateAgentParams) (Agent, error)
-	// Open questions (run still parked) with no recipient who can still answer, because everyone left
-	// the org or lost the role: the org's admins and owners become recipients and start waiting now (a
-	// new recipient's age starts when the item starts waiting on them). Returns the new rows.
-	AddDefaultRecipientsToOrphanedQuestions(ctx context.Context, orgID pgtype.UUID) ([]AddDefaultRecipientsToOrphanedQuestionsRow, error)
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
 	// The question's recipients, when it is created (waiting_since stays NULL until it is opened).
 	AddQuestionRecipients(ctx context.Context, arg AddQuestionRecipientsParams) error
 	// Adds reported token usage to an unfinished run. The caller cancels the run
 	// when tokens_used reaches max_tokens. No row: the run is finished or absent.
 	AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run, error)
+	// The people a question is retargeted to start waiting now (a new recipient's age starts when the
+	// item starts waiting on them). Returns the rows that were new.
+	AddWaitingQuestionRecipients(ctx context.Context, arg AddWaitingQuestionRecipientsParams) ([]pgtype.UUID, error)
 	// Appends an event from the control plane (API, scheduler) without an epoch,
 	// for example a cancel notice. Stamped with the run's current epoch.
 	AppendRunControlEvent(ctx context.Context, arg AppendRunControlEventParams) (RunEvent, error)
@@ -568,6 +567,9 @@ type Querier interface {
 	ListOrgsWithQuestionsOfFinishedRuns(ctx context.Context) ([]pgtype.UUID, error)
 	// Orgs that have at least one opened question to notify about (the sweeper then queries per org).
 	ListOrgsWithQuestionsToNotify(ctx context.Context) ([]pgtype.UUID, error)
+	// Open questions (run still parked) with no recipient who can still answer, because everyone left
+	// the org or lost the role, with the notify target of their task (NULL kind: the org's default).
+	ListOrphanedQuestions(ctx context.Context, orgID pgtype.UUID) ([]ListOrphanedQuestionsRow, error)
 	// The org's requests waiting for a human (input_required), oldest first.
 	// Trusted-preset calls are recorded as approved and never listed here.
 	ListPendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
