@@ -27,6 +27,15 @@ func envOr(key, def string) string {
 	return def
 }
 
+// answered fails a spec whose request got no HTTP answer from the sandbox proxy: curl's code 000
+// means DNS or the connection failed before the proxy decided anything, so the spec observed no
+// policy decision (issue #244). It is a test error, never an expected code. Specs that expect no
+// answer (direct egress, which the sandbox refuses at connect) do not call it.
+func answered(code, body string) {
+	GinkgoHelper()
+	Expect(code).NotTo(Equal("000"), "no HTTP answer from the sandbox proxy (DNS or connect failure, not a policy decision): "+body)
+}
+
 // gateway is a real OpenShell gateway from the KOINON_OPENSHELL_* variables.
 type gateway struct {
 	b         *openshell.Backend

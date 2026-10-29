@@ -4,6 +4,7 @@ package flavors_test
 
 import (
 	"context"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -112,6 +113,32 @@ func lastBody(gw *gateway) string {
 	Expect(b).NotTo(BeEmpty())
 	return b[len(b)-1]
 }
+
+// The tool set matches the egress (ADR 0080, issue #247): without web egress the model is not
+// offered OpenCode's built-in webfetch, so it uses the org's MCP tools; with it (no switch) it is.
+var _ = Describe("koinon-opencode web tools", func() {
+	// offered reports which of the tools the model was offered in the first turn.
+	offered := func(ctx SpecContext, tools []string, extra ...string) map[string]bool {
+		gw := newGateway(contractScript(opencode))
+		sb := newOpencodeSandbox(ctx, instructionsMarker+"\n")
+		h, session := opencodeHarness(ctx, sb, gw, extra...)
+		_, err := h.conn.Prompt(ctx, session, helloPrompt)
+		Expect(err).NotTo(HaveOccurred())
+		body := lastBody(gw)
+		Expect(body).To(ContainSubstring(opencode.mcpToolName), "the request lists the tools")
+		got := map[string]bool{}
+		for _, t := range tools {
+			got[t] = regexp.MustCompile(`"name":\s*"` + regexp.QuoteMeta(t) + `"`).MatchString(body)
+		}
+		return got
+	}
+	It("offers webfetch without the switch (control) and never websearch", func(ctx SpecContext) {
+		Expect(offered(ctx, []string{"webfetch", "websearch"})).To(Equal(map[string]bool{"webfetch": true, "websearch": false}))
+	}, SpecTimeout(3*time.Minute))
+	It("offers neither with --no-web-tools", func(ctx SpecContext) {
+		Expect(offered(ctx, []string{"webfetch", "websearch"}, "--no-web-tools")).To(Equal(map[string]bool{"webfetch": false, "websearch": false}))
+	}, SpecTimeout(3*time.Minute))
+})
 
 var _ = Describe("koinon-opencode instructions", func() {
 	It("delivers an edit of the instruction file to the model at the next turn", func(ctx SpecContext) {
@@ -320,6 +347,14 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"compatibility":{"cacheFormat":"anthropic"}}}}` + "\n"))
 		Expect(entryEnv(ctx, "--plugin-installs", "--cache-alibaba")).To(ContainSubstring(
 			`OPENCODE_CONFIG_CONTENT={"plugins":["/sandbox/.config/opencode/plugins/one"],"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
+	})
+
+	It("denies the built-in webfetch with --no-web-tools, next to the other overlays", func(ctx SpecContext) {
+		deny := `"permissions":[{"action":"webfetch","resource":"*","effect":"deny"}]`
+		Expect(entryEnv(ctx, "--no-web-tools")).To(ContainSubstring(`OPENCODE_CONFIG_CONTENT={` + deny + `}` + "\n"))
+		Expect(entryEnv(ctx, "--plugin-installs", "--no-web-tools", "--cache-alibaba")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"plugins":["/sandbox/.config/opencode/plugins/one"],` + deny +
+				`,"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
 	})
 
 	It("sends the run ID as the body field session_id with --session-id", func(ctx SpecContext) {

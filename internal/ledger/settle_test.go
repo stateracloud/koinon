@@ -18,6 +18,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/budget"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
@@ -146,7 +147,7 @@ var _ = Describe("Settling responses cut short", func() {
 		charges, held, _ := spent(ctx)
 		Expect(charges).To(Equal("0.0002"), "the logged usage: 1000 in at 0.20 per million, no output")
 		Expect(held).To(Equal("0.40"), "the bound (1000 in + 200k max_tokens out at 2, $0.4002) minus the charge")
-		Expect(ledger.AgentLimit(ctx, q, e.agent, clock)).To(HaveField("Amount", BeNumerically("~", 1-0.4002, 1e-9)))
+		Expect(ledger.AgentLimit(ctx, q, e.agent, clock)).To(HaveField("Amount", Equal(money.MustParse("0.5998"))))
 
 		By("pending: the attempt is deferred and nothing changes")
 		clock = clock.Add(time.Minute)
@@ -207,7 +208,7 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(rs).To(HaveLen(1))
 		Expect(rs[0].Reason).To(Equal("expired"))
 		Expect(rs[0].Source).To(Equal("gateway"), "the logged usage stands")
-		Expect(ledger.AgentLimit(ctx, q, e.agent, clock)).To(HaveField("Amount", BeNumerically("~", 1-0.0002, 1e-9)))
+		Expect(ledger.AgentLimit(ctx, q, e.agent, clock)).To(HaveField("Amount", Equal(money.MustParse("0.9998"))))
 	})
 
 	It("holds the reserve back from the gateway key only; budgets, alerts and stops count the charges", func(ctx SpecContext) {
@@ -240,8 +241,23 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(e.provisional(ctx)).To(BeZero())
 		l2, err := ledger.AgentLimit(ctx, q, e.agent, clock)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(l2.Amount).To(BeNumerically("~", 1-5*0.0004, 1e-9))
+		Expect(l2.Amount).To(Equal(money.MustParse("0.998")))
 		Expect(l2.Generation).NotTo(Equal(l.Generation), "a fresh gateway counter for the new amount")
+	})
+
+	It("pushes a limit with at most nine fraction digits, rounded down (issue #245)", func(ctx SpecContext) {
+		// A provider's own cost can carry ten digits; the remainder of a $1.00 limit then has ten
+		// too, and agentgateway rejects its whole config for a budget with more than nine.
+		_, err := db.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, request_id, key_id, model, input_tokens, output_tokens, cost_usd, priced, occurred_at)
+			VALUES ($1, $2, 'ten-digits', 'k', 'm', 1, 1, 0.0172757592, true, $3)`, e.org, e.agent.ID, clock)
+		Expect(err).NotTo(HaveOccurred())
+		l, err := ledger.AgentLimit(ctx, q, e.agent, clock)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(l.Amount).To(Equal(money.MustParse("0.98272424")), "1 - 0.0172757592 = 0.9827242408, rounded down")
+		Expect(l.Amount.HasFractionDigits(gateway.BudgetFractionDigits)).To(BeTrue())
+		sys, err := ledger.SystemLimit(ctx, q, e.org, clock)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sys.Amount.HasFractionDigits(gateway.BudgetFractionDigits)).To(BeTrue())
 	})
 
 	It("adds the provider's extra tokens to the run once, even when the settlement is replayed", func(ctx SpecContext) {
