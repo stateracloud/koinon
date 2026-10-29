@@ -141,6 +141,12 @@ type Config struct {
 	ExpectSandboxPullSecrets bool
 	// SupervisorImages is the effective sandboxPolicy.supervisorImages; empty when the policy is off.
 	SupervisorImages []string
+	// OpenShellGatewayID is openshell.gatewayId: compared with the gateway's gateway_id, because the
+	// sandbox observer derives the workspace namespaces from it (ADR 0078). Empty skips the check.
+	OpenShellGatewayID string
+	// SandboxObserverDisabled is sandboxObserver.enabled=false: the preflight warns that a sandbox that
+	// cannot pull its image will show an unknown cause.
+	SandboxObserverDisabled bool
 }
 
 // OpenShell is the part of the OpenShell gateway API the preflight calls.
@@ -180,6 +186,7 @@ func (c *Checker) Run(ctx context.Context) []Result {
 		c.checkRuntimeClass(ctx),
 	}
 	results = append(results, c.checkSandboxImages(ctx)...)
+	results = append(results, c.checkSandboxObserver()...)
 	if c.Config.PostgresMode == project.PostgresCNPG {
 		results = append(results, c.checkCNPG(ctx))
 	}
