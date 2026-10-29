@@ -9,7 +9,10 @@ import (
 	"time"
 	_ "time/tzdata" // IANA zones are validated and used even where the image has no zoneinfo
 
+	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
+
+	"github.com/stateracloud/koinon/internal/db/store"
 )
 
 // TriggerType says what starts work on an agent (ADR 0066).
@@ -40,6 +43,63 @@ type Trigger struct {
 	Type        TriggerType   `json:"type"`
 	Filter      TriggerFilter `json:"filter,omitzero"`
 	Instruction string        `json:"instruction"`
+	// Notify is who is asked when the agent asks a person without naming one. Every type but
+	// direct_message. Nil: the org's default.
+	Notify *NotifyTarget `json:"notify,omitempty"`
+}
+
+// NotifyKind is who a trigger's task asks when the agent asks a person without naming one.
+type NotifyKind string
+
+// Notify kinds.
+const (
+	NotifyUser NotifyKind = "user"
+	NotifyRole NotifyKind = "role"
+	// NotifyChannel is reserved for v0.2 (chat connectors); refused until then.
+	NotifyChannel NotifyKind = "channel"
+)
+
+// NotifyTarget is a trigger's notify target. A nil target is the org's default: today its admins and
+// owners; from v0.2 the org's notify channel when one is set (the inbox item is created either way).
+type NotifyTarget struct {
+	Kind NotifyKind `json:"kind"`
+	// User is a user ID (kind user). Templates cannot name a person.
+	User string `json:"user,omitempty"`
+	// Role is member, admin or owner (kind role): everyone with that role or higher.
+	Role store.OrgRole `json:"role,omitempty"`
+	// Channel is reserved for v0.2: the ID of a row of the org's chat channels (a UUID).
+	Channel string `json:"channel,omitempty"`
+}
+
+// validateNotify checks a trigger's notify target.
+func validateNotify(tr Trigger) error {
+	n := tr.Notify
+	if n == nil {
+		return nil
+	}
+	if tr.Type == TriggerDirectMessage {
+		return fmt.Errorf("notify: a direct_message trigger asks the person in the chat; it takes no notify")
+	}
+	switch n.Kind {
+	case NotifyUser:
+		if _, err := uuid.Parse(n.User); err != nil || n.Role != "" || n.Channel != "" {
+			return fmt.Errorf("notify: user must be a user ID")
+		}
+	case NotifyRole:
+		switch n.Role {
+		case store.OrgRoleMember, store.OrgRoleAdmin, store.OrgRoleOwner:
+		default:
+			return fmt.Errorf("notify: role must be member, admin or owner")
+		}
+		if n.User != "" || n.Channel != "" {
+			return fmt.Errorf("notify: role must be member, admin or owner")
+		}
+	case NotifyChannel:
+		return fmt.Errorf("notify: chat channels need a chat connector, available from v0.2")
+	default:
+		return fmt.Errorf("notify: unknown kind %q", n.Kind)
+	}
+	return nil
 }
 
 // TriggerFilter is the filter of a trigger, typed per trigger type. There is no expression
@@ -114,6 +174,9 @@ func ValidateTriggers(ts []Trigger) error {
 		}
 		if len(tr.Instruction) > MaxTriggerInstruction {
 			return bad("instruction is longer than %d characters", MaxTriggerInstruction)
+		}
+		if err := validateNotify(tr); err != nil {
+			return bad("%v", err)
 		}
 		switch tr.Type {
 		case TriggerSchedule:

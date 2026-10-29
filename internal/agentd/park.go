@@ -32,10 +32,11 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/questions"
+	"github.com/stateracloud/koinon/internal/runreply"
 )
 
 // kindParked is the run and task event of a run parking on approvals.
-const kindParked = "run.parked"
+const kindParked = runreply.KindParked
 
 // parkResumeNote opens the prompt of a run resumed after its approvals were decided.
 const parkResumeNote = "[Koinon] Your run was paused while a human decided on your approval requests, " +

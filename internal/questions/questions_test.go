@@ -23,7 +23,7 @@ func tx(ctx context.Context, fn func(q *store.Queries) error) error {
 
 var _ = Describe("Ask.Validate", func() {
 	base := func() questions.Ask {
-		return questions.Ask{Question: "Post the reply?", Default: "do not post", Choices: []string{"post", "do not post"}}
+		return questions.Ask{Recipients: []pgtype.UUID{{Valid: true}}, Question: "Post the reply?", Default: "do not post", Choices: []string{"post", "do not post"}}
 	}
 	It("accepts a question with choices and a default among them", func() {
 		a := base()
@@ -40,7 +40,7 @@ var _ = Describe("Ask.Validate", func() {
 		Expect(a.Validate()).To(MatchError(ContainSubstring("one of the choices")))
 	})
 	It("takes any default with free text", func() {
-		a := questions.Ask{Question: "What should the title be?", Default: "keep the current title"}
+		a := questions.Ask{Recipients: []pgtype.UUID{{Valid: true}}, Question: "What should the title be?", Default: "keep the current title"}
 		Expect(a.Validate()).To(Succeed())
 	})
 	It("refuses empty, duplicate and too many choices, and long text", func() {
@@ -65,7 +65,8 @@ var _ = Describe("a question", func() {
 	BeforeEach(func(ctx SpecContext) {
 		w = newWorld(ctx)
 		ask = questions.Ask{
-			Org: w.org, Task: w.task, Run: w.run.ID, Agent: w.agent, To: w.user,
+			Org: w.org, Task: w.task, Run: w.run.ID, Agent: w.agent,
+			Target: questions.Target{Kind: store.NotifyTargetKindUser, User: w.user}, Recipients: []pgtype.UUID{w.user},
 			Question: "Post the reply?", Draft: "Thanks, fixed in 1.2.", Choices: []string{"post", "do not post"}, Default: "do not post",
 		}
 	})
@@ -110,7 +111,7 @@ var _ = Describe("a question", func() {
 
 	It("can only be addressed to a member of the org", func(ctx SpecContext) {
 		stranger := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
-		ask.To = stranger
+		ask.Target.User, ask.Recipients = stranger, []pgtype.UUID{stranger}
 		err := tx(ctx, func(q *store.Queries) error { _, _, err := questions.Create(ctx, q, ask); return err })
 		Expect(err).To(MatchError(questions.ErrNotMember))
 	})
@@ -210,7 +211,7 @@ var _ = Describe("a question", func() {
 		viewer := w.member(ctx)
 		_, err := pool.Exec(ctx, `UPDATE org_memberships SET role = 'viewer' WHERE org_id = $1 AND user_id = $2`, w.org, viewer)
 		Expect(err).NotTo(HaveOccurred())
-		ask.To = viewer
+		ask.Target.User, ask.Recipients = viewer, []pgtype.UUID{viewer}
 		err = tx(ctx, func(q *store.Queries) error { _, _, err := questions.Create(ctx, q, ask); return err })
 		Expect(err).To(MatchError(questions.ErrNotMember))
 	})

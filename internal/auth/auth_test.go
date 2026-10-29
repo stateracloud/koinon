@@ -83,6 +83,15 @@ var _ = Describe("roles", func() {
 		Expect(roleToProto(store.OrgRoleAdmin)).To(Equal(authv1alpha1.OrgRole_ORG_ROLE_ADMIN))
 		Expect(roleToProto(store.OrgRoleOwner)).To(Equal(authv1alpha1.OrgRole_ORG_ROLE_OWNER))
 		Expect(roleToProto("root")).To(Equal(authv1alpha1.OrgRole_ORG_ROLE_UNSPECIFIED))
+		for _, r := range []store.OrgRole{store.OrgRoleViewer, store.OrgRoleMember, store.OrgRoleAdmin, store.OrgRoleOwner} {
+			back, ok := RoleFromProto(RoleToProto(r))
+			Expect(ok).To(BeTrue())
+			Expect(back).To(Equal(r))
+		}
+		_, ok := RoleFromProto(authv1alpha1.OrgRole_ORG_ROLE_UNSPECIFIED)
+		Expect(ok).To(BeFalse())
+		_, ok = RoleFromProto(authv1alpha1.OrgRole(99))
+		Expect(ok).To(BeFalse())
 		for i := 1; i < len(orgRoles); i++ {
 			Expect(orgRoles[i].proto).To(BeNumerically(">", orgRoles[i-1].proto))
 		}

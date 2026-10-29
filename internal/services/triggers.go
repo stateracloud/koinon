@@ -75,8 +75,11 @@ func (s *Server) fireNow(ctx context.Context, in triggers.RunNow) (store.Task, e
 		Source: durable.SourceManualTrigger, Key: durable.TriggerFireKey(trig.String(), now),
 		Title:   triggers.ManualTaskTitle(in.Trigger, now, loc),
 		Message: tr.Instruction,
-		Origin:  store.RunOriginScheduled,
-		Fire:    triggers.FireManual, FiredBy: in.User,
+		// Run now uses the trigger's notify target, not the person who fired it (ADR 0072 amendment
+		// 2026-10-28): a test fire behaves like the real one.
+		Notify: tr.Notify,
+		Origin: store.RunOriginScheduled,
+		Fire:   triggers.FireManual, FiredBy: in.User,
 		OnCreate: func(ctx context.Context, q *store.Queries, t store.Task) error {
 			return audit.RecordErr(ctx, q, audit.Event{
 				Org: in.Org, Actor: in.Actor, Action: "agent.trigger.run_now", TargetKind: "agent", TargetID: in.Agent.String(),

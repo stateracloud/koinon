@@ -33,6 +33,11 @@ const (
 	// end the turn as cancelled, as OpenCode 2.2.0 does (a plain decline interrupts the step).
 	// The prompt that continues the turn carries agentd's note instead.
 	markRefuse = "REFUSE-PATH"
+	// wrapUpMarker opens agentd's wrap-up notice (a prompt of its own, or the start of a resumed
+	// turn's prompt). The fake answers it with wrapUpReply and waits for the next cancel.
+	wrapUpMarker = "[Koinon] About"
+	// wrapUpReply is what the fake writes when it is told to wrap up.
+	wrapUpReply = "Done so far: A. Left: B."
 	// resumeMarker is how the fake harness recognises agentd's resume note.
 	resumeMarker = "[Koinon]"
 	// summaryMarker opens agentd's end-of-turn summary prompt.
@@ -85,6 +90,20 @@ type harness struct {
 	onRefuse func()
 	// lingers: keep running after end-of-file on stdin, until the exec is closed.
 	lingers bool
+	// ignoreCancel makes a markWait turn ignore session/cancel (it ends only when the stream goes
+	// away); endOnCancel makes it answer a cancel with end_turn, as a turn that ended on its own at
+	// that moment does.
+	ignoreCancel, endOnCancel bool
+	// lateCancel makes a markWait turn honour session/cancel only this long after it arrived.
+	lateCancel time.Duration
+	// refuseAfterCancel makes a markWait turn, once cancelled, ask for an outside edit (which
+	// agentd refuses) before it ends cancelled.
+	refuseAfterCancel bool
+	// noChunk makes a markWait turn stream nothing before it waits.
+	noChunk bool
+	// promptsSeen counts the prompts that arrived (the summary does not count) and inFlight how
+	// many are being answered; maxInFlight is the most there ever were at once.
+	inFlight, maxInFlight int
 }
 
 func newHarness() *harness {
@@ -163,7 +182,7 @@ func (p *process) summary(ctx context.Context, id sdk.SessionId, text string) (s
 	end := sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}
 	if hang {
 		select {
-		case <-p.cancelled:
+		case <-p.cancelCh():
 		case <-ctx.Done():
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
@@ -288,6 +307,13 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	if firstHang {
 		p.h.hung = true
 	}
+	p.h.inFlight++
+	p.h.maxInFlight = max(p.h.maxInFlight, p.h.inFlight)
+	defer func() {
+		p.h.mu.Lock()
+		p.h.inFlight--
+		p.h.mu.Unlock()
+	}()
 	onPrompt := p.h.onPrompt
 	modelFault := p.h.modelFault
 	refuseAll := p.h.refuseAll || p.h.refuseOn[len(p.h.prompts)]
@@ -338,6 +364,18 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 
+	case strings.HasPrefix(text, wrapUpMarker):
+		// Told to wrap up: say where things stand, then wait for the next cancel (the time limit).
+		p.resetCancel()
+		if err := p.say(ctx, id, sdk.UpdateAgentMessageText(wrapUpReply)); err != nil {
+			return sdk.PromptResponse{}, err
+		}
+		select {
+		case <-p.cancelCh():
+		case <-ctx.Done():
+		}
+		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
+
 	case strings.Contains(text, resumeMarker):
 		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("resumed")); err != nil {
 			return sdk.PromptResponse{}, err
@@ -363,12 +401,52 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		return sdk.PromptResponse{}, ctx.Err()
 
 	case strings.Contains(text, markWait):
-		if err := p.say(ctx, id, sdk.UpdateAgentMessageText("working")); err != nil {
-			return sdk.PromptResponse{}, err
+		p.h.mu.Lock()
+		ignore, endOnCancel, noChunk := p.h.ignoreCancel, p.h.endOnCancel, p.h.noChunk
+		p.h.mu.Unlock()
+		if !noChunk {
+			if err := p.say(ctx, id, sdk.UpdateAgentMessageText("working")); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+		}
+		if ignore {
+			// The SDK cancels ctx on session/cancel; a harness that ignores the cancel keeps the
+			// turn open until the connection goes away.
+			<-p.agent().Done()
+			return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 		}
 		select {
-		case <-p.cancelled:
+		case <-p.cancelCh():
 		case <-ctx.Done():
+		}
+		p.h.mu.Lock()
+		late := p.h.lateCancel
+		p.h.mu.Unlock()
+		time.Sleep(late)
+		p.h.mu.Lock()
+		refuseAfter := p.h.refuseAfterCancel
+		p.h.mu.Unlock()
+		if refuseAfter {
+			tid, name, k := sdk.ToolCallId("refuse-after-cancel"), "write", sdk.ToolKindEdit
+			if err := p.say(context.WithoutCancel(ctx), id, sdk.StartToolCall(tid, name, sdk.WithStartKind(k))); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+			if _, err := p.agent().RequestPermission(context.WithoutCancel(ctx), sdk.RequestPermissionRequest{
+				SessionId: id,
+				ToolCall: sdk.ToolCallUpdate{
+					ToolCallId: tid, Title: &name, Kind: &k,
+					Locations: []sdk.ToolCallLocation{{Path: "/sandbox/.koinon/notes/external/report.md"}},
+				},
+				Options: []sdk.PermissionOption{
+					{OptionId: "allow", Name: "Allow", Kind: sdk.PermissionOptionKindAllowOnce},
+					{OptionId: "reject", Name: "Reject", Kind: sdk.PermissionOptionKindRejectOnce},
+				},
+			}); err != nil {
+				return sdk.PromptResponse{}, err
+			}
+		}
+		if endOnCancel {
+			return end, nil
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 
@@ -457,14 +535,35 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 
 func (p *process) Cancel(context.Context, sdk.CancelNotification) error {
 	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
 	p.h.cancels++
-	p.h.mu.Unlock()
 	select {
 	case <-p.cancelled:
 	default:
 		close(p.cancelled)
 	}
 	return nil
+}
+
+// cancelCh is the channel a session/cancel closes.
+func (p *process) cancelCh() <-chan struct{} {
+	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
+	return p.cancelled
+}
+
+// resetCancel arms the channel again, so a turn after a cancelled one can be cancelled in its turn.
+func (p *process) resetCancel() {
+	p.h.mu.Lock()
+	defer p.h.mu.Unlock()
+	p.cancelled = make(chan struct{})
+}
+
+// maxPromptsInFlight is the most prompts the fake ever had open at once.
+func (h *harness) maxPromptsInFlight() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.maxInFlight
 }
 
 func (p *process) Authenticate(context.Context, sdk.AuthenticateRequest) (sdk.AuthenticateResponse, error) {

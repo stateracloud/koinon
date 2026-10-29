@@ -166,7 +166,10 @@ var _ = Describe("ask_user", func() {
 
 		row := a.question(ctx, qid)
 		Expect(row.State).To(Equal(store.QuestionStateOpen))
-		Expect(row.AskedTo).To(Equal(a.user), "the default addressee is the task's creator")
+		Expect(row.TargetKind).To(Equal(store.NotifyTargetKindUser))
+		recipients, err := q.ListActiveQuestionRecipientIDs(ctx, store.ListActiveQuestionRecipientIDsParams{OrgID: a.org, QuestionID: row.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(recipients).To(Equal([]pgtype.UUID{a.user}), "the default addressee is the task's creator")
 		Expect(row.DefaultAnswer).To(Equal("eu-west-1"))
 		Expect(questions.ChoicesOf(row)).To(Equal([]string{"eu-west-1", "us-east-1"}))
 		got, err := q.GetTask(ctx, store.GetTaskParams{OrgID: a.org, ID: t.ID})
@@ -432,7 +435,11 @@ var _ = Describe("ask_user", func() {
 		r = a.enqueue(ctx, t)
 		a.pool("agentd-a")
 		Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
-		Expect(a.question(ctx, qid).AskedTo).To(Equal(a.user))
+		row := a.question(ctx, qid)
+		Expect(row.TargetKind).To(Equal(store.NotifyTargetKindUser))
+		recipients, err := q.ListActiveQuestionRecipientIDs(ctx, store.ListActiveQuestionRecipientIDsParams{OrgID: a.org, QuestionID: row.ID})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(recipients).To(Equal([]pgtype.UUID{a.user}))
 		Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
 	})
 
@@ -473,5 +480,119 @@ var _ = Describe("ask_user", func() {
 		Expect(err).To(MatchError(questions.ErrNotAskedTo))
 		Expect(a.question(ctx, qid).State).To(Equal(store.QuestionStateOpen))
 		Expect(runState(ctx, r)()).To(Equal(store.RunStateParked))
+	})
+
+	Describe("for a task no person created", func() {
+		// trigger makes a task a trigger created (not a chat), with the notify columns given.
+		trigger := func(ctx SpecContext, notify func(p *store.CreateTaskParams)) {
+			GinkgoHelper()
+			a.args = map[string]any{"question": "Ship the report?", "choices": []string{"Yes", "No"}, "default": "No"}
+			p := store.CreateTaskParams{
+				OrgID: a.org, Title: uniq("scheduled"), AgentID: a.agent.ID, CreatedByKind: store.TaskCreatorKindTrigger,
+				CreatedByTriggerID: pgtype.UUID{Bytes: [16]byte{0xc0, 1}, Valid: true},
+			}
+			if notify != nil {
+				notify(&p)
+			}
+			var err error
+			t, err = q.CreateTask(ctx, p)
+			Expect(err).NotTo(HaveOccurred())
+			a.message(ctx, t, markQuestion)
+			r = a.enqueue(ctx, t)
+		}
+		addUser := func(ctx SpecContext, role store.OrgRole, member bool) pgtype.UUID {
+			GinkgoHelper()
+			var personal, id pgtype.UUID
+			// (A deleted personal org: the manual-owner rule is checked for live orgs only.)
+			Expect(db.QueryRow(ctx, `INSERT INTO orgs (slug, display_name, kind, deleted_at) VALUES ($1, 'Personal', 'personal', now()) RETURNING id`, uniq("org")).Scan(&personal)).To(Succeed())
+			Expect(db.QueryRow(ctx, `INSERT INTO users (oidc_issuer, oidc_subject, personal_org_id) VALUES ('https://idp.test', $1, $2) RETURNING id`, uniq("sub"), personal).Scan(&id)).To(Succeed())
+			if member {
+				_, err := db.Exec(ctx, `INSERT INTO org_memberships (org_id, user_id, source, role) VALUES ($1, $2, 'manual', $3)`, a.org, id, role)
+				Expect(err).NotTo(HaveOccurred())
+			}
+			return id
+		}
+		recipients := func(ctx SpecContext, id string) []pgtype.UUID {
+			GinkgoHelper()
+			ids, err := q.ListActiveQuestionRecipientIDs(ctx, store.ListActiveQuestionRecipientIDsParams{OrgID: a.org, QuestionID: mustUUID(id)})
+			Expect(err).NotTo(HaveOccurred())
+			return ids
+		}
+		asked := func(ctx SpecContext) string {
+			GinkgoHelper()
+			a.pool("agentd-a")
+			Eventually(a.ids).WithTimeout(10 * time.Second).Should(Receive(&qid))
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateParked))
+			return qid
+		}
+		// toolText is the text the harness's ask_user call got back.
+		toolText := make(chan string, 1)
+		capture := func() {
+			a.harness.mu.Lock()
+			a.harness.onPrompt = func(ctx context.Context, text string) (string, bool) {
+				if !strings.Contains(text, markQuestion) {
+					return "", false
+				}
+				out, id := a.call(ctx, a.args)
+				toolText <- out
+				a.ids <- id
+				return "Asked. " + out, true
+			}
+			a.harness.mu.Unlock()
+		}
+
+		BeforeEach(func(ctx SpecContext) { a = newAskEnv(ctx) })
+
+		It("asks the org's admins when the agent leaves out 'to'", func(ctx SpecContext) {
+			trigger(ctx, nil)
+			admin := addUser(ctx, store.OrgRoleAdmin, true)
+			id := asked(ctx)
+			row := a.question(ctx, id)
+			Expect(row.TargetKind).To(Equal(store.NotifyTargetKindRole))
+			Expect(row.TargetRole.OrgRole).To(Equal(store.OrgRoleAdmin))
+			Expect(recipients(ctx, id)).To(ConsistOf(a.user, admin))
+		})
+
+		It("asks the trigger's notify person", func(ctx SpecContext) {
+			member := addUser(ctx, store.OrgRoleMember, true)
+			trigger(ctx, func(p *store.CreateTaskParams) {
+				p.NotifyKind = store.NullNotifyTargetKind{NotifyTargetKind: store.NotifyTargetKindUser, Valid: true}
+				p.NotifyUserID = member
+			})
+			id := asked(ctx)
+			Expect(recipients(ctx, id)).To(Equal([]pgtype.UUID{member}))
+			Expect(a.question(ctx, id).TargetKind).To(Equal(store.NotifyTargetKindUser))
+		})
+
+		It("falls back to the admins when the notify person left", func(ctx SpecContext) {
+			gone := addUser(ctx, store.OrgRoleMember, false)
+			trigger(ctx, func(p *store.CreateTaskParams) {
+				p.NotifyKind = store.NullNotifyTargetKind{NotifyTargetKind: store.NotifyTargetKindUser, Valid: true}
+				p.NotifyUserID = gone
+			})
+			capture()
+			id := asked(ctx)
+			Expect(recipients(ctx, id)).To(Equal([]pgtype.UUID{a.user}))
+			Expect(a.question(ctx, id).TargetKind).To(Equal(store.NotifyTargetKindRole))
+			Expect(<-toolText).To(ContainSubstring("no longer a member who can answer"))
+		})
+
+		It("falls back when the task's creator left", func(ctx SpecContext) {
+			creator := addUser(ctx, store.OrgRoleMember, true)
+			var err error
+			t, err = q.CreateTask(ctx, store.CreateTaskParams{
+				OrgID: a.org, Title: uniq("task"), AgentID: a.agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: creator,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			a.message(ctx, t, markQuestion)
+			r = a.enqueue(ctx, t)
+			_, err = db.Exec(ctx, `DELETE FROM org_memberships WHERE org_id = $1 AND user_id = $2`, a.org, creator)
+			Expect(err).NotTo(HaveOccurred())
+			a.args = map[string]any{"question": "Ship the report?", "default": "No"}
+			capture()
+			id := asked(ctx)
+			Expect(recipients(ctx, id)).To(Equal([]pgtype.UUID{a.user}), "the admins, not an error")
+			Expect(<-toolText).To(ContainSubstring("the task's creator is no longer a member who can answer"))
+		})
 	})
 })

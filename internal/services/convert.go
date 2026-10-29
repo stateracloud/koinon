@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/stateracloud/koinon/internal/agentconfig"
+	"github.com/stateracloud/koinon/internal/auth"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/flavor"
 	runv1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/run/v1alpha1"
@@ -171,12 +172,13 @@ var runStateToProto = map[store.RunState]runv1alpha1.RunState{
 }
 
 var failureClassToProto = map[store.RunFailureClass]runv1alpha1.FailureClass{
-	store.RunFailureClassTransient:       runv1alpha1.FailureClass_FAILURE_CLASS_TRANSIENT,
-	store.RunFailureClassThrottled:       runv1alpha1.FailureClass_FAILURE_CLASS_THROTTLED,
-	store.RunFailureClassContextOverflow: runv1alpha1.FailureClass_FAILURE_CLASS_CONTEXT_OVERFLOW,
-	store.RunFailureClassBudget:          runv1alpha1.FailureClass_FAILURE_CLASS_BUDGET,
-	store.RunFailureClassPolicy:          runv1alpha1.FailureClass_FAILURE_CLASS_POLICY,
-	store.RunFailureClassFatal:           runv1alpha1.FailureClass_FAILURE_CLASS_FATAL,
+	store.RunFailureClassTransient:          runv1alpha1.FailureClass_FAILURE_CLASS_TRANSIENT,
+	store.RunFailureClassThrottled:          runv1alpha1.FailureClass_FAILURE_CLASS_THROTTLED,
+	store.RunFailureClassContextOverflow:    runv1alpha1.FailureClass_FAILURE_CLASS_CONTEXT_OVERFLOW,
+	store.RunFailureClassBudget:             runv1alpha1.FailureClass_FAILURE_CLASS_BUDGET,
+	store.RunFailureClassPolicy:             runv1alpha1.FailureClass_FAILURE_CLASS_POLICY,
+	store.RunFailureClassFatal:              runv1alpha1.FailureClass_FAILURE_CLASS_FATAL,
+	store.RunFailureClassSandboxUnavailable: runv1alpha1.FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE,
 }
 
 var parkReasonToProto = map[store.RunParkReason]runv1alpha1.ParkReason{
@@ -242,10 +244,45 @@ func triggersProto(ts []templates.Trigger) []*templatev1alpha1.Trigger {
 	for _, t := range ts {
 		out = append(out, &templatev1alpha1.Trigger{
 			Id: t.ID, Type: triggerTypeToProto[t.Type], Cron: t.Filter.Cron, Timezone: t.Filter.Timezone,
-			Instruction: t.Instruction,
+			Instruction: t.Instruction, Notify: notifyToProto(t.Notify),
 		})
 	}
 	return out
+}
+
+var notifyKindToProto = map[templates.NotifyKind]templatev1alpha1.NotifyTargetKind{
+	templates.NotifyUser:    templatev1alpha1.NotifyTargetKind_NOTIFY_TARGET_KIND_USER,
+	templates.NotifyRole:    templatev1alpha1.NotifyTargetKind_NOTIFY_TARGET_KIND_ROLE,
+	templates.NotifyChannel: templatev1alpha1.NotifyTargetKind_NOTIFY_TARGET_KIND_CHANNEL,
+}
+
+// notifyToProto is the wire form of a trigger's notify target; a nil target is an unset message.
+func notifyToProto(n *templates.NotifyTarget) *templatev1alpha1.NotifyTarget {
+	if n == nil {
+		return nil
+	}
+	return &templatev1alpha1.NotifyTarget{
+		Kind: notifyKindToProto[n.Kind], UserId: n.User, Role: auth.RoleToProto(n.Role), ChannelId: n.Channel,
+	}
+}
+
+// notifyFromProto is the notify target of a request's trigger; an unknown kind stays empty so that
+// validation refuses it.
+func notifyFromProto(p *templatev1alpha1.NotifyTarget) *templates.NotifyTarget {
+	if p == nil {
+		return nil
+	}
+	n := &templates.NotifyTarget{User: p.GetUserId(), Channel: p.GetChannelId()}
+	// An unspecified or unknown role stays empty, so that validation refuses it.
+	if role, ok := auth.RoleFromProto(p.GetRole()); ok {
+		n.Role = role
+	}
+	for k, v := range notifyKindToProto {
+		if v == p.GetKind() {
+			n.Kind = k
+		}
+	}
+	return n
 }
 
 // triggersFromProto converts and validates a request's triggers.
@@ -261,7 +298,7 @@ func triggersFromProto(ps []*templatev1alpha1.Trigger) ([]templates.Trigger, err
 		out = append(out, templates.Trigger{
 			ID: p.GetId(), Type: typ,
 			Filter:      templates.TriggerFilter{Cron: p.GetCron(), Timezone: p.GetTimezone()},
-			Instruction: p.GetInstruction(),
+			Instruction: p.GetInstruction(), Notify: notifyFromProto(p.GetNotify()),
 		})
 	}
 	if err := templates.ValidateTriggers(out); err != nil {

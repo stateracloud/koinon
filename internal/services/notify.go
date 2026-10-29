@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/scheduler"
 	"github.com/stateracloud/koinon/internal/triggers"
 	"github.com/stateracloud/koinon/internal/wake"
+	"github.com/stateracloud/koinon/templates"
 )
 
 // ErrAgentInactive is returned when a task is created for an agent that is not active. It is a
@@ -99,6 +100,9 @@ type TriggeredTask struct {
 	Fire string
 	// FiredBy is the user who fired the trigger by hand; recorded with a manual fire.
 	FiredBy pgtype.UUID
+	// Notify is the trigger's notify target, copied to the task (tasks.notify_*) so a later version
+	// change does not move the task's questions. Nil: the org's default.
+	Notify *templates.NotifyTarget
 	// OnCreate, when set, runs in the creating transaction once the task and its run exist, so a
 	// record of the fire (an audit event) commits with it or not at all. It is not called for a
 	// replay.
@@ -141,6 +145,7 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 			t, err := q.CreateTask(ctx, store.CreateTaskParams{
 				OrgID: in.Org, Title: in.Title, AgentID: agent.ID,
 				CreatedByKind: store.TaskCreatorKindTrigger, CreatedByTriggerID: in.Trigger,
+				NotifyKind: notifyKindOf(in.Notify), NotifyUserID: notifyUserOf(in.Notify), NotifyRole: notifyRoleOf(in.Notify),
 			})
 			if err != nil {
 				return "", pgtype.UUID{}, err
@@ -186,4 +191,31 @@ func (s *Server) CreateTriggeredTask(ctx context.Context, in TriggeredTask) (tas
 		return notes, nil
 	})
 	return task, created, s.sendFailed(err, "waking the agent's sandbox for a triggered task failed")
+}
+
+// notifyKindOf, notifyUserOf and notifyRoleOf are the task columns of a trigger's notify target. A
+// channel target is not stored in v0.1 (the API refuses it), so it is the default.
+func notifyKindOf(n *templates.NotifyTarget) store.NullNotifyTargetKind {
+	switch {
+	case n != nil && n.Kind == templates.NotifyUser:
+		return store.NullNotifyTargetKind{NotifyTargetKind: store.NotifyTargetKindUser, Valid: true}
+	case n != nil && n.Kind == templates.NotifyRole:
+		return store.NullNotifyTargetKind{NotifyTargetKind: store.NotifyTargetKindRole, Valid: true}
+	}
+	return store.NullNotifyTargetKind{}
+}
+
+func notifyUserOf(n *templates.NotifyTarget) pgtype.UUID {
+	var id pgtype.UUID
+	if n != nil && n.Kind == templates.NotifyUser {
+		_ = id.Scan(n.User)
+	}
+	return id
+}
+
+func notifyRoleOf(n *templates.NotifyTarget) store.NullOrgRole {
+	if n != nil && n.Kind == templates.NotifyRole {
+		return store.NullOrgRole{OrgRole: n.Role, Valid: true}
+	}
+	return store.NullOrgRole{}
 }

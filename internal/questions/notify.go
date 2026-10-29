@@ -89,14 +89,29 @@ func deliver(ctx context.Context, pool *pgxpool.Pool, note durable.Notification)
 		body, _ := json.Marshal(map[string]any{
 			"question_id": row.ID.String(), "task_id": row.TaskID.String(), "question": row.Question,
 		})
-		if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
-			OrgID: org, UserID: row.AskedTo, Kind: NotificationKind, DedupeKey: "question:" + row.ID.String(), Payload: body,
-		}); err != nil {
+		if err := notifyRecipients(ctx, q, row, NotificationKind, "question:"+row.ID.String(), body); err != nil {
 			return err
 		}
 	}
 	_, err = q.MarkQuestionNotified(ctx, store.MarkQuestionNotifiedParams{OrgID: org, ID: id})
 	return err
+}
+
+// notifyRecipients writes the in-app notification for each recipient who can still answer. The
+// insert is idempotent per user (the dedupe key), so a retry adds nobody twice.
+func notifyRecipients(ctx context.Context, q *store.Queries, row store.Question, kind, dedupe string, body []byte) error {
+	users, err := q.ListActiveQuestionRecipientIDs(ctx, store.ListActiveQuestionRecipientIDsParams{OrgID: row.OrgID, QuestionID: row.ID})
+	if err != nil {
+		return err
+	}
+	for _, u := range users {
+		if _, err := q.InsertNotification(ctx, store.InsertNotificationParams{
+			OrgID: row.OrgID, UserID: u, Kind: kind, DedupeKey: dedupe, Payload: body,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NotifyPending sends the notification of every opened question that has none yet. The park that
@@ -131,13 +146,18 @@ func NotifyPending(ctx context.Context, pool *pgxpool.Pool, send durable.Sender)
 	return sent, errors.Join(errs...)
 }
 
-// Sweeper calls NotifyPending, RunTimers and CancelOfFinishedRuns every interval until ctx ends.
+// Sweeper calls NotifyPending, RetargetOrphaned, RunTimers and CancelOfFinishedRuns every interval until ctx ends.
 func Sweeper(ctx context.Context, pool *pgxpool.Pool, send durable.Sender, interval time.Duration, log *slog.Logger) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
 		if _, err := NotifyPending(ctx, pool, send); err != nil && ctx.Err() == nil {
 			log.Error("question notification sweep failed", "err", err)
+		}
+		if n, err := RetargetOrphaned(ctx, pool); err != nil && ctx.Err() == nil {
+			log.Error("giving orphaned questions to the org's admins failed", "err", err)
+		} else if n > 0 {
+			log.Info("gave orphaned questions to the org's admins", "questions", n)
 		}
 		if res, err := RunTimers(ctx, pool, send, time.Now()); err != nil && ctx.Err() == nil {
 			log.Error("question reminder and expiry sweep failed", "err", err)

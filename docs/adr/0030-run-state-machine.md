@@ -185,3 +185,12 @@ Before FC1 a failure was free text (`internal/agentd/run.go:42`, `:603-611`, `:6
 - [0029 Run-level resume](0029-run-level-resume.md), [0032 Agent home](0032-agent-home-checkpoints.md)
 - Restate Virtual Objects: https://docs.restate.dev/concepts/services
 - Design adapted from [hydro-project/infinity](https://github.com/hydro-project/infinity) (Apache-2.0, commit 341f6c2): the failure classes (`infinity-provider-protocol/src/completion.rs:57-76`; unknown errors default to fatal, `remote.rs:44-60`). Research notes: `infinity-code-ideas.md`.
+
+## Amendment (2026-10-28, rc.6): `sandbox_unavailable` and two run columns
+
+The failure class `sandbox_unavailable` joins the list of #146 A1: the run's sandbox never became ready
+within the org's cap (ADR 0066 amendment 2026-10-28). It is never retried. Two columns record the
+timers the amendment adds: `runs.sandbox_wait_started_at` (when the current wait for the sandbox
+began; kept across requeues, cleared when any run of the agent finds the sandbox ready or the agent is
+resumed) and `runs.wrap_up_notice_at` (set when the wrap-up notice is no longer armed: it was sent, or it was suppressed because the harness ignored the cancel; the `run.wrap_up_notice` event is the record that the agent was told). There are no new
+states or transitions.

@@ -451,6 +451,15 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, agent.ID).UnhealthyAt.Valid).To(BeFalse(), "recording the new home clears the stale mark")
 		})
 
+		It("records the reason and message of the sandbox's condition that is not true", func(ctx SpecContext) {
+			names := execution.AgentObjectNames(org.Bytes, agent.ID.Bytes)
+			osg.SetCondition(row.Workspace, names.Sandbox, "ErrImagePull", "boom")
+			pass(ctx, r)
+			got := sandboxRow(ctx, agent.ID)
+			Expect(got.Reason).To(Equal("ErrImagePull"))
+			Expect(got.Message).To(Equal("boom"))
+		})
+
 		Describe("a sandbox in Error or Completed", func() {
 			var names execution.AgentNames
 			fail := func(phase openshellv1.SandboxPhase) {

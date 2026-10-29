@@ -164,6 +164,8 @@ const (
 	FailureClass_FAILURE_CLASS_POLICY FailureClass = 5
 	// Anything unknown; never retried.
 	FailureClass_FAILURE_CLASS_FATAL FailureClass = 6
+	// The sandbox never became ready within the org's cap; never retried.
+	FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE FailureClass = 7
 )
 
 // Enum value maps for FailureClass.
@@ -176,15 +178,17 @@ var (
 		4: "FAILURE_CLASS_BUDGET",
 		5: "FAILURE_CLASS_POLICY",
 		6: "FAILURE_CLASS_FATAL",
+		7: "FAILURE_CLASS_SANDBOX_UNAVAILABLE",
 	}
 	FailureClass_value = map[string]int32{
-		"FAILURE_CLASS_UNSPECIFIED":      0,
-		"FAILURE_CLASS_TRANSIENT":        1,
-		"FAILURE_CLASS_THROTTLED":        2,
-		"FAILURE_CLASS_CONTEXT_OVERFLOW": 3,
-		"FAILURE_CLASS_BUDGET":           4,
-		"FAILURE_CLASS_POLICY":           5,
-		"FAILURE_CLASS_FATAL":            6,
+		"FAILURE_CLASS_UNSPECIFIED":         0,
+		"FAILURE_CLASS_TRANSIENT":           1,
+		"FAILURE_CLASS_THROTTLED":           2,
+		"FAILURE_CLASS_CONTEXT_OVERFLOW":    3,
+		"FAILURE_CLASS_BUDGET":              4,
+		"FAILURE_CLASS_POLICY":              5,
+		"FAILURE_CLASS_FATAL":               6,
+		"FAILURE_CLASS_SANDBOX_UNAVAILABLE": 7,
 	}
 )
 
@@ -1051,7 +1055,7 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\x14PARK_REASON_APPROVAL\x10\x01\x12\x16\n" +
 	"\x12PARK_REASON_BUDGET\x10\x02\x12\x13\n" +
 	"\x0fPARK_REASON_A2A\x10\x03\x12\x1e\n" +
-	"\x1aPARK_REASON_INPUT_REQUIRED\x10\x04*\xd8\x01\n" +
+	"\x1aPARK_REASON_INPUT_REQUIRED\x10\x04*\xff\x01\n" +
 	"\fFailureClass\x12\x1d\n" +
 	"\x19FAILURE_CLASS_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17FAILURE_CLASS_TRANSIENT\x10\x01\x12\x1b\n" +
@@ -1059,7 +1063,8 @@ const file_koinon_run_v1alpha1_run_proto_rawDesc = "" +
 	"\x1eFAILURE_CLASS_CONTEXT_OVERFLOW\x10\x03\x12\x18\n" +
 	"\x14FAILURE_CLASS_BUDGET\x10\x04\x12\x18\n" +
 	"\x14FAILURE_CLASS_POLICY\x10\x05\x12\x17\n" +
-	"\x13FAILURE_CLASS_FATAL\x10\x062\xa0\x02\n" +
+	"\x13FAILURE_CLASS_FATAL\x10\x06\x12%\n" +
+	"!FAILURE_CLASS_SANDBOX_UNAVAILABLE\x10\a2\xa0\x02\n" +
 	"\n" +
 	"RunService\x12V\n" +
 	"\x06GetRun\x12\".koinon.run.v1alpha1.GetRunRequest\x1a#.koinon.run.v1alpha1.GetRunResponse\"\x03\x90\x02\x01\x12Z\n" +

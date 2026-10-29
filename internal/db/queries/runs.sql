@@ -141,7 +141,9 @@ RETURNING *;
 -- name: RequeueRun :one
 -- starting -> queued, for the owner (epoch compare-and-set): the sandbox was not ready within the
 -- org's wait (LT1, ADR 0066), so the run waits in the queue instead of failing. It goes to the back
--- of its origin's queue (ready_at = now) and the next claim gives it a new epoch. The time since the
+-- of its origin's queue (ready_at = now) and the next claim gives it a new epoch.
+-- sandbox_wait_started_at is kept, so the total wait is capped (ADR 0066 amendment
+-- 2026-10-28). The time since the
 -- claim was spent waiting for the sandbox, so it is credited to parked_seconds and does not count
 -- against the wall-clock cap.
 UPDATE runs
@@ -156,6 +158,27 @@ SET state = 'queued',
     heartbeat_at = NULL
 WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state = 'starting'
 RETURNING *;
+
+-- name: MarkRunSandboxWait :one
+-- Records when the run started waiting for its sandbox, once per wait (the first requeue keeps it).
+-- Fenced by the epoch. Returns the recorded start.
+UPDATE runs
+SET sandbox_wait_started_at = coalesce(sandbox_wait_started_at, @started::timestamptz)
+WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state IN ('starting', 'running')
+RETURNING sandbox_wait_started_at;
+
+-- name: ClearSandboxWaitForAgent :execrows
+-- The agent's sandbox was found ready (by any of its runs), or an admin resumed the agent: every
+-- run of the agent starts a fresh wait the next time it finds the sandbox not ready. Uses
+-- runs_sandbox_waiting.
+UPDATE runs SET sandbox_wait_started_at = NULL
+WHERE org_id = @org_id AND agent_id = @agent_id AND sandbox_wait_started_at IS NOT NULL;
+
+-- name: MarkRunWrapUpNotice :execrows
+-- Disarms the wrap-up notice (sent, or suppressed because the harness ignored the cancel); once per
+-- run. Only a sent notice has a run.wrap_up_notice event. Fenced by the epoch.
+UPDATE runs SET wrap_up_notice_at = now()
+WHERE org_id = @org_id AND id = @id AND epoch = @epoch AND state = 'running' AND wrap_up_notice_at IS NULL;
 
 -- name: MarkRunRunning :one
 -- starting -> running once the harness session is ready.

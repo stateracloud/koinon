@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/templates"
 )
 
@@ -139,7 +140,7 @@ var _ = Describe("Embedded templates", func() {
 			t, ok := templates.Get("finops-analyst")
 			Expect(ok).To(BeTrue())
 			Expect(t.Spec.Grants).To(BeEmpty())
-			Expect(t.Spec.Instructions).To(ContainSubstring("email or user ID"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("without `to`"))
 			Expect(t.Spec.Instructions).To(ContainSubstring("used or not used"))
 			Expect(t.Spec.Triggers).To(HaveLen(1))
 			tr := t.Spec.Triggers[0]
@@ -147,7 +148,8 @@ var _ = Describe("Embedded templates", func() {
 			Expect(tr.Filter).To(Equal(templates.TriggerFilter{Cron: "0 7 * * *", Timezone: "UTC"}))
 			Expect(t.Spec.Limits.Run.MaxDuration.Duration).To(Equal(20 * time.Minute))
 			Expect(t.Spec.Limits.SpendUSD.String()).To(Equal("1.00"))
-			Expect(tr.Instruction).To(ContainSubstring("Ask:"))
+			Expect(tr.Instruction).NotTo(ContainSubstring("Ask:"))
+			Expect(tr.Notify).To(Equal(&templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleAdmin}))
 			Expect(t.Spec.Instructions).To(ContainSubstring("ask_user"))
 			Expect(t.Metadata.Description).To(ContainSubstring("MCP servers you allow"))
 		})
@@ -168,6 +170,8 @@ var _ = Describe("Embedded templates", func() {
 			Expect(t.Spec.Limits.SpendUSD.String()).To(Equal("3.00"))
 			Expect(t.Spec.Instructions).To(ContainSubstring("`notes/<task-slug>.md` in your working directory, `/sandbox/work`"))
 			Expect(t.Spec.Instructions).NotTo(ContainSubstring("create_pull_request"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("about 5 minutes remain"))
+			Expect(t.Spec.Instructions).NotTo(ContainSubstring("date -u"))
 			Expect(t.Spec.Limits.Run.MaxTokens).To(BeEquivalentTo(1000000))
 		})
 
@@ -192,9 +196,10 @@ var _ = Describe("Embedded templates", func() {
 			Expect(t.Spec.Triggers).To(HaveLen(1))
 			Expect(t.Spec.Triggers[0].Filter).To(Equal(templates.TriggerFilter{Cron: "0 7 * * 1", Timezone: "UTC"}))
 			Expect(t.Spec.Limits.SpendUSD.String()).To(Equal("2.00"))
-			Expect(t.Spec.Triggers[0].Instruction).To(ContainSubstring("Ask:"))
+			Expect(t.Spec.Triggers[0].Instruction).NotTo(ContainSubstring("Ask:"))
+			Expect(t.Spec.Triggers[0].Notify).To(Equal(&templates.NotifyTarget{Kind: templates.NotifyRole, Role: store.OrgRoleAdmin}))
 			Expect(t.Spec.Triggers[0].Instruction).To(ContainSubstring("Repository:"))
-			Expect(t.Spec.Instructions).To(ContainSubstring("email or user ID"))
+			Expect(t.Spec.Instructions).To(ContainSubstring("without `to`"))
 			Expect(t.Spec.Questions.ReminderAfter.Duration).To(Equal(24 * time.Hour))
 			Expect(t.Spec.Questions.ExpireAfter.Duration).To(Equal(144 * time.Hour))
 			text := t.Spec.Instructions
