@@ -71,19 +71,37 @@ func deniedAddr(a netip.Addr) bool {
 		slices.ContainsFunc(deniedPrefixes, func(p netip.Prefix) bool { return p.Contains(a) })
 }
 
-// allowedAddr reports whether an AllowedHosts entry (an IP or a CIDR) covers a.
 // ValidateAllowedHosts refuses an AllowedHosts entry that is a pattern. Entries are matched
 // exactly, so a wildcard never matched anything; failing at startup tells the operator instead of
-// leaving a setting that looks like it allows a whole domain (ADR 0075, decision 13).
+// leaving a setting that looks like it allows a whole domain (ADR 0075, decision 13). A bracketed
+// IPv6 literal, with or without a port ("[fd00::1]:11434", as written in a URL), is exact.
 func ValidateAllowedHosts(entries []string) error {
 	for _, e := range entries {
-		if strings.ContainsAny(e, "*?[]{}") {
+		e = strings.TrimSpace(e)
+		if strings.ContainsAny(withoutIPv6Literal(e), "*?[]{}") {
 			return fmt.Errorf("egress.allowedInternalHosts entry %q is a pattern; list each host exactly (an IP or a CIDR is fine)", e)
 		}
 	}
 	return nil
 }
 
+// withoutIPv6Literal returns e without a leading bracketed IPv6 address, so that the brackets of
+// "[fd00::1]" or "[fd00::1]:11434" are not read as a glob class. Anything else is returned as is.
+func withoutIPv6Literal(e string) string {
+	if !strings.HasPrefix(e, "[") {
+		return e
+	}
+	end := strings.IndexByte(e, ']')
+	if end < 0 {
+		return e
+	}
+	if a, err := netip.ParseAddr(e[1:end]); err != nil || !a.Is6() {
+		return e
+	}
+	return e[end+1:]
+}
+
+// allowedAddr reports whether an AllowedHosts entry (an IP or a CIDR) covers a.
 func (p URLPolicy) allowedAddr(a netip.Addr) bool {
 	a = a.Unmap()
 	for _, e := range p.AllowedHosts {

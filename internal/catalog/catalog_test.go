@@ -35,7 +35,7 @@ var _ = Describe("URLPolicy", func() {
 	}
 	p := catalog.URLPolicy{
 		Namespace:    "koinon",
-		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com", "10.20.0.0/24", "fakemodel.fakes.svc:8080", "192.168.7.7"},
+		AllowedHosts: []string{"localhost:11434", "ollama.lab.example.com", "10.20.0.0/24", "fakemodel.fakes.svc:8080", "192.168.7.7", "[fd00::7]:11434"},
 		Resolver: resolver(map[string][]string{
 			"api.openai.com":          {"104.18.6.192"},
 			"ollama.lab.example.com":  {"127.0.0.1"},
@@ -65,7 +65,10 @@ var _ = Describe("URLPolicy", func() {
 	)
 	It("refuses a pattern in the platform allow list", func() {
 		Expect(catalog.ValidateAllowedHosts([]string{"ollama.lab.example.com:11434", "10.20.0.0/24"})).To(Succeed())
-		Expect(catalog.ValidateAllowedHosts([]string{"*.lab.example.com"})).To(MatchError(ContainSubstring("is a pattern")))
+		Expect(catalog.ValidateAllowedHosts([]string{"[fd00::1]", "[fd00::1]:11434", "fd00::1", "fd00::/8"})).To(Succeed())
+		for _, bad := range []string{"*.lab.example.com", "[ab].lab.example.com", "[fd00::1]*", "[fd00::1]:[1-9]", "[*]:80"} {
+			Expect(catalog.ValidateAllowedHosts([]string{bad})).To(MatchError(ContainSubstring("is a pattern")), bad)
+		}
 	})
 	DescribeTable("denies",
 		func(ctx SpecContext, u string) {
@@ -130,6 +133,8 @@ var _ = Describe("URLPolicy", func() {
 		Entry("an IP inside an allow-listed CIDR", "http://10.20.0.5:11434/v1"),
 		Entry("a name that resolves into an allow-listed CIDR", "http://allowed-net.example.com/v1"),
 		Entry("an allow-listed IP", "http://192.168.7.7:11434/v1"),
+		Entry("a public IPv6 literal (brackets are not a pattern)", "http://[2606:4700::1111]/v1"),
+		Entry("an allow-listed IPv6 literal with its port", "http://[fd00::7]:11434/v1"),
 		Entry("a name that does not resolve (checked again at render)", "https://future.example.com/v1"),
 	)
 	DescribeTable("rejects non-ASCII hosts", func(ctx SpecContext, u string) {
