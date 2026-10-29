@@ -89,10 +89,13 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 		gatewayKey = fmt.Sprintf("koinon-escape-key-%d-%x", n, time.Now().UnixNano())
 		githubKey  = fmt.Sprintf("koinon-escape-gh-%d-%x", n, time.Now().UnixNano())
 		clusterDNS = envOr("KOINON_ESCAPE_CLUSTER_DNS", "10.96.0.10")
-		// A model gateway stand-in that resolves inside the sandbox and has nothing listening: the
-		// proxy resolves it, applies the policy and, for a request the policy allows, fails to
-		// connect (502). A name that fails DNS would never reach the proxy (issue #244).
-		gwHost = envOr("KOINON_ESCAPE_GATEWAY_HOST", "localhost")
+		// A model gateway stand-in with no default (ADR 0080): the name must be resolvable by the
+		// proxy to a non-loopback address (OpenShell always blocks loopback and link-local) with
+		// nothing listening on port 4000, so that a request the policy allows fails to connect
+		// (502). A name that fails DNS never reaches the proxy (issue #244). The gateway spec
+		// skips without it; the provider record below only needs some host to bind the key to.
+		gwStandIn = os.Getenv("KOINON_ESCAPE_GATEWAY_HOST")
+		gwHost    = envOr("KOINON_ESCAPE_GATEWAY_HOST", "agentgateway.koinon-escape.invalid")
 	)
 
 	// probe runs checks in the sandbox and returns each check's result by id.
@@ -186,6 +189,9 @@ var _ = Describe("Agent sandbox", Label("escape", "openshell"), Ordered, Continu
 	}, NodeTimeout(3*time.Minute))
 
 	It("lets the sandbox post to the gateway's model routes and nothing else on it (ADR 0069)", func(ctx SpecContext) {
+		if gwStandIn == "" {
+			Skip("KOINON_ESCAPE_GATEWAY_HOST is not set: name a non-loopback host that resolves for the proxy with nothing listening on port 4000, for example a Service without endpoints in the escape namespace")
+		}
 		// The gateway host resolves but nothing listens on it, so a request the policy allows
 		// fails when the proxy tries to connect (502, Bad Gateway) and a denied one is answered 403
 		// by the policy itself. Either way the proxy answers: curl code 000 (DNS or connect
