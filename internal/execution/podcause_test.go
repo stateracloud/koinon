@@ -41,6 +41,20 @@ var _ = Describe("PodWaitDetail", func() {
 		Expect(execution.ClassifySandboxWait(reason, message)).To(Equal(execution.WaitCauseImagePull))
 	})
 
+	It("explains the captured supervisor pod whose image cannot be pulled", func() {
+		// containerStatuses of pod os-supervisor-<sandbox ID>, captured on kind with OpenShell 0.1.5 and a
+		// supervisor_image that does not exist, 2026-10-29. OpenShell reported ConfigurationPending for it,
+		// and the workload pod only "Error" (terminated, nothing waiting).
+		data, err := os.ReadFile("testdata/supervisor-bad-image-container-statuses.json")
+		Expect(err).NotTo(HaveOccurred())
+		pod := &corev1.Pod{}
+		Expect(json.Unmarshal(data, &pod.Status.ContainerStatuses)).To(Succeed())
+		d := execution.PodWaitDetail(pod)
+		Expect(d.Reason).To(Equal("ErrImagePull"))
+		Expect(execution.ClassifySandboxWait(d.Reason, d.Message)).To(Equal(execution.WaitCauseImagePull))
+		Expect(execution.SupervisorPodName("de6eb2f0-cf9c-4449-961b-d18863ccbf31")).To(Equal("os-supervisor-de6eb2f0-cf9c-4449-961b-d18863ccbf31"))
+	})
+
 	It("looks at init containers before containers and skips routine waits", func() {
 		pod := &corev1.Pod{Status: corev1.PodStatus{
 			InitContainerStatuses: []corev1.ContainerStatus{waiting("a", "PodInitializing", ""), waiting("b", "ErrImagePull", "boom")},

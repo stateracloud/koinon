@@ -1327,7 +1327,7 @@ func (r *Reconciler) record(ctx context.Context, w *work, sb execution.Sandbox, 
 	} else if r.cfg.Observer != nil && sb.Phase == execution.PhaseProvisioning && execution.OpaqueWaitReason(sb.Reason) && sb.Workspace != "" {
 		// OpenShell hides the pod's pull and crash errors behind ConfigurationPending (ADR 0078): read the
 		// pod, only for such a reason, and keep OpenShell's words when the pod says nothing.
-		reason, msg = execution.ExplainWait(sb.Reason, sb.Message, r.cfg.Observer.Explain(ctx, sb.Workspace, sb.Name))
+		reason, msg = execution.ExplainWait(sb.Reason, sb.Message, r.cfg.Observer.Explain(ctx, sb.Workspace, sb.Name, sb.ID))
 	}
 	return r.recordRow(ctx, w, sandboxState(sb.Phase), string(sb.Phase), msg, reason, hash, sb.ID)
 }

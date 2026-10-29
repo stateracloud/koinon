@@ -47,6 +47,10 @@ func ExplainWait(reason, message string, d WaitDetail) (string, string) {
 	return d.Reason, d.Message
 }
 
+// SupervisorPodName is the name of a sandbox's supervisor pod: OpenShell 0.1.5 creates it next to the
+// workload pod, named after the sandbox's ID (not its name).
+func SupervisorPodName(sandboxID string) string { return "os-supervisor-" + sandboxID }
+
 // PodWaitDetail names why a pod cannot start from its container statuses: the first init container
 // or container that waits for a reason other than the routine ContainerCreating and PodInitializing.
 // Init containers come first because the pod does not start the others before they finish. A crash
@@ -106,6 +110,9 @@ func SandboxCRDetail(sb *unstructured.Unstructured) WaitDetail {
 	}
 	return WaitDetail{}
 }
+
+// TruncateWaitDetail cuts s to MaxWaitDetail bytes.
+func TruncateWaitDetail(s string) string { return truncate(s, MaxWaitDetail) }
 
 // truncate cuts s to at most n bytes on a rune boundary, marking the cut.
 func truncate(s string, n int) string {
