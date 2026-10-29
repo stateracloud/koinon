@@ -20,11 +20,8 @@ import (
 // ADR 0069 decision 6: a model in the Anthropic format runs on the koinon-anthropic entry, which
 // posts Messages to <gateway>/v1/messages with the agent's key as a bearer token.
 
-// entryOf is the model value agentd selects for a format; the flavor table in internal/flavor is
-// its source, so the suite uses the same one.
-func entryOf(format modelformat.Format) string { return entryFor(format, contractModel) }
-
-// entryFor is entryOf for another model name.
+// entryFor is the model value agentd selects for a format and a model name; the flavor table in
+// internal/flavor is its source, so the suite uses the same one.
 func entryFor(format modelformat.Format, model string) string {
 	GinkgoHelper()
 	d, ok := koinflavor.Lookup(opencode.storeFlavor)

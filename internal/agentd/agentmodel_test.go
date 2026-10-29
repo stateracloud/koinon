@@ -179,7 +179,7 @@ var _ = Describe("The agent's model setting", func() {
 	// Koinon decides whether the model thinks, and the harness renders that (rc.8, ADR 0069 amendment
 	// 2026-10-29): thinking is on unless the agent, or its version, turns it off, and a model whose
 	// catalog capability says it cannot think runs with none.
-	var _ = Describe("The agent's thinking setting", func() {
+	Describe("The agent's thinking setting", func() {
 		serveClaude := func(ctx context.Context, e *env, name string) {
 			GinkgoHelper()
 			var providerID, modelID pgtype.UUID
