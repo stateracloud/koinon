@@ -230,6 +230,57 @@ var _ = Describe("a question to a role", func() {
 		_, err = questions.RetargetOrphaned(ctx, pool)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(recipients(ctx, row.ID)).To(ConsistOf(w.user, admin))
+		var after []byte
+		Expect(pool.QueryRow(ctx, `SELECT summary->'after' FROM audit_events WHERE org_id = $1 AND action = 'question.retarget' AND target_id = $2`, w.org, row.ID.String()).Scan(&after)).To(Succeed())
+		var a map[string]any
+		Expect(json.Unmarshal(after, &a)).To(Succeed())
+		Expect(a).To(HaveKeyWithValue("requestedTarget", HaveKeyWithValue("user", member.String())))
+		Expect(a).To(HaveKeyWithValue("fallbackReason", ContainSubstring("no longer a member")))
+		var payload []byte
+		Expect(pool.QueryRow(ctx, `SELECT payload FROM task_events WHERE org_id = $1 AND task_id = $2 AND kind = $3`, w.org, w.task, questions.KindRetargeted).Scan(&payload)).To(Succeed())
+		Expect(string(payload)).To(And(ContainSubstring("requestedTarget"), ContainSubstring("fallbackReason")))
+	})
+
+	It("does not widen a role nobody holds to the admins", func(ctx SpecContext) {
+		// The only owner (w.user) is deleted, so nobody holds the role the trigger notifies.
+		_, err := pool.Exec(ctx, `UPDATE users SET deleted_at = now() WHERE id = $1`, w.user)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = pool.Exec(ctx, `UPDATE tasks SET notify_kind = 'role', notify_role = 'owner' WHERE org_id = $1 AND id = $2`, w.org, w.task)
+		Expect(err).NotTo(HaveOccurred())
+		member := addUser(ctx, store.OrgRoleMember)
+		row := ask(ctx, questions.Target{Kind: store.NotifyTargetKindUser, User: member})
+		_, err = pool.Exec(ctx, `DELETE FROM org_memberships WHERE org_id = $1 AND user_id = $2`, w.org, member)
+		Expect(err).NotTo(HaveOccurred())
+
+		n, err := questions.RetargetOrphaned(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeZero())
+		Expect(countOf(ctx, `SELECT count(*) FROM question_recipients WHERE question_id = $1`, row.ID)).To(Equal(1), "no new recipient")
+		Expect(countOf(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'question.retarget'`, w.org)).To(BeZero())
+	})
+
+	It("gives nothing to a question that is closed while the sweep runs", func(ctx SpecContext) {
+		member := addUser(ctx, store.OrgRoleMember)
+		row := ask(ctx, questions.Target{Kind: store.NotifyTargetKindUser, User: member})
+		_, err := pool.Exec(ctx, `DELETE FROM org_memberships WHERE org_id = $1 AND user_id = $2`, w.org, member)
+		Expect(err).NotTo(HaveOccurred())
+
+		// An expiry holds the question's row, uncommitted, while the sweep runs.
+		resolving, err := pool.Begin(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = questions.Expire(ctx, store.New(resolving), w.org, row.ID)
+		Expect(err).NotTo(HaveOccurred())
+		n, err := questions.RetargetOrphaned(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeZero(), "the locked question is skipped")
+		Expect(resolving.Commit(ctx)).To(Succeed())
+
+		Expect(countOf(ctx, `SELECT count(*) FROM question_recipients WHERE question_id = $1`, row.ID)).To(Equal(1), "only the original recipient")
+		Expect(countOf(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'question.retarget'`, w.org)).To(BeZero())
+		Expect(countOf(ctx, `SELECT count(*) FROM notifications WHERE org_id = $1 AND kind = $2`, w.org, questions.NotificationKind)).To(BeZero())
+		n, err = questions.RetargetOrphaned(ctx, pool)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(n).To(BeZero(), "and once closed it is not orphaned")
 	})
 
 	It("keeps the call hash of a user target", func(ctx SpecContext) {

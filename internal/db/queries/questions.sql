@@ -138,7 +138,8 @@ ORDER BY qr.user_id;
 
 -- name: ListOrphanedQuestions :many
 -- Open questions (run still parked) with no recipient who can still answer, because everyone left
--- the org or lost the role, with the notify target of their task (NULL kind: the org's default).
+-- the org or lost the role, with the notify target of their task (NULL kind: the org's default). The rows are locked, and a question that is being resolved or canceled is
+-- skipped, so a question closed meanwhile gets no recipients, notification or audit row.
 SELECT qn.id, qn.task_id, qn.run_id, t.agent_id, t.notify_kind, t.notify_user_id, t.notify_role
 FROM questions qn
 JOIN runs r ON r.org_id = qn.org_id AND r.id = qn.run_id AND r.state = 'parked'
@@ -150,7 +151,8 @@ WHERE qn.org_id = @org_id AND qn.state = 'open'
     WHERE qr.org_id = qn.org_id AND qr.question_id = qn.id AND qr.removed_at IS NULL
       AND EXISTS (SELECT 1 FROM org_memberships om
                   WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member'))
-ORDER BY qn.id;
+ORDER BY qn.id
+FOR UPDATE OF qn SKIP LOCKED;
 
 -- name: AddWaitingQuestionRecipients :many
 -- The people a question is retargeted to start waiting now (a new recipient's age starts when the

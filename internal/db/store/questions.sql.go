@@ -793,6 +793,7 @@ WHERE qn.org_id = $1 AND qn.state = 'open'
       AND EXISTS (SELECT 1 FROM org_memberships om
                   WHERE om.org_id = qr.org_id AND om.user_id = qr.user_id AND om.role >= 'member'))
 ORDER BY qn.id
+FOR UPDATE OF qn SKIP LOCKED
 `
 
 type ListOrphanedQuestionsRow struct {
@@ -806,7 +807,8 @@ type ListOrphanedQuestionsRow struct {
 }
 
 // Open questions (run still parked) with no recipient who can still answer, because everyone left
-// the org or lost the role, with the notify target of their task (NULL kind: the org's default).
+// the org or lost the role, with the notify target of their task (NULL kind: the org's default). The rows are locked, and a question that is being resolved or canceled is
+// skipped, so a question closed meanwhile gets no recipients, notification or audit row.
 func (q *Queries) ListOrphanedQuestions(ctx context.Context, orgID pgtype.UUID) ([]ListOrphanedQuestionsRow, error) {
 	rows, err := q.db.Query(ctx, listOrphanedQuestions, orgID)
 	if err != nil {
