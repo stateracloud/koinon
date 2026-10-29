@@ -140,6 +140,20 @@ revocation, model or limit applied until the digits went away. Decisions:
    next good file. The waiter now returns rejected when the gauge is 0 and the log shows a failure
    logged after the wait began (at once, with the reason), or when the gauge has read 0 for
    `RejectAfter` (default 2 minutes, longer than a ConfigMap sync) and no log says otherwise.
+5. Reading the log is bounded and never guesses. `PodLogReload` names the `agentgateway` container
+   (a service-mesh or logging sidecar would otherwise make the log request fail), builds the pod
+   selector from the whole Deployment selector including expressions, and reads only the last hour
+   (`reloadLookback`), so a pass does not stream a rotated log file from every replica. A log line
+   over 1 MiB is skipped and the scan goes on after it; a read error is reported. Before delivery
+   the waiter records a baseline: the newest failure in the window, or the window start when there
+   is none. When the baseline read fails, the baseline is unknown and the waiter does not attribute
+   a failure by the log at all (an older failure would pass for this file's); `RejectAfter` alone
+   decides, and the reason is missing from that report.
+6. Deferred: a preflight check of the gateway's reload state. Preflight checks install
+   prerequisites before the reconciler runs; the reload state of a running gateway is reported by
+   the gauge, the reconciler log and agent status above, and `agentgateway_config_synchronized`
+   on the gateway's stats listener. A preflight check can be added when preflight grows a
+   post-install mode.
 
 ## Open questions
 

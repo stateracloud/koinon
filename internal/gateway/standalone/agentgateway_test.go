@@ -294,8 +294,7 @@ func (d delayedDeliverer) Deliver(ctx context.Context, config []byte, rev gatewa
 type containerReloadLog struct{ logs func(context.Context) string }
 
 func (c containerReloadLog) LatestReloadFailure(ctx context.Context, after time.Time) (standalone.ReloadFailure, bool, error) {
-	f, ok := standalone.ParseReloadFailure(strings.NewReader(c.logs(ctx)), after)
-	return f, ok, nil
+	return standalone.ParseReloadFailure(strings.NewReader(c.logs(ctx)), after)
 }
 
 func portOf(s *httptest.Server) int {

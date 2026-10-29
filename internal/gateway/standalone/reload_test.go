@@ -183,7 +183,7 @@ var _ = Describe("ProbeWaiter", func() {
 		Expect(rej.Revision).To(BeEquivalentTo("abc123"))
 		Expect(err.Error()).To(ContainSubstring("at most 9 fractional digits"))
 		Expect(time.Since(before)).To(BeNumerically("<", 5*time.Second), "no wait for RejectAfter")
-		Expect(log.after).To(BeZero(), "no failure was logged before delivery: any counts")
+		Expect(log.after).To(BeTemporally("~", time.Now().Add(-time.Hour), time.Minute), "nothing logged before delivery: the window start is the baseline")
 	})
 
 	It("keeps waiting when the gauge reads 0 and the log shows no new failure", func(ctx SpecContext) {
@@ -205,6 +205,20 @@ var _ = Describe("ProbeWaiter", func() {
 		var rej *standalone.ConfigRejectedError
 		Expect(errors.As(err, &rej)).To(BeTrue())
 		Expect(rej.Reason).To(BeEmpty())
+	})
+
+	It("does not attribute an older failure to this file when the baseline could not be read", func(ctx SpecContext) {
+		srv := gaugeServer(0)
+		// Prepare's read fails once; afterwards the log shows the previous file's failure.
+		log := &fakeReloadLog{reason: "previous file's reason", errOnCalls: 1}
+		w := standalone.ProbeWaiter{
+			GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 10 * time.Millisecond, RejectAfter: 100 * time.Millisecond, Reload: log,
+		}
+		err := w.Wait(w.Prepare(ctx), "abc123")
+		var rej *standalone.ConfigRejectedError
+		Expect(errors.As(err, &rej)).To(BeTrue(), "%v", err)
+		Expect(rej.Reason).To(BeEmpty(), "decided by RejectAfter alone, not by an old log line")
+		Expect(log.calls).To(Equal(1), "Wait did not read the log")
 	})
 
 	It("resets the clock when the gauge reads 1", func(ctx SpecContext) {
@@ -234,6 +248,7 @@ type fakeReloadLog struct {
 	reason     string
 	err        error
 	afterCalls int // the failure appears on this call
+	errOnCalls int // the first calls fail with a read error
 	calls      int
 	after      time.Time
 }
@@ -241,6 +256,9 @@ type fakeReloadLog struct {
 func (f *fakeReloadLog) LatestReloadFailure(_ context.Context, after time.Time) (standalone.ReloadFailure, bool, error) {
 	f.calls++
 	f.after = after
+	if f.calls <= f.errOnCalls {
+		return standalone.ReloadFailure{}, false, errors.New("log read failed")
+	}
 	if f.err != nil {
 		return standalone.ReloadFailure{}, false, f.err
 	}
