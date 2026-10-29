@@ -322,6 +322,12 @@ n=$(render "${sm[@]}" | grep -c '^kind: ServiceMonitor$' || true)
 [ "$n" = 4 ] || fail "$n ServiceMonitors with metrics.serviceMonitor.enabled, want 4 (api, reconciler, agentd, gateway)"
 has "gateway ServiceMonitor scrapes the stats port" 'port: stats$' "${sm[@]}" --show-only templates/metrics.yaml
 has "gateway ServiceMonitor is named for the gateway" 'name: koinon-gateway$' "${sm[@]}" --show-only templates/metrics.yaml
+# The gateway ServiceMonitor selects by component: exactly one Service carries component=gateway,
+# and it is the gateway Service with its "stats" port.
+gwsvc=$(render "${sm[@]}" | awk 'BEGIN{RS="\n---\n"} /\nkind: Service\n/ && /app\.kubernetes\.io\/component: gateway\n/ {n++; if (/name: koinon-gateway\n/ && /- name: stats\n/) s++} END{print n+0, s+0}')
+[ "$gwsvc" = "1 1" ] || fail "Services matching the gateway ServiceMonitor (count, of which the gateway Service with a stats port): $gwsvc, want 1 1"
+gwsel=$(render "${sm[@]}" --show-only templates/metrics.yaml | awk 'BEGIN{RS="\n---\n"} /kind: ServiceMonitor\n/ && /\n  name: koinon-gateway\n/ && /matchLabels:\n( +app\.kubernetes\.io\/(name|instance): koinon\n)+ +app\.kubernetes\.io\/component: gateway\n/ {n++} END{print n+0}')
+[ "$gwsel" = 1 ] || fail "gateway ServiceMonitor must select app.kubernetes.io/component=gateway"
 smk=("${sm[@]}" --set gateway.mode=kubernetes)
 lacks "no PodMonitor in standalone mode" 'kind: PodMonitor' "${sm[@]}"
 pm=(--api-versions monitoring.coreos.com/v1/PodMonitor)
