@@ -113,7 +113,10 @@ var _ = Describe("Render", func() {
 						Keys []apiKey `yaml:"keys"`
 					} `yaml:"apiKey"`
 					Transformations struct {
-						Request struct{ Set map[string]string }
+						Request struct {
+							Replace string
+							Set     map[string]string
+						}
 					}
 				}
 				Models []model
@@ -144,6 +147,18 @@ var _ = Describe("Render", func() {
 
 		It("stamps the key's org into the header before a model is chosen", func() {
 			Expect(render().LLM.Policies.Transformations.Request.Set).To(HaveKeyWithValue(gateway.OrgHeader, `default(apiKey.org, "")`))
+		})
+
+		It("keeps only the allowlisted client headers on LLM and MCP routes (#262)", func() {
+			d := render()
+			Expect(d.LLM.Policies.Transformations.Request.Replace).To(Equal(
+				`request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])`))
+			Expect(d.LLM.Policies.Transformations.Request.Set).To(HaveKey(gateway.OrgHeader), "the org header is set after the replace")
+
+			got, _, err := standalone.Render(fixtures()[2].state, fixtures()[2].options)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(got)).To(ContainSubstring(
+				`replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "last-event-id", "mcp-protocol-version", "mcp-session-id", "user-agent"])`))
 		})
 
 		It("limits every key to its own org's plain model names", func() {
@@ -371,7 +386,7 @@ var _ = Describe("Render", func() {
 				Expect(p).To(HaveLen(1))
 				Expect(p[0].KeyHash).To(Equal(gateway.HashKey(standalone.ReloadProbeKey(rev))))
 				Expect(p[0].Metadata.Agent).To(BeEmpty())
-				Expect(d.LLM.Policies.Authorization.Rules).To(Equal([]string{`apiKey.name != "koinon-reload-probe" && !has(llmRequest.mcp_servers)`}), "the probe is refused and so is mcp_servers")
+				Expect(d.LLM.Policies.Authorization.Rules).To(Equal([]string{`apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !has(llmRequest.mcp_servers)`}), "the probe is refused, and so are a key in the URL and mcp_servers")
 				if d.MCP != nil {
 					Expect(probes(d.MCP.Policies.APIKey.Keys)).To(BeEmpty())
 				}

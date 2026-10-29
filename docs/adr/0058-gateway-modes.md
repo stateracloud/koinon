@@ -179,3 +179,35 @@ named `koinon.placeholder` (condition `false`, host `127.0.0.1:9`, never contact
 name from colliding with an org's `<org>-<server>` name, since slugs and server names never contain
 one. Remove it when upstream allows a condition on a lone target. No upstream issue will be filed
 (procoduck's decision).
+
+## Amendment (2026-10-30, #262): the gateway forwards an allowlist of client headers
+
+An agent holds its gateway key (`kgw_...`) and is untrusted. Until now the gateway removed named
+headers (`anthropic-beta`, a target's credential header) and passed every other client header to the
+model's upstream or the MCP target, so an agent, or a command in its shell, could put the key in a
+header of its own (`X-Canary: kgw_...`, or embedded in a value) and a third party would log it. The
+key in a URL query or path was forwarded the same way.
+
+- **Standalone mode** replaces the header set with an allowlist. agentgateway's `transformations.request.replace`
+  (a CEL map of the headers to keep, applied before `set` and `remove`) is rendered on the `llm` and
+  `mcp` policies as `request.headers.filterKeys(k, k in [...])`. LLM routes keep `accept`,
+  `content-length`, `content-type` and `user-agent` (`gateway.ForwardedHeaders`); MCP routes add the
+  headers the gateway's own MCP handling reads after the transformation (`mcp-session-id`,
+  `mcp-protocol-version`, `last-event-id`; `gateway.MCPForwardedHeaders`). What a format needs beyond
+  these, the gateway sets itself (`Rendering.Headers`, the provider's credential, `x-koinon-org`).
+  OpenRouter sticky routing is a body field, so it needs no header. If the expression ever fails to
+  evaluate, agentgateway leaves the headers untouched; the expression reads only `request.headers` and
+  literals, and the real-gateway spec fails if it stops working.
+- **Kubernetes mode cannot allowlist.** The v1.7.0 `AgentgatewayPolicy` CRD has no `replace` field
+  (the data plane has it). The sustainable fix is upstream, so the driver renders the strongest guard
+  the CRD allows: the model's authorization rule refuses (403) a request that carries a gateway key
+  in any header but `authorization` (`gateway.NoKeyInHeadersExpr`). That stops the accident and the
+  plain attack; a key the agent re-encodes first evades it. The MCP route there still only drops
+  credential headers. **Exit condition:** switch the driver to `replace` when the CRD exposes it.
+- **Both modes refuse a gateway key in the URL.** The LLM authorization rule includes
+  `!url.decode(request.pathAndQuery).contains("kgw_")` (`gateway.NoKeyInURLExpr`), so the request is
+  answered 403 before it reaches the upstream (agentgateway has no way to strip a query parameter by
+  pattern, and a refusal is louder than a silent rewrite). A key encoded twice evades it.
+- The shared gateway spec asserts all of this against both modes (`Env.HeaderAllowlist`), and the
+  e2e (`test/e2e`, step 8) sends the same requests through the real gateway to the fake model server,
+  whose `/_fake/requests?detail=1` lists the query and headers it received.

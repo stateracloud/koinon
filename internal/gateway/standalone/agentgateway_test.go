@@ -143,7 +143,8 @@ var _ = func() bool {
 			}
 			return &r.Gateway, nil
 		},
-		GatewayBudgets: true,
+		GatewayBudgets:  true,
+		HeaderAllowlist: true,
 	})
 	return true
 }()

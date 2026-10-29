@@ -1,4 +1,4 @@
-# Revision 6860b9aebd369b0d
+# Revision 67db22a29f02e17f
 apiVersion: v1
 data:
   catalog.json: '{"providers":{"acme.anthropic":{"models":{"claude-haiku-4-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}},"claude-haiku-5-5":{"rates":{"cacheRead":"0.1","cacheWrite":"1.25","input":"1","output":"5"}}}},"acme.openrouter":{"models":{"open/model":{"rates":{"input":"1","output":"2"}}}}}}'
@@ -25,7 +25,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  koinon-reload-probe: '{"keyHash":"sha256:8ee072311247a628125b6dbe71cb517fc1a4af2692eb1961117798a3559fd5d2","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+  koinon-reload-probe: '{"keyHash":"sha256:ab7cafbaba5087d5c14e77fac3aa43eaac61c64bcd7f9c7693594be764a4e737","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -116,7 +116,7 @@ spec:
       action: Require
       policy:
         matchExpressions:
-          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "open/model" in default(apiKey.models, []))
+          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "open/model" in default(apiKey.models, [])) && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")
     transformations:
       - expression: 'has(llmRequest.stream) && llmRequest.stream == true ? {"include_usage": true} : null'
         field: stream_options
@@ -157,7 +157,7 @@ spec:
       action: Require
       policy:
         matchExpressions:
-          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers)
+          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers) && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")
     headers:
       request:
         remove:
@@ -207,7 +207,7 @@ spec:
       action: Require
       policy:
         matchExpressions:
-          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-5-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers)
+          - apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-5-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers) && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")
     headers:
       request:
         set:

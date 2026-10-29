@@ -90,12 +90,14 @@ const (
 		"# Keys appear only as hashes; key material lives in Kubernetes Secrets.\n"
 )
 
-// admitRule is probeRule, narrowed by the body fields no format admits (gateway.RejectExpr).
+// admitRule is probeRule, narrowed by the body fields no format admits (gateway.RejectExpr) and by a
+// gateway key in the URL (gateway.NoKeyInURLExpr).
 func admitRule() string {
+	rule := probeRule + " && " + gateway.NoKeyInURLExpr()
 	if e := gateway.RejectExpr(); e != "" {
-		return probeRule + " && " + e
+		rule += " && " + e
 	}
-	return probeRule
+	return rule
 }
 
 // Render returns agentgateway's config file for s and its revision. It is a
@@ -421,6 +423,9 @@ type transformations struct {
 }
 
 type headerTransform struct {
+	// Replace is a CEL expression for the whole header set, evaluated before Set and Remove: the
+	// request keeps exactly the headers it names (gateway.AllowHeadersExpr), whatever the client sent.
+	Replace string `yaml:"replace,omitempty"`
 	// Set replaces a header, so a client cannot supply its own value.
 	Set map[string]string `yaml:"set"`
 	// Remove drops headers a client sent, before any target policy runs: a client-supplied copy of
@@ -537,9 +542,11 @@ func build(s gateway.State, o Options) document {
 		Policies: llmPolicies{
 			APIKey:        keyPolicy(keys, s, allowed),
 			Authorization: authorization{Rules: []string{admitRule()}},
-			Transformations: transformations{Request: headerTransform{Set: map[string]string{
-				gateway.OrgHeader: `default(apiKey.org, "")`,
-			}}},
+			// Only the allowlisted client headers go on (#262); the org header is set after.
+			Transformations: transformations{Request: headerTransform{
+				Replace: gateway.AllowHeadersExpr(gateway.ForwardedHeaders),
+				Set:     map[string]string{gateway.OrgHeader: `default(apiKey.org, "")`},
+			}},
 		},
 		Models: []llmModel{},
 	}
@@ -626,8 +633,9 @@ func build(s gateway.State, o Options) document {
 				// Targets learn which agent calls from this header (gateway.AgentHeader);
 				// set overwrites whatever the client sent.
 				Transformations: transformations{Request: headerTransform{
-					Set:    map[string]string{strings.ToLower(gateway.AgentHeader): "apiKey.agent"},
-					Remove: credentialHeaders(s.MCP),
+					Replace: gateway.AllowHeadersExpr(gateway.MCPForwardedHeaders),
+					Set:     map[string]string{strings.ToLower(gateway.AgentHeader): "apiKey.agent"},
+					Remove:  credentialHeaders(s.MCP),
 				}},
 			},
 		}
