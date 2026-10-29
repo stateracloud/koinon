@@ -60,6 +60,24 @@ var _ = Describe("prompt caching of the default price list", func() {
 		}
 	})
 
+	// ADR 0069 decision 8: a direct Anthropic model runs on the Messages route with the harness
+	// placing the cache markers, and OpenCode gets its own entry for it.
+	It("runs every direct Anthropic model in the catalog natively, on the anthropic entry", func() {
+		n := 0
+		for _, r := range entries {
+			if r.Entry.Provider != "anthropic" {
+				continue
+			}
+			n++
+			name := strings.TrimSuffix(r.Entry.Match.Glob, "*")
+			format := modelformat.Default(r.Entry.Provider, name)
+			Expect(prices.CacheModeFor(r.Entry.Provider, name, format, r.Price)).To(Equal(prices.CacheNative),
+				"%s is a direct Anthropic model: it must run natively in Messages format with a cache_read price (ADR 0069)", r.Entry.ID)
+			Expect(agentd.ModelOption(store.AgentFlavorOpencode, format, name)).To(Equal("koinon-anthropic/"+name), r.Entry.ID)
+		}
+		Expect(n).To(BeNumerically(">", 0), "the default price list has no direct Anthropic entry")
+	})
+
 	DescribeTable("maps provider formats to cache modes",
 		func(provider, model string, format modelformat.Format, want prices.CacheMode) {
 			p := pricingWithCacheRead()
