@@ -15,11 +15,11 @@ var _ = DescribeTable("HarnessArgs",
 		Expect(agentd.HarnessArgs(f, []byte(config))).To(Equal(want))
 	},
 	Entry("plugin installs on: OpenCode loads plugins", store.AgentFlavorOpencode,
-		`{"harness":{"pluginInstalls":true}}`, []string{"--plugin-installs"}),
-	Entry("plugin installs off", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":false}}`, nil),
-	Entry("no harness settings", store.AgentFlavorOpencode, `{"model":"m"}`, nil),
-	Entry("an unreadable config", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":"yes"}}`, nil),
-	Entry("a config agentconfig.Parse cannot read", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":true},"model":{"name":"m"}}`, nil),
+		`{"harness":{"pluginInstalls":true}}`, []string{"--plugin-installs", "--no-web-tools"}),
+	Entry("plugin installs off", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":false}}`, []string{"--no-web-tools"}),
+	Entry("no harness settings: no web egress, so no built-in web tools", store.AgentFlavorOpencode, `{"model":"m"}`, []string{"--no-web-tools"}),
+	Entry("an unreadable config", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":"yes"}}`, []string{"--no-web-tools"}),
+	Entry("a config agentconfig.Parse cannot read", store.AgentFlavorOpencode, `{"harness":{"pluginInstalls":true},"model":{"name":"m"}}`, []string{"--no-web-tools"}),
 	Entry("a flavor without the option: the switch is OpenCode's", store.AgentFlavor("other"), `{"harness":{"pluginInstalls":true}}`, nil),
 )
 

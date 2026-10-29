@@ -94,3 +94,4 @@ are in [0046](0046-adr-conventions.md).
 | [0077](0077-pinned-openshell-and-installer.md) | Koinon pins OpenShell and Agent Sandbox per release, and ships an installer | Accepted (delivery after v0.1.0, in v0.1.x) |
 | [0078](0078-sandbox-observer.md) | Sandbox observer: get-only reads of sandbox pods to explain why a sandbox never became ready | Accepted (delivery in rc.7) |
 | [0079](0079-dependency-cooldown.md) | Dependency cooldown: three days everywhere, and a checked fast path for security fixes | Accepted |
+| [0080](0080-tool-set-matches-egress-and-escape-hosts.md) | The tool set matches the sandbox's egress, and escape cases observe proxy decisions | Accepted |
