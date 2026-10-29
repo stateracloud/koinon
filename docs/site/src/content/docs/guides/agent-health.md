@@ -54,7 +54,56 @@ cause from the sandbox's last condition:
 - **the image could not be pulled** (a missing tag, a registry that refuses or cannot be reached);
 - **the cluster's admission policy refused the sandbox**;
 - **no node can run the sandbox** (more CPU or memory than any node has, a taint nothing tolerates);
+- **a container in the sandbox keeps crashing** (`CrashLoopBackOff`);
+- **a container in the sandbox could not be created** (`CreateContainerConfigError`, for example a Secret it mounts that is missing, or `CreateContainerError`);
 - **the cause is unknown**.
+
+The run's failure message carries the detail, for example the registry's own error for an image that
+cannot be pulled.
+
+### How Koinon finds the cause
+
+OpenShell reports a sandbox that cannot start only as `ConfigurationPending`, and in the mode Koinon
+uses it forwards no Kubernetes events, so an image that cannot be pulled would look like any slow start.
+To tell them apart, the **sandbox observer** in koinon-reconciler reads the sandbox's pod, and only when
+OpenShell's reason says nothing (`ConfigurationPending`, `DependenciesNotReady` or `SchedulingGated`).
+It reads the pod, or the Agent Sandbox object when the pod does not exist, by name and with `get` only:
+no listing, no watching, no secrets. What it finds replaces the sandbox's recorded reason and message.
+
+It is on by default (`sandboxObserver.enabled`). The chart gives the reconciler a role that can create one
+RoleBinding in each OpenShell workspace namespace and bind one ClusterRole (`get` on pods and Sandboxes),
+and a ValidatingAdmissionPolicy that allows nothing else: only namespaces labelled
+`openshell.ai/managed-by=openshell` and `openshell.ai/gateway-id=<openshell.gatewayId>`, with a fixed name,
+role and subject. [ADR 0078](https://github.com/stateracloud/koinon/blob/main/docs/adr/0078-sandbox-observer.md)
+has the objects and the reasoning. The chart refuses to render the observer without `sandboxPolicy`.
+
+Set `openshell.gatewayId` to the `gatewayId` of your OpenShell release (the default, `openshell`, is its
+default too): OpenShell names a workspace's namespace `openshell-<gatewayId>-<workspace>`. The preflight
+compares it with the gateway's configuration and warns when they differ. With a wrong ID the cluster refuses
+the RoleBinding, `koinon_reconciler_sandbox_observer_errors_total{reason="forbidden"}` rises, and the cause
+stays unknown.
+
+Platform teams that do not want the extra grant set `sandboxObserver.enabled: false`. The chart then renders
+none of it, the reconciler reads nothing, and the preflight warns that an unpullable image or a crash loop
+will show as **the cause is unknown**. Everything else, including the wait cap and the unhealthy mark, works
+the same. The observer goes away once OpenShell reports pod failures itself.
+
+**Upgrading with `sandboxPolicy.enabled: false`.** The observer's RoleBinding policy is what limits its grant, so the chart
+refuses to render `sandboxObserver.enabled` (the default) without `sandboxPolicy.enabled`, or without a `Deny` entry in
+`sandboxPolicy.validationActions`. If you turned the sandbox policy off, also set `sandboxObserver.enabled: false` before you
+upgrade. The error names both settings.
+
+**Turning the observer off later.** The reconciler does not delete what it made. The RoleBindings stay in the workspace
+namespaces, harmless once the ClusterRole is gone (they point at nothing) and reused if you turn the observer on again. To
+remove them:
+
+```sh
+kubectl delete rolebinding --all-namespaces -l koinon.dev/sandbox-observer=true
+```
+
+A sandbox pod can also fail because of the supervisor pod OpenShell starts next to it (for example a supervisor image that
+cannot be pulled). The observer reads that pod too, by name, when the workload pod says nothing; the detail then starts with
+"supervisor pod:".
 
 The agent is marked **unhealthy** with that reason, the org's owners and admins get a notice, every task
 with a run waiting on the agent gets a note, and admins and owners see an item for the agent in the

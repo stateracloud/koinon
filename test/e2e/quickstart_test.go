@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -634,6 +635,97 @@ var _ = Describe("the quickstart", Ordered, func() {
 		total := time.Since(t.t0)
 		Expect(total).To(BeNumerically("<=", quickstartBudget),
 			"the quickstart took %s from helm install, more than the plan's %s", total.Round(time.Second), quickstartBudget)
+	})
+	// Not part of the quickstart, and after its time check: the flavor image is broken for the rest of
+	// the run (the cluster is deleted afterwards).
+	It("8. a flavor image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
+		t.begin()
+		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
+		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+		kc := func(args ...string) string {
+			GinkgoHelper()
+			out, err := exec.CommandContext(ctx, kubectl, args...).CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), "kubectl %s: %s", strings.Join(args, " "), out)
+			return strings.TrimSpace(string(out))
+		}
+
+		By("the reconciler bound the observer role in the workspace namespace, to itself only")
+		ns := kc("get", "ns", "-l", "openshell.ai/managed-by=openshell", "-o", "jsonpath={.items[0].metadata.name}")
+		Expect(ns).To(HavePrefix("openshell-openshell-kw-"))
+		Expect(kc("-n", ns, "get", "rolebinding", "koinon-koinon-sandbox-observer", "-o",
+			"jsonpath={.roleRef.kind}/{.roleRef.name} {range .subjects[*]}{.kind}:{.namespace}/{.name} {end}")).
+			To(Equal("ClusterRole/koinon-koinon-sandbox-observer ServiceAccount:koinon/koinon-reconciler"))
+
+		By("pointing the flavor at an image nobody can pull, and shortening the sandbox wait cap")
+		cfgYAML := kc("-n", "koinon", "get", "cm", "koinon-config", "-o", "jsonpath={.data.config\\.yaml}")
+		broken := regexp.MustCompile(`(?m)^(\s+image: ).*flavor-opencode.*$`).ReplaceAllString(cfgYAML, "${1}kind.local/koinon-escape/agent:nope")
+		Expect(broken).NotTo(Equal(cfgYAML), "the flavor image line")
+		patch, err := json.Marshal(map[string]any{"data": map[string]string{"config.yaml": broken}})
+		Expect(err).NotTo(HaveOccurred())
+		kc("-n", "koinon", "patch", "cm", "koinon-config", "--type", "merge", "-p", string(patch))
+		kc("-n", "koinon", "rollout", "restart", "deploy/koinon-reconciler")
+		kc("-n", "koinon", "set", "env", "deploy/koinon-agentd", "KOINON_SANDBOX_WAIT_CAP=2m")
+		kc("-n", "koinon", "rollout", "status", "deploy/koinon-reconciler", "--timeout=3m")
+		kc("-n", "koinon", "rollout", "status", "deploy/koinon-agentd", "--timeout=3m")
+
+		By("a task for a new agent: its sandbox is rendered with the broken image")
+		ts, err := c.templates.ListTemplates(ctx, &templatev1alpha1.ListTemplatesRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		var tmpl string
+		for _, tp := range ts.GetTemplates() {
+			if tp.GetSlug() == "repo-helper" {
+				tmpl = tp.GetId()
+			}
+		}
+		Expect(tmpl).NotTo(BeEmpty())
+		created, err := c.agents.CreateAgentFromTemplate(ctx, &agentv1alpha1.CreateAgentFromTemplateRequest{
+			OrgId: org, TemplateId: tmpl, DisplayName: "Missing image", Flavor: templatev1alpha1.Flavor_FLAVOR_OPENCODE,
+			Grants: []*agentv1alpha1.GrantBinding{{Connector: "github", ConnectionId: conn.GetId(), Repositories: []string{repository}}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		bad := created.GetAgent()
+		_, err = c.agents.ActivateAgent(ctx, &agentv1alpha1.ActivateAgentRequest{OrgId: org, AgentId: bad.GetId(), Version: bad.GetLatestVersion()})
+		Expect(err).NotTo(HaveOccurred())
+		res, err := c.tasks.CreateTask(ctx, &taskv1alpha1.CreateTaskRequest{
+			OrgId: org, AgentId: bad.GetId(), Title: "Never starts", Message: "Say hello.",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var seq int64
+		var evKinds []string
+		bw := watchRun(context.WithoutCancel(ctx), c, org, res.GetRun().GetId(), 0)
+		failed := bw.until(ctx, c, org, res.GetRun().GetId(), 8*time.Minute, &seq, &evKinds, func(r *runv1alpha1.Run) bool {
+			return terminal(r.GetState())
+		})
+
+		Expect(failed.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_FAILED))
+		Expect(failed.GetFailureClass()).To(Equal(runv1alpha1.FailureClass_FAILURE_CLASS_SANDBOX_UNAVAILABLE))
+		Expect(failed.GetOutcomeReason()).To(ContainSubstring("the image could not be pulled"))
+		// The kubelet alternates between ErrImagePull and ImagePullBackOff while it retries.
+		Expect(failed.GetOutcomeReason()).To(MatchRegexp(`ErrImagePull|ImagePullBackOff`), "the pod's reason is in the detail")
+		Expect(failed.GetOutcomeReason()).NotTo(ContainSubstring("ConfigurationPending"), "not OpenShell's opaque reason")
+		got, err := c.tasks.GetTask(ctx, &taskv1alpha1.GetTaskRequest{OrgId: org, TaskId: res.GetTask().GetId()})
+		Expect(err).NotTo(HaveOccurred())
+		var cause string
+		for _, ev := range got.GetEvents() {
+			if ev.GetKind() == "run.failed" {
+				cause, _ = ev.GetPayload().AsMap()["sandboxCause"].(string)
+			}
+		}
+		Expect(cause).To(Equal("image_pull"))
+
+		By("the metrics count it, by cause")
+		metrics := func(target, port string) string {
+			GinkgoHelper()
+			res, err := http.Get("http://" + portForward(ctx, kubectl, target, port) + "/metrics")
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = res.Body.Close() }()
+			b, _ := io.ReadAll(res.Body)
+			return string(b)
+		}
+		Expect(metrics("deploy/koinon-agentd", "9090")).To(MatchRegexp(`(?m)^koinon_agentd_sandbox_wait_cap_total\{cause="image_pull"\} [1-9]`))
+		Expect(metrics("deploy/koinon-reconciler", "9090")).To(MatchRegexp(`(?m)^koinon_reconciler_sandbox_observer_errors_total\{reason="forbidden"\} 0$`),
+			"the observer read the pod without being refused")
+		t.end("8. Missing flavor image: image_pull from the pod, through the observer")
 	})
 })
 

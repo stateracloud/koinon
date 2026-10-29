@@ -1,0 +1,74 @@
+[
+    {
+        "containerID": "containerd://33adc84af7b1c5061fbd10b06b77179a6c286273820d8bd4228d92184fcb4460",
+        "image": "ghcr.io/nvidia/openshell/sandbox:0.1.5",
+        "imageID": "ghcr.io/nvidia/openshell/sandbox@sha256:e9adf9ecde328122414ad2ee8c6fc5d5b389e4cf168daf4357c46f5a77d55851",
+        "lastState": {},
+        "name": "openshell-sandbox-bootstrap",
+        "ready": true,
+        "resources": {},
+        "restartCount": 0,
+        "started": false,
+        "state": {
+            "terminated": {
+                "containerID": "containerd://33adc84af7b1c5061fbd10b06b77179a6c286273820d8bd4228d92184fcb4460",
+                "exitCode": 0,
+                "finishedAt": "2026-10-29T02:53:08Z",
+                "reason": "Completed",
+                "startedAt": "2026-10-29T02:53:08Z"
+            }
+        },
+        "user": {
+            "linux": {
+                "gid": 10001,
+                "supplementalGroups": [
+                    10001
+                ],
+                "uid": 10001
+            }
+        },
+        "volumeMounts": [
+            {
+                "mountPath": "/.openshell/bootstrap-input",
+                "name": "openshell-sandbox-bootstrap",
+                "readOnly": true,
+                "recursiveReadOnly": "Disabled"
+            },
+            {
+                "mountPath": "/.openshell/runtime",
+                "name": "openshell-runtime"
+            },
+            {
+                "mountPath": "/.openshell/state",
+                "name": "openshell-runtime-state"
+            }
+        ]
+    },
+    {
+        "image": "kind.local/koinon-escape/agent:nope",
+        "imageID": "",
+        "lastState": {},
+        "name": "workspace-init",
+        "ready": false,
+        "restartCount": 0,
+        "started": false,
+        "state": {
+            "waiting": {
+                "message": "Back-off pulling image \"kind.local/koinon-escape/agent:nope\": ErrImagePull: failed to pull and unpack image \"kind.local/koinon-escape/agent:nope\": failed to resolve reference \"kind.local/koinon-escape/agent:nope\": failed to do request: Head \"https://kind.local/v2/koinon-escape/agent/manifests/nope\": dial tcp: lookup kind.local on 0.250.250.254:53: server misbehaving",
+                "reason": "ImagePullBackOff"
+            }
+        },
+        "volumeMounts": [
+            {
+                "mountPath": "/mnt/openshell-workspace",
+                "name": "workspace"
+            },
+            {
+                "mountPath": "/.openshell/runtime",
+                "name": "openshell-runtime",
+                "readOnly": true,
+                "recursiveReadOnly": "Disabled"
+            }
+        ]
+    }
+]

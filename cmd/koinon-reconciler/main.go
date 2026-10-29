@@ -138,6 +138,11 @@ func run() error {
 	ready.Store(true)
 	safego.GoOrStop(ctx, log, "keyring-watch-dir", stop, func(ctx context.Context) { keyring.WatchDir(ctx, cfg.kekDir, time.Minute, log) })
 
+	observer, err := newSandboxObserver(cfg, kube, log)
+	if err != nil {
+		return err
+	}
+
 	reg := metrics.NewRegistry()
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, log); err != nil {
 		return err
@@ -171,8 +176,9 @@ func run() error {
 				Keys:   keyring,
 				Client: github.NewClient(github.Options{BaseURL: cfg.githubAPIURL}),
 			},
-			Logger:  log,
-			Metrics: reconciler.NewMetrics(reg),
+			Observer: observer,
+			Logger:   log,
+			Metrics:  reconciler.NewMetrics(reg),
 		})
 	if err != nil {
 		return err
@@ -203,6 +209,26 @@ func restConfig(kubeconfig string) (*rest.Config, error) {
 		return nil, fmt.Errorf("kubernetes client config: %w", err)
 	}
 	return rc, nil
+}
+
+// newSandboxObserver builds the sandbox observer (ADR 0078), or nil when it is off.
+func newSandboxObserver(cfg config, kube kubernetes.Interface, log *slog.Logger) (*reconciler.SandboxObserver, error) {
+	if !cfg.sandboxObserver {
+		log.Warn("the sandbox observer is off: a sandbox that cannot pull its image or keeps crashing shows only OpenShell's reason, so its wait cause stays unknown")
+		return nil, nil
+	}
+	rc, err := restConfig(cfg.kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	dyn, err := dynamic.NewForConfig(rc)
+	if err != nil {
+		return nil, err
+	}
+	return &reconciler.SandboxObserver{
+		Kube: kube, Dynamic: dyn, GatewayID: cfg.openshellGateway, ClusterRole: cfg.sandboxObserverClusterRole,
+		ServiceAccount: cfg.sandboxObserverServiceAccount, ServiceAccountNamespace: cfg.namespace, Log: log,
+	}, nil
 }
 
 func kubeClient(kubeconfig string) (kubernetes.Interface, error) {

@@ -92,3 +92,4 @@ are in [0046](0046-adr-conventions.md).
 | [0075](0075-isolation-tiers.md) | Isolation tiers: vm, hardened and dev | Accepted (pending qualification on Bottlerocket) |
 | [0076](0076-database-modes.md) | Database modes: bring your own, existing CNPG, or standalone Postgres | Accepted (delivery after v0.1.0, in v0.1.x) |
 | [0077](0077-pinned-openshell-and-installer.md) | Koinon pins OpenShell and Agent Sandbox per release, and ships an installer | Accepted (delivery after v0.1.0, in v0.1.x) |
+| [0078](0078-sandbox-observer.md) | Sandbox observer: get-only reads of sandbox pods to explain why a sandbox never became ready | Accepted (delivery in rc.7) |
