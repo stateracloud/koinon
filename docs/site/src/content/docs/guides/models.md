@@ -165,7 +165,9 @@ amendment of 2026-10-29). **Thinking is on unless you turn it off.**
 - **Templates.** A template can start its agents with thinking off: `spec.model.thinking: off`. The
   agent's own setting wins over the template's.
 - **Cost.** Thinking tokens are billed as output tokens at the model's output price. The spend report
-  shows the part providers report separately as `reasoningTokens`, inside `outputTokens`. Expect a
+  shows the part providers report separately as `reasoningTokens`, inside `outputTokens`; it is `null`
+  for Claude models, because Anthropic counts thinking inside the output tokens and reports no split.
+  Expect a
   thinking run to cost more than one without; turn thinking off for agents where it does not help.
 - **The gateway.** It sets the `anthropic-beta` value the model needs itself and never passes an
   agent's header through, so an agent cannot enable provider features.

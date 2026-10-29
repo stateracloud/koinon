@@ -1467,7 +1467,10 @@ components:
         requests: {type: integer, format: int64}
         inputTokens: {type: integer, format: int64}
         outputTokens: {type: integer, format: int64, description: "Output tokens, reasoning (thinking) tokens included."}
-        reasoningTokens: {type: integer, format: int64, description: "The part of outputTokens the provider reported as reasoning. Thinking is billed as output: at the output rate unless the price names a reasoning rate (ADR 0069 amendment 2026-10-29)."}
+        reasoningTokens:
+          type: [integer, "null"]
+          format: int64
+          description: "The part of outputTokens the provider reported as reasoning, or null when no request of the model reported a split. Null does not mean the model did not think: Anthropic Messages has no separate reasoning count and counts thinking inside outputTokens. Thinking is billed as output: at the output rate unless the price names a reasoning rate (ADR 0069 amendment 2026-10-29)."
         reportedUsd: {type: string, description: "Cost of requests whose usage the provider reported."}
         estimatedUsd: {type: string, description: "Cost of requests whose usage was estimated. Counts toward limits."}
         estimatedRequests: {type: integer, format: int64}

@@ -148,6 +148,9 @@ SELECT model,
        -- Reasoning (thinking) tokens are part of output_tokens, billed at the output rate unless the
        -- price names a reasoning rate; this is the part the provider reported separately.
        coalesce(sum(reasoning_tokens), 0)::bigint AS reasoning_tokens,
+       -- False when no request reported a split (Anthropic Messages never does), so the report says
+       -- "not reported" instead of 0.
+       coalesce(bool_or(reasoning_tokens > 0), false)::boolean AS reasoning_reported,
        coalesce(sum(cost_usd) FILTER (WHERE NOT estimated), 0)::text AS reported_usd,
        coalesce(sum(cost_usd) FILTER (WHERE estimated), 0)::text AS estimated_usd,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests,
