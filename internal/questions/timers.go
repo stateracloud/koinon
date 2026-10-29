@@ -195,8 +195,9 @@ func TaskTarget(kind store.NullNotifyTargetKind, user pgtype.UUID, role store.Nu
 // target (the trigger's, by default the org's admins), and returns how many questions it changed. A
 // recipient counts only while they can answer (not deleted, role member or higher); when the last one
 // leaves the org or becomes a viewer, the question would otherwise wait on nobody until it expires.
-// The target resolves as it does when a question is asked: a notify person who can no longer answer,
-// or a target nobody holds, falls back to the default. The new recipients get the question.asked
+// The target resolves as it does when a question is asked: a notify person who can no longer answer
+// falls back to the default (recorded as requestedTarget and fallbackReason); a role nobody holds
+// gets no recipients and the question is left alone. The new recipients get the question.asked
 // notification and their age starts then (ADR 0065 amendment 2026-10-28). Who may answer is an
 // authorization change, so each question that changes is audited as question.retarget, by the system,
 // in the same transaction. An org with nobody to give the question to changes nothing, and the
@@ -223,7 +224,15 @@ func RetargetOrphaned(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 				if err != nil {
 					return err
 				}
-				if len(people) == 0 && target != DefaultTarget {
+				var fallback map[string]any
+				if target.Kind == store.NotifyTargetKindUser && len(people) == 0 {
+					// As on the ask path: only a notify person who can no longer answer falls back to
+					// the default. A role nobody holds stays empty: the question is not widened to
+					// the admins, and (as ask_user refuses it) stays as it is until it expires.
+					fallback = map[string]any{
+						"requestedTarget": map[string]any{"kind": "user", "user": target.User.String()},
+						"fallbackReason":  "the trigger's notify person is no longer a member who can answer",
+					}
 					target = DefaultTarget
 					if people, err = Recipients(ctx, q, org, target); err != nil {
 						return err
@@ -262,21 +271,26 @@ func RetargetOrphaned(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 					}
 				}
 				toLabel := Label(target, name)
+				payload := map[string]any{
+					"question_id": qn.ID.String(), "to_label": toLabel, "recipients": ids,
+					"reason": "nobody it was addressed to can answer any more",
+				}
+				after := map[string]any{
+					"toLabel": toLabel, "recipients": ids, "reason": "nobody it was addressed to can answer any more",
+					"taskId": qn.TaskID.String(), "runId": qn.RunID.String(), "agentId": o.AgentID.String(),
+				}
+				for k, v := range fallback {
+					payload[k], after[k] = v, v
+				}
 				if _, err := q.AppendTaskEvent(ctx, store.AppendTaskEventParams{
 					OrgID: org, TaskID: qn.TaskID, RunID: qn.RunID, Kind: KindRetargeted, ActorKind: store.TaskActorKindSystem,
-					Payload: mustJSON(map[string]any{
-						"question_id": qn.ID.String(), "to_label": toLabel, "recipients": ids,
-						"reason": "nobody it was addressed to can answer any more",
-					}),
+					Payload: mustJSON(payload),
 				}); err != nil {
 					return err
 				}
 				if err := audit.RecordErr(ctx, q, audit.Event{
 					Org: org, Actor: audit.System(), Action: "question.retarget", TargetKind: "question", TargetID: qn.ID.String(),
-					After: map[string]any{
-						"toLabel": toLabel, "recipients": ids, "reason": "nobody it was addressed to can answer any more",
-						"taskId": qn.TaskID.String(), "runId": qn.RunID.String(), "agentId": o.AgentID.String(),
-					},
+					After: after,
 				}); err != nil {
 					return err
 				}

@@ -568,7 +568,8 @@ type Querier interface {
 	// Orgs that have at least one opened question to notify about (the sweeper then queries per org).
 	ListOrgsWithQuestionsToNotify(ctx context.Context) ([]pgtype.UUID, error)
 	// Open questions (run still parked) with no recipient who can still answer, because everyone left
-	// the org or lost the role, with the notify target of their task (NULL kind: the org's default).
+	// the org or lost the role, with the notify target of their task (NULL kind: the org's default). The rows are locked, and a question that is being resolved or canceled is
+	// skipped, so a question closed meanwhile gets no recipients, notification or audit row.
 	ListOrphanedQuestions(ctx context.Context, orgID pgtype.UUID) ([]ListOrphanedQuestionsRow, error)
 	// The org's requests waiting for a human (input_required), oldest first.
 	// Trusted-preset calls are recorded as approved and never listed here.
