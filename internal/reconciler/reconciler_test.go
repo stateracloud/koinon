@@ -1140,6 +1140,38 @@ var _ = Describe("Reconciler", func() {
 			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
 		})
 
+		It("keeps a key the gateway refused not live and holds its agent back, while served keys are converged (issue #245)", func(ctx SpecContext) {
+			a := newAgent(ctx, org, user)
+			r := newReconciler()
+			pass(ctx, r)
+			served := map[string]bool{}
+			for _, k := range mg.last().Keys {
+				served[k.ID] = true
+			}
+			fresh := newAgent(ctx, org, user)
+			// The gateway judges the new key alone: everything else of the state is live.
+			mg.onApply = func(s gateway.State) {
+				for _, k := range s.Keys {
+					if !served[k.ID] {
+						mg.fail = &gateway.RejectedError{Rejected: []gateway.Rejection{
+							{Kind: "Key", Name: k.ID, Reason: "USD budget limits support at most 9 fractional digits"},
+						}}
+					}
+				}
+			}
+			advance(11 * time.Minute)
+			Expect(r.ReconcileAll(ctx)).To(HaveOccurred())
+			Expect(osg.Calls("CreateSandbox")).To(Equal(1), "the refused key is not live: no sandbox for the fresh agent")
+			Expect(sandboxRow(ctx, fresh.ID).Message).To(ContainSubstring("waiting for the gateway"))
+			Expect(sandboxRow(ctx, a.ID).State).To(Equal(store.SandboxStateStopped), "the live key's agent is converged")
+
+			By("the key is accepted")
+			mg.onApply, mg.fail = nil, nil
+			now.Store(nil)
+			pass(ctx, r)
+			Expect(sandboxRow(ctx, fresh.ID).State).To(Equal(store.SandboxStateReady))
+		})
+
 		It("holds back every agent after a restart until one Apply has succeeded", func(ctx SpecContext) {
 			a := newAgent(ctx, org, user)
 			pass(ctx, newReconciler())
