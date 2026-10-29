@@ -29,6 +29,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // ModelGateway is implemented by each gateway driver.
@@ -326,6 +327,10 @@ type Model struct {
 	// Format is the model's wire format (ADR 0069); the drivers render it through one table
 	// (Rendering). It is required.
 	Format modelformat.Format
+	// Thinking is what the catalog says about the model's thinking (internal/thinking). The
+	// rendering pins the anthropic-beta its mode needs and never passes the client's header
+	// through (ADR 0069 amendment 2026-10-29). The zero value is a model that does not think.
+	Thinking thinking.Capability
 	// Guard turns on the routing guard (ADR 0048): the gateway forces GuardOverrides
 	// into every request body.
 	Guard bool
@@ -521,6 +526,8 @@ var (
 	keyID      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	keyHash    = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	modelName  = regexp.MustCompile(`^[A-Za-z0-9_.:/@-]{1,256}$`)
+	// betaValue is one anthropic-beta value, a dated feature name such as thinking-binding-controls-2026-08-01.
+	betaValue = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 	// providerType is an agentgateway providerOverride.
 	providerType = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 	keyPath      = regexp.MustCompile(`^/[A-Za-z0-9_./-]{1,256}$`)
@@ -636,6 +643,15 @@ func (s State) Validate() error {
 				errs = append(errs, fmt.Errorf("model %q of provider %q: unknown or unset format %q", m.Name, ref, m.Format))
 			} else if _, err := RenderingOf(m); err != nil {
 				errs = append(errs, fmt.Errorf("model %q of provider %q: %w", m.Name, ref, err))
+			}
+			if m.Thinking.Mode != "" && !thinking.Known(m.Thinking.Mode) {
+				errs = append(errs, fmt.Errorf("model %q of provider %q: unknown thinking mode %q", m.Name, ref, m.Thinking.Mode))
+			}
+			for _, b := range m.Thinking.Betas {
+				// A beta becomes a header value the gateway sets.
+				if !betaValue.MatchString(b) {
+					errs = append(errs, fmt.Errorf("model %q of provider %q: invalid anthropic beta %q", m.Name, ref, b))
+				}
 			}
 			if !modelName.MatchString(m.Name) {
 				errs = append(errs, fmt.Errorf("model %q of provider %q: invalid name", m.Name, ref))

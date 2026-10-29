@@ -8,6 +8,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 var (
@@ -90,7 +91,11 @@ func fixtures() []fixture {
 		{
 			Org: "acme", Name: "claude", Type: "anthropic", BaseURL: "https://api.anthropic.com/v1",
 			APIKeyFile: "/secrets/upstream/api_key", AnthropicWorkspaceID: "wrkspc_01ExampleExample",
-			Models: []gateway.Model{{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}}},
+			Models: []gateway.Model{
+				{Name: "claude-haiku-4-5", Format: modelformat.Anthropic, Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
+				// A model the catalog says can think: the gateway pins the beta its mode needs.
+				{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Of("anthropic", "claude-haiku-5-5", modelformat.Anthropic), Price: &gateway.Price{Input: "1", Output: "5", CacheRead: "0.1", CacheWrite: "1.25"}},
+			},
 		},
 		{
 			Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: "https://openrouter.ai/api/v1",
