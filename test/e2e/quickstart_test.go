@@ -271,8 +271,8 @@ var _ = Describe("the quickstart", Ordered, func() {
 		fake := providers.Providers[byName["fake"]]
 		Expect(fake.Source).To(Equal("secret"))
 		Expect(fake.ManagedBySecret).To(Equal("fake-model"))
-		Expect(byName).To(HaveKey("anthropic-fake"))
-		Expect(providers.Providers[byName["anthropic-fake"]].ManagedBySecret).To(Equal("fake-anthropic"))
+		Expect(byName).To(HaveKey("fake-anthropic"))
+		Expect(providers.Providers[byName["fake-anthropic"]].ManagedBySecret).To(Equal("fake-anthropic"))
 		code, body := admin(ctx, http.MethodDelete, "/providers/"+fake.ID)
 		Expect(code).To(Equal(http.StatusConflict), "declared providers are read-only: %s", body)
 		// A model has no rates of its own; its price is an org price (or a default one). The fake model
@@ -326,6 +326,18 @@ var _ = Describe("the quickstart", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred())
 		agent = activated.GetAgent()
 		Expect(agent.GetStatus()).To(Equal(agentv1alpha1.AgentStatus_AGENT_STATUS_ACTIVE))
+
+		// The template names no model, so the run takes the org default. The quickstart steps need it
+		// to be the quickstart's model (repo-helper's script makes the tool call step 4 parks on); a
+		// second provider declared by the e2e must not take its place (kind/model-provider-anthropic.yaml).
+		Eventually(func(g Gomega) {
+			code, body := admin(ctx, http.MethodGet, "/agents/"+agent.GetId()+"/model")
+			g.Expect(code).To(Equal(http.StatusOK), string(body))
+			var m struct{ Effective, Source string }
+			g.Expect(json.Unmarshal(body, &m)).To(Succeed())
+			g.Expect(m.Source).To(Equal("org_default"), string(body))
+			g.Expect(m.Effective).To(Equal("repo-helper"), string(body))
+		}).WithContext(ctx).WithTimeout(30 * time.Second).WithPolling(time.Second).Should(Succeed())
 		t.end("3. Agent from template, activated")
 	})
 
