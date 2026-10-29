@@ -21,6 +21,10 @@
 //	KOINON_ESCAPE_REPO          the repository the grant is bound to (default
 //	                            octocat/Hello-World)
 //	KOINON_ESCAPE_OTHER_REPO    a repository it is not bound to (default octocat/Spoon-Knife)
+//	KOINON_ESCAPE_GATEWAY_HOST  a name that resolves inside the sandbox with nothing listening on
+//	                            port 4000, standing in for agentgateway (default localhost)
+//	KOINON_ESCAPE_GITEA_URL     the Gitea base URL the read grant is rendered for (default
+//	                            https://example.com/gitea; the host must resolve in the sandbox)
 //	KOINON_ESCAPE_CLUSTER_DNS   the cluster DNS Service IP (default 10.96.0.10)
 //	KOINON_ESCAPE_EGRESS, KOINON_ESCAPE_METADATA, KOINON_ESCAPE_API, KOINON_ESCAPE_INTERNAL
 //	                            comma-separated host:port lists that replace the default
