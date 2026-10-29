@@ -14,7 +14,10 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/moby/moby/api/types/container"
 	. "github.com/onsi/ginkgo/v2"
@@ -24,6 +27,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/errbody"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/ledger"
@@ -63,6 +67,10 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		ctr      *testcontainers.DockerContainer
 		slowPort int
 		cutPort  int
+		// refusePort is an upstream that answers every request with refuseStatus and refuseBody.
+		refusePort   int
+		refuseStatus atomic.Int64
+		refuseBody   atomic.Value
 	)
 
 	chat := func(ctx context.Context, material, model string) int {
@@ -136,6 +144,15 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		}))
 		DeferCleanup(cut.Close)
 		cutPort = hostPort(cut)
+		refuse := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Generation-Id", "gen-refused-1")
+			w.WriteHeader(int(refuseStatus.Load()))
+			_, _ = io.WriteString(w, refuseBody.Load().(string))
+		}))
+		DeferCleanup(refuse.Close)
+		refusePort = hostPort(refuse)
 		// The fake provider type gets a usage source, as OpenRouter has, so a cut stream is provisional.
 		settling := &ledger.Ingester{DB: db, Log: ing.Log, Prices: ing.Prices, Sources: providerusage.Registry{"fake": &fakeSource{}}}
 		receiver := httptest.NewServer(ledger.Handler(settling, slog.New(slog.NewTextHandler(GinkgoWriter, nil))))
@@ -170,7 +187,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		ctr, err = testcontainers.Run(ctx, agentgatewayImage,
 			testcontainers.WithCmd("-f", "/cfg/config.yaml"),
 			testcontainers.WithExposedPorts("4000/tcp", "15020/tcp", "15021/tcp"),
-			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver), slowPort, cutPort),
+			testcontainers.WithHostPortAccess(hostPort(upstream), hostPort(receiver), slowPort, cutPort, refusePort),
 			testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
 				hc.Binds = append(hc.Binds, cfgDir+":/cfg:ro")
 			}),
@@ -262,6 +279,19 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 
 		Expect(chat(ctx, key.Material, pricedModel)).To(Equal(http.StatusUnauthorized))
 		Expect(chat(ctx, rotated.Material, pricedModel)).To(Equal(http.StatusTooManyRequests))
+
+		// The gateway's own budget 429 and revoked-key 401 say they were not the provider's.
+		logs, err := ctr.Logs(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		raw, _ := io.ReadAll(logs)
+		var own int
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.Contains(line, `"scope":"request"`) && (strings.Contains(line, `"http.status":429`) || strings.Contains(line, `"http.status":401`)) && strings.Contains(line, `"koinon.agent"`) {
+				own++
+				Expect(line).NotTo(ContainSubstring(`"koinon.upstream":true`))
+			}
+		}
+		Expect(own).To(BeNumerically(">", 0), "the gateway's refusals are logged")
 	}, SpecTimeout(time.Minute))
 
 	// agentgateway logs a request whose client left before the response headers with the model
@@ -378,4 +408,134 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_settlements WHERE org_id = $1`, c.org).Scan(&settlements)).To(Succeed())
 		Expect(settlements).To(Equal(1))
 	}, SpecTimeout(time.Minute))
+
+	// A provider's refusal reaches the ledger with the provider's status and a redacted excerpt of its
+	// error, and costs nothing from a provider that does not bill it; the gateway's own refusals (a
+	// bad key, a model the key may not use) are not records of the provider (ADR 0056, amendment
+	// 2026-10-29; ADR 0030, amendment 2026-10-29). Verified against the real binary: koinon.upstream
+	// is true exactly when agentgateway called the provider.
+	Describe("a provider's refusal, as the gateway logs it", func() {
+		var (
+			d    *env
+			dkey gateway.IssuedKey
+		)
+		BeforeAll(func(ctx SpecContext) {
+			d = newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+			d.model(ctx, "openrouter", flash)
+			d.startRun(ctx, d.task(ctx), 1<<40, time.Now().Add(-time.Minute))
+			var err error
+			dkey, err = gateway.NewKey(d.ref())
+			Expect(err).NotTo(HaveOccurred())
+			state.Providers = append(state.Providers, gateway.Provider{
+				Org: d.ref().Org, Name: "refuser", Type: "openrouter",
+				BaseURL: fmt.Sprintf("http://%s:%d/v1", testcontainers.HostInternal, refusePort),
+				Models:  []gateway.Model{{Name: flash, Format: modelformat.OpenAI, Price: &gateway.Price{Input: "0.20", Output: "2"}}},
+			})
+			state.AddKey(dkey.Key)
+			_, err = driver.Apply(ctx, state)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		type refused struct {
+			status       int
+			detail       *string
+			cost         string
+			tokens       int64
+			estimateJSON string
+		}
+		// refusedWith makes the upstream answer status with body, asks for flash through the gateway
+		// and returns the entry the ledger records for it.
+		refusedWith := func(ctx SpecContext, status int, body string) (int, refused) {
+			GinkgoHelper()
+			refuseStatus.Store(int64(status))
+			refuseBody.Store(body)
+			var before int
+			Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE org_id = $1`, d.org).Scan(&before)).To(Succeed())
+			got := chat(ctx, dkey.Material, flash)
+			var r refused
+			Eventually(func() error {
+				var n int
+				if err := db.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE org_id = $1`, d.org).Scan(&n); err != nil {
+					return err
+				}
+				if n <= before {
+					return fmt.Errorf("not recorded yet")
+				}
+				return db.QueryRow(ctx, `SELECT coalesce(upstream_status, 0), upstream_error, cost_usd::text, input_tokens + output_tokens, coalesce(estimate, '{}'::jsonb)::text
+					FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, d.org).Scan(&r.status, &r.detail, &r.cost, &r.tokens, &r.estimateJSON)
+			}).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(Succeed())
+			return got, r
+		}
+
+		It("records an OpenRouter-style moderation 403: the status, the reasons, no prompt text, no charge", func(ctx SpecContext) {
+			got, r := refusedWith(ctx, http.StatusForbidden, `{"error":{"code":403,"message":"Input flagged by moderation","metadata":{"reasons":["violence"],"flagged_input":"the agent's private prompt text","provider_name":"OpenAI"}}}`)
+			Expect(got).To(Equal(http.StatusForbidden))
+			Expect(r.status).To(Equal(403))
+			Expect(r.detail).NotTo(BeNil())
+			Expect(*r.detail).To(Equal("403: Input flagged by moderation (reasons: violence; provider: OpenAI)"))
+			Expect(ledger.FormatUSD(r.cost)).To(Equal("0.00"))
+			Expect(r.tokens).To(BeZero())
+			Expect(r.estimateJSON).To(ContainSubstring("never billed"))
+		})
+
+		It("records a provider's 401 with its status", func(ctx SpecContext) {
+			got, r := refusedWith(ctx, http.StatusUnauthorized, `{"error":{"code":401,"message":"No auth credentials found"}}`)
+			Expect(got).To(Equal(http.StatusUnauthorized))
+			Expect(r.status).To(Equal(401))
+			Expect(*r.detail).To(Equal("401: No auth credentials found"))
+		})
+
+		It("waives an OpenRouter 400 and keeps its status, as a refused request that is not billed", func(ctx SpecContext) {
+			_, r := refusedWith(ctx, http.StatusBadRequest, `{"error":{"code":400,"message":"max_tokens must be positive"}}`)
+			Expect(r.status).To(Equal(400))
+			Expect(ledger.FormatUSD(r.cost)).To(Equal("0.00"))
+			Expect(r.tokens).To(BeZero())
+			Expect(r.estimateJSON).To(ContainSubstring(`"rejected_by_upstream": true`))
+			Expect(r.estimateJSON).To(ContainSubstring("does not bill refused requests"))
+		})
+
+		It("keeps a credential the provider echoed out of the ledger and out of the gateway's log", func(ctx SpecContext) {
+			const echoed = "sk-or-v1-0123456789abcdef0123456789abcdef"
+			_, r := refusedWith(ctx, http.StatusUnauthorized, `{"error":{"code":401,"message":"Invalid key `+echoed+` for Bearer abcdef0123456789xyz"}}`)
+			Expect(*r.detail).NotTo(ContainSubstring("0123456789abcdef"))
+			Expect(*r.detail).To(ContainSubstring("[redacted]"))
+			logs, err := ctr.Logs(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			raw, _ := io.ReadAll(logs)
+			Expect(string(raw)).To(ContainSubstring(`"koinon.error_body"`), "the failed response's body is logged")
+			Expect(string(raw)).NotTo(ContainSubstring("0123456789abcdef0123456789abcdef"))
+			Expect(string(raw)).NotTo(ContainSubstring("abcdef0123456789xyz"))
+		})
+
+		It("caps the logged body, whatever its size or encoding", func(ctx SpecContext) {
+			big := `{"error":{"message":"` + strings.Repeat("é", 50_000) + `"}}`
+			_, r := refusedWith(ctx, http.StatusBadRequest, big)
+			Expect(r.status).To(Equal(400))
+			Expect(*r.detail).NotTo(BeEmpty())
+			Expect(utf8.RuneCountInString(*r.detail)).To(BeNumerically("<=", errbody.ExcerptMax))
+			logs, err := ctr.Logs(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			raw, _ := io.ReadAll(logs)
+			Expect(strings.Count(string(raw), "é")).To(BeNumerically("<", 40_000), "the gateway logs a prefix, not the body")
+		})
+
+		It("does not record the gateway's own refusals as the provider's", func(ctx SpecContext) {
+			var before int
+			Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE org_id = $1`, d.org).Scan(&before)).To(Succeed())
+			Expect(chat(ctx, "kgw_not-a-key-the-gateway-knows", flash)).To(Equal(http.StatusUnauthorized), "a bad key")
+			Expect(chat(ctx, dkey.Material, unpricedModel)).To(BeElementOf(http.StatusForbidden, http.StatusNotFound), "a model the key may not use")
+			// Both records have been exported once a later request has been recorded.
+			refuseStatus.Store(http.StatusOK)
+			refuseBody.Store(`{"id":"x","object":"chat.completion","model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+			Expect(chat(ctx, dkey.Material, flash)).To(Equal(http.StatusOK))
+			Eventually(func() int {
+				var n int
+				Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE org_id = $1`, d.org).Scan(&n)).To(Succeed())
+				return n
+			}).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(Equal(before + 1))
+			var refusals int
+			Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE org_id = $1 AND upstream_status IS NOT NULL`, d.org).Scan(&refusals)).To(Succeed())
+			Expect(refusals).To(Equal(before), "only the provider's refusals carry an upstream status")
+		}, SpecTimeout(time.Minute))
+	})
 })
