@@ -18,7 +18,8 @@ const (
 	errKindSpendLimit      = "spend_limit"      // an agent's budget could not be computed
 	errKindProviderKeys    = "provider_keys"    // delivering or pruning provider key files failed
 	errKindGatewayApply    = "gateway_apply"    // the gateway was unreachable or the reload did not complete
-	errKindGatewayRejected = "gateway_rejected" // the gateway rejected objects (Kubernetes mode)
+	errKindGatewayRejected = "gateway_rejected" // the gateway rejected objects or keys while serving the rest
+	errKindGatewayConfig   = "gateway_config"   // the gateway refused the whole config and kept the previous one (standalone mode)
 	errKindSandbox         = "sandbox"          // converging an agent's sandbox failed
 )
 
@@ -32,14 +33,16 @@ var sandboxStates = []store.SandboxState{
 
 // Metrics are the reconciler's Prometheus metrics (docs/site guide "Metrics").
 type Metrics struct {
-	PassDuration    prometheus.Histogram
-	Passes          *prometheus.CounterVec
-	PassErrors      *prometheus.CounterVec
-	GatewayApply    prometheus.Histogram
-	Sandboxes       *prometheus.GaugeVec
-	AgentsHeldBack  prometheus.Gauge
-	SandboxRepairs  prometheus.Counter
-	AgentsUnhealthy prometheus.Counter
+	PassDuration prometheus.Histogram
+	Passes       *prometheus.CounterVec
+	PassErrors   *prometheus.CounterVec
+	GatewayApply prometheus.Histogram
+	// GatewayConfigRejected is 1 while the last Apply was refused whole by the gateway.
+	GatewayConfigRejected prometheus.Gauge
+	Sandboxes             *prometheus.GaugeVec
+	AgentsHeldBack        prometheus.Gauge
+	SandboxRepairs        prometheus.Counter
+	AgentsUnhealthy       prometheus.Counter
 	// ObserverErrors counts failures of the sandbox observer (ADR 0078), by reason: forbidden,
 	// not_found or other.
 	ObserverErrors *prometheus.CounterVec
@@ -63,6 +66,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_reconciler_gateway_apply_duration_seconds", Help: "Duration of applying the gateway state, including the wait for the reload.",
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300},
 		}),
+		GatewayConfigRejected: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "koinon_reconciler_gateway_config_rejected", Help: "1 while the gateway refused the whole config of the last gateway apply and kept serving the previous one, else 0. The reason is in the reconciler log.",
+		}),
 		Sandboxes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "koinon_reconciler_sandboxes", Help: "Agent sandboxes by recorded state, at the end of the last pass.",
 		}, []string{"state"}),
@@ -85,7 +91,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	for _, k := range []string{
 		errKindDatabase, errKindAgentPrepare, errKindProvider, errKindMCP, errKindSpendLimit,
-		errKindProviderKeys, errKindGatewayApply, errKindGatewayRejected, errKindSandbox,
+		errKindProviderKeys, errKindGatewayApply, errKindGatewayRejected, errKindGatewayConfig, errKindSandbox,
 	} {
 		m.PassErrors.WithLabelValues(k)
 	}
@@ -96,7 +102,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.Sandboxes.WithLabelValues(string(s))
 	}
 	if reg != nil {
-		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.Sandboxes, m.AgentsHeldBack,
+		reg.MustRegister(m.PassDuration, m.Passes, m.PassErrors, m.GatewayApply, m.GatewayConfigRejected, m.Sandboxes, m.AgentsHeldBack,
 			m.SandboxRepairs, m.AgentsUnhealthy, m.ObserverErrors)
 	}
 	return m

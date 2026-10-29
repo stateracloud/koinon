@@ -6,7 +6,9 @@
 # Secret rt1-searxng-secrets (keys secret_key and mcp_token) is delivered by the operator, not by this
 # kustomization; see secrets.example.yaml and ../README.md.
 # Memory: searxng request 96Mi / limit 256Mi (about 87 MiB measured), mcp-searxng request 48Mi / limit
-# 128Mi (about 43 MiB measured).
+# 256Mi (about 43 MiB measured at rest) and CPU limit 2, with 5 s probe timeouts, as fixed on the home
+# lab on 2026-10-29: web_url_read converts whole pages and the old limits (500m, 128Mi, default 1 s
+# probe timeout) did not leave /health room under load.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -144,13 +146,15 @@ spec:
             capabilities: {drop: [ALL]}
           resources:
             requests: {cpu: 20m, memory: 48Mi}
-            limits: {cpu: 500m, memory: 128Mi}
+            limits: {cpu: "2", memory: 256Mi}
           readinessProbe:
             httpGet: {path: /health, port: mcp}
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet: {path: /health, port: mcp}
             periodSeconds: 30
+            timeoutSeconds: 5
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
       volumes:

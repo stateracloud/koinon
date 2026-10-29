@@ -1,4 +1,4 @@
-# Revision 54e6a94e9a5c97d1
+# Revision 9d27191e97796900
 apiVersion: v1
 data:
   catalog.json: '{"providers":{"acme.openrouter":{"models":{"deepseek/deepseek-v4.1-flash":{"rates":{"cacheRead":"0.006","input":"0.30","output":"1.20"},"tiers":[{"contextOver":200000,"rates":{"input":"0.60"}}]}}},"globex.ollama":{"models":{"deepseek/deepseek-v4.1-flash":{"rates":{"input":"0","output":"0"}}}}}}'
@@ -38,7 +38,7 @@ metadata:
 ---
 apiVersion: v1
 data:
-  koinon-reload-probe: '{"keyHash":"sha256:08e3ca84c7ce9f1690d5b13a58271353c43a2fd158d4cd57e045ffeba833eda4","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
+  koinon-reload-probe: '{"keyHash":"sha256:68433a1d5b0cec5465affc2915ecf42c7eaf74e5ddf9e1f26f0b3b4a5be3ef2a","metadata":{"agent":"","internal":true,"name":"koinon-reload-probe","org":""}}'
 kind: ConfigMap
 metadata:
   labels:
@@ -303,6 +303,8 @@ spec:
             name: koinon.req_bytes
           - expression: coalesce(response.headers["x-generation-id"])
             name: koinon.response_id
+          - expression: default(proxy.upstreamDuration, "") != ""
+            name: koinon.upstream
       otlp:
         protocol: HTTP
         url: http://koinon-api.koinon.svc:4318

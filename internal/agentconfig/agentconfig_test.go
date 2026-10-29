@@ -56,6 +56,18 @@ var _ = Describe("The thinking setting", func() {
 	})
 })
 
+var _ = Describe("WebEgress", func() {
+	// No grant opens arbitrary web hosts yet (ADR 0080); a grant type that does adds its case here.
+	It("is false for a version with the usual grants", func() {
+		c := agentconfig.Config{
+			Grants:  []templates.Grant{{Connector: "github", Scopes: []string{"repo.read"}, Preset: templates.PresetStandard}},
+			Harness: templates.Harness{PluginInstalls: true},
+		}
+		Expect(c.WebEgress()).To(BeFalse())
+		Expect(agentconfig.Config{}.WebEgress()).To(BeFalse())
+	})
+})
+
 var _ = Describe("IsEphemeral", func() {
 	It("is off by default, including for a config stored before it existed", func() {
 		cfg, err := agentconfig.Parse([]byte(`{"instructions":"x"}`))
