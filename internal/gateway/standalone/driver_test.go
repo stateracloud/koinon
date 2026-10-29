@@ -4,13 +4,16 @@ package standalone_test
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
+	"github.com/stateracloud/koinon/internal/money"
 )
 
 type recordingDeliverer struct{ configs []string }
@@ -52,5 +55,43 @@ var _ = Describe("Driver", func() {
 		_, err = d.Apply(ctx, s)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(del.configs[3]).To(Equal(del.configs[0]))
+	})
+
+	It("fails only the key of an agent with an invalid limit, and delivers the rest (issue #245)", func(ctx SpecContext) {
+		del := &recordingDeliverer{}
+		d := &standalone.Driver{Deliverer: del, Options: standalone.Options{DatabaseURL: "sqlite:///tmp/x.db"}}
+		s := gateway.State{}
+		s.AddKey(fixedKey("k-aaaaaaaaaaaa", agentA, "test-a"))
+		s.AddKey(fixedKey("k-bbbbbbbbbbbb", agentB, "test-b"))
+		s.AddKey(fixedKey("k-gggggggggggg", agentG, "test-g"))
+		s.SetLimit(agentA, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("0.0172757592"), Window: 24 * time.Hour}) // ten digits
+		s.SetLimit(agentB, &gateway.Limit{Unit: gateway.USD, Amount: money.MustParse("4.98"), Window: 24 * time.Hour})
+		s.SetLimit(agentG, &gateway.Limit{Unit: gateway.USD, Amount: -1, Window: 24 * time.Hour})
+
+		rev, err := d.Apply(ctx, s)
+		var rej *gateway.RejectedError
+		Expect(errors.As(err, &rej)).To(BeTrue(), "%v", err)
+		Expect(rev).NotTo(BeEmpty(), "the revision is live for everything else")
+		Expect(rej.Rejected).To(HaveLen(2))
+		Expect(rej.Rejected[0]).To(Equal(gateway.Rejection{Org: "acme", Kind: "Key", Name: "k-aaaaaaaaaaaa", Reason: "limit: amount 0.017275759200 has more than 9 fraction digits"}))
+		Expect(rej.Rejected[1].Org).To(Equal("globex"))
+		Expect(rej.Rejected[1].Name).To(Equal("k-gggggggggggg"))
+		Expect(rej.Orgs()).To(Equal([]string{"acme", "globex"}))
+
+		Expect(del.configs).To(HaveLen(1))
+		cfg := del.configs[0]
+		Expect(cfg).To(ContainSubstring(gateway.HashKey("test-b")), "the good agent's key is served")
+		Expect(cfg).NotTo(ContainSubstring(gateway.HashKey("test-a")), "a rejected key is not served: it fails closed")
+		Expect(cfg).NotTo(ContainSubstring(gateway.HashKey("test-g")))
+	})
+
+	It("passes the gateway's reason through when it refuses the whole config", func(ctx SpecContext) {
+		reason := &standalone.ConfigRejectedError{Revision: "abc", Reason: "USD budget limits support at most 9 fractional digits"}
+		d := &standalone.Driver{Deliverer: &recordingDeliverer{}, Waiter: &scriptedWaiter{results: []error{reason}}}
+		_, err := d.Apply(ctx, fixtures()[1].state)
+		Expect(err).To(MatchError(standalone.ErrConfigRejected))
+		var got *gateway.ConfigRejectedError
+		Expect(errors.As(err, &got)).To(BeTrue())
+		Expect(got.Reason).To(ContainSubstring("9 fractional digits"))
 	})
 })
