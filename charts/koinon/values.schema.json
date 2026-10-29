@@ -422,7 +422,15 @@
         "address": {"type": "string"},
         "clientTLSSecret": {"type": "string"},
         "insecure": {"type": "boolean"},
-        "runtimeClassName": {"$ref": "#/definitions/nonEmpty"}
+        "runtimeClassName": {"$ref": "#/definitions/nonEmpty"},
+        "gatewayId": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,30}[a-z0-9])?$"}
+      }
+    },
+    "sandboxObserver": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"}
       }
     },
     "publicUrl": {"type": "string", "pattern": "^(https?://[^/?#\\s]+/?)?$"},

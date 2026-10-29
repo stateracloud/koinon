@@ -51,6 +51,8 @@ const sandboxCauses: Record<string, string> = {
   image_pull: 'the image could not be pulled',
   admission: "the cluster's admission policy refused the sandbox",
   no_nodes: 'no node can run the sandbox',
+  crash_loop: 'a container in the sandbox keeps crashing',
+  container_create: 'a container in the sandbox could not be created',
   unknown: 'the cause is unknown',
 }
 

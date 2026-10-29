@@ -73,6 +73,8 @@ var _ = Describe("the sandbox wait cap", func() {
 		Expect(failed.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassSandboxUnavailable))
 		Expect(failed.OutcomeReason.String).To(ContainSubstring("the sandbox never became ready in 20m"))
 		Expect(failed.OutcomeReason.String).To(ContainSubstring("the image could not be pulled"))
+		Expect(failed.OutcomeReason.String).To(ContainSubstring(`(starting: ImagePullBackOff: Back-off pulling image "zot.example.test/x:1")`),
+			"the detail carries the recorded reason and message")
 		var failEvent map[string]any
 		for _, ev := range taskEvents(ctx, e, t) {
 			if ev.Kind == "run.failed" {

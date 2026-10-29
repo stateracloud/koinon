@@ -537,7 +537,23 @@ egress.allowedInternalHosts; both are joined. */}}
 {{- end }}
 {{- end }}
 
+{{/*
+The sandbox observer's ClusterRole (ADR 0078), named <namespace>-<fullname>-sandbox-observer like the
+sandbox policies. The reconciler's RoleBinding to it in each workspace namespace has the same name.
+*/}}
+{{- define "koinon.observerRole" -}}
+{{- printf "%s-%s-sandbox-observer" .Release.Namespace (include "koinon.fullname" .) -}}
+{{- end }}
+
 {{- define "koinon.validate" -}}
+{{- if .Values.sandboxObserver.enabled }}
+{{- if not .Values.sandboxPolicy.enabled }}
+{{- fail "sandboxObserver.enabled needs sandboxPolicy.enabled: the policy's RoleBinding rule is what limits the reconciler's right to bind the observer role to sandbox namespaces. Enable sandboxPolicy, or set sandboxObserver.enabled=false (a sandbox that cannot pull its image then stays an unknown wait cause)" }}
+{{- end }}
+{{- if not (has "Deny" .Values.sandboxPolicy.validationActions) }}
+{{- fail "sandboxObserver.enabled needs sandboxPolicy.validationActions to include Deny: without it the policy only warns or audits and does not limit where the reconciler may bind the observer role. Set sandboxObserver.enabled=false to run without the observer" }}
+{{- end }}
+{{- end }}
 {{- if .Values.checkpoints.enabled }}
 {{- if not .Values.checkpoints.s3.existingSecret }}
 {{- fail "checkpoints.s3.existingSecret is required when checkpoints.enabled is true: a Secret with AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, endpoint and region" }}

@@ -31,6 +31,7 @@ The reconciler runs as one leading replica; standby replicas report the Go and p
 | `koinon_reconciler_agents_waiting_for_gateway_key` | gauge | none | Agents whose sandbox work the last pass held back because the gateway did not serve their new key yet. |
 | `koinon_reconciler_sandbox_repairs_total` | counter | none | Stuck, failed or completed sandboxes deleted to be recreated ([stuck sandboxes](../agent-health/)). |
 | `koinon_reconciler_agents_marked_unhealthy_total` | counter | none | Agents marked unhealthy because their sandbox kept failing. |
+| `koinon_reconciler_sandbox_observer_errors_total` | counter | `reason`: `forbidden`, `not_found`, `other` | Failed reads of sandbox pods or failed RoleBindings of the [sandbox observer](../agent-health/#how-koinon-finds-the-cause). `forbidden` means the cluster refused (the RoleBinding is gone, or `openshell.gatewayId` is wrong). The observer never fails a pass. |
 
 `gateway_rejected` and `gateway_apply` count once per pass, not once per object. Any counted error also makes
 the pass `result="error"`, so `result="ok"` means no error kind increased.
@@ -49,7 +50,7 @@ pruning key files), `gateway_apply` (the gateway was unreachable or the reload d
 | `koinon_agentd_runs_finished_total` | counter | `outcome`: `succeeded`, `failed`, `canceled`, `parked` | Runs this replica ended or parked on approvals. A cancel made by the control plane (a cap, a spend limit, a user) is made by koinon-api and not counted here. |
 | `koinon_agentd_takeovers_total` | counter | none | Runs this replica took over after the owner's lease expired or was released. |
 | `koinon_agentd_sandbox_wait_duration_seconds` | histogram | none | Time a run waited for its agent's sandbox to be ready, whatever the result (a timeout is observed too). |
-| `koinon_agentd_sandbox_wait_cap_total` | counter | `cause`: `image_pull`, `admission`, `no_nodes`, `unknown` | Runs failed because their sandbox never became ready within the org's cap. |
+| `koinon_agentd_sandbox_wait_cap_total` | counter | `cause`: `image_pull`, `admission`, `no_nodes`, `crash_loop`, `container_create`, `unknown` | Runs failed because their sandbox never became ready within the org's cap. |
 | `koinon_agentd_wrap_up_notices_total` | counter | none | Runs whose agent was told its time limit is near. |
 | `koinon_agentd_time_limit_stops_total` | counter | none | Runs this replica stopped at their time limit. The api's wall-clock sweep is the backstop and is not counted. |
 | `koinon_agentd_model_wait_duration_seconds` | histogram | none | Time a run waited, before starting its harness, for the gateway to serve its model (a new provider's key still reaching the gateway). Observed only for runs that waited and were then served or timed out, not for a wait ended by a cancel, a lost lease or a shutdown. |

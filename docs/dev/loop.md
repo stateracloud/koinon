@@ -86,6 +86,8 @@ The sandbox ValidatingAdmissionPolicies and their bindings (ADRs 0045, 0048) are
 deny writes in every `openshell.ai/managed-by=openshell` namespace, which would reach the platform's
 existing sandboxes. The home-lab profile therefore renders them off. `tilt up -- --sandbox-policy`
 turns them on; that needs a Rivet request that Andre approves first. The kind profile always has them.
+The sandbox observer (ADR 0078) needs the policies, so the home-lab profile renders it off too
+(`sandboxObserver.enabled=false`): an image pull error shows as an unknown wait cause there.
 With them off, nothing at admission enforces the Kata runtime class on home-lab dev sandboxes: that
 rests on OpenShell's `default_runtime_class_name: kata` and the reconciler's `runtimeClassName`, so
 the escape suite's admission cases don't hold there.
