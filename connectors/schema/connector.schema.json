@@ -182,7 +182,7 @@
       "additionalProperties": false,
       "required": ["host", "methods", "paths"],
       "properties": {
-        "host": { "type": "string" },
+        "host": { "type": "string", "description": "An exact host name. Patterns are refused: a wildcard host reopens a DNS exfiltration channel (ADR 0075).", "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" },
         "methods": {
           "type": "array",
           "minItems": 1,

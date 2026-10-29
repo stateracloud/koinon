@@ -284,6 +284,23 @@ var _ = Describe("Backend", func() {
 			Expect(err).To(MatchError(execution.ErrFailedPrecondition))
 		})
 
+		It("refuses a wildcard egress host in a policy", func(ctx SpecContext) {
+			_, err := b.CreateSandbox(ctx, ws, spec())
+			Expect(err).NotTo(HaveOccurred())
+			before := len(gw.Policies(ws, "agent-1"))
+
+			for _, host := range []string{"*.example.com", "*", "api.*.example.com"} {
+				p := harnessPolicy()
+				p.Network["wild"] = execution.NetworkRule{
+					Endpoints: []execution.Endpoint{{Host: host, Port: 443, Protocol: "rest", Access: execution.AccessReadOnly}},
+					Binaries:  []string{"/usr/bin/curl"},
+				}
+				_, err = b.EnsurePolicy(ctx, ws, "agent-1", p)
+				Expect(err).To(MatchError(ContainSubstring("DNS exfiltration")), host)
+				Expect(gw.Policies(ws, "agent-1")).To(HaveLen(before))
+			}
+		})
+
 		It("keeps the policy version for an unchanged policy and bumps it for new network rules", func(ctx SpecContext) {
 			_, err := b.CreateSandbox(ctx, ws, spec())
 			Expect(err).NotTo(HaveOccurred())
