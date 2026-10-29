@@ -13,6 +13,7 @@ import (
 	"github.com/stateracloud/koinon/internal/flavor"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/thinking"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -84,8 +85,8 @@ var _ = Describe("prompt caching of the default price list", func() {
 			Expect(prices.CacheModeFor(provider, model, format, p)).To(Equal(want))
 		},
 		Entry("direct anthropic: Messages, the harness places the markers", "anthropic", "claude-haiku-5-5", modelformat.Anthropic, prices.CacheNative),
-		Entry("openrouter anthropic still on chat completions: cache_control markers", "openrouter", "anthropic/claude-haiku-5.5", modelformat.OpenAI, prices.CacheAnthropic),
-		Entry("openrouter anthropic in Messages format (an admin override, or after the flip)", "openrouter", "anthropic/claude-haiku-5.5", modelformat.Anthropic, prices.CacheNative),
+		Entry("openrouter anthropic an admin kept on chat completions: cache_control markers", "openrouter", "anthropic/claude-haiku-5.5", modelformat.OpenAI, prices.CacheAnthropic),
+		Entry("openrouter anthropic in Messages format (the default since #242)", "openrouter", "anthropic/claude-haiku-5.5", modelformat.Anthropic, prices.CacheNative),
 		Entry("openrouter qwen", "openrouter", "qwen/qwen4", modelformat.OpenAI, prices.CacheAlibaba),
 		Entry("openai", "openai", "gpt-6-luna", modelformat.OpenAI, prices.CacheAuto),
 		Entry("openrouter deepseek", "openrouter", "deepseek/deepseek-v4.1-flash", modelformat.OpenAI, prices.CacheAuto),
@@ -113,6 +114,16 @@ var _ = Describe("prompt caching of the default price list", func() {
 			"--mcp-url", "http://gw.test/mcp", "--model-format", "anthropic",
 		}))
 		Expect(agentd.ModelOption(store.AgentFlavorOpencode, modelformat.Anthropic, "claude-haiku-5-5")).To(Equal("koinon-anthropic/claude-haiku-5-5"))
+	})
+
+	It("passes the thinking mode Koinon decided, and nothing when none was", func() {
+		for _, mode := range []thinking.Mode{thinking.None, thinking.Adaptive} {
+			cmd, err := agentd.LaunchCommand(store.AgentFlavorOpencode, agentd.Endpoints{
+				ModelBaseURL: "http://gw.test/v1", Model: "claude-haiku-5-5", MCPURL: "http://gw.test/mcp", Format: modelformat.Anthropic, Thinking: mode,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cmd[len(cmd)-2:]).To(Equal([]string{"--thinking", string(mode)}))
+		}
 	})
 
 	DescribeTable("selects the entry of the model's format",

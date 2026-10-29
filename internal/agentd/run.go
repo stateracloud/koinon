@@ -27,6 +27,7 @@ import (
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/runreply"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // How a driven run ends, besides success (nil).
@@ -437,7 +438,11 @@ func (r *runner) execute(ctx context.Context) error {
 	if ptype == "openrouter" {
 		sessionID = r.run.ID.String()
 	}
-	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker, SessionID: sessionID})
+	// Koinon decides whether the model thinks, from the catalog and the agent's setting; the harness
+	// renders that and never guesses from the model ID (ADR 0069 amendment 2026-10-29).
+	thinkMode := thinking.Of(ptype, model, format).Effective(agentmodel.ChooseThinking(agent.Thinking.String, vc.Thinking))
+	r.log.Info("the run's thinking", "model", model, "mode", string(thinkMode))
+	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker, Thinking: thinkMode, SessionID: sessionID})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/stateracloud/koinon/internal/flavor"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // endpoints are the per-agent values a flavor's launch command takes. None is a secret:
@@ -26,6 +27,10 @@ type endpoints struct {
 	// CacheMarker is the cache-marker format the model's provider needs (prices.CacheMode.Marker),
 	// or "" when it needs none.
 	CacheMarker string
+	// Thinking is the thinking mode Koinon decided for the run (thinking.Capability.Effective): none
+	// or the model's mode. Empty leaves the switch out. The harness renders it; its own guess from
+	// the model ID never decides (ADR 0069 amendment 2026-10-29).
+	Thinking thinking.Mode
 	// SessionID is the run ID to send to OpenRouter as session_id (sticky routing), or "".
 	SessionID string
 }
@@ -50,6 +55,9 @@ func launchCommand(f store.AgentFlavor, e endpoints) ([]string, error) {
 		if d.FormatArg != "" {
 			cmd = append(cmd, d.FormatArg, string(e.Format))
 		}
+	}
+	if e.Thinking != "" && d.ThinkingArg != "" {
+		cmd = append(cmd, d.ThinkingArg, string(e.Thinking))
 	}
 	if e.CacheMarker != "" {
 		arg, ok := d.CacheArgs[e.CacheMarker]
