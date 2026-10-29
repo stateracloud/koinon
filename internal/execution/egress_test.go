@@ -30,5 +30,6 @@ var _ = Describe("CheckEgressHost", func() {
 		Entry("name", "api.github.com"),
 		Entry("service", "agentgateway.koinon.svc"),
 		Entry("ip", "10.0.0.1"),
+		Entry("ipv6, as url.Hostname returns it", "fd00::1"),
 	)
 })
