@@ -174,8 +174,17 @@ has "the observer policy fails closed" 'failurePolicy: Fail' --show-only "$obs"
 has "the observer policy covers RoleBinding create and update" 'operations: \[CREATE, UPDATE\]' --show-only "$obs"
 has "the observer policy binding denies" 'validationActions: \["Deny"\]' --show-only "$obs"
 has "the observer policy keys on the reconciler identity" 'system:serviceaccount:koinon:koinon-reconciler' --show-only "$obs"
-has "the observer policy limits bindings to OpenShell namespaces" "namespaceObject.metadata.labels\['openshell.ai/managed-by'\] == 'openshell'" --show-only "$obs"
 has "the observer policy limits bindings to the configured gateway ID" "openshell.ai/gateway-id'\] == \"prod\"" --set openshell.gatewayId=prod --show-only "$obs"
+has "the observer policy takes the sandbox namespaces from sandboxPolicy.namespaceSelector" 'variables.labels\[\\"openshell.ai/managed-by\\"\] == \\"openshell\\"' --show-only "$obs"
+has "a label added to sandboxPolicy.namespaceSelector reaches the observer policy" 'variables.labels\[\\"team\\"\] == \\"sandboxes\\"' --set sandboxPolicy.namespaceSelector.matchLabels.team=sandboxes --show-only "$obs"
+has "a matchExpression of sandboxPolicy.namespaceSelector reaches the observer policy" 'variables.labels\[\\"tier\\"\] in \[\\"a\\",\\"b\\"\]' \
+	--set 'sandboxPolicy.namespaceSelector.matchExpressions[0].key=tier' --set 'sandboxPolicy.namespaceSelector.matchExpressions[0].operator=In' \
+	--set 'sandboxPolicy.namespaceSelector.matchExpressions[0].values={a,b}' --show-only "$obs"
+if render --set 'sandboxPolicy.namespaceSelector.matchExpressions[0].key=x' --set 'sandboxPolicy.namespaceSelector.matchExpressions[0].operator=Gt' >/dev/null 2>&1; then fail "an unsupported namespaceSelector operator must not render with the observer"; fi
+has "the observer policy requires the workspace namespace name" 'namespaceObject.metadata.name.startsWith\("openshell-openshell-"\)' --show-only "$obs"
+has "the observer policy requires the sandbox-workspace label" "'openshell.ai/sandbox-workspace' in variables.labels" --show-only "$obs"
+has "the observer policy refuses Koinon's own namespace" 'namespaceObject.metadata.name != "koinon"' --show-only "$obs"
+has "the observer policy matches the observer role of any kind" 'has\(object.roleRef\) && object.roleRef.name == ' --show-only "$obs"
 has "the observer policy fixes the roleRef" 'object.roleRef.name == "koinon-koinon-sandbox-observer"' --show-only "$obs"
 has "the observer policy fixes the subject" 'size\(object.subjects\) == 1' --show-only "$obs"
 has "the observer policy fences other identities" "only the Koinon reconciler may bind the sandbox observer role" --show-only "$obs"

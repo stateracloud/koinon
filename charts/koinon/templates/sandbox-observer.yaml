@@ -28,6 +28,29 @@ stays "unknown" in the wait cause. Remove all of this once OpenShell surfaces po
 {{- $sa := include "koinon.componentName" (list . "reconciler") }}
 {{- $user := printf "system:serviceaccount:%s:%s" .Release.Namespace $sa }}
 {{- $gatewayID := .Values.openshell.gatewayId }}
+{{- /* The sandbox namespaces are the ones sandboxPolicy.namespaceSelector selects, as CEL over the namespace's labels. */}}
+{{- $sel := .Values.sandboxPolicy.namespaceSelector }}
+{{- $conds := list }}
+{{- range $k, $v := ($sel.matchLabels | default dict) }}
+{{- $conds = append $conds (printf "(%s in variables.labels && variables.labels[%s] == %s)" ($k | quote) ($k | quote) ($v | quote)) }}
+{{- end }}
+{{- range ($sel.matchExpressions | default list) }}
+{{- $k := .key | quote }}
+{{- if eq .operator "In" }}
+{{- $conds = append $conds (printf "(%s in variables.labels && variables.labels[%s] in %s)" $k $k (.values | toJson)) }}
+{{- else if eq .operator "NotIn" }}
+{{- $conds = append $conds (printf "(!(%s in variables.labels) || !(variables.labels[%s] in %s))" $k $k (.values | toJson)) }}
+{{- else if eq .operator "Exists" }}
+{{- $conds = append $conds (printf "(%s in variables.labels)" $k) }}
+{{- else if eq .operator "DoesNotExist" }}
+{{- $conds = append $conds (printf "(!(%s in variables.labels))" $k) }}
+{{- else }}
+{{- fail (printf "sandboxPolicy.namespaceSelector.matchExpressions: operator %q is not supported by the sandbox observer's policy (In, NotIn, Exists, DoesNotExist)" .operator) }}
+{{- end }}
+{{- end }}
+{{- if not $conds }}
+{{- fail "sandboxPolicy.namespaceSelector selects nothing: the observer's policy needs it to say which namespaces are sandbox namespaces" }}
+{{- end }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -92,25 +115,31 @@ spec:
     - name: reconciler-or-observer-role
       expression: >-
         request.userInfo.username == {{ $user | quote }} || object.metadata.name == {{ $role | quote }} ||
-        (has(object.roleRef) && object.roleRef.kind == 'ClusterRole' && object.roleRef.name == {{ $role | quote }})
+        (has(object.roleRef) && object.roleRef.name == {{ $role | quote }})
   variables:
     - name: reconciler
       expression: {{ printf "request.userInfo.username == %s" ($user | quote) | quote }}
+    - name: labels
+      expression: "has(namespaceObject.metadata.labels) ? namespaceObject.metadata.labels : {'koinon.dev/none': ''}"
+    # A sandbox namespace: what sandboxPolicy.namespaceSelector selects.
     - name: sandboxNamespace
-      expression: >-
-        has(namespaceObject.metadata.labels) && 'openshell.ai/managed-by' in namespaceObject.metadata.labels &&
-        namespaceObject.metadata.labels['openshell.ai/managed-by'] == 'openshell'
+      expression: {{ join " && " $conds | quote }}
+    # A workspace namespace of this release's gateway, as OpenShell managed mode makes it: the gateway-ID
+    # and sandbox-workspace labels, the name openshell-<gatewayId>-<workspace>, and not Koinon's own.
     - name: ourGateway
       expression: >-
-        variables.sandboxNamespace && 'openshell.ai/gateway-id' in namespaceObject.metadata.labels &&
-        namespaceObject.metadata.labels['openshell.ai/gateway-id'] == {{ $gatewayID | quote }}
+        variables.sandboxNamespace && 'openshell.ai/gateway-id' in variables.labels &&
+        variables.labels['openshell.ai/gateway-id'] == {{ $gatewayID | quote }} &&
+        'openshell.ai/sandbox-workspace' in variables.labels &&
+        namespaceObject.metadata.name.startsWith({{ printf "openshell-%s-" $gatewayID | quote }}) &&
+        namespaceObject.metadata.name != {{ .Release.Namespace | quote }}
   validations:
     - expression: "variables.reconciler || !variables.sandboxNamespace"
       reason: Forbidden
       messageExpression: "'only the Koinon reconciler may bind the sandbox observer role in sandbox namespaces, not ' + request.userInfo.username"
     - expression: "!variables.reconciler || variables.ourGateway"
       reason: Forbidden
-      message: {{ printf "the sandbox observer role may be bound only in namespaces labelled openshell.ai/managed-by=openshell and openshell.ai/gateway-id=%s" $gatewayID | quote }}
+      message: {{ printf "the sandbox observer role may be bound only in OpenShell workspace namespaces of gateway %s: namespaces named openshell-%s-<workspace>, labelled as sandboxPolicy.namespaceSelector says and with openshell.ai/gateway-id=%s and openshell.ai/sandbox-workspace" $gatewayID $gatewayID $gatewayID | quote }}
     - expression: {{ printf "!variables.reconciler || object.metadata.name == %s" ($role | quote) | quote }}
       reason: Forbidden
       message: {{ printf "the sandbox observer RoleBinding must be named %s" $role | quote }}
