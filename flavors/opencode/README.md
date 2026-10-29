@@ -123,6 +123,21 @@ turn ends cancelled after it refused a request it prompts the session again with
 refused action and the session directory (`internal/agentd/refusal.go`, run event `run.refusal`).
 The contract suite's `answers the harness's permission requests` spec covers it.
 
+**Subagents are off for every agent** (issue #261). OpenCode 2.2.0's `subagent` tool is live by
+default (depth 1; `explore` is the one configured subagent). A child session outlives a cancelled
+turn (`packages/cli/src/acp/turn.ts:303-311`), so the wall clock (#243) and the wrap-up notice (#183)
+would leave work running, and its messages reach agentd only through the private extension
+`opencode/session/child_update` (gated on `_meta["opencode/child-session-updates"]`, which agentd
+does not advertise), so ADR 0074 traces would miss it. The config therefore ends the top-level
+`permissions` with `{action: subagent, resource: "*", effect: deny}` and repeats it under
+`agents.explore.permissions`. The action name is the tool name (`packages/core/src/tool/plugin/subagent.ts:17`,
+asserted at `:140`). `Tool.snapshot` drops a tool whose last matching rule has resource `*` and
+effect deny (`packages/core/src/tool.ts:255`, `:326-329`), so the model is not offered the tool, the
+same way it is not offered `webfetch`. Keep the rule last for its action. The contract suite checks
+the tool list and that a scripted `subagent` call starts no child. Allowing `explore` per template
+waits for agentd to advertise and record child updates and for cancel to cascade to children
+(verified by a flavor test).
+
 OpenCode's permission gate is not a security boundary: rules saved by an "always" answer live in
 the agent-writable `opencode.db` and can turn `ask` into `allow`, and the shell is unrestricted.
 OpenShell and Kata are the boundary. koinon-agentd answers each request once and saves nothing.
@@ -209,6 +224,7 @@ session whose call was `functions.write:0` replays as `functions_write_0`; the s
 | Built-in provider plugins (Copilot, Bedrock, OpenRouter, …) | plugin `-opencode.provider.*`; `opencode.provider.opencode` is guarded and stays (see below) | `packages/core/src/plugin/provider/`, `packages/core/src/plugin/internal.ts` |
 | Web search | plugins `-opencode.websearch.*`, `-opencode.tool.websearch` | `packages/core/src/tool/plugin/websearch.ts` |
 | Built-in `webfetch`, for an agent without web egress | `--no-web-tools` (set by koinon-agentd unless `agentconfig.Config.WebEgress`, ADR 0080) adds the permission rule `webfetch` `*` deny to the config overlay; a denied tool is not offered to the model, so the agent uses the org's MCP tools, which its instructions name. The contract suite checks the tool list with and without the switch | `packages/core/src/permission.ts` |
+| Subagents (`subagent` tool) | the permission rule `subagent` `*` deny in the config, top level and `agents.explore`; a denied tool is not offered to the model. Children outlive a cancelled turn and agentd does not see their events (issue #261) | `packages/core/src/tool.ts`, `packages/core/src/tool/plugin/subagent.ts` |
 | Logins for well-known integrations | plugin `-opencode.wellknown` | `packages/core/src/wellknown/plugin.ts` |
 | ripgrep download from GitHub | `rg` installed; OpenCode uses `rg` from `PATH` | `packages/core/src/ripgrep/binary.ts` |
 | Telemetry | OpenTelemetry export only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which the entry script unsets | `packages/util/src/observability/otlp.ts` |

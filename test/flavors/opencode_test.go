@@ -4,6 +4,7 @@ package flavors_test
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"slices"
 	"strings"
@@ -137,6 +138,70 @@ var _ = Describe("koinon-opencode web tools", func() {
 	}, SpecTimeout(3*time.Minute))
 	It("offers neither with --no-web-tools", func(ctx SpecContext) {
 		Expect(offered(ctx, []string{"webfetch", "websearch"}, "--no-web-tools")).To(Equal(map[string]bool{"webfetch": false, "websearch": false}))
+	}, SpecTimeout(3*time.Minute))
+})
+
+// Subagents are off for every agent (issue #261): OpenCode 2.2.0's children outlive a cancelled
+// turn and agentd records none of their events. The permission rule `subagent` `*` deny in the
+// config removes the tool from what the model is offered, and a call to it anyway starts no child.
+var _ = Describe("koinon-opencode subagents", func() {
+	const (
+		subagentMarker = "KOINON-SUBAGENT"
+		// The text OpenCode puts at the start of a child session's first prompt
+		// (packages/core/src/tool/plugin/subagent.ts).
+		childPrompt = "You are a subagent spawned by another session"
+	)
+	script := fakemodel.Script{Model: contractModel, Turns: []fakemodel.Turn{
+		{When: fakemodel.When{ToolResult: fakemodel.AnyTool, UserContains: subagentMarker}, Text: helloReply},
+		{
+			When: fakemodel.When{UserContains: subagentMarker},
+			ToolCalls: []fakemodel.ToolCall{{Name: "subagent", Arguments: map[string]any{
+				"agent": "explore", "description": "List files", "prompt": "List the files.", "background": true,
+			}}},
+		},
+		{Text: helloReply},
+	}}
+	// offeredTools are the names in the request's "tools" list; the history may name other tools.
+	offeredTools := func(body string) []string {
+		var req struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		Expect(json.Unmarshal([]byte(body), &req)).To(Succeed())
+		var names []string
+		for _, t := range req.Tools {
+			names = append(names, t.Function.Name)
+		}
+		return names
+	}
+
+	It("does not offer the subagent tool, and refuses a scripted call without starting a child", func(ctx SpecContext) {
+		gw := newGateway(script)
+		sb := newOpencodeSandbox(ctx, instructionsMarker+"\n")
+		h, session := opencodeHarness(ctx, sb, gw)
+
+		stop, err := h.conn.Prompt(ctx, session, subagentMarker+" delegate this.")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(stop).To(BeElementOf(acp.StopEndTurn, acp.StopCancelled))
+		h.client.take()
+
+		// The agent's own requests carry the tool list; the session title request does not.
+		var agent []string
+		for _, body := range gw.modelBodies() {
+			Expect(body).NotTo(ContainSubstring(childPrompt), "a child session sent a request")
+			if slices.Contains(offeredTools(body), opencode.mcpToolName) {
+				agent = append(agent, body)
+			}
+		}
+		// One request offered the tools and one returned the refused call's error.
+		Expect(len(agent)).To(BeNumerically(">=", 2), "the model was asked again after the call")
+		for _, body := range agent {
+			Expect(offeredTools(body)).NotTo(ContainElement("subagent"), "the model is offered the subagent tool")
+			Expect(body).NotTo(ContainSubstring("Available subagents"))
+		}
 	}, SpecTimeout(3*time.Minute))
 })
 
