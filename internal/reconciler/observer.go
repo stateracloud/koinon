@@ -18,6 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/project"
 )
 
 // Observer error reasons of koinon_reconciler_sandbox_observer_errors_total: a fixed set (ADR 0023).
@@ -26,6 +27,10 @@ const (
 	observerNotFound  = "not_found"
 	observerOther     = "other"
 )
+
+// ObserverLabel is the label of the RoleBindings the observer creates: kubectl delete rolebinding -A -l
+// koinon.dev/sandbox-observer=true removes them.
+var ObserverLabel = project.Domain + "/sandbox-observer"
 
 var observerReasons = []string{observerForbidden, observerNotFound, observerOther}
 
@@ -53,8 +58,44 @@ type SandboxObserver struct {
 	// Errors counts failures by reason; nil keeps them uncounted.
 	Errors *prometheus.CounterVec
 
+	// Now defaults to time.Now; tests move it.
+	Now func() time.Time
+
 	mu    sync.Mutex
 	bound map[string]bool
+	// denied is the negative cache: a namespace whose RoleBinding could not be created is not tried
+	// again until its backoff has passed.
+	denied map[string]*denial
+}
+
+// denial is one namespace's failed attempts.
+type denial struct {
+	failures int
+	until    time.Time
+	err      error
+}
+
+// Backoff after a failed RoleBinding: observerBackoffBase doubled for each failure in a row, capped at
+// observerBackoffMax. A namespace OpenShell has not created yet is retried soon; a policy that refuses
+// the binding (a wrong gateway ID) is not asked every 30 seconds for ever.
+const (
+	observerBackoffBase = 10 * time.Second
+	observerBackoffMax  = 5 * time.Minute
+)
+
+func (o *SandboxObserver) now() time.Time {
+	if o.Now != nil {
+		return o.Now()
+	}
+	return time.Now()
+}
+
+func observerBackoff(failures int) time.Duration {
+	d := observerBackoffBase
+	for i := 1; i < failures && d < observerBackoffMax; i++ {
+		d *= 2
+	}
+	return min(d, observerBackoffMax)
 }
 
 func (o *SandboxObserver) namespace(workspace string) string {
@@ -68,21 +109,37 @@ func (o *SandboxObserver) EnsureAccess(ctx context.Context, workspace string) er
 	ns := o.namespace(workspace)
 	o.mu.Lock()
 	done := o.bound[ns]
+	d := o.denied[ns]
 	o.mu.Unlock()
 	if done {
 		return nil
+	}
+	if d != nil && o.now().Before(d.until) {
+		return d.err
 	}
 	ctx, cancel := context.WithTimeout(ctx, observerCallTimeout)
 	defer cancel()
 	_, err := o.Kube.RbacV1().RoleBindings(ns).Create(ctx, &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: o.ClusterRole, Namespace: ns, Labels: map[string]string{
 			"app.kubernetes.io/managed-by": ManagedByValue,
+			// For the one-liner that removes them after the observer is turned off (docs).
+			ObserverLabel: "true",
 		}},
 		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: o.ClusterRole},
 		Subjects: []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: o.ServiceAccount, Namespace: o.ServiceAccountNamespace}},
 	}, metav1.CreateOptions{FieldManager: ManagedByValue})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		o.count(err)
+		o.mu.Lock()
+		if o.denied == nil {
+			o.denied = map[string]*denial{}
+		}
+		failures := 1
+		if d != nil {
+			failures = d.failures + 1
+		}
+		o.denied[ns] = &denial{failures: failures, until: o.now().Add(observerBackoff(failures)), err: err}
+		o.mu.Unlock()
 		return err
 	}
 	o.mu.Lock()
@@ -90,6 +147,7 @@ func (o *SandboxObserver) EnsureAccess(ctx context.Context, workspace string) er
 		o.bound = map[string]bool{}
 	}
 	o.bound[ns] = true
+	delete(o.denied, ns)
 	o.mu.Unlock()
 	if err == nil {
 		o.log().Info("bound the sandbox observer role", "namespace", ns)
@@ -97,26 +155,45 @@ func (o *SandboxObserver) EnsureAccess(ctx context.Context, workspace string) er
 	return nil
 }
 
-// Explain reads the pod of the sandbox, or the Agent Sandbox object when the pod does not exist,
-// and returns what explains the wait. Any failure returns the zero detail: the observer only adds
-// to what OpenShell reports, so the caller keeps OpenShell's reason.
-func (o *SandboxObserver) Explain(ctx context.Context, workspace, sandbox string) execution.WaitDetail {
+// Explain reads the sandbox's workload pod and returns what explains the wait. When that pod says
+// nothing it reads the supervisor pod, which OpenShell 0.1.5 creates next to it and names after the
+// sandbox's ID (a supervisor image that cannot be pulled leaves the workload pod terminated with
+// nothing waiting, and OpenShell reporting only ConfigurationPending). When the workload pod does
+// not exist it reads the Agent Sandbox object. Any failure returns the zero detail: the observer only
+// adds to what OpenShell reports, so the caller keeps OpenShell's reason. Reads are get by name.
+func (o *SandboxObserver) Explain(ctx context.Context, workspace, sandbox, sandboxID string) execution.WaitDetail {
 	if err := o.EnsureAccess(ctx, workspace); err != nil {
 		return execution.WaitDetail{}
 	}
 	ns := o.namespace(workspace)
 	cctx, cancel := context.WithTimeout(ctx, observerCallTimeout)
 	defer cancel()
-	// In managed mode the pod and the Sandbox object are named after the OpenShell sandbox.
+	// In managed mode the pod and the Sandbox object carry the OpenShell sandbox's name.
 	pod, err := o.Kube.CoreV1().Pods(ns).Get(cctx, sandbox, metav1.GetOptions{})
+	podMissing := apierrors.IsNotFound(err)
 	switch {
 	case err == nil:
-		return execution.PodWaitDetail(pod)
-	case !apierrors.IsNotFound(err):
+		if d := execution.PodWaitDetail(pod); !d.IsZero() {
+			return d
+		}
+	case !podMissing:
 		o.failed(ns, err)
 		return execution.WaitDetail{}
 	}
-	if o.Dynamic == nil {
+	if sandboxID != "" {
+		sup, err := o.Kube.CoreV1().Pods(ns).Get(cctx, execution.SupervisorPodName(sandboxID), metav1.GetOptions{})
+		switch {
+		case err == nil:
+			if d := execution.PodWaitDetail(sup); !d.IsZero() {
+				d.Message = truncateSupervisor(d.Message)
+				return d
+			}
+		case !apierrors.IsNotFound(err):
+			o.failed(ns, err)
+			return execution.WaitDetail{}
+		}
+	}
+	if !podMissing || o.Dynamic == nil {
 		return execution.WaitDetail{}
 	}
 	cr, err := o.Dynamic.Resource(sandboxGVR).Namespace(ns).Get(cctx, sandbox, metav1.GetOptions{})
@@ -129,6 +206,12 @@ func (o *SandboxObserver) Explain(ctx context.Context, workspace, sandbox string
 	}
 	o.failed(ns, err)
 	return execution.WaitDetail{}
+}
+
+// truncateSupervisor marks a message as the supervisor pod's, so that an operator does not look for the
+// flavor image.
+func truncateSupervisor(msg string) string {
+	return execution.TruncateWaitDetail("supervisor pod: " + msg)
 }
 
 // failed counts a failed read. A forbidden read means the RoleBinding is gone (deleted by hand):

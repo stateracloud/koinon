@@ -530,6 +530,28 @@ var _ = Describe("Reconciler", func() {
 				Expect(execution.ClassifySandboxWait(got.Reason, got.Message)).To(Equal(execution.WaitCauseImagePull))
 			})
 
+			It("reads the supervisor pod, by the sandbox's ID, when the workload pod says nothing", func(ctx SpecContext) {
+				// Captured on kind (OpenShell 0.1.5, supervisor_image that cannot be pulled): the workload pod
+				// ended with nothing waiting, the supervisor pod was in ErrImagePull, and OpenShell said
+				// ConfigurationPending.
+				workload := imagePullPod()
+				workload.Status.InitContainerStatuses = nil
+				_, err := kube.CoreV1().Pods(ns).Create(ctx, workload, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				data, err := os.ReadFile("../execution/testdata/supervisor-bad-image-container-statuses.json")
+				Expect(err).NotTo(HaveOccurred())
+				sup := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: execution.SupervisorPodName(sandboxRow(ctx, agent.ID).HomeGeneration.String), Namespace: ns}}
+				Expect(json.Unmarshal(data, &sup.Status.ContainerStatuses)).To(Succeed())
+				_, err = kube.CoreV1().Pods(ns).Create(ctx, sup, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				provisioning()
+				pass(ctx, r)
+				got := sandboxRow(ctx, agent.ID)
+				Expect(got.Reason).To(Equal("ErrImagePull"))
+				Expect(got.Message).To(HavePrefix("supervisor pod: failed to pull and unpack image"))
+				Expect(execution.ClassifySandboxWait(got.Reason, got.Message)).To(Equal(execution.WaitCauseImagePull))
+			})
+
 			It("reads the Agent Sandbox object when the pod is missing", func(ctx SpecContext) {
 				cr := &unstructured.Unstructured{Object: map[string]any{
 					"apiVersion": "agents.x-k8s.io/v1beta1", "kind": "Sandbox",
