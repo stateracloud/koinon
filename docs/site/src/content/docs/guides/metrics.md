@@ -51,7 +51,7 @@ pruning key files), `gateway_apply` (the gateway was unreachable or the reload d
 | `koinon_agentd_takeovers_total` | counter | none | Runs this replica took over after the owner's lease expired or was released. |
 | `koinon_agentd_sandbox_wait_duration_seconds` | histogram | none | Time a run waited for its agent's sandbox to be ready, whatever the result (a timeout is observed too). |
 | `koinon_agentd_sandbox_wait_cap_total` | counter | `cause`: `image_pull`, `admission`, `no_nodes`, `crash_loop`, `container_create`, `unknown` | Runs failed because their sandbox never became ready within the org's cap. |
-| `koinon_agentd_wrap_up_notices_total` | counter | none | Runs whose agent was told its time limit is near. |
+| `koinon_agentd_wrap_up_notices_total` | counter | `limit`: `time`, `requests`, `spend` | Runs whose agent was told a run limit is near (about 80% of it), by the limit that was nearest. |
 | `koinon_agentd_time_limit_stops_total` | counter | none | Runs this replica stopped at their time limit. The api's wall-clock sweep is the backstop and is not counted. |
 | `koinon_agentd_model_wait_duration_seconds` | histogram | none | Time a run waited, before starting its harness, for the gateway to serve its model (a new provider's key still reaching the gateway). Observed only for runs that waited and were then served or timed out, not for a wait ended by a cancel, a lost lease or a shutdown. |
 
