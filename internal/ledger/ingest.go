@@ -220,10 +220,9 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			}
 		}
 		if run.ID.Valid {
-			// The token cap (plan item A4). RecordTokenUsage nests a savepoint. Estimated
-			// tokens count like reported ones.
-			if _, err := scheduler.RecordTokenUsage(ctx, tx, org.ID, run.ID, pr.inTokens+pr.outTokens); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("record token usage: %w", err)
+			// Tokens are reported, not enforced (ADR 0080). Estimated tokens count like reported ones.
+			if _, err := q.AddRunTokens(ctx, store.AddRunTokensParams{OrgID: org.ID, ID: run.ID, Tokens: pr.inTokens + pr.outTokens}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("record run tokens: %w", err)
 			}
 		}
 		// Budgets, alerts and stops count the charge only; the reserve gates the gateway key, so
@@ -233,7 +232,18 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 				return fmt.Errorf("wake the reconciler: %w", err)
 			}
 		}
-		return in.enforce(ctx, q, org.ID, agent.ID, run, e, pr.cost)
+		// The agent's, org's and platform's budgets stop first: the broadest limit reached names the
+		// stop. Then the run's own limits (ADR 0080), against the ledger including this entry: its
+		// model requests and its spend. CheckRunLimits nests a savepoint.
+		if err := in.enforce(ctx, q, org.ID, agent.ID, run, e, pr.cost); err != nil {
+			return err
+		}
+		if run.ID.Valid {
+			if _, err := scheduler.CheckRunLimits(ctx, tx, org.ID, run.ID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("check run limits: %w", err)
+			}
+		}
+		return nil
 	})
 	return recorded, err
 }

@@ -60,7 +60,8 @@ var _ = Describe("template sync", func() {
 			HaveField("Preset", templatev1alpha1.Preset_PRESET_STANDARD),
 		)))
 		Expect(t.GetRunLimits().GetMaxDurationSeconds()).To(Equal(int64(1800)))
-		Expect(t.GetRunLimits().GetMaxTokens()).To(Equal(int64(2_000_000)))
+		Expect(t.GetRunLimits().GetMaxModelRequests()).To(Equal(int64(300)))
+		Expect(t.GetRunLimits().GetMaxSpendUsd()).To(Equal("5.00"))
 		Expect(t.GetSpendLimitUsd()).To(Equal("10.00"))
 	})
 })
@@ -300,7 +301,8 @@ var _ = Describe("TicketService and run scheduling", func() {
 		Expect(t.GetStatus()).To(Equal(ticketv1alpha1.TicketStatus_TICKET_STATUS_TODO))
 		Expect(r.GetState()).To(Equal(runv1alpha1.RunState_RUN_STATE_QUEUED))
 		Expect(r.GetMaxWallClockSeconds()).To(Equal(int64(1800)))
-		Expect(r.GetMaxTokens()).To(Equal(int64(2_000_000)))
+		Expect(r.GetMaxModelRequests()).To(Equal(int64(300)))
+		Expect(r.GetMaxSpendUsd()).To(Equal("5.00"))
 
 		got := member.getTicket(ctx, org, t.GetId())
 		Expect(ticketKinds(got)).To(Equal([]string{"ticket.created", "message", "run.queued"}))
@@ -504,23 +506,15 @@ var _ = Describe("TicketService and run scheduling", func() {
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("message", "Stopped at the time limit of 30m."))
 		})
 
-		It("cancels a run when recorded usage reaches the token cap", func(ctx SpecContext) {
-			t, r := member.createTicket(ctx, org, agent.GetId(), "chatty")
+		It("reports the tokens a run used without ending it at any total (ADR 0080)", func(ctx SpecContext) {
+			_, r := member.createTicket(ctx, org, agent.GetId(), "chatty")
 			run := ad.mustClaim(ctx, org)
-			got, err := recordTokens(ctx, e, run, 1_999_999)
+			_, err := recordTokens(ctx, e, run, 1_999_999)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(got.State).To(Equal(store.RunStateRunning))
-			got, err = recordTokens(ctx, e, run, 1)
+			got, err := recordTokens(ctx, e, run, 40_000_000)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(got.State).To(Equal(store.RunStateCanceled))
-			Expect(got.FailureClass.RunFailureClass).To(Equal(store.RunFailureClassBudget))
-			Expect(member.getRun(ctx, org, r.GetId()).GetTokensUsed()).To(Equal(int64(2_000_000)))
-
-			ticket := member.getTicket(ctx, org, t.GetId())
-			last := ticket.GetEvents()[len(ticket.GetEvents())-1]
-			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("reason", "token_cap"))
-			_, err = recordTokens(ctx, e, run, 10)
-			Expect(err).To(HaveOccurred(), "usage after the run finished is dropped")
+			Expect(got.State).To(Equal(store.RunStateRunning), "tokens are reported, not enforced")
+			Expect(member.getRun(ctx, org, r.GetId()).GetTokensUsed()).To(Equal(int64(41_999_999)))
 		})
 
 		It("shows the recorded spend of each run and of the ticket", func(ctx SpecContext) {

@@ -52,7 +52,7 @@ func newWorld(ctx context.Context) world {
 	t, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: w.org, Title: "t", AgentID: a.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: w.user})
 	Expect(err).NotTo(HaveOccurred())
 	w.task = t.ID
-	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: w.org, AgentID: a.ID, TaskID: t.ID, MaxWallClockSeconds: 600, MaxTokens: 1000})
+	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: w.org, AgentID: a.ID, TaskID: t.ID, MaxWallClockSeconds: 600})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: w.org, OwnerID: "test", LeaseSeconds: 60})
 	Expect(err).NotTo(HaveOccurred())

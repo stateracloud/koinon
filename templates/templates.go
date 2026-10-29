@@ -192,10 +192,20 @@ type Limits struct {
 	SpendUSD USD       `json:"spendUSD"`
 }
 
-// RunLimits cap a single run; hitting one cancels the run.
+// RunLimits cap a single run; the first one reached cancels it (ADR 0080).
 type RunLimits struct {
+	// MaxDuration is the wall-clock limit.
 	MaxDuration Duration `json:"maxDuration"`
-	MaxTokens   int64    `json:"maxTokens"`
+	// MaxModelRequests counts every model request through the agent's key, the harness's own title,
+	// summary and compaction calls included.
+	MaxModelRequests int64 `json:"maxModelRequests"`
+	// MaxSpendUSD is the run's spend by the ledger's settled cost.
+	MaxSpendUSD USD `json:"maxSpendUSD"`
+	// MaxTokens is deprecated: tokens are reported, not enforced (ADR 0080). A template may still
+	// carry it; nothing reads it.
+	//
+	// Deprecated: tokens are reported, not enforced.
+	MaxTokens int64 `json:"maxTokens,omitempty"`
 }
 
 // Duration is a time.Duration written as a Go duration string.
@@ -360,6 +370,12 @@ func (t *Template) check() error {
 	}
 	if t.Spec.Limits.SpendUSD <= 0 {
 		return errors.New("limits.spendUSD must be greater than zero")
+	}
+	if t.Spec.Limits.Run.MaxModelRequests <= 0 {
+		return errors.New("limits.run.maxModelRequests must be greater than zero")
+	}
+	if t.Spec.Limits.Run.MaxSpendUSD <= 0 {
+		return errors.New("limits.run.maxSpendUSD must be greater than zero")
 	}
 	if err := t.Spec.Questions.Validate(); err != nil {
 		return fmt.Errorf("spec.%w", err)

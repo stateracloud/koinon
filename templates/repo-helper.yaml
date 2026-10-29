@@ -34,7 +34,8 @@ spec:
   limits:
     run:
       maxDuration: 30m
-      maxTokens: 2000000
+      maxModelRequests: 300
+      maxSpendUSD: "5.00"
     spendUSD: "10.00"
   instructions: |
     # Repo helper
