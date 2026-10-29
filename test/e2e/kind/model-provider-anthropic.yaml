@@ -2,10 +2,14 @@
 #
 # A second declared provider for the e2e (ADR 0069): a direct Anthropic provider whose upstream is the
 # fake model server (test/fakemodel/scripts/claude-e2e.yaml), so its model runs in the Messages format
-# through the harness's koinon-anthropic entry, the gateway and the ledger. Step 6d sets the agent to
-# claude-e2e explicitly, so the provider's name plays no part in which model the run uses. Side effect:
-# once 6d prices claude-e2e it becomes the org default, because "anthropic-fake" sorts before "fake";
-# a step added after 6d that relies on the default model must set its model explicitly.
+# through the harness's koinon-anthropic entry, the gateway and the ledger. Steps 6d and 8 set the
+# agent's model explicitly.
+# The provider's name must sort after the quickstart's ("fake"): the org default is the first served,
+# priced model by provider name, then model name (agentmodel.OrgDefault), and the quickstart steps run
+# on the org default, which must stay repo-helper. claude-haiku-5-5 is priced by the default price list
+# from the moment it is declared, so under a name sorting first ("anthropic-fake", rc.8) it became the
+# org default and step 4 ran on its script instead of repo-helper's. test/e2e/fixtures_test.go checks
+# this offline.
 # claude-haiku-5-5 is a Claude 5.x ID the thinking table matches (internal/thinking), so step 6e
 # sends adaptive thinking with block_binding through the real gateway to the strict fake model
 # (script claude-haiku-5-5.yaml; the fake runs with -strict-messages, test/e2e/kind/fakes.yaml).
@@ -19,7 +23,7 @@ metadata:
     koinon.dev/secret-type: model-provider
     koinon.dev/org: default
 stringData:
-  name: anthropic-fake
+  name: fake-anthropic
   provider: anthropic
   url: http://fakemodel.koinon-e2e-fakes.svc:8080/v1
   apiKey: e2e-dummy-key
