@@ -54,6 +54,8 @@ func toAgentModel(v agentmodel.View) AgentModel {
 	if v.Problem != "" {
 		out.Problem = &v.Problem
 	}
+	t := toThinkingState(v.Thinking)
+	out.Thinking = &t
 	out.Available = make([]struct {
 		Name     string `json:"name"`
 		Provider string `json:"provider"`
@@ -159,4 +161,39 @@ func (s *Server) CheckProviderEcho(ctx context.Context, req CheckProviderEchoReq
 		return CheckProviderEchodefaultJSONResponse{Body: e, StatusCode: st}, nil
 	}
 	return CheckProviderEcho200JSONResponse(toEchoCheck(r)), nil
+}
+
+func toThinkingState(t agentmodel.ThinkingView) ThinkingState {
+	out := ThinkingState{
+		Setting: ThinkingStateSetting(settingLabel(string(t.Setting))), Effective: ThinkingStateEffective(t.Effective),
+		Supported: t.Supported(), Mode: ThinkingStateMode(t.Mode()),
+	}
+	if t.VersionSetting != "" {
+		v := ThinkingStateVersionSetting(t.VersionSetting)
+		out.VersionSetting = &v
+	}
+	return out
+}
+
+func settingLabel(s string) string {
+	if s == "" {
+		return agentmodel.Default
+	}
+	return s
+}
+
+// SetAgentThinking implements StrictServerInterface.
+func (s *Server) SetAgentThinking(ctx context.Context, req SetAgentThinkingRequestObject) (SetAgentThinkingResponseObject, error) {
+	p, actor := s.actor(ctx)
+	agent := pgUUID(req.AgentId.String())
+	if _, err := s.agentModels.SetThinking(ctx, p.Org, agent, actor, agentmodel.NormalizeThinking(string(req.Body.Thinking))); err != nil {
+		st, e := s.problem(err)
+		return SetAgentThinkingdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	_, v, err := s.agentModels.Load(ctx, p.Org, agent, time.Now())
+	if err != nil {
+		st, e := s.problem(err)
+		return SetAgentThinkingdefaultJSONResponse{Body: e, StatusCode: st}, nil
+	}
+	return SetAgentThinking200JSONResponse(toAgentModel(v)), nil
 }

@@ -42,6 +42,27 @@ func (e AgentModelSource) Valid() bool {
 	}
 }
 
+// Defines values for AgentThinkingUpdateThinking.
+const (
+	AgentThinkingUpdateThinkingDefault AgentThinkingUpdateThinking = "default"
+	AgentThinkingUpdateThinkingOff     AgentThinkingUpdateThinking = "off"
+	AgentThinkingUpdateThinkingOn      AgentThinkingUpdateThinking = "on"
+)
+
+// Valid indicates whether the value is a known member of the AgentThinkingUpdateThinking enum.
+func (e AgentThinkingUpdateThinking) Valid() bool {
+	switch e {
+	case AgentThinkingUpdateThinkingDefault:
+		return true
+	case AgentThinkingUpdateThinkingOff:
+		return true
+	case AgentThinkingUpdateThinkingOn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditEventActorKind.
 const (
 	AuditEventActorKindAgent  AuditEventActorKind = "agent"
@@ -336,6 +357,81 @@ func (e Source) Valid() bool {
 	}
 }
 
+// Defines values for ThinkingStateEffective.
+const (
+	ThinkingStateEffectiveOff ThinkingStateEffective = "off"
+	ThinkingStateEffectiveOn  ThinkingStateEffective = "on"
+)
+
+// Valid indicates whether the value is a known member of the ThinkingStateEffective enum.
+func (e ThinkingStateEffective) Valid() bool {
+	switch e {
+	case ThinkingStateEffectiveOff:
+		return true
+	case ThinkingStateEffectiveOn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ThinkingStateMode.
+const (
+	ThinkingStateModeAdaptive ThinkingStateMode = "adaptive"
+	ThinkingStateModeNone     ThinkingStateMode = "none"
+)
+
+// Valid indicates whether the value is a known member of the ThinkingStateMode enum.
+func (e ThinkingStateMode) Valid() bool {
+	switch e {
+	case ThinkingStateModeAdaptive:
+		return true
+	case ThinkingStateModeNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ThinkingStateSetting.
+const (
+	ThinkingStateSettingDefault ThinkingStateSetting = "default"
+	ThinkingStateSettingOff     ThinkingStateSetting = "off"
+	ThinkingStateSettingOn      ThinkingStateSetting = "on"
+)
+
+// Valid indicates whether the value is a known member of the ThinkingStateSetting enum.
+func (e ThinkingStateSetting) Valid() bool {
+	switch e {
+	case ThinkingStateSettingDefault:
+		return true
+	case ThinkingStateSettingOff:
+		return true
+	case ThinkingStateSettingOn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ThinkingStateVersionSetting.
+const (
+	ThinkingStateVersionSettingOff ThinkingStateVersionSetting = "off"
+	ThinkingStateVersionSettingOn  ThinkingStateVersionSetting = "on"
+)
+
+// Valid indicates whether the value is a known member of the ThinkingStateVersionSetting enum.
+func (e ThinkingStateVersionSetting) Valid() bool {
+	switch e {
+	case ThinkingStateVersionSettingOff:
+		return true
+	case ThinkingStateVersionSettingOn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ListAuditEventsParamsActorKind.
 const (
 	ListAuditEventsParamsActorKindAgent  ListAuditEventsParamsActorKind = "agent"
@@ -406,6 +502,9 @@ type AgentModel struct {
 	// Source Where `effective` comes from, in order of precedence.
 	Source AgentModelSource `json:"source"`
 
+	// Thinking The agent's thinking setting and what it resolves to (ADR 0069 amendment 2026-10-29).
+	Thinking *ThinkingState `json:"thinking,omitempty"`
+
 	// VersionModel The active version's model; unset when it names none.
 	VersionModel *string `json:"versionModel,omitempty"`
 }
@@ -418,6 +517,15 @@ type AgentModelUpdate struct {
 	// Model `default`, or a model the org serves and has a price for.
 	Model string `json:"model"`
 }
+
+// AgentThinkingUpdate defines model for AgentThinkingUpdate.
+type AgentThinkingUpdate struct {
+	// Thinking `default` clears the setting.
+	Thinking AgentThinkingUpdateThinking `json:"thinking"`
+}
+
+// AgentThinkingUpdateThinking `default` clears the setting.
+type AgentThinkingUpdateThinking string
 
 // AuditEvent defines model for AuditEvent.
 type AuditEvent struct {
@@ -1025,13 +1133,18 @@ type SpendLine struct {
 	GatewayRequests int64 `json:"gatewayRequests"`
 
 	// GatewayUsd agentgateway's own cost of those requests.
-	GatewayUsd   string `json:"gatewayUsd"`
-	InputTokens  int64  `json:"inputTokens"`
-	Model        string `json:"model"`
-	OutputTokens int64  `json:"outputTokens"`
+	GatewayUsd  string `json:"gatewayUsd"`
+	InputTokens int64  `json:"inputTokens"`
+	Model       string `json:"model"`
+
+	// OutputTokens Output tokens, reasoning (thinking) tokens included.
+	OutputTokens int64 `json:"outputTokens"`
 
 	// ProvisionalRequests Responses cut short whose provider figure is pending; their cost is the usage the gateway logged until the provider reports.
 	ProvisionalRequests int64 `json:"provisionalRequests"`
+
+	// ReasoningTokens The part of outputTokens the provider reported as reasoning. Thinking is billed as output: at the output rate unless the price names a reasoning rate (ADR 0069 amendment 2026-10-29).
+	ReasoningTokens int64 `json:"reasoningTokens"`
 
 	// ReportedUsd Cost of requests whose usage the provider reported.
 	ReportedUsd string `json:"reportedUsd"`
@@ -1055,6 +1168,36 @@ type SpendReport struct {
 		Requests int64  `json:"requests"`
 	} `json:"systemChecks"`
 }
+
+// ThinkingState The agent's thinking setting and what it resolves to (ADR 0069 amendment 2026-10-29).
+type ThinkingState struct {
+	// Effective What the layers resolve to, whether or not the model can think.
+	Effective ThinkingStateEffective `json:"effective"`
+
+	// Mode The mode the next run uses.
+	Mode ThinkingStateMode `json:"mode"`
+
+	// Setting The agent's own setting; `default` when it has none.
+	Setting ThinkingStateSetting `json:"setting"`
+
+	// Supported Whether the effective model can think. When false the setting has no effect and a UI says "not supported by this model".
+	Supported bool `json:"supported"`
+
+	// VersionSetting The active version's value (a template's `spec.model.thinking`); unset when it names none.
+	VersionSetting *ThinkingStateVersionSetting `json:"versionSetting,omitempty"`
+}
+
+// ThinkingStateEffective What the layers resolve to, whether or not the model can think.
+type ThinkingStateEffective string
+
+// ThinkingStateMode The mode the next run uses.
+type ThinkingStateMode string
+
+// ThinkingStateSetting The agent's own setting; `default` when it has none.
+type ThinkingStateSetting string
+
+// ThinkingStateVersionSetting The active version's value (a template's `spec.model.thinking`); unset when it names none.
+type ThinkingStateVersionSetting string
 
 // Token defines model for Token.
 type Token struct {
@@ -1160,6 +1303,9 @@ type SetAgentMcpServersJSONRequestBody = AgentMcpServers
 // SetAgentModelJSONRequestBody defines body for SetAgentModel for application/json ContentType.
 type SetAgentModelJSONRequestBody = AgentModelUpdate
 
+// SetAgentThinkingJSONRequestBody defines body for SetAgentThinking for application/json ContentType.
+type SetAgentThinkingJSONRequestBody = AgentThinkingUpdate
+
 // SetBudgetJSONRequestBody defines body for SetBudget for application/json ContentType.
 type SetBudgetJSONRequestBody = OrgBudgetUpdate
 
@@ -1218,6 +1364,9 @@ type ServerInterface interface {
 	// SetAgentModel Set an agent's model, or clear it with `default`.
 	// (PUT /agents/{agentId}/model)
 	SetAgentModel(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// SetAgentThinking Turn an agent's thinking on or off, or clear the setting.
+	// (PUT /agents/{agentId}/thinking)
+	SetAgentThinking(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
 	// RunAgentTrigger Fire a schedule trigger now ("run now").
 	// (POST /agents/{agentId}/triggers/{triggerId}/run)
 	RunAgentTrigger(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID, triggerId string)
@@ -1481,6 +1630,32 @@ func (siw *ServerInterfaceWrapper) SetAgentModel(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetAgentModel(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentThinking operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentThinking(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "agentId" -------------
+	var agentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agentId", r.PathValue("agentId"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentThinking(w, r, agentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2531,6 +2706,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/agents/{agentId}/budget", wrapper.SetAgentBudget)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents/{agentId}/model", wrapper.GetAgentModel)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/agents/{agentId}/model", wrapper.SetAgentModel)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/agents/{agentId}/thinking", wrapper.SetAgentThinking)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/agents/{agentId}/triggers/{triggerId}/run", wrapper.RunAgentTrigger)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/audit", wrapper.ListAuditEvents)
 
@@ -2765,6 +2941,46 @@ type SetAgentModeldefaultJSONResponse struct {
 }
 
 func (response SetAgentModeldefaultJSONResponse) VisitSetAgentModelResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(response.StatusCode)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetAgentThinkingRequestObject struct {
+	AgentId openapi_types.UUID `json:"agentId"`
+	Body    *SetAgentThinkingJSONRequestBody
+}
+
+type SetAgentThinkingResponseObject interface {
+	VisitSetAgentThinkingResponse(w http.ResponseWriter) error
+}
+
+type SetAgentThinking200JSONResponse AgentModel
+
+func (response SetAgentThinking200JSONResponse) VisitSetAgentThinkingResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetAgentThinkingdefaultJSONResponse struct {
+	Body       Error
+	StatusCode int
+}
+
+func (response SetAgentThinkingdefaultJSONResponse) VisitSetAgentThinkingResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
@@ -4097,6 +4313,9 @@ type StrictServerInterface interface {
 	// SetAgentModel Set an agent's model, or clear it with `default`.
 	// (PUT /agents/{agentId}/model)
 	SetAgentModel(ctx context.Context, request SetAgentModelRequestObject) (SetAgentModelResponseObject, error)
+	// SetAgentThinking Turn an agent's thinking on or off, or clear the setting.
+	// (PUT /agents/{agentId}/thinking)
+	SetAgentThinking(ctx context.Context, request SetAgentThinkingRequestObject) (SetAgentThinkingResponseObject, error)
 	// RunAgentTrigger Fire a schedule trigger now ("run now").
 	// (POST /agents/{agentId}/triggers/{triggerId}/run)
 	RunAgentTrigger(ctx context.Context, request RunAgentTriggerRequestObject) (RunAgentTriggerResponseObject, error)
@@ -4413,6 +4632,39 @@ func (sh *strictHandler) SetAgentModel(w http.ResponseWriter, r *http.Request, a
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetAgentModelResponseObject); ok {
 		if err := validResponse.VisitSetAgentModelResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetAgentThinking operation middleware
+func (sh *strictHandler) SetAgentThinking(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	var request SetAgentThinkingRequestObject
+
+	request.AgentId = agentId
+
+	var body SetAgentThinkingJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetAgentThinking(ctx, request.(SetAgentThinkingRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetAgentThinking")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetAgentThinkingResponseObject); ok {
+		if err := validResponse.VisitSetAgentThinkingResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

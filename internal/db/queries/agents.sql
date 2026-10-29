@@ -105,3 +105,10 @@ UPDATE agents
 SET model = sqlc.narg(model)
 WHERE org_id = @org_id AND id = @id AND status <> 'archived'
 RETURNING *;
+
+-- name: SetAgentThinking :one
+-- An agent's thinking setting (NULL: use the version's value, then the default, on). Not a new version.
+UPDATE agents
+SET thinking = sqlc.narg(thinking)
+WHERE org_id = @org_id AND id = @id AND status <> 'archived'
+RETURNING *;

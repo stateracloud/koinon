@@ -107,6 +107,39 @@ var _ = Describe("agents in the admin API (rc.6)", func() {
 		})
 	})
 
+	Describe("the agent's thinking (rc.8)", func() {
+		It("is on by default, turns off and clears, says when the model cannot think, and audits it", func(ctx SpecContext) {
+			serveModel(ctx, e, "vendor/a-model", true)
+			agent := agentWith(ctx, e, `{"instructions":"x","model":"default"}`)
+
+			st, raw := e.call(ctx, e.token, http.MethodGet, "/agents/"+agent+"/model", nil)
+			Expect(st).To(Equal(http.StatusOK), string(raw))
+			Expect(decode[map[string]any](raw)["thinking"]).To(Equal(map[string]any{
+				"setting": "default", "effective": "on", "supported": false, "mode": "none",
+			}), "on by default; a model the catalog does not list ignores it")
+
+			st, raw = e.call(ctx, e.token, http.MethodPut, "/agents/"+agent+"/thinking", map[string]any{"thinking": "off"})
+			Expect(st).To(Equal(http.StatusOK), string(raw))
+			Expect(decode[map[string]any](raw)["thinking"]).To(And(
+				HaveKeyWithValue("setting", "off"), HaveKeyWithValue("effective", "off")))
+
+			st, raw = e.call(ctx, e.token, http.MethodPut, "/agents/"+agent+"/thinking", map[string]any{"thinking": "high"})
+			Expect(st).To(Equal(http.StatusBadRequest), string(raw))
+
+			st, raw = e.call(ctx, e.token, http.MethodPut, "/agents/"+agent+"/thinking", map[string]any{"thinking": "default"})
+			Expect(st).To(Equal(http.StatusOK), string(raw))
+			Expect(decode[map[string]any](raw)["thinking"]).To(HaveKeyWithValue("setting", "default"))
+
+			var n int
+			Expect(pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id = $1 AND action = 'agent.thinking.set' AND target_id = $2
+				AND actor_kind = 'token' AND summary->'before' IS NOT NULL AND summary->'after' IS NOT NULL`, e.org, agent).Scan(&n)).To(Succeed())
+			Expect(n).To(Equal(2))
+
+			st, _ = e.call(ctx, e.token, http.MethodPut, "/agents/019a0000-0000-7000-8000-00000000ffff/thinking", map[string]any{"thinking": "off"})
+			Expect(st).To(Equal(http.StatusNotFound))
+		})
+	})
+
 	Describe("running a schedule trigger now", func() {
 		const cfg = `{"instructions":"x","triggers":[
 			{"id":"daily-check","type":"schedule","filter":{"cron":"0 9 * * *","timezone":"UTC"},"instruction":"Check the costs."},

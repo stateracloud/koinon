@@ -167,6 +167,10 @@ type Flavors struct {
 // when an agent is created. "default" is the install's default model.
 type Model struct {
 	Name string `json:"name"`
+	// Thinking is the template's starting value for the agent's thinking setting: "on" or "off".
+	// Unset means the default, on. An admin changes the agent's own setting later; the model's
+	// catalog capability decides whether it has any effect (internal/thinking, ADR 0069 amendment).
+	Thinking string `json:"thinking,omitempty"`
 }
 
 // Grant is a suggested grant on a connector type (ADR 0007). It is a
