@@ -107,8 +107,8 @@ An unmodified SearXNG (image `searxng/searxng`, pinned by digest `sha256:0f48ffe
 2026.10.27) behind `ihor-sokoliuk/mcp-searxng` 2.9.0 (MIT, image by digest `sha256:8f1dd92a...`) in
 Streamable HTTP mode with a static bearer token (`MCP_HTTP_HARDEN`, `MCP_HTTP_AUTH_TOKEN` from Secret
 `rt1-searxng-secrets`, stateless). Tools: `searxng_web_search` and `web_url_read`. SearXNG's config is
-`manifests/searxng-settings.yml`: JSON and HTML formats, engines duckduckgo, bing, wikipedia, github and
-stackoverflow, limiter and image proxy off, no Valkey or Redis. Its secret key comes from the Secret
+`manifests/searxng-settings.yml`: JSON and HTML formats, engines brave, mojeek, bing, wikipedia, github and
+stackoverflow (DuckDuckGo is out: it answers a CAPTCHA to a server-side client), limiter and image proxy off, no Valkey or Redis. Its secret key comes from the Secret
 (placeholder; set the real one out of band). Nothing is built: the build script copies both images to Zot
 by digest.
 
@@ -190,7 +190,7 @@ The two tokens are the credentials registered for the MCP servers in Koinon.
 | rt1-motherduck | motherduck 192Mi (about 75 MiB measured) | 192Mi |
 | rt1-fakecicost | fakecicost 64Mi | 64Mi |
 | rt1-searxng | searxng 256Mi (about 87 MiB measured) | 256Mi |
-| rt1-searxng-mcp | mcp-searxng 128Mi (about 43 MiB) | 128Mi |
+| rt1-searxng-mcp | mcp-searxng 256Mi (about 43 MiB at rest; CPU limit 2; readiness and liveness probes time out after 5 s) | 256Mi |
 | rt1-prometheus | prometheus 128Mi (31 MiB idle, 57 MiB under a 30-day query loop), prometheus-mcp 112Mi (about 78 MiB); init: promgen 64Mi, promtool 256Mi | 240Mi at run time |
 
 To let agents use them, the gateway must be allowed to reach the four hosts
