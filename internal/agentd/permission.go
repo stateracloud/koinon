@@ -107,7 +107,9 @@ func (p *PermissionPolicy) decide(req acp.PermissionRequest, workspace string, r
 			d.Outside, d.Verdict = l.Path, Reject
 			break
 		}
-		paths = append(paths, absPath(workspace, l.Path))
+		// Resolved as the harness names it: cleaning first would drop a ".." that follows a link,
+		// which the kernel resolves from the link's target.
+		paths = append(paths, rawAbsPath(workspace, l.Path))
 	}
 	if d.Verdict == Allow && resolve != nil && len(paths) > 0 {
 		if out := outsideAfterLinks(workspace, paths, resolve); out != "" {
@@ -129,7 +131,7 @@ func (p *PermissionPolicy) decide(req acp.PermissionRequest, workspace string, r
 	return d
 }
 
-// outsideAfterLinks returns the first of paths (absolute, lexically inside workspace) whose
+// outsideAfterLinks returns the first of paths (absolute, not cleaned, lexically inside workspace) whose
 // physical path is not inside the workspace's, or "" when all are. A path that is itself a
 // symbolic link counts as outside whatever it points at, and so does any path that cannot be
 // resolved: the check fails closed.
@@ -146,6 +148,14 @@ func outsideAfterLinks(workspace string, paths []string, resolve pathResolver) s
 	return ""
 }
 
+// rawAbsPath is p made absolute against dir, not cleaned.
+func rawAbsPath(dir, p string) string {
+	if path.IsAbs(p) {
+		return p
+	}
+	return strings.TrimSuffix(dir, "/") + "/" + p
+}
+
 // absPath is p made absolute against dir and cleaned.
 func absPath(dir, p string) string {
 	if !path.IsAbs(p) {
@@ -156,8 +166,10 @@ func absPath(dir, p string) string {
 
 // realpathScript prints the physical path of each argument after the first (the workspace,
 // printed first), "!" for one that is itself a symbolic link or cannot be resolved. A path that
-// does not exist yet is its deepest existing ancestor's physical path plus the rest. It fails
-// when the workspace cannot be resolved.
+// does not exist yet is its deepest existing ancestor's physical path plus the rest (which has
+// no links, so the caller may clean it lexically). The paths come as arguments, uncleaned, so a
+// ".." after a link is resolved from the link's target as the kernel does. It fails when the
+// workspace cannot be resolved.
 const realpathScript = `# koinon-realpath
 phys() {
   d=$1; rest=
@@ -195,11 +207,13 @@ func (r *runner) pathResolver(ctx context.Context) pathResolver {
 	return func(workspace string, paths []string) ([]string, error) {
 		cmd := append([]string{"/bin/sh", "-c", realpathScript, "sh", workspace}, paths...)
 		out, code, stderr, err := r.sandboxExecLimit(ctx, r.sbWorkspace, r.sbName, cmd, nil, 10*time.Second, 1<<20)
-		if err != nil {
-			return nil, err
+		if err == nil && code != 0 {
+			err = fmt.Errorf("exit %d: %s", code, strings.TrimSpace(stderr))
 		}
-		if code != 0 {
-			return nil, fmt.Errorf("resolving paths: exit %d: %s", code, strings.TrimSpace(stderr))
+		if err != nil {
+			// The request is rejected (fail closed); say why, since the refusal names the path.
+			r.log.Warn("could not resolve a permission request's paths in the sandbox", "err", err)
+			return nil, err
 		}
 		return strings.Split(strings.TrimSuffix(string(out), "\n"), "\n"), nil
 	}
