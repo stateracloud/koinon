@@ -109,7 +109,10 @@ var _ = Describe("Settling responses cut short", func() {
 		e = newEnv(ctx, uniq("org"), "", "1.00", 1<<40)
 		e.model(ctx, "openrouter", flash)
 		src = &fakeSource{}
-		clock = time.Now()
+		// The specs move the clock by up to a few hours and read the agent's UTC-day limit at the
+		// end: a clock that starts within those hours of UTC midnight would cross into the next
+		// day, where the day's charges no longer count. Start at noon UTC of the current day.
+		clock = time.Now().UTC().Truncate(24 * time.Hour).Add(12 * time.Hour)
 		now := func() time.Time { return clock }
 		sources := providerusage.Registry{"openrouter": src}
 		in = &ledger.Ingester{DB: db, Log: ing.Log, Prices: ing.Prices, Sources: sources, Now: now}
