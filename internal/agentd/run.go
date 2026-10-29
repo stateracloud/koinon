@@ -62,6 +62,9 @@ type sandboxUnavailable struct {
 	cause  execution.SandboxWaitCause
 	detail string
 	waited time.Duration
+	// cap is the org's sandbox wait cap the wait applied, read once; every text about the failure
+	// uses it, so they all agree with the run's failure reason.
+	cap time.Duration
 }
 
 func (f *failure) Error() string { return f.reason }
@@ -819,11 +822,13 @@ func (r *runner) turnWithRetry(ctx, fctx context.Context, conn *acp.Conn, proc e
 	refusedTurns := 0
 	limit := time.Duration(r.run.MaxWallClockSeconds) * time.Second
 	for attempt := 0; ; attempt++ {
-		if r.wantsWrapUp() && time.Until(r.capEnd()) <= cfg.WrapUpNotice {
+		// The window is the last WrapUpNotice before the cap. A run already past its cap (taken over
+		// after its lease expired) gets no notice: its turn is cancelled at once, so the agent could
+		// not act on it, and the event and the metric must mean the agent was told.
+		if remaining := time.Until(r.capEnd()); r.wantsWrapUp() && remaining > 0 && remaining <= cfg.WrapUpNotice {
 			// The turn starts inside the window (a resume, a retry or a takeover), so it is not
 			// interrupted. The notice is recorded first and prepended only by the owner that
 			// recorded it, so two owners never both send it.
-			remaining := time.Until(r.capEnd())
 			recorded, merr := r.markWrapUp(fctx, remaining)
 			if merr != nil {
 				return merr
