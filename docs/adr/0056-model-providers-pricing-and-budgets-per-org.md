@@ -196,7 +196,7 @@ Research: [Claude token estimation](../research/claude-token-estimation.md).
    the log (`llm.prompt` and `llm.completion` would, and cost CPU), so the live path estimates input from
    request bytes and settles output as in (3). A provider that returns 2xx without usage is
    indistinguishable from an aborted one and settles the same way, which overestimates; such an entry
-   is recorded with `usage_missing` and flagged so admins can see why it was charged at max. An upstream 4xx without usage (the provider refused the request) is charged the input estimate only, never output; the gateway's own refusals (401, 403, 404, 405, 413, 415, 429) are not charged, and 5xx or a missing status (client disconnect) settle like a 2xx. To keep
+   is recorded with `usage_missing` and flagged so admins can see why it was charged at max. An upstream 4xx without usage (the provider refused the request) is charged the input estimate only, never output, unless its provider is documented not to bill it (amendment 2026-10-29); the gateway's own refusals (401, 403, 404, 405, 413, 415, 429) are not charged, and 5xx or a missing status (client disconnect) settle like a 2xx. To keep
    that rare, every model's request transformation sets `stream_options.include_usage: true` on
    streaming chat completions (agentgateway v1.6.0 adds it only when the client sent no
    `stream_options` at all, so a client sending `include_usage: false` would otherwise get its streams
@@ -440,7 +440,7 @@ replaces decision 6.3 for responses cut short.
    (revision source `gateway`). The shortfall is what the provider generated after
    `message_start`, at most one response per stop, within ADR 0041's bound of one response in
    flight. The detection takes effect when the Messages routes (plan item 6b) log the two fields.
-6. **Unchanged:** an upstream 4xx without usage is charged its input estimate only; a response that
+6. **Unchanged** (but see amendment 2026-10-29): an upstream 4xx without usage is charged its input estimate only; a response that
    completed without usage is estimated from its bytes; requests the gateway refused itself are not
    charged.
 
@@ -494,6 +494,75 @@ not borrow an agent's key.
    issues a new one). If it leaks, it can request only that org's served, priced models and spend
    at most $0.10 a day (less when the org's caps are lower), and it opens no MCP tool. Its spend is recorded with the `system` principal
    (ADR 0041 amendment) and counts against the org budget.
+
+## Amendment (2026-10-29, issues #241 and #246): requests the provider refused
+
+The rc.7 re-run charged four Anthropic `400 invalid_request` responses $0.0030058 each: the input
+estimated from the request bytes, at the model's price. Anthropic, OpenRouter and OpenAI do not bill a
+request they reject, so the charge was phantom spend that counted toward budgets and caps. The same
+run's OpenRouter moderation `403` was invisible to the ledger, because 403 sat in the list of statuses
+taken as the gateway's own. This amendment replaces the first (4xx charged the input estimate) and
+the last (the gateway's refusals) sentences of the 2026-10-24 decision (3) and of amendment 6 of
+2026-10-28, which are otherwise unchanged.
+
+1. **The gateway says who answered.** The access log gains `koinon.upstream` (`gateway.LogFieldUpstream`):
+   `default(proxy.upstreamDuration, "") != ""`, true exactly when agentgateway called the provider. A
+   bad or revoked key (`APIKeyAuth`), a model the key may not use (`model_not_allowed`) and the
+   gateway's own budget `429` have no outbound call. Verified against the real agentgateway v1.7.0 in
+   `internal/ledger/agentgateway_test.go`. The decision no longer rests on the status number.
+2. **What the ledger records.** A record with no usage:
+   - `koinon.upstream` false: the gateway's own answer, skipped as before.
+   - `koinon.upstream` true and a 4xx: a refusal by the provider, **recorded** whatever the status
+     (401, 403, 404, 429 included), flagged `rejected_by_upstream` in the entry's `estimate`.
+   - 5xx, a 2xx without usage and a missing status settle as before.
+   - A record from a config that predates the field cannot say who answered. It is read as before: the
+     statuses the gateway uses (401, 403, 404, 405, 413, 415, 429) are skipped, any other 4xx is a
+     refusal. A rolling update therefore changes nothing until the new config is served.
+3. **What a refusal costs.** Nothing, for two reasons, tried in this order:
+   - the status is never billed by any provider (401, 402, 403, 404, 405, 413, 415, 429:
+     `ledger.neverBilled`); or
+   - the model's provider type documents that it does not bill refused requests. That is an
+     explicit per-type flag, `providertype.Traits.BillsRejectedRequests`, set false for `anthropic`,
+     `openrouter` and `openai` (each row cites the provider's error page). A type without a row
+     (`ollama`, a custom or unknown type) takes the conservative default, true: any other 4xx is
+     charged the input estimate only, as before.
+   A waived entry keeps its row, with tokens 0 and cost 0 (it must not count toward the run's token
+   cap either), `rejected_by_upstream: true`, `charge_waived` (why) and `waived_input_tokens` (what
+   the estimate would have charged, so the size of the request stays visible). It is not
+   `cost_flagged`: that flag feeds the price report, and a refused request is not a price problem.
+   A charged refusal keeps `usage_missing` and the flag, as today.
+4. **Retry loops are bounded elsewhere.** A client that retries a rejected request is stopped by
+   agentd failing the run fast on a non-transient error (ADR 0030 amendment 2026-10-26) and the model
+   retry limit, not by phantom charges.
+5. **Stored for the run's sake.** `spend_entries` gains `upstream_status` (the provider's error
+   status, NULL otherwise) and `upstream_error` (a one-line excerpt), migration 00038. agentd reads
+   them to say why a run failed (ADR 0030 amendment 2026-10-29).
+6. **The error body is logged, redacted and capped.** For a response with status >= 400 the access log
+   carries `koinon.error_body` (`gateway.LogFieldErrorBody`): the first 2,048 characters of the body
+   with credentials replaced by `[redacted]`. The CEL (`errbody.GatewayExpr`) reads
+   `response.bodyPrefix`, which agentgateway records for the log as the stream passes; the response is
+   never held back (schema/cel-functions.md, "Body Variables"). For a success the expression fails and
+   the field is left out. The recording costs one copy of at most 2 MiB per response, the price of
+   having the body at all; the earlier worry (point 2 of the 2026-10-24 decision) was a body that
+   delays or breaks the stream, and the gateway specs (streaming, cut streams, cache markers) pass
+   with it on.
+7. **Redaction.** Two layers share one list of patterns (`errbody.Patterns`, RE2 syntax valid in Go and
+   in the gateway's regex engine): a bearer token, a Koinon gateway key, a provider key (`sk-`,
+   `sk-or-v1-`, ...), a credential-like JSON field with its value, and any unbroken token of 40 or
+   more characters. The gateway applies them in the CEL (so neither its stdout log nor the OTLP export
+   carries a credential a provider echoed). The ledger then reduces the body to
+   `errbody.Summarize`: for the known error shapes (OpenAI, OpenRouter, Anthropic, plain) the
+   provider's code, type, message (400 characters) and moderation reasons, and nothing else. Fields
+   that carry the prompt, such as OpenRouter's `metadata.flagged_input`, are dropped by design; an
+   unknown shape is whitespace-collapsed, redacted and cut. The excerpt is at most 512 characters.
+   Redaction removes what looks like a credential; the cap bounds the rest, so a provider message that
+   quotes a few words of the prompt can appear in the excerpt, never more than that. No
+   `$` appears in any expression: agentgateway's config loader expands `$` in the file as an
+   environment variable, so the patterns have no capture groups.
+8. **Metrics.** None added. Labels stay the fixed sets of ADR 0023; the status and the excerpt are
+   row data, not labels.
+9. **History is not rewritten.** Entries recorded before this change (the rc.7 phantom charges) stay
+   as they were; a ledger is append-only (ADR 0041).
 
 ## Open questions
 
