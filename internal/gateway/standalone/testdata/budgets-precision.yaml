@@ -14,7 +14,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"870dd6c04a1a8b2e"'
+      koinon.config: '"2b6b436ade368f95"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -82,7 +82,7 @@ llm:
               window:
                 rolling: 24h
               onBudgetExceeded: Block
-        - keyHash: sha256:b3cacd377ae04d8240c26f410a733b0ef6affcc96b52ee68805bff8f35d98a2b
+        - keyHash: sha256:d9341fd769b8bd69e08666293c4a9ab3e5f4e4e2bc9e5e0e0969bb4bf337c1e2
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -96,9 +96,10 @@ llm:
               onBudgetExceeded: Block
     authorization:
       rules:
-        - apiKey.name != "koinon-reload-probe" && !has(llmRequest.mcp_servers)
+        - apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !has(llmRequest.mcp_servers)
     transformations:
       request:
+        replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
         set:
           x-koinon-org: default(apiKey.org, "")
   models: []

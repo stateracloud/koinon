@@ -145,7 +145,7 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rep, err := s.plan(r.URL.Path, r.Header, req.Model, body, req.conversation())
+	rep, err := s.plan(r.URL.Path, r.URL.RawQuery, r.Header, req.Model, body, req.conversation())
 	if err != nil {
 		writeAnthropicError(w, err)
 		return

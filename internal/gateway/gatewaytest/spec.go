@@ -43,6 +43,10 @@ type Env struct {
 	// GatewayBudgets is true when the gateway itself blocks a key over its limit with 429 (standalone
 	// mode). In Kubernetes mode the ledger revokes the key instead, which that driver's own suite tests.
 	GatewayBudgets bool
+	// HeaderAllowlist is true when the gateway drops every client header outside
+	// gateway.ForwardedHeaders (standalone mode). Otherwise (Kubernetes mode, whose CRD cannot say
+	// so) it refuses with 403 a request that carries a gateway key in any header but Authorization.
+	HeaderAllowlist bool
 }
 
 // Gateway is a started gateway under test.
@@ -681,6 +685,33 @@ func mcpServersSpec(env Env) {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.Content[0].(*mcp.TextContent).Text).To(Equal("acme-open saw "))
 			Expect(strings.Join(openLog.values("Authorization"), ",")).NotTo(ContainSubstring(gateway.KeyPrefix))
+		})
+
+		It("passes a server only the headers MCP needs, never one that carries the agent's key (#262)", func(ctx SpecContext) {
+			if !env.HeaderAllowlist {
+				Skip("the Kubernetes CRD cannot allowlist headers; the MCP route there only drops credential headers")
+			}
+			client := mcp.NewClient(&mcp.Implementation{Name: "koinon-test", Version: "0.0.1"}, nil)
+			s, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+				Endpoint: llmURL + "/mcp",
+				HTTPClient: &http.Client{Transport: headerSetter{
+					key: keyAcme.Material, name: "X-Canary",
+					value: "prefix-" + keyAcme.Material + "-suffix", base: http.DefaultTransport,
+				}},
+				DisableStandaloneSSE: true, MaxRetries: -1,
+			}, nil)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() { _ = s.Close() })
+			for _, tool := range []string{"acme-open_read_item", "acme-wiki_read_item"} {
+				_, err = s.CallTool(ctx, &mcp.CallToolParams{Name: tool})
+				Expect(err).NotTo(HaveOccurred())
+			}
+			for name, l := range map[string]*headerLog{"acme-open": openLog, "acme-wiki": acmeLog} {
+				Expect(l.values("X-Canary")).To(BeEmpty(), name+": a header the agent invented reached the server")
+				for _, h := range []string{"Authorization", "X-Canary", "Cookie"} {
+					Expect(strings.Join(l.values(h), ",")).NotTo(ContainSubstring(gateway.KeyPrefix), name+": "+h)
+				}
+			}
 		})
 
 		It("drops a credential header the agent sent to a server that has none", func(ctx SpecContext) {

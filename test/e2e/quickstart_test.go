@@ -755,6 +755,80 @@ var _ = Describe("the quickstart", Ordered, func() {
 		}
 		t.end("8. Adaptive thinking on and off: strict fake behind the real gateway")
 	})
+	// Not part of the quickstart (#262). An agent holds its gateway key and is untrusted, so it can put
+	// the key in a header of its own or in the URL; the upstream is a third party that logs both.
+	It("8. the gateway sends the model upstream only the headers a format needs, and refuses an agent key in the URL (#262)", func(ctx SpecContext) {
+		t.begin()
+		// Step 8 priced claude-haiku-5-5 and the reconciler serves it. The request is what a sandbox
+		// would send, from here through the gateway's Service with the agent's own key.
+		const model = "claude-haiku-5-5"
+		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
+		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+		fakeModel := strings.TrimRight(os.Getenv("KOINON_E2E_FAKEMODEL_URL"), "/")
+		Expect(fakeModel).NotTo(BeEmpty(), "KOINON_E2E_FAKEMODEL_URL")
+		key := agentGatewayKey(ctx, kubectl, org, agent.GetId())
+		local := portForward(ctx, kubectl, "svc/koinon-gateway", "8080")
+
+		send := func(query string, header ...string) (int, string) {
+			GinkgoHelper()
+			body := `{"model":"` + model + `","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+local+"/v1/messages"+query, strings.NewReader(body))
+			Expect(err).NotTo(HaveOccurred())
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+key)
+			for i := 0; i+1 < len(header); i += 2 {
+				req.Header.Set(header[i], header[i+1])
+			}
+			res, err := http.DefaultClient.Do(req)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { _ = res.Body.Close() }()
+			out, _ := io.ReadAll(res.Body)
+			return res.StatusCode, string(out)
+		}
+		count := func() int {
+			var n int
+			Eventually(func(g Gomega) { n = len(fakeModelRequests(ctx, g, fakeModel, model)) }).
+				WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+			return n
+		}
+
+		By("a request with the key in headers of the agent's own choosing reaches the model without them")
+		before := count()
+		Eventually(func(g Gomega) {
+			code, out := send("", "X-Canary", key, "X-Embedded", "prefix-"+key+"-suffix", "X-Api-Key", key,
+				"Cookie", "session="+key, "X-Forwarded-For", "203.0.113.9")
+			g.Expect(code).To(Equal(http.StatusOK), out)
+		}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+		var got []fakeRequest
+		Eventually(func(g Gomega) {
+			got = fakeModelDetail(ctx, g, fakeModel, model)
+			g.Expect(len(got)).To(BeNumerically(">", before))
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		for _, r := range got[before:] {
+			for name, values := range r.Headers {
+				for _, v := range values {
+					Expect(v).NotTo(ContainSubstring("kgw_"), "header %s reached the upstream: %+v", name, r.Headers)
+				}
+			}
+			for _, name := range []string{"X-Canary", "X-Embedded", "X-Api-Key", "Cookie", "X-Forwarded-For"} {
+				Expect(r.Headers).NotTo(HaveKey(name), "the upstream got the header the agent invented")
+			}
+			Expect(r.Headers.Get("Content-Type")).To(Equal("application/json"))
+		}
+
+		By("a request with the key in the query or the path is refused before it reaches the model")
+		n := count()
+		for _, q := range []string{"?canary=" + key, "?canary=" + strings.Replace(key, "_", "%5F", 1)} {
+			code, out := send(q)
+			Expect(code).To(Equal(http.StatusForbidden), out)
+		}
+		Expect(count()).To(Equal(n), "nothing reached the upstream")
+		for _, r := range fakeModelDetail(ctx, Default, fakeModel, model) {
+			Expect(r.Query).NotTo(ContainSubstring("kgw_"))
+		}
+		t.end("8. Gateway header allowlist and key-in-URL refusal")
+	})
+
 	// Not part of the quickstart, and after its time check: the flavor image is broken for the rest of
 	// the run (the cluster is deleted afterwards).
 	It("8. a flavor image that cannot be pulled fails the run with the cause image_pull, read from the pod by the sandbox observer", func(ctx SpecContext) {
@@ -863,11 +937,23 @@ func fakeModelPaths(ctx context.Context, g Gomega, base, model string) []string 
 type fakeRequest struct {
 	Path, Model, Thinking string
 	Betas                 []string
+	// Query and Headers are filled by fakeModelDetail (?detail=1).
+	Query   string
+	Headers http.Header
 }
 
 // fakeModelRequests returns the requests the fake model server got for model, in arrival order.
 func fakeModelRequests(ctx context.Context, g Gomega, base, model string) []fakeRequest {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/_fake/requests", nil)
+	return fakeModelList(ctx, g, base+"/_fake/requests", model)
+}
+
+// fakeModelDetail is fakeModelRequests with the query and every header of each request.
+func fakeModelDetail(ctx context.Context, g Gomega, base, model string) []fakeRequest {
+	return fakeModelList(ctx, g, base+"/_fake/requests?detail=1", model)
+}
+
+func fakeModelList(ctx context.Context, g Gomega, url, model string) []fakeRequest {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	g.Expect(err).NotTo(HaveOccurred())
 	res, err := http.DefaultClient.Do(req)
 	g.Expect(err).NotTo(HaveOccurred())

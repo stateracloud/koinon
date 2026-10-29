@@ -366,6 +366,63 @@ func anthropicSpec(env Env) {
 			Expect(up.Header).NotTo(HaveKey("Anthropic-Version"), "an openai model gets no Anthropic headers")
 		})
 
+		It("sends the upstream only the headers a format needs, never one that carries the agent's key (#262)", func(ctx SpecContext) {
+			// An agent is untrusted and holds its gateway key, so it can put the key in any header or in
+			// the query. The upstream is a third party that logs what it receives: only an allowlist of
+			// headers passes (gateway.ForwardedHeaders), whatever the client sent.
+			spoof := []string{
+				"X-Canary", keyC.Material,
+				"X-Embedded", "prefix-" + keyC.Material + "-suffix",
+				"X-Api-Key", keyC.Material,
+				"Cookie", "session=" + keyC.Material,
+				"X-Forwarded-For", "203.0.113.9",
+				"Proxy-Authorization", "Basic " + keyC.Material,
+			}
+			allowed := map[string]bool{}
+			for _, h := range gateway.ForwardedHeaders {
+				allowed[http.CanonicalHeaderKey(h)] = true
+			}
+			// What the gateway and the HTTP stack add themselves.
+			for _, h := range []string{
+				"Host", "Authorization", "Anthropic-Version", "Anthropic-Workspace-Id", "Anthropic-Beta",
+				gateway.OrgHeader, "Traceparent", "Tracestate", "Content-Length", "Accept-Encoding", "Connection", "Transfer-Encoding",
+			} {
+				allowed[http.CanonicalHeaderKey(h)] = true
+			}
+			for _, tc := range []struct{ model, path string }{
+				{"claude-test", "/v1/messages"},
+				{"gpt-test", "/v1/chat/completions"},
+			} {
+				body := map[string]any{"model": tc.model, "max_tokens": 16, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+				before := len(upstrm.Requests())
+				code, out := post(ctx, tc.path, keyC.Material, body, spoof...)
+				if !env.HeaderAllowlist {
+					Expect(code).To(Equal(http.StatusForbidden), tc.model+": a key in a header is refused: "+out)
+					Expect(upstrm.Requests()).To(HaveLen(before))
+					// What the harness really sends passes.
+					code, out = post(ctx, tc.path, keyC.Material, body, "User-Agent", "koinon-test", "Accept", "application/json")
+				}
+				Expect(code).To(Equal(http.StatusOK), tc.model+": "+out)
+				up := lastUpstream(tc.model)
+				for name, values := range up.Header {
+					Expect(allowed).To(HaveKey(name), tc.model+": a header outside the allowlist reached the upstream")
+					for _, v := range values {
+						Expect(v).NotTo(ContainSubstring(gateway.KeyPrefix), tc.model+": header "+name)
+					}
+				}
+				Expect(up.Header.Get("Authorization")).To(Equal("Bearer "+providerKey), "the provider's key replaces the agent's")
+				Expect(up.Header.Get("Content-Type")).To(Equal("application/json"), "a header the format needs still passes")
+
+				By(tc.model + ": a request with the key in the query is refused before it reaches the upstream")
+				before = len(upstrm.Requests())
+				code, out = post(ctx, tc.path+"?canary="+keyC.Material, keyC.Material, body)
+				Expect(code).To(Equal(http.StatusForbidden), out)
+				code, out = post(ctx, tc.path+"?canary="+strings.Replace(keyC.Material, "_", "%5F", 1), keyC.Material, body)
+				Expect(code).To(Equal(http.StatusForbidden), "a percent-encoded key: "+out)
+				Expect(upstrm.Requests()).To(HaveLen(before))
+			}
+		})
+
 		It("keeps another org's key off the model", func(ctx SpecContext) {
 			before := len(upstrm.Requests())
 			code, body := messages(ctx, keyG.Material, "claude-test", false)

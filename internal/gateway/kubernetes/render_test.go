@@ -211,7 +211,8 @@ var _ = Describe("Render", func() {
 		Expect(pol["transformations"]).To(ConsistOf(HaveKeyWithValue("field", "tools")),
 			"no stream_options; the agent's server tools are dropped")
 		Expect(pol["authorization"]).To(HaveKeyWithValue("policy", HaveKeyWithValue("matchExpressions", ConsistOf(
-			`apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers)`))), "mcp_servers is refused")
+			`apiKey.org == "acme" && !apiKey.internal && (!default(apiKey.restricted, false) || "claude-haiku-4-5" in default(apiKey.models, [])) && !has(llmRequest.mcp_servers) && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")`))),
+			"mcp_servers is refused, and so is a gateway key in the URL or in a header but authorization (#262)")
 		Expect(pol["headers"]).To(Equal(map[string]any{"request": map[string]any{
 			"set": []any{
 				map[string]any{"name": "anthropic-version", "value": "2023-06-01"},
@@ -392,7 +393,8 @@ var _ = Describe("Render", func() {
 	It("holds no key material, only hashes", func() {
 		r, err := gwk8s.Render(fullState(), opts())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(string(dump(r))).NotTo(ContainSubstring("kgw_"))
+		// The admission rules name the prefix (gateway.NoKeyInURLExpr); a key is the prefix and 43 characters.
+		Expect(string(dump(r))).NotTo(MatchRegexp(`kgw_[A-Za-z0-9_-]{43}`))
 	})
 })
 

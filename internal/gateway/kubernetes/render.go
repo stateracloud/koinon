@@ -430,6 +430,9 @@ func (b *builder) models(s gateway.State) {
 			for _, f := range rd.Reject {
 				admit += " && !has(llmRequest." + f + ")"
 			}
+			// The CRD cannot allowlist headers (gateway.NoKeyInHeadersExpr), so a request that carries a
+			// gateway key anywhere but the key header is refused (#262).
+			admit += " && " + gateway.NoKeyInURLExpr() + " && " + gateway.NoKeyInHeadersExpr()
 			policies := map[string]any{
 				"authorization": map[string]any{
 					"action": "Require",
