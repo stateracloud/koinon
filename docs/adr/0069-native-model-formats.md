@@ -1,6 +1,6 @@
 # 0069. Models speak their family's native API format
 
-- Status: Accepted
+- Status: Accepted. The OpenRouter live check (decision 7) passed in the rc.7 home-lab re-run on 2026-10-29 (`anthropic/claude-haiku-5.5` in the `anthropic` format, 5 requests, charged 31% of the uncached list price so cache reads were priced, no `run.uncached` events), and the OpenRouter pin rows are deleted (#242): OpenRouter `anthropic/*` models default to `anthropic` like every other Claude model. Thinking: see the amendment of 2026-10-29.
 - Date: 2026-10-28
 - Relates to: [#148](https://github.com/stateracloud/koinon/issues/148), [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0045](0045-openshell-hardening-defaults.md), [0048](0048-openshell-spike-results.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0058](0058-gateway-modes.md), [0068](0068-prompt-caching-always-on.md)
 
@@ -331,7 +331,8 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
 - **Beta flags:** on the `koinon-anthropic` entry OpenCode 2.2.0 sends `anthropic-beta:
   interleaved-thinking-2025-05-14` only. The model declares no reasoning, so no `thinking` block is
   sent and the beta is a no-op; the gateway keeps removing the header and the rendering table pins
-  nothing. A flavor spec fails if OpenCode's set changes.
+  nothing. A flavor spec fails if OpenCode's set changes. **Wrong for a Claude 5.1+ ID, found in
+  rc.7: superseded by the amendment of 2026-10-29 below.**
 - **Resume across the switch:** a session created under `koinon/` loads under `koinon-anthropic/` and
   the other way round, with its history (a tool-call turn included) in the next request and the next
   request in the new format. No new session is needed. OpenCode rewrites every character outside
@@ -351,3 +352,111 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
   model posts only to `/v1/messages` (the fake server's `GET /_fake/requests`), and its ledger entries
   show a cache write and then `cache_read_tokens > 0`, each priced at its own rate. The ledger's
   `input_tokens` includes cache reads and writes.
+
+## Amendment (2026-10-29, rc.8): thinking is on unless the agent turns it off (#240, #242)
+
+### Context
+
+rc.7 failed on direct Anthropic with `thinking.adaptive.block_binding: Extra inputs are not permitted`
+on every turn. OpenCode 2.2.0 decides from the model ID, not from the config: for an ID that parses as
+Claude 5.1 or later it gives every Messages request `thinking: {"type": "adaptive", "block_binding":
+...}` and the beta `thinking-binding-controls-2026-08-01` that goes with the field
+(`anthropic-messages.ts` `applyThinkingBindingDefault`, `claude-model.ts`). The gateway removes
+`anthropic-beta` (PR 2), so Anthropic saw a beta-only field without its beta. PR 3's "no thinking is
+sent" was true only for the fake model's ID, which does not parse as Claude. The OpenRouter runs very
+likely carried the same block, and OpenRouter accepted it: those runs were probably on adaptive thinking.
+The fault was Koinon not deciding whether a model thinks, which is a cost and behaviour choice (thinking
+tokens are billed as output).
+
+### Decision (procoduck, 2026-10-29)
+
+1. **Koinon decides; no harness does.** Thinking is **on by default** with a per-agent opt-out.
+   Turning it off is a setting, not a code path, so the next model family changes a table row.
+2. **Catalog capability per model.** `internal/thinking` is the one table, in the manner of
+   `internal/modelformat`: for a provider type, a model name and the model's format, a mode and the
+   `anthropic-beta` values that mode needs. Today the modes are `none` and `adaptive` (Anthropic's
+   adaptive thinking on Messages). A model is `adaptive` when its family is in the table and it speaks
+   `anthropic`; a Claude ID not in the table (or on chat completions) is `none`, because a field or a
+   beta the model does not know is a refusal. The families are the four the price list ships
+   (`claude-fable-5-`, `claude-opus-5-`, `claude-sonnet-5-`, `claude-haiku-5-`), matched on the name
+   with the vendor prefix and dots normalized, so `anthropic/claude-haiku-5.5` and `claude-haiku-5-5`
+   are one model. A new family or mode is a row; the model-metadata work of ADR 0070 may later fill the
+   table from models.dev.
+   - **Not built: reasoning effort for OpenAI-style models.** The decision names it as the second mode.
+     It is not in the table because nothing renders it yet: no flavor switch would turn it on or off,
+     and a mode the UI offers but no harness honours would be a lie. It joins as a mode with a row and
+     a case in the flavor's entry script, and until then those models are `none` ("not supported by this
+     model"). Their hidden-thinking flag in the price list is unchanged.
+3. **The gateway pins the beta per model, from the catalog.** The Messages rendering sets
+   `anthropic-beta` to the model's mode betas (`gateway.Model.Thinking`, set by the reconciler from
+   `thinking.Of`) and removes the client's header only for a model that needs none. It never passes the
+   agent's header through, so the PR 2 threat model (MCP connector, code execution, web fetch, long
+   context) stands. The pin is per model, not per request: a thinking-capable model always carries its
+   beta, whether or not this agent has thinking on, because a beta no field uses changes nothing and
+   the gateway cannot see the agent. For direct Anthropic the pinned value is
+   `thinking-binding-controls-2026-08-01` only. `interleaved-thinking-2025-05-14`, which OpenCode also
+   sends, is not pinned: it is not needed for the adaptive request Koinon sends, and the flavor spec
+   shows the request is accepted without it. For OpenRouter models no beta is pinned: the live check of
+   2026-10-29 passed through OpenRouter's Messages route with none. If a later check shows OpenRouter
+   needs one, it is a field in the row.
+4. **The agent's setting.** `agents.thinking` (migration 00038) is `NULL`, `on` or `off`, a mutable
+   setting of the agent like `agents.model` (ADR 0072): not part of a version, applied to the next
+   run, audited as `agent.thinking.set` with the old and new value in the same transaction, a repeat
+   writes nothing. Precedence: the agent's setting, then the version's value (a template's
+   `spec.model.thinking`, so a template sets the starting value), then the default, **on**
+   (`thinking.Choose`). It is on `AgentService.SetAgentThinking` and `PUT /admin/v1/agents/{id}/thinking`;
+   `GetAgentModel` returns the thinking state (setting, version value, what it resolves to, whether the
+   model supports it, the mode a run uses). The agent page shows a Thinking select under the model; a model whose capability is
+   `none` shows "Not supported by this model" and no choice, and keeps the setting for when the model
+   changes. The setting is not validated against the model on save, because the model can change
+   later.
+5. **The flavor renders Koinon's choice.** agentd computes `thinking.Of(provider type, model,
+   format).Effective(setting)` for the run's effective model and passes it as `--thinking none|adaptive`
+   (`flavor.Descriptor.ThinkingArg`). The OpenCode entry script writes the model's `compatibility`
+   into `OPENCODE_CONFIG_CONTENT`: `adaptive` is `supportsThinkingBlockBinding: true`, which makes
+   OpenCode send adaptive thinking with the binding the gateway's beta covers; `none`, or no switch,
+   is `supportsThinkingBlockBinding: false`, which sends no `thinking` field. `supportsEffortUpdates`
+   is `false` in both, since per-turn effort adds `output_config` and a beta of its own. OpenCode's ID
+   regex never decides. `flavors/opencode/README.md` is corrected.
+6. **Cost.** Thinking tokens are billed as output: agentgateway and Anthropic report them inside
+   `output_tokens`, and `pricing.Split` already bills the reasoning part at the output rate unless the
+   price names a reasoning rate (ADR 0056). Nothing about the ledger changes except visibility: the spend
+   report line gains `reasoningTokens` (the part providers report separately, inside `outputTokens`). The
+   price list marks every thinking-capable model `hidden_thinking` (Haiku 5.5 lacked it; list version
+   `2026-10-29.1`), so a cut stream's output is flagged `thinking_unmeasured`, and a test keeps the
+   price list and the catalog in step. The budget reserve of a cut stream is the request's `max_tokens`
+   capped at the entry's `max_output`; Anthropic counts thinking inside `max_tokens`, so the reserve
+   already covers it.
+7. **#242: the OpenRouter pin rows are deleted** after the live check (decision 7) passed on 2026-10-29,
+   as decision 4 said. `anthropic/*` models on OpenRouter default to `anthropic` through the family
+   preference; the startup re-derivation moves every model whose format no admin set and writes
+   `model.format_rederived`. The per-model overrides the home lab applied stay (they are overrides,
+   not re-derived). They are no longer needed and an admin may reset them. The migration `00031` comment
+   about "stay on openai for now" is history.
+
+### Tests
+
+- `internal/thinking`: the table over real IDs on two providers, the precedence, and the price-list
+  consistency check.
+- The fake model server's **strict Messages mode** (`SetStrictMessages`, `koinon-fakemodel
+  --strict-messages`) refuses unknown top-level and `thinking` fields, beta-only fields without their
+  beta and a missing `anthropic-version`, with Anthropic's 400 shape.
+- The flavor spec (`test/flavors/thinking_test.go`) runs `claude-haiku-5-5`,
+  `anthropic/claude-haiku-5.5`, `claude-opus-5-5`, `claude-sonnet-4-5` and the contract ID with
+  thinking on and off, against the strict fake.
+- The gateway spec (`gatewaytest`, both drivers, real agentgateway v1.7.0) sends adaptive thinking
+  with `block_binding` and no client beta through a Claude-shaped model ID to the strict fake: it
+  arrives with the pinned beta and the client's own beta replaced; the same body to a model the catalog
+  says cannot think is refused with Anthropic's message, reproducing the rc.7 failure.
+- The ledger prices reasoning tokens as output; the agent API audits and resolves the setting; agentd
+  passes the mode.
+
+### Consequences
+
+- Every Claude 5.x model now thinks by default, on the direct and the OpenRouter route. That raises
+  output tokens and cost per run; it is the point of the decision, and the follow-up in the next
+  home-lab window compares FinOps and research with thinking on and off and records it in the release
+  notes. An org that wants the old behaviour sets `thinking: off` in a template or on the agent.
+- Open questions are listed in the pull request: the OpenAI-style effort mode, no CLI in this
+  repository to carry the setting, and the beta pin for OpenRouter.
+
