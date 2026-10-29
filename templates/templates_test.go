@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing/fstest"
 	"time"
@@ -284,6 +285,39 @@ var _ = Describe("Parse", func() {
 			"  model:\n", "  harness:\n    pluginInstalls: true\n  model:\n", 1)))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(t.Spec.Harness.PluginInstalls).To(BeTrue())
+	})
+
+	Describe("optional run limits (ADR 0080)", func() {
+		withLimits := func(lines string) string {
+			return regexp.MustCompile(`(?s)    run:\n.*?    spendUSD`).ReplaceAllString(string(valid),
+				"    run:\n      maxDuration: 30m\n"+lines+"    spendUSD")
+		}
+
+		It("accepts a template that sets only the deprecated maxTokens", func() {
+			t, err := templates.Parse([]byte(withLimits("      maxTokens: 2000000\n")))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeZero())
+			Expect(t.Spec.Limits.Run.MaxSpendUSD).To(BeZero())
+		})
+
+		It("accepts a template that sets neither limit", func() {
+			_, err := templates.Parse([]byte(withLimits("")))
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("keeps explicit values", func() {
+			t, err := templates.Parse([]byte(withLimits("      maxModelRequests: 150\n      maxSpendUSD: \"1.50\"\n")))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeEquivalentTo(150))
+			Expect(t.Spec.Limits.Run.MaxSpendUSD.String()).To(Equal("1.50"))
+		})
+
+		It("still refuses an explicit zero", func() {
+			_, err := templates.Parse([]byte(withLimits("      maxSpendUSD: \"0.00\"\n")))
+			Expect(err).To(HaveOccurred())
+			_, err = templates.Parse([]byte(withLimits("      maxModelRequests: 0\n")))
+			Expect(err).To(HaveOccurred())
+		})
 	})
 
 	DescribeTable("rejects invalid fixtures",

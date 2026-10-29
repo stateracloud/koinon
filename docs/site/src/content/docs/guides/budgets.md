@@ -40,7 +40,9 @@ the run**:
   gateway enforces on the agent's key, so a run is also refused between ledger checks.
 - **Time**: the wall clock of the run, without the time it is parked.
 
-The template sets the defaults (the agent and template pages show them as "Run limits"). An org admin
+The template sets the defaults (the agent and template pages show them as "Run limits"). A template
+may leave the request and spend limits out, as one written before run limits does with only `maxTokens`:
+its runs then get the platform defaults of 200 requests and $5.00. The shipped templates set their own. An org admin
 can change them for one agent; the change applies to runs queued afterwards. The task's timeline shows each run's
 use of its limits (requests, spend and time), and names the limit a run stopped at.
 

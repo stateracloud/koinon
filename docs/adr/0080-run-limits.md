@@ -87,7 +87,8 @@ with compaction instead of a stop.
    `budget.agent_run_limits.set`), the way the agent's daily limit is overridden; an unset field
    follows the agent's version. A run copies its limits when it is queued, so a change applies to
    runs queued afterwards. A version made before this decision, with no run limits, gets the platform
-   defaults: 200 requests and $5.00 per run.
+   defaults: 200 requests and $5.00 per run. The same fallback applies to a template that omits
+   `maxModelRequests` or `maxSpendUSD` (see the amendment on optional limits below).
 9. **Defaults per template** are calibrated from the home-lab data below.
 
 ## Defaults, with the data
@@ -182,3 +183,28 @@ The reasoning:
    `CheckRunLimits` locks it (`FOR UPDATE`) before it reads the usage, holding the lock to the end of
    the transaction: concurrent requests of one run count each other's committed entries, so the request
    limit is exact, and the entry's foreign-key lock cannot deadlock with the token update.
+
+## Amendment 2026-10-29: the request and spend limits are optional in a template
+
+The first version of this decision made `limits.run.maxModelRequests` and `limits.run.maxSpendUSD`
+required in the template schema. A custom template written before this decision, with only the
+now-deprecated `maxTokens`, would then stop validating after an upgrade. That is a breaking upgrade
+for a setting this ADR itself calls ignored.
+
+1. **Both are optional.** The schema requires only `maxDuration`. A template that sets neither, or
+   only `maxTokens`, validates. An explicit zero is still refused (the schema's minimum for requests,
+   a `not` pattern for spend), so "unset" and "no limit" cannot be confused: there is no way to
+   switch a limit off.
+2. **An unset limit falls back to the platform default**, the one older agent versions already get:
+   200 requests and $5.00 per run (`agentconfig.DefaultMaxModelRequests`, `DefaultMaxSpend`). The
+   fallback is applied where a run's limits are read (`agentconfig.Config.RunLimits`), so a version
+   stores what the template said and the platform's defaults can move later without rewriting
+   versions. `TemplateService` reports the effective limits, defaults included.
+3. **Overrides are unchanged.** An admin can still override either limit per agent
+   (`BudgetService.SetAgentRunLimits`).
+4. **The shipped templates keep their explicit, calibrated values.** The defaults are a floor for
+   templates that predate run limits, not a replacement for calibration.
+
+What a cheaper option would cost later: keeping the fields required would have forced every custom
+template to be edited at upgrade time, and a hard default inside the schema would have hidden the
+fallback from the version record.

@@ -120,3 +120,29 @@ var _ = Describe("QuestionTimers", func() {
 		Expect(e).To(Equal(6 * time.Hour))
 	})
 })
+
+var _ = Describe("RunLimits", func() {
+	It("gives a template that sets only the deprecated maxTokens the platform defaults", func() {
+		t := &templates.Template{Spec: templates.Spec{Limits: templates.Limits{
+			Run: templates.RunLimits{MaxDuration: templates.Duration{Duration: 10 * time.Minute}, MaxTokens: 2_000_000}, //nolint:staticcheck // the deprecated field is the case under test
+		}}}
+		raw, err := agentconfig.FromTemplate(t, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		cfg, err := agentconfig.Parse(raw)
+		Expect(err).NotTo(HaveOccurred())
+		l := cfg.RunLimits()
+		Expect(l.WallClock).To(Equal(10 * time.Minute))
+		Expect(l.MaxModelRequests).To(Equal(int64(200)))
+		Expect(l.MaxSpend.String()).To(Equal(agentconfig.DefaultMaxSpend.String()))
+		Expect(l.MaxSpend.Float64()).To(Equal(5.0))
+	})
+
+	It("keeps a template's explicit values", func() {
+		t := &templates.Template{Spec: templates.Spec{Limits: templates.Limits{
+			Run: templates.RunLimits{MaxModelRequests: 100, MaxSpendUSD: templates.USD(75)},
+		}}}
+		l := agentconfig.FromTemplate(t, "sha256:x").RunLimits()
+		Expect(l.MaxModelRequests).To(Equal(int64(100)))
+		Expect(l.MaxSpend.Float64()).To(Equal(0.75))
+	})
+})
