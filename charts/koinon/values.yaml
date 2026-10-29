@@ -378,6 +378,11 @@ openshell:
   insecure: false
   # Default sandbox runtime class (ADR 0045).
   runtimeClassName: kata
+  # The OpenShell gateway's gateway_id (its chart's gatewayId; the default there is openshell). In
+  # managed mode OpenShell names each workspace's namespace openshell-<gatewayId>-<workspace> and
+  # labels it openshell.ai/gateway-id; the sandbox observer reads pods there. The preflight compares
+  # it with the gateway's gateway.toml.
+  gatewayId: openshell
 
 # URL browsers reach Koinon at, for example https://koinon.example.com. Its scheme sets the
 # session cookies' Secure attribute (http:// turns it off, so logins work without TLS) and it is
@@ -501,6 +506,19 @@ metrics:
     skipCapabilityCheck: false
     # Scrape interval, for example 30s; empty uses the Prometheus default.
     interval: ""
+
+# The sandbox observer (ADR 0078): when OpenShell says only "ConfigurationPending" about a sandbox
+# that never became ready, the reconciler reads the sandbox's pod (get only, by name) to find out why:
+# an image that cannot be pulled, a container that keeps crashing, a refused pod. On by default.
+# Cluster-scoped objects it renders (templates/sandbox-observer.yaml): a ClusterRole with get on pods
+# and agents.x-k8s.io sandboxes, a ClusterRole that lets the reconciler create RoleBindings and bind
+# that one ClusterRole, and a ValidatingAdmissionPolicy that limits those bindings to OpenShell
+# workspace namespaces of openshell.gatewayId, with the fixed name, role and subject. It needs
+# sandboxPolicy.enabled. Off, the chart renders none of it, the reconciler reads nothing, and a pull
+# error stays an "unknown" wait cause (the preflight warns). Planned to go away once OpenShell
+# surfaces pod failures itself.
+sandboxObserver:
+  enabled: true
 
 # ValidatingAdmissionPolicy for OpenShell sandbox namespaces (ADRs 0045, 0048).
 sandboxPolicy:

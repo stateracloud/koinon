@@ -1,0 +1,140 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- /*
+The sandbox observer (ADR 0078): get-only reads of sandbox pods, to say why a sandbox never became
+ready. OpenShell hides the kubelet's pull and crash errors behind ConfigurationPending, and in
+managed mode it delivers no Kubernetes events, so the reconciler reads the pod (or the Agent Sandbox
+object when the pod is missing) when OpenShell's reason says nothing.
+
+Three pieces, all cluster-scoped, all prefixed <namespace>-<fullname> like the sandbox policies:
+- the observer ClusterRole: get on pods and on agents.x-k8s.io sandboxes. It is bound only per
+  workspace namespace, never cluster-wide, by RoleBindings the reconciler creates;
+- the binder ClusterRole, bound cluster-wide to the reconciler: create RoleBindings, and bind that
+  one ClusterRole (resourceNames). RBAC cannot select namespaces by label, so this alone would let
+  the reconciler grant pod reads anywhere;
+- a native ValidatingAdmissionPolicy (never Kyverno) that bounds the grant: the reconciler may
+  create or update a RoleBinding only in a namespace labelled openshell.ai/managed-by=openshell and
+  openshell.ai/gateway-id=<openshell.gatewayId>, with the fixed name, the fixed roleRef (this
+  ClusterRole) and the fixed subject (the reconciler's ServiceAccount). Nobody else may write that
+  name, or bind this ClusterRole, in a sandbox namespace: the same identity-keyed pattern as
+  sandbox-policy.yaml, cluster admins included. failurePolicy Fail; the denials answer 403.
+
+sandboxObserver.enabled=false renders none of it and the reconciler reads nothing: a pull error then
+stays "unknown" in the wait cause. Remove all of this once OpenShell surfaces pod failures itself.
+*/ -}}
+{{- if .Values.sandboxObserver.enabled }}
+{{- $role := include "koinon.observerRole" . }}
+{{- $binder := printf "%s-binder" $role }}
+{{- $policy := printf "%s-binding" $role }}
+{{- $sa := include "koinon.componentName" (list . "reconciler") }}
+{{- $user := printf "system:serviceaccount:%s:%s" .Release.Namespace $sa }}
+{{- $gatewayID := .Values.openshell.gatewayId }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $role }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get]
+  - apiGroups: [agents.x-k8s.io]
+    resources: [sandboxes]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $binder }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+rules:
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [rolebindings]
+    verbs: [create]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles]
+    resourceNames: [{{ $role }}]
+    verbs: [bind]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $binder }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $binder }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $policy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [rbac.authorization.k8s.io]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [rolebindings]
+  # Only the reconciler's writes, and anything that uses the fixed name or this ClusterRole, reach
+  # the validations: every other RoleBinding in the cluster passes untouched.
+  matchConditions:
+    - name: reconciler-or-observer-role
+      expression: >-
+        request.userInfo.username == {{ $user | quote }} || object.metadata.name == {{ $role | quote }} ||
+        (has(object.roleRef) && object.roleRef.kind == 'ClusterRole' && object.roleRef.name == {{ $role | quote }})
+  variables:
+    - name: reconciler
+      expression: {{ printf "request.userInfo.username == %s" ($user | quote) | quote }}
+    - name: sandboxNamespace
+      expression: >-
+        has(namespaceObject.metadata.labels) && 'openshell.ai/managed-by' in namespaceObject.metadata.labels &&
+        namespaceObject.metadata.labels['openshell.ai/managed-by'] == 'openshell'
+    - name: ourGateway
+      expression: >-
+        variables.sandboxNamespace && 'openshell.ai/gateway-id' in namespaceObject.metadata.labels &&
+        namespaceObject.metadata.labels['openshell.ai/gateway-id'] == {{ $gatewayID | quote }}
+  validations:
+    - expression: "variables.reconciler || !variables.sandboxNamespace"
+      reason: Forbidden
+      messageExpression: "'only the Koinon reconciler may bind the sandbox observer role in sandbox namespaces, not ' + request.userInfo.username"
+    - expression: "!variables.reconciler || variables.ourGateway"
+      reason: Forbidden
+      message: {{ printf "the sandbox observer role may be bound only in namespaces labelled openshell.ai/managed-by=openshell and openshell.ai/gateway-id=%s" $gatewayID | quote }}
+    - expression: {{ printf "!variables.reconciler || object.metadata.name == %s" ($role | quote) | quote }}
+      reason: Forbidden
+      message: {{ printf "the sandbox observer RoleBinding must be named %s" $role | quote }}
+    - expression: >-
+        !variables.reconciler || (object.roleRef.apiGroup == 'rbac.authorization.k8s.io' &&
+        object.roleRef.kind == 'ClusterRole' && object.roleRef.name == {{ $role | quote }})
+      reason: Forbidden
+      message: {{ printf "the sandbox observer RoleBinding must bind exactly the ClusterRole %s" $role | quote }}
+    - expression: >-
+        !variables.reconciler || (has(object.subjects) && size(object.subjects) == 1 &&
+        object.subjects[0].kind == 'ServiceAccount' && object.subjects[0].name == {{ $sa | quote }} &&
+        has(object.subjects[0].namespace) && object.subjects[0].namespace == {{ .Release.Namespace | quote }})
+      reason: Forbidden
+      message: {{ printf "the sandbox observer RoleBinding must have exactly one subject, the ServiceAccount %s/%s" .Release.Namespace $sa | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $policy }}
+  labels:
+    {{- include "koinon.commonLabels" . | nindent 4 }}
+spec:
+  policyName: {{ $policy }}
+  validationActions: {{ toJson .Values.sandboxPolicy.validationActions }}
+  # All namespaces: the policy looks at the namespace's labels itself, and RoleBindings that have
+  # nothing to do with the observer are filtered out by its matchConditions.
+{{- end }}
