@@ -270,11 +270,16 @@ func RecordUsage(ctx context.Context, db DB, org, runID pgtype.UUID, tokens int6
 // its scope (ADR 0080). Whoever records or changes a ledger entry of the run calls it after the
 // write, in the same transaction: a new entry, and a settlement that raises an entry's cost. It
 // returns the run, canceled or not; pgx.ErrNoRows means the run has finished or does not exist.
+//
+// The run row is locked first and the lock is held to the end of the enclosing transaction, so
+// that concurrent writers of one run's entries are serialised: each counts the entries the
+// others committed before it. Without the lock two requests recorded at once could both count
+// N-1 entries and overshoot the request limit.
 func CheckRunLimits(ctx context.Context, db DB, org, runID pgtype.UUID) (store.Run, error) {
 	var out store.Run
 	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
 		q := store.New(tx)
-		run, err := q.GetRun(ctx, store.GetRunParams{OrgID: org, ID: runID})
+		run, err := q.LockRun(ctx, store.LockRunParams{OrgID: org, ID: runID})
 		if err != nil {
 			return err
 		}

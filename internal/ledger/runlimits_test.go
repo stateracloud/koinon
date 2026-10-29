@@ -5,6 +5,7 @@ package ledger_test
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -169,7 +170,7 @@ var _ = Describe("run limits", func() {
 			Expect(l.Amount).To(BeNumerically("~", 9.80, 1e-9), "the run is over: the agent's daily remainder")
 		})
 
-		It("holds back a pending response's reserve from the run level too", func(ctx SpecContext) {
+		It("does not hold a pending response's reserve back at the run level (it can exceed the whole limit)", func(ctx SpecContext) {
 			e := newEnv(ctx, uniq("org"), "", "10.00")
 			now := time.Now()
 			r := e.startLimitedRun(ctx, e.task(ctx), runLimits{requests: 100, spendUSD: "0.50"}, now.Add(-time.Minute))
@@ -180,7 +181,136 @@ var _ = Describe("run limits", func() {
 			Expect(err).NotTo(HaveOccurred())
 			l, err := ledger.AgentLimit(ctx, q, e.agent, now)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(l.Amount).To(BeNumerically("~", 0.15, 1e-9), "$0.50 less the $0.10 charge and the $0.25 reserve")
+			Expect(l.Amount).To(BeNumerically("~", 0.40, 1e-9), "$0.50 less the $0.10 charge; the $0.25 reserve is held at the agent's level only")
+		})
+
+		It("keeps a run whose limit a cut response's reserve exceeds running, with a positive run level", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "10.00")
+			now := time.Now()
+			r := e.startLimitedRun(ctx, e.task(ctx), runLimits{requests: 100, spendUSD: "0.30"}, now.Add(-time.Minute))
+			_, err := db.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, run_id, task_id, request_id, key_id, model,
+				input_tokens, output_tokens, cost_usd, priced, occurred_at, provisional, reserve_usd)
+				VALUES ($1, $2, $3, $4, 'req-big-reserve', 'k-1', 'm', 10, 0, 0.0002, true, now(), true, 0.40)`,
+				e.org, e.agent.ID, r.ID, r.TaskID)
+			Expect(err).NotTo(HaveOccurred())
+			l, err := ledger.AgentLimit(ctx, q, e.agent, now)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(l.Amount).To(BeNumerically("~", 0.2998, 1e-9), "the run's remaining spend: the wrap-up turn is not refused")
+			n, err := ledger.StopSpent(ctx, db, e.agent, now)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(BeZero())
+		})
+	})
+
+	Describe("attributing requests to the run that makes them", func() {
+		// parkedThenResumed builds the normal sequence of one agent: run A parks (input_required),
+		// the agent's next run B starts and ends, and A resumes right after. A keeps its first
+		// started_at, which is older than B's.
+		parkedThenResumed := func(ctx SpecContext, e *env, l runLimits) (a, b store.Run) {
+			GinkgoHelper()
+			now := time.Now()
+			a = e.startLimitedRun(ctx, e.task(ctx), l, now.Add(-10*time.Minute))
+			_, err := db.Exec(ctx, `UPDATE runs SET state = 'parked', park_reason = 'input_required', parked_at = $3,
+				owner_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL WHERE org_id = $1 AND id = $2`, e.org, a.ID, now.Add(-9*time.Minute))
+			Expect(err).NotTo(HaveOccurred())
+			b = e.startLimitedRun(ctx, e.task(ctx), runLimits{requests: 100, spendUSD: "5.00"}, now.Add(-5*time.Minute))
+			e.finishRun(ctx, b.ID, now.Add(-10*time.Second))
+			_, err = db.Exec(ctx, `UPDATE runs SET state = 'starting', park_reason = NULL, parked_at = NULL, owner_id = 'test',
+				lease_expires_at = now() + interval '1 hour', claimed_at = $3 WHERE org_id = $1 AND id = $2`, e.org, a.ID, now.Add(-time.Second))
+			Expect(err).NotTo(HaveOccurred())
+			return e.run(ctx, a.ID), e.run(ctx, b.ID)
+		}
+
+		It("books a resumed parked run's requests to it, not to the run that finished just before", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "10.00")
+			a, b := parkedThenResumed(ctx, e, runLimits{requests: 2, spendUSD: "5.00"})
+			_, err := ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.001", 10, 1), e.entry(time.Now(), "0.001", 10, 1)})
+			Expect(err).NotTo(HaveOccurred())
+
+			var forA, forB int
+			Expect(db.QueryRow(ctx, `SELECT count(*) FILTER (WHERE run_id = $2), count(*) FILTER (WHERE run_id = $3)
+				FROM spend_entries WHERE org_id = $1`, e.org, a.ID, b.ID).Scan(&forA, &forB)).To(Succeed())
+			Expect([]int{forA, forB}).To(Equal([]int{2, 0}))
+			Expect(e.run(ctx, a.ID).State).To(Equal(store.RunStateCanceled), "the 2nd request reaches A's limit of 2")
+			Expect(canceledPayload(ctx, e, e.run(ctx, a.ID))).To(HaveKeyWithValue("reason", "request_cap"))
+		})
+
+		It("still books a response finishing after its run ended to that run, within the grace", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "10.00")
+			now := time.Now()
+			r := e.startLimitedRun(ctx, e.task(ctx), runLimits{requests: 100, spendUSD: "5.00"}, now.Add(-time.Minute))
+			e.finishRun(ctx, r.ID, now.Add(-10*time.Second))
+			_, err := ing.Ingest(ctx, []ledger.Entry{e.entry(now, "0.001", 10, 1)})
+			Expect(err).NotTo(HaveOccurred())
+			var n int
+			Expect(db.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE org_id = $1 AND run_id = $2`, e.org, r.ID).Scan(&n)).To(Succeed())
+			Expect(n).To(Equal(1))
+		})
+
+		It("books a late response of the finished run to it, after the parked run resumed", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "10.00")
+			a, b := parkedThenResumed(ctx, e, runLimits{requests: 100, spendUSD: "5.00"})
+			_, err := ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now().Add(-20*time.Second), "0.001", 10, 1)})
+			Expect(err).NotTo(HaveOccurred())
+			var forA, forB int
+			Expect(db.QueryRow(ctx, `SELECT count(*) FILTER (WHERE run_id = $2), count(*) FILTER (WHERE run_id = $3)
+				FROM spend_entries WHERE org_id = $1`, e.org, a.ID, b.ID).Scan(&forA, &forB)).To(Succeed())
+			Expect([]int{forA, forB}).To(Equal([]int{0, 1}), "B was executing 20 s ago; A had not been claimed yet")
+		})
+	})
+
+	Describe("the stop at a run limit", func() {
+		It("carries what the agent last said when the reconciler's stop is the one that cancels", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "10.00")
+			now := time.Now()
+			task := e.task(ctx)
+			r := e.startLimitedRun(ctx, task, runLimits{requests: 100, spendUSD: "0.50"}, now.Add(-time.Minute))
+			_, err := db.Exec(ctx, `UPDATE tasks SET agent_summary = 'half done: the report is in section 2', agent_summary_at = now() WHERE org_id = $1 AND id = $2`, e.org, task.ID)
+			Expect(err).NotTo(HaveOccurred())
+			// Spend recorded without the ledger's check (an admin lowered the limit afterwards).
+			_, err = db.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, run_id, task_id, request_id, key_id, model,
+				input_tokens, output_tokens, cost_usd, priced, occurred_at) VALUES ($1, $2, $3, $4, 'req-late', 'k-1', 'm', 10, 1, 0.60, true, now())`,
+				e.org, e.agent.ID, r.ID, r.TaskID)
+			Expect(err).NotTo(HaveOccurred())
+
+			n, err := ledger.StopSpent(ctx, db, e.agent, now)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(n).To(Equal(1))
+			run := e.run(ctx, r.ID)
+			Expect(run.State).To(Equal(store.RunStateCanceled))
+			p := canceledPayload(ctx, e, run)
+			Expect(p).To(HaveKeyWithValue("reason", "run_spend_cap"))
+			Expect(p).To(HaveKeyWithValue("summary", "half done: the report is in section 2"))
+			Expect(p).To(HaveKey("model_requests"))
+		})
+
+		It("carries the summary at the ledger's own cancel too", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "10.00")
+			task := e.task(ctx)
+			r := e.startLimitedRun(ctx, task, runLimits{requests: 1, spendUSD: "5.00"}, time.Now().Add(-time.Minute))
+			_, err := db.Exec(ctx, `UPDATE tasks SET agent_summary = 'nearly there', agent_summary_at = now() WHERE org_id = $1 AND id = $2`, e.org, task.ID)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.001", 10, 1)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(canceledPayload(ctx, e, e.run(ctx, r.ID))).To(HaveKeyWithValue("summary", "nearly there"))
+		})
+
+		It("serialises concurrent requests of one run so the request limit is exact", func(ctx SpecContext) {
+			e := newEnv(ctx, uniq("org"), "", "10.00")
+			r := e.startLimitedRun(ctx, e.task(ctx), runLimits{requests: 4, spendUSD: "5.00"}, time.Now().Add(-time.Minute))
+			var wg sync.WaitGroup
+			for range 4 {
+				wg.Add(1)
+				go func() {
+					defer GinkgoRecover()
+					defer wg.Done()
+					_, err := ing.Ingest(ctx, []ledger.Entry{e.entry(time.Now(), "0.001", 10, 1)})
+					Expect(err).NotTo(HaveOccurred())
+				}()
+			}
+			wg.Wait()
+			Expect(e.run(ctx, r.ID).State).To(Equal(store.RunStateCanceled), "the 4th of 4 concurrent requests reaches the limit")
+			Expect(canceledPayload(ctx, e, e.run(ctx, r.ID))).To(HaveKeyWithValue("reason", "request_cap"))
 		})
 	})
 })

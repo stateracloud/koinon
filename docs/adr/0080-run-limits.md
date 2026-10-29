@@ -43,7 +43,8 @@ with compaction instead of a stop.
 3. **The spend limit is the "run" level of the net key limit** (ADR 0041, decision 5, which
    named it and left it unbuilt). While an agent has a starting or running run with a spend limit,
    the key's pushed limit is `min(run, agent daily, org monthly, platform ceiling)` remaining, net of
-   the spend recorded in each window and the reserves of provisional entries. In standalone mode
+   the spend recorded in each window and, for the agent, org and platform levels, the reserves of
+   provisional entries (the run level holds none back: see the amendment below). In standalone mode
    agentgateway therefore refuses the key's next request between ledger passes; the overshoot is
    bounded by one in-flight response per level, as for the others. A run start and a run end change
    the pushed limit once each (one config reload in standalone mode). In Kubernetes mode there is no
@@ -147,3 +148,37 @@ The reasoning:
 - **A counter column for requests and spend** on the run: cheaper to read, but a settlement that
   changes a cost would have to adjust it. Reading the entries (an index on `(org_id, run_id)`
   exists) cannot drift.
+
+## Amendment 2026-10-29: review findings
+
+1. **Reserves stay out of the run level.** A provisional entry (a response cut short, ADR 0056)
+   reserves its request's `max_tokens` bound against the gateway key. That bound is priced for the
+   whole possible output and can exceed an entire run limit (the finops default is $0.75): one cut
+   response would push a run limit of zero for a run the ledger had not stopped, and the gateway would
+   refuse the run's requests, the 80% wrap-up turn among them, with a 429 that `agentd` cannot tell
+   from a budget stop (it compares charges only). The run level of the pushed limit is therefore the
+   run's remaining *charges*. What a cheaper option would cost later: the run can overshoot its
+   spend limit by the cost of the in-flight cut responses, which the settlement then checks (point
+   2); the agent, org and platform levels still hold the reserve, so the key stays bounded by them.
+   The overshoot is one in-flight response per run, the bound every level already has.
+2. **One enforcement sequence for every writer of an entry.** Ingest and the settler both call
+   `ledger.enforce`: the agent's, org's and platform's budgets (alerts, the stop, the reconciler
+   wake), then `scheduler.CheckRunLimits`. A settlement that raises a cost past both the agent's
+   daily limit and the run's spend limit therefore names the daily limit, as decision 5 says. The
+   settler checks only when the settlement changed the entry, and its alerts go through the same
+   `Notifier` as ingest's.
+3. **The run's own cancel is one path.** `ledger.Stop` for a run-level limit (the reconciler's
+   `StopSpent`) calls `scheduler.CheckRunLimits`, so the cancel carries the agent's last reply and the
+   usage whichever path reaches the limit first (decision 7). `agentd`'s `budgetStop` records the
+   limit and the reason; the ledger's cancel carries the reply when it wins the race.
+4. **Attribution of a request to a run.** `FindRunAt` prefers the run that is executing (starting or
+   running, claimed by the request's time) over a run that finished inside the grace. A parked run that
+   resumes keeps its first `started_at`, older than the run that ran meanwhile, and its requests were
+   booked to that finished run for up to the grace, so its request and spend counts came out too low and
+   its limits were overshot. `claimed_at` is set on every claim, resume included. A response that
+   completes after its run ended is still booked to that run when no run is executing, and a response
+   logged before the resume is still booked to the run that was executing then.
+5. **Serialisation.** Ingest locks the run's row before it writes the entry, and
+   `CheckRunLimits` locks it (`FOR UPDATE`) before it reads the usage, holding the lock to the end of
+   the transaction: concurrent requests of one run count each other's committed entries, so the request
+   limit is exact, and the entry's foreign-key lock cannot deadlock with the token update.

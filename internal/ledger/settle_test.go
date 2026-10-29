@@ -244,6 +244,69 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(l2.Generation).NotTo(Equal(l.Generation), "a fresh gateway counter for the new amount")
 	})
 
+	Describe("a settlement that raises the cost to a run limit (ADR 0080, decision 5)", func() {
+		canceled := func(ctx SpecContext) map[string]any {
+			GinkgoHelper()
+			var raw []byte
+			Expect(db.QueryRow(ctx, `SELECT payload FROM task_events WHERE org_id = $1 AND run_id = $2 AND kind = 'run.canceled'`,
+				e.org, run.ID).Scan(&raw)).To(Succeed())
+			var p map[string]any
+			Expect(json.Unmarshal(raw, &p)).To(Succeed())
+			return p
+		}
+		limit := func(ctx SpecContext, spendUSD string) {
+			GinkgoHelper()
+			_, err := db.Exec(ctx, `UPDATE runs SET max_spend_usd = $3::numeric WHERE org_id = $1 AND id = $2`, e.org, run.ID, spendUSD)
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		It("cancels the run at its spend limit and names it, with what the agent last said", func(ctx SpecContext) {
+			limit(ctx, "0.50")
+			_, err := db.Exec(ctx, `UPDATE tasks SET agent_summary = 'the draft is in notes', agent_summary_at = now() WHERE org_id = $1 AND id = $2`, e.org, run.TaskID)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = in.Ingest(ctx, []ledger.Entry{cut("gen-r1")})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateRunning), "$0.0002 charged at ingest")
+
+			// 1000 in at 0.20 and 300k out at 2, per million: $0.6002 against the $0.50 limit.
+			src.answer("gen-r1", providerusage.Usage{InputTokens: 1000, OutputTokens: 300_000, Cost: money.MustParse("0.6002")})
+			clock = clock.Add(time.Minute)
+			_, err = settler.SettleDue(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateCanceled))
+			p := canceled(ctx)
+			Expect(p).To(HaveKeyWithValue("reason", "run_spend_cap"))
+			Expect(p).To(HaveKeyWithValue("limit", "run_spend"))
+			Expect(p).To(HaveKeyWithValue("summary", "the draft is in notes"))
+		})
+
+		It("names the agent's daily limit when the settlement reaches it too", func(ctx SpecContext) {
+			limit(ctx, "1.00")
+			_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-r2")})
+			Expect(err).NotTo(HaveOccurred())
+			// 600k out at 2 per million: $1.2002, over the agent's $1.00 a day and the run's $1.00.
+			src.answer("gen-r2", providerusage.Usage{InputTokens: 1000, OutputTokens: 600_000, Cost: money.MustParse("1.2002")})
+			clock = clock.Add(time.Minute)
+			_, err = settler.SettleDue(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateCanceled))
+			p := canceled(ctx)
+			Expect(p).To(HaveKeyWithValue("reason", "spend_limit"), "the broadest limit reached names the stop")
+			Expect(p).To(HaveKeyWithValue("limit", budget.AgentDaily))
+		})
+
+		It("leaves the run running when the settlement stays below its limits", func(ctx SpecContext) {
+			limit(ctx, "0.50")
+			_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-r3")})
+			Expect(err).NotTo(HaveOccurred())
+			src.answer("gen-r3", providerusage.Usage{InputTokens: 1000, OutputTokens: 100, Cost: money.MustParse("0.0004")})
+			clock = clock.Add(time.Minute)
+			_, err = settler.SettleDue(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(e.run(ctx, run.ID).State).To(Equal(store.RunStateRunning))
+		})
+	})
+
 	It("adds the provider's extra tokens to the run once, even when the settlement is replayed", func(ctx SpecContext) {
 		_, err := in.Ingest(ctx, []ledger.Entry{cut("gen-d")})
 		Expect(err).NotTo(HaveOccurred())
