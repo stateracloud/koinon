@@ -23,6 +23,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/mcpservers"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/reconciler"
 	"github.com/stateracloud/koinon/pricing"
@@ -117,7 +118,7 @@ var _ = Describe("Provider delivery", func() {
 		Expect(st.AllowedModels(check, st.ServedModels(slug))).To(Equal([]string{"deepseek/flash"}))
 		l := st.Limits[check]
 		Expect(l.Unit).To(Equal(gateway.USD))
-		Expect(l.Amount).To(BeNumerically("~", 0.10, 1e-9), "the system key's small daily budget")
+		Expect(l.Amount).To(Equal(money.MustParse("0.10")), "the system key's small daily budget")
 		Expect(l.Window).To(Equal(24 * time.Hour))
 		sec, err := kube.CoreV1().Secrets(namespace).Get(ctx, mcpservers.ModelCheckSecretName(org), metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
@@ -130,7 +131,7 @@ var _ = Describe("Provider delivery", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(r.ReconcileAll(ctx)).To(Succeed())
 		again := mg.last()
-		Expect(again.Limits[check].Amount).To(BeNumerically("~", 0.06, 1e-9))
+		Expect(again.Limits[check].Amount).To(Equal(money.MustParse("0.06")))
 		for _, k := range again.Keys {
 			if k.Agent == check {
 				Expect(k.ID).To(Equal(key.ID))

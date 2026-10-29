@@ -125,47 +125,107 @@ var _ = Describe("ProbeWaiter", func() {
 		Expect(err).To(MatchError(ContainSubstring("not live yet")))
 	})
 
-	It("reports a rejected config from the synchronized gauge", func(ctx SpecContext) {
+	// gaugeServer answers the probe with 401 and the gauge with the next reading from values (the
+	// last one repeats).
+	gaugeServer := func(values ...int) *httptest.Server {
 		var metrics atomic.Int32
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasSuffix(r.URL.Path, "/metrics") {
-				metrics.Add(1)
-				_, _ = fmt.Fprint(w, "# TYPE agentgateway_config_synchronized gauge\nagentgateway_config_synchronized 0\n")
+				n := int(metrics.Add(1))
+				_, _ = fmt.Fprintf(w, "# TYPE agentgateway_config_synchronized gauge\nagentgateway_config_synchronized %d\n", values[min(n, len(values))-1])
 				return
 			}
 			w.WriteHeader(http.StatusUnauthorized)
 		}))
 		DeferCleanup(srv.Close)
+		return srv
+	}
 
-		w := standalone.ProbeWaiter{GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 10 * time.Millisecond}
+	It("reports a rejected config when the gauge stays 0 for RejectAfter", func(ctx SpecContext) {
+		srv := gaugeServer(0)
+		w := standalone.ProbeWaiter{GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 10 * time.Millisecond, RejectAfter: 100 * time.Millisecond}
+		start := time.Now()
 		err := w.Wait(ctx, "abc123")
 		Expect(errors.Is(err, standalone.ErrConfigRejected)).To(BeTrue(), "%v", err)
-		Expect(metrics.Load()).To(Equal(int32(4)), "rejects after consecutive zeros, not the first")
+		Expect(time.Since(start)).To(BeNumerically(">=", 100*time.Millisecond), "time, not a count of polls, decides")
 	})
 
-	It("counts consecutive zero readings across the backoff, resetting on a 1", func(ctx SpecContext) {
-		// Gauge readings per poll: two zeros, a one, then zeros. The one resets the count,
-		// so the rejection comes on the 7th poll (4 zeros after it), not the 4th.
-		var metrics atomic.Int32
+	It("does not call a good file rejected while the gauge still reads 0 from the previous rejection (issue #245)", func(ctx SpecContext) {
+		// The ConfigMap takes a minute to deliver the next file: the gauge reads 0 for that long, the
+		// probe gets 401, and then the file loads.
+		var polls atomic.Int32
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasSuffix(r.URL.Path, "/metrics") {
-				v := 0
-				if metrics.Add(1) == 3 {
-					v = 1
-				}
-				_, _ = fmt.Fprintf(w, "agentgateway_config_synchronized %d\n", v)
+				_, _ = fmt.Fprint(w, "agentgateway_config_synchronized 0\n")
 				return
 			}
-			w.WriteHeader(http.StatusUnauthorized)
+			if polls.Add(1) < 15 { // about 300 ms of stale 0 readings: far over the old four polls
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusTooManyRequests)
 		}))
 		DeferCleanup(srv.Close)
+		w := standalone.ProbeWaiter{GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 10 * time.Millisecond, MaxInterval: 20 * time.Millisecond, RejectAfter: time.Minute}
+		Expect(w.Wait(ctx, "abc123")).To(Succeed())
+	})
 
+	It("returns agentgateway's reason as soon as its log shows a failed reload after the wait began", func(ctx SpecContext) {
+		srv := gaugeServer(0)
+		log := &fakeReloadLog{reason: "USD budget limits support at most 9 fractional digits", afterCalls: 2}
+		w := standalone.ProbeWaiter{GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 10 * time.Millisecond, Reload: log}
+		before := time.Now()
+		err := w.Wait(w.Prepare(ctx), "abc123")
+		Expect(errors.Is(err, standalone.ErrConfigRejected)).To(BeTrue(), "%v", err)
+		var rej *standalone.ConfigRejectedError
+		Expect(errors.As(err, &rej)).To(BeTrue())
+		Expect(rej.Reason).To(Equal("USD budget limits support at most 9 fractional digits"))
+		Expect(rej.Revision).To(BeEquivalentTo("abc123"))
+		Expect(err.Error()).To(ContainSubstring("at most 9 fractional digits"))
+		Expect(time.Since(before)).To(BeNumerically("<", 5*time.Second), "no wait for RejectAfter")
+		Expect(log.after).To(BeTemporally("~", time.Now().Add(-time.Hour), time.Minute), "nothing logged before delivery: the window start is the baseline")
+	})
+
+	It("keeps waiting when the gauge reads 0 and the log shows no new failure", func(ctx SpecContext) {
+		srv := gaugeServer(0)
+		short, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+		defer cancel()
+		w := standalone.ProbeWaiter{GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 10 * time.Millisecond, Reload: &fakeReloadLog{}}
+		Expect(w.Wait(short, "abc123")).To(MatchError(context.DeadlineExceeded))
+	})
+
+	It("goes on when the log cannot be read", func(ctx SpecContext) {
+		srv := gaugeServer(0)
 		w := standalone.ProbeWaiter{
-			GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 5 * time.Millisecond, MaxInterval: 20 * time.Millisecond,
+			GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 10 * time.Millisecond, RejectAfter: 80 * time.Millisecond,
+			Reload: &fakeReloadLog{err: errors.New("forbidden")},
 		}
 		err := w.Wait(ctx, "abc123")
 		Expect(errors.Is(err, standalone.ErrConfigRejected)).To(BeTrue(), "%v", err)
-		Expect(metrics.Load()).To(Equal(int32(7)))
+		var rej *standalone.ConfigRejectedError
+		Expect(errors.As(err, &rej)).To(BeTrue())
+		Expect(rej.Reason).To(BeEmpty())
+	})
+
+	It("does not attribute an older failure to this file when the baseline could not be read", func(ctx SpecContext) {
+		srv := gaugeServer(0)
+		// Prepare's read fails once; afterwards the log shows the previous file's failure.
+		log := &fakeReloadLog{reason: "previous file's reason", errOnCalls: 1}
+		w := standalone.ProbeWaiter{
+			GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 10 * time.Millisecond, RejectAfter: 100 * time.Millisecond, Reload: log,
+		}
+		err := w.Wait(w.Prepare(ctx), "abc123")
+		var rej *standalone.ConfigRejectedError
+		Expect(errors.As(err, &rej)).To(BeTrue(), "%v", err)
+		Expect(rej.Reason).To(BeEmpty(), "decided by RejectAfter alone, not by an old log line")
+		Expect(log.calls).To(Equal(1), "Wait did not read the log")
+	})
+
+	It("resets the clock when the gauge reads 1", func(ctx SpecContext) {
+		// Zero, one, then zero for good: RejectAfter counts from the last transition to 0.
+		srv := gaugeServer(0, 0, 1, 0)
+		w := standalone.ProbeWaiter{GatewayURL: srv.URL, StatsURL: srv.URL, Interval: 5 * time.Millisecond, MaxInterval: 20 * time.Millisecond, RejectAfter: 150 * time.Millisecond}
+		Expect(errors.Is(w.Wait(ctx, "abc123"), standalone.ErrConfigRejected)).To(BeTrue())
 	})
 
 	It("keeps waiting while the gauge reads 1", func(ctx SpecContext) {
@@ -183,3 +243,24 @@ var _ = Describe("ProbeWaiter", func() {
 		Expect(w.Wait(short, "abc123")).To(MatchError(context.DeadlineExceeded))
 	})
 })
+
+type fakeReloadLog struct {
+	reason     string
+	err        error
+	afterCalls int // the failure appears on this call
+	errOnCalls int // the first calls fail with a read error
+	calls      int
+	after      time.Time
+}
+
+func (f *fakeReloadLog) LatestReloadFailure(_ context.Context, after time.Time) (standalone.ReloadFailure, bool, error) {
+	f.calls++
+	f.after = after
+	if f.calls <= f.errOnCalls {
+		return standalone.ReloadFailure{}, false, errors.New("log read failed")
+	}
+	if f.err != nil {
+		return standalone.ReloadFailure{}, false, f.err
+	}
+	return standalone.ReloadFailure{At: time.Now(), Reason: f.reason}, f.reason != "" && f.calls >= f.afterCalls, nil
+}

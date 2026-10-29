@@ -7,11 +7,16 @@
 # Usage:
 #   koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs]
 #                   [--model-format openai|anthropic] [--cache-anthropic | --cache-alibaba]
-#                   [--session-id ID]
+#                   [--session-id ID] [--no-web-tools]
 #                   [-- OPENCODE_ACP_ARGS...]
 #
 # --plugin-installs is set by koinon-agentd when the agent's template turns
 # harness.pluginInstalls on; only then are the agent's own plugins loaded (see README.md).
+#
+# --no-web-tools is set by koinon-agentd for an agent whose sandbox has no web egress
+# (agentconfig.Config.WebEgress, ADR 0080): OpenCode's built-in webfetch is then denied by a
+# permission rule, which removes it from the tools the model is offered. (Web search is off for
+# everyone: plugins -opencode.websearch.* and -opencode.tool.websearch in the config.)
 #
 # --model-format is the model's wire format (ADR 0069), openai (chat completions) by default.
 # It picks the provider entry of opencode.jsonc: koinon for openai, koinon-anthropic for anthropic
@@ -51,9 +56,11 @@ check() {
 # --plugin-installs is the one switch only this flavor takes.
 plugin_installs=''
 cache_format=''
+no_web_tools=''
 koinon_extra_arg() {
   case $1 in
     --plugin-installs) plugin_installs=1 ;;
+    --no-web-tools) no_web_tools=1 ;;
     --cache-anthropic) cache_format=anthropic ;;
     --cache-alibaba) cache_format=alibaba ;;
     *) return 1 ;;
@@ -121,6 +128,11 @@ if [ -n "$plugin_installs" ]; then
     list="$list${list:+,}\"$d\""
   done
   config_content="\"plugins\":[$list]"
+fi
+# No web egress (ADR 0080): deny the built-in webfetch for everyone, the explore subagent included
+# (the top-level rules are appended to every agent's). A denied tool is not offered to the model.
+if [ -n "$no_web_tools" ]; then
+  config_content="$config_content${config_content:+,}\"permissions\":[{\"action\":\"webfetch\",\"resource\":\"*\",\"effect\":\"deny\"}]"
 fi
 # Prompt caching (ADR 0068): the openai entry's models send Anthropic-style cache_control
 # markers. The key is compatibility.cacheFormat (packages/schema/src/model-compatibility.ts,

@@ -77,7 +77,12 @@ func RetryNote(class string) string { return fmt.Sprintf(retryNote, class) }
 // InstructionsFile exposes the instruction file's content for a version's instructions to the
 // golden tests.
 func InstructionsFile(instructions, cwd string, repos ...Repository) string {
-	return string(instructionsFile(instructions, cwd, repos))
+	return string(instructionsFile(instructions, cwd, repos, false))
+}
+
+// InstructionsFileWithWeb is InstructionsFile for an agent with web egress.
+func InstructionsFileWithWeb(instructions, cwd string, repos ...Repository) string {
+	return string(instructionsFile(instructions, cwd, repos, true))
 }
 
 // Repository is a granted repository as the instruction file lists it.
