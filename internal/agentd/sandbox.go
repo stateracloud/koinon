@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -150,6 +151,10 @@ func (r *runner) waitSandbox(ctx context.Context) (store.AgentSandbox, error) {
 				cause, detail := execution.ClassifySandboxWait(lastReason, lastMessage), last
 				if !observed {
 					cause, detail = execution.WaitCauseUnknown, "the sandbox was never rendered"
+				} else if lastReason != "" || lastMessage != "" {
+					// What the cause was named from: the kubelet's own words when the sandbox observer read the pod
+					// (ADR 0078), else OpenShell's.
+					detail += ": " + strings.Trim(lastReason+": "+lastMessage, ": ")
 				}
 				return store.AgentSandbox{}, &failure{
 					reason:  fmt.Sprintf("the sandbox never became ready in %s: %s (%s)", runreply.Human(capd), cause.Describe(), detail),
