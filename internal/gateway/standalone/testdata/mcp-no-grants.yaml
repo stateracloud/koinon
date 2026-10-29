@@ -12,9 +12,9 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"b20f1d2fb7920ab0"'
+      koinon.config: '"fe6a3a84bbc3fc51"'
       koinon.error: proxy.error.reason
-      koinon.error_body: 'response.code >= 400 ? string(response.bodyPrefix).with(b, size(b) > 2048 ? b.substring(0, 2048) : b).regexReplaceAll("(?i)bearer\\s+[A-Za-z0-9._~+/=-]{8,}", "[redacted]").regexReplaceAll("kgw[_][A-Za-z0-9_-]{8,}", "[redacted]").regexReplaceAll("\\b(?:sk|pk|rk|gsk|xai)-[A-Za-z0-9_-]{8,}", "[redacted]").regexReplaceAll("(?i)\"?(?:api[_-]?key|authorization|access[_-]?token|secret|password)\"?\\s*[:=]\\s*\"?[^\",\\s}]+\"?", "[redacted]").regexReplaceAll("\\b[A-Za-z0-9_-]{40,}\\b", "[redacted]") : fail("not an error response")'
+      koinon.error_body: 'response.code >= 400 ? coalesce(json(response.bodyPrefix).error.with(e, toJson({"error": {"type": coalesce(e.type + "", ""), "code": coalesce(e.code, ""), "message": (e.message + "").with(m, size(m) > 400 ? m.substring(0, 400) : m), "metadata": {"reasons": coalesce(e.metadata.reasons, []), "provider_name": coalesce(e.metadata.provider_name + "", "")}}})), toJson({"error": {"message": (json(response.bodyPrefix).error + "").with(m, size(m) > 400 ? m.substring(0, 400) : m)}}), toJson({"error": {"message": (json(response.bodyPrefix).message + "").with(m, size(m) > 400 ? m.substring(0, 400) : m)}}), json(response.bodyPrefix).with(j, "[error body of an unrecognised shape]"), string(response.bodyPrefix).with(b, b.trim().startsWith("{") || b.trim().startsWith("[") ? "[error body that is not complete JSON]" : (b).with(m, size(m) > 2048 ? m.substring(0, 2048) : m))).regexReplaceAll("(?i)bearer\\s+[A-Za-z0-9._~+/=-]{8,}", "[redacted]").regexReplaceAll("kgw[_][A-Za-z0-9_-]{8,}", "[redacted]").regexReplaceAll("\\b(?:sk|pk|rk|gsk|xai)-[A-Za-z0-9_-]{8,}", "[redacted]").regexReplaceAll("(?i)\"?(?:api[_-]?key|authorization|access[_-]?token|secret|password)\"?\\s*[:=]\\s*\"?[^\",\\s}]+\"?", "[redacted]").regexReplaceAll("\\b[A-Za-z0-9_-]{40,}\\b", "[redacted]") : fail("not an error response")'
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
       koinon.key: default(apiKey.name, "")
@@ -45,7 +45,7 @@ llm:
             agent: acme/triage
             org: acme
           allowedModels: []
-        - keyHash: sha256:7443be9a0549ea3adec743191374c617a18250bf1a0bc5300950621cbddd5be1
+        - keyHash: sha256:a5fc73b4a14c35a4f88a7f195105fb7c12438880b1cb1785924c07ca739dbde2
           metadata:
             name: koinon-reload-probe
             agent: ""

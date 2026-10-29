@@ -414,6 +414,28 @@ so the router needs only that.
   table, and the prior-art pages in the Context.
 - OpenShell passing a harness's `traceparent` header to the gateway: not yet tested (decision 2).
 
+## Amendment (2026-10-29): the gateway's error-body log field carries no prompt text
+
+Decision 6 says an org at `none` sends no content off the gateway at all. The error body the gateway
+logs for a failed response (`koinon.error_body`, ADR 0056 amendment 2026-10-29) did not meet that: its
+CEL cut the body to 2,048 characters and redacted credentials, but a provider that echoes the prompt
+(OpenRouter's `metadata.flagged_input`) put it in the gateway's stdout log and in the OTLP export.
+Only the ledger dropped it, later.
+
+1. **The gateway builds the field from known fields; it never copies the body.** `errbody.GatewayExpr`
+   parses a JSON body (`json(response.bodyPrefix)`) and emits a new object with the error's type, code,
+   message (400 characters), moderation reasons and provider name, in the shape the ledger's
+   `errbody.Summarize` reads. `{"error": "text"}` and `{"message": "text"}` give the text alone. JSON of
+   any other shape, and JSON cut at the prefix limit, give a fixed placeholder. Only a body that is not
+   JSON is copied, as its first 2,048 characters. Credential redaction is applied on top, as before.
+2. **Content level does not change it.** The field holds provider error metadata, never the request or
+   the completion, so it is the same at every content level and `none` stays true to its word. A
+   provider message that quotes a few words of the prompt in `message` is still passed on (capped at 400
+   characters), as the ADR 0056 amendment already says; moderation fields that carry the whole input
+   are not.
+3. **Test.** The ledger's gateway specs assert, against the real binary's container log, that
+   `flagged_input` text never appears, for the OpenRouter shape and for each fallback shape.
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),

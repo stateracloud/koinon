@@ -538,8 +538,10 @@ the last (the gateway's refusals) sentences of the 2026-10-24 decision (3) and o
    status, NULL otherwise) and `upstream_error` (a one-line excerpt), migration 00038. agentd reads
    them to say why a run failed (ADR 0030 amendment 2026-10-29).
 6. **The error body is logged, redacted and capped.** For a response with status >= 400 the access log
-   carries `koinon.error_body` (`gateway.LogFieldErrorBody`): the first 2,048 characters of the body
-   with credentials replaced by `[redacted]`. The CEL (`errbody.GatewayExpr`) reads
+   carries `koinon.error_body` (`gateway.LogFieldErrorBody`): the error's known fields (type, code,
+   message, reasons, provider) with credentials replaced by `[redacted]`, and the first 2,048 characters
+   only for a body that is not JSON (ADR 0074 amendment 2026-10-29: no prompt text leaves the gateway).
+   The CEL (`errbody.GatewayExpr`) reads
    `response.bodyPrefix`, which agentgateway records for the log as the stream passes; the response is
    never held back (schema/cel-functions.md, "Body Variables"). For a success the expression fails and
    the field is left out. The recording costs one copy of at most 2 MiB per response, the price of
@@ -550,7 +552,7 @@ the last (the gateway's refusals) sentences of the 2026-10-24 decision (3) and o
    in the gateway's regex engine): a bearer token, a Koinon gateway key, a provider key (`sk-`,
    `sk-or-v1-`, ...), a credential-like JSON field with its value, and any unbroken token of 40 or
    more characters. The gateway applies them in the CEL (so neither its stdout log nor the OTLP export
-   carries a credential a provider echoed). The ledger then reduces the body to
+   carries a credential a provider echoed, or a field that quotes the prompt). The ledger then reduces the body to
    `errbody.Summarize`: for the known error shapes (OpenAI, OpenRouter, Anthropic, plain) the
    provider's code, type, message (400 characters) and moderation reasons, and nothing else. Fields
    that carry the prompt, such as OpenRouter's `metadata.flagged_input`, are dropped by design; an

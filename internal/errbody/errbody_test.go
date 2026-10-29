@@ -93,3 +93,21 @@ func TestGatewayExprIsOneConditionalOverTheBodyPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestGatewayExprNeverCopiesAJSONBody(t *testing.T) {
+	e := errbody.GatewayExpr()
+	if strings.Contains(e, "$") {
+		t.Errorf("expression contains $, which the gateway's config loader expands: %s", e)
+	}
+	// The structured form is built field by field, and the body is only copied when it is not JSON.
+	for _, want := range []string{"coalesce(", "json(response.bodyPrefix)", "toJson(", "unrecognised shape", "startsWith("} {
+		if !strings.Contains(e, want) {
+			t.Errorf("expression lacks %q: %s", want, e)
+		}
+	}
+	for _, banned := range []string{"flagged_input", "raw"} {
+		if strings.Contains(e, banned) {
+			t.Errorf("expression names the prompt-bearing field %q", banned)
+		}
+	}
+}

@@ -418,11 +418,12 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		var (
 			d    *env
 			dkey gateway.IssuedKey
+			drun store.Run
 		)
 		BeforeAll(func(ctx SpecContext) {
 			d = newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
 			d.model(ctx, "openrouter", flash)
-			d.startRun(ctx, d.task(ctx), 1<<40, time.Now().Add(-time.Minute))
+			drun = d.startRun(ctx, d.task(ctx), 1<<40, time.Now().Add(-time.Minute))
 			var err error
 			dkey, err = gateway.NewKey(d.ref())
 			Expect(err).NotTo(HaveOccurred())
@@ -442,6 +443,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 			cost         string
 			tokens       int64
 			estimateJSON string
+			runID        *string
 		}
 		// refusedWith makes the upstream answer status with body, asks for flash through the gateway
 		// and returns the entry the ledger records for it.
@@ -461,8 +463,8 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 				if n <= before {
 					return fmt.Errorf("not recorded yet")
 				}
-				return db.QueryRow(ctx, `SELECT coalesce(upstream_status, 0), upstream_error, cost_usd::text, input_tokens + output_tokens, coalesce(estimate, '{}'::jsonb)::text
-					FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, d.org).Scan(&r.status, &r.detail, &r.cost, &r.tokens, &r.estimateJSON)
+				return db.QueryRow(ctx, `SELECT coalesce(upstream_status, 0), upstream_error, cost_usd::text, input_tokens + output_tokens, coalesce(estimate, '{}'::jsonb)::text, run_id::text
+					FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, d.org).Scan(&r.status, &r.detail, &r.cost, &r.tokens, &r.estimateJSON, &r.runID)
 			}).WithTimeout(30 * time.Second).WithPolling(200 * time.Millisecond).Should(Succeed())
 			return got, r
 		}
@@ -476,7 +478,36 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 			Expect(ledger.FormatUSD(r.cost)).To(Equal("0.00"))
 			Expect(r.tokens).To(BeZero())
 			Expect(r.estimateJSON).To(ContainSubstring("never billed"))
+			// agentd finds the refusal by the run (ADR 0030, amendment 2026-10-29): a refused request
+			// must be attributed to the run that was active, whatever it cost.
+			Expect(r.runID).NotTo(BeNil())
+			Expect(*r.runID).To(Equal(drun.ID.String()))
+			// ADR 0074 decision 6: the prompt the provider echoed is not in the gateway's log either.
+			logs, err := ctr.Logs(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			raw, _ := io.ReadAll(logs)
+			Expect(string(raw)).To(ContainSubstring("Input flagged by moderation"), "the failed response is logged")
+			Expect(string(raw)).NotTo(ContainSubstring("private prompt text"))
+			Expect(string(raw)).NotTo(ContainSubstring("flagged_input"))
 		})
+
+		DescribeTable("logs an error body of another shape without quoting it",
+			func(ctx SpecContext, body, wantLogged, wantExcerpt string) {
+				_, r := refusedWith(ctx, http.StatusBadRequest, body)
+				Expect(r.detail).NotTo(BeNil())
+				Expect(*r.detail).To(Equal(wantExcerpt))
+				logs, err := ctr.Logs(ctx)
+				Expect(err).NotTo(HaveOccurred())
+				raw, _ := io.ReadAll(logs)
+				Expect(string(raw)).To(ContainSubstring(wantLogged))
+				Expect(string(raw)).NotTo(ContainSubstring("PROMPT-QUOTE"))
+			},
+			Entry("an error that is a string", `{"error":"bad request","input":"PROMPT-QUOTE"}`, "bad request", "bad request"),
+			Entry("a top-level message", `{"message":"bad shape","input":"PROMPT-QUOTE"}`, "bad shape", "bad shape"),
+			Entry("JSON of no known shape", `{"detail":"PROMPT-QUOTE"}`, "unrecognised shape", "[error body of an unrecognised shape]"),
+			Entry("a body that is cut JSON", `{"error":{"message":"`+strings.Repeat("x", 3_000_000)+`PROMPT-QUOTE`, "not complete JSON", "[error body that is not complete JSON]"),
+			Entry("a plain-text body", "upstream connect error", "upstream connect error", "upstream connect error"),
+		)
 
 		It("records a provider's 401 with its status", func(ctx SpecContext) {
 			got, r := refusedWith(ctx, http.StatusUnauthorized, `{"error":{"code":401,"message":"No auth credentials found"}}`)
