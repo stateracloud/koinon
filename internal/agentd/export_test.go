@@ -27,6 +27,18 @@ func ClassifyError(err error) (class string, retryAfter time.Duration) {
 // ClassifyGateway reports whether the error is a gateway refusal (401 or 429).
 func ClassifyGateway(err error) bool { return classifyPromptError(err).gateway }
 
+// RefusedByProvider applies the gateway's record of a provider refusal to the failure the harness's
+// error classifies as, and returns the class, whether it still counts as a gateway refusal, and the
+// reason.
+func RefusedByProvider(err error, status int, detail, providerType string) (class string, gateway bool, reason string) {
+	f := classFailure("session/prompt", err)
+	f = refusedByProvider(f, providerRefusal{status: status, detail: detail, providerType: providerType})
+	return string(f.class), f.gateway, f.reason
+}
+
+// IsAuthLike reports whether the error is one the gateway's record can improve.
+func IsAuthLike(err error) bool { return classFailure("session/prompt", err).authLike }
+
 func StopClass(stop acp.StopReason) string { return string(stopFailure(stop).class) }
 
 // RenderOutcomes, BuildHandoff and the notes expose the prompt shapes to the golden tests.
