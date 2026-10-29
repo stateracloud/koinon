@@ -381,15 +381,41 @@ var _ = Describe("the quickstart", Ordered, func() {
 			cost = got.GetRun().GetCost()
 			g.Expect(cost.GetRequests()).To(BeNumerically(">", 0), "the ledger recorded the run's requests")
 		}, 60*time.Second, time.Second).Should(Succeed())
-		// The streamed requests carry usage through the gateway; the title request the fake model
-		// refuses (a 400 without usage) is charged its input only. OpenCode asks for a title with each
-		// prompt until it has one, so the turn's prompt and the end-of-turn note's prompt make exactly
-		// two such requests; a third would be a request nobody accounts for.
-		Expect(cost.GetRequests()-cost.GetEstimatedRequests()).To(BeNumerically(">=", 1), "streamed requests reported their usage")
-		Expect(cost.GetEstimatedRequests()).To(BeNumerically("<=", 2))
-		Expect(cost.GetEstimatedRequests()).To(BeNumerically(">=", 1))
+		// The streamed requests carry usage through the gateway, so none is an estimate. The title
+		// request the fake model refuses (a 400 without usage) is the provider's refusal, and the
+		// quickstart's provider type, openai, does not bill one: the ledger keeps its entry with no
+		// tokens and no cost and marks the charge waived; it is not an estimate either (ADR 0056,
+		// amendment 2026-10-29, point 3; #241).
+		Expect(cost.GetEstimatedRequests()).To(BeZero(), "streamed requests reported their usage; a refusal is waived, not estimated")
 		Expect(cost.GetInputTokens()).To(BeNumerically(">=", 1200), "the fake model's reported input tokens")
 		Expect(cost.GetOutputTokens()).To(BeNumerically("<", 1000), "no output is charged for the refused request")
+
+		By("the refused title request is in the ledger, with the provider's status, and charged nothing")
+		kubectl := os.Getenv("KOINON_E2E_KUBECTL")
+		Expect(kubectl).NotTo(BeEmpty(), "KOINON_E2E_KUBECTL")
+		var refused, answered []ledgerRow
+		Eventually(func(g Gomega) {
+			refused, answered = nil, nil
+			for _, r := range ledgerRows(ctx, g, kubectl, run.GetId()) {
+				if r.UpstreamStatus != 0 {
+					refused = append(refused, r)
+				} else {
+					answered = append(answered, r)
+				}
+			}
+			g.Expect(refused).NotTo(BeEmpty(), "the title request the fake model refuses")
+		}).WithContext(ctx).WithTimeout(time.Minute).WithPolling(time.Second).Should(Succeed())
+		Expect(answered).NotTo(BeEmpty(), "the streamed requests")
+		// OpenCode asks for a title with each prompt until it has one, so the turn's prompt and the
+		// end-of-turn note's prompt make at most two such requests; a third would be a request nobody
+		// accounts for.
+		Expect(len(refused)).To(BeNumerically("<=", 2), "%v", refused)
+		for _, r := range refused {
+			Expect(r.UpstreamStatus).To(Equal(http.StatusBadRequest), "%+v", r)
+			Expect(r.ChargeWaived).NotTo(BeEmpty(), "%+v", r)
+			Expect(r.Input+r.Output).To(BeZero(), "%+v", r)
+			Expect(r.Cost.Sign()).To(BeZero(), "%+v", r)
+		}
 
 		By("nothing has reached GitHub before the approval")
 		repo := gh.repo(ctx, repoName)
@@ -863,6 +889,10 @@ type ledgerRow struct {
 	Model                                string
 	Input, Output, CacheRead, CacheWrite int64
 	Cost                                 *big.Rat
+	// UpstreamStatus is the provider's error status, 0 when it answered (ADR 0056 amendment
+	// 2026-10-29); ChargeWaived says why a refusal was charged nothing, "" when it was not waived.
+	UpstreamStatus int
+	ChargeWaived   string
 }
 
 // ledgerRows reads the run's spend entries straight from the primary Postgres pod, as its local
@@ -871,14 +901,14 @@ func ledgerRows(ctx context.Context, g Gomega, kubectl, run string) []ledgerRow 
 	pod, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "get", "pod", "-l", "cnpg.io/instanceRole=primary", "-o", "name").Output()
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(strings.TrimSpace(string(pod))).NotTo(BeEmpty(), "the primary Postgres pod")
-	query := "SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd::text FROM spend_entries WHERE run_id = '" + run + "' ORDER BY occurred_at"
+	query := "SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd::text, coalesce(upstream_status, 0), coalesce(estimate->>'charge_waived', '') FROM spend_entries WHERE run_id = '" + run + "' ORDER BY occurred_at"
 	out, err := exec.CommandContext(ctx, kubectl, "-n", "koinon", "exec", strings.TrimSpace(string(pod)), "-c", "postgres", "--",
 		"psql", "-U", "postgres", "-d", "koinon", "-At", "-F", "|", "-c", query).CombinedOutput()
 	g.Expect(err).NotTo(HaveOccurred(), string(out))
 	var rows []ledgerRow
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		f := strings.Split(line, "|")
-		if len(f) != 6 {
+		if len(f) != 8 {
 			continue
 		}
 		r := ledgerRow{Model: f[0]}
@@ -890,6 +920,9 @@ func ledgerRows(ctx context.Context, g Gomega, kubectl, run string) []ledgerRow 
 		var ok bool
 		r.Cost, ok = new(big.Rat).SetString(f[5])
 		g.Expect(ok).To(BeTrue(), line)
+		r.UpstreamStatus, err = strconv.Atoi(f[6])
+		g.Expect(err).NotTo(HaveOccurred())
+		r.ChargeWaived = f[7]
 		rows = append(rows, r)
 	}
 	return rows
