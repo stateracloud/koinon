@@ -146,7 +146,7 @@ function RunCosts({ runs }: { runs: { id: string; state: RunState; cost?: Cost; 
           <li key={r.id}>
             Run {r.id.slice(0, 8)} · {runStateLabel(r.state)} ·{' '}
             {r.cost ? <span title={costDetail(r.cost)}>{costLabel(r.cost)}{estimateNote(r.cost) && ` (${estimateNote(r.cost)})`}</span> : 'no cost recorded'}
-            {/* The run's use of its limits (ADR 0080): the first one reached ends it. */}
+            {/* The run's use of its limits (ADR 0081): the first one reached ends it. */}
             {runProgress(r.run, r.cost, now).length > 0 && (
               <span title="Requests, spend and time against the run's limits. The first limit reached ends the run; tokens are reported, not limited.">
                 {' '}

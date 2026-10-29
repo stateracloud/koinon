@@ -311,7 +311,7 @@ func (s *Settler) settleOne(ctx context.Context, tx pgx.Tx, org pgtype.UUID, row
 		}
 		// A settlement that raised the entry's cost can reach a limit: the agent's, the org's and the
 		// platform's budgets and then the run's own, in the order and with the naming of an
-		// ingested entry (ADR 0080, decision 5). Tokens the provider reports beyond the logged usage
+		// ingested entry (ADR 0081, decision 5). Tokens the provider reports beyond the logged usage
 		// are added to the run's reported total, once: only the settlement that changed the entry
 		// adds them.
 		if updated {

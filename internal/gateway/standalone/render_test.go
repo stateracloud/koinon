@@ -17,6 +17,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 var _ = Describe("Render", func() {
@@ -249,6 +250,14 @@ var _ = Describe("Render", func() {
 						"anthropic-version": "2023-06-01", "anthropic-workspace-id": "wrkspc_01ExampleExample",
 					}))
 					Expect(m.Provider.Custom.ProviderOverride).To(Equal("acme.anthropic"))
+					continue
+				}
+				if m.ID == "acme/claude-haiku-5-5" {
+					Expect(m.RequestHeaders.Remove).To(BeEmpty(), "the pinned beta replaces the client's")
+					Expect(m.RequestHeaders.Set).To(Equal(map[string]string{
+						"anthropic-version": "2023-06-01", "anthropic-workspace-id": "wrkspc_01ExampleExample",
+						"anthropic-beta": thinking.BindingBeta,
+					}))
 					continue
 				}
 				Expect(m.Transformation).To(HaveKey("stream_options"), m.ID)

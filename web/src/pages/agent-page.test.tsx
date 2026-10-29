@@ -201,7 +201,7 @@ describe('AgentPage standing approvals', () => {
   })
 })
 
-describe('AgentPage run limits (ADR 0080)', () => {
+describe('AgentPage run limits (ADR 0081)', () => {
   it('shows an admin the limits of a run and lets them override the template, leaving a field empty to follow it', async () => {
     const { runLimitSets } = setup({ role: OrgRole.ADMIN })
     const region = await screen.findByRole('region', { name: 'Run limits' })

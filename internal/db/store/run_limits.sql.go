@@ -53,7 +53,7 @@ type GetAgentRunLimitsRow struct {
 
 // SPDX-License-Identifier: Apache-2.0
 //
-// Run limits (ADR 0080): an agent's overrides of the template's limits, and a run's usage against
+// Run limits (ADR 0081): an agent's overrides of the template's limits, and a run's usage against
 // them. Every query on an org-owned table takes @org_id and filters on it
 // (TestQueriesAreOrgScoped).
 // The agent's overrides; a NULL column falls back to the agent version's value.

@@ -91,7 +91,7 @@ var _ = Describe("A gateway refusal on a spent budget", func() {
 		Expect(payload(eventOf(events(ctx, r), "run.canceled")[0])).To(HaveKeyWithValue("limit", budget.OrgMonthly))
 	})
 
-	It("names the run's spend limit when only the run level is reached (ADR 0080)", func(ctx SpecContext) {
+	It("names the run's spend limit when only the run level is reached (ADR 0081)", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		_, err := q.SetAgentBudget(ctx, store.SetAgentBudgetParams{OrgID: e.org, AgentID: e.agent.ID, DailyLimit: "100", UpdatedBy: "test"})
 		Expect(err).NotTo(HaveOccurred())

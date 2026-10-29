@@ -823,7 +823,7 @@ export const BudgetService: GenService<{
   },
   /**
    * GetAgentRunLimits returns the limits a run of the agent gets: the effective values, the
-   * template's defaults and the admin's overrides (ADR 0080).
+   * template's defaults and the admin's overrides (ADR 0081).
    *
    * @generated from rpc koinon.budget.v1alpha1.BudgetService.GetAgentRunLimits
    */

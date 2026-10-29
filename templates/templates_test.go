@@ -258,6 +258,19 @@ var _ = Describe("Parse", func() {
 		Expect(t.Spec.Ephemeral).To(BeTrue())
 	})
 
+	It("takes the starting value of the agent's thinking setting, on or off, and nothing else", func() {
+		t, err := templates.Parse(valid)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(t.Spec.Model.Thinking).To(BeEmpty(), "unset is the default, on")
+		for _, v := range []string{"on", "off"} {
+			t, err = templates.Parse([]byte(strings.Replace(string(valid), "    name: default\n", "    name: default\n    thinking: "+v+"\n", 1)))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(t.Spec.Model.Thinking).To(Equal(v))
+		}
+		_, err = templates.Parse([]byte(strings.Replace(string(valid), "    name: default\n", "    name: default\n    thinking: high\n", 1)))
+		Expect(err).To(HaveOccurred())
+	})
+
 	It("takes question timers, with the defaults when omitted", func() {
 		t, err := templates.Parse(valid)
 		Expect(err).NotTo(HaveOccurred())
@@ -287,7 +300,7 @@ var _ = Describe("Parse", func() {
 		Expect(t.Spec.Harness.PluginInstalls).To(BeTrue())
 	})
 
-	Describe("optional run limits (ADR 0080)", func() {
+	Describe("optional run limits (ADR 0081)", func() {
 		withLimits := func(lines string) string {
 			return regexp.MustCompile(`(?s)    run:\n.*?    spendUSD`).ReplaceAllString(string(valid),
 				"    run:\n      maxDuration: 30m\n"+lines+"    spendUSD")

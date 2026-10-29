@@ -167,6 +167,10 @@ type Flavors struct {
 // when an agent is created. "default" is the install's default model.
 type Model struct {
 	Name string `json:"name"`
+	// Thinking is the template's starting value for the agent's thinking setting: "on" or "off".
+	// Unset means the default, on. An admin changes the agent's own setting later; the model's
+	// catalog capability decides whether it has any effect (internal/thinking, ADR 0069 amendment).
+	Thinking string `json:"thinking,omitempty"`
 }
 
 // Grant is a suggested grant on a connector type (ADR 0007). It is a
@@ -192,17 +196,17 @@ type Limits struct {
 	SpendUSD USD       `json:"spendUSD"`
 }
 
-// RunLimits cap a single run; the first one reached cancels it (ADR 0080).
+// RunLimits cap a single run; the first one reached cancels it (ADR 0081).
 type RunLimits struct {
 	// MaxDuration is the wall-clock limit.
 	MaxDuration Duration `json:"maxDuration"`
 	// MaxModelRequests counts every model request through the agent's key, the harness's own title,
 	// summary and compaction calls included. Optional: zero means unset, and a run gets the platform
-	// default (ADR 0080). The schema refuses an explicit zero.
+	// default (ADR 0081). The schema refuses an explicit zero.
 	MaxModelRequests int64 `json:"maxModelRequests,omitempty"`
 	// MaxSpendUSD is the run's spend by the ledger's settled cost. Optional like MaxModelRequests.
 	MaxSpendUSD USD `json:"maxSpendUSD,omitempty"`
-	// MaxTokens is deprecated: tokens are reported, not enforced (ADR 0080). A template may still
+	// MaxTokens is deprecated: tokens are reported, not enforced (ADR 0081). A template may still
 	// carry it; nothing reads it.
 	//
 	// Deprecated: tokens are reported, not enforced.

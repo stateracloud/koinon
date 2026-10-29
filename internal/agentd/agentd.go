@@ -96,7 +96,7 @@ type Config struct {
 	// amendment 2026-10-28).
 	WrapUpNotice time.Duration
 	// WrapUpFraction is how far through its model-request or spend limit a run is when the agent is
-	// told to wrap up (ADR 0080); runlimits.WrapUpFraction (80%) by default, a negative value turns
+	// told to wrap up (ADR 0081); runlimits.WrapUpFraction (80%) by default, a negative value turns
 	// the notice off for these two limits.
 	WrapUpFraction float64
 	// UsagePoll is how often a running turn reads the run's ledger usage for that notice.

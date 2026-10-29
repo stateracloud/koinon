@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package runlimits is what bounds a single run (ADR 0080): the model-request limit, the spend
+// Package runlimits is what bounds a single run (ADR 0081): the model-request limit, the spend
 // limit and the wall clock. The first one reached ends the run. Tokens are reported, not enforced.
 //
 // A run copies its limits when it is queued: from its agent version (the template's values), over
@@ -9,7 +9,7 @@
 // counter that can drift when an entry is settled later.
 //
 // [Nearest] says which limit is closest to being reached; the wrap-up notice (ADR 0066 amendment
-// 2026-10-28, ADR 0080) is sent when it reaches [WrapUpFraction].
+// 2026-10-28, ADR 0081) is sent when it reaches [WrapUpFraction].
 package runlimits
 
 import (
@@ -44,7 +44,7 @@ var Kinds = []Kind{KindTime, KindRequests, KindSpend}
 const WrapUpFraction = 0.8
 
 // Limits are the limits of one run. A zero value is no limit, which only a run queued before ADR
-// 0080 has for requests and spend.
+// 0081 has for requests and spend.
 type Limits struct {
 	// WallClock is the time the run may be owned; parked time does not count.
 	WallClock time.Duration

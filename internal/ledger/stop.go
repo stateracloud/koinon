@@ -26,7 +26,7 @@ import (
 // then matches no row, so the run keeps the budget reason.
 //
 // The run's own limit goes through [scheduler.CheckRunLimits], the cancel of every other writer of
-// the run's entries: it carries what the agent last said and the run's usage (ADR 0080, decision
+// the run's entries: it carries what the agent last said and the run's usage (ADR 0081, decision
 // 7), whichever path reaches the limit first.
 func Stop(ctx context.Context, db scheduler.DB, org, agent pgtype.UUID, l budget.Level) (int, error) {
 	q := store.New(db)

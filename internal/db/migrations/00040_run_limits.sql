@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- Run limits replace the token cap (issue #243, ADR 0080). A run stops at the first of its time
+-- Run limits replace the token cap (issue #243, ADR 0081). A run stops at the first of its time
 -- limit, its model-request limit and its spend limit; tokens are reported, not enforced.
 
 -- +goose Up

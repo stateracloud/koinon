@@ -66,7 +66,7 @@ var _ = Describe("BudgetService and PriceService", func() {
 		Expect(n).To(Equal(2))
 	})
 
-	It("lets admins override an agent's run limits, and runs queued afterwards get them (ADR 0080)", func(ctx SpecContext) {
+	It("lets admins override an agent's run limits, and runs queued afterwards get them (ADR 0081)", func(ctx SpecContext) {
 		admin := e.userIn(ctx, org, store.OrgRoleAdmin)
 		member := e.userIn(ctx, org, store.OrgRoleMember)
 		a := owner.activeAgent(ctx, org)

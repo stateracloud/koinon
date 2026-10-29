@@ -37,7 +37,7 @@ const (
 	// wrapUpMarker opens agentd's wrap-up notice (a prompt of its own, or the start of a resumed
 	// turn's prompt). The fake answers it with wrapUpReply and waits for the next cancel.
 	wrapUpMarker = "[Koinon] About"
-	// limitWrapUpMarker opens the notice of a request or spend limit (ADR 0080).
+	// limitWrapUpMarker opens the notice of a request or spend limit (ADR 0081).
 	limitWrapUpMarker = "[Koinon] This run has"
 	// wrapUpReply is what the fake writes when it is told to wrap up.
 	wrapUpReply = "Done so far: A. Left: B."

@@ -543,6 +543,10 @@ func agentModelProto(v agentmodel.View) *agentv1alpha1.GetAgentModelResponse {
 	out := &agentv1alpha1.GetAgentModelResponse{
 		Setting: v.Setting, VersionModel: v.VersionModel, Effective: v.Effective,
 		Source: modelSourceProto[v.Source], Problem: v.Problem,
+		Thinking: &agentv1alpha1.ThinkingState{
+			Setting: string(v.Thinking.Setting), VersionSetting: string(v.Thinking.VersionSetting),
+			Effective: string(v.Thinking.Effective), Supported: v.Thinking.Supported(), Mode: string(v.Thinking.Mode()),
+		},
 	}
 	for _, m := range v.Available {
 		out.Available = append(out.Available, &agentv1alpha1.ServedModel{Name: m.Name, Provider: m.Provider})
@@ -596,4 +600,24 @@ func (s *Server) SetAgentModel(ctx context.Context, req *agentv1alpha1.SetAgentM
 		return nil, s.agentModelError(err)
 	}
 	return &agentv1alpha1.SetAgentModelResponse{Model: agentModelProto(v)}, nil
+}
+
+// SetAgentThinking implements AgentService. Admins and owners.
+func (s *Server) SetAgentThinking(ctx context.Context, req *agentv1alpha1.SetAgentThinkingRequest) (*agentv1alpha1.SetAgentThinkingResponse, error) {
+	c, err := authorize(ctx, req.GetOrgId(), store.OrgRoleAdmin)
+	if err != nil {
+		return nil, err
+	}
+	id, err := parseID("agent_id", req.GetAgentId())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.agentModels.SetThinking(requestCtx(ctx), c.org, id, c.auditActor(), req.GetThinking()); err != nil {
+		return nil, s.agentModelError(err)
+	}
+	_, v, err := s.agentModels.Load(ctx, c.org, id, time.Now())
+	if err != nil {
+		return nil, s.agentModelError(err)
+	}
+	return &agentv1alpha1.SetAgentThinkingResponse{Model: agentModelProto(v)}, nil
 }

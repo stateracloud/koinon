@@ -25,7 +25,7 @@ func TestCheckRequestsReachesAtTheLimit(t *testing.T) {
 		t.Fatalf("%v %v", r, hit)
 	}
 	if _, hit := (runlimits.Limits{}).CheckRequests(runlimits.Usage{Requests: 1 << 40}); hit {
-		t.Fatal("a run without a request limit (queued before ADR 0080) has none")
+		t.Fatal("a run without a request limit (queued before ADR 0081) has none")
 	}
 }
 
@@ -95,6 +95,6 @@ func TestOfReadsTheLimitsOfAStoredRun(t *testing.T) {
 	}
 	old, err := runlimits.Of(store.Run{MaxWallClockSeconds: 1800})
 	if err != nil || old.MaxModelRequests != 0 || old.MaxSpend != 0 {
-		t.Fatalf("a run queued before ADR 0080 has no request or spend limit: %+v %v", old, err)
+		t.Fatalf("a run queued before ADR 0081 has no request or spend limit: %+v %v", old, err)
 	}
 }

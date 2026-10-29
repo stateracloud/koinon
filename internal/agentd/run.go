@@ -28,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/runreply"
 	"github.com/stateracloud/koinon/internal/safego"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // How a driven run ends, besides success (nil).
@@ -443,7 +444,11 @@ func (r *runner) execute(ctx context.Context) error {
 	if ptype == "openrouter" {
 		sessionID = r.run.ID.String()
 	}
-	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker, SessionID: sessionID})
+	// Koinon decides whether the model thinks, from the catalog and the agent's setting; the harness
+	// renders that and never guesses from the model ID (ADR 0069 amendment 2026-10-29).
+	thinkMode := thinking.Of(ptype, model, format).Effective(agentmodel.ChooseThinking(agent.Thinking.String, vc.Thinking))
+	r.log.Info("the run's thinking", "model", model, "mode", string(thinkMode))
+	cmd, err := launchCommand(agent.Flavor, endpoints{ModelBaseURL: gw + "/v1", Model: model, MCPURL: gw + "/mcp", Format: format, CacheMarker: marker, Thinking: thinkMode, SessionID: sessionID})
 	if err != nil {
 		return &failure{reason: err.Error()}
 	}
@@ -1368,7 +1373,7 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	}
 	// A run's tokens are reported by the spend ledger (package ledger, plan item L1), which adds
 	// them to the run for every request agentgateway logs (tokens are reported, not enforced:
-	// ADR 0080). ACP cannot report them: the
+	// ADR 0081). ACP cannot report them: the
 	// only usage update (usage_update, unstable in acp-go-sdk v0.13.5) reports the context
 	// window's occupancy (used/size) and a cost, which rise and fall with compaction and cannot
 	// be summed into tokens used, and the unstable PromptResponse.usage arrives only when the turn,

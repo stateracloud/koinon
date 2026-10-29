@@ -14,9 +14,9 @@ import (
 	"github.com/stateracloud/koinon/templates"
 )
 
-// Defaults for versions whose config sets no run limits (plan item A4, ADR 0049, ADR 0080): the
+// Defaults for versions whose config sets no run limits (plan item A4, ADR 0049, ADR 0081): the
 // versions made before run limits existed. Shipped templates set their own, calibrated per
-// template (ADR 0080).
+// template (ADR 0081).
 const (
 	DefaultMaxWallClock     = 30 * time.Minute
 	DefaultMaxModelRequests = int64(200)
@@ -35,10 +35,13 @@ type TemplateRef struct {
 // Config is one agent version's definition. Treat it as immutable once
 // stored: edits add a version.
 type Config struct {
-	Template     *TemplateRef      `json:"template,omitempty"`
-	Instructions string            `json:"instructions"`
-	Model        string            `json:"model,omitempty"`
-	Grants       []templates.Grant `json:"grants,omitempty"`
+	Template     *TemplateRef `json:"template,omitempty"`
+	Instructions string       `json:"instructions"`
+	Model        string       `json:"model,omitempty"`
+	// Thinking is the template's starting value for the thinking setting, "on" or "off", "" when
+	// it names none (internal/thinking.Choose reads it after the agent's own setting).
+	Thinking string            `json:"thinking,omitempty"`
+	Grants   []templates.Grant `json:"grants,omitempty"`
 	// Bindings tie grants to an org's connections and targets (for GitHub:
 	// the repositories). The grant says what the agent may do; its binding
 	// says where. Set from CreateAgentFromTemplate's grants (plan item C2).
@@ -134,6 +137,7 @@ func FromTemplate(t *templates.Template, contentHash string) Config {
 		},
 		Instructions: t.Spec.Instructions,
 		Model:        t.Spec.Model.Name,
+		Thinking:     t.Spec.Model.Thinking,
 		Grants:       t.Spec.Grants,
 		Limits:       t.Spec.Limits,
 		Triggers:     t.Spec.Triggers,
@@ -159,7 +163,7 @@ func Parse(raw []byte) (Config, error) {
 // Marshal encodes c for storage.
 func (c Config) Marshal() ([]byte, error) { return json.Marshal(c) }
 
-// RunLimits are the limits one run gets (ADR 0080): the first reached ends the run.
+// RunLimits are the limits one run gets (ADR 0081): the first reached ends the run.
 type RunLimits struct {
 	// WallClock is the time a run may be owned.
 	WallClock time.Duration

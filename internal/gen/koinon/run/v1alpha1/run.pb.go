@@ -234,7 +234,7 @@ type Run struct {
 	OutcomeReason string `protobuf:"bytes,8,opt,name=outcome_reason,json=outcomeReason,proto3" json:"outcome_reason,omitempty"`
 	// Limits copied from the agent's version (or the agent's override) when the run was queued.
 	MaxWallClockSeconds int64 `protobuf:"varint,9,opt,name=max_wall_clock_seconds,json=maxWallClockSeconds,proto3" json:"max_wall_clock_seconds,omitempty"`
-	// Deprecated: tokens are reported, not enforced (ADR 0080). Zero on new runs.
+	// Deprecated: tokens are reported, not enforced (ADR 0081). Zero on new runs.
 	//
 	// Deprecated: Marked as deprecated in koinon/run/v1alpha1/run.proto.
 	MaxTokens int64 `protobuf:"varint,10,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
@@ -252,7 +252,7 @@ type Run struct {
 	// The class of the error that failed or stopped the run. Unspecified when the run did not
 	// fail, or failed before classes existed.
 	FailureClass FailureClass `protobuf:"varint,17,opt,name=failure_class,json=failureClass,proto3,enum=koinon.run.v1alpha1.FailureClass" json:"failure_class,omitempty"`
-	// The run's request limit: 0 for a run queued before run limits existed (ADR 0080). Progress is
+	// The run's request limit: 0 for a run queued before run limits existed (ADR 0081). Progress is
 	// cost.requests.
 	MaxModelRequests int64 `protobuf:"varint,18,opt,name=max_model_requests,json=maxModelRequests,proto3" json:"max_model_requests,omitempty"`
 	// The run's spend limit in USD as a decimal string; empty when the run has none. Progress is

@@ -1,4 +1,4 @@
-# 0080. Run limits: model requests, spend and time; tokens are reported, not enforced
+# 0081. Run limits: model requests, spend and time; tokens are reported, not enforced
 
 - Status: Accepted
 - Date: 2026-10-29

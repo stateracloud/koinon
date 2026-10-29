@@ -25,7 +25,7 @@ type AddRunTokensParams struct {
 	ID     pgtype.UUID
 }
 
-// Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0080):
+// Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0081):
 // the run limits are requests, spend and time. No row: the run is finished or absent.
 func (q *Queries) AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run, error) {
 	row := q.db.QueryRow(ctx, addRunTokens, arg.Tokens, arg.OrgID, arg.ID)

@@ -48,7 +48,7 @@ Facts checked against agentgateway v1.6.0 (source tag `v1.6.0`) on 2026-10-22:
    an explicit zero price. A record that still arrives without a cost is kept with `priced = false`.
 5. **Token cap.** Each new entry adds its tokens to its run through `scheduler.RecordTokenUsage` in
    the same transaction, which cancels the run at its token cap (plan item A4).
-   *Replaced by [ADR 0080](0080-run-limits.md) (2026-10-29): tokens are still added to the run's
+   *Replaced by [ADR 0081](0081-run-limits.md) (2026-10-29): tokens are still added to the run's
    reported total, but nothing is cancelled on them. A run ends at its model-request limit, its
    spend limit or its time limit; `RecordTokenUsage` is now `scheduler.RecordUsage` and the limits
    are checked by `scheduler.CheckRunLimits`.*

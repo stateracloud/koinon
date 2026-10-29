@@ -14,7 +14,7 @@ import (
 
 // Spend totals from the spend ledger (plan item L1).
 
-// tokenSplit is the tokens of a total by type (ADR 0080): InputTokens of the proto stays the total
+// tokenSplit is the tokens of a total by type (ADR 0081): InputTokens of the proto stays the total
 // input, cache reads and writes included.
 type tokenSplit struct{ cacheRead, cacheWrite, reasoning int64 }
 

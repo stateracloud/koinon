@@ -47,7 +47,7 @@ service BudgetService {
   rpc SetAgentBudget(SetAgentBudgetRequest) returns (SetAgentBudgetResponse);
 
   // GetAgentRunLimits returns the limits a run of the agent gets: the effective values, the
-  // template's defaults and the admin's overrides (ADR 0080).
+  // template's defaults and the admin's overrides (ADR 0081).
   rpc GetAgentRunLimits(GetAgentRunLimitsRequest) returns (GetAgentRunLimitsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }

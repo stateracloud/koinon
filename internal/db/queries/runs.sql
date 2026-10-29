@@ -286,7 +286,7 @@ WHERE org_id = @org_id
 RETURNING *;
 
 -- name: AddRunTokens :one
--- Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0080):
+-- Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0081):
 -- the run limits are requests, spend and time. No row: the run is finished or absent.
 UPDATE runs
 SET tokens_used = tokens_used + @tokens::bigint

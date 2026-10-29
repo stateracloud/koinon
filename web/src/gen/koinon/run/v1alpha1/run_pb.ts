@@ -73,7 +73,7 @@ export type Run = Message<"koinon.run.v1alpha1.Run"> & {
   maxWallClockSeconds: bigint;
 
   /**
-   * Deprecated: tokens are reported, not enforced (ADR 0080). Zero on new runs.
+   * Deprecated: tokens are reported, not enforced (ADR 0081). Zero on new runs.
    *
    * @generated from field: int64 max_tokens = 10 [deprecated = true];
    * @deprecated
@@ -127,7 +127,7 @@ export type Run = Message<"koinon.run.v1alpha1.Run"> & {
   failureClass: FailureClass;
 
   /**
-   * The run's request limit: 0 for a run queued before run limits existed (ADR 0080). Progress is
+   * The run's request limit: 0 for a run queued before run limits existed (ADR 0081). Progress is
    * cost.requests.
    *
    * @generated from field: int64 max_model_requests = 18;
