@@ -52,7 +52,7 @@ what is left and the next step, and that reply is posted on the task when the ru
 Tokens are **reported, not limited**. A run's cost shows the tokens by type (input, cache read, cache
 write, output and reasoning), and no total of tokens ends a run. The old `maxTokens` setting in
 templates is ignored. The reasons are in
-[ADR 0080](https://github.com/stateracloud/koinon/blob/main/docs/adr/0080-run-limits.md).
+[ADR 0081](https://github.com/stateracloud/koinon/blob/main/docs/adr/0081-run-limits.md).
 
 ## Notices
 

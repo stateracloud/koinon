@@ -16,7 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
 
-// Run limits (issue #243, ADR 0080): a run ends at the first of its model-request limit, its spend
+// Run limits (issue #243, ADR 0081): a run ends at the first of its model-request limit, its spend
 // limit and its time limit. Tokens are reported, not enforced.
 var _ = Describe("run limits", func() {
 	BeforeEach(needDocker)

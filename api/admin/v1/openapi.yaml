@@ -713,6 +713,37 @@ paths:
                 $ref: "#/components/schemas/AgentModel"
         default:
           $ref: "#/components/responses/Error"
+  /agents/{agentId}/thinking:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    put:
+      tags: [agents]
+      operationId: setAgentThinking
+      summary: Turn an agent's thinking on or off, or clear the setting.
+      description: |
+        Thinking is on unless somebody turns it off (ADR 0069 amendment 2026-10-29). A setting of
+        the agent, not a new version: it applies to the next run. Precedence: this setting, then
+        the active version's value (a template's `spec.model.thinking`), then the default, on. A
+        model that cannot think ignores the setting; the response says so (`thinking.supported`).
+        The change is audited with the old and new value. Reasoning tokens are billed as output.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentThinkingUpdate"
+      responses:
+        "200":
+          description: The agent's model, with its thinking state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentModel"
+        default:
+          $ref: "#/components/responses/Error"
   /agents/{agentId}/triggers/{triggerId}/run:
     parameters:
       - name: agentId
@@ -947,6 +978,40 @@ components:
             properties:
               name: {type: string}
               provider: {type: string}
+        thinking:
+          $ref: "#/components/schemas/ThinkingState"
+    ThinkingState:
+      type: object
+      description: The agent's thinking setting and what it resolves to (ADR 0069 amendment 2026-10-29).
+      required: [setting, effective, supported, mode]
+      properties:
+        setting:
+          type: string
+          enum: [default, "on", "off"]
+          description: The agent's own setting; `default` when it has none.
+        versionSetting:
+          type: string
+          enum: ["on", "off"]
+          description: The active version's value (a template's `spec.model.thinking`); unset when it names none.
+        effective:
+          type: string
+          enum: ["on", "off"]
+          description: What the layers resolve to, whether or not the model can think.
+        supported:
+          type: boolean
+          description: Whether the effective model can think. When false the setting has no effect and a UI says "not supported by this model".
+        mode:
+          type: string
+          enum: [none, adaptive]
+          description: The mode the next run uses.
+    AgentThinkingUpdate:
+      type: object
+      required: [thinking]
+      properties:
+        thinking:
+          type: string
+          enum: [default, "on", "off"]
+          description: "`default` clears the setting."
     AgentModelUpdate:
       type: object
       required: [model]
@@ -1396,12 +1461,16 @@ components:
           items: {$ref: "#/components/schemas/FlaggedPrice"}
     SpendLine:
       type: object
-      required: [model, requests, inputTokens, outputTokens, reportedUsd, estimatedUsd, estimatedRequests, estimatedOutputTokens, gatewayRequests, gatewayUsd, gatewayComparedUsd, flaggedRequests, provisionalRequests, reservedUsd]
+      required: [model, requests, inputTokens, outputTokens, reasoningTokens, reportedUsd, estimatedUsd, estimatedRequests, estimatedOutputTokens, gatewayRequests, gatewayUsd, gatewayComparedUsd, flaggedRequests, provisionalRequests, reservedUsd]
       properties:
         model: {type: string}
         requests: {type: integer, format: int64}
         inputTokens: {type: integer, format: int64}
-        outputTokens: {type: integer, format: int64}
+        outputTokens: {type: integer, format: int64, description: "Output tokens, reasoning (thinking) tokens included."}
+        reasoningTokens:
+          type: [integer, "null"]
+          format: int64
+          description: "The part of outputTokens the provider reported as reasoning, or null when no request of the model reported a split. Null does not mean the model did not think: Anthropic Messages has no separate reasoning count and counts thinking inside outputTokens. Thinking is billed as output: at the output rate unless the price names a reasoning rate (ADR 0069 amendment 2026-10-29)."
         reportedUsd: {type: string, description: "Cost of requests whose usage the provider reported."}
         estimatedUsd: {type: string, description: "Cost of requests whose usage was estimated. Counts toward limits."}
         estimatedRequests: {type: integer, format: int64}

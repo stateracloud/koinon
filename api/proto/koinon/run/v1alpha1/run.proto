@@ -87,7 +87,7 @@ message Run {
   string outcome_reason = 8;
   // Limits copied from the agent's version (or the agent's override) when the run was queued.
   int64 max_wall_clock_seconds = 9;
-  // Deprecated: tokens are reported, not enforced (ADR 0080). Zero on new runs.
+  // Deprecated: tokens are reported, not enforced (ADR 0081). Zero on new runs.
   int64 max_tokens = 10 [deprecated = true];
   // Tokens the run's requests used, input plus output as the gateway reports them (cache reads
   // and writes are part of the input). The split by type is in cost.
@@ -103,7 +103,7 @@ message Run {
   // The class of the error that failed or stopped the run. Unspecified when the run did not
   // fail, or failed before classes existed.
   FailureClass failure_class = 17;
-  // The run's request limit: 0 for a run queued before run limits existed (ADR 0080). Progress is
+  // The run's request limit: 0 for a run queued before run limits existed (ADR 0081). Progress is
   // cost.requests.
   int64 max_model_requests = 18;
   // The run's spend limit in USD as a decimal string; empty when the run has none. Progress is

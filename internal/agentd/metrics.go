@@ -28,7 +28,7 @@ type Metrics struct {
 	Requeued    prometheus.Counter
 	// SandboxWaitCap counts runs failed because their sandbox never became ready, by cause.
 	SandboxWaitCap *prometheus.CounterVec
-	// WrapUpNotices counts runs whose agent was told a run limit is near, by the limit (ADR 0080).
+	// WrapUpNotices counts runs whose agent was told a run limit is near, by the limit (ADR 0081).
 	WrapUpNotices *prometheus.CounterVec
 	// TimeLimitStops counts runs this replica stopped at their time limit.
 	TimeLimitStops prometheus.Counter

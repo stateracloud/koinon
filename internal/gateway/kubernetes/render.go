@@ -439,7 +439,7 @@ func (b *builder) models(s gateway.State) {
 			if t := b.modelTransformations(m, rd); len(t) > 0 {
 				policies["transformations"] = t
 			}
-			if hs, rm := rd.RequestHeaders(p), rd.RemoveHeaders(p); len(hs) > 0 || len(rm) > 0 {
+			if hs, rm := rd.RequestHeaders(p, m), rd.RemoveHeaders(p, m); len(hs) > 0 || len(rm) > 0 {
 				req := map[string]any{}
 				if len(hs) > 0 {
 					set := make([]any, len(hs))

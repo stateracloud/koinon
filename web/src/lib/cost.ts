@@ -42,7 +42,7 @@ export function costDetail(c: Cost): string {
 }
 
 /**
- * tokenSplit says how a cost's tokens divide by type (ADR 0080): of the input, what came from the
+ * tokenSplit says how a cost's tokens divide by type (ADR 0081): of the input, what came from the
  * provider's cache and what was written to it; of the output, what was reasoning. Empty when the
  * ledger has no split.
  */
@@ -63,7 +63,7 @@ function humanDuration(totalSeconds: number): string {
 }
 
 /**
- * runLimitsLabel is the limits of a run for an agent or template page (ADR 0080): "30m, 200
+ * runLimitsLabel is the limits of a run for an agent or template page (ADR 0081): "30m, 200
  * requests, $2.00". The first limit a run reaches ends it. Tokens are not a limit.
  */
 export function runLimitsLabel(l: Pick<RunLimits, 'maxDurationSeconds' | 'maxModelRequests' | 'maxSpendUsd'>): string {
@@ -76,7 +76,7 @@ export function runLimitsLabel(l: Pick<RunLimits, 'maxDurationSeconds' | 'maxMod
 
 /**
  * runProgress is a run's use of its limits: "12 of 200 requests", "$0.42 of $2.00", "6m of 30m". A
- * limit the run does not have (a run queued before ADR 0080 has no request or spend limit) shows
+ * limit the run does not have (a run queued before ADR 0081 has no request or spend limit) shows
  * what was used alone. Time is the span since the run started, which counts parked time that the
  * limit does not. now is when to stop counting an unfinished run.
  */

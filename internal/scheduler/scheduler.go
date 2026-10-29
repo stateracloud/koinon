@@ -8,7 +8,7 @@
 //   - A run gets the limits of the agent version it executes (from the template, or the
 //     agent's override): a wall-clock limit enforced by Sweeper, and a model-request limit and a
 //     spend limit enforced by CheckRunLimits, which whoever records a ledger entry calls (ADR
-//     0080). Tokens are reported by RecordUsage, not enforced.
+//     0081). Tokens are reported by RecordUsage, not enforced.
 //   - Every cancel writes a run event and a task event saying why.
 //
 // Functions taking a *store.Queries run inside the caller's transaction.
@@ -49,12 +49,12 @@ const (
 	ReasonTaskDone      CancelReason = "ticket_done"
 	ReasonAgentArchived CancelReason = "agent_archived"
 	ReasonWallClockCap  CancelReason = "wall_clock_cap"
-	// ReasonTokenCap: the token cap of runs before ADR 0080. It cancels nothing now; old events
+	// ReasonTokenCap: the token cap of runs before ADR 0081. It cancels nothing now; old events
 	// carry it.
 	ReasonTokenCap CancelReason = "token_cap"
-	// ReasonRequestCap: the run made as many model requests as its limit allows (ADR 0080).
+	// ReasonRequestCap: the run made as many model requests as its limit allows (ADR 0081).
 	ReasonRequestCap CancelReason = "request_cap"
-	// ReasonRunSpendCap: the run spent its spend limit (ADR 0080). The agent's, org's and platform's
+	// ReasonRunSpendCap: the run spent its spend limit (ADR 0081). The agent's, org's and platform's
 	// budgets cancel with ReasonSpendLimit.
 	ReasonRunSpendCap CancelReason = "run_spend_cap"
 	// ReasonSpendLimit: the agent reached its spend limit (plan item L1).
@@ -246,7 +246,7 @@ type DB interface {
 
 // RecordUsage adds tokens to a run's reported total and checks its limits (CheckRunLimits).
 // Whoever learns a run's token usage (the spend ledger, from agentgateway's access log) calls it
-// with the tokens used since the last report. Tokens are reported, not enforced (ADR 0080): the
+// with the tokens used since the last report. Tokens are reported, not enforced (ADR 0081): the
 // limits that can end the run are its model requests and its spend. It returns the updated run;
 // pgx.ErrNoRows means the run has finished or does not exist in the org, and the usage is dropped.
 func RecordUsage(ctx context.Context, db DB, org, runID pgtype.UUID, tokens int64) (store.Run, error) {
@@ -267,7 +267,7 @@ func RecordUsage(ctx context.Context, db DB, org, runID pgtype.UUID, tokens int6
 }
 
 // CheckRunLimits cancels the run if it has reached its model-request limit or a spend limit of
-// its scope (ADR 0080). Whoever records or changes a ledger entry of the run calls it after the
+// its scope (ADR 0081). Whoever records or changes a ledger entry of the run calls it after the
 // write, in the same transaction: a new entry, and a settlement that raises an entry's cost. It
 // returns the run, canceled or not; pgx.ErrNoRows means the run has finished or does not exist.
 //

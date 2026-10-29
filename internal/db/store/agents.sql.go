@@ -19,7 +19,7 @@ WHERE agents.org_id = $3 AND agents.id = $4
   AND (agents.status = 'draft' OR (agents.status = 'active' AND agents.active_version_id IS DISTINCT FROM $1
     AND (SELECT nv.version FROM agent_versions nv WHERE nv.org_id = $3 AND nv.id = $1)
       > (SELECT av.version FROM agent_versions av WHERE av.org_id = agents.org_id AND av.id = agents.active_version_id)))
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking
 `
 
 type ActivateAgentParams struct {
@@ -60,6 +60,7 @@ func (q *Queries) ActivateAgent(ctx context.Context, arg ActivateAgentParams) (A
 		&i.UnhealthyReason,
 		&i.ResumedAt,
 		&i.Model,
+		&i.Thinking,
 	)
 	return i, err
 }
@@ -68,7 +69,7 @@ const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agents
 SET status = 'archived', archived_at = now()
 WHERE org_id = $1 AND id = $2 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking
 `
 
 type ArchiveAgentParams struct {
@@ -99,6 +100,7 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.UnhealthyReason,
 		&i.ResumedAt,
 		&i.Model,
+		&i.Thinking,
 	)
 	return i, err
 }
@@ -107,7 +109,7 @@ const createAgent = `-- name: CreateAgent :one
 
 INSERT INTO agents (org_id, display_name, flavor, template_id, created_by)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking
 `
 
 type CreateAgentParams struct {
@@ -152,6 +154,7 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.UnhealthyReason,
 		&i.ResumedAt,
 		&i.Model,
+		&i.Thinking,
 	)
 	return i, err
 }
@@ -198,7 +201,7 @@ func (q *Queries) CreateAgentVersion(ctx context.Context, arg CreateAgentVersion
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model FROM agents
+SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking FROM agents
 WHERE org_id = $1 AND id = $2
 `
 
@@ -230,12 +233,13 @@ func (q *Queries) GetAgent(ctx context.Context, arg GetAgentParams) (Agent, erro
 		&i.UnhealthyReason,
 		&i.ResumedAt,
 		&i.Model,
+		&i.Thinking,
 	)
 	return i, err
 }
 
 const getAgentForUpdate = `-- name: GetAgentForUpdate :one
-SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model FROM agents
+SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking FROM agents
 WHERE org_id = $1 AND id = $2
 FOR UPDATE
 `
@@ -269,6 +273,7 @@ func (q *Queries) GetAgentForUpdate(ctx context.Context, arg GetAgentForUpdatePa
 		&i.UnhealthyReason,
 		&i.ResumedAt,
 		&i.Model,
+		&i.Thinking,
 	)
 	return i, err
 }
@@ -457,7 +462,7 @@ func (q *Queries) ListAgentVersions(ctx context.Context, arg ListAgentVersionsPa
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model FROM agents
+SELECT org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking FROM agents
 WHERE org_id = $1
 ORDER BY created_at, id
 `
@@ -491,6 +496,7 @@ func (q *Queries) ListAgents(ctx context.Context, orgID pgtype.UUID) ([]Agent, e
 			&i.UnhealthyReason,
 			&i.ResumedAt,
 			&i.Model,
+			&i.Thinking,
 		); err != nil {
 			return nil, err
 		}
@@ -506,7 +512,7 @@ const returnAgentToDraft = `-- name: ReturnAgentToDraft :one
 UPDATE agents
 SET status = 'draft'
 WHERE org_id = $1 AND id = $2 AND status = 'active'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking
 `
 
 type ReturnAgentToDraftParams struct {
@@ -539,6 +545,7 @@ func (q *Queries) ReturnAgentToDraft(ctx context.Context, arg ReturnAgentToDraft
 		&i.UnhealthyReason,
 		&i.ResumedAt,
 		&i.Model,
+		&i.Thinking,
 	)
 	return i, err
 }
@@ -547,7 +554,7 @@ const setAgentModel = `-- name: SetAgentModel :one
 UPDATE agents
 SET model = $1
 WHERE org_id = $2 AND id = $3 AND status <> 'archived'
-RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking
 `
 
 type SetAgentModelParams struct {
@@ -580,6 +587,49 @@ func (q *Queries) SetAgentModel(ctx context.Context, arg SetAgentModelParams) (A
 		&i.UnhealthyReason,
 		&i.ResumedAt,
 		&i.Model,
+		&i.Thinking,
+	)
+	return i, err
+}
+
+const setAgentThinking = `-- name: SetAgentThinking :one
+UPDATE agents
+SET thinking = $1
+WHERE org_id = $2 AND id = $3 AND status <> 'archived'
+RETURNING org_id, id, display_name, status, flavor, template_id, active_version_id, latest_version, epoch, created_by, activated_by, activated_at, archived_at, created_at, updated_at, unhealthy_at, unhealthy_reason, resumed_at, model, thinking
+`
+
+type SetAgentThinkingParams struct {
+	Thinking pgtype.Text
+	OrgID    pgtype.UUID
+	ID       pgtype.UUID
+}
+
+// An agent's thinking setting (NULL: use the version's value, then the default, on). Not a new version.
+func (q *Queries) SetAgentThinking(ctx context.Context, arg SetAgentThinkingParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, setAgentThinking, arg.Thinking, arg.OrgID, arg.ID)
+	var i Agent
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.DisplayName,
+		&i.Status,
+		&i.Flavor,
+		&i.TemplateID,
+		&i.ActiveVersionID,
+		&i.LatestVersion,
+		&i.Epoch,
+		&i.CreatedBy,
+		&i.ActivatedBy,
+		&i.ActivatedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UnhealthyAt,
+		&i.UnhealthyReason,
+		&i.ResumedAt,
+		&i.Model,
+		&i.Thinking,
 	)
 	return i, err
 }

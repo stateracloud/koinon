@@ -118,6 +118,11 @@ var isolationCases = map[string]isolationCase{
 			return c.agents.SetAgentModel(ctx, &agentv1alpha1.SetAgentModelRequest{OrgId: org, AgentId: f.agent.GetId(), Model: "default"})
 		},
 	},
+	agentv1alpha1connect.AgentServiceSetAgentThinkingProcedure: {
+		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
+			return c.agents.SetAgentThinking(ctx, &agentv1alpha1.SetAgentThinkingRequest{OrgId: org, AgentId: f.agent.GetId(), Thinking: "default"})
+		},
+	},
 	agentv1alpha1connect.AgentServiceRunAgentTriggerProcedure: {
 		call: func(ctx context.Context, c *client, org string, f orgFixture) (proto.Message, error) {
 			return c.agents.RunAgentTrigger(ctx, &agentv1alpha1.RunAgentTriggerRequest{OrgId: org, AgentId: f.agent.GetId(), TriggerId: "daily-check"})

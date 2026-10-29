@@ -357,12 +357,12 @@ func (x *Grant) GetRepositories() []string {
 	return nil
 }
 
-// RunLimits cap a single run; the first one reached cancels it (plan item A4, ADR 0080).
+// RunLimits cap a single run; the first one reached cancels it (plan item A4, ADR 0081).
 type RunLimits struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Wall-clock time a run may be owned (starting or running), in seconds.
 	MaxDurationSeconds int64 `protobuf:"varint,1,opt,name=max_duration_seconds,json=maxDurationSeconds,proto3" json:"max_duration_seconds,omitempty"`
-	// Deprecated: tokens are reported, not enforced (ADR 0080). Kept so older clients and stored
+	// Deprecated: tokens are reported, not enforced (ADR 0081). Kept so older clients and stored
 	// templates still decode; it caps nothing and is zero on new templates and agents.
 	//
 	// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
@@ -624,7 +624,10 @@ type Template struct {
 	Triggers      []*Trigger `protobuf:"bytes,14,rep,name=triggers,proto3" json:"triggers,omitempty"`
 	// Agents made from the template are ephemeral by default: each task gets a fresh sandbox
 	// without a home, deleted when the task ends (ADR 0065 decision 13c).
-	Ephemeral     bool `protobuf:"varint,15,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	Ephemeral bool `protobuf:"varint,15,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	// The starting value of the agent's thinking setting, "on" or "off"; empty when the template
+	// names none, which is the default, on (ADR 0069 amendment 2026-10-29).
+	Thinking      string `protobuf:"bytes,16,opt,name=thinking,proto3" json:"thinking,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -764,6 +767,13 @@ func (x *Template) GetEphemeral() bool {
 	return false
 }
 
+func (x *Template) GetThinking() string {
+	if x != nil {
+		return x.Thinking
+	}
+	return ""
+}
+
 // ListTemplatesRequest is empty.
 type ListTemplatesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -880,7 +890,7 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x121\n" +
 	"\x04role\x18\x03 \x01(\x0e2\x1d.koinon.auth.v1alpha1.OrgRoleR\x04role\x12\x1d\n" +
 	"\n" +
-	"channel_id\x18\x04 \x01(\tR\tchannelId\"\x80\x05\n" +
+	"channel_id\x18\x04 \x01(\tR\tchannelId\"\x9c\x05\n" +
 	"\bTemplate\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04slug\x18\x02 \x01(\tR\x04slug\x12!\n" +
@@ -898,7 +908,8 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"run_limits\x18\f \x01(\v2#.koinon.template.v1alpha1.RunLimitsR\trunLimits\x12&\n" +
 	"\x0fspend_limit_usd\x18\r \x01(\tR\rspendLimitUsd\x12=\n" +
 	"\btriggers\x18\x0e \x03(\v2!.koinon.template.v1alpha1.TriggerR\btriggers\x12\x1c\n" +
-	"\tephemeral\x18\x0f \x01(\bR\tephemeral\"\x16\n" +
+	"\tephemeral\x18\x0f \x01(\bR\tephemeral\x12\x1a\n" +
+	"\bthinking\x18\x10 \x01(\tR\bthinking\"\x16\n" +
 	"\x14ListTemplatesRequest\"Y\n" +
 	"\x15ListTemplatesResponse\x12@\n" +
 	"\ttemplates\x18\x01 \x03(\v2\".koinon.template.v1alpha1.TemplateR\ttemplates*_\n" +

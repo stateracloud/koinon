@@ -167,7 +167,7 @@ type BudgetServiceClient interface {
 	// a new agent.
 	SetAgentBudget(context.Context, *v1alpha1.SetAgentBudgetRequest) (*v1alpha1.SetAgentBudgetResponse, error)
 	// GetAgentRunLimits returns the limits a run of the agent gets: the effective values, the
-	// template's defaults and the admin's overrides (ADR 0080).
+	// template's defaults and the admin's overrides (ADR 0081).
 	GetAgentRunLimits(context.Context, *v1alpha1.GetAgentRunLimitsRequest) (*v1alpha1.GetAgentRunLimitsResponse, error)
 	// SetAgentRunLimits replaces the agent's overrides of its run limits. A zero value clears that
 	// override; all zero clears them all. It applies to runs queued afterwards.
@@ -207,7 +207,7 @@ type BudgetServiceHandler interface {
 	// a new agent.
 	SetAgentBudget(context.Context, *v1alpha1.SetAgentBudgetRequest) (*v1alpha1.SetAgentBudgetResponse, error)
 	// GetAgentRunLimits returns the limits a run of the agent gets: the effective values, the
-	// template's defaults and the admin's overrides (ADR 0080).
+	// template's defaults and the admin's overrides (ADR 0081).
 	GetAgentRunLimits(context.Context, *v1alpha1.GetAgentRunLimitsRequest) (*v1alpha1.GetAgentRunLimitsResponse, error)
 	// SetAgentRunLimits replaces the agent's overrides of its run limits. A zero value clears that
 	// override; all zero clears them all. It applies to runs queued afterwards.

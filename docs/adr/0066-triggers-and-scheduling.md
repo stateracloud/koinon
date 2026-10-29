@@ -493,7 +493,7 @@ thread correlation ships in v0.1; Slack and Teams thread correlation stays in v0
    - At the cap, both agentd and the api's sweep write the same `run.canceled` payload: reason
      `wall_clock_cap`, a message, and the agent's text since its last park as `summary`, or the task's
      notes when it said nothing.
-   - *Generalised by [ADR 0080](0080-run-limits.md) (2026-10-29): the same notice also fires at about 80%
+   - *Generalised by [ADR 0081](0081-run-limits.md) (2026-10-29): the same notice also fires at about 80%
      of the run's model-request limit and of its spend limit, whichever limit is nearest names it, and
      the ledger's cancel at those limits carries the same `summary`. The event gains `limit`.*
    - Continuation runs (after v0.1.0: at most 3 per task, set per template or agent, only with budget

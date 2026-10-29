@@ -47,7 +47,7 @@ const (
 	// SystemDaily is the daily budget of an org's system key (the provider echo check), a level
 	// of ComputeSystem only.
 	SystemDaily = "system_daily"
-	// RunSpend is the spend limit of the run an agent's key is serving (ADR 0080). It is a level of
+	// RunSpend is the spend limit of the run an agent's key is serving (ADR 0081). It is a level of
 	// the key's net limit while the run is open, narrower than the agent's daily limit, and covers
 	// only that run. A task scope (#183) is another level of the same kind.
 	RunSpend = "run_spend"
@@ -256,7 +256,7 @@ func AgentDailyLimit(ctx context.Context, q *store.Queries, org, agent pgtype.UU
 }
 
 // WithRun adds the run level to st: the spend limit of run and what the run has spent, from its
-// ledger entries. A run without a spend limit (queued before ADR 0080) adds nothing. The run's
+// ledger entries. A run without a spend limit (queued before ADR 0081) adds nothing. The run's
 // window starts when it was claimed.
 func (s Status) WithRun(ctx context.Context, q *store.Queries, run store.Run) (Status, error) {
 	l, ok, err := RunLevel(ctx, q, run)
@@ -681,13 +681,13 @@ func (s *Service) GetAgent(ctx context.Context, org, agent pgtype.UUID, fallback
 	return AgentView{Agent: agent, DailyLimit: limit, SpentToday: spent, DayStart: since}, true, err
 }
 
-// Largest values an admin may set for a run's limits (the template schema's bounds, ADR 0080).
+// Largest values an admin may set for a run's limits (the template schema's bounds, ADR 0081).
 const (
 	MaxRunModelRequests = 100_000
 	MaxRunDuration      = 24 * time.Hour
 )
 
-// SetAgentRunLimits replaces the agent's overrides of its run limits (ADR 0080): a zero field
+// SetAgentRunLimits replaces the agent's overrides of its run limits (ADR 0081): a zero field
 // clears that override and the agent follows its version's value again; all zero removes the row.
 // It applies to runs queued afterwards; a queued or running run keeps the limits it was queued with.
 func (s *Service) SetAgentRunLimits(ctx context.Context, org, agent pgtype.UUID, actor audit.Actor, o runlimits.Override) error {

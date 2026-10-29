@@ -253,7 +253,7 @@ describe('a spend limit', () => {
       expect(text).toContain("(from the agent's notes)")
     })
 
-    it('says a run stopped at its model request or spend limit, with the last summary (ADR 0080)', () => {
+    it('says a run stopped at its model request or spend limit, with the last summary (ADR 0081)', () => {
       const [req] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'request_cap', message: 'model request limit reached (150 of 150 requests)', summary: 'S', summarySource: 'reply' }))
       expect(req).toContain('stopped at its model request limit: model request limit reached (150 of 150 requests)')
       expect(req).toContain('Last summary:\nS')

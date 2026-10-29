@@ -185,7 +185,7 @@ function taskItem(ev: TaskEvent): TimelineItem {
           runId,
         }
       }
-      // The ledger ends a run at its model-request or spend limit (ADR 0080) with the same note as
+      // The ledger ends a run at its model-request or spend limit (ADR 0081) with the same note as
       // the time limit: {reason, message, limit, ..., summary?, summarySource?}.
       if (ev.kind === 'run.canceled' && (str(p.reason) === 'request_cap' || str(p.reason) === 'run_spend_cap')) {
         const what = str(p.reason) === 'request_cap' ? 'model request limit' : 'spend limit'

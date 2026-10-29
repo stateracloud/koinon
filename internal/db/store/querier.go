@@ -19,7 +19,7 @@ type Querier interface {
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
 	// The question's recipients, when it is created (waiting_since stays NULL until it is opened).
 	AddQuestionRecipients(ctx context.Context, arg AddQuestionRecipientsParams) error
-	// Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0080):
+	// Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0081):
 	// the run limits are requests, spend and time. No row: the run is finished or absent.
 	AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run, error)
 	// The people a question is retargeted to start waiting now (a new recipient's age starts when the
@@ -260,7 +260,7 @@ type Querier interface {
 	// (starting or running) wins over one that finished inside the grace: a parked run that resumes
 	// right after another run of the agent ended keeps its first started_at, which is older than the
 	// finished run's, and its requests are its own (claimed_at is set on every claim, resume included;
-	// ADR 0080). Among the rest the latest-started run that had started by then and had not finished
+	// ADR 0081). Among the rest the latest-started run that had started by then and had not finished
 	// more than @grace_seconds earlier wins. One run per agent is owned at a time (ADR 0009), so the
 	// latest start wins when a parked run's window overlaps a later run. The grace covers a response
 	// that completes just after its run was canceled (for example by a run limit).
@@ -292,7 +292,7 @@ type Querier interface {
 	GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
-	// Run limits (ADR 0080): an agent's overrides of the template's limits, and a run's usage against
+	// Run limits (ADR 0081): an agent's overrides of the template's limits, and a run's usage against
 	// them. Every query on an org-owned table takes @org_id and filters on it
 	// (TestQueriesAreOrgScoped).
 	// The agent's overrides; a NULL column falls back to the agent version's value.
@@ -811,6 +811,8 @@ type Querier interface {
 	// reconciler waits for its deletion first). The unhealthy mark and any pending home restore belonged
 	// to that sandbox: a task sandbox starts its own lineage and nothing carries over between tasks.
 	SetAgentSandboxName(ctx context.Context, arg SetAgentSandboxNameParams) (AgentSandbox, error)
+	// An agent's thinking setting (NULL: use the version's value, then the default, on). Not a new version.
+	SetAgentThinking(ctx context.Context, arg SetAgentThinkingParams) (Agent, error)
 	// The first of two approvals: remembered, the request stays pending.
 	SetApprovalFirstApprover(ctx context.Context, arg SetApprovalFirstApproverParams) (ApprovalRequest, error)
 	SetApprovalRequestScope(ctx context.Context, arg SetApprovalRequestScopeParams) error

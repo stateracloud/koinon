@@ -170,7 +170,7 @@ type runLimits struct {
 	spendUSD string
 }
 
-// startLimitedRun is startRun for a run queued with limits (ADR 0080).
+// startLimitedRun is startRun for a run queued with limits (ADR 0081).
 func (e *env) startLimitedRun(ctx context.Context, t store.Task, l runLimits, startedAt time.Time) store.Run {
 	p := store.CreateRunParams{OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 1800}
 	if l.requests > 0 {

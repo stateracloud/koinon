@@ -94,6 +94,61 @@ var _ = Describe("Cost truth", func() {
 		Expect(s.CacheReadTokens).To(Equal(int64(500_000)))
 	})
 
+	// Thinking is on by default (ADR 0069 amendment 2026-10-29), and a provider bills thinking tokens as
+	// output. agentgateway's token semantics put them inside output (llm.outputTokens includes reasoning),
+	// with the reasoning part reported beside it when the provider splits it out.
+	It("bills reasoning tokens as output, records them, and shows them in the spend report", func(ctx SpecContext) {
+		e := newEnv(ctx, uniq("org"), "", "100.00")
+		e.model(ctx, "openrouter", flash)
+		reasoning := func() (n int64) {
+			Expect(db.QueryRow(ctx, `SELECT reasoning_tokens FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, e.org).Scan(&n)).To(Succeed())
+			return n
+		}
+
+		By("1M output tokens of which 400k were reasoning: all billed at the output rate, none twice")
+		u := e.usage(time.Now(), flash, 1_000_000, 1_000_000, 0, "")
+		u.ReasoningTokens = 400_000
+		_, err := ing.Ingest(ctx, []ledger.Entry{u})
+		Expect(err).NotTo(HaveOccurred())
+		s := e.lastEntry(ctx)
+		// 1M input at 0.20 plus 1M output at 2; the 400k reasoning tokens are in the output.
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("2.20"))
+		Expect(s.OutputTokens).To(Equal(int64(1_000_000)), "output includes reasoning")
+		Expect(reasoning()).To(Equal(int64(400_000)))
+		Expect(s.CostFlagged).To(BeFalse())
+
+		By("a provider that does not split thinking out (Anthropic Messages) bills it as the output it is")
+		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 1_000_000, 0, "")})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("2.20"))
+		Expect(reasoning()).To(BeZero())
+
+		By("the report counts the reasoning tokens inside the output tokens")
+		rep, err := q.SpendReport(ctx, store.SpendReportParams{OrgID: e.org, Since: pgtype.Timestamptz{Time: time.Now().Add(-time.Hour), Valid: true}})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rep).To(HaveLen(1))
+		Expect(rep[0].OutputTokens).To(Equal(int64(2_000_000)))
+		Expect(rep[0].ReasoningTokens).To(Equal(int64(400_000)))
+		Expect(ledger.FormatUSD(rep[0].ReportedUsd)).To(Equal("4.40"))
+
+		By("a price that names a reasoning rate bills the reasoning part at it, and the rest of the output at the output rate")
+		_, err = prices.New(db, nil, priceList).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
+			Entry: pricing.Entry{
+				ID: "flash-reasoning", Provider: "openrouter", Match: pricing.Match{Glob: flash},
+				Spec:      pricing.Spec{Prices: pricing.Wire{Input: "1", Output: "2", Reasoning: "4"}},
+				Tokenizer: pricing.TokenizerBytes, Ratio: "3.0", MaxOutput: 4096,
+			},
+			ValidFrom: time.Now().Add(-time.Hour),
+		})
+		Expect(err).NotTo(HaveOccurred())
+		u = e.usage(time.Now(), flash, 1_000_000, 1_000_000, 0, "")
+		u.ReasoningTokens = 400_000
+		_, err = ing.Ingest(ctx, []ledger.Entry{u})
+		Expect(err).NotTo(HaveOccurred())
+		// 1M input at 1, 600k output at 2, 400k reasoning at 4.
+		Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("3.80"))
+	})
+
 	It("charges its own cost and flags the entry when the gateway differs by more than 1%", func(ctx SpecContext) {
 		e := newEnv(ctx, uniq("org"), "", "10.00")
 		e.model(ctx, "openrouter", flash)

@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-21
 - Amends: ADR 0013 (model access)
-- Amended by: [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), 2026-10-28 (below), [0080](0080-run-limits.md) (2026-10-29, the run level)
+- Amended by: [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), 2026-10-28 (below), [0081](0081-run-limits.md) (2026-10-29, the run level)
 
 ## Context
 
@@ -208,11 +208,11 @@ before: at midnight a windowed counter resets before the reconciler pushes the n
 so the gateway can regrant the previous net amount until the next pass, at most 30 seconds, the kind
 of overshoot this ADR accepts. Counters of past days are removed by agentgateway at its next start.
 
-## Amendment 2026-10-29: the run level is built (ADR 0080)
+## Amendment 2026-10-29: the run level is built (ADR 0081)
 
 Decision 5 named the **run** among the levels whose remaining amount is netted into the gateway key
 limit ("the minimum of run, ticket, agent, org and platform remaining") and it was never built. ADR
-0080 builds it, for the spend of one run (issue #243):
+0081 builds it, for the spend of one run (issue #243):
 
 - A run's spend limit, `limits.run.maxSpendUSD` (default per template, overridable per agent), is
   copied to the run when it is queued. While an agent has a starting or running run, the key's net

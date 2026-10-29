@@ -158,7 +158,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 		}
 		// The run's row is locked before the entry is written, so concurrent requests of one run are
 		// serialised from here to the commit: each counts the entries the others committed (the
-		// request limit is exact, ADR 0080), and none holds the key-share lock the entry's foreign
+		// request limit is exact, ADR 0081), and none holds the key-share lock the entry's foreign
 		// key takes on the row while waiting to update it (a deadlock between two such requests).
 		if run.ID.Valid {
 			if _, err := q.LockRun(ctx, store.LockRunParams{OrgID: org.ID, ID: run.ID}); err != nil {
@@ -230,7 +230,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			}
 		}
 		if run.ID.Valid {
-			// Tokens are reported, not enforced (ADR 0080). Estimated tokens count like reported ones.
+			// Tokens are reported, not enforced (ADR 0081). Estimated tokens count like reported ones.
 			if _, err := q.AddRunTokens(ctx, store.AddRunTokensParams{OrgID: org.ID, ID: run.ID, Tokens: pr.inTokens + pr.outTokens}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("record run tokens: %w", err)
 			}
@@ -243,7 +243,7 @@ func (in *Ingester) ingest(ctx context.Context, e Entry) (bool, error) {
 			}
 		}
 		// The agent's, org's and platform's budgets stop first: the broadest limit reached names the
-		// stop. Then the run's own limits (ADR 0080), against the ledger including this entry: its
+		// stop. Then the run's own limits (ADR 0081), against the ledger including this entry: its
 		// model requests and its spend. CheckRunLimits nests a savepoint.
 		return enforce(ctx, tx, in.Notifier, in.now(), enforcement{
 			org: org.ID, agent: agent.ID, version: run.AgentVersionID, run: run.ID, at: e.Time, delta: pr.cost,
@@ -335,7 +335,7 @@ type enforcement struct {
 }
 
 // enforce is the one sequence every writer of a ledger entry runs, so they name a stop alike (ADR
-// 0080, decision 5): first the agent's daily limit, the org's monthly cap and the platform ceiling
+// 0081, decision 5): first the agent's daily limit, the org's monthly cap and the platform ceiling
 // (budgets), then the run's own limits. The broadest limit reached names the stop: a request that
 // reaches both the agent's daily limit and the run's spend limit cancels with the daily limit,
 // whether it was ingested or a settlement raised its cost. Ingest and the settler both call it.

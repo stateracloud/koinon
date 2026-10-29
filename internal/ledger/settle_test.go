@@ -245,7 +245,7 @@ var _ = Describe("Settling responses cut short", func() {
 		Expect(l2.Generation).NotTo(Equal(l.Generation), "a fresh gateway counter for the new amount")
 	})
 
-	Describe("a settlement that raises the cost to a run limit (ADR 0080, decision 5)", func() {
+	Describe("a settlement that raises the cost to a run limit (ADR 0081, decision 5)", func() {
 		canceled := func(ctx SpecContext) map[string]any {
 			GinkgoHelper()
 			var raw []byte

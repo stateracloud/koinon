@@ -10,7 +10,7 @@
 //     from the model catalog. [Ingester] maps it to the agent's run at the
 //     record's time and writes one spend_entries row, idempotent on the
 //     request id.
-//   - Run limits (ADR 0080): a recorded request adds its tokens to the run's reported total
+//   - Run limits (ADR 0081): a recorded request adds its tokens to the run's reported total
 //     (tokens are reported, not enforced), and every recorded or settled entry of a run is
 //     followed by scheduler.CheckRunLimits, which cancels the run at its model-request or spend
 //     limit after the agent's, org's and platform's budgets were checked ([enforce]).

@@ -506,7 +506,7 @@ var _ = Describe("TicketService and run scheduling", func() {
 			Expect(last.GetPayload().AsMap()).To(HaveKeyWithValue("message", "Stopped at the time limit of 30m."))
 		})
 
-		It("reports the tokens a run used without ending it at any total (ADR 0080)", func(ctx SpecContext) {
+		It("reports the tokens a run used without ending it at any total (ADR 0081)", func(ctx SpecContext) {
 			_, r := member.createTicket(ctx, org, agent.GetId(), "chatty")
 			run := ad.mustClaim(ctx, org)
 			_, err := recordTokens(ctx, e, run, 1_999_999)

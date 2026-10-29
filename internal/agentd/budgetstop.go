@@ -33,7 +33,7 @@ func (r *runner) budgetStop(ctx context.Context, err error) error {
 		r.log.Warn("checking the budget after a gateway refusal failed", "err", berr)
 		return err
 	}
-	// The run's own spend limit is a level of the key too (ADR 0080).
+	// The run's own spend limit is a level of the key too (ADR 0081).
 	if st, berr = st.WithRun(ctx, r.q, r.run); berr != nil {
 		r.log.Warn("checking the run's spend after a gateway refusal failed", "err", berr)
 		return err

@@ -17,7 +17,7 @@ const wholeNumber = /^[0-9]{1,6}$/
 
 /**
  * AgentRunLimits is where an admin or owner sees the limits of one run of an agent and overrides
- * the template's values (ADR 0080). The first limit a run reaches ends it. An empty field follows
+ * the template's values (ADR 0081). The first limit a run reaches ends it. An empty field follows
  * the template; a change applies to runs queued afterwards.
  */
 export function AgentRunLimits({ agent }: { agent: Agent }) {

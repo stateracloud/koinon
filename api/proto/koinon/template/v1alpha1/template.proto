@@ -55,11 +55,11 @@ message Grant {
   repeated string repositories = 8;
 }
 
-// RunLimits cap a single run; the first one reached cancels it (plan item A4, ADR 0080).
+// RunLimits cap a single run; the first one reached cancels it (plan item A4, ADR 0081).
 message RunLimits {
   // Wall-clock time a run may be owned (starting or running), in seconds.
   int64 max_duration_seconds = 1;
-  // Deprecated: tokens are reported, not enforced (ADR 0080). Kept so older clients and stored
+  // Deprecated: tokens are reported, not enforced (ADR 0081). Kept so older clients and stored
   // templates still decode; it caps nothing and is zero on new templates and agents.
   int64 max_tokens = 2 [deprecated = true];
   // Model requests a run may make: every request through the agent's key counts, the harness's
@@ -144,6 +144,9 @@ message Template {
   // Agents made from the template are ephemeral by default: each task gets a fresh sandbox
   // without a home, deleted when the task ends (ADR 0065 decision 13c).
   bool ephemeral = 15;
+  // The starting value of the agent's thinking setting, "on" or "off"; empty when the template
+  // names none, which is the default, on (ADR 0069 amendment 2026-10-29).
+  string thinking = 16;
 }
 
 // ListTemplatesRequest is empty.

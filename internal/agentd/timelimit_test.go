@@ -223,7 +223,7 @@ var _ = Describe("the time limit", func() {
 	})
 })
 
-// The warning before the model-request and spend limits (ADR 0080): at about 80% of whichever
+// The warning before the model-request and spend limits (ADR 0081): at about 80% of whichever
 // limit is nearest, read from the ledger while a turn runs. The ledger, not agentd, ends the run at
 // the limit; these specs stop at the notice.
 var _ = Describe("the request and spend limits", func() {
