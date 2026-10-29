@@ -46,6 +46,15 @@ the network must be what the sandbox's proxy actually does.
    is set (the home lab) and skip everywhere else, kind and CI included, so nothing about the kind
    runs changes.
 
+## Amendment 2026-10-30: subagents are off (issue #261)
+
+The same rule governs OpenCode's `subagent` tool, for a different reason: a child session outlives a
+cancelled turn and agentd records none of its events, so the wall clock (#243) and the wrap-up
+notice (#183) could not stop it and traces (ADR 0074) would not show it. The config overlay denies
+the `subagent` action for every agent, `explore` included, so the model is not offered the tool. The
+contract suite checks the tool list. Allowing `explore` again needs agentd to advertise and record
+child updates and cancel to cascade to children.
+
 ## Consequences
 
 - An agent without web egress cannot waste a turn on `webfetch`; its instructions point to MCP.
