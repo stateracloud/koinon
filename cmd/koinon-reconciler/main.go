@@ -278,7 +278,12 @@ func newGatewayDriver(cfg config, kube kubernetes.Interface, log *slog.Logger) (
 		}
 		// Reloads are detected on the data plane, with the revision's probe key; agentgateway's
 		// admin listener stays on localhost.
-		driver.Waiter = standalone.ProbeWaiter{GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log}
+		// agentgateway reports a refused config only in its log, so the waiter reads the gateway
+		// pods' logs for the reason (ADR 0050, amendment 2026-10-29).
+		driver.Waiter = standalone.ProbeWaiter{
+			GatewayURL: cfg.gatewayURL, StatsURL: cfg.gatewayStatsURL, Log: log,
+			Reload: standalone.PodLogReload{Client: kube, Namespace: cfg.namespace, Deployment: cfg.gatewayDeployment},
+		}
 		return driver, nil
 	case project.GatewayKubernetes:
 		rc, err := restConfig(cfg.kubeconfig)

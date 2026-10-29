@@ -27,6 +27,7 @@ The reconciler runs as one leading replica; standby replicas report the Go and p
 | `koinon_reconciler_passes_total` | counter | `result`: `ok`, `error` | Passes, by whether any error was reported. |
 | `koinon_reconciler_pass_errors_total` | counter | `kind` (below) | Errors in passes. One pass can add several. |
 | `koinon_reconciler_gateway_apply_duration_seconds` | histogram | none | Time to apply the gateway state, including the wait for the reload. |
+| `koinon_reconciler_gateway_config_rejected` | gauge | none | 1 while the last gateway apply was refused whole by agentgateway (standalone mode), which keeps serving its previous config; 0 otherwise. The reason is in the reconciler log. |
 | `koinon_reconciler_sandboxes` | gauge | `state`: `pending`, `starting`, `ready`, `stopping`, `stopped`, `error`, `deleting`, `deleted`, `retained` | Agent sandboxes by recorded state, set at the end of each pass. |
 | `koinon_reconciler_agents_waiting_for_gateway_key` | gauge | none | Agents whose sandbox work the last pass held back because the gateway did not serve their new key yet. |
 | `koinon_reconciler_sandbox_repairs_total` | counter | none | Stuck, failed or completed sandboxes deleted to be recreated ([stuck sandboxes](../agent-health/)). |
@@ -40,7 +41,33 @@ Error `kind` values: `database` (listing orgs, agents or providers failed), `age
 agent's key or desired state), `provider` (a model provider could not be rendered), `mcp` (an org MCP
 server), `spend_limit` (an agent's budget could not be computed), `provider_keys` (delivering or
 pruning key files), `gateway_apply` (the gateway was unreachable or the reload did not complete),
-`gateway_rejected` (the gateway rejected objects), and `sandbox` (converging an agent's sandbox).
+`gateway_rejected` (the gateway rejected objects, or the standalone driver left out the keys of agents whose limit it cannot render),
+`gateway_config` (agentgateway refused the whole standalone config and kept the previous one), and `sandbox` (converging an agent's sandbox).
+
+### Alerting on a frozen gateway
+
+When agentgateway refuses a config it keeps serving the previous one, so no new key, revocation,
+model or limit reaches it until a file loads. Two signals say so; alert on either:
+
+```yaml
+- alert: KoinonGatewayConfigRejected
+  expr: koinon_reconciler_gateway_config_rejected == 1
+  for: 5m
+  annotations:
+    summary: agentgateway refused Koinon's config and serves the previous one
+    description: >-
+      Read the reason in the koinon-reconciler log ("agentgateway rejected the config", field
+      "reason"); waiting agents show it as their message.
+- alert: AgentgatewayConfigNotSynchronized
+  expr: agentgateway_config_synchronized == 0
+  for: 5m
+```
+
+`agentgateway_config_synchronized` is agentgateway's own gauge on its stats port (15020, see
+`networkPolicy.metricsFrom`). It also reads 0 for the minute a ConfigMap takes to reach the pod after a
+rejected file, so use `for: 5m` or longer. The reconciler needs read access to the gateway pods'
+logs to name the reason (the chart grants it in standalone mode); without it the alert still fires,
+and the log line says the reason could not be read.
 
 ## koinon-agentd
 
