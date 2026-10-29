@@ -163,15 +163,15 @@ var _ = Describe("ProviderService", func() {
 		Expect(or.GetProvider().GetFormats()[1].GetLabel()).To(Equal("Anthropic Messages"))
 		orID, oaID := or.GetProvider().GetId(), oa.GetProvider().GetId()
 
-		// The default follows the table; OpenRouter anthropic/* stays on openai until the flip.
+		// The default follows the table: OpenRouter's Claude models speak Messages (#242).
 		m, err := owner.providers.CreateModel(ctx, &providerv1alpha1.CreateModelRequest{OrgId: org, ProviderId: orID, Name: "anthropic/claude-haiku-5.5"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(m.GetModel().GetFormat()).To(Equal("openai"))
+		Expect(m.GetModel().GetFormat()).To(Equal("anthropic"))
 		Expect(m.GetModel().GetFormatOverridden()).To(BeFalse())
 
 		fm, err := owner.providers.ModelFormats(ctx, &providerv1alpha1.ModelFormatsRequest{OrgId: org, ProviderId: orID, Name: "claude-haiku"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(fm.GetDefaultFormat()).To(Equal("openai"), "OpenRouter claude-* is pinned to openai until the flip")
+		Expect(fm.GetDefaultFormat()).To(Equal("anthropic"), "OpenRouter claude-* follows the family preference")
 		ti, err := owner.providers.ProviderTypeInfo(ctx, &providerv1alpha1.ProviderTypeInfoRequest{OrgId: org, Type: "anthropic"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ti.GetTakesWorkspaceId()).To(BeTrue())
@@ -182,14 +182,14 @@ var _ = Describe("ProviderService", func() {
 		Expect(ti.GetFormats()).To(HaveLen(2))
 
 		// An override within what the provider offers is stored and marked.
-		upd, err := owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), Format: new("anthropic")})
+		upd, err := owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), Format: new("openai")})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(upd.GetModel().GetFormat()).To(Equal("anthropic"))
+		Expect(upd.GetModel().GetFormat()).To(Equal("openai"))
 		Expect(upd.GetModel().GetFormatOverridden()).To(BeTrue())
 		// An empty format goes back to the default.
 		upd, err = owner.providers.UpdateModel(ctx, &providerv1alpha1.UpdateModelRequest{OrgId: org, ModelId: m.GetModel().GetId(), Format: new("")})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(upd.GetModel().GetFormat()).To(Equal("openai"))
+		Expect(upd.GetModel().GetFormat()).To(Equal("anthropic"))
 		Expect(upd.GetModel().GetFormatOverridden()).To(BeFalse())
 
 		// Not offered, and unknown, are refused.
