@@ -4,7 +4,9 @@
 use_default_settings:
   engines:
     keep_only:
-      - duckduckgo
+      # DuckDuckGo is out: it answers a CAPTCHA to a server-side client (home lab, 2026-10-29).
+      - brave
+      - mojeek
       - bing
       - wikipedia
       - github

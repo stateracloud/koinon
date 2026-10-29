@@ -8,8 +8,8 @@
 // The type holds up to about 9.2 million USD, far above any limit Koinon accepts ([MaxLimit]);
 // arithmetic is checked and reports overflow instead of wrapping.
 //
-// Floats are used only at the edge, where agentgateway's config takes a JSON number
-// ([USD.Float64]); the database stores numeric(24,12) and crosses the Go boundary as text.
+// Floats are never used for a stored or sent amount: agentgateway's config takes a decimal with at
+// most nine fraction digits, which [USD.Floor] and [USD.Fixed] produce exactly; the database stores numeric(24,12) and crosses the Go boundary as text.
 package money
 
 import (
@@ -148,8 +148,35 @@ func (u USD) Numeric() string {
 	return s
 }
 
-// Float64 converts at the edge to agentgateway's config. It is the only float conversion.
-func (u USD) Float64() float64 { return float64(u) / PerUSD }
+// MaxFractionDigits is the number of fraction digits a [USD] holds.
+const MaxFractionDigits = 12
+
+// Floor rounds a non-negative amount down to a multiple of 10^-digits USD (digits 0 to
+// [MaxFractionDigits]). Rounding down never hands out more than the amount.
+func (u USD) Floor(digits int) USD {
+	digits = max(0, min(digits, MaxFractionDigits))
+	unit := USD(1)
+	for range MaxFractionDigits - digits {
+		unit *= 10
+	}
+	return u - u%unit
+}
+
+// HasFractionDigits reports whether the amount needs no more than digits fraction digits.
+func (u USD) HasFractionDigits(digits int) bool { return u.Floor(digits) == u }
+
+// Fixed formats the amount in fixed-point notation, never with an exponent, with at least one and at
+// most digits fraction digits (trailing zeros trimmed): "4.982724240" is "4.98272424", 5 is "5.0".
+// It is the form a gateway's decimal field takes. The amount must be non-negative.
+func (u USD) Fixed(digits int) string {
+	digits = max(1, min(digits, MaxFractionDigits))
+	n := int64(u.Floor(digits))
+	whole, frac := n/PerUSD, fmt.Sprintf("%012d", n%PerUSD)[:digits]
+	if frac = strings.TrimRight(frac, "0"); frac == "" {
+		frac = "0"
+	}
+	return fmt.Sprintf("%d.%s", whole, frac)
+}
 
 // Add returns u+v or ErrOverflow.
 func (u USD) Add(v USD) (USD, error) {

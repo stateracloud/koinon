@@ -71,6 +71,10 @@ type Entry struct {
 	CostUSD string
 	// Status is the HTTP status the gateway answered (0 when not logged).
 	Status int64
+	// UpstreamKnown says the record carries koinon.upstream; Upstream is its value: the gateway
+	// called the provider, so Status is the provider's. Without the field (a config that predates
+	// it) the origin of a status is not known.
+	UpstreamKnown, Upstream bool
 	// MaxTokens is the request's max_tokens (0 when not logged).
 	MaxTokens int64
 	// RequestBytes and ResponseBytes are -1 when not logged.

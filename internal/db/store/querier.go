@@ -331,6 +331,11 @@ type Querier interface {
 	//
 	// Every query on an org-owned table takes @org_id and filters on it (TestQueriesAreOrgScoped).
 	GetHomeRepository(ctx context.Context, arg GetHomeRepositoryParams) (HomeRepository, error)
+	// The last request of a run that its provider answered with an error status at or after @since: the
+	// gateway's own record of why a model request failed (agentd reads it when a harness reports an
+	// error without a status). Only the statuses in @statuses count. No row when the provider
+	// refused nothing in the window.
+	GetLastUpstreamRefusal(ctx context.Context, arg GetLastUpstreamRefusalParams) (GetLastUpstreamRefusalRow, error)
 	GetLocalCredential(ctx context.Context, userID pgtype.UUID) (LocalCredential, error)
 	GetLocalCredentialByUsername(ctx context.Context, username string) (LocalCredential, error)
 	GetMCPServer(ctx context.Context, arg GetMCPServerParams) (McpServer, error)

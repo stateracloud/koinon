@@ -41,6 +41,18 @@ var _ = Describe("Harness settings", func() {
 	})
 })
 
+var _ = Describe("WebEgress", func() {
+	// No grant opens arbitrary web hosts yet (ADR 0080); a grant type that does adds its case here.
+	It("is false for a version with the usual grants", func() {
+		c := agentconfig.Config{
+			Grants:  []templates.Grant{{Connector: "github", Scopes: []string{"repo.read"}, Preset: templates.PresetStandard}},
+			Harness: templates.Harness{PluginInstalls: true},
+		}
+		Expect(c.WebEgress()).To(BeFalse())
+		Expect(agentconfig.Config{}.WebEgress()).To(BeFalse())
+	})
+})
+
 var _ = Describe("IsEphemeral", func() {
 	It("is off by default, including for a config stored before it existed", func() {
 		cfg, err := agentconfig.Parse([]byte(`{"instructions":"x"}`))
@@ -134,7 +146,7 @@ var _ = Describe("RunLimits", func() {
 		Expect(l.WallClock).To(Equal(10 * time.Minute))
 		Expect(l.MaxModelRequests).To(Equal(int64(200)))
 		Expect(l.MaxSpend.String()).To(Equal(agentconfig.DefaultMaxSpend.String()))
-		Expect(l.MaxSpend.Float64()).To(Equal(5.0))
+		Expect(l.MaxSpend.String()).To(Equal("5.00"))
 	})
 
 	It("keeps a template's explicit values", func() {
@@ -143,6 +155,6 @@ var _ = Describe("RunLimits", func() {
 		}}}
 		l := agentconfig.FromTemplate(t, "sha256:x").RunLimits()
 		Expect(l.MaxModelRequests).To(Equal(int64(100)))
-		Expect(l.MaxSpend.Float64()).To(Equal(0.75))
+		Expect(l.MaxSpend.String()).To(Equal("0.75"))
 	})
 })

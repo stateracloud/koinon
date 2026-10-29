@@ -16,6 +16,7 @@ import (
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/ledger"
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/scheduler"
 )
@@ -324,7 +325,7 @@ var _ = Describe("AgentLimit", func() {
 		now := time.Now()
 		l, err := ledger.AgentLimit(ctx, q, e.agent, now)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(l.Amount).To(BeNumerically("==", 10))
+		Expect(l.Amount).To(Equal(money.MustParse("10")))
 
 		_, err = ing.Ingest(ctx, []ledger.Entry{
 			e.entry(now.Add(-ledger.Window), "5", 1, 1), // the previous window
@@ -333,7 +334,7 @@ var _ = Describe("AgentLimit", func() {
 		Expect(err).NotTo(HaveOccurred())
 		net, err := ledger.AgentLimit(ctx, q, e.agent, now)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(net.Amount).To(BeNumerically("==", 7.75))
+		Expect(net.Amount).To(Equal(money.MustParse("7.75")))
 		Expect(net.Generation).NotTo(Equal(l.Generation))
 	})
 
