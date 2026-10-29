@@ -5,6 +5,7 @@ package agentd
 import (
 	"fmt"
 
+	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
 
@@ -23,6 +24,18 @@ func VersionModel(config []byte) string {
 
 // Within exposes the permission policy's workspace check.
 var Within = within
+
+// RealpathScript is the script that resolves a permission request's paths in the sandbox.
+const RealpathScript = realpathScript
+
+// PathResolver resolves paths in the sandbox; Decide is the permission policy's answer.
+type PathResolver = pathResolver
+
+// Decide answers a permission request for a session in workspace.
+func Decide(p *PermissionPolicy, req acp.PermissionRequest, workspace string, resolve PathResolver) (verdict Verdict, optionID, outside string) {
+	d := p.decide(req, workspace, resolve)
+	return d.Verdict, d.OptionID, d.Outside
+}
 
 // LinkScript and InstructionLink expose the instruction link's restore script and paths.
 var (
