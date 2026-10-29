@@ -41,7 +41,7 @@ type ReloadFailure struct {
 // its own log, never on a listener, so a deployment supplies where to read it (PodLogReload).
 type ReloadLog interface {
 	// LatestReloadFailure returns the latest failed reload logged strictly after the given
-	// time (zero: any), by agentgateway's own clock. found is false when there is none.
+	// time (callers pass a lower bound; zero reads all), by agentgateway's own clock. found is false when there is none.
 	LatestReloadFailure(ctx context.Context, after time.Time) (f ReloadFailure, found bool, err error)
 }
 
@@ -103,10 +103,24 @@ type ProbeWaiter struct {
 // misreported the good file that followed a rejected one).
 const defaultRejectAfter = 2 * time.Minute
 
-type afterKey struct{}
+type baselineKey struct{}
+
+// baseline is what Prepare learned about the reload log before delivery.
+type baseline struct {
+	// after counts only failures logged strictly after it (the gateway's clock).
+	after time.Time
+	// unknown is set when the log could not be read: no failure may be attributed by the log
+	// then, because an older one would pass for this file's. Only RejectAfter decides.
+	unknown bool
+}
+
+// reloadLookback bounds how far back the waiter reads the gateway's log. A failed reload older
+// than this is no candidate for the file being delivered, and reading less keeps a pass from
+// streaming a whole rotated log file from every replica.
+const reloadLookback = time.Hour
 
 // Prepare reads agentgateway's newest reload failure before a file is delivered and remembers its
-// time, so that Wait counts only failures logged after it: a rejection can come before Wait is
+// time (or that the log could not be read, and then Wait does not attribute failures by the log), so that Wait counts only failures logged after it: a rejection can come before Wait is
 // called (a file on disk is read at once), and an earlier file's failure must not count. The time
 // is the gateway's own, so clock skew between the reconciler and the gateway does not matter.
 // Driver calls it before Deliver when the Waiter has it.
@@ -114,11 +128,17 @@ func (w ProbeWaiter) Prepare(ctx context.Context) context.Context {
 	if w.Reload == nil {
 		return ctx
 	}
-	f, found, err := w.Reload.LatestReloadFailure(ctx, time.Time{})
-	if err != nil || !found {
-		return ctx // nothing logged yet, or unreadable: any failure counts
+	// Nothing logged within the lookback: the baseline is the start of the window (the
+	// reconciler's clock against a window of an hour, skew is immaterial).
+	b := baseline{after: time.Now().Add(-reloadLookback)}
+	f, found, err := w.Reload.LatestReloadFailure(ctx, b.after)
+	switch {
+	case err != nil:
+		b = baseline{unknown: true}
+	case found:
+		b.after = f.At
 	}
-	return context.WithValue(ctx, afterKey{}, f.At)
+	return context.WithValue(ctx, baselineKey{}, b)
 }
 
 // The default poll schedule: waits of 0.5 s, 1 s, 2 s, 4 s, then 5 s.
@@ -153,7 +173,10 @@ func (w ProbeWaiter) Wait(ctx context.Context, rev gateway.Revision) error {
 	if rejectAfter <= 0 {
 		rejectAfter = defaultRejectAfter
 	}
-	after, _ := ctx.Value(afterKey{}).(time.Time)
+	base, ok := ctx.Value(baselineKey{}).(baseline)
+	if !ok { // no Prepare: every failure in the lookback window counts
+		base = baseline{after: time.Now().Add(-reloadLookback)}
+	}
 	var lastErr error
 	var unsyncedSince time.Time
 	t := time.NewTimer(interval)
@@ -177,8 +200,8 @@ func (w ProbeWaiter) Wait(ctx context.Context, rev gateway.Revision) error {
 				if unsyncedSince.IsZero() {
 					unsyncedSince = time.Now()
 				}
-				if w.Reload != nil {
-					f, found, err := w.Reload.LatestReloadFailure(ctx, after)
+				if w.Reload != nil && !base.unknown {
+					f, found, err := w.Reload.LatestReloadFailure(ctx, base.after)
 					switch {
 					case err != nil:
 						log.WarnContext(ctx, "cannot read agentgateway's reload errors", "err", err)

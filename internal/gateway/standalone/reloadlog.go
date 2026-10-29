@@ -4,8 +4,11 @@ package standalone
 
 import (
 	"bufio"
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -13,7 +16,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -31,7 +33,14 @@ type PodLogReload struct {
 	Client     kubernetes.Interface
 	Namespace  string
 	Deployment string
+	// Container is the agentgateway container in the pod, default "agentgateway" (the chart's
+	// name). A pod with a sidecar (service mesh, log shipper) needs it: the log API refuses a
+	// request that names no container.
+	Container string
 }
+
+// defaultGatewayContainer is the chart's agentgateway container name.
+const defaultGatewayContainer = "agentgateway"
 
 var _ ReloadLog = PodLogReload{}
 
@@ -41,7 +50,13 @@ func (p PodLogReload) LatestReloadFailure(ctx context.Context, after time.Time) 
 	if err != nil {
 		return ReloadFailure{}, false, fmt.Errorf("read the gateway Deployment %s: %w", p.Deployment, err)
 	}
-	sel := labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
+	if dep.Spec.Selector == nil {
+		return ReloadFailure{}, false, fmt.Errorf("the gateway Deployment %s has no selector", p.Deployment)
+	}
+	sel, err := metav1.LabelSelectorAsSelector(dep.Spec.Selector)
+	if err != nil {
+		return ReloadFailure{}, false, fmt.Errorf("the gateway Deployment %s selector: %w", p.Deployment, err)
+	}
 	pods, err := p.Client.CoreV1().Pods(p.Namespace).List(ctx, metav1.ListOptions{LabelSelector: sel.String()})
 	if err != nil {
 		return ReloadFailure{}, false, fmt.Errorf("list the gateway pods: %w", err)
@@ -52,9 +67,10 @@ func (p PodLogReload) LatestReloadFailure(ctx context.Context, after time.Time) 
 		errs  []error
 	)
 	for _, pod := range pods.Items {
-		opts := &corev1.PodLogOptions{}
+		opts := &corev1.PodLogOptions{Container: cmp.Or(p.Container, defaultGatewayContainer)}
 		if !after.IsZero() {
-			// The API takes whole seconds; ParseReloadFailure filters exactly.
+			// Bounds the read to what can matter (callers never pass zero, see lookback); the API
+			// takes whole seconds, so ParseReloadFailure filters exactly.
 			t := metav1.NewTime(after.Add(-time.Second))
 			opts.SinceTime = &t
 		}
@@ -63,8 +79,11 @@ func (p PodLogReload) LatestReloadFailure(ctx context.Context, after time.Time) 
 			errs = append(errs, fmt.Errorf("read the log of %s: %w", pod.Name, err))
 			continue
 		}
-		f, ok := ParseReloadFailure(stream, after)
+		f, ok, err := ParseReloadFailure(stream, after)
 		_ = stream.Close()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read the log of %s: %w", pod.Name, err))
+		}
 		if ok && (!found || f.At.After(best.At)) {
 			best, found = f, true
 		}
@@ -75,32 +94,60 @@ func (p PodLogReload) LatestReloadFailure(ctx context.Context, after time.Time) 
 	return best, found, nil
 }
 
+// maxLogLine is the longest log line ParseReloadFailure parses; a longer one (a huge access-log
+// entry) is skipped whole, and the scan goes on after it.
+const maxLogLine = 1 << 20
+
 // ParseReloadFailure scans agentgateway's JSON log for the latest failed reload logged strictly
-// after the given time.
-func ParseReloadFailure(r io.Reader, after time.Time) (f ReloadFailure, found bool) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if !strings.Contains(string(line), reloadFailedMessage) {
+// after the given time. Lines over maxLogLine are skipped; a read error ends the scan and is
+// returned with whatever was found before it.
+func ParseReloadFailure(r io.Reader, after time.Time) (f ReloadFailure, found bool, err error) {
+	br := bufio.NewReaderSize(r, 64<<10)
+	var line []byte
+	skipping := false
+	for {
+		chunk, rerr := br.ReadSlice('\n')
+		switch {
+		case errors.Is(rerr, bufio.ErrBufferFull):
+			// A partial line: collect it up to maxLogLine, then drop the rest of it.
+			if !skipping {
+				line = append(line, chunk...)
+				skipping = len(line) > maxLogLine
+			}
 			continue
+		case rerr != nil && !errors.Is(rerr, io.EOF):
+			return f, found, rerr
 		}
-		var e struct {
-			Time    time.Time `json:"time"`
-			Message string    `json:"message"`
+		if !skipping {
+			line = append(line, chunk...)
+			if cand, ok := reloadFailureIn(line, after); ok && (!found || !cand.At.Before(f.At)) {
+				f, found = cand, true
+			}
 		}
-		if json.Unmarshal(line, &e) != nil {
-			continue
-		}
-		msg, ok := strings.CutPrefix(e.Message, reloadFailedMessage)
-		if !ok || !e.Time.After(after) {
-			continue
-		}
-		if !found || !e.Time.Before(f.At) {
-			f, found = ReloadFailure{At: e.Time, Reason: truncate(strings.TrimSpace(msg), maxReasonLen)}, true
+		line, skipping = line[:0], false
+		if rerr != nil { // EOF
+			return f, found, nil
 		}
 	}
-	return f, found
+}
+
+// reloadFailureIn parses one log line; ok is false unless it is a failed reload after the time.
+func reloadFailureIn(line []byte, after time.Time) (ReloadFailure, bool) {
+	if !bytes.Contains(line, []byte(reloadFailedMessage)) {
+		return ReloadFailure{}, false
+	}
+	var e struct {
+		Time    time.Time `json:"time"`
+		Message string    `json:"message"`
+	}
+	if json.Unmarshal(line, &e) != nil {
+		return ReloadFailure{}, false
+	}
+	msg, ok := strings.CutPrefix(e.Message, reloadFailedMessage)
+	if !ok || !e.Time.After(after) {
+		return ReloadFailure{}, false
+	}
+	return ReloadFailure{At: e.Time, Reason: truncate(strings.TrimSpace(msg), maxReasonLen)}, true
 }
 
 func truncate(s string, n int) string {
