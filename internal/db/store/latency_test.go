@@ -22,7 +22,7 @@ var _ = Describe("latency defaults", func() {
 		agent, _ := newAgent(ctx, f.org, f.user)
 		task := newTask(ctx, f.org, f.user, agent.ID)
 		r, err := q.CreateRun(ctx, store.CreateRunParams{
-			OrgID: f.org, AgentID: agent.ID, TaskID: task.ID, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
+			OrgID: f.org, AgentID: agent.ID, TaskID: task.ID, MaxWallClockSeconds: 1800,
 			Origin: store.NullRunOrigin{RunOrigin: origin, Valid: true},
 		})
 		Expect(err).NotTo(HaveOccurred())

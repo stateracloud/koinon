@@ -357,14 +357,23 @@ func (x *Grant) GetRepositories() []string {
 	return nil
 }
 
-// RunLimits cap a single run; hitting one cancels the run (plan item A4).
+// RunLimits cap a single run; the first one reached cancels it (plan item A4, ADR 0080).
 type RunLimits struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Wall-clock time a run may be owned (starting or running), in seconds.
 	MaxDurationSeconds int64 `protobuf:"varint,1,opt,name=max_duration_seconds,json=maxDurationSeconds,proto3" json:"max_duration_seconds,omitempty"`
-	MaxTokens          int64 `protobuf:"varint,2,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Deprecated: tokens are reported, not enforced (ADR 0080). Kept so older clients and stored
+	// templates still decode; it caps nothing and is zero on new templates and agents.
+	//
+	// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
+	MaxTokens int64 `protobuf:"varint,2,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
+	// Model requests a run may make: every request through the agent's key counts, the harness's
+	// own title, summary and compaction calls included.
+	MaxModelRequests int64 `protobuf:"varint,3,opt,name=max_model_requests,json=maxModelRequests,proto3" json:"max_model_requests,omitempty"`
+	// USD a run may spend, by the ledger's settled cost, as an exact decimal string such as "2.00".
+	MaxSpendUsd   string `protobuf:"bytes,4,opt,name=max_spend_usd,json=maxSpendUsd,proto3" json:"max_spend_usd,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunLimits) Reset() {
@@ -404,11 +413,26 @@ func (x *RunLimits) GetMaxDurationSeconds() int64 {
 	return 0
 }
 
+// Deprecated: Marked as deprecated in koinon/template/v1alpha1/template.proto.
 func (x *RunLimits) GetMaxTokens() int64 {
 	if x != nil {
 		return x.MaxTokens
 	}
 	return 0
+}
+
+func (x *RunLimits) GetMaxModelRequests() int64 {
+	if x != nil {
+		return x.MaxModelRequests
+	}
+	return 0
+}
+
+func (x *RunLimits) GetMaxSpendUsd() string {
+	if x != nil {
+		return x.MaxSpendUsd
+	}
+	return ""
 }
 
 // Trigger is one way work starts on an agent, with the instruction it gets when the trigger fires.
@@ -837,11 +861,13 @@ const file_koinon_template_v1alpha1_template_proto_rawDesc = "" +
 	"targetsMax\x12\x18\n" +
 	"\apurpose\x18\x06 \x01(\tR\apurpose\x12#\n" +
 	"\rconnection_id\x18\a \x01(\tR\fconnectionId\x12\"\n" +
-	"\frepositories\x18\b \x03(\tR\frepositories\"\\\n" +
+	"\frepositories\x18\b \x03(\tR\frepositories\"\xb2\x01\n" +
 	"\tRunLimits\x120\n" +
-	"\x14max_duration_seconds\x18\x01 \x01(\x03R\x12maxDurationSeconds\x12\x1d\n" +
+	"\x14max_duration_seconds\x18\x01 \x01(\x03R\x12maxDurationSeconds\x12!\n" +
 	"\n" +
-	"max_tokens\x18\x02 \x01(\x03R\tmaxTokens\"\xe6\x01\n" +
+	"max_tokens\x18\x02 \x01(\x03B\x02\x18\x01R\tmaxTokens\x12,\n" +
+	"\x12max_model_requests\x18\x03 \x01(\x03R\x10maxModelRequests\x12\"\n" +
+	"\rmax_spend_usd\x18\x04 \x01(\tR\vmaxSpendUsd\"\xe6\x01\n" +
 	"\aTrigger\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x129\n" +
 	"\x04type\x18\x02 \x01(\x0e2%.koinon.template.v1alpha1.TriggerTypeR\x04type\x12\x12\n" +

@@ -19,8 +19,8 @@ type Querier interface {
 	AddManualMembership(ctx context.Context, arg AddManualMembershipParams) error
 	// The question's recipients, when it is created (waiting_since stays NULL until it is opened).
 	AddQuestionRecipients(ctx context.Context, arg AddQuestionRecipientsParams) error
-	// Adds reported token usage to an unfinished run. The caller cancels the run
-	// when tokens_used reaches max_tokens. No row: the run is finished or absent.
+	// Adds reported token usage to an unfinished run. Tokens are reported, not enforced (ADR 0080):
+	// the run limits are requests, spend and time. No row: the run is finished or absent.
 	AddRunTokens(ctx context.Context, arg AddRunTokensParams) (Run, error)
 	// The people a question is retargeted to start waiting now (a new recipient's age starts when the
 	// item starts waiting on them). Returns the rows that were new.
@@ -209,6 +209,7 @@ type Querier interface {
 	// The provider had no figure yet (or failed): try again later.
 	DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
+	DeleteAgentRunLimits(ctx context.Context, arg DeleteAgentRunLimitsParams) (int64, error)
 	DeleteConnection(ctx context.Context, arg DeleteConnectionParams) (int64, error)
 	// Sweeps records older than the cutoff; sources keep redelivering for a bounded time only.
 	DeleteDedupeRecordsBefore(ctx context.Context, arg DeleteDedupeRecordsBeforeParams) (int64, error)
@@ -286,6 +287,13 @@ type Querier interface {
 	// do not keep the sandbox up, but they hold off its recreation (has_held):
 	// a parked run resumes its session in the same home volume.
 	GetAgentRunActivity(ctx context.Context, arg GetAgentRunActivityParams) (GetAgentRunActivityRow, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Run limits (ADR 0080): an agent's overrides of the template's limits, and a run's usage against
+	// them. Every query on an org-owned table takes @org_id and filters on it
+	// (TestQueriesAreOrgScoped).
+	// The agent's overrides; a NULL column falls back to the agent version's value.
+	GetAgentRunLimits(ctx context.Context, arg GetAgentRunLimitsParams) (GetAgentRunLimitsRow, error)
 	GetAgentSandbox(ctx context.Context, arg GetAgentSandboxParams) (AgentSandbox, error)
 	// An agent's recorded USD spend since @since, for its spend limit: the charges only. Reserves
 	// gate the gateway key alone (GetAgentReserveSince).
@@ -354,6 +362,9 @@ type Querier interface {
 	// monthly cap and the platform ceiling: the charges only.
 	GetOrgSpendSince(ctx context.Context, arg GetOrgSpendSinceParams) (string, error)
 	GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWorkspace, error)
+	// The run an agent's key is serving now: the starting or running run (one per agent, ADR 0009).
+	// Its spend limit is the "run" level of the key's net limit (ADR 0041, decision 5). No row: none.
+	GetOwnedRunOfAgent(ctx context.Context, arg GetOwnedRunOfAgentParams) (Run, error)
 	GetPriceOverride(ctx context.Context, arg GetPriceOverrideParams) (PriceOverride, error)
 	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
 	GetQuestion(ctx context.Context, arg GetQuestionParams) (Question, error)
@@ -362,6 +373,12 @@ type Querier interface {
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
 	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
 	GetRunForUpload(ctx context.Context, arg GetRunForUploadParams) (Run, error)
+	// What a run has used, from its ledger entries: one entry per model request through the agent's
+	// key (the harness's own title, summary and compaction calls included), their settled cost, and
+	// the tokens by type. input_tokens includes the cache reads and writes (the gateway's convention);
+	// the uncached part is input minus the two. reserve_usd is what provisional entries hold back from
+	// the gateway key (not a cost).
+	GetRunUsage(ctx context.Context, arg GetRunUsageParams) (GetRunUsageRow, error)
 	// SPDX-License-Identifier: Apache-2.0
 	//
 	// Ask-tier approval requests (plan item C3, ADR 0042). C3 records them; P1
@@ -467,6 +484,7 @@ type Querier interface {
 	ListAgentBudgets(ctx context.Context, orgID pgtype.UUID) ([]ListAgentBudgetsRow, error)
 	ListAgentMCPServers(ctx context.Context, orgID pgtype.UUID) ([]AgentMcpServer, error)
 	ListAgentMCPServersOfAgent(ctx context.Context, arg ListAgentMCPServersOfAgentParams) ([]AgentMcpServer, error)
+	ListAgentRunLimits(ctx context.Context, orgID pgtype.UUID) ([]ListAgentRunLimitsRow, error)
 	// Every agent's recorded USD spend since @since, for the budgets list.
 	ListAgentSpendSince(ctx context.Context, arg ListAgentSpendSinceParams) ([]ListAgentSpendSinceRow, error)
 	ListAgentVersions(ctx context.Context, arg ListAgentVersionsParams) ([]AgentVersion, error)
@@ -776,6 +794,8 @@ type Querier interface {
 	SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (SetAgentBudgetRow, error)
 	// An agent's model setting (NULL: use the version's model, then the org default). Not a new version.
 	SetAgentModel(ctx context.Context, arg SetAgentModelParams) (Agent, error)
+	// Replaces the agent's overrides. A NULL argument clears that override.
+	SetAgentRunLimits(ctx context.Context, arg SetAgentRunLimitsParams) (SetAgentRunLimitsRow, error)
 	// Records a newly issued agentgateway key by ID and hash.
 	SetAgentSandboxKey(ctx context.Context, arg SetAgentSandboxKeyParams) (AgentSandbox, error)
 	// Points an ephemeral agent's row at the sandbox of its next task: nothing is rendered under the

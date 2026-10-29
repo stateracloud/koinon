@@ -940,6 +940,349 @@ func (x *SetAgentBudgetResponse) GetBudget() *AgentBudget {
 	return nil
 }
 
+// RunLimitValues are the limits of one run. Zero (or empty) means unset.
+type RunLimitValues struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// max_model_requests counts every model request through the agent's key.
+	MaxModelRequests int64 `protobuf:"varint,1,opt,name=max_model_requests,json=maxModelRequests,proto3" json:"max_model_requests,omitempty"`
+	// max_spend_usd is a USD decimal string.
+	MaxSpendUsd string `protobuf:"bytes,2,opt,name=max_spend_usd,json=maxSpendUsd,proto3" json:"max_spend_usd,omitempty"`
+	// max_duration_seconds is the wall-clock limit.
+	MaxDurationSeconds int64 `protobuf:"varint,3,opt,name=max_duration_seconds,json=maxDurationSeconds,proto3" json:"max_duration_seconds,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *RunLimitValues) Reset() {
+	*x = RunLimitValues{}
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunLimitValues) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunLimitValues) ProtoMessage() {}
+
+func (x *RunLimitValues) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunLimitValues.ProtoReflect.Descriptor instead.
+func (*RunLimitValues) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *RunLimitValues) GetMaxModelRequests() int64 {
+	if x != nil {
+		return x.MaxModelRequests
+	}
+	return 0
+}
+
+func (x *RunLimitValues) GetMaxSpendUsd() string {
+	if x != nil {
+		return x.MaxSpendUsd
+	}
+	return ""
+}
+
+func (x *RunLimitValues) GetMaxDurationSeconds() int64 {
+	if x != nil {
+		return x.MaxDurationSeconds
+	}
+	return 0
+}
+
+type AgentRunLimits struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	AgentId   string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	AgentName string                 `protobuf:"bytes,2,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	// effective is what a run queued now gets: the override, else the template's value.
+	Effective *RunLimitValues `protobuf:"bytes,3,opt,name=effective,proto3" json:"effective,omitempty"`
+	// template_default is the agent's active version (the template's values).
+	TemplateDefault *RunLimitValues `protobuf:"bytes,4,opt,name=template_default,json=templateDefault,proto3" json:"template_default,omitempty"`
+	// override is what an admin set; unset fields follow the template.
+	Override      *RunLimitValues `protobuf:"bytes,5,opt,name=override,proto3" json:"override,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentRunLimits) Reset() {
+	*x = AgentRunLimits{}
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentRunLimits) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentRunLimits) ProtoMessage() {}
+
+func (x *AgentRunLimits) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentRunLimits.ProtoReflect.Descriptor instead.
+func (*AgentRunLimits) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *AgentRunLimits) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *AgentRunLimits) GetAgentName() string {
+	if x != nil {
+		return x.AgentName
+	}
+	return ""
+}
+
+func (x *AgentRunLimits) GetEffective() *RunLimitValues {
+	if x != nil {
+		return x.Effective
+	}
+	return nil
+}
+
+func (x *AgentRunLimits) GetTemplateDefault() *RunLimitValues {
+	if x != nil {
+		return x.TemplateDefault
+	}
+	return nil
+}
+
+func (x *AgentRunLimits) GetOverride() *RunLimitValues {
+	if x != nil {
+		return x.Override
+	}
+	return nil
+}
+
+type GetAgentRunLimitsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAgentRunLimitsRequest) Reset() {
+	*x = GetAgentRunLimitsRequest{}
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAgentRunLimitsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAgentRunLimitsRequest) ProtoMessage() {}
+
+func (x *GetAgentRunLimitsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAgentRunLimitsRequest.ProtoReflect.Descriptor instead.
+func (*GetAgentRunLimitsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *GetAgentRunLimitsRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *GetAgentRunLimitsRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+type GetAgentRunLimitsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limits        *AgentRunLimits        `protobuf:"bytes,1,opt,name=limits,proto3" json:"limits,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAgentRunLimitsResponse) Reset() {
+	*x = GetAgentRunLimitsResponse{}
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAgentRunLimitsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAgentRunLimitsResponse) ProtoMessage() {}
+
+func (x *GetAgentRunLimitsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAgentRunLimitsResponse.ProtoReflect.Descriptor instead.
+func (*GetAgentRunLimitsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *GetAgentRunLimitsResponse) GetLimits() *AgentRunLimits {
+	if x != nil {
+		return x.Limits
+	}
+	return nil
+}
+
+type SetAgentRunLimitsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OrgId         string                 `protobuf:"bytes,1,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	AgentId       string                 `protobuf:"bytes,2,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	Override      *RunLimitValues        `protobuf:"bytes,3,opt,name=override,proto3" json:"override,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAgentRunLimitsRequest) Reset() {
+	*x = SetAgentRunLimitsRequest{}
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAgentRunLimitsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAgentRunLimitsRequest) ProtoMessage() {}
+
+func (x *SetAgentRunLimitsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAgentRunLimitsRequest.ProtoReflect.Descriptor instead.
+func (*SetAgentRunLimitsRequest) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *SetAgentRunLimitsRequest) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *SetAgentRunLimitsRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *SetAgentRunLimitsRequest) GetOverride() *RunLimitValues {
+	if x != nil {
+		return x.Override
+	}
+	return nil
+}
+
+type SetAgentRunLimitsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limits        *AgentRunLimits        `protobuf:"bytes,1,opt,name=limits,proto3" json:"limits,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetAgentRunLimitsResponse) Reset() {
+	*x = SetAgentRunLimitsResponse{}
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetAgentRunLimitsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAgentRunLimitsResponse) ProtoMessage() {}
+
+func (x *SetAgentRunLimitsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAgentRunLimitsResponse.ProtoReflect.Descriptor instead.
+func (*SetAgentRunLimitsResponse) Descriptor() ([]byte, []int) {
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *SetAgentRunLimitsResponse) GetLimits() *AgentRunLimits {
+	if x != nil {
+		return x.Limits
+	}
+	return nil
+}
+
 type Notification struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -966,7 +1309,7 @@ type Notification struct {
 
 func (x *Notification) Reset() {
 	*x = Notification{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[17]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -978,7 +1321,7 @@ func (x *Notification) String() string {
 func (*Notification) ProtoMessage() {}
 
 func (x *Notification) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[17]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -991,7 +1334,7 @@ func (x *Notification) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Notification.ProtoReflect.Descriptor instead.
 func (*Notification) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{17}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *Notification) GetId() string {
@@ -1082,7 +1425,7 @@ type ListNotificationsRequest struct {
 
 func (x *ListNotificationsRequest) Reset() {
 	*x = ListNotificationsRequest{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[18]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1094,7 +1437,7 @@ func (x *ListNotificationsRequest) String() string {
 func (*ListNotificationsRequest) ProtoMessage() {}
 
 func (x *ListNotificationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[18]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1107,7 +1450,7 @@ func (x *ListNotificationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNotificationsRequest.ProtoReflect.Descriptor instead.
 func (*ListNotificationsRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{18}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ListNotificationsRequest) GetOrgId() string {
@@ -1133,7 +1476,7 @@ type ListNotificationsResponse struct {
 
 func (x *ListNotificationsResponse) Reset() {
 	*x = ListNotificationsResponse{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[19]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1145,7 +1488,7 @@ func (x *ListNotificationsResponse) String() string {
 func (*ListNotificationsResponse) ProtoMessage() {}
 
 func (x *ListNotificationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[19]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1158,7 +1501,7 @@ func (x *ListNotificationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNotificationsResponse.ProtoReflect.Descriptor instead.
 func (*ListNotificationsResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{19}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ListNotificationsResponse) GetNotifications() []*Notification {
@@ -1178,7 +1521,7 @@ type MarkNotificationReadRequest struct {
 
 func (x *MarkNotificationReadRequest) Reset() {
 	*x = MarkNotificationReadRequest{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[20]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1190,7 +1533,7 @@ func (x *MarkNotificationReadRequest) String() string {
 func (*MarkNotificationReadRequest) ProtoMessage() {}
 
 func (x *MarkNotificationReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[20]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1203,7 +1546,7 @@ func (x *MarkNotificationReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkNotificationReadRequest.ProtoReflect.Descriptor instead.
 func (*MarkNotificationReadRequest) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{20}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *MarkNotificationReadRequest) GetOrgId() string {
@@ -1228,7 +1571,7 @@ type MarkNotificationReadResponse struct {
 
 func (x *MarkNotificationReadResponse) Reset() {
 	*x = MarkNotificationReadResponse{}
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[21]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1240,7 +1583,7 @@ func (x *MarkNotificationReadResponse) String() string {
 func (*MarkNotificationReadResponse) ProtoMessage() {}
 
 func (x *MarkNotificationReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[21]
+	mi := &file_koinon_budget_v1alpha1_budget_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1253,7 +1596,7 @@ func (x *MarkNotificationReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkNotificationReadResponse.ProtoReflect.Descriptor instead.
 func (*MarkNotificationReadResponse) Descriptor() ([]byte, []int) {
-	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{21}
+	return file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP(), []int{27}
 }
 
 var File_koinon_budget_v1alpha1_budget_proto protoreflect.FileDescriptor
@@ -1317,7 +1660,29 @@ const file_koinon_budget_v1alpha1_budget_proto_rawDesc = "" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12&\n" +
 	"\x0fdaily_limit_usd\x18\x03 \x01(\tR\rdailyLimitUsd\"U\n" +
 	"\x16SetAgentBudgetResponse\x12;\n" +
-	"\x06budget\x18\x01 \x01(\v2#.koinon.budget.v1alpha1.AgentBudgetR\x06budget\"\x84\x03\n" +
+	"\x06budget\x18\x01 \x01(\v2#.koinon.budget.v1alpha1.AgentBudgetR\x06budget\"\x94\x01\n" +
+	"\x0eRunLimitValues\x12,\n" +
+	"\x12max_model_requests\x18\x01 \x01(\x03R\x10maxModelRequests\x12\"\n" +
+	"\rmax_spend_usd\x18\x02 \x01(\tR\vmaxSpendUsd\x120\n" +
+	"\x14max_duration_seconds\x18\x03 \x01(\x03R\x12maxDurationSeconds\"\xa7\x02\n" +
+	"\x0eAgentRunLimits\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1d\n" +
+	"\n" +
+	"agent_name\x18\x02 \x01(\tR\tagentName\x12D\n" +
+	"\teffective\x18\x03 \x01(\v2&.koinon.budget.v1alpha1.RunLimitValuesR\teffective\x12Q\n" +
+	"\x10template_default\x18\x04 \x01(\v2&.koinon.budget.v1alpha1.RunLimitValuesR\x0ftemplateDefault\x12B\n" +
+	"\boverride\x18\x05 \x01(\v2&.koinon.budget.v1alpha1.RunLimitValuesR\boverride\"L\n" +
+	"\x18GetAgentRunLimitsRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\"[\n" +
+	"\x19GetAgentRunLimitsResponse\x12>\n" +
+	"\x06limits\x18\x01 \x01(\v2&.koinon.budget.v1alpha1.AgentRunLimitsR\x06limits\"\x90\x01\n" +
+	"\x18SetAgentRunLimitsRequest\x12\x15\n" +
+	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x19\n" +
+	"\bagent_id\x18\x02 \x01(\tR\aagentId\x12B\n" +
+	"\boverride\x18\x03 \x01(\v2&.koinon.budget.v1alpha1.RunLimitValuesR\boverride\"[\n" +
+	"\x19SetAgentRunLimitsResponse\x12>\n" +
+	"\x06limits\x18\x01 \x01(\v2&.koinon.budget.v1alpha1.AgentRunLimitsR\x06limits\"\x84\x03\n" +
 	"\fNotification\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x14\n" +
@@ -1341,7 +1706,8 @@ const file_koinon_budget_v1alpha1_budget_proto_rawDesc = "" +
 	"\x1bMarkNotificationReadRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12'\n" +
 	"\x0fnotification_id\x18\x02 \x01(\tR\x0enotificationId\"\x1e\n" +
-	"\x1cMarkNotificationReadResponse2\xc6\b\n" +
+	"\x1cMarkNotificationReadResponse2\xbf\n" +
+	"\n" +
 	"\rBudgetService\x12n\n" +
 	"\fGetOrgBudget\x12+.koinon.budget.v1alpha1.GetOrgBudgetRequest\x1a,.koinon.budget.v1alpha1.GetOrgBudgetResponse\"\x03\x90\x02\x01\x12t\n" +
 	"\x0eListOrgBudgets\x12-.koinon.budget.v1alpha1.ListOrgBudgetsRequest\x1a..koinon.budget.v1alpha1.ListOrgBudgetsResponse\"\x03\x90\x02\x01\x12l\n" +
@@ -1350,6 +1716,8 @@ const file_koinon_budget_v1alpha1_budget_proto_rawDesc = "" +
 	"\x0eGetAgentBudget\x12-.koinon.budget.v1alpha1.GetAgentBudgetRequest\x1a..koinon.budget.v1alpha1.GetAgentBudgetResponse\"\x03\x90\x02\x01\x12z\n" +
 	"\x10ListAgentBudgets\x12/.koinon.budget.v1alpha1.ListAgentBudgetsRequest\x1a0.koinon.budget.v1alpha1.ListAgentBudgetsResponse\"\x03\x90\x02\x01\x12o\n" +
 	"\x0eSetAgentBudget\x12-.koinon.budget.v1alpha1.SetAgentBudgetRequest\x1a..koinon.budget.v1alpha1.SetAgentBudgetResponse\x12}\n" +
+	"\x11GetAgentRunLimits\x120.koinon.budget.v1alpha1.GetAgentRunLimitsRequest\x1a1.koinon.budget.v1alpha1.GetAgentRunLimitsResponse\"\x03\x90\x02\x01\x12x\n" +
+	"\x11SetAgentRunLimits\x120.koinon.budget.v1alpha1.SetAgentRunLimitsRequest\x1a1.koinon.budget.v1alpha1.SetAgentRunLimitsResponse\x12}\n" +
 	"\x11ListNotifications\x120.koinon.budget.v1alpha1.ListNotificationsRequest\x1a1.koinon.budget.v1alpha1.ListNotificationsResponse\"\x03\x90\x02\x01\x12\x81\x01\n" +
 	"\x14MarkNotificationRead\x123.koinon.budget.v1alpha1.MarkNotificationReadRequest\x1a4.koinon.budget.v1alpha1.MarkNotificationReadResponseBSZQgithub.com/stateracloud/koinon/internal/gen/koinon/budget/v1alpha1;budgetv1alpha1b\x06proto3"
 
@@ -1365,7 +1733,7 @@ func file_koinon_budget_v1alpha1_budget_proto_rawDescGZIP() []byte {
 	return file_koinon_budget_v1alpha1_budget_proto_rawDescData
 }
 
-var file_koinon_budget_v1alpha1_budget_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_koinon_budget_v1alpha1_budget_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_koinon_budget_v1alpha1_budget_proto_goTypes = []any{
 	(*OrgBudget)(nil),                    // 0: koinon.budget.v1alpha1.OrgBudget
 	(*ListOrgBudgetsRequest)(nil),        // 1: koinon.budget.v1alpha1.ListOrgBudgetsRequest
@@ -1384,51 +1752,67 @@ var file_koinon_budget_v1alpha1_budget_proto_goTypes = []any{
 	(*ListAgentBudgetsResponse)(nil),     // 14: koinon.budget.v1alpha1.ListAgentBudgetsResponse
 	(*SetAgentBudgetRequest)(nil),        // 15: koinon.budget.v1alpha1.SetAgentBudgetRequest
 	(*SetAgentBudgetResponse)(nil),       // 16: koinon.budget.v1alpha1.SetAgentBudgetResponse
-	(*Notification)(nil),                 // 17: koinon.budget.v1alpha1.Notification
-	(*ListNotificationsRequest)(nil),     // 18: koinon.budget.v1alpha1.ListNotificationsRequest
-	(*ListNotificationsResponse)(nil),    // 19: koinon.budget.v1alpha1.ListNotificationsResponse
-	(*MarkNotificationReadRequest)(nil),  // 20: koinon.budget.v1alpha1.MarkNotificationReadRequest
-	(*MarkNotificationReadResponse)(nil), // 21: koinon.budget.v1alpha1.MarkNotificationReadResponse
-	(*timestamppb.Timestamp)(nil),        // 22: google.protobuf.Timestamp
+	(*RunLimitValues)(nil),               // 17: koinon.budget.v1alpha1.RunLimitValues
+	(*AgentRunLimits)(nil),               // 18: koinon.budget.v1alpha1.AgentRunLimits
+	(*GetAgentRunLimitsRequest)(nil),     // 19: koinon.budget.v1alpha1.GetAgentRunLimitsRequest
+	(*GetAgentRunLimitsResponse)(nil),    // 20: koinon.budget.v1alpha1.GetAgentRunLimitsResponse
+	(*SetAgentRunLimitsRequest)(nil),     // 21: koinon.budget.v1alpha1.SetAgentRunLimitsRequest
+	(*SetAgentRunLimitsResponse)(nil),    // 22: koinon.budget.v1alpha1.SetAgentRunLimitsResponse
+	(*Notification)(nil),                 // 23: koinon.budget.v1alpha1.Notification
+	(*ListNotificationsRequest)(nil),     // 24: koinon.budget.v1alpha1.ListNotificationsRequest
+	(*ListNotificationsResponse)(nil),    // 25: koinon.budget.v1alpha1.ListNotificationsResponse
+	(*MarkNotificationReadRequest)(nil),  // 26: koinon.budget.v1alpha1.MarkNotificationReadRequest
+	(*MarkNotificationReadResponse)(nil), // 27: koinon.budget.v1alpha1.MarkNotificationReadResponse
+	(*timestamppb.Timestamp)(nil),        // 28: google.protobuf.Timestamp
 }
 var file_koinon_budget_v1alpha1_budget_proto_depIdxs = []int32{
-	22, // 0: koinon.budget.v1alpha1.OrgBudget.month_start:type_name -> google.protobuf.Timestamp
+	28, // 0: koinon.budget.v1alpha1.OrgBudget.month_start:type_name -> google.protobuf.Timestamp
 	2,  // 1: koinon.budget.v1alpha1.ListOrgBudgetsResponse.orgs:type_name -> koinon.budget.v1alpha1.OrgBudgetSummary
-	22, // 2: koinon.budget.v1alpha1.ListOrgBudgetsResponse.month_start:type_name -> google.protobuf.Timestamp
+	28, // 2: koinon.budget.v1alpha1.ListOrgBudgetsResponse.month_start:type_name -> google.protobuf.Timestamp
 	0,  // 3: koinon.budget.v1alpha1.GetOrgBudgetResponse.budget:type_name -> koinon.budget.v1alpha1.OrgBudget
 	0,  // 4: koinon.budget.v1alpha1.SetMonthlyCapResponse.budget:type_name -> koinon.budget.v1alpha1.OrgBudget
 	0,  // 5: koinon.budget.v1alpha1.SetPlatformCeilingResponse.budget:type_name -> koinon.budget.v1alpha1.OrgBudget
-	22, // 6: koinon.budget.v1alpha1.AgentBudget.day_start:type_name -> google.protobuf.Timestamp
+	28, // 6: koinon.budget.v1alpha1.AgentBudget.day_start:type_name -> google.protobuf.Timestamp
 	10, // 7: koinon.budget.v1alpha1.GetAgentBudgetResponse.budget:type_name -> koinon.budget.v1alpha1.AgentBudget
 	10, // 8: koinon.budget.v1alpha1.ListAgentBudgetsResponse.budgets:type_name -> koinon.budget.v1alpha1.AgentBudget
 	10, // 9: koinon.budget.v1alpha1.SetAgentBudgetResponse.budget:type_name -> koinon.budget.v1alpha1.AgentBudget
-	22, // 10: koinon.budget.v1alpha1.Notification.window_start:type_name -> google.protobuf.Timestamp
-	22, // 11: koinon.budget.v1alpha1.Notification.created_at:type_name -> google.protobuf.Timestamp
-	22, // 12: koinon.budget.v1alpha1.Notification.read_at:type_name -> google.protobuf.Timestamp
-	17, // 13: koinon.budget.v1alpha1.ListNotificationsResponse.notifications:type_name -> koinon.budget.v1alpha1.Notification
-	4,  // 14: koinon.budget.v1alpha1.BudgetService.GetOrgBudget:input_type -> koinon.budget.v1alpha1.GetOrgBudgetRequest
-	1,  // 15: koinon.budget.v1alpha1.BudgetService.ListOrgBudgets:input_type -> koinon.budget.v1alpha1.ListOrgBudgetsRequest
-	6,  // 16: koinon.budget.v1alpha1.BudgetService.SetMonthlyCap:input_type -> koinon.budget.v1alpha1.SetMonthlyCapRequest
-	8,  // 17: koinon.budget.v1alpha1.BudgetService.SetPlatformCeiling:input_type -> koinon.budget.v1alpha1.SetPlatformCeilingRequest
-	11, // 18: koinon.budget.v1alpha1.BudgetService.GetAgentBudget:input_type -> koinon.budget.v1alpha1.GetAgentBudgetRequest
-	13, // 19: koinon.budget.v1alpha1.BudgetService.ListAgentBudgets:input_type -> koinon.budget.v1alpha1.ListAgentBudgetsRequest
-	15, // 20: koinon.budget.v1alpha1.BudgetService.SetAgentBudget:input_type -> koinon.budget.v1alpha1.SetAgentBudgetRequest
-	18, // 21: koinon.budget.v1alpha1.BudgetService.ListNotifications:input_type -> koinon.budget.v1alpha1.ListNotificationsRequest
-	20, // 22: koinon.budget.v1alpha1.BudgetService.MarkNotificationRead:input_type -> koinon.budget.v1alpha1.MarkNotificationReadRequest
-	5,  // 23: koinon.budget.v1alpha1.BudgetService.GetOrgBudget:output_type -> koinon.budget.v1alpha1.GetOrgBudgetResponse
-	3,  // 24: koinon.budget.v1alpha1.BudgetService.ListOrgBudgets:output_type -> koinon.budget.v1alpha1.ListOrgBudgetsResponse
-	7,  // 25: koinon.budget.v1alpha1.BudgetService.SetMonthlyCap:output_type -> koinon.budget.v1alpha1.SetMonthlyCapResponse
-	9,  // 26: koinon.budget.v1alpha1.BudgetService.SetPlatformCeiling:output_type -> koinon.budget.v1alpha1.SetPlatformCeilingResponse
-	12, // 27: koinon.budget.v1alpha1.BudgetService.GetAgentBudget:output_type -> koinon.budget.v1alpha1.GetAgentBudgetResponse
-	14, // 28: koinon.budget.v1alpha1.BudgetService.ListAgentBudgets:output_type -> koinon.budget.v1alpha1.ListAgentBudgetsResponse
-	16, // 29: koinon.budget.v1alpha1.BudgetService.SetAgentBudget:output_type -> koinon.budget.v1alpha1.SetAgentBudgetResponse
-	19, // 30: koinon.budget.v1alpha1.BudgetService.ListNotifications:output_type -> koinon.budget.v1alpha1.ListNotificationsResponse
-	21, // 31: koinon.budget.v1alpha1.BudgetService.MarkNotificationRead:output_type -> koinon.budget.v1alpha1.MarkNotificationReadResponse
-	23, // [23:32] is the sub-list for method output_type
-	14, // [14:23] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	17, // 10: koinon.budget.v1alpha1.AgentRunLimits.effective:type_name -> koinon.budget.v1alpha1.RunLimitValues
+	17, // 11: koinon.budget.v1alpha1.AgentRunLimits.template_default:type_name -> koinon.budget.v1alpha1.RunLimitValues
+	17, // 12: koinon.budget.v1alpha1.AgentRunLimits.override:type_name -> koinon.budget.v1alpha1.RunLimitValues
+	18, // 13: koinon.budget.v1alpha1.GetAgentRunLimitsResponse.limits:type_name -> koinon.budget.v1alpha1.AgentRunLimits
+	17, // 14: koinon.budget.v1alpha1.SetAgentRunLimitsRequest.override:type_name -> koinon.budget.v1alpha1.RunLimitValues
+	18, // 15: koinon.budget.v1alpha1.SetAgentRunLimitsResponse.limits:type_name -> koinon.budget.v1alpha1.AgentRunLimits
+	28, // 16: koinon.budget.v1alpha1.Notification.window_start:type_name -> google.protobuf.Timestamp
+	28, // 17: koinon.budget.v1alpha1.Notification.created_at:type_name -> google.protobuf.Timestamp
+	28, // 18: koinon.budget.v1alpha1.Notification.read_at:type_name -> google.protobuf.Timestamp
+	23, // 19: koinon.budget.v1alpha1.ListNotificationsResponse.notifications:type_name -> koinon.budget.v1alpha1.Notification
+	4,  // 20: koinon.budget.v1alpha1.BudgetService.GetOrgBudget:input_type -> koinon.budget.v1alpha1.GetOrgBudgetRequest
+	1,  // 21: koinon.budget.v1alpha1.BudgetService.ListOrgBudgets:input_type -> koinon.budget.v1alpha1.ListOrgBudgetsRequest
+	6,  // 22: koinon.budget.v1alpha1.BudgetService.SetMonthlyCap:input_type -> koinon.budget.v1alpha1.SetMonthlyCapRequest
+	8,  // 23: koinon.budget.v1alpha1.BudgetService.SetPlatformCeiling:input_type -> koinon.budget.v1alpha1.SetPlatformCeilingRequest
+	11, // 24: koinon.budget.v1alpha1.BudgetService.GetAgentBudget:input_type -> koinon.budget.v1alpha1.GetAgentBudgetRequest
+	13, // 25: koinon.budget.v1alpha1.BudgetService.ListAgentBudgets:input_type -> koinon.budget.v1alpha1.ListAgentBudgetsRequest
+	15, // 26: koinon.budget.v1alpha1.BudgetService.SetAgentBudget:input_type -> koinon.budget.v1alpha1.SetAgentBudgetRequest
+	19, // 27: koinon.budget.v1alpha1.BudgetService.GetAgentRunLimits:input_type -> koinon.budget.v1alpha1.GetAgentRunLimitsRequest
+	21, // 28: koinon.budget.v1alpha1.BudgetService.SetAgentRunLimits:input_type -> koinon.budget.v1alpha1.SetAgentRunLimitsRequest
+	24, // 29: koinon.budget.v1alpha1.BudgetService.ListNotifications:input_type -> koinon.budget.v1alpha1.ListNotificationsRequest
+	26, // 30: koinon.budget.v1alpha1.BudgetService.MarkNotificationRead:input_type -> koinon.budget.v1alpha1.MarkNotificationReadRequest
+	5,  // 31: koinon.budget.v1alpha1.BudgetService.GetOrgBudget:output_type -> koinon.budget.v1alpha1.GetOrgBudgetResponse
+	3,  // 32: koinon.budget.v1alpha1.BudgetService.ListOrgBudgets:output_type -> koinon.budget.v1alpha1.ListOrgBudgetsResponse
+	7,  // 33: koinon.budget.v1alpha1.BudgetService.SetMonthlyCap:output_type -> koinon.budget.v1alpha1.SetMonthlyCapResponse
+	9,  // 34: koinon.budget.v1alpha1.BudgetService.SetPlatformCeiling:output_type -> koinon.budget.v1alpha1.SetPlatformCeilingResponse
+	12, // 35: koinon.budget.v1alpha1.BudgetService.GetAgentBudget:output_type -> koinon.budget.v1alpha1.GetAgentBudgetResponse
+	14, // 36: koinon.budget.v1alpha1.BudgetService.ListAgentBudgets:output_type -> koinon.budget.v1alpha1.ListAgentBudgetsResponse
+	16, // 37: koinon.budget.v1alpha1.BudgetService.SetAgentBudget:output_type -> koinon.budget.v1alpha1.SetAgentBudgetResponse
+	20, // 38: koinon.budget.v1alpha1.BudgetService.GetAgentRunLimits:output_type -> koinon.budget.v1alpha1.GetAgentRunLimitsResponse
+	22, // 39: koinon.budget.v1alpha1.BudgetService.SetAgentRunLimits:output_type -> koinon.budget.v1alpha1.SetAgentRunLimitsResponse
+	25, // 40: koinon.budget.v1alpha1.BudgetService.ListNotifications:output_type -> koinon.budget.v1alpha1.ListNotificationsResponse
+	27, // 41: koinon.budget.v1alpha1.BudgetService.MarkNotificationRead:output_type -> koinon.budget.v1alpha1.MarkNotificationReadResponse
+	31, // [31:42] is the sub-list for method output_type
+	20, // [20:31] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_koinon_budget_v1alpha1_budget_proto_init() }
@@ -1442,7 +1826,7 @@ func file_koinon_budget_v1alpha1_budget_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_koinon_budget_v1alpha1_budget_proto_rawDesc), len(file_koinon_budget_v1alpha1_budget_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

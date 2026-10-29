@@ -180,7 +180,7 @@ var _ = Describe("runs", func() {
 			Expect(err).NotTo(HaveOccurred())
 			t := newTask(ctx, org, user, draft.ID)
 			_, err = q.CreateRun(ctx, store.CreateRunParams{
-				OrgID: org, AgentID: draft.ID, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: maxTokens,
+				OrgID: org, AgentID: draft.ID, TaskID: t.ID, MaxWallClockSeconds: 1800,
 			})
 			Expect(err).To(MatchError(pgx.ErrNoRows))
 		})

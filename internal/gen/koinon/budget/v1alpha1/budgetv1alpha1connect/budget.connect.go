@@ -46,6 +46,12 @@ const (
 	// BudgetServiceSetAgentBudgetProcedure is the procedure name of the BudgetService's SetAgentBudget
 	// RPC.
 	BudgetServiceSetAgentBudgetProcedure = "/koinon.budget.v1alpha1.BudgetService/SetAgentBudget"
+	// BudgetServiceGetAgentRunLimitsProcedure is the procedure name of the BudgetService's
+	// GetAgentRunLimits RPC.
+	BudgetServiceGetAgentRunLimitsProcedure = "/koinon.budget.v1alpha1.BudgetService/GetAgentRunLimits"
+	// BudgetServiceSetAgentRunLimitsProcedure is the procedure name of the BudgetService's
+	// SetAgentRunLimits RPC.
+	BudgetServiceSetAgentRunLimitsProcedure = "/koinon.budget.v1alpha1.BudgetService/SetAgentRunLimits"
 	// BudgetServiceListNotificationsProcedure is the procedure name of the BudgetService's
 	// ListNotifications RPC.
 	BudgetServiceListNotificationsProcedure = "/koinon.budget.v1alpha1.BudgetService/ListNotifications"
@@ -108,6 +114,21 @@ var (
 			Procedure:  BudgetServiceSetAgentBudgetProcedure,
 		}
 	})
+	budgetServiceGetAgentRunLimitsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1alpha1.File_koinon_budget_v1alpha1_budget_proto.Services().ByName("BudgetService").Methods().ByName("GetAgentRunLimits"),
+			Procedure:        BudgetServiceGetAgentRunLimitsProcedure,
+			IdempotencyLevel: connect.IdempotencyNoSideEffects,
+		}
+	})
+	budgetServiceSetAgentRunLimitsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1alpha1.File_koinon_budget_v1alpha1_budget_proto.Services().ByName("BudgetService").Methods().ByName("SetAgentRunLimits"),
+			Procedure:  BudgetServiceSetAgentRunLimitsProcedure,
+		}
+	})
 	budgetServiceListNotificationsSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType:       connect.StreamTypeUnary,
@@ -145,6 +166,12 @@ type BudgetServiceClient interface {
 	// SetAgentBudget sets an agent's daily limit. A template's spendUSD is only the default for
 	// a new agent.
 	SetAgentBudget(context.Context, *v1alpha1.SetAgentBudgetRequest) (*v1alpha1.SetAgentBudgetResponse, error)
+	// GetAgentRunLimits returns the limits a run of the agent gets: the effective values, the
+	// template's defaults and the admin's overrides (ADR 0080).
+	GetAgentRunLimits(context.Context, *v1alpha1.GetAgentRunLimitsRequest) (*v1alpha1.GetAgentRunLimitsResponse, error)
+	// SetAgentRunLimits replaces the agent's overrides of its run limits. A zero value clears that
+	// override; all zero clears them all. It applies to runs queued afterwards.
+	SetAgentRunLimits(context.Context, *v1alpha1.SetAgentRunLimitsRequest) (*v1alpha1.SetAgentRunLimitsResponse, error)
 	// ListNotifications returns the caller's notifications in this org, newest first: budget
 	// warnings at 80% and stops at 100%. Owners and admins receive them; platform admins also
 	// those about the platform ceiling.
@@ -179,6 +206,12 @@ type BudgetServiceHandler interface {
 	// SetAgentBudget sets an agent's daily limit. A template's spendUSD is only the default for
 	// a new agent.
 	SetAgentBudget(context.Context, *v1alpha1.SetAgentBudgetRequest) (*v1alpha1.SetAgentBudgetResponse, error)
+	// GetAgentRunLimits returns the limits a run of the agent gets: the effective values, the
+	// template's defaults and the admin's overrides (ADR 0080).
+	GetAgentRunLimits(context.Context, *v1alpha1.GetAgentRunLimitsRequest) (*v1alpha1.GetAgentRunLimitsResponse, error)
+	// SetAgentRunLimits replaces the agent's overrides of its run limits. A zero value clears that
+	// override; all zero clears them all. It applies to runs queued afterwards.
+	SetAgentRunLimits(context.Context, *v1alpha1.SetAgentRunLimitsRequest) (*v1alpha1.SetAgentRunLimitsResponse, error)
 	// ListNotifications returns the caller's notifications in this org, newest first: budget
 	// warnings at 80% and stops at 100%. Owners and admins receive them; platform admins also
 	// those about the platform ceiling.
@@ -199,6 +232,8 @@ func RegisterBudgetServiceHandler(server *connect.Server, svc BudgetServiceHandl
 		connect.Method{Spec: budgetServiceGetAgentBudgetSpec(), Handler: adapter.getAgentBudget},
 		connect.Method{Spec: budgetServiceListAgentBudgetsSpec(), Handler: adapter.listAgentBudgets},
 		connect.Method{Spec: budgetServiceSetAgentBudgetSpec(), Handler: adapter.setAgentBudget},
+		connect.Method{Spec: budgetServiceGetAgentRunLimitsSpec(), Handler: adapter.getAgentRunLimits},
+		connect.Method{Spec: budgetServiceSetAgentRunLimitsSpec(), Handler: adapter.setAgentRunLimits},
 		connect.Method{Spec: budgetServiceListNotificationsSpec(), Handler: adapter.listNotifications},
 		connect.Method{Spec: budgetServiceMarkNotificationReadSpec(), Handler: adapter.markNotificationRead},
 	)
@@ -233,6 +268,14 @@ func (UnimplementedBudgetServiceHandler) ListAgentBudgets(context.Context, *v1al
 
 func (UnimplementedBudgetServiceHandler) SetAgentBudget(context.Context, *v1alpha1.SetAgentBudgetRequest) (*v1alpha1.SetAgentBudgetResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.SetAgentBudget is not implemented")
+}
+
+func (UnimplementedBudgetServiceHandler) GetAgentRunLimits(context.Context, *v1alpha1.GetAgentRunLimitsRequest) (*v1alpha1.GetAgentRunLimitsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.GetAgentRunLimits is not implemented")
+}
+
+func (UnimplementedBudgetServiceHandler) SetAgentRunLimits(context.Context, *v1alpha1.SetAgentRunLimitsRequest) (*v1alpha1.SetAgentRunLimitsResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "koinon.budget.v1alpha1.BudgetService.SetAgentRunLimits is not implemented")
 }
 
 func (UnimplementedBudgetServiceHandler) ListNotifications(context.Context, *v1alpha1.ListNotificationsRequest) (*v1alpha1.ListNotificationsResponse, error) {
@@ -298,6 +341,22 @@ func (c *budgetServiceClient) ListAgentBudgets(ctx context.Context, req *v1alpha
 func (c *budgetServiceClient) SetAgentBudget(ctx context.Context, req *v1alpha1.SetAgentBudgetRequest) (*v1alpha1.SetAgentBudgetResponse, error) {
 	var res v1alpha1.SetAgentBudgetResponse
 	if err := c.client.CallUnary(ctx, budgetServiceSetAgentBudgetSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *budgetServiceClient) GetAgentRunLimits(ctx context.Context, req *v1alpha1.GetAgentRunLimitsRequest) (*v1alpha1.GetAgentRunLimitsResponse, error) {
+	var res v1alpha1.GetAgentRunLimitsResponse
+	if err := c.client.CallUnary(ctx, budgetServiceGetAgentRunLimitsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *budgetServiceClient) SetAgentRunLimits(ctx context.Context, req *v1alpha1.SetAgentRunLimitsRequest) (*v1alpha1.SetAgentRunLimitsResponse, error) {
+	var res v1alpha1.SetAgentRunLimitsResponse
+	if err := c.client.CallUnary(ctx, budgetServiceSetAgentRunLimitsSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -399,6 +458,30 @@ func (h budgetServiceHandler) setAgentBudget(ctx context.Context, _ connect.Spec
 		return err
 	}
 	res, err := h.svc.SetAgentBudget(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h budgetServiceHandler) getAgentRunLimits(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.GetAgentRunLimitsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.GetAgentRunLimits(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h budgetServiceHandler) setAgentRunLimits(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1alpha1.SetAgentRunLimitsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetAgentRunLimits(ctx, &req)
 	if err != nil {
 		return err
 	}

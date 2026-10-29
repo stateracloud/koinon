@@ -801,6 +801,9 @@ SELECT run_id::uuid AS run_id,
        count(*)::bigint AS requests,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
+       coalesce(sum(cache_read_tokens), 0)::bigint AS cache_read_tokens,
+       coalesce(sum(cache_write_tokens), 0)::bigint AS cache_write_tokens,
+       coalesce(sum(reasoning_tokens), 0)::bigint AS reasoning_tokens,
        coalesce(sum(cost_usd), 0)::text AS cost_usd,
        bool_and(priced) AS priced,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
@@ -819,6 +822,9 @@ type SumRunCostsRow struct {
 	Requests          int64
 	InputTokens       int64
 	OutputTokens      int64
+	CacheReadTokens   int64
+	CacheWriteTokens  int64
+	ReasoningTokens   int64
 	CostUsd           string
 	Priced            bool
 	EstimatedRequests int64
@@ -839,6 +845,9 @@ func (q *Queries) SumRunCosts(ctx context.Context, arg SumRunCostsParams) ([]Sum
 			&i.Requests,
 			&i.InputTokens,
 			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.ReasoningTokens,
 			&i.CostUsd,
 			&i.Priced,
 			&i.EstimatedRequests,
@@ -858,6 +867,9 @@ SELECT task_id::uuid AS task_id,
        count(*)::bigint AS requests,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
+       coalesce(sum(cache_read_tokens), 0)::bigint AS cache_read_tokens,
+       coalesce(sum(cache_write_tokens), 0)::bigint AS cache_write_tokens,
+       coalesce(sum(reasoning_tokens), 0)::bigint AS reasoning_tokens,
        coalesce(sum(cost_usd), 0)::text AS cost_usd,
        bool_and(priced) AS priced,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests
@@ -876,6 +888,9 @@ type SumTaskCostsRow struct {
 	Requests          int64
 	InputTokens       int64
 	OutputTokens      int64
+	CacheReadTokens   int64
+	CacheWriteTokens  int64
+	ReasoningTokens   int64
 	CostUsd           string
 	Priced            bool
 	EstimatedRequests int64
@@ -896,6 +911,9 @@ func (q *Queries) SumTaskCosts(ctx context.Context, arg SumTaskCostsParams) ([]S
 			&i.Requests,
 			&i.InputTokens,
 			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.ReasoningTokens,
 			&i.CostUsd,
 			&i.Priced,
 			&i.EstimatedRequests,

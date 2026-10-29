@@ -1312,6 +1312,16 @@ type AgentMcpServer struct {
 	Tools    []string
 }
 
+type AgentRunLimit struct {
+	OrgID            pgtype.UUID
+	AgentID          pgtype.UUID
+	MaxModelRequests pgtype.Int8
+	MaxSpendUsd      pgtype.Numeric
+	MaxDurationSecs  pgtype.Int4
+	UpdatedBy        string
+	UpdatedAt        pgtype.Timestamptz
+}
+
 type AgentSandbox struct {
 	OrgID               pgtype.UUID
 	AgentID             pgtype.UUID
@@ -1776,7 +1786,7 @@ type Run struct {
 	ParkExpiresAt        pgtype.Timestamptz
 	OutcomeReason        pgtype.Text
 	MaxWallClockSeconds  int32
-	MaxTokens            int64
+	MaxTokens            pgtype.Int8
 	LastEventSeq         int64
 	StartedAt            pgtype.Timestamptz
 	FinishedAt           pgtype.Timestamptz
@@ -1792,6 +1802,8 @@ type Run struct {
 	ClaimedAt            pgtype.Timestamptz
 	SandboxWaitStartedAt pgtype.Timestamptz
 	WrapUpNoticeAt       pgtype.Timestamptz
+	MaxModelRequests     pgtype.Int8
+	MaxSpendUsd          pgtype.Numeric
 }
 
 type RunEvent struct {
