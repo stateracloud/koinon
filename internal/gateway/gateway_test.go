@@ -16,6 +16,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 func TestGateway(t *testing.T) {
@@ -93,6 +94,21 @@ var _ = Describe("State", func() {
 		Expect(provider("gemini", "").Validate()).To(MatchError(ContainSubstring(`format "gemini"`)))
 		for _, bad := range []string{"wrkspc_", "ws_01", "wrkspc_01\r\nx-evil: 1", "wrkspc_01 "} {
 			Expect(provider(modelformat.Anthropic, bad).Validate()).To(MatchError(ContainSubstring("workspace id")), bad)
+		}
+	})
+
+	It("refuses a thinking mode it does not know and a beta that cannot be a header value", func() {
+		model := func(c thinking.Capability) gateway.State {
+			return gateway.State{Providers: []gateway.Provider{{
+				Org: "acme", Name: "p", Type: "anthropic", BaseURL: "http://p/v1",
+				Models: []gateway.Model{{Name: "m", Format: modelformat.Anthropic, Thinking: c}},
+			}}}
+		}
+		Expect(model(thinking.Of("anthropic", "claude-haiku-5-5", modelformat.Anthropic)).Validate()).To(Succeed())
+		Expect(model(thinking.Capability{}).Validate()).To(Succeed(), "the zero value is a model that does not think")
+		Expect(model(thinking.Capability{Mode: "extreme"}).Validate()).To(MatchError(ContainSubstring(`thinking mode "extreme"`)))
+		for _, bad := range []string{"", "a b", "x\r\nevil: 1", "UPPER", strings.Repeat("a", 200)} {
+			Expect(model(thinking.Capability{Mode: thinking.Adaptive, Betas: []string{bad}}).Validate()).To(MatchError(ContainSubstring("invalid anthropic beta")), bad)
 		}
 	})
 

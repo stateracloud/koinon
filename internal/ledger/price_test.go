@@ -111,7 +111,7 @@ var _ = Describe("Cost truth", func() {
 		Expect(err).NotTo(HaveOccurred())
 		s := e.lastEntry(ctx)
 		// 1M input at 0.20 plus 1M output at 2; the 400k reasoning tokens are in the output.
-		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("2.2"))
+		Expect(ledger.FormatUSD(s.CostUsd)).To(Equal("2.20"))
 		Expect(s.OutputTokens).To(Equal(int64(1_000_000)), "output includes reasoning")
 		Expect(reasoning()).To(Equal(int64(400_000)))
 		Expect(s.CostFlagged).To(BeFalse())
@@ -119,7 +119,7 @@ var _ = Describe("Cost truth", func() {
 		By("a provider that does not split thinking out (Anthropic Messages) bills it as the output it is")
 		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 1_000_000, 0, "")})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("2.2"))
+		Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("2.20"))
 		Expect(reasoning()).To(BeZero())
 
 		By("the report counts the reasoning tokens inside the output tokens")
@@ -128,7 +128,7 @@ var _ = Describe("Cost truth", func() {
 		Expect(rep).To(HaveLen(1))
 		Expect(rep[0].OutputTokens).To(Equal(int64(2_000_000)))
 		Expect(rep[0].ReasoningTokens).To(Equal(int64(400_000)))
-		Expect(ledger.FormatUSD(rep[0].ReportedUsd)).To(Equal("4.4"))
+		Expect(ledger.FormatUSD(rep[0].ReportedUsd)).To(Equal("4.40"))
 
 		By("a price that names a reasoning rate bills the reasoning part at it, and the rest of the output at the output rate")
 		_, err = prices.New(db, nil, priceList).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
@@ -145,7 +145,7 @@ var _ = Describe("Cost truth", func() {
 		_, err = ing.Ingest(ctx, []ledger.Entry{u})
 		Expect(err).NotTo(HaveOccurred())
 		// 1M input at 1, 600k output at 2, 400k reasoning at 4.
-		Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("3.8"))
+		Expect(ledger.FormatUSD(e.lastEntry(ctx).CostUsd)).To(Equal("3.80"))
 	})
 
 	It("charges its own cost and flags the entry when the gateway differs by more than 1%", func(ctx SpecContext) {
