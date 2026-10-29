@@ -10,6 +10,11 @@ import (
 	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
+// BetaHeader is the Messages API's feature-flag header. The client never chooses it: the gateway
+// sets the value the model's catalog capability needs (thinking.Capability.Betas) and drops the
+// client's otherwise.
+const BetaHeader = "anthropic-beta"
+
 // Header is one request header the gateway sets on the way to a model's upstream. The value is a
 // literal, replacing whatever the client sent.
 type Header struct{ Name, Value string }
@@ -52,10 +57,10 @@ type Rendering struct {
 	// paths of the table.
 	Path string
 	// Headers are the request headers set on the model's upstream request. p is the model's provider.
-	Headers func(p Provider) []Header
+	Headers func(p Provider, m Model) []Header
 	// Remove are the client-supplied request headers dropped before the request leaves the gateway.
-	// A header that Headers sets needs no entry: setting replaces the client's value.
-	Remove func(p Provider) []string
+	// A header that Headers sets for m needs no entry: setting replaces the client's value.
+	Remove func(p Provider, m Model) []string
 	// Body are the request body fields the gateway sets; the expression null drops a field the
 	// request format types, but leaves an explicit null in one it does not.
 	Body []BodyField
@@ -79,21 +84,34 @@ var renderings = map[modelformat.Format]Rendering{
 	// anthropic-beta enables the MCP connector (Anthropic itself calls the URL, which bypasses the
 	// sandbox's egress rules), code execution, web fetch and long context, and mcp_servers and the
 	// server tools use those features. The gateway sets the version and the provider's workspace,
-	// drops the beta header and the workspace header of a provider without one, and removes the
+	// sets the beta header to what the model's catalog capability needs (thinking, below) and drops
+	// the client's otherwise, drops the workspace header of a provider without one, and removes the
 	// body fields.
+	//
+	// The beta is pinned per model, not per request: a thinking-capable model always gets the betas
+	// of its mode, whether or not the agent has thinking on, because a beta no field uses changes
+	// nothing. Whether the body uses it is the harness's call, made from Koinon's choice
+	// (internal/thinking), and the strict Messages mode of the fake model server refuses a body
+	// field without its beta.
 	modelformat.Anthropic: {
 		Standalone: "messages",
 		Kubernetes: "Messages",
 		Path:       "/v1/messages",
-		Headers: func(p Provider) []Header {
+		Headers: func(p Provider, m Model) []Header {
 			h := []Header{{Name: "anthropic-version", Value: AnthropicVersion}}
 			if p.AnthropicWorkspaceID != "" {
 				h = append(h, Header{Name: "anthropic-workspace-id", Value: p.AnthropicWorkspaceID})
 			}
+			if beta := m.Thinking.AnthropicBeta(); beta != "" {
+				h = append(h, Header{Name: BetaHeader, Value: beta})
+			}
 			return h
 		},
-		Remove: func(p Provider) []string {
-			r := []string{"anthropic-beta"}
+		Remove: func(p Provider, m Model) []string {
+			var r []string
+			if m.Thinking.AnthropicBeta() == "" {
+				r = append(r, BetaHeader)
+			}
 			if p.AnthropicWorkspaceID == "" {
 				r = append(r, "anthropic-workspace-id")
 			}
@@ -123,20 +141,20 @@ func RenderingOf(m Model) (Rendering, error) {
 	return r, nil
 }
 
-// RemoveHeaders returns the client headers to drop on the upstream request of a model of p.
-func (r Rendering) RemoveHeaders(p Provider) []string {
+// RemoveHeaders returns the client headers to drop on the upstream request of model m of p.
+func (r Rendering) RemoveHeaders(p Provider, m Model) []string {
 	if r.Remove == nil {
 		return nil
 	}
-	return r.Remove(p)
+	return r.Remove(p, m)
 }
 
-// RequestHeaders returns the headers to set on the upstream request of a model of p.
-func (r Rendering) RequestHeaders(p Provider) []Header {
+// RequestHeaders returns the headers to set on the upstream request of model m of p.
+func (r Rendering) RequestHeaders(p Provider, m Model) []Header {
 	if r.Headers == nil {
 		return nil
 	}
-	return r.Headers(p)
+	return r.Headers(p, m)
 }
 
 // FormatLogExpr is the CEL expression of the access-log field LogFieldFormat: the format whose route

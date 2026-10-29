@@ -301,7 +301,7 @@ func (q *Queries) GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWo
 }
 
 const listAgentsToReconcile = `-- name: ListAgentsToReconcile :many
-SELECT a.org_id, a.id, a.display_name, a.status, a.flavor, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model FROM agents a
+SELECT a.org_id, a.id, a.display_name, a.status, a.flavor, a.template_id, a.active_version_id, a.latest_version, a.epoch, a.created_by, a.activated_by, a.activated_at, a.archived_at, a.created_at, a.updated_at, a.unhealthy_at, a.unhealthy_reason, a.resumed_at, a.model, a.thinking FROM agents a
 WHERE a.org_id = $1
   AND (a.status <> 'archived' OR EXISTS (
       SELECT 1 FROM agent_sandboxes s
@@ -341,6 +341,7 @@ func (q *Queries) ListAgentsToReconcile(ctx context.Context, orgID pgtype.UUID) 
 			&i.UnhealthyReason,
 			&i.ResumedAt,
 			&i.Model,
+			&i.Thinking,
 		); err != nil {
 			return nil, err
 		}

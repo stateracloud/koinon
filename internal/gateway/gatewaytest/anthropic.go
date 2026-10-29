@@ -22,6 +22,7 @@ import (
 	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
+	"github.com/stateracloud/koinon/internal/thinking"
 )
 
 // anthropicSpec is ADR 0069 decision 8: a model in the Messages format, served beside an openai one in
@@ -104,12 +105,17 @@ func anthropicSpec(env Env) {
 			var err error
 			upstrm, err = fakemodel.New(
 				fakemodel.Script{Model: "claude-test", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
+				fakemodel.Script{Model: "claude-haiku-5-5", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
+				fakemodel.Script{Model: "anthropic/claude-haiku-5.5", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 				fakemodel.Script{Model: "claude-nows", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 				fakemodel.Script{Model: "gpt-test", Turns: []fakemodel.Turn{{Text: "ok", Usage: fakemodel.Usage{InputTokens: 10, OutputTokens: 10}}}},
 				fakemodel.Script{Model: "claude-cut", Faults: fakemodel.Faults{Truncate: true}, Turns: []fakemodel.Turn{{Text: "a long answer that is cut", Usage: usage}}},
 				fakemodel.Script{Model: "globex-model", Turns: []fakemodel.Turn{{Text: "ok", Usage: usage}}},
 			)
 			Expect(err).NotTo(HaveOccurred())
+			// The upstream refuses what Anthropic refuses (unknown fields, beta-only fields without their
+			// beta), so a body the gateway cannot vouch for fails here the way it does on api.anthropic.com.
+			upstrm.SetStrictMessages(true)
 			srv := newServer(upstrm)
 			DeferCleanup(srv.Close)
 
@@ -126,7 +132,18 @@ func anthropicSpec(env Env) {
 					Models: []gateway.Model{
 						{Name: "claude-test", Format: modelformat.Anthropic, Price: price},
 						{Name: "claude-cut", Format: modelformat.Anthropic, Price: price},
+						// A Claude-shaped ID the catalog says can think; claude-test has the same shape of
+						// provider and no thinking capability.
+						{Name: "claude-haiku-5-5", Format: modelformat.Anthropic, Thinking: thinking.Of("anthropic", "claude-haiku-5-5", modelformat.Anthropic), Price: price},
 					},
+				},
+				{
+					// OpenRouter's Messages route: the catalog says adaptive thinking and pins no beta.
+					Org: "acme", Name: "openrouter", Type: "openrouter", BaseURL: url, APIKeyFile: env.KeyFile("provider_key"),
+					Models: []gateway.Model{{
+						Name: "anthropic/claude-haiku-5.5", Format: modelformat.Anthropic,
+						Thinking: thinking.Of("openrouter", "anthropic/claude-haiku-5.5", modelformat.Anthropic), Price: price,
+					}},
 				},
 				{
 					Org: "acme", Name: "claude-unscoped", Type: "anthropic", BaseURL: url, APIKeyFile: env.KeyFile("provider_key"),
@@ -261,6 +278,62 @@ func anthropicSpec(env Env) {
 			Expect(code).To(Equal(http.StatusOK), out)
 			Expect(string(lastUpstream("claude-test").Body)).NotTo(ContainSubstring(`"tools"`))
 			Expect(string(lastUpstream("claude-test").Body)).NotTo(ContainSubstring("mcp_servers"), "no field is added to a plain request")
+		})
+
+		It("pins the catalog's beta for a model that can think, so adaptive thinking reaches a strict upstream (rc.7, #240)", func(ctx SpecContext) {
+			// What OpenCode 2.2.0 sends for a Claude 5.1+ ID: adaptive thinking with block_binding. Anthropic
+			// accepts block_binding only with its beta, which the client did not send.
+			adaptive := func(model string) map[string]any {
+				b := msgBody(model, false)
+				b["thinking"] = map[string]any{"type": "adaptive", "block_binding": map[string]any{"prefix_mismatch_behavior": "drop_block"}}
+				return b
+			}
+			code, out := post(ctx, "/v1/messages", keyC.Material, adaptive("claude-haiku-5-5"), "anthropic-version", clientDate)
+			Expect(code).To(Equal(http.StatusOK), out)
+			up := lastUpstream("claude-haiku-5-5")
+			Expect(up.Header.Values("anthropic-beta")).To(Equal([]string{thinking.BindingBeta}))
+			Expect(string(up.Body)).To(ContainSubstring(`"adaptive"`))
+
+			By("the client's own beta never passes: the pinned value replaces it")
+			code, out = post(ctx, "/v1/messages", keyC.Material, adaptive("claude-haiku-5-5"),
+				"anthropic-version", clientDate, "anthropic-beta", "mcp-client-2025-04-04,interleaved-thinking-2025-05-14")
+			Expect(code).To(Equal(http.StatusOK), out)
+			Expect(lastUpstream("claude-haiku-5-5").Header.Values("anthropic-beta")).To(Equal([]string{thinking.BindingBeta}))
+
+			By("a model the catalog says cannot think gets no beta, and a thinking body is refused as Anthropic refuses it")
+			code, out = post(ctx, "/v1/messages", keyC.Material, adaptive("claude-test"), "anthropic-version", clientDate)
+			Expect(code).To(Equal(http.StatusBadRequest), out)
+			Expect(out).To(ContainSubstring("thinking.adaptive.block_binding: Extra inputs are not permitted"))
+			Expect(lastUpstream("claude-test").Header).NotTo(HaveKey("Anthropic-Beta"))
+
+			By("thinking off sends no thinking field, and the pinned beta changes nothing")
+			code, out = messages(ctx, keyC.Material, "claude-haiku-5-5", false)
+			Expect(code).To(Equal(http.StatusOK), out)
+			Expect(string(lastUpstream("claude-haiku-5-5").Body)).NotTo(ContainSubstring("thinking"))
+		})
+
+		It("drops the client's anthropic-beta for a model that thinks without a pinned beta (OpenRouter, #240)", func(ctx SpecContext) {
+			// The catalog says adaptive and lists no beta, so nothing replaces the client's header and
+			// the gateway must remove it: otherwise OpenCode's own betas reach the upstream and hide a
+			// request that only works because of them (rc.7).
+			const model = "anthropic/claude-haiku-5.5"
+			Expect(thinking.Of("openrouter", model, modelformat.Anthropic)).To(
+				And(HaveField("Mode", thinking.Adaptive), HaveField("Betas", BeEmpty())))
+			body := msgBody(model, false)
+			body["thinking"] = map[string]any{"type": "adaptive"}
+			code, out := post(ctx, "/v1/messages", keyC.Material, body, "anthropic-version", clientDate,
+				"anthropic-beta", "interleaved-thinking-2025-05-14,"+thinking.BindingBeta)
+			Expect(code).To(Equal(http.StatusOK), out)
+			up := lastUpstream(model)
+			Expect(up.Header).NotTo(HaveKey("Anthropic-Beta"))
+			Expect(string(up.Body)).To(ContainSubstring(`"adaptive"`))
+
+			By("a beta-only field is then refused by the strict upstream, as it would be if the client's beta leaked or were missing")
+			body["thinking"] = map[string]any{"type": "adaptive", "block_binding": map[string]any{"prefix_mismatch_behavior": "drop_block"}}
+			code, out = post(ctx, "/v1/messages", keyC.Material, body, "anthropic-version", clientDate,
+				"anthropic-beta", thinking.BindingBeta)
+			Expect(code).To(Equal(http.StatusBadRequest), out)
+			Expect(lastUpstream(model).Header).NotTo(HaveKey("Anthropic-Beta"), "the client's beta never passes")
 		})
 
 		It("keeps the tools of a chat-completions request sent to an anthropic model", func(ctx SpecContext) {

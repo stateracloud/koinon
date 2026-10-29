@@ -355,20 +355,21 @@ var _ = Describe("Service", func() {
 			router := create(ctx, "openrouter", "")
 			Expect(model(ctx, direct, "claude-haiku-4-5", "")).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)))
 			Expect(model(ctx, router, "deepseek/flash", "")).To(HaveField("Format", "openai"))
-			pinned := model(ctx, router, "anthropic/claude-haiku-5.5", "")
-			Expect(pinned).To(And(HaveField("Format", "openai"), HaveField("FormatOverridden", false)))
+			// OpenRouter's Claude models speak Messages like any other Claude (#242).
+			routed := model(ctx, router, "anthropic/claude-haiku-5.5", "")
+			Expect(routed).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", false)))
 
-			anth := "anthropic"
-			upd, err := svc.UpdateModel(ctx, org, actor, pinned.ID, catalog.ModelPatch{Format: &anth})
+			oai := "openai"
+			upd, err := svc.UpdateModel(ctx, org, actor, routed.ID, catalog.ModelPatch{Format: &oai})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(upd).To(And(HaveField("Format", "anthropic"), HaveField("FormatOverridden", true)))
+			Expect(upd).To(And(HaveField("Format", "openai"), HaveField("FormatOverridden", true)))
 
 			_, err = svc.CreateModel(ctx, org, actor, user, catalog.ModelInput{ProviderID: direct.ID, Name: "x", Format: "openai"})
 			var inv *catalog.InvalidError
 			Expect(errors.As(err, &inv)).To(BeTrue())
 			Expect(err).To(MatchError(ContainSubstring("does not offer")))
 			bad := "gemini"
-			_, err = svc.UpdateModel(ctx, org, actor, pinned.ID, catalog.ModelPatch{Format: &bad})
+			_, err = svc.UpdateModel(ctx, org, actor, routed.ID, catalog.ModelPatch{Format: &bad})
 			Expect(err).To(MatchError(ContainSubstring("unknown model format")))
 			Expect(events(ctx, "model.update")[0].Summary).To(ContainSubstring("formatOverridden"))
 		})
