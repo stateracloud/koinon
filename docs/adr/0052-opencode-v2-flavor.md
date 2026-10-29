@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-10-22
+- Amended by: [0079](0079-dependency-cooldown.md) (the minimum age in the 2026-10-28 amendment)
 - Amends: [0048](0048-openshell-spike-results.md) (PR 15 in the previous repository) (the OpenCode version and the
   OpenCode details of decision 4; decision 4's flavor contract stands)
 - Verification: spike on 2026-10-22 (below); re-pin tracked in
@@ -151,7 +152,7 @@ home-lab run described in Context. Source references are in `flavors/opencode/RE
 ## Amendment 2026-10-28: re-pin to 2.2.0 (issue #54)
 
 Andre decided on 2026-10-28 to move the OpenCode flavor from `@opencode/cli` 2.0.24 to **2.2.0**
-(published 2026-10-27), **waiving the project's two-week minimum age for this update only**. The
+(published 2026-10-27), **waiving the project's two-week minimum age for this update only**. (Amended 2026-10-29: [0079](0079-dependency-cooldown.md) replaces the unwritten two-week rule with a 3-day minimum and a security fast path; this waiver was made under the old rule and stands as recorded.) The
 reasons: 2.2.0 bundles Bun 1.4.4 (verified in the x64 binary: `Bun v1.4.4 (38afee6c8) Linux x64`;
 the Bun release is from 2026-10-22), which fixes security issues in TLS, HTTP/1.1-3, WebSocket,
 `fetch` and Brotli ([bun.com/blog/bun-v1.4.4#security](https://bun.com/blog/bun-v1.4.4#security)),
