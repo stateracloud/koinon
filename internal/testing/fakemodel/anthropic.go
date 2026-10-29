@@ -138,6 +138,13 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, err)
 		return
 	}
+	if s.strict() {
+		if err := checkStrictMessages(body, r.Header); err != nil {
+			s.record(r.URL.Path, r.Header, req.Model, body)
+			writeAnthropicError(w, &apiError{kind: errBadRequest, message: err.Error()})
+			return
+		}
+	}
 	rep, err := s.plan(r.URL.Path, r.Header, req.Model, body, req.conversation())
 	if err != nil {
 		writeAnthropicError(w, err)
