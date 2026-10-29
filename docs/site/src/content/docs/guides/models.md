@@ -131,8 +131,8 @@ Claude and other models, and each family wants its own API. What a provider offe
 
 **The default.** Koinon prefers `anthropic` for `claude-*` and `anthropic/*` model names and `openai`
 for everything else. If the provider does not offer the preferred format, the model gets the first
-format the provider offers. For now OpenRouter's `anthropic/*` models default to `openai`; they move to
-`anthropic` once Koinon has checked that path against OpenRouter. The model form marks the default.
+format the provider offers. That includes OpenRouter's `anthropic/*` models: Koinon checked the Messages
+path against OpenRouter live on 2026-10-29 and moved them to `anthropic`. The model form marks the default.
 
 **Overriding it.** Choose another format on the model form, in the admin API (`format` on `POST
 /admin/v1/models` and `PATCH /admin/v1/models/{id}`) or per model in a declared Secret. The format
@@ -148,7 +148,27 @@ models of an Anthropic provider moved to `anthropic` when Koinon was upgraded.
 agent's model, else its version's, else the organisation default). An `anthropic` model is sent
 to `/v1/messages`, and OpenCode places the prompt-cache breakpoints itself, so direct Anthropic
 models cache. An `openai` model stays on chat completions with the ADR 0068 cache markers.
-OpenRouter `anthropic/*` models stay on `openai` until they are checked live.
+
+## Thinking
+
+Claude models think before they answer, and Koinon decides whether they do, not the harness
+([ADR 0069](https://github.com/stateracloud/koinon/blob/main/docs/adr/0069-native-model-formats.md),
+amendment of 2026-10-29). **Thinking is on unless you turn it off.**
+
+- **Which models can.** Koinon keeps a table of the models that can think (today the Claude 5.x
+  families, on the `anthropic` format, direct or through OpenRouter). A model that is not in it runs
+  without thinking, and the agent page says "Not supported by this model".
+- **Turning it off for an agent.** The agent page has a **Thinking** choice under the model. It is a
+  setting of the agent, not a new version: it applies to the next run and is recorded in the audit
+  log. In the admin API it is `PUT /admin/v1/agents/{id}/thinking` with `{"thinking": "off"}` (`on`, or
+  `default` to clear it), and `GET /admin/v1/agents/{id}/model` returns its state.
+- **Templates.** A template can start its agents with thinking off: `spec.model.thinking: off`. The
+  agent's own setting wins over the template's.
+- **Cost.** Thinking tokens are billed as output tokens at the model's output price. The spend report
+  shows the part providers report separately as `reasoningTokens`, inside `outputTokens`. Expect a
+  thinking run to cost more than one without; turn thinking off for agents where it does not help.
+- **The gateway.** It sets the `anthropic-beta` value the model needs itself and never passes an
+  agent's header through, so an agent cannot enable provider features.
 
 ## Anthropic
 
