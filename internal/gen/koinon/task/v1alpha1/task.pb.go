@@ -293,7 +293,8 @@ type Task struct {
 	// True when a direct message to the agent started the task: replies in its inbox-chat thread
 	// go to SendDirectMessage with this task_id (plan item TR3).
 	DirectMessageThread bool `protobuf:"varint,16,opt,name=direct_message_thread,json=directMessageThread,proto3" json:"direct_message_thread,omitempty"`
-	// Everyone the task's open questions wait on.
+	// Everyone the task's open questions wait on. Set by ListTasks and GetTask. The inbox uses it so
+	// that a task waiting on someone else's answer is not shown to its creator as theirs to act on.
 	WaitingOnUserIds []string `protobuf:"bytes,17,rep,name=waiting_on_user_ids,json=waitingOnUserIds,proto3" json:"waiting_on_user_ids,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
