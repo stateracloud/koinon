@@ -13,7 +13,7 @@ import (
 
 const claimDueSettlements = `-- name: ClaimDueSettlements :many
 SELECT st.entry_id, st.provider_id, st.provider_type, st.response_id, st.attempts, st.deadline,
-       e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
+       e.agent_id, e.run_id, e.model, e.occurred_at, e.input_tokens, e.output_tokens, e.cache_read_tokens, e.cache_write_tokens,
        e.reasoning_tokens, e.cost_usd::text AS cost_usd, e.reserve_usd::text AS reserve_usd, e.estimate,
        coalesce(e.price_ref, '')::text AS price_ref
 FROM spend_settlements st
@@ -37,6 +37,7 @@ type ClaimDueSettlementsRow struct {
 	ResponseID       pgtype.Text
 	Attempts         int32
 	Deadline         pgtype.Timestamptz
+	AgentID          pgtype.UUID
 	RunID            pgtype.UUID
 	Model            string
 	OccurredAt       pgtype.Timestamptz
@@ -69,6 +70,7 @@ func (q *Queries) ClaimDueSettlements(ctx context.Context, arg ClaimDueSettlemen
 			&i.ResponseID,
 			&i.Attempts,
 			&i.Deadline,
+			&i.AgentID,
 			&i.RunID,
 			&i.Model,
 			&i.OccurredAt,
@@ -137,7 +139,9 @@ WHERE org_id = $1 AND agent_id = $2
   AND started_at IS NOT NULL AND started_at <= $3::timestamptz
   AND (finished_at IS NULL
        OR finished_at >= $3::timestamptz - make_interval(secs => $4::integer))
-ORDER BY started_at DESC, id DESC
+ORDER BY (finished_at IS NULL AND state IN ('starting', 'running')
+          AND coalesce(claimed_at, started_at) <= $3::timestamptz) DESC,
+         started_at DESC, id DESC
 LIMIT 1
 `
 
@@ -163,11 +167,14 @@ type FindRunAtRow struct {
 //
 // Every query on an org-owned table takes @org_id and filters on it
 // (TestQueriesAreOrgScoped).
-// The run an agent was executing at @at: the latest-started run that had
-// started by then and had not finished more than @grace_seconds earlier. One
-// run per agent is owned at a time (ADR 0009), so the latest start wins when a
-// parked run's window overlaps a later run. The grace covers a response that
-// completes just after its run was canceled (for example by the token cap).
+// The run an agent was executing at @at. A run that was claimed by then and is still executing
+// (starting or running) wins over one that finished inside the grace: a parked run that resumes
+// right after another run of the agent ended keeps its first started_at, which is older than the
+// finished run's, and its requests are its own (claimed_at is set on every claim, resume included;
+// ADR 0080). Among the rest the latest-started run that had started by then and had not finished
+// more than @grace_seconds earlier wins. One run per agent is owned at a time (ADR 0009), so the
+// latest start wins when a parked run's window overlaps a later run. The grace covers a response
+// that completes just after its run was canceled (for example by a run limit).
 // state and finished_at tell whether that run was canceled by the record's time, which marks a
 // streamed response logged then as cut (ADR 0056, amendment 2026-10-28).
 func (q *Queries) FindRunAt(ctx context.Context, arg FindRunAtParams) (FindRunAtRow, error) {
