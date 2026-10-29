@@ -74,6 +74,10 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
               "maxLength": 128
+            },
+            "thinking": {
+              "description": "The starting value of the agent's thinking setting. Thinking is on unless an agent turns it off; a model that cannot think ignores the setting.",
+              "enum": ["on", "off"]
             }
           }
         },

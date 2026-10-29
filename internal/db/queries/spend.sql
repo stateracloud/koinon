@@ -145,6 +145,9 @@ SELECT model,
        count(*)::bigint AS requests,
        coalesce(sum(input_tokens), 0)::bigint AS input_tokens,
        coalesce(sum(output_tokens), 0)::bigint AS output_tokens,
+       -- Reasoning (thinking) tokens are part of output_tokens, billed at the output rate unless the
+       -- price names a reasoning rate; this is the part the provider reported separately.
+       coalesce(sum(reasoning_tokens), 0)::bigint AS reasoning_tokens,
        coalesce(sum(cost_usd) FILTER (WHERE NOT estimated), 0)::text AS reported_usd,
        coalesce(sum(cost_usd) FILTER (WHERE estimated), 0)::text AS estimated_usd,
        count(*) FILTER (WHERE estimated)::bigint AS estimated_requests,

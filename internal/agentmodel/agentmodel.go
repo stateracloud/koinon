@@ -16,6 +16,9 @@
 //
 // The model's wire format (ADR 0069) belongs to the model, not to the agent, so a model chosen
 // here needs nothing more: the format is looked up by the resolved model name.
+//
+// The agent has a second setting of the same kind, whether its model thinks (thinking.go, ADR 0069
+// amendment 2026-10-29): on unless turned off, resolved for the effective model.
 package agentmodel
 
 import (
@@ -181,11 +184,22 @@ type View struct {
 	// Problem is set when Setting is no longer usable.
 	Problem   string
 	Available []Served
+	// Thinking is the agent's thinking setting for Effective (thinking.go).
+	Thinking ThinkingView
 }
 
-// Describe builds the view of an agent. versionModel is the active version's model ("" or
-// "default" for none; for an agent not yet activated, the latest version's).
-func Describe(ctx context.Context, rv prices.Resolver, q *store.Queries, a store.Agent, versionModel, platformDefault string, at time.Time) (View, error) {
+// Describe builds the view of an agent. versionModel and versionThinking are the active version's
+// ("" or "default" for no model; for an agent not yet activated, the latest version's).
+func Describe(ctx context.Context, rv prices.Resolver, q *store.Queries, a store.Agent, versionModel, versionThinking, platformDefault string, at time.Time) (View, error) {
+	v, err := describeModel(ctx, rv, q, a, versionModel, platformDefault, at)
+	if err != nil {
+		return View{}, err
+	}
+	v.Thinking, err = describeThinking(ctx, q, a, versionThinking, v.Effective)
+	return v, err
+}
+
+func describeModel(ctx context.Context, rv prices.Resolver, q *store.Queries, a store.Agent, versionModel, platformDefault string, at time.Time) (View, error) {
 	v := View{Setting: a.Model.String, VersionModel: Normalize(versionModel)}
 	var err error
 	if v.Available, err = ListServed(ctx, rv, q, a.OrgID, at); err != nil {
@@ -233,17 +247,17 @@ func (s *Service) Load(ctx context.Context, org, agent pgtype.UUID, at time.Time
 	if err != nil {
 		return store.Agent{}, View{}, err
 	}
-	var versionModel string
+	var versionModel, versionThinking string
 	for _, v := range versions {
 		if v.ID == a.ActiveVersionID || (!a.ActiveVersionID.Valid && v.Version == a.LatestVersion) {
 			cfg, err := agentconfig.Parse(v.Config)
 			if err != nil {
 				return store.Agent{}, View{}, err
 			}
-			versionModel = cfg.Model
+			versionModel, versionThinking = cfg.Model, cfg.Thinking
 		}
 	}
-	view, err := Describe(ctx, s.prices, q, a, versionModel, s.platformDefault, at)
+	view, err := Describe(ctx, s.prices, q, a, versionModel, versionThinking, s.platformDefault, at)
 	return a, view, err
 }
 

@@ -222,7 +222,7 @@ func (s *Server) GetSpendReport(ctx context.Context, req GetSpendReportRequestOb
 	out.SystemChecks.Requests, out.SystemChecks.CostUsd = sys.Requests, ledgerUSD(sys.CostUsd)
 	for _, r := range rows {
 		out.Models = append(out.Models, SpendLine{
-			Model: r.Model, Requests: r.Requests, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens,
+			Model: r.Model, Requests: r.Requests, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens, ReasoningTokens: r.ReasoningTokens,
 			ReportedUsd: ledgerUSD(r.ReportedUsd), EstimatedUsd: ledgerUSD(r.EstimatedUsd), EstimatedRequests: r.EstimatedRequests,
 			EstimatedOutputTokens: r.EstimatedOutputTokens, GatewayRequests: r.GatewayRequests,
 			GatewayUsd: ledgerUSD(r.GatewayUsd), GatewayComparedUsd: ledgerUSD(r.GatewayComparedUsd), FlaggedRequests: r.FlaggedRequests,

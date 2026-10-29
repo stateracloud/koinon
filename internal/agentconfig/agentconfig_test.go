@@ -41,6 +41,21 @@ var _ = Describe("Harness settings", func() {
 	})
 })
 
+var _ = Describe("The thinking setting", func() {
+	It("copies the template's starting value and leaves it out when the template names none", func() {
+		raw, err := agentconfig.FromTemplate(&templates.Template{Spec: templates.Spec{Model: templates.Model{Name: "default", Thinking: "off"}}}, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).To(ContainSubstring(`"thinking":"off"`))
+		cfg, err := agentconfig.Parse(raw)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cfg.Thinking).To(Equal("off"))
+
+		raw, err = agentconfig.FromTemplate(&templates.Template{}, "sha256:x").Marshal()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(raw)).NotTo(ContainSubstring("thinking"))
+	})
+})
+
 var _ = Describe("IsEphemeral", func() {
 	It("is off by default, including for a config stored before it existed", func() {
 		cfg, err := agentconfig.Parse([]byte(`{"instructions":"x"}`))

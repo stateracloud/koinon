@@ -52,6 +52,14 @@ service AgentService {
   // serves and has a price for. Audited, with the old and the new value. Admins and owners only.
   rpc SetAgentModel(SetAgentModelRequest) returns (SetAgentModelResponse);
 
+  // SetAgentThinking sets whether the agent's model thinks: "on" or "off", or clears the setting
+  // with an empty value so the version's value (a template's spec.model.thinking) and then the
+  // default, on, apply. Thinking is on unless somebody turns it off (ADR 0069 amendment
+  // 2026-10-29). Like the model it is a setting of the agent, not a new version, and applies to the
+  // next run. A model that cannot think ignores it (GetAgentModel says so). Audited, with the old
+  // and the new value. Admins and owners only.
+  rpc SetAgentThinking(SetAgentThinkingRequest) returns (SetAgentThinkingResponse);
+
   // RunAgentTrigger fires one schedule trigger of the active version now, as the scheduler would
   // at a due time, with the trigger's instruction. The task is marked as a manual fire. Audited.
   // Admins and owners only.
@@ -265,6 +273,25 @@ message GetAgentModelResponse {
   string problem = 5;
   // Models the org serves and has a price for, by provider and name: the picker's choices.
   repeated ServedModel available = 6;
+  // The agent's thinking setting for the effective model.
+  ThinkingState thinking = 7;
+}
+
+// ThinkingState is the agent's thinking setting and what it resolves to (ADR 0069 amendment
+// 2026-10-29).
+message ThinkingState {
+  // The agent's own setting: "on", "off", or empty when it follows the version and the default.
+  string setting = 1;
+  // The active version's value (a template's spec.model.thinking); empty when it names none.
+  string version_setting = 2;
+  // What the layers resolve to, "on" or "off", whether or not the model can think.
+  string effective = 3;
+  // Whether the effective model can think. When false the setting has no effect and the UI says
+  // "not supported by this model".
+  bool supported = 4;
+  // The mode the next run uses: "adaptive" when the model can think and the setting resolves to
+  // on, "none" otherwise.
+  string mode = 5;
 }
 
 // SetAgentModelRequest sets the agent's model.
@@ -277,6 +304,19 @@ message SetAgentModelRequest {
 
 // SetAgentModelResponse holds the result, as GetAgentModel would return it.
 message SetAgentModelResponse {
+  GetAgentModelResponse model = 1;
+}
+
+// SetAgentThinkingRequest sets the agent's thinking setting.
+message SetAgentThinkingRequest {
+  string org_id = 1;
+  string agent_id = 2;
+  // "on" or "off"; empty clears the setting.
+  string thinking = 3;
+}
+
+// SetAgentThinkingResponse holds the result, as GetAgentModel would return it.
+message SetAgentThinkingResponse {
   GetAgentModelResponse model = 1;
 }
 

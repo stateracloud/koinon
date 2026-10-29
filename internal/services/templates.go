@@ -64,6 +64,7 @@ func templateProto(row store.Template, t *templates.Template) *templatev1alpha1.
 		DisplayName:  row.DisplayName,
 		Description:  row.Description,
 		Model:        t.Spec.Model.Name,
+		Thinking:     t.Spec.Model.Thinking,
 		Instructions: t.Spec.Instructions,
 		Grants:       grantsProto(t.Spec.Grants),
 		Triggers:     triggersProto(t.Spec.Triggers),
