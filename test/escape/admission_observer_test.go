@@ -34,6 +34,8 @@ var _ = Describe("Sandbox observer admission policy", Label("escape", "admission
 	const (
 		role     = "koinon-koinon-sandbox-observer" // the ClusterRole, and the RoleBinding's name
 		managed  = "openshell-openshell-kw-obs"     // a workspace namespace of gateway "openshell"
+		noWs     = "openshell-openshell-kw-nows"    // labelled like one, without the sandbox-workspace label
+		badName  = "kw-obs-misnamed"                // labelled like one, but not named openshell-openshell-*
 		foreign  = "openshell-prod-kw-obs"          // a workspace namespace of another gateway
 		plain    = "koinon-observer-plain"          // not an OpenShell namespace
 		reconcil = otherUser                        // system:serviceaccount:koinon:koinon-reconciler
@@ -106,11 +108,26 @@ var _ = Describe("Sandbox observer admission policy", Label("escape", "admission
 		rec, ctrl, gw = as(reconcil), as(controllerUser), as(gatewayUser)
 
 		for name, labels := range map[string]map[string]string{
-			managed: {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell"},
-			foreign: {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "prod"},
+			managed: {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell", "openshell.ai/sandbox-workspace": "kw-obs"},
+			foreign: {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "prod", "openshell.ai/sandbox-workspace": "kw-obs"},
+			noWs:    {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell"},
+			badName: {"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell", "openshell.ai/sandbox-workspace": "kw-obs"},
 			plain:   nil,
 		} {
 			_, err := admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		// kube-system and Koinon's own namespace, labelled like workspace namespaces by someone who means harm.
+		for _, name := range []string{"kube-system", "koinon"} {
+			var n *corev1.Namespace
+			if name == "koinon" {
+				n, err = admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}, metav1.CreateOptions{})
+			} else {
+				n, err = admin.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+			}
+			Expect(err).NotTo(HaveOccurred())
+			n.Labels = map[string]string{"openshell.ai/managed-by": "openshell", "openshell.ai/gateway-id": "openshell", "openshell.ai/sandbox-workspace": "kw-obs"}
+			_, err = admin.CoreV1().Namespaces().Update(ctx, n, metav1.UpdateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 		}
 		sandboxSA = as("system:serviceaccount:" + managed + ":default")
@@ -166,20 +183,26 @@ var _ = Describe("Sandbox observer admission policy", Label("escape", "admission
 
 	It("denies the reconciler a RoleBinding outside the fence", func(ctx SpecContext) {
 		By("in a namespace that is not an OpenShell namespace")
-		denied(create(ctx, rec, plain, binding()), "may be bound only in namespaces labelled openshell.ai/managed-by=openshell")
+		denied(create(ctx, rec, plain, binding()), "may be bound only in OpenShell workspace namespaces")
 		By("in a namespace of another gateway")
-		denied(create(ctx, rec, foreign, binding()), "openshell.ai/gateway-id=openshell")
+		denied(create(ctx, rec, foreign, binding()), "of gateway openshell")
 		By("under another name")
 		denied(create(ctx, rec, managed, binding(func(b *rbacv1.RoleBinding) { b.Name = "other" })), "must be named "+role)
-		By("with the namespace of kube-system or any unlabelled one")
-		denied(create(ctx, rec, "kube-system", binding()), "may be bound only in namespaces labelled")
+		By("in kube-system, labelled like a workspace namespace but not named like one")
+		denied(create(ctx, rec, "kube-system", binding()), "may be bound only in OpenShell workspace namespaces")
+		By("in Koinon's own namespace, labelled the same way")
+		denied(create(ctx, rec, "koinon", binding()), "may be bound only in OpenShell workspace namespaces")
+		By("in a labelled namespace with a wrong name")
+		denied(create(ctx, rec, badName, binding()), "may be bound only in OpenShell workspace namespaces")
+		By("in a namespace named right and labelled with the gateway ID but without the sandbox-workspace label")
+		denied(create(ctx, rec, noWs, binding()), "may be bound only in OpenShell workspace namespaces")
 	})
 
 	Context("with the right to bind any ClusterRole, so that only admission can refuse", func() {
 		BeforeAll(func(ctx SpecContext) {
 			_, err := admin.RbacV1().ClusterRoles().Create(ctx, &rbacv1.ClusterRole{
 				ObjectMeta: metav1.ObjectMeta{Name: "escape-obs-bind-any"},
-				Rules:      []rbacv1.PolicyRule{{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles"}, Verbs: []string{"bind"}}},
+				Rules:      []rbacv1.PolicyRule{{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles", "roles"}, Verbs: []string{"bind"}}},
 			}, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
 			_, err = admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
@@ -196,6 +219,8 @@ var _ = Describe("Sandbox observer admission policy", Label("escape", "admission
 				{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
 				{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "view"},
 				{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: role + "-binder"},
+				// A namespaced Role that happens to carry the observer's name is not the observer role.
+				{APIGroup: rbacv1.GroupName, Kind: "Role", Name: role},
 			} {
 				denied(create(ctx, rec, managed, binding(func(b *rbacv1.RoleBinding) { b.RoleRef = ref })), "must bind exactly the ClusterRole "+role)
 			}
@@ -235,6 +260,8 @@ var _ = Describe("Sandbox observer admission policy", Label("escape", "admission
 			denied(create(ctx, c, foreign, binding(func(b *rbacv1.RoleBinding) { b.Name = "mine" })), "only the Koinon reconciler may bind the sandbox observer role")
 			By("the fixed name with another role")
 			denied(create(ctx, c, managed, binding(func(b *rbacv1.RoleBinding) { b.RoleRef.Name = "view" })), "only the Koinon reconciler")
+			By("a Role of the observer's name, under another name")
+			denied(create(ctx, c, managed, binding(func(b *rbacv1.RoleBinding) { b.Name = "mine"; b.RoleRef.Kind = "Role" })), "only the Koinon reconciler")
 		}
 		By("and cannot change the reconciler's binding")
 		b, err := admin.RbacV1().RoleBindings(managed).Get(ctx, role, metav1.GetOptions{})
