@@ -363,7 +363,7 @@ var _ = Describe("Pool", func() {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		t := e.task(ctx, markWait)
 		r, err := q.CreateRun(ctx, store.CreateRunParams{
-			OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 2, MaxTokens: 1000,
+			OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 2,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		e.pool("agentd-a")

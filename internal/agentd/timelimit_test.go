@@ -12,6 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/stateracloud/koinon/internal/agentd"
 	"github.com/stateracloud/koinon/internal/db/store"
 )
@@ -22,7 +24,7 @@ var _ = Describe("the time limit", func() {
 	capped := func(ctx SpecContext, e *env, t store.Task, seconds int32) store.Run {
 		GinkgoHelper()
 		r, err := q.CreateRun(ctx, store.CreateRunParams{
-			OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: seconds, MaxTokens: 1000,
+			OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: seconds,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		return r
@@ -79,7 +81,7 @@ var _ = Describe("the time limit", func() {
 		Expect(p["summary"]).To(ContainSubstring("Done so far: A."))
 		Expect(p["summary"]).To(ContainSubstring("working"), "the reply is the text since the last park")
 		Expect(getRun(ctx, r).WrapUpNoticeAt.Valid).To(BeTrue())
-		Expect(testutil.ToFloat64(m.WrapUpNotices)).To(Equal(1.0))
+		Expect(testutil.ToFloat64(m.WrapUpNotices.WithLabelValues("time"))).To(Equal(1.0))
 		Eventually(func() float64 { return testutil.ToFloat64(m.TimeLimitStops) }).Should(Equal(1.0))
 	})
 
@@ -139,7 +141,7 @@ var _ = Describe("the time limit", func() {
 		}
 		Expect(notices(ctx, r)).To(BeZero(), "no run.wrap_up_notice event for a notice nobody got")
 		Expect(getRun(ctx, r).WrapUpNoticeAt.Valid).To(BeFalse())
-		Expect(testutil.ToFloat64(m.WrapUpNotices)).To(BeZero())
+		Expect(testutil.ToFloat64(m.WrapUpNotices.WithLabelValues("time"))).To(BeZero())
 	})
 
 	It("honours an end of turn that races the notice", func(ctx SpecContext) {
@@ -218,5 +220,120 @@ var _ = Describe("the time limit", func() {
 		Expect(p).To(HaveKeyWithValue("summary", "notes text"))
 		Expect(p).To(HaveKeyWithValue("summarySource", "notes"))
 		Expect(strings.TrimSpace(p["message"].(string))).To(Equal("Stopped at the time limit of 2s."))
+	})
+})
+
+// The warning before the model-request and spend limits (ADR 0080): at about 80% of whichever
+// limit is nearest, read from the ledger while a turn runs. The ledger, not agentd, ends the run at
+// the limit; these specs stop at the notice.
+var _ = Describe("the request and spend limits", func() {
+	// limited enqueues a run with a long time limit and the given request and spend limits.
+	limited := func(ctx SpecContext, e *env, t store.Task, requests int64, spend string) store.Run {
+		GinkgoHelper()
+		p := store.CreateRunParams{OrgID: e.org, AgentID: e.agent.ID, TaskID: t.ID, MaxWallClockSeconds: 3600}
+		if requests > 0 {
+			p.MaxModelRequests = pgtype.Int8{Int64: requests, Valid: true}
+		}
+		if spend != "" {
+			p.MaxSpendUsd = pgtype.Text{String: spend, Valid: true}
+		}
+		r, err := q.CreateRun(ctx, p)
+		Expect(err).NotTo(HaveOccurred())
+		return r
+	}
+	// spend adds n ledger entries of cost each to the run, as the ledger would.
+	spend := func(ctx SpecContext, e *env, r store.Run, n int, cost string) {
+		GinkgoHelper()
+		for range n {
+			_, err := db.Exec(ctx, `INSERT INTO spend_entries (org_id, agent_id, run_id, task_id, request_id, key_id, model,
+				input_tokens, output_tokens, cost_usd, priced, occurred_at)
+				VALUES ($1, $2, $3, $4, gen_random_uuid()::text, 'k-1', 'm', 100, 20, $5::numeric, true, now())`,
+				e.org, e.agent.ID, r.ID, r.TaskID, cost)
+			Expect(err).NotTo(HaveOccurred())
+		}
+	}
+	noticeOf := func(ctx SpecContext, r store.Run) map[string]any {
+		for _, ev := range events(ctx, r) {
+			if ev.Kind == "run.wrap_up_notice" {
+				var p map[string]any
+				Expect(json.Unmarshal(ev.Payload, &p)).To(Succeed())
+				return p
+			}
+		}
+		return nil
+	}
+	fast := func(m *agentd.Metrics) func(*agentd.Config) {
+		return func(c *agentd.Config) { c.UsagePoll = 100 * time.Millisecond; c.Metrics = m }
+	}
+
+	It("tells the agent at 80% of its model requests, once", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		t := e.task(ctx, markWait)
+		r := limited(ctx, e, t, 10, "")
+		m := agentd.NewMetrics(prometheus.NewRegistry())
+		e.pool("agentd-a", fast(m))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(10 * time.Second).Should(Equal(1))
+		spend(ctx, e, r, 7, "0.001")
+		Consistently(func() map[string]any { return noticeOf(ctx, r) }, "1s", "100ms").Should(BeNil(), "7 of 10 is below 80%")
+		spend(ctx, e, r, 1, "0.001")
+		Eventually(func() map[string]any { return noticeOf(ctx, r) }).WithTimeout(10 * time.Second).ShouldNot(BeNil())
+		p := noticeOf(ctx, r)
+		Expect(p).To(HaveKeyWithValue("limit", "requests"))
+		Expect(p["modelRequests"]).To(BeEquivalentTo(8))
+		Expect(p["maxModelRequests"]).To(BeEquivalentTo(10))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).Should(Equal(2))
+		prompts, _, _, _ := e.harness.snapshot()
+		Expect(prompts[1]).To(HavePrefix(limitWrapUpMarker))
+		Expect(prompts[1]).To(ContainSubstring("8 of the 10 model requests"))
+		spend(ctx, e, r, 1, "0.001")
+		Consistently(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }, "1s", "100ms").Should(Equal(2), "the notice is sent once")
+		Expect(testutil.ToFloat64(m.WrapUpNotices.WithLabelValues("requests"))).To(Equal(1.0))
+		Expect(testutil.ToFloat64(m.WrapUpNotices.WithLabelValues("time"))).To(BeZero())
+	})
+
+	It("tells the agent at 80% of its spend limit", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		t := e.task(ctx, markWait)
+		r := limited(ctx, e, t, 1000, "1.00")
+		m := agentd.NewMetrics(prometheus.NewRegistry())
+		e.pool("agentd-a", fast(m))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(10 * time.Second).Should(Equal(1))
+		spend(ctx, e, r, 1, "0.79")
+		Consistently(func() map[string]any { return noticeOf(ctx, r) }, "1s", "100ms").Should(BeNil())
+		spend(ctx, e, r, 1, "0.02")
+		Eventually(func() map[string]any { return noticeOf(ctx, r) }).WithTimeout(10 * time.Second).ShouldNot(BeNil())
+		p := noticeOf(ctx, r)
+		Expect(p).To(HaveKeyWithValue("limit", "spend"))
+		Expect(p).To(HaveKeyWithValue("spentUSD", "0.81"))
+		Expect(p).To(HaveKeyWithValue("maxSpendUSD", "1.00"))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).Should(Equal(2))
+		prompts, _, _, _ := e.harness.snapshot()
+		Expect(prompts[1]).To(ContainSubstring("$0.81 of the $1.00 it may spend"))
+		Expect(testutil.ToFloat64(m.WrapUpNotices.WithLabelValues("spend"))).To(Equal(1.0))
+	})
+
+	It("names the limit that is nearest when two are in their window", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		t := e.task(ctx, markWait)
+		r := limited(ctx, e, t, 10, "1.00")
+		// 9 of 10 requests (90%) and $0.85 of $1.00 (85%), both over 80%, are in the ledger before
+		// the first turn is sent: the notice is prepended to it, and names the nearer, the requests.
+		spend(ctx, e, r, 8, "0.001")
+		spend(ctx, e, r, 1, "0.842")
+		e.pool("agentd-a", fast(agentd.NewMetrics(prometheus.NewRegistry())))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(10 * time.Second).Should(BeNumerically(">=", 1))
+		prompts, _, _, _ := e.harness.snapshot()
+		Expect(prompts[0]).To(ContainSubstring("9 of the 10 model requests"))
+		Expect(noticeOf(ctx, r)).To(HaveKeyWithValue("limit", "requests"))
+	})
+
+	It("sends no notice for a run with neither a request nor a spend limit", func(ctx SpecContext) {
+		e := newEnv(ctx, store.AgentFlavorOpencode)
+		t := e.task(ctx, markWait)
+		r := limited(ctx, e, t, 0, "")
+		spend(ctx, e, r, 50, "0.5")
+		e.pool("agentd-a", fast(agentd.NewMetrics(prometheus.NewRegistry())))
+		Eventually(func() int { p, _, _, _ := e.harness.snapshot(); return len(p) }).WithTimeout(10 * time.Second).Should(Equal(1))
+		Consistently(func() map[string]any { return noticeOf(ctx, r) }, "1s", "100ms").Should(BeNil())
 	})
 })

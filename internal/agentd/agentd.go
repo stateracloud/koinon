@@ -51,6 +51,7 @@ import (
 	"github.com/stateracloud/koinon/internal/execution"
 	"github.com/stateracloud/koinon/internal/orgsettings"
 	"github.com/stateracloud/koinon/internal/prices"
+	"github.com/stateracloud/koinon/internal/runlimits"
 	"github.com/stateracloud/koinon/internal/safego"
 )
 
@@ -94,6 +95,12 @@ type Config struct {
 	// WrapUpNotice is how long before the run's time limit the agent is told to wrap up (ADR 0066
 	// amendment 2026-10-28).
 	WrapUpNotice time.Duration
+	// WrapUpFraction is how far through its model-request or spend limit a run is when the agent is
+	// told to wrap up (ADR 0080); runlimits.WrapUpFraction (80%) by default, a negative value turns
+	// the notice off for these two limits.
+	WrapUpFraction float64
+	// UsagePoll is how often a running turn reads the run's ledger usage for that notice.
+	UsagePoll time.Duration
 	// Now defaults to time.Now; tests move it forward to pass SandboxTimeout.
 	Now func() time.Time
 	// ModelServeTimeout bounds the wait, before a run starts its harness, for the gateway to serve
@@ -190,6 +197,8 @@ func (c *Config) defaults() error {
 	setDefault(&c.SandboxTimeout, orgsettings.DefaultQueueWait)
 	setDefault(&c.SandboxWaitCap, orgsettings.DefaultSandboxWaitCap)
 	setDefault(&c.WrapUpNotice, 5*time.Minute)
+	setDefault(&c.WrapUpFraction, runlimits.WrapUpFraction)
+	setDefault(&c.UsagePoll, 5*time.Second)
 	if c.Now == nil {
 		c.Now = time.Now
 	}
