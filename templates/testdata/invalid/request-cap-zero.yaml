@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# want: missing property 'maxTokens'
+# want: maxModelRequests
 apiVersion: templates.koinon.dev/v1alpha1
 kind: Template
 metadata:
@@ -21,6 +21,8 @@ spec:
   limits:
     run:
       maxDuration: 30m
+      maxModelRequests: 0
+      maxSpendUSD: "1.00"
     spendUSD: "10.00"
   instructions: |
     Do the thing.

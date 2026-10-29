@@ -10,8 +10,10 @@
 //     from the model catalog. [Ingester] maps it to the agent's run at the
 //     record's time and writes one spend_entries row, idempotent on the
 //     request id.
-//   - Run caps: a recorded request adds its tokens to the run through
-//     scheduler.RecordTokenUsage, so the run's token cap (plan item A4) works.
+//   - Run limits (ADR 0081): a recorded request adds its tokens to the run's reported total
+//     (tokens are reported, not enforced), and every recorded or settled entry of a run is
+//     followed by scheduler.CheckRunLimits, which cancels the run at its model-request or spend
+//     limit after the agent's, org's and platform's budgets were checked ([enforce]).
 //   - Cost truth (plan item PV2): the ledger recomputes each request's cost from the raw
 //     usage and the dated price ([prices.Resolve]) and records the price version it used.
 //     That cost counts for limits and reports; agentgateway's own cost is kept beside it and
@@ -42,7 +44,7 @@ import (
 const Window = budget.DayWindow
 
 // RunGrace attributes a request that completes shortly after its run finished
-// (for example a response in flight when the token cap canceled the run) to
+// (for example a response in flight when a run limit canceled the run) to
 // that run.
 const RunGrace = time.Minute
 

@@ -37,6 +37,8 @@ const (
 	// wrapUpMarker opens agentd's wrap-up notice (a prompt of its own, or the start of a resumed
 	// turn's prompt). The fake answers it with wrapUpReply and waits for the next cancel.
 	wrapUpMarker = "[Koinon] About"
+	// limitWrapUpMarker opens the notice of a request or spend limit (ADR 0081).
+	limitWrapUpMarker = "[Koinon] This run has"
 	// wrapUpReply is what the fake writes when it is told to wrap up.
 	wrapUpReply = "Done so far: A. Left: B."
 	// resumeMarker is how the fake harness recognises agentd's resume note.
@@ -368,7 +370,7 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 		}
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 
-	case strings.HasPrefix(text, wrapUpMarker):
+	case strings.HasPrefix(text, wrapUpMarker), strings.HasPrefix(text, limitWrapUpMarker):
 		// Told to wrap up: say where things stand, then wait for the next cancel (the time limit).
 		p.resetCancel()
 		if err := p.say(ctx, id, sdk.UpdateAgentMessageText(wrapUpReply)); err != nil {

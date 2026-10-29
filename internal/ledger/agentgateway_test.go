@@ -106,8 +106,8 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 	BeforeAll(func(ctx SpecContext) {
 		needDocker()
 		// $0.03 per day; each request is 10 + 10 tokens at $50/1M, so $0.001.
-		e = newEnv(ctx, uniq("org"), "", "0.03", 1_000_000)
-		run = e.startRun(ctx, e.task(ctx), 1_000_000, time.Now().Add(-time.Minute))
+		e = newEnv(ctx, uniq("org"), "", "0.03")
+		run = e.startRun(ctx, e.task(ctx), time.Now().Add(-time.Minute))
 
 		model, err := fakemodel.New(fakemodel.Script{Model: pricedModel, Turns: []fakemodel.Turn{{
 			Text: "ok", Usage: fakemodel.Usage{InputTokens: 10, OutputTokens: 10},
@@ -298,7 +298,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 	// have read the prompt, so the ledger charges the input estimate, marked usage_missing; no
 	// output was streamed, so none is charged.
 	It("charges a request whose client disconnected before the headers, as an estimate", func(ctx SpecContext) {
-		d := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		d := newEnv(ctx, uniq("org"), "", "100.00")
 		d.model(ctx, "fake", slowModel)
 		_, err := prices.New(db, nil, priceList).SetOverride(ctx, d.org, audit.User(d.user), prices.OverrideInput{
 			Entry: pricing.Entry{
@@ -349,7 +349,7 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 	// ledger charges the logged usage (here the input estimate), never max_tokens, and holds the
 	// max_tokens bound back from the key while the provider's figure is pending.
 	It("charges a stream cut short the usage the gateway logged, provisionally, with the provider's response ID", func(ctx SpecContext) {
-		c := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		c := newEnv(ctx, uniq("org"), "", "100.00")
 		c.model(ctx, "fake", cutModel)
 		_, err := prices.New(db, nil, priceList).SetOverride(ctx, c.org, audit.User(c.user), prices.OverrideInput{
 			Entry: pricing.Entry{
@@ -421,9 +421,9 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 			drun store.Run
 		)
 		BeforeAll(func(ctx SpecContext) {
-			d = newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+			d = newEnv(ctx, uniq("org"), "", "100.00")
 			d.model(ctx, "openrouter", flash)
-			drun = d.startRun(ctx, d.task(ctx), 1<<40, time.Now().Add(-time.Minute))
+			drun = d.startRun(ctx, d.task(ctx), time.Now().Add(-time.Minute))
 			var err error
 			dkey, err = gateway.NewKey(d.ref())
 			Expect(err).NotTo(HaveOccurred())

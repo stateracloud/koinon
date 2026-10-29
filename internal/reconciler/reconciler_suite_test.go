@@ -150,7 +150,7 @@ func queueRun(ctx context.Context, org, user, agent pgtype.UUID) store.Run {
 	t, err := q.CreateTask(ctx, store.CreateTaskParams{OrgID: org, Title: uniq("task"), AgentID: agent, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: user})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.CreateRun(ctx, store.CreateRunParams{
-		OrgID: org, AgentID: agent, TaskID: t.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000,
+		OrgID: org, AgentID: agent, TaskID: t.ID, MaxWallClockSeconds: 1800,
 	})
 	Expect(err).NotTo(HaveOccurred())
 	return run

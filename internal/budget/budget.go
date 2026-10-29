@@ -36,6 +36,7 @@ import (
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/money"
+	"github.com/stateracloud/koinon/internal/runlimits"
 )
 
 // Levels, in the order they are checked.
@@ -46,6 +47,10 @@ const (
 	// SystemDaily is the daily budget of an org's system key (the provider echo check), a level
 	// of ComputeSystem only.
 	SystemDaily = "system_daily"
+	// RunSpend is the spend limit of the run an agent's key is serving (ADR 0081). It is a level of
+	// the key's net limit while the run is open, narrower than the agent's daily limit, and covers
+	// only that run. A task scope (#183) is another level of the same kind.
+	RunSpend = "run_spend"
 )
 
 // SystemDailyLimit is the daily budget of an org's system key: a check costs a fraction of a
@@ -76,6 +81,8 @@ type Level struct {
 	Limit       money.USD
 	Spent       money.USD
 	WindowStart time.Time
+	// Run is the run a RunSpend level covers; unset for the others.
+	Run pgtype.UUID
 }
 
 // Remaining is what is left, never below zero.
@@ -131,6 +138,10 @@ func (s Status) Reached() []Level {
 func (s Status) Current(now time.Time) []Level {
 	var out []Level
 	for _, l := range s.Reached() {
+		if l.Name == RunSpend {
+			out = append(out, l) // the run is open, so its level is current
+			continue
+		}
 		current := MonthStart(now)
 		if l.Name == AgentDaily || l.Name == SystemDaily {
 			current = DayStart(now)
@@ -144,12 +155,12 @@ func (s Status) Current(now time.Time) []Level {
 
 // Pick is the one limit a stop names when several are reached: of the levels reached in their
 // current window at now ([Status.Current]), the broadest scope first, platform ceiling, then org
-// monthly cap, then agent daily limit, because the broadest one decides which runs stop (an
+// monthly cap, then agent daily limit, then the run's own limit, because the broadest one decides which runs stop (an
 // org-wide limit stops every run of the org) and raising only a narrower limit would not let the
 // agent run again. ok is false when none is reached. Every stop path reports the limit Pick
 // returns: the ledger and the reconciler here; agentd adopts it (rc.6, PR 2).
 func (s Status) Pick(now time.Time) (Level, bool) {
-	rank := map[string]int{PlatformCeiling: 0, OrgMonthly: 1, AgentDaily: 2, SystemDaily: 3}
+	rank := map[string]int{PlatformCeiling: 0, OrgMonthly: 1, AgentDaily: 2, RunSpend: 3, SystemDaily: 4}
 	var pick Level
 	found := false
 	for _, l := range s.Current(now) {
@@ -169,21 +180,27 @@ func (l Level) Title() string {
 		return "platform ceiling"
 	case SystemDaily:
 		return "system checks daily limit"
+	case RunSpend:
+		return "run spend limit"
 	}
 	return "agent daily limit"
 }
 
 // StopMessage is why a run is stopped by the level, as the run's outcome reason.
 func (l Level) StopMessage() string {
+	if l.Name == RunSpend {
+		return fmt.Sprintf("%s reached ($%s of $%s)", l.Title(), l.Spent, l.Limit)
+	}
 	return fmt.Sprintf("%s reached ($%s of $%s since %s)", l.Title(), l.Spent, l.Limit, l.WindowStart.Format("2006-01-02 15:04 MST"))
 }
 
 // StopDetail is the level's part of the payload of a run canceled by a limit.
 func (l Level) StopDetail() map[string]any {
-	return map[string]any{
-		"limit": l.Name, "spend_limit_usd": l.Limit.String(), "spent_usd": l.Spent.String(),
-		"window_start": l.WindowStart.Format("2006-01-02T15:04:05Z"),
+	d := map[string]any{"limit": l.Name, "spend_limit_usd": l.Limit.String(), "spent_usd": l.Spent.String()}
+	if l.Name != RunSpend {
+		d["window_start"] = l.WindowStart.Format("2006-01-02T15:04:05Z")
 	}
+	return d
 }
 
 // Org describes a limit set on an org.
@@ -238,6 +255,54 @@ func AgentDailyLimit(ctx context.Context, q *store.Queries, org, agent pgtype.UU
 	return fallback, fallback > 0, nil
 }
 
+// WithRun adds the run level to st: the spend limit of run and what the run has spent, from its
+// ledger entries. A run without a spend limit (queued before ADR 0081) adds nothing. The run's
+// window starts when it was claimed.
+func (s Status) WithRun(ctx context.Context, q *store.Queries, run store.Run) (Status, error) {
+	l, ok, err := RunLevel(ctx, q, run)
+	if err != nil || !ok {
+		return s, err
+	}
+	out := s
+	out.Levels = append(append([]Level(nil), s.Levels...), l)
+	return out, nil
+}
+
+// RunLevel is run's spend limit and spend as a level. ok is false when the run has no limit.
+func RunLevel(ctx context.Context, q *store.Queries, run store.Run) (Level, bool, error) {
+	limit, ok, err := RunSpendLimit(run)
+	if err != nil || !ok {
+		return Level{}, false, err
+	}
+	u, err := q.GetRunUsage(ctx, store.GetRunUsageParams{OrgID: run.OrgID, RunID: run.ID})
+	if err != nil {
+		return Level{}, false, err
+	}
+	spent, err := money.ParseNumeric(u.CostUsd)
+	if err != nil {
+		return Level{}, false, err
+	}
+	since := run.CreatedAt.Time
+	if run.StartedAt.Valid {
+		since = run.StartedAt.Time
+	}
+	return Level{Name: RunSpend, Limit: limit, Spent: spent, WindowStart: since, Run: run.ID}, true, nil
+}
+
+// RunSpendLimit is the run's spend limit; ok is false when it has none.
+func RunSpendLimit(run store.Run) (money.USD, bool, error) {
+	if !run.MaxSpendUsd.Valid {
+		return 0, false, nil
+	}
+	v, err := run.MaxSpendUsd.Value()
+	if err != nil {
+		return 0, false, fmt.Errorf("budget: run spend limit: %w", err)
+	}
+	str, _ := v.(string)
+	limit, err := money.ParseNumeric(str)
+	return limit, err == nil && limit > 0, err
+}
+
 // Compute reads the agent's limits and the spend in their windows at now. fallback is the
 // agent version's template limit (0 for none).
 func Compute(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, fallback money.USD, now time.Time) (Status, error) {
@@ -259,7 +324,7 @@ func Compute(ctx context.Context, q *store.Queries, org, agent pgtype.UUID, fall
 		if err != nil {
 			return st, err
 		}
-		st.Levels = append(st.Levels, Level{AgentDaily, limit, sp, since})
+		st.Levels = append(st.Levels, Level{Name: AgentDaily, Limit: limit, Spent: sp, WindowStart: since})
 	}
 	levels, err := orgLevels(ctx, q, org, now)
 	st.Levels = append(st.Levels, levels...)
@@ -287,10 +352,10 @@ func orgLevels(ctx context.Context, q *store.Queries, org pgtype.UUID, now time.
 	}
 	var out []Level
 	if o.MonthlyCap != nil {
-		out = append(out, Level{OrgMonthly, *o.MonthlyCap, sp, since})
+		out = append(out, Level{Name: OrgMonthly, Limit: *o.MonthlyCap, Spent: sp, WindowStart: since})
 	}
 	if o.PlatformCeiling != nil {
-		out = append(out, Level{PlatformCeiling, *o.PlatformCeiling, sp, since})
+		out = append(out, Level{Name: PlatformCeiling, Limit: *o.PlatformCeiling, Spent: sp, WindowStart: since})
 	}
 	return out, nil
 }
@@ -308,7 +373,7 @@ func ComputeSystem(ctx context.Context, q *store.Queries, org pgtype.UUID, now t
 	if err != nil {
 		return st, err
 	}
-	st.Levels = append(st.Levels, Level{SystemDaily, SystemDailyLimit, sp, since})
+	st.Levels = append(st.Levels, Level{Name: SystemDaily, Limit: SystemDailyLimit, Spent: sp, WindowStart: since})
 	levels, err := orgLevels(ctx, q, org, now)
 	st.Levels = append(st.Levels, levels...)
 	return st, err
@@ -377,6 +442,9 @@ func Alert(ctx context.Context, q *store.Queries, nf Notifier, st Status, delta 
 		nf = InApp{}
 	}
 	for _, l := range st.Levels {
+		if l.Name == RunSpend {
+			continue // the agent is told at 80% (the wrap-up notice); a person is not notified per run
+		}
 		before := l
 		before.Spent = l.Spent.SubFloor(delta)
 		for _, t := range []struct {
@@ -611,4 +679,57 @@ func (s *Service) GetAgent(ctx context.Context, org, agent pgtype.UUID, fallback
 	}
 	spent, err := money.ParseNumeric(sp)
 	return AgentView{Agent: agent, DailyLimit: limit, SpentToday: spent, DayStart: since}, true, err
+}
+
+// Largest values an admin may set for a run's limits (the template schema's bounds, ADR 0081).
+const (
+	MaxRunModelRequests = 100_000
+	MaxRunDuration      = 24 * time.Hour
+)
+
+// SetAgentRunLimits replaces the agent's overrides of its run limits (ADR 0081): a zero field
+// clears that override and the agent follows its version's value again; all zero removes the row.
+// It applies to runs queued afterwards; a queued or running run keeps the limits it was queued with.
+func (s *Service) SetAgentRunLimits(ctx context.Context, org, agent pgtype.UUID, actor audit.Actor, o runlimits.Override) error {
+	switch {
+	case o.MaxModelRequests < 0 || o.MaxModelRequests > MaxRunModelRequests:
+		return &InvalidError{Msg: fmt.Sprintf("the model request limit must be between 1 and %d", MaxRunModelRequests)}
+	case o.MaxSpend < 0 || o.MaxSpend > money.MaxLimit:
+		return &InvalidError{Msg: fmt.Sprintf("the run spend limit must be greater than 0 and at most %s USD", money.MaxLimit)}
+	case o.WallClock < 0 || o.WallClock > MaxRunDuration || o.WallClock%time.Second != 0:
+		return &InvalidError{Msg: fmt.Sprintf("the run duration must be a whole number of seconds, at most %s", MaxRunDuration)}
+	}
+	return s.tx(ctx, func(q *store.Queries) error {
+		if _, err := q.GetAgent(ctx, store.GetAgentParams{OrgID: org, ID: agent}); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		before, err := runlimits.GetOverride(ctx, q, org, agent)
+		if err != nil {
+			return err
+		}
+		if o.IsZero() {
+			if _, err := q.DeleteAgentRunLimits(ctx, store.DeleteAgentRunLimitsParams{OrgID: org, AgentID: agent}); err != nil {
+				return err
+			}
+		} else if _, err := q.SetAgentRunLimits(ctx, store.SetAgentRunLimitsParams{
+			OrgID: org, AgentID: agent, UpdatedBy: actor.String(),
+			MaxModelRequests: pgtype.Int8{Int64: o.MaxModelRequests, Valid: o.MaxModelRequests > 0},
+			MaxSpendUsd:      pgtype.Text{String: o.MaxSpend.Numeric(), Valid: o.MaxSpend > 0},
+			MaxDurationSecs:  pgtype.Int4{Int32: int32(o.WallClock / time.Second), Valid: o.WallClock > 0}, //nolint:gosec // bounded by MaxRunDuration
+		}); err != nil {
+			return err
+		}
+		return audit.RecordErr(ctx, q, audit.Event{
+			Org: org, Actor: actor, Action: "budget.agent_run_limits.set", TargetKind: "agent", TargetID: agent.String(),
+			Before: overrideSummary(before), After: overrideSummary(o),
+		})
+	})
+}
+
+func overrideSummary(o runlimits.Override) map[string]any {
+	return map[string]any{
+		"maxModelRequests": o.MaxModelRequests, "maxSpendUSD": o.MaxSpend.String(), "maxDurationSeconds": int64(o.WallClock / time.Second),
+	}
 }

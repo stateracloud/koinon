@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing/fstest"
 	"time"
@@ -111,9 +112,10 @@ var _ = Describe("Embedded templates", func() {
 			Expect(g.Targets).To(Equal(&templates.Targets{Min: 1, Max: 1}))
 		})
 
-		It("caps runs at 30 minutes and a token budget, with a spend limit", func() {
+		It("caps runs at 30 minutes, a model-request count and a run spend, with a daily spend limit", func() {
 			Expect(t.Spec.Limits.Run.MaxDuration.Duration).To(Equal(30 * time.Minute))
-			Expect(t.Spec.Limits.Run.MaxTokens).To(BeNumerically(">", 0))
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeNumerically(">", 0))
+			Expect(t.Spec.Limits.Run.MaxSpendUSD.Cents()).To(BeNumerically(">", 0))
 			Expect(t.Spec.Limits.SpendUSD.Cents()).To(BeNumerically(">", 0))
 		})
 
@@ -172,7 +174,9 @@ var _ = Describe("Embedded templates", func() {
 			Expect(t.Spec.Instructions).NotTo(ContainSubstring("create_pull_request"))
 			Expect(t.Spec.Instructions).To(ContainSubstring("about 5 minutes remain"))
 			Expect(t.Spec.Instructions).NotTo(ContainSubstring("date -u"))
-			Expect(t.Spec.Limits.Run.MaxTokens).To(BeEquivalentTo(1000000))
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeEquivalentTo(200))
+			Expect(t.Spec.Limits.Run.MaxSpendUSD.String()).To(Equal("2.00"))
+			Expect(t.Spec.Limits.Run.MaxTokens).To(BeZero(), "the token cap is deprecated and no shipped template sets it")
 		})
 
 		It("keeps notes only under /sandbox/work, in every shipped template", func() {
@@ -294,6 +298,39 @@ var _ = Describe("Parse", func() {
 			"  model:\n", "  harness:\n    pluginInstalls: true\n  model:\n", 1)))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(t.Spec.Harness.PluginInstalls).To(BeTrue())
+	})
+
+	Describe("optional run limits (ADR 0081)", func() {
+		withLimits := func(lines string) string {
+			return regexp.MustCompile(`(?s)    run:\n.*?    spendUSD`).ReplaceAllString(string(valid),
+				"    run:\n      maxDuration: 30m\n"+lines+"    spendUSD")
+		}
+
+		It("accepts a template that sets only the deprecated maxTokens", func() {
+			t, err := templates.Parse([]byte(withLimits("      maxTokens: 2000000\n")))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeZero())
+			Expect(t.Spec.Limits.Run.MaxSpendUSD).To(BeZero())
+		})
+
+		It("accepts a template that sets neither limit", func() {
+			_, err := templates.Parse([]byte(withLimits("")))
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("keeps explicit values", func() {
+			t, err := templates.Parse([]byte(withLimits("      maxModelRequests: 150\n      maxSpendUSD: \"1.50\"\n")))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(t.Spec.Limits.Run.MaxModelRequests).To(BeEquivalentTo(150))
+			Expect(t.Spec.Limits.Run.MaxSpendUSD.String()).To(Equal("1.50"))
+		})
+
+		It("still refuses an explicit zero", func() {
+			_, err := templates.Parse([]byte(withLimits("      maxSpendUSD: \"0.00\"\n")))
+			Expect(err).To(HaveOccurred())
+			_, err = templates.Parse([]byte(withLimits("      maxModelRequests: 0\n")))
+			Expect(err).To(HaveOccurred())
+		})
 	})
 
 	DescribeTable("rejects invalid fixtures",

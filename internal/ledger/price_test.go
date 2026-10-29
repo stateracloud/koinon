@@ -78,7 +78,7 @@ var _ = Describe("Cost truth", func() {
 	BeforeEach(needDocker)
 
 	It("recomputes the cost from raw usage and the dated default price, in disjoint buckets", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		e.model(ctx, "openrouter", flash)
 		// 1M input of which 500k were cache reads, 1k output. The gateway agrees.
 		_, err := ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 1000, 500_000, "0.127")})
@@ -98,7 +98,7 @@ var _ = Describe("Cost truth", func() {
 	// output. agentgateway's token semantics put them inside output (llm.outputTokens includes reasoning),
 	// with the reasoning part reported beside it when the provider splits it out.
 	It("bills reasoning tokens as output, records them, and shows them in the spend report", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "100.00")
 		e.model(ctx, "openrouter", flash)
 		reasoning := func() (n int64) {
 			Expect(db.QueryRow(ctx, `SELECT reasoning_tokens FROM spend_entries WHERE org_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, e.org).Scan(&n)).To(Succeed())
@@ -150,7 +150,7 @@ var _ = Describe("Cost truth", func() {
 	})
 
 	It("charges its own cost and flags the entry when the gateway differs by more than 1%", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		e.model(ctx, "openrouter", flash)
 		_, err := ing.Ingest(ctx, []ledger.Entry{
 			e.usage(time.Now(), flash, 1_000_000, 0, 0, "0.201"), // 0.20 vs 0.201: 0.5%
@@ -170,7 +170,7 @@ var _ = Describe("Cost truth", func() {
 	})
 
 	It("lets an org override win and records its version", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		e.model(ctx, "openrouter", flash)
 		svc := prices.New(db, nil, priceList)
 		o, err := svc.SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
@@ -199,7 +199,7 @@ var _ = Describe("Cost truth", func() {
 	})
 
 	It("bills a bucket an org price does not name at the rate it would have without the split", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		e.model(ctx, "openrouter", frontier)
 		_, err := prices.New(db, nil, priceList).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
 			Entry: pricing.Entry{
@@ -220,10 +220,10 @@ var _ = Describe("Cost truth", func() {
 	})
 
 	It("estimates missing usage, marks it and counts it toward the limit", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "0.01", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "0.01")
 		e.model(ctx, "openrouter", flash)
 		t := e.task(ctx)
-		r := e.startRun(ctx, t, 1<<40, time.Now().Add(-time.Minute))
+		r := e.startRun(ctx, t, time.Now().Add(-time.Minute))
 		x := ledger.Entry{
 			RequestID: uniq("req"), KeyID: "k-test", Agent: e.ref(), Model: flash, Status: 200,
 			MaxTokens: 1000, RequestBytes: 3_000_000, ResponseBytes: -1, Time: time.Now(), // 1M tokens at 3.0 bytes per token
@@ -249,7 +249,7 @@ var _ = Describe("Cost truth", func() {
 	})
 
 	It("raises, never lowers, the estimate with the learned p90", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "100.00")
 		e.model(ctx, "openrouter", flash)
 		var batch []ledger.Entry
 		for i := 0; i < prices.MinCalibrationSamples; i++ {
@@ -272,8 +272,8 @@ var _ = Describe("An unusable stored price", func() {
 	BeforeEach(needDocker)
 
 	It("records the request unpriced and flagged, and never stops the batch or other orgs", func(ctx SpecContext) {
-		bad := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
-		good := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		bad := newEnv(ctx, uniq("org"), "", "10.00")
+		good := newEnv(ctx, uniq("org"), "", "10.00")
 		bad.model(ctx, "openrouter", flash)
 		good.model(ctx, "openrouter", flash)
 		// A rate from before the stricter validation, and an override that no longer parses.
@@ -302,8 +302,8 @@ var _ = Describe("An unusable stored price", func() {
 	})
 
 	It("caps the bound of an absurd max_tokens, which blocks neither ingest nor the budgets of anyone else", func(ctx SpecContext) {
-		abuser := newEnv(ctx, uniq("org"), "", "10.00", 1<<62)
-		other := newEnv(ctx, uniq("org"), "", "10.00", 1<<62)
+		abuser := newEnv(ctx, uniq("org"), "", "10.00")
+		other := newEnv(ctx, uniq("org"), "", "10.00")
 		abuser.model(ctx, "openrouter", frontier)
 		other.model(ctx, "openrouter", flash)
 		var batch []ledger.Entry
@@ -354,7 +354,7 @@ var _ = Describe("An unusable stored price", func() {
 		}
 		// customProvider serves flash on a provider type with no documented billing, priced by an org entry.
 		customProvider := func(ctx SpecContext) *env {
-			e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+			e := newEnv(ctx, uniq("org"), "", "100.00")
 			e.model(ctx, "acme-gateway", flash)
 			_, err := prices.New(db, nil, priceList).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
 				Entry: pricing.Entry{
@@ -379,7 +379,7 @@ var _ = Describe("An unusable stored price", func() {
 
 		for _, typ := range []string{"anthropic", "openrouter", "openai"} {
 			It("charges nothing for a 400 from "+typ+", which does not bill it, and keeps the entry flagged rejected_by_upstream", func(ctx SpecContext) {
-				e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+				e := newEnv(ctx, uniq("org"), "", "100.00")
 				e.model(ctx, typ, flash)
 				if typ != "openrouter" {
 					_, err := prices.New(db, nil, priceList).SetOverride(ctx, e.org, audit.User(e.user), prices.OverrideInput{
@@ -392,7 +392,7 @@ var _ = Describe("An unusable stored price", func() {
 					})
 					Expect(err).NotTo(HaveOccurred())
 				}
-				run := e.startRun(ctx, e.task(ctx), 1_000_000, time.Now().Add(-time.Minute))
+				run := e.startRun(ctx, e.task(ctx), time.Now().Add(-time.Minute))
 				_, err := ing.Ingest(ctx, []ledger.Entry{rejected(e, 400)})
 				Expect(err).NotTo(HaveOccurred())
 				s := e.lastEntry(ctx)
@@ -425,7 +425,7 @@ var _ = Describe("An unusable stored price", func() {
 		})
 
 		It("charges a record from a config that cannot say who answered the same way", func(ctx SpecContext) {
-			e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+			e := newEnv(ctx, uniq("org"), "", "100.00")
 			e.model(ctx, "openrouter", flash)
 			x := rejected(e, 400)
 			x.UpstreamKnown, x.Upstream = false, false
@@ -440,7 +440,7 @@ var _ = Describe("An unusable stored price", func() {
 		// custom one keeps the conservative input charge for any 4xx, 401 and 403 included.
 		for _, status := range []int64{401, 402, 403, 404, 413, 429} {
 			It(fmt.Sprintf("charges nothing for a provider's %d when its type documents not billing it", status), func(ctx SpecContext) {
-				e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+				e := newEnv(ctx, uniq("org"), "", "100.00")
 				e.model(ctx, "openrouter", flash)
 				_, err := ing.Ingest(ctx, []ledger.Entry{rejected(e, status)})
 				Expect(err).NotTo(HaveOccurred())
@@ -465,7 +465,7 @@ var _ = Describe("An unusable stored price", func() {
 		}
 
 		It("settles a 5xx as it did: not waived, and the provider's status is kept", func(ctx SpecContext) {
-			e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+			e := newEnv(ctx, uniq("org"), "", "100.00")
 			e.model(ctx, "openrouter", flash)
 			x := rejected(e, 502)
 			_, err := ing.Ingest(ctx, []ledger.Entry{x})
@@ -479,7 +479,7 @@ var _ = Describe("An unusable stored price", func() {
 		})
 
 		It("settles a record without a status as it did", func(ctx SpecContext) {
-			e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+			e := newEnv(ctx, uniq("org"), "", "100.00")
 			e.model(ctx, "openrouter", flash)
 			x := rejected(e, 0)
 			x.UpstreamKnown, x.Upstream = false, false
@@ -492,7 +492,7 @@ var _ = Describe("An unusable stored price", func() {
 	})
 
 	It("charges an aborted response the usage the gateway logged and holds max_tokens back from the key while the provider's figure is pending", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "100.00")
 		e.model(ctx, "openrouter", flash)
 		x := func(max int64, responseID string) ledger.Entry {
 			return ledger.Entry{
@@ -544,12 +544,12 @@ var _ = Describe("Budgets", func() {
 	BeforeEach(needDocker)
 
 	It("cancels every open run of the org at its monthly cap, naming the limit, and alerts at 80% and 100%", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "100.00")
 		e.model(ctx, "openrouter", flash)
 		svc := budget.New(db)
 		Expect(svc.SetOrgCap(ctx, e.org, audit.User(e.user), ptr(money.MustParse("1.00")))).To(Succeed())
 		t := e.task(ctx)
-		r := e.startRun(ctx, t, 1<<40, time.Now().Add(-time.Minute))
+		r := e.startRun(ctx, t, time.Now().Add(-time.Minute))
 
 		// 0.20 per entry: 20%, 40%, 60%, 80%.
 		for i := 0; i < 4; i++ {
@@ -579,7 +579,7 @@ var _ = Describe("Budgets", func() {
 	})
 
 	It("pushes the smallest remaining amount of the agent, the org and the platform", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		e.model(ctx, "openrouter", flash)
 		svc := budget.New(db)
 		now := time.Now()
@@ -617,14 +617,14 @@ var _ = Describe("Budgets", func() {
 	})
 
 	It("tells platform admins when an org reaches its ceiling", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "100.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "100.00")
 		e.model(ctx, "openrouter", flash)
 		_, err := db.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, e.user)
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func(ctx SpecContext) { _, _ = db.Exec(ctx, `DELETE FROM platform_admins WHERE user_id = $1`, e.user) })
 		Expect(budget.New(db).SetPlatformCeiling(ctx, e.org, audit.User(e.user), e.user, ptr(money.MustParse("0.20")))).To(Succeed())
 		t := e.task(ctx)
-		r := e.startRun(ctx, t, 1<<40, time.Now().Add(-time.Minute))
+		r := e.startRun(ctx, t, time.Now().Add(-time.Minute))
 		_, err = ing.Ingest(ctx, []ledger.Entry{e.usage(time.Now(), flash, 1_000_000, 0, 0, "")})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(e.run(ctx, r.ID).OutcomeReason.String).To(HavePrefix("platform ceiling reached"))
@@ -666,7 +666,7 @@ var _ = Describe("Prices migrated from model rates", func() {
 	}
 
 	It("takes what the model's rates never set from the matching default entry, once", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		migrated(ctx, e.org, "openrouter", frontier, `{"input":"2","output":"10"}`)
 		svc := prices.New(db, nil, priceList)
 		n, err := svc.CompleteMigrated(ctx)
@@ -698,7 +698,7 @@ var _ = Describe("Prices migrated from model rates", func() {
 	})
 
 	It("keeps generic settings and asks for a review when no default entry matches", func(ctx SpecContext) {
-		e := newEnv(ctx, uniq("org"), "", "10.00", 1<<40)
+		e := newEnv(ctx, uniq("org"), "", "10.00")
 		migrated(ctx, e.org, "openai", "acme/custom-model", `{"input":"1","output":"2"}`)
 		_, err := prices.New(db, nil, priceList).CompleteMigrated(ctx)
 		Expect(err).NotTo(HaveOccurred())

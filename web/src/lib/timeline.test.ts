@@ -253,6 +253,14 @@ describe('a spend limit', () => {
       expect(text).toContain("(from the agent's notes)")
     })
 
+    it('says a run stopped at its model request or spend limit, with the last summary (ADR 0081)', () => {
+      const [req] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'request_cap', message: 'model request limit reached (150 of 150 requests)', summary: 'S', summarySource: 'reply' }))
+      expect(req).toContain('stopped at its model request limit: model request limit reached (150 of 150 requests)')
+      expect(req).toContain('Last summary:\nS')
+      const [spend] = noteText(taskEvent(1, 100, 'run.canceled', { reason: 'run_spend_cap', message: 'run spend limit reached ($2.01 of $2.00)' }))
+      expect(spend).toContain('stopped at its spend limit: run spend limit reached ($2.01 of $2.00)')
+    })
+
     it('names why a sandbox never became ready', () => {
       const [text] = noteText(taskEvent(1, 100, 'run.failed', { reason: 'x', failureClass: 'sandbox_unavailable', sandboxCause: 'no_nodes' }))
       expect(text).toContain('no node can run the sandbox')
@@ -282,6 +290,11 @@ describe('a spend limit', () => {
       const [text] = noteText(runEvent(1, 'run.wrap_up_notice', { remainingSeconds: 300, maxWallClockSeconds: 1800 }))
       expect(text).toContain('asked to wrap up')
       expect(text).toContain('about 5 minutes left')
+    })
+
+    it('shows the wrap-up notice of a request or spend limit', () => {
+      expect(noteText(runEvent(1, 'run.wrap_up_notice', { limit: 'requests', modelRequests: 120, maxModelRequests: 150 }))[0]).toContain('120 of 150 model requests used')
+      expect(noteText(runEvent(1, 'run.wrap_up_notice', { limit: 'spend', spentUSD: '1.62', maxSpendUSD: '2.00' }))[0]).toContain('$1.62 of $2.00 spent')
     })
   })
 })

@@ -9,6 +9,7 @@ import { useState } from 'react'
 import { AgentApprovalScopes } from '@/components/agent-approval-scopes'
 import { AgentMcpServers } from '@/components/agent-mcp-servers'
 import { AgentModel } from '@/components/agent-model'
+import { AgentRunLimits } from '@/components/agent-run-limits'
 import { AgentTriggers } from '@/components/agent-triggers'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +18,7 @@ import { Label } from '@/components/ui/label'
 import { AgentService, AgentStatus } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { ConnectionService } from '@/gen/koinon/connection/v1alpha1/connection_pb'
 import type { Grant } from '@/gen/koinon/template/v1alpha1/template_pb'
+import { runLimitsLabel } from '@/lib/cost'
 import { agentStatusLabel, flavorLabel, presetLabel } from '@/lib/labels'
 import { isApprover } from '@/lib/approvals'
 import { useOrg } from '@/lib/org-context'
@@ -115,7 +117,7 @@ export function AgentPage() {
             <>
               <dt className="text-muted-foreground">Run limits</dt>
               <dd>
-                {Math.round(Number(a.runLimits.maxDurationSeconds) / 60)} min, {Number(a.runLimits.maxTokens).toLocaleString()} tokens per run
+                {runLimitsLabel(a.runLimits)} per run
               </dd>
             </>
           )}
@@ -124,6 +126,7 @@ export function AgentPage() {
         {grants.length === 0 ? <p className="text-muted-foreground">None.</p> : grants.map((g, i) => <GrantSummary key={i} grant={g} connectionName={connName} />)}
       </section>
       {isApprover(org.role) && <AgentModel agent={a} />}
+      {isApprover(org.role) && a.status !== AgentStatus.ARCHIVED && <AgentRunLimits agent={a} />}
       <AgentTriggers agent={a} canEdit={isApprover(org.role)} />
       {!draft && <AgentApprovalScopes agentId={a.id} canRevoke={isApprover(org.role)} />}
       {isApprover(org.role) && <AgentMcpServers agentId={a.id} />}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/internal/runlimits"
 )
 
 // outcomes are the label values of koinon_agentd_runs_finished_total: the run states agentd moves
@@ -27,8 +28,8 @@ type Metrics struct {
 	Requeued    prometheus.Counter
 	// SandboxWaitCap counts runs failed because their sandbox never became ready, by cause.
 	SandboxWaitCap *prometheus.CounterVec
-	// WrapUpNotices counts runs whose agent was told its time limit is near.
-	WrapUpNotices prometheus.Counter
+	// WrapUpNotices counts runs whose agent was told a run limit is near, by the limit (ADR 0081).
+	WrapUpNotices *prometheus.CounterVec
 	// TimeLimitStops counts runs this replica stopped at their time limit.
 	TimeLimitStops prometheus.Counter
 }
@@ -51,9 +52,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		SandboxWaitCap: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koinon_agentd_sandbox_wait_cap_total", Help: "Runs failed because their sandbox never became ready within the org's cap, by cause.",
 		}, []string{"cause"}),
-		WrapUpNotices: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "koinon_agentd_wrap_up_notices_total", Help: "Runs whose agent was told its time limit is near.",
-		}),
+		WrapUpNotices: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koinon_agentd_wrap_up_notices_total", Help: "Runs whose agent was told a run limit is near, by the limit.",
+		}, []string{"limit"}),
 		TimeLimitStops: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_agentd_time_limit_stops_total", Help: "Runs this replica stopped at their time limit (the api's sweep is the backstop and is not counted).",
 		}),
@@ -68,6 +69,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	for _, o := range outcomes {
 		m.Finished.WithLabelValues(string(o))
+	}
+	for _, k := range runlimits.Kinds {
+		m.WrapUpNotices.WithLabelValues(string(k))
 	}
 	for _, c := range execution.WaitCauses {
 		m.SandboxWaitCap.WithLabelValues(string(c))

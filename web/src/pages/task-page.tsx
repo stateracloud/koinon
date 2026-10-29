@@ -4,6 +4,7 @@ import { ConnectError } from '@connectrpc/connect'
 import { createConnectQueryKey, useMutation, useQuery, useTransport } from '@connectrpc/connect-query'
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
+import { useEffect, useState } from 'react'
 import { AgentNotes } from '@/components/agent-notes'
 import { ApprovalView } from '@/components/approval-view'
 import { Composer } from '@/components/composer'
@@ -14,10 +15,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { AgentService } from '@/gen/koinon/agent/v1alpha1/agent_pb'
 import { OrgRole } from '@/gen/koinon/auth/v1alpha1/auth_pb'
-import type { Cost, RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
+import type { Cost, Run, RunState } from '@/gen/koinon/run/v1alpha1/run_pb'
 import { TaskService, TaskState } from '@/gen/koinon/task/v1alpha1/task_pb'
 import { useTaskConversation } from '@/hooks/use-task-conversation'
-import { costDetail, costLabel, estimateNote } from '@/lib/cost'
+import { costDetail, costLabel, estimateNote, runProgress } from '@/lib/cost'
 import { isEnded, runFinished, runStateLabel, stateLabel } from '@/lib/labels'
 import { useOrg } from '@/lib/org-context'
 
@@ -63,7 +64,7 @@ export function TaskPage() {
   const agentName = agent?.displayName
   const runs = taskQuery.data.runs.map((r) => watches[r.id]?.run ?? r)
   // Costs come from GetTask only: watched runs carry none.
-  const runCosts = taskQuery.data.runs.map((r, i) => ({ id: r.id, state: runs[i].state, cost: r.cost }))
+  const runCosts = taskQuery.data.runs.map((r, i) => ({ id: r.id, state: runs[i].state, cost: r.cost, run: runs[i] }))
   const active = runs.filter((r) => !runFinished(r.state))
 
   return (
@@ -130,7 +131,13 @@ export function TaskPage() {
   )
 }
 
-function RunCosts({ runs }: { runs: { id: string; state: RunState; cost?: Cost }[] }) {
+function RunCosts({ runs }: { runs: { id: string; state: RunState; cost?: Cost; run: Run }[] }) {
+  // The elapsed time of a running run moves on its own.
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 15_000)
+    return () => clearInterval(t)
+  }, [])
   if (!runs.some((r) => r.cost)) return null
   return (
     <section aria-label="Run costs" className="text-muted-foreground text-sm">
@@ -139,6 +146,13 @@ function RunCosts({ runs }: { runs: { id: string; state: RunState; cost?: Cost }
           <li key={r.id}>
             Run {r.id.slice(0, 8)} · {runStateLabel(r.state)} ·{' '}
             {r.cost ? <span title={costDetail(r.cost)}>{costLabel(r.cost)}{estimateNote(r.cost) && ` (${estimateNote(r.cost)})`}</span> : 'no cost recorded'}
+            {/* The run's use of its limits (ADR 0081): the first one reached ends it. */}
+            {runProgress(r.run, r.cost, now).length > 0 && (
+              <span title="Requests, spend and time against the run's limits. The first limit reached ends the run; tokens are reported, not limited.">
+                {' '}
+                · {runProgress(r.run, r.cost, now).join(' · ')}
+              </span>
+            )}
           </li>
         ))}
       </ul>

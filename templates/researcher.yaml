@@ -33,7 +33,8 @@ spec:
   limits:
     run:
       maxDuration: 30m
-      maxTokens: 1000000
+      maxModelRequests: 200
+      maxSpendUSD: "2.00"
     spendUSD: "3.00"
   instructions: |
     # Researcher

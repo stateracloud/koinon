@@ -10,14 +10,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/stateracloud/koinon/internal/money"
 	"github.com/stateracloud/koinon/templates"
 )
 
-// Defaults for versions whose config sets no run caps (plan item A4, ADR 0049).
+// Defaults for versions whose config sets no run limits (plan item A4, ADR 0049, ADR 0081): the
+// versions made before run limits existed. Shipped templates set their own, calibrated per
+// template (ADR 0081).
 const (
-	DefaultMaxWallClock = 30 * time.Minute
-	DefaultMaxTokens    = int64(2_000_000)
+	DefaultMaxWallClock     = 30 * time.Minute
+	DefaultMaxModelRequests = int64(200)
 )
+
+// DefaultMaxSpend is the run spend limit of a version that sets none: $5.
+var DefaultMaxSpend = money.FromCents(500)
 
 // TemplateRef records the template content a version was made from.
 type TemplateRef struct {
@@ -157,15 +163,32 @@ func Parse(raw []byte) (Config, error) {
 // Marshal encodes c for storage.
 func (c Config) Marshal() ([]byte, error) { return json.Marshal(c) }
 
-// RunCaps returns the caps a run of this version gets, with defaults for
-// unset values.
-func (c Config) RunCaps() (wallClock time.Duration, maxTokens int64) {
-	wallClock, maxTokens = c.Limits.Run.MaxDuration.Duration, c.Limits.Run.MaxTokens
-	if wallClock <= 0 {
-		wallClock = DefaultMaxWallClock
+// RunLimits are the limits one run gets (ADR 0081): the first reached ends the run.
+type RunLimits struct {
+	// WallClock is the time a run may be owned.
+	WallClock time.Duration
+	// MaxModelRequests counts every model request through the agent's key.
+	MaxModelRequests int64
+	// MaxSpend is the run's spend by the ledger's settled cost.
+	MaxSpend money.USD
+}
+
+// RunLimits returns the limits a run of this version gets, with defaults for unset values. An
+// admin's override of the agent (package budget's run-limit overrides) is applied on top of it.
+func (c Config) RunLimits() RunLimits {
+	l := RunLimits{
+		WallClock:        c.Limits.Run.MaxDuration.Duration,
+		MaxModelRequests: c.Limits.Run.MaxModelRequests,
+		MaxSpend:         money.FromCents(c.Limits.Run.MaxSpendUSD.Cents()),
 	}
-	if maxTokens <= 0 {
-		maxTokens = DefaultMaxTokens
+	if l.WallClock <= 0 {
+		l.WallClock = DefaultMaxWallClock
 	}
-	return wallClock, maxTokens
+	if l.MaxModelRequests <= 0 {
+		l.MaxModelRequests = DefaultMaxModelRequests
+	}
+	if l.MaxSpend <= 0 {
+		l.MaxSpend = DefaultMaxSpend
+	}
+	return l
 }

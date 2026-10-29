@@ -66,7 +66,7 @@ func (f *fixture) nextRun(ctx context.Context) {
 	Expect(err).NotTo(HaveOccurred())
 	f.task, err = q.CreateTask(ctx, store.CreateTaskParams{OrgID: f.org, Title: "weekly update", AgentID: f.agent.ID, CreatedByKind: store.TaskCreatorKindUser, CreatedByUserID: f.owner})
 	Expect(err).NotTo(HaveOccurred())
-	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: f.org, AgentID: f.agent.ID, TaskID: f.task.ID, MaxWallClockSeconds: 1800, MaxTokens: 200_000})
+	_, err = q.CreateRun(ctx, store.CreateRunParams{OrgID: f.org, AgentID: f.agent.ID, TaskID: f.task.ID, MaxWallClockSeconds: 1800})
 	Expect(err).NotTo(HaveOccurred())
 	run, err := q.ClaimNextRun(ctx, store.ClaimNextRunParams{OrgID: f.org, OwnerID: "agentd-test", LeaseSeconds: 600})
 	Expect(err).NotTo(HaveOccurred())
