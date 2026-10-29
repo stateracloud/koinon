@@ -28,7 +28,7 @@ namespaces come back altered), with nothing in Koinon able to say so.
    because providers and prices change afterwards. A set model that fails it **fails the run at
    once** with "the agent's model X is not served in this org; pick another on the agent page" (or
    the unpriced variant), like an unpriced model (#174). It never falls back to another layer.
-4. Composes with ADR 0069 and the budget code without change: the wire format belongs to the model
+4. Composes with ADR 0069 (the harness's wire format follows the run's effective model) and the budget code without change: the wire format belongs to the model
    (`models.format`, looked up by name) and spend is charged to the agent by the gateway key, so a
    different model name changes neither.
 
@@ -54,8 +54,10 @@ namespaces come back altered), with nothing in Koinon able to say so.
 
 ### The provider echo check
 
-8. `CheckProviderEcho` / `POST /admin/v1/providers/{id}/echo-check` sends one chat request through
-   the gateway to a chosen served, priced model of the provider: "Echo this line back exactly,
+8. `CheckProviderEcho` / `POST /admin/v1/providers/{id}/echo-check` sends one request through
+   the gateway to a chosen served, priced model of the provider, on the route of the model's wire
+   format as a run does (ADR 0069): Messages (`/v1/messages`) for an `anthropic` model, chat
+   completions for the rest: "Echo this line back exactly,
    character for character, nothing else: <a name, an address-like string and a Kubernetes
    namespace>". `modelcheck.Compare` ignores surrounding whitespace and one pair of quotes and
    otherwise needs a character-for-character match; the word-level diff is returned. The latest

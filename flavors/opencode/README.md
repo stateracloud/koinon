@@ -16,11 +16,11 @@ the remaining workarounds are in ADR 0052 (amendment 2026-10-28). The bundled ru
 
 | Item (ADR 0035) | OpenCode flavor |
 | --- | --- |
-| ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs] [--cache-anthropic|--cache-alibaba] [--session-id RUN_ID]`, run as UID 10001 in a session working directory under `/sandbox`. agentd adds `--plugin-installs` only for an agent whose template sets `harness.pluginInstalls: true` (see [Plugins](#plugins)). It adds `--cache-anthropic` or `--cache-alibaba` for a model whose provider needs explicit prompt-cache markers (ADR 0068); the entry script then sets `providers.koinon.compatibility.cacheFormat` through `OPENCODE_CONFIG_CONTENT`. For an OpenRouter model agentd also passes `--session-id` with the run ID, sent as the request body field `session_id` (OpenRouter sticky routing: a run stays on one upstream, so its cache stays warm). The config also caps every tool result at 24576 bytes / 600 lines (`tool_output`); the full text goes to the tool-output directory |
+| ACP command | `/usr/local/bin/koinon-opencode --model-base-url URL --model NAME --mcp-url URL [--plugin-installs] [--model-format openai|anthropic] [--cache-anthropic|--cache-alibaba] [--session-id RUN_ID]`, run as UID 10001 in a session working directory under `/sandbox`. agentd adds `--plugin-installs` only for an agent whose template sets `harness.pluginInstalls: true` (see [Plugins](#plugins)). It always adds `--model-format` (the model's wire format, ADR 0069): `openai` (chat completions, provider entry `koinon`) or `anthropic` (Messages, entry `koinon-anthropic`, which posts to `<gateway>/v1/messages` with the key as `Authorization: Bearer`); `internal/flavor` holds the format-to-entry table. It adds `--cache-anthropic` or `--cache-alibaba` for a chat-completions model whose provider needs explicit prompt-cache markers (ADR 0068); the entry script then sets `providers.koinon.compatibility.cacheFormat` through `OPENCODE_CONFIG_CONTENT`. An `anthropic`-format model gets no such switch: OpenCode places up to four `cache_control` breakpoints itself. For an OpenRouter model agentd also passes `--session-id` with the run ID, sent as the request body field `session_id` on whichever entry the run uses (OpenRouter sticky routing: a run stays on one upstream, so its cache stays warm). The config also caps every tool result at 24576 bytes / 600 lines (`tool_output`); the full text goes to the tool-output directory |
 | Instructions | `/sandbox/.koinon/AGENTS.md`, named by the `instructions` key of the read-only config, written by koinon-agentd before every harness start from the run's agent version, and checked before every prompt. The entry script refuses to start (exit 64) when it is missing, empty or a symbolic link |
-| Session start | After `session/new` or `session/load`, agentd waits for the command `koinon:github_koinon-ready`, then selects the model with `session/set_config_option` (`configId` `model`, value `koinon/<model>`) |
+| Session start | After `session/new` or `session/load`, agentd waits for the command `koinon:github_koinon-ready`, then selects the model with `session/set_config_option` (`configId` `model`, value `<entry>/<model>`: `koinon/<model>` or `koinon-anthropic/<model>`) |
 | Resume mode | `session/load` (replays history). OpenCode also advertises `session/resume`; Koinon does not rely on it |
-| Model endpoint | `--model-base-url` (agentgateway's OpenAI-compatible base, ending in `/v1`) and `--model` (the gateway's model name); key from `$OPENAI_API_KEY` |
+| Model endpoint | `--model-base-url` (agentgateway's LLM base, ending in `/v1`; the `koinon` entry posts to `/chat/completions` and `koinon-anthropic` to `/messages`, ADR 0069) and `--model` (the gateway's model name); key from `$OPENAI_API_KEY` |
 | MCP | `--mcp-url` (agentgateway's MCP route), server `koinon` in OpenCode's own config, `Authorization: Bearer <key>`; tools reach the model one by one as `koinon_<tool>` (`codemode: false`) |
 | Project configuration | Off (`OPENCODE_DISABLE_PROJECT_CONFIG=1`): a repository's `opencode.json(c)`, `.opencode/`, `.claude/`, `.agents/` and its top-level `AGENTS.md` have no effect |
 | State | `/sandbox/.local/share/opencode` (sessions in `opencode.db`), `/sandbox/.local/state/opencode` |
@@ -142,9 +142,35 @@ then waits one more second: OpenCode registers the server's tools after a 100 ms
 ## Model selection
 
 A new session reports a model OpenCode picked from its own catalog (for example
-`opencode/fledge-alpha-free`) until one is selected. agentd always selects `koinon/<model>` with
+`opencode/fledge-alpha-free`) until one is selected. agentd always selects `<entry>/<model>` with
 `session/set_config_option` (`packages/cli/src/acp/config-option.ts`; OpenCode has no
 `session/set_model`) and fails the run unless the answer shows that model.
+
+### Two provider entries (ADR 0069)
+
+`opencode.jsonc` has two static providers on the same gateway URL: `koinon`
+(`aisdk:@ai-sdk/openai-compatible`, chat completions, `apiKey`) and `koinon-anthropic`
+(`aisdk:@ai-sdk/anthropic`, Messages, `authToken`). Both send the agent's key as
+`Authorization: Bearer <placeholder>`, the header the sandbox's gateway profile names
+(`internal/reconciler`, `GatewayProfile`: `authStyle bearer`, `authorization`), so OpenShell
+rewrites the placeholder (it does so in any header) and the gateway's key policy reads the same header. Never set
+`apiKey` and `authToken` together (`packages/ai/src/providers/anthropic.ts` refuses it), and the
+Anthropic provider's default `x-api-key` is not used. `--model-format anthropic` also sets the
+config's default model to `koinon-anthropic/<model>` through `OPENCODE_CONFIG_CONTENT`.
+
+OpenCode 2.2.0 sends one `anthropic-beta` value on the Messages entry: `interleaved-thinking-2025-05-14`
+(`packages/ai/src/protocols/anthropic-messages.ts`, `requiredBetaHeaders`), plus others only for
+compaction, fast mode and thinking-block binding, none of which Koinon's config enables. The
+model declares no reasoning, so no `thinking` block is sent and that beta changes nothing; the
+gateway removes `anthropic-beta` (ADR 0069 amendment) and nothing needs pinning. A flavor spec
+(`test/flavors/anthropic_test.go`) fails if that changes.
+
+A session saved under one entry loads under the other (measured with OpenCode 2.2.0, both
+directions, `test/flavors/anthropic_test.go`): the replayed history is complete, a turn with a tool
+call included, the model receives it on the next request, and that request is in the new entry's
+format. agentd therefore needs no new session when a task's model changes format. OpenCode rewrites
+characters outside `[a-zA-Z0-9_-]` in a tool-call ID to `_` for Messages (`scrubToolCallID`), so a
+session whose call was `functions.write:0` replays as `functions_write_0`; the spec checks it.
 
 ## Phone-home, updates, telemetry and plugins
 

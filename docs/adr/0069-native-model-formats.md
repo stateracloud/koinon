@@ -84,6 +84,10 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
    - `models.format` holds the model's wire format: `openai` (chat completions) or `anthropic`
      (Messages). The value set is open: Gemini `generateContent`, Bedrock Converse or OpenAI
      Responses would each be a new value, a gateway renderer, a harness entry and tests.
+   - The harness's format is the format of the run's **effective model** (the agent's setting, then
+     the version's model, then the org default; ADR 0072), looked up by name, never of the
+     version's model alone. An agent set to a Messages model runs on the `koinon-anthropic` entry
+     even when its version names a chat-completions model, and the reverse.
    - One table in Go (`internal/modelformat`) holds the defaults, and it is the only place that knows
      them:
      - **Provider capabilities:** the formats each provider type offers. `anthropic` offers
@@ -202,7 +206,7 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
      `koinon-anthropic`.
    - **`test/flavors`:** with `--model-format anthropic`, OpenCode posts to `/v1/messages` with up to
      four `cache_control` breakpoints and `Authorization: Bearer`. A session saved under `koinon/` and
-     resumed under `koinon-anthropic/` keeps its history; this is not yet tested.
+     resumed under `koinon-anthropic/` keeps its history (amendment PR 3).
    - **Reconciler and escape suite:** the profile allows `POST /v1/messages`. A sandbox can post there
      and still reach nothing else.
    - **e2e (local kind):** one org with an `anthropic` provider on the fake model server. A two-turn
@@ -234,8 +238,7 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
   to the other. The `gatewaytest` spec runs both on the real binary. Adding Gemini native or Bedrock
   later is the same kind of change.
 - Direct `anthropic` models switch format at their next harness start, and a resumed OpenCode session
-  changes provider entry. The test in decision 8 covers that. Until it passes, resume across the
-  switch is not yet tested.
+  changes provider entry. The test in decision 8 covers that (amendment PR 3).
 - An admin who overrides a format keeps it through later default changes. Everyone else follows the
   table.
 - Keys that are not scoped to a workspace work once the provider's workspace ID is set. The models
@@ -314,3 +317,37 @@ What the components already do (agentgateway v1.6.0, OpenCode v2.2.0, Anthropic'
 - An empty `Model.Format` is an error in `State.Validate`; the reconciler always fills it.
 - The workspace-ID rule (`modelformat.WorkspaceIDPattern`, `MaxWorkspaceIDLength`, `ValidWorkspaceID`)
   has one home, used by the catalog and the gateway; a test compares it with the migration's CHECK.
+
+## Amendment (2026-10-28): the harness (PR 3)
+
+- `prices.CacheModeFor(providerType, model, format, price)` is the one decision point: an
+  `anthropic`-format model is `CacheNative` (no marker, no `--cache-*`), whoever serves it, and chat
+  completions keep the ADR 0068 modes by provider (an OpenRouter `anthropic/*` model on `openai`
+  stays `CacheAnthropic` until the flip). `CacheUnsupported` and its reason are gone; nothing maps to
+  it. `prices.Model` carries the model's `Format` (from `models.format`).
+- `flavor.Descriptor.ModelEntries` maps each format to the OpenCode provider entry and `FormatArg` is
+  the entry script's switch. agentd always passes `--model-format` and selects `<entry>/<model>`. The
+  script sets the default model and the OpenRouter `session_id` overlay on the entry in use.
+- **Beta flags:** on the `koinon-anthropic` entry OpenCode 2.2.0 sends `anthropic-beta:
+  interleaved-thinking-2025-05-14` only. The model declares no reasoning, so no `thinking` block is
+  sent and the beta is a no-op; the gateway keeps removing the header and the rendering table pins
+  nothing. A flavor spec fails if OpenCode's set changes.
+- **Resume across the switch:** a session created under `koinon/` loads under `koinon-anthropic/` and
+  the other way round, with its history (a tool-call turn included) in the next request and the next
+  request in the new format. No new session is needed. OpenCode rewrites every character outside
+  `[a-zA-Z0-9_-]` in a tool-call ID to `_` when it builds a Messages request
+  (`scrubToolCallID`, `anthropic-messages.ts`), which Anthropic's ID pattern needs. A spec resumes a
+  session whose tool call is `functions.write:0` and sees `functions_write_0`.
+- **The OpenRouter flip** deletes the two pin rows in `internal/modelformat/modelformat.go`
+  (`anthropic/` and `claude-` for OpenRouter); the startup re-derivation moves every model that is
+  not overridden. Nothing else changes: a flipped model becomes `CacheNative` through
+  `CacheModeFor`.
+- **Sandbox auth:** both entries send `Authorization: Bearer <placeholder>`, the header the profile's
+  `authStyle bearer` credential names, and the gateway's key policy reads (OpenShell v0.1.5 rewrites the placeholder in any header, so
+  the header is chosen for the key policy). The flavor spec asserts
+  one `Authorization` value and no `x-api-key` on every Messages request.
+- **e2e (kind):** the quickstart driver declares a second, direct `anthropic` provider on the fake
+  model server (`test/e2e/kind/model-provider-anthropic.yaml`, script `claude-e2e.yaml`). A run on its
+  model posts only to `/v1/messages` (the fake server's `GET /_fake/requests`), and its ledger entries
+  show a cache write and then `cache_read_tokens > 0`, each priced at its own rate. The ledger's
+  `input_tokens` includes cache reads and writes.

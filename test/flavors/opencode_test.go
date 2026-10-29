@@ -13,6 +13,8 @@ import (
 
 	"github.com/stateracloud/koinon/internal/acp"
 	"github.com/stateracloud/koinon/internal/db/store"
+	koinflavor "github.com/stateracloud/koinon/internal/flavor"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
@@ -323,6 +325,32 @@ var _ = Describe("koinon-opencode plugin switch", Ordered, func() {
 	It("sends the run ID as the body field session_id with --session-id", func(ctx SpecContext) {
 		Expect(entryEnv(ctx, "--session-id", "01234567-run")).To(ContainSubstring(
 			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"body":{"session_id":"01234567-run"}}}}` + "\n"))
+	})
+
+	It("puts the overlay on the entry of --model-format, and makes it the default model", func(ctx SpecContext) {
+		Expect(entryEnv(ctx, "--model-format", "anthropic", "--session-id", "01234567-run")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1","providers":{"koinon-anthropic":{"body":{"session_id":"01234567-run"}}}}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "anthropic")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"model":"koinon-anthropic/m-1"}` + "\n"))
+		Expect(entryEnv(ctx, "--model-format", "openai", "--cache-alibaba")).To(ContainSubstring(
+			`OPENCODE_CONFIG_CONTENT={"providers":{"koinon":{"compatibility":{"cacheFormat":"alibaba"}}}}` + "\n"))
+	})
+
+	It("reaches the provider entry of every format in the flavor table", func(ctx SpecContext) {
+		d, ok := koinflavor.Lookup(opencode.storeFlavor)
+		Expect(ok).To(BeTrue())
+		for _, f := range modelformat.All() {
+			entry := d.ModelEntries[f]
+			Expect(entry).NotTo(BeEmpty(), "no entry for the %s format", f)
+			Expect(entryEnv(ctx, "--model-format", string(f), "--session-id", "run-1")).To(
+				ContainSubstring(`"providers":{"`+entry+`":{"body":{"session_id":"run-1"}}}`), "format %s", f)
+		}
+	})
+
+	It("refuses a format its entry table has no row for", func(ctx SpecContext) {
+		_, stderr, code := sb.try(ctx, append(opencode.command("http://gw.test/v1", "m-1", "http://gw.test/mcp"), "--model-format", "gemini")...)
+		Expect(code).To(Equal(64), stderr)
+		Expect(stderr).To(ContainSubstring("koinon-opencode: no provider entry for --model-format 'gemini'"))
 	})
 
 	It("keeps the model key from OpenCode's built-in providers", func(ctx SpecContext) {
