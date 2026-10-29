@@ -473,7 +473,9 @@ networkPolicy:
   # Extra peers allowed to reach the API port (for example the ingress controller's or Gateway's namespace).
   # Empty allows every source.
   apiFrom: []
-  # Peers allowed to scrape agentgateway's stats port.
+  # Peers allowed to scrape agentgateway's stats port (15020). Like metrics.allowFrom, this only
+  # opens the port; it works with any scraper (prometheus-operator, a VictoriaMetrics VMServiceScrape,
+  # a plain Prometheus config), with metrics.serviceMonitor.enabled left false.
   metricsFrom: []
   # Egress rules added to agentgateway's, for internal model upstreams (it may otherwise reach DNS,
   # koinon-api and the public internet only). Each item is a NetworkPolicy egress rule, for example
@@ -493,9 +495,14 @@ metrics:
   #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
   # Empty (the default) admits nobody, so with networkPolicy.enabled the metrics are not scrapable
   # until you name the scraper. (networkPolicy.metricsFrom is separate: agentgateway's stats port.)
+  # This only opens the port. A scraper that is not prometheus-operator (for example VictoriaMetrics'
+  # VMServiceScrape) needs no ServiceMonitor: leave serviceMonitor.enabled false, list its namespace
+  # here and in networkPolicy.metricsFrom, and point it at the <release>-koinon-<component>-metrics
+  # Services (port "metrics").
   allowFrom: []
   serviceMonitor:
-    # A prometheus-operator ServiceMonitor per component. Needs the monitoring.coreos.com/v1
+    # A prometheus-operator ServiceMonitor per component, plus one for agentgateway's stats port
+    # (gateway.mode=standalone) or a PodMonitor on the controller's proxy pods (kubernetes). Needs the monitoring.coreos.com/v1
     # ServiceMonitor CRD: enabling it without the CRD fails the install.
     enabled: false
     # Extra labels on the ServiceMonitors, for example the release label your Prometheus selects on.

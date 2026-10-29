@@ -319,14 +319,28 @@ n=$(render --show-only templates/metrics.yaml | grep -c '^kind: Service$' || tru
 lacks "no ServiceMonitor by default" 'kind: ServiceMonitor'
 sm=(--set metrics.serviceMonitor.enabled=true --api-versions monitoring.coreos.com/v1/ServiceMonitor)
 n=$(render "${sm[@]}" | grep -c '^kind: ServiceMonitor$' || true)
-[ "$n" = 3 ] || fail "$n ServiceMonitors with metrics.serviceMonitor.enabled, want 3"
+[ "$n" = 4 ] || fail "$n ServiceMonitors with metrics.serviceMonitor.enabled, want 4 (api, reconciler, agentd, gateway)"
+has "gateway ServiceMonitor scrapes the stats port" 'port: stats$' "${sm[@]}" --show-only templates/metrics.yaml
+has "gateway ServiceMonitor is named for the gateway" 'name: koinon-gateway$' "${sm[@]}" --show-only templates/metrics.yaml
+smk=("${sm[@]}" --set gateway.mode=kubernetes)
+lacks "no PodMonitor in standalone mode" 'kind: PodMonitor' "${sm[@]}"
+pm=(--api-versions monitoring.coreos.com/v1/PodMonitor)
+n=$(render "${smk[@]}" "${pm[@]}" | grep -c '^kind: ServiceMonitor$' || true)
+[ "$n" = 3 ] || fail "$n ServiceMonitors in kubernetes mode, want 3 (the chart renders no gateway Service)"
+n=$(render "${smk[@]}" "${pm[@]}" | grep -c '^kind: PodMonitor$' || true)
+[ "$n" = 1 ] || fail "$n PodMonitors in kubernetes mode, want 1"
+has "PodMonitor selects the proxy pods" 'gateway.networking.k8s.io/gateway-name: koinon-gateway$' "${smk[@]}" "${pm[@]}" --show-only templates/metrics.yaml
+has "PodMonitor scrapes the stats port" 'portNumber: 15020$' "${smk[@]}" "${pm[@]}" --set metrics.serviceMonitor.labels.release=prom --show-only templates/metrics.yaml
+if render "${smk[@]}" >/dev/null 2>&1; then fail "kubernetes mode with the ServiceMonitor CRD but no PodMonitor CRD must fail"; fi
+n=$(render --set metrics.serviceMonitor.enabled=true --set metrics.serviceMonitor.skipCapabilityCheck=true --set gateway.mode=kubernetes | grep -c '^kind: PodMonitor$' || true)
+[ "$n" = 1 ] || fail "$n PodMonitors with skipCapabilityCheck, want 1"
 has "ServiceMonitor interval and labels" 'interval: "30s"' "${sm[@]}" --set metrics.serviceMonitor.interval=30s --set metrics.serviceMonitor.labels.release=prom --show-only templates/metrics.yaml
 has "ServiceMonitor extra labels" 'release: prom$' "${sm[@]}" --set metrics.serviceMonitor.labels.release=prom --show-only templates/metrics.yaml
 if render --set metrics.serviceMonitor.enabled=true >/dev/null 2>&1; then
 	fail "metrics.serviceMonitor.enabled=true must fail without the ServiceMonitor CRD"
 fi
 n=$(render --set metrics.serviceMonitor.enabled=true --set metrics.serviceMonitor.skipCapabilityCheck=true | grep -c '^kind: ServiceMonitor$' || true)
-[ "$n" = 3 ] || fail "$n ServiceMonitors with skipCapabilityCheck and no --api-versions, want 3"
+[ "$n" = 4 ] || fail "$n ServiceMonitors with skipCapabilityCheck and no --api-versions, want 4"
 lacks "metrics port closed by default" 'port: metrics$' --show-only templates/networkpolicy.yaml
 scrape=(--set 'metrics.allowFrom[0].namespaceSelector.matchLabels.kubernetes\.io/metadata\.name=monitoring')
 n=$(render "${scrape[@]}" --show-only templates/networkpolicy.yaml | grep -c 'port: metrics$' || true)
