@@ -395,8 +395,12 @@ tokens are billed as output).
    beta, whether or not this agent has thinking on, because a beta no field uses changes nothing and
    the gateway cannot see the agent. For direct Anthropic the pinned value is
    `thinking-binding-controls-2026-08-01` only. `interleaved-thinking-2025-05-14`, which OpenCode also
-   sends, is not pinned: it is not needed for the adaptive request Koinon sends, and the flavor spec
-   shows the request is accepted without it. For OpenRouter models no beta is pinned: the live check of
+   sends, is not pinned: Anthropic's documentation of adaptive thinking lists no beta for it, so the
+   adaptive request Koinon sends should not need one. No spec in the suite shows that: the flavor
+   spec runs with OpenCode's own header (it asserts the header is present) and the strict fake has
+   no rule for interleaved thinking. Whether direct Anthropic accepts an adaptive request with tool
+   use and no interleaved beta is an open item for the home-lab window, a live check before the
+   claim is relied on. For OpenRouter models no beta is pinned: the live check of
    2026-10-29 passed through OpenRouter's Messages route with none. If a later check shows OpenRouter
    needs one, it is a field in the row.
 4. **The agent's setting.** `agents.thinking` (migration 00038) is `NULL`, `on` or `off`, a mutable
@@ -421,7 +425,10 @@ tokens are billed as output).
 6. **Cost.** Thinking tokens are billed as output: agentgateway and Anthropic report them inside
    `output_tokens`, and `pricing.Split` already bills the reasoning part at the output rate unless the
    price names a reasoning rate (ADR 0056). Nothing about the ledger changes except visibility: the spend
-   report line gains `reasoningTokens` (the part providers report separately, inside `outputTokens`). The
+   report line gains `reasoningTokens` (the part providers report separately, inside `outputTokens`).
+   Anthropic Messages reports no such split, so for direct and OpenRouter Claude models the line is
+   `null` ("not reported"), never 0: a 0 would read as "no thinking happened" (#240 comment 2), and the
+   thinking is in `outputTokens`. It is a number once any request of the model reported a split. The
    price list marks every thinking-capable model `hidden_thinking` (Haiku 5.5 lacked it; list version
    `2026-10-29.1`), so a cut stream's output is flagged `thinking_unmeasured`, and a test keeps the
    price list and the catalog in step. The budget reserve of a cut stream is the request's `max_tokens`
@@ -447,7 +454,17 @@ tokens are billed as output).
 - The gateway spec (`gatewaytest`, both drivers, real agentgateway v1.7.0) sends adaptive thinking
   with `block_binding` and no client beta through a Claude-shaped model ID to the strict fake: it
   arrives with the pinned beta and the client's own beta replaced; the same body to a model the catalog
-  says cannot think is refused with Anthropic's message, reproducing the rc.7 failure.
+  says cannot think is refused with Anthropic's message, reproducing the rc.7 failure. A second case
+  covers the OpenRouter route: an adaptive model with no pinned beta (`Supported()` with empty
+  `Betas`) gets the client's `anthropic-beta` removed, so OpenCode's own betas never reach the
+  upstream and cannot hide a request that works only because of them.
+- The kind e2e runs the fake model server with `--strict-messages`, so every e2e Messages request is
+  checked the way Anthropic checks it. Step 8 (after the quickstart's time check) sets the agent to
+  `claude-haiku-5-5`, a Claude 5.x ID on the anthropic provider (script `claude-haiku-5-5.yaml`),
+  turns thinking on and then off, and asserts on `GET /_fake/requests` (which now reports each
+  request's thinking type and `anthropic-beta` values): OpenCode's real body crosses the real
+  agentgateway to the strict fake, with adaptive thinking and only the pinned beta when on, and no
+  thinking block when off. Step 6d keeps `claude-e2e`, a model that does not think.
 - The ledger prices reasoning tokens as output; the agent API audits and resolves the setting; agentd
   passes the mode.
 
