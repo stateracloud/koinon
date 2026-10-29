@@ -13,6 +13,10 @@ You have access to these repositories. A task names one as `owner/name`: clone i
 - `procoduck/homelab` on Gitea (connector `gitea`, host `git.example.test:3000`): `git clone https://git.example.test:3000/procoduck/homelab`
 - `procoduck/koinon-docs` on Gitea (connector `gitea`, host `git.example.test:3000`): `git clone https://git.example.test:3000/procoduck/koinon-docs`
 
+## Web access
+
+The sandbox cannot reach the web, so there is no built-in web fetch or web search, and `curl` and `git` reach only the hosts of your repositories, if you have any. Web access goes through the organization's MCP tools: use the ones your tool list offers for searching and reading pages. If none is offered, say that you cannot reach the web instead of trying other routes.
+
 ## Working with large data
 
 - Check size before reading: `wc -c FILE`, `ls -l`, `file FILE`. Read in ranges, not whole files.

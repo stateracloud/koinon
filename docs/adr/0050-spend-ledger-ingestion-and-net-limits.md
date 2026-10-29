@@ -105,6 +105,60 @@ Amendment 2026-10-24 (PV2, BG1): the ledger recomputes cost itself and the net l
 remaining amount of the agent's daily limit, the org's monthly cap and the platform ceiling; the
 counter generation digests every spend that amount derives from. See ADR 0056.
 
+## Amendment (2026-10-29): exact decimals at the gateway edge, one bad key fails alone (issue #245)
+
+Standalone agentgateway v1.7.0 rejects its whole config when any USD budget has more than nine
+fraction digits. The ledger works in pico-USD (twelve digits) and the limit was a float64, so the
+remainder after a ten-digit DeepSeek charge (`4.9827242408`) froze the gateway: no new key,
+revocation, model or limit applied until the digits went away. Decisions:
+
+1. `gateway.Limit.Amount` is a `money.USD`; there is no float in the path. `gateway.USDLimit` rounds
+   the amount **down** to `gateway.BudgetFractionDigits` (9) so the gateway never hands out more
+   than the remainder, and the standalone renderer writes it fixed-point (`money.USD.Fixed`),
+   never with an exponent (`5e-05` is `0.00005`). The constant sits next to the agentgateway pin; a
+   gateway upgrade revisits it. The counter generation digests the exact spends, not the rounded
+   amount, so counter semantics are unchanged. The Token unit is no longer a limit unit: Koinon
+   budgets money, and the reload probe's zero Tokens budget is the renderer's own constant.
+   Kubernetes mode renders no amounts (it only revokes a key at zero), so it needs no change.
+2. Validation happens before delivery and fails per key. `Limit.Validate` (unit, sign, digits,
+   generation) runs on every limit; `State.WithoutInvalidLimits` takes the keys of agents with an
+   invalid limit out of the state and the standalone driver returns the revision with a
+   `*gateway.RejectedError` naming each key (Kind `Key`), like the Kubernetes driver does for an
+   object its controller refuses. A key that is not in the file is refused by the gateway, so the
+   agent fails closed, and the reconciler reports it on the org's agents and does not mark the key
+   live. The renderer also checks the rendered amounts against agentgateway's rule
+   (`checkDocument`) and refuses to produce a file agentgateway would reject. The golden files
+   still pass through `agentgateway --validate-only`, now including a limit net of ten- and
+   twelve-digit spend.
+3. The reason is surfaced. agentgateway reports a refused reload only in its log (JSON, level error,
+   `Failed to reload config: <reason>`), so the standalone waiter takes a `ReloadLog`; the chart's
+   reconciler reads the gateway pods' logs (`PodLogReload`: get on the Deployment, list on pods, get
+   on pods/log in its namespace). An unreadable log never fails the apply. A refused whole config is
+   a `*gateway.ConfigRejectedError` carrying the reason; the reconciler logs it, counts
+   `koinon_reconciler_pass_errors_total{kind="gateway_config"}`, sets the gauge
+   `koinon_reconciler_gateway_config_rejected`, and puts it in the message of the agents held back
+   (the status the API already exposes). All label sets are fixed (ADR 0023). The metrics guide
+   documents alerts on that gauge and on agentgateway's `agentgateway_config_synchronized`.
+4. The rejection window counts time, not polls. The gauge reads 0 after a rejection until the next
+   file loads, which a ConfigMap delivers 60 to 80 s later, so four polls (3.5 s) misreported the
+   next good file. The waiter now returns rejected when the gauge is 0 and the log shows a failure
+   logged after the wait began (at once, with the reason), or when the gauge has read 0 for
+   `RejectAfter` (default 2 minutes, longer than a ConfigMap sync) and no log says otherwise.
+5. Reading the log is bounded and never guesses. `PodLogReload` names the `agentgateway` container
+   (a service-mesh or logging sidecar would otherwise make the log request fail), builds the pod
+   selector from the whole Deployment selector including expressions, and reads only the last hour
+   (`reloadLookback`), so a pass does not stream a rotated log file from every replica. A log line
+   over 1 MiB is skipped and the scan goes on after it; a read error is reported. Before delivery
+   the waiter records a baseline: the newest failure in the window, or the window start when there
+   is none. When the baseline read fails, the baseline is unknown and the waiter does not attribute
+   a failure by the log at all (an older failure would pass for this file's); `RejectAfter` alone
+   decides, and the reason is missing from that report.
+6. Deferred: a preflight check of the gateway's reload state. Preflight checks install
+   prerequisites before the reconciler runs; the reload state of a running gateway is reported by
+   the gauge, the reconciler log and agent status above, and `agentgateway_config_synchronized`
+   on the gateway's stats listener. A preflight check can be added when preflight grows a
+   post-install mode.
+
 ## Open questions
 
 - Whether the receiver should require a token once agentgateway can read one from a file.

@@ -268,6 +268,43 @@ func (q *Queries) GetCalibration(ctx context.Context, arg GetCalibrationParams) 
 	return i, err
 }
 
+const getLastUpstreamRefusal = `-- name: GetLastUpstreamRefusal :one
+SELECT upstream_status::int AS status, model, occurred_at
+FROM spend_entries
+WHERE org_id = $1 AND run_id = $2 AND upstream_status = ANY($3::int[]) AND occurred_at >= $4
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLastUpstreamRefusalParams struct {
+	OrgID    pgtype.UUID
+	RunID    pgtype.UUID
+	Statuses []int32
+	Since    pgtype.Timestamptz
+}
+
+type GetLastUpstreamRefusalRow struct {
+	Status     int32
+	Model      string
+	OccurredAt pgtype.Timestamptz
+}
+
+// The last request of a run that its provider answered with an error status at or after @since: the
+// gateway's own record of why a model request failed (agentd reads it when a harness reports an
+// error without a status). Only the statuses in @statuses count. No row when the provider
+// refused nothing in the window.
+func (q *Queries) GetLastUpstreamRefusal(ctx context.Context, arg GetLastUpstreamRefusalParams) (GetLastUpstreamRefusalRow, error) {
+	row := q.db.QueryRow(ctx, getLastUpstreamRefusal,
+		arg.OrgID,
+		arg.RunID,
+		arg.Statuses,
+		arg.Since,
+	)
+	var i GetLastUpstreamRefusalRow
+	err := row.Scan(&i.Status, &i.Model, &i.OccurredAt)
+	return i, err
+}
+
 const getOrgEstimatedSpendSince = `-- name: GetOrgEstimatedSpendSince :one
 SELECT coalesce(sum(cost_usd), 0)::text AS cost_usd
 FROM spend_entries
@@ -350,14 +387,16 @@ INSERT INTO spend_entries (
     org_id, agent_id, principal, run_id, task_id, request_id, key_id, model,
     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
     cost_usd, gateway_cost_usd, price_ref, priced, estimated, estimate, cost_flagged,
-    request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id
+    request_bytes, response_bytes, occurred_at, provisional, reserve_usd, response_id,
+    upstream_status
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8,
     $9, $10, $11, $12, $13,
     ($14::text)::numeric, ($15::text)::numeric,
     $16, $17, $18, $19::jsonb, $20,
     $21, $22, $23,
-    $24, coalesce(($25::text)::numeric, 0), $26
+    $24, coalesce(($25::text)::numeric, 0), $26,
+    $27
 )
 ON CONFLICT (org_id, request_id) DO NOTHING
 RETURNING id
@@ -390,6 +429,7 @@ type InsertSpendEntryParams struct {
 	Provisional      bool
 	ReserveUsd       pgtype.Text
 	ResponseID       pgtype.Text
+	UpstreamStatus   pgtype.Int2
 }
 
 // Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
@@ -426,6 +466,7 @@ func (q *Queries) InsertSpendEntry(ctx context.Context, arg InsertSpendEntryPara
 		arg.Provisional,
 		arg.ReserveUsd,
 		arg.ResponseID,
+		arg.UpstreamStatus,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)

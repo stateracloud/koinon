@@ -41,6 +41,7 @@ var _ = Describe("GitHub read grant", Label("escape", "openshell"), Ordered, fun
 	// refusedByPolicy is OpenShell's answer to a request its L7 policy denies (spike 3.2).
 	refusedByPolicy := func(code, body string) {
 		GinkgoHelper()
+		answered(code, body)
 		Expect(code).To(Equal("403"))
 		Expect(body).To(ContainSubstring("policy"))
 	}

@@ -1,0 +1,104 @@
+# Rendered by Koinon (internal/gateway/standalone). Do not edit: changes are overwritten.
+# Keys appear only as hashes; key material lives in Kubernetes Secrets.
+config:
+  adminAddr: localhost:15000
+  statsAddr: '[::]:15020'
+  readinessAddr: '[::]:15021'
+  database:
+    url: sqlite:///data/agentgateway.db?mode=rwc
+  logging:
+    format: json
+frontendPolicies:
+  accessLog:
+    add:
+      koinon.agent: default(apiKey.agent, "")
+      koinon.cache_read: llm.cachedInputTokens
+      koinon.cache_write: llm.cacheCreationInputTokens
+      koinon.config: '"870dd6c04a1a8b2e"'
+      koinon.error: proxy.error.reason
+      koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
+      koinon.in: llm.inputTokens
+      koinon.key: default(apiKey.name, "")
+      koinon.max_tokens: llm.params.max_tokens
+      koinon.out: llm.outputTokens
+      koinon.reasoning: llm.reasoningTokens
+      koinon.req_bytes: int(request.headers["content-length"])
+      koinon.request: uuid()
+      koinon.response_id: coalesce(response.headers["x-generation-id"])
+      koinon.status: response.code
+      koinon.stream: llm.streaming
+      koinon.upstream: default(proxy.upstreamDuration, "") != ""
+gateways:
+  default:
+    port: 4000
+llm:
+  policies:
+    apiKey:
+      mode: strict
+      location:
+        header:
+          name: authorization
+          prefix: 'Bearer '
+      keys:
+        - keyHash: sha256:d7ef9a39720870db13b85251d2f81938233b8417e9ef596c773638c5d38fd60c
+          metadata:
+            name: k-aaaaaaaaaaaa
+            agent: acme/repo-helper
+            org: acme
+          allowedModels: []
+          budgets:
+            - name: koinon-agent-limit-1792627200-0123456789abcdef
+              limit:
+                unit: USD
+                amount: 4.98272424
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+        - keyHash: sha256:afba2a391fafa9cdf6ca56f8efe1d251dcc3829546026c10f2694c0b2c759a32
+          metadata:
+            name: k-bbbbbbbbbbbb
+            agent: acme/triage
+            org: acme
+          allowedModels: []
+          budgets:
+            - name: koinon-agent-limit-1792627200-0123456789abcdef
+              limit:
+                unit: USD
+                amount: 4.999999876
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+        - keyHash: sha256:b0b03f2ad19f1dc9e87777f6432dd6ca96548f078a07c9bc473a278c2e1b85c6
+          metadata:
+            name: k-gggggggggggg
+            agent: globex/analyst
+            org: globex
+          allowedModels: []
+          budgets:
+            - name: koinon-agent-limit-1792627200-0123456789abcdef
+              limit:
+                unit: USD
+                amount: 0.00005
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+        - keyHash: sha256:b3cacd377ae04d8240c26f410a733b0ef6affcc96b52ee68805bff8f35d98a2b
+          metadata:
+            name: koinon-reload-probe
+            agent: ""
+          budgets:
+            - name: koinon-reload-probe
+              limit:
+                unit: Tokens
+                amount: 0
+              window:
+                rolling: 24h
+              onBudgetExceeded: Block
+    authorization:
+      rules:
+        - apiKey.name != "koinon-reload-probe" && !has(llmRequest.mcp_servers)
+    transformations:
+      request:
+        set:
+          x-koinon-org: default(apiKey.org, "")
+  models: []

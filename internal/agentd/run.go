@@ -52,6 +52,9 @@ type failure struct {
 	retryAfter time.Duration
 	// gateway: the gateway answered the harness's model request with 401 or 429 (classify.go).
 	gateway bool
+	// authLike: the harness reported an authentication failure; the gateway's record says who
+	// refused it (providerRefusal, providerrefusal.go).
+	authLike bool
 	// modelNotFound: the gateway answered 404 or model_not_found for the run's model.
 	modelNotFound bool
 	// sandbox is set when the sandbox never became ready within the org's cap (sandbox.go).
@@ -534,7 +537,7 @@ func (r *runner) execute(ctx context.Context) error {
 	if err != nil {
 		return r.execErr(ctx, "read the code host of the agent's repositories", err)
 	}
-	instructions := instructionsFile(vc.Instructions, cwd, repos)
+	instructions := instructionsFile(vc.Instructions, cwd, repos, vc.WebEgress())
 	if err := r.writeInstructions(fctx, workspace, sandbox, instructions); err != nil {
 		return r.execErr(ctx, "write the instructions", err)
 	}
@@ -712,6 +715,7 @@ type promptResult struct {
 // pool to stop.
 func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, session acp.SessionID, text string) error {
 	done := make(chan promptResult, 1)
+	started := time.Now()
 	r.takeRefusals()
 	go func() {
 		stop, err := conn.Prompt(ctx, session, text)
@@ -764,7 +768,7 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 			// The turn ended on its own while the timer fired (for example end_turn after an
 			// ask_user, where the run must park and must not get another prompt). Honour it; if a
 			// next turn starts inside the window, it gets the notice prepended.
-			return true, r.turnResult(ctx, conn, proc, stderr, res)
+			return true, r.turnResult(ctx, conn, proc, stderr, res, started)
 		}
 		// The harness ignored session/cancel: a second session/prompt must not overlap the first.
 		// Arm no new notice; the run ends at the limit as it does without one.
@@ -794,7 +798,7 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 					return errShutdown
 				}
 			}
-			return r.turnResult(ctx, conn, proc, stderr, res)
+			return r.turnResult(ctx, conn, proc, stderr, res, started)
 		case <-r.fenced:
 			if fence(r.fenceKind.Load()) == fenceCanceled {
 				r.log.Info("run canceled; cancelling the turn")
@@ -822,9 +826,9 @@ func (r *runner) turn(ctx context.Context, conn *acp.Conn, proc execution.Proces
 }
 
 // turnResult acts on how the prompt of a turn ended.
-func (r *runner) turnResult(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, res promptResult) error {
+func (r *runner) turnResult(ctx context.Context, conn *acp.Conn, proc execution.Process, stderr *tail, res promptResult, since time.Time) error {
 	if res.err != nil {
-		return r.modelGone(ctx, r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)))
+		return r.modelGone(ctx, r.providerRefusal(ctx, r.budgetStop(ctx, r.harnessErr(ctx, conn, proc, stderr, "session/prompt", res.err)), since))
 	}
 	switch res.stop {
 	case acp.StopEndTurn:

@@ -3,6 +3,7 @@
 package flavor_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stateracloud/koinon/internal/flavor"
@@ -21,6 +22,9 @@ func TestTableMatchesTemplates(t *testing.T) {
 		}
 		if d.PluginInstalls != (d.PluginInstallsArg != "") {
 			t.Errorf("flavor %q: PluginInstalls and PluginInstallsArg disagree", d.Name)
+		}
+		if d.NoWebToolsArg != "" && !strings.HasPrefix(d.NoWebToolsArg, "--") {
+			t.Errorf("flavor %q: NoWebToolsArg %q is not a switch", d.Name, d.NoWebToolsArg)
 		}
 		if got, ok := flavor.FromProto(d.Proto); !ok || got.Name != d.Name {
 			t.Errorf("flavor %q does not round-trip through its proto value", d.Name)

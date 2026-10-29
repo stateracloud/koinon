@@ -484,6 +484,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 
 	var rejections []gateway.Rejection
 	applyFailed := false
+	rejectedReason := ""
 	applyStart := time.Now()
 	_, applyErr := r.gw.Apply(ctx, state)
 	r.m.GatewayApply.Observe(time.Since(applyStart).Seconds())
@@ -496,7 +497,21 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			// depend on it (start on demand, idle stop), so it goes on, except for agents whose
 			// new key is not live yet. Nothing is recorded as applied and nothing is pruned.
 			applyFailed = true
-			r.m.PassErrors.WithLabelValues(errKindGatewayApply).Inc()
+			var cfgRej *gateway.ConfigRejectedError
+			if errors.As(err, &cfgRej) {
+				// The whole file was refused and the gateway keeps its previous config, so no key,
+				// revocation, model or limit of this pass is live. Its reason is only in the gateway's
+				// log; say it here, on the agents waiting for it and in the metrics (ADR 0050).
+				rejectedReason = cfgRej.Reason
+				if rejectedReason == "" {
+					rejectedReason = "the reason could not be read from the gateway's log"
+				}
+				r.m.PassErrors.WithLabelValues(errKindGatewayConfig).Inc()
+				r.log.Error("agentgateway rejected the config; it keeps serving the previous one, so no change of this pass is live",
+					"revision", string(cfgRej.Revision), "reason", rejectedReason)
+			} else {
+				r.m.PassErrors.WithLabelValues(errKindGatewayApply).Inc()
+			}
 			errs = append(errs, fmt.Errorf("reconciler: apply gateway state: %w", err))
 		} else {
 			rejections = rej.Rejected
@@ -507,8 +522,9 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("reconciler: %w", rej))
 		}
 	}
+	r.m.GatewayConfigRejected.Set(b2f(rejectedReason != ""))
 	if !applyFailed {
-		r.keysLive(state)
+		r.keysLive(state, rejections)
 		r.recordApplied(served, state, rejections)
 		if err := r.recordServed(ctx, orgs, served, state, rejections); err != nil {
 			r.m.PassErrors.WithLabelValues(errKindDatabase).Inc()
@@ -527,9 +543,13 @@ func (r *Reconciler) reconcileAll(ctx context.Context) error {
 	defer func() { r.m.AgentsHeldBack.Set(float64(heldBack)) }()
 	var lateRun []*work
 	for _, w := range late {
-		if applyFailed {
+		if applyFailed || r.keyNotLive(w.key.ID) {
 			r.log.Warn("the gateway does not serve the agent's new key yet; its sandbox work waits", w.logAttrs()...)
-			r.recordMessage(ctx, w, errors.New("waiting for the gateway to serve the agent's new key"))
+			msg := "waiting for the gateway to serve the agent's new key"
+			if rejectedReason != "" {
+				msg += ": agentgateway rejected the config: " + rejectedReason
+			}
+			r.recordMessage(ctx, w, errors.New(msg))
 			heldBack++
 			continue
 		}
@@ -604,12 +624,20 @@ func (r *Reconciler) startJobs(ctx context.Context, ws []*work, workspaces map[s
 }
 
 // keysLive records that the applied state carries its keys.
-func (r *Reconciler) keysLive(s gateway.State) {
+func (r *Reconciler) keysLive(s gateway.State, rejected []gateway.Rejection) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.appliedSinceStart = true
+	refused := map[string]bool{}
+	for _, x := range rejected {
+		if x.Kind == "Key" {
+			refused[x.Name] = true
+		}
+	}
 	for _, k := range s.Keys {
-		delete(r.notLive, k.ID)
+		if !refused[k.ID] {
+			delete(r.notLive, k.ID)
+		}
 	}
 }
 
@@ -1396,4 +1424,11 @@ func (r *Reconciler) failClosedLimit(agent gateway.AgentRef, now time.Time) *gat
 		}
 	}
 	return &gateway.Limit{Unit: gateway.USD, Amount: 0, Window: ledger.Window, Generation: "failed"}
+}
+
+func b2f(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }

@@ -82,6 +82,15 @@ func (c Config) QuestionTimers() (reminder, expiry time.Duration) {
 	return reminder, expiry
 }
 
+// WebEgress reports whether a sandbox running this version may reach arbitrary web hosts, which
+// is what a harness's built-in web fetch needs. It is the one predicate behind the tool set
+// matching the egress (ADR 0080): koinon-agentd offers the built-in web tools only when it is
+// true, and says so in the instructions it writes. No grant opens arbitrary hosts today (a
+// connector grant opens its connection's host, the npm registry follows harness.pluginInstalls,
+// and web research goes through an MCP tool the gateway runs), so it is false for every version;
+// a grant type that opens the web adds its case here.
+func (c Config) WebEgress() bool { return false }
+
 // IsEphemeral reports whether the agent version with config c is ephemeral. It is the one
 // predicate behind every ephemeral special case: the reconciler's sandbox-per-task lifecycle and
 // the places that skip home checkpoints and the archive tier (ADR 0032, ADR 0065 decision 13b).

@@ -21,7 +21,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"548bad7fae93b35b"'
+      koinon.config: '"204e8b75a2f1a58a"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -34,6 +34,7 @@ frontendPolicies:
       koinon.response_id: coalesce(response.headers["x-generation-id"])
       koinon.status: response.code
       koinon.stream: llm.streaming
+      koinon.upstream: default(proxy.upstreamDuration, "") != ""
 gateways:
   default:
     port: 8080
@@ -53,7 +54,7 @@ llm:
             org: acme
           allowedModels:
             - qwen3.5:4b
-        - keyHash: sha256:857b9578d4f2ca0f2de8f647bbaab71129dbff94dc2a701b947b52d62b30fa3d
+        - keyHash: sha256:824192b974f61f6ce3754b3f74cc8375d9874158d1022d205b7bad133d694bc1
           metadata:
             name: koinon-reload-probe
             agent: ""

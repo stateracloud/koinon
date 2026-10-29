@@ -121,6 +121,10 @@ type Config struct {
 	// registers the tools after a 100 ms debounce, separately from the command (ADR 0052).
 	// Default 1s.
 	ReadySettle time.Duration
+	// GatewayRecordWait bounds the wait, after a harness reports an authentication failure, for the
+	// gateway's record of the request to reach the spend ledger (providerrefusal.go): the access log is
+	// exported in batches. A negative value does not wait. Default 20s.
+	GatewayRecordWait time.Duration
 	// SummaryTimeout bounds the end-of-turn summary prompt (summary.go). Default 2m.
 	SummaryTimeout time.Duration
 	// StuckAfter is how long a process may outlive the sweep's last SIGKILL before the sandbox
@@ -212,6 +216,7 @@ func (c *Config) defaults() error {
 	setDefault(&c.MaxRefusedTurns, 5)
 	setDefault(&c.RetryBackoff, 2*time.Second)
 	setDefault(&c.MaxRetryAfter, 5*time.Minute)
+	setDefault(&c.GatewayRecordWait, defaultGatewayRecordWait)
 	setDefault(&c.SummaryTimeout, defaultSummaryWait)
 	setDefault(&c.StuckAfter, defaultStuckAfter)
 	setDefault(&c.StuckPoll, defaultStuckPoll)

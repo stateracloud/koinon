@@ -1897,6 +1897,7 @@ type SpendEntry struct {
 	ReserveUsd       pgtype.Numeric
 	ResponseID       pgtype.Text
 	Principal        string
+	UpstreamStatus   pgtype.Int2
 }
 
 type SpendEntryRevision struct {

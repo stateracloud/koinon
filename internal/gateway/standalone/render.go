@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -107,6 +108,9 @@ func Render(s gateway.State, o Options) ([]byte, gateway.Revision, error) {
 		return nil, "", errors.New("standalone: limits need Options.DatabaseURL (agentgateway keeps budgets in a database)")
 	}
 	doc := build(s, o)
+	if err := checkDocument(doc); err != nil {
+		return nil, "", fmt.Errorf("standalone: rendered config would be rejected: %w", err)
+	}
 	body, err := marshal(doc)
 	if err != nil {
 		return nil, "", err
@@ -276,7 +280,43 @@ type budget struct {
 
 type budgetLimit struct {
 	Unit   string  `yaml:"unit"`
-	Amount float64 `yaml:"amount"`
+	Amount decimal `yaml:"amount"`
+}
+
+// decimal is a number (a whole one is an integer, as the Tokens budget takes) written exactly as it is held, in fixed-point notation: a float would write
+// its shortest round-trip form, which can have an exponent ("5e-05") or more digits than
+// agentgateway accepts (issue #245).
+type decimal string
+
+// MarshalYAML implements yaml.Marshaler.
+func (d decimal) MarshalYAML() (any, error) {
+	tag := "!!int"
+	if strings.Contains(string(d), ".") {
+		tag = "!!float"
+	}
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: string(d)}, nil
+}
+
+// usdAmountRE is what agentgateway v1.7.0 accepts for a USD budget: fixed-point, at most
+// gateway.BudgetFractionDigits fraction digits, no sign, no exponent.
+var usdAmountRE = regexp.MustCompile(`^[0-9]+\.[0-9]{1,` + strconv.Itoa(gateway.BudgetFractionDigits) + `}$`)
+
+// checkDocument applies the checks agentgateway makes when it loads the file that Koinon can make
+// itself, so a file agentgateway would refuse as a whole is never delivered.
+func checkDocument(doc document) error {
+	if doc.LLM == nil {
+		return nil
+	}
+	var errs []error
+	for _, k := range doc.LLM.Policies.APIKey.Keys {
+		for _, b := range k.Budgets {
+			if b.Limit.Unit == string(gateway.USD) && !usdAmountRE.MatchString(string(b.Limit.Amount)) {
+				errs = append(errs, fmt.Errorf("key %q budget %q: USD amount %q is not fixed-point with at most %d fraction digits",
+					k.Metadata.Name, b.Name, b.Limit.Amount, gateway.BudgetFractionDigits))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 type window struct {
@@ -459,7 +499,9 @@ func build(s gateway.State, o Options) document {
 			gateway.LogFieldRequestBytes: `int(request.headers["content-length"])`,
 			// The provider's response ID, to settle a stream cut short (ADR 0056, amendment 2026-10-28).
 			gateway.LogFieldResponseID: gateway.ResponseIDCEL,
-			MarkerField:                `""`,
+			// Who answered (ADR 0056, amendment 2026-10-29). No field reads a response body.
+			gateway.LogFieldUpstream: gateway.UpstreamCEL,
+			MarkerField:              `""`,
 		}}},
 		Gateways: map[string]listener{"default": {Port: o.Port}},
 	}
@@ -617,6 +659,9 @@ func build(s gateway.State, o Options) document {
 	return doc
 }
 
+// tokensUnit is agentgateway's token budget unit, used by the reload probe's zero budget only.
+const tokensUnit = "Tokens"
+
 // probeKey is the reload probe's llm key entry, without its hash.
 // agentgateway v1.7.0 refuses a config with budgets but no config.database,
 // so the zero budget (429 before routing) is rendered only with a database;
@@ -626,7 +671,7 @@ func probeKey(withBudget bool) apiKey {
 	if withBudget {
 		k.Budgets = []budget{{
 			Name:             gateway.ReloadProbeKeyName,
-			Limit:            budgetLimit{Unit: string(gateway.Tokens), Amount: 0},
+			Limit:            budgetLimit{Unit: tokensUnit, Amount: "0"},
 			Window:           &window{Rolling: "24h"},
 			OnBudgetExceeded: "Block",
 		}}
@@ -659,7 +704,7 @@ func keyPolicy(keys []gateway.Key, s gateway.State, allowed map[string][]string)
 			}
 			ak.Budgets = []budget{{
 				Name:             name,
-				Limit:            budgetLimit{Unit: string(l.Unit), Amount: l.Amount},
+				Limit:            budgetLimit{Unit: string(l.Unit), Amount: decimal(l.Amount.Fixed(gateway.BudgetFractionDigits))},
 				OnBudgetExceeded: "Block",
 			}}
 			// No window: the counter accumulates for its lifetime (agentgateway v1.7), so a

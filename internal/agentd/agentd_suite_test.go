@@ -402,6 +402,8 @@ func (e *env) poolOn(conns *pgxpool.Pool, name string, mutate ...func(*agentd.Co
 		SandboxTimeout: 10 * time.Second,
 		ReadyTimeout:   2 * time.Second,
 		ReadySettle:    10 * time.Millisecond,
+		// Specs that fail a run with an authentication error have no access-log record to wait for.
+		GatewayRecordWait: 300 * time.Millisecond,
 	}
 	for _, m := range mutate {
 		m(&cfg)

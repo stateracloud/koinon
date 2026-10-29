@@ -414,6 +414,24 @@ so the router needs only that.
   table, and the prior-art pages in the Context.
 - OpenShell passing a harness's `traceparent` header to the gateway: not yet tested (decision 2).
 
+## Amendment (2026-10-29): the gateway logs no response body
+
+Decision 6 says an org at `none` sends no content off the gateway at all. A first version of the
+failed-response log field (`koinon.error_body`, ADR 0056 amendment 2026-10-29) did not meet that: a
+provider that echoes the prompt (OpenRouter's `metadata.flagged_input`) put it in the gateway's stdout
+log and in the OTLP export. Redacting it in CEL would have fixed that, but reading agentgateway v1.7.0
+showed a larger fault: any log or tracer expression that references `response.body` or
+`response.bodyPrefix` makes the gateway record the body of every response on the listener (up to 32 MiB
+on an LLM route, held for the whole stream; ADR 0056 amendment 2026-10-29, point 6).
+
+1. **No rendered expression reads a response body**, in the access log or in a tracer field, in either
+   driver. The field and `errbody.GatewayExpr` are removed, and a render spec in each driver fails if
+   `response.body` appears in any rendered output.
+2. **Content level is unaffected.** The gateway's log and the OTLP export hold provider status and
+   metadata only, never the request, the completion or an error body, so `none` stays true to its word.
+3. **Any future trace field that wants a body** must be weighed against that cost first; the
+   per-response buffering is what a per-field status guard cannot avoid.
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),
