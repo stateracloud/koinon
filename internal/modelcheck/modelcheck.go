@@ -27,6 +27,7 @@ import (
 	"github.com/stateracloud/koinon/internal/agentmodel"
 	"github.com/stateracloud/koinon/internal/audit"
 	"github.com/stateracloud/koinon/internal/db/store"
+	"github.com/stateracloud/koinon/internal/modelformat"
 	"github.com/stateracloud/koinon/internal/prices"
 )
 
@@ -38,9 +39,10 @@ const Line = "Maria Schneider, Hauptstrasse 12, 10115 Berlin, namespace payments
 const Prompt = "Echo this line back exactly, character for character, nothing else: " + Line
 
 // Chat sends a single user message to a model of the org through the gateway and returns the text
-// of the reply.
+// of the reply. format is the model's wire format (models.format, the one the run uses, ADR 0069):
+// the request goes to the route and has the shape of that format.
 type Chat interface {
-	Complete(ctx context.Context, org pgtype.UUID, model, prompt string) (string, error)
+	Complete(ctx context.Context, org pgtype.UUID, model string, format modelformat.Format, prompt string) (string, error)
 }
 
 // ErrNotFound means the provider does not exist in the org.
@@ -192,9 +194,11 @@ func (s *Service) Check(ctx context.Context, org, provider pgtype.UUID, model st
 		return Result{}, err
 	}
 	onProvider := false
+	format := modelformat.OpenAI
 	for _, m := range served {
 		if m.ProviderID == p.ID && m.ModelName == model {
 			onProvider = true
+			format = modelformat.Format(m.ModelFormat)
 		}
 	}
 	if !onProvider {
@@ -222,7 +226,7 @@ func (s *Service) Check(ctx context.Context, org, provider pgtype.UUID, model st
 		}
 		cctx, cancel := context.WithTimeout(ctx, s.Timeout)
 		defer cancel()
-		reply, err := s.chat.Complete(cctx, org, model, Prompt)
+		reply, err := s.chat.Complete(cctx, org, model, format, Prompt)
 		if err != nil {
 			return &UnavailableError{Msg: "the model did not answer the check: " + err.Error()}
 		}

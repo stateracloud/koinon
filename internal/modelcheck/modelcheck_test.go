@@ -6,12 +6,15 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 )
 
 var _ = Describe("Compare", func() {
@@ -74,7 +77,7 @@ var _ = Describe("GatewayChat", func() {
 			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"hello"}}]}`))
 		}))
 		DeferCleanup(srv.Close)
-		got, err := modelcheck.GatewayChat{URL: srv.URL + "/", Keys: key("koinon_test_not-a-real-token")}.Complete(ctx, pgtype.UUID{}, "m", "hi")
+		got, err := modelcheck.GatewayChat{URL: srv.URL + "/", Keys: key("koinon_test_not-a-real-token")}.Complete(ctx, pgtype.UUID{}, "m", modelformat.OpenAI, "hi")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(Equal("hello"))
 		Expect(path).To(Equal("/v1/chat/completions"))
@@ -86,7 +89,74 @@ var _ = Describe("GatewayChat", func() {
 			http.Error(w, `{"error":"unknown model"}`, http.StatusNotFound)
 		}))
 		DeferCleanup(srv.Close)
-		_, err := modelcheck.GatewayChat{URL: srv.URL, Keys: key("k")}.Complete(ctx, pgtype.UUID{}, "m", "hi")
+		_, err := modelcheck.GatewayChat{URL: srv.URL, Keys: key("k")}.Complete(ctx, pgtype.UUID{}, "m", modelformat.OpenAI, "hi")
 		Expect(err).To(MatchError(ContainSubstring("404")))
+	})
+
+	// The check posts to the route of the model's format, as a run does (ADR 0069), against the
+	// fake model server's own routes, which answer in each API's shape.
+	Describe("against the fake model server", func() {
+		masked := strings.NewReplacer("Maria Schneider", "[NAME]", "Hauptstrasse 12, 10115 Berlin", "[ADDRESS]").Replace(modelcheck.Line)
+		var fake *fakemodel.Server
+		var srv *httptest.Server
+		BeforeEach(func() {
+			var err error
+			fake, err = fakemodel.New(
+				fakemodel.Script{Model: "faithful", Turns: []fakemodel.Turn{{Text: modelcheck.Line}}},
+				fakemodel.Script{Model: "masking", Turns: []fakemodel.Turn{{Text: masked}}},
+			)
+			Expect(err).NotTo(HaveOccurred())
+			srv = httptest.NewServer(fake)
+			DeferCleanup(srv.Close)
+		})
+		gw := func() modelcheck.GatewayChat {
+			return modelcheck.GatewayChat{URL: srv.URL, Keys: key("koinon_test_not-a-real-token")}
+		}
+		paths := func() []string {
+			var out []string
+			for _, r := range fake.Requests() {
+				out = append(out, r.Path)
+			}
+			return out
+		}
+
+		DescribeTable("returns the reply, and posts to the route of the format",
+			func(ctx SpecContext, format modelformat.Format, path string) {
+				got, err := gw().Complete(ctx, pgtype.UUID{}, "faithful", format, modelcheck.Prompt)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got).To(Equal(modelcheck.Line))
+				Expect(paths()).To(Equal([]string{path}))
+			},
+			Entry("openai: chat completions", modelformat.OpenAI, "/v1/chat/completions"),
+			Entry("anthropic: Messages", modelformat.Anthropic, "/v1/messages"),
+			Entry("no format: chat completions", modelformat.Format(""), "/v1/chat/completions"),
+		)
+
+		DescribeTable("shows what a masking filter changed, in either format",
+			func(ctx SpecContext, format modelformat.Format) {
+				got, err := gw().Complete(ctx, pgtype.UUID{}, "masking", format, modelcheck.Prompt)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got).To(Equal(masked))
+				ok, diff := modelcheck.Compare(modelcheck.Line, got)
+				Expect(ok).To(BeFalse())
+				Expect(diff).To(Equal([]modelcheck.Segment{
+					{Op: modelcheck.Deleted, Text: "Maria Schneider, Hauptstrasse 12"},
+					{Op: modelcheck.Inserted, Text: "[NAME]"},
+					{Op: modelcheck.Equal, Text: ", "},
+					{Op: modelcheck.Deleted, Text: "10115 Berlin"},
+					{Op: modelcheck.Inserted, Text: "[ADDRESS]"},
+					{Op: modelcheck.Equal, Text: ", namespace payments-prod-eu"},
+				}))
+			},
+			Entry("openai", modelformat.OpenAI),
+			Entry("anthropic", modelformat.Anthropic),
+		)
+
+		It("reports a Messages reply with no text", func(ctx SpecContext) {
+			bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"content":[]}`)) }))
+			DeferCleanup(bad.Close)
+			_, err := modelcheck.GatewayChat{URL: bad.URL, Keys: key("k")}.Complete(ctx, pgtype.UUID{}, "m", modelformat.Anthropic, "hi")
+			Expect(err).To(MatchError(ContainSubstring("no text")))
+		})
 	})
 })

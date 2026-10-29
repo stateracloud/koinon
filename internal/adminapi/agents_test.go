@@ -15,6 +15,7 @@ import (
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/modelcheck"
+	"github.com/stateracloud/koinon/internal/modelformat"
 )
 
 // fakeChat stands in for the gateway: it answers every check with reply, or fails with err.
@@ -24,7 +25,7 @@ type fakeChat struct {
 	calls []string
 }
 
-func (f *fakeChat) Complete(_ context.Context, _ pgtype.UUID, model, _ string) (string, error) {
+func (f *fakeChat) Complete(_ context.Context, _ pgtype.UUID, model string, _ modelformat.Format, _ string) (string, error) {
 	f.calls = append(f.calls, model)
 	return f.reply, f.err
 }
