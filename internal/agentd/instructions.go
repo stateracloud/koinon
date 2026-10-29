@@ -142,6 +142,20 @@ func workspaceSection(cwd string) string {
 		"Keep notes and scratch files under `" + dir + "/notes/`, not in `~`.\n\n"
 }
 
+// webSection tells an agent without web egress how it reaches the web. The harness's built-in web
+// fetch is not offered to it (flavor.Descriptor.NoWebToolsArg, ADR 0080), and curl fails the same
+// way, so the instructions send it to the org's MCP tools, which run outside the sandbox.
+func webSection(webEgress bool) string {
+	if webEgress {
+		return ""
+	}
+	return "## Web access\n\n" +
+		"The sandbox cannot reach the web, so there is no built-in web fetch or web search, and `curl` " +
+		"and `git` reach only the hosts of your repositories, if you have any. Web access goes through the " +
+		"organization's MCP tools: use the ones your tool list offers for searching and reading " +
+		"pages. If none is offered, say that you cannot reach the web instead of trying other routes.\n\n"
+}
+
 // repositoriesSection lists the repositories the agent has access to and where to clone them
 // from. A task names a repository as owner/name; without the host the agent guesses github.com.
 func repositoriesSection(repos []repository) string {
@@ -161,10 +175,10 @@ func repositoriesSection(repos []repository) string {
 }
 
 // instructionsFile is the file's content for a version's instructions. It is never empty,
-// which the flavors' entry scripts require. cwd is the session directory and repos the agent's
-// granted repositories.
-func instructionsFile(instructions, cwd string, repos []repository) []byte {
-	head := instructionsPreamble + workspaceSection(cwd) + repositoriesSection(repos) + workingWithData
+// which the flavors' entry scripts require. cwd is the session directory, repos the agent's
+// granted repositories and webEgress whether it may reach arbitrary web hosts.
+func instructionsFile(instructions, cwd string, repos []repository, webEgress bool) []byte {
+	head := instructionsPreamble + workspaceSection(cwd) + repositoriesSection(repos) + webSection(webEgress) + workingWithData
 	if instructions = strings.TrimSpace(instructions); instructions == "" {
 		return []byte(head + "The agent version has no instructions of its own.\n")
 	}
