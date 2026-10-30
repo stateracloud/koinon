@@ -12,7 +12,9 @@ Run the API and the Vite dev server side by side:
 ```sh
 # terminal 1: the API on :8080 (needs Postgres; or use `tilt up`, docs/dev/loop.md)
 go run ./cmd/koinon-api --migrate --database-url "$DATABASE_URL" \
-  --bootstrap-password-file ./bootstrap-password
+  --bootstrap-password-file ./bootstrap-password --otlp-addr=
+
+# (--otlp-addr= turns the internal OTLP receiver off; it never runs without its bearer token)
 
 # terminal 2: the UI on :5173, proxying the API
 cd web && pnpm dev

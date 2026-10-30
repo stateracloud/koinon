@@ -115,7 +115,12 @@
         "image": {"$ref": "#/definitions/koinonImage"},
         "replicas": {"type": "integer", "minimum": 0},
         "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-        "otlpPort": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "the spend ledger's OTLP/HTTP receiver for agentgateway's access log"},
+        "otlpPort": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "the internal OTLP/HTTP receiver for agentgateway's access log and agentd's run spans"},
+        "otlpToken": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"existingSecret": {"type": "string"}}
+        },
         "toolsPort": {"type": "integer", "minimum": 1, "maximum": 65535},
         "savedWorkPort": {"type": "integer", "minimum": 1, "maximum": 65535},
         "durable": {

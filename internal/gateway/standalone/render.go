@@ -56,6 +56,14 @@ type OTLPExport struct {
 	HostPort string
 	// Path defaults to /v1/logs.
 	Path string
+	// TokenFile is the file, as the gateway pod sees it, with the bearer token the receiver
+	// requires (standalone mode). The gateway reads it and sends it as "Authorization: Bearer".
+	// The token never enters the rendered config, which is a world-readable ConfigMap.
+	TokenFile string
+	// TokenSecret and TokenSecretKey name the Secret and its key that hold the same token
+	// (kubernetes mode: the controller reads the Secret and hands the value to the proxy).
+	TokenSecret    string
+	TokenSecretKey string
 }
 
 const (
@@ -233,9 +241,20 @@ type accessLog struct {
 }
 
 type otlpLog struct {
-	Host     string `yaml:"host"`
-	Protocol string `yaml:"protocol"`
-	Path     string `yaml:"path,omitempty"`
+	Host     string        `yaml:"host"`
+	Protocol string        `yaml:"protocol"`
+	Path     string        `yaml:"path,omitempty"`
+	Policies *otlpPolicies `yaml:"policies,omitempty"`
+}
+
+// otlpPolicies are the backend policies of the OTLP export: the bearer token, read from a file
+// (backendAuth.key places it in "Authorization: Bearer <value>" by default).
+type otlpPolicies struct {
+	BackendAuth backendKeyAuth `yaml:"backendAuth"`
+}
+
+type backendKeyAuth struct {
+	Key backendKey `yaml:"key"`
 }
 
 type listener struct {
@@ -518,6 +537,9 @@ func build(s gateway.State, o Options) document {
 		doc.FrontendPolicies.AccessLog.OTLP = &otlpLog{Host: o.AccessLogOTLP.HostPort, Protocol: "http", Path: o.AccessLogOTLP.Path}
 		if doc.FrontendPolicies.AccessLog.OTLP.Path == "/v1/logs" {
 			doc.FrontendPolicies.AccessLog.OTLP.Path = ""
+		}
+		if o.AccessLogOTLP.TokenFile != "" {
+			doc.FrontendPolicies.AccessLog.OTLP.Policies = &otlpPolicies{BackendAuth: backendKeyAuth{Key: backendKey{File: o.AccessLogOTLP.TokenFile}}}
 		}
 	}
 	if o.DatabaseURL != "" {

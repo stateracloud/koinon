@@ -332,12 +332,18 @@ func readBody(r *http.Request) ([]byte, error) {
 	return b, nil
 }
 
-// Serve runs the OTLP receiver on addr until ctx ends.
-func Serve(ctx context.Context, addr string, in *Ingester, log *slog.Logger) error {
+// Serve runs the OTLP receiver on addr until ctx ends. Each wrap wraps the whole handler, the
+// first one outermost; koinon-api passes the bearer-token check (internal/otlpauth), which must
+// cover every path of the listener.
+func Serve(ctx context.Context, addr string, in *Ingester, log *slog.Logger, wrap ...func(http.Handler) http.Handler) error {
 	if err := in.Validate(); err != nil {
 		return err
 	}
-	srv := &http.Server{Addr: addr, Handler: Handler(in, log), ReadHeaderTimeout: 10 * time.Second}
+	h := Handler(in, log)
+	for i := len(wrap) - 1; i >= 0; i-- {
+		h = wrap[i](h)
+	}
+	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
 	safego.Go(ctx, log, "otlp-shutdown", func(context.Context) {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)

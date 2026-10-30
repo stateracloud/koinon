@@ -152,6 +152,45 @@ var _ = Describe("Ensure with an AES key", func() {
 	})
 })
 
+var _ = Describe("Ensure with a bearer token", func() {
+	spec := []ensuresecrets.Spec{{Name: "otlp", Type: corev1.SecretTypeOpaque, Kind: ensuresecrets.KindBearerToken}}
+
+	It("creates a 64-hex-character token under token, and never logs it", func(ctx SpecContext) {
+		var out bytes.Buffer
+		client := fake.NewClientset()
+		_, err := ensuresecrets.Ensure(ctx, client, "koinon", spec, &out)
+		Expect(err).NotTo(HaveOccurred())
+		got, err := client.CoreV1().Secrets("koinon").Get(ctx, "otlp", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(got.Data["token"])).To(MatchRegexp(`^[0-9a-f]{64}$`))
+		Expect(got.Data).To(HaveLen(1))
+		Expect(out.String()).NotTo(ContainSubstring(string(got.Data["token"])))
+	})
+
+	It("keeps a rotated token and its previous key, and rejects a short one unchanged", func(ctx SpecContext) {
+		rotated := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "otlp", Namespace: "koinon"},
+			Data: map[string][]byte{
+				"token":    []byte("koinon_test_not-a-real-token-rotated-0001\n"),
+				"previous": []byte("koinon_test_not-a-real-token-previous-002"),
+			},
+		}
+		client := fake.NewClientset(rotated)
+		var out bytes.Buffer
+		_, err := ensuresecrets.Ensure(ctx, client, "koinon", spec, &out)
+		Expect(err).NotTo(HaveOccurred())
+		got, _ := client.CoreV1().Secrets("koinon").Get(ctx, "otlp", metav1.GetOptions{})
+		Expect(got).To(Equal(rotated))
+
+		bad := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "otlp", Namespace: "koinon"},
+			Data:       map[string][]byte{"token": []byte("short")},
+		}
+		_, err = ensuresecrets.Ensure(ctx, fake.NewClientset(bad), "koinon", spec, &out)
+		Expect(err).To(MatchError(ContainSubstring("at least 32 characters")))
+	})
+})
+
 var _ = Describe("Ensure with an unknown kind", func() {
 	It("fails instead of creating a password", func(ctx SpecContext) {
 		client := fake.NewClientset()
