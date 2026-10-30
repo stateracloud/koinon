@@ -28,8 +28,9 @@ pattern() {
 	web) echo '^(web/|api/proto/)' ;;
 	generate) echo '^(api/proto/|internal/db/(queries|migrations)/|sqlc\.yaml|buf\.|internal/gen/|web/src/gen/)' ;;
 	chart) echo '^(charts/|hack/chart-check\.sh|hack/chartlint/)' ;;
-	# The binaries the chart starts, their flags and the migrations they apply count too.
-	chartsmoke) echo '^(charts/|cmd/|internal/|test/chartsmoke/|go\.(mod|sum))' ;;
+	# The binaries the chart starts, their flags and everything they import (the Go packages
+	# outside internal/ and cmd/) count too.
+	chartsmoke) echo '^(charts/|cmd/|internal/|pricing/|connectors/|templates/|api/|web/|test/chartsmoke/|go\.(mod|sum))' ;;
 	docs) echo '^(docs/|test/e2e/|charts/|web/e2e-real/|hack/docs-|README\.md)' ;;
 	escape) echo '^(charts/|test/escape/)' ;;
 	flavors) echo '^(flavors/|internal/(agentd|flavor|acp)/|test/flavors/|hack/flavor-tag\.sh|templates/)' ;;

@@ -214,7 +214,8 @@ jobs:
     if: needs.changes.outputs.chartsmoke == 'true'
     name: chart smoke
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    # Above the test's own timeouts (go test 20m, ginkgo 15m), so a hang fails the test and cleans up.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -223,6 +224,12 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.1
+      # setup-envtest downloads the API server binaries into this directory; Go's own caches come
+      # from setup-go.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/kubebuilder-envtest
+          key: envtest-1.37.0
       - run: make test-chart-smoke
 
   # Docs site (plan item DOC1): builds the Starlight site and checks the quickstart against

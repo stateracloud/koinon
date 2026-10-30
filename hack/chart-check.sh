@@ -23,8 +23,10 @@ trap 'rm -rf "$out"' EXIT
 value_files=("$CHART/values.yaml" "$CHART"/ci/*-values.yaml)
 # The chart requires openshell.clientTLSSecret or openshell.insecure=true (#103); the default
 # values set neither, so they are rendered with insecure, as are the assertions below (render).
+# The same goes for openshell.address (required, no default).
 # Value files choose for themselves. insecure_for <values file>: the extra helm arguments.
-insecure_for() { [[ $1 == "$CHART/values.yaml" ]] && echo "--set openshell.insecure=true" || true; }
+ADDRESS="openshell.address=openshell.openshell.svc:8080"
+insecure_for() { [[ $1 == "$CHART/values.yaml" ]] && echo "--set openshell.insecure=true --set $ADDRESS" || true; }
 
 for f in "${value_files[@]}"; do
 	name=$(basename "$f" .yaml)
@@ -36,9 +38,9 @@ for f in "${value_files[@]}"; do
 done
 
 # Assertions on rendered output: render with --set flags, then grep.
-render() { "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true "$@"; }
+render() { "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true --set "$ADDRESS" "$@"; }
 # render_raw renders without that default, for the assertions about the TLS choice itself.
-render_raw() { "$HELM" template koinon "$CHART" --namespace koinon "$@"; }
+render_raw() { "$HELM" template koinon "$CHART" --namespace koinon --set "$ADDRESS" "$@"; }
 # Assertions capture the rendering before grepping it: piping into grep -q under pipefail fails
 # the pipeline when grep exits on the first match and helm then dies of SIGPIPE.
 failures=0
@@ -218,6 +220,10 @@ render_raw --set openshell.clientTLSSecret=tls >/dev/null 2>&1 || fail "a client
 render_raw --set openshell.insecure=true >/dev/null 2>&1 || fail "openshell.insecure=true alone must render"
 if render_raw --set openshell.clientTLSSecret=tls --set openshell.insecure=true >"$out/both.out" 2>"$out/both.err"; then fail "a client TLS Secret together with insecure must not render"; fi
 grep -q 'contradict' "$out/both.err" || fail "the TLS-plus-insecure error must say the options contradict"
+# openshell.address has no default: without it the reconciler and agentd would crash-loop.
+if "$HELM" template koinon "$CHART" --namespace koinon --set openshell.insecure=true >/dev/null 2>"$out/addr.err"; then fail "no openshell.address must not render"; fi
+grep -q 'openshell.address is required' "$out/addr.err" || fail "the missing-address error must name openshell.address"
+has "openshell.address reaches the reconciler config" 'address: "openshell.openshell.svc:8080"' --show-only templates/config.yaml
 has "TLS Secret reaches the reconciler config" 'tls: /etc/koinon/openshell-tls' --set openshell.insecure=false --set openshell.clientTLSSecret=tls --show-only templates/config.yaml
 has "insecure renders an empty tls dir (plaintext, warned by the components)" 'tls: ""' --show-only templates/config.yaml
 # The key-encryption keys (plan item PV1): a generated Secret kept on uninstall, or an existing one;
@@ -521,7 +527,7 @@ done
 if render --set global.imageRegistry=https://art.example.com >/dev/null 2>&1; then fail "imageRegistry with a scheme must not render"; fi
 if render --set 'global.registryMirrors.ghcr\.io=https://art.example.com' >/dev/null 2>&1; then fail "a mirror with a scheme must not render"; fi
 # NOTES warn when image.registry is customised next to a global mirror (helm install prints them; template does not).
-notes=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set image.registry=quay.io/m --set global.imageRegistry=art.example.com 2>&1) || true
+notes=$("$HELM" install koinon "$CHART" -n koinon --dry-run=client --set openshell.insecure=true --set "$ADDRESS" --set image.registry=quay.io/m --set global.imageRegistry=art.example.com 2>&1) || true
 grep -q 'WARNING: image.registry is quay.io/m' <<<"$notes" || fail "no NOTES warning for image.registry with a global mirror"
 # An explicit image.registry is the upstream that the rewrite starts from.
 has "image.registry is rewritten too" 'image: art.example.com/ghcr-remote/mine/koinon-api:0.0.0$' \
