@@ -43,7 +43,7 @@ type runTrace struct {
 	q       *store.Queries
 	run     store.Run
 	log     interface{ Warn(msg string, args ...any) }
-	content bool
+	decider TraceDecider
 	// fenced closes when the worker may no longer write; database calls on the run's path end then.
 	fenced <-chan struct{}
 
@@ -67,6 +67,8 @@ type turnTrace struct {
 	reason  string // how the turn ended, as far as turn() knows
 	tools   map[string]*toolTrace
 	done    map[string]bool
+	// content: this turn carries content, by the org's level read when the turn began.
+	content bool
 	parts   []msgPart
 	size    int
 	input   string
@@ -113,16 +115,7 @@ func (p *Pool) traceStart(ctx context.Context, run store.Run, fenced <-chan stru
 	if !traced {
 		return nil
 	}
-	level, err := p.cfg.Tracing.Decider.ContentLevel(dctx, run.OrgID)
-	if err != nil {
-		// Without the level, content is left out: the safe side.
-		log.Warn("reading the org's trace content level failed; no content is traced", "err", err)
-		level = tracedest.LevelNone
-	}
-	return &runTrace{
-		sink: p.sink, q: p.q, run: run, log: log, fenced: fenced,
-		content: tracedest.LevelRank(level) > tracedest.LevelRank(tracedest.LevelNone),
-	}
+	return &runTrace{sink: p.sink, q: p.q, run: run, log: log, fenced: fenced, decider: p.cfg.Tracing.Decider}
 }
 
 // dbctx bounds a database call of the run's path: d at most, and until the worker is fenced.
@@ -240,7 +233,15 @@ func (t *runTrace) beginTurn(ctx context.Context, prompt string) map[string]any 
 		root.AddEvent(semconv.EventWait, trace.WithTimestamp(now), trace.WithAttributes(attribute.Float64(semconv.KoinonWaitSeconds, wait.Seconds())))
 	}
 	tt := &turnTrace{row: row, root: root, rootCtx: rctx, tools: map[string]*toolTrace{}, done: map[string]bool{}}
-	if t.content {
+	// The level is read for every turn: a run parked for days must not send content once the org or
+	// the platform ceiling has been lowered. Without the level, content is left out.
+	level, err := t.decider.ContentLevel(dctx, t.run.OrgID)
+	if err != nil {
+		t.log.Warn("reading the org's trace content level failed; no content is traced", "err", err)
+		level = tracedest.LevelNone
+	}
+	tt.content = tracedest.LevelRank(level) > tracedest.LevelRank(tracedest.LevelNone)
+	if tt.content {
 		tt.input = t.sink.messagesJSON(chatMessage{Role: "user", Parts: []msgPart{{Type: "text", Content: t.sink.clip(prompt)}}})
 	}
 	t.mu.Lock()
@@ -373,7 +374,7 @@ func (t *runTrace) closeTurn(ctx context.Context, tt *turnTrace, end *turnEnd, w
 		}
 	}
 	var content []string
-	if t.content {
+	if tt.content {
 		if tt.input != "" {
 			attrs = append(attrs, attribute.String(semconv.GenAIInputMessages, tt.input))
 			content = append(content, semconv.GenAIInputMessages)
@@ -438,9 +439,9 @@ func (t *runTrace) update(n acp.SessionNotification, at time.Time) {
 				status = string(*c.Status)
 			}
 			fin = t.toolUpdate(tt, string(c.ToolCallId), title, kind, status, c.RawInput, c.RawOutput, at)
-		case u.AgentMessageChunk != nil && t.content:
+		case u.AgentMessageChunk != nil && tt.content:
 			t.addPart(tt, "text", acp.Flatten(n).Text)
-		case u.AgentThoughtChunk != nil && t.content:
+		case u.AgentThoughtChunk != nil && tt.content:
 			t.addPart(tt, "reasoning", acp.Flatten(n).Text)
 		}
 	}
@@ -506,7 +507,7 @@ func (t *runTrace) toolUpdate(tt *turnTrace, id, title, kind, status string, in,
 	}
 	tool.kind = cmp.Or(kind, tool.kind)
 	tool.status = cmp.Or(status, tool.status)
-	if t.content {
+	if tt.content {
 		if in != nil {
 			tool.inputJSON = t.sink.contentJSON(in)
 			tool.target = cmp.Or(askAgentTarget(in), tool.target)
@@ -542,20 +543,22 @@ func (t *runTrace) endTool(tt *turnTrace, tool *toolTrace, at time.Time) {
 		attrs = append(attrs, attribute.String(semconv.GenAIToolCallResult, tool.outputJSON))
 		content = append(content, semconv.GenAIToolCallResult)
 	}
-	if len(content) > 0 {
-		attrs = append(attrs, attribute.StringSlice(semconv.KoinonContentAttributes, content))
-	}
 	// PROVISIONAL: koinon_ask_agent does not exist yet (ADR 0065). Its argument and result shapes
 	// below are guesses to be replaced when the tool is built. The target is the callee's name, so it
 	// is traced only above content level none, like the arguments it comes from.
 	if tool.name == "koinon_ask_agent" {
 		attrs = append(attrs, attribute.String(semconv.GenAITransferMode, semconv.GenAITransferModeReturnCall))
 		if tool.target != "" {
+			// Agent-written free text, so content: the router scrubs or strips it by level.
 			attrs = append(attrs, attribute.String(semconv.GenAITransferTargetName, tool.target))
+			content = append(content, semconv.GenAITransferTargetName)
 		}
 		if link, ok := t.childLink(tool.childRun); ok {
 			tool.span.AddLink(link)
 		}
+	}
+	if len(content) > 0 {
+		attrs = append(attrs, attribute.StringSlice(semconv.KoinonContentAttributes, content))
 	}
 	tool.span.SetAttributes(attrs...)
 	if tool.status == string(acp.ToolFailed) {

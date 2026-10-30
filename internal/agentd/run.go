@@ -257,8 +257,10 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	}
 	stop()
 	hb.Wait()
-	r.conclude(ctx, err)
+	// The turn's row ends before the run's state changes, so whoever sees the run finished sees the
+	// turn ended (a success ends it inside endTurn's transaction, a park likewise).
 	r.tr.finish(ctx, err, fence(r.fenceKind.Load()))
+	r.conclude(ctx, err)
 }
 
 func (r *runner) fence(k fence) {
