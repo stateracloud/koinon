@@ -50,14 +50,16 @@ type queue struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu      sync.Mutex
-	items   []item
-	head    int
-	queued  int // bytes of the items in the queue (a batch being sent is counted in the router's total, not here)
-	route   tracedest.Route
-	retired bool
-	closed  bool
-	wake    chan struct{}
+	mu     sync.Mutex
+	items  []item
+	head   int
+	queued int // estimated bytes of the items in the queue
+	// inflight is the bytes of the batch being sent; it counts toward the queue's share like queued.
+	inflight int
+	route    tracedest.Route
+	retired  bool
+	closed   bool
+	wake     chan struct{}
 
 	// droppedByOrg counts spans lost since the org's last root span reported them
 	// (koinon.spans_dropped). The platform queue serves every org, so the count is per org.
@@ -68,6 +70,8 @@ type queue struct {
 
 	// Worker state; only the worker goroutine touches it.
 	failures   int
+	attempts   int       // consecutive failed sends of the batch at the head
+	resumeAt   time.Time // no send before this: the retry backoff, or the breaker's pause
 	openUntil  time.Time
 	okDirty    bool
 	errDirty   bool
@@ -78,16 +82,28 @@ type queue struct {
 
 func (q *queue) depth() int { return len(q.items) - q.head }
 
-// enqueue adds items. Each item first reserves its bytes in the router's global budget; when the budget
-// is full the oldest spans of the queue holding the most bytes are dropped to make room, so one
-// destination that is down cannot take the memory of the others. A queue over its count drops its own
-// oldest. It reports false when the queue has been closed (idle, retired), and the caller then asks for
-// a new one.
+// enqueue adds items. A queue may hold its share of the router's queue budget (equal shares among the
+// live queues, at least queueFloor); over it, the queue drops its own oldest spans, and never another
+// queue's, so a destination that is down cannot take what a healthy one needs. A queue over its count
+// drops its own oldest too. It reports false when the queue has been closed (idle, retired), and the
+// caller then asks for a new one.
 func (q *queue) enqueue(route tracedest.Route, in []item) bool {
+	capBytes := q.r.queueCap() // before q.mu: the router's lock comes first
 	var lost []item
 	for _, it := range in {
+		q.mu.Lock()
+		if q.closed || q.retired {
+			q.mu.Unlock()
+			q.lose(lost, dropQueueFull)
+			return false
+		}
+		q.route = route
+		for q.depth() > 0 && (q.depth() >= q.r.cfg.QueueSize || q.queued+q.inflight+it.size > capBytes) {
+			lost = append(lost, q.popLocked())
+		}
+		q.mu.Unlock()
 		if !q.r.reserve(it.size) {
-			lost = append(lost, it) // nothing is queued anywhere that could make room
+			lost = append(lost, it) // the global budget is full (shares changed under us): this one is dropped
 			continue
 		}
 		q.mu.Lock()
@@ -96,10 +112,6 @@ func (q *queue) enqueue(route tracedest.Route, in []item) bool {
 			q.r.queueBytes.Add(-int64(it.size))
 			q.lose(lost, dropQueueFull)
 			return false
-		}
-		q.route = route
-		for q.depth() >= q.r.cfg.QueueSize {
-			lost = append(lost, q.popLocked())
 		}
 		q.items = append(q.items, it)
 		q.queued += it.size
@@ -131,28 +143,9 @@ func (q *queue) popLocked() item {
 	return old
 }
 
-// dropOldest drops the oldest queued item to make room for another queue's span.
-func (q *queue) dropOldest() bool {
-	q.mu.Lock()
-	if q.depth() == 0 {
-		q.mu.Unlock()
-		return false
-	}
-	old := q.popLocked()
-	q.mu.Unlock()
-	q.lose([]item{old}, dropQueueFull)
-	return true
-}
-
-func (q *queue) queuedBytes() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.queued
-}
-
-// take removes up to n items, and up to maxBytes (at least one), from the front. Their bytes stay in
-// the router's budget until the caller has finished with them: a batch being sent or retried is still
-// in memory.
+// take removes up to n items, and up to maxBytes (at least one), from the front. Their bytes move from
+// queued to in flight: they stay in the queue's share and the router's budget until the caller has
+// finished with them (release) or put them back (putBack).
 func (q *queue) take(n, maxBytes int) []item {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -172,6 +165,7 @@ func (q *queue) take(n, maxBytes int) []item {
 	}
 	q.head += k
 	q.queued -= sum
+	q.inflight += sum
 	if q.head == len(q.items) {
 		q.items, q.head = q.items[:0], 0
 	}
@@ -179,13 +173,53 @@ func (q *queue) take(n, maxBytes int) []item {
 	return out
 }
 
-// release frees the budget of items that are finished with, however they ended.
+// release frees the bytes of items that are finished with, however they ended.
 func (q *queue) release(items []item) {
 	sum := 0
 	for _, it := range items {
 		sum += it.size
 	}
+	q.mu.Lock()
+	q.inflight -= sum
+	q.mu.Unlock()
 	q.r.queueBytes.Add(-int64(sum))
+}
+
+// trim drops the queue's own oldest spans until it is within capBytes (what is in flight stays).
+func (q *queue) trim(capBytes int) {
+	q.mu.Lock()
+	var lost []item
+	for q.depth() > 0 && q.queued+q.inflight > capBytes {
+		lost = append(lost, q.popLocked())
+	}
+	q.mu.Unlock()
+	q.lose(lost, dropQueueFull)
+}
+
+// putBack returns a batch that will be retried to the front of the queue, where it counts toward the
+// queue's share and, being the oldest, is the first to go if the queue fills while the destination is
+// paused. A batch is never pinned in memory outside the queue's cap through a backoff or a breaker pause.
+func (q *queue) putBack(items []item) {
+	if len(items) == 0 {
+		return
+	}
+	sum := 0
+	for _, it := range items {
+		sum += it.size
+	}
+	capBytes := q.r.queueCap()
+	q.mu.Lock()
+	q.items = append(append(make([]item, 0, len(items)+q.depth()), items...), q.items[q.head:]...)
+	q.head = 0
+	q.inflight -= sum
+	q.queued += sum
+	q.r.metrics.QueueDepth.WithLabelValues(q.kind, q.backend).Add(float64(len(items)))
+	var lost []item
+	for q.depth() > 1 && q.queued+q.inflight > capBytes {
+		lost = append(lost, q.popLocked())
+	}
+	q.mu.Unlock()
+	q.lose(lost, dropQueueFull)
 }
 
 func (q *queue) snapshot() (tracedest.Route, int) {
@@ -263,6 +297,13 @@ func (q *queue) run() {
 			q.finish()
 			return
 		}
+		if wait := q.resumeAt.Sub(q.r.now()); wait > 0 {
+			// Backing off, or the breaker is open: this destination is paused. Its queue keeps filling
+			// and dropping its own oldest; nothing else waits.
+			q.flushHealth(false)
+			_ = q.r.sleep(q.ctx, wait)
+			continue
+		}
 		_, depth := q.snapshot()
 		if depth == 0 {
 			q.flushHealth(false)
@@ -320,10 +361,12 @@ func (q *queue) finish() {
 }
 
 // prepare makes the destination's copy of a batch from the destination's settings as they are now.
-// Items for an org that no longer has this destination are returned as gone (and an org queue is
-// retired). An error means the settings could not be read; nothing is sent then, because a copy made
-// from stale settings could carry more than the org now allows.
-func (q *queue) prepare(ctx context.Context, batch []item, drops map[int]int64) (spans []*tracepb.Span, route tracedest.Route, gone []item, err error) {
+// Items for an org that no longer has this destination are dropped as removed (and an org queue is
+// retired); items for a destination whose credentials cannot be opened are dropped as lost, without
+// retiring the queue. Both are returned as consumed. An error means the settings could not be read;
+// nothing is sent then, because a copy made from stale settings could carry more than the org now
+// allows.
+func (q *queue) prepare(ctx context.Context, batch []item, drops map[int]int64) (spans []*tracepb.Span, route tracedest.Route, consumed []item, err error) {
 	type orgState struct {
 		route   tracedest.Route
 		found   bool
@@ -331,6 +374,12 @@ func (q *queue) prepare(ctx context.Context, batch []item, drops map[int]int64) 
 		serr    error
 	}
 	states := map[pgtype.UUID]*orgState{}
+	var gone, unreadable []item
+	defer func() {
+		q.removed(gone)
+		q.lose(unreadable, dropUnreadable)
+		consumed = append(gone, unreadable...)
+	}()
 	for i, it := range batch {
 		st, ok := states[it.org]
 		if !ok {
@@ -344,19 +393,23 @@ func (q *queue) prepare(ctx context.Context, batch []item, drops map[int]int64) 
 					st.route, st.found = rt, true
 				}
 			}
-			if st.found {
+			if st.found && !st.route.Unreadable {
 				st.secrets, st.serr = q.r.secretsFor(ctx, it.org)
 				if st.serr != nil {
 					q.r.log.Warn("trace router: the org's secrets cannot be loaded; sending no content", "err", st.serr)
 				}
-			} else if !q.platform {
+			} else if !st.found && !q.platform {
 				q.retire()
 				q.r.unregister(q)
 			}
 			states[it.org] = st
 		}
-		if !st.found {
+		switch {
+		case !st.found:
 			gone = append(gone, it)
+			continue
+		case st.route.Unreadable:
+			unreadable = append(unreadable, it)
 			continue
 		}
 		route = st.route
@@ -375,33 +428,38 @@ func (q *queue) prepare(ctx context.Context, batch []item, drops map[int]int64) 
 		q.route = route
 		q.mu.Unlock()
 	}
-	return spans, route, gone, nil
+	return spans, route, nil, nil
 }
 
-// send exports one batch, retrying a retryable failure with exponential backoff, and dropping the
-// batch after MaxAttempts or at once for a refusal that retrying cannot fix. Every attempt makes the
+// send makes one attempt to export a batch taken from the queue. On success, or when the batch can
+// never be delivered (a refusal, too many attempts, the destination gone), the batch is finished with.
+// When a retry may help it goes back to the front of the queue and the queue pauses (resumeAt): the
+// backoff, honouring Retry-After, or the breaker's pause when that is longer. Every attempt makes the
 // copy anew and first checks that the destination still exists.
 func (q *queue) send(batch []item) {
 	cfg := q.r.cfg
-	defer q.release(batch) // the batch is in memory until its final outcome
 	drops := map[int]int64{}
 	for i, it := range batch {
 		if isRoot(it.sp) {
 			drops[i] = q.reportDropped(it.org)
 		}
 	}
+	finished := true // the batch leaves the queue for good, unless put back
 	delivered := false
 	defer func() {
-		if delivered {
-			return
+		if !delivered {
+			// The roots in the batch did not tell their orgs what was lost, so the next roots must.
+			q.dmu.Lock()
+			for i, n := range drops {
+				q.droppedByOrg[batch[i].org] += n
+			}
+			q.dmu.Unlock()
 		}
-		// The batch was not delivered: the roots in it did not tell their orgs what was lost, so the
-		// next roots must.
-		q.dmu.Lock()
-		for i, n := range drops {
-			q.droppedByOrg[batch[i].org] += n
+	}()
+	defer func() {
+		if finished {
+			q.release(batch) // the bytes were in memory until the final outcome
 		}
-		q.dmu.Unlock()
 	}()
 	stop := func() {
 		if q.isRetired() {
@@ -410,105 +468,102 @@ func (q *queue) send(batch []item) {
 			q.lose(batch, dropShutdown)
 		}
 	}
-	for attempt := 1; ; attempt++ {
+	if q.ctx.Err() != nil {
+		stop()
+		return
+	}
+	var (
+		retryable  = true
+		retryAfter time.Duration
+		msg        string
+	)
+	spans, route, consumed, err := q.prepare(q.ctx, batch, drops)
+	if err != nil {
 		if q.ctx.Err() != nil {
 			stop()
 			return
 		}
-		if wait := q.openUntil.Sub(q.r.now()); wait > 0 {
-			// The breaker is open: this destination is paused. Its queue keeps filling and dropping
-			// its oldest; nothing else waits.
-			q.flushHealth(false)
-			if q.r.sleep(q.ctx, wait) != nil {
-				stop()
-				return
-			}
+		msg = "the destination's settings could not be read"
+	} else {
+		if len(spans) == 0 {
+			delivered = true // nothing to say: every span was consumed
+			return
 		}
-		spans, route, gone, err := q.prepare(q.ctx, batch, drops)
-		q.removed(gone)
-		var (
-			retryable  = true
-			retryAfter time.Duration
-			msg        string
-			took       time.Duration
-		)
-		if err != nil {
-			if q.ctx.Err() != nil {
-				stop()
-				return
+		start := q.r.now()
+		cctx, cancel := context.WithTimeout(q.ctx, cfg.ExportTimeout)
+		res, xerr := q.r.sender.Export(cctx, route.Destination, buildRequest(route, spans))
+		cancel()
+		took := q.r.now().Sub(start)
+		if xerr == nil {
+			q.r.metrics.ExportTime.WithLabelValues(q.kind, q.backend, outcomeOK).Observe(took.Seconds())
+			q.failures, q.attempts, q.resumeAt, q.openUntil = 0, 0, time.Time{}, time.Time{}
+			q.errDirty, q.errWritten = false, ""
+			// A backend's count is its own claim: it cannot refuse more spans than were sent.
+			rejected := max(min(res.Rejected, int64(len(spans))), 0)
+			q.r.metrics.Exported.WithLabelValues(q.kind, q.backend).Add(float64(int64(len(spans)) - rejected))
+			if rejected > 0 {
+				q.r.metrics.Rejected.WithLabelValues(q.kind, q.backend, rejectPartial).Add(float64(rejected))
+				q.lostForHealth.Add(rejected)
+				q.chargeRejected(batch, rejected)
 			}
-			msg = "the destination's settings could not be read"
-		} else {
-			if len(spans) == 0 {
-				return
-			}
-			start := q.r.now()
-			cctx, cancel := context.WithTimeout(q.ctx, cfg.ExportTimeout)
-			res, xerr := q.r.sender.Export(cctx, route.Destination, buildRequest(route, spans))
-			cancel()
-			took = q.r.now().Sub(start)
-			if xerr == nil {
-				q.r.metrics.ExportTime.WithLabelValues(q.kind, q.backend, outcomeOK).Observe(took.Seconds())
-				q.failures, q.openUntil = 0, time.Time{}
-				q.errDirty, q.errWritten = false, ""
-				ok := int64(len(spans)) - min(res.Rejected, int64(len(spans)))
-				q.r.metrics.Exported.WithLabelValues(q.kind, q.backend).Add(float64(ok))
-				if res.Rejected > 0 {
-					q.r.metrics.Rejected.WithLabelValues(q.kind, q.backend, rejectPartial).Add(float64(res.Rejected))
-					q.lostForHealth.Add(res.Rejected)
-					q.chargeRejected(batch, res.Rejected)
-				}
-				delivered = true
-				q.okDirty = true
-				q.flushHealth(false)
-				return
-			}
-			if q.ctx.Err() != nil {
-				stop()
-				return
-			}
-			var ee *export.Error
-			msg = "the batch could not be sent"
-			if errors.As(xerr, &ee) {
-				retryable, retryAfter, msg = ee.Retryable(), ee.RetryAfter, ee.Message
-			} else {
-				retryable = false
-			}
-			outcome := outcomeRefused
-			if retryable {
-				outcome = outcomeRetryable
-			}
-			q.r.metrics.ExportTime.WithLabelValues(q.kind, q.backend, outcome).Observe(took.Seconds())
-		}
-
-		// A failure. The error is written to the destination's record once per episode, not on
-		// every attempt: the same message again changes nothing the admin can see.
-		q.failures++
-		if msg != q.errWritten {
-			q.errMsg, q.errDirty, q.errWritten = msg, true, msg
-		}
-		if q.failures >= cfg.BreakerThreshold {
-			pause := cfg.BreakerBase << min(q.failures-cfg.BreakerThreshold, 16)
-			q.openUntil = q.r.now().Add(min(pause, cfg.BreakerMax))
-		}
-		if !retryable {
-			q.r.metrics.Rejected.WithLabelValues(q.kind, q.backend, rejectRefused).Add(float64(len(spans)))
-			q.lose(nonGone(batch, gone), "")
+			delivered = true
+			q.okDirty = true
 			q.flushHealth(false)
 			return
 		}
-		if attempt >= cfg.MaxAttempts {
-			q.lose(nonGone(batch, gone), dropExportFailed)
-			q.flushHealth(false)
-			return
-		}
-		delay := max(min(cfg.BackoffBase<<min(attempt-1, 16), cfg.BackoffMax), retryAfter)
-		q.flushHealth(false)
-		if q.r.sleep(q.ctx, delay) != nil {
+		if q.ctx.Err() != nil {
 			stop()
 			return
 		}
+		var ee *export.Error
+		msg = "the batch could not be sent"
+		if errors.As(xerr, &ee) {
+			retryable, retryAfter, msg = ee.Retryable(), ee.RetryAfter, ee.Message
+		} else {
+			retryable = false
+		}
+		outcome := outcomeRefused
+		if retryable {
+			outcome = outcomeRetryable
+		}
+		q.r.metrics.ExportTime.WithLabelValues(q.kind, q.backend, outcome).Observe(took.Seconds())
 	}
+
+	// A failure. The error is written to the destination's record once per episode, not on every
+	// attempt: the same message again changes nothing the admin can see.
+	q.failures++
+	if msg != q.errWritten {
+		q.errMsg, q.errDirty, q.errWritten = msg, true, msg
+	}
+	if q.failures >= cfg.BreakerThreshold {
+		pause := cfg.BreakerBase << min(q.failures-cfg.BreakerThreshold, 16)
+		q.openUntil = q.r.now().Add(min(pause, cfg.BreakerMax))
+	}
+	live := nonGone(batch, consumed)
+	if !retryable {
+		q.attempts = 0
+		q.r.metrics.Rejected.WithLabelValues(q.kind, q.backend, rejectRefused).Add(float64(len(spans)))
+		q.lose(live, "")
+		q.flushHealth(false)
+		return
+	}
+	q.attempts++
+	if q.attempts >= cfg.MaxAttempts {
+		q.attempts = 0
+		q.lose(live, dropExportFailed)
+		q.flushHealth(false)
+		return
+	}
+	delay := max(min(cfg.BackoffBase<<min(q.attempts-1, 16), cfg.BackoffMax), retryAfter)
+	q.resumeAt = q.r.now().Add(delay)
+	if q.openUntil.After(q.resumeAt) {
+		q.resumeAt = q.openUntil
+	}
+	// The consumed items are done with; the rest wait in the queue, inside its share.
+	q.release(consumed)
+	q.putBack(live)
+	finished = false
+	q.flushHealth(false)
 }
 
 // chargeRejected shares n rejected spans among the orgs of a batch in proportion to their spans (the

@@ -3,6 +3,7 @@
 package router
 
 import (
+	"bytes"
 	"compress/gzip"
 	"errors"
 	"fmt"
@@ -40,12 +41,18 @@ func (r *Router) Handler() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		refuse := func(reason string, code int, msg string) {
+			r.metrics.RequestsRejected.WithLabelValues(reason).Inc()
+			if code == http.StatusServiceUnavailable {
+				w.Header().Set("Retry-After", "1")
+			}
+			http.Error(w, msg, code)
+		}
 		select {
 		case r.reqs <- struct{}{}:
 			defer func() { <-r.reqs }()
 		default:
-			w.Header().Set("Retry-After", "1")
-			http.Error(w, "too many requests in progress", http.StatusServiceUnavailable)
+			refuse(reqBusy, http.StatusServiceUnavailable, "too many requests in progress")
 			return
 		}
 		ct, _, _ := mime.ParseMediaType(req.Header.Get("Content-Type"))
@@ -53,25 +60,64 @@ func (r *Router) Handler() http.Handler {
 			http.Error(w, "only application/x-protobuf is supported", http.StatusUnsupportedMediaType)
 			return
 		}
-		body, err := readBody(req, r.cfg.MaxRequestBytes)
-		if err != nil {
-			code := http.StatusBadRequest
-			if errors.Is(err, errTooLarge) {
-				code = http.StatusRequestEntityTooLarge
+		// The bytes this request holds are charged to RequestBytes as they are known: the encoded body
+		// first, then the decompressed body and what decoding it allocates. A request that does not fit
+		// waits for none: it is refused with Retry-After, or, if it could never fit, as too large.
+		var held int64
+		defer func() { r.reqBytes.Add(-held) }()
+		charge := func(n int64) bool {
+			if r.reqBytes.Add(n) > int64(r.cfg.RequestBytes) {
+				r.reqBytes.Add(-n)
+				return false
 			}
-			http.Error(w, err.Error(), code)
+			held += n
+			return true
+		}
+		encoded := req.ContentLength
+		if encoded <= 0 || encoded > int64(r.cfg.MaxRequestBytes) {
+			encoded = int64(r.cfg.MaxRequestBytes)
+		}
+		if !charge(encoded) {
+			if encoded > int64(r.cfg.RequestBytes) {
+				refuse(reqMemory, http.StatusRequestEntityTooLarge, "the request is too large to read within the router's memory budget; send smaller batches")
+			} else {
+				refuse(reqMemory, http.StatusServiceUnavailable, "the trace router is handling as much as it can; retry")
+			}
 			return
 		}
-		if _, err := scanRequest(body, r.cfg.MaxRequestSpans); errors.Is(err, errBounds) {
-			http.Error(w, "the request is larger than the router accepts", http.StatusRequestEntityTooLarge)
+		body, err := readBody(req, r.cfg.MaxRequestBytes)
+		if err != nil {
+			if errors.Is(err, errTooLarge) {
+				refuse(reqBodyTooLarge, http.StatusRequestEntityTooLarge,
+					fmt.Sprintf("the request is larger than %d bytes (encoded) or %d bytes (decompressed); send smaller batches", r.cfg.MaxRequestBytes, 4*r.cfg.MaxRequestBytes))
+			} else {
+				refuse(reqMalformed, http.StatusBadRequest, err.Error())
+			}
 			return
-		} else if err != nil {
-			http.Error(w, "invalid ExportTraceServiceRequest", http.StatusBadRequest)
+		}
+		if _, err := scanRequest(body, r.cfg.MaxRequestSpans); err != nil {
+			switch {
+			case errors.Is(err, errTooManySpans):
+				refuse(reqTooManySpans, http.StatusRequestEntityTooLarge, fmt.Sprintf("more than %d spans in one request; send smaller batches", r.cfg.MaxRequestSpans))
+			case errors.Is(err, errBounds):
+				refuse(reqStructure, http.StatusRequestEntityTooLarge, err.Error())
+			default:
+				refuse(reqMalformed, http.StatusBadRequest, "invalid ExportTraceServiceRequest")
+			}
+			return
+		}
+		// Decoding allocates a few times the encoded size; the decompressed body is held too.
+		if need := int64(len(body)) * 4; !charge(need) {
+			if need > int64(r.cfg.RequestBytes) {
+				refuse(reqMemory, http.StatusRequestEntityTooLarge, "the request is too large to decode within the router's memory budget; send smaller batches")
+			} else {
+				refuse(reqMemory, http.StatusServiceUnavailable, "the trace router is handling as much as it can; retry")
+			}
 			return
 		}
 		var in coltracepb.ExportTraceServiceRequest
 		if err := proto.Unmarshal(body, &in); err != nil {
-			http.Error(w, "invalid ExportTraceServiceRequest", http.StatusBadRequest)
+			refuse(reqMalformed, http.StatusBadRequest, "invalid ExportTraceServiceRequest")
 			return
 		}
 		var spans []*tracepb.Span
@@ -129,7 +175,18 @@ func readBody(r *http.Request, limit int) ([]byte, error) {
 	default:
 		return nil, errors.New("unsupported Content-Encoding")
 	}
-	b, err := io.ReadAll(src)
+	// The buffer is sized from Content-Length (bounded) instead of growing by doubling, which would
+	// allocate about twice the body.
+	hint := 64 << 10
+	if cl := int(min(max(r.ContentLength, 0), int64(limit))); cl > 0 {
+		hint = cl
+		if maxOut > limit {
+			hint = min(cl*8, maxOut)
+		}
+	}
+	buf := bytes.NewBuffer(make([]byte, 0, hint))
+	_, err := buf.ReadFrom(src)
+	b := buf.Bytes()
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
@@ -186,12 +243,17 @@ const (
 	maxNesting         = 16      // AnyValue inside array or kvlist inside AnyValue ...
 )
 
-// errBounds is a request that exceeds the structural bounds.
-var errBounds = errors.New("request exceeds the structural bounds")
+// errBounds is a request that exceeds the structural bounds; errTooManySpans is the one that has more
+// spans than allowed.
+var (
+	errBounds       = errors.New("the request exceeds the structural bounds the router accepts (sub-messages, resources or nesting)")
+	errTooManySpans = errors.New("too many spans")
+)
 
 // scanRequest walks b on the wire without allocating, and returns the number of spans. It fails with
 // errBounds when the request has more than maxSpans spans, more than maxRequestNodes sub-messages, more
-// than maxRequestResource resources or scopes, or nests deeper than maxNesting; and with a parse error
+// than maxRequestResource resources or scopes, or nests deeper than maxNesting (errTooManySpans for the
+// span cap); and with a parse error
 // when it is not a well-formed message.
 func scanRequest(b []byte, maxSpans int) (spans int, err error) {
 	nodes := 0
@@ -222,7 +284,7 @@ func scanRequest(b []byte, maxSpans int) (spans int, err error) {
 				case child == kSpan:
 					spans++
 					if spans > maxSpans {
-						return errBounds
+						return errTooManySpans
 					}
 				case (child == kResourceSpans || child == kScopeSpans) && counts[child] > maxRequestResource:
 					return errBounds

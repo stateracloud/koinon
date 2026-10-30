@@ -185,6 +185,10 @@ type Route struct {
 	Platform           bool
 	Destination        export.Destination
 	ResourceAttributes map[string]string
+	// Unreadable: the destination is configured and enabled but its stored credentials cannot be
+	// opened. It is listed (so a caller does not mistake it for a deleted one and drop its queue) with
+	// no credentials, and nothing can be sent to it.
+	Unreadable bool
 	// Level is the content level for this destination: the org's own level for an org destination,
 	// and for the platform's the org's opt-in, never above the ceiling.
 	Level string
@@ -210,11 +214,15 @@ func (s *Service) Routes(ctx context.Context, org pgtype.UUID) ([]Route, error) 
 		}
 		secrets, err := s.open(r.Credentials, Binding(org, r.ID))
 		if err != nil {
-			// One destination that cannot be opened must not stop the org's other traces: skip it, log
-			// it and record the error on its health, where the admin sees it.
-			s.log.Error("trace destination credentials cannot be opened; skipping it", "destination", r.ID.String(), "err", err)
+			// One destination that cannot be opened must not stop the org's other traces: list it as
+			// unreadable, log it and record the error on its health, where the admin sees it.
+			s.log.Error("trace destination credentials cannot be opened; it receives nothing", "destination", r.ID.String(), "err", err)
 			_ = q.RecordTraceDestinationError(ctx, store.RecordTraceDestinationErrorParams{
 				OrgID: org, ID: r.ID, LastError: pgtype.Text{String: "the stored credentials cannot be opened", Valid: true},
+			})
+			out = append(out, Route{
+				ID: r.ID.String(), Name: r.Name, Unreadable: true, Level: LevelNone,
+				Destination: export.Destination{Preset: export.Preset(r.Backend), Endpoint: r.EndpointUrl},
 			})
 			continue
 		}
@@ -233,11 +241,14 @@ func (s *Service) Routes(ctx context.Context, org pgtype.UUID) ([]Route, error) 
 	}
 	secrets, err := s.open(p.Credentials, PlatformBinding())
 	if err != nil {
-		s.log.Error("platform trace destination credentials cannot be opened; skipping it", "err", err)
+		s.log.Error("platform trace destination credentials cannot be opened; it receives nothing", "err", err)
 		_ = q.RecordPlatformTraceDestinationError(ctx, store.RecordPlatformTraceDestinationErrorParams{
 			LastError: pgtype.Text{String: "the stored credentials cannot be opened", Valid: true},
 		})
-		return out, nil
+		return append(out, Route{
+			Name: "platform", Platform: true, Unreadable: true, Level: LevelNone,
+			Destination: export.Destination{Preset: export.Preset(p.Backend), Endpoint: p.EndpointUrl},
+		}), nil
 	}
 	return append(out, Route{
 		Name: "platform", Platform: true,

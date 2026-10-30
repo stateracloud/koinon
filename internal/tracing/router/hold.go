@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
-	"google.golang.org/protobuf/proto"
 )
 
 // heldRoot is a turn's root span waiting for the ledger.
@@ -32,19 +31,15 @@ type heldRoot struct {
 	// a row agree and none of the rows is pending.
 	seen   int
 	polled bool
+	reread bool
 }
 
 // hold queues a root for its ledger rows, or releases it at once when the bounds are reached. The
-// turn row is read again here, not taken from the attribution cache, which may have seen the turn
-// open. A root whose trace is already held or finished is a duplicate (agentd retried an export) and
+// turn row is read again when the root is first polled (rereadTurn), not taken from the attribution
+// cache, which may have seen the turn open; that read is off the intake worker. A root whose trace is already held or finished is a duplicate (agentd retried an export) and
 // is dropped: the chat spans were or will be made once.
 func (r *Router) hold(ctx context.Context, h *heldRoot) {
-	cctx, cancel := context.WithTimeout(ctx, r.cfg.ConfigTimeout)
-	if turn, err := r.store.Attribute(cctx, h.org, h.run, h.trace); err == nil {
-		h.turn = turn
-	}
-	cancel()
-	h.size = proto.Size(h.span)
+	h.size = estimateSize(h.span)
 	r.hmu.Lock()
 	if exp, claimed := r.claimed[h.trace]; claimed && r.now().Before(exp) {
 		r.hmu.Unlock()
@@ -94,6 +89,7 @@ func (r *Router) Sweep(ctx context.Context, now time.Time) {
 }
 
 func (r *Router) sweepOne(ctx context.Context, h *heldRoot, now time.Time) {
+	r.rereadTurn(ctx, h)
 	cctx, cancel := context.WithTimeout(ctx, r.cfg.SweepTimeout)
 	calls, err := r.modelCalls(cctx, h)
 	cancel()
@@ -137,6 +133,7 @@ func anyPending(calls []ModelCall) bool {
 
 // release finishes a root that was not held.
 func (r *Router) release(ctx context.Context, h *heldRoot) {
+	r.rereadTurn(ctx, h)
 	cctx, cancel := context.WithTimeout(ctx, r.cfg.SweepTimeout)
 	defer cancel()
 	calls, err := r.modelCalls(cctx, h)
@@ -145,6 +142,19 @@ func (r *Router) release(ctx context.Context, h *heldRoot) {
 		calls = nil
 	}
 	r.finish(ctx, h, calls)
+}
+
+// rereadTurn reads the turn row once more, with a deadline; if that fails the cached row stands.
+func (r *Router) rereadTurn(ctx context.Context, h *heldRoot) {
+	if h.reread {
+		return
+	}
+	h.reread = true
+	cctx, cancel := context.WithTimeout(ctx, r.cfg.SweepTimeout)
+	defer cancel()
+	if turn, err := r.store.Attribute(cctx, h.org, h.run, h.trace); err == nil {
+		h.turn = turn
+	}
 }
 
 // modelCalls reads the turn's ledger rows: from the turn's start to its end plus TurnGrace (a request

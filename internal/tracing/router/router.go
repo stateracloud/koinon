@@ -133,7 +133,7 @@ type Config struct {
 	// PollInterval how often the ledger is read meanwhile (default 2s).
 	LedgerWait   time.Duration
 	PollInterval time.Duration
-	// MaxHeld and MaxHeldBytes bound the roots waiting for the ledger (defaults 2048 and 32 MiB); a
+	// MaxHeld and MaxHeldBytes bound the roots waiting for the ledger (defaults 2048 and 3% of the memory limit); a
 	// root over the bound is released at once with the ledger as it stands.
 	MaxHeld      int
 	MaxHeldBytes int
@@ -157,10 +157,16 @@ type Config struct {
 	// FinishedTTL is how long a finished turn is remembered, so a duplicate root does not make its
 	// model calls twice (default 10m).
 	FinishedTTL time.Duration
-	// IntakeBytes and QueueBytes bound the memory of spans waiting for attribution and of all
-	// destination queues together (defaults 64 MiB and 256 MiB). A queue over the budget drops its
-	// own oldest spans.
-	IntakeBytes, QueueBytes int
+	// MemoryLimit is the process's memory limit in bytes (internal/memlimit.Limit; 0 when unknown). The
+	// byte budgets below default to shares of it: queues 20%, intake 5%, held roots 3%, requests in
+	// progress 8% (without a limit: 128, 32, 16 and 64 MiB). Bytes are counted as the size of the
+	// encoded span plus an estimate of the Go objects it decodes to (see estimateSize).
+	MemoryLimit int64
+	// IntakeBytes bounds the spans waiting for attribution. QueueBytes bounds all destination queues
+	// together; each queue gets an equal share of it (at least queueFloor) and drops only its own oldest
+	// spans when it is over, so one destination that is down cannot take what another needs.
+	// RequestBytes bounds the bytes of the requests being read and decoded at once.
+	IntakeBytes, QueueBytes, RequestBytes int
 	// ConfigTimeout bounds every database read on the path of a span (attribution, destinations,
 	// secrets); a failed read is remembered for ConfigCheck so a slow database is asked once, not once
 	// per span (default 3s).
@@ -229,7 +235,6 @@ func (c *Config) defaults() error {
 	setDur(&c.LedgerWait, 30*time.Second)
 	setDur(&c.PollInterval, 2*time.Second)
 	setInt(&c.MaxHeld, 2048)
-	setInt(&c.MaxHeldBytes, 32<<20)
 	setInt(&c.ContentLimit, DefaultContentLimit)
 	setDur(&c.AttributionTTL, 10*time.Minute)
 	setDur(&c.NegativeTTL, 30*time.Second)
@@ -240,8 +245,16 @@ func (c *Config) defaults() error {
 	setDur(&c.RecheckInterval, 15*time.Second)
 	setDur(&c.TurnGrace, 2*time.Second)
 	setDur(&c.FinishedTTL, 10*time.Minute)
-	setInt(&c.IntakeBytes, 64<<20)
-	setInt(&c.QueueBytes, 256<<20)
+	share := func(p int64, def int) int {
+		if c.MemoryLimit > 0 {
+			return int(c.MemoryLimit / 100 * p)
+		}
+		return def
+	}
+	setInt(&c.IntakeBytes, share(5, 32<<20))
+	setInt(&c.QueueBytes, share(20, 128<<20))
+	setInt(&c.RequestBytes, share(8, 64<<20))
+	setInt(&c.MaxHeldBytes, share(3, 16<<20))
 	setInt(&c.SweepParallel, 8)
 	setDur(&c.SweepTimeout, 5*time.Second)
 	setDur(&c.ConfigTimeout, 3*time.Second)
@@ -295,6 +308,7 @@ type Router struct {
 
 	intakeBytes atomic.Int64
 	queueBytes  atomic.Int64
+	reqBytes    atomic.Int64
 
 	cmu      sync.Mutex
 	attrs    map[attrKey]attrEntry
@@ -421,7 +435,7 @@ func (r *Router) Submit(source string, spans []*tracepb.Span) (rejected int64) {
 			r.metrics.Discarded.WithLabelValues(discardInvalid).Inc()
 			continue
 		}
-		size := proto.Size(sp)
+		size := estimateSize(sp)
 		if r.intakeBytes.Add(int64(size)) > int64(r.cfg.IntakeBytes) {
 			r.intakeBytes.Add(-int64(size))
 			rejected++
@@ -437,6 +451,20 @@ func (r *Router) Submit(source string, spans []*tracepb.Span) (rejected int64) {
 		}
 	}
 	return rejected
+}
+
+// estimateSize is what a span costs in memory: its encoded size plus about 100 bytes for each
+// attribute, event and link (the Go objects around the strings), which is what makes a span of many
+// small attributes weigh what it does once decoded.
+func estimateSize(sp *tracepb.Span) int {
+	n := len(sp.Attributes) + len(sp.Events) + len(sp.Links)
+	for _, e := range sp.Events {
+		n += len(e.Attributes)
+	}
+	for _, l := range sp.Links {
+		n += len(l.Attributes)
+	}
+	return proto.Size(sp) + 100*n
 }
 
 // Structural limits on one span: far above what agentd makes (content is pre-capped at 64 KiB), far
@@ -543,15 +571,31 @@ func (r *Router) attribute(ctx context.Context, org, run pgtype.UUID, trace [16]
 	}
 	r.cmu.Unlock()
 
-	cctx, cancel := context.WithTimeout(ctx, r.cfg.ConfigTimeout)
-	defer cancel()
-	turn, err := r.store.Attribute(cctx, org, run, trace)
+	fkey := "attr/" + org.String() + "/" + run.String() + "/" + string(trace[:])
+	if err := r.failed(fkey, now); err != nil {
+		return Turn{}, err
+	}
+	type result struct {
+		turn Turn
+		err  error
+	}
+	v, ferr := r.fl.do(fkey, func() (any, error) {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.cfg.ConfigTimeout)
+		defer cancel()
+		t, err := r.store.Attribute(cctx, org, run, trace)
+		return result{t, err}, nil
+	})
+	if ferr != nil {
+		return Turn{}, ferr
+	}
+	turn, err := v.(result).turn, v.(result).err
 	ttl := r.cfg.AttributionTTL
 	switch {
 	case err == nil:
 	case errors.Is(err, ErrUnknownRun), errors.Is(err, ErrUnknownTrace), errors.Is(err, ErrUntraced):
 		ttl = r.cfg.NegativeTTL
 	default:
+		r.fail(fkey, err, now)
 		return Turn{}, err
 	}
 	r.cmu.Lock()
@@ -771,9 +815,19 @@ func (r *Router) dispatch(ctx context.Context, org pgtype.UUID, spans ...*tracep
 	}
 	items := make([]item, len(spans))
 	for i, sp := range spans {
-		items[i] = item{sp: sp, org: org, size: proto.Size(sp)}
+		items[i] = item{sp: sp, org: org, size: estimateSize(sp)}
 	}
 	for _, route := range routes {
+		if route.Unreadable {
+			// The destination exists but its credentials cannot be opened: its queue is kept (it is not
+			// a deleted destination), and what would go to it is counted as lost.
+			kind := KindOrg
+			if route.Platform {
+				kind = KindPlatform
+			}
+			r.metrics.Dropped.WithLabelValues(kind, string(route.Destination.Preset), dropUnreadable).Add(float64(len(items)))
+			continue
+		}
 		queued := false
 		for range 3 {
 			if r.queueFor(org, route).enqueue(route, items) {
@@ -906,34 +960,48 @@ func (r *Router) evict() {
 	r.cmu.Lock()
 }
 
-// reserve takes size bytes of the global queue budget. When the budget is full it drops the oldest
-// spans of the queue holding the most queued bytes until there is room, so the destination that is
-// farthest behind pays, not a healthy one. It reports false when nothing is queued that could make
-// room.
+// reserve takes size bytes of the global queue budget, or reports false when the budget is full. The
+// per-queue shares keep the sum of the queues within it, so this is a backstop; it never evicts another
+// queue's spans.
 func (r *Router) reserve(size int) bool {
-	for range 1 << 16 {
+	for try := 0; try < 2; try++ {
 		if r.queueBytes.Add(int64(size)) <= int64(r.cfg.QueueBytes) {
 			return true
 		}
 		r.queueBytes.Add(-int64(size))
-		if v := r.largestQueue(); v == nil || !v.dropOldest() {
-			return false
+		if try == 0 {
+			// The budget is full because a queue holds more than its share (the shares shrank when
+			// another queue appeared): make each such queue drop its own excess, then try again.
+			r.rebalance()
 		}
 	}
 	return false
 }
 
-func (r *Router) largestQueue() *queue {
+// rebalance makes every queue that holds more than its share drop its own oldest spans down to it.
+func (r *Router) rebalance() {
+	capBytes := r.queueCap()
 	r.qmu.Lock()
-	defer r.qmu.Unlock()
-	var best *queue
-	most := 0
+	qs := make([]*queue, 0, len(r.queues))
 	for _, q := range r.queues {
-		if b := q.queuedBytes(); b > most {
-			best, most = q, b
-		}
+		qs = append(qs, q)
 	}
-	return best
+	r.qmu.Unlock()
+	for _, q := range qs {
+		q.trim(capBytes)
+	}
+}
+
+// queueFloor is the least a queue may hold, however many queues share the budget.
+const queueFloor = 256 << 10
+
+// queueCap is one queue's share of the queue budget: equal shares among the live queues, at least
+// queueFloor.
+func (r *Router) queueCap() int {
+	r.qmu.Lock()
+	n := max(len(r.queues), 1)
+	r.qmu.Unlock()
+	return max(r.cfg.QueueBytes/n, queueFloor)
 }
 
 // unregister removes a retired queue from the router, so a new destination under the same key gets a

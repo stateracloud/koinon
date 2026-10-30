@@ -129,15 +129,18 @@ type config struct {
 	sweepInterval time.Duration
 	watchPoll     time.Duration
 
-	otlpAddr         string
-	otlpTokenDir     string
-	metricsAddr      string
-	toolsAddr        string
-	savedWorkAddr    string
-	savedWorkSecret  string
-	secretsNamespace string
-	kubeconfig       string
-	githubAPIURL     string
+	otlpAddr     string
+	otlpTokenDir string
+	// The trace router's byte budgets; 0 derives each from the container memory limit (20% queues, 5%
+	// intake, 3% held roots, 8% requests in progress).
+	traceQueueBytes, traceIntakeBytes, traceHeldBytes, traceRequestBytes int
+	metricsAddr                                                          string
+	toolsAddr                                                            string
+	savedWorkAddr                                                        string
+	savedWorkSecret                                                      string
+	secretsNamespace                                                     string
+	kubeconfig                                                           string
+	githubAPIURL                                                         string
 
 	kekDir string
 	// kekSecret names the Secret with the key-encryption keys. koinon-api creates it on its first
@@ -214,6 +217,15 @@ func parseFlags(args []string) (config, error) {
 	fs.StringVar(&c.otlpTokenDir, "otlp-token-dir", "",
 		"directory with the OTLP receiver's bearer token (file token) and, during a rotation, the one it replaced (file previous); "+
 			"required with --otlp-addr")
+
+	fs.IntVar(&c.traceQueueBytes, "trace-queue-bytes", 0,
+		"bytes all run-trace destination queues may hold together (ADR 0074); 0 is 20% of the container memory limit (128 MiB without one)")
+	fs.IntVar(&c.traceIntakeBytes, "trace-intake-bytes", 0,
+		"bytes of spans the trace router may hold while attributing them; 0 is 5% of the memory limit (32 MiB without one)")
+	fs.IntVar(&c.traceHeldBytes, "trace-held-bytes", 0,
+		"bytes of turn root spans the trace router may hold for the ledger; 0 is 3% of the memory limit (16 MiB without one)")
+	fs.IntVar(&c.traceRequestBytes, "trace-request-bytes", 0,
+		"bytes of export requests the trace receiver may read and decode at once; 0 is 8% of the memory limit (64 MiB without one)")
 
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort,
 		"listen address of /metrics (Prometheus); empty disables it")
@@ -644,7 +656,9 @@ func run() error {
 		}
 		traceRouter, err := tracerouter.New(tracerouter.Config{
 			Store: tracerouter.NewPGStore(pool), Routes: traceSvc, Secrets: tracerouter.NewPGSecrets(pool, opener, slog.Default()),
-			Health: tracerouter.NewPGHealth(pool), Sender: exportClient, Metrics: tracerouter.NewMetrics(reg), Log: slog.Default(),
+			Health: tracerouter.NewPGHealth(pool), Sender: exportClient, MemoryLimit: memlimit.Limit(),
+			QueueBytes: cfg.traceQueueBytes, IntakeBytes: cfg.traceIntakeBytes, MaxHeldBytes: cfg.traceHeldBytes, RequestBytes: cfg.traceRequestBytes,
+			Metrics: tracerouter.NewMetrics(reg), Log: slog.Default(),
 		})
 		if err != nil {
 			return err

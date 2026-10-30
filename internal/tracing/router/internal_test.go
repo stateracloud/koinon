@@ -12,12 +12,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/encoding/protowire"
@@ -72,6 +76,7 @@ func (s *pStore) ModelCalls(ctx context.Context, _, _ pgtype.UUID, _ int32, _, _
 type pRoutes struct {
 	mu     sync.Mutex
 	routes map[pgtype.UUID][]tracedest.Route
+	ver    int
 }
 
 func (p *pRoutes) Routes(_ context.Context, org pgtype.UUID) ([]tracedest.Route, error) {
@@ -79,7 +84,22 @@ func (p *pRoutes) Routes(_ context.Context, org pgtype.UUID) ([]tracedest.Route,
 	defer p.mu.Unlock()
 	return p.routes[org], nil
 }
-func (p *pRoutes) ConfigVersion(context.Context, pgtype.UUID) (string, error) { return "v", nil }
+
+func (p *pRoutes) ConfigVersion(context.Context, pgtype.UUID) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return strconv.Itoa(p.ver), nil
+}
+
+func (p *pRoutes) set(org pgtype.UUID, routes ...tracedest.Route) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.routes == nil {
+		p.routes = map[pgtype.UUID][]tracedest.Route{}
+	}
+	p.ver++
+	p.routes[org] = routes
+}
 
 type pHealth struct{}
 
@@ -93,6 +113,8 @@ type pSender struct {
 	spans map[string]int // dest endpoint -> spans
 	fail  map[string]bool
 	calls atomic.Int32
+	// rejected is the rejected_spans every export answers with.
+	rejected int64
 }
 
 func (s *pSender) Export(_ context.Context, d export.Destination, req *coltracepb.ExportTraceServiceRequest) (export.Result, error) {
@@ -107,7 +129,7 @@ func (s *pSender) Export(_ context.Context, d export.Destination, req *coltracep
 			s.spans[d.Endpoint] += len(ss.Spans)
 		}
 	}
-	return export.Result{}, nil
+	return export.Result{Rejected: s.rejected}, nil
 }
 
 func route(id, endpoint string) tracedest.Route {
@@ -249,7 +271,7 @@ func TestScanCountsSpansAndAcceptsAgentdBatches(t *testing.T) {
 	if err != nil || n != 256 {
 		t.Fatalf("scan = %d, %v; want 256, nil", n, err)
 	}
-	if _, err := scanRequest(raw, 100); !errors.Is(err, errBounds) {
+	if _, err := scanRequest(raw, 100); !errors.Is(err, errTooManySpans) {
 		t.Fatalf("over the span cap: %v", err)
 	}
 	if _, err := scanRequest([]byte{0x0a, 0xff}, 10); err == nil || errors.Is(err, errBounds) {
@@ -383,36 +405,184 @@ func TestInflightBatchStaysInTheBudgetAndBatchesAreBoundedByBytes(t *testing.T) 
 	}
 }
 
-// One destination that is down must not take the memory of the others.
+// One destination that is down must not take the memory of the others: each queue drops only its own.
 func TestFailingDestinationDoesNotStarveAnother(t *testing.T) {
-	snd := &pSender{spans: map[string]int{}, fail: map[string]bool{"http://bad": true}}
+	for name, batch := range map[string]int{"small batches": 1, "one big in-flight batch": 512} {
+		t.Run(name, func(t *testing.T) {
+			snd := &pSender{spans: map[string]int{}, fail: map[string]bool{"http://bad": true}}
+			rs := &pRoutes{routes: map[pgtype.UUID][]tracedest.Route{
+				pOrg:  {route("bad", "http://bad")},
+				pOrg2: {route("good", "http://good")},
+			}}
+			r := newRouter(t, Config{Routes: rs, Sender: snd, Linger: time.Millisecond, QueueBytes: 1 << 20, BatchSize: batch, BackoffBase: time.Hour})
+			var bad []*tracepb.Span
+			for i := range 200 {
+				bad = append(bad, span(pOrg, [16]byte{byte(i + 1)}, false, 8<<10))
+			}
+			r.dispatch(context.Background(), pOrg, bad...)
+			time.Sleep(20 * time.Millisecond)
+			// The healthy org is the larger: 100 spans over time, exported as they come.
+			for chunk := range 10 {
+				var good []*tracepb.Span
+				for i := range 10 {
+					good = append(good, span(pOrg2, [16]byte{0xe0, byte(chunk), byte(i + 1)}, false, 8<<10))
+				}
+				r.dispatch(context.Background(), pOrg2, good...)
+				want := (chunk + 1) * 10
+				eventually(t, "the healthy destination exports its chunk", func() bool {
+					snd.mu.Lock()
+					defer snd.mu.Unlock()
+					return snd.spans["http://good"] == want
+				})
+			}
+		})
+	}
+}
+
+func testutilValue(c prometheus.Counter) float64 {
+	var m dto.Metric
+	_ = c.Write(&m)
+	return m.GetCounter().GetValue()
+}
+
+// A backend's rejected_spans is its own claim: a huge one must not hang the router.
+func TestHugeRejectedCountIsClamped(t *testing.T) {
+	snd := &pSender{spans: map[string]int{}, rejected: 1 << 62}
 	rs := &pRoutes{routes: map[pgtype.UUID][]tracedest.Route{
-		pOrg:  {route("bad", "http://bad")},
-		pOrg2: {route("good", "http://good")},
+		pOrg:  {route("d1", "http://d1")},
+		pOrg2: {route("d2", "http://d2")},
 	}}
-	r := newRouter(t, Config{Routes: rs, Sender: snd, Linger: time.Millisecond, QueueBytes: 1 << 20, BatchSize: 1, BackoffBase: time.Hour})
-	var bad []*tracepb.Span
-	for i := range 200 {
-		bad = append(bad, span(pOrg, [16]byte{byte(i + 1)}, false, 8<<10))
+	r := newRouter(t, Config{Routes: rs, Sender: snd, Linger: time.Millisecond})
+	var spans []*tracepb.Span
+	for i := range 3 {
+		spans = append(spans, span(pOrg, [16]byte{byte(i + 1)}, false, 0))
 	}
-	r.dispatch(context.Background(), pOrg, bad...)
+	r.dispatch(context.Background(), pOrg, spans...)
+	eventually(t, "the batch is done", func() bool { return snd.calls.Load() >= 1 && r.queueBytes.Load() == 0 })
+	if got := testutilValue(r.metrics.Rejected.WithLabelValues(KindOrg, "generic", rejectPartial)); got != 3 {
+		t.Errorf("rejected = %v, want 3 (clamped to the batch)", got)
+	}
+	if got := testutilValue(r.metrics.Exported.WithLabelValues(KindOrg, "generic")); got != 0 {
+		t.Errorf("exported = %v, want 0", got)
+	}
+}
+
+// A destination whose credentials cannot be opened is not a deleted one.
+func TestUnreadableDestinationKeepsItsQueue(t *testing.T) {
+	snd := &pSender{spans: map[string]int{}, fail: map[string]bool{"http://d1": true}}
+	rs := &pRoutes{routes: map[pgtype.UUID][]tracedest.Route{pOrg: {route("d1", "http://d1")}}}
+	r := newRouter(t, Config{Routes: rs, Sender: snd, Linger: time.Millisecond, BackoffBase: time.Hour, ConfigCheck: time.Millisecond})
+	r.dispatch(context.Background(), pOrg, span(pOrg, [16]byte{1}, false, 0))
+	eventually(t, "the first attempt fails", func() bool { return snd.calls.Load() >= 1 })
+
+	un := route("d1", "http://d1")
+	un.Unreadable = true
+	rs.set(pOrg, un)
+	time.Sleep(5 * time.Millisecond)
+	r.dispatch(context.Background(), pOrg, span(pOrg, [16]byte{2}, false, 0))
+	if r.QueueCount() != 1 {
+		t.Errorf("queues = %d; an unreadable destination keeps its queue", r.QueueCount())
+	}
+	if got := testutilValue(r.metrics.Dropped.WithLabelValues(KindOrg, "generic", dropUnreadable)); got < 1 {
+		t.Errorf("spans lost to unreadable credentials = %v, want at least the new one", got)
+	}
+	if got := testutilValue(r.metrics.Dropped.WithLabelValues(KindOrg, "generic", dropRemoved)); got != 0 {
+		t.Errorf("removed = %v; the destination was not deleted", got)
+	}
+}
+
+func TestFlightReleasesWaitersWhenTheLeaderPanics(t *testing.T) {
+	var f flight
+	started := make(chan struct{})
+	release := make(chan struct{})
+	errs := make(chan error, 2)
+	go func() {
+		_, err := f.do("k", func() (any, error) {
+			close(started)
+			<-release
+			panic("boom")
+		})
+		errs <- err
+	}()
+	<-started
+	go func() {
+		_, err := f.do("k", func() (any, error) { return nil, nil })
+		errs <- err
+	}()
 	time.Sleep(20 * time.Millisecond)
-	var good []*tracepb.Span
-	for i := range 5 {
-		good = append(good, span(pOrg2, [16]byte{0xe0 + byte(i)}, false, 8<<10))
+	close(release)
+	for range 2 {
+		select {
+		case err := <-errs:
+			if err == nil {
+				t.Error("a panicking read must give its callers an error")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("a waiter was never released")
+		}
 	}
-	r.dispatch(context.Background(), pOrg2, good...)
-	eventually(t, "the healthy destination exports all five", func() bool {
-		snd.mu.Lock()
-		defer snd.mu.Unlock()
-		return snd.spans["http://good"] == 5
-	})
+}
+
+func TestRefusalsSayWhyAndAreCounted(t *testing.T) {
+	r := newRouter(t, Config{MaxRequestSpans: 2, RequestBytes: 8 << 10})
+	post := func(spans ...*tracepb.Span) (int, string) {
+		raw, _ := proto.Marshal(&coltracepb.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{ScopeSpans: []*tracepb.ScopeSpans{{Spans: spans}}}}})
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, TracesPath, bytes.NewReader(raw))
+		req.Header.Set("Content-Type", "application/x-protobuf")
+		w := httptest.NewRecorder()
+		r.Handler().ServeHTTP(w, req)
+		return w.Code, w.Body.String()
+	}
+	one := func() *tracepb.Span { return span(pOrg, [16]byte{1}, false, 0) }
+	if code, body := post(one(), one(), one()); code != http.StatusRequestEntityTooLarge || !strings.Contains(body, "more than 2 spans") {
+		t.Errorf("too many spans: %d %q", code, body)
+	}
+	if got := testutilValue(r.metrics.RequestsRejected.WithLabelValues(reqTooManySpans)); got != 1 {
+		t.Errorf("too_many_spans = %v", got)
+	}
+	big := span(pOrg, [16]byte{1}, false, 6<<10)
+	if code, body := post(big, big); code != http.StatusRequestEntityTooLarge || !strings.Contains(body, "memory budget") {
+		t.Errorf("a request that can never fit: %d %q", code, body)
+	}
+	if got := testutilValue(r.metrics.RequestsRejected.WithLabelValues(reqMemory)); got != 1 {
+		t.Errorf("memory = %v", got)
+	}
+}
+
+func TestBudgetsDeriveFromTheMemoryLimit(t *testing.T) {
+	r, _ := New(Config{Store: &pStore{}, Routes: &pRoutes{}, Health: pHealth{}, Sender: &pSender{}, MemoryLimit: 512 << 20})
+	lim := int64(512 << 20)
+	for name, got := range map[string]struct{ have, want int64 }{
+		"queues":   {int64(r.cfg.QueueBytes), lim / 100 * 20},
+		"intake":   {int64(r.cfg.IntakeBytes), lim / 100 * 5},
+		"held":     {int64(r.cfg.MaxHeldBytes), lim / 100 * 3},
+		"requests": {int64(r.cfg.RequestBytes), lim / 100 * 8},
+	} {
+		if got.have != got.want {
+			t.Errorf("%s budget = %d, want %d", name, got.have, got.want)
+		}
+	}
+	explicit, _ := New(Config{Store: &pStore{}, Routes: &pRoutes{}, Health: pHealth{}, Sender: &pSender{}, MemoryLimit: 512 << 20, QueueBytes: 1 << 20})
+	if explicit.cfg.QueueBytes != 1<<20 {
+		t.Error("an explicit budget must win")
+	}
+}
+
+func TestEstimateChargesTheObjectsAroundTheBytes(t *testing.T) {
+	plain := span(pOrg, [16]byte{1}, false, 0)
+	many := span(pOrg, [16]byte{1}, false, 0)
+	for range 100 {
+		many.Attributes = append(many.Attributes, kvStr("k", "v"))
+	}
+	if estimateSize(many)-estimateSize(plain) < 100*100 {
+		t.Errorf("100 attributes cost %d bytes more; each should cost at least 100", estimateSize(many)-estimateSize(plain))
+	}
 }
 
 // A database that does not answer must not stop the receiver, and is asked once, not once per span.
 func TestHangingDatabaseDoesNotStopTheReceiver(t *testing.T) {
 	st := &pStore{hang: true}
-	r := newRouter(t, Config{Store: st, ConfigTimeout: 100 * time.Millisecond, Workers: 2, IngestQueue: 8})
+	r := newRouter(t, Config{Store: st, ConfigTimeout: 100 * time.Millisecond, Workers: 2, IngestQueue: 8, NegativeTTL: time.Hour})
 	srv := httptest.NewServer(r.Handler())
 	defer srv.Close()
 	post := func() (time.Duration, int) {
@@ -432,6 +602,10 @@ func TestHangingDatabaseDoesNotStopTheReceiver(t *testing.T) {
 		if d, code := post(); d > 50*time.Millisecond || code != 200 {
 			t.Fatalf("the receiver took %v and answered %d while the database hung", d, code)
 		}
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := st.attrs.Load(); n > 3 {
+		t.Errorf("the database was asked %d times about one trace; the workers share one read and a failure is remembered", n)
 	}
 }
 

@@ -34,3 +34,13 @@ func Apply() int64 {
 	debug.SetMemoryLimit(limit)
 	return limit
 }
+
+// Limit returns the container's memory limit in bytes from Env, or 0 when it is not set. Components
+// that hold memory on behalf of callers (the trace router's queues) size themselves from it.
+func Limit() int64 {
+	n, err := strconv.ParseInt(os.Getenv(Env), 10, 64)
+	if err != nil || n <= 0 || n > 1<<50 {
+		return 0
+	}
+	return n
+}
