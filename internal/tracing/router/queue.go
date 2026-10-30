@@ -53,7 +53,7 @@ type queue struct {
 	mu      sync.Mutex
 	items   []item
 	head    int
-	bytes   int
+	queued  int // bytes of the items in the queue (a batch being sent is counted in the router's total, not here)
 	route   tracedest.Route
 	retired bool
 	closed  bool
@@ -78,45 +78,41 @@ type queue struct {
 
 func (q *queue) depth() int { return len(q.items) - q.head }
 
-// enqueue adds items. When the queue is full by count, or the router's global byte budget would be
-// exceeded, it drops this queue's oldest items first. It reports false when the queue has been
-// closed (idle, retired), and the caller then asks for a new one.
+// enqueue adds items. Each item first reserves its bytes in the router's global budget; when the budget
+// is full the oldest spans of the queue holding the most bytes are dropped to make room, so one
+// destination that is down cannot take the memory of the others. A queue over its count drops its own
+// oldest. It reports false when the queue has been closed (idle, retired), and the caller then asks for
+// a new one.
 func (q *queue) enqueue(route tracedest.Route, in []item) bool {
-	q.mu.Lock()
-	if q.closed || q.retired {
-		q.mu.Unlock()
-		return false
-	}
-	q.route = route
 	var lost []item
 	for _, it := range in {
-		for q.depth() > 0 && (q.depth() >= q.r.cfg.QueueSize || q.r.queueBytes.Load()+int64(it.size) > int64(q.r.cfg.QueueBytes)) {
-			old := q.items[q.head]
-			q.items[q.head] = item{}
-			q.head++
-			q.bytes -= old.size
-			q.r.queueBytes.Add(-int64(old.size))
-			q.r.metrics.QueueDepth.WithLabelValues(q.kind, q.backend).Dec()
-			lost = append(lost, old)
-		}
-		if q.depth() == 0 && q.r.queueBytes.Load()+int64(it.size) > int64(q.r.cfg.QueueBytes) {
-			lost = append(lost, it) // nothing of ours left to drop: this one does not fit
+		if !q.r.reserve(it.size) {
+			lost = append(lost, it) // nothing is queued anywhere that could make room
 			continue
 		}
+		q.mu.Lock()
+		if q.closed || q.retired {
+			q.mu.Unlock()
+			q.r.queueBytes.Add(-int64(it.size))
+			q.lose(lost, dropQueueFull)
+			return false
+		}
+		q.route = route
+		for q.depth() >= q.r.cfg.QueueSize {
+			lost = append(lost, q.popLocked())
+		}
 		q.items = append(q.items, it)
-		q.bytes += it.size
-		q.r.queueBytes.Add(int64(it.size))
+		q.queued += it.size
 		q.r.metrics.QueueDepth.WithLabelValues(q.kind, q.backend).Inc()
+		q.mu.Unlock()
 	}
+	q.mu.Lock()
 	if q.head > 1024 && q.head > len(q.items)/2 {
 		q.items = append([]item(nil), q.items[q.head:]...)
 		q.head = 0
 	}
 	q.mu.Unlock()
-	if len(lost) > 0 {
-		// Those queued earlier were counted in the depth; the one that did not fit never was.
-		q.lose(lost, dropQueueFull)
-	}
+	q.lose(lost, dropQueueFull)
 	select {
 	case q.wake <- struct{}{}:
 	default:
@@ -124,26 +120,72 @@ func (q *queue) enqueue(route tracedest.Route, in []item) bool {
 	return true
 }
 
-// take removes up to n items from the front.
-func (q *queue) take(n int) []item {
+// popLocked removes the oldest item and frees its bytes. q.mu must be held and the queue not empty.
+func (q *queue) popLocked() item {
+	old := q.items[q.head]
+	q.items[q.head] = item{}
+	q.head++
+	q.queued -= old.size
+	q.r.queueBytes.Add(-int64(old.size))
+	q.r.metrics.QueueDepth.WithLabelValues(q.kind, q.backend).Dec()
+	return old
+}
+
+// dropOldest drops the oldest queued item to make room for another queue's span.
+func (q *queue) dropOldest() bool {
+	q.mu.Lock()
+	if q.depth() == 0 {
+		q.mu.Unlock()
+		return false
+	}
+	old := q.popLocked()
+	q.mu.Unlock()
+	q.lose([]item{old}, dropQueueFull)
+	return true
+}
+
+func (q *queue) queuedBytes() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	k := min(n, q.depth())
+	return q.queued
+}
+
+// take removes up to n items, and up to maxBytes (at least one), from the front. Their bytes stay in
+// the router's budget until the caller has finished with them: a batch being sent or retried is still
+// in memory.
+func (q *queue) take(n, maxBytes int) []item {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	k, sum := 0, 0
+	for k < min(n, q.depth()) {
+		size := q.items[q.head+k].size
+		if k > 0 && sum+size > maxBytes {
+			break
+		}
+		sum += size
+		k++
+	}
 	out := make([]item, k)
 	copy(out, q.items[q.head:q.head+k])
-	freed := 0
 	for i := range k {
-		freed += q.items[q.head+i].size
 		q.items[q.head+i] = item{}
 	}
 	q.head += k
-	q.bytes -= freed
-	q.r.queueBytes.Add(-int64(freed))
+	q.queued -= sum
 	if q.head == len(q.items) {
 		q.items, q.head = q.items[:0], 0
 	}
 	q.r.metrics.QueueDepth.WithLabelValues(q.kind, q.backend).Sub(float64(k))
 	return out
+}
+
+// release frees the budget of items that are finished with, however they ended.
+func (q *queue) release(items []item) {
+	sum := 0
+	for _, it := range items {
+		sum += it.size
+	}
+	q.r.queueBytes.Add(-int64(sum))
 }
 
 func (q *queue) snapshot() (tracedest.Route, int) {
@@ -210,12 +252,14 @@ func (q *queue) run() {
 	idleSince := q.r.now()
 	for {
 		if q.ctx.Err() != nil {
+			rest := q.take(1<<30, 1<<62)
 			if q.isRetired() {
-				q.removed(q.take(1 << 30))
+				q.removed(rest)
 			} else {
-				q.lose(q.take(1<<30), dropShutdown)
+				q.lose(rest, dropShutdown)
 				q.flushHealth(true)
 			}
+			q.release(rest)
 			q.finish()
 			return
 		}
@@ -237,7 +281,7 @@ func (q *queue) run() {
 			// Let a few more spans arrive, so a trace goes out in one request.
 			_ = q.r.sleep(q.ctx, cfg.Linger)
 		}
-		batch := q.take(cfg.BatchSize)
+		batch := q.take(cfg.BatchSize, cfg.BatchBytes)
 		if len(batch) == 0 {
 			continue
 		}
@@ -307,6 +351,7 @@ func (q *queue) prepare(ctx context.Context, batch []item, drops map[int]int64) 
 				}
 			} else if !q.platform {
 				q.retire()
+				q.r.unregister(q)
 			}
 			states[it.org] = st
 		}
@@ -338,12 +383,26 @@ func (q *queue) prepare(ctx context.Context, batch []item, drops map[int]int64) 
 // copy anew and first checks that the destination still exists.
 func (q *queue) send(batch []item) {
 	cfg := q.r.cfg
+	defer q.release(batch) // the batch is in memory until its final outcome
 	drops := map[int]int64{}
 	for i, it := range batch {
 		if isRoot(it.sp) {
 			drops[i] = q.reportDropped(it.org)
 		}
 	}
+	delivered := false
+	defer func() {
+		if delivered {
+			return
+		}
+		// The batch was not delivered: the roots in it did not tell their orgs what was lost, so the
+		// next roots must.
+		q.dmu.Lock()
+		for i, n := range drops {
+			q.droppedByOrg[batch[i].org] += n
+		}
+		q.dmu.Unlock()
+	}()
 	stop := func() {
 		if q.isRetired() {
 			q.removed(batch)
@@ -397,10 +456,9 @@ func (q *queue) send(batch []item) {
 				if res.Rejected > 0 {
 					q.r.metrics.Rejected.WithLabelValues(q.kind, q.backend, rejectPartial).Add(float64(res.Rejected))
 					q.lostForHealth.Add(res.Rejected)
-					q.dmu.Lock()
-					q.droppedByOrg[batch[0].org] += res.Rejected
-					q.dmu.Unlock()
+					q.chargeRejected(batch, res.Rejected)
 				}
+				delivered = true
 				q.okDirty = true
 				q.flushHealth(false)
 				return
@@ -451,6 +509,35 @@ func (q *queue) send(batch []item) {
 			return
 		}
 	}
+}
+
+// chargeRejected shares n rejected spans among the orgs of a batch in proportion to their spans (the
+// backend does not say which it refused), the remainder going to the first orgs, so koinon.spans_dropped
+// tells each org about its own share.
+func (q *queue) chargeRejected(batch []item, n int64) {
+	var order []pgtype.UUID
+	count := map[pgtype.UUID]int64{}
+	for _, it := range batch {
+		if count[it.org] == 0 {
+			order = append(order, it.org)
+		}
+		count[it.org]++
+	}
+	total, given := int64(len(batch)), int64(0)
+	share := map[pgtype.UUID]int64{}
+	for _, o := range order {
+		share[o] = n * count[o] / total
+		given += share[o]
+	}
+	for i := 0; given < n; i++ {
+		share[order[i%len(order)]]++
+		given++
+	}
+	q.dmu.Lock()
+	for o, v := range share {
+		q.droppedByOrg[o] += v
+	}
+	q.dmu.Unlock()
 }
 
 // nonGone returns the items of batch that are not in gone.

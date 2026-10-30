@@ -161,6 +161,12 @@ type Config struct {
 	// destination queues together (defaults 64 MiB and 256 MiB). A queue over the budget drops its
 	// own oldest spans.
 	IntakeBytes, QueueBytes int
+	// ConfigTimeout bounds every database read on the path of a span (attribution, destinations,
+	// secrets); a failed read is remembered for ConfigCheck so a slow database is asked once, not once
+	// per span (default 3s).
+	ConfigTimeout time.Duration
+	// BatchBytes bounds the bytes of one export batch, besides BatchSize (default 4 MiB).
+	BatchBytes int
 	// SweepParallel and SweepTimeout bound the ledger reads for held roots (defaults 8 and 5s), so
 	// one slow read does not hold the others past their 30 seconds.
 	SweepParallel int
@@ -238,6 +244,11 @@ func (c *Config) defaults() error {
 	setInt(&c.QueueBytes, 256<<20)
 	setInt(&c.SweepParallel, 8)
 	setDur(&c.SweepTimeout, 5*time.Second)
+	setDur(&c.ConfigTimeout, 3*time.Second)
+	setInt(&c.BatchBytes, 4<<20)
+	// A held root settles after two polls that agree. Rows of a turn can still be logged up to
+	// TurnGrace after it ended, so polls closer together than that would settle too early.
+	c.PollInterval = max(c.PollInterval, c.TurnGrace)
 	setInt(&c.MaxRequestSpans, 1024)
 	setInt(&c.MaxRequestBytes, 4<<20)
 	setInt(&c.MaxConcurrentRequests, 8)
@@ -289,7 +300,9 @@ type Router struct {
 	attrs    map[attrKey]attrEntry
 	rts      map[pgtype.UUID]routeEntry
 	scr      map[pgtype.UUID]secretEntry
-	finished map[[16]byte]time.Time
+	fails    map[string]failEntry
+	routeSeq uint64
+	fl       flight
 
 	qmu    sync.Mutex
 	queues map[string]*queue
@@ -297,6 +310,15 @@ type Router struct {
 	hmu       sync.Mutex
 	held      map[[16]byte]*heldRoot
 	heldBytes int
+	// claimed holds the traces whose root was accepted, held or finished, until FinishedTTL: a second
+	// root of the same trace is a duplicate. It is claimed in the same critical section as the check.
+	claimed map[[16]byte]time.Time
+}
+
+// failEntry remembers a failed read for a moment.
+type failEntry struct {
+	err   error
+	until time.Time
 }
 
 type intakeItem struct {
@@ -315,8 +337,9 @@ func New(cfg Config) (*Router, error) {
 		now: cfg.Now, sleep: cfg.Sleep,
 		intake: make(chan intakeItem, cfg.IngestQueue), reqs: make(chan struct{}, cfg.MaxConcurrentRequests),
 		attrs: map[attrKey]attrEntry{}, rts: map[pgtype.UUID]routeEntry{}, scr: map[pgtype.UUID]secretEntry{},
-		finished: map[[16]byte]time.Time{},
-		queues:   map[string]*queue{}, held: map[[16]byte]*heldRoot{},
+		fails:   map[string]failEntry{},
+		claimed: map[[16]byte]time.Time{},
+		queues:  map[string]*queue{}, held: map[[16]byte]*heldRoot{},
 	}, nil
 }
 
@@ -520,7 +543,9 @@ func (r *Router) attribute(ctx context.Context, org, run pgtype.UUID, trace [16]
 	}
 	r.cmu.Unlock()
 
-	turn, err := r.store.Attribute(ctx, org, run, trace)
+	cctx, cancel := context.WithTimeout(ctx, r.cfg.ConfigTimeout)
+	defer cancel()
+	turn, err := r.store.Attribute(cctx, org, run, trace)
 	ttl := r.cfg.AttributionTTL
 	switch {
 	case err == nil:
@@ -550,6 +575,7 @@ func (r *Router) attribute(ctx context.Context, org, run pgtype.UUID, trace [16]
 type routeEntry struct {
 	routes  []tracedest.Route
 	ver     string
+	seq     uint64    // order of the load, so an older load never replaces a newer one
 	checked time.Time // last confirmed current
 	expires time.Time // for a source without versions
 }
@@ -561,59 +587,96 @@ type secretEntry struct {
 	expires time.Time // for a source without versions
 }
 
+// failed returns a recent failure of the same read, if any: a read that just failed is not repeated by
+// every span behind it. The caller still fails closed.
+func (r *Router) failed(key string, now time.Time) error {
+	r.cmu.Lock()
+	defer r.cmu.Unlock()
+	if f, ok := r.fails[key]; ok {
+		if now.Before(f.until) {
+			return f.err
+		}
+		delete(r.fails, key)
+	}
+	return nil
+}
+
+func (r *Router) fail(key string, err error, now time.Time) {
+	r.cmu.Lock()
+	r.fails[key] = failEntry{err: err, until: now.Add(r.cfg.ConfigCheck)}
+	r.cmu.Unlock()
+}
+
 // routesFor returns the org's destinations. With a versioned source the cache is confirmed against
 // the settings' fingerprint every ConfigCheck and reloaded the moment it changes; a failed check or
 // load is an error, never a stale answer, because a copy made from stale settings could carry more
-// than the org now allows.
+// than the org now allows. Reads have a deadline, run once per org at a time, and a failure is
+// remembered for ConfigCheck.
 func (r *Router) routesFor(ctx context.Context, org pgtype.UUID) ([]tracedest.Route, error) {
 	now := r.now()
 	r.cmu.Lock()
 	e, ok := r.rts[org]
 	r.cmu.Unlock()
 	rv, versioned := r.routes.(RouteVersioner)
-	var ver string
 	if ok {
 		if !versioned && now.Before(e.expires) {
 			return e.routes, nil
 		}
+		if versioned && now.Sub(e.checked) < r.cfg.ConfigCheck {
+			return e.routes, nil
+		}
+	}
+	key := "routes/" + org.String()
+	if err := r.failed(key, now); err != nil {
+		return nil, err
+	}
+	v, err := r.fl.do(key, func() (any, error) {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.cfg.ConfigTimeout)
+		defer cancel()
+		var ver string
 		if versioned {
-			if now.Sub(e.checked) < r.cfg.ConfigCheck {
-				return e.routes, nil
-			}
-			v, err := rv.ConfigVersion(ctx, org)
-			if err != nil {
+			var err error
+			if ver, err = rv.ConfigVersion(cctx, org); err != nil {
 				return nil, err
 			}
-			if v == e.ver {
+			if ok && ver == e.ver {
 				e.checked = now
 				r.cmu.Lock()
-				r.rts[org] = e
+				if cur, still := r.rts[org]; still && cur.seq == e.seq {
+					r.rts[org] = e
+				}
 				r.cmu.Unlock()
 				return e.routes, nil
 			}
 		}
-	}
-	if versioned {
-		v, err := rv.ConfigVersion(ctx, org) // before the load: a change in between is seen next time
+		r.cmu.Lock()
+		r.routeSeq++
+		seq := r.routeSeq
+		r.cmu.Unlock()
+		routes, err := r.routes.Routes(cctx, org)
 		if err != nil {
 			return nil, err
 		}
-		ver = v
-	}
-	routes, err := r.routes.Routes(ctx, org)
+		r.cmu.Lock()
+		if cur, still := r.rts[org]; !still || cur.seq < seq {
+			r.rts[org] = routeEntry{routes: routes, ver: ver, seq: seq, checked: now, expires: now.Add(r.cfg.RouteTTL)}
+		}
+		r.cmu.Unlock()
+		r.syncQueues(org, routes)
+		return routes, nil
+	})
 	if err != nil {
+		r.fail(key, err, now)
 		return nil, err
 	}
-	r.cmu.Lock()
-	r.rts[org] = routeEntry{routes: routes, ver: ver, checked: now, expires: now.Add(r.cfg.RouteTTL)}
-	r.cmu.Unlock()
-	r.syncQueues(org, routes)
-	return routes, nil
+	return v.([]tracedest.Route), nil
 }
 
 // secretsFor returns the org's secret set. It is confirmed against the credentials' fingerprint like
-// the routes. When it cannot be loaded or confirmed, the last set is used for SecretsGrace at most;
-// after that the error is returned and the caller sends no content (fail closed).
+// the routes. The last set is used for SecretsGrace only when the fingerprint itself cannot be read (or,
+// for a source without one, after its TTL): once the fingerprint says the credentials changed, or an
+// envelope cannot be opened, a failed reload gives an error and the caller sends no content (fail
+// closed).
 func (r *Router) secretsFor(ctx context.Context, org pgtype.UUID) (*scrub.Secrets, error) {
 	if r.secrets == nil {
 		return nil, nil
@@ -623,44 +686,72 @@ func (r *Router) secretsFor(ctx context.Context, org pgtype.UUID) (*scrub.Secret
 	e, ok := r.scr[org]
 	r.cmu.Unlock()
 	sv, versioned := r.secrets.(SecretVersioner)
-	stale := func(err error) (*scrub.Secrets, error) {
+	if ok {
+		if !versioned && now.Before(e.expires) {
+			return e.set, nil
+		}
+		if versioned && now.Sub(e.checked) < r.cfg.ConfigCheck {
+			return e.set, nil
+		}
+	}
+	key := "secrets/" + org.String()
+	if err := r.failed(key, now); err != nil {
+		return r.graceOrFail(e, ok, versioned, err, now)
+	}
+	v, err := r.fl.do(key, func() (any, error) {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.cfg.ConfigTimeout)
+		defer cancel()
+		var ver string
+		if versioned {
+			var err error
+			if ver, err = sv.Version(cctx, org); err != nil {
+				return nil, &graceable{err}
+			}
+			if ok && ver == e.ver {
+				e.checked = now
+				r.cmu.Lock()
+				r.scr[org] = e
+				r.cmu.Unlock()
+				return e.set, nil
+			}
+		}
+		set, err := r.secrets.Secrets(cctx, org)
+		if err != nil {
+			if versioned || errors.Is(err, ErrUnopenable) {
+				return nil, err // the credentials changed, or cannot be read: no grace
+			}
+			return nil, &graceable{err}
+		}
+		r.cmu.Lock()
+		r.scr[org] = secretEntry{set: set, ver: ver, checked: now, expires: now.Add(r.cfg.SecretsTTL)}
+		r.cmu.Unlock()
+		return set, nil
+	})
+	if err != nil {
+		r.fail(key, err, now)
+		return r.graceOrFail(e, ok, versioned, err, now)
+	}
+	return v.(*scrub.Secrets), nil
+}
+
+// graceable marks a failure that leaves the last set usable for SecretsGrace: the fingerprint could not
+// be read, so nothing says the credentials changed.
+type graceable struct{ error }
+
+func (g *graceable) Unwrap() error { return g.error }
+
+func (r *Router) graceOrFail(e secretEntry, ok, versioned bool, err error, now time.Time) (*scrub.Secrets, error) {
+	var g *graceable
+	if ok && errors.As(err, &g) && !errors.Is(err, ErrUnopenable) {
 		valid := e.expires
 		if versioned {
 			valid = e.checked.Add(r.cfg.ConfigCheck)
 		}
-		if ok && now.Before(valid.Add(r.cfg.SecretsGrace)) {
+		if now.Before(valid.Add(r.cfg.SecretsGrace)) {
 			return e.set, nil
 		}
-		return nil, err
 	}
-	var ver string
-	if versioned {
-		if ok && now.Sub(e.checked) < r.cfg.ConfigCheck {
-			return e.set, nil
-		}
-		v, err := sv.Version(ctx, org)
-		if err != nil {
-			return stale(err)
-		}
-		ver = v
-		if ok && v == e.ver {
-			e.checked = now
-			r.cmu.Lock()
-			r.scr[org] = e
-			r.cmu.Unlock()
-			return e.set, nil
-		}
-	} else if ok && now.Before(e.expires) {
-		return e.set, nil
-	}
-	set, err := r.secrets.Secrets(ctx, org)
-	if err != nil {
-		return stale(err)
-	}
-	r.cmu.Lock()
-	r.scr[org] = secretEntry{set: set, ver: ver, checked: now, expires: now.Add(r.cfg.SecretsTTL)}
-	r.cmu.Unlock()
-	return set, nil
+	return nil, err
 }
 
 // ---- fan-out ----
@@ -749,10 +840,9 @@ func (r *Router) syncQueues(org pgtype.UUID, routes []tracedest.Route) {
 	defer r.qmu.Unlock()
 	for _, q := range r.queues {
 		switch {
-		case q.platform && !platform:
+		case q.platform && !platform, !q.platform && q.org == org && !have[q.key]:
 			q.retire()
-		case !q.platform && q.org == org && !have[q.key]:
-			q.retire()
+			delete(r.queues, q.key) // a new destination under the same key gets a new queue
 		}
 	}
 }
@@ -800,9 +890,58 @@ func (r *Router) evict() {
 			delete(r.scr, org)
 		}
 	}
-	for t, exp := range r.finished {
-		if !now.Before(exp) {
-			delete(r.finished, t)
+	for k, f := range r.fails {
+		if !now.Before(f.until) {
+			delete(r.fails, k)
 		}
+	}
+	r.cmu.Unlock()
+	r.hmu.Lock()
+	for t, exp := range r.claimed {
+		if _, held := r.held[t]; !held && !now.Before(exp) {
+			delete(r.claimed, t)
+		}
+	}
+	r.hmu.Unlock()
+	r.cmu.Lock()
+}
+
+// reserve takes size bytes of the global queue budget. When the budget is full it drops the oldest
+// spans of the queue holding the most queued bytes until there is room, so the destination that is
+// farthest behind pays, not a healthy one. It reports false when nothing is queued that could make
+// room.
+func (r *Router) reserve(size int) bool {
+	for range 1 << 16 {
+		if r.queueBytes.Add(int64(size)) <= int64(r.cfg.QueueBytes) {
+			return true
+		}
+		r.queueBytes.Add(-int64(size))
+		if v := r.largestQueue(); v == nil || !v.dropOldest() {
+			return false
+		}
+	}
+	return false
+}
+
+func (r *Router) largestQueue() *queue {
+	r.qmu.Lock()
+	defer r.qmu.Unlock()
+	var best *queue
+	most := 0
+	for _, q := range r.queues {
+		if b := q.queuedBytes(); b > most {
+			best, most = q, b
+		}
+	}
+	return best
+}
+
+// unregister removes a retired queue from the router, so a new destination under the same key gets a
+// queue of its own.
+func (r *Router) unregister(q *queue) {
+	r.qmu.Lock()
+	defer r.qmu.Unlock()
+	if r.queues[q.key] == q {
+		delete(r.queues, q.key)
 	}
 }

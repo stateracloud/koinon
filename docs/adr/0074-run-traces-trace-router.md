@@ -633,6 +633,26 @@ router amendment above.
    is counted per org on the shared platform queue. Ledger reads for held roots run in parallel (8) with a
    5 s timeout each. A span no live queue could take is counted as discarded (`enqueue_failed`).
 
+### Second review (2026-10-30)
+
+- The platform destination's fingerprint includes its `updated_at`, because deleting and recreating it
+  resets `config_version`.
+- The pre-scan walks the whole request on the wire and rejects it before decoding when it has more than
+  262,144 sub-messages, 64 resources or scopes, the span cap, or values nested deeper than 16.
+- A trace is claimed (for ten minutes after it finishes) in the same critical section as the duplicate
+  check, so two roots arriving together make the model calls once.
+- A batch stays in the byte budget until its final outcome, and a batch is bounded by 4 MiB as well as
+  512 spans. When the global budget is full, the queue holding the most bytes drops its oldest spans, so
+  a destination that is down does not take the memory of a healthy one.
+- The last secret set is used for the grace only when the credentials' fingerprint cannot be read. Once it
+  says they changed, or an envelope cannot be opened, a failed reload sends no content.
+- Every database read on the path of a span has a deadline (3 s), runs once per org at a time, and a
+  failure is remembered for a second, still failing closed.
+- A retired queue leaves the router at once; a partial rejection is shared among the batch's orgs by
+  their spans; the drop count a lost batch's root carried is not lost; an older load never replaces a
+  newer one. A held root settles only after its window (turn end + 2 s) has closed, and the poll interval
+  is never shorter than that grace.
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),

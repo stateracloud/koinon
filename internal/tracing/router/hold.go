@@ -39,20 +39,21 @@ type heldRoot struct {
 // open. A root whose trace is already held or finished is a duplicate (agentd retried an export) and
 // is dropped: the chat spans were or will be made once.
 func (r *Router) hold(ctx context.Context, h *heldRoot) {
-	if turn, err := r.store.Attribute(ctx, h.org, h.run, h.trace); err == nil {
+	cctx, cancel := context.WithTimeout(ctx, r.cfg.ConfigTimeout)
+	if turn, err := r.store.Attribute(cctx, h.org, h.run, h.trace); err == nil {
 		h.turn = turn
 	}
+	cancel()
 	h.size = proto.Size(h.span)
-	r.cmu.Lock()
-	_, done := r.finished[h.trace]
-	r.cmu.Unlock()
 	r.hmu.Lock()
-	_, dup := r.held[h.trace]
-	if dup || done {
+	if exp, claimed := r.claimed[h.trace]; claimed && r.now().Before(exp) {
 		r.hmu.Unlock()
 		r.metrics.Discarded.WithLabelValues(discardDuplicate).Inc()
 		return
 	}
+	// Claimed in the same critical section as the check, before the root is held or released, so two
+	// roots of one trace arriving together cannot both make the model calls.
+	r.claimed[h.trace] = r.now().Add(r.cfg.LedgerWait + r.cfg.FinishedTTL)
 	if len(r.held) < r.cfg.MaxHeld && r.heldBytes+h.size <= r.cfg.MaxHeldBytes {
 		r.held[h.trace] = h
 		r.heldBytes += h.size
@@ -97,7 +98,9 @@ func (r *Router) sweepOne(ctx context.Context, h *heldRoot, now time.Time) {
 	calls, err := r.modelCalls(cctx, h)
 	cancel()
 	overdue := now.Sub(h.since) >= r.cfg.LedgerWait
-	settled := err == nil && h.polled && len(calls) == h.seen && !anyPending(calls)
+	// Settled: two polls agree, none is pending, and the window has closed (rows are logged when the
+	// request completes, up to TurnGrace after the turn ended).
+	settled := err == nil && h.polled && len(calls) == h.seen && !anyPending(calls) && !now.Before(r.windowEnd(h))
 	if err == nil {
 		h.seen, h.polled = len(calls), true
 	}
@@ -148,11 +151,17 @@ func (r *Router) release(ctx context.Context, h *heldRoot) {
 // is logged when it completes, which can be just after the turn ended), half-open, and never into the
 // next turn. While the row is still open the window ends with the root span.
 func (r *Router) modelCalls(ctx context.Context, h *heldRoot) ([]ModelCall, error) {
+	return r.store.ModelCalls(ctx, h.org, h.run, h.turn.Seq, h.turn.StartedAt, r.windowEnd(h))
+}
+
+// windowEnd is where the turn's ledger window ends: the turn's end, or while its row is still open the
+// end of the root span, plus TurnGrace.
+func (r *Router) windowEnd(h *heldRoot) time.Time {
 	end := time.Unix(0, int64(h.span.EndTimeUnixNano)) //nolint:gosec // a span end time, far below the int64 limit
 	if h.turn.EndedAt != nil {
 		end = *h.turn.EndedAt
 	}
-	return r.store.ModelCalls(ctx, h.org, h.run, h.turn.Seq, h.turn.StartedAt, end.Add(r.cfg.TurnGrace))
+	return end.Add(r.cfg.TurnGrace)
 }
 
 // finish builds the model-call spans, puts the totals on the root and queues them all.
@@ -160,8 +169,8 @@ func (r *Router) finish(ctx context.Context, h *heldRoot, calls []ModelCall) {
 	spans, use := modelCallSpans(h.span, h.trace, h.turn.Seq, calls)
 	r.metrics.Received.WithLabelValues(SourceLedger).Add(float64(len(spans)))
 	putTotals(h.span, use)
-	r.cmu.Lock()
-	r.finished[h.trace] = r.now().Add(r.cfg.FinishedTTL)
-	r.cmu.Unlock()
+	r.hmu.Lock()
+	r.claimed[h.trace] = r.now().Add(r.cfg.FinishedTTL)
+	r.hmu.Unlock()
 	r.dispatch(ctx, h.org, append(spans, h.span)...)
 }

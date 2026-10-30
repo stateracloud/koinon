@@ -62,11 +62,11 @@ func (r *Router) Handler() http.Handler {
 			http.Error(w, err.Error(), code)
 			return
 		}
-		if n, err := countSpans(body); err != nil {
-			http.Error(w, "invalid ExportTraceServiceRequest", http.StatusBadRequest)
+		if _, err := scanRequest(body, r.cfg.MaxRequestSpans); errors.Is(err, errBounds) {
+			http.Error(w, "the request is larger than the router accepts", http.StatusRequestEntityTooLarge)
 			return
-		} else if n > r.cfg.MaxRequestSpans {
-			http.Error(w, "too many spans in one request", http.StatusRequestEntityTooLarge)
+		} else if err != nil {
+			http.Error(w, "invalid ExportTraceServiceRequest", http.StatusBadRequest)
 			return
 		}
 		var in coltracepb.ExportTraceServiceRequest
@@ -143,44 +143,98 @@ func readBody(r *http.Request, limit int) ([]byte, error) {
 	return b, nil
 }
 
-// Field numbers of the OTLP trace request: ExportTraceServiceRequest.resource_spans,
-// ResourceSpans.scope_spans and ScopeSpans.spans.
+// The kinds of message the pre-scan descends into, and for each the fields that hold more of them.
+// Everything else (strings, numbers, IDs) is skipped without being read.
+type msgKind int
+
 const (
-	fieldResourceSpans = 1
-	fieldScopeSpans    = 2
-	fieldSpans         = 2
+	kRequest msgKind = iota
+	kResourceSpans
+	kResource
+	kScopeSpans
+	kScope
+	kSpan
+	kEvent
+	kLink
+	kKeyValue
+	kAnyValue
+	kArray
+	kKVList
 )
 
-// countSpans counts the spans of a request from the wire format, without decoding or allocating them.
-func countSpans(b []byte) (int, error) {
-	n := 0
-	err := eachField(b, fieldResourceSpans, func(rs []byte) error {
-		return eachField(rs, fieldScopeSpans, func(ss []byte) error {
-			return eachField(ss, fieldSpans, func([]byte) error { n++; return nil })
-		})
-	})
-	return n, err
+var childKinds = map[msgKind]map[protowire.Number]msgKind{
+	kRequest:       {1: kResourceSpans},
+	kResourceSpans: {1: kResource, 2: kScopeSpans},
+	kResource:      {1: kKeyValue},
+	kScopeSpans:    {1: kScope, 2: kSpan},
+	kScope:         {3: kKeyValue},
+	kSpan:          {9: kKeyValue, 11: kEvent, 13: kLink},
+	kEvent:         {3: kKeyValue},
+	kLink:          {5: kKeyValue},
+	kKeyValue:      {2: kAnyValue},
+	kAnyValue:      {5: kArray, 6: kKVList},
+	kArray:         {1: kAnyValue},
+	kKVList:        {1: kKeyValue},
 }
 
-// eachField calls f with the payload of every length-delimited field num of the message b.
-func eachField(b []byte, num protowire.Number, f func([]byte) error) error {
-	for len(b) > 0 {
-		n, typ, l := protowire.ConsumeTag(b)
-		if l < 0 {
-			return protowire.ParseError(l)
+// Bounds of a request's structure, in sub-messages. A few KB of gzip can name millions of empty
+// attributes or resources, each of which decodes to a struct of tens of bytes, so the request is
+// walked on the wire first and rejected before proto.Unmarshal allocates any of it.
+const (
+	maxRequestNodes    = 1 << 18 // sub-messages of every kind together: 256 spans of 1000 each
+	maxRequestResource = 64      // ResourceSpans, and ScopeSpans in each
+	maxNesting         = 16      // AnyValue inside array or kvlist inside AnyValue ...
+)
+
+// errBounds is a request that exceeds the structural bounds.
+var errBounds = errors.New("request exceeds the structural bounds")
+
+// scanRequest walks b on the wire without allocating, and returns the number of spans. It fails with
+// errBounds when the request has more than maxSpans spans, more than maxRequestNodes sub-messages, more
+// than maxRequestResource resources or scopes, or nests deeper than maxNesting; and with a parse error
+// when it is not a well-formed message.
+func scanRequest(b []byte, maxSpans int) (spans int, err error) {
+	nodes := 0
+	var walk func(kind msgKind, b []byte, depth int) error
+	walk = func(kind msgKind, b []byte, depth int) error {
+		if depth > maxNesting {
+			return errBounds
 		}
-		b = b[l:]
-		l = protowire.ConsumeFieldValue(n, typ, b)
-		if l < 0 {
-			return protowire.ParseError(l)
-		}
-		if n == num && typ == protowire.BytesType {
-			v, _ := protowire.ConsumeBytes(b)
-			if err := f(v); err != nil {
-				return err
+		kids := childKinds[kind]
+		counts := map[msgKind]int{}
+		for len(b) > 0 {
+			n, typ, l := protowire.ConsumeTag(b)
+			if l < 0 {
+				return protowire.ParseError(l)
 			}
+			b = b[l:]
+			vl := protowire.ConsumeFieldValue(n, typ, b)
+			if vl < 0 {
+				return protowire.ParseError(vl)
+			}
+			if child, ok := kids[n]; ok && typ == protowire.BytesType {
+				payload, _ := protowire.ConsumeBytes(b)
+				nodes++
+				counts[child]++
+				switch {
+				case nodes > maxRequestNodes:
+					return errBounds
+				case child == kSpan:
+					spans++
+					if spans > maxSpans {
+						return errBounds
+					}
+				case (child == kResourceSpans || child == kScopeSpans) && counts[child] > maxRequestResource:
+					return errBounds
+				}
+				if err := walk(child, payload, depth+1); err != nil {
+					return err
+				}
+			}
+			b = b[vl:]
 		}
-		b = b[l:]
+		return nil
 	}
-	return nil
+	err = walk(kRequest, b, 0)
+	return spans, err
 }
