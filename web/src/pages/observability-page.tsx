@@ -14,6 +14,7 @@ import { ContentLevel, TraceDestinationService, type Destination } from '@/gen/k
 import { useTraceActions } from '@/hooks/use-trace-actions'
 import { useOrg } from '@/lib/org-context'
 import { savedNotice, testNotice } from '@/lib/trace'
+import { describeTraceError } from '@/lib/trace-errors'
 
 /** ObservabilityPage is where org admins send their runs' traces to a backend and choose what the traces carry (ADR 0074). */
 export function ObservabilityPage() {
@@ -45,6 +46,16 @@ function ObservabilityContent() {
   const full = s?.contentLevel === ContentLevel.FULL
   // While the org sends full content, only an owner may add a destination or change a connection.
   const locked = full && org.role !== OrgRole.OWNER
+  // A refusal is worded from its reason; one that says the destination changed also closes the form and reloads.
+  const refuse = (e: unknown) => {
+    const r = describeTraceError(e)
+    setNotice(undefined)
+    setRefused(r.message)
+    if (r.changed) {
+      setEditing(undefined)
+      void actions.reload()
+    }
+  }
   const say = (m: string) => {
     setRefused(undefined)
     setNotice(m)
@@ -109,10 +120,7 @@ function ObservabilityContent() {
                 edit={() => setEditing({ kind: 'destination', snapshot: d })}
                 remove={() => actions.deleteDestination(d.id)}
                 onRemoved={() => say(`Deleted destination ${d.name}.`)}
-                onRefused={(m) => {
-                  setNotice(undefined)
-                  setRefused(m)
-                }}
+                onRefused={refuse}
                 editing={
                   editing?.kind === 'destination' && editing.snapshot.id === d.id ? (
                     <TraceDestinationForm

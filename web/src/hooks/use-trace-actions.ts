@@ -47,10 +47,11 @@ export type TraceActions = ReturnType<typeof useTraceActions>
 
 /** usePlatformTraceActions returns the platform admin calls. */
 export function usePlatformTraceActions() {
-  const { client, done } = useClientAndRefresh()
+  const { client, done, refresh } = useClientAndRefresh()
   return useMemo(
     () => ({
-      setDestination: (destination: DestinationWrite) => done(client.setPlatformDestination({ destination })),
+      setDestination: (destination: DestinationWrite, expectedVersion: bigint) => done(client.setPlatformDestination({ destination, expectedVersion })),
+      reload: () => refresh(),
       deleteDestination: () => done(client.deletePlatformDestination({})),
       testDestination: () => done(client.testPlatformDestination({})),
       setCeiling: (ceiling: ContentLevel) => done(client.setPlatformCeiling({ ceiling })),

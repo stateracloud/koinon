@@ -335,9 +335,6 @@ export function testNotice(name: string, r: TestResult | undefined): string {
   return r.ok ? `Test passed for ${name}. The backend accepted the test trace.` : `Test failed for ${name}${r.message ? `: ${r.message}` : '.'}`
 }
 
-/** settingsDeniedMessage explains a refused settings change by a platform admin who is not a member of the org. */
-export const settingsDeniedMessage = 'You are not a member of this org, so you can only lower its settings here, not raise them. Ask an org owner to raise them.'
-
 /** savedNotice words a save: the test result is mentioned only when the save ran a test. */
 export function savedNotice(name: string, saved: Destination, tested: boolean): string {
   return tested ? `Saved ${name}. ${testNotice(name, saved.lastTest)}` : `Saved ${name}. It was not tested again.`

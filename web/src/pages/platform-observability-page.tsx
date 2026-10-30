@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { AuthService } from '@/gen/koinon/auth/v1alpha1/auth_pb'
 import { ContentLevel, TraceDestinationService, type Destination } from '@/gen/koinon/trace/v1alpha1/trace_pb'
 import { usePlatformTraceActions, type PlatformTraceActions } from '@/hooks/use-trace-actions'
+import { describeTraceError } from '@/lib/trace-errors'
 import { levelLabel, levelRank, levels, normalLevel, savedNotice, testNotice } from '@/lib/trace'
 
 /**
@@ -43,6 +44,15 @@ function PlatformObservability() {
   const [refused, setRefused] = useState<string>()
   const d = platform.data?.destination
   const ceiling = normalLevel(platform.data?.ceiling ?? ContentLevel.NONE)
+  const refuse = (e: unknown) => {
+    const r = describeTraceError(e)
+    setNotice(undefined)
+    setRefused(r.message)
+    if (r.changed) {
+      setEditing(false)
+      void actions.reload()
+    }
+  }
   const say = (m: string) => {
     setRefused(undefined)
     setNotice(m)
@@ -82,8 +92,14 @@ function PlatformObservability() {
           {editing && !d && (
             <TraceDestinationForm
               platform
-              save={(input) => actions.setDestination(input).then((r) => r.destination!)}
+              save={(input) => actions.setDestination(input, 0n).then((r) => r.destination!)}
               onDone={() => setEditing(false)}
+              onConflict={(m) => {
+                setEditing(false)
+                setNotice(undefined)
+                setRefused(m)
+                void actions.reload()
+              }}
               onSaved={(saved, tested) => say(savedNotice('the platform destination', saved, tested))}
             />
           )}
@@ -102,17 +118,20 @@ function PlatformObservability() {
               }}
               remove={() => actions.deleteDestination()}
               onRemoved={() => say('Deleted the platform destination.')}
-              onRefused={(m) => {
-                setNotice(undefined)
-                setRefused(m)
-              }}
+              onRefused={refuse}
               editing={
                 editing ? (
                   <TraceDestinationForm
                     platform
                     destination={snapshot ?? d}
-                    save={(input) => actions.setDestination(input).then((r) => r.destination!)}
+                    save={(input) => actions.setDestination(input, (snapshot ?? d).configVersion).then((r) => r.destination!)}
                     onDone={() => setEditing(false)}
+                    onConflict={(m) => {
+                      setEditing(false)
+                      setNotice(undefined)
+                      setRefused(m)
+                      void actions.reload()
+                    }}
                     onSaved={(saved, tested) => say(savedNotice('the platform destination', saved, tested))}
                   />
                 ) : undefined
@@ -121,14 +140,14 @@ function PlatformObservability() {
           ) : (
             !editing && <p className="text-muted-foreground text-sm">No platform destination. Orgs still send traces to their own destinations.</p>
           )}
-          <CeilingForm key={ceiling} ceiling={ceiling} actions={actions} onSaved={say} onRefused={setRefused} />
+          <CeilingForm key={ceiling} ceiling={ceiling} actions={actions} onSaved={say} onRefused={refuse} />
         </>
       )}
     </>
   )
 }
 
-function CeilingForm({ ceiling, actions, onSaved, onRefused }: { ceiling: ContentLevel; actions: PlatformTraceActions; onSaved: (m: string) => void; onRefused: (m: string) => void }) {
+function CeilingForm({ ceiling, actions, onSaved, onRefused }: { ceiling: ContentLevel; actions: PlatformTraceActions; onSaved: (m: string) => void; onRefused: (e: unknown) => void }) {
   const [level, setLevel] = useState(ceiling)
   const [pending, setPending] = useState(false)
   const lowering = levelRank(level) < levelRank(ceiling)
@@ -144,7 +163,7 @@ function CeilingForm({ ceiling, actions, onSaved, onRefused }: { ceiling: Conten
           : `The ceiling is now ${levelLabel(normalLevel(r.ceiling)).toLowerCase()}. No org was above it.`,
       )
     } catch (e2) {
-      onRefused(ConnectError.from(e2).rawMessage)
+      onRefused(e2)
     } finally {
       setPending(false)
     }

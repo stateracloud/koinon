@@ -38,7 +38,7 @@ test('owner walks the Observability page: destinations, a refused test, adding o
   await form.getByLabel('Secret key').fill('koinon_test_not-a-real-token')
   await expectAccessible(page)
   await form.getByRole('button', { name: 'Test and add' }).click()
-  await expect(form.getByRole('alert')).toContainText('the test trace failed: the backend answered HTTP 401 (the credentials were refused)')
+  await expect(form.getByRole('alert')).toContainText('Not saved. The backend answered HTTP 401 (the credentials were refused). The secrets were cleared from this page. Type them again.')
   await expect(form.getByLabel('Secret key')).toHaveValue('')
   await form.getByLabel('Traces endpoint').fill('https://lf.example.com/v1/traces')
   await form.getByLabel('Public key').fill('koinon_test_public')

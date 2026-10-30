@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Code, ConnectError } from '@connectrpc/connect'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { FullContentBadge } from '@/components/trace-destination-card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -8,7 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { ContentLevel, type Settings } from '@/gen/koinon/trace/v1alpha1/trace_pb'
-import { settingsDeniedMessage, clampLevel, levelDisabledReason, levelLabel, levelRank, levels, normalLevel, percentToRate, rateToPercent, samplingError } from '@/lib/trace'
+import { describeTraceError } from '@/lib/trace-errors'
+import { clampLevel, levelDisabledReason, levelLabel, levelRank, levels, normalLevel, percentToRate, rateToPercent, samplingError } from '@/lib/trace'
 
 export type TraceSettingsFormProps = {
   settings: Settings
@@ -61,8 +61,7 @@ export function TraceSettingsForm({ settings, isOwner, save, onSaved }: TraceSet
       onSaved?.()
     } catch (e) {
       setConfirming(false)
-      const err = ConnectError.from(e)
-      setRefused(err.code === Code.PermissionDenied ? `${settingsDeniedMessage} (${err.rawMessage})` : err.rawMessage)
+      setRefused(describeTraceError(e).message)
     } finally {
       setPending(false)
     }
