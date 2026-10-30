@@ -266,8 +266,10 @@ the migration, which does nothing; the Job shows in the Application as a hook.
 Flux's helm-controller runs real installs and upgrades and uses the Helm hooks.
 
 To manage the passwords yourself, set `postgres.cnpg.existingSecrets.<role>` (Secrets with the keys
-`username` and `password`, type `kubernetes.io/basic-auth`) and `bootstrapAdmin.existingSecret`. With
-all of them set the chart renders no hook Job.
+`username` and `password`, type `kubernetes.io/basic-auth`), `bootstrapAdmin.existingSecret`,
+`api.otlpToken.existingSecret` (a Secret with a `token` key: the bearer token of the internal OTLP
+listener) and, in standalone gateway mode, `gateway.standalone.sessionKey.existingSecret`. With all of
+them set the chart renders no hook Job.
 
 The Secrets the Job created are not owned by the release, so `helm uninstall` leaves them (as it
 leaves `koinon-kek`). To start over, delete them: `kubectl -n koinon delete secret -l

@@ -123,7 +123,7 @@ func fixtures() []fixture {
 		{name: "models-only", state: modelsOnly, options: standalone.Options{Port: 8080}},
 		{name: "full", state: full, options: standalone.Options{
 			DatabaseURL:   "sqlite:///data/agentgateway.db?mode=rwc",
-			AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318"},
+			AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318", TokenFile: "/secrets/otlp/token"},
 		}},
 		{name: "mcp-no-grants", state: mcpNoGrants},
 		{name: "mcp-servers", state: mcpServers},

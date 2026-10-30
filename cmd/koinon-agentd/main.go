@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -27,6 +28,7 @@ import (
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/memlimit"
 	"github.com/stateracloud/koinon/internal/metrics"
+	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
 	"github.com/stateracloud/koinon/pricing"
@@ -39,7 +41,12 @@ type config struct {
 	openshellName    string
 	savedWorkKeyFile string
 	metricsAddr      string
-	pool             agentd.Config
+
+	// The internal OTLP listener of koinon-api, where run spans go (ADR 0074): its base URL and
+	// the file with the bearer token it requires. Validated at start; the exporter uses them.
+	otlpEndpoint  string
+	otlpTokenFile string
+	pool          agentd.Config
 
 	// Home checkpoints (plan item HC1). koinon-agentd is the writer: it holds the S3 credentials
 	// (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) but no key-encryption key: it asks koinon-api
@@ -60,6 +67,10 @@ func parseFlags(args []string) (config, error) {
 		"directory with the OpenShell client bundle (tls.crt, tls.key, ca.crt); empty connects without TLS")
 	fs.StringVar(&c.openshellName, "openshell-server-name", "", "name checked against the gateway's certificate")
 	fs.StringVar(&c.metricsAddr, "metrics-addr", metrics.DefaultPort, "listen address of /metrics (Prometheus); empty disables it")
+	fs.StringVar(&c.otlpEndpoint, "otlp-endpoint", "",
+		"base URL of koinon-api's internal OTLP/HTTP listener (for example http://koinon-api.koinon.svc:4318), where run spans are exported; empty: not exported")
+	fs.StringVar(&c.otlpTokenFile, "otlp-token-file", "",
+		"file with the bearer token that listener requires (the Secret koinon-otlp-token, key token, mounted read-only); required with --otlp-endpoint")
 	fs.StringVar(&c.savedWorkKeyFile, "saved-work-key-file", "", "file with the key that signs saved-work posts (the Secret koinon-api creates, mounted read-only)")
 	fs.StringVar(&c.pool.SavedWorkURL, "saved-work-url", "",
 		"koinon-api's tools listener, where the uncommitted work of a stuck sandbox is posted to be sealed (ADR 0054); empty: not saved")
@@ -103,6 +114,11 @@ func parseFlags(args []string) (config, error) {
 		}
 		c.pool.OwnerID = h
 	}
+	if c.otlpEndpoint != "" || c.otlpTokenFile != "" {
+		if err := validateOTLP(c.otlpEndpoint, c.otlpTokenFile); err != nil {
+			return c, err
+		}
+	}
 	switch {
 	case c.databaseURL == "":
 		return c, errors.New("--database-url is required")
@@ -114,6 +130,23 @@ func parseFlags(args []string) (config, error) {
 		return c, errors.New("--saved-work-url and --saved-work-key-file are required with --checkpoints: koinon-api hands out the repository passwords")
 	}
 	return c, nil
+}
+
+// validateOTLP checks the exporter's settings at start, so a missing token fails the pod instead of
+// every export: the endpoint is an http(s) URL without a path (the exporter adds /v1/traces) and
+// the token file holds a valid token. The value is never reported.
+func validateOTLP(endpoint, tokenFile string) error {
+	if endpoint == "" || tokenFile == "" {
+		return errors.New("--otlp-endpoint and --otlp-token-file are required together: the OTLP listener refuses requests without its bearer token")
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
+		return errors.New("--otlp-endpoint must be an http(s) URL with a host and no path, for example http://koinon-api.koinon.svc:4318")
+	}
+	if _, err := otlpauth.ReadToken(tokenFile); err != nil {
+		return fmt.Errorf("--otlp-token-file: %w", err)
+	}
+	return nil
 }
 
 func main() {

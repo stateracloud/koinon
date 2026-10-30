@@ -315,11 +315,15 @@ var _ = Describe("golden files", func() {
 		for _, name := range []string{"api_key", "mcp_wiki", "mcp_search"} {
 			Expect(os.WriteFile(filepath.Join(secrets, name), []byte("not-a-real-key"), 0o644)).To(Succeed())
 		}
+		// And the OTLP bearer token file.
+		otlp := GinkgoT().TempDir()
+		Expect(os.Chmod(otlp, 0o755)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(otlp, "token"), []byte("koinon_test_not-a-real-token"), 0o644)).To(Succeed())
 		for _, f := range fixtures() {
 			ctr, err := testcontainers.Run(ctx, AgentgatewayImage,
 				testcontainers.WithCmd("--validate-only", "-f", "/cfg/"+f.name+".yaml"),
 				testcontainers.WithHostConfigModifier(func(hc *container.HostConfig) {
-					hc.Binds = append(hc.Binds, dir+":/cfg:ro", secrets+":/secrets/upstream:ro")
+					hc.Binds = append(hc.Binds, dir+":/cfg:ro", secrets+":/secrets/upstream:ro", otlp+":/secrets/otlp:ro")
 				}),
 				testcontainers.WithWaitStrategyAndDeadline(time.Minute, wait.ForExit()),
 			)

@@ -98,7 +98,7 @@ func formatsState() gateway.State {
 func opts() gwk8s.Options {
 	return gwk8s.Options{
 		Namespace: "koinon", ProviderKeysSecret: "koinon-gateway-providers",
-		AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318"},
+		AccessLogOTLP: &standalone.OTLPExport{HostPort: "koinon-api.koinon.svc:4318", TokenSecret: "koinon-otlp-token", TokenSecretKey: "token"},
 	}
 }
 
