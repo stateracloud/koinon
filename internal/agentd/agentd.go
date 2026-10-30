@@ -287,7 +287,7 @@ func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 		saveSem: make(chan struct{}, 1), http: &http.Client{Timeout: cfg.SaveTimeout},
 	}
 	if cfg.Tracing != nil {
-		sink, err := newTraceSink(cfg.Tracing, cfg.Metrics)
+		sink, err := newTraceSink(cfg.Tracing, cfg.Metrics, cfg.Logger)
 		if err != nil {
 			return nil, fmt.Errorf("agentd: tracing: %w", err)
 		}

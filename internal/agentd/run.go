@@ -244,7 +244,7 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 		log: log.With("org", run.OrgID.String(), "run", run.ID.String(), "epoch", run.Epoch),
 	}
 	r.log.Info("driving run", "state", run.State, "takeovers", run.Takeovers)
-	r.tr = p.traceStart(ctx, run, r.log)
+	r.tr = p.traceStart(ctx, run, r.fenced, r.log)
 
 	hctx, stop := context.WithCancel(ctx)
 	var hb sync.WaitGroup
@@ -258,7 +258,7 @@ func (p *Pool) drive(ctx context.Context, run store.Run, log *slog.Logger) {
 	stop()
 	hb.Wait()
 	r.conclude(ctx, err)
-	r.tr.finish(ctx, err)
+	r.tr.finish(ctx, err, fence(r.fenceKind.Load()))
 }
 
 func (r *runner) fence(k fence) {
@@ -1362,6 +1362,7 @@ func (r *runner) release(ctx context.Context) {
 type handler struct{ r *runner }
 
 func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) error {
+	at := time.Now() // for the trace, before the event write
 	if h.r.summaryUpdate(n) {
 		return nil // the summary prompt's reply is the task's note, not a run event
 	}
@@ -1380,7 +1381,7 @@ func (h handler) SessionUpdate(ctx context.Context, n acp.SessionNotification) e
 	if err := h.r.recordRaw(ctx, "acp."+updateKind(b), b); err != nil {
 		return err
 	}
-	h.r.tr.update(n)
+	h.r.tr.update(n, at)
 	if n.Update.ToolCall != nil {
 		h.r.markTool(string(n.Update.ToolCall.ToolCallId))
 	}

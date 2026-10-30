@@ -8,11 +8,14 @@ package agentd
 // is dropped and counted. Nothing waits for the receiver.
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -25,6 +28,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/project"
@@ -109,6 +114,8 @@ func (t *Tracing) defaults() error {
 const (
 	dropQueueFull    = "queue_full"
 	dropExportFailed = "export_failed"
+	dropRejected     = "rejected"
+	dropShutdown     = "shutdown"
 )
 
 // traceSink owns the tracer provider of the pool.
@@ -119,7 +126,7 @@ type traceSink struct {
 	cap    int
 }
 
-func newTraceSink(cfg *Tracing, m *Metrics) (*traceSink, error) {
+func newTraceSink(cfg *Tracing, m *Metrics, log *slog.Logger) (*traceSink, error) {
 	exp := cfg.Exporter
 	if exp == nil {
 		var err error
@@ -127,7 +134,7 @@ func newTraceSink(cfg *Tracing, m *Metrics) (*traceSink, error) {
 			return nil, err
 		}
 	}
-	proc := newDropProcessor(exp, cfg, m)
+	proc := newDropProcessor(exp, cfg, m, log)
 	res := resource.NewWithAttributes(semconv.SchemaURL,
 		attribute.String("service.name", semconv.ServiceName),
 		attribute.String("service.version", project.Version))
@@ -145,31 +152,61 @@ func (s *traceSink) shutdown(ctx context.Context) { _ = s.tp.Shutdown(ctx) }
 
 func otlpExporter(cfg *Tracing) (sdktrace.SpanExporter, error) {
 	base := strings.TrimSuffix(cfg.Endpoint, "/")
-	return otlptracehttp.New(context.Background(),
+	tr := &tokenTransport{file: cfg.TokenFile, next: http.DefaultTransport}
+	exp, err := otlptracehttp.New(context.Background(),
 		otlptracehttp.WithEndpointURL(base+"/v1/traces"),
-		otlptracehttp.WithHTTPClient(&http.Client{Transport: tokenTransport{file: cfg.TokenFile, next: http.DefaultTransport}}),
+		otlptracehttp.WithHTTPClient(&http.Client{Transport: tr}),
 		otlptracehttp.WithTimeout(cfg.ExportTimeout),
 		otlptracehttp.WithRetry(otlptracehttp.RetryConfig{
 			Enabled: true, InitialInterval: 500 * time.Millisecond, MaxInterval: 2 * time.Second, MaxElapsedTime: cfg.ExportTimeout,
 		}),
 	)
+	if err != nil {
+		return nil, err
+	}
+	return otlpSpanExporter{SpanExporter: exp, tr: tr}, nil
 }
 
-// tokenTransport sends the listener's bearer token, read from its file on every request.
+// tokenTransport sends the listener's bearer token, read from its file on every request, and notes
+// the spans the listener rejected in a partial success (the exporter reports those only as an
+// error without a count).
 type tokenTransport struct {
-	file string
-	next http.RoundTripper
+	file     string
+	next     http.RoundTripper
+	rejected atomic.Int64
 }
 
-func (t tokenTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+func (t *tokenTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	tok, err := otlpauth.ReadToken(t.file)
 	if err != nil {
 		return nil, fmt.Errorf("the OTLP token: %w", err)
 	}
 	r = r.Clone(r.Context())
 	r.Header.Set("Authorization", "Bearer "+tok)
-	return t.next.RoundTrip(r)
+	resp, err := t.next.RoundTrip(r)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return resp, err
+	}
+	body, rerr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	_ = resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	if rerr == nil {
+		var out coltracepb.ExportTraceServiceResponse
+		if proto.Unmarshal(body, &out) == nil {
+			t.rejected.Add(out.GetPartialSuccess().GetRejectedSpans())
+		}
+	}
+	return resp, nil
 }
+
+// otlpSpanExporter is the OTLP/HTTP exporter and the count of spans its last export had rejected.
+type otlpSpanExporter struct {
+	sdktrace.SpanExporter
+	tr *tokenTransport
+}
+
+// takeRejected returns, and resets, the spans rejected since the last call.
+func (e otlpSpanExporter) takeRejected() int64 { return e.tr.rejected.Swap(0) }
 
 // dropProcessor is a span processor with a bounded queue that drops instead of waiting.
 type dropProcessor struct {
@@ -182,13 +219,21 @@ type dropProcessor struct {
 	batch   int
 	every   time.Duration
 	timeout time.Duration
+	log     *slog.Logger
+	// mu orders OnEnd against Shutdown: no span is queued once closed is set, so the worker's last
+	// drain sees every span that was accepted.
+	mu      sync.RWMutex
+	closed  bool
 	once    sync.Once
-	closed  atomic.Bool
+	lastLog time.Time
 }
 
-func newDropProcessor(exp sdktrace.SpanExporter, cfg *Tracing, m *Metrics) *dropProcessor {
+// rejecter is implemented by exporters that know how many spans the receiver rejected.
+type rejecter interface{ takeRejected() int64 }
+
+func newDropProcessor(exp sdktrace.SpanExporter, cfg *Tracing, m *Metrics, log *slog.Logger) *dropProcessor {
 	p := &dropProcessor{
-		exp: exp, m: m, ch: make(chan sdktrace.ReadOnlySpan, cfg.QueueSize), flushCh: make(chan chan struct{}),
+		exp: exp, m: m, log: log, ch: make(chan sdktrace.ReadOnlySpan, cfg.QueueSize), flushCh: make(chan chan struct{}),
 		stop: make(chan struct{}), done: make(chan struct{}),
 		batch: cfg.BatchSize, every: cfg.Interval, timeout: cfg.ExportTimeout,
 	}
@@ -199,7 +244,10 @@ func newDropProcessor(exp sdktrace.SpanExporter, cfg *Tracing, m *Metrics) *drop
 func (p *dropProcessor) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
 
 func (p *dropProcessor) OnEnd(s sdktrace.ReadOnlySpan) {
-	if p.closed.Load() {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.closed {
+		p.m.TraceSpansDropped.WithLabelValues(dropShutdown).Inc()
 		return
 	}
 	select {
@@ -256,11 +304,33 @@ func (p *dropProcessor) loop() {
 func (p *dropProcessor) export(spans []sdktrace.ReadOnlySpan) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
-	if err := p.exp.ExportSpans(ctx, spans); err != nil {
+	err := p.exp.ExportSpans(ctx, spans)
+	var rejected int64
+	if r, ok := p.exp.(rejecter); ok {
+		rejected = min(r.takeRejected(), int64(len(spans)))
+	}
+	switch {
+	case err != nil && rejected == 0:
 		p.m.TraceSpansDropped.WithLabelValues(dropExportFailed).Add(float64(len(spans)))
+		p.warn("exporting run spans failed; the batch is dropped", err, len(spans))
+	case rejected > 0:
+		// A partial success: the listener took the rest.
+		p.m.TraceSpansDropped.WithLabelValues(dropRejected).Add(float64(rejected))
+		p.m.TraceSpansExported.Add(float64(int64(len(spans)) - rejected))
+		p.warn("the OTLP listener rejected run spans", err, int(rejected))
+	default:
+		p.m.TraceSpansExported.Add(float64(len(spans)))
+	}
+}
+
+// warn logs at most once every 30 seconds. The error is the exporter's: it names the URL and the
+// status, never the token.
+func (p *dropProcessor) warn(msg string, err error, spans int) {
+	if p.log == nil || time.Since(p.lastLog) < 30*time.Second {
 		return
 	}
-	p.m.TraceSpansExported.Add(float64(len(spans)))
+	p.lastLog = time.Now()
+	p.log.Warn(msg, "spans", spans, "err", err)
 }
 
 func (p *dropProcessor) ForceFlush(ctx context.Context) error {
@@ -282,7 +352,9 @@ func (p *dropProcessor) ForceFlush(ctx context.Context) error {
 
 func (p *dropProcessor) Shutdown(ctx context.Context) error {
 	p.once.Do(func() {
-		p.closed.Store(true)
+		p.mu.Lock()
+		p.closed = true
+		p.mu.Unlock()
 		close(p.stop)
 	})
 	select {

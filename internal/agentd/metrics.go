@@ -63,7 +63,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_agentd_time_limit_stops_total", Help: "Runs this replica stopped at their time limit (the api's sweep is the backstop and is not counted).",
 		}),
 		TraceSpansDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "koinon_agentd_trace_spans_dropped_total", Help: "Run spans dropped instead of exported, by reason (queue_full, export_failed).",
+			Name: "koinon_agentd_trace_spans_dropped_total", Help: "Run spans dropped instead of exported, by reason (queue_full, export_failed, rejected, shutdown).",
 		}, []string{"reason"}),
 		TraceSpansExported: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "koinon_agentd_trace_spans_exported_total", Help: "Run spans the OTLP listener accepted.",
@@ -86,7 +86,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, c := range execution.WaitCauses {
 		m.SandboxWaitCap.WithLabelValues(string(c))
 	}
-	for _, r := range []string{dropQueueFull, dropExportFailed} {
+	for _, r := range []string{dropQueueFull, dropExportFailed, dropRejected, dropShutdown} {
 		m.TraceSpansDropped.WithLabelValues(r)
 	}
 	if reg != nil {

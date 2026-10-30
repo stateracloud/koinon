@@ -255,6 +255,15 @@ func (r *runner) endTurn(ctx context.Context) error {
 		}); err != nil {
 			return err
 		}
+		// The turn's row ends with the park, in the same transaction, so a resume on another replica
+		// sees it ended and how long the run waited.
+		if turn, ok := r.tr.openRow(); ok {
+			if _, err := q.EndRunTurn(ctx, store.EndRunTurnParams{
+				OrgID: r.run.OrgID, ID: turn, EndReason: pgtype.Text{String: "park:" + string(reason), Valid: true},
+			}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		if asked {
 			if _, err := questions.OpenForRun(ctx, q, r.run.OrgID, r.run.ID, r.run.TaskID); err != nil {
 				return err

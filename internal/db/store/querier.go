@@ -455,6 +455,10 @@ type Querier interface {
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
+	// InsertRunTurn for the run's current owner only (the epoch matches and the run is starting or
+	// running), so a fenced replica cannot add a turn. A turn row the previous owner left open (it died or
+	// lost the run) is ended as interrupted in the same statement, before the new one starts.
+	InsertOwnedRunTurn(ctx context.Context, arg InsertOwnedRunTurnParams) (RunTurn, error)
 	InsertPriceOverride(ctx context.Context, arg InsertPriceOverrideParams) (PriceOverride, error)
 	// Starts the run's next turn with the given trace ID. seq comes from the run's counter, taken under
 	// the run's row lock (the way run_events.seq does), so concurrent writers cannot pick the same number.

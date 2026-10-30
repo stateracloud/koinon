@@ -189,6 +189,27 @@ SELECT run.org_id, run.id, run.last_turn_seq, @trace_id
 FROM run
 RETURNING *;
 
+-- name: InsertOwnedRunTurn :one
+-- InsertRunTurn for the run's current owner only (the epoch matches and the run is starting or
+-- running), so a fenced replica cannot add a turn. A turn row the previous owner left open (it died or
+-- lost the run) is ended as interrupted in the same statement, before the new one starts.
+WITH run AS (
+    UPDATE runs
+    SET last_turn_seq = last_turn_seq + 1
+    WHERE runs.org_id = @org_id AND runs.id = @run_id AND runs.epoch = @epoch
+      AND runs.state IN ('starting', 'running')
+    RETURNING runs.org_id, runs.id, runs.last_turn_seq
+), interrupted AS (
+    UPDATE run_turns
+    SET ended_at = now(), end_reason = 'interrupted'
+    WHERE run_turns.org_id = @org_id AND run_turns.run_id = @run_id AND run_turns.ended_at IS NULL
+      AND EXISTS (SELECT 1 FROM run)
+)
+INSERT INTO run_turns (org_id, run_id, seq, trace_id)
+SELECT run.org_id, run.id, run.last_turn_seq, @trace_id
+FROM run
+RETURNING *;
+
 -- name: EndRunTurn :one
 UPDATE run_turns
 SET ended_at = now(), end_reason = @end_reason

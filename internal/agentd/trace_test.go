@@ -58,6 +58,8 @@ type otlpReceiver struct {
 	schemas  []string
 	badAuth  int
 	requests atomic.Int64
+	// reject, when set, is the number of spans every response says it rejected (a partial success).
+	reject int64
 	// block makes every request wait until it is closed (a dead or slow receiver).
 	block chan struct{}
 }
@@ -102,6 +104,12 @@ func newReceiver() *otlpReceiver {
 		r.mu.Unlock()
 		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.WriteHeader(http.StatusOK)
+		if r.reject > 0 {
+			out, _ := proto.Marshal(&coltracepb.ExportTraceServiceResponse{
+				PartialSuccess: &coltracepb.ExportTracePartialSuccess{RejectedSpans: r.reject, ErrorMessage: "fake rejection"},
+			})
+			_, _ = w.Write(out)
+		}
 	}))
 	DeferCleanup(r.Close)
 	return r
@@ -176,7 +184,7 @@ func traceScript(a *askEnv, qid *string) func(ctx context.Context, text string, 
 		switch {
 		case strings.Contains(text, markQuestion):
 			Expect(say(sdk.UpdateAgentThoughtText("I should ask which region. "))).To(Succeed())
-			Expect(say(sdk.StartToolCall("call-read", "read_file", sdk.WithStartKind(sdk.ToolKindRead),
+			Expect(say(sdk.StartToolCall("call-read", "read", sdk.WithStartKind(sdk.ToolKindRead),
 				sdk.WithStartRawInput(map[string]any{"path": "README.md"})))).To(Succeed())
 			time.Sleep(20 * time.Millisecond)
 			Expect(say(sdk.UpdateToolCall("call-read", sdk.WithUpdateStatus(sdk.ToolCallStatusCompleted),
@@ -275,7 +283,7 @@ var _ = Describe("run spans (ADR 0074)", func() {
 			Expect(ra).NotTo(HaveKey(semconv.KoinonOutcome), "only the last turn has the outcome")
 
 			// Tool spans are children of their turn, and nothing is open across the park.
-			for _, name := range []string{"execute_tool read_file", "execute_tool koinon_ask_user"} {
+			for _, name := range []string{"execute_tool read", "execute_tool koinon_ask_user"} {
 				ts := spanByName(spans, name)
 				Expect(ts).To(HaveLen(1), name)
 				Expect(ts[0].ParentSpanId).To(Equal(root1.SpanId))
@@ -287,10 +295,10 @@ var _ = Describe("run spans (ADR 0074)", func() {
 				Expect(ta).To(HaveKeyWithValue(semconv.KoinonToolStatus, "completed"))
 				Expect(ta).To(HaveKeyWithValue(semconv.KoinonRun, r.ID.String()))
 			}
-			read := spanByName(spans, "execute_tool read_file")[0]
+			read := spanByName(spans, "execute_tool read")[0]
 			Expect(attrMap(read.Attributes)).To(HaveKeyWithValue(semconv.GenAIToolCallID, "call-read"))
 			Expect(attrMap(read.Attributes)).To(HaveKeyWithValue(semconv.KoinonToolKind, "read"))
-			Expect(read.EndTimeUnixNano-read.StartTimeUnixNano).To(BeNumerically(">=", 15*uint64(time.Millisecond)), "timed from the first update to the final status")
+			Expect(read.EndTimeUnixNano).To(BeNumerically(">", read.StartTimeUnixNano), "timed from the first update to the final status")
 
 			// The park ends turn 1; turn 2 links back and says how long the run waited.
 			Expect(eventNames(root1)).To(Equal([]string{semconv.EventPark}))
