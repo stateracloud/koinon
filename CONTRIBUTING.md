@@ -44,7 +44,14 @@ make dev        # Tilt against the home lab, or kind after `make dev-kind-up` (d
 - `main` is protected by a ruleset: changes land only through pull requests, with the checks
   above passing and every review thread resolved; force-pushes and deletion are blocked, with no
   bypass. Merge with a merge commit (keeps stacked pull requests intact) or squash; rebase merges
-  are off. CODEOWNERS requests the maintainer's review on every pull request.
+  are off. CODEOWNERS requests the other maintainer's review; approval is required on sensitive
+  paths (workflows, ADRs, migrations, auth, gateway, secret store, sandbox policy).
+- Every pull request names its issue with `Closes #N`, and its author holds the claim on that issue
+  (`hack/claim.sh take N`; [ADR 0082](docs/adr/0082-work-claims-and-ready-queue.md)). The `claim`
+  check enforces it; `chore`, `ci` and `deps` titles, Dependabot and the label `unclaimed-ok` are
+  exempt. With strict checks, keep the branch up to date with `main`; the updater bot also does it
+  for auto-merge pull requests.
+- ADR numbers are unique and contiguous (`hack/adr-lint.sh`): if yours collides, renumber it.
 - Dependabot opens one grouped update per ecosystem (Go, web, GitHub Actions, Docker) each Monday
   (see [Dependency updates](#dependency-updates)); security updates arrive as soon as they are
   published.
