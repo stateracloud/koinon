@@ -4,7 +4,10 @@ package tracedest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"maps"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,39 +43,60 @@ func (s *Service) GetPlatform(ctx context.Context) (Platform, error) {
 	return out, nil
 }
 
-// SetPlatformDestination tests, then saves, the platform destination. Audited in auditOrg, the
-// platform admin's personal org: the log has no org-less events (ADR 0023).
+// SetPlatformDestination saves the platform destination, testing it first when the change touches its
+// connection (see Update). Stored secrets are kept only while backend and endpoint origin stay the
+// same. Audited in auditOrg, the platform admin's personal org: the log has no org-less events (ADR 0023).
 func (s *Service) SetPlatformDestination(ctx context.Context, auditOrg pgtype.UUID, actor audit.Actor, in Input) (Destination, error) {
 	q := store.New(s.pool)
 	cur, err := q.GetPlatformTraceDestination(ctx)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Destination{}, err
 	}
-	var existing map[string]string
+	exists := err == nil
+	endpoint, err := s.endpoint(in.EndpointURL)
+	if err != nil {
+		return Destination{}, err
+	}
 	var before *Destination
-	if err == nil {
+	touched := true
+	if exists {
 		v := toPlatform(cur)
 		before = &v
-		if string(cur.Backend) == in.Backend {
+		touched = string(cur.Backend) != in.Backend || cur.EndpointUrl != endpoint ||
+			!maps.Equal(decodeMap(cur.Params), nonNil(in.Params)) || len(in.Secrets) > 0 || len(in.RemoveSecrets) > 0
+	}
+	var p prepared
+	var outcome export.Outcome
+	var at time.Time
+	if touched {
+		var existing map[string]string
+		if exists && string(cur.Backend) == in.Backend && export.SameOrigin(cur.EndpointUrl, endpoint) {
 			if existing, err = s.open(cur.Credentials, PlatformBinding()); err != nil {
 				return Destination{}, err
 			}
 		}
-	}
-	p, err := s.prepare(ctx, in, existing, PlatformBinding())
-	if err != nil {
-		return Destination{}, err
-	}
-	outcome, at := s.test(ctx, p.dest, "", in.ResourceAttributes)
-	if !outcome.OK {
-		return Destination{}, &TestFailedError{Outcome: outcome}
+		if p, err = s.prepare(ctx, in, existing, PlatformBinding()); err != nil {
+			return Destination{}, err
+		}
+		if outcome, at = s.test(ctx, p.dest, "", in.ResourceAttributes); !outcome.OK {
+			return Destination{}, &TestFailedError{Outcome: outcome}
+		}
+	} else {
+		if err := validateAttributes(in.ResourceAttributes); err != nil {
+			return Destination{}, err
+		}
+		p = prepared{endpoint: cur.EndpointUrl, envelope: cur.Credentials, fields: cur.SecretFields, params: cur.Params}
+		p.dest.Preset = export.Preset(cur.Backend)
+		if p.attrs, err = json.Marshal(nonNil(in.ResourceAttributes)); err != nil {
+			return Destination{}, err
+		}
 	}
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	var out Destination
 	err = s.tx(ctx, func(q *store.Queries) error {
 		row, err := q.UpsertPlatformTraceDestination(ctx, store.UpsertPlatformTraceDestinationParams{
-			Backend: store.TraceBackend(p.dest.Preset), EndpointUrl: in.EndpointURL, Params: p.params, Credentials: p.envelope,
-			SecretFields: p.fields, ResourceAttributes: p.attrs, Enabled: in.Enabled,
+			Backend: store.TraceBackend(p.dest.Preset), EndpointUrl: p.endpoint, Params: p.params, Credentials: p.envelope,
+			SecretFields: p.fields, ResourceAttributes: p.attrs, Enabled: in.Enabled, SetTest: touched,
 			LastTestAt: testAt, LastTestOk: testOK, LastTestMessage: testMsg, UpdatedBy: actor.String(),
 		})
 		if err != nil {
@@ -111,7 +135,9 @@ func (s *Service) DeletePlatformDestination(ctx context.Context, auditOrg pgtype
 	})
 }
 
-// TestPlatform sends the platform destination a synthetic trace again and keeps the result.
+// TestPlatform sends the platform destination a synthetic trace again and keeps the result, only if
+// the configuration is still the one that was tested: a destination deleted meanwhile is ErrNotFound
+// and one changed meanwhile is ErrChanged; neither is written back.
 func (s *Service) TestPlatform(ctx context.Context, auditOrg pgtype.UUID, actor audit.Actor) (Destination, export.Outcome, error) {
 	cur, err := store.New(s.pool).GetPlatformTraceDestination(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -132,13 +158,21 @@ func (s *Service) TestPlatform(ctx context.Context, auditOrg pgtype.UUID, actor 
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	var out Destination
 	err = s.tx(ctx, func(q *store.Queries) error {
-		row, err := q.UpsertPlatformTraceDestination(ctx, store.UpsertPlatformTraceDestinationParams{
-			Backend: cur.Backend, EndpointUrl: cur.EndpointUrl, Params: cur.Params, Credentials: cur.Credentials,
-			SecretFields: cur.SecretFields, ResourceAttributes: cur.ResourceAttributes, Enabled: cur.Enabled,
-			LastTestAt: testAt, LastTestOk: testOK, LastTestMessage: testMsg, UpdatedBy: cur.UpdatedBy,
+		n, err := q.SetPlatformTraceDestinationTest(ctx, store.SetPlatformTraceDestinationTestParams{
+			ExpectedVersion: cur.ConfigVersion, LastTestAt: testAt, LastTestOk: testOK, LastTestMessage: testMsg,
 		})
 		if err != nil {
 			return err
+		}
+		row, err := q.GetPlatformTraceDestination(ctx)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrChanged
 		}
 		out = toPlatform(row)
 		return audit.RecordErr(ctx, q, audit.Event{

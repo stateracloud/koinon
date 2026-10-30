@@ -24,16 +24,25 @@ VALUES (@org_id, @id, @name, @backend, @endpoint_url, @params, @credentials, @se
 RETURNING *;
 
 -- name: UpdateTraceDestination :one
--- Replaces the settings of a destination and records the test that let the change be saved. The
--- router's health columns stay. Applies only to the version the caller read (@expected_updated_at), so
--- two admins editing at once do not overwrite each other's secrets.
+-- Replaces the settings of a destination. Applies only to the version the caller read
+-- (@expected_version), so two admins editing at once do not overwrite each other's secrets, and bumps
+-- config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
+-- previous test result stays. The router's health columns stay.
 UPDATE trace_destinations
 SET name = @name, backend = @backend, endpoint_url = @endpoint_url, params = @params,
     credentials = @credentials, secret_fields = @secret_fields, resource_attributes = @resource_attributes,
-    enabled = @enabled, last_test_at = @last_test_at, last_test_ok = @last_test_ok,
-    last_test_message = @last_test_message
-WHERE org_id = @org_id AND id = @id AND updated_at = @expected_updated_at
+    enabled = @enabled, config_version = config_version + 1,
+    last_test_at = CASE WHEN @set_test::boolean THEN @last_test_at ELSE last_test_at END,
+    last_test_ok = CASE WHEN @set_test::boolean THEN @last_test_ok ELSE last_test_ok END,
+    last_test_message = CASE WHEN @set_test::boolean THEN @last_test_message ELSE last_test_message END
+WHERE org_id = @org_id AND id = @id AND config_version = @expected_version
 RETURNING *;
+
+-- name: SetTraceDestinationTest :execrows
+-- Records the result of a re-test, only if the configuration is the one that was tested.
+UPDATE trace_destinations
+SET last_test_at = @last_test_at, last_test_ok = @last_test_ok, last_test_message = @last_test_message
+WHERE org_id = @org_id AND id = @id AND config_version = @expected_version;
 
 -- name: DeleteTraceDestination :execrows
 DELETE FROM trace_destinations
@@ -90,6 +99,13 @@ ORDER BY b.org_id;
 SELECT * FROM platform_trace_settings
 WHERE singleton;
 
+-- name: ShareLockPlatformTraceSettings :one
+-- Reads the ceiling and keeps it from being lowered until the transaction ends, without blocking
+-- other readers of it (org settings writes).
+SELECT * FROM platform_trace_settings
+WHERE singleton
+FOR SHARE;
+
 -- name: LockPlatformTraceSettings :one
 -- Reads the ceiling and holds the row until the transaction ends, so an org's level and a lowering
 -- of the ceiling cannot pass each other.
@@ -108,7 +124,8 @@ SELECT * FROM platform_trace_destination
 WHERE singleton;
 
 -- name: UpsertPlatformTraceDestination :one
--- The platform destination has one writer at a time: a platform admin. Last write wins.
+-- The platform destination has one writer at a time: a platform admin. A change bumps config_version.
+-- @set_test as for UpdateTraceDestination.
 INSERT INTO platform_trace_destination (singleton, backend, endpoint_url, params, credentials, secret_fields,
                                         resource_attributes, enabled, last_test_at, last_test_ok, last_test_message, updated_by)
 VALUES (true, @backend, @endpoint_url, @params, @credentials, @secret_fields,
@@ -117,9 +134,19 @@ ON CONFLICT (singleton) DO UPDATE
 SET backend = EXCLUDED.backend, endpoint_url = EXCLUDED.endpoint_url, params = EXCLUDED.params,
     credentials = EXCLUDED.credentials, secret_fields = EXCLUDED.secret_fields,
     resource_attributes = EXCLUDED.resource_attributes, enabled = EXCLUDED.enabled,
-    last_test_at = EXCLUDED.last_test_at, last_test_ok = EXCLUDED.last_test_ok,
-    last_test_message = EXCLUDED.last_test_message, updated_by = EXCLUDED.updated_by, updated_at = now()
+    config_version = platform_trace_destination.config_version + 1,
+    last_test_at = CASE WHEN @set_test::boolean THEN EXCLUDED.last_test_at ELSE platform_trace_destination.last_test_at END,
+    last_test_ok = CASE WHEN @set_test::boolean THEN EXCLUDED.last_test_ok ELSE platform_trace_destination.last_test_ok END,
+    last_test_message = CASE WHEN @set_test::boolean THEN EXCLUDED.last_test_message ELSE platform_trace_destination.last_test_message END,
+    updated_by = EXCLUDED.updated_by, updated_at = now()
 RETURNING *;
+
+-- name: SetPlatformTraceDestinationTest :execrows
+-- Records the result of a re-test, only if the configuration is the one that was tested. A deleted
+-- destination matches nothing and is not brought back.
+UPDATE platform_trace_destination
+SET last_test_at = @last_test_at, last_test_ok = @last_test_ok, last_test_message = @last_test_message
+WHERE singleton AND config_version = @expected_version;
 
 -- name: DeletePlatformTraceDestination :execrows
 DELETE FROM platform_trace_destination
@@ -149,18 +176,17 @@ SELECT traced FROM runs
 WHERE org_id = @org_id AND id = @id;
 
 -- name: InsertRunTurn :one
--- Starts the run's next turn with the given trace ID. seq is the previous turn's plus one, taken
--- under the run's row lock so two writers cannot pick the same number.
-WITH locked AS (
-    SELECT r.org_id, r.id FROM runs r
-    WHERE r.org_id = @org_id AND r.id = @run_id
-    FOR UPDATE
+-- Starts the run's next turn with the given trace ID. seq comes from the run's counter, taken under
+-- the run's row lock (the way run_events.seq does), so concurrent writers cannot pick the same number.
+WITH run AS (
+    UPDATE runs
+    SET last_turn_seq = last_turn_seq + 1
+    WHERE runs.org_id = @org_id AND runs.id = @run_id
+    RETURNING runs.org_id, runs.id, runs.last_turn_seq
 )
 INSERT INTO run_turns (org_id, run_id, seq, trace_id)
-SELECT l.org_id, l.id,
-       coalesce((SELECT max(t.seq) FROM run_turns t WHERE t.org_id = @org_id AND t.run_id = @run_id), 0) + 1,
-       @trace_id
-FROM locked l
+SELECT run.org_id, run.id, run.last_turn_seq, @trace_id
+FROM run
 RETURNING *;
 
 -- name: EndRunTurn :one
