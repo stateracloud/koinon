@@ -3,6 +3,7 @@
 package api_test
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,13 +12,40 @@ import (
 
 	connect "connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
+	"connectrpc.com/connect/v2/connectproto"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 
 	"github.com/stateracloud/koinon/internal/db/store"
 	tracev1alpha1 "github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1"
 	"github.com/stateracloud/koinon/internal/gen/koinon/trace/v1alpha1/tracev1alpha1connect"
 )
+
+// reasonOf reads the google.rpc.ErrorInfo reason of a connect error ("" if it has none), and the
+// TestResult detail if there is one.
+func reasonOf(err error) (string, *tracev1alpha1.TestResult) {
+	var ce *connect.Error
+	if !errors.As(err, &ce) {
+		return "", nil
+	}
+	var reason string
+	var result *tracev1alpha1.TestResult
+	for _, d := range ce.Details() {
+		msg, derr := connectproto.UnmarshalErrorDetail(d)
+		if derr != nil {
+			continue
+		}
+		switch m := msg.(type) {
+		case *errdetails.ErrorInfo:
+			Expect(m.GetDomain()).To(Equal("koinon.dev"))
+			reason = m.GetReason()
+		case *tracev1alpha1.TestResult:
+			result = m
+		}
+	}
+	return reason, result
+}
 
 func traceClient(c *client) tracev1alpha1connect.TraceDestinationServiceClient {
 	return tracev1alpha1connect.NewTraceDestinationServiceClient(connect.NewClient(connecthttp.NewTransport(c.b.http, c.b.e.srv.URL)))
@@ -62,6 +90,8 @@ var _ = Describe("TraceDestinationService", func() {
 
 		_, err := traceClient(member).ListDestinations(ctx, &tracev1alpha1.ListDestinationsRequest{OrgId: org})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		reason, _ := reasonOf(err)
+		Expect(reason).To(Equal("ADMIN_REQUIRED"))
 		_, err = traceClient(member).CreateDestination(ctx, &tracev1alpha1.CreateDestinationRequest{OrgId: org, Destination: input("m")})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
 		Expect(hits.Load()).To(BeZero(), "a refused caller triggers no test trace")
@@ -71,6 +101,9 @@ var _ = Describe("TraceDestinationService", func() {
 		_, err = traceClient(admin).CreateDestination(ctx, &tracev1alpha1.CreateDestinationRequest{OrgId: org, Destination: input("dd")})
 		Expect(codeOf(err)).To(Equal(connect.CodeFailedPrecondition))
 		Expect(err.Error()).To(ContainSubstring("HTTP 401"))
+		reason, result := reasonOf(err)
+		Expect(reason).To(Equal("TEST_FAILED"))
+		Expect(result.GetMessage()).To(Equal("the backend answered HTTP 401 (the credentials were refused)"), "the outcome alone, no prefix")
 		Expect(err.Error()).NotTo(ContainSubstring(fakeKey))
 		list, err := traceClient(admin).ListDestinations(ctx, &tracev1alpha1.ListDestinationsRequest{OrgId: org})
 		Expect(err).NotTo(HaveOccurred())
@@ -124,6 +157,8 @@ var _ = Describe("TraceDestinationService", func() {
 			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, SampleRate: new(float64(1)), PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		reason, _ := reasonOf(err)
+		Expect(reason).To(Equal("OWNER_ONLY"))
 		res, err := traceClient(admin).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
 			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_REDACTED, SampleRate: new(float64(0.5)), PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
 		})
@@ -147,6 +182,8 @@ var _ = Describe("TraceDestinationService", func() {
 	It("keeps the platform calls for platform admins, and lowering the ceiling lowers the orgs above it", func(ctx SpecContext) {
 		_, err := traceClient(owner).GetPlatform(ctx, &tracev1alpha1.GetPlatformRequest{})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied), "an org owner is not a platform admin")
+		reason, _ := reasonOf(err)
+		Expect(reason).To(Equal("PLATFORM_ADMIN_REQUIRED"))
 		_, err = traceClient(owner).SetPlatformCeiling(ctx, &tracev1alpha1.SetPlatformCeilingRequest{Ceiling: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
 		_, err = traceClient(owner).SetPlatformDestination(ctx, &tracev1alpha1.SetPlatformDestinationRequest{Destination: input("x")})
@@ -172,6 +209,17 @@ var _ = Describe("TraceDestinationService", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got.GetDestination().GetEndpointUrl()).To(Equal(otlp.URL + "/v1/traces"))
 		Expect(strings.Contains(got.String(), fakeKey)).To(BeFalse())
+
+		By("a stale platform form is refused with ABORTED")
+		stale := got.GetDestination().GetConfigVersion()
+		quiet := input("ignored")
+		quiet.Secrets, quiet.Enabled = nil, false
+		_, err = traceClient(pa).SetPlatformDestination(ctx, &tracev1alpha1.SetPlatformDestinationRequest{Destination: quiet, ExpectedVersion: new(stale)})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = traceClient(pa).SetPlatformDestination(ctx, &tracev1alpha1.SetPlatformDestinationRequest{Destination: quiet, ExpectedVersion: new(stale)})
+		Expect(codeOf(err)).To(Equal(connect.CodeAborted))
+		_, err = traceClient(pa).SetPlatformDestination(ctx, &tracev1alpha1.SetPlatformDestinationRequest{Destination: input("ignored")})
+		Expect(err).NotTo(HaveOccurred())
 
 		By("a failing test keeps the platform destination as it was")
 		status.Store(500)
@@ -200,7 +248,7 @@ var _ = Describe("TraceDestinationService", func() {
 		Expect(n).To(Equal(1))
 		Expect(e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events a JOIN users u ON u.personal_org_id = a.org_id
 			WHERE u.id = $1 AND a.action IN ('trace.platform_destination.set', 'trace.platform_ceiling.set')`, pa.userID).Scan(&n)).To(Succeed())
-		Expect(n).To(Equal(2))
+		Expect(n).To(Equal(4), "three destination saves and the ceiling")
 	})
 
 	It("does not let a platform admin choose what an org sends: they may lower its settings but not raise them", func(ctx SpecContext) {
@@ -212,12 +260,15 @@ var _ = Describe("TraceDestinationService", func() {
 			return err
 		}
 		none, redacted, full := tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE, tracev1alpha1.ContentLevel_CONTENT_LEVEL_REDACTED, tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL
-		Expect(codeOf(raise(full, none))).To(Equal(connect.CodePermissionDenied))
+		err := raise(full, none)
+		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		reason, _ := reasonOf(err)
+		Expect(reason).To(Equal("NOT_MEMBER"))
 		Expect(codeOf(raise(redacted, none))).To(Equal(connect.CodePermissionDenied))
 		Expect(codeOf(raise(redacted, redacted))).To(Equal(connect.CodePermissionDenied))
 
 		By("the org's owner sets it, then the platform admin lowers it, leaving the stored rate alone")
-		_, err := traceClient(owner).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
+		_, err = traceClient(owner).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
 			OrgId: org, ContentLevel: full, SampleRate: new(float64(0.3)), PlatformCopyLevel: redacted,
 		})
 		Expect(err).NotTo(HaveOccurred())
@@ -247,6 +298,8 @@ var _ = Describe("TraceDestinationService", func() {
 			OrgId: org, DestinationId: d.GetId(), Destination: in, ExpectedVersion: new(d.GetConfigVersion()),
 		})
 		Expect(codeOf(err)).To(Equal(connect.CodeAborted))
+		reason, _ := reasonOf(err)
+		Expect(reason).To(Equal("CHANGED"))
 
 		_, err = traceClient(owner).UpdateSettings(ctx, &tracev1alpha1.UpdateSettingsRequest{
 			OrgId: org, ContentLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_FULL, PlatformCopyLevel: tracev1alpha1.ContentLevel_CONTENT_LEVEL_NONE,
@@ -254,6 +307,8 @@ var _ = Describe("TraceDestinationService", func() {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = traceClient(admin).CreateDestination(ctx, &tracev1alpha1.CreateDestinationRequest{OrgId: org, Destination: input("second")})
 		Expect(codeOf(err)).To(Equal(connect.CodePermissionDenied))
+		reason, _ = reasonOf(err)
+		Expect(reason).To(Equal("OWNER_AT_FULL"))
 		_, err = traceClient(owner).CreateDestination(ctx, &tracev1alpha1.CreateDestinationRequest{OrgId: org, Destination: input("second")})
 		Expect(err).NotTo(HaveOccurred())
 	})
