@@ -30,6 +30,9 @@ CREATE TABLE trace_destinations (
     secret_fields       text[]              NOT NULL DEFAULT '{}',
     resource_attributes jsonb               NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(resource_attributes) = 'object'),
     enabled             boolean             NOT NULL DEFAULT true,
+    -- Bumped by every change of the configuration and by nothing else, so the router's health writes
+    -- do not invalidate an admin's form. Optimistic checks compare it.
+    config_version      bigint              NOT NULL DEFAULT 1,
     -- The test before saving (decision 9): the result of the last one, which is also the one that let
     -- this version of the destination be saved.
     last_test_at        timestamptz,
@@ -94,6 +97,7 @@ CREATE TABLE platform_trace_destination (
     secret_fields       text[]        NOT NULL DEFAULT '{}',
     resource_attributes jsonb         NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(resource_attributes) = 'object'),
     enabled             boolean       NOT NULL DEFAULT true,
+    config_version      bigint        NOT NULL DEFAULT 1,
     last_test_at        timestamptz,
     last_test_ok        boolean,
     last_test_message   text,
@@ -108,6 +112,13 @@ CREATE TABLE platform_trace_destination (
 -- Whether a run is traced, decided once when agentd first claims it and kept for the run's life
 -- (decision 1). NULL until decided, and on a run from before this migration, which is not traced.
 ALTER TABLE runs ADD COLUMN traced boolean;
+
+-- A run that is already past its queue was never decided and must not become traced mid-life: a run is
+-- traced whole or not at all. Queued runs are decided when they are claimed.
+UPDATE runs SET traced = false WHERE state <> 'queued';
+
+-- Counter for run_turns.seq, taken under the run's row lock like last_event_seq.
+ALTER TABLE runs ADD COLUMN last_turn_seq integer NOT NULL DEFAULT 0 CHECK (last_turn_seq >= 0);
 
 -- One row per turn of a run (decision 2): a turn is one session/prompt, from the first prompt or a
 -- resume after a park until it ends, and is one trace. The trace ID is random, comes from the

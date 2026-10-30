@@ -56,7 +56,7 @@ func Fields(p Preset) []Field {
 	case LangSmith:
 		return []Field{{"api_key", true, true}, {"project", false, false}}
 	case Opik:
-		return []Field{{"api_key", true, true}, {"workspace", false, true}, {"project", false, false}}
+		return []Field{{"api_key", true, false}, {"workspace", false, false}, {"project", false, false}}
 	}
 	return nil
 }
@@ -102,6 +102,39 @@ func redactURL(raw string) string {
 		return "(invalid url)"
 	}
 	return u.Scheme + "://" + u.Host + u.EscapedPath()
+}
+
+// NormalizeEndpoint checks the endpoint's shape and returns it in its canonical form (lower-case scheme
+// and host), the form that is stored and compared. Whether its host is allowed is the egress policy's
+// call, made on save by the service and again on every dial by the client.
+func NormalizeEndpoint(raw string) (string, error) {
+	if err := ValidateEndpoint(raw); err != nil {
+		return "", err
+	}
+	u, _ := url.Parse(raw)
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	return u.String(), nil
+}
+
+// SameOrigin reports whether two endpoints share scheme, host and port. Credentials stored for one
+// may be sent to the other only then.
+func SameOrigin(a, b string) bool {
+	ua, errA := url.Parse(a)
+	ub, errB := url.Parse(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	port := func(u *url.URL) string {
+		if p := u.Port(); p != "" {
+			return p
+		}
+		if strings.EqualFold(u.Scheme, "https") {
+			return "443"
+		}
+		return "80"
+	}
+	return strings.EqualFold(ua.Scheme, ub.Scheme) && strings.EqualFold(ua.Hostname(), ub.Hostname()) && port(ua) == port(ub)
 }
 
 // ValidateEndpoint checks the endpoint's shape. Whether its host is allowed is the egress policy's
@@ -216,8 +249,13 @@ func (d Destination) Headers() (http.Header, error) {
 			h.Set("Langsmith-Project", p)
 		}
 	case Opik:
-		h.Set("Authorization", d.Secrets["api_key"])
-		h.Set("Comet-Workspace", d.Params["workspace"])
+		// Self-hosted Opik runs without authentication; Comet cloud needs both.
+		if k := d.Secrets["api_key"]; k != "" {
+			h.Set("Authorization", k)
+		}
+		if w := d.Params["workspace"]; w != "" {
+			h.Set("Comet-Workspace", w)
+		}
 		if p := d.Params["project"]; p != "" {
 			h.Set("projectName", p)
 		}

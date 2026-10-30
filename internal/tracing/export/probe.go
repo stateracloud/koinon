@@ -84,7 +84,7 @@ func TestTrace(now time.Time, org string, resource map[string]string) *coltracep
 					TraceId: traceID[:], SpanId: childID[:], ParentSpanId: rootID[:],
 					Name: semconv.SpanName(semconv.OperationChat, "koinon-test"), Kind: tracepb.Span_SPAN_KIND_CLIENT,
 					StartTimeUnixNano: mid, EndTimeUnixNano: end,
-					Attributes: attrs(semconv.OperationChat, str(semconv.GenAIRequestModel, "koinon-test")),
+					Attributes: attrs(semconv.OperationChat, str(semconv.GenAIRequestModel, "koinon-test"), str(semconv.GenAIProviderName, "koinon")),
 				},
 			},
 		}},
@@ -116,9 +116,6 @@ func (c *Client) Test(ctx context.Context, d Destination, org string, resource m
 	}
 	if res.Rejected > 0 {
 		msg := fmt.Sprintf("the backend accepted the request but rejected %d span(s)", res.Rejected)
-		if res.Message != "" {
-			msg += ": " + res.Message
-		}
 		return Outcome{Status: res.Status, Rejected: res.Rejected, Message: msg}
 	}
 	return Outcome{OK: true, Status: res.Status}
