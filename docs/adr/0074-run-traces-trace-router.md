@@ -1,6 +1,6 @@
 # 0074. Run traces: a Koinon trace router to each org's OTLP backend
 
-- Status: Accepted (delivery after v0.1.0)
+- Status: Accepted; option C (decision 11 step 1) ships in v0.1.0-rc.9
 - Date: 2026-10-28
 - Amends: [0023](0023-observability-and-audit.md) (run traces, deferred there)
 - Relates to: [0041](0041-koinon-spend-ledger-and-budget-stops.md), [0049](0049-v01-scope-decisions.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md), [0056](0056-model-providers-pricing-and-budgets-per-org.md), [0059](0059-v01-opencode-only.md), [0065](0065-work-model-tasks-inbox.md), [0072](0072-agent-model-run-now-echo-check.md), [0073](0073-agent-passport.md), [#213](https://github.com/stateracloud/koinon/issues/213)
@@ -692,3 +692,11 @@ router amendment above.
   [0073](0073-agent-passport.md)
 - https://github.com/open-telemetry/semantic-conventions-genai
 - https://agentgateway.dev/docs/standalone/main/documentation/observability/traces/attribute-reference/
+
+## Amendment (2026-10-30): delivered before v0.1.0
+
+Decision 11 placed the first step after v0.1.0. On 2026-10-29 Andre moved it ahead of v0.1.0, into
+rc.9. The rc.7 re-run showed that models behave very differently, and traces show the thinking, the
+tool calls and each turn's cost. rc.9 ships option C as amended above: agentd's spans, model-call
+spans built from the ledger, destinations with test-before-save, the router's queues, and the content
+levels with the scrubber. The spikes and option D (the gateway's own spans) still follow v0.1.0.
