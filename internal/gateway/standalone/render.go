@@ -91,9 +91,10 @@ const (
 )
 
 // admitRule is probeRule, narrowed by the body fields no format admits (gateway.RejectExpr) and by a
-// gateway key in the URL (gateway.NoKeyInURLExpr).
+// gateway key in the URL or in a header but authorization (gateway.NoKeyInURLExpr,
+// gateway.NoKeyInHeadersExpr).
 func admitRule() string {
-	rule := probeRule + " && " + gateway.NoKeyInURLExpr()
+	rule := probeRule + " && " + gateway.NoKeyInURLExpr() + " && " + gateway.NoKeyInHeadersExpr()
 	if e := gateway.RejectExpr(); e != "" {
 		rule += " && " + e
 	}
@@ -413,7 +414,10 @@ type mcpSection struct {
 }
 
 type mcpPolicies struct {
-	APIKey           apiKeyPolicy     `yaml:"apiKey"`
+	APIKey apiKeyPolicy `yaml:"apiKey"`
+	// Authorization refuses (403) a request that carries a gateway key in a header but authorization
+	// (gateway.NoKeyInHeadersExpr). It runs after apiKey and before Transformations.
+	Authorization    authorization    `yaml:"authorization"`
 	MCPAuthorization mcpAuthorization `yaml:"mcpAuthorization"`
 	Transformations  transformations  `yaml:"transformations"`
 }
@@ -629,6 +633,7 @@ func build(s gateway.State, o Options) document {
 			PrefixMode:  "always",
 			Policies: mcpPolicies{
 				APIKey:           keyPolicy(keys, gateway.State{}, nil),
+				Authorization:    authorization{Rules: []string{gateway.NoKeyInHeadersExpr()}},
 				MCPAuthorization: mcpAuthorization{Rules: toolRules(s.Tools)},
 				// Targets learn which agent calls from this header (gateway.AgentHeader);
 				// set overwrites whatever the client sent.

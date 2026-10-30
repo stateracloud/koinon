@@ -757,7 +757,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 	})
 	// Not part of the quickstart (#262). An agent holds its gateway key and is untrusted, so it can put
 	// the key in a header of its own or in the URL; the upstream is a third party that logs both.
-	It("8. the gateway sends the model upstream only the headers a format needs, and refuses an agent key in the URL (#262)", func(ctx SpecContext) {
+	It("8. the gateway sends the model upstream only the headers a format needs, and refuses an agent key in a header or the URL (#262)", func(ctx SpecContext) {
 		t.begin()
 		// Step 8 priced claude-haiku-5-5 and the reconciler serves it. The request is what a sandbox
 		// would send, from here through the gateway's Service with the agent's own key.
@@ -792,11 +792,10 @@ var _ = Describe("the quickstart", Ordered, func() {
 			return n
 		}
 
-		By("a request with the key in headers of the agent's own choosing reaches the model without them")
+		By("a request with headers of the agent's own choosing reaches the model without them")
 		before := count()
 		Eventually(func(g Gomega) {
-			code, out := send("", "X-Canary", key, "X-Embedded", "prefix-"+key+"-suffix", "X-Api-Key", key,
-				"Cookie", "session="+key, "X-Forwarded-For", "203.0.113.9")
+			code, out := send("", "X-Custom", "hello", "X-Forwarded-For", "203.0.113.9", "User-Agent", "koinon-e2e")
 			g.Expect(code).To(Equal(http.StatusOK), out)
 		}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 		var got []fakeRequest
@@ -810,14 +809,28 @@ var _ = Describe("the quickstart", Ordered, func() {
 					Expect(v).NotTo(ContainSubstring("kgw_"), "header %s reached the upstream: %+v", name, r.Headers)
 				}
 			}
-			for _, name := range []string{"X-Canary", "X-Embedded", "X-Api-Key", "Cookie", "X-Forwarded-For"} {
+			for _, name := range []string{"X-Custom", "X-Forwarded-For"} {
 				Expect(r.Headers).NotTo(HaveKey(name), "the upstream got the header the agent invented")
 			}
 			Expect(r.Headers.Get("Content-Type")).To(Equal("application/json"))
 		}
 
-		By("a request with the key in the query or the path is refused before it reaches the model")
+		By("a request with the key in any header but Authorization is refused before it reaches the model")
 		n := count()
+		for _, h := range [][2]string{
+			{"X-Canary", key},
+			{"X-Embedded", "prefix-" + key + "-suffix"},
+			{"X-Api-Key", key},
+			{"Cookie", "session=" + key},
+			{"User-Agent", "harness/1.0 (" + key + ")"},
+		} {
+			code, out := send("", h[0], h[1])
+			Expect(code).To(Equal(http.StatusForbidden), h[0]+": "+out)
+		}
+		Expect(count()).To(Equal(n), "nothing reached the upstream")
+
+		By("a request with the key in the query or the path is refused before it reaches the model")
+		n = count()
 		for _, q := range []string{"?canary=" + key, "?canary=" + strings.Replace(key, "_", "%5F", 1)} {
 			code, out := send(q)
 			Expect(code).To(Equal(http.StatusForbidden), out)
@@ -826,7 +839,7 @@ var _ = Describe("the quickstart", Ordered, func() {
 		for _, r := range fakeModelDetail(ctx, Default, fakeModel, model) {
 			Expect(r.Query).NotTo(ContainSubstring("kgw_"))
 		}
-		t.end("8. Gateway header allowlist and key-in-URL refusal")
+		t.end("8. Gateway header allowlist and key-in-header/URL refusal")
 	})
 
 	// Not part of the quickstart, and after its time check: the flavor image is broken for the rest of

@@ -366,17 +366,20 @@ func anthropicSpec(env Env) {
 			Expect(up.Header).NotTo(HaveKey("Anthropic-Version"), "an openai model gets no Anthropic headers")
 		})
 
-		It("sends the upstream only the headers a format needs, never one that carries the agent's key (#262)", func(ctx SpecContext) {
+		It("refuses a request with the agent's key in any header but Authorization, and sends the upstream only the headers a format needs (#262)", func(ctx SpecContext) {
 			// An agent is untrusted and holds its gateway key, so it can put the key in any header or in
-			// the query. The upstream is a third party that logs what it receives: only an allowlist of
-			// headers passes (gateway.ForwardedHeaders), whatever the client sent.
-			spoof := []string{
-				"X-Canary", keyC.Material,
-				"X-Embedded", "prefix-" + keyC.Material + "-suffix",
-				"X-Api-Key", keyC.Material,
-				"Cookie", "session=" + keyC.Material,
-				"X-Forwarded-For", "203.0.113.9",
-				"Proxy-Authorization", "Basic " + keyC.Material,
+			// the query. The upstream is a third party that logs what it receives. Both modes refuse a key
+			// in a header but Authorization, including one the allowlist keeps (a client chooses its
+			// User-Agent); standalone mode also passes only gateway.ForwardedHeaders, whatever else the
+			// client sent.
+			keyed := [][2]string{
+				{"X-Canary", keyC.Material},
+				{"X-Embedded", "prefix-" + keyC.Material + "-suffix"},
+				{"X-Api-Key", keyC.Material},
+				{"Cookie", "session=" + keyC.Material},
+				{"Proxy-Authorization", "Basic " + keyC.Material},
+				{"User-Agent", "harness/1.0 (" + keyC.Material + ")"},
+				{"Accept", "application/json, " + keyC.Material},
 			}
 			allowed := map[string]bool{}
 			for _, h := range gateway.ForwardedHeaders {
@@ -395,23 +398,29 @@ func anthropicSpec(env Env) {
 			} {
 				body := map[string]any{"model": tc.model, "max_tokens": 16, "messages": []any{map[string]any{"role": "user", "content": "hi"}}}
 				before := len(upstrm.Requests())
-				code, out := post(ctx, tc.path, keyC.Material, body, spoof...)
-				if !env.HeaderAllowlist {
-					Expect(code).To(Equal(http.StatusForbidden), tc.model+": a key in a header is refused: "+out)
-					Expect(upstrm.Requests()).To(HaveLen(before))
-					// What the harness really sends passes.
-					code, out = post(ctx, tc.path, keyC.Material, body, "User-Agent", "koinon-test", "Accept", "application/json")
+				for _, h := range keyed {
+					code, out := post(ctx, tc.path, keyC.Material, body, h[0], h[1])
+					Expect(code).To(Equal(http.StatusForbidden), tc.model+": the key in "+h[0]+" is refused: "+out)
 				}
+				Expect(upstrm.Requests()).To(HaveLen(before), tc.model+": no request with a key in a header reached the upstream")
+
+				// Headers of the agent's own choosing without a key pass in Kubernetes mode and are
+				// dropped in standalone mode.
+				code, out := post(ctx, tc.path, keyC.Material, body,
+					"User-Agent", "koinon-test", "Accept", "application/json", "X-Forwarded-For", "203.0.113.9", "X-Custom", "hello")
 				Expect(code).To(Equal(http.StatusOK), tc.model+": "+out)
 				up := lastUpstream(tc.model)
 				for name, values := range up.Header {
-					Expect(allowed).To(HaveKey(name), tc.model+": a header outside the allowlist reached the upstream")
+					if env.HeaderAllowlist {
+						Expect(allowed).To(HaveKey(name), tc.model+": a header outside the allowlist reached the upstream")
+					}
 					for _, v := range values {
 						Expect(v).NotTo(ContainSubstring(gateway.KeyPrefix), tc.model+": header "+name)
 					}
 				}
 				Expect(up.Header.Get("Authorization")).To(Equal("Bearer "+providerKey), "the provider's key replaces the agent's")
 				Expect(up.Header.Get("Content-Type")).To(Equal("application/json"), "a header the format needs still passes")
+				Expect(up.Header.Get("User-Agent")).To(Equal("koinon-test"), "an allowlisted header without a key still passes")
 
 				By(tc.model + ": a request with the key in the query is refused before it reaches the upstream")
 				before = len(upstrm.Requests())

@@ -34,7 +34,7 @@ frontendPolicies:
       koinon.agent: default(apiKey.agent, "")
       koinon.cache_read: llm.cachedInputTokens
       koinon.cache_write: llm.cacheCreationInputTokens
-      koinon.config: '"29efd1b5ecb3aeaf"'
+      koinon.config: '"dc0535e74f5a525c"'
       koinon.error: proxy.error.reason
       koinon.format: 'request.path == "/v1/messages" ? "anthropic" : request.path == "/v1/chat/completions" ? "openai" : ""'
       koinon.in: llm.inputTokens
@@ -100,7 +100,7 @@ llm:
             org: globex
           allowedModels:
             - deepseek/deepseek-v4.1-flash
-        - keyHash: sha256:e82f0313898f1bb281707531dec87567988e4b031dc222e663460519ff41aafc
+        - keyHash: sha256:d80c414bb9c4b91a6ccb66e7dcc8a69756d734ba7e0580dccb25b9d402ae1f87
           metadata:
             name: koinon-reload-probe
             agent: ""
@@ -114,7 +114,7 @@ llm:
               onBudgetExceeded: Block
     authorization:
       rules:
-        - apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !has(llmRequest.mcp_servers)
+        - apiKey.name != "koinon-reload-probe" && !url.decode(request.pathAndQuery).contains("kgw_") && !toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_") && !has(llmRequest.mcp_servers)
     transformations:
       request:
         replace: request.headers.filterKeys(k, k in ["accept", "content-length", "content-type", "user-agent"])
@@ -203,6 +203,9 @@ mcp:
             name: k-gggggggggggg
             agent: globex/analyst
             org: globex
+    authorization:
+      rules:
+        - '!toJson(request.headers.filterKeys(k, k != "authorization")).contains("kgw_")'
     mcpAuthorization:
       rules:
         - apiKey.agent == "acme/repo-helper" && ((mcp.tool.target == "github" && mcp.tool.name in ["create_pull_request", "get_approval_status"]) || (mcp.tool.target == "docs" && mcp.tool.name in ["search"]))
