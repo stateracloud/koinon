@@ -82,10 +82,12 @@ chart-check: ## Lint and render the Helm chart in every mode and validate it wit
 	hack/chart-check.sh
 
 .PHONY: generate
-# The OpenShell client is generated after buf.gen.yaml, whose clean step empties internal/gen.
+# The OpenShell client and the googleapis ErrorInfo types are generated after buf.gen.yaml, whose clean step
+# empties internal/gen and web/src/gen.
 generate: ## Regenerate protobuf, sqlc and admin API code
 	buf generate
 	buf generate --template buf.gen.openshell.yaml
+	buf generate --template buf.gen.googleapis.yaml
 	$(GO) tool sqlc generate
 	$(GO) tool oapi-codegen -config api/admin/v1/oapi-codegen.yaml api/admin/v1/openapi.yaml
 

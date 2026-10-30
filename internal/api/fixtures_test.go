@@ -267,6 +267,8 @@ type orgFixture struct {
 	provider, model string
 	// mcpServer is a remote MCP server of the org, with the tool "search"; mcpTool is its name.
 	mcpServer, mcpTool string
+	// traceDest is a trace destination of the org.
+	traceDest string
 }
 
 func (e *env) newOrgFixture(ctx context.Context) orgFixture {

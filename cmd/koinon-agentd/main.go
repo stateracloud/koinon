@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stateracloud/koinon/internal/agentd"
+	"github.com/stateracloud/koinon/internal/catalog"
 	"github.com/stateracloud/koinon/internal/checkpoint"
 	"github.com/stateracloud/koinon/internal/cli"
 	"github.com/stateracloud/koinon/internal/memlimit"
@@ -31,6 +32,7 @@ import (
 	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/project"
+	"github.com/stateracloud/koinon/internal/tracedest"
 	"github.com/stateracloud/koinon/pricing"
 )
 
@@ -194,6 +196,14 @@ func run() error {
 	cfg.pool.Prices = prices.NewResolver(pricing.Embedded())
 	if err := metrics.Serve(ctx, cfg.metricsAddr, reg, slog.Default()); err != nil {
 		return err
+	}
+	if cfg.otlpEndpoint != "" {
+		// Run spans (ADR 0074). The service only reads settings and decides runs: agentd holds no
+		// key-encryption key and dials no destination; the router in koinon-api does.
+		cfg.pool.Tracing = &agentd.Tracing{
+			Decider:  agentd.TraceDeciderFrom(tracedest.NewWithClient(db, nil, catalog.URLPolicy{}, nil, slog.Default())),
+			Endpoint: cfg.otlpEndpoint, TokenFile: cfg.otlpTokenFile,
+		}
 	}
 	pool, err := agentd.New(db, backend, cfg.pool)
 	if err != nil {

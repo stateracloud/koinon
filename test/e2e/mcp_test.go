@@ -21,6 +21,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/stateracloud/koinon/internal/execution"
+	"github.com/stateracloud/koinon/test/scenarios"
 )
 
 const (
@@ -163,7 +164,7 @@ func mcpServerE2E(ctx context.Context, admin func(context.Context, string, strin
 	}).WithContext(ctx).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 	DeferCleanup(func() { _ = session.Close() })
 	Expect(names).NotTo(ContainElement(HaveSuffix("default-tracker_write_item")), "an ask-tier tool is not on the server's own target")
-	Expect(names).To(ContainElement(HaveSuffix("default-tracker-ask_write_item")), "it is behind the approval proxy")
+	Expect(names).To(ContainElement(HaveSuffix(scenarios.PullRequest.TrackerAskTool)), "it is behind the approval proxy")
 
 	By("a call to the auto tool goes through the gateway to the server, with the credential and the agent's identity")
 	var read string
