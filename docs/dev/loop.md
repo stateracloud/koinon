@@ -112,7 +112,7 @@ The `koinon-ensure-secrets` Job generates the bootstrap admin password into the 
 `koinon-bootstrap-admin` once and never overwrites it. Nothing is stored in the repository.
 
 ```sh
-kubectl -n koinon get secret koinon-bootstrap-admin -o jsonpath='{.data.password}' | base64 -d
+kubectl --context <your context> -n koinon get secret koinon-bootstrap-admin -o jsonpath='{.data.password}' | base64 -d
 ```
 
 Log in as `admin`. Dev images do not embed the UI, so use the Vite
@@ -131,5 +131,5 @@ server on http://localhost:5173 (see [web.md](web.md)); the API itself is on htt
   missing or wrong. Sandbox namespaces are created by OpenShell and need their own pull access to
   `flavor-*` in your registry.
 - `koinon-preflight` fails: it names the missing prerequisite (Agent Sandbox, OpenShell, the
-  RuntimeClass, CloudNativePG). Its Job is kept for `kubectl -n koinon logs job/koinon-preflight`.
+  RuntimeClass, CloudNativePG). Its Job is kept for `kubectl --context <your context> -n koinon logs job/koinon-preflight`.
 - `tilt down` deletes the release objects including the database and its volume.

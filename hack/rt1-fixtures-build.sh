@@ -12,7 +12,7 @@
 #   <registry>/koinon/rt1-searxng        a copy, by digest, of searxng/searxng (AGPL-3.0, unmodified)
 #   <registry>/koinon/rt1-searxng-mcp    a copy, by digest, of isokoliuk/mcp-searxng
 #
-# Usage: hack/rt1-fixtures-build.sh REGISTRY [TAG]     e.g. zot.apps.lab.example.invalid, TAG defaults to dev
+# Usage: hack/rt1-fixtures-build.sh REGISTRY [TAG]     e.g. registry.example.com, TAG defaults to dev
 # DRY_RUN=1 prints the commands and pushes nothing. You must be logged in to the registry (docker login
 # or a DOCKER_CONFIG that has it). Prints a ready-to-paste kustomize images: block with digests at the end
 # (names use REGISTRY; see test/fixtures/rt1/overlays/remote for the matching overlay).
