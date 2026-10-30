@@ -86,6 +86,38 @@ var _ = Describe("run spans: turns, privacy and exporter", func() {
 		}
 	})
 
+	DescribeTable("lists the ask_agent target as content, and sends it only above none", func(ctx SpecContext, level string) {
+		{
+			e := newEnv(ctx, store.AgentFlavorOpencode)
+			e.harness.set(func(h *harness) {
+				h.script = func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
+					defer GinkgoRecover()
+					Expect(say(sdk.StartToolCall("c1", "koinon_ask_agent", sdk.WithStartRawInput(map[string]any{"agent": "triage"})))).To(Succeed())
+					Expect(say(sdk.UpdateToolCall("c1", sdk.WithUpdateStatus(sdk.ToolCallStatusCompleted)))).To(Succeed())
+					return true
+				}
+			})
+			rcv := newReceiver()
+			r := e.enqueue(ctx, e.task(ctx, "ask"))
+			e.pool("agentd-askagent-"+level, tracingOn(rcv, fakeDecider{traced: true, level: level}))
+			Eventually(runState(ctx, r)).WithTimeout(10 * time.Second).Should(Equal(store.RunStateSucceeded))
+			Eventually(rcv.count).WithTimeout(10 * time.Second).Should(Equal(2))
+			tool := spanByName(rcv.snapshot(), "execute_tool koinon_ask_agent")[0]
+			a := attrMap(tool.Attributes)
+			Expect(a).To(HaveKeyWithValue(semconv.GenAITransferMode, "return_to_caller"))
+			if level == "none" {
+				Expect(a).NotTo(HaveKey(semconv.GenAITransferTargetName))
+				Expect(a).NotTo(HaveKey(semconv.KoinonContentAttributes))
+			} else {
+				Expect(a).To(HaveKeyWithValue(semconv.GenAITransferTargetName, "triage"))
+				Expect(a[semconv.KoinonContentAttributes]).To(ContainSubstring(semconv.GenAITransferTargetName))
+			}
+		}
+	},
+		Entry("at none", "none"),
+		Entry("at full", "full"),
+	)
+
 	It("ends a turn with the reason turn() saw, and marks failed turns as errors: retry", func(ctx SpecContext) {
 		e := newEnv(ctx, store.AgentFlavorOpencode)
 		srv, err := fakemodel.New(fakemodel.Script{Model: "faulty", Faults: fakemodel.Faults{Unavailable: 1}, Turns: []fakemodel.Turn{{Text: "ok"}}})
