@@ -151,6 +151,10 @@ type config struct {
 	providerAllowedHosts string
 }
 
+// migrateOnly reports whether the command is the migrate subcommand, which applies the migrations
+// and exits without serving.
+func (c config) migrateOnly() bool { return len(c.args) == 1 && c.args[0] == "migrate" }
+
 func parseFlags(args []string) (config, error) {
 	var c config
 	fs := flag.NewFlagSet("koinon-api", flag.ContinueOnError)
@@ -246,7 +250,9 @@ func parseFlags(args []string) (config, error) {
 	if c.databaseURL == "" {
 		return c, errors.New("--database-url is required")
 	}
-	if c.otlpAddr != "" && c.otlpTokenDir == "" {
+	// Only the server opens the OTLP receiver; the migrate subcommand (the chart's migrate Job,
+	// which mounts no token) must not need its token.
+	if c.otlpAddr != "" && c.otlpTokenDir == "" && !c.migrateOnly() {
 		return c, errors.New("--otlp-token-dir is required with --otlp-addr: the OTLP receiver never runs without its bearer token (pass --otlp-addr= to turn the receiver off)")
 	}
 	if c.secretsNamespace == "" {
@@ -332,7 +338,7 @@ func run() error {
 	defer stop()
 
 	switch {
-	case len(cfg.args) == 1 && cfg.args[0] == "migrate":
+	case cfg.migrateOnly():
 		return migrate(ctx, cfg.databaseURL, cfg.wait, cfg.durable)
 	case len(cfg.args) > 0:
 		return fmt.Errorf("unknown arguments %q; the subcommands are \"migrate\", \"preflight\", \"ensure-secrets\", \"keys\" and \"audit\" (first)", cfg.args)
