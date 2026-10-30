@@ -46,13 +46,22 @@ func (s *Service) GetPlatform(ctx context.Context) (Platform, error) {
 // SetPlatformDestination saves the platform destination, testing it first when the change touches its
 // connection (see Update). Stored secrets are kept only while backend and endpoint origin stay the
 // same. Audited in auditOrg, the platform admin's personal org: the log has no org-less events (ADR 0023).
-func (s *Service) SetPlatformDestination(ctx context.Context, auditOrg pgtype.UUID, actor audit.Actor, in Input) (Destination, error) {
+func (s *Service) SetPlatformDestination(ctx context.Context, auditOrg pgtype.UUID, actor audit.Actor, expectedVersion *int64, in Input) (Destination, error) {
 	q := store.New(s.pool)
 	cur, err := q.GetPlatformTraceDestination(ctx)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Destination{}, err
 	}
 	exists := err == nil
+	if expectedVersion != nil {
+		have := int64(0)
+		if exists {
+			have = cur.ConfigVersion
+		}
+		if *expectedVersion != have {
+			return Destination{}, ErrChanged
+		}
+	}
 	endpoint, err := s.endpoint(in.EndpointURL)
 	if err != nil {
 		return Destination{}, err
@@ -94,6 +103,18 @@ func (s *Service) SetPlatformDestination(ctx context.Context, auditOrg pgtype.UU
 	testAt, testOK, testMsg := testColumns(outcome, at)
 	var out Destination
 	err = s.tx(ctx, func(q *store.Queries) error {
+		// Only the version that was read (and tested against) is replaced.
+		now, err := q.LockPlatformTraceDestination(ctx)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			if exists {
+				return ErrChanged
+			}
+		case err != nil:
+			return err
+		case !exists || now.ConfigVersion != cur.ConfigVersion:
+			return ErrChanged
+		}
 		row, err := q.UpsertPlatformTraceDestination(ctx, store.UpsertPlatformTraceDestinationParams{
 			Backend: store.TraceBackend(p.dest.Preset), EndpointUrl: p.endpoint, Params: p.params, Credentials: p.envelope,
 			SecretFields: p.fields, ResourceAttributes: p.attrs, Enabled: in.Enabled, SetTest: touched,
