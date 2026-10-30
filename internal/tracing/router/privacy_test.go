@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -296,17 +297,23 @@ var _ = Describe("Hostile or repeated input", func() {
 		req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, e.srv.URL, pr)
 		req.Header.Set("Content-Type", "application/x-protobuf")
 		done := make(chan struct{})
+		var outcome atomic.Value
 		go func() {
 			defer close(done)
-			if resp, err := http.DefaultClient.Do(req); err == nil {
-				_ = resp.Body.Close()
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				outcome.Store("error: " + err.Error())
+				return
 			}
+			outcome.Store("status " + resp.Status)
+			_ = resp.Body.Close()
 		}()
-		Eventually(func() int {
-			resp := httpDo(http.MethodPost, e.srv.URL, "application/x-protobuf", bytes.NewReader(nil))
-			defer func() { _ = resp.Body.Close() }()
-			return resp.StatusCode
-		}, 5*time.Second).Should(Equal(http.StatusServiceUnavailable))
+		defer func() { GinkgoWriter.Println("blocking request outcome:", outcome.Load()) }()
+		// Probe only once the receiver says the blocking request holds the slot, not on a timer.
+		Eventually(e.r.RequestsInProgress, 10*time.Second).Should(Equal(1), "the blocking request reached the handler (outcome: %v)", outcome.Load())
+		resp := httpDo(http.MethodPost, e.srv.URL, "application/x-protobuf", bytes.NewReader(nil))
+		_ = resp.Body.Close()
+		Expect(resp.StatusCode).To(Equal(http.StatusServiceUnavailable))
 		_ = pw.Close()
 		<-done
 	})

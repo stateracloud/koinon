@@ -357,6 +357,9 @@ func New(cfg Config) (*Router, error) {
 	}, nil
 }
 
+// RequestsInProgress is the number of export requests the receiver is handling.
+func (r *Router) RequestsInProgress() int { return len(r.reqs) }
+
 // HeldRoots is the number of turn roots waiting for the ledger.
 func (r *Router) HeldRoots() int {
 	r.hmu.Lock()
