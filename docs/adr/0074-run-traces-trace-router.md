@@ -503,11 +503,24 @@ internal OTLP listener, `/v1/logs` and `/v1/traces`, requires a bearer token fro
    level (held to the platform ceiling) is above `none`; the router strips or scrubs exactly the listed
    attributes per destination level and removes the marker. agentd pre-caps each value at 64 KiB to
    bound memory; a longer value becomes a JSON string of its cut-off text.
-4. **Tool names.** `gen_ai.tool.name` is the ACP title only when it is a plain identifier; free text
-   (which can carry arguments) falls back to the ACP kind.
-5. **Export.** A bounded queue (2048 spans) that drops when full, one worker, 256-span batches with a
-   5 s deadline; a failed batch is dropped. `koinon_agentd_trace_spans_dropped_total{reason}`
-   (`queue_full`, `export_failed`) and `..._exported_total` count them.
+4. **Tool names.** A tool call is named by its first message and never renamed: OpenCode fills in a file
+   path or URL as the title of a finished call. `gen_ai.tool.name` and the span name use the ACP title
+   only if it is a known tool name (the harness's built-ins, `koinon_*` or `mcp__*`); anything else
+   falls back to the ACP kind. `gen_ai.transfer.target.name` is set only above content level `none`.
+5. **Turn rows.** A turn row is inserted only by the run's current owner (`InsertOwnedRunTurn`: the epoch
+   matches and the run is starting or running), and the same statement ends any row a previous owner
+   left open as `interrupted`. The park transaction ends the turn's row with `park:<reason>`, so a fast
+   resume on another replica sees it. A control-plane cancel ends the last turn as `canceled`.
+6. **Content JSON.** Over the pre-cap, the leaf strings of `gen_ai.input.messages` and
+   `gen_ai.output.messages` are cut, so they stay the messages array; only an opaque tool value falls
+   back to a JSON string of its cut-off text.
+7. **Export.** A bounded queue (2048 spans) that drops when full, one worker, 256-span batches with a
+   5 s deadline; a failed batch is dropped, spans the listener rejected in a partial success are counted
+   apart, and errors are logged at most every 30 s. `koinon_agentd_trace_spans_dropped_total{reason}`
+   (`queue_full`, `export_failed`, `rejected`, `shutdown`) and `..._exported_total` count them.
+8. **Provisional: `ask_agent`.** The tool does not exist yet. The span's `gen_ai.transfer.*` attributes
+   and the link to the child run's first turn read guessed argument and result fields (`agent`/`to`,
+   `runId`/`run`); revisit when the tool is built.
 
 ## Links
 

@@ -284,6 +284,56 @@ func (q *Queries) GetTraceDestination(ctx context.Context, arg GetTraceDestinati
 	return i, err
 }
 
+const insertOwnedRunTurn = `-- name: InsertOwnedRunTurn :one
+WITH run AS (
+    UPDATE runs
+    SET last_turn_seq = last_turn_seq + 1
+    WHERE runs.org_id = $2 AND runs.id = $3 AND runs.epoch = $4
+      AND runs.state IN ('starting', 'running')
+    RETURNING runs.org_id, runs.id, runs.last_turn_seq
+), interrupted AS (
+    UPDATE run_turns
+    SET ended_at = now(), end_reason = 'interrupted'
+    WHERE run_turns.org_id = $2 AND run_turns.run_id = $3 AND run_turns.ended_at IS NULL
+      AND EXISTS (SELECT 1 FROM run)
+)
+INSERT INTO run_turns (org_id, run_id, seq, trace_id)
+SELECT run.org_id, run.id, run.last_turn_seq, $1
+FROM run
+RETURNING org_id, id, run_id, seq, trace_id, started_at, ended_at, end_reason
+`
+
+type InsertOwnedRunTurnParams struct {
+	TraceID []byte
+	OrgID   pgtype.UUID
+	RunID   pgtype.UUID
+	Epoch   int64
+}
+
+// InsertRunTurn for the run's current owner only (the epoch matches and the run is starting or
+// running), so a fenced replica cannot add a turn. A turn row the previous owner left open (it died or
+// lost the run) is ended as interrupted in the same statement, before the new one starts.
+func (q *Queries) InsertOwnedRunTurn(ctx context.Context, arg InsertOwnedRunTurnParams) (RunTurn, error) {
+	row := q.db.QueryRow(ctx, insertOwnedRunTurn,
+		arg.TraceID,
+		arg.OrgID,
+		arg.RunID,
+		arg.Epoch,
+	)
+	var i RunTurn
+	err := row.Scan(
+		&i.OrgID,
+		&i.ID,
+		&i.RunID,
+		&i.Seq,
+		&i.TraceID,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.EndReason,
+	)
+	return i, err
+}
+
 const insertRunTurn = `-- name: InsertRunTurn :one
 WITH run AS (
     UPDATE runs
