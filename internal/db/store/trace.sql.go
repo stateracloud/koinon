@@ -441,6 +441,93 @@ func (q *Queries) InsertTraceDestination(ctx context.Context, arg InsertTraceDes
 	return i, err
 }
 
+const listRunModelCalls = `-- name: ListRunModelCalls :many
+SELECT e.request_id, e.model, e.agent_id, e.task_id, e.input_tokens, e.output_tokens,
+       e.cache_read_tokens, e.cache_write_tokens, e.reasoning_tokens,
+       e.cost_usd, e.priced, e.gateway_cost_usd, e.provisional, e.estimated, e.upstream_status,
+       e.occurred_at, coalesce(p.type, '')::text AS provider_type
+FROM spend_entries e
+JOIN orgs o ON o.id = e.org_id
+LEFT JOIN models m ON m.org_id = e.org_id AND (m.name = e.model OR o.slug || '/' || m.name = e.model)
+LEFT JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
+WHERE e.org_id = $1 AND e.run_id = $2
+  AND e.occurred_at >= $3 AND e.occurred_at <= $4
+ORDER BY e.occurred_at, e.request_id
+`
+
+type ListRunModelCallsParams struct {
+	OrgID    pgtype.UUID
+	RunID    pgtype.UUID
+	FromTime pgtype.Timestamptz
+	ToTime   pgtype.Timestamptz
+}
+
+type ListRunModelCallsRow struct {
+	RequestID        string
+	Model            string
+	AgentID          pgtype.UUID
+	TaskID           pgtype.UUID
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	ReasoningTokens  int64
+	CostUsd          pgtype.Numeric
+	Priced           bool
+	GatewayCostUsd   pgtype.Numeric
+	Provisional      bool
+	Estimated        bool
+	UpstreamStatus   pgtype.Int2
+	OccurredAt       pgtype.Timestamptz
+	ProviderType     string
+}
+
+// The model calls of a run in a window, for the trace router's model-call spans (ADR 0074, decision
+// 3): the ledger's rows with the provider type of the model the agent asked for. The model name is
+// the one the agent used, with or without the org slug the gateway prefixes.
+func (q *Queries) ListRunModelCalls(ctx context.Context, arg ListRunModelCallsParams) ([]ListRunModelCallsRow, error) {
+	rows, err := q.db.Query(ctx, listRunModelCalls,
+		arg.OrgID,
+		arg.RunID,
+		arg.FromTime,
+		arg.ToTime,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunModelCallsRow
+	for rows.Next() {
+		var i ListRunModelCallsRow
+		if err := rows.Scan(
+			&i.RequestID,
+			&i.Model,
+			&i.AgentID,
+			&i.TaskID,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.ReasoningTokens,
+			&i.CostUsd,
+			&i.Priced,
+			&i.GatewayCostUsd,
+			&i.Provisional,
+			&i.Estimated,
+			&i.UpstreamStatus,
+			&i.OccurredAt,
+			&i.ProviderType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunTurns = `-- name: ListRunTurns :many
 SELECT org_id, id, run_id, seq, trace_id, started_at, ended_at, end_reason FROM run_turns
 WHERE org_id = $1 AND run_id = $2

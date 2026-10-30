@@ -228,3 +228,19 @@ WHERE org_id = @org_id AND trace_id = @trace_id;
 SELECT * FROM run_turns
 WHERE org_id = @org_id AND run_id = @run_id
 ORDER BY seq;
+
+-- name: ListRunModelCalls :many
+-- The model calls of a run in a window, for the trace router's model-call spans (ADR 0074, decision
+-- 3): the ledger's rows with the provider type of the model the agent asked for. The model name is
+-- the one the agent used, with or without the org slug the gateway prefixes.
+SELECT e.request_id, e.model, e.agent_id, e.task_id, e.input_tokens, e.output_tokens,
+       e.cache_read_tokens, e.cache_write_tokens, e.reasoning_tokens,
+       e.cost_usd, e.priced, e.gateway_cost_usd, e.provisional, e.estimated, e.upstream_status,
+       e.occurred_at, coalesce(p.type, '')::text AS provider_type
+FROM spend_entries e
+JOIN orgs o ON o.id = e.org_id
+LEFT JOIN models m ON m.org_id = e.org_id AND (m.name = e.model OR o.slug || '/' || m.name = e.model)
+LEFT JOIN providers p ON p.org_id = m.org_id AND p.id = m.provider_id
+WHERE e.org_id = @org_id AND e.run_id = @run_id
+  AND e.occurred_at >= @from_time AND e.occurred_at <= @to_time
+ORDER BY e.occurred_at, e.request_id;

@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package router
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+	"google.golang.org/protobuf/proto"
+)
+
+// heldRoot is a turn's root span waiting for the ledger.
+//
+// The totals belong on the root (ADR 0074, decision 3), and the ledger's rows for a turn arrive up
+// to LedgerWait after it ends, so the router holds the root, not the other spans: tool spans and the
+// like go out at once, and only one small span per open turn waits. Memory is bounded twice, by a
+// count and by bytes (a root can carry content up to agentd's pre-cap); a root that does not fit is
+// released at once with the ledger as it stands. A child summary span would have avoided holding
+// anything, but then no backend would show the cost on the turn itself.
+type heldRoot struct {
+	span  *tracepb.Span
+	org   pgtype.UUID
+	run   pgtype.UUID
+	trace [16]byte
+	turn  Turn
+	since time.Time
+	size  int
+	// seen is the number of ledger rows the last poll found; the root is released when two polls in
+	// a row agree and none of the rows is pending.
+	seen   int
+	polled bool
+}
+
+// hold queues a root for its ledger rows, or releases it at once when the bounds are reached.
+func (r *Router) hold(ctx context.Context, h *heldRoot) {
+	h.size = proto.Size(h.span)
+	r.hmu.Lock()
+	_, dup := r.held[h.trace]
+	full := len(r.held) >= r.cfg.MaxHeld || r.heldBytes+h.size > r.cfg.MaxHeldBytes
+	if !full && !dup {
+		r.held[h.trace] = h
+		r.heldBytes += h.size
+		r.metrics.HeldRoots.Set(float64(len(r.held)))
+		r.hmu.Unlock()
+		return
+	}
+	r.hmu.Unlock()
+	// Release now: one read of the ledger, no waiting.
+	r.release(ctx, h)
+}
+
+// Sweep reads the ledger for every held root and releases those that are settled or have waited
+// LedgerWait. The router calls it every PollInterval; tests call it with a chosen time.
+func (r *Router) Sweep(ctx context.Context, now time.Time) {
+	r.hmu.Lock()
+	hs := make([]*heldRoot, 0, len(r.held))
+	for _, h := range r.held {
+		hs = append(hs, h)
+	}
+	r.hmu.Unlock()
+	for _, h := range hs {
+		if ctx.Err() != nil {
+			return
+		}
+		calls, err := r.modelCalls(ctx, h)
+		overdue := now.Sub(h.since) >= r.cfg.LedgerWait
+		settled := err == nil && h.polled && len(calls) == h.seen && !anyPending(calls)
+		if err == nil {
+			h.seen, h.polled = len(calls), true
+		}
+		if !settled && !overdue {
+			continue
+		}
+		r.hmu.Lock()
+		cur, ok := r.held[h.trace]
+		if ok && cur == h {
+			delete(r.held, h.trace)
+			r.heldBytes -= h.size
+			r.metrics.HeldRoots.Set(float64(len(r.held)))
+		}
+		r.hmu.Unlock()
+		if !ok || cur != h {
+			continue
+		}
+		if err != nil {
+			// The ledger could not be read: send the root as it is, without totals, rather than lose it.
+			r.log.Warn("trace router: reading the ledger failed; sending the turn without model calls", "err", err)
+			calls = nil
+		}
+		r.finish(ctx, h, calls)
+	}
+}
+
+func anyPending(calls []ModelCall) bool {
+	for _, c := range calls {
+		if c.pending() {
+			return true
+		}
+	}
+	return false
+}
+
+// release finishes a root that was not held.
+func (r *Router) release(ctx context.Context, h *heldRoot) {
+	calls, err := r.modelCalls(ctx, h)
+	if err != nil {
+		r.log.Warn("trace router: reading the ledger failed; sending the turn without model calls", "err", err)
+		calls = nil
+	}
+	r.finish(ctx, h, calls)
+}
+
+// modelCalls reads the turn's ledger rows. The window is the turn's: from its start to its end, or,
+// while the row is still open, to the end of the root span.
+func (r *Router) modelCalls(ctx context.Context, h *heldRoot) ([]ModelCall, error) {
+	to := time.Unix(0, int64(h.span.EndTimeUnixNano)) //nolint:gosec // a span end time, far below the int64 limit
+	if h.turn.EndedAt != nil {
+		to = *h.turn.EndedAt
+	}
+	return r.store.ModelCalls(ctx, h.org, h.run, h.turn.StartedAt, to)
+}
+
+// finish builds the model-call spans, puts the totals on the root and sends them all.
+func (r *Router) finish(ctx context.Context, h *heldRoot, calls []ModelCall) {
+	spans, use := modelCallSpans(h.span, h.trace, h.turn.Seq, calls)
+	r.metrics.Received.WithLabelValues(SourceLedger).Add(float64(len(spans)))
+	putTotals(h.span, use)
+	r.dispatch(ctx, h.org, append(spans, h.span)...)
+}

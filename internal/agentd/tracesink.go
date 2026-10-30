@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -400,12 +399,4 @@ func randSpanID() trace.SpanID {
 
 // RootSpanID is the span ID of the root span of the turn with this trace ID: the first 8 bytes of
 // SHA-256("koinon.turn.root" + trace ID). The router uses it to place spans under the turn.
-func RootSpanID(traceID [16]byte) [8]byte {
-	h := sha256.Sum256(append([]byte("koinon.turn.root"), traceID[:]...))
-	var id [8]byte
-	copy(id[:], h[:8])
-	if id == ([8]byte{}) {
-		id[7] = 1
-	}
-	return id
-}
+func RootSpanID(traceID [16]byte) [8]byte { return semconv.RootSpanID(traceID) }
