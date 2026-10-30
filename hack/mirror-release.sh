@@ -7,14 +7,14 @@
 # (not referrers-API-only bundles), and the Helm chart. It needs crane and jq and reads credentials
 # from the docker config (crane uses the same keychain as docker); it never prints them.
 #
-#   hack/mirror-release.sh 0.1.0-rc.1 zot.apps.lab.example.invalid/koinon
+#   hack/mirror-release.sh 0.1.0-rc.1 registry.example.com/koinon
 #
 # The images land at <registry>/<name>:<version> and the chart at <registry>/charts/koinon:<version>,
 # so install with --set image.registry=<registry>. SOURCE overrides the source registry (tests).
 set -euo pipefail
 
 if (($# != 2)); then
-	echo "usage: $0 <version> <registry>   (for example 0.1.0-rc.1 zot.apps.lab.example.invalid/koinon)" >&2
+	echo "usage: $0 <version> <registry>   (for example 0.1.0-rc.1 registry.example.com/koinon)" >&2
 	exit 2
 fi
 version=${1#v}

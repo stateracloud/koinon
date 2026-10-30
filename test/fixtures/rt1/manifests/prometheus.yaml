@@ -51,7 +51,7 @@ spec:
       initContainers:
         - name: promgen
           # Placeholder tags: digests are filled in at deploy (see kustomization.yaml).
-          image: zot.apps.lab.example.invalid/koinon/rt1-promgen:dev
+          image: rt1-promgen:dev
           args: ["-seed=1", "-days=30", "-lag=3h", "-o=/om/rt1.om"]
           securityContext: &sc
             allowPrivilegeEscalation: false
@@ -63,7 +63,7 @@ spec:
           volumeMounts:
             - {name: om, mountPath: /om}
         - name: promtool
-          image: zot.apps.lab.example.invalid/koinon/rt1-prometheus:v3.7.3
+          image: rt1-prometheus:v3.7.3
           command: ["/bin/promtool"]
           # 24 h blocks instead of the default 2 h: 40 blocks, not 360, so building takes seconds and Prometheus
           # needs no compaction at start. (Hidden flag; accepted by the pinned v3.7.3.)
@@ -79,7 +79,7 @@ spec:
             - {name: promtool-tmp, mountPath: /tmp}
       containers:
         - name: prometheus
-          image: zot.apps.lab.example.invalid/koinon/rt1-prometheus:v3.7.3
+          image: rt1-prometheus:v3.7.3
           args:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/data
@@ -98,7 +98,7 @@ spec:
             - {name: config, mountPath: /etc/prometheus, readOnly: true}
             - {name: data, mountPath: /data}
         - name: prometheus-mcp
-          image: zot.apps.lab.example.invalid/koinon/rt1-prometheus-mcp:dev
+          image: rt1-prometheus-mcp:dev
           env:
             - {name: PROMETHEUS_URL, value: "http://127.0.0.1:9090"}
           ports:

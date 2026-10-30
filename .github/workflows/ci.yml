@@ -95,18 +95,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          # Waivers outside the security fast path are Andre's alone (ADR 0079).
-          APPROVER: procoduck
+          BASE: ${{ github.base_ref }}
+        # Waivers outside the security fast path are the maintainers' (ADR 0079). The approvers are
+        # the GitHub handles in the table of MAINTAINERS.md, read from the base branch so that a
+        # pull request cannot add itself.
         run: |
           label=dependency-age-waiver
           if gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" --jq '.[].name' | grep -qx "$label"; then
+            # Both the file and the parser come from the base branch.
+            approvers=$(bash <(git show "origin/$BASE:hack/waiver-approvers.sh") <(git show "origin/$BASE:MAINTAINERS.md"))
+            [[ -n $approvers ]] || { echo "::error::no maintainer handles found in the table of MAINTAINERS.md on $BASE"; exit 1; }
             actor=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/events" \
               --jq "[.[] | select(.event == \"labeled\" and .label.name == \"$label\")] | last | .actor.login // empty" | tail -n1)
-            if [[ $actor == "$APPROVER" ]]; then
+            if [[ -n $actor ]] && grep -qixF "$actor" <<<"$approvers"; then
               echo "label $label was added by $actor: age failures are waived and listed below"
               echo "by=$actor" >>"$GITHUB_OUTPUT"
             else
-              echo "::error::label $label was added by '${actor:-unknown}', not by $APPROVER; it does not waive anything"
+              echo "::error::label $label was added by '${actor:-unknown}', not by a maintainer listed in MAINTAINERS.md ($(tr '\n' ' ' <<<"$approvers")); it does not waive anything"
             fi
           fi
       - name: versions are at least 3 days old

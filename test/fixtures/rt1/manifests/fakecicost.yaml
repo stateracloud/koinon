@@ -30,7 +30,7 @@ spec:
       containers:
         - name: fakecicost
           # Placeholder tag: the digest is filled in at deploy (see kustomization.yaml).
-          image: zot.apps.lab.example.invalid/koinon/rt1-fakecicost:dev
+          image: rt1-fakecicost:dev
           args: ["-addr=:8080"]
           env:
             - name: KOINON_FAKECICOST_TOKEN

@@ -4,17 +4,18 @@
 
 `tilt up` builds the Koinon images and deploys `charts/koinon` into the namespace `koinon`, the same
 chart a user installs, with the values in `hack/dev/`. It replaces the earlier kustomize manifests.
-There are two profiles; the kube context picks one.
+There are two profiles, picked by the kube context: **kind** (`kind-koinon-*`, the default for
+everyone, no configuration) and **remote** (a cluster of your own, configured in a git-ignored file).
 
-| | `homelab` | `kind` |
+| | `kind` | `remote` |
 | --- | --- | --- |
-| Context | `homelab` or `homelab-koinon` | `kind-koinon-*` (`make dev-kind-up` makes `kind-koinon-dev`) |
-| Registry | Zot, `zot.apps.lab.example.invalid/koinon` ([registry.md](registry.md)) | none; ko and `kind load` put images into the node |
-| Sandbox runtime | `kata` | `runc` (kind has no VM runtime) |
-| OpenShell | the one already on the cluster | OpenShell 0.1.5, installed by `make dev-kind-up` |
-| Model | home-lab Ollama, `qwen3.5:4b` | the fake model server (model `repo-helper`) |
-| GitHub | not configured | the fake GitHub App API |
-| Values | `hack/dev/values.yaml` + `values-homelab.yaml` | `hack/dev/values.yaml` + `values-kind.yaml` |
+| Context | `kind-koinon-*` (`make dev-kind-up` makes `kind-koinon-dev`) | any context listed under `contexts` in `hack/dev/local.yaml` |
+| Registry | none; ko and `kind load` put images into the node | yours (`registry` in local.yaml); Tilt pushes there |
+| Sandbox runtime | `runc` (kind has no VM runtime) | `openshell.runtimeClassName` (for example `kata`) |
+| OpenShell | OpenShell 0.1.5, installed by `make dev-kind-up` | the one already on the cluster (`openshell.*`) |
+| Model | the fake model server (model `repo-helper`) | the provider manifest named by `modelProvider`, or add one in the UI |
+| GitHub | the fake GitHub App API | not configured |
+| Values | `hack/dev/values.yaml` + `values-kind.yaml` | `hack/dev/values.yaml` + local.yaml's keys and `values` files |
 
 The Tiltfile refuses every other context, so a stray `tilt up` cannot touch another cluster.
 
@@ -30,8 +31,8 @@ The Tiltfile refuses every other context, so a stray `tilt up` cannot touch anot
   migrate`), `koinon-preflight`, `koinon-ensure-secrets` (`koinon-api ensure-secrets`: the generated database and
   bootstrap-admin passwords, created once and never overwritten), `koinon-gateway` (standalone agentgateway), `koinon-config` (the
   rest of the chart's objects).
-- `openshell-client-cert`: copies the OpenShell client certificate Secret into `koinon` (kind only
-  by default, see below).
+- `openshell-client-cert`: copies the OpenShell client certificate Secret into `koinon` (both profiles;
+  `--openshell-tls-secret=` turns it off).
 - `web-deps`, `web`: the Vite dev server for `web/` on http://localhost:5173, proxying the API.
   `tilt up -- --web=false` leaves it out.
 - The API is port-forwarded to http://localhost:8080.
@@ -44,9 +45,10 @@ config ConfigMap is created by the reconciler.
 
 ## kind
 
-Needs Docker, kind, kubectl, helm, jq, Go, ko, Tilt and pnpm. Pulling images (ko base image, charts)
-needs a Docker config without a locked credential helper; on a Mac with a locked keychain use
-`DOCKER_CONFIG` pointing at a directory whose `config.json` has no `credsStore`.
+Needs Docker, kind, kubectl, helm, jq, Go, ko, Tilt and pnpm (versions in
+[CONTRIBUTING.md](../../CONTRIBUTING.md#requirements)). Everything is pulled anonymously. If your
+Docker config uses a credential helper that is locked or hangs (a Mac with a locked keychain), see
+the `DOCKER_CONFIG` caveat in [maintainer-homelab.md](maintainer-homelab.md#docker-config-caveat).
 
 ```sh
 make dev-kind-up          # kind cluster kind-koinon-dev: CNPG, Agent Sandbox, runc RuntimeClass, OpenShell (about 1 minute)
@@ -58,48 +60,51 @@ make dev-kind-down        # delete the cluster
 Another name: `DEV_KIND_CLUSTER=koinon-foo make dev-kind-up`
 and a context named `kind-koinon-foo`. A fresh `tilt ci` takes about a minute with a warm Go cache.
 
-## Home lab
+## Remote cluster
 
-One-time setup: the Zot login and the `dev-registry` pull secret ([registry.md](registry.md)). Then:
-
-```sh
-kubectl config use-context homelab
-tilt up --context homelab
-```
-
-Tilt builds for `linux/amd64`. The home-lab profile assumes OpenShell at
-`openshell.openshell.svc:8080` and the `kata` RuntimeClass; change them without editing files:
+For a cluster that is not kind (a dev cluster of your own, a VM runtime for the `vm` isolation tier):
+you need a container registry the cluster can pull from, an OpenShell gateway and the Agent Sandbox
+and CloudNativePG operators on it (the install preflight names anything missing), and `docker login`
+for the registry.
 
 ```sh
-tilt up --context homelab -- --helm-set openshell.address=openshell.other.svc:8080 --helm-set openshell.runtimeClassName=kata-qemu
-tilt up --context homelab -- --openshell-tls-secret=   # no mTLS (the default copies openshell-client-tls)
-tilt up --context homelab -- --openshell-namespace=openshell
+cp hack/dev/local.example.yaml hack/dev/local.yaml     # git-ignored; edit it
+cp hack/dev/model-provider.example.yaml hack/dev/model-provider.local.yaml   # optional, git-ignored
+tilt up --context my-dev-cluster
 ```
 
-The home-lab gateway requires mTLS (docs/spikes/openshell.md), so both profiles copy the Secret
-`openshell-client-tls` from the OpenShell namespace into `koinon`; `--openshell-tls-secret=` turns
-that off, another name picks another Secret.
+`local.yaml` names, and never holds, secrets:
 
-### Cluster-wide objects on the home lab
+| Key | Meaning |
+| --- | --- |
+| `contexts` | kube contexts this profile may deploy to (required) |
+| `registry` | where Tilt pushes images and the cluster pulls them (`image.registry`; required) |
+| `platform` | build platform of the nodes (default `linux/amd64`) |
+| `imagePullSecret` | name of a pull Secret you created in `koinon` |
+| `openshell.address`, `.runtimeClassName`, `.namespace`, `.clientTLSSecret` | the gateway, the sandbox runtime class, and the gateway's namespace and client certificate Secret that Tilt copies into `koinon` (`""`: no mTLS) |
+| `sandboxPolicy` | render the cluster-wide sandbox admission policies (default off on a remote cluster, because they also deny writes in other OpenShell sandbox namespaces; always on for kind) |
+| `modelProvider` | a manifest declaring the default org's model provider (ADR 0056) |
+| `values` | extra chart values files, for the model endpoint's network policy and egress hosts |
+| `namespaceLabels` | labels added to the `koinon` namespace |
 
-The sandbox ValidatingAdmissionPolicies and their bindings (ADRs 0045, 0048) are cluster-wide and
-deny writes in every `openshell.ai/managed-by=openshell` namespace, which would reach the platform's
-existing sandboxes. The home-lab profile therefore renders them off. `tilt up -- --sandbox-policy`
-turns them on; that needs a Rivet request that Andre approves first. The kind profile always has them.
-The sandbox observer (ADR 0078) needs the policies, so the home-lab profile renders it off too
-(`sandboxObserver.enabled=false`): an image pull error shows as an unknown wait cause there.
-With them off, nothing at admission enforces the Kata runtime class on home-lab dev sandboxes: that
-rests on OpenShell's `default_runtime_class_name: kata` and the reconciler's `runtimeClassName`, so
-the escape suite's admission cases don't hold there.
+The command line overrides the file (`--helm-set`, `--openshell-tls-secret=`, `--openshell-namespace`,
+`--sandbox-policy`, `--platform`).
 
-The cluster-scoped objects the home-lab profile still applies, both needed:
+Tilt builds for the platform you set; images are pushed with `docker push` (flavors) and ko (Koinon).
+With `sandboxPolicy` off, nothing at admission enforces the sandbox runtime class: that rests on
+OpenShell's default runtime class and the reconciler's `runtimeClassName`, so the escape suite's
+admission cases do not hold on that cluster. The sandbox observer (ADR 0078) needs the policies, so
+it is rendered off with them: an image pull error shows as an unknown wait cause.
 
-- ClusterRole and ClusterRoleBinding `koinon-koinon-reconciler`: the reconciler gets, lists, watches
-  and deletes `sandboxes.agents.x-k8s.io`. The binding is cluster-wide, so this holds in every
-  namespace, not only the OpenShell workspace namespaces.
-- ClusterRole and ClusterRoleBinding `koinon-koinon-preflight`: read-only. `get` on the CRDs, the
-  Agent Sandbox controller, the RuntimeClass and the like that the install preflight checks, and
-  in cnpg mode `list` on `validatingwebhookconfigurations` and `endpointslices` cluster-wide.
+Cluster-scoped objects the remote profile applies even with the policies off: ClusterRole and
+ClusterRoleBinding `koinon-koinon-reconciler` (get, list, watch and delete `sandboxes.agents.x-k8s.io`,
+cluster-wide) and `koinon-koinon-preflight` (read-only: the CRDs, the Agent Sandbox controller, the
+RuntimeClass and so on that the preflight checks; in cnpg mode `list` on
+`validatingwebhookconfigurations` and `endpointslices`).
+
+The maintainer's home lab is one such configuration: `hack/dev/local.homelab.example.yaml`, used
+automatically for the contexts `homelab` and `homelab-koinon` when there is no `local.yaml`
+([maintainer-homelab.md](maintainer-homelab.md)).
 
 ## Logging in
 
@@ -107,7 +112,7 @@ The `koinon-ensure-secrets` Job generates the bootstrap admin password into the 
 `koinon-bootstrap-admin` once and never overwrites it. Nothing is stored in the repository.
 
 ```sh
-kubectl -n koinon get secret koinon-bootstrap-admin -o jsonpath='{.data.password}' | base64 -d
+kubectl --context <your context> -n koinon get secret koinon-bootstrap-admin -o jsonpath='{.data.password}' | base64 -d
 ```
 
 Log in as `admin`. Dev images do not embed the UI, so use the Vite
@@ -116,15 +121,15 @@ server on http://localhost:5173 (see [web.md](web.md)); the API itself is on htt
 ## Overrides
 
 `tilt up -- --help` lists the options: `--mode`, `--flavors`, `--platform`, `--openshell-tls-secret`,
-`--openshell-namespace`, `--helm-set key=value` (repeatable), `--web`.
+`--openshell-namespace`, `--sandbox-policy`, `--helm-set key=value` (repeatable), `--web`.
 
 ## Troubleshooting
 
-- `kube context ... is not a Koinon dev cluster`: switch to `homelab`, `homelab-koinon` or a
-  `kind-koinon-*` context.
-- `ImagePullBackOff` with 401 on the home lab: `dev-registry` is missing or wrong, see
-  [registry.md](registry.md). Sandbox namespaces are created by OpenShell and need their own pull
-  access to `koinon/flavor-*` in Zot.
+- `kube context ... is not a Koinon dev cluster`: switch to a `kind-koinon-*` context, or list the
+  context under `contexts` in `hack/dev/local.yaml`.
+- `ImagePullBackOff` with 401 on a remote cluster: the pull Secret named by `imagePullSecret` is
+  missing or wrong. Sandbox namespaces are created by OpenShell and need their own pull access to
+  `flavor-*` in your registry.
 - `koinon-preflight` fails: it names the missing prerequisite (Agent Sandbox, OpenShell, the
-  RuntimeClass, CloudNativePG). Its Job is kept for `kubectl -n koinon logs job/koinon-preflight`.
+  RuntimeClass, CloudNativePG). Its Job is kept for `kubectl --context <your context> -n koinon logs job/koinon-preflight`.
 - `tilt down` deletes the release objects including the database and its volume.
