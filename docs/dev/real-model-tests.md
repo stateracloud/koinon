@@ -62,9 +62,12 @@ The Prometheus and cloud-bill fixtures date their data from when the pod started
 on the day of the test** (`kubectl --context "$CONTEXT" -n koinon-fixtures rollout restart deploy`)
 so that "yesterday" is the day before. Do it after 03:00 UTC.
 
-Let the gateway reach the fixtures: add the four hosts and ports listed in the fixtures README to the
-chart's `egress.allowedInternalHosts` and `networkPolicy.gatewayEgressTo` (for example in your local
-Tilt values file), then register each as an MCP server
+Let the gateway reach the fixtures: the chart's `egress.allowedInternalHosts` and
+`networkPolicy.gatewayEgressTo` need the four fixture hosts and ports (listed in the fixtures README).
+Helm lists replace, so keep the profile's own entries. On kind, create `hack/dev/local.yaml` (git-ignored)
+containing `values: [hack/dev/values-rt1.example.yaml]` and restart `tilt up`: that file has the four
+hosts plus the fake model server. On a remote cluster, copy it, replace the fake model entry with your
+model endpoint and name your copy under `values:` in your local.yaml. Then register each as an MCP server
 ([MCP servers](../site/src/content/docs/guides/mcp-servers.md)). Give `rt1-fakecicost` and
 `rt1-searxng-mcp` a bearer credential: the token in the Secrets above.
 

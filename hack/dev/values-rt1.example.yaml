@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Lets the gateway reach the RT fixtures (test/fixtures/rt1, docs/dev/real-model-tests.md) on kind.
+# Lists replace the profile's lists in Helm, so this repeats the fake model server that
+# hack/dev/values-kind.yaml allows. Use it on kind with a local.yaml that has only
+#   values: [hack/dev/values-rt1.example.yaml]
+# (the other keys are for remote clusters); for a remote cluster, copy it, drop the fake model entry
+# and add your model endpoint.
+egress:
+  allowedInternalHosts:
+    - fakemodel.koinon-e2e-fakes.svc:8080
+    - rt1-motherduck.koinon-fixtures.svc.cluster.local:8000
+    - rt1-fakecicost.koinon-fixtures.svc.cluster.local:8080
+    - rt1-prometheus.koinon-fixtures.svc.cluster.local:8080
+    - rt1-searxng-mcp.koinon-fixtures.svc.cluster.local:8080
+
+networkPolicy:
+  gatewayEgressTo:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon-e2e-fakes
+      ports:
+        - port: 8080
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: koinon-fixtures
+      ports:
+        - port: 8000
+        - port: 8080

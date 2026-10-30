@@ -6,8 +6,11 @@
 #   kustomize build test/fixtures/rt1/overlays/remote | sed "s#registry.example.test/koinon#$REGISTRY/koinon#g" |
 #     kubectl --context <your context> apply -f -
 # The Secrets are not here: create rt1-fakecicost-token and rt1-searxng-secrets yourself (the keys
-# are in ../kind/secrets.example.yaml) before the pods start. To pin the images by digest, add the
-# digests the build script prints to an `images:` block of your own.
+# are in ../kind/secrets.example.yaml) before the pods start.
+# The built images use the tag `dev`, which a node caches (imagePullPolicy IfNotPresent): after you
+# rebuild, either pin them by digest (add the digests the build script prints to an `images:` block of
+# your own, which is the safe way) or build with a new tag (`hack/rt1-fixtures-build.sh REGISTRY TAG`)
+# and set `newTag` here, or restart the pods on nodes that were wiped. Never rely on `dev` being refreshed.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:

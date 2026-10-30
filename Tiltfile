@@ -39,6 +39,9 @@ elif ctx in LEGACY_CONTEXTS:
     print('no %s: using %s for the context %s' % (LOCAL_FILE, LEGACY_FILE, ctx))
     watch_file(LEGACY_FILE)
 remote_contexts = local_cfg.get('contexts', [])
+if type(remote_contexts) != 'list':
+    # `in` on a string is a substring match, so a bare name would also allow its prefixes.
+    fail('`contexts` in the local profile must be a list of kube context names, e.g. contexts: [my-dev-cluster]')
 
 mode = cfg.get('mode', '')
 if mode == 'homelab':
@@ -62,6 +65,8 @@ KIND = mode == 'kind'
 os_cfg = local_cfg.get('openshell', {})
 platform = cfg.get('platform', '') or ('linux/' + str(local('go env GOARCH', quiet=True)).strip() if KIND else local_cfg.get('platform', 'linux/amd64'))
 registry = 'kind.local' if KIND else local_cfg.get('registry', '')
+if not KIND and not os_cfg.get('address'):
+    fail('%s needs `openshell.address` (the OpenShell gateway, e.g. openshell.openshell.svc:8080)' % LOCAL_FILE)
 if not KIND and not registry:
     fail('%s needs `registry` (the registry and path Tilt pushes images to, e.g. registry.example.com/koinon)' % LOCAL_FILE)
 kind_cluster = ctx[len('kind-'):]
@@ -174,12 +179,14 @@ values = ['hack/dev/values.yaml']
 sets = ['image.tag=dev']
 if KIND:
     values.append('hack/dev/values-kind.yaml')
+    # Extra values files of a local.yaml apply on kind too (for example hack/dev/values-rt1.example.yaml
+    # for the RT fixtures); the file's other keys are for remote clusters.
+    values += local_cfg.get('values', [])
 else:
     sets.append('image.registry=' + registry)
     if local_cfg.get('imagePullSecret'):
         sets.append('imagePullSecrets[0].name=' + local_cfg['imagePullSecret'])
-    if os_cfg.get('address'):
-        sets.append('openshell.address=' + os_cfg['address'])
+    sets.append('openshell.address=' + os_cfg['address'])
     if os_cfg.get('runtimeClassName'):
         sets.append('openshell.runtimeClassName=' + os_cfg['runtimeClassName'])
     # Extra values files for what the keys above do not cover (network policy, egress hosts, ...).
