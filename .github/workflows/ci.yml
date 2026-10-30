@@ -255,6 +255,9 @@ jobs:
         with:
           fetch-depth: 0
       - run: hack/migrate-lint-test.sh
+      # Not migrations, but the same cheap script-test slot: the e2e decision rule and the remote runner.
+      - run: hack/needs-e2e-test.sh
+      - run: hack/e2e-remote-test.sh
       - run: hack/migrate-lint.sh ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 
   # Flavor contract suite (plan item E3, issue #76): the flavor image is built from this

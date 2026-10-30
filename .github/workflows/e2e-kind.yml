@@ -3,38 +3,21 @@
 # E1 quickstart e2e on kind (plan item E1): test/e2e/run.sh on a GitHub-hosted runner. Not on
 # Blacksmith like the other workflows (ADR 0047): its kernel has no Landlock, which the OpenShell
 # sandbox supervisor requires (issue #159). While the repository is private, where it spends the
-# plan's included Actions minutes, it runs on manual dispatch and on pull requests that touch the
-# paths the quickstart depends on most (ADR 0047 amendment); once it is public, it runs on every
+# plan's included Actions minutes, it runs on manual dispatch and on pull requests that hack/needs-e2e.sh
+# says need it (ADR 0047 amendment); once it is public, it runs on every
 # pull request to main and nightly. Calls no external service besides
 # image and manifest downloads: the model is the fake model server and GitHub is the fake
 # GitHub, both in the cluster.
 name: e2e-kind
 
 on:
-  # The go suite on ready pull requests that change what runs in the installed system: startup
-  # and flags, the chart, the control-plane services, migrations, the gateway and ledger, the
-  # harness flavor, tracing, and the e2e itself. Regressions there only the full install catches
-  # (#281 changed branch naming in githubtools; #284 a startup flag the chart's migrate Job lacked).
+  # The go suite on ready pull requests that change what only a full install observes; the
+  # `decide` job asks hack/needs-e2e.sh, the one source of truth for that rule (also used by
+  # AGENTS.md's pre-push check and hack/e2e-remote.sh). Regressions there only this catches (#281
+  # changed branch naming in githubtools; #284 a startup flag the chart's migrate Job lacked).
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - cmd/**
-      - charts/**
-      - internal/agentd/**
-      - internal/api/**
-      - internal/db/migrations/**
-      - internal/execution/**
-      - internal/gateway/**
-      - internal/githubtools/**
-      - internal/ledger/**
-      - internal/reconciler/**
-      - internal/services/**
-      - internal/tracing/**
-      - flavors/**
-      - test/e2e/**
-      - test/fakemodel/**
-      - .github/workflows/e2e-kind.yml
   workflow_dispatch:
     inputs:
       suite:
@@ -51,8 +34,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quickstart:
+  # Cheap: a checkout and a git diff. Manual dispatch always runs the suite.
+  decide:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      needed: ${{ steps.decide.outputs.needed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the merge base with the base branch
+
+      - name: Does this change need the e2e?
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [[ $EVENT != pull_request ]]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Run the base branch's copy of the rule: a pull request must not be able to change the
+          # rule that decides whether it is tested. The PR's own copy only when the base has none
+          # (the commit that introduces the script).
+          script="$RUNNER_TEMP/needs-e2e.sh"
+          if git show "origin/$BASE:hack/needs-e2e.sh" > "$script" 2>/dev/null; then
+            echo "using hack/needs-e2e.sh from origin/$BASE"
+          else
+            echo "origin/$BASE has no hack/needs-e2e.sh; using this pull request's"
+            cp hack/needs-e2e.sh "$script"
+          fi
+          chmod +x "$script"
+          if "$script" "origin/$BASE" | tee "$RUNNER_TEMP/decide.txt"; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          fi
+          { echo '## Kind e2e'; echo; sed 's/^/    /' "$RUNNER_TEMP/decide.txt"; } >> "$GITHUB_STEP_SUMMARY"
+
+  quickstart:
+    needs: decide
+    if: needs.decide.outputs.needed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     defaults:
