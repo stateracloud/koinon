@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tilt profile "homelab": the lab's Ollama as the default org's provider (docs/spikes/openshell.md),
+# Home-lab model provider (hack/dev/local.homelab.example.yaml): the lab's Ollama as the default org's provider (docs/spikes/openshell.md),
 # declared with a labelled Secret (ADR 0056). Ollama needs no key, so this file holds no secret and
 # is safe in git; a provider that needs one takes it from a file outside git (add apiKey to a copy).
 # The Tiltfile applies this file.
