@@ -16,6 +16,12 @@ Instructions for coding agents working on Koinon.
 - Sandbox admission policy (`charts/koinon/templates/sandbox-policy.yaml`): the escape suite,
   `KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path) go test ./test/escape/ -ginkgo.label-filter=admission`.
 - Migrations: `hack/migrate-lint.sh origin/main` (merged migrations unchanged, numbers contiguous).
+- Kind e2e: `hack/needs-e2e.sh` says whether your change needs it (the rule lives only there; CI's
+  `decide` job runs the same script). If it does, run `hack/e2e-remote.sh` (Andre's testbox) or
+  `hack/e2e-remote.sh --local` before pushing, and link the result in the PR body. Merge only after
+  CI's e2e (the backstop, not required) is green too. Why: #281 (branch naming in githubtools) and
+  #284 (a startup flag the chart's migrate Job lacked) passed every package test and failed only in
+  a full install.
 - `go mod tidy` must leave `go.mod` and `go.sum` unchanged; CI checks it.
 - Before pushing: `gitleaks git --redact --no-banner --log-opts="origin/main..HEAD" .`. CI scans
   every commit of a pull request, so a leak fixed in a later commit still fails.

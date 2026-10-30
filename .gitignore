@@ -27,3 +27,4 @@ docs/site/.astro/
 /koinon-fakemcp
 /koinon-fakecicost
 /koinon-rt1-promgen
+/.e2e-out/
