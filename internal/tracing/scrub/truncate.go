@@ -3,6 +3,7 @@
 package scrub
 
 import (
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,6 +40,9 @@ const (
 // truncated reports whether anything was cut, so the caller can set an attribute for it.
 func TruncateJSON(raw []byte, limit int) (out []byte, truncated bool, err error) {
 	n, err := parseJSON(raw)
+	if errors.Is(err, errTooDeep) {
+		return []byte(TooDeepPlaceholder), true, nil
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -246,8 +250,12 @@ func TruncateText(s string, limit int) (string, bool) {
 // the limit was already replaced. limit 0 means DefaultMaxBytes. truncated reports a cut.
 func (s *Scrubber) Content(in string, limit int) (out string, truncated bool) {
 	if t := strings.TrimSpace(in); t != "" && (t[0] == '{' || t[0] == '[' || t[0] == '"') {
-		if n, err := parseJSON([]byte(t)); err == nil {
-			s.scrubNode(n, "")
+		n, err := parseJSON([]byte(t))
+		if errors.Is(err, errTooDeep) {
+			return TooDeepPlaceholder, true
+		}
+		if err == nil {
+			s.scrubNode(n, "", 0)
 			b, cut := truncateNode(n, limit)
 			return string(b), cut
 		}

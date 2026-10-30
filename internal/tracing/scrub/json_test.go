@@ -51,7 +51,7 @@ func TestJSON(t *testing.T) {
 			"header array values",
 			`{"Cookie": ["a=b", "c=d"], "n": 1}`, `{"Cookie":["[redacted:cookie]","[redacted:cookie]"],"n":1}`, "",
 		},
-		{"non-string under header key is kept", `{"authorization": true, "cookie": 3}`, `{"authorization":true,"cookie":3}`, ""},
+		{"scalars under a header key are replaced", `{"authorization": true, "cookie": 3, "x-api-key": null}`, `{"authorization":"[redacted:auth-header]","cookie":"[redacted:cookie]","x-api-key":null}`, ""},
 		{"card as a number", `{"n": 4111111111111111, "ok": 12345}`, `{"n":4111111111111111,"ok":12345}`, `{"n":"[redacted:card]","ok":12345}`},
 		{"escapes survive", `"line\nbreak \"quoted\" <tag> \u2028"`, `"line\nbreak \"quoted\" <tag> \u2028"`, ""},
 		{"scalar string", `"x"`, `"x"`, ""},
@@ -84,8 +84,7 @@ func TestJSON(t *testing.T) {
 
 func TestJSONRejectsBadInput(t *testing.T) {
 	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
-	deep := strings.Repeat("[", 300) + strings.Repeat("]", 300)
-	for _, in := range []string{``, `{`, `{"a":}`, `[1,]`, `1 2`, `{"a":1} x`, deep} {
+	for _, in := range []string{``, `{`, `{"a":}`, `[1,]`, `1 2`, `{"a":1} x`} {
 		if out, err := s.JSON([]byte(in)); !errors.Is(err, scrub.ErrInvalidJSON) || out != nil {
 			t.Errorf("%.20q: out %q err %v", in, out, err)
 		}
@@ -242,5 +241,22 @@ func TestJSONOutputIsCompactAndStable(t *testing.T) {
 	b, _ := s.JSON(a)
 	if !bytes.Equal(a, b) || bytes.ContainsAny(a, " \n") {
 		t.Errorf("%q %q", a, b)
+	}
+}
+
+func TestTooDeepJSONIsAPlaceholderNeverText(t *testing.T) {
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
+	deep := strings.Repeat("[", 300) + `"` + esc(`kgw~u005fnotrealnotrealnotreal`) + `"` + strings.Repeat("]", 300)
+	out, err := s.JSON([]byte(deep))
+	if err != nil || string(out) != scrub.TooDeepPlaceholder {
+		t.Errorf("JSON: %q %v", out, err)
+	}
+	got, cut := s.Content(deep, 0)
+	if got != scrub.TooDeepPlaceholder || !cut {
+		t.Errorf("Content: %q %v", got, cut)
+	}
+	tr, cut, err := scrub.TruncateJSON([]byte(deep), 0)
+	if err != nil || string(tr) != scrub.TooDeepPlaceholder || !cut {
+		t.Errorf("TruncateJSON: %q %v %v", tr, cut, err)
 	}
 }

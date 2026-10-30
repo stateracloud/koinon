@@ -156,9 +156,17 @@ type group struct {
 	plus       bool // a '+' directly before
 }
 
+// maxChainGroups bounds how many groups are read at once. A longer chain is read in overlapping
+// pieces (see findNumbers), so memory stays bounded and no number is missed at a seam.
+const (
+	maxChainGroups = 512
+	chainOverlap   = 24 // groups re-read at the start of the next piece; a number has at most 19 digits
+)
+
 // findNumbers finds payment-card numbers and phone numbers. Digit groups joined by single
-// separators form a chain; windows of consecutive groups are tried as cards first (13 to 19
-// digits, Luhn, known issuer range, separators only spaces or hyphens), then as phone numbers.
+// separators form a chain. Over the chain, windows of consecutive groups are tried as cards first
+// (13 to 19 digits, Luhn, known issuer range, separators only spaces or hyphens) and then, in
+// the groups no card took, as phone numbers.
 func findNumbers(in string, spans []span) []span {
 	for i := 0; i < len(in); i++ {
 		if !isDigit(in[i]) {
@@ -178,19 +186,26 @@ func findNumbers(in string, spans []span) []span {
 			}
 			continue
 		}
-		groups, next := readChain(in, i)
-		spans = scanChain(in, groups, spans)
-		i = next - 1
+		for start := i; ; {
+			groups, next := readChain(in, start)
+			spans = scanChain(in, groups, spans)
+			if len(groups) < maxChainGroups {
+				i = next - 1
+				break
+			}
+			// a long chain: continue from the last groups, whatever precedes them
+			start = groups[len(groups)-chainOverlap].start
+		}
 	}
 	return spans
 }
 
-// readChain reads digit groups from in[i:], joined by one separator each, to at most 8 groups.
-// It returns the groups and the index after the chain.
+// readChain reads digit groups from in[i:], joined by one separator each, to at most
+// maxChainGroups groups. It returns the groups and the index after the chain.
 func readChain(in string, i int) ([]group, int) {
 	var groups []group
 	pos := i
-	for len(groups) < 8 {
+	for len(groups) < maxChainGroups {
 		g := group{start: pos}
 		if pos > 0 {
 			switch in[pos-1] {
@@ -212,13 +227,11 @@ func readChain(in string, i int) ([]group, int) {
 			for pos < len(in) && (isAlnum(in[pos]) || in[pos] == '_') {
 				pos++
 			}
-			groups = append(groups, g)
-			groups[len(groups)-1].sepAfter = 'x'
-			return groups, pos
+			g.sepAfter = 'x'
+			return append(groups, g), pos
 		}
 		if g.end-g.start > 19 {
-			groups = append(groups, g)
-			return groups, pos
+			return append(groups, g), pos
 		}
 		// a separator, then a group (possibly "(digits"), continues the chain
 		if pos+1 < len(in) && (in[pos] == ' ' || in[pos] == '-' || in[pos] == '.') {
@@ -233,49 +246,63 @@ func readChain(in string, i int) ([]group, int) {
 				continue
 			}
 		}
-		groups = append(groups, g)
-		break
+		return append(groups, g), pos
 	}
 	return groups, pos
 }
 
+// scanChain slides windows over the whole chain: cards first, then phones among the groups no
+// card used.
 func scanChain(in string, groups []group, spans []span) []span {
-	for a := 0; a < len(groups); {
-		bestCard, bestPhone, digits := -1, -1, 0
-		for b := a; b < len(groups); b++ {
-			if groups[b].sepAfter == 'x' {
-				break
-			}
-			digits += glen(groups[b])
-			if digits > 19 {
-				break
-			}
-			if digits >= 13 && cardWindow(in, groups[a:b+1]) {
-				bestCard = b
-			}
-			if digits <= 15 && phoneWindow(in, groups[a:b+1]) {
-				bestPhone = b
-			}
-		}
-		best, kind := bestPhone, KindPhone
-		if bestCard >= 0 {
-			best, kind = bestCard, KindCard
-		}
-		if best < 0 {
-			a++
-			continue
-		}
-		start, end := groups[a].start, groups[best].end
+	used := make([]bool, len(groups))
+	emit := func(a, b int, kind Kind) {
+		start, end := groups[a].start, groups[b].end
 		if groups[a].plus {
 			start--
 		}
 		if groups[a].open {
 			start--
 		}
-		if groups[best].close {
+		if groups[b].close {
 			end++
 		}
 		spans = append(spans, span{start, end, kind})
+		for k := a; k <= b; k++ {
+			used[k] = true
+		}
+	}
+	for a := 0; a < len(groups); {
+		best, digits := -1, 0
+		for b := a; b < len(groups) && groups[b].sepAfter != 'x'; b++ {
+			if digits += glen(groups[b]); digits > 19 {
+				break
+			}
+			if digits >= 13 && cardWindow(in, groups[a:b+1]) {
+				best = b
+			}
+		}
+		if best < 0 {
+			a++
+			continue
+		}
+		emit(a, best, KindCard)
+		a = best + 1
+	}
+	for a := 0; a < len(groups); {
+		best, digits := -1, 0
+		for b := a; b < len(groups) && groups[b].sepAfter != 'x' && !used[b]; b++ {
+			if digits += glen(groups[b]); digits > 15 {
+				break
+			}
+			if phoneWindow(in, groups[a:b+1]) {
+				best = b
+			}
+		}
+		if best < 0 {
+			a++
+			continue
+		}
+		emit(a, best, KindPhone)
 		a = best + 1
 	}
 	return spans
@@ -377,7 +404,7 @@ func phoneWindow(in string, gs []group) bool {
 	if digits < 8 || digits > 15 {
 		return false
 	}
-	if !plus && (digits < 9 || dots) {
+	if !plus && (digits < 9 || (dots && !dottedUS(gs))) {
 		return false
 	}
 	if len(gs) < 2 && !plus {
@@ -401,6 +428,12 @@ func phoneWindow(in string, gs []group) bool {
 		}
 	}
 	return true
+}
+
+// dottedUS reports whether the groups are exactly 3, 3 and 4 digits joined by dots (555.867.5309).
+func dottedUS(gs []group) bool {
+	return len(gs) == 3 && glen(gs[0]) == 3 && glen(gs[1]) == 3 && glen(gs[2]) == 4 &&
+		gs[0].sepAfter == '.' && gs[1].sepAfter == '.'
 }
 
 func glen(g group) int { return g.end - g.start }

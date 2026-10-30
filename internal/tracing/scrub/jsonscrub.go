@@ -19,6 +19,20 @@ const maxJSONDepth = 200
 // maxJSONDepth.
 var ErrInvalidJSON = errors.New("scrub: invalid JSON")
 
+// TooDeepPlaceholder is the JSON value emitted in place of a document nested deeper than the
+// parser allows. Such a document is never passed through as text, where an escaped credential
+// inside it would not be seen.
+const TooDeepPlaceholder = `"[koinon: content too deeply nested]"`
+
+var errTooDeep = fmt.Errorf("%w: nested too deeply", ErrInvalidJSON)
+
+const (
+	// maxEmbeddedDepth is how many times a JSON document inside a JSON string is unpacked.
+	maxEmbeddedDepth = 3
+	// maxEmbeddedBytes is the largest string that is tried as an embedded JSON document.
+	maxEmbeddedBytes = 1 << 20
+)
+
 type nodeKind uint8
 
 const (
@@ -44,6 +58,9 @@ func parseJSON(raw []byte) (*node, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	n, err := parseValue(dec, 0)
+	if errors.Is(err, errTooDeep) {
+		return nil, errTooDeep
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidJSON, err)
 	}
@@ -55,7 +72,7 @@ func parseJSON(raw []byte) (*node, error) {
 
 func parseValue(dec *json.Decoder, depth int) (*node, error) {
 	if depth > maxJSONDepth {
-		return nil, errors.New("too deep")
+		return nil, errTooDeep
 	}
 	tok, err := dec.Token()
 	if err != nil {
@@ -205,16 +222,19 @@ func (n *node) appendTo(b []byte) []byte {
 // whether to treat the bytes as text.
 func (s *Scrubber) JSON(raw []byte) ([]byte, error) {
 	n, err := parseJSON(raw)
+	if errors.Is(err, errTooDeep) {
+		return []byte(TooDeepPlaceholder), nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	s.scrubNode(n, "")
+	s.scrubNode(n, "", 0)
 	return n.appendTo(make([]byte, 0, len(raw))), nil
 }
 
-// scrubNode scrubs n in place. force is the kind to replace every string leaf under n with, when
-// the leaf sits below a header key.
-func (s *Scrubber) scrubNode(n *node, force Kind) {
+// scrubNode scrubs n in place. force is the kind to replace every scalar under n with, when the
+// scalar sits below a header key; embedded counts how many JSON strings deep n is.
+func (s *Scrubber) scrubNode(n *node, force Kind, embedded int) {
 	switch n.kind {
 	case strNode:
 		if force != "" {
@@ -223,16 +243,38 @@ func (s *Scrubber) scrubNode(n *node, force Kind) {
 			}
 			return
 		}
+		if embedded < maxEmbeddedDepth && len(n.str) <= maxEmbeddedBytes {
+			if sub := s.embeddedJSON(n.str, embedded); sub != nil {
+				n.str = string(sub)
+				return
+			}
+		}
 		n.str = s.Text(n.str)
-	case numNode:
-		if s.level == LevelRedacted {
+	case numNode, boolNode:
+		switch {
+		case force != "":
+			n.kind, n.str = strNode, s.replaceAll(force)
+		case s.secrets.Len() > 0 || s.level == LevelRedacted:
+			// a numeric secret (a PIN), or a card number written as a JSON number
 			if out := s.Text(n.lit); out != n.lit {
 				n.kind, n.str = strNode, out
 			}
 		}
 	case arrNode:
+		kind := force
+		if kind == "" && len(n.kids) >= 2 && n.kids[0].kind == strNode {
+			// a [name, value] tuple, the way header lists are written
+			kind = headerKind(n.kids[0].str)
+			if kind != "" {
+				s.scrubNode(n.kids[0], "", embedded)
+				for _, k := range n.kids[1:] {
+					s.scrubNode(k, kind, embedded)
+				}
+				return
+			}
+		}
 		for _, k := range n.kids {
-			s.scrubNode(k, force)
+			s.scrubNode(k, force, embedded)
 		}
 	case objNode:
 		pair := headerPair(n)
@@ -241,19 +283,37 @@ func (s *Scrubber) scrubNode(n *node, force Kind) {
 			if kind == "" {
 				kind = headerKind(n.keys[i])
 			}
-			if kind == "" && pair != "" && (n.keys[i] == "value" || n.keys[i] == "values") {
-				kind = pair
+			if kind == "" && pair != "" {
+				if lk := strings.ToLower(strings.TrimSpace(n.keys[i])); lk == "value" || lk == "values" {
+					kind = pair
+				}
 			}
-			s.scrubNode(k, kind)
+			s.scrubNode(k, kind, embedded)
 			n.keys[i] = s.Text(n.keys[i])
 		}
 	}
 }
 
-// headerPair returns the header kind when the object names a header in "name", "key" or "header".
+// embeddedJSON scrubs a string that holds a JSON object or array (tool output often does) as JSON
+// and returns it re-encoded as the string's new value, or nil when str is not such a document.
+func (s *Scrubber) embeddedJSON(str string, embedded int) []byte {
+	t := strings.TrimSpace(str)
+	if t == "" || (t[0] != '{' && t[0] != '[') {
+		return nil
+	}
+	sub, err := parseJSON([]byte(t))
+	if err != nil {
+		return nil
+	}
+	s.scrubNode(sub, "", embedded+1)
+	return sub.appendTo(nil)
+}
+
+// headerPair returns the header kind when the object names a header in "name", "key" or "header"
+// (any case).
 func headerPair(n *node) Kind {
 	for i, k := range n.keys {
-		switch strings.ToLower(k) {
+		switch strings.ToLower(strings.TrimSpace(k)) {
 		case "name", "key", "header":
 			if n.kids[i].kind == strNode {
 				if kind := headerKind(n.kids[i].str); kind != "" {
