@@ -28,14 +28,6 @@ var (
 	// bearerRE matches "Bearer <token>" with a token long enough to be one ("bearer of bad news"
 	// is prose).
 	bearerRE = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/=-]{16,}`)
-	// authValueRE matches an Authorization value that is not on a line of its own: an optional
-	// scheme word and then a token, or a list of name=value parameters (Digest, AWS SigV4,
-	// Token token="...") whose values may be quoted.
-	authValueRE = regexp.MustCompile(`^(?:[A-Za-z][A-Za-z0-9-]*[ \t]+)?(?:` +
-		`[A-Za-z0-9._~+/-]+=(?:\\*"[^"]*"|[^\s,"']*)(?:,[ \t]*[A-Za-z0-9._~+/-]+=(?:\\*"[^"]*"|[^\s,"']*))*` +
-		`|[^\s"'\\` + "`" + `,;)}<>]+)`)
-	// paramContRE matches further name=value parameters of an Authorization list.
-	paramContRE = regexp.MustCompile(`^(?:,[ \t]*[A-Za-z0-9._~+/-]+=(?:\\*"[^"]*"|[^\s,"']*))+`)
 	// pemRE matches a PEM private key block, armour included, raw or with escaped newlines. A
 	// block that is cut off before its END line is taken to the end of the text.
 	pemRE = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|\z)`)
@@ -529,33 +521,70 @@ func foldFollows(in string, i int) bool {
 }
 
 // authValueEnd returns the end of an Authorization value that does not stand on a line of its
-// own: a scheme and token, or a parameter list. The pattern is tried on the first KiB; a value
-// that fills it is followed on to the next blank, quote or line break.
+// own: an optional scheme word and then a list of name=value parameters (Digest, AWS SigV4,
+// Token token="..."; values may be quoted, escaped quotes included), or a plain token. It reads
+// the text itself, with no window, so a parameter of any length is taken whole.
 func authValueEnd(in string, vs int) int {
-	seg := headerPrefix1K(in, vs)
-	m := authValueRE.FindStringIndex(seg)
-	if m == nil {
-		return vs
+	i := vs
+	// an optional scheme word followed by blanks
+	j := i
+	for j < len(in) && (isAlnum(in[j]) || in[j] == '-') {
+		j++
 	}
-	ve := vs + m[1]
-	if len(seg) == 1024 && m[1] >= 512 { // the window ended inside a parameter: resume at the last comma
-		if c := strings.LastIndexByte(seg[:m[1]], ','); c > 0 {
-			ve = vs + c
+	if j > i && j < len(in) && (in[j] == ' ' || in[j] == '\t') && isAlpha(in[i]) {
+		i = skipSet(in, j, " \t", 1<<30)
+	}
+	if end := authParams(in, i); end > i {
+		return end
+	}
+	e := i
+	for e < len(in) && strings.IndexByte("\"'\\`,;)}<> \t\r\n", in[e]) < 0 {
+		e++
+	}
+	return e
+}
+
+// authParams reads name=value parameters joined by commas from i and returns the end of the last
+// one, or i when there is none.
+func authParams(in string, i int) int {
+	end := i
+	for p := i; p < len(in); {
+		n := p
+		for n < len(in) && (isAlnum(in[n]) || strings.IndexByte("._~+/-", in[n]) >= 0) {
+			n++
 		}
-	}
-	for ve < len(in) && in[ve] == ',' { // a parameter list longer than the window goes on
-		c := paramContRE.FindStringIndex(headerPrefix1K(in, ve))
-		if c == nil {
+		if n == p || n >= len(in) || in[n] != '=' {
 			break
 		}
-		ve += c[1]
-	}
-	if m[1] == len(seg) {
-		for ve < len(in) && in[ve] != ' ' && in[ve] != '\t' && in[ve] != '"' && in[ve] != '\'' && !lineBreakAt(in, ve) {
-			ve++
+		v := n + 1
+		b := v
+		for b < len(in) && in[b] == '\\' {
+			b++
 		}
+		if b < len(in) && in[b] == '"' { // quoted, possibly with escaped quotes: to the next quote
+			q := b + 1
+			for q < len(in) && in[q] != '"' && !lineBreakAt(in, q) {
+				q++
+			}
+			if q < len(in) && in[q] == '"' {
+				end = q + 1
+			} else {
+				end = q // unterminated: to the end of the line
+				break
+			}
+		} else {
+			e := v
+			for e < len(in) && strings.IndexByte(" \t\r\n,\"'", in[e]) < 0 {
+				e++
+			}
+			end = e
+		}
+		if end >= len(in) || in[end] != ',' {
+			break
+		}
+		p = skipSet(in, end+1, " \t", 1<<30)
 	}
-	return ve
+	return end
 }
 
 // scanQuoted returns the end of a quoted value that starts at vs: the matching closing quote q
@@ -620,12 +649,6 @@ func sepHasSpace(sep string, idx int) bool {
 // headerPrefix returns up to 256 bytes of the text that starts at vs, cut at the first line break.
 func headerPrefix(in string, vs int) string {
 	seg := in[vs:min(len(in), vs+256)]
-	return seg[:indexLineEnd(seg)]
-}
-
-// headerPrefix1K is the same for 1 KiB.
-func headerPrefix1K(in string, vs int) string {
-	seg := in[vs:min(len(in), vs+1024)]
 	return seg[:indexLineEnd(seg)]
 }
 
