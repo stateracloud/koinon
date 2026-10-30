@@ -31,8 +31,9 @@ type Settings struct {
 
 // SettingsInput is what an admin writes.
 type SettingsInput struct {
-	ContentLevel      string
-	SampleRate        float64
+	ContentLevel string
+	// SampleRate nil keeps the stored rate (1 for an org that never set one).
+	SampleRate        *float64
 	PlatformCopyLevel string
 }
 
@@ -85,23 +86,25 @@ func settingsView(v Settings) map[string]any {
 }
 
 // UpdateSettings sets the org's content level, sampling and platform opt-in. Raising the content
-// level, or the platform copy, to full needs an org owner (isOwner). Neither level may exceed the
-// platform ceiling, and the platform copy may not exceed the org's own level. Every change is audited.
-func (s *Service) UpdateSettings(ctx context.Context, org pgtype.UUID, actor audit.Actor, isOwner bool, in SettingsInput) (Settings, error) {
+// level, or the platform copy, to full needs an org owner, and any raise of either needs a member of
+// the org: a platform admin acting from outside may lower them but not raise them (who comes from
+// real membership, not from the platform role). Neither level may exceed the platform ceiling, and the platform copy may not exceed the org's own level. Every change is audited.
+func (s *Service) UpdateSettings(ctx context.Context, org pgtype.UUID, actor audit.Actor, who Authority, in SettingsInput) (Settings, error) {
 	switch {
 	case !ValidLevel(in.ContentLevel):
 		return Settings{}, invalid("content level must be none, redacted or full")
 	case !ValidLevel(in.PlatformCopyLevel):
 		return Settings{}, invalid("platform copy level must be none, redacted or full")
-	case in.SampleRate < 0 || in.SampleRate > 1 || in.SampleRate != in.SampleRate:
+	case in.SampleRate != nil && (*in.SampleRate < 0 || *in.SampleRate > 1 || *in.SampleRate != *in.SampleRate):
 		return Settings{}, invalid("sample rate must be between 0 and 1")
 	case LevelRank(in.PlatformCopyLevel) > LevelRank(in.ContentLevel):
 		return Settings{}, invalid("the platform copy cannot carry more than the org's own content level")
 	}
 	var out Settings
 	err := s.tx(ctx, func(q *store.Queries) error {
-		// The ceiling row is locked so a lowering of the ceiling cannot pass this write.
-		ceiling, err := q.LockPlatformTraceSettings(ctx)
+		// The ceiling row is share-locked so a lowering of the ceiling cannot pass this write, while
+		// two org writes do not wait for each other.
+		ceiling, err := q.ShareLockPlatformTraceSettings(ctx)
 		if err != nil {
 			return err
 		}
@@ -110,15 +113,22 @@ func (s *Service) UpdateSettings(ctx context.Context, org pgtype.UUID, actor aud
 			return err
 		}
 		for _, lv := range []struct{ now, prev string }{{in.ContentLevel, before.ContentLevel}, {in.PlatformCopyLevel, before.PlatformCopyLevel}} {
-			if lv.now == LevelFull && lv.prev != LevelFull && !isOwner {
+			if LevelRank(lv.now) > LevelRank(lv.prev) && !who.Member {
+				return ErrNotMember
+			}
+			if lv.now == LevelFull && lv.prev != LevelFull && !who.Owner {
 				return ErrOwnerOnly
 			}
 			if LevelRank(lv.now) > LevelRank(string(ceiling.ContentCeiling)) {
 				return ErrAboveCeiling
 			}
 		}
+		sampleRate := before.SampleRate
+		if in.SampleRate != nil {
+			sampleRate = *in.SampleRate
+		}
 		if _, err := q.UpsertOrgTraceSettings(ctx, store.UpsertOrgTraceSettingsParams{
-			OrgID: org, ContentLevel: store.TraceContentLevel(in.ContentLevel), SampleRate: numeric(in.SampleRate),
+			OrgID: org, ContentLevel: store.TraceContentLevel(in.ContentLevel), SampleRate: numeric(sampleRate),
 			PlatformCopyLevel: store.TraceContentLevel(in.PlatformCopyLevel), UpdatedBy: actor.String(),
 		}); err != nil {
 			return err
@@ -200,7 +210,13 @@ func (s *Service) Routes(ctx context.Context, org pgtype.UUID) ([]Route, error) 
 		}
 		secrets, err := s.open(r.Credentials, Binding(org, r.ID))
 		if err != nil {
-			return nil, err
+			// One destination that cannot be opened must not stop the org's other traces: skip it, log
+			// it and record the error on its health, where the admin sees it.
+			s.log.Error("trace destination credentials cannot be opened; skipping it", "destination", r.ID.String(), "err", err)
+			_ = q.RecordTraceDestinationError(ctx, store.RecordTraceDestinationErrorParams{
+				OrgID: org, ID: r.ID, LastError: pgtype.Text{String: "the stored credentials cannot be opened", Valid: true},
+			})
+			continue
 		}
 		out = append(out, Route{
 			ID: r.ID.String(), Name: r.Name,
@@ -217,7 +233,11 @@ func (s *Service) Routes(ctx context.Context, org pgtype.UUID) ([]Route, error) 
 	}
 	secrets, err := s.open(p.Credentials, PlatformBinding())
 	if err != nil {
-		return nil, err
+		s.log.Error("platform trace destination credentials cannot be opened; skipping it", "err", err)
+		_ = q.RecordPlatformTraceDestinationError(ctx, store.RecordPlatformTraceDestinationErrorParams{
+			LastError: pgtype.Text{String: "the stored credentials cannot be opened", Valid: true},
+		})
+		return out, nil
 	}
 	return append(out, Route{
 		Name: "platform", Platform: true,
