@@ -280,6 +280,15 @@ delete them after the hook keeps them. Before that first upgrade, mark them to b
 `kubectl -n koinon annotate secret koinon-db-migrate koinon-db-api koinon-db-reconciler
 koinon-db-agentd koinon-bootstrap-admin helm.sh/resource-policy=keep`.
 
+### Upgrading to the OTLP receiver token
+
+The first upgrade to a chart that has `koinon-otlp-token` makes koinon-api require a bearer token on
+its internal OTLP listener. Until the gateway has the token (the reconciler renders the new gateway
+config, or the controller applies the new policy), its access-log exports are refused with a 401 and
+agentgateway does not retry them, so the spend of requests in that window (usually under a minute) is
+missing from the ledger. Upgrade at a quiet time. Later rotations lose nothing while `previous` is kept
+(see the [runbook](https://github.com/stateracloud/koinon/blob/main/docs/ops/secret-keys.md)).
+
 ## Get Koinon
 
 ### From a release

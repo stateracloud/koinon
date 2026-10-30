@@ -127,6 +127,15 @@ var _ = Describe("Render", func() {
 		Expect(string(dump(r))).To(Equal(string(want)))
 	}
 
+	It("refuses a malformed OTLP receiver when a token Secret is set, instead of exporting without the token", func() {
+		for _, bad := range []string{"http://koinon-api.koinon.svc:4318", "koinon-api.koinon.svc", "koinon-api.koinon.svc:http", ":4318"} {
+			o := opts()
+			o.AccessLogOTLP = &standalone.OTLPExport{HostPort: bad, TokenSecret: "koinon-otlp-token", TokenSecretKey: "token"}
+			_, err := gwk8s.Render(fullState(), o)
+			Expect(err).To(MatchError(ContainSubstring("OTLP receiver")), bad)
+		}
+	})
+
 	It("matches the golden file", func() { golden(fullState(), "full") })
 	It("matches the golden file for models in each format (ADR 0069)", func() { golden(formatsState(), "model-formats") })
 

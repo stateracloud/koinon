@@ -451,6 +451,9 @@ for mode in standalone kubernetes; do
 	n=$(render "${m[@]}" --show-only templates/networkpolicy.yaml | grep -A14 -E '^        - port: otlp$' | grep -c 'app.kubernetes.io/component: agentd' || true)
 	[ "$n" = 1 ] || fail "the OTLP ingress admits agentd $n times in $mode mode, want 1"
 done
+# The token file is mode 0440 and group-readable by the pod's fsGroup, so the non-root gateway, api and agentd read it.
+has "the token volume is group-readable (0440)" 'defaultMode: 0440' --show-only templates/gateway-standalone.yaml
+has "the gateway pod's fsGroup is set, to read the 0440 token" 'fsGroup: 65532' --show-only templates/gateway-standalone.yaml
 has "the standalone gateway mounts the token Secret" 'secretName: koinon-otlp-token$' --set gateway.mode=standalone --show-only templates/gateway-standalone.yaml
 has "the standalone gateway sees the token at /secrets/otlp" 'mountPath: /secrets/otlp$' --set gateway.mode=standalone --show-only templates/gateway-standalone.yaml
 has "the reconciler config names the token file (standalone)" 'accessLogOtlpTokenFile: /secrets/otlp/token$' --set gateway.mode=standalone --show-only templates/config.yaml

@@ -188,6 +188,20 @@ var _ = Describe("Ensure with a bearer token", func() {
 		}
 		_, err = ensuresecrets.Ensure(ctx, fake.NewClientset(bad), "koinon", spec, &out)
 		Expect(err).To(MatchError(ContainSubstring("at least 32 characters")))
+
+		badPrev := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "otlp", Namespace: "koinon"},
+			Data: map[string][]byte{
+				"token":    []byte("koinon_test_not-a-real-token-rotated-0001"),
+				"previous": []byte("short"),
+			},
+		}
+		_, err = ensuresecrets.Ensure(ctx, fake.NewClientset(badPrev), "koinon", spec, &out)
+		Expect(err).To(MatchError(ContainSubstring(`"previous"`)))
+		// An empty previous (a rotation finished by blanking it) is fine.
+		badPrev.Data["previous"] = []byte("\n")
+		_, err = ensuresecrets.Ensure(ctx, fake.NewClientset(badPrev), "koinon", spec, &out)
+		Expect(err).NotTo(HaveOccurred())
 	})
 })
 

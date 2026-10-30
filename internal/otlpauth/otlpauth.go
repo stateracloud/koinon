@@ -58,15 +58,19 @@ type Tokens struct {
 	dir string
 	log *slog.Logger
 
-	mu       sync.Mutex
-	loaded   time.Time
-	digests  [][sha256.Size]byte
-	now      func() time.Time
-	lastFail string
+	mu      sync.Mutex
+	loaded  time.Time
+	cur     [sha256.Size]byte // the last valid "token"
+	prev    [sha256.Size]byte // the valid "previous", when hasPrev
+	hasPrev bool
+	now     func() time.Time
+	// lastFail is the last logged problem per file, so a persistent one is logged once.
+	lastFail map[string]string
 }
 
 // NewTokens returns the tokens in dir. It fails when dir has no valid "token" file, so a
-// misconfigured listener does not start (and so is never open).
+// misconfigured listener does not start (and so is never open). A bad "previous" never blocks the
+// start: it is logged and not accepted.
 func NewTokens(dir string, log *slog.Logger) (*Tokens, error) {
 	if dir == "" {
 		return nil, errors.New("the OTLP token directory is required")
@@ -74,31 +78,47 @@ func NewTokens(dir string, log *slog.Logger) (*Tokens, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	t := &Tokens{Reload: DefaultReload, dir: dir, log: log, now: time.Now}
-	d, err := t.read()
-	if err != nil {
-		return nil, err
-	}
-	t.digests, t.loaded = d, t.now()
-	return t, nil
-}
-
-// read loads the current token (required) and the previous one (optional).
-func (t *Tokens) read() ([][sha256.Size]byte, error) {
+	t := &Tokens{Reload: DefaultReload, dir: dir, log: log, now: time.Now, lastFail: map[string]string{}}
 	cur, err := ReadToken(filepath.Join(t.dir, TokenFile))
 	if err != nil {
 		return nil, err
 	}
-	out := [][sha256.Size]byte{sha256.Sum256([]byte(cur))}
-	prev, err := ReadToken(filepath.Join(t.dir, PreviousFile))
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-	case err != nil:
-		return nil, err
-	default:
-		out = append(out, sha256.Sum256([]byte(prev)))
+	t.cur = sha256.Sum256([]byte(cur))
+	t.readPrevious()
+	t.loaded = t.now()
+	return t, nil
+}
+
+// readPrevious loads the optional "previous" token: absent, empty and invalid all mean none (an
+// invalid one is logged without its value). It is validated apart from "token", so a bad
+// "previous" never blocks a freshly rotated "token".
+func (t *Tokens) readPrevious() {
+	t.hasPrev = false
+	path := filepath.Join(t.dir, PreviousFile)
+	if b, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(b)) == "" { //nolint:gosec // an operator-set directory
+		t.fail(PreviousFile, nil)
+		return
 	}
-	return out, nil
+	v, err := ReadToken(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			t.fail(PreviousFile, err)
+		}
+		return
+	}
+	t.fail(PreviousFile, nil)
+	t.prev, t.hasPrev = sha256.Sum256([]byte(v)), true
+}
+
+// fail logs err once per distinct error for file; nil clears it.
+func (t *Tokens) fail(file string, err error) {
+	switch {
+	case err == nil:
+		delete(t.lastFail, file)
+	case err.Error() != t.lastFail[file]:
+		t.lastFail[file] = err.Error()
+		t.log.Warn("OTLP token file not usable", "file", file, "err", err)
+	}
 }
 
 // ReadToken returns the token in the file at path, for a sender (koinon-agentd) to put in
@@ -122,23 +142,26 @@ func ReadToken(path string) (string, error) {
 }
 
 // accepted returns the digests of the accepted tokens, re-reading the files when the last read is
-// old. A failed re-read keeps the last good tokens (a Secret mid-update must not lock the senders
-// out) and is logged once per distinct error.
+// old. An unreadable or invalid "token" keeps the last good one (a Secret mid-update must not lock
+// the senders out); "previous" is accepted only while it is valid.
 func (t *Tokens) accepted() [][sha256.Size]byte {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.now().Sub(t.loaded) >= t.Reload {
-		d, err := t.read()
 		t.loaded = t.now()
-		switch {
-		case err == nil:
-			t.digests, t.lastFail = d, ""
-		case err.Error() != t.lastFail:
-			t.lastFail = err.Error()
-			t.log.Warn("OTLP token files unreadable; keeping the tokens already loaded", "err", err)
+		if cur, err := ReadToken(filepath.Join(t.dir, TokenFile)); err != nil {
+			t.fail(TokenFile, err)
+		} else {
+			t.fail(TokenFile, nil)
+			t.cur = sha256.Sum256([]byte(cur))
 		}
+		t.readPrevious()
 	}
-	return t.digests
+	out := [][sha256.Size]byte{t.cur}
+	if t.hasPrev {
+		out = append(out, t.prev)
+	}
+	return out
 }
 
 // Match reports whether bearer is an accepted token. It compares SHA-256 digests in constant time
