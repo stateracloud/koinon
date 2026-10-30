@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# RT1 fixtures: three remote MCP servers in namespace koinon-fixtures. See ../README.md.
+# RT1 fixtures: remote MCP servers and the escape suite's gateway stand-in in namespace koinon-fixtures. See ../README.md.
 #   kubectl apply -k test/fixtures/rt1/manifests
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -12,6 +12,7 @@ resources:
   - fakecicost.yaml
   - prometheus.yaml
   - searxng.yaml
+  - escape-gateway-standin.yaml
 # SearXNG's settings file, mounted by the searxng Deployment.
 configMapGenerator:
   - name: rt1-searxng-settings
@@ -30,6 +31,9 @@ images:
   - name: zot.apps.lab.example.invalid/koinon/rt1-promgen
     newTag: "rt1-bfaab19"
     digest: sha256:d14b0e6e71ac5227dd415f0d06bcc52bd43abc0e5a5e954cee3c9a6afe6f2c02
+  - name: zot.apps.lab.example.invalid/koinon/rt1-fakemodel
+    newTag: dev
+    digest: sha256:TODO-paste-the-digest-printed-by-hack-rt1-fixtures-build-sh
   - name: zot.apps.lab.example.invalid/koinon/rt1-prometheus-mcp
     newTag: "rt1-bfaab19"
     digest: sha256:fb2355b39fcecaeb38a03e2d0e73a45f8c13a1a4e11c7e862d232b50ad48e939
