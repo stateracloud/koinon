@@ -30,10 +30,11 @@ const (
 	maxRounds = 6
 )
 
-// detectViews appends the spans found in the views of in. detect is the detector set.
-func detectViews(in string, detect func(string, []span) []span, spans []span) []span {
+// eachView calls fn with every other reading of in (see maxViews), each composed so that its
+// positions refer to in.
+func eachView(in string, fn func(*view)) {
 	if !needsViews(in) { // no escape, no fullwidth form: no other reading
-		return spans
+		return
 	}
 	type item struct {
 		v     *view
@@ -58,15 +59,22 @@ func detectViews(in string, detect func(string, []span) []span, spans []span) []
 			if it.v != root {
 				v = it.v.compose(v)
 			}
-			for _, sp := range detect(v.s, nil) {
-				a, b := v.toOriginal(sp.start, sp.end)
-				if b > a {
-					spans = append(spans, span{a, b, sp.kind})
-				}
-			}
+			fn(v)
 			frontier = append(frontier, item{v, it.round + 1})
 		}
 	}
+}
+
+// detectViews appends the spans found in the views of in. detect is the detector set.
+func detectViews(in string, detect func(string, []span) []span, spans []span) []span {
+	eachView(in, func(v *view) {
+		for _, sp := range detect(v.s, nil) {
+			a, b := v.toOriginal(sp.start, sp.end)
+			if b > a {
+				spans = append(spans, span{a, b, sp.kind})
+			}
+		}
+	})
 	return spans
 }
 

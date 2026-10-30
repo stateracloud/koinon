@@ -4,7 +4,9 @@ package scrub_test
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	mrand "math/rand"
 	"strings"
@@ -257,6 +259,8 @@ func randomWord(n int) string {
 	return string(b)
 }
 
+func b64Of(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+
 func alwaysShapes(w string) []shape {
 	return []shape{
 		{"kgw_" + w + "abcd", w},
@@ -280,6 +284,16 @@ func alwaysShapes(w string) []shape {
 		{"ya29." + w + w, w},
 		{"npm_" + w + w + w, w},
 		{"Authorization: Digest realm=\"r\", response=\"" + w + "\"", w},
+		{`{"name":"DB_PASSWORD","value":"` + w + `"}`, w},
+		{`{"value":"` + w + `","name":"DB_PASSWORD"}`, w},
+		{"- name: DB_PASSWORD\n  value: " + w + "\n", w},
+		{"\n[db]\npassword = " + w + "\n", w},
+		{"machine h.example.test login u password " + w, w},
+		{"-----BEGIN PGP " + "PRIVATE KEY BLOCK-----\nlQ" + w + "\n-----END PGP " + "PRIVATE KEY BLOCK-----", w},
+		{"key: " + b64Of(pemBegin+"\nMII"+w+w+"\n"+pemEnd), b64Of(pemBegin + "\nMII" + w + w + "\n" + pemEnd)[30:48]},
+		{"mysql -u root -p" + w + " db", w},
+		{`{"auths":{"r.example.test":{"auth":"` + b64Of("u:"+w) + `"}}}`, b64Of("u:" + w)[:12]},
+		{"PGPASSWORD=" + w + ";psql", w},
 	}
 }
 
@@ -503,11 +517,169 @@ func TestContentIsBoundedOnHugeInputs(t *testing.T) {
 	} {
 		start := time.Now()
 		out, cut := s.Content(in, 0)
-		if d := time.Since(start); d > 2*time.Second {
+		if d := time.Since(start); d > 2*time.Second*raceSlowdown {
 			t.Errorf("%s: %v", name, d)
 		}
 		if !cut || len(out) > scrub.DefaultMaxBytes {
 			t.Errorf("%s: cut %v len %d", name, cut, len(out))
 		}
+	}
+}
+
+// TestReview3Leaks are the gaps of the third review.
+func TestReview3Leaks(t *testing.T) {
+	cu := "cu" + "rl"
+	pgp := "-----BEGIN PGP " + "PRIVATE KEY BLOCK-----\nlQOYBF2notrealpgpbodyXXXX\n-----END PGP " + "PRIVATE KEY BLOCK-----"
+	pem := pemBegin + "\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n" + pemEnd
+	b64 := func(s string, pad int) string {
+		return base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", pad) + s))
+	}
+	docker := `{"auths":{"r.example.test":{"auth":"bm90cmVhbDpwdw=="}}}`
+	cases := []struct{ name, in, needle string }{
+		{"value past a semicolon", "PGPASSWORD=notreal;pw12 psql -h db", "pw12"},
+		{"value past a paren", "run password=abcdef)ghijkl rest", "ghijkl"},
+		{"value past a comma and quote", "secret=a,b'notreal-x rest", "notreal-x"},
+		{"k8s env pair, JSON", `{"name":"DB_PASSWORD","value":"notreal-dbpw"}`, "notreal-dbpw"},
+		{"k8s env pair, JSON in text", `env: {"name":"DB_PASSWORD","value":"notreal-dbpw"}`, "notreal-dbpw"},
+		{"k8s env pair, value first", `env: {"value":"notreal-dbpw","name":"DB_PASSWORD"}`, "notreal-dbpw"},
+		{"k8s env pair, YAML", "env:\n  - name: DB_PASSWORD\n    value: notreal-yamlpw\n  - name: HOME\n    value: /root\n", "notreal-yamlpw"},
+		{"ini password", "[db]\nhost = h\npassword = notreal-inipw\n", "notreal-inipw"},
+		{"mysql --password X", "mysql -u root --password notreal-mypw db", "notreal-mypw"},
+		{"mysql -pX", "mysql -u root -pnotreal-mypw2 db", "notreal-mypw2"},
+		{"user flag with equals", cu + " --us" + "er=admin:notreal-cpw https://x.example.test", "notreal-cpw"},
+		{"attached user flag", cu + " -" + "uadmin:notreal-cpw2 https://x.example.test", "notreal-cpw2"},
+		{"netrc one line", "machine example.test login bob password notreal-netrc", "notreal-netrc"},
+		{"netrc lines", "machine example.test\n  login bob\n  password notreal-netrc2\n", "notreal-netrc2"},
+		{"docker config JSON", docker, "bm90cmVhbDpw"},
+		{"docker config in text", "cat config.json: " + docker, "bm90cmVhbDpw"},
+		{"PGP block", "gpg:\n" + pgp + "\nend", "notrealpgpbody"},
+		{"base64 PEM", "data:\n  tls.key: " + b64(pem, 0), b64(pem, 0)[30:60]},
+		{"base64 PEM, offset 1", "key: " + b64(pem, 1), b64(pem, 1)[30:60]},
+		{"base64 PEM, offset 2", "key: " + b64(pem, 2), b64(pem, 2)[30:60]},
+		{"base64 dockerconfigjson", "  .dockerconfigjson: " + b64(docker, 0), b64(docker, 0)[30:50]},
+		{"base64 dockerconfigjson, offset 1", "x: " + b64(docker, 1), b64(docker, 1)[30:50]},
+		{"url password with a slash", "git clone https://user:pa/ss-notreal@host.example.test/x.git", "ss-notreal"},
+		{"cookie over 8 KiB", "Cookie: a=" + strings.Repeat("v", 20000) + "\nHost: x", "vvvvvvvv"},
+		{"password over 2 KiB", "password=" + strings.Repeat("q", 5000) + " rest", "qqqqqqqq"},
+		{"digest over 1 KiB mid-line", "x Authorization: Digest " + strings.Repeat(`k="notreal-param", `, 100) + `last="notreal-last"`, "notreal-last"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := scrub.New(scrub.Config{Level: scrub.LevelFull})
+			out, _ := s.Content(tc.in, 1<<20)
+			if strings.Contains(out, tc.needle) || out == tc.in {
+				t.Errorf("Content left %q in %.200q", tc.needle, out)
+			}
+			if txt := s.Text(tc.in); strings.Contains(txt, tc.needle) {
+				t.Errorf("Text left %q", tc.needle)
+			}
+		})
+	}
+	t.Run("a pair's name beyond the bound", func(t *testing.T) {
+		var b strings.Builder
+		b.WriteString(`{"value":"Basic dXNlcjpwYXNzd29yZA==",`)
+		for i := 0; i < 400; i++ {
+			fmt.Fprintf(&b, `"k%03d":"v",`, i)
+		}
+		b.WriteString(`"name":"Authorization"}`)
+		out, _ := scrub.New(scrub.Config{Level: scrub.LevelFull}).Content(b.String(), 1024)
+		if strings.Contains(out, "dXNlcjpw") {
+			t.Errorf("%.200q", out)
+		}
+	})
+}
+
+func TestReview3OverRedaction(t *testing.T) {
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
+	for _, in := range []string{
+		"token: expired", "status token: string", "password: string", "set token = resp.AccessToken now",
+		"tokenValue", "x.password=tokenValue next", "existingSecret: my-release-secrets",
+		"imagePullSecret: regcred", "secretName: my-tls", "authorization:\n  next: value",
+		"token:\n  count: 3", "secret: none", `["Authorization", "is a header"]`, "password: null",
+	} {
+		if out := s.Text(in); out != in {
+			t.Errorf("Text %q -> %q", in, out)
+		}
+		if out, _ := s.Content(in, 0); strings.Contains(out, "redacted") {
+			t.Errorf("Content %q -> %q", in, out)
+		}
+	}
+	for _, in := range []string{
+		`{"token":"expired"}`, `{"password":"string"}`, `{"existingSecret":"my-release-secrets"}`,
+		`{"secret":"tokenValue"}`, `{"a":"password = getPassword()"}`,
+	} {
+		if out, _ := s.Content(in, 0); strings.Contains(out, "redacted") {
+			t.Errorf("JSON %q -> %q", in, out)
+		}
+	}
+	if out := s.Text("\tpassword = getPassword()\n\tpass := token"); strings.Contains(out, "redacted") {
+		t.Errorf("code: %q", out)
+	}
+}
+
+func TestKindsListIsComplete(t *testing.T) {
+	have := map[scrub.Kind]bool{}
+	for _, k := range scrub.Kinds {
+		have[k] = true
+	}
+	for _, k := range []scrub.Kind{scrub.KindPrivateKey, scrub.KindCredential, scrub.KindToken, scrub.KindSecret} {
+		if !have[k] {
+			t.Errorf("Kinds lacks %q", k)
+		}
+	}
+}
+
+// A secret split by the cut, in the text or in an escaped reading of it, leaves no fragment.
+func TestCutLeavesNoFragmentOfEscapedSecret(t *testing.T) {
+	secret := `koinon_test"not-a-real-planted-secret-0123456789`
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull, Secrets: scrub.NewSecrets(secret)})
+	const limit = 1024
+	esc := strings.ReplaceAll(secret, `"`, `\"`)
+	for off := limit + 4096 - 150; off < limit+4096+30; off += 3 {
+		for _, form := range []string{secret, esc, strings.ReplaceAll(secret, `"`, "%22")} {
+			in := strings.Repeat("x ", off/2) + form + strings.Repeat(" y", 4000)
+			out, cut := s.Content(in, limit)
+			if !cut || len(out) > limit || strings.Contains(out, "not-a-real") || strings.Contains(out, "koinon_test") {
+				t.Fatalf("off %d form %.30q: tail %q", off, form, out[max(0, len(out)-50):])
+			}
+		}
+	}
+}
+
+func TestContentLimitIsCappedAndHugeJSONStaysJSON(t *testing.T) {
+	s := scrub.New(scrub.Config{Level: scrub.LevelFull})
+	out, _ := s.Content(strings.Repeat("a ", 3<<20), 1<<30)
+	if len(out) > 1<<20 {
+		t.Errorf("limit not capped: %d", len(out))
+	}
+	big := `["` + strings.Repeat("x\\n", 3<<20) + `"]` // over 4 MiB of valid JSON
+	out, cut := s.Content(big, 2048)
+	if !cut || !json.Valid([]byte(out)) || len(out) > 2048 {
+		t.Errorf("cut %v valid %v len %d", cut, json.Valid([]byte(out)), len(out))
+	}
+}
+
+// The reviewer's input: 4 MiB of nested escaped JSON full of header and credential names must not
+// cost seconds.
+func TestNestedEscapedJSONIsBounded(t *testing.T) {
+	leaf := `{"headers":[{"name":"Authorization","value":"Basic dXNlcjpwYXNzd29yZA=="},{"name":"Cookie","value":"a=b"}],` +
+		`"env":[{"name":"DB_PASSWORD","value":"notreal-dbpw"}],"password":"notreal-pw","text":"Authorization: Bearer abcdefghijklmnop1234 token=notreal-t"}`
+	level1, _ := json.Marshal(strings.Repeat(leaf+"\n", 40))
+	level2, _ := json.Marshal(map[string]string{"output": string(level1)})
+	var items []string
+	total := 0
+	for total < 4<<20 {
+		items = append(items, string(level2))
+		total += len(level2)
+	}
+	doc, _ := json.Marshal(map[string]any{"calls": items})
+	s := scrub.New(scrub.Config{Level: scrub.LevelRedacted, Secrets: scrub.NewSecrets("notreal-dbpw")})
+	start := time.Now()
+	out, cut := s.Content(string(doc), 0)
+	if d := time.Since(start); d > 200*time.Millisecond*raceSlowdown {
+		t.Errorf("took %v", d)
+	}
+	if !cut || !json.Valid([]byte(out)) || strings.Contains(out, "dXNlcjpw") || strings.Contains(out, "notreal-dbpw") {
+		t.Errorf("cut %v valid %v len %d", cut, json.Valid([]byte(out)), len(out))
 	}
 }

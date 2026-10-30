@@ -34,11 +34,24 @@ var (
 	authValueRE = regexp.MustCompile(`^(?:[A-Za-z][A-Za-z0-9-]*[ \t]+)?(?:` +
 		`[A-Za-z0-9._~+/-]+=(?:\\*"[^"]*"|[^\s,"']*)(?:,[ \t]*[A-Za-z0-9._~+/-]+=(?:\\*"[^"]*"|[^\s,"']*))*` +
 		`|[^\s"'\\` + "`" + `,;)}<>]+)`)
+	// paramContRE matches further name=value parameters of an Authorization list.
+	paramContRE = regexp.MustCompile(`^(?:,[ \t]*[A-Za-z0-9._~+/-]+=(?:\\*"[^"]*"|[^\s,"']*))+`)
 	// pemRE matches a PEM private key block, armour included, raw or with escaped newlines. A
 	// block that is cut off before its END line is taken to the end of the text.
-	pemRE = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)`)
+	pemRE = regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|\z)`)
 	// curlUserRE matches the password of curl -u user:password (group 1).
-	curlUserRE = regexp.MustCompile(`(?i)curl\b[^\r\n]*?[ \t](?:-u|--user)[ \t]+["']?[^\s:"']+:([^\s"']+)`)
+	curlUserRE = regexp.MustCompile(`(?i)curl\b[^\r\n]*?[ \t](?:-u[ \t]*|--user(?:[ \t]+|=))["']?[^\s:"']+:([^\s"']+)`)
+	// passwordFlagRE matches a password given as the next argument (mysql --password X); the
+	// attached --password=X form is a key=value pair and is found with the other credential names.
+	passwordFlagRE = regexp.MustCompile(`(?i)--pass(?:word|wd)[ \t]+["']?([^\s"'-][^\s"']*)`)
+	// mysqlPassRE matches mysql -pSECRET (the password is attached to the flag).
+	mysqlPassRE = regexp.MustCompile(`(?i)\bmysql[a-z]*\b[^\r\n]*?[ \t]-p([^\s-][^\s]*)`)
+	// netrcRE and netrcLineRE match a .netrc password, on the machine line or on a line of its own.
+	netrcRE     = regexp.MustCompile(`(?i)\b(?:machine|login)\b[^\r\n]*?\bpassword[ \t]+([^\s]+)`)
+	netrcLineRE = regexp.MustCompile(`(?im)^[ \t]*password[ \t]+([^\s]+)[ \t]*$`)
+	// yamlPairRE matches a Kubernetes env entry written as "name: DB_PASSWORD" with "value:" on
+	// the next line (group 1 the name, group 3 the value).
+	yamlPairRE = regexp.MustCompile(`(?i)\bname:[ \t]*["']?([A-Za-z0-9_.-]+)["']?[ \t]*\r?\n[ \t]*(?:- )?value:[ \t]*(["']?)([^\r\n"']+)`)
 	// vendorKeyRE matches the documented shapes of common vendor credentials. They are secrets
 	// the org may never have stored in Koinon (a key an agent found on disk), so the known-secret
 	// set cannot catch them.
@@ -87,7 +100,7 @@ func findAlways(in string, spans []span) []span {
 			}
 		}
 	}
-	if strings.Contains(in, "PRIVATE KEY-----") {
+	if strings.Contains(in, "PRIVATE KEY") {
 		for _, m := range pemRE.FindAllStringIndex(in, -1) {
 			spans = append(spans, span{m[0], m[1], KindPrivateKey})
 		}
@@ -100,8 +113,33 @@ func findAlways(in string, spans []span) []span {
 			spans = append(spans, span{m[2], m[3], KindCredential})
 		}
 	}
-	if hasCredentialWord(in) {
-		spans = findHeaders(in, spans)
+	if containsFold(in, "--pass") {
+		for _, m := range passwordFlagRE.FindAllStringSubmatchIndex(in, -1) {
+			spans = append(spans, span{m[2], m[3], KindCredential})
+		}
+	}
+	if containsFold(in, "mysql") {
+		for _, m := range mysqlPassRE.FindAllStringSubmatchIndex(in, -1) {
+			spans = append(spans, span{m[2], m[3], KindCredential})
+		}
+	}
+	if containsFold(in, "password") && (containsFold(in, "machine") || containsFold(in, "login")) {
+		for _, re := range []*regexp.Regexp{netrcRE, netrcLineRE} {
+			for _, m := range re.FindAllStringSubmatchIndex(in, -1) {
+				spans = append(spans, span{m[2], m[3], KindCredential})
+			}
+		}
+	}
+	if containsFold(in, "name:") && containsFold(in, "value:") {
+		for _, m := range yamlPairRE.FindAllStringSubmatchIndex(in, -1) {
+			if credentialKind(in[m[2]:m[3]]) != "" || headerKind(in[m[2]:m[3]]) != "" {
+				spans = append(spans, span{m[6], m[7], KindCredential})
+			}
+		}
+	}
+	spans = findEncodedBlobs(in, spans)
+	var sawWord bool
+	if spans, sawWord = findHeaders(in, spans); sawWord {
 		spans = findForcedLeaves(in, spans)
 	}
 	if hasVendorPrefix(in) {
@@ -135,9 +173,46 @@ func isHex(b byte) bool {
 }
 
 func hasVendorPrefix(in string) bool {
-	for _, p := range [...]string{"sk-", "sk_", "rk_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "glpat-", "xox", "hvs.", "hf_", "ya29.", "GOCSPX-", "npm_", "glsa_", "dop_v1_", "AIza", "AKIA"} {
-		if strings.Contains(in, p) {
-			return true
+	for i := 0; i < len(in); i++ {
+		switch in[i] {
+		case 's', 'r':
+			if strings.HasPrefix(in[i:], "sk-") || strings.HasPrefix(in[i:], "sk_") || strings.HasPrefix(in[i:], "rk_") {
+				return true
+			}
+		case 'g':
+			if strings.HasPrefix(in[i:], "ghp_") || strings.HasPrefix(in[i:], "gho_") || strings.HasPrefix(in[i:], "ghu_") ||
+				strings.HasPrefix(in[i:], "ghs_") || strings.HasPrefix(in[i:], "ghr_") || strings.HasPrefix(in[i:], "github_pat_") ||
+				strings.HasPrefix(in[i:], "glpat-") || strings.HasPrefix(in[i:], "glsa_") {
+				return true
+			}
+		case 'x':
+			if strings.HasPrefix(in[i:], "xox") {
+				return true
+			}
+		case 'h':
+			if strings.HasPrefix(in[i:], "hvs.") || strings.HasPrefix(in[i:], "hf_") {
+				return true
+			}
+		case 'y':
+			if strings.HasPrefix(in[i:], "ya29.") {
+				return true
+			}
+		case 'n':
+			if strings.HasPrefix(in[i:], "npm_") {
+				return true
+			}
+		case 'd':
+			if strings.HasPrefix(in[i:], "dop_v1_") {
+				return true
+			}
+		case 'G':
+			if strings.HasPrefix(in[i:], "GOCSPX-") {
+				return true
+			}
+		case 'A':
+			if strings.HasPrefix(in[i:], "AIza") || strings.HasPrefix(in[i:], "AKIA") {
+				return true
+			}
 		}
 	}
 	return false
@@ -167,36 +242,6 @@ func lower(b byte) byte {
 		return b + 32
 	}
 	return b
-}
-
-// hasCredentialWord gates the header and credential-key rules, in one pass over the text.
-func hasCredentialWord(in string) bool {
-	for i := 0; i < len(in); i++ {
-		switch lower(in[i]) {
-		case 'a':
-			if hasPrefixFold(in, i, "authorization") || hasPrefixFold(in, i, "api-key") || hasPrefixFold(in, i, "api_key") || hasPrefixFold(in, i, "apikey") {
-				return true
-			}
-		case 'c':
-			if hasPrefixFold(in, i, "cookie") {
-				return true
-			}
-		case 'p':
-			if hasPrefixFold(in, i, "password") || hasPrefixFold(in, i, "passwd") || hasPrefixFold(in, i, "private_key") ||
-				hasPrefixFold(in, i, "private-key") || hasPrefixFold(in, i, "privatekey") {
-				return true
-			}
-		case 's':
-			if hasPrefixFold(in, i, "secret") {
-				return true
-			}
-		case 't':
-			if hasPrefixFold(in, i, "token") {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // hasPrefixFold reports whether s[i:] starts with the lower-case ASCII word w, ignoring case.
@@ -253,6 +298,15 @@ func headerKind(key string) Kind {
 // secret, and compounds that end in one (db_password, PGPASSWORD, aws_secret_access_key, accessToken).
 func credentialKind(key string) Kind {
 	k := normKey(key)
+	switch k {
+	case "auth", "identitytoken", "registrytoken": // a Docker config's credentials
+		return KindCredential
+	}
+	for _, ref := range [...]string{"existing-secret", "pull-secret", "tls-secret", "existingsecret"} {
+		if strings.HasSuffix(k, ref) {
+			return "" // names a Kubernetes Secret object, not a value
+		}
+	}
 	for _, suf := range [...]string{
 		"password", "passwd", "secret", "token", "apikey", "api-key", "private-key",
 		"secret-key", "secret-access-key", "privatekey", "secretkey",
@@ -272,24 +326,17 @@ func nameKind(name string) Kind {
 	return credentialKind(name)
 }
 
-// maxHeaderValue bounds how far a header or credential value is searched for, so that text with
-// no line breaks and many names cannot make the scan quadratic.
-const (
-	maxHeaderValue     = 8 << 10
-	maxCredentialValue = 2 << 10
-)
-
 // credWords are the words that end the name of a header or credential key, longest first within a
 // first letter. A name is such a word, possibly preceded by more of the identifier (x-vault-token,
 // db_password, PGPASSWORD, accessToken).
 var credWords = [...]string{
 	"authorization", "cookie", "api-key", "api_key", "apikey", "private-key", "private_key", "privatekey",
 	"secret-access-key", "secret_access_key", "secret-key", "secret_key", "secretkey", "password", "passwd",
-	"secret", "token",
+	"secret", "token", "auth",
 }
 
 // findHeaders appends the value spans of headers and credential-named keys written in text.
-func findHeaders(in string, spans []span) []span {
+func findHeaders(in string, spans []span) (_ []span, sawWord bool) {
 	for i := 0; i < len(in); i++ {
 		c := lower(in[i])
 		if c != 'a' && c != 'c' && c != 'p' && c != 's' && c != 't' {
@@ -305,21 +352,31 @@ func findHeaders(in string, spans []span) []span {
 		if w == "" {
 			continue
 		}
+		sawWord = true
 		e := i + len(w)
 		sepE, ok := separatorEnd(in, e)
 		if !ok {
 			i = e - 1
 			continue
 		}
-		nameS, kind := i, nameKind(in[i:e])
-		if kind == "" || !leftOK(in, nameS) { // the word ends a longer identifier
-			for nameS > 0 && isNameChar(in[nameS-1]) {
-				nameS--
+		// the whole identifier the word ends (x-vault-token, db_password) names the key; failing
+		// that, the word alone (after an escape such as \n there is no identifier boundary)
+		nameS := i
+		for nameS > 0 && isNameChar(in[nameS-1]) {
+			nameS--
+		}
+		kind := nameKind(in[nameS:e])
+		if kind == "" || !leftOK(in, nameS) {
+			nameS, kind = i, nameKind(in[i:e])
+			if !leftOK(in, nameS) {
+				kind = ""
 			}
-			kind = nameKind(in[nameS:e])
 		}
 		i = e - 1
-		if kind == "" || !leftOK(in, nameS) {
+		if kind == "" {
+			continue
+		}
+		if w == "auth" && (nameS != i-len(w)+1 || !nameQuoted(in, nameS)) { // only a quoted "auth" key (Docker config)
 			continue
 		}
 		vs, ve, ok := headerValue(in, nameS, e, e, sepE, kind)
@@ -329,7 +386,7 @@ func findHeaders(in string, spans []span) []span {
 		spans = append(spans, span{vs, ve, kind})
 		i = ve - 1 // what follows is inside the value
 	}
-	return spans
+	return spans, sawWord
 }
 
 // separatorEnd parses what may follow a name: blanks, up to three quote or backslash characters
@@ -349,10 +406,22 @@ func separatorEnd(in string, e int) (int, bool) {
 			k++
 		}
 		if k+1 < len(in) && (in[k+1] == ' ' || in[k+1] == '\t') {
-			j = skipSet(in, k+1, " \t", 99)
+			if next := skipSet(in, k+1, " \t", 99); !startsKeyLine(in, next) {
+				j = next
+			}
 		}
 	}
 	return skipSet(in, j, "\\\"'", 3), true
+}
+
+// startsKeyLine reports whether the text at i begins a "key:" line (YAML), which is the next
+// entry and not the folded continuation of a value.
+func startsKeyLine(in string, i int) bool {
+	j := i
+	for j < len(in) && isNameChar(in[j]) {
+		j++
+	}
+	return j > i && j < len(in) && in[j] == ':' && (j+1 >= len(in) || in[j+1] == ' ' || in[j+1] == '\n' || in[j+1] == '\r')
 }
 
 func skipSet(in string, i int, set string, limit int) int {
@@ -364,8 +433,11 @@ func skipSet(in string, i int, set string, limit int) int {
 
 // headerValue finds the value that follows a name and separator. Quoted values run to the
 // matching closing quote (the escaped form \" included); an HTTP header line runs to the end of
-// the line, with obs-fold continuation lines; other values are a token, or for an auth header a
-// scheme and a token.
+// the line, with obs-fold continuation lines; an auth header elsewhere is a scheme and a token or
+// a parameter list; a credential is the run of non-blank characters. There is no length window:
+// a value is redacted to its real end. Matches that cannot be values are rejected from a short
+// prefix before any long scan, and the caller resumes after an accepted value, so the total
+// work stays linear.
 func headerValue(in string, nameS, nameE, sepS, sepE int, kind Kind) (vs, ve int, ok bool) {
 	sep := in[sepS:sepE]
 	idx := strings.IndexAny(sep, ":=,")
@@ -380,106 +452,158 @@ func headerValue(in string, nameS, nameE, sepS, sepE int, kind Kind) (vs, ve int
 		k = len(open) - 1
 	}
 	vs = sepE
-	window := maxHeaderValue
-	if kind == KindCredential {
-		window = maxCredentialValue
-	}
-	hardEnd := min(len(in), vs+window)
-	lineEnd := -1 // computed on first use: most values end at a quote long before the line does
-	eol := func() int {
-		if lineEnd < 0 {
-			lineEnd = vs + indexLineEnd(in[vs:hardEnd])
-		}
-		return lineEnd
-	}
 	if sep[idx] == ',' && (q == 0 || !nameQuoted(in, nameS)) {
 		return 0, 0, false // "password, token" in prose
 	}
-	if strings.ContainsRune("=:", rune(first(in[vs:]))) && kind == KindCredential {
+	if kind == KindCredential && strings.IndexByte("=:", first(in[vs:])) >= 0 && vs < len(in) {
 		return 0, 0, false // := and ==
 	}
+	prefix := headerPrefix(in, vs)
+	if q == 0 && skipHeaderValue(kind, prefix) && !foldFollows(in, vs+len(prefix)) {
+		return 0, 0, false // decided from the start of the value, before any long scan
+	}
 	if kind == KindCookie && !strings.Contains(in[vs:min(len(in), vs+256)], "=") {
-		return 0, 0, false // not cookie-shaped; decided before any long scan
+		return 0, 0, false // not cookie-shaped
 	}
 	switch {
 	case q != 0:
-		if k == 0 {
-			ve = vs
-			for ve < hardEnd && in[ve] != q && !lineBreakAt(in, ve) {
-				if in[ve] == '\\' && ve+1 < hardEnd {
-					ve++
-				}
-				ve++
-			}
-		} else {
-			closing := strings.Repeat("\\", k) + string(q)
-			if j := strings.Index(in[vs:eol()], closing); j >= 0 {
-				ve = vs + j
-			} else {
-				ve = eol()
-			}
-		}
-		ve = min(ve, hardEnd)
+		ve = scanQuoted(in, vs, q, k)
 		if after := strings.TrimLeft(in[min(len(in), ve+1+k):], " \t"); sep[idx] == ',' && strings.HasPrefix(after, ":") {
 			return 0, 0, false // that was a key, not a value
 		}
+		if sep[idx] == ',' && proseLike(in[vs:min(ve, vs+256)]) {
+			return 0, 0, false // ["Authorization", "is a header"]
+		}
 	case kind != KindCredential && openQuote(in, nameS) != 0:
 		// "Name: value" inside a string (JSON, curl -H "..."): the value runs to the string's end
-		oq := openQuote(in, nameS)
-		k := quoteEscapes(in, nameS)
-		if k == 0 {
-			ve = vs
-			for ve < hardEnd && in[ve] != oq && !lineBreakAt(in, ve) {
-				if in[ve] == '\\' && ve+1 < hardEnd {
-					ve++
-				}
-				ve++
-			}
-			ve = min(ve, hardEnd)
-		} else if j := strings.Index(in[vs:eol()], strings.Repeat("\\", k)+string(oq)); j >= 0 {
-			ve = vs + j
-		} else {
-			ve = eol()
-		}
+		ve = scanQuoted(in, vs, openQuote(in, nameS), quoteEscapes(in, nameS))
 		if kind == KindAuthHeader { // a stray quote before the name does not bound the value
-			if m := authValueRE.FindStringIndex(headerPrefix(in, vs, hardEnd)); m != nil {
-				ve = max(ve, vs+m[1])
-			}
+			ve = max(ve, authValueEnd(in, vs))
 		}
 	case kind != KindCredential && headerLine(in, nameS):
-		ve = eol()
-		for ve < len(in) { // obs-fold: continuation lines start with space or tab
-			nl := ve
-			if nl < len(in) && in[nl] == '\r' {
-				nl++
+		ve = vs + indexLineEnd(in[vs:])
+		for { // obs-fold: continuation lines start with space or tab
+			end, ok := foldAt(in, ve)
+			if !ok {
+				break
 			}
-			if nl+1 < len(in) && in[nl] == '\n' && (in[nl+1] == ' ' || in[nl+1] == '\t') {
-				ve = nl + 1 + indexLineEnd(in[nl+1:])
-				continue
-			}
-			break
+			ve = end
 		}
 	case kind == KindCookie:
-		ve = eol()
-	default:
-		ve = vs
-		if kind == KindAuthHeader {
-			if m := authValueRE.FindStringIndex(headerPrefix(in, vs, hardEnd)); m != nil {
-				ve = vs + m[1]
-			}
-		} else {
-			for ve < eol() && !strings.ContainsRune("\"'\\`,;)}<> \t\r\n", rune(in[ve])) {
-				ve++
-			}
+		ve = vs + indexLineEnd(in[vs:])
+	case kind == KindAuthHeader:
+		ve = authValueEnd(in, vs)
+	default: // a credential: up to a blank, a double quote or a line break
+		if sep[idx] == '=' && sepHasSpace(sep, idx) && (!lineStartExact(in, nameS) || strings.ContainsAny(prefix, "(){}")) {
+			return 0, 0, false // password = getPassword(): code, not an ini line
 		}
-		if kind == KindCredential && sep[idx] == '=' && sepHasSpace(sep, idx) {
-			return 0, 0, false // password = getPassword(): code, not a value
+		for ve = vs; ve < len(in) && in[ve] != ' ' && in[ve] != '\t' && in[ve] != '"' && !lineBreakAt(in, ve) && !escapedQuoteAt(in, ve); ve++ {
 		}
-		if kind == KindCredential && strings.ContainsAny(in[vs:ve], "()[]") {
-			return 0, 0, false
+		if strings.IndexByte(in[vs:ve], '(') >= 0 {
+			return 0, 0, false // password=getPassword(): a call
 		}
 	}
-	return vs, ve, ve > vs
+	return vs, ve, ve > vs && !skipHeaderValue(kind, in[vs:min(ve, vs+256)])
+}
+
+// foldAt reports whether the line break at i (CR LF or LF) is followed by a continuation line: one
+// that starts with a blank and is not itself a "key:" line. It returns the end of that line.
+func foldAt(in string, i int) (end int, ok bool) {
+	if i < len(in) && in[i] == '\r' {
+		i++
+	}
+	if i+1 >= len(in) || in[i] != '\n' || (in[i+1] != ' ' && in[i+1] != '\t') {
+		return 0, false
+	}
+	next := skipSet(in, i+1, " \t", 1<<30)
+	if startsKeyLine(in, next) {
+		return 0, false
+	}
+	return next + indexLineEnd(in[next:]), true
+}
+
+// foldFollows reports whether a line break at i is followed by a continuation of the value.
+func foldFollows(in string, i int) bool {
+	_, ok := foldAt(in, i)
+	return ok
+}
+
+// authValueEnd returns the end of an Authorization value that does not stand on a line of its
+// own: a scheme and token, or a parameter list. The pattern is tried on the first KiB; a value
+// that fills it is followed on to the next blank, quote or line break.
+func authValueEnd(in string, vs int) int {
+	seg := headerPrefix1K(in, vs)
+	m := authValueRE.FindStringIndex(seg)
+	if m == nil {
+		return vs
+	}
+	ve := vs + m[1]
+	if len(seg) == 1024 && m[1] >= 512 { // the window ended inside a parameter: resume at the last comma
+		if c := strings.LastIndexByte(seg[:m[1]], ','); c > 0 {
+			ve = vs + c
+		}
+	}
+	for ve < len(in) && in[ve] == ',' { // a parameter list longer than the window goes on
+		c := paramContRE.FindStringIndex(headerPrefix1K(in, ve))
+		if c == nil {
+			break
+		}
+		ve += c[1]
+	}
+	if m[1] == len(seg) {
+		for ve < len(in) && in[ve] != ' ' && in[ve] != '\t' && in[ve] != '"' && in[ve] != '\'' && !lineBreakAt(in, ve) {
+			ve++
+		}
+	}
+	return ve
+}
+
+// scanQuoted returns the end of a quoted value that starts at vs: the matching closing quote q
+// (k backslashes before it for an escaped quote), or the line break that ends the line.
+func scanQuoted(in string, vs int, q byte, k int) int {
+	closing := strings.Repeat("\\", k) + string(q)
+	for i := vs; i < len(in); i++ {
+		if lineBreakAt(in, i) {
+			return i
+		}
+		if k == 0 {
+			if in[i] == '\\' && i+1 < len(in) {
+				i++
+				continue
+			}
+			if in[i] == q {
+				return i
+			}
+		} else if in[i] == '\\' && strings.HasPrefix(in[i:], closing) {
+			return i
+		}
+	}
+	return len(in)
+}
+
+func escapedQuoteAt(in string, i int) bool {
+	return in[i] == '\\' && i+1 < len(in) && (in[i+1] == '"' || in[i+1] == '\'')
+}
+
+// lineStartExact reports whether the name starts a line with no indentation.
+func lineStartExact(in string, nameS int) bool {
+	return nameS == 0 || in[nameS-1] == '\n' || in[nameS-1] == '\r'
+}
+
+// proseLike reports a value of three or more lower-case words ("is a header").
+func proseLike(v string) bool {
+	f := strings.Fields(v)
+	if len(f) < 3 {
+		return false
+	}
+	for _, w := range f {
+		for i := 0; i < len(w); i++ {
+			if w[i] < 'a' || w[i] > 'z' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func first(s string) byte {
@@ -493,11 +617,15 @@ func sepHasSpace(sep string, idx int) bool {
 	return (idx > 0 && (sep[idx-1] == ' ' || sep[idx-1] == '\t')) || (idx+1 < len(sep) && (sep[idx+1] == ' ' || sep[idx+1] == '\t'))
 }
 
-// indexLineEnd returns the offset of the first line break in s, or len(s). A line break is CR, LF,
-// or the two characters backslash-n or backslash-r, which is how one appears in escaped text.
-// headerPrefix returns up to 1 KiB of the value that starts at vs, cut at the first line break.
-func headerPrefix(in string, vs, hardEnd int) string {
-	seg := in[vs:min(hardEnd, vs+1024)]
+// headerPrefix returns up to 256 bytes of the text that starts at vs, cut at the first line break.
+func headerPrefix(in string, vs int) string {
+	seg := in[vs:min(len(in), vs+256)]
+	return seg[:indexLineEnd(seg)]
+}
+
+// headerPrefix1K is the same for 1 KiB.
+func headerPrefix1K(in string, vs int) string {
+	seg := in[vs:min(len(in), vs+1024)]
 	return seg[:indexLineEnd(seg)]
 }
 
@@ -511,6 +639,8 @@ func lineBreakAt(in string, i int) bool {
 	return false
 }
 
+// indexLineEnd returns the offset of the first line break in s, or len(s). A line break is CR, LF,
+// or the two characters backslash-n or backslash-r, which is how one appears in escaped text.
 func indexLineEnd(s string) int {
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
@@ -625,9 +755,75 @@ func skipHeaderValue(kind Kind, value string) bool {
 		}
 		return true
 	case KindCredential:
-		return len(v) < 4
+		return len(v) < 4 || notAValue(v)
 	}
 	return false
+}
+
+// notAValue reports text that names a thing and is not a secret: a type or state word ("string",
+// "expired"), or an identifier of letters, underscores and dots that reads as one: a field path
+// ("resp.AccessToken"), snake_case, or camelCase ("tokenValue"). A plain lower-case word is not
+// skipped (a weak password is still a password), and anything with a digit or a symbol never is.
+func notAValue(v string) bool {
+	switch strings.ToLower(v) {
+	case "string", "number", "integer", "int", "bool", "boolean", "float", "double", "object", "array", "any",
+		"null", "nil", "none", "true", "false", "undefined", "required", "optional", "expired", "invalid",
+		"missing", "empty", "unknown", "redacted", "hidden", "masked", "secret", "password", "token":
+		return true
+	}
+	parts := strings.FieldsFunc(v, func(r rune) bool { return r == '.' || r == '_' })
+	if len(parts) == 0 {
+		return false
+	}
+	joined := len(parts) > 1 || len(parts[0]) != len(v)
+	camel := false
+	for _, p := range parts {
+		switch kind := identifierPart(p); kind {
+		case 0:
+			return false
+		case 2:
+			camel = true
+		}
+	}
+	return joined || camel
+}
+
+// identifierPart classifies a run of letters: 0 not an identifier word, 1 a lower-case word, 2
+// camelCase words. In camelCase every upper-case letter starts a word of at least three letters
+// and the words of four or more lower-case letters make up 80% of the run; random mixed-case
+// letters fail that nearly always.
+func identifierPart(p string) int {
+	if p == "" {
+		return 0
+	}
+	upper := false
+	run, in := 0, 0
+	for i := 0; i <= len(p); i++ {
+		if i < len(p) && 'a' <= p[i] && p[i] <= 'z' {
+			run++
+			continue
+		}
+		if run >= 4 {
+			in += run
+		}
+		if i < len(p) {
+			if p[i] < 'A' || p[i] > 'Z' {
+				return 0
+			}
+			upper = true
+			if i+2 >= len(p) || p[i+1] < 'a' || p[i+1] > 'z' || p[i+2] < 'a' || p[i+2] > 'z' {
+				return 0
+			}
+		}
+		run = 0
+	}
+	if !upper {
+		return 1
+	}
+	if in*10 < len(p)*8 {
+		return 0
+	}
+	return 2
 }
 
 // credLooking reports whether a value looks like a credential and not like prose: at most a
@@ -650,8 +846,10 @@ func hasDigit(s string) bool {
 }
 
 // findUserinfo appends the password of every URL with credentials (scheme://user:password@host).
+// The password runs to the last "@" before the next blank or quote, so a "/" inside it does not
+// end it, unless what precedes that "/" is only digits (a port: host:8080/path@x).
 func findUserinfo(in string, spans []span) []span {
-	const stop = "/ \t\r\n\"'\\"
+	const stop = " \t\r\n\"'\\"
 	for from := 0; ; {
 		i := strings.Index(in[from:], "://")
 		if i < 0 {
@@ -660,20 +858,89 @@ func findUserinfo(in string, spans []span) []span {
 		j := from + i + 3
 		from = j
 		u := j
-		for u < len(in) && in[u] != ':' && in[u] != '@' && strings.IndexByte(stop, in[u]) < 0 {
+		for u < len(in) && in[u] != ':' && in[u] != '@' && in[u] != '/' && strings.IndexByte(stop, in[u]) < 0 {
 			u++
 		}
 		if u == j || u >= len(in) || in[u] != ':' {
 			continue
 		}
 		p := u + 1
-		e := p
-		for e < len(in) && in[e] != '@' && strings.IndexByte(stop, in[e]) < 0 {
-			e++
+		end := p
+		for end < len(in) && strings.IndexByte(stop, in[end]) < 0 {
+			end++
 		}
-		if e > p && e < len(in) && in[e] == '@' {
-			spans = append(spans, span{p, e, KindCredential})
-			from = e
+		at := strings.LastIndexByte(in[p:end], '@')
+		if at <= 0 {
+			continue
+		}
+		pw := in[p : p+at]
+		if slash := strings.IndexByte(pw, '/'); slash >= 0 {
+			if allDigits(pw[:slash]) {
+				continue
+			}
+		}
+		spans = append(spans, span{p, p + at, KindCredential})
+		from = p + at
+	}
+}
+
+func allDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isDigit(s[i]) {
+			return false
 		}
 	}
+	return s != ""
+}
+
+// hasLongBase64Run reports whether in holds a run of at least n base64 characters.
+func hasLongBase64Run(in string, n int) bool {
+	run := 0
+	for i := 0; i < len(in); i++ {
+		c := in[i]
+		if isAlnum(c) || c == '+' || c == '/' || c == '=' || c == '-' || c == '_' {
+			if run++; run >= n {
+				return true
+			}
+		} else {
+			run = 0
+		}
+	}
+	return false
+}
+
+// Fixed base64 forms of "-----BEGIN " and of {"auths" at the three byte alignments, so a PEM
+// file or a Docker config embedded in base64 (a Kubernetes Secret's data) is found without decoding.
+var (
+	b64PEM    = [...]string{"LS0tLS1CRU", "0tLS0tQkVH", "tLS0tLUJFR"}
+	b64Docker = [...]string{"eyJhdXRocy", "siYXV0aHMi", "7ImF1dGhzI"}
+)
+
+// findEncodedBlobs appends a span from each base64 PEM or docker-config prefix to the end of its
+// base64 run.
+func findEncodedBlobs(in string, spans []span) []span {
+	if !hasLongBase64Run(in, 40) {
+		return spans
+	}
+	for _, set := range []struct {
+		prefixes []string
+		kind     Kind
+	}{{b64PEM[:], KindPrivateKey}, {b64Docker[:], KindCredential}} {
+		for _, p := range set.prefixes {
+			for from := 0; ; {
+				i := strings.Index(in[from:], p)
+				if i < 0 {
+					break
+				}
+				a := from + i
+				e := a + len(p)
+				for e < len(in) && (isAlnum(in[e]) || in[e] == '+' || in[e] == '/' || in[e] == '=' || in[e] == '-' || in[e] == '_') {
+					e++
+				}
+				spans = append(spans, span{a, e, set.kind})
+				from = e
+			}
+		}
+	}
+	return spans
 }
