@@ -21,8 +21,9 @@ import (
 
 // An org MCP server's approval-gated tools are offered on a second gateway target,
 // "<org>-<server>-ask", that points at koinon-api's proxy and holds no credential (ADR 0042,
-// package mcpask). The kind e2e step for MC1 relies on it end to end; this is the same wiring
-// against the real agentgateway, without a cluster. Already covered for this driver by the shared
+// package mcpask). The kind e2e step for MC1 relies on it end to end. This guards the gateway layer
+// only: it builds the state and the grants by hand, in the shape the reconciler renders
+// (internal/reconciler/mcp.go), so it does not check that the reconciler computes them. Already covered for this driver by the shared
 // G1 suite (internal/gateway/gatewaytest): the credential injected at the gateway and not
 // settable by the agent, the agent's key never forwarded, the key refused in any header but
 // Authorization; and by the reload specs above: the prober key never reaching an upstream.

@@ -308,9 +308,15 @@ var _ = Describe("Server", func() {
 		res, text := call(ctx, session(ctx, f.agentID), p.ParkingTool, json.RawMessage(args))
 		Expect(res.IsError).To(BeFalse(), text)
 
-		want, err := p.Branch("helper", f.agent.ID.String())
+		// Spelled out by hand, not through the code under test: koinon/<slug of the display name>-<last
+		// eight hex digits of the agent ID>/<suggestion without its koinon/ prefix>. A change to the
+		// naming rule must fail here and be made in test/e2e's expectation deliberately.
+		hexID := strings.ReplaceAll(f.agent.ID.String(), "-", "")
+		want := "koinon/helper-" + hexID[len(hexID)-8:] + "/add-hello-md"
+		Expect(p.Suggestion).To(Equal("koinon/add-hello-md"))
+		got, err := p.Branch("helper", f.agent.ID.String())
 		Expect(err).NotTo(HaveOccurred())
-		Expect(want).To(HavePrefix(githubtools.BranchPrefix + githubtools.AgentNamespace("helper", f.agent.ID.String()) + "/"))
+		Expect(got).To(Equal(want), "the e2e expects the same branch")
 		rows, err := q.ListApprovalRequestsForTask(ctx, store.ListApprovalRequestsForTaskParams{OrgID: f.org.ID, TaskID: f.run.TaskID})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rows).To(HaveLen(1))

@@ -35,6 +35,7 @@ import (
 	"github.com/stateracloud/koinon/internal/otlpauth"
 	"github.com/stateracloud/koinon/internal/prices"
 	"github.com/stateracloud/koinon/internal/providerusage"
+	"github.com/stateracloud/koinon/internal/testing/containerhost"
 	"github.com/stateracloud/koinon/internal/testing/fakemodel"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/test/scenarios"
@@ -205,9 +206,9 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		DeferCleanup(func(ctx context.Context) error { return testcontainers.TerminateContainer(ctr) })
 		Expect(err).NotTo(HaveOccurred())
 
-		llmURL, err = ipv4Endpoint(ctx, ctr, "4000/tcp")
+		llmURL, err = containerhost.Endpoint(ctx, ctr, "4000/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
-		statsURL, err := ipv4Endpoint(ctx, ctr, "15020/tcp")
+		statsURL, err := containerhost.Endpoint(ctx, ctr, "15020/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
 		driver = &standalone.Driver{
 			Options: options, Deliverer: file,
@@ -605,11 +606,3 @@ var _ = Describe("agentgateway v1.7.0 exporting its access log to the ledger", O
 		}, SpecTimeout(2*time.Minute))
 	})
 })
-
-// ipv4Endpoint is the container port's URL on the IPv4 loopback. "localhost" resolves to ::1 first,
-// and Docker runtimes that publish the port on both families (OrbStack) accept a connection there
-// and reset it when the process listens on IPv4 only (#290).
-func ipv4Endpoint(ctx context.Context, ctr *testcontainers.DockerContainer, port string) (string, error) {
-	u, err := ctr.PortEndpoint(ctx, port, "http")
-	return strings.Replace(u, "//localhost:", "//127.0.0.1:", 1), err
-}

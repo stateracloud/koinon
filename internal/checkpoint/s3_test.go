@@ -17,6 +17,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/stateracloud/koinon/internal/checkpoint"
+	"github.com/stateracloud/koinon/internal/testing/containerhost"
 )
 
 // seaweedImage is the S3 server of the spike (ADR 0032): plain HTTP, path-style, no checksum
@@ -57,15 +58,9 @@ var _ = Describe("Writer on S3", Ordered, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func(ctx context.Context) error { return ctr.Terminate(ctx) })
-		host, err := ctr.Host(sctx)
+		// SeaweedFS listens on IPv4 only (#290): dial the IPv4 loopback.
+		host, err := containerhost.Host(sctx, ctr)
 		Expect(err).NotTo(HaveOccurred())
-		// SeaweedFS listens on IPv4 only. Docker runtimes that publish the port on both families
-		// (OrbStack does) accept a connection to [::1]:port and then reset it, and "localhost"
-		// resolves to ::1 first, so the first request failed with ECONNRESET for the whole minute.
-		// Dial the IPv4 loopback explicitly.
-		if host == "localhost" {
-			host = "127.0.0.1"
-		}
 		port, err := ctr.MappedPort(sctx, "8333/tcp")
 		Expect(err).NotTo(HaveOccurred())
 		s3 = checkpoint.S3{
