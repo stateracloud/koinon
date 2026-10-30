@@ -18,6 +18,10 @@ IMAGE=${KOINON_OPENSHELL_IMAGE:-koinon/spike-probe:1}
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 
+# Ambient settings must not point the suite's cluster-side cases at another cluster.
+unset KOINON_ESCAPE_NAMESPACE KOINON_ESCAPE_KUBECONFIG
+export KOINON_ESCAPE_KUBE_CONTEXT="$CTX"
+
 kind get clusters 2>/dev/null | grep -qx "$CLUSTER" || { echo "no kind cluster $CLUSTER: run 'make dev-kind-up' first" >&2; exit 1; }
 K=(kubectl --context "$CTX")
 "${K[@]}" -n openshell get secret openshell-client-tls >/dev/null ||
@@ -45,6 +49,8 @@ for _ in $(seq 1 30); do
   kill -0 "$pf" 2>/dev/null || { cat "$tmp/pf.log" >&2; exit 1; }
   sleep 1
 done
+# A listener that is not our port-forward (something else on $PORT) must not pass for it.
+kill -0 "$pf" 2>/dev/null || { echo "port-forward to svc/openshell failed (is $PORT in use?):" >&2; cat "$tmp/pf.log" >&2; exit 1; }
 
 echo "== escape suite, OpenShell cases"
 cd "$root"
