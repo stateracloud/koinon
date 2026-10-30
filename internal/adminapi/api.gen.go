@@ -713,12 +713,21 @@ type McpServerUpdateTransport string
 
 // McpTool defines model for McpTool.
 type McpTool struct {
-	// ContentHash SHA-256 of the description and input schema as last published.
-	ContentHash string    `json:"contentHash"`
-	Description string    `json:"description"`
-	FirstSeenAt time.Time `json:"firstSeenAt"`
-	LastSeenAt  time.Time `json:"lastSeenAt"`
-	Name        string    `json:"name"`
+	// ContentHash SHA-256 of the sanitised description and input schema as last published.
+	ContentHash string `json:"contentHash"`
+	Description string `json:"description"`
+
+	// DescriptionCapped The description, or a description in the input schema, was cut to its length cap.
+	DescriptionCapped bool `json:"descriptionCapped"`
+
+	// DescriptionCleaned Control, invisible or tag characters were removed, or harness-lookalike tags escaped, in the description or the input schema's strings.
+	DescriptionCleaned bool `json:"descriptionCleaned"`
+
+	// DescriptionOriginalLength Length in characters of the description as the server published it. `description` is the sanitised text.
+	DescriptionOriginalLength int       `json:"descriptionOriginalLength"`
+	FirstSeenAt               time.Time `json:"firstSeenAt"`
+	LastSeenAt                time.Time `json:"lastSeenAt"`
+	Name                      string    `json:"name"`
 
 	// Present False once the server stopped listing the tool.
 	Present bool `json:"present"`

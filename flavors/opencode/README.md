@@ -79,7 +79,13 @@ mechanism for a flavor that needs one).
   `packages/core/src/config/plugin/instruction.ts:39`), and Koinon's template instructions tell the
   agent to read it, `CONTRIBUTING.md` and the `README` before changing code
   (`templates/repo-helper.yaml`). OpenCode still attaches an `AGENTS.md` from a subdirectory when
-  the agent reads a file there (`packages/core/src/tool/plugin/read.ts`).
+  the agent reads a file there (`packages/core/src/tool/plugin/read.ts:82-103`, issue #267).
+  There is no switch in 2.2.0: the read tool walks up from the file to the project root, exclusive,
+  and calls `SessionInstructions.load` unconditionally (`session/instructions.ts`), which publishes the
+  file's text as a synthetic `Instructions from: <path>` message. Nothing in that path reads a flag,
+  an environment variable or the configuration. A repository's subdirectory file is therefore repository text at instruction weight.
+  Koinon does not patch OpenCode. It is a requirement on koinon-harness (#249): subdirectory
+  `AGENTS.md` files are returned as data inside the read result, or not at all, never as instructions.
 
 ### Global config directory
 
