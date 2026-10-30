@@ -156,6 +156,22 @@ Lessons that cost time more than once. They apply to humans and agents alike.
   alias (`/bin/ls`, not an `ls` that is really `eza`), and do not assume your human's aliases or
   interactive shell setup exist.
 
+## Agent skills
+
+### Issue tracker
+
+GitHub issues in `stateracloud/koinon` on the org board; work is taken by claim (`hack/claim.sh`).
+See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five triage roles map onto Koinon's labels (`ready-for-agent` is `agent-ok`, `ready-for-human`
+is `human-only`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` at the root and `docs/adr/`. See `docs/agents/domain.md`.
+
 ## Principles
 
 - Favor the long-term, sustainable design: build foundations generic enough to extend, and take no
