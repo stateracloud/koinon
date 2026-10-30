@@ -30,6 +30,7 @@ import (
 	"github.com/stateracloud/koinon/internal/gateway/gatewaytest"
 	"github.com/stateracloud/koinon/internal/gateway/standalone"
 	"github.com/stateracloud/koinon/internal/modelformat"
+	"github.com/stateracloud/koinon/internal/testing/containerhost"
 )
 
 // AgentgatewayImage is the agentgateway release Koinon targets (ADR 0048).
@@ -115,10 +116,10 @@ func startStandalone(ctx context.Context, hostPorts []int, files map[string]stri
 		b, _ := io.ReadAll(l)
 		return string(b)
 	}
-	if r.URL, err = ctr.PortEndpoint(ctx, "4000/tcp", "http"); err != nil {
+	if r.URL, err = containerhost.Endpoint(ctx, ctr, "4000/tcp", "http"); err != nil {
 		return nil, err
 	}
-	if r.statsURL, err = ctr.PortEndpoint(ctx, "15020/tcp", "http"); err != nil {
+	if r.statsURL, err = containerhost.Endpoint(ctx, ctr, "15020/tcp", "http"); err != nil {
 		return nil, err
 	}
 	r.driver = &standalone.Driver{
@@ -392,7 +393,7 @@ var _ = Describe("agentgateway v1.7.0 anthropic-version header (ADR 0069)", func
 		)
 		DeferCleanup(func(ctx context.Context) error { return testcontainers.TerminateContainer(ctr) })
 		Expect(err).NotTo(HaveOccurred())
-		url, err := ctr.PortEndpoint(ctx, "4000/tcp", "http")
+		url, err := containerhost.Endpoint(ctx, ctr, "4000/tcp", "http")
 		Expect(err).NotTo(HaveOccurred())
 
 		for _, name := range []string{"pinned", "unpinned"} {

@@ -113,6 +113,7 @@ type Querier interface {
 	// Platform-wide, for the reconciler's koinon_reconciler_sandboxes gauge. It returns counts only,
 	// no org-owned row, so it takes no @org_id.
 	CountAgentSandboxesByState(ctx context.Context) ([]CountAgentSandboxesByStateRow, error)
+	CountEnabledTraceDestinations(ctx context.Context, orgID pgtype.UUID) (int64, error)
 	// Questions of the run that still wait for a person (asked or open).
 	CountOpenQuestionsForRun(ctx context.Context, arg CountOpenQuestionsForRunParams) (int64, error)
 	// Recreations in the last 24 hours, since the agent was last resumed: ADR 0054's loop guard,
@@ -206,6 +207,9 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// pending -> approved | denied by a human. No row: already decided.
 	DecideApprovalRequest(ctx context.Context, arg DecideApprovalRequestParams) (ApprovalRequest, error)
+	// Stores whether the run is traced, once: a run decided earlier keeps its decision (a resume after a
+	// park claims the run again). Returns the stored decision.
+	DecideRunTraced(ctx context.Context, arg DecideRunTracedParams) (bool, error)
 	// The provider had no figure yet (or failed): try again later.
 	DeferSpendSettlement(ctx context.Context, arg DeferSpendSettlementParams) error
 	DeleteAgentMCPServers(ctx context.Context, arg DeleteAgentMCPServersParams) error
@@ -221,14 +225,17 @@ type Querier interface {
 	DeleteModel(ctx context.Context, arg DeleteModelParams) (int64, error)
 	// A nonce only matters while its token could still be good (5 minutes); older ones go.
 	DeleteOldUploadNonces(ctx context.Context, orgID pgtype.UUID) (int64, error)
+	DeletePlatformTraceDestination(ctx context.Context) (int64, error)
 	DeleteProvider(ctx context.Context, arg DeleteProviderParams) (int64, error)
 	DeleteSpendSettlement(ctx context.Context, arg DeleteSpendSettlementParams) error
 	// Drops IdP-sourced memberships from this issuer whose group the user no
 	// longer has, or whose org stopped using the IdP.
 	DeleteStaleGroupMemberships(ctx context.Context, arg DeleteStaleGroupMembershipsParams) error
+	DeleteTraceDestination(ctx context.Context, arg DeleteTraceDestinationParams) (int64, error)
 	DisableModelsOfDisabledProviders(ctx context.Context, arg DisableModelsOfDisabledProvidersParams) error
 	DisableModelsOfProvider(ctx context.Context, arg DisableModelsOfProviderParams) error
 	EnableModel(ctx context.Context, arg EnableModelParams) error
+	EndRunTurn(ctx context.Context, arg EndRunTurnParams) (RunTurn, error)
 	// pending -> expired once expires_at has passed (ADR 0049: 7 days).
 	ExpirePendingApprovalRequests(ctx context.Context, orgID pgtype.UUID) ([]ApprovalRequest, error)
 	// Saved work is kept for 14 days; the sealed files go with it.
@@ -369,10 +376,13 @@ type Querier interface {
 	// An org's recorded USD spend since @since (the start of the calendar month in UTC), for its
 	// monthly cap and the platform ceiling: the charges only.
 	GetOrgSpendSince(ctx context.Context, arg GetOrgSpendSinceParams) (string, error)
+	GetOrgTraceSettings(ctx context.Context, orgID pgtype.UUID) (OrgTraceSetting, error)
 	GetOrgWorkspace(ctx context.Context, orgID pgtype.UUID) (OrgWorkspace, error)
 	// The run an agent's key is serving now: the starting or running run (one per agent, ADR 0009).
 	// Its spend limit is the "run" level of the key's net limit (ADR 0041, decision 5). No row: none.
 	GetOwnedRunOfAgent(ctx context.Context, arg GetOwnedRunOfAgentParams) (Run, error)
+	GetPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
+	GetPlatformTraceSettings(ctx context.Context) (PlatformTraceSetting, error)
 	GetPriceOverride(ctx context.Context, arg GetPriceOverrideParams) (PriceOverride, error)
 	GetProvider(ctx context.Context, arg GetProviderParams) (Provider, error)
 	GetQuestion(ctx context.Context, arg GetQuestionParams) (Question, error)
@@ -381,6 +391,9 @@ type Querier interface {
 	GetRunEventBySource(ctx context.Context, arg GetRunEventBySourceParams) (RunEvent, error)
 	// The run a saved-work upload names, if it still owns the sandbox (starting or running) under that epoch.
 	GetRunForUpload(ctx context.Context, arg GetRunForUploadParams) (Run, error)
+	GetRunTraced(ctx context.Context, arg GetRunTracedParams) (pgtype.Bool, error)
+	GetRunTurn(ctx context.Context, arg GetRunTurnParams) (RunTurn, error)
+	GetRunTurnByTrace(ctx context.Context, arg GetRunTurnByTraceParams) (RunTurn, error)
 	// What a run has used, from its ledger entries: one entry per model request through the agent's
 	// key (the harness's own title, summary and compaction calls included), their settled cost, and
 	// the tokens by type. input_tokens includes the cache reads and writes (the gateway's convention);
@@ -412,6 +425,7 @@ type Querier interface {
 	// other runs; messages after it are new for the next run.
 	GetTaskPromptedThrough(ctx context.Context, arg GetTaskPromptedThroughParams) (int64, error)
 	GetTemplate(ctx context.Context, id pgtype.UUID) (Template, error)
+	GetTraceDestination(ctx context.Context, arg GetTraceDestinationParams) (TraceDestination, error)
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (User, error)
 	GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error)
 	GrantPlatformAdmin(ctx context.Context, arg GrantPlatformAdminParams) error
@@ -441,7 +455,14 @@ type Querier interface {
 	InsertMCPTool(ctx context.Context, arg InsertMCPToolParams) (McpTool, error)
 	// One notification per user, kind and window: a repeat does nothing.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error)
+	// InsertRunTurn for the run's current owner only (the epoch matches and the run is starting or
+	// running), so a fenced replica cannot add a turn. A turn row the previous owner left open (it died or
+	// lost the run) is ended as interrupted in the same statement, before the new one starts.
+	InsertOwnedRunTurn(ctx context.Context, arg InsertOwnedRunTurnParams) (RunTurn, error)
 	InsertPriceOverride(ctx context.Context, arg InsertPriceOverrideParams) (PriceOverride, error)
+	// Starts the run's next turn with the given trace ID. seq comes from the run's counter, taken under
+	// the run's row lock (the way run_events.seq does), so concurrent writers cannot pick the same number.
+	InsertRunTurn(ctx context.Context, arg InsertRunTurnParams) (RunTurn, error)
 	InsertSandboxIncident(ctx context.Context, arg InsertSandboxIncidentParams) (SandboxIncident, error)
 	InsertSavedWork(ctx context.Context, arg InsertSavedWorkParams) (SavedWork, error)
 	// Records one request of an agent (principal 'agent', agent_id set) or of a system key of the org
@@ -454,6 +475,7 @@ type Querier interface {
 	InsertSpendEntryRevision(ctx context.Context, arg InsertSpendEntryRevisionParams) error
 	// Queues a provisional entry for the settler. Without a response ID it is a hold until the deadline.
 	InsertSpendSettlement(ctx context.Context, arg InsertSpendSettlementParams) error
+	InsertTraceDestination(ctx context.Context, arg InsertTraceDestinationParams) (TraceDestination, error)
 	// Zero rows: the nonce was used before (a replay).
 	InsertUploadNonce(ctx context.Context, arg InsertUploadNonceParams) (int64, error)
 	IsActiveQuestionRecipient(ctx context.Context, arg IsActiveQuestionRecipientParams) (bool, error)
@@ -630,6 +652,12 @@ type Querier interface {
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
+	// The model calls of a run in a turn's window, for the trace router's model-call spans (ADR 0074,
+	// decision 3): the ledger's rows with the provider type and ID of the model the agent asked for. The
+	// model name is the one the agent used, with or without the org slug the gateway prefixes. A row at or
+	// after the next turn's start belongs to that turn, so a boundary row counts once.
+	ListRunModelCalls(ctx context.Context, arg ListRunModelCallsParams) ([]ListRunModelCallsRow, error)
+	ListRunTurns(ctx context.Context, arg ListRunTurnsParams) ([]RunTurn, error)
 	ListRunsForTask(ctx context.Context, arg ListRunsForTaskParams) ([]Run, error)
 	// Every enabled provider of the org with its enabled models, for the gateway.
 	ListServedCatalog(ctx context.Context, orgID pgtype.UUID) ([]ListServedCatalogRow, error)
@@ -652,6 +680,11 @@ type Querier interface {
 	ListTasksWithParkedRunOfAgent(ctx context.Context, arg ListTasksWithParkedRunOfAgentParams) ([]pgtype.UUID, error)
 	// Tasks with a queued or parked run of the agent: they wait while the agent is unhealthy.
 	ListTasksWithWaitingRunOfAgent(ctx context.Context, arg ListTasksWithWaitingRunOfAgentParams) ([]pgtype.UUID, error)
+	// SPDX-License-Identifier: Apache-2.0
+	//
+	// Run traces (rc.9, ADR 0074): destinations, content levels, sampling, the traced flag of a run and
+	// the turns of a run. Every query on an org-owned table takes @org_id (TestQueriesAreOrgScoped).
+	ListTraceDestinations(ctx context.Context, orgID pgtype.UUID) ([]TraceDestination, error)
 	// The servers an agent may use that are down or disabled right now, for the note agentd gives the
 	// agent when a session starts.
 	ListUnavailableMCPServersOfAgent(ctx context.Context, arg ListUnavailableMCPServersOfAgentParams) ([]ListUnavailableMCPServersOfAgentRow, error)
@@ -674,10 +707,17 @@ type Querier interface {
 	// principal and sync IdP groups at login), always keyed by user_id.
 	// Serialises bootstrap across API replicas for the rest of the transaction.
 	LockBootstrap(ctx context.Context) error
+	LockPlatformTraceDestination(ctx context.Context) (PlatformTraceDestination, error)
+	// Reads the ceiling and holds the row until the transaction ends, so an org's level and a lowering
+	// of the ceiling cannot pass each other.
+	LockPlatformTraceSettings(ctx context.Context) (PlatformTraceSetting, error)
 	LockQuestion(ctx context.Context, arg LockQuestionParams) (Question, error)
 	// Serialises a park decision (agentd) with the resolution of the run's
 	// approvals (the executor), so neither misses the other.
 	LockRun(ctx context.Context, arg LockRunParams) (Run, error)
+	// Lowers every org above a new platform ceiling to it, and the platform copies that follow, in the
+	// caller's transaction. Returns the orgs it changed with their levels before, for the audit log.
+	LowerOrgTraceLevels(ctx context.Context, arg LowerOrgTraceLevelsParams) ([]LowerOrgTraceLevelsRow, error)
 	MarkAgentUnhealthy(ctx context.Context, arg MarkAgentUnhealthyParams) (Agent, error)
 	// Records that the outcomes were sent to the agent.
 	MarkApprovalRequestsDelivered(ctx context.Context, arg MarkApprovalRequestsDeliveredParams) (int64, error)
@@ -740,11 +780,17 @@ type Querier interface {
 	// One probe's result. Three failures in a row make a server unhealthy; one success makes it
 	// healthy again. health_since moves only when the health changes.
 	RecordMCPServerProbe(ctx context.Context, arg RecordMCPServerProbeParams) (McpServer, error)
+	RecordPlatformTraceDestinationError(ctx context.Context, arg RecordPlatformTraceDestinationErrorParams) error
+	RecordPlatformTraceDestinationSuccess(ctx context.Context) error
 	// One failed delivery of the notification. At @give_up failures the question counts as notified
 	// (notified_at is set), so the sweep stops re-sending it; the caller logs that it gave up.
 	RecordQuestionNotifyFailure(ctx context.Context, arg RecordQuestionNotifyFailureParams) (Question, error)
 	// One failed delivery of the reminder. At @give_up failures the question counts as reminded.
 	RecordQuestionRemindFailure(ctx context.Context, arg RecordQuestionRemindFailureParams) (Question, error)
+	// The router's health: a batch failed, or spans were dropped. The message is secret-free.
+	RecordTraceDestinationError(ctx context.Context, arg RecordTraceDestinationErrorParams) error
+	// The router's health: a batch was accepted.
+	RecordTraceDestinationSuccess(ctx context.Context, arg RecordTraceDestinationSuccessParams) error
 	RecordUserLogin(ctx context.Context, arg RecordUserLoginParams) error
 	ReenableUIMCPServers(ctx context.Context, orgID pgtype.UUID) error
 	// Re-enable UI models whose provider is enabled and that no declared model shadows.
@@ -835,6 +881,10 @@ type Querier interface {
 	SetOrgMonthlyCap(ctx context.Context, arg SetOrgMonthlyCapParams) (SetOrgMonthlyCapRow, error)
 	// Sets or clears (NULL) the platform ceiling of an org, keeping its monthly cap.
 	SetOrgPlatformCeiling(ctx context.Context, arg SetOrgPlatformCeilingParams) (SetOrgPlatformCeilingRow, error)
+	SetPlatformTraceCeiling(ctx context.Context, arg SetPlatformTraceCeilingParams) (PlatformTraceSetting, error)
+	// Records the result of a re-test, only if the configuration is the one that was tested. A deleted
+	// destination matches nothing and is not brought back.
+	SetPlatformTraceDestinationTest(ctx context.Context, arg SetPlatformTraceDestinationTestParams) (int64, error)
 	SetProviderDisabled(ctx context.Context, arg SetProviderDisabledParams) error
 	// Records, before the prompt is sent, the task timeline seq through which
 	// the task's messages are in it.
@@ -857,6 +907,8 @@ type Querier interface {
 	SetTaskStateFrom(ctx context.Context, arg SetTaskStateFromParams) (Task, error)
 	// Stores the agent's end-of-turn summary. Fenced by the run epoch like SetTaskHarnessSession.
 	SetTaskSummary(ctx context.Context, arg SetTaskSummaryParams) (int64, error)
+	// Records the result of a re-test, only if the configuration is the one that was tested.
+	SetTraceDestinationTest(ctx context.Context, arg SetTraceDestinationTestParams) (int64, error)
 	// Makes a provisional entry final: with the provider's usage and cost, or (expired) as it is. The
 	// reserve is released either way. No row: the entry was not provisional (settled already).
 	SettleSpendEntry(ctx context.Context, arg SettleSpendEntryParams) (pgtype.UUID, error)
@@ -865,6 +917,9 @@ type Querier interface {
 	ShadowUIModels(ctx context.Context, arg ShadowUIModelsParams) error
 	// A declared provider of this name now exists: disable the UI ones.
 	ShadowUIProviders(ctx context.Context, arg ShadowUIProvidersParams) error
+	// Reads the ceiling and keeps it from being lowered until the transaction ends, without blocking
+	// other readers of it (org settings writes).
+	ShareLockPlatformTraceSettings(ctx context.Context) (PlatformTraceSetting, error)
 	// Spend of agents per model since @since, with estimated usage kept apart. System checks are
 	// reported by SpendSystemSince.
 	SpendReport(ctx context.Context, arg SpendReportParams) ([]SpendReportRow, error)
@@ -911,12 +966,21 @@ type Querier interface {
 	// api_key is written only when @set_api_key is true (the patch sets it): the caller read the row
 	// without a lock, and `koinon-api keys rewrap` or `reencrypt` may have replaced the envelope since.
 	UpdateProvider(ctx context.Context, arg UpdateProviderParams) (Provider, error)
+	// Replaces the settings of a destination. Applies only to the version the caller read
+	// (@expected_version), so two admins editing at once do not overwrite each other's secrets, and bumps
+	// config_version. @set_test says the change was tested and the test columns are recorded; otherwise the
+	// previous test result stays. The router's health columns stay.
+	UpdateTraceDestination(ctx context.Context, arg UpdateTraceDestinationParams) (TraceDestination, error)
 	UpsertGroupMapping(ctx context.Context, arg UpsertGroupMappingParams) error
 	// Grants the roles of every mapping that matches one of the user's groups,
 	// in orgs whose identity mode uses the IdP.
 	UpsertGroupMemberships(ctx context.Context, arg UpsertGroupMembershipsParams) error
 	UpsertOrgSettings(ctx context.Context, arg UpsertOrgSettingsParams) (OrgSetting, error)
+	UpsertOrgTraceSettings(ctx context.Context, arg UpsertOrgTraceSettingsParams) (OrgTraceSetting, error)
 	UpsertOrgWorkspace(ctx context.Context, arg UpsertOrgWorkspaceParams) (OrgWorkspace, error)
+	// The platform destination has one writer at a time: a platform admin. A change bumps config_version.
+	// @set_test as for UpdateTraceDestination.
+	UpsertPlatformTraceDestination(ctx context.Context, arg UpsertPlatformTraceDestinationParams) (PlatformTraceDestination, error)
 	// The latest echo check of a provider replaces the one before it.
 	UpsertProviderEchoCheck(ctx context.Context, arg UpsertProviderEchoCheckParams) (ProviderEchoCheck, error)
 	// SPDX-License-Identifier: Apache-2.0

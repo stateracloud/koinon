@@ -125,6 +125,9 @@ function Shell({ who }: { who: WhoAmIResponse }) {
             <Link to="/settings/budgets" className={navLink} activeProps={active}>
               Budgets
             </Link>
+            <Link to="/settings/observability" className={navLink} activeProps={active}>
+              Observability
+            </Link>
             <Link to="/settings/tokens" className={navLink} activeProps={active}>
               API tokens
             </Link>
@@ -137,6 +140,9 @@ function Shell({ who }: { who: WhoAmIResponse }) {
             </h2>
             <Link to="/platform/budgets" className={navLink} activeProps={active}>
               Budget ceilings
+            </Link>
+            <Link to="/platform/observability" className={navLink} activeProps={active}>
+              Observability
             </Link>
           </nav>
         )}
