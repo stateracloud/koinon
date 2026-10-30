@@ -173,6 +173,8 @@ type Config struct {
 	KeepLeaseOnShutdown bool
 	// Checkpoints turns on home checkpoints (checkpoint.go); nil leaves them off.
 	Checkpoints *Checkpoints
+	// Tracing turns on run spans (ADR 0074); nil leaves them off.
+	Tracing *Tracing
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 	// Metrics receives the pool's metrics; nil keeps them unexported.
@@ -246,6 +248,11 @@ func (c *Config) defaults() error {
 	if c.Metrics == nil {
 		c.Metrics = NewMetrics(nil)
 	}
+	if c.Tracing != nil {
+		if err := c.Tracing.defaults(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -266,6 +273,8 @@ type Pool struct {
 	// saveSem lets one save run at a time: a bundle is up to 50 MB.
 	saveSem chan struct{}
 	http    *http.Client
+	// sink exports run spans; nil when tracing is off.
+	sink *traceSink
 }
 
 // New returns a pool. Run starts it.
@@ -273,10 +282,18 @@ func New(db *pgxpool.Pool, backend Backend, cfg Config) (*Pool, error) {
 	if err := cfg.defaults(); err != nil {
 		return nil, err
 	}
-	return &Pool{
+	p := &Pool{
 		db: db, q: store.New(db), backend: backend, cfg: cfg, log: cfg.Logger,
 		saveSem: make(chan struct{}, 1), http: &http.Client{Timeout: cfg.SaveTimeout},
-	}, nil
+	}
+	if cfg.Tracing != nil {
+		sink, err := newTraceSink(cfg.Tracing, cfg.Metrics)
+		if err != nil {
+			return nil, fmt.Errorf("agentd: tracing: %w", err)
+		}
+		p.sink = sink
+	}
+	return p, nil
 }
 
 // Run drives runs until ctx ends, then waits for the workers to stop.
@@ -289,6 +306,12 @@ func (p *Pool) Run(ctx context.Context) error {
 		wg.Go(func() { p.work(ctx, p.cfg.OwnerID+"/"+strconv.Itoa(i)) })
 	}
 	wg.Wait()
+	if p.sink != nil {
+		// Spans of runs that just ended; bounded, so a dead receiver cannot hold the shutdown.
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.cfg.Tracing.ExportTimeout+time.Second)
+		p.sink.shutdown(sctx)
+		cancel()
+	}
 	return nil
 }
 

@@ -77,6 +77,10 @@ type harness struct {
 	// onPrompt, if set, may answer a prompt itself (for example by calling Koinon's tools as
 	// the agent would): it returns the reply and true, or false to fall through.
 	onPrompt func(ctx context.Context, text string) (string, bool)
+	// script, if set, may drive a prompt itself with session updates (tool calls, thinking): it
+	// returns true when it answered, and the turn then ends with end_turn.
+	metas  []map[string]any
+	script func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool
 	// modelFault, if set, runs before every prompt is answered, as the harness's request to its
 	// model would: a non-nil error is what the prompt fails with.
 	modelFault func(ctx context.Context, text string) error
@@ -136,6 +140,19 @@ func (h *harness) command(ctx context.Context, args []string, stdin io.Reader, s
 	case <-p.crash:
 		return 137
 	}
+}
+
+func (h *harness) scriptHook() func(ctx context.Context, text string, say func(sdk.SessionUpdate) error) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.script
+}
+
+// promptMetas are the _meta of the prompts that arrived, in order.
+func (h *harness) promptMetas() []map[string]any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.metas)
 }
 
 func (h *harness) selectedModels() []string {
@@ -304,6 +321,7 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	}
 	p.h.mu.Lock()
 	p.h.prompts = append(p.h.prompts, text)
+	p.h.metas = append(p.h.metas, r.Meta)
 	p.h.sessions[string(r.SessionId)] = append(p.h.sessions[string(r.SessionId)], sdk.UpdateUserMessageText(text))
 	firstCrash := strings.Contains(text, markCrash) && !p.h.crashed
 	if firstCrash {
@@ -331,6 +349,11 @@ func (p *process) Prompt(ctx context.Context, r sdk.PromptRequest) (sdk.PromptRe
 	if modelFault != nil {
 		if err := modelFault(ctx, text); err != nil {
 			return sdk.PromptResponse{}, err
+		}
+	}
+	if script := p.h.scriptHook(); script != nil {
+		if script(ctx, text, func(u sdk.SessionUpdate) error { return p.say(ctx, id, u) }) {
+			return end, nil
 		}
 	}
 	if onPrompt != nil {
