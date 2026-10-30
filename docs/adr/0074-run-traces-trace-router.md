@@ -700,3 +700,11 @@ rc.9. The rc.7 re-run showed that models behave very differently, and traces sho
 tool calls and each turn's cost. rc.9 ships option C as amended above: agentd's spans, model-call
 spans built from the ledger, destinations with test-before-save, the router's queues, and the content
 levels with the scrubber. The spikes and option D (the gateway's own spans) still follow v0.1.0.
+
+## Amendment (2026-10-30): "session" means the harness session
+
+Wording only, no decision change. In Koinon's vocabulary (GLOSSARY.md) a **session** is the harness
+session: one per task, spanning its runs, reloaded by each run (ADR 0029, 0051). Decision 2's
+"The session is the run and its task" names something else: the **trace session**, the grouping a
+tracing backend builds from `session.id` and `gen_ai.conversation.id`, which Koinon sets to the run
+ID. Read "session" in this ADR's trace attributes as "trace session".
