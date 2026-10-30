@@ -557,7 +557,7 @@ var _ = Describe("Service", func() {
 		Expect(st.SampleRate).To(Equal(1.0), "an org that never set one is sampled in full")
 	})
 
-	It("skips a destination whose credentials cannot be opened and says so on its health", func(ctx SpecContext) {
+	It("lists a destination whose credentials cannot be opened as unreadable and says so on its health", func(ctx SpecContext) {
 		bad, err := svc.Create(ctx, org, actor, user, own, langfuse("bad"))
 		Expect(err).NotTo(HaveOccurred())
 		_, err = svc.Create(ctx, org, actor, user, own, langfuse("good"))
@@ -566,8 +566,14 @@ var _ = Describe("Service", func() {
 		Expect(err).NotTo(HaveOccurred())
 		routes, err := svc.Routes(ctx, org)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(routes).To(HaveLen(1))
-		Expect(routes[0].Name).To(Equal("good"))
+		Expect(routes).To(HaveLen(2))
+		byName := map[string]tracedest.Route{}
+		for _, r := range routes {
+			byName[r.Name] = r
+		}
+		Expect(byName["good"].Unreadable).To(BeFalse())
+		Expect(byName["bad"].Unreadable).To(BeTrue(), "listed, so it is not mistaken for a deleted destination")
+		Expect(byName["bad"].Destination.Secrets).To(BeEmpty())
 		got, _ := svc.Get(ctx, org, bad.ID)
 		Expect(got.Health.LastError).To(ContainSubstring("cannot be opened"))
 	})

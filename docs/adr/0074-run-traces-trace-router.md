@@ -653,6 +653,29 @@ router amendment above.
   newer one. A held root settles only after its window (turn end + 2 s) has closed, and the poll interval
   is never shorter than that grace.
 
+### Third review (2026-10-30)
+
+- A backend's `rejected_spans` is clamped to the batch before it is counted or shared among the orgs.
+- **Memory.** The byte budgets derive from the container's memory limit (`KOINON_MEMORY_LIMIT_BYTES`):
+  queues 20%, spans waiting for attribution 5%, held roots 3%, requests being read and decoded 8% (128,
+  32, 16 and 64 MiB without a limit), each overridable with `--trace-queue-bytes`, `--trace-intake-bytes`,
+  `--trace-held-bytes` and `--trace-request-bytes`. Bytes are the encoded size plus 100 bytes for every
+  attribute, event and link, which approximates the decoded objects. A request charges its encoded
+  size, then four times its decompressed size before decoding; it is refused with 503 and `Retry-After`
+  when the budget is full, or 413 when it could never fit. The body buffer is sized from
+  `Content-Length`. Each refusal says why and is counted in
+  `koinon_api_trace_requests_rejected_total{reason}`.
+- **Isolation (decision 7).** Each queue has an equal share of the queue budget (at least 256 KiB) and
+  drops only its own oldest spans beyond it; in-flight bytes count toward the share. A batch that failed
+  goes back to the front of its queue for its backoff or the breaker's pause instead of being held
+  outside the budget, so a destination that is down loses its own oldest spans and nothing else. When a
+  new queue shrinks the shares, queues above theirs trim themselves.
+- Attribution reads share one read per key and remember a failure for a second; the turn row of a held
+  root is read in the sweep, off the intake worker. A read that panics gives its waiters an error.
+- A destination whose stored credentials cannot be opened is listed as `Unreadable`, not left out: its
+  queue is kept, what would go to it is counted as dropped (`credentials_unreadable`), and it is not
+  mistaken for a deleted destination.
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),

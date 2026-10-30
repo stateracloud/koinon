@@ -39,6 +39,7 @@ const (
 	dropExportFailed = "export_failed"
 	dropRemoved      = "destination_removed"
 	dropShutdown     = "shutdown"
+	dropUnreadable   = "credentials_unreadable" // the destination's stored credentials cannot be opened
 )
 
 // Reasons a destination refuses spans (koinon_api_trace_spans_rejected_total).
@@ -66,6 +67,8 @@ type Metrics struct {
 	QueueDepth *prometheus.GaugeVec
 	Redactions *prometheus.CounterVec
 	HeldRoots  prometheus.Gauge
+	// RequestsRejected counts requests the receiver refused whole, by reason.
+	RequestsRejected *prometheus.CounterVec
 }
 
 // NewMetrics creates the metrics and registers them with reg (nil: not registered).
@@ -101,6 +104,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "koinon_api_trace_held_roots", Help: "Turn root spans waiting for their model calls from the ledger.",
 		}),
 	}
+	m.RequestsRejected = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "koinon_api_trace_requests_rejected_total", Help: "Export requests the trace receiver refused whole, by reason (body_too_large, too_many_spans, structure, malformed, busy, memory).",
+	}, []string{"reason"})
+	for _, r := range []string{reqBodyTooLarge, reqTooManySpans, reqStructure, reqMalformed, reqBusy, reqMemory} {
+		m.RequestsRejected.WithLabelValues(r)
+	}
 	for _, s := range []string{SourceAgentd, SourceLedger} {
 		m.Received.WithLabelValues(s)
 	}
@@ -108,7 +117,17 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.Discarded.WithLabelValues(r)
 	}
 	if reg != nil {
-		reg.MustRegister(m.Received, m.Discarded, m.Exported, m.Dropped, m.Rejected, m.ExportTime, m.QueueDepth, m.Redactions, m.HeldRoots)
+		reg.MustRegister(m.Received, m.Discarded, m.Exported, m.Dropped, m.Rejected, m.ExportTime, m.QueueDepth, m.Redactions, m.HeldRoots, m.RequestsRejected)
 	}
 	return m
 }
+
+// Reasons the receiver refuses a request whole (koinon_api_trace_requests_rejected_total).
+const (
+	reqBodyTooLarge = "body_too_large"
+	reqTooManySpans = "too_many_spans"
+	reqStructure    = "structure"
+	reqMalformed    = "malformed"
+	reqBusy         = "busy"
+	reqMemory       = "memory"
+)

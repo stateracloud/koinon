@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -209,21 +210,26 @@ var _ = Describe("Settings that change while spans wait", func() {
 		Expect(has(roots()[orgA], semconv.KoinonSpansDropped)).To(BeTrue(), "org A is told what it lost")
 	})
 
-	It("drops a queue's oldest spans when the byte budget is full", func() {
-		setup("none", func(c *router.Config) { c.BatchSize = 1; c.QueueBytes = 4000 })
+	It("drops a queue's oldest spans when its share of the byte budget is full", func() {
+		setup("none", func(c *router.Config) { c.BatchSize = 1; c.QueueBytes = 300 << 10 })
 		hold := make(chan struct{})
 		g.mu.Lock()
 		g.hold[ep] = hold
 		g.mu.Unlock()
-		e.post(named(tr.tool(false), "s0"))
+		padded := func(name string) *tracepb.Span {
+			sp := named(tr.tool(false), name)
+			sp.Attributes = append(sp.Attributes, str("pad", strings.Repeat("a", 60<<10)))
+			return sp
+		}
+		e.post(padded("s0"))
 		Eventually(func() int { return len(g.times(ep)) }).Should(Equal(1))
 		for i := range 20 {
-			e.post(named(tr.tool(false), "s"+strconv.Itoa(i+1)))
+			e.post(padded("s" + strconv.Itoa(i+1)))
 		}
 		Eventually(func() float64 {
 			return testutil.ToFloat64(e.r.Metrics().Dropped.WithLabelValues("org", "generic", "queue_full"))
-		}).Should(BeNumerically(">=", 10))
-		Expect(testutil.ToFloat64(e.r.Metrics().QueueDepth.WithLabelValues("org", "generic"))).To(BeNumerically("<=", 10))
+		}).Should(BeNumerically(">=", 12))
+		Expect(testutil.ToFloat64(e.r.Metrics().QueueDepth.WithLabelValues("org", "generic"))).To(BeNumerically("<=", 5))
 		close(hold)
 	})
 })
