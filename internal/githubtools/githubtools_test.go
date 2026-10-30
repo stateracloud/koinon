@@ -316,7 +316,7 @@ var _ = Describe("Server", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rows).To(HaveLen(1))
 		row := rows[0]
-		Expect(row.ArgsJson).To(Equal(`{"branch":"koinon/fix","files":[{"content":"A","path":"a.txt"},{"content":"B","path":"b.txt"}],"title":"Fix"}`))
+		Expect(row.ArgsJson).To(Equal(`{"branch":"` + githubtools.BranchPrefix + githubtools.AgentNamespace("helper", f.agent.ID.String()) + `/fix","files":[{"content":"A","path":"a.txt"},{"content":"B","path":"b.txt"}],"title":"Fix"}`))
 		Expect(row.ArgsSha256).To(Equal(githubtools.HashArgs([]byte(row.ArgsJson))))
 		Expect(row.ArgsSha256).To(Equal(r1.ArgsSHA256))
 		Expect(row.Tool).To(Equal("create_pull_request"))
@@ -447,4 +447,38 @@ var _ = Describe("ValidatePullRequest with a connection's CI directories", func(
 		a.Files = append(a.Files, file("ci/other.yml", "x"), file(".github/workflows/ok.yml", "x"))
 		Expect(githubtools.ValidatePullRequest(a, g)).To(Succeed())
 	})
+})
+
+var _ = Describe("the branch namespace", func() {
+	const id = "01234567-89ab-cdef-0123-456789abcdef"
+
+	DescribeTable("AgentNamespace",
+		func(name, want string) { Expect(githubtools.AgentNamespace(name, id)).To(Equal(want)) },
+		Entry("slugifies the display name", "Luna the Helper!", "luna-the-helper-89abcdef"),
+		Entry("falls back when nothing is left", "???", "agent-89abcdef"),
+		Entry("is bounded", "an agent with a very long display name indeed", "an-agent-with-a-very-lon-89abcdef"),
+	)
+
+	DescribeTable("FinalBranch",
+		func(suggestion, want string) {
+			got, err := githubtools.FinalBranch("luna-01234567", suggestion)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal(want))
+		},
+		Entry("adds the namespace", "upgrade-x", "koinon/luna-01234567/upgrade-x"),
+		Entry("replaces the koinon/ the agent added", "koinon/upgrade-x", "koinon/luna-01234567/upgrade-x"),
+		Entry("keeps a nested suggestion", "deps/upgrade-x", "koinon/luna-01234567/deps/upgrade-x"),
+	)
+
+	DescribeTable("FinalBranch refuses",
+		func(suggestion string) {
+			_, err := githubtools.FinalBranch("luna-01234567", suggestion)
+			Expect(err).To(MatchError(ContainSubstring("short name for the change")))
+		},
+		Entry("an empty name", ""),
+		Entry("the bare prefix", "koinon/"),
+		Entry("a bad ref", "a..b"),
+		Entry("a .lock ref", "x.lock"),
+		Entry("a space", "a b"),
+	)
 })

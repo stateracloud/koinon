@@ -54,6 +54,7 @@ import (
 	"github.com/stateracloud/koinon/internal/approvalscope"
 	"github.com/stateracloud/koinon/internal/codehost"
 	"github.com/stateracloud/koinon/internal/codehost/providers"
+	"github.com/stateracloud/koinon/internal/connections"
 	"github.com/stateracloud/koinon/internal/db/store"
 	"github.com/stateracloud/koinon/internal/gateway"
 	"github.com/stateracloud/koinon/internal/project"
@@ -84,6 +85,9 @@ type Options struct {
 	// preset allows without a human (Trusted), so it runs at once; the approval sweeper
 	// executes it otherwise.
 	Execute func(ctx context.Context, org, id pgtype.UUID)
+	// Keys opens the connection's secrets so create_pull_request can check, before it asks for
+	// approval, that the branch is free. Nil skips the check; the executor still makes it.
+	Keys connections.Opener
 }
 
 // KindApprovalRequested is the task event written when a call is recorded.
@@ -99,6 +103,7 @@ type Server struct {
 	hosts *codehost.Registry
 	mcp   *mcp.Server
 	exec  func(ctx context.Context, org, id pgtype.UUID)
+	keys  connections.Opener
 }
 
 // New returns a Server recording requests in pool.
@@ -120,13 +125,15 @@ func New(pool *pgxpool.Pool, opts Options) (*Server, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, hosts: opts.Hosts, exec: opts.Execute}
+	s := &Server{pool: pool, q: store.New(pool), log: opts.Logger, ttl: opts.ApprovalTTL, now: opts.Now, hosts: opts.Hosts, exec: opts.Execute, keys: opts.Keys}
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: project.Name + "-github-tools", Version: project.Version}, nil)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: ToolCreatePullRequest,
 		Description: "Propose a pull request on the task's repository. Needs human approval: returns " +
 			"\"approval requested: id=...\" at once and your run pauses; once approved, Koinon creates the branch, " +
 			"the commit and the pull request exactly as given, and you get the result when the run resumes. " +
+			"Koinon owns the branch namespace: give branch as a short name such as fix-readme-typo (a leading koinon/ is dropped) and the branch is created as koinon/<your agent>/<name>; " +
+			"the approval shows that final name. A branch that already exists on the code host is refused: choose another name. " +
 			"A file marked executable is written as 100755; otherwise a new file is regular (100644) and a modified file keeps its mode. " +
 			"Symbolic links and submodules cannot be written. " +
 			"Refused: changes to the code host's CI paths (for GitHub .github/workflows/, and any the connection lists), more than 100 files or 1 MiB, unsafe paths.",
@@ -273,6 +280,17 @@ func (s *Server) authorise(c caller, tool string) (connectors.Decision, string, 
 }
 
 func (s *Server) createPullRequest(ctx context.Context, req *mcp.CallToolRequest, in PullRequestArgs) (*mcp.CallToolResult, Result, error) {
+	c, err := s.identify(ctx, req)
+	if err != nil {
+		return nil, Result{}, err
+	}
+	// Koinon owns the branch namespace: the recorded (and approved) branch is the final name,
+	// so agents of one template, which suggest the same name, never collide (ADR 0062).
+	branch, err := FinalBranch(AgentNamespace(c.agent.DisplayName, c.agent.ID.String()), in.Branch)
+	if err != nil {
+		return nil, Result{}, err
+	}
+	in.Branch = branch
 	guard, err := s.guardFor(ctx, req)
 	if err != nil {
 		return nil, Result{}, err
@@ -280,11 +298,71 @@ func (s *Server) createPullRequest(ctx context.Context, req *mcp.CallToolRequest
 	if err := ValidatePullRequest(in, guard); err != nil {
 		return nil, Result{}, err
 	}
+	if err := s.checkBranchFree(ctx, c, in.Branch); err != nil {
+		return nil, Result{}, err
+	}
 	canonical, err := canonicalPullRequest(in)
 	if err != nil {
 		return nil, Result{}, err
 	}
 	return s.record(ctx, req, ToolCreatePullRequest, canonical, AssessRisk(in))
+}
+
+// checkBranchFree refuses, with an error the agent can act on, a branch that already exists on
+// the code host, so no human approves a call that cannot run. The executor checks again (a
+// branch can appear after approval, and only it knows the branch is not its own). A host that
+// cannot be asked does not block the call: the executor's check stands.
+func (s *Server) checkBranchFree(ctx context.Context, c caller, branch string) error {
+	if s.keys == nil {
+		return nil
+	}
+	skip := func(why string, err error) error {
+		s.log.Warn("github tools: branch check skipped", append(c.attrs(), "why", why, "err", err)...)
+		return nil
+	}
+	connector, _, ok := s.hosts.Grant(c.config)
+	if !ok {
+		return nil // record refuses a call without a grant
+	}
+	b, ok := c.config.Binding(connector)
+	if !ok || len(b.Targets) != 1 {
+		return nil // record refuses it
+	}
+	p, ok := s.hosts.Get(connector)
+	if !ok {
+		return nil
+	}
+	repo, err := p.ParseRepo(b.Targets[0])
+	if err != nil {
+		return nil //nolint:nilerr // record refuses it
+	}
+	var id pgtype.UUID
+	if id.Scan(b.ConnectionID) != nil || !id.Valid {
+		return nil
+	}
+	row, err := s.q.GetConnection(ctx, store.GetConnectionParams{OrgID: c.org.ID, ID: id})
+	if err != nil {
+		return skip("load the connection", err)
+	}
+	conn, err := connections.Load(ctx, s.keys, row)
+	if err != nil {
+		return skip("open the connection", err)
+	}
+	acc, err := p.Open(ctx, conn, codehost.Scope{
+		Repositories: []string{repo.String()},
+		Permissions:  map[string]string{"metadata": "read", "contents": "read"},
+	})
+	if err != nil {
+		return skip("open the code host", err)
+	}
+	_, found, err := acc.Branch(ctx, repo, branch)
+	if err != nil {
+		return skip("look the branch up", err)
+	}
+	if found {
+		return refuse([]string{fmt.Sprintf("branch %s already exists in %s and was not created for this request; choose another branch name", branch, repo)})
+	}
+	return nil
 }
 
 // guardFor builds the workflow guard of the connection the caller's grant uses: the provider's

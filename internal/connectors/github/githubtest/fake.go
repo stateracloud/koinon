@@ -161,6 +161,13 @@ func (f *Fake) Mints() int {
 	return f.mints
 }
 
+// ResetTokens forgets the tokens minted and requested so far.
+func (f *Fake) ResetTokens() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mints, f.requests = 0, nil
+}
+
 // Requests returns the token requests received.
 func (f *Fake) Requests() []Request {
 	f.mu.Lock()
