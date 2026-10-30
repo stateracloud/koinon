@@ -370,14 +370,14 @@ var _ = Describe("Service", func() {
 		})
 
 		It("same for the platform destination", func(ctx SpecContext) {
-			_, err := svc.SetPlatformDestination(ctx, auditor, actor, langfuse("platform"))
+			_, err := svc.SetPlatformDestination(ctx, auditor, actor, nil, langfuse("platform"))
 			Expect(err).NotTo(HaveOccurred())
 			evil := newFakeBackend()
 			DeferCleanup(evil.Close)
 			in := langfuse("platform")
 			in.EndpointURL = evil.URL
 			in.Secrets = nil
-			_, err = svc.SetPlatformDestination(ctx, auditor, actor, in)
+			_, err = svc.SetPlatformDestination(ctx, auditor, actor, nil, in)
 			var inv *tracedest.InvalidError
 			Expect(err).To(BeAssignableToTypeOf(inv))
 			Expect(evil.calls()).To(BeZero())
@@ -463,7 +463,7 @@ var _ = Describe("Service", func() {
 		})
 
 		It("does not bring back a deleted platform destination", func(ctx SpecContext) {
-			_, err := svc.SetPlatformDestination(ctx, auditor, actor, langfuse("platform"))
+			_, err := svc.SetPlatformDestination(ctx, auditor, actor, nil, langfuse("platform"))
 			Expect(err).NotTo(HaveOccurred())
 			be.set(func(b *fakeBackend) {
 				b.onHit = func() {
@@ -477,6 +477,23 @@ var _ = Describe("Service", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(p.Destination).To(BeNil())
 		})
+	})
+
+	It("checks the platform destination's version", func(ctx SpecContext) {
+		zero := int64(0)
+		d, err := svc.SetPlatformDestination(ctx, auditor, actor, &zero, langfuse("platform"))
+		Expect(err).NotTo(HaveOccurred(), "version 0 is 'no destination yet'")
+		_, err = svc.SetPlatformDestination(ctx, auditor, actor, &zero, langfuse("platform"))
+		Expect(err).To(MatchError(tracedest.ErrChanged))
+		v := d.ConfigVersion
+		in := langfuse("platform")
+		in.Secrets = nil
+		in.Enabled = false
+		d2, err := svc.SetPlatformDestination(ctx, auditor, actor, &v, in)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(d2.ConfigVersion).To(Equal(v + 1))
+		_, err = svc.SetPlatformDestination(ctx, auditor, actor, &v, in)
+		Expect(err).To(MatchError(tracedest.ErrChanged))
 	})
 
 	Describe("endpoints", func() {
@@ -512,11 +529,11 @@ var _ = Describe("Service", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			_, err = svc.Create(ctx, org, actor, user, adminOnly, langfuse("second"))
-			Expect(err).To(MatchError(tracedest.ErrOwnerOnly))
+			Expect(err).To(MatchError(tracedest.ErrOwnerAtFull))
 			in := langfuse("lvl")
 			in.EndpointURL += "2"
 			_, err = svc.Update(ctx, org, actor, adminOnly, d.ID, nil, in)
-			Expect(err).To(MatchError(tracedest.ErrOwnerOnly))
+			Expect(err).To(MatchError(tracedest.ErrOwnerAtFull))
 
 			quiet := langfuse("lvl")
 			quiet.Secrets, quiet.Enabled = nil, false
@@ -707,7 +724,7 @@ var _ = Describe("Service", func() {
 			return in
 		}
 		It("is tested, sealed, audited in the admin's org, and receives the org's opt-in level", func(ctx SpecContext) {
-			d, err := svc.SetPlatformDestination(ctx, auditor, actor, platform())
+			d, err := svc.SetPlatformDestination(ctx, auditor, actor, nil, platform())
 			Expect(err).NotTo(HaveOccurred())
 			Expect(d.LastTest.OK).To(BeTrue())
 			got, err := svc.GetPlatform(ctx)
@@ -741,7 +758,7 @@ var _ = Describe("Service", func() {
 
 			By("a failing test leaves it alone, and it can be deleted")
 			be.set(func(b *fakeBackend) { b.status = 401 })
-			_, err = svc.SetPlatformDestination(ctx, auditor, actor, platform())
+			_, err = svc.SetPlatformDestination(ctx, auditor, actor, nil, platform())
 			var failed *tracedest.TestFailedError
 			Expect(err).To(BeAssignableToTypeOf(failed))
 			be.set(func(b *fakeBackend) { b.status = 200 })
@@ -809,7 +826,7 @@ var _ = Describe("Service", func() {
 			other, _, _ := pgtest.NewOrg(ctx, pool)
 			ok, _ = svc.WouldTrace(ctx, other, 0)
 			Expect(ok).To(BeFalse())
-			_, err = svc.SetPlatformDestination(ctx, auditor, actor, langfuse("platform"))
+			_, err = svc.SetPlatformDestination(ctx, auditor, actor, nil, langfuse("platform"))
 			Expect(err).NotTo(HaveOccurred())
 			ok, _ = svc.WouldTrace(ctx, other, 0)
 			Expect(ok).To(BeTrue())
