@@ -117,7 +117,7 @@ puts it on after reading the checklist; the checklist is the substance.
 Only procoduck may waive the cooldown for anything else, for example to pick up a feature early. The
 waiver is recorded in the PR: who decided, why, which version, how old it was, and what was verified
 (ADR 0052's OpenCode 2.2.0 amendment is the model). The mechanism is the PR label
-`dependency-age-waiver`. The CI job honours the label only when the maintainer put it on, reads it
+`dependency-age-waiver`. The CI job honours the label only when a maintainer listed in `MAINTAINERS.md` (read from the base branch) put it on, reads it
 each time it runs (re-run the job after labelling), and prints each waived version. pnpm waivers
 use the same exact-version exemption.
 
