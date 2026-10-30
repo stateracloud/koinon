@@ -652,6 +652,10 @@ type Querier interface {
 	// Events after a sequence number (0 for the start), in order. WatchRun replays
 	// from the client's last seq, then follows.
 	ListRunEventsAfter(ctx context.Context, arg ListRunEventsAfterParams) ([]RunEvent, error)
+	// The model calls of a run in a window, for the trace router's model-call spans (ADR 0074, decision
+	// 3): the ledger's rows with the provider type of the model the agent asked for. The model name is
+	// the one the agent used, with or without the org slug the gateway prefixes.
+	ListRunModelCalls(ctx context.Context, arg ListRunModelCallsParams) ([]ListRunModelCallsRow, error)
 	ListRunTurns(ctx context.Context, arg ListRunTurnsParams) ([]RunTurn, error)
 	ListRunsForTask(ctx context.Context, arg ListRunsForTaskParams) ([]Run, error)
 	// Every enabled provider of the org with its enabled models, for the gateway.

@@ -522,6 +522,74 @@ internal OTLP listener, `/v1/logs` and `/v1/traces`, requires a bearer token fro
    and the link to the child run's first turn read guessed argument and result fields (`agent`/`to`,
    `runId`/`run`); revisit when the tool is built.
 
+## Amendment (2026-10-30): how the trace router works in rc.9
+
+`internal/tracing/router` in koinon-api fills in what decisions 1, 3 to 8 and 10 left open.
+
+1. **Receiver.** `POST /v1/traces` on the internal OTLP listener, inside the bearer-token check, OTLP/HTTP
+   protobuf only (gzip allowed, 32 MiB bound). It hands the spans to a bounded intake (8192) without
+   waiting and answers at once; spans that do not fit are counted and reported as `rejected_spans` in
+   the partial success. OTLP JSON is refused with 415: it writes trace and span IDs as hex where proto3
+   JSON writes base64, so a generic decoder would mangle every ID, and agentd sends protobuf.
+2. **Attribution (decision 4, agentd spans).** A span is kept only if its run exists in the org it names,
+   `runs.traced` is true and its trace ID is one of that run's `run_turns`. The answer is cached (ten
+   minutes; a refusal 30 seconds, so a flood of forged spans costs one query). Everything else is
+   discarded and counted by reason (`unattributed`, `unknown_run`, `unknown_trace`, `untraced`,
+   `lookup_failed`). A database error drops the span rather than guessing. The org and run on the
+   exported copy are the canonical forms of what was proven.
+3. **Model-call spans (decision 3, last bullet; decision 5).**
+   - The root span of a turn triggers them. The router reads the run's `spend_entries` rows whose time
+     is in the turn's `[started_at, ended_at]` window (the root's end time while the row is open) and
+     makes one `chat {model}` CLIENT span per row, parented under the root. Span IDs are derived from
+     the trace ID and the request ID, so a replayed root makes the same spans.
+   - `gen_ai.provider.name` is the provider's type, found through the model catalog (`_OTHER` when the
+     model is gone). Tokens are the ledger's (input includes cache, output includes reasoning, as the
+     conventions mean them). `gen_ai.usage.cost` and `koinon.cost_usd` are the ledger's cost,
+     `koinon.gateway_cost_usd` the gateway's, `koinon.request` the join key. The ledger knows when the
+     gateway logged a request, not how long it took, so a span is a point at that time (start = end);
+     option D brings the real timing.
+   - **Waiting.** The root is held until two polls two seconds apart find the same rows and none is
+     pending (no cost, or a provider figure still awaited), or 30 seconds after it arrived. At the
+     deadline a span whose cost is missing or provisional carries `koinon.cost_pending = true` (and no
+     cost if it has none), and so does the root.
+   - **Totals on the root, not a summary span.** The root carries the turn's `gen_ai.usage.*`,
+     `gen_ai.usage.cost`, `koinon.cost_usd` and `koinon.model_calls`, as decision 3 says. Holding only
+     the root keeps memory bounded: tool spans and the rest go out at once, and one small span per open
+     turn waits at most 30 seconds. The hold is bounded by count (2048) and bytes (32 MiB), because a
+     root can carry content; a root that does not fit is released at once with the ledger as it stands.
+     A child summary span would have held nothing, but no backend would show the turn's cost on the turn.
+     If the ledger cannot be read, the root goes out without totals rather than being lost.
+4. **A copy per destination (decisions 3, 6 and 8).** At `none` every attribute listed in
+   `koinon.content.attributes`, and the four known content names even when unlisted, is removed. At
+   `redacted` and `full` each is scrubbed with `scrub.Content` at that level and cut to 16 KiB. The marker
+   never leaves. Every other string (attributes, events, links, the span name and status message) goes
+   through the always tier, so a credential in a tool name or an error message is removed at every level.
+   Content that is not a string is removed. The org's known secrets are the values of its provider keys,
+   connection fields, remote MCP credentials, agent home repository passwords and its own trace
+   destination credentials, opened with the key-encryption keys and cached for five minutes. If they
+   cannot be loaded the router sends no content (fail closed). On the platform's copy the agent's name
+   becomes its ID (attribute and span name), a transfer target's name is removed and an MCP tool loses its
+   server's name.
+5. **Queues (decision 7).** One queue per org destination and one for the platform, started on first use
+   and stopped when idle for five minutes or when its destination is disabled or deleted (what is queued
+   is then dropped, not sent). 10,000 spans, drop-oldest, 512-span batches. A retryable failure backs off
+   from one second to a minute and honours `Retry-After`; a batch is dropped after six attempts, or at
+   once for a refusal retrying cannot fix. The circuit breaker opens after three failures in a row and
+   pauses 30 seconds, doubling with each further failure up to ten minutes; it also holds back the next
+   batches. Health is written by the destination's own worker at most every five seconds (success, last
+   error, spans dropped). A span count lost since the last root is added to that destination's next root
+   as `koinon.spans_dropped`, once.
+6. **Metrics (decision 10).** `koinon_api_trace_spans_received_total{source}` (`agentd`, `ledger`;
+   the ledger-made spans, where the ADR said `gateway`, which is option D),
+   `..._discarded_total{reason}` before any destination, `..._exported_total`, `..._dropped_total{reason}`
+   and `..._rejected_total{reason}` by `destination_kind` and `backend`,
+   `koinon_api_trace_export_duration_seconds{outcome}`, `koinon_api_trace_queue_depth` and
+   `koinon_api_trace_redactions_total{kind}`. No ID is a label.
+7. **Test.** The isolation suite runs two orgs, each with its own fake backend, and a platform
+   destination, and asserts that every exported span's `koinon.org` is its destination's org, that no
+   org's content appears in another's payload, and that the platform's copy has IDs and its own level. A
+   golden file per level and for the platform's copy pins the emitted spans.
+
 ## Links
 
 - [0023](0023-observability-and-audit.md), [0050](0050-spend-ledger-ingestion-and-net-limits.md),

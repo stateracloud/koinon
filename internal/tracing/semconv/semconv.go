@@ -8,7 +8,10 @@
 // names are plain constants so the router, agentd and the tests spell them one way.
 package semconv
 
-import "strings"
+import (
+	"crypto/sha256"
+	"strings"
+)
 
 // Commit is the pinned commit of open-telemetry/semantic-conventions-genai (2026-10-28).
 const Commit = "3fe84604a581b3d50dd5b4bd29383b462d2a5018"
@@ -126,3 +129,28 @@ func SpanName(operation, subject string) string {
 
 // IsKoinon reports whether an attribute name is one of Koinon's own.
 func IsKoinon(name string) bool { return strings.HasPrefix(name, "koinon.") }
+
+// RootSpanID is the span ID of the root span of the turn with this trace ID: the first 8 bytes of
+// SHA-256("koinon.turn.root" + trace ID). agentd names its root span with it, and the router parents
+// the model-call spans it makes on it.
+func RootSpanID(traceID [16]byte) [8]byte {
+	h := sha256.Sum256(append([]byte("koinon.turn.root"), traceID[:]...))
+	var id [8]byte
+	copy(id[:], h[:8])
+	if id == ([8]byte{}) {
+		id[7] = 1
+	}
+	return id
+}
+
+// ModelCallSpanID is the span ID of the model-call span the router makes from the ledger entry with
+// this request ID: derived, so a replayed root makes the same span and a backend de-duplicates it.
+func ModelCallSpanID(traceID [16]byte, requestID string) [8]byte {
+	h := sha256.Sum256(append(append([]byte("koinon.model.call"), traceID[:]...), requestID...))
+	var id [8]byte
+	copy(id[:], h[:8])
+	if id == ([8]byte{}) {
+		id[7] = 1
+	}
+	return id
+}

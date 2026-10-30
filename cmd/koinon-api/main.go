@@ -35,6 +35,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -89,6 +90,8 @@ import (
 	"github.com/stateracloud/koinon/internal/services"
 	"github.com/stateracloud/koinon/internal/tokens"
 	"github.com/stateracloud/koinon/internal/tracedest"
+	"github.com/stateracloud/koinon/internal/tracing/export"
+	tracerouter "github.com/stateracloud/koinon/internal/tracing/router"
 	"github.com/stateracloud/koinon/internal/triggers/schedule"
 	"github.com/stateracloud/koinon/pricing"
 	"github.com/stateracloud/koinon/templates"
@@ -634,9 +637,23 @@ func run() error {
 			return fmt.Errorf("--otlp-token-dir: %w", err)
 		}
 		otlpMetrics := otlpauth.NewMetrics(reg)
+		// The trace router (ADR 0074): agentd's spans arrive at /v1/traces, inside the token check.
+		exportClient, err := export.NewClient(urlPolicy.DialContext(&net.Dialer{Timeout: 5 * time.Second}), 0)
+		if err != nil {
+			return err
+		}
+		traceRouter, err := tracerouter.New(tracerouter.Config{
+			Store: tracerouter.NewPGStore(pool), Routes: traceSvc, Secrets: tracerouter.NewPGSecrets(pool, opener),
+			Health: tracerouter.NewPGHealth(pool), Sender: exportClient, Metrics: tracerouter.NewMetrics(reg), Log: slog.Default(),
+		})
+		if err != nil {
+			return err
+		}
+		traceRouter.Start(bgCtx)
+		defer traceRouter.Close()
 		safego.GoOrStop(ctx, slog.Default(), "ledger-otlp", stop, func(context.Context) {
 			slog.Info("starting the internal OTLP receiver", "addr", cfg.otlpAddr)
-			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), otlpauth.Middleware(otlpTokens, otlpMetrics)); err != nil {
+			if err := ledger.Serve(bgCtx, cfg.otlpAddr, &ledger.Ingester{DB: pool, Metrics: ledger.NewMetrics(reg), Prices: prices.NewResolver(pricing.Embedded())}, slog.Default(), otlpauth.Middleware(otlpTokens, otlpMetrics), traceRouter.Mount()); err != nil {
 				slog.Error("spend ledger OTLP receiver failed", "err", err)
 				stop()
 			}
