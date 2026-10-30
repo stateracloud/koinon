@@ -174,3 +174,11 @@ func expireLease(ctx context.Context, r store.Run) {
 		r.OrgID, r.ID)
 	Expect(err).NotTo(HaveOccurred())
 }
+
+func pgText(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+
+func numeric(s string) pgtype.Numeric {
+	var n pgtype.Numeric
+	Expect(n.Scan(s)).To(Succeed())
+	return n
+}
