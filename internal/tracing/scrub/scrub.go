@@ -144,6 +144,12 @@ func (s *Scrubber) Text(in string) string {
 
 // collect appends every match in in to spans.
 func (s *Scrubber) collect(in string, spans []span) []span {
+	spans = s.detect(in, spans)
+	return detectViews(in, s.detect, spans)
+}
+
+// detect appends the spans of every detector that applies at the level, on one reading of the text.
+func (s *Scrubber) detect(in string, spans []span) []span {
 	spans = s.secrets.find(in, spans)
 	spans = findAlways(in, spans)
 	if s.level == LevelRedacted {
@@ -152,7 +158,7 @@ func (s *Scrubber) collect(in string, spans []span) []span {
 	return spans
 }
 
-// apply merges overlapping spans and rebuilds in. Overlapping and touching spans become one span
+// apply merges overlapping spans and rebuilds in. Overlapping spans, and touching spans of one kind, become one span
 // that keeps the kind of the earliest-starting (then longest) member.
 func (s *Scrubber) apply(in string, spans []span) string {
 	sort.Slice(spans, func(i, j int) bool {
@@ -174,7 +180,7 @@ func (s *Scrubber) apply(in string, spans []span) string {
 		}
 	}
 	for _, sp := range spans[1:] {
-		if sp.start < cur.end {
+		if sp.start < cur.end || (sp.start == cur.end && sp.kind == cur.kind) {
 			if sp.end > cur.end {
 				cur.end = sp.end
 			}

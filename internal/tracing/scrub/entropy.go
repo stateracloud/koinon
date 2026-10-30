@@ -41,17 +41,33 @@ func findTokens(in string, spans []span) []span {
 		for j < len(in) && isTokenChar(in[j]) {
 			j++
 		}
-		if j-i >= MinTokenLen {
-			if strings.HasPrefix(in[maxInt(0, i-len("base64,")):i], "base64,") {
-				// data:...;base64,<payload> is content, not a credential
-				i = j
-				continue
-			}
+		if j-i >= MinTokenLen && !inDataURL(in, i) && !digestPrefix(in, i) {
 			spans = scoreRun(in, i, j, spans)
 		}
 		i = j
 	}
 	return spans
+}
+
+// inDataURL reports whether a run at i is the payload of a data:...;base64, URL.
+func inDataURL(in string, i int) bool {
+	if i < len("base64,") || in[i-len("base64,"):i] != "base64," {
+		return false
+	}
+	head := in[max(0, i-160):i]
+	d := strings.LastIndex(head, "data:")
+	return d >= 0 && strings.IndexByte(head[d:], ';') >= 0 && !strings.ContainsAny(head[d:], " \t\r\n")
+}
+
+// digestPrefix reports whether the run at i follows a digest label: go.sum's h1: and the OCI
+// sha256:, sha384:, sha512:. What follows is a public hash.
+func digestPrefix(in string, i int) bool {
+	for _, p := range [...]string{"h1:", "sha256:", "sha384:", "sha512:"} {
+		if i >= len(p) && in[i-len(p):i] == p {
+			return true
+		}
+	}
+	return false
 }
 
 func maxInt(a, b int) int {
@@ -69,7 +85,22 @@ func scoreRun(in string, i, j int, spans []span) []span {
 		return spans // a public digest, however many slashes it has
 	}
 	if j-i > maxRunLen {
-		// An extremely long run is a blob (a data payload); leave it.
+		// A very long run is judged in pieces: by slash-separated segment, and a segment that is
+		// itself longer than maxRunLen in windows. Judging it whole would let a credential
+		// hide behind padding.
+		off := i
+		for _, seg := range strings.Split(run, "/") {
+			for w := 0; w < len(seg); w += maxRunLen / 2 {
+				end := min(len(seg), w+maxRunLen)
+				if end-w >= MinTokenLen && tokenLike(seg[w:end]) {
+					spans = append(spans, span{off + w, off + end, KindToken})
+				}
+				if end == len(seg) {
+					break
+				}
+			}
+			off += len(seg) + 1
+		}
 		return spans
 	}
 	if strings.Count(run, "/") >= 3 {
@@ -124,10 +155,13 @@ func tokenLike(run string) bool {
 	if !digit || (!upper && !lower) {
 		return false // identifiers and words have no digits; numbers have no letters
 	}
-	if hex && (n == 40 || n == 64) {
-		return false // git SHA-1 / SHA-256 object names and plain digests: public, and useful in a trace
+	if hex && (n == 40 || n == 64 || (!upper && n <= 40)) {
+		// git SHA-1 and SHA-256 names, plain digests, and the lower-case 32- and 16-digit hex of
+		// abbreviated git SHAs, trace and span IDs: public, and exactly what a trace reader needs to see. A hex secret of
+		// these lengths is therefore not caught by this rule (see the package comment).
+		return false
 	}
-	if isUUID(run) {
+	if isUUID(run) || publicID(run) {
 		return false
 	}
 	if looksLikeImage(run) {
@@ -243,4 +277,20 @@ func camelCaseWords(s string) bool {
 		}
 	}
 	return upper >= 3 && followed*10 >= upper*8
+}
+
+// publicID recognises shapes that are identifiers, not credentials: a 26-character Crockford
+// base32 ULID, and a base64 DER ECDSA signature (cosign, sigstore), which starts MEUCI, MEQCI or MEYCI.
+func publicID(s string) bool {
+	if len(s) == 26 {
+		ok := true
+		for i := 0; i < 26 && ok; i++ {
+			c := s[i]
+			ok = isDigit(c) || (c >= 'A' && c <= 'Z' && c != 'I' && c != 'L' && c != 'O' && c != 'U')
+		}
+		if ok && s[0] <= '7' {
+			return true
+		}
+	}
+	return strings.HasPrefix(s, "MEUCI") || strings.HasPrefix(s, "MEQCI") || strings.HasPrefix(s, "MEYCI")
 }

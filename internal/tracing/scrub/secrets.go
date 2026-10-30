@@ -3,7 +3,10 @@
 package scrub
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -37,9 +40,16 @@ type acNode struct {
 }
 
 // NewSecrets builds the set. Values shorter than MinSecretLen after trimming surrounding
-// whitespace are ignored. Besides the value itself it matches the JSON-escaped form (a secret
-// with quotes or newlines appears escaped inside a JSON string that is scrubbed as text) and,
-// for a multi-line value such as a PEM key, each long enough line.
+// whitespace are ignored. Besides the value itself it matches the forms the value takes when it
+// is printed by something else:
+//
+//   - JSON-escaped, with and without HTML escaping, ASCII-only (\uXXXX for non-ASCII) and
+//     escaped twice (JSON inside a JSON string);
+//   - URL-encoded (query and path escaping) and base64 of the whole value (standard and URL
+//     alphabets, padded and raw);
+//   - each line of a multi-line value such as a PEM key, split on real and escaped newlines;
+//   - for a value that is itself a JSON document (a service-account key file), each of its
+//     string leaves, split into lines the same way.
 func NewSecrets(values ...string) *Secrets {
 	set := map[string]struct{}{}
 	add := func(v string) {
@@ -52,14 +62,28 @@ func NewSecrets(values ...string) *Secrets {
 		if len(v) < MinSecretLen {
 			continue
 		}
-		add(v)
-		if e, err := json.Marshal(v); err == nil {
-			// Without the surrounding quotes, and without HTML escaping surprises: both forms.
-			add(string(e[1 : len(e)-1]))
+		bases := map[string]struct{}{v: {}}
+		for _, piece := range splitLines(v) {
+			bases[piece] = struct{}{}
 		}
-		if strings.ContainsAny(v, "\r\n") {
-			for _, line := range strings.FieldsFunc(v, func(r rune) bool { return r == '\n' || r == '\r' }) {
-				add(strings.TrimSpace(line))
+		if v[0] == '{' || v[0] == '[' {
+			var doc any
+			if json.Unmarshal([]byte(v), &doc) == nil {
+				walkStrings(doc, func(leaf string) {
+					leaf = strings.TrimSpace(leaf)
+					bases[leaf] = struct{}{}
+					for _, piece := range splitLines(leaf) {
+						bases[piece] = struct{}{}
+					}
+				})
+			}
+		}
+		for base := range bases {
+			if len(base) < MinSecretLen {
+				continue
+			}
+			for _, form := range secretForms(base) {
+				add(form)
 			}
 		}
 	}
@@ -172,4 +196,77 @@ func (s *Secrets) find(in string, spans []span) []span {
 		}
 	}
 	return spans
+}
+
+// splitLines splits v on real and escaped (backslash-n, backslash-r) newlines and trims the pieces.
+func splitLines(v string) []string {
+	if !strings.ContainsAny(v, "\r\n\\") {
+		return nil
+	}
+	v = strings.NewReplacer(`\r`, "\n", `\n`, "\n", "\r", "\n").Replace(v)
+	var out []string
+	for _, l := range strings.Split(v, "\n") {
+		if l = strings.TrimSpace(l); len(l) >= MinSecretLen {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func walkStrings(v any, f func(string)) {
+	switch t := v.(type) {
+	case string:
+		f(t)
+	case []any:
+		for _, e := range t {
+			walkStrings(e, f)
+		}
+	case map[string]any:
+		for _, e := range t {
+			walkStrings(e, f)
+		}
+	}
+}
+
+// secretForms returns v and the encoded forms it may be printed in.
+func secretForms(v string) []string {
+	forms := []string{v}
+	if e, err := json.Marshal(v); err == nil { // HTML-escaped: \u003c for <
+		forms = append(forms, string(e[1:len(e)-1]))
+	}
+	plain := string(appendString(nil, v))
+	plain = plain[1 : len(plain)-1]
+	forms = append(forms, plain)
+	ascii := asciiEscape(plain, false)
+	forms = append(forms, ascii, asciiEscape(plain, true))
+	double := string(appendString(nil, plain))
+	forms = append(forms, double[1:len(double)-1])
+	q := url.QueryEscape(v)
+	forms = append(forms, q, url.PathEscape(v), strings.ToLower(q))
+	b := []byte(v)
+	forms = append(forms, base64.StdEncoding.EncodeToString(b), base64.URLEncoding.EncodeToString(b),
+		base64.RawStdEncoding.EncodeToString(b), base64.RawURLEncoding.EncodeToString(b))
+	return forms
+}
+
+// asciiEscape writes every non-ASCII rune of s as a \uXXXX escape (a surrogate pair above the
+// BMP), the way Python's json.dumps does by default.
+func asciiEscape(s string, upper bool) string {
+	format := "%04x"
+	if upper {
+		format = "%04X"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r < 0x80:
+			b.WriteRune(r)
+		case r < 0x10000:
+			fmt.Fprintf(&b, `\u`+format, r)
+		default:
+			r -= 0x10000
+			fmt.Fprintf(&b, `\u`+format+`\u`+format, 0xD800+(r>>10), 0xDC00+(r&0x3ff))
+		}
+	}
+	return b.String()
 }
