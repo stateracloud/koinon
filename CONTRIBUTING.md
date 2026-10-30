@@ -52,6 +52,7 @@ make generate   # regenerate protobuf and sqlc code; commit the result
 make breaking   # buf breaking against main
 make dev-kind-up # local kind cluster with Koinon's prerequisites (once)
 make dev        # Tilt on that cluster (docs/dev/loop.md)
+make test-escape-kind # the sandbox escape suite's OpenShell cases on that cluster
 ```
 
 The local development loop is kind: `make dev-kind-up`, then `make dev` (Tilt), and
