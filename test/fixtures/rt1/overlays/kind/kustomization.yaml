@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# RT1 fixtures on a local kind cluster. The five images this repository builds are built locally and
+# loaded into the node (hack/rt1-fixtures-kind.sh does all of it); the three upstream images are pulled
+# anonymously by digest. The Secrets are the fake ones in secrets.example.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: koinon-fixtures
+resources:
+  - ../../manifests
+  - secrets.example.yaml
+images:
+  - name: rt1-motherduck
+    newName: kind.local/rt1-motherduck
+  - name: rt1-fakecicost
+    newName: kind.local/rt1-fakecicost
+  - name: rt1-promgen
+    newName: kind.local/rt1-promgen
+  - name: rt1-fakemodel
+    newName: kind.local/rt1-fakemodel
+  - name: rt1-prometheus-mcp
+    newName: kind.local/rt1-prometheus-mcp
+  - name: rt1-prometheus
+    newName: docker.io/prom/prometheus
+    newTag: v3.7.3
+    digest: sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
+  - name: rt1-searxng
+    newName: docker.io/searxng/searxng
+    newTag: "2026.10.27"
+    digest: sha256:0f48ffe2152f388f5eaede27f96b610449cebfc890d0ad457304475a54ad7b6e
+  - name: rt1-searxng-mcp
+    newName: docker.io/isokoliuk/mcp-searxng
+    newTag: "2.9.0"
+    digest: sha256:8f1dd92a9e2875cb4e8df7036785ec4c088b7600cefb611de472a352a3dcba60

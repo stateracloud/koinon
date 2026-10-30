@@ -81,20 +81,12 @@ They are separate because a ruleset's bypass covers all of its rules: one rulese
 bypass would let admins move or delete a published tag. To fix a bad tag, cut the next `rc.N`; only
 disabling the `immutable` ruleset in the repository settings lets anyone move or delete one.
 
-## Mirror a release to the home lab
+## Mirror a release to a registry
 
-REL2 run A installs the rc from the home-lab Zot ([registry.md](registry.md)), not from ghcr.io.
-With `crane` and `jq` installed and `docker login` done for both registries:
-
-```sh
-hack/mirror-release.sh 0.1.0-rc.1 zot.apps.lab.example.invalid/koinon
-```
-
-It copies the four images (the three Go images and `flavor-opencode`, every platform, plus any
-cosign signature, attestation and SBOM tags) and the chart to `<registry>/<name>:<version>` and `<registry>/charts/koinon:<version>`. The script
-uses the credentials in the docker config and never prints them. Cosign 3 stores its bundles as
-OCI referrers; the script copies them only where they also exist under the `sha256-<hex>` tag, so
-referrers-API-only output is not copied. Install the mirrored chart with
+`hack/mirror-release.sh <version> <registry>` copies a release's images and chart to another
+registry, for example to test an rc from a registry your cluster can reach. The maintainer does this
+for the home lab: see [maintainer-homelab.md](maintainer-homelab.md#mirror-a-release-to-the-home-lab).
+Install the mirrored chart with
 `helm install koinon oci://<registry>/charts/koinon --version <version> --set image.registry=<registry>`.
 
 ### The flavor image when installing a release
